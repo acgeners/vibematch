@@ -1,0 +1,381 @@
+import { searchAniList, fetchAniListById, fetchAniListReviews } from "./anilist"
+import { searchComicK, fetchComicKByHid } from "./comick"
+import { searchJikanManga, fetchJikanMangaByTitle, fetchJikanMangaReviews } from "./jikan"
+import { searchKitsuManga, fetchKitsuMangaById } from "./kitsu"
+import { searchMangaDex, fetchMangaDexById } from "./mangadex"
+import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews } from "./mangaupdates"
+import { evaluateCriteriaWithAI } from "./ai-criteria"
+import type {
+  ExternalMergeDebug,
+  ExternalSearchResult,
+  ExternalSourceDebug,
+  ExternalSourceId,
+  ExternalWorkData,
+  MergedCandidate,
+  MultiSourceResult,
+  SourcedReview,
+} from "./types"
+
+function normalizeText(value: string | null | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const value of values) {
+    const item = value?.trim()
+    if (!item) continue
+    const key = normalizeText(item)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(item)
+  }
+  return out
+}
+
+function titleSimilarity(a: string, b: string) {
+  const na = normalizeText(a)
+  const nb = normalizeText(b)
+  if (!na || !nb) return 0
+  if (na === nb) return 1
+  if (na.includes(nb) || nb.includes(na)) return 0.9
+  const aw = new Set(na.split(" ").filter((w) => w.length > 2))
+  const bw = new Set(nb.split(" ").filter((w) => w.length > 2))
+  if (!aw.size || !bw.size) return 0
+  const intersection = [...aw].filter((word) => bw.has(word)).length
+  return intersection / new Set([...aw, ...bw]).size
+}
+
+function bestTitleMatch(query: string, result: Pick<ExternalSearchResult, "title" | "originalTitle" | "alternativeTitles">) {
+  const names = [result.title, result.originalTitle, ...(result.alternativeTitles ?? [])]
+  return Math.max(...names.map((name) => titleSimilarity(query, name ?? "")), 0)
+}
+
+function synopsisSimilarity(a?: string, b?: string) {
+  const na = normalizeText(a)
+  const nb = normalizeText(b)
+  if (!na || !nb) return 0.5
+  const aw = new Set(na.split(" ").filter((w) => w.length > 4))
+  const bw = new Set(nb.split(" ").filter((w) => w.length > 4))
+  if (!aw.size || !bw.size) return 0.5
+  const intersection = [...aw].filter((word) => bw.has(word)).length
+  return intersection / Math.min(aw.size, bw.size)
+}
+
+function sourceId(result: ExternalSearchResult) {
+  return result.id.split(":").slice(1).join(":")
+}
+
+function sourceDebug(result: ExternalSearchResult, accepted: boolean, reason?: string): ExternalSourceDebug {
+  return {
+    source: result.source,
+    sourceId: sourceId(result),
+    title: result.title,
+    originalTitle: result.originalTitle,
+    alternativeTitles: result.alternativeTitles ?? [],
+    matchScore: result.score ?? 0,
+    accepted,
+    rejectionReason: reason,
+    synopsis: result.synopsis,
+    coverUrl: result.coverUrl,
+    year: result.year,
+    yearEnd: result.yearEnd,
+    publicationStatus: result.publicationStatus,
+    chapters: result.chapters,
+    score: result.score,
+    votes: result.votes,
+    genres: result.genres ?? [],
+    tags: [],
+    reviews: [],
+  }
+}
+
+function mergeSearchResults(query: string, results: ExternalSearchResult[]): MergedCandidate[] {
+  const filtered = results
+    .map((result) => ({ result, matchScore: bestTitleMatch(query, result) }))
+    .filter(({ matchScore }) => matchScore >= 0.62)
+    .sort((a, b) => b.matchScore - a.matchScore)
+
+  const groups: Array<{ main: ExternalSearchResult; matchScore: number; results: ExternalSearchResult[] }> = []
+  for (const item of filtered) {
+    const group = groups.find((existing) => {
+      const sameTitle = bestTitleMatch(existing.main.title, item.result) >= 0.78
+      const compatibleSynopsis = synopsisSimilarity(existing.main.synopsis, item.result.synopsis) >= 0.08
+      return sameTitle && compatibleSynopsis
+    })
+    if (group) {
+      group.results.push(item.result)
+      group.matchScore = Math.max(group.matchScore, item.matchScore)
+    } else {
+      groups.push({ main: item.result, matchScore: item.matchScore, results: [item.result] })
+    }
+  }
+
+  return groups.slice(0, 8).map(({ main, matchScore, results }) => {
+    const bySource = new Map(results.map((result) => [result.source, result]))
+    const muId = bySource.get("mangaupdates")?.id.split(":")[1]
+    const malId = bySource.get("myanimelist")?.id.split(":")[1]
+    return {
+      title: main.title,
+      originalTitle: main.originalTitle,
+      alternativeTitles: uniqueStrings(results.flatMap((result) => [
+        result.originalTitle,
+        ...(result.alternativeTitles ?? []),
+      ])),
+      synopsis: main.synopsis,
+      coverUrl: main.coverUrl,
+      year: main.year,
+      yearEnd: main.yearEnd,
+      publicationStatus: main.publicationStatus,
+      chapters: main.chapters,
+      score: main.score,
+      genres: uniqueStrings(results.flatMap((result) => result.genres ?? [])),
+      anilistId: bySource.get("anilist") ? Number(bySource.get("anilist")!.id.split(":")[1]) : undefined,
+      muId: muId ? Number(muId) : undefined,
+      kitsuId: bySource.get("kitsu")?.id.split(":")[1],
+      mangadexId: bySource.get("mangadex")?.id.split(":")[1],
+      malId: malId ? Number(malId) : undefined,
+      comickHid: bySource.get("comick")?.id.split(":")[1],
+      matchScore,
+      sources: [...new Set(results.map((result) => result.source))],
+      sourceResults: results,
+    }
+  })
+}
+
+type SearchConnector = {
+  source: ExternalSourceId
+  search: (query: string) => Promise<ExternalSearchResult[]>
+}
+
+const SEARCH_CONNECTORS = [
+  {
+    source: "anilist",
+    search: searchAniList,
+  },
+  {
+    source: "mangaupdates",
+    search: searchMangaUpdates,
+  },
+  {
+    source: "comick",
+    search: searchComicK,
+  },
+  {
+    source: "kitsu",
+    search: async (query: string) => {
+      const results = await searchKitsuManga(query)
+      return results.map((item): ExternalSearchResult => ({
+        id: `kitsu:${item.id}`,
+        source: "kitsu",
+        title: item.title,
+        alternativeTitles: item.alternativeTitles,
+        synopsis: item.synopsis,
+        coverUrl: item.coverUrl,
+        year: item.year,
+        chapters: item.chapters,
+        score: item.averageRating != null ? Math.round((item.averageRating / 10) * 10) / 10 : undefined,
+        votes: item.userCount,
+      }))
+    },
+  },
+  {
+    source: "myanimelist",
+    search: async (query: string) => {
+      const results = await searchJikanManga(query)
+      return results.map((item): ExternalSearchResult => ({
+        id: `mal:${item.id}`,
+        source: "myanimelist",
+        title: item.title,
+        alternativeTitles: item.alternativeTitles,
+        synopsis: item.synopsis,
+        coverUrl: item.coverUrl,
+        year: item.year,
+        chapters: item.chapters,
+        score: item.score,
+        votes: item.scoredBy,
+      }))
+    },
+  },
+  {
+    source: "mangadex",
+    search: async (query: string) => {
+      const results = await searchMangaDex(query)
+      return results.map((item): ExternalSearchResult => ({
+        id: `mangadex:${item.id}`,
+        source: "mangadex",
+        title: item.title,
+        alternativeTitles: item.alternativeTitles,
+        synopsis: item.synopsis,
+        coverUrl: item.coverUrl,
+        year: item.year,
+        chapters: item.chapters,
+      }))
+    },
+  },
+] satisfies SearchConnector[]
+
+export async function searchAllSources(query: string): Promise<MergedCandidate[]> {
+  const settled = await Promise.allSettled(
+    SEARCH_CONNECTORS.map((connector) => connector.search(query))
+  )
+  const results = settled.flatMap((entry) => entry.status === "fulfilled" ? entry.value : [])
+  return mergeSearchResults(query, results)
+}
+
+async function fetchReviewsForCandidate(candidate: MergedCandidate): Promise<SourcedReview[]> {
+  const settled = await Promise.allSettled([
+    candidate.muId
+      ? fetchMangaUpdatesReviews(candidate.muId).then((reviews) => ({
+        source: "mangaupdates" as const,
+        sourceTitle: candidate.title,
+        matchScore: candidate.matchScore ?? 1,
+        reviews,
+      }))
+      : null,
+    candidate.anilistId
+      ? fetchAniListReviews(candidate.anilistId).then((reviews) => ({
+        source: "anilist" as const,
+        sourceTitle: candidate.title,
+        matchScore: candidate.matchScore ?? 1,
+        reviews,
+      }))
+      : null,
+    candidate.malId
+      ? fetchJikanMangaReviews(candidate.malId).then((reviews) => ({
+        source: "myanimelist" as const,
+        sourceTitle: candidate.title,
+        matchScore: candidate.matchScore ?? 1,
+        reviews,
+      }))
+      : null,
+  ])
+
+  return settled
+    .flatMap((entry) => entry.status === "fulfilled" && entry.value ? [entry.value] : [])
+    .flatMap((group) =>
+      group.reviews.slice(0, 4).map((text) => ({
+        source: group.source,
+        sourceTitle: group.sourceTitle,
+        matchScore: group.matchScore,
+        text,
+      }))
+    )
+    .slice(0, 8)
+}
+
+export async function fetchExternalReviewsForWork(input: {
+  title: string
+  originalTitle?: string | null
+  alternativeTitles?: string[] | null
+}): Promise<SourcedReview[]> {
+  const queries = uniqueStrings([
+    input.title,
+    input.originalTitle,
+    ...(input.alternativeTitles ?? []),
+  ]).slice(0, 3)
+
+  for (const query of queries) {
+    const [candidate] = await searchAllSources(query)
+    if (!candidate || (candidate.matchScore ?? 0) < 0.72) continue
+
+    const reviews = await fetchReviewsForCandidate(candidate)
+    if (reviews.length) return reviews
+  }
+
+  return []
+}
+
+async function hydrateCandidate(candidate: MergedCandidate): Promise<ExternalSearchResult[]> {
+  const base = candidate.sourceResults ?? []
+  const settled = await Promise.allSettled([
+    candidate.anilistId ? fetchAniListById(candidate.anilistId) : null,
+    candidate.muId ? fetchMangaUpdatesById(candidate.muId) : null,
+    candidate.kitsuId ? fetchKitsuMangaById(candidate.kitsuId) : null,
+    candidate.malId ? fetchJikanMangaByTitle(candidate.title) : null,
+    candidate.mangadexId ? fetchMangaDexById(candidate.mangadexId) : null,
+    candidate.comickHid ? fetchComicKByHid(candidate.comickHid) : null,
+  ])
+
+  const [ani, mu, kitsu, mal, md, cmx] = settled.map((entry) => entry.status === "fulfilled" ? entry.value : null) as Array<Record<string, any> | null>
+  const hydrated: ExternalSearchResult[] = [...base]
+  if (ani) hydrated.push({ id: `anilist:${candidate.anilistId}`, source: "anilist", title: ani.title, originalTitle: ani.originalTitle, alternativeTitles: ani.alternativeTitles, synopsis: ani.synopsis, coverUrl: ani.coverUrl, year: ani.year, yearEnd: ani.yearEnd, publicationStatus: ani.status, chapters: ani.chapters, score: ani.score, genres: ani.genres })
+  if (mu) hydrated.push({ id: `mu:${candidate.muId}`, source: "mangaupdates", title: mu.title, alternativeTitles: mu.alternativeTitles, synopsis: mu.synopsis, coverUrl: mu.coverUrl, year: mu.year, publicationStatus: mu.publicationStatus, chapters: mu.chapters, score: mu.rating, votes: mu.votes, genres: mu.genres })
+  if (kitsu) hydrated.push({ id: `kitsu:${candidate.kitsuId}`, source: "kitsu", title: kitsu.title, synopsis: kitsu.synopsis, coverUrl: kitsu.coverUrl, year: kitsu.year, publicationStatus: kitsu.publicationStatus, chapters: kitsu.chapters, score: kitsu.score, votes: kitsu.votes, genres: kitsu.genres })
+  if (mal) hydrated.push({ id: `mal:${candidate.malId}`, source: "myanimelist", title: mal.title, originalTitle: mal.originalTitle, alternativeTitles: mal.alternativeTitles, synopsis: mal.synopsis, coverUrl: mal.coverUrl, year: mal.year, publicationStatus: mal.publicationStatus, chapters: mal.chapters, score: mal.score, votes: mal.votes, genres: mal.genres })
+  if (md) hydrated.push({ id: `mangadex:${candidate.mangadexId}`, source: "mangadex", title: md.title, alternativeTitles: md.alternativeTitles, synopsis: md.synopsis, coverUrl: md.coverUrl, year: md.year, publicationStatus: md.publicationStatus, chapters: md.chapters, genres: md.tags })
+  if (cmx) hydrated.push({ id: `comick:${candidate.comickHid}`, source: "comick", title: cmx.title, alternativeTitles: cmx.alternativeTitles, synopsis: cmx.synopsis, coverUrl: cmx.coverUrl, publicationStatus: cmx.publicationStatus, chapters: cmx.lastChapter, score: cmx.rating, votes: cmx.votes, genres: cmx.tags })
+  return hydrated
+}
+
+function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[], reviews: string[]): ExternalWorkData {
+  const primary = accepted[0] ?? candidate
+  const synopses = uniqueStrings(accepted.map((result) => result.synopsis))
+  const ratings = accepted.flatMap((result) => result.score != null || result.votes != null
+    ? [{ platform: result.source, rating: result.score ?? null, votes: result.votes ?? null }]
+    : [])
+  return {
+    title: primary.title,
+    originalTitle: primary.originalTitle ?? candidate.originalTitle,
+    alternativeTitles: uniqueStrings([
+      candidate.originalTitle,
+      ...(candidate.alternativeTitles ?? []),
+      ...accepted.flatMap((result) => [result.originalTitle, ...(result.alternativeTitles ?? [])]),
+    ]),
+    synopsis: synopses.join("\n\n---\n\n") || candidate.synopsis,
+    synopsisIsMerged: synopses.length > 1,
+    coverUrl: accepted.find((result) => result.coverUrl)?.coverUrl ?? candidate.coverUrl,
+    year: accepted.find((result) => result.year)?.year ?? candidate.year,
+    yearEnd: accepted.find((result) => result.yearEnd)?.yearEnd ?? candidate.yearEnd,
+    publicationStatus: accepted.find((result) => result.publicationStatus)?.publicationStatus ?? candidate.publicationStatus,
+    totalChapters: accepted.find((result) => result.chapters != null)?.chapters ?? candidate.chapters,
+    genres: uniqueStrings(accepted.flatMap((result) => result.genres ?? [])),
+    tags: uniqueStrings(accepted.flatMap((result) => result.genres ?? [])),
+    muRating: ratings.find((rating) => rating.platform === "mangaupdates")?.rating ?? undefined,
+    muVotes: ratings.find((rating) => rating.platform === "mangaupdates")?.votes ?? undefined,
+    cmxRating: ratings.find((rating) => rating.platform === "comick")?.rating ?? undefined,
+    cmxVotes: ratings.find((rating) => rating.platform === "comick")?.votes ?? undefined,
+    externalPlatformRatings: ratings,
+  }
+}
+
+export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promise<MultiSourceResult> {
+  const hydrated = await hydrateCandidate(candidate)
+  const accepted: ExternalSearchResult[] = []
+  const rejected: ExternalSearchResult[] = []
+  for (const result of hydrated) {
+    const titleScore = bestTitleMatch(candidate.title, result)
+    const synScore = synopsisSimilarity(candidate.synopsis, result.synopsis)
+    if (titleScore >= 0.62 && synScore >= 0.05) accepted.push({ ...result, score: result.score })
+    else rejected.push(result)
+  }
+
+  const uniqueAccepted = Array.from(new Map(accepted.map((result) => [result.id, result])).values())
+  const reviews = candidate.muId ? await fetchMangaUpdatesReviews(candidate.muId) : []
+  const data = mergeData(candidate, uniqueAccepted, reviews)
+  const criteriaScores = await evaluateCriteriaWithAI({
+    title: data.title,
+    synopsis: data.synopsis,
+    genres: data.genres,
+    tags: data.tags,
+    reviews,
+  })
+  if (criteriaScores) data.criteriaScores = criteriaScores
+
+  const debug: ExternalMergeDebug = {
+    queryTitle: candidate.title,
+    acceptedSources: uniqueAccepted.map((result) => ({ ...sourceDebug(result, true), reviews: result.source === "mangaupdates" ? reviews : [] })),
+    rejectedSources: rejected.map((result) => sourceDebug(result, false, "Título/sinopse não bateram com o candidato principal")),
+    mergedSynopses: uniqueAccepted.flatMap((result) => result.synopsis ? [{ source: result.source as ExternalSourceId, text: result.synopsis }] : []),
+  }
+  data.debug = debug
+
+  return { data, conflicts: [], debug }
+}
