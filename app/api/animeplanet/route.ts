@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { fetchHtmlWithCfFallback } from "@/lib/external/flaresolverr"
 
 const AP_BASE = "https://www.anime-planet.com"
 const AP_META = new Set(["all", "tags", "genres", "top-100", "recommendations", "browse"])
@@ -19,34 +20,35 @@ export async function GET(req: NextRequest) {
   if (!title) return NextResponse.json(null)
 
   try {
-    const listRes = await fetch(`${AP_BASE}/manga/all?name=${encodeURIComponent(title)}`, {
-      headers: HEADERS,
-      cache: "no-store",
-    })
-    if (!listRes.ok) return NextResponse.json(null)
-    const ct = listRes.headers.get("content-type") ?? ""
-    if (!ct.includes("html")) return NextResponse.json(null)
+    const listResult = await fetchHtmlWithCfFallback(
+      `${AP_BASE}/manga/all?name=${encodeURIComponent(title)}`,
+      HEADERS
+    )
+    if (!listResult) return NextResponse.json(null)
 
-    const listHtml = await listRes.text()
-
-    const slugRegex = /href="\/manga\/([a-z0-9][a-z0-9-]*)"[^>]*title="([^"]*)"/g
-    let slug: string | null = null
-    let match: RegExpExecArray | null
-    while ((match = slugRegex.exec(listHtml)) !== null) {
-      const [, s, t] = match
-      if (!AP_META.has(s) && !/\(novel\)$/i.test(t.trim())) {
-        slug = s
-        break
+    // AP collapses a single-result search to the detail page (HTTP redirect).
+    // Recognize that and skip the slug-discovery step entirely.
+    const directDetailMatch = listResult.finalUrl.match(/\/manga\/([a-z0-9][a-z0-9-]*)\/?$/)
+    let detailHtml: string | null = null
+    if (directDetailMatch && !AP_META.has(directDetailMatch[1])) {
+      detailHtml = listResult.html
+    } else {
+      const slugRegex = /href="\/manga\/([a-z0-9][a-z0-9-]*)"[^>]*title="([^"]*)"/g
+      let slug: string | null = null
+      let match: RegExpExecArray | null
+      while ((match = slugRegex.exec(listResult.html)) !== null) {
+        const [, s, t] = match
+        if (!AP_META.has(s) && !/\(novel\)$/i.test(t.trim())) {
+          slug = s
+          break
+        }
       }
-    }
-    if (!slug) return NextResponse.json(null)
+      if (!slug) return NextResponse.json(null)
 
-    const detailRes = await fetch(`${AP_BASE}/manga/${slug}`, {
-      headers: HEADERS,
-      cache: "no-store",
-    })
-    if (!detailRes.ok) return NextResponse.json(null)
-    const detailHtml = await detailRes.text()
+      const detailResult = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${slug}`, HEADERS)
+      if (!detailResult) return NextResponse.json(null)
+      detailHtml = detailResult.html
+    }
 
     const m = detailHtml.match(/class="avgRating"[^>]*title="([\d.]+) out of 5 from ([\d,]+) votes"/)
     if (!m) return NextResponse.json(null)

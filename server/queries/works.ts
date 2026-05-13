@@ -12,7 +12,9 @@ const WORK_WITH_RELATIONS_SELECT = `
   category_scores(*),
   platform_ratings(*),
   calculated_scores(*),
-  work_tags(tag_id, tags(*))
+  work_tags(tag_id, tags(*)),
+  work_covers(id, url, source, is_primary, position),
+  work_synopses(id, source, text, is_primary, position)
 `
 
 const WORK_LIST_SELECT = `
@@ -280,6 +282,8 @@ function normalizeWorkRelations(data: any): WorkWithRelations {
     category_scores: data.category_scores ?? [],
     platform_ratings: data.platform_ratings ?? [],
     calculated_scores: data.calculated_scores ?? null,
+    work_covers: ((data.work_covers ?? []) as Array<{ position: number }>).slice().sort((a, b) => a.position - b.position),
+    work_synopses: ((data.work_synopses ?? []) as Array<{ position: number }>).slice().sort((a, b) => a.position - b.position),
     genres,
     tags,
   }

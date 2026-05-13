@@ -124,7 +124,9 @@ export async function searchComicK(search: string): Promise<ExternalSearchResult
           coverUrl: coverUrl(item?.md_covers?.[0]?.b2key),
           publicationStatus: mapStatus(item?.status),
           chapters: item?.last_chapter != null ? Math.floor(parseFloat(String(item.last_chapter))) : undefined,
-          score: item?.bayesian_rating != null ? parseFloat(String(item.bayesian_rating)) : undefined,
+          score: item?.rating != null
+            ? parseFloat(String(item.rating))
+            : item?.bayesian_rating != null ? parseFloat(String(item.bayesian_rating)) : undefined,
           votes: typeof item?.rating_count === "number" ? item.rating_count : item?.follow_count,
           genres: tagsFromComic(item),
         }
@@ -143,7 +145,8 @@ export async function fetchComicKByHid(hid: string): Promise<ComicKDetail | null
     const raw: any = data
     const comic = raw?.comic ?? raw
 
-    const rawRating = comic.bayesian_rating
+    // Prefer real "rating" (simple mean) over "bayesian_rating" (smoothed).
+    const rawRating = comic.rating ?? comic.bayesian_rating
     const rating = rawRating != null ? parseFloat(String(rawRating)) : undefined
     const rawChapter = comic.last_chapter
     const lastChapter = rawChapter != null ? Math.floor(parseFloat(String(rawChapter))) : undefined

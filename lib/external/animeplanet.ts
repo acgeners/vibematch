@@ -1,5 +1,6 @@
 import type { PublicationStatus } from "@/types/domain"
 import type { ExternalSearchResult } from "./types"
+import { fetchHtmlWithCfFallback } from "./flaresolverr"
 
 const AP_BASE = "https://www.anime-planet.com"
 
@@ -11,6 +12,8 @@ const HEADERS = {
 export interface AnimePlanetDetail {
   rating?: number  // 0–10 (converted from AP's 0–5)
   votes?: number
+  coverUrl?: string
+  synopsis?: string
 }
 
 function cleanHtml(text: string | undefined): string | undefined {
@@ -51,16 +54,18 @@ function hasExcludedTitleSuffix(title: string | undefined) {
 
 async function findSlug(title: string): Promise<string | null> {
   const url = `${AP_BASE}/manga/all?name=${encodeURIComponent(title)}`
-  const res = await fetch(url, { cache: "no-store", headers: HEADERS })
-  if (!res.ok) return null
-  const html = await res.text()
+  const result = await fetchHtmlWithCfFallback(url, HEADERS)
+  if (!result) return null
 
-  // Search results have cards with href="/manga/{slug}" — skip meta-paths
+  // AP collapses single-result searches via 302 to the detail page.
   const META = new Set(["all", "tags", "genres", "top-100", "recommendations", "browse"])
+  const directMatch = result.finalUrl.match(/\/manga\/([a-z0-9][a-z0-9-]*)\/?$/)
+  if (directMatch && !META.has(directMatch[1])) return directMatch[1]
+
   // Capture slug + title attribute to filter "(Novel)" entries by display name
   const slugRegex = /href="\/manga\/([a-z0-9][a-z0-9-]*)"[^>]*title="([^"]*)"/g
   let match: RegExpExecArray | null
-  while ((match = slugRegex.exec(html)) !== null) {
+  while ((match = slugRegex.exec(result.html)) !== null) {
     const [, slug, title] = match
     if (!META.has(slug) && !hasExcludedTitleSuffix(title)) return slug
   }
@@ -69,13 +74,12 @@ async function findSlug(title: string): Promise<string | null> {
 
 export async function searchAnimePlanet(search: string): Promise<ExternalSearchResult[]> {
   try {
-    const res = await fetch(`${AP_BASE}/manga/all?name=${encodeURIComponent(search)}`, {
-      cache: "no-store",
-      headers: HEADERS,
-    })
-    if (!res.ok) return []
-    const html = await res.text()
-    if (/cf-mitigated|challenge-platform|Just a moment/i.test(html)) return []
+    const result = await fetchHtmlWithCfFallback(
+      `${AP_BASE}/manga/all?name=${encodeURIComponent(search)}`,
+      HEADERS
+    )
+    if (!result) return []
+    const html = result.html
 
     const results: ExternalSearchResult[] = []
     const seen = new Set<string>()
@@ -120,23 +124,33 @@ export async function fetchAnimePlanetByTitle(title: string, knownSlug?: string)
     const slug = knownSlug ?? await findSlug(title)
     if (!slug) return null
 
-    const res = await fetch(`${AP_BASE}/manga/${slug}`, {
-      cache: "no-store",
-      headers: HEADERS,
-    })
-    if (!res.ok) return null
-    const html = await res.text()
+    const result = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${slug}`, HEADERS)
+    if (!result) return null
+    const html = result.html
 
     // <div class="avgRating" title="3.872 out of 5 from 819 votes">
-    const m = html.match(/class="avgRating"[^>]*title="([\d.]+) out of 5 from ([\d,]+) votes"/)
-    if (!m) return null
+    const ratingMatch = html.match(/class="avgRating"[^>]*title="([\d.]+) out of 5 from ([\d,]+) votes"/)
+    const rawRating = ratingMatch ? parseFloat(ratingMatch[1]) : NaN
+    const rawVotes = ratingMatch ? parseInt(ratingMatch[2].replace(/,/g, ""), 10) : NaN
 
-    const raw = parseFloat(m[1])
-    const votes = parseInt(m[2].replace(/,/g, ""), 10)
+    // og:image is the canonical large cover URL. Fall back to first <img class="screenshots"> if absent.
+    const ogImage = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i)?.[1]
+    const fallbackImage = ogImage ? undefined : html.match(/<img[^>]+class="[^"]*screenshots?[^"]*"[^>]+src="([^"]+)"/i)?.[1]
+    const coverPath = ogImage ?? fallbackImage
+    const coverUrl = coverPath ? new URL(coverPath, AP_BASE).toString() : undefined
+
+    // og:description carries the full synopsis on AP detail pages.
+    const ogDesc = html.match(/<meta\s+property="og:description"\s+content="([^"]+)"/i)?.[1]
+    const synopsis = ogDesc ? cleanHtml(ogDesc) : undefined
+
+    // Return the detail even when rating is unavailable — cover/synopsis alone are useful signals.
+    if (!ratingMatch && !coverUrl && !synopsis) return null
 
     return {
-      rating: !isNaN(raw) ? Math.round(raw * 2 * 10) / 10 : undefined,
-      votes: !isNaN(votes) ? votes : undefined,
+      rating: !isNaN(rawRating) ? Math.round(rawRating * 2 * 10) / 10 : undefined,
+      votes: !isNaN(rawVotes) ? rawVotes : undefined,
+      coverUrl,
+      synopsis,
     }
   } catch {
     return null

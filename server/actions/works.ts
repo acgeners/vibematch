@@ -343,6 +343,51 @@ async function syncWorkGenres(
     )
 }
 
+async function syncWorkCovers(
+  supabase: SupabaseAdminClient,
+  workId: string,
+  covers: Array<{ url: string; source: string; isPrimary: boolean }> | undefined
+) {
+  if (!covers || covers.length === 0) return
+  // Replace all on save — the multi-pick UI is the authoritative source.
+  await supabase.from("work_covers").delete().eq("work_id", workId)
+  const rows = covers.map((c, position) => ({
+    work_id: workId,
+    url: c.url,
+    source: c.source,
+    is_primary: c.isPrimary,
+    position,
+  }))
+  // Ensure only one primary (the table has a partial unique index enforcing this,
+  // but normalize defensively first).
+  const primaryIdx = rows.findIndex((r) => r.is_primary)
+  if (primaryIdx === -1 && rows.length > 0) rows[0].is_primary = true
+  for (let i = 0; i < rows.length; i++) if (i !== primaryIdx && primaryIdx !== -1) rows[i].is_primary = false
+  const { error } = await supabase.from("work_covers").insert(rows)
+  if (error) console.error("[syncWorkCovers] insert failed", error.message)
+}
+
+async function syncWorkSynopses(
+  supabase: SupabaseAdminClient,
+  workId: string,
+  synopses: Array<{ source: string; text: string; isPrimary: boolean }> | undefined
+) {
+  if (!synopses || synopses.length === 0) return
+  await supabase.from("work_synopses").delete().eq("work_id", workId)
+  const rows = synopses.map((s, position) => ({
+    work_id: workId,
+    source: s.source,
+    text: s.text,
+    is_primary: s.isPrimary,
+    position,
+  }))
+  const primaryIdx = rows.findIndex((r) => r.is_primary)
+  if (primaryIdx === -1 && rows.length > 0) rows[0].is_primary = true
+  for (let i = 0; i < rows.length; i++) if (i !== primaryIdx && primaryIdx !== -1) rows[i].is_primary = false
+  const { error } = await supabase.from("work_synopses").insert(rows)
+  if (error) console.error("[syncWorkSynopses] insert failed", error.message)
+}
+
 // Adds external genres/tags without deleting existing work_tags.
 // Data entered manually (not returned by external search) is preserved.
 async function syncWorkTagsPartial(
@@ -610,10 +655,62 @@ async function persistNewWork(values: WorkFormValues): Promise<
 
   const workId = work.id
 
+  // Create the AI evaluation row FIRST when AI justifications exist, so the
+  // category_scores rows below can reference it with source="ai_accepted" +
+  // ai_evaluation_id. Without this, scores produced by the AI search flow
+  // get stamped as "manual" and lose their provenance.
+  const aiJustifications = data.ai_justifications ?? {}
+  const aiJustificationEntries = Object.entries(aiJustifications)
+    .filter(([, justification]) => justification?.trim())
+
+  let aiEvaluationId: string | null = null
+  if (aiJustificationEntries.length > 0) {
+    const { data: evaluation } = await supabase
+      .from("ai_evaluations")
+      .insert({
+        work_id: workId,
+        status: "completed",
+        model_name: "external-ai-criteria",
+        prompt_version: "external-import",
+        summary: "Notas e explicações geradas durante a busca externa do título.",
+        confidence: null,
+        raw_response: { criteriaJustifications: aiJustifications },
+      })
+      .select("id")
+      .single()
+
+    if (evaluation) {
+      aiEvaluationId = evaluation.id
+      await supabase.from("ai_evaluation_scores").insert(
+        CRITERION_SLUGS.flatMap((slug) => {
+          const score = data[slug as keyof WorkFormValues]
+          const justification = aiJustifications[slug]
+          if (score == null && !justification) return []
+          return [{
+            ai_evaluation_id: evaluation.id,
+            criterion_slug: slug,
+            suggested_score: score == null ? null : Number(score),
+            accepted_score: score == null ? null : Number(score),
+            was_accepted: score != null,
+            was_edited: false,
+            justification: justification ?? null,
+          }]
+        })
+      )
+    }
+  }
+
   const scores = CRITERION_SLUGS.flatMap((slug) => {
     const score = data[slug as keyof WorkFormValues]
     if (score == null) return []
-    return [{ work_id: workId, criterion_slug: slug, score: Number(score), source: "manual" }]
+    const hasAi = Boolean(aiJustifications[slug]?.trim()) && aiEvaluationId != null
+    return [{
+      work_id: workId,
+      criterion_slug: slug,
+      score: Number(score),
+      source: hasAi ? ("ai_accepted" as const) : ("manual" as const),
+      ai_evaluation_id: hasAi ? aiEvaluationId : null,
+    }]
   })
 
   if (scores.length > 0) {
@@ -645,44 +742,8 @@ async function persistNewWork(values: WorkFormValues): Promise<
 
   await syncWorkTags(supabase, workId, knownGenres.names, data.tags ?? [], knownGenres.tagIds)
   await syncWorkGenres(supabase, workId, knownGenres.genreIds, "replace")
-
-  const aiJustifications = data.ai_justifications ?? {}
-  const aiJustificationEntries = Object.entries(aiJustifications)
-    .filter(([, justification]) => justification?.trim())
-  if (aiJustificationEntries.length > 0) {
-    const { data: evaluation } = await supabase
-      .from("ai_evaluations")
-      .insert({
-        work_id: workId,
-        status: "completed",
-        model_name: "external-ai-criteria",
-        prompt_version: "external-import",
-        summary: "Notas e explicações geradas durante a busca externa do título.",
-        confidence: null,
-        raw_response: { criteriaJustifications: aiJustifications },
-      })
-      .select("id")
-      .single()
-
-    if (evaluation) {
-      await supabase.from("ai_evaluation_scores").insert(
-        CRITERION_SLUGS.flatMap((slug) => {
-          const score = data[slug as keyof WorkFormValues]
-          const justification = aiJustifications[slug]
-          if (score == null && !justification) return []
-          return [{
-            ai_evaluation_id: evaluation.id,
-            criterion_slug: slug,
-            suggested_score: score == null ? null : Number(score),
-            accepted_score: score == null ? null : Number(score),
-            was_accepted: score != null,
-            was_edited: false,
-            justification: justification ?? null,
-          }]
-        })
-      )
-    }
-  }
+  await syncWorkCovers(supabase, workId, data.covers)
+  await syncWorkSynopses(supabase, workId, data.synopses)
 
   const hasScores = scores.length >= CRITERION_SLUGS.length
   await supabase
@@ -864,11 +925,39 @@ export async function updateWork(id: string, values: WorkFormValues) {
 
   if (error) return { error: { _root: [error.message] } }
 
-  // Sincronizar notas por critério: upsert presentes, deletar removidos
+  // Sincronizar notas por critério: upsert presentes, deletar removidos.
+  // Preserva a origem AI quando o score não muda (mantém ai_accepted/ai_edited
+  // + ai_evaluation_id). Se o score era AI e foi alterado pelo usuário, marca
+  // como ai_edited preservando o ai_evaluation_id. Score novo ou que já era
+  // manual permanece manual.
+  const { data: existingScoreRows } = await supabase
+    .from("category_scores")
+    .select("criterion_slug, score, source, ai_evaluation_id")
+    .eq("work_id", id)
+  const existingByCriterion = new Map(
+    (existingScoreRows ?? []).map((row) => [row.criterion_slug, row])
+  )
+
   const scores = CRITERION_SLUGS.flatMap((slug) => {
     const score = data[slug as keyof WorkFormValues]
     if (score == null) return []
-    return [{ work_id: id, criterion_slug: slug, score: Number(score), source: "manual" as const }]
+    const numericScore = Number(score)
+    const prev = existingByCriterion.get(slug)
+    const prevSource = prev?.source ?? null
+    const wasAi = prevSource === "ai_accepted" || prevSource === "ai_edited"
+    const sameValue = prev != null && Number(prev.score) === numericScore
+    const source: "manual" | "ai_accepted" | "ai_edited" = wasAi
+      ? sameValue
+        ? (prevSource as "ai_accepted" | "ai_edited")
+        : "ai_edited"
+      : "manual"
+    return [{
+      work_id: id,
+      criterion_slug: slug,
+      score: numericScore,
+      source,
+      ai_evaluation_id: wasAi ? prev?.ai_evaluation_id ?? null : null,
+    }]
   })
 
   const slugsToDelete = CRITERION_SLUGS.filter((slug) => data[slug as keyof WorkFormValues] == null)
@@ -917,6 +1006,8 @@ export async function updateWork(id: string, values: WorkFormValues) {
   // Salvar tags
   await syncWorkTags(supabase, id, knownGenres.names, data.tags ?? [], knownGenres.tagIds)
   await syncWorkGenres(supabase, id, knownGenres.genreIds, "replace")
+  await syncWorkCovers(supabase, id, data.covers)
+  await syncWorkSynopses(supabase, id, data.synopses)
 
   // Atualizar status IA com base na cobertura de critérios
   const hasAllScores = scores.length >= CRITERION_SLUGS.length

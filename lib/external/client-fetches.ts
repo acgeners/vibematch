@@ -34,7 +34,8 @@ export async function fetchComicKClient(title: string): Promise<ComicKClientResu
     if (!detail) return null
     const comic = detail?.comic ?? detail
 
-    const rawRating = comic.bayesian_rating
+    // Prefer real average over Bayesian (smoothed) — same reasoning as MU.
+    const rawRating = comic.rating ?? comic.bayesian_rating
     const rating = rawRating != null ? parseFloat(String(rawRating)) : undefined
     const rawChapter = comic.last_chapter
     const chapters = rawChapter != null ? Math.floor(parseFloat(String(rawChapter))) : undefined

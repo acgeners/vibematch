@@ -135,11 +135,29 @@ export interface Work {
   updated_at: string
 }
 
+export interface WorkCover {
+  id: string
+  url: string
+  source: string
+  is_primary: boolean
+  position: number
+}
+
+export interface WorkSynopsis {
+  id: string
+  source: string
+  text: string
+  is_primary: boolean
+  position: number
+}
+
 export interface WorkWithRelations extends Work {
   category_scores: CategoryScore[]
   platform_ratings: PlatformRating[]
   calculated_scores: CalculatedScore | null
   tags: Tag[]
+  work_covers?: WorkCover[]
+  work_synopses?: WorkSynopsis[]
 }
 
 export interface AiEvaluationScore {

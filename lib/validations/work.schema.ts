@@ -30,6 +30,18 @@ const extraPlatformRatingSchema = z.object({
   votes: z.number().int().min(0).nullable().optional(),
 })
 
+const coverEntrySchema = z.object({
+  url: z.string().url(),
+  source: z.string().trim().min(1).max(80),
+  isPrimary: z.boolean(),
+})
+
+const synopsisEntrySchema = z.object({
+  source: z.string().trim().min(1).max(80),
+  text: z.string().trim().min(1).max(5000),
+  isPrimary: z.boolean(),
+})
+
 export const workFormSchema = z.object({
   title: z.string().min(1, "Título obrigatório").max(500),
   original_title: z.string().max(500).nullable().optional(),
@@ -78,6 +90,10 @@ export const workFormSchema = z.object({
   cmx_rating: z.number().min(0).max(10).nullable().optional(),
   cmx_votes: z.number().int().min(0).nullable().optional(),
   extra_platform_ratings: z.array(extraPlatformRatingSchema).default([]),
+
+  // Multi-source metadata (Fase 2)
+  covers: z.array(coverEntrySchema).default([]),
+  synopses: z.array(synopsisEntrySchema).default([]),
 })
 
 export type WorkFormValues = z.infer<typeof workFormSchema>

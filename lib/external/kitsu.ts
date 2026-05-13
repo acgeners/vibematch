@@ -137,7 +137,7 @@ export async function fetchKitsuMangaById(id: string): Promise<KitsuMangaDetail 
     const url = new URL(`${KITSU_BASE}/manga/${id}`)
     url.searchParams.set(
       "fields[manga]",
-      "canonicalTitle,titles,abbreviatedTitles,synopsis,description,startDate,endDate,chapterCount,status,averageRating,userCount,posterImage",
+      "canonicalTitle,titles,abbreviatedTitles,synopsis,description,startDate,endDate,chapterCount,status,averageRating,userCount,ratingFrequencies,posterImage",
     )
     url.searchParams.set("include", "genres,categories")
     url.searchParams.set("fields[genres]", "name")
@@ -155,7 +155,30 @@ export async function fetchKitsuMangaById(id: string): Promise<KitsuMangaDetail 
     const attr = data.attributes
     const poster = attr.posterImage as Record<string, string> | undefined
     const rawRating = attr.averageRating
-    const ratingNum = typeof rawRating === "string" ? parseFloat(rawRating) : (typeof rawRating === "number" ? rawRating : undefined)
+    let ratingNum = typeof rawRating === "string" ? parseFloat(rawRating) : (typeof rawRating === "number" ? rawRating : undefined)
+
+    // Fallback: when Kitsu doesn't expose averageRating, compute weighted mean from
+    // ratingFrequencies. The keys are integers 2..20 representing rating × 2 (so "20"
+    // means 10/10). Returned average is on the same 0-100 scale used downstream.
+    let ratingVotes: number | undefined
+    const freq = attr.ratingFrequencies as Record<string, string> | undefined
+    if (freq && typeof freq === "object") {
+      let totalVotes = 0
+      let weightedSum = 0
+      for (const [key, value] of Object.entries(freq)) {
+        const k = Number(key)
+        const v = Number(value)
+        if (!Number.isFinite(k) || !Number.isFinite(v) || v <= 0) continue
+        totalVotes += v
+        weightedSum += (k * 5) * v // k is on 2-20 scale; multiply by 5 to get 10-100
+      }
+      if (totalVotes > 0) {
+        ratingVotes = totalVotes
+        if (ratingNum == null || !Number.isFinite(ratingNum)) {
+          ratingNum = weightedSum / totalVotes
+        }
+      }
+    }
 
     const included = Array.isArray(json?.included) ? (json.included as Array<Record<string, unknown>>) : []
     const genres: string[] = []
@@ -179,7 +202,9 @@ export async function fetchKitsuMangaById(id: string): Promise<KitsuMangaDetail 
       publicationStatus: statusFromKitsu(attr.status),
       // Convert Kitsu's 0-100 average to 0-10 scale
       rating: ratingNum != null && Number.isFinite(ratingNum) ? Math.round((ratingNum / 10) * 10) / 10 : undefined,
-      votes: typeof attr.userCount === "number" ? attr.userCount : undefined,
+      // Prefer actual rating sample size (sum of ratingFrequencies). Fall back to
+      // userCount (= users who added it to library) when the distribution is missing.
+      votes: ratingVotes ?? (typeof attr.userCount === "number" ? attr.userCount : undefined),
       genres: Array.from(new Set(genres)),
     }
   } catch {

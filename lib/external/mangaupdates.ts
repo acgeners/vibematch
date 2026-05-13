@@ -84,9 +84,12 @@ export async function searchMangaUpdates(search: string): Promise<ExternalSearch
     return results.map((r) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rec = (r as any).record ?? {}
-      // Search results have flat fields: bayesian_rating (number) and rating_votes (number)
-      // latest_chapter is NOT included in search results
-      const rating = typeof rec.bayesian_rating === "number" ? rec.bayesian_rating : undefined
+      // Prefer the real "rating" field (simple average) over "bayesian_rating" (smoothed
+      // toward the global mean). Bayesian compresses the spread which makes high-vote
+      // niche works look more average than they are.
+      const rating = typeof rec.rating === "number"
+        ? rec.rating
+        : typeof rec.bayesian_rating === "number" ? rec.bayesian_rating : undefined
       const votes = typeof rec.rating_votes === "number" ? rec.rating_votes : undefined
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const genres = (rec.genres ?? []).map((g: any) => (g.genre ?? g) as string).filter(Boolean)
@@ -158,6 +161,29 @@ export async function fetchMangaUpdatesReviews(id: number): Promise<string[]> {
   }
 }
 
+/**
+ * MU's API does NOT expose the simple-average rating — only `bayesian_rating` (smoothed
+ * toward the global mean) and the vote count. The web page in contrast renders both:
+ * "Average: 6.9" (simple) AND "Bayesian Average: 6.68". This scrape pulls the simple
+ * average from the HTML to give a more honest signal for niche works.
+ */
+async function scrapeMangaUpdatesAverage(seriesUrl: string): Promise<number | undefined> {
+  try {
+    const res = await fetch(seriesUrl, {
+      cache: "no-store",
+      headers: { "User-Agent": "Mozilla/5.0" },
+    })
+    if (!res.ok) return undefined
+    const html = await res.text()
+    const match = html.match(/Average:\s*(?:<!--\s*-->\s*)?(\d+(?:\.\d+)?)/i)
+    if (!match) return undefined
+    const value = parseFloat(match[1])
+    return Number.isFinite(value) ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export async function fetchMangaUpdatesById(id: number): Promise<MangaUpdatesDetail | null> {
   try {
     const res = await fetch(`${MU_BASE}/series/${id}`, {
@@ -166,8 +192,11 @@ export async function fetchMangaUpdatesById(id: number): Promise<MangaUpdatesDet
     if (!res.ok) return null
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any = await res.json()
-    // Detail has flat fields: bayesian_rating (number), rating_votes (number), latest_chapter (number)
-    const rating = typeof data.bayesian_rating === "number" ? data.bayesian_rating : undefined
+    const bayesian = typeof data.bayesian_rating === "number" ? data.bayesian_rating : undefined
+    const realAvg = typeof data.url === "string" ? await scrapeMangaUpdatesAverage(data.url) : undefined
+    // Prefer the real (simple) average from the page; fall back to bayesian when
+    // scraping is blocked (Cloudflare/rate-limited) or the layout changes.
+    const rating = realAvg ?? bayesian
     const votes = typeof data.rating_votes === "number" ? data.rating_votes : undefined
 
     return {

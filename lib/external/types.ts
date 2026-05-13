@@ -55,6 +55,7 @@ export interface MergedCandidate {
   sources: ExternalSourceId[]
   matchScore?: number
   comickHid?: string
+  comixHid?: string
   sourceResults?: ExternalSearchResult[]
 }
 

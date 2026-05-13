@@ -130,7 +130,9 @@ async function syncLegacyGenresToWorkTags(supabase, genreTagGroupId) {
 
   const existingPairs = new Set()
   const workIds = [...new Set(desiredPairs.map(pair => pair.work_id))]
-  const chunkSize = 500
+  // Limit UUIDs per .in() so the request URL stays well under PostgREST/undici's
+  // URI limit (~8–16 KB). 50 × 36-char UUIDs ≈ 1.8 KB.
+  const chunkSize = 50
   for (let i = 0; i < workIds.length; i += chunkSize) {
     const chunk = workIds.slice(i, i + chunkSize)
     let from = 0
@@ -204,8 +206,8 @@ async function main() {
 
   const [criteriaRes, pubStatusRes, persStatusRes, sourceRes, tagGroupRes, tagsRes, genresRes] = await Promise.all([
     supabase.from("criteria").select("eval_type, slug, criteria, emoji, description, weight, key, ranges").order("id"),
-    supabase.from("publication_status").select("short, status, previous").order("id"),
-    supabase.from("personal_status").select("previous, status").order("id"),
+    supabase.from("publication_status").select("id, status, slug, short, color, symbol, previous").order("id"),
+    supabase.from("personal_status").select("id, status, slug, color, symbol, previous, comment").order("id"),
     supabase.from("source").select("slug, name").order("order", { ascending: true, nullsFirst: false }).order("name"),
     supabase.from("tag_group").select("id, slug, group").order("group"),
     fetchAllPaginated(() => supabase.from("tags").select("name, slug, tag_group_id").order("name")),
@@ -246,15 +248,30 @@ async function main() {
     return `  ${c.slug}: {\n    title: ${JSON.stringify(c.criteria)},\n    ranges: [\n${ranges}\n    ],\n  },`
   }).join("\n")
 
+  // Legacy text→canonical lookup; ainda usado durante a migração das colunas
+  // works.publication_status/personal_status (texto) para os FKs _id. Sai
+  // junto com previous quando os textos forem dropados (Fase 4.1).
   const pubLabelEntries = [...new Set(pubStatuses.flatMap(r => [
-    `  ${JSON.stringify(r.short)}: ${JSON.stringify(r.status)},`,
-    `  ${JSON.stringify(r.status)}: ${JSON.stringify(r.status)},`,
-  ]))].join("\n")
-
-  const persLabelEntries = [...new Set(persStatuses.flatMap(r => [
+    r.short ? `  ${JSON.stringify(r.short)}: ${JSON.stringify(r.status)},` : null,
+    r.slug ? `  ${JSON.stringify(r.slug)}: ${JSON.stringify(r.status)},` : null,
     r.previous ? `  ${JSON.stringify(r.previous)}: ${JSON.stringify(r.status)},` : null,
     `  ${JSON.stringify(r.status)}: ${JSON.stringify(r.status)},`,
   ].filter(Boolean)))].join("\n")
+
+  const persLabelEntries = [...new Set(persStatuses.flatMap(r => [
+    r.slug ? `  ${JSON.stringify(r.slug)}: ${JSON.stringify(r.status)},` : null,
+    r.previous ? `  ${JSON.stringify(r.previous)}: ${JSON.stringify(r.status)},` : null,
+    `  ${JSON.stringify(r.status)}: ${JSON.stringify(r.status)},`,
+  ].filter(Boolean)))].join("\n")
+
+  // Novos lookups por id — fonte da verdade após Fase 3.2 (UI passa a ler FKs).
+  const pubByIdEntries = pubStatuses.map(r =>
+    `  ${r.id}: { id: ${r.id}, status: ${JSON.stringify(r.status)}, slug: ${JSON.stringify(r.slug ?? "")}, short: ${JSON.stringify(r.short ?? "")}, color: ${JSON.stringify(r.color ?? "")}, symbol: ${JSON.stringify(r.symbol ?? "")} },`
+  ).join("\n")
+
+  const persByIdEntries = persStatuses.map(r =>
+    `  ${r.id}: { id: ${r.id}, status: ${JSON.stringify(r.status)}, slug: ${JSON.stringify(r.slug ?? "")}, color: ${JSON.stringify(r.color ?? "")}, symbol: ${JSON.stringify(r.symbol ?? "")}, comment: ${JSON.stringify(r.comment ?? "")} },`
+  ).join("\n")
 
   const platformLabelEntries = sources
     .filter(s => s.slug)
@@ -281,6 +298,32 @@ ${pubLabelEntries}
 
 export const PERSONAL_STATUS_LABELS: Record<string, string> = {
 ${persLabelEntries}
+}
+
+export interface PublicationStatusInfo {
+  id: number
+  status: string
+  slug: string
+  short: string
+  color: string
+  symbol: string
+}
+
+export const PUBLICATION_STATUSES_BY_ID: Record<number, PublicationStatusInfo> = {
+${pubByIdEntries}
+}
+
+export interface PersonalStatusInfo {
+  id: number
+  status: string
+  slug: string
+  color: string
+  symbol: string
+  comment: string
+}
+
+export const PERSONAL_STATUSES_BY_ID: Record<number, PersonalStatusInfo> = {
+${persByIdEntries}
 }
 
 export const SYNOPSIS_QUALITY_LABELS: Record<string, string> = {

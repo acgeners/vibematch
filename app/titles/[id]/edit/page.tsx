@@ -107,6 +107,11 @@ function workToFormValues(work: WorkWithRelations): Partial<WorkFormValues> {
     observation_penalty: work.observation_penalty,
     manual_score: work.manual_score ?? undefined,
     cover_url: work.cover_url ?? "",
+    covers: (work.work_covers ?? []).map((c) => ({
+      url: c.url,
+      source: c.source,
+      isPrimary: c.is_primary,
+    })),
     ai_eval_status: work.ai_eval_status,
     mu_rating: mu?.rating ?? undefined,
     mu_votes: mu?.vote_count ?? undefined,

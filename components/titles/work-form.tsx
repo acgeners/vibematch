@@ -10,6 +10,7 @@ import type { WorkFormValues, WorkFormInput } from "@/lib/validations/work.schem
 import { ChipInput } from "@/components/ui/chip-input"
 import { Textarea } from "@/components/ui/textarea"
 import { ExternalSearch } from "@/components/titles/external-search"
+import { CoversManager } from "@/components/titles/covers-manager"
 import type { ExternalWorkData } from "@/lib/external/types"
 import { createWork, createWorksBatch, findDuplicateWorkByTitle, updateWork } from "@/server/actions/works"
 import type { DuplicateWorkForForm } from "@/server/actions/works"
@@ -61,7 +62,7 @@ import {
 } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { ChevronDown, ImageIcon, Info, LinkIcon, Loader2, Pencil, Plus, Settings2, Trash2, X } from "lucide-react"
+import { ChevronDown, ImageIcon, Info, Loader2, Pencil, Plus, Settings2, Trash2, X } from "lucide-react"
 
 interface WorkFormProps {
   workId?: string
@@ -448,6 +449,8 @@ const getEmptyCreateValues = (): Partial<WorkFormValues> => ({
   cmx_rating: null,
   cmx_votes: null,
   extra_platform_ratings: [],
+  covers: [],
+  synopses: [],
 })
 
 const normalizePostReadingScoresInValues = (values: WorkFormValues): WorkFormValues => {
@@ -503,6 +506,7 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
   const pubStatus = useWatch({ control, name: "publication_status" })
   const personalStatus = useWatch({ control, name: "personal_status" })
   const coverUrl = useWatch({ control, name: "cover_url" })
+  const covers = useWatch({ control, name: "covers" }) ?? []
   const manualScore = useWatch({ control, name: "manual_score" })
   const titleValue = useWatch({ control, name: "title" })
   const yearValue = useWatch({ control, name: "year" })
@@ -513,7 +517,6 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
   const tagsValue = useWatch({ control, name: "tags" })
   const synopsisQualityValue = useWatch({ control, name: "synopsis_quality" })
   const [coverPreviewFailedUrl, setCoverPreviewFailedUrl] = useState<string | null>(null)
-  const [showCoverUrl, setShowCoverUrl] = useState(false)
   const [openSections, setOpenSections] = useState(DEFAULT_OPEN_SECTIONS)
   const [sourceOptions, setSourceOptions] = useState<ExternalSourceOption[]>([])
   const [genreSuggestions, setGenreSuggestions] = useState<string[]>(GENRE_NAMES)
@@ -567,7 +570,6 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
   const clearFormState = () => {
     setCriteriaJustifications({})
     setCoverPreviewFailedUrl(null)
-    setShowCoverUrl(false)
   }
 
   const resetForNewEntry = () => {
@@ -720,6 +722,22 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
     if (data.alternativeTitles?.length) setValue("alternative_titles", data.alternativeTitles)
     if (data.synopsis) setValue("synopsis", data.synopsis)
     if (data.coverUrl) setValue("cover_url", data.coverUrl)
+    if (data.multiCovers?.length) {
+      const primaryUrl = data.coverUrl
+      setValue("covers", data.multiCovers.map((c) => ({
+        url: c.url,
+        source: c.source,
+        isPrimary: c.url === primaryUrl,
+      })))
+    }
+    if (data.multiSynopses?.length) {
+      const primaryText = data.multiSynopses[0]?.text
+      setValue("synopses", data.multiSynopses.map((s) => ({
+        source: s.source,
+        text: s.text,
+        isPrimary: s.text === primaryText,
+      })))
+    }
     if (data.year) setValue("year", data.year)
     if (data.yearEnd) setValue("year_end", data.yearEnd)
     if (data.publicationStatus) setValue("publication_status", data.publicationStatus)
@@ -1322,19 +1340,8 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
                 </div>
               </div>
 
-              {/* Capa + URL */}
+              {/* Capa (multi-source manager) */}
               <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="cover_url">Capa</Label>
-                  <button
-                    type="button"
-                    aria-label={showCoverUrl ? "Ocultar URL da capa" : "Editar URL da capa"}
-                    onClick={() => setShowCoverUrl((current) => !current)}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    <LinkIcon className="h-4 w-4" />
-                  </button>
-                </div>
                 <div className="flex aspect-[3/4] w-full max-w-[320px] items-center justify-center overflow-hidden rounded-lg border bg-muted">
                   {coverUrl && !coverPreviewFailed ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -1353,15 +1360,16 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
                     </div>
                   )}
                 </div>
-                {showCoverUrl && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cover_url" className="text-xs text-muted-foreground">URL da capa</Label>
-                    <Input id="cover_url" {...register("cover_url")} placeholder="https://..." />
-                    {errors.cover_url && (
-                      <p className="text-xs text-destructive">{errors.cover_url.message}</p>
-                    )}
-                  </div>
-                )}
+                <CoversManager
+                  value={covers}
+                  onChange={(next) => {
+                    setValue("covers", next, { shouldDirty: true })
+                    // Keep the legacy single cover_url in sync with the primary,
+                    // so list/card views (which still read cover_url) update too.
+                    const primary = next.find((c) => c.isPrimary) ?? next[0]
+                    setValue("cover_url", primary?.url ?? "", { shouldDirty: true })
+                  }}
+                />
               </div>
             </div>
 

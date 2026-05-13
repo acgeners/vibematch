@@ -8,6 +8,7 @@ export const TAG_GROUP_IDS = {
   "fantasy": "d86c1b07-5f44-4526-9416-70ddc80c6927",
   "format": "575383cc-8464-40e0-91dd-b0689903fb66",
   "genre": "04eadb9a-5cc8-42ec-bbb3-1408fd7a1b7e",
+  "other": "606e6239-515b-46c5-b985-9f41f948cdc9",
   "relationship_dynamics": "b66edefb-67f3-4c8d-8c16-b6f00ab07ddf",
   "romance": "1dd17228-8315-41e1-9ab9-9eaa3b4a3f4f",
   "school_youth": "56378f06-46e4-4d6d-a9f5-1abee5ae1c68",
@@ -31,6 +32,7 @@ export const TAG_GROUP_LABELS: Record<TagGroupSlug, string> = {
   "fantasy": "Fantasy",
   "format": "Format",
   "genre": "Genre",
+  "other": "Other",
   "relationship_dynamics": "Relationship Dynamics",
   "romance": "Romance",
   "school_youth": "School / Youth",
@@ -51,6 +53,7 @@ export const ELEMENTS_TAG_GROUP_ID = TAG_GROUP_IDS["elements"]
 export const FANTASY_TAG_GROUP_ID = TAG_GROUP_IDS["fantasy"]
 export const FORMAT_TAG_GROUP_ID = TAG_GROUP_IDS["format"]
 export const GENRE_TAG_GROUP_ID = TAG_GROUP_IDS["genre"]
+export const OTHER_TAG_GROUP_ID = TAG_GROUP_IDS["other"]
 export const RELATIONSHIP_DYNAMICS_TAG_GROUP_ID = TAG_GROUP_IDS["relationship_dynamics"]
 export const ROMANCE_TAG_GROUP_ID = TAG_GROUP_IDS["romance"]
 export const SCHOOL_YOUTH_TAG_GROUP_ID = TAG_GROUP_IDS["school_youth"]

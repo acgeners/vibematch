@@ -39,6 +39,7 @@ query GetManga($id: Int) {
     tags { name category isGeneralSpoiler }
     averageScore
     popularity
+    stats { scoreDistribution { score amount } }
   }
 }
 `
@@ -96,7 +97,16 @@ function parseMedia(m: any) {
     genres,
     tags,
     score: m.averageScore != null ? Math.round((m.averageScore / 10) * 10) / 10 : undefined,
-    votes: typeof m.popularity === "number" ? m.popularity : undefined,
+    // Real vote count = sum of users in scoreDistribution. AniList "popularity" is the
+    // total list-add count (followers), not the rating sample size — different signal.
+    votes: (() => {
+      const dist = m.stats?.scoreDistribution as Array<{ score?: number; amount?: number }> | undefined
+      if (!Array.isArray(dist) || dist.length === 0) {
+        return typeof m.popularity === "number" ? m.popularity : undefined
+      }
+      const total = dist.reduce((sum, entry) => sum + (typeof entry?.amount === "number" ? entry.amount : 0), 0)
+      return total > 0 ? total : undefined
+    })(),
   }
 }
 

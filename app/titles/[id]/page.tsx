@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft, ChevronDown, ImageIcon, Plus } from "lucide-react"
+import { ArrowLeft, ChevronDown, Plus } from "lucide-react"
 import { getWorkWithAiEvaluations, getWorkBySlug } from "@/server/queries/works"
 import { titleToSlug } from "@/lib/utils"
 import { ScoreBadge } from "@/components/ui/score-badge"
@@ -11,6 +11,7 @@ import {
 import { CalculationBreakdown } from "@/components/titles/calculation-breakdown"
 import { WorkDetailActions } from "@/components/titles/work-detail-actions"
 import { BatchCreatedNavigator } from "@/components/titles/batch-created-navigator"
+import { WorkCoverGallery } from "@/components/titles/work-cover-gallery"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -228,20 +229,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       <section className="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)]">
         {/* Coluna esquerda: capa + status + capítulos */}
         <div className="flex flex-col gap-3 w-full max-w-[220px] justify-self-center md:max-w-none md:justify-self-start">
-          <div className="aspect-[2/3] overflow-hidden rounded-lg border bg-muted shadow-sm">
-            {work.cover_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={work.cover_url}
-                alt={`Capa de ${work.title}`}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                <ImageIcon className="h-10 w-10" />
-              </div>
-            )}
-          </div>
+          <WorkCoverGallery
+            title={work.title}
+            fallbackUrl={work.cover_url}
+            covers={work.work_covers ?? []}
+          />
 
           {/* Status badges abaixo da capa */}
           <div className="flex flex-wrap gap-1.5">

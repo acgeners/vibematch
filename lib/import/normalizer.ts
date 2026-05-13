@@ -65,7 +65,6 @@ export function normalizePersonalStatus(
     "hiatus": "Hiatus",
     "lendo (antigo)": "On-hold",
     "on-hold": "On-hold",
-    "ler": "To read",
     "to read": "To read",
     "droppado": "Dropped",
     "dropped": "Dropped",
