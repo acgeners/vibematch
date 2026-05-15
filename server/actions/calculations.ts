@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import {
   calculateGPT,
   normalizeGPT,
@@ -25,11 +26,10 @@ import type {
 
 interface RawWork {
   id: string
-  publication_status: string
-  personal_status: string
+  publication_status_id: number | null
   total_chapters: number | null
   synopsis_quality: string | null
-  observation_penalty: number
+  observation_adjustment: number
   manual_score: number | null
   is_archived: boolean
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -44,7 +44,7 @@ interface WorkComputed {
   publicationStatus: string
   totalChapters: number | null
   synopsisQuality: SynopsisQuality | null
-  observationPenalty: number
+  observationAdjustment: number
   categoryScores: CategoryScoreMap
   platformRatings: PlatformRating[]
   totalVotes: number
@@ -77,10 +77,10 @@ function buildWork(raw: RawWork): WorkComputed {
   return {
     id: raw.id,
     manualScore: raw.manual_score == null ? null : Number(raw.manual_score),
-    publicationStatus: raw.publication_status,
+    publicationStatus: getPublicationStatusNameById(raw.publication_status_id) ?? "Unknown",
     totalChapters: raw.total_chapters,
     synopsisQuality: raw.synopsis_quality as SynopsisQuality | null,
-    observationPenalty: Number(raw.observation_penalty ?? 0),
+    observationAdjustment: Number(raw.observation_adjustment ?? 0),
     categoryScores,
     platformRatings,
     totalVotes: sumVotes(platformRatings),
@@ -102,7 +102,7 @@ function buildPredictionInput(w: WorkComputed): PredictionInput {
     totalVotes: w.totalVotes,
     totalChapters: w.totalChapters,
     synopsisQuality: w.synopsisQuality,
-    observationPenalty: w.observationPenalty,
+    observationAdjustment: w.observationAdjustment,
     publicationStatus: w.publicationStatus,
   }
 }
@@ -124,8 +124,8 @@ export async function recalculateAll() {
     supabase
       .from("works")
       .select(
-        `id, publication_status, personal_status, total_chapters, synopsis_quality,
-         observation_penalty, manual_score, is_archived,
+        `id, publication_status_id, total_chapters, synopsis_quality,
+         observation_adjustment, manual_score, is_archived,
          category_scores(criterion_slug, score),
          platform_ratings(id, platform, rating, vote_count)`
       )
@@ -205,7 +205,7 @@ export async function recalculateAll() {
       chaptersNormalized: w.chaptersNormalized,
       publicationStatus: (w.publicationStatus as PublicationStatus) ?? "Unknown",
       synopsisQuality: w.synopsisQuality,
-      observationPenalty: w.observationPenalty,
+      observationAdjustment: w.observationAdjustment,
       pseudoVotesBlend,
     })
   }
@@ -279,6 +279,14 @@ export async function recalculateAll() {
     .from("calculated_scores")
     .upsert(rows, { onConflict: "work_id" })
   if (upsertErr) throw new Error(upsertErr.message)
+
+  // Atualiza calculated_scores.confidence como pass-through da
+  // ai_evaluations.confidence mais recente. Função criada na migration 022.
+  // Falha aqui não invalida o resto do recalculate.
+  const { error: confidenceErr } = await supabase.rpc("refresh_calculated_scores_confidence")
+  if (confidenceErr) {
+    console.warn("[recalculateAll] refresh_calculated_scores_confidence falhou:", confidenceErr.message)
+  }
 
   // ---------- 7) Persistir novo formula_config ----------
   const { error: configUpdateErr } = await supabase

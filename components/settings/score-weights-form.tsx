@@ -29,7 +29,7 @@ const schema = z.object({
     z.object({
       slug: z.string(),
       weight: z.number().min(-20).max(20),
-      max_negative_threshold: z.number().min(0).max(10).nullable().optional(),
+      threshold: z.number().min(0).max(10).nullable().optional(),
     })
   ),
 })
@@ -51,7 +51,7 @@ export function ScoreWeightsForm({ weights }: ScoreWeightsFormProps) {
       weights: sorted.map((w) => ({
         slug: w.slug,
         weight: w.weight,
-        max_negative_threshold: w.max_negative_threshold,
+        threshold: w.threshold,
       })),
     },
   })
@@ -83,7 +83,7 @@ export function ScoreWeightsForm({ weights }: ScoreWeightsFormProps) {
             <TableRow>
               <TableHead>Critério</TableHead>
               <TableHead>Peso</TableHead>
-              <TableHead>Threshold neg.</TableHead>
+              <TableHead title="Negativo: piso para penalizar. Positivo: a partir desse valor o impacto é amplificado.">Threshold</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -117,9 +117,8 @@ export function ScoreWeightsForm({ weights }: ScoreWeightsFormProps) {
                       max={10}
                       placeholder="—"
                       className="w-20 h-8 text-sm"
-                      {...register(`weights.${i}.max_negative_threshold`, {
-                        valueAsNumber: true,
-                        setValueAs: (v) => v === "" ? null : Number(v),
+                      {...register(`weights.${i}.threshold`, {
+                        setValueAs: (v) => v === "" || v == null ? null : Number(v),
                       })}
                     />
                   </TableCell>

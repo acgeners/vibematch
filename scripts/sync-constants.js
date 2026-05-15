@@ -22,6 +22,20 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://djbreiyzwo
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 const ROOT = path.resolve(__dirname, "..")
+
+// Slugs cujos connectors estão implementados em lib/external/index.ts (SEARCH_CONNECTORS).
+// Mantenha em sincronia ao adicionar/remover connector.
+const IMPLEMENTED_CONNECTOR_SLUGS = [
+  "anilist",
+  "mangaupdates",
+  "comick",
+  "kitsu",
+  "myanimelist",
+  "mangadex",
+  "animeplanet",
+  "comix",
+]
+
 const CODE_ONLY_SOURCES = [
   { slug: "anilist", name: "AniList" },
   { slug: "mangaupdates", name: "Manga Updates" },
@@ -79,100 +93,6 @@ function uniqueAliasLines(criteria) {
   return lines.join("\n")
 }
 
-function normalizeTagName(value) {
-  return String(value ?? "").trim().toLowerCase()
-}
-
-async function syncLegacyGenresToWorkTags(supabase, genreTagGroupId) {
-  if (!genreTagGroupId) {
-    return { matchedPairs: 0, insertedPairs: 0, skippedPairs: 0 }
-  }
-
-  const [{ data: works, error: worksError }, { data: genreTags, error: tagsError }] = await Promise.all([
-    supabase
-      .from("works")
-      .select("id, genres")
-      .limit(5000),
-    supabase
-      .from("tags")
-      .select("id, name")
-      .eq("tag_group_id", genreTagGroupId)
-      .limit(5000),
-  ])
-
-  if (worksError) throw new Error(`Erro ao buscar works.genres: ${worksError.message}`)
-  if (tagsError) throw new Error(`Erro ao buscar tags de gênero: ${tagsError.message}`)
-
-  const genreTagIdByName = new Map(
-    (genreTags ?? [])
-      .filter(tag => tag.id && tag.name)
-      .map(tag => [normalizeTagName(tag.name), tag.id])
-  )
-
-  const desiredPairs = []
-  const seenPairs = new Set()
-
-  for (const work of works ?? []) {
-    const genres = Array.isArray(work.genres) ? work.genres : []
-    for (const genreName of genres) {
-      const tagId = genreTagIdByName.get(normalizeTagName(genreName))
-      if (!tagId) continue
-      const pairKey = `${work.id}:${tagId}`
-      if (seenPairs.has(pairKey)) continue
-      seenPairs.add(pairKey)
-      desiredPairs.push({ work_id: work.id, tag_id: tagId })
-    }
-  }
-
-  if (desiredPairs.length === 0) {
-    return { matchedPairs: 0, insertedPairs: 0, skippedPairs: 0 }
-  }
-
-  const existingPairs = new Set()
-  const workIds = [...new Set(desiredPairs.map(pair => pair.work_id))]
-  // Limit UUIDs per .in() so the request URL stays well under PostgREST/undici's
-  // URI limit (~8–16 KB). 50 × 36-char UUIDs ≈ 1.8 KB.
-  const chunkSize = 50
-  for (let i = 0; i < workIds.length; i += chunkSize) {
-    const chunk = workIds.slice(i, i + chunkSize)
-    let from = 0
-    const pageSize = 1000
-
-    while (true) {
-      const { data, error } = await supabase
-        .from("work_tags")
-        .select("work_id, tag_id")
-        .in("work_id", chunk)
-        .range(from, from + pageSize - 1)
-
-      if (error) throw new Error(`Erro ao buscar work_tags existentes: ${error.message}`)
-      for (const pair of data ?? []) {
-        existingPairs.add(`${pair.work_id}:${pair.tag_id}`)
-      }
-
-      if (!data || data.length < pageSize) break
-      from += pageSize
-    }
-  }
-
-  const missingPairs = desiredPairs.filter(pair => !existingPairs.has(`${pair.work_id}:${pair.tag_id}`))
-
-  for (let i = 0; i < missingPairs.length; i += chunkSize) {
-    const chunk = missingPairs.slice(i, i + chunkSize)
-    const { error } = await supabase
-      .from("work_tags")
-      .upsert(chunk, { onConflict: "work_id,tag_id", ignoreDuplicates: true })
-
-    if (error) throw new Error(`Erro ao inserir work_tags de gênero: ${error.message}`)
-  }
-
-  return {
-    matchedPairs: desiredPairs.length,
-    insertedPairs: missingPairs.length,
-    skippedPairs: desiredPairs.length - missingPairs.length,
-  }
-}
-
 async function main() {
   if (!SUPABASE_KEY) {
     console.error("Defina SUPABASE_SERVICE_ROLE_KEY antes de rodar npm run sync-constants.")
@@ -206,12 +126,12 @@ async function main() {
 
   const [criteriaRes, pubStatusRes, persStatusRes, sourceRes, tagGroupRes, tagsRes, genresRes] = await Promise.all([
     supabase.from("criteria").select("eval_type, slug, criteria, emoji, description, weight, key, ranges").order("id"),
-    supabase.from("publication_status").select("id, status, slug, short, color, symbol, previous").order("id"),
-    supabase.from("personal_status").select("id, status, slug, color, symbol, previous, comment").order("id"),
+    supabase.from("publication_status").select("id, status, slug, short, color, symbol").order("id"),
+    supabase.from("personal_status").select("id, status, slug, color, symbol, comment").order("id"),
     supabase.from("source").select("slug, name").order("order", { ascending: true, nullsFirst: false }).order("name"),
-    supabase.from("tag_group").select("id, slug, group").order("group"),
+    supabase.from("tag_group").select("id, slug, group, description, example").order("group"),
     fetchAllPaginated(() => supabase.from("tags").select("name, slug, tag_group_id").order("name")),
-    fetchAllPaginated(() => supabase.from("genres").select("id, tag_id, tags(name, slug, tag_group_id)")),
+    fetchAllPaginated(() => supabase.from("genres").select("id, name, slug")),
   ])
 
   /** @type {Array<[string, { data: any, error: any }]>} */
@@ -227,13 +147,23 @@ async function main() {
   const persStatuses  = persStatusRes.data
   const sources       = withCodeOnlySources(sourceRes.data)
   const tagGroups     = tagGroupRes.data
-  const genreTagGroupId = tagGroups.find(group => group.slug === "genre")?.id
 
   console.log(`  ${iaCriteria.length} critérios IA, ${userCriteria.length} critérios User`)
   console.log(`  ${pubStatuses.length} pub statuses, ${persStatuses.length} personal statuses, ${sources.length} sources`)
   console.log(`  ${tagGroups.length} tag groups`)
-  if (!genreTagGroupId) {
-    console.warn('  ⚠ tag_group com slug "genre" não encontrado; backfill de gêneros ignorado.')
+
+  // Valida cruzamento entre tabela `source` (DB) e SEARCH_CONNECTORS implementados.
+  // Divergências não param o sync, mas indicam que alguém esqueceu de adicionar
+  // entrada no DB OU remover connector do código.
+  const dbSourceSlugs = new Set((sourceRes.data ?? []).map((s) => s.slug).filter(Boolean))
+  const implementedSet = new Set(IMPLEMENTED_CONNECTOR_SLUGS)
+  const dbWithoutConnector = [...dbSourceSlugs].filter((s) => !implementedSet.has(s))
+  const connectorWithoutDb = IMPLEMENTED_CONNECTOR_SLUGS.filter((s) => !dbSourceSlugs.has(s))
+  if (dbWithoutConnector.length > 0) {
+    console.warn(`  ⚠ source no DB sem connector implementado: ${dbWithoutConnector.join(", ")}`)
+  }
+  if (connectorWithoutDb.length > 0) {
+    console.warn(`  ⚠ connector implementado sem entrada na tabela source: ${connectorWithoutDb.join(", ")}`)
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -248,19 +178,16 @@ async function main() {
     return `  ${c.slug}: {\n    title: ${JSON.stringify(c.criteria)},\n    ranges: [\n${ranges}\n    ],\n  },`
   }).join("\n")
 
-  // Legacy text→canonical lookup; ainda usado durante a migração das colunas
-  // works.publication_status/personal_status (texto) para os FKs _id. Sai
-  // junto com previous quando os textos forem dropados (Fase 4.1).
+  // Lookup texto→canonical para o normalizer de import (CSV/XLSX). Mapeia
+  // status, slug e short (apenas pub) para o nome canônico.
   const pubLabelEntries = [...new Set(pubStatuses.flatMap(r => [
     r.short ? `  ${JSON.stringify(r.short)}: ${JSON.stringify(r.status)},` : null,
     r.slug ? `  ${JSON.stringify(r.slug)}: ${JSON.stringify(r.status)},` : null,
-    r.previous ? `  ${JSON.stringify(r.previous)}: ${JSON.stringify(r.status)},` : null,
     `  ${JSON.stringify(r.status)}: ${JSON.stringify(r.status)},`,
   ].filter(Boolean)))].join("\n")
 
   const persLabelEntries = [...new Set(persStatuses.flatMap(r => [
     r.slug ? `  ${JSON.stringify(r.slug)}: ${JSON.stringify(r.status)},` : null,
-    r.previous ? `  ${JSON.stringify(r.previous)}: ${JSON.stringify(r.status)},` : null,
     `  ${JSON.stringify(r.status)}: ${JSON.stringify(r.status)},`,
   ].filter(Boolean)))].join("\n")
 
@@ -439,20 +366,16 @@ ${namedTagGroupExports}
   // ─────────────────────────────────────────────────────────────
   const allTags = (tagsRes.data ?? []).filter(t => t.name && t.name.trim())
 
-  const genreTagGroupIdForTags = tagGroups.find(g => g.slug === "genre")?.id
   const tagGroupById = new Map(tagGroups.map(g => [g.id, g]))
 
-  const genreNamesFromGenres = (genresRes.data ?? [])
-    .map(g => g.tags?.name)
+  const genreNames = (genresRes.data ?? [])
+    .map(g => g.name)
     .filter(Boolean)
     .map(name => name.trim())
-
-  const genreNames = genreNamesFromGenres
     .sort((a, b) => a.localeCompare(b))
 
   const tagsByGroupSlug = new Map()
   for (const t of allTags) {
-    if (t.tag_group_id === genreTagGroupIdForTags) continue
     const group = tagGroupById.get(t.tag_group_id)
     if (!group) continue
     const slug = group.slug
@@ -482,12 +405,6 @@ ${tagGroupsLiteral}
 `)
 
   console.log(`  ${genreNames.length} gêneros, ${allTags.length - genreNames.length} outras tags em ${tagsByGroupSlug.size} grupos`)
-
-  const genreSyncResult = await syncLegacyGenresToWorkTags(supabase, genreTagGroupId)
-  console.log(
-    `  work_tags gêneros: ${genreSyncResult.matchedPairs} pares reconhecidos, ` +
-    `${genreSyncResult.insertedPairs} inseridos, ${genreSyncResult.skippedPairs} já existiam`
-  )
 
   // ─────────────────────────────────────────────────────────────
   // 4. lib/external/types.ts  (ExternalSourceId only)
@@ -570,8 +487,8 @@ ${criteriaAliasLines}
   chapters_read: "chapters_read",
   "♥Sinopse": "synopsis_quality",
   synopsis_quality: "synopsis_quality",
-  Obs: "observation_penalty",
-  observation_penalty: "observation_penalty",
+  Obs: "observation_adjustment",
+  observation_adjustment: "observation_adjustment",
   "M.Nota": "manual_score",
   manual_score: "manual_score",
 
@@ -626,8 +543,8 @@ ${criteriaSlugCases}
       case "chapters_read":
         result[targetField] = parseInteger(raw) ?? undefined
         break
-      case "observation_penalty":
-        result.observation_penalty = parseBrazilianNumber(raw) ?? undefined
+      case "observation_adjustment":
+        result.observation_adjustment = parseBrazilianNumber(raw) ?? undefined
         break
       case "publication_status":
         result.publication_status = normalizePublicationStatus(raw) ?? undefined
@@ -649,21 +566,19 @@ ${criteriaSlugCases}
   // ─────────────────────────────────────────────────────────────
   // 5. lib/import/normalizer.ts
   // ─────────────────────────────────────────────────────────────
-  // publication_status: mapeia previous, short e status → status (novo valor canônico)
+  // publication_status: mapeia short, slug e status → status (canônico) para import.
   const pubMapEntries = []
   for (const r of pubStatuses) {
-    if (r.previous) pubMapEntries.push(`    ${JSON.stringify(r.previous.toUpperCase())}: ${JSON.stringify(r.status)},`)
-    pubMapEntries.push(`    ${JSON.stringify(r.short.toUpperCase())}: ${JSON.stringify(r.status)},`)
+    if (r.short) pubMapEntries.push(`    ${JSON.stringify(r.short.toUpperCase())}: ${JSON.stringify(r.status)},`)
+    if (r.slug) pubMapEntries.push(`    ${JSON.stringify(r.slug.toUpperCase())}: ${JSON.stringify(r.status)},`)
     pubMapEntries.push(`    ${JSON.stringify(r.status.toUpperCase())}: ${JSON.stringify(r.status)},`)
   }
   const pubMapStr = [...new Set(pubMapEntries)].join("\n")
 
-  // personal_status: mapeia previous E status → status (novo valor)
+  // personal_status: mapeia slug e status → status (canônico) para import.
   const persMapEntries = []
   for (const r of persStatuses) {
-    if (r.previous) {
-      persMapEntries.push(`    ${JSON.stringify(r.previous.toLowerCase())}: ${JSON.stringify(r.status)},`)
-    }
+    if (r.slug) persMapEntries.push(`    ${JSON.stringify(r.slug.toLowerCase())}: ${JSON.stringify(r.status)},`)
     persMapEntries.push(`    ${JSON.stringify(r.status.toLowerCase())}: ${JSON.stringify(r.status)},`)
   }
   const persMapStr = [...new Set(persMapEntries)].join("\n")

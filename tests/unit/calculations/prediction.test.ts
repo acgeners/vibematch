@@ -13,13 +13,13 @@ const baseInput = (overrides: Partial<PredictionInput> = {}): PredictionInput =>
     drama: 4,
     tragedy: 2,
   },
-  gptNormalized: 7.5,
+  iaEvalNormalized: 7.5,
   platformAvg: 8.0,
   totalVotes: 1500,
   totalChapters: 120,
   synopsisQuality: "♥♥♥",
-  observationPenalty: 0,
-  publicationStatus: "C",
+  observationAdjustment: 0,
+  publicationStatus: "Completed",
   ...overrides,
 })
 

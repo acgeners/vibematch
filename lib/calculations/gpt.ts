@@ -3,9 +3,14 @@ import type { ScoreWeight, CategoryScoreMap } from "@/types/domain"
 /**
  * GPT = soma ponderada das categorias / soma dos pesos positivos
  *
- * Critérios negativos (Drama, Tragédia) só contribuem quando o score
- * supera o max_negative_threshold. A divisão é sempre pela soma
- * dos pesos POSITIVOS (56 por default).
+ * O campo `threshold` aplica-se a critérios positivos e negativos:
+ *   - Critério negativo (Drama, Tragédia): score abaixo do threshold não
+ *     penaliza; apenas o excedente é multiplicado pelo peso (negativo).
+ *   - Critério positivo (Romance, Ação, …): contribui normalmente até o
+ *     threshold e ganha bônus dobrado para cada ponto acima dele.
+ *
+ * Denominador segue sendo a soma dos pesos POSITIVOS. O clamp 0–10
+ * absorve qualquer excedente vindo do bônus.
  */
 export function calculateGPT(
   scores: CategoryScoreMap,
@@ -21,12 +26,12 @@ export function calculateGPT(
 
   const numerator = activeWeights.reduce((acc, w) => {
     const score = scores[w.slug] ?? 0
+    const threshold = w.threshold ?? 0
+    const excess = Math.max(0, score - threshold)
     if (w.weight < 0) {
-      const threshold = w.max_negative_threshold ?? 0
-      const excess = Math.max(0, score - threshold)
       return acc + excess * w.weight
     }
-    return acc + score * w.weight
+    return acc + score * w.weight + excess * w.weight
   }, 0)
 
   return Math.max(0, Math.min(10, numerator / positiveWeightSum))

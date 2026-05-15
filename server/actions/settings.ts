@@ -3,7 +3,7 @@
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { revalidatePath } from "next/cache"
-import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { recalculateAll } from "./calculations"
 import { computeCalibration, type CalibrationDiff } from "@/lib/calculations/calibration"
 
@@ -12,18 +12,18 @@ const execFileAsync = promisify(execFile)
 export interface ScoreWeightUpdate {
   slug: string
   weight: number
-  max_negative_threshold?: number | null
+  threshold?: number | null
 }
 
 export async function updateScoreWeights(updates: ScoreWeightUpdate[]) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   for (const u of updates) {
     await supabase
       .from("score_weights")
       .update({
         weight: u.weight,
-        max_negative_threshold: u.max_negative_threshold ?? null,
+        threshold: u.threshold ?? null,
       })
       .eq("slug", u.slug)
   }
@@ -69,7 +69,7 @@ export interface RankingPreferencesUpdate {
 }
 
 export async function updateRankingPreferences(update: RankingPreferencesUpdate) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data: existing } = await supabase
     .from("formula_config")
@@ -98,7 +98,7 @@ export async function updateRankingPreferences(update: RankingPreferencesUpdate)
 }
 
 export async function updateFormulaConfig(update: FormulaConfigUpdate) {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   await supabase
     .from("formula_config")
@@ -120,7 +120,7 @@ export async function updateFormulaConfig(update: FormulaConfigUpdate) {
  * sem retreinar nada. Útil pra exibir métricas em /settings.
  */
 export async function getCalibrationSnapshot() {
-  const supabase = await createClient()
+  const supabase = createAdminClient()
 
   const { data, error } = await supabase
     .from("works")

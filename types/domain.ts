@@ -57,7 +57,7 @@ export interface ScoreWeight {
   slug: string
   name: string
   weight: number
-  max_negative_threshold: number | null
+  threshold: number | null
   display_order: number
   is_active: boolean
 }
@@ -113,12 +113,12 @@ export interface Work {
   genres: string[]
   year: number | null
   year_end: number | null
-  publication_status: PublicationStatus
-  personal_status: PersonalStatus
+  publication_status_id: number | null
+  personal_status_id: number | null
   total_chapters: number | null
   chapters_read: number | null
   synopsis_quality: SynopsisQuality | null
-  observation_penalty: number
+  observation_adjustment: number
   manual_score: number | null
   post_story_score: number | null
   post_fl_score: number | null
@@ -128,6 +128,7 @@ export interface Work {
   post_art_visual_score: number | null
   post_impact_immersion_score: number | null
   post_originality_score: number | null
+  observations: string | null
   cover_url: string | null
   ai_eval_status: AiEvalStatus
   is_archived: boolean
@@ -233,7 +234,7 @@ export interface CalculationInputs {
   totalChapters: number | null
   publicationStatus: PublicationStatus
   synopsisQuality: SynopsisQuality | null
-  observationPenalty: number
+  observationAdjustment: number
   config: FormulaConfig
   globalPlatformMean: number
 }
@@ -280,7 +281,7 @@ export interface MappedImportRow {
   chapters_read?: number
   synopsis_quality?: SynopsisQuality
   personal_status?: PersonalStatus
-  observation_penalty?: number
+  observation_adjustment?: number
   manual_score?: number
   ia_eval?: number
   ia_eval_normalized?: number

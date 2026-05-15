@@ -19,20 +19,59 @@ interface AiEvaluationReviewFormProps {
   onCancel: () => void
 }
 
-function getReviewUsage(rawResponse: unknown): boolean {
-  if (typeof rawResponse !== "object" || rawResponse === null) return false
+type ReviewUsageState =
+  | { kind: "unavailable" } // sem reviews externas para essa obra
+  | { kind: "declined" }    // reviews disponíveis mas modelo não citou nenhuma
+  | { kind: "used"; count: number }
+
+function getReviewUsage(rawResponse: unknown): ReviewUsageState {
+  if (typeof rawResponse !== "object" || rawResponse === null) {
+    return { kind: "unavailable" }
+  }
 
   const raw = rawResponse as Record<string, unknown>
   const audit = raw.reviewAudit
-  if (typeof audit !== "object" || audit === null) return false
+  if (typeof audit !== "object" || audit === null) {
+    return { kind: "unavailable" }
+  }
 
   const reviewAudit = audit as Record<string, unknown>
-  const usedReviewIds = reviewAudit.usedReviewIds
+  const usedReviewIds = Array.isArray(reviewAudit.usedReviewIds) ? reviewAudit.usedReviewIds : []
 
-  return reviewAudit.required === true
-    && reviewAudit.passed === true
-    && Array.isArray(usedReviewIds)
-    && usedReviewIds.length > 0
+  if (reviewAudit.required !== true) {
+    return { kind: "unavailable" }
+  }
+  if (usedReviewIds.length === 0) {
+    return { kind: "declined" }
+  }
+  return { kind: "used", count: usedReviewIds.length }
+}
+
+interface EvaluationContextDebug {
+  title?: string
+  synopsis?: string | null
+  synopsisIsManual?: boolean
+  synopsisOmittedFromPrompt?: boolean
+  genres?: string[]
+  tagsGrouped?: Array<{ group: string | null; names: string[] }>
+  externalContext?: string[]
+  sourcedReviews?: Array<{
+    id: string
+    source: string
+    sourceTitle: string
+    matchScore: number
+    text: string
+    userRating?: number
+  }>
+  legacyReviews?: Array<{ id: string; text: string }>
+  r19Detected?: boolean
+}
+
+function getEvaluationContext(rawResponse: unknown): EvaluationContextDebug | null {
+  if (typeof rawResponse !== "object" || rawResponse === null) return null
+  const ctx = (rawResponse as Record<string, unknown>).evaluationContext
+  if (typeof ctx !== "object" || ctx === null) return null
+  return ctx as EvaluationContextDebug
 }
 
 export function AiEvaluationReviewForm({
@@ -58,7 +97,30 @@ export function AiEvaluationReviewForm({
 
   const [scores, setScores] = useState(initialScores)
   const [submitting, setSubmitting] = useState(false)
-  const usedReview = getReviewUsage(evaluation.raw_response)
+  const [showDebug, setShowDebug] = useState(false)
+  const reviewUsage = getReviewUsage(evaluation.raw_response)
+  const debugContext = getEvaluationContext(evaluation.raw_response)
+
+  const reviewBadge = (() => {
+    switch (reviewUsage.kind) {
+      case "used":
+        return {
+          label: `${reviewUsage.count} review${reviewUsage.count === 1 ? "" : "s"} usada${reviewUsage.count === 1 ? "" : "s"}`,
+          className: "border-emerald-300 bg-emerald-50 text-emerald-700",
+        }
+      case "declined":
+        return {
+          label: "reviews disponíveis, mas não usadas",
+          className: "border-amber-300 bg-amber-50 text-amber-700",
+        }
+      case "unavailable":
+      default:
+        return {
+          label: "sem reviews externas",
+          className: "border-slate-300 bg-slate-100 text-slate-600",
+        }
+    }
+  })()
 
   const updateScore = (slug: string, value: number) => {
     setScores((prev) =>
@@ -128,18 +190,133 @@ export function AiEvaluationReviewForm({
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <p className="text-xs font-medium text-muted-foreground">Resumo da IA</p>
               <span
-                className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
-                  usedReview
-                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                    : "border-slate-300 bg-slate-100 text-slate-600"
-                }`}
+                className={`rounded-full border px-2 py-0.5 text-xs font-medium ${reviewBadge.className}`}
               >
-                uso de review: {usedReview ? "true" : "false"}
+                {reviewBadge.label}
               </span>
             </div>
             {evaluation.summary}
           </div>
         </div>
+      )}
+
+      {debugContext && (
+        <details
+          open={showDebug}
+          onToggle={(e) => setShowDebug((e.target as HTMLDetailsElement).open)}
+          className="rounded-md border border-dashed border-amber-300 bg-amber-50/40 p-3 text-xs"
+        >
+          <summary className="cursor-pointer text-xs font-medium text-amber-800">
+            🐛 Dados usados na avaliação (debug temporário)
+          </summary>
+          <div className="mt-3 space-y-3 text-foreground">
+            {debugContext.title && (
+              <div>
+                <p className="font-semibold">Título</p>
+                <p className="text-muted-foreground">{debugContext.title}</p>
+              </div>
+            )}
+            {debugContext.synopsis != null && (
+              <div>
+                <p className="font-semibold">
+                  Sinopse{" "}
+                  <span
+                    className={
+                      "ml-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium " +
+                      (debugContext.synopsisIsManual
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                        : "border-amber-300 bg-amber-50 text-amber-700")
+                    }
+                  >
+                    {debugContext.synopsisIsManual ? "manual" : "auto/externa"}
+                  </span>
+                  {debugContext.synopsisOmittedFromPrompt && (
+                    <span className="ml-2 text-[10px] font-normal text-amber-700">
+                      (omitida do prompt — usando [C1]…[Cn])
+                    </span>
+                  )}
+                </p>
+                <p className="whitespace-pre-wrap text-muted-foreground">
+                  {debugContext.synopsis || "(vazia)"}
+                </p>
+              </div>
+            )}
+            {debugContext.genres && debugContext.genres.length > 0 && (
+              <div>
+                <p className="font-semibold">Gêneros ({debugContext.genres.length})</p>
+                <p className="text-muted-foreground">{debugContext.genres.join(", ")}</p>
+              </div>
+            )}
+            {debugContext.tagsGrouped && debugContext.tagsGrouped.length > 0 && (
+              <div>
+                <p className="font-semibold">
+                  Tags por grupo (
+                  {debugContext.tagsGrouped.reduce((acc, g) => acc + g.names.length, 0)})
+                </p>
+                <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                  {debugContext.tagsGrouped.map((g, i) => (
+                    <li key={i}>
+                      <span className="font-medium text-foreground">{g.group ?? "(sem grupo)"}:</span>{" "}
+                      {g.names.join(", ")}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {debugContext.externalContext && debugContext.externalContext.length > 0 && (
+              <div>
+                <p className="font-semibold">
+                  Contexto externo ({debugContext.externalContext.length})
+                </p>
+                <ul className="mt-1 space-y-2 text-muted-foreground">
+                  {debugContext.externalContext.map((c, i) => (
+                    <li key={i} className="whitespace-pre-wrap">
+                      <span className="font-medium text-foreground">[C{i + 1}]</span> {c}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {debugContext.sourcedReviews && debugContext.sourcedReviews.length > 0 && (
+              <div>
+                <p className="font-semibold">
+                  Reviews externas ({debugContext.sourcedReviews.length})
+                </p>
+                <ul className="mt-1 space-y-2 text-muted-foreground">
+                  {debugContext.sourcedReviews.map((r) => (
+                    <li key={r.id} className="whitespace-pre-wrap">
+                      <span className="font-medium text-foreground">[{r.id}]</span>{" "}
+                      <span className="text-[10px]">
+                        ({r.source}, match {Math.round(r.matchScore * 100)}%
+                        {r.userRating != null ? `, nota: ${r.userRating}/10` : ""}
+                        , &ldquo;{r.sourceTitle}&rdquo;)
+                      </span>
+                      <br />
+                      {r.text}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {debugContext.legacyReviews && debugContext.legacyReviews.length > 0 && (
+              <div>
+                <p className="font-semibold">
+                  Reviews (legado) ({debugContext.legacyReviews.length})
+                </p>
+                <ul className="mt-1 space-y-2 text-muted-foreground">
+                  {debugContext.legacyReviews.map((r) => (
+                    <li key={r.id} className="whitespace-pre-wrap">
+                      <span className="font-medium text-foreground">[{r.id}]</span> {r.text}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {debugContext.r19Detected && (
+              <p className="text-amber-700">⚠️ Marcador R19 detectado nas evidências.</p>
+            )}
+          </div>
+        </details>
       )}
 
       <div className="space-y-3">

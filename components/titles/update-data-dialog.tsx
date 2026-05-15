@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { RefreshCw } from "lucide-react"
+import { Loader2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -15,7 +15,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 import { ExternalSearch } from "@/components/titles/external-search"
-import { updateWorkExternalData } from "@/server/actions/works"
+import { updateWorkExternalData, refreshWorkExternalData } from "@/server/actions/works"
 import type { ExternalWorkData } from "@/lib/external/types"
 
 interface CurrentWork {
@@ -73,7 +73,7 @@ function getConflicts(current: CurrentWork, external: ExternalWorkData): FieldCo
 export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
-  const [phase, setPhase] = useState<"search" | "conflicts" | "saving">("search")
+  const [phase, setPhase] = useState<"refreshing" | "search" | "conflicts" | "saving">("refreshing")
   const [pendingData, setPendingData] = useState<ExternalWorkData | null>(null)
   const [conflicts, setConflicts] = useState<FieldConflict[]>([])
   const [resolutions, setResolutions] = useState<Record<string, "current" | "external">>({})
@@ -89,6 +89,27 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
       setPhase("conflicts")
     } else {
       applyUpdate(data, {})
+    }
+  }
+
+  const handleOpen = async () => {
+    setOpen(true)
+    setPhase("refreshing")
+    try {
+      const result = await refreshWorkExternalData(workId)
+      if (result.ok) {
+        handleSelect(result.data)
+        return
+      }
+      if (result.reason === "ALL_404") {
+        toast.warning("Fontes externas indisponíveis para esta obra. Buscando por título...")
+      }
+      setPhase("search")
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error("[UpdateDataDialog] refresh failed:", message)
+      toast.error(`Erro ao atualizar: ${message}`)
+      setPhase("search")
     }
   }
 
@@ -131,6 +152,16 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
     if ((data.genres?.length ?? 0) > 0) updates.genres = data.genres
     if ((data.tags?.length ?? 0) > 0) updates.tags = data.tags
 
+    // Persiste IDs externos da fonte vinculada para que o próximo "Atualizar dados"
+    // pegue o fast-path (sem busca por título nem AI).
+    if (data.externalIds && Object.keys(data.externalIds).length > 0) {
+      const cleaned: Record<string, string> = {}
+      for (const [source, id] of Object.entries(data.externalIds)) {
+        if (id) cleaned[source] = String(id)
+      }
+      if (Object.keys(cleaned).length > 0) updates.externalIds = cleaned
+    }
+
     let result: { data?: { id: string }; error?: string }
     try {
       result = await updateWorkExternalData(workId, updates)
@@ -148,7 +179,7 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
 
     toast.success("Dados atualizados com sucesso.")
     setOpen(false)
-    setPhase("search")
+    setPhase("refreshing")
     router.refresh()
   }
 
@@ -159,14 +190,14 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
 
   const handleClose = () => {
     setOpen(false)
-    setPhase("search")
+    setPhase("refreshing")
     setPendingData(null)
     setConflicts([])
   }
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+      <Button variant="outline" size="sm" onClick={handleOpen}>
         <RefreshCw className="h-4 w-4" />
         Atualizar dados
       </Button>
@@ -176,13 +207,20 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
           <DialogHeader>
             <DialogTitle>Atualizar dados externos</DialogTitle>
             <DialogDescription>
-              Busque a obra em fontes externas para atualizar sinopse, capa, capítulos, avaliações e tags.
+              Rehidrata sinopse, capa, capítulos, avaliações e tags a partir das fontes já vinculadas.
             </DialogDescription>
           </DialogHeader>
 
+          {phase === "refreshing" && (
+            <div className="flex flex-col items-center justify-center py-10 gap-3 text-sm text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin" />
+              <p>Comparando dados externos...</p>
+            </div>
+          )}
+
           {phase === "search" && (
             <div className="pt-2">
-              <ExternalSearch titleQuery={currentWork.title} onSelect={handleSelect} />
+              <ExternalSearch titleQuery={currentWork.title} onSelect={handleSelect} evaluateAi={false} checkDuplicates={false} />
             </div>
           )}
 

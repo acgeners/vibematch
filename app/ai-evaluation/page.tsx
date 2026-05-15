@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { Header } from "@/components/layout/header"
 import { AiEvaluationPanel } from "@/components/ai-evaluation/ai-evaluation-panel"
 import { Badge } from "@/components/ui/badge"
+import { pickPrimaryCover } from "@/lib/work-derived"
 
 async function getPendingWorks() {
   const supabase = createAdminClient()
@@ -10,8 +11,8 @@ async function getPendingWorks() {
     supabase
       .from("works")
       .select(`
-        id, title, publication_status, personal_status, total_chapters,
-        cover_url,
+        id, title, publication_status_id, personal_status_id, total_chapters,
+        work_covers(url, is_primary, position),
         calculated_scores(final_score)
       `)
       .eq("ai_eval_status", "pending")
@@ -31,10 +32,12 @@ async function getPendingWorks() {
   const works = (worksResult.data ?? []).map((w: any) => ({
     id: w.id,
     title: w.title,
-    publication_status: w.publication_status,
-    personal_status: w.personal_status,
+    publication_status: "" as string,
+    publication_status_id: w.publication_status_id ?? null,
+    personal_status: "" as string,
+    personal_status_id: w.personal_status_id ?? null,
     total_chapters: w.total_chapters,
-    cover_url: w.cover_url,
+    cover_url: pickPrimaryCover(w.work_covers),
     final_score: w.calculated_scores?.final_score ?? null,
   }))
 

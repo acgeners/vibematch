@@ -5,7 +5,10 @@ import type {
   WorkSort,
   PaginatedResult,
 } from "@/types/domain"
-import { GENRE_TAG_GROUP_ID } from "@/lib/constants/tag-groups"
+import {
+  getPublicationStatusIdByName,
+  getPersonalStatusIdByName,
+} from "@/lib/constants/status-lookups"
 
 const WORK_WITH_RELATIONS_SELECT = `
   *,
@@ -13,6 +16,7 @@ const WORK_WITH_RELATIONS_SELECT = `
   platform_ratings(*),
   calculated_scores(*),
   work_tags(tag_id, tags(*)),
+  work_genres(genre_id, genres(id, name, slug)),
   work_covers(id, url, source, is_primary, position),
   work_synopses(id, source, text, is_primary, position)
 `
@@ -22,8 +26,8 @@ const WORK_LIST_SELECT = `
   title,
   original_title,
   alternative_titles,
-  publication_status,
-  personal_status,
+  publication_status_id,
+  personal_status_id,
   ai_eval_status,
   chapters_read,
   total_chapters,
@@ -54,12 +58,20 @@ export async function getWorks(
     .from("works")
     .select(WORK_LIST_SELECT, { count: "exact" })
 
-  // Filtros
+  // Filtros — agora por FK. Filtros antigos (que mandam o nome canônico do UI)
+  // são convertidos para id via lookup; valores que não casarem com nenhum
+  // status conhecido caem fora da query.
   if (filters.publicationStatus?.length) {
-    query = query.in("publication_status", filters.publicationStatus)
+    const ids = filters.publicationStatus
+      .map(getPublicationStatusIdByName)
+      .filter((id): id is number => id != null)
+    if (ids.length > 0) query = query.in("publication_status_id", ids)
   }
   if (filters.personalStatus?.length) {
-    query = query.in("personal_status", filters.personalStatus)
+    const ids = filters.personalStatus
+      .map(getPersonalStatusIdByName)
+      .filter((id): id is number => id != null)
+    if (ids.length > 0) query = query.in("personal_status_id", ids)
   }
   if (filters.aiEvalStatus?.length) {
     query = query.in("ai_eval_status", filters.aiEvalStatus)
@@ -75,10 +87,9 @@ export async function getWorks(
   }
   if (filters.genres?.length) {
     const { data: genreRows } = await supabase
-      .from("work_tags")
-      .select("work_id, tags!inner(name, tag_group_id)")
-      .eq("tags.tag_group_id", GENRE_TAG_GROUP_ID)
-      .in("tags.name", filters.genres)
+      .from("work_genres")
+      .select("work_id, genres!inner(name)")
+      .in("genres.name", filters.genres)
     const matchAny = [...new Set((genreRows ?? []).map((row) => row.work_id))]
     query = query.in("id", matchAny.length ? matchAny : ["00000000-0000-0000-0000-000000000000"])
   }
@@ -247,7 +258,6 @@ export async function getWorkWithAiEvaluations(id: string) {
         )
       `)
       .eq("work_id", id)
-      .eq("status", "completed")
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -267,14 +277,12 @@ export async function getWorkWithAiEvaluations(id: string) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalizeWorkRelations(data: any): WorkWithRelations {
-  const linkedTags = (data.work_tags ?? [])
+  const tags = (data.work_tags ?? [])
     .map((wt: { tags: unknown }) => wt.tags)
     .filter(Boolean) as Array<{ name?: string; tag_group_id?: string | null }>
-  const genres = linkedTags
-    .filter((tag) => tag.tag_group_id === GENRE_TAG_GROUP_ID)
-    .map((tag) => tag.name)
-    .filter(Boolean) as string[]
-  const tags = linkedTags.filter((tag) => tag.tag_group_id !== GENRE_TAG_GROUP_ID)
+  const genres = ((data.work_genres ?? []) as Array<{ genres?: { name?: string } | null }>)
+    .map((wg) => wg.genres?.name)
+    .filter((name): name is string => Boolean(name))
 
   return {
     ...data,

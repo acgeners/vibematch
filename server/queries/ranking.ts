@@ -1,7 +1,13 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { unstable_cache } from "next/cache"
-import { GENRE_TAG_GROUP_ID } from "@/lib/constants/tag-groups"
+import {
+  getPublicationStatusIdByName,
+  getPersonalStatusIdByName,
+  getPublicationStatusNameById,
+  getPersonalStatusNameById,
+} from "@/lib/constants/status-lookups"
+import { pickPrimarySynopsis, pickPrimaryCover } from "@/lib/work-derived"
 
 export interface RankingEntry {
   rank: number
@@ -82,10 +88,10 @@ const getRankingStatusRows = unstable_cache(
     const [personal, publication] = await Promise.all([
       admin
         .from("personal_status")
-        .select("id, status, previous, symbol"),
+        .select("id, status, symbol"),
       admin
         .from("publication_status")
-        .select("id, status, previous, short, color"),
+        .select("id, status, short, color"),
     ])
     return {
       personalStatusRows: personal.data ?? [],
@@ -104,52 +110,51 @@ export async function getRanking(
   const personalStatusOptions = (personalStatusRows ?? []) as Array<{
     id: number
     status?: string | null
-    previous?: string | null
     symbol: string | null
   }>
   const publicationStatusOptions = (publicationStatusRows ?? []) as Array<{
     id: number
     status?: string | null
-    previous?: string | null
     short: string | null
     color: string | null
   }>
-  const expandStatusFilter = (
+
+  const resolveStatusIds = (
     selected: string[] | undefined,
-    options: Array<{ status?: string | null; previous?: string | null }>
+    nameToId: (name: string) => number | null
   ) => {
     if (!selected?.length) return undefined
-    const expanded = new Set(selected)
-    for (const value of selected) {
-      for (const option of options) {
-        if (option.status === value || option.previous === value) {
-          if (option.status) expanded.add(option.status)
-          if (option.previous) expanded.add(option.previous)
-        }
-      }
-    }
-    return [...expanded]
+    const ids = selected.map(nameToId).filter((id): id is number => id != null)
+    return ids.length > 0 ? ids : []
   }
-  const publicationStatusFilter = expandStatusFilter(filters.publicationStatus, publicationStatusOptions)
-  const personalStatusFilter = expandStatusFilter(filters.personalStatus, personalStatusOptions)
+  const publicationStatusIdFilter = resolveStatusIds(filters.publicationStatus, getPublicationStatusIdByName)
+  const personalStatusIdFilter = resolveStatusIds(filters.personalStatus, getPersonalStatusIdByName)
 
   let worksQuery = supabase
     .from("works")
     .select(`
-      id, title, publication_status, publication_status_id, personal_status, personal_status_id, ai_eval_status,
+      id, title, publication_status_id, personal_status_id, ai_eval_status,
       total_chapters, chapters_read, manual_score, is_archived,
-      cover_url, synopsis, synopsis_quality, observations, year, genres,
+      synopsis_quality, observations, year,
       calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, platform_avg, total_votes),
       category_scores(criterion_slug, score),
-      work_tags(tags(id, name, slug, tag_group_id))
+      work_tags(tags(id, name, slug, tag_group_id)),
+      work_genres(genres(name)),
+      work_covers(url, is_primary, position),
+      work_synopses(text, is_primary, position)
     `)
     .eq("is_archived", false)
 
-  if (publicationStatusFilter?.length) {
-    worksQuery = worksQuery.in("publication_status", publicationStatusFilter)
+  if (publicationStatusIdFilter && publicationStatusIdFilter.length > 0) {
+    worksQuery = worksQuery.in("publication_status_id", publicationStatusIdFilter)
+  } else if (publicationStatusIdFilter && publicationStatusIdFilter.length === 0) {
+    // Filter pediu status que nenhum nome resolve — força match vazio.
+    worksQuery = worksQuery.eq("id", "00000000-0000-0000-0000-000000000000")
   }
-  if (personalStatusFilter?.length) {
-    worksQuery = worksQuery.in("personal_status", personalStatusFilter)
+  if (personalStatusIdFilter && personalStatusIdFilter.length > 0) {
+    worksQuery = worksQuery.in("personal_status_id", personalStatusIdFilter)
+  } else if (personalStatusIdFilter && personalStatusIdFilter.length === 0) {
+    worksQuery = worksQuery.eq("id", "00000000-0000-0000-0000-000000000000")
   }
   if (filters.aiEvalStatus?.length) {
     worksQuery = worksQuery.in("ai_eval_status", filters.aiEvalStatus)
@@ -171,24 +176,11 @@ export async function getRanking(
   const personalStatusSymbolsById = new Map(
     personalStatusOptions.map((status) => [status.id, status.symbol])
   )
-  const personalStatusSymbolsByPrevious = new Map(
-    personalStatusOptions
-      .filter((status) => status.previous)
-      .map((status) => [status.previous!, status.symbol])
-  )
   const publicationStatusDisplayById = new Map(
     publicationStatusOptions.map((status) => [
       status.id,
       { short: status.short, color: status.color },
     ])
-  )
-  const publicationStatusDisplayByPrevious = new Map(
-    publicationStatusOptions
-      .filter((status) => status.previous)
-      .map((status) => [
-        status.previous!,
-        { short: status.short, color: status.color },
-      ])
   )
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -197,22 +189,20 @@ export async function getRanking(
       typeof w.publication_status_id === "number" ? w.publication_status_id : null
     const publicationStatusDisplay = publicationStatusId != null
       ? publicationStatusDisplayById.get(publicationStatusId)
-      : publicationStatusDisplayByPrevious.get(w.publication_status)
+      : undefined
     const personalStatusId =
       typeof w.personal_status_id === "number" ? w.personal_status_id : null
     const scores: Record<string, number> = {}
     for (const cs of w.category_scores ?? []) {
       scores[cs.criterion_slug] = cs.score
     }
-    const workTags = (w.work_tags ?? [])
+    const displayTags = ((w.work_tags ?? [])
       .map((wt: { tags: unknown }) => wt.tags)
-      .filter(Boolean) as Array<{ id: string; name: string; slug: string; tag_group_id?: string | null }>
-    const genreNames = workTags
-      .filter((tag) => tag.tag_group_id === GENRE_TAG_GROUP_ID)
-      .map((tag) => tag.name)
-    const displayTags = workTags
-      .filter((tag) => tag.tag_group_id !== GENRE_TAG_GROUP_ID)
+      .filter(Boolean) as Array<{ id: string; name: string; slug: string; tag_group_id?: string | null }>)
       .map((tag) => ({ ...tag, tag_group_id: tag.tag_group_id ?? null }))
+    const genreNames = ((w.work_genres ?? []) as Array<{ genres?: { name?: string } | null }>)
+      .map((wg) => wg.genres?.name)
+      .filter((name): name is string => Boolean(name))
 
     return {
       rank: 0,
@@ -225,20 +215,19 @@ export async function getRanking(
       totalVotes: w.calculated_scores?.total_votes ?? 0,
       predictedIsStub: w.calculated_scores?.predicted_is_stub ?? true,
       manualScore: w.manual_score,
-      publicationStatus: w.publication_status,
+      publicationStatus: getPublicationStatusNameById(publicationStatusId) ?? "Unknown",
       publicationStatusId,
       publicationStatusShort: publicationStatusDisplay?.short ?? null,
       publicationStatusColor: publicationStatusDisplay?.color ?? null,
-      personalStatus: w.personal_status,
+      personalStatus: getPersonalStatusNameById(personalStatusId) ?? "To read",
       personalStatusId,
-      personalStatusSymbol: personalStatusId != null
-        ? personalStatusSymbolsById.get(personalStatusId) ?? null
-        : personalStatusSymbolsByPrevious.get(w.personal_status) ?? null,
+      personalStatusSymbol:
+        personalStatusId != null ? personalStatusSymbolsById.get(personalStatusId) ?? null : null,
       aiEvalStatus: w.ai_eval_status,
       totalChapters: w.total_chapters,
       chaptersRead: w.chapters_read ?? null,
-      coverUrl: w.cover_url ?? null,
-      synopsis: w.synopsis ?? null,
+      coverUrl: pickPrimaryCover(w.work_covers),
+      synopsis: pickPrimarySynopsis(w.work_synopses),
       synopsisQuality: w.synopsis_quality ?? null,
       observations: w.observations ?? null,
       year: w.year ?? null,
@@ -262,10 +251,10 @@ export async function getRanking(
   )
 
   if (filters.publicationStatus?.length) {
-    entries = entries.filter((e) => publicationStatusFilter?.includes(e.publicationStatus))
+    entries = entries.filter((e) => filters.publicationStatus!.includes(e.publicationStatus))
   }
   if (filters.personalStatus?.length) {
-    entries = entries.filter((e) => personalStatusFilter?.includes(e.personalStatus))
+    entries = entries.filter((e) => filters.personalStatus!.includes(e.personalStatus))
   }
   if (filters.aiEvalStatus?.length) {
     entries = entries.filter((e) => filters.aiEvalStatus!.includes(e.aiEvalStatus))

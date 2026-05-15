@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils"
 
 interface CalculationBreakdownProps {
   calculatedScore: CalculatedScore
+  aiConfidence: number | null
+  criteriaCoverage: number
 }
 
 interface BreakdownStep {
@@ -15,6 +17,42 @@ interface BreakdownStep {
   field: keyof CalculatedScore
   description: string
   isStub?: boolean
+}
+
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x))
+const maeToConf = (m: number) => clamp01(1 - m / 10)
+const confToMaeEff = (c: number) => Math.max(0.0001, 10 * (1 - c))
+
+function confIA(
+  aiConfidence: number | null,
+  chaptersNormalized: number | null
+): number | null {
+  if (aiConfidence == null) return null
+  const cpsFactor = clamp01((chaptersNormalized ?? 0) / 10)
+  return clamp01(aiConfidence) * cpsFactor
+}
+
+function confPr(
+  maePredicted: number,
+  predictedIsStub: boolean,
+  coverage: number
+): number | null {
+  if (predictedIsStub) return null
+  return maeToConf(maePredicted) * clamp01(coverage)
+}
+
+function confFinal(cIa: number | null, cPr: number | null): number | null {
+  if (cIa == null && cPr == null) return null
+  if (cIa == null) return cPr
+  if (cPr == null) return cIa
+  const maeIa = confToMaeEff(cIa)
+  const maePr = confToMaeEff(cPr)
+  const sigma = 1 / Math.sqrt(1 / maeIa ** 2 + 1 / maePr ** 2)
+  return maeToConf(sigma)
+}
+
+function formatPct(value: number | null): string {
+  return value == null ? "N/A" : `${(value * 100).toFixed(0)}%`
 }
 
 const STEPS: BreakdownStep[] = [
@@ -56,8 +94,20 @@ const STEPS: BreakdownStep[] = [
   },
 ]
 
-export function CalculationBreakdown({ calculatedScore }: CalculationBreakdownProps) {
+export function CalculationBreakdown({
+  calculatedScore,
+  aiConfidence,
+  criteriaCoverage,
+}: CalculationBreakdownProps) {
   const [open, setOpen] = useState(false)
+
+  const cIa = confIA(aiConfidence, calculatedScore.chapters_normalized)
+  const cPr = confPr(
+    calculatedScore.mae_predicted,
+    calculatedScore.predicted_is_stub,
+    criteriaCoverage
+  )
+  const cFinal = confFinal(cIa, cPr)
 
   return (
     <div className="border rounded-lg">
@@ -75,6 +125,14 @@ export function CalculationBreakdown({ calculatedScore }: CalculationBreakdownPr
             {STEPS.map((step) => {
               const value = calculatedScore[step.field]
               const isStubField = step.isStub && calculatedScore.predicted_is_stub
+              const stepConfidence =
+                step.field === "calc_score"
+                  ? cIa
+                  : step.field === "predicted_score"
+                    ? cPr
+                    : step.field === "final_score"
+                      ? cFinal
+                      : undefined
 
               return (
                 <div
@@ -91,8 +149,15 @@ export function CalculationBreakdown({ calculatedScore }: CalculationBreakdownPr
                       showStub={isStubField}
                     />
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{step.label}</p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium">{step.label}</p>
+                      {stepConfidence !== undefined && (
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          Conf.: <span className="font-medium text-foreground">{formatPct(stepConfidence)}</span>
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{step.description}</p>
                   </div>
                 </div>

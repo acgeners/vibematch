@@ -36,20 +36,16 @@ function mergeTagArrays(...arrays: (string[] | undefined)[]): string[] {
 interface ExternalSearchProps {
   titleQuery: string
   onSelect: (data: ExternalWorkData) => void
+  /** Quando false, pula a avaliação IA durante a seleção (usado pelo fallback do "Atualizar dados", onde os scores seriam descartados). Default: true. */
+  evaluateAi?: boolean
+  /** Quando false, pula a checagem de obra duplicada (usado pelo fallback do "Atualizar dados", onde a obra-alvo já existe). Default: true. */
+  checkDuplicates?: boolean
 }
 
 type Phase = "idle" | "searching" | "results" | "duplicate" | "loading" | "multipick" | "conflicts"
 
 interface CoverChoice { url: string; source: string; included: boolean; isPrimary: boolean }
 interface SynopsisChoice { source: string; text: string; included: boolean; isPrimary: boolean }
-
-const STATUS_LABELS: Record<string, string> = {
-  C: "Completo",
-  O: "Em andamento",
-  H: "Hiatus",
-  D: "Cancelado",
-  Unknown: "Desconhecido",
-}
 
 const SOURCE_COLORS: Partial<Record<string, string>> = {
   anilist: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
@@ -60,7 +56,7 @@ function getSourceLabel(source: string) {
   return PLATFORM_LABELS[source] ?? source
 }
 
-export function ExternalSearch({ titleQuery, onSelect }: ExternalSearchProps) {
+export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkDuplicates = true }: ExternalSearchProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [phase, setPhase] = useState<Phase>("idle")
   const [candidates, setCandidates] = useState<MergedCandidate[]>([])
@@ -91,20 +87,22 @@ export function ExternalSearch({ titleQuery, onSelect }: ExternalSearchProps) {
   const handleSelect = async (candidate: MergedCandidate) => {
     setPendingCandidate(candidate)
     setPhase("loading")
-    try {
-      const matches = await checkExistingWorkInDb({
-        title: candidate.title,
-        originalTitle: candidate.originalTitle,
-        alternativeTitles: candidate.alternativeTitles,
-      })
-      if (matches.length > 0) {
-        setDuplicates(matches)
-        setPhase("duplicate")
-        return
+    if (checkDuplicates) {
+      try {
+        const matches = await checkExistingWorkInDb({
+          title: candidate.title,
+          originalTitle: candidate.originalTitle,
+          alternativeTitles: candidate.alternativeTitles,
+        })
+        if (matches.length > 0) {
+          setDuplicates(matches)
+          setPhase("duplicate")
+          return
+        }
+      } catch (error) {
+        console.error("[ExternalSearch] checkExistingWorkInDb failed", error)
+        // fall through and proceed normally — better to import than to block on a check failure
       }
-    } catch (error) {
-      console.error("[ExternalSearch] checkExistingWorkInDb failed", error)
-      // fall through and proceed normally — better to import than to block on a check failure
     }
     await proceedWithCandidate(candidate)
   }
@@ -155,12 +153,18 @@ export function ExternalSearch({ titleQuery, onSelect }: ExternalSearchProps) {
         if (cmx.tags?.length) {
           merged.tags = mergeTagArrays(merged.tags, cmx.tags)
         }
+        if (candidate.comickHid) {
+          merged.externalIds = { ...merged.externalIds, comick: candidate.comickHid }
+        }
       }
 
       const ap = apResult.status === "fulfilled" ? apResult.value : null
       if (ap) {
         if (ap.rating != null) merged.apRating = ap.rating
         if (ap.votes != null) merged.apVotes = ap.votes
+        if (candidate.animePlanetSlug) {
+          merged.externalIds = { ...merged.externalIds, animeplanet: candidate.animePlanetSlug }
+        }
       }
 
       const allConflicts = result.conflicts.filter(c => c.field !== "totalChapters" || cmx?.chapters == null)
@@ -175,17 +179,21 @@ export function ExternalSearch({ titleQuery, onSelect }: ExternalSearchProps) {
       // marked as model_name "claude-haiku-4-5-...", and category_scores with
       // source "ai_accepted"). Failure is non-blocking — user can re-run via
       // /ai-evaluation later.
-      const aiResult = await evaluateCandidateForCreate({
-        title: merged.title,
-        originalTitle: merged.originalTitle ?? null,
-        alternativeTitles: merged.alternativeTitles ?? null,
-        synopsis: merged.synopsis ?? null,
-        genres: merged.genres,
-        tags: merged.tags,
-      })
-      if (aiResult) {
-        merged.criteriaScores = aiResult.scores
-        merged.criteriaJustifications = aiResult.justifications
+      // Pulado quando evaluateAi=false (ex.: fallback de "Atualizar dados",
+      // onde os scores seriam descartados pelo updateWorkExternalData).
+      if (evaluateAi) {
+        const aiResult = await evaluateCandidateForCreate({
+          title: merged.title,
+          originalTitle: merged.originalTitle ?? null,
+          alternativeTitles: merged.alternativeTitles ?? null,
+          synopsis: merged.synopsis ?? null,
+          genres: merged.genres,
+          tags: merged.tags,
+        })
+        if (aiResult) {
+          merged.criteriaScores = aiResult.scores
+          merged.criteriaJustifications = aiResult.justifications
+        }
       }
 
       const covers = merged.multiCovers ?? []
@@ -355,9 +363,13 @@ export function ExternalSearch({ titleQuery, onSelect }: ExternalSearchProps) {
             <div className="flex flex-col items-center justify-center py-16 gap-4 text-muted-foreground">
               <Loader2 className="h-8 w-8 animate-spin" />
               <div className="text-center">
-                <p className="font-medium text-sm">Buscando dados e avaliando com IA...</p>
+                <p className="font-medium text-sm">
+                  {evaluateAi ? "Buscando dados e avaliando com IA..." : "Buscando dados externos..."}
+                </p>
                 <p className="text-xs mt-1">AniList · MangaUpdates · ComicK · AnimePlanet · Comix · Kitsu · MangaDex · MAL</p>
-                <p className="text-xs mt-1 text-muted-foreground">A IA pode levar ~10s — você não precisará reavaliar depois.</p>
+                {evaluateAi && (
+                  <p className="text-xs mt-1 text-muted-foreground">A IA pode levar ~10s — você não precisará reavaliar depois.</p>
+                )}
               </div>
             </div>
           )}
@@ -592,7 +604,7 @@ interface CandidateCardProps {
 function CandidateCard({ candidate, onSelect }: CandidateCardProps) {
   return (
     <div className="flex gap-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors">
-      <div className="h-16 w-12 rounded overflow-hidden bg-muted shrink-0">
+      <div className="h-28 w-20 rounded overflow-hidden bg-muted shrink-0">
         {candidate.coverUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -624,20 +636,6 @@ function CandidateCard({ candidate, onSelect }: CandidateCardProps) {
               {getSourceLabel(src)}
             </span>
           ))}
-          {candidate.publicationStatus && (
-            <Badge variant="outline" className="text-xs px-1.5 py-0">
-              {STATUS_LABELS[candidate.publicationStatus] ?? candidate.publicationStatus}
-            </Badge>
-          )}
-          {candidate.year && (
-            <span className="text-xs text-muted-foreground">{candidate.year}</span>
-          )}
-          {candidate.chapters != null && (
-            <span className="text-xs text-muted-foreground">{candidate.chapters} caps</span>
-          )}
-          {candidate.score != null && (
-            <span className="text-xs font-mono text-muted-foreground">★ {candidate.score.toFixed(1)}</span>
-          )}
         </div>
       </div>
 

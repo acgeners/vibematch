@@ -11,6 +11,8 @@ export interface MangaDexResult {
   coverUrl?: string
   year?: number
   chapters?: number
+  /** Cross-platform IDs from MangaDex `attributes.links`: al=AniList, mu=MangaUpdates, mal=MyAnimeList, kt=Kitsu, ap=AnimePlanet. */
+  links?: { al?: string; mu?: string; mal?: string; kt?: string; ap?: string }
 }
 
 export interface MangaDexDetail {
@@ -96,6 +98,25 @@ function tagsFromAttributes(attrs: Record<string, unknown>): string[] {
   return out
 }
 
+function extractLinks(raw: unknown): MangaDexResult["links"] | undefined {
+  if (!raw || typeof raw !== "object") return undefined
+  const src = raw as Record<string, unknown>
+  const pick = (key: string): string | undefined => {
+    const v = src[key]
+    if (typeof v === "string" && v.trim()) return v.trim()
+    if (typeof v === "number") return String(v)
+    return undefined
+  }
+  const out = {
+    al: pick("al"),
+    mu: pick("mu"),
+    mal: pick("mal"),
+    kt: pick("kt"),
+    ap: pick("ap"),
+  }
+  return Object.values(out).some(Boolean) ? out : undefined
+}
+
 function chapterCountFromLastChapter(raw: unknown): number | undefined {
   if (typeof raw !== "string" || !raw.trim()) return undefined
   const n = parseFloat(raw)
@@ -137,6 +158,7 @@ export async function searchMangaDex(title: string): Promise<MangaDexResult[]> {
           coverUrl: coverFromRelationships(record.id, record.relationships),
           year: typeof attr.year === "number" ? attr.year : undefined,
           chapters: chapterCountFromLastChapter(attr.lastChapter),
+          links: extractLinks(attr.links),
         }
       })
       .filter((item): item is MangaDexResult => item !== null)

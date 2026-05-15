@@ -8,7 +8,9 @@ query SearchManga($search: String) {
   Page(page: 1, perPage: 10) {
     media(search: $search, type: MANGA, sort: SEARCH_MATCH) {
       id
+      idMal
       title { romaji english native }
+      synonyms
       description(asHtml: false)
       coverImage { large }
       status
@@ -17,7 +19,7 @@ query SearchManga($search: String) {
       endDate { year }
       genres
       tags { name category isGeneralSpoiler }
-      averageScore
+      meanScore
       popularity
     }
   }
@@ -37,7 +39,7 @@ query GetManga($id: Int) {
     endDate { year }
     genres
     tags { name category isGeneralSpoiler }
-    averageScore
+    meanScore
     popularity
     stats { scoreDistribution { score amount } }
   }
@@ -58,10 +60,14 @@ function mapStatus(status: string): PublicationStatus {
 function parseMedia(m: any) {
   const title = m.title?.english ?? m.title?.romaji ?? m.title?.native ?? ""
   const originalTitle = m.title?.native ?? undefined
+  const synonyms: string[] = Array.isArray(m.synonyms)
+    ? (m.synonyms as unknown[]).filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    : []
   const alternativeTitles = [
     m.title?.english,
     m.title?.romaji,
     m.title?.native,
+    ...synonyms,
   ].filter((item): item is string => Boolean(item && item !== title))
 
   const rawDesc: string = m.description ?? ""
@@ -85,6 +91,7 @@ function parseMedia(m: any) {
 
   return {
     id: m.id as number,
+    malId: typeof m.idMal === "number" ? m.idMal : undefined,
     title,
     originalTitle,
     alternativeTitles,
@@ -96,7 +103,7 @@ function parseMedia(m: any) {
     chapters: m.chapters ?? undefined,
     genres,
     tags,
-    score: m.averageScore != null ? Math.round((m.averageScore / 10) * 10) / 10 : undefined,
+    score: m.meanScore != null ? Math.round((m.meanScore / 10) * 10) / 10 : undefined,
     // Real vote count = sum of users in scoreDistribution. AniList "popularity" is the
     // total list-add count (followers), not the rating sample size — different signal.
     votes: (() => {
@@ -142,6 +149,7 @@ export async function searchAniList(search: string): Promise<ExternalSearchResul
         score: p.score,
         votes: p.votes,
         genres: p.genres,
+        crossIds: p.malId != null ? { myanimelist: String(p.malId) } : undefined,
       }
     })
   } catch {
@@ -167,6 +175,7 @@ query GetMangaReviews($id: Int) {
       nodes {
         summary
         body(asHtml: false)
+        score
       }
     }
   }
@@ -182,8 +191,13 @@ export async function fetchAniListReviews(anilistId: number): Promise<string[]> 
       .map((r) => {
         const summary = r.summary?.trim()
         const body = r.body?.replace(/<[^>]+>/g, "").trim()
-        const text = [summary, body].filter(Boolean).join("\n")
-        return text.slice(0, 900)
+        const text = [summary, body].filter(Boolean).join("\n").slice(0, 900)
+        if (!text) return ""
+        // score 0-100 → prefixo "Nota do usuário: X/10\n" para extractUserRating()
+        const score10 = typeof r.score === "number" && r.score > 0
+          ? Math.round(r.score / 10 * 10) / 10
+          : null
+        return score10 !== null ? `Nota do usuário: ${score10}/10\n${text}` : text
       })
       .filter(Boolean)
   } catch {

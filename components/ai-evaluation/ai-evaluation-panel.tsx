@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import { WorkTitleLink } from "@/components/titles/work-title-link"
 import {
   Dialog,
   DialogContent,
@@ -26,7 +27,9 @@ interface PendingWork {
   id: string
   title: string
   publication_status: string
+  publication_status_id: number | null
   personal_status: string
+  personal_status_id: number | null
   total_chapters: number | null
   cover_url?: string | null
   final_score: number | null
@@ -365,10 +368,16 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                   />
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{work.title}</p>
+                  <span onClick={(e) => e.stopPropagation()} className="block truncate">
+                    <WorkTitleLink
+                      title={work.title}
+                      workId={work.id}
+                      className="font-medium hover:underline"
+                    />
+                  </span>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    <PublicationStatusBadge status={work.publication_status} />
-                    <PersonalStatusBadge status={work.personal_status} />
+                    <PublicationStatusBadge statusId={work.publication_status_id ?? null} />
+                    <PersonalStatusBadge statusId={work.personal_status_id ?? null} />
                   </div>
                   {work.total_chapters != null && (
                     <p className="text-xs text-muted-foreground mt-1">

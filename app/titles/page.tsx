@@ -7,7 +7,6 @@ import { WorkTable } from "@/components/titles/work-table"
 import { Button } from "@/components/ui/button"
 import type { WorkFilters as WorkFiltersType, PublicationStatus, PersonalStatus, AiEvalStatus } from "@/types/domain"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { GENRE_TAG_GROUP_ID } from "@/lib/constants/tag-groups"
 import { unstable_cache } from "next/cache"
 
 interface TitlesPageProps {
@@ -56,14 +55,13 @@ function parseSort(raw: string | undefined): import("@/types/domain").WorkSort {
 const getGenreOptions = unstable_cache(async (): Promise<string[]> => {
   const supabase = createAdminClient()
   const { data } = await supabase
-    .from("tags")
+    .from("genres")
     .select("name")
-    .eq("tag_group_id", GENRE_TAG_GROUP_ID)
     .order("name")
     .limit(1000)
 
   return (data ?? []).map((row) => row.name).filter(Boolean)
-}, ["titles-genre-tags-v1"], { revalidate: 300 })
+}, ["titles-genres-v1"], { revalidate: 300 })
 
 export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   const params = await searchParams

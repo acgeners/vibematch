@@ -31,6 +31,8 @@ export interface ExternalSearchResult {
   score?: number
   votes?: number
   genres?: string[]
+  /** Cross-platform IDs the source itself surfaces (e.g. MangaDex `attributes.links`, AniList `idMal`). Used by the search pipeline to populate sibling-source IDs on the merged candidate so we can hydrate sources whose title search failed. */
+  crossIds?: Partial<Record<ExternalSourceId, string>>
 }
 
 /** One title deduplicated across sources — what the UI shows */
@@ -57,6 +59,8 @@ export interface MergedCandidate {
   comickHid?: string
   comixHid?: string
   sourceResults?: ExternalSearchResult[]
+  /** Sources whose IDs came from another source's canonical cross-link (e.g. MangaDex `attributes.links`). At hydrate time we skip the title/synopsis acceptance filter for these — the cross-link is the trust signal. */
+  trustedSources?: ExternalSourceId[]
 }
 
 export interface MultiSourceResult {
@@ -106,6 +110,8 @@ export interface ExternalWorkData {
   multiCovers?: Array<{ url: string; source: ExternalSourceId }>
   /** Per-source synopsis blocks collected during fetch (cleaned + deduped). Empty when only one accepted source. */
   multiSynopses?: Array<{ source: ExternalSourceId; text: string }>
+  /** Per-source external IDs from accepted sources, persisted to `work_external_ids` so future refreshes skip title search. */
+  externalIds?: Partial<Record<ExternalSourceId, string>>
   criteriaScores?: Partial<Record<CriterionSlug, number>>
   criteriaJustifications?: Partial<Record<CriterionSlug, string>>
   debug?: ExternalMergeDebug
@@ -116,6 +122,10 @@ export interface SourcedReview {
   sourceTitle: string
   matchScore: number
   text: string
+  /** Nota 0-10 extraída do prefixo "Nota do usuário: X/10" (quando a fonte expõe). */
+  userRating?: number
+  /** Comprimento do texto antes de qualquer truncamento — usado pelo sampler. */
+  textLength?: number
 }
 
 export interface ExternalSourceDebug {

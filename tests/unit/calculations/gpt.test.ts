@@ -3,15 +3,15 @@ import { calculateGPT, normalizeGPT } from "@/lib/calculations/gpt"
 import type { ScoreWeight, CategoryScoreMap } from "@/types/domain"
 
 const baseWeights: ScoreWeight[] = [
-  { id: "1", slug: "romance", name: "Romance", weight: 10, max_negative_threshold: null, display_order: 1, is_active: true },
-  { id: "2", slug: "couple_dynamics", name: "Dinâmica", weight: 9, max_negative_threshold: null, display_order: 2, is_active: true },
-  { id: "3", slug: "fantasy_nobility", name: "Fantasia", weight: 6, max_negative_threshold: null, display_order: 3, is_active: true },
-  { id: "4", slug: "action_adventure", name: "Ação", weight: 8, max_negative_threshold: null, display_order: 4, is_active: true },
-  { id: "5", slug: "adult_content", name: "Adulto", weight: 6, max_negative_threshold: null, display_order: 5, is_active: true },
-  { id: "6", slug: "protagonist", name: "Protagonista", weight: 10, max_negative_threshold: null, display_order: 6, is_active: true },
-  { id: "7", slug: "humor", name: "Humor", weight: 7, max_negative_threshold: null, display_order: 7, is_active: true },
-  { id: "8", slug: "drama", name: "Drama", weight: -4, max_negative_threshold: 5, display_order: 8, is_active: true },
-  { id: "9", slug: "tragedy", name: "Tragédia", weight: -10, max_negative_threshold: 3, display_order: 9, is_active: true },
+  { id: "1", slug: "romance", name: "Romance", weight: 10, threshold: null, display_order: 1, is_active: true },
+  { id: "2", slug: "couple_dynamics", name: "Dinâmica", weight: 9, threshold: null, display_order: 2, is_active: true },
+  { id: "3", slug: "fantasy_nobility", name: "Fantasia", weight: 6, threshold: null, display_order: 3, is_active: true },
+  { id: "4", slug: "action_adventure", name: "Ação", weight: 8, threshold: null, display_order: 4, is_active: true },
+  { id: "5", slug: "adult_content", name: "Adulto", weight: 6, threshold: null, display_order: 5, is_active: true },
+  { id: "6", slug: "protagonist", name: "Protagonista", weight: 10, threshold: null, display_order: 6, is_active: true },
+  { id: "7", slug: "humor", name: "Humor", weight: 7, threshold: null, display_order: 7, is_active: true },
+  { id: "8", slug: "drama", name: "Drama", weight: -4, threshold: 5, display_order: 8, is_active: true },
+  { id: "9", slug: "tragedy", name: "Tragédia", weight: -10, threshold: 3, display_order: 9, is_active: true },
 ]
 
 describe("calculateGPT", () => {
@@ -27,33 +27,72 @@ describe("calculateGPT", () => {
       action_adventure: 8, adult_content: 8, protagonist: 8,
       humor: 8, drama: 3, tragedy: 2,
     }
-    // numerador = 8*10 + 8*9 + 8*6 + 8*8 + 8*6 + 8*10 + 8*7 + 0 + 0
-    // = 8 * (10+9+6+8+6+10+7) = 8 * 56 = 448
-    // positiveSum = 56
-    // GPT = 448/56 = 8
-    expect(calculateGPT(scores, baseWeights)).toBe(8)
+    // Todos os positivos têm threshold null (= 0): cada ponto acima de 0 conta dobrado.
+    // contribuição positiva = score * w + (score - 0) * w = 2 * score * w
+    // numerador = 2 * 8 * 56 = 896
+    // positiveSum = 56 → GPT = 896/56 = 16 → clamp = 10
+    expect(calculateGPT(scores, baseWeights)).toBe(10)
   })
 
-  it("aplica penalidade de drama acima do threshold", () => {
+  it("critério positivo abaixo do threshold contribui só com a base", () => {
+    // Romance com threshold 9, score 7: contribuição = 7 * 10 = 70 (sem bônus)
+    const weights = baseWeights.map((w) =>
+      w.slug === "romance"
+        ? { ...w, threshold: 9 }
+        : { ...w, threshold: 10 } // demais positivos: threshold no topo => nunca há bônus
+    )
+    const scores: CategoryScoreMap = {
+      romance: 7, couple_dynamics: 7, fantasy_nobility: 7,
+      action_adventure: 7, adult_content: 7, protagonist: 7,
+      humor: 7, drama: 3, tragedy: 2,
+    }
+    // numerador = 7 * 56 = 392; positiveSum = 56 → GPT = 7
+    expect(calculateGPT(scores, weights)).toBeCloseTo(7, 3)
+  })
+
+  it("critério positivo acima do threshold ganha bônus dobrado", () => {
+    // Romance threshold=8, weight=10. Score=10 → 10*10 + (10-8)*10 = 120.
+    // Demais positivos com threshold=10 (sem bônus).
+    const weights = baseWeights.map((w) => {
+      if (w.weight < 0) return w
+      if (w.slug === "romance") return { ...w, threshold: 8 }
+      return { ...w, threshold: 10 }
+    })
+    const scores: CategoryScoreMap = {
+      romance: 10, couple_dynamics: 8, fantasy_nobility: 8,
+      action_adventure: 8, adult_content: 8, protagonist: 8,
+      humor: 8, drama: 3, tragedy: 2,
+    }
+    // numerador = (10*10 + 2*10) + 8 * (9+6+8+6+10+7) = 120 + 8*46 = 120 + 368 = 488
+    // positiveSum = 56 → GPT = 488/56 ≈ 8.714
+    const result = calculateGPT(scores, weights)
+    expect(result).toBeCloseTo(488 / 56, 3)
+  })
+
+  it("aplica penalidade de drama acima do threshold (negativo)", () => {
+    const weights = baseWeights.map((w) =>
+      w.weight > 0 ? { ...w, threshold: 10 } : w // remove bônus dos positivos para isolar a penalidade
+    )
     const scores: CategoryScoreMap = {
       romance: 8, couple_dynamics: 8, fantasy_nobility: 8,
       action_adventure: 8, adult_content: 8, protagonist: 8,
       humor: 8, drama: 7, tragedy: 2, // drama=7, excess=7-5=2, penalty=2*(-4)=-8
     }
-    // numerador = 8*56 - 2*4 = 448 - 8 = 440
-    // GPT = 440/56 ≈ 7.857
-    const result = calculateGPT(scores, baseWeights)
+    // numerador = 8*56 - 8 = 440
+    const result = calculateGPT(scores, weights)
     expect(result).toBeCloseTo(440 / 56, 3)
   })
 
-  it("aplica penalidade de tragédia acima do threshold", () => {
+  it("aplica penalidade de tragédia acima do threshold (negativo)", () => {
+    const weights = baseWeights.map((w) =>
+      w.weight > 0 ? { ...w, threshold: 10 } : w
+    )
     const scores: CategoryScoreMap = {
       romance: 8, couple_dynamics: 8, fantasy_nobility: 8,
       action_adventure: 8, adult_content: 8, protagonist: 8,
       humor: 8, drama: 3, tragedy: 8, // tragedy=8, excess=8-3=5, penalty=5*(-10)=-50
     }
-    const result = calculateGPT(scores, baseWeights)
-    // numerador = 448 - 50 = 398
+    const result = calculateGPT(scores, weights)
     expect(result).toBeCloseTo(398 / 56, 3)
   })
 

@@ -37,12 +37,13 @@ export const AUTO_COLUMN_ALIASES: Record<string, keyof MappedImportRow> = {
   "🦸": "protagonist",
   "protagonist": "protagonist",
   "Protagonista Marcante": "protagonist",
+  "😂": "humor",
   "humor": "humor",
   "Humor": "humor",
-  "😂": "drama",
+  "🎭": "drama",
   "drama": "drama",
   "Drama": "drama",
-  "🎭": "tragedy",
+  "💔": "tragedy",
   "tragedy": "tragedy",
   "Tragédia": "tragedy",
 
@@ -78,8 +79,8 @@ export const AUTO_COLUMN_ALIASES: Record<string, keyof MappedImportRow> = {
   chapters_read: "chapters_read",
   "♥Sinopse": "synopsis_quality",
   synopsis_quality: "synopsis_quality",
-  Obs: "observation_penalty",
-  observation_penalty: "observation_penalty",
+  Obs: "observation_adjustment",
+  observation_adjustment: "observation_adjustment",
   "M.Nota": "manual_score",
   manual_score: "manual_score",
 
@@ -142,8 +143,8 @@ export function applyMapping(
       case "chapters_read":
         result[targetField] = parseInteger(raw) ?? undefined
         break
-      case "observation_penalty":
-        result.observation_penalty = parseBrazilianNumber(raw) ?? undefined
+      case "observation_adjustment":
+        result.observation_adjustment = parseBrazilianNumber(raw) ?? undefined
         break
       case "publication_status":
         result.publication_status = normalizePublicationStatus(raw) ?? undefined

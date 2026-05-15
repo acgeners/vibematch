@@ -68,15 +68,27 @@ function tagsFromItem(item: any): string[] {
   return Array.from(new Set(out))
 }
 
+function extractIdFromUrl(value: unknown, regex: RegExp): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined
+  const m = value.match(regex)
+  return m?.[1]
+}
+
 function linksFromItem(links: unknown): ComixDetail["links"] {
   if (!links || typeof links !== "object") return undefined
   const l = links as Record<string, unknown>
-  const out: NonNullable<ComixDetail["links"]> = {}
-  if (typeof l.al === "string") out.anilist = l.al
-  if (typeof l.mal === "string") out.mal = l.mal
-  if (typeof l.mu === "string") out.mu = l.mu
-  if (typeof l.md === "string") out.md = l.md
-  return Object.keys(out).length ? out : undefined
+  // comix.to surfaces full URLs (e.g. "https://anilist.co/manga/121439/"). Extract just the ID.
+  const out: NonNullable<ComixDetail["links"]> = {
+    anilist: extractIdFromUrl(l.al, /anilist\.co\/manga\/(\d+)/i),
+    mal: extractIdFromUrl(l.mal, /myanimelist\.net\/manga\/(\d+)/i),
+    mu: extractIdFromUrl(l.mu, /mangaupdates\.com\/series\/([a-z0-9]+)/i),
+    md: extractIdFromUrl(l.md, /mangadex\.org\/title\/([0-9a-f-]+)/i),
+  }
+  const cleaned: NonNullable<ComixDetail["links"]> = {}
+  for (const [k, v] of Object.entries(out)) {
+    if (v) (cleaned as Record<string, string>)[k] = v
+  }
+  return Object.keys(cleaned).length ? cleaned : undefined
 }
 
 export async function searchComix(query: string): Promise<ExternalSearchResult[]> {
@@ -89,24 +101,37 @@ export async function searchComix(query: string): Promise<ExternalSearchResult[]
     const items: any[] = data?.result?.items ?? []
     return items
       .filter((item) => item?.hid && item?.title)
-      .map((item): ExternalSearchResult => ({
-        id: `comix:${item.hid}`,
-        source: "comix",
-        title: item.title,
-        synopsis: typeof item.synopsis === "string" ? item.synopsis : undefined,
-        coverUrl: coverFromPoster(item.poster),
-        year: typeof item.year === "number" ? item.year : undefined,
-        chapters:
-          typeof item.finalChapter === "number" && item.finalChapter > 0
-            ? item.finalChapter
-            : typeof item.latestChapter === "number" && item.latestChapter > 0
-              ? item.latestChapter
-              : undefined,
-        publicationStatus: mapStatus(item.status),
-        score: typeof item.ratedAvg === "number" ? item.ratedAvg : undefined,
-        votes: typeof item.ratedCount === "number" ? item.ratedCount : undefined,
-        genres: tagsFromItem(item),
-      }))
+      .map((item): ExternalSearchResult => {
+        const links = linksFromItem(item.links)
+        const crossIds: Partial<Record<import("./types").ExternalSourceId, string>> = {}
+        if (links?.anilist) crossIds.anilist = links.anilist
+        if (links?.mal) crossIds.myanimelist = links.mal
+        if (links?.mu) crossIds.mangaupdates = links.mu
+        if (links?.md) crossIds.mangadex = links.md
+        return {
+          id: `comix:${item.hid}`,
+          source: "comix",
+          title: item.title,
+          alternativeTitles: Array.isArray(item.altTitles)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ? item.altTitles.map((t: any) => (typeof t === "string" ? t : t?.title)).filter(Boolean)
+            : undefined,
+          synopsis: typeof item.synopsis === "string" ? item.synopsis : undefined,
+          coverUrl: coverFromPoster(item.poster),
+          year: typeof item.year === "number" ? item.year : undefined,
+          chapters:
+            typeof item.finalChapter === "number" && item.finalChapter > 0
+              ? item.finalChapter
+              : typeof item.latestChapter === "number" && item.latestChapter > 0
+                ? item.latestChapter
+                : undefined,
+          publicationStatus: mapStatus(item.status),
+          score: typeof item.ratedAvg === "number" ? item.ratedAvg : undefined,
+          votes: typeof item.ratedCount === "number" ? item.ratedCount : undefined,
+          genres: tagsFromItem(item),
+          crossIds: Object.keys(crossIds).length > 0 ? crossIds : undefined,
+        }
+      })
   } catch {
     return []
   }
@@ -126,9 +151,9 @@ export async function fetchComixById(hid: string): Promise<ComixDetail | null> {
     return {
       hid: r.hid ?? hid,
       title: r.title ?? "",
-      alternativeTitles: Array.isArray(r.alternativeTitles)
+      alternativeTitles: Array.isArray(r.altTitles)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? r.alternativeTitles.map((t: any) => (typeof t === "string" ? t : t?.title)).filter(Boolean)
+        ? r.altTitles.map((t: any) => (typeof t === "string" ? t : t?.title)).filter(Boolean)
         : [],
       synopsis: typeof r.synopsis === "string" ? r.synopsis : undefined,
       coverUrl: coverFromPoster(r.poster),

@@ -27,16 +27,12 @@ export function normalizePublicationStatus(
   if (value == null) return null
   const s = String(value).trim().toUpperCase()
   const map: Record<string, PublicationStatus> = {
-    "C": "Completed",
     "CMP": "Completed",
     "COMPLETED": "Completed",
-    "O": "Ongoing",
     "ONG": "Ongoing",
     "ONGOING": "Ongoing",
-    "H": "Hiatus",
     "HIA": "Hiatus",
     "HIATUS": "Hiatus",
-    "D": "Cancelled",
     "CXL": "Cancelled",
     "CANCELLED": "Cancelled",
     "UNK": "Unknown",
@@ -51,22 +47,15 @@ export function normalizePersonalStatus(
   if (value == null) return null
   const s = String(value).trim().toLowerCase()
   const map: Record<string, PersonalStatus> = {
-    "finalizado": "Completed",
     "completed": "Completed",
-    "lendo": "Reading",
     "reading": "Reading",
-    "pausado": "Started",
     "started": "Started",
-    "retomar (tenso)": "Stalled",
     "stalled": "Stalled",
-    "retomar": "Paused",
     "paused": "Paused",
-    "esp. temp": "Hiatus",
     "hiatus": "Hiatus",
-    "lendo (antigo)": "On-hold",
     "on-hold": "On-hold",
+    "to-read": "To read",
     "to read": "To read",
-    "droppado": "Dropped",
     "dropped": "Dropped",
   }
   return map[s] ?? null

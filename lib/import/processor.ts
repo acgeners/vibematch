@@ -3,6 +3,10 @@ type AnySupabaseClient = any
 
 import type { MappedImportRow, ImportResult } from "@/types/domain"
 import { CRITERION_SLUGS } from "@/types/domain"
+import {
+  getPublicationStatusIdByName,
+  getPersonalStatusIdByName,
+} from "@/lib/constants/status-lookups"
 
 export type DuplicateMode = "skip" | "update" | "create_new"
 
@@ -129,16 +133,18 @@ async function createWork(
   supabase: AnySupabaseClient,
   row: MappedImportRow
 ): Promise<string> {
+  const publicationStatus = row.publication_status ?? "Unknown"
+  const personalStatus = row.personal_status ?? "To read"
   const { data, error } = await supabase
     .from("works")
     .insert({
       title: row.title,
-      publication_status: row.publication_status ?? "Unknown",
-      personal_status: row.personal_status ?? "To read",
+      publication_status_id: getPublicationStatusIdByName(publicationStatus),
+      personal_status_id: getPersonalStatusIdByName(personalStatus),
       total_chapters: row.total_chapters ?? null,
       chapters_read: row.chapters_read ?? null,
       synopsis_quality: row.synopsis_quality ?? null,
-      observation_penalty: row.observation_penalty ?? 0,
+      observation_adjustment: row.observation_adjustment ?? 0,
       manual_score: row.manual_score ?? null,
       ai_eval_status: "pending",
     })
@@ -155,12 +161,16 @@ async function updateWork(
   row: MappedImportRow
 ) {
   const update: Record<string, unknown> = {}
-  if (row.publication_status) update.publication_status = row.publication_status
-  if (row.personal_status) update.personal_status = row.personal_status
+  if (row.publication_status) {
+    update.publication_status_id = getPublicationStatusIdByName(row.publication_status)
+  }
+  if (row.personal_status) {
+    update.personal_status_id = getPersonalStatusIdByName(row.personal_status)
+  }
   if (row.total_chapters != null) update.total_chapters = row.total_chapters
   if (row.chapters_read != null) update.chapters_read = row.chapters_read
   if (row.synopsis_quality) update.synopsis_quality = row.synopsis_quality
-  if (row.observation_penalty != null) update.observation_penalty = row.observation_penalty
+  if (row.observation_adjustment != null) update.observation_adjustment = row.observation_adjustment
   if (row.manual_score != null) update.manual_score = row.manual_score
 
   if (Object.keys(update).length > 0) {

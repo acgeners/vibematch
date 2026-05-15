@@ -36,7 +36,7 @@ const NUMERIC_FEATURE_NAMES = [
   "LogVotos",
   "Cps.N",
   "SinopseScore",
-  "ObsPenalty",
+  "ObsAdjustment",
 ] as const
 
 const CATEGORICAL_FEATURE_NAMES = ["Status"] as const
@@ -49,7 +49,7 @@ export interface PredictionInput {
   totalVotes: number
   totalChapters: number | null
   synopsisQuality: string | null
-  observationPenalty: number
+  observationAdjustment: number
   publicationStatus: string
 }
 
@@ -73,7 +73,7 @@ function buildNumericRow(input: PredictionInput): NumericRow {
   row.push(Math.log1p(Math.max(input.totalVotes, 0)))
   row.push(normalizeChapters(input.totalChapters))
   row.push(input.synopsisQuality ? SINOPSE_MAP[input.synopsisQuality] ?? null : null)
-  row.push(Math.min(Math.max(input.observationPenalty, 0), 0.30))
+  row.push(Math.min(Math.max(input.observationAdjustment, -0.30), 0.30))
   return row
 }
 

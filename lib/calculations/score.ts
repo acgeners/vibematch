@@ -22,7 +22,7 @@ export interface NotaCalcInputs {
   chaptersNormalized: number
   publicationStatus: PublicationStatus
   synopsisQuality: SynopsisQuality | null
-  observationPenalty: number
+  observationAdjustment: number
   /** sqrt(pseudo_votes) para o blend IA(n) vs Nota.M */
   pseudoVotesBlend: number
 }
@@ -34,7 +34,8 @@ export interface NotaCalcInputs {
  * 2. Multiplica por bônus de capítulos: (1 + Cps.N / 200)
  * 3. Multiplica por fator de status
  * 4. Multiplica por fator de sinopse
- * 5. Multiplica por (1 - Obs penalty), onde penalty ≤ 0.30
+ * 5. Soma Obs adjustment em pontos de nota, clamp ∈ [-0.30, +0.30]
+ *    (positivo = bônus, negativo = penalidade)
  * 6. Clamp 0–10
  */
 export function calculateNotaCalc(inputs: NotaCalcInputs): number {
@@ -45,7 +46,7 @@ export function calculateNotaCalc(inputs: NotaCalcInputs): number {
     chaptersNormalized,
     publicationStatus,
     synopsisQuality,
-    observationPenalty,
+    observationAdjustment,
     pseudoVotesBlend,
   } = inputs
 
@@ -67,11 +68,10 @@ export function calculateNotaCalc(inputs: NotaCalcInputs): number {
   const synopsisMult = synopsisQuality
     ? (SYNOPSIS_MULTIPLIER[synopsisQuality] ?? 1)
     : 1
-  const obsPenalty = Math.min(Math.max(observationPenalty, 0), 0.30)
-  const obsFactor = 1 - obsPenalty
+  const obsAdjustment = Math.min(Math.max(observationAdjustment, -0.30), 0.30)
 
   const result =
-    blend * chapterBonus * statusMult * synopsisMult * obsFactor
+    blend * chapterBonus * statusMult * synopsisMult + obsAdjustment
 
   return Math.max(0, Math.min(10, result))
 }

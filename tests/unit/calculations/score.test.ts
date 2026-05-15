@@ -4,13 +4,13 @@ import { calculateNotaFinal } from "@/lib/calculations/final"
 
 describe("calculateNotaCalc", () => {
   const base = {
-    gptNormalized: 7.5,
+    iaEvalNormalized: 7.5,
     platformAvg: 8.0,
     totalVotes: 1000,
     chaptersNormalized: 8.0,
-    publicationStatus: "C" as const,
+    publicationStatus: "Completed" as const,
     synopsisQuality: "♥♥♥" as const,
-    observationPenalty: 0,
+    observationAdjustment: 0,
     pseudoVotesBlend: 1024,
   }
 
@@ -20,16 +20,16 @@ describe("calculateNotaCalc", () => {
     expect(result).toBeLessThanOrEqual(10)
   })
 
-  it("sem platformAvg usa apenas gptNormalized no blend", () => {
+  it("sem platformAvg usa apenas iaEvalNormalized no blend", () => {
     const result = calculateNotaCalc({ ...base, platformAvg: null, totalVotes: 0 })
-    // blend = gptNormalized puro
+    // blend = iaEvalNormalized puro
     expect(result).toBeGreaterThan(0)
     expect(result).toBeLessThan(10)
   })
 
-  it("status Hiatus (H) tem penalidade maior que Completed (C)", () => {
-    const resC = calculateNotaCalc({ ...base, publicationStatus: "C" })
-    const resH = calculateNotaCalc({ ...base, publicationStatus: "H" })
+  it("status Hiatus tem penalidade maior que Completed", () => {
+    const resC = calculateNotaCalc({ ...base, publicationStatus: "Completed" })
+    const resH = calculateNotaCalc({ ...base, publicationStatus: "Hiatus" })
     expect(resC).toBeGreaterThan(resH)
   })
 
@@ -43,16 +43,26 @@ describe("calculateNotaCalc", () => {
     expect(r2).toBeGreaterThan(r1)
   })
 
-  it("observationPenalty=0.30 reduz nota em 30%", () => {
-    const resZero = calculateNotaCalc({ ...base, observationPenalty: 0 })
-    const res30 = calculateNotaCalc({ ...base, observationPenalty: 0.30 })
-    expect(res30).toBeCloseTo(resZero * 0.70 * (1 + base.chaptersNormalized / 200) / (1 + base.chaptersNormalized / 200), 0)
+  it("observationAdjustment=-0.30 reduz nota em 0.30 ponto", () => {
+    const resZero = calculateNotaCalc({ ...base, observationAdjustment: 0 })
+    const resNeg = calculateNotaCalc({ ...base, observationAdjustment: -0.30 })
+    expect(resNeg).toBeCloseTo(Math.max(0, resZero - 0.30), 4)
   })
 
-  it("penalidade acima de 0.30 é clamped a 0.30", () => {
-    const res30 = calculateNotaCalc({ ...base, observationPenalty: 0.30 })
-    const res50 = calculateNotaCalc({ ...base, observationPenalty: 0.50 })
-    expect(res30).toBeCloseTo(res50, 4)
+  it("observationAdjustment=+0.20 aumenta nota em 0.20 ponto", () => {
+    const resZero = calculateNotaCalc({ ...base, observationAdjustment: 0 })
+    const resPos = calculateNotaCalc({ ...base, observationAdjustment: 0.20 })
+    expect(resPos).toBeCloseTo(Math.min(10, resZero + 0.20), 4)
+  })
+
+  it("ajuste fora de [-0.30, +0.30] é clamped nos limites", () => {
+    const resMin = calculateNotaCalc({ ...base, observationAdjustment: -0.30 })
+    const resBelow = calculateNotaCalc({ ...base, observationAdjustment: -0.50 })
+    expect(resMin).toBeCloseTo(resBelow, 4)
+
+    const resMax = calculateNotaCalc({ ...base, observationAdjustment: 0.30 })
+    const resAbove = calculateNotaCalc({ ...base, observationAdjustment: 0.50 })
+    expect(resMax).toBeCloseTo(resAbove, 4)
   })
 })
 

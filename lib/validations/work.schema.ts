@@ -53,10 +53,15 @@ export const workFormSchema = z.object({
   year_end: z.number({ message: "Ano deve ser um número" }).int().min(1900).max(2100).nullable().optional(),
   publication_status: z.enum(PUBLICATION_STATUSES).default("Unknown"),
   personal_status: z.enum(PERSONAL_STATUSES).default("To read"),
+  // FKs canônicos (derivados do nome canônico no save). Opcionais aqui porque
+  // o form ainda usa as colunas texto como binding; o server action faz a
+  // conversão e grava ambos. Sairão obrigatórios após Fase 4.1.
+  publication_status_id: z.number().int().nullable().optional(),
+  personal_status_id: z.number().int().nullable().optional(),
   total_chapters: z.number().int().min(0).nullable().optional(),
   chapters_read: z.number().int().min(0).nullable().optional(),
   synopsis_quality: z.enum(SYNOPSIS_QUALITIES).nullable().optional(),
-  observation_penalty: z.number().min(0).max(1).default(0),
+  observation_adjustment: z.number().min(-0.30).max(0.30).default(0),
   manual_score: scoreField("Nota pessoal"),
   post_story_score: scoreField("História"),
   post_fl_score: scoreField("Female Lead"),
@@ -94,6 +99,10 @@ export const workFormSchema = z.object({
   // Multi-source metadata (Fase 2)
   covers: z.array(coverEntrySchema).default([]),
   synopses: z.array(synopsisEntrySchema).default([]),
+
+  // External source IDs (anilist, mangaupdates, myanimelist, kitsu, mangadex, comick, comix, animeplanet)
+  // Persisted to work_external_ids so future "Atualizar dados" can rehydrate without a title search.
+  external_ids: z.record(z.string().trim().min(1), z.string().trim().min(1)).default({}),
 })
 
 export type WorkFormValues = z.infer<typeof workFormSchema>
@@ -104,3 +113,24 @@ export const workUpdateSchema = workFormSchema.partial().extend({
 })
 
 export type WorkUpdateValues = z.infer<typeof workUpdateSchema>
+
+export const workStatusSchema = z.object({
+  personal_status: z.enum(PERSONAL_STATUSES),
+  personal_status_id: z.number().int().nullable().optional(),
+  synopsis_quality: z.enum(SYNOPSIS_QUALITIES).nullable().optional(),
+  observation_adjustment: z.number().min(-0.30).max(0.30).default(0),
+  observations: z.string().max(2000).nullable().optional(),
+  chapters_read: z.number().int().min(0).nullable().optional(),
+  manual_score: scoreField("Nota pessoal"),
+  post_story_score: scoreField("História"),
+  post_fl_score: scoreField("Female Lead"),
+  post_ml_score: scoreField("Male Lead"),
+  post_character_development_score: scoreField("Desenvolvimento dos Personagens"),
+  post_pacing_score: scoreField("Ritmo"),
+  post_art_visual_score: scoreField("Arte/Visual"),
+  post_impact_immersion_score: scoreField("Impacto/Imersão"),
+  post_originality_score: scoreField("Originalidade"),
+})
+
+export type WorkStatusValues = z.infer<typeof workStatusSchema>
+export type WorkStatusInput = z.input<typeof workStatusSchema>

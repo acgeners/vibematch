@@ -6,6 +6,12 @@ import { requestAiEvaluation } from "@/lib/ai-evaluation/service"
 import { fetchExternalEvaluationContextForWork } from "@/lib/external/index"
 import { recalculateWork } from "./calculations"
 import type { AiEvaluation } from "@/types/domain"
+import { pickPrimarySynopsis } from "@/lib/work-derived"
+import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
+
+const TAG_GROUP_ID_TO_SLUG: Record<string, string> = Object.fromEntries(
+  Object.entries(TAG_GROUP_IDS).map(([slug, id]) => [id, slug.replace(/^﻿/, "")])
+)
 
 export async function triggerAiEvaluation(workId: string) {
   const supabase = createAdminClient()
@@ -13,24 +19,44 @@ export async function triggerAiEvaluation(workId: string) {
   const { data: work, error: workError } = await supabase
     .from("works")
     .select(`
-      id, title, original_title, alternative_titles, synopsis, genres,
-      work_tags(tags(name))
+      id, title, original_title, alternative_titles,
+      work_tags(tags(name, tag_group_id)),
+      work_genres(genres(name)),
+      work_synopses(source, text, is_primary, position)
     `)
     .eq("id", workId)
     .single()
 
   if (workError || !work) return { error: "Obra não encontrada" }
 
-  const tagNames = ((work as { work_tags?: Array<{ tags?: { name?: string } }> }).work_tags ?? [])
-    .map((wt) => wt.tags?.name)
+  const tags = ((work as { work_tags?: Array<{ tags?: { name?: string; tag_group_id?: string | null } }> }).work_tags ?? [])
+    .map((wt) => wt.tags)
+    .filter((tag): tag is { name: string; tag_group_id?: string | null } => Boolean(tag?.name))
+    .map((tag) => ({
+      name: tag.name,
+      group: tag.tag_group_id ? (TAG_GROUP_ID_TO_SLUG[tag.tag_group_id] ?? null) : null,
+    }))
+
+  const genreNames = ((work as { work_genres?: Array<{ genres?: { name?: string } | null }> }).work_genres ?? [])
+    .map((wg) => wg.genres?.name)
     .filter((name): name is string => Boolean(name))
+
+  // Snapshot dos scores atuais — usado pelo review form para mostrar diff
+  // entre nota atual e a sugestão nova da IA.
+  const { data: currentScoreRows } = await supabase
+    .from("category_scores")
+    .select("criterion_slug, score")
+    .eq("work_id", workId)
+  const currentScores: Record<string, number> = Object.fromEntries(
+    (currentScoreRows ?? []).map((row) => [row.criterion_slug, Number(row.score)])
+  )
 
   const { data: evaluation, error: evalError } = await supabase
     .from("ai_evaluations")
     .insert({
       work_id: workId,
       status: "processing",
-      prompt_version: "v8",
+      prompt_version: "v9",
     })
     .select("id")
     .single()
@@ -44,15 +70,20 @@ export async function triggerAiEvaluation(workId: string) {
       alternativeTitles: work.alternative_titles,
     })
 
+    const synopses = (work as { work_synopses?: Array<{ source?: string | null; text?: string | null; is_primary?: boolean | null; position?: number | null }> }).work_synopses ?? []
+    const primarySynopsisRow = synopses.find((s) => s?.is_primary) ?? null
+    const synopsisIsManual = primarySynopsisRow?.source === "manual"
+
     const response = await requestAiEvaluation({
       workId,
       title: work.title,
-      synopsis: work.synopsis ?? undefined,
-      genres: work.genres ?? [],
-      tags: tagNames,
+      synopsis: pickPrimarySynopsis(synopses) ?? undefined,
+      synopsisIsManual,
+      genres: genreNames,
+      tags,
       sourcedReviews,
       externalContext,
-      promptVersion: "v8",
+      promptVersion: "v9",
     })
 
     const scoresToInsert = response.scores.map((s) => ({
@@ -91,7 +122,7 @@ export async function triggerAiEvaluation(workId: string) {
 
     revalidatePath(`/titles/${workId}`)
     revalidatePath("/ai-evaluation")
-    return { data: { evaluation: completedEvaluation as AiEvaluation } }
+    return { data: { evaluation: completedEvaluation as AiEvaluation, currentScores, reviewsUsed: response.reviewsUsed } }
   } catch (err) {
     await supabase
       .from("ai_evaluations")

@@ -1,11 +1,11 @@
 import type { CriterionSlug } from "@/types/domain"
-import { requestAiEvaluation } from "@/lib/ai-evaluation/service"
+import { requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
 
 export async function evaluateCriteriaWithAI(params: {
   title: string
   synopsis?: string
   genres: string[]
-  tags: string[]
+  tags: Array<string | AiEvaluationTag>
   reviews?: string[]
 }): Promise<Partial<Record<CriterionSlug, number>> | null> {
   const hasData = params.synopsis || params.genres.length > 0 || params.tags.length > 0 || (params.reviews?.length ?? 0) > 0
@@ -19,7 +19,7 @@ export async function evaluateCriteriaWithAI(params: {
       genres: params.genres,
       tags: params.tags,
       reviews: params.reviews,
-      promptVersion: "v8",
+      promptVersion: "v9",
     })
 
     const result: Partial<Record<CriterionSlug, number>> = {}

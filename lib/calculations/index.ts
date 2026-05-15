@@ -34,7 +34,7 @@ export function calculateAll(inputs: CalculationInputs): CalculationResult {
     totalChapters,
     publicationStatus,
     synopsisQuality,
-    observationPenalty,
+    observationAdjustment,
     config,
     globalPlatformMean,
   } = inputs
@@ -58,7 +58,7 @@ export function calculateAll(inputs: CalculationInputs): CalculationResult {
     chaptersNormalized,
     publicationStatus,
     synopsisQuality,
-    observationPenalty,
+    observationAdjustment,
     pseudoVotesBlend: config.pseudo_votes_blend,
   })
 

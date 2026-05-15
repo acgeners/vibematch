@@ -64,9 +64,22 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ChevronDown, ImageIcon, Info, Loader2, Pencil, Plus, Settings2, Trash2, X } from "lucide-react"
 
+export interface WorkFormAiEvaluation {
+  model_name: string | null
+  confidence: number | null
+  created_at: string
+  summary: string | null
+  scores: Array<{
+    criterion_slug: string
+    justification: string | null
+  }>
+}
+
 interface WorkFormProps {
   workId?: string
+  workSlug?: string
   initialValues?: Partial<WorkFormValues>
+  aiEvaluation?: WorkFormAiEvaluation | null
 }
 
 const PLATFORM_FIELDS = [
@@ -211,7 +224,7 @@ const POST_READING_STAR_LEGEND = [
   { stars: "★★★★★", value: "10", label: "Excelente / ponto forte da obra" },
 ]
 
-type SectionKey = "new" | "basic" | "external" | "criteria" | "status"
+type SectionKey = "new" | "basic" | "external" | "criteria" | "status" | "categorization"
 type ExternalSourceOption = { id: number; name: string; order?: number | string | null }
 type BatchDraft = { localId: string; values: WorkFormValues }
 type CriteriaJustifications = Partial<Record<import("@/types/domain").CriterionSlug, string>>
@@ -270,7 +283,7 @@ const DUPLICATE_FIELD_CONFIGS = [
   { name: "personal_status", label: "Status leitura" },
   { name: "chapters_read", label: "Capítulos lidos" },
   { name: "synopsis_quality", label: "Interesse sinopse" },
-  { name: "observation_penalty", label: "Penalidade" },
+  { name: "observation_adjustment", label: "Ajuste" },
   { name: "observations", label: "Observações" },
   { name: "mu_rating", label: "MangaUpdates - nota" },
   { name: "mu_votes", label: "MangaUpdates - votos" },
@@ -293,6 +306,7 @@ const DEFAULT_OPEN_SECTIONS: Record<SectionKey, boolean> = {
   external: true,
   criteria: true,
   status: true,
+  categorization: true,
 }
 
 const optionalNumber = (value: unknown) => {
@@ -419,7 +433,7 @@ const getEmptyCreateValues = (): Partial<WorkFormValues> => ({
   total_chapters: null,
   chapters_read: null,
   synopsis_quality: null,
-  observation_penalty: 0,
+  observation_adjustment: 0,
   manual_score: null,
   post_story_score: null,
   post_fl_score: null,
@@ -467,7 +481,7 @@ const scrollToTop = () => {
   window.scrollTo({ top: 0, behavior: "smooth" })
 }
 
-export function WorkForm({ workId, initialValues }: WorkFormProps) {
+export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: WorkFormProps) {
   const router = useRouter()
   const isCreating = !workId
 
@@ -490,9 +504,24 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
   })
 
   const [batchSubmitting, setBatchSubmitting] = useState(false)
-  const [batchDrafts, setBatchDrafts] = useState<BatchDraft[]>(() => isCreating ? readBatchDrafts() : [])
+  const [batchDrafts, setBatchDrafts] = useState<BatchDraft[]>([])
+  // Sincroniza com localStorage (sistema externo) no mount; SSR seguro porque
+  // readBatchDrafts retorna [] quando window é undefined.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (isCreating) setBatchDrafts(readBatchDrafts())
+  }, [isCreating])
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null)
-  const [criteriaJustifications, setCriteriaJustifications] = useState<CriteriaJustifications>({})
+  const [criteriaJustifications, setCriteriaJustifications] = useState<CriteriaJustifications>(() => {
+    if (!aiEvaluation?.scores?.length) return {}
+    const map: CriteriaJustifications = {}
+    for (const score of aiEvaluation.scores) {
+      if (score.justification) {
+        map[score.criterion_slug as keyof CriteriaJustifications] = score.justification
+      }
+    }
+    return map
+  })
   const [topFeedback, setTopFeedback] = useState<string | null>(null)
   const [duplicateResolution, setDuplicateResolution] = useState<DuplicateResolutionState | null>(null)
   const {
@@ -610,6 +639,15 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
       setValue("extra_platform_ratings", next, { shouldDirty: false, shouldValidate: false })
     }
   }, [buildFixedExtraPlatformRatings, getValues, setValue, sourceOptions])
+
+  // Auto-preencher chapters_read = total_chapters quando status muda para Completed.
+  useEffect(() => {
+    if (personalStatus !== "Completed") return
+    if (typeof totalChapters !== "number" || totalChapters <= 0) return
+    const current = getValues("chapters_read")
+    if (current != null && current >= totalChapters) return
+    setValue("chapters_read", totalChapters, { shouldDirty: true, shouldValidate: true })
+  }, [personalStatus, totalChapters, getValues, setValue])
 
   useEffect(() => {
     const weightedScores = postReadingScores.reduce(
@@ -791,13 +829,21 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
     }
     setCriteriaJustifications(data.criteriaJustifications ?? {})
     setValue("ai_justifications", data.criteriaJustifications ?? {})
+    if (data.externalIds && Object.keys(data.externalIds).length > 0) {
+      const cleaned: Record<string, string> = {}
+      for (const [source, id] of Object.entries(data.externalIds)) {
+        if (id) cleaned[source] = String(id)
+      }
+      setValue("external_ids", cleaned, { shouldDirty: true })
+    }
   }
 
   const onSubmit = async (rawValues: WorkFormValues) => {
     const values = normalizePostReadingScoresInValues(rawValues)
     scrollToTop()
-    setTopFeedback(workId ? "Atualizando obra..." : "Verificando duplicidade...")
-    if (!workId && await checkDuplicateBeforeCreate(values, "create")) return
+    const shouldCheckDuplicate = !workId && Object.keys(values.external_ids ?? {}).length === 0
+    setTopFeedback(workId ? "Atualizando obra..." : shouldCheckDuplicate ? "Verificando duplicidade..." : "Criando obra e recalculando notas...")
+    if (shouldCheckDuplicate && await checkDuplicateBeforeCreate(values, "create")) return
 
     setTopFeedback(workId ? "Atualizando obra..." : "Criando obra e recalculando notas...")
     const result = workId
@@ -817,7 +863,7 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
     }
 
     toast.success(workId ? "Obra atualizada!" : "Obra criada!")
-    router.push(`/titles/${result.data?.id ?? workId}`)
+    router.push(`/titles/${workSlug ?? result.data?.id ?? workId}`)
   }
 
   const persistDrafts = (drafts: BatchDraft[]) => {
@@ -829,8 +875,11 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
     if (workId) return
     const values = normalizePostReadingScoresInValues(rawValues)
     scrollToTop()
-    setTopFeedback("Verificando duplicidade...")
-    if (await checkDuplicateBeforeCreate(values, "addMore")) return
+    const shouldCheckDuplicate = Object.keys(values.external_ids ?? {}).length === 0
+    if (shouldCheckDuplicate) {
+      setTopFeedback("Verificando duplicidade...")
+      if (await checkDuplicateBeforeCreate(values, "addMore")) return
+    }
     setTopFeedback(null)
 
     const draft: BatchDraft = {
@@ -892,9 +941,11 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
           setTopFeedback(null)
           return
         }
-        setTopFeedback("Verificando duplicidade...")
         const normalizedCurrent = normalizePostReadingScoresInValues(parsedCurrent.data)
-        if (await checkDuplicateBeforeCreate(normalizedCurrent, "addMore")) return
+        if (Object.keys(normalizedCurrent.external_ids ?? {}).length === 0) {
+          setTopFeedback("Verificando duplicidade...")
+          if (await checkDuplicateBeforeCreate(normalizedCurrent, "addMore")) return
+        }
         setTopFeedback("Criando lote e recalculando notas...")
         valuesToCreate = [...valuesToCreate, normalizedCurrent]
       }
@@ -1035,8 +1086,56 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
     )
   }
 
+  const actionButtons = (
+    <div className="flex flex-wrap justify-end gap-3">
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => {
+          if (workSlug || workId) {
+            router.push(`/titles/${workSlug ?? workId}`)
+          } else {
+            router.back()
+          }
+        }}
+        disabled={isSubmitting || batchSubmitting}
+      >
+        Cancelar
+      </Button>
+      {isCreating && (
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleSubmit(onSubmitAddMore)}
+          disabled={isSubmitting || batchSubmitting}
+          title="Salva no banco mas adia o recálculo até o fim do lote"
+        >
+          {batchSubmitting
+            ? "Salvando..."
+            : editingDraftId
+              ? "Atualizar standby"
+              : "Salvar e incluir mais"}
+        </Button>
+      )}
+      <Button
+        type={isCreating && batchDrafts.length > 0 ? "button" : "submit"}
+        disabled={isSubmitting || batchSubmitting}
+        onClick={isCreating && batchDrafts.length > 0 ? handleCreateBatch : undefined}
+      >
+        {isSubmitting || batchSubmitting
+          ? "Salvando..."
+          : workId
+            ? "Atualizar"
+            : batchDrafts.length > 0
+              ? `Criar ${batchDrafts.length + (titleValue?.trim() ? 1 : 0)} obra${batchDrafts.length + (titleValue?.trim() ? 1 : 0) === 1 ? "" : "s"}`
+              : "Criar obra"}
+      </Button>
+    </div>
+  )
+
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      {actionButtons}
       {topFeedback && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm"
@@ -1251,8 +1350,8 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
         {openSections.basic && (
           <CardContent className="space-y-6">
 
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="space-y-5">
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] items-stretch">
+              <div className="flex flex-col gap-5">
                 {/* Título original */}
                 <div className="space-y-1.5">
                   <Label htmlFor="original_title">Título original</Label>
@@ -1328,14 +1427,13 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
                 </div>
 
                 {/* Sinopse */}
-                <div className="space-y-1.5">
+                <div className="flex flex-1 flex-col space-y-1.5">
                   <Label htmlFor="synopsis">Sinopse</Label>
                   <Textarea
                     id="synopsis"
                     {...register("synopsis")}
                     placeholder="Breve descrição da obra..."
-                    rows={8}
-                    className="h-[278px] resize-none"
+                    className="h-full min-h-[200px] flex-1 resize-none"
                   />
                 </div>
               </div>
@@ -1373,40 +1471,206 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
               </div>
             </div>
 
-            {/* Gêneros */}
-            <div className="space-y-1.5">
-              <Label>Gêneros</Label>
-              <ChipInput
-                value={genresValue ?? []}
-                onChange={(v) => setValue("genres", filterKnownGenres(v), { shouldDirty: true, shouldValidate: true })}
-                suggestions={genreSuggestions}
-                restrictToSuggestions
-                showSuggestionMenu={false}
-                placeholder="Digite um gênero válido..."
-              />
-            </div>
-
-            {/* Tags */}
-            <div className="space-y-1.5">
-              <Label>Tags</Label>
-              <ChipInput
-                value={tagsValue ?? []}
-                onChange={(v) => setValue("tags", v, { shouldDirty: true })}
-                suggestionGroups={TAG_GROUPS_CATALOG}
-                groups={TAG_GROUPS_CATALOG
-                  .map((grp) => ({
-                    label: grp.label,
-                    values: (tagsValue ?? []).filter((t) => grp.values.includes(t)),
-                  }))
-                  .filter((g) => g.values.length > 0)}
-                placeholder="Digite para buscar tag..."
-              />
-            </div>
           </CardContent>
         )}
       </Card>
 
-      {/* 2. Avaliações externas */}
+      {/* 2. Status */}
+      <Card>
+        {renderSectionHeader("status", "Status")}
+        {openSections.status && (
+          <CardContent className="space-y-8">
+
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-medium">Informações de antes de iniciar a leitura</h3>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,240px)_minmax(0,240px)_minmax(0,180px)]">
+                {/* Status leitura */}
+                <div className="space-y-1.5">
+                  <Label>Status leitura</Label>
+                  <Select
+                    value={personalStatus}
+                    onValueChange={(v) => setValue("personal_status", v as WorkFormValues["personal_status"])}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PERSONAL_STATUSES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {PERSONAL_STATUS_LABELS[s]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Interesse sinopse */}
+                <div className="space-y-1.5">
+                  <Label>Interesse sinopse</Label>
+                  <Select
+                    value={synopsisQualityValue ?? "none"}
+                    onValueChange={(v) =>
+                      setValue("synopsis_quality", v === "none" ? null : (v as WorkFormValues["synopsis_quality"]), { shouldValidate: true })
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Não avaliada" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Não avaliada</SelectItem>
+                      {SYNOPSIS_QUALITIES.map((q) => (
+                        <SelectItem key={q} value={q}>
+                          {q} — {SYNOPSIS_QUALITY_LABELS[q]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Ajuste manual: positivo = bônus, negativo = penalidade */}
+                <div className="space-y-1.5">
+                  {renderFieldLabel("observation_adjustment", "Ajuste", "negativo = penalidade · positivo = bônus · 0 = neutro · range −0.30 a +0.30")}
+                  <Input
+                    id="observation_adjustment"
+                    type="number"
+                    step={0.05}
+                    min={-0.30}
+                    max={0.30}
+                    {...register("observation_adjustment", { setValueAs: numberOrZero })}
+                  />
+                  {errors.observation_adjustment && (
+                    <p className="text-xs text-destructive">{errors.observation_adjustment.message}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="observations">Observações</Label>
+                <Textarea
+                  id="observations"
+                  {...register("observations")}
+                  placeholder="Notas pessoais sobre a obra..."
+                  rows={3}
+                  className="resize-none"
+                />
+              </div>
+            </div>
+
+            {hasProgress && (
+              <div className="space-y-4 border-t pt-6">
+                <div className="max-w-[260px] space-y-1.5">
+                  <Label htmlFor="chapters_read">Capítulos lidos</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="chapters_read"
+                      type="number"
+                      min={0}
+                      {...register("chapters_read", { setValueAs: optionalNumber })}
+                    />
+                    <span className="text-muted-foreground">/</span>
+                    <div className="flex h-9 min-w-16 items-center justify-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">
+                      {typeof totalChapters === "number" && Number.isFinite(totalChapters) ? totalChapters : "?"}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-medium">Critérios de avaliação</h3>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full gap-1.5 text-xs sm:w-auto"
+                      onClick={() => router.push("/settings")}
+                    >
+                      <Settings2 className="h-3.5 w-3.5" />
+                      Editar pesos
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid gap-2 rounded-lg border bg-muted/20 p-3 text-sm sm:grid-cols-2 xl:grid-cols-5">
+                  {POST_READING_STAR_LEGEND.map((item) => (
+                    <TooltipProvider key={item.value}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="rounded-md bg-background/80 px-3 py-2 transition-colors hover:bg-background">
+                            <span className="block whitespace-nowrap text-amber-500">{item.stars}</span>
+                            <p className="mt-1 text-xs leading-snug text-muted-foreground">{item.label}</p>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          Valor: {item.value}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  {POST_READING_SCORE_FIELDS.map((field, index) => {
+                    const currentValue = postReadingScores[index]
+                    const selectedStars = scoreToPostReadingStars(currentValue)
+                    const selectedHint = selectedStars == null
+                      ? null
+                      : POST_READING_STAR_HINTS[field.name][selectedStars - 1]
+                    return (
+                      <div key={field.name} className="space-y-1.5">
+                        {renderFieldLabel(field.name, field.label, field.help)}
+                        <StarRating
+                          id={field.name}
+                          value={currentValue}
+                          valueForStars={starsToPostReadingScore}
+                          starsForValue={scoreToPostReadingStars}
+                          showValue={false}
+                          starDescriptions={POST_READING_STAR_HINTS[field.name]}
+                          onChange={(value) =>
+                            setValue(field.name as PostReadingScoreField, value, {
+                              shouldDirty: true,
+                              shouldValidate: true,
+                            })
+                          }
+                        />
+                        {selectedHint && (
+                          <p className="text-xs leading-snug text-muted-foreground whitespace-pre-line">
+                            {selectedHint}
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="max-w-[280px] space-y-2 rounded-lg border bg-primary/5 p-4">
+                  {renderFieldLabel("manual_score", "Minha nota", "Calculada pela média dos ratings preenchidos.")}
+                  <Input
+                    id="manual_score"
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    max={10}
+                    placeholder="—"
+                    readOnly
+                    className="bg-background text-base font-semibold"
+                    {...register("manual_score", {
+                      setValueAs: optionalNumber,
+                    })}
+                  />
+                </div>
+              </div>
+            )}
+
+          </CardContent>
+        )}
+      </Card>
+
+      {/* 3. Avaliações externas */}
       <Card>
         {renderSectionHeader("external", "Avaliações externas", {
           description: "Rating 0 - 10",
@@ -1590,7 +1854,7 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
         )}
       </Card>
 
-      {/* 3. Notas por critério */}
+      {/* 4. Notas por critério */}
       <Card>
         {renderSectionHeader("criteria", "Notas por critério", {
           description: "Rating 0 - 10",
@@ -1608,7 +1872,43 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
           ),
         })}
         {openSections.criteria && (
-          <CardContent>
+          <CardContent className="space-y-4">
+            {aiEvaluation && (
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>
+                    Modelo:{" "}
+                    <span className="font-medium text-foreground">
+                      {aiEvaluation.model_name ?? "—"}
+                    </span>
+                  </span>
+                  <span>
+                    Confiança:{" "}
+                    <span className="font-medium text-foreground">
+                      {aiEvaluation.confidence != null
+                        ? `${(aiEvaluation.confidence * 100).toFixed(0)}%`
+                        : "—"}
+                    </span>
+                  </span>
+                  <span>
+                    Data:{" "}
+                    <span className="font-medium text-foreground">
+                      {new Date(aiEvaluation.created_at).toLocaleDateString("pt-BR")}
+                    </span>
+                  </span>
+                </div>
+                {aiEvaluation.summary && (
+                  <div className="rounded-md border bg-muted/20 p-3">
+                    <p className="mb-1 text-[10px] font-medium uppercase text-muted-foreground">
+                      Resumo da última avaliação IA
+                    </p>
+                    <p className="text-sm leading-6 text-foreground/80 whitespace-pre-line">
+                      {aiEvaluation.summary}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               {CRITERION_SLUGS.map((slug) => {
                 const info = CRITERIA_INFO[slug]
@@ -1640,241 +1940,44 @@ export function WorkForm({ workId, initialValues }: WorkFormProps) {
         )}
       </Card>
 
-      {/* 4. Status — posição final */}
+      {/* 5. Categorização */}
       <Card>
-        {renderSectionHeader("status", "Status")}
-        {openSections.status && (
-          <CardContent className="space-y-8">
-
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-sm font-medium">Informações de antes de iniciar a leitura</h3>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,240px)_minmax(0,240px)_minmax(0,180px)]">
-                {/* Status leitura */}
-                <div className="space-y-1.5">
-                  <Label>Status leitura</Label>
-                  <Select
-                    value={personalStatus}
-                    onValueChange={(v) => setValue("personal_status", v as WorkFormValues["personal_status"])}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PERSONAL_STATUSES.map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {PERSONAL_STATUS_LABELS[s]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Interesse sinopse */}
-                <div className="space-y-1.5">
-                  <Label>Interesse sinopse</Label>
-                  <Select
-                    value={synopsisQualityValue ?? "none"}
-                    onValueChange={(v) =>
-                      setValue("synopsis_quality", v === "none" ? null : (v as WorkFormValues["synopsis_quality"]), { shouldValidate: true })
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Não avaliada" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Não avaliada</SelectItem>
-                      {SYNOPSIS_QUALITIES.map((q) => (
-                        <SelectItem key={q} value={q}>
-                          {q} — {SYNOPSIS_QUALITY_LABELS[q]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Penalidades */}
-                <div className="space-y-1.5">
-                  {renderFieldLabel("observation_penalty", "Penalidade", "0 = sem penalidade · 1 = penalidade máxima")}
-                  <Input
-                    id="observation_penalty"
-                    type="number"
-                    step={0.05}
-                    min={0}
-                    max={1}
-                    {...register("observation_penalty", { setValueAs: numberOrZero })}
-                  />
-                  {errors.observation_penalty && (
-                    <p className="text-xs text-destructive">{errors.observation_penalty.message}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="observations">Observações</Label>
-                <Textarea
-                  id="observations"
-                  {...register("observations")}
-                  placeholder="Notas pessoais sobre a obra..."
-                  rows={3}
-                  className="resize-none"
-                />
-              </div>
+        {renderSectionHeader("categorization", "Categorização")}
+        {openSections.categorization && (
+          <CardContent className="space-y-6">
+            <div className="space-y-1.5">
+              <Label>Gêneros</Label>
+              <ChipInput
+                value={genresValue ?? []}
+                onChange={(v) => setValue("genres", filterKnownGenres(v), { shouldDirty: true, shouldValidate: true })}
+                suggestions={genreSuggestions}
+                restrictToSuggestions
+                showSuggestionMenu={false}
+                placeholder="Digite um gênero válido..."
+              />
             </div>
-
-            {hasProgress && (
-              <div className="space-y-4 border-t pt-6">
-                <div className="max-w-[260px] space-y-1.5">
-                  <Label htmlFor="chapters_read">Capítulos lidos</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="chapters_read"
-                      type="number"
-                      min={0}
-                      {...register("chapters_read", { setValueAs: optionalNumber })}
-                    />
-                    <span className="text-muted-foreground">/</span>
-                    <div className="flex h-9 min-w-16 items-center justify-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">
-                      {typeof totalChapters === "number" && Number.isFinite(totalChapters) ? totalChapters : "?"}
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h3 className="text-sm font-medium">Critérios de avaliação</h3>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-full gap-1.5 text-xs sm:w-auto"
-                      onClick={() => router.push("/settings")}
-                    >
-                      <Settings2 className="h-3.5 w-3.5" />
-                      Editar pesos
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="grid gap-2 rounded-lg border bg-muted/20 p-3 text-sm sm:grid-cols-2 xl:grid-cols-5">
-                  {POST_READING_STAR_LEGEND.map((item) => (
-                    <TooltipProvider key={item.value}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div className="rounded-md bg-background/80 px-3 py-2 transition-colors hover:bg-background">
-                            <span className="block whitespace-nowrap text-amber-500">{item.stars}</span>
-                            <p className="mt-1 text-xs leading-snug text-muted-foreground">{item.label}</p>
-                          </div>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          Valor: {item.value}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {POST_READING_SCORE_FIELDS.map((field, index) => {
-                    const currentValue = postReadingScores[index]
-                    const selectedStars = scoreToPostReadingStars(currentValue)
-                    const selectedHint = selectedStars == null
-                      ? null
-                      : POST_READING_STAR_HINTS[field.name][selectedStars - 1]
-                    return (
-                      <div key={field.name} className="space-y-1.5">
-                        {renderFieldLabel(field.name, field.label, field.help)}
-                        <StarRating
-                          id={field.name}
-                          value={currentValue}
-                          valueForStars={starsToPostReadingScore}
-                          starsForValue={scoreToPostReadingStars}
-                          showValue={false}
-                          starDescriptions={POST_READING_STAR_HINTS[field.name]}
-                          onChange={(value) =>
-                            setValue(field.name as PostReadingScoreField, value, {
-                              shouldDirty: true,
-                              shouldValidate: true,
-                            })
-                          }
-                        />
-                        {selectedHint && (
-                          <p className="text-xs leading-snug text-muted-foreground whitespace-pre-line">
-                            {selectedHint}
-                          </p>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-
-                <div className="max-w-[280px] space-y-2 rounded-lg border bg-primary/5 p-4">
-                  {renderFieldLabel("manual_score", "Minha nota", "Calculada pela média dos ratings preenchidos.")}
-                  <Input
-                    id="manual_score"
-                    type="number"
-                    step={0.1}
-                    min={0}
-                    max={10}
-                    placeholder="—"
-                    readOnly
-                    className="bg-background text-base font-semibold"
-                    {...register("manual_score", {
-                      setValueAs: optionalNumber,
-                    })}
-                  />
-                </div>
-              </div>
-            )}
-
+            <div className="space-y-1.5">
+              <Label>Tags</Label>
+              <ChipInput
+                value={tagsValue ?? []}
+                onChange={(v) => setValue("tags", v, { shouldDirty: true })}
+                suggestionGroups={TAG_GROUPS_CATALOG}
+                groups={TAG_GROUPS_CATALOG
+                  .map((grp) => ({
+                    label: grp.label,
+                    values: (tagsValue ?? []).filter((t) => grp.values.includes(t)),
+                  }))
+                  .filter((g) => g.values.length > 0)}
+                placeholder="Digite para buscar tag..."
+              />
+            </div>
           </CardContent>
         )}
       </Card>
 
       <Separator />
 
-      <div className="flex flex-wrap justify-end gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => router.back()}
-          disabled={isSubmitting || batchSubmitting}
-        >
-          Cancelar
-        </Button>
-        {isCreating && (
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={handleSubmit(onSubmitAddMore)}
-            disabled={isSubmitting || batchSubmitting}
-            title="Salva no banco mas adia o recálculo até o fim do lote"
-          >
-            {batchSubmitting
-              ? "Salvando..."
-              : editingDraftId
-                ? "Atualizar standby"
-                : "Salvar e incluir mais"}
-          </Button>
-        )}
-        <Button
-          type={isCreating && batchDrafts.length > 0 ? "button" : "submit"}
-          disabled={isSubmitting || batchSubmitting}
-          onClick={isCreating && batchDrafts.length > 0 ? handleCreateBatch : undefined}
-        >
-          {isSubmitting || batchSubmitting
-            ? "Salvando..."
-            : workId
-              ? "Atualizar"
-              : batchDrafts.length > 0
-                ? `Criar ${batchDrafts.length + (titleValue?.trim() ? 1 : 0)} obra${batchDrafts.length + (titleValue?.trim() ? 1 : 0) === 1 ? "" : "s"}`
-                : "Criar obra"}
-        </Button>
-      </div>
+      {actionButtons}
     </form>
   )
 }

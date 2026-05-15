@@ -119,6 +119,61 @@ export async function searchAnimePlanet(search: string): Promise<ExternalSearchR
   }
 }
 
+/**
+ * Scrapes user reviews from `/manga/{slug}/reviews`. AP usa schema.org markup:
+ *   <div itemprop="reviewBody" class="userContent readMore" ...>
+ *     <p>...</p><p>...</p>
+ *   </div>
+ *
+ * Rating extraído do contexto HTML antes de cada reviewBody:
+ *   1. itemprop="ratingValue" content="X.X"  (schema.org, 0-5)
+ *   2. fallback: contagem de iconStarFull     (0-5 inteiro)
+ * Convertido para 0-10 e prefixado como "Nota do usuário: X/10\n" para que
+ * extractUserRating() no pipeline de coleta possa parsear.
+ *
+ * CF protege — caímos no FlareSolverr quando o fetch direto for bloqueado.
+ */
+export async function fetchAnimePlanetReviews(slug: string, limit = Infinity): Promise<string[]> {
+  try {
+    const result = await fetchHtmlWithCfFallback(
+      `${AP_BASE}/manga/${slug}/reviews`,
+      HEADERS
+    )
+    if (!result) return []
+
+    const html = result.html
+    const bodyRegex = /<div[^>]+itemprop="reviewBody"[^>]*>([\s\S]*?)<\/div>/gi
+    const reviews: string[] = []
+
+    for (const match of html.matchAll(bodyRegex)) {
+      if (reviews.length >= limit) break
+      const text = cleanHtml(match[1])
+      if (!text || text.length < 100) continue
+
+      // Olha 2000 chars antes deste bloco para encontrar o rating da review
+      const lookback = html.slice(Math.max(0, (match.index ?? 0) - 2000), match.index ?? 0)
+      const ratingValueMatch = lookback.match(/itemprop="ratingValue"[^>]*content="([0-9.]+)"/)
+      const starsFull = (lookback.match(/iconStarFull/g) ?? []).length
+
+      let prefix = ""
+      if (ratingValueMatch) {
+        const raw = parseFloat(ratingValueMatch[1])
+        if (Number.isFinite(raw) && raw >= 0.5 && raw <= 5) {
+          prefix = `Nota do usuário: ${Math.round(raw * 2 * 10) / 10}/10\n`
+        }
+      } else if (starsFull >= 1 && starsFull <= 5) {
+        prefix = `Nota do usuário: ${starsFull * 2}/10\n`
+      }
+
+      reviews.push(`${prefix}${text}`)
+    }
+
+    return reviews
+  } catch {
+    return []
+  }
+}
+
 export async function fetchAnimePlanetByTitle(title: string, knownSlug?: string): Promise<AnimePlanetDetail | null> {
   try {
     const slug = knownSlug ?? await findSlug(title)

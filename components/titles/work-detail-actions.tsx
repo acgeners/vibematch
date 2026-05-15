@@ -3,12 +3,14 @@
 import { useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Archive, Edit, Loader2, MoreHorizontal, Sparkles, Trash2 } from "lucide-react"
+import { Archive, BookOpen, Edit, Loader2, Sparkles, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation } from "@/server/actions/ai"
 import { archiveWork, deleteWork, unarchiveWork } from "@/server/actions/works"
 import { AiEvaluationReviewForm } from "@/components/ai-evaluation/ai-evaluation-review-form"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
+import { StatusEditDialog } from "@/components/titles/status-edit-dialog"
+import type { WorkStatusValues } from "@/lib/validations/work.schema"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -32,10 +34,11 @@ import type { AiEvaluation } from "@/types/domain"
 
 interface WorkDetailActionsProps {
   workId: string
+  workSlug?: string
   workTitle: string
   isArchived: boolean
   coverUrl?: string | null
-  hasAiEvaluationData?: boolean
+  hasCriteriaScores?: boolean
   className?: string
   currentWork?: {
     title: string
@@ -45,21 +48,28 @@ interface WorkDetailActionsProps {
     publicationStatus?: string | null
     totalChapters?: number | null
   }
+  statusInitialValues?: WorkStatusValues
+  totalChapters?: number | null
 }
 
 export function WorkDetailActions({
   workId,
+  workSlug,
   workTitle,
   isArchived,
   coverUrl,
+  hasCriteriaScores = false,
   className,
   currentWork,
+  statusInitialValues,
+  totalChapters,
 }: WorkDetailActionsProps) {
   void workTitle
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [evaluating, setEvaluating] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
+  const [statusOpen, setStatusOpen] = useState(false)
   const [evaluation, setEvaluation] = useState<AiEvaluation | null>(null)
   const [currentScores, setCurrentScores] = useState<Record<string, number>>({})
 
@@ -102,29 +112,41 @@ export function WorkDetailActions({
     setEvaluation(result.data.evaluation)
     setCurrentScores(result.data.currentScores ?? {})
     setReviewOpen(true)
+    const reviewsUsed = result.data.reviewsUsed ?? 0
+    toast.success(
+      reviewsUsed === 0
+        ? "Avaliação IA gerada sem reviews externas."
+        : `Avaliação IA gerada usando ${reviewsUsed} review${reviewsUsed === 1 ? "" : "s"} externa${reviewsUsed === 1 ? "" : "s"}.`
+    )
   }
 
   return (
     <>
       <div className={className ? `flex flex-wrap gap-2 ${className}` : "flex flex-wrap gap-2"}>
         <Button asChild variant="outline" size="sm">
-          <Link href={`/titles/${workId}/edit`}>
+          <Link href={`/titles/${workSlug ?? workId}/edit`}>
             <Edit className="h-4 w-4" />
             Editar
           </Link>
         </Button>
+        {statusInitialValues && (
+          <Button variant="outline" size="sm" onClick={() => setStatusOpen(true)}>
+            <BookOpen className="h-4 w-4" />
+            Status
+          </Button>
+        )}
         {currentWork && (
           <UpdateDataDialog workId={workId} currentWork={currentWork} />
         )}
         <Button variant="outline" size="sm" onClick={handleAiEvaluation} disabled={evaluating}>
           <Sparkles className="h-4 w-4" />
-          {evaluating ? "Avaliando..." : "Reavaliar IA"}
+          {evaluating ? "Avaliando..." : hasCriteriaScores ? "Reavaliar IA" : "Avaliar IA"}
         </Button>
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button variant="outline" size="sm" disabled={isPending}>
-              <MoreHorizontal className="h-4 w-4" />
-              Gerenciar
+              <Trash2 className="h-4 w-4" />
+              Deletar
             </Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
@@ -157,13 +179,23 @@ export function WorkDetailActions({
             <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
               <Loader2 className="h-7 w-7 animate-spin text-primary" />
             </div>
-            <DialogTitle>Reavaliando com IA</DialogTitle>
+            <DialogTitle>{hasCriteriaScores ? "Reavaliando com IA" : "Avaliando com IA"}</DialogTitle>
             <DialogDescription>
-              Buscando reviews externas e gerando uma nova avaliação. Isso pode levar alguns segundos.
+              Buscando reviews externas e gerando {hasCriteriaScores ? "uma nova avaliação" : "a avaliação"}. Isso pode levar alguns segundos.
             </DialogDescription>
           </DialogHeader>
         </DialogContent>
       </Dialog>
+
+      {statusInitialValues && (
+        <StatusEditDialog
+          open={statusOpen}
+          onOpenChange={setStatusOpen}
+          workId={workId}
+          totalChapters={totalChapters ?? null}
+          initialValues={statusInitialValues}
+        />
+      )}
 
       <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">

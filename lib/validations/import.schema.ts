@@ -30,7 +30,7 @@ export const importRowSchema = z.object({
   chapters_read: z.number().int().min(0).nullable().optional(),
   synopsis_quality: z.enum(SYNOPSIS_QUALITIES).nullable().optional(),
   personal_status: z.enum(PERSONAL_STATUSES).nullable().optional(),
-  observation_penalty: z.number().min(0).max(1).nullable().optional(),
+  observation_adjustment: z.number().min(-0.30).max(0.30).nullable().optional(),
   manual_score: optionalScore,
   predicted_score: optionalScore,
 })

@@ -4,7 +4,7 @@ import { useState, useTransition } from "react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { recalculateNow } from "@/server/actions/settings"
-import { titleToSlug } from "@/lib/utils"
+import { WorkTitleLink } from "@/components/titles/work-title-link"
 import type { FormulaConfig } from "@/types/domain"
 import type { CalibrationDiff } from "@/lib/calculations/calibration"
 
@@ -167,12 +167,12 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
                 {snapshot.worstDiffs.map((d) => (
                   <tr key={d.workId}>
                     <td className="px-3 py-2 text-xs max-w-[200px]">
-                      <a
+                      <WorkTitleLink
+                        title={d.title ?? `${d.workId.slice(0, 8)}…`}
+                        workId={d.workId}
+                        href={d.title ? undefined : `/titles/${d.workId}`}
                         className="hover:underline line-clamp-1 block"
-                        href={d.title ? `/titles/${titleToSlug(d.title)}` : `/titles/${d.workId}`}
-                      >
-                        {d.title ?? `${d.workId.slice(0, 8)}…`}
-                      </a>
+                      />
                     </td>
                     <td className="px-3 py-2 text-right">{d.manualScore.toFixed(1)}</td>
                     <td className="px-3 py-2 text-right">{d.calcScore?.toFixed(2) ?? "—"}</td>

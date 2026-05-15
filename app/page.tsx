@@ -1,13 +1,13 @@
 import Link from "next/link"
 import { BookOpen, Brain, Star, Archive, TrendingUp, Plus, Upload, Sparkles } from "lucide-react"
 import { getDashboardStats } from "@/server/queries/dashboard"
-import { titleToSlug } from "@/lib/utils"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { Header } from "@/components/layout/header"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import { PublicationStatusBadge, PersonalStatusBadge } from "@/components/ui/status-badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { WorkTitleLink } from "@/components/titles/work-title-link"
 
 export default async function DashboardPage() {
   const stats = await getDashboardStats()
@@ -128,21 +128,26 @@ export default async function DashboardPage() {
           <CardContent>
             <div className="space-y-3">
               {stats.topWorks.map((work, index) => (
-                <Link
+                <div
                   key={work.id}
-                  href={`/titles/${titleToSlug(work.title)}`}
                   className="flex items-center gap-3 p-2 rounded-md hover:bg-muted/50 transition-colors"
                 >
                   <span className="text-muted-foreground font-mono text-sm w-5 text-right shrink-0">
                     {index + 1}
                   </span>
                   <ScoreBadge score={work.finalScore} size="sm" />
-                  <span className="font-medium text-sm flex-1 min-w-0 truncate">{work.title}</span>
+                  <span className="flex-1 min-w-0 truncate">
+                    <WorkTitleLink
+                      title={work.title}
+                      workId={work.id}
+                      className="font-medium text-sm hover:underline"
+                    />
+                  </span>
                   <div className="flex gap-1 shrink-0">
-                    <PublicationStatusBadge status={work.publicationStatus} />
-                    <PersonalStatusBadge status={work.personalStatus} />
+                    <PublicationStatusBadge statusId={work.publicationStatusId} />
+                    <PersonalStatusBadge statusId={work.personalStatusId} />
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
             <div className="mt-4">

@@ -2,15 +2,20 @@
 
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { workFormSchema } from "@/lib/validations/work.schema"
-import type { WorkFormValues } from "@/lib/validations/work.schema"
+import { workFormSchema, workStatusSchema } from "@/lib/validations/work.schema"
+import type { WorkFormValues, WorkStatusValues } from "@/lib/validations/work.schema"
 import { CRITERION_SLUGS } from "@/types/domain"
 import {
-  PERSONAL_STATUS_LABELS,
-  PUBLICATION_STATUS_LABELS,
-} from "@/lib/constants/criteria"
+  getPublicationStatusIdByName,
+  getPersonalStatusIdByName,
+  getPublicationStatusNameById,
+  getPersonalStatusNameById,
+} from "@/lib/constants/status-lookups"
+import { pickPrimarySynopsis, pickPrimaryCover } from "@/lib/work-derived"
 import { recalculateAll } from "./calculations"
-import { GENRE_TAG_GROUP_ID, TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
+import { fetchExternalData } from "./external"
+import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField } from "@/lib/external/types"
+import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
 import { TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
 
 let cachedTagNameToGroupId: Map<string, string> | null = null
@@ -40,6 +45,24 @@ function recalculateAllInBackground(context: string) {
   void recalculateAll().catch((error) => {
     console.error(`[${context}] Failed to recalculate scores`, error)
   })
+}
+
+async function upsertWorkExternalIds(
+  supabase: SupabaseAdminClient,
+  workId: string,
+  externalIds: Record<string, string> | undefined
+): Promise<void> {
+  if (!externalIds) return
+  const rows = Object.entries(externalIds)
+    .filter(([source, id]) => source.trim().length > 0 && id != null && String(id).trim().length > 0)
+    .map(([source, id]) => ({ work_id: workId, source: source.trim(), external_id: String(id).trim() }))
+  if (rows.length === 0) return
+  const { error } = await supabase
+    .from("work_external_ids")
+    .upsert(rows, { onConflict: "work_id,source" })
+  if (error) {
+    console.error("[upsertWorkExternalIds] failed:", error.message)
+  }
 }
 
 export interface DuplicateWorkForForm {
@@ -79,37 +102,17 @@ type GenreCatalogEntry = {
   name: string
 }
 
-type GenreJoinRow = {
-  id?: string | null
-  tag_id?: string | null
-  tags?: { name?: string | null } | null
-}
-
 async function fetchGenreCatalog(supabase: SupabaseAdminClient): Promise<GenreCatalogEntry[]> {
   const { data, error } = await supabase
     .from("genres")
-    .select("id, tag_id, tags(name)")
-    .limit(10000)
-
-  if (!error && data) {
-    return (data as GenreJoinRow[])
-      .flatMap((row) => {
-        const name = row.tags?.name?.trim()
-        return name ? [{ id: row.id ?? null, tagId: row.tag_id ?? null, name }] : []
-      })
-  }
-
-  const { data: tagRows, error: tagError } = await supabase
-    .from("tags")
     .select("id, name")
-    .eq("tag_group_id", GENRE_TAG_GROUP_ID)
     .limit(10000)
 
-  if (tagError) throw new Error(`Erro ao validar gêneros: ${tagError.message}`)
+  if (error) throw new Error(`Erro ao validar gêneros: ${error.message}`)
 
-  return (tagRows ?? []).flatMap((tag) => {
-    const name = tag.name?.trim()
-    return name ? [{ id: null, tagId: tag.id, name }] : []
+  return (data ?? []).flatMap((row) => {
+    const name = (row.name as string | null)?.trim()
+    return name ? [{ id: (row.id as string) ?? null, tagId: null, name }] : []
   })
 }
 
@@ -208,54 +211,6 @@ function normalizeExternalPlatformUpdates(
   return [...normalized.values()]
 }
 
-function normalizePublicationStatusForForm(value: string | null | undefined): WorkFormValues["publication_status"] {
-  const normalized = value ? PUBLICATION_STATUS_LABELS[value] ?? value : null
-  switch (normalized) {
-    case "C":
-    case "CMP":
-    case "Completed":
-      return "Completed"
-    case "O":
-    case "ONG":
-    case "Ongoing":
-      return "Ongoing"
-    case "H":
-    case "HIA":
-    case "Hiatus":
-      return "Hiatus"
-    case "D":
-    case "CXL":
-    case "Cancelled":
-      return "Cancelled"
-    default:
-      return "Unknown"
-  }
-}
-
-function normalizePersonalStatusForForm(value: string | null | undefined): WorkFormValues["personal_status"] {
-  const normalized = value ? PERSONAL_STATUS_LABELS[value] ?? value : null
-  switch (normalized) {
-    case "Completed":
-      return "Completed"
-    case "Reading":
-      return "Reading"
-    case "Started":
-      return "Started"
-    case "Stalled":
-      return "Stalled"
-    case "Paused":
-      return "Paused"
-    case "Hiatus":
-      return "Hiatus"
-    case "On-hold":
-      return "On-hold"
-    case "Dropped":
-      return "Dropped"
-    default:
-      return "To read"
-  }
-}
-
 async function upsertTag(
   supabase: SupabaseAdminClient,
   name: string,
@@ -293,18 +248,11 @@ async function upsertTag(
 async function syncWorkTags(
   supabase: SupabaseAdminClient,
   workId: string,
-  genres: string[],
-  tags: string[],
-  knownGenreTagIds: string[] = []
+  tags: string[]
 ) {
   await supabase.from("work_tags").delete().eq("work_id", workId)
 
-  const tagIds: string[] = [...knownGenreTagIds]
-  for (const name of genres) {
-    if (knownGenreTagIds.length > 0) continue
-    const id = await upsertTag(supabase, name, GENRE_TAG_GROUP_ID)
-    if (id) tagIds.push(id)
-  }
+  const tagIds: string[] = []
   for (const name of tags) {
     const id = await upsertTag(supabase, name, resolveTagGroupId(name))
     if (id) tagIds.push(id)
@@ -393,45 +341,33 @@ async function syncWorkSynopses(
 async function syncWorkTagsPartial(
   supabase: SupabaseAdminClient,
   workId: string,
-  genres: string[] | undefined,
   tags: string[] | undefined,
-  knownGenreTagIds: string[] = [],
   knownGenreIds: string[] = []
 ) {
-  if (genres === undefined && tags === undefined) return
-
-  const tagIdsToAdd: string[] = [...knownGenreTagIds]
-  if (genres !== undefined) {
-    for (const name of genres) {
-      if (knownGenreTagIds.length > 0) continue
-      const id = await upsertTag(supabase, name, GENRE_TAG_GROUP_ID)
-      if (id) tagIdsToAdd.push(id)
-    }
-  }
   if (tags !== undefined) {
+    const tagIdsToAdd: string[] = []
     for (const name of tags) {
       const id = await upsertTag(supabase, name, resolveTagGroupId(name))
       if (id) tagIdsToAdd.push(id)
     }
-  }
 
-  const uniqueIdsToAdd = [...new Set(tagIdsToAdd)]
-  if (uniqueIdsToAdd.length === 0) return
+    const uniqueIdsToAdd = [...new Set(tagIdsToAdd)]
+    if (uniqueIdsToAdd.length > 0) {
+      const { data: existing } = await supabase
+        .from("work_tags").select("tag_id").eq("work_id", workId)
+      const existingSet = new Set<string>((existing ?? []).map((wt: { tag_id: string }) => wt.tag_id))
 
-  // Only insert work_tags that don't already exist
-  const { data: existing } = await supabase
-    .from("work_tags").select("tag_id").eq("work_id", workId)
-  const existingSet = new Set<string>((existing ?? []).map((wt: { tag_id: string }) => wt.tag_id))
-
-  const newEntries = uniqueIdsToAdd
-    .filter((id) => !existingSet.has(id))
-    .map((tag_id) => ({ work_id: workId, tag_id }))
-  if (newEntries.length > 0) {
-    const { error } = await supabase
-      .from("work_tags")
-      .upsert(newEntries, { onConflict: "work_id,tag_id", ignoreDuplicates: true })
-    if (error) {
-      console.error(`[syncWorkTagsPartial] upsert work_tags failed (workId=${workId})`, error.message)
+      const newEntries = uniqueIdsToAdd
+        .filter((id) => !existingSet.has(id))
+        .map((tag_id) => ({ work_id: workId, tag_id }))
+      if (newEntries.length > 0) {
+        const { error } = await supabase
+          .from("work_tags")
+          .upsert(newEntries, { onConflict: "work_id,tag_id", ignoreDuplicates: true })
+        if (error) {
+          console.error(`[syncWorkTagsPartial] upsert work_tags failed (workId=${workId})`, error.message)
+        }
+      }
     }
   }
 
@@ -468,6 +404,10 @@ function dbWorkToFormValues(work: any): WorkFormValues {
     .map((wt: { tags?: { name?: string } | null }) => wt.tags?.name)
     .filter(Boolean) as string[]
 
+  const genres = (work.work_genres ?? [])
+    .map((wg: { genres?: { name?: string } | null }) => wg.genres?.name)
+    .filter(Boolean) as string[]
+
   const criterionValues = Object.fromEntries(
     CRITERION_SLUGS.map((slug) => [slug, scoreMap[slug] ?? null])
   )
@@ -476,17 +416,19 @@ function dbWorkToFormValues(work: any): WorkFormValues {
     title: work.title,
     original_title: work.original_title ?? "",
     alternative_titles: work.alternative_titles ?? [],
-    synopsis: work.synopsis ?? "",
-    genres: work.genres ?? [],
+    synopsis: pickPrimarySynopsis(work.work_synopses) ?? "",
+    genres,
     tags,
     year: work.year ?? null,
     year_end: work.year_end ?? null,
-    publication_status: normalizePublicationStatusForForm(work.publication_status),
-    personal_status: normalizePersonalStatusForForm(work.personal_status),
+    publication_status: getPublicationStatusNameById(work.publication_status_id) ?? "Unknown",
+    personal_status: getPersonalStatusNameById(work.personal_status_id) ?? "To read",
+    publication_status_id: work.publication_status_id ?? null,
+    personal_status_id: work.personal_status_id ?? null,
     total_chapters: work.total_chapters ?? null,
     chapters_read: work.chapters_read ?? null,
     synopsis_quality: work.synopsis_quality ?? null,
-    observation_penalty: work.observation_penalty ?? 0,
+    observation_adjustment: work.observation_adjustment ?? 0,
     manual_score: work.manual_score ?? null,
     post_story_score: work.post_story_score ?? null,
     post_fl_score: work.post_fl_score ?? null,
@@ -497,7 +439,7 @@ function dbWorkToFormValues(work: any): WorkFormValues {
     post_impact_immersion_score: work.post_impact_immersion_score ?? null,
     post_originality_score: work.post_originality_score ?? null,
     observations: work.observations ?? "",
-    cover_url: work.cover_url ?? "",
+    cover_url: pickPrimaryCover(work.work_covers) ?? "",
     ai_eval_status: work.ai_eval_status ?? "pending",
     mu_rating: mu?.rating ?? null,
     mu_votes: mu?.vote_count ?? null,
@@ -508,6 +450,53 @@ function dbWorkToFormValues(work: any): WorkFormValues {
     extra_platform_ratings: extraPlatformRatings,
     ...criterionValues,
   })
+}
+
+export interface WorkPreview {
+  workId: string
+  title: string
+  coverUrl: string | null
+  synopsis: string | null
+  synopsisQuality: string | null
+  publicationStatusId: number | null
+  observations: string | null
+  year: number | null
+  platformAvg: number | null
+  totalVotes: number
+}
+
+export async function getWorkPreview(workId: string): Promise<WorkPreview | null> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("works")
+    .select(`
+      id, title, synopsis_quality,
+      publication_status_id, observations, year,
+      work_covers(url, is_primary, position),
+      work_synopses(source, text, is_primary, position),
+      calculated_scores(platform_avg, total_votes)
+    `)
+    .eq("id", workId)
+    .maybeSingle()
+
+  if (error || !data) return null
+
+  const calc = (data as { calculated_scores?: { platform_avg?: number | null; total_votes?: number | null } | null }).calculated_scores
+  const covers = (data as { work_covers?: Parameters<typeof pickPrimaryCover>[0] }).work_covers
+  const synopses = (data as { work_synopses?: Parameters<typeof pickPrimarySynopsis>[0] }).work_synopses
+
+  return {
+    workId: data.id as string,
+    title: data.title as string,
+    coverUrl: pickPrimaryCover(covers),
+    synopsis: pickPrimarySynopsis(synopses),
+    synopsisQuality: (data.synopsis_quality as string | null) ?? null,
+    publicationStatusId: (data.publication_status_id as number | null) ?? null,
+    observations: (data.observations as string | null) ?? null,
+    year: (data.year as number | null) ?? null,
+    platformAvg: calc?.platform_avg ?? null,
+    totalVotes: calc?.total_votes ?? 0,
+  }
 }
 
 export async function findDuplicateWorkByTitle(
@@ -625,16 +614,16 @@ async function persistNewWork(values: WorkFormValues): Promise<
       title: data.title,
       original_title: data.original_title ?? null,
       alternative_titles: normalizeTextList(data.alternative_titles ?? []),
-      synopsis: data.synopsis ?? null,
-      genres: knownGenres.names,
       year: data.year ?? null,
       year_end: data.year_end ?? null,
-      publication_status: data.publication_status,
-      personal_status: data.personal_status,
+      publication_status_id:
+        data.publication_status_id ?? getPublicationStatusIdByName(data.publication_status),
+      personal_status_id:
+        data.personal_status_id ?? getPersonalStatusIdByName(data.personal_status),
       total_chapters: data.total_chapters ?? null,
       chapters_read: data.chapters_read ?? null,
       synopsis_quality: data.synopsis_quality ?? null,
-      observation_penalty: data.observation_penalty,
+      observation_adjustment: data.observation_adjustment,
       manual_score: data.manual_score ?? null,
       post_story_score: data.post_story_score ?? null,
       post_fl_score: data.post_fl_score ?? null,
@@ -644,7 +633,6 @@ async function persistNewWork(values: WorkFormValues): Promise<
       post_art_visual_score: data.post_art_visual_score ?? null,
       post_impact_immersion_score: data.post_impact_immersion_score ?? null,
       post_originality_score: data.post_originality_score ?? null,
-      cover_url: data.cover_url || null,
       observations: data.observations ?? null,
       ai_eval_status: "pending",
     })
@@ -740,10 +728,11 @@ async function persistNewWork(values: WorkFormValues): Promise<
     if (platformError) return { ok: false, error: { _root: [platformError.message] } }
   }
 
-  await syncWorkTags(supabase, workId, knownGenres.names, data.tags ?? [], knownGenres.tagIds)
+  await syncWorkTags(supabase, workId, data.tags ?? [])
   await syncWorkGenres(supabase, workId, knownGenres.genreIds, "replace")
   await syncWorkCovers(supabase, workId, data.covers)
   await syncWorkSynopses(supabase, workId, data.synopses)
+  await upsertWorkExternalIds(supabase, workId, data.external_ids)
 
   const hasScores = scores.length >= CRITERION_SLUGS.length
   await supabase
@@ -899,16 +888,16 @@ export async function updateWork(id: string, values: WorkFormValues) {
       title: data.title,
       original_title: data.original_title ?? null,
       alternative_titles: normalizeTextList(data.alternative_titles ?? []),
-      synopsis: data.synopsis ?? null,
-      genres: knownGenres.names,
       year: data.year ?? null,
       year_end: data.year_end ?? null,
-      publication_status: data.publication_status,
-      personal_status: data.personal_status,
+      publication_status_id:
+        data.publication_status_id ?? getPublicationStatusIdByName(data.publication_status),
+      personal_status_id:
+        data.personal_status_id ?? getPersonalStatusIdByName(data.personal_status),
       total_chapters: data.total_chapters ?? null,
       chapters_read: data.chapters_read ?? null,
       synopsis_quality: data.synopsis_quality ?? null,
-      observation_penalty: data.observation_penalty,
+      observation_adjustment: data.observation_adjustment,
       manual_score: data.manual_score ?? null,
       post_story_score: data.post_story_score ?? null,
       post_fl_score: data.post_fl_score ?? null,
@@ -918,7 +907,6 @@ export async function updateWork(id: string, values: WorkFormValues) {
       post_art_visual_score: data.post_art_visual_score ?? null,
       post_impact_immersion_score: data.post_impact_immersion_score ?? null,
       post_originality_score: data.post_originality_score ?? null,
-      cover_url: data.cover_url || null,
       observations: data.observations ?? null,
     })
     .eq("id", id)
@@ -1004,10 +992,11 @@ export async function updateWork(id: string, values: WorkFormValues) {
   }
 
   // Salvar tags
-  await syncWorkTags(supabase, id, knownGenres.names, data.tags ?? [], knownGenres.tagIds)
+  await syncWorkTags(supabase, id, data.tags ?? [])
   await syncWorkGenres(supabase, id, knownGenres.genreIds, "replace")
   await syncWorkCovers(supabase, id, data.covers)
   await syncWorkSynopses(supabase, id, data.synopses)
+  await upsertWorkExternalIds(supabase, id, data.external_ids)
 
   // Atualizar status IA com base na cobertura de critérios
   const hasAllScores = scores.length >= CRITERION_SLUGS.length
@@ -1054,6 +1043,47 @@ export async function unarchiveWork(id: string) {
   return { data: null }
 }
 
+export async function updateWorkStatus(id: string, values: WorkStatusValues) {
+  const parsed = workStatusSchema.safeParse(values)
+  if (!parsed.success) {
+    return { error: parsed.error.flatten().fieldErrors }
+  }
+
+  const data = parsed.data
+  const supabase = createAdminClient()
+
+  const { error } = await supabase
+    .from("works")
+    .update({
+      personal_status_id:
+        getPersonalStatusIdByName(data.personal_status) ?? data.personal_status_id ?? null,
+      synopsis_quality: data.synopsis_quality ?? null,
+      observation_adjustment: data.observation_adjustment,
+      observations: data.observations ?? null,
+      chapters_read: data.chapters_read ?? null,
+      manual_score: data.manual_score ?? null,
+      post_story_score: data.post_story_score ?? null,
+      post_fl_score: data.post_fl_score ?? null,
+      post_ml_score: data.post_ml_score ?? null,
+      post_character_development_score: data.post_character_development_score ?? null,
+      post_pacing_score: data.post_pacing_score ?? null,
+      post_art_visual_score: data.post_art_visual_score ?? null,
+      post_impact_immersion_score: data.post_impact_immersion_score ?? null,
+      post_originality_score: data.post_originality_score ?? null,
+    })
+    .eq("id", id)
+
+  if (error) return { error: { _root: [error.message] } }
+
+  recalculateAllInBackground("updateWorkStatus")
+
+  revalidatePath("/titles/[id]", "page")
+  revalidatePath("/titles")
+  revalidatePath("/ranking")
+  revalidatePath("/")
+  return { data: { id } }
+}
+
 export async function deleteWork(id: string) {
   const supabase = createAdminClient()
   const { error } = await supabase.from("works").delete().eq("id", id)
@@ -1075,6 +1105,7 @@ export interface ExternalWorkUpdate {
   genres?: string[]
   tags?: string[]
   platformRatings?: Array<{ platform: string; rating?: number | null; votes?: number | null }>
+  externalIds?: Record<string, string>
 }
 
 export async function updateWorkExternalData(id: string, updates: ExternalWorkUpdate) {
@@ -1088,15 +1119,37 @@ export async function updateWorkExternalData(id: string, updates: ExternalWorkUp
     if (updates.title !== undefined) workFields.title = updates.title
     if (updates.originalTitle !== undefined) workFields.original_title = updates.originalTitle ?? null
     if (updates.alternativeTitles !== undefined) workFields.alternative_titles = updates.alternativeTitles
-    if (updates.synopsis !== undefined) workFields.synopsis = updates.synopsis ?? null
-    if (updates.coverUrl !== undefined) workFields.cover_url = updates.coverUrl ?? null
-    if (updates.publicationStatus !== undefined) workFields.publication_status = updates.publicationStatus ?? null
+    if (updates.publicationStatus !== undefined) {
+      workFields.publication_status_id = getPublicationStatusIdByName(updates.publicationStatus)
+    }
     if (updates.totalChapters !== undefined) workFields.total_chapters = updates.totalChapters ?? null
-    if (knownGenres) workFields.genres = knownGenres.names
 
     if (Object.keys(workFields).length > 0) {
       const { error } = await supabase.from("works").update(workFields).eq("id", id)
       if (error) return { error: error.message }
+    }
+
+    // synopsis/coverUrl: gravar via work_synopses/work_covers como nova entrada
+    // primária (substitui a primária anterior).
+    if (typeof updates.synopsis === "string" && updates.synopsis.trim().length > 0) {
+      await supabase.from("work_synopses").update({ is_primary: false }).eq("work_id", id)
+      await supabase.from("work_synopses").insert({
+        work_id: id,
+        source: "manual",
+        text: updates.synopsis,
+        is_primary: true,
+        position: 0,
+      })
+    }
+    if (typeof updates.coverUrl === "string" && updates.coverUrl.trim().length > 0) {
+      await supabase.from("work_covers").update({ is_primary: false }).eq("work_id", id)
+      await supabase.from("work_covers").insert({
+        work_id: id,
+        url: updates.coverUrl,
+        source: "manual",
+        is_primary: true,
+        position: 0,
+      })
     }
 
     if (updates.platformRatings?.length) {
@@ -1133,16 +1186,16 @@ export async function updateWorkExternalData(id: string, updates: ExternalWorkUp
       }
     }
 
-    if (updates.genres !== undefined || updates.tags !== undefined) {
+    if (updates.tags !== undefined || knownGenres) {
       await syncWorkTagsPartial(
         supabase,
         id,
-        knownGenres?.names,
         updates.tags,
-        knownGenres?.tagIds ?? [],
         knownGenres?.genreIds ?? []
       )
     }
+
+    await upsertWorkExternalIds(supabase, id, updates.externalIds)
 
     recalculateAllInBackground("updateWorkExternalData")
     revalidatePath(`/titles`)
@@ -1152,5 +1205,114 @@ export async function updateWorkExternalData(id: string, updates: ExternalWorkUp
     const message = err instanceof Error ? err.message : String(err)
     console.error("[updateWorkExternalData] Uncaught error:", message)
     return { error: message }
+  }
+}
+
+// ============================================================================
+// Refresh external data using persisted IDs (no title search, no AI evaluation)
+// ============================================================================
+
+export type RefreshWorkExternalDataResult =
+  | { ok: true; data: ExternalWorkData; conflicts: ConflictField[]; sources: ExternalSourceId[] }
+  | { ok: false; reason: "NO_IDS" | "ALL_404"; message?: string }
+
+const SUPPORTED_SOURCES: ReadonlySet<ExternalSourceId> = new Set([
+  "anilist",
+  "mangaupdates",
+  "myanimelist",
+  "kitsu",
+  "mangadex",
+  "comick",
+  "comix",
+  "animeplanet",
+])
+
+function buildCandidateFromStoredIds(
+  work: { title: string; original_title: string | null; alternative_titles: string[] | null },
+  rows: Array<{ source: string; external_id: string }>
+): MergedCandidate {
+  const sources: ExternalSourceId[] = []
+  const candidate: MergedCandidate = {
+    title: work.title,
+    originalTitle: work.original_title ?? undefined,
+    alternativeTitles: work.alternative_titles ?? [],
+    sources,
+  }
+  for (const row of rows) {
+    const source = row.source as ExternalSourceId
+    if (!SUPPORTED_SOURCES.has(source)) continue
+    sources.push(source)
+    switch (source) {
+      case "anilist": {
+        const n = Number(row.external_id)
+        if (Number.isFinite(n)) candidate.anilistId = n
+        break
+      }
+      case "mangaupdates": {
+        const n = Number(row.external_id)
+        if (Number.isFinite(n)) candidate.muId = n
+        break
+      }
+      case "myanimelist": {
+        const n = Number(row.external_id)
+        if (Number.isFinite(n)) candidate.malId = n
+        break
+      }
+      case "kitsu":
+        candidate.kitsuId = row.external_id
+        break
+      case "mangadex":
+        candidate.mangadexId = row.external_id
+        break
+      case "comick":
+        candidate.comickHid = row.external_id
+        break
+      case "comix":
+        candidate.comixHid = row.external_id
+        break
+      case "animeplanet":
+        candidate.animePlanetSlug = row.external_id
+        break
+    }
+  }
+  return candidate
+}
+
+export async function refreshWorkExternalData(workId: string): Promise<RefreshWorkExternalDataResult> {
+  const supabase = createAdminClient()
+
+  const { data: work, error: workError } = await supabase
+    .from("works")
+    .select("title, original_title, alternative_titles")
+    .eq("id", workId)
+    .single()
+  if (workError || !work) {
+    return { ok: false, reason: "NO_IDS", message: workError?.message }
+  }
+
+  const { data: idRows } = await supabase
+    .from("work_external_ids")
+    .select("source, external_id")
+    .eq("work_id", workId)
+
+  if (!idRows || idRows.length === 0) {
+    console.log(`[refreshWorkExternalData] no stored IDs for work=${workId}, falling back to search`)
+    return { ok: false, reason: "NO_IDS" }
+  }
+
+  const candidate = buildCandidateFromStoredIds(work, idRows)
+  console.log(`[refreshWorkExternalData] work=${workId} sources=${candidate.sources.join(",")}`)
+
+  try {
+    const result = await fetchExternalData(candidate)
+    const acceptedSources = result.data.externalIds ? Object.keys(result.data.externalIds) : []
+    if (acceptedSources.length === 0) {
+      return { ok: false, reason: "ALL_404" }
+    }
+    return { ok: true, data: result.data, conflicts: result.conflicts, sources: candidate.sources }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error("[refreshWorkExternalData] fetch failed:", message)
+    return { ok: false, reason: "ALL_404", message }
   }
 }

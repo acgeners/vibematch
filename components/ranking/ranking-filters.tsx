@@ -156,7 +156,6 @@ interface StatusOption {
   slug: string
   color: string | null
   symbol: string | null
-  previous: string
   comment: string | null
 }
 
@@ -952,14 +951,57 @@ export function RankingFilters({
   }
 
   const selectedSynopsisQ = csvSet("synopsis_q")
-  const selectedPublicationStatuses = csvSet("pub_status")
+
+  const DEFAULT_PUB_STATUS = "Completed"
+  const DEFAULT_PER_STATUS = "To read"
+
+  const pubStatusParam = searchParams.get("pub_status")
+  const isAllPublication = pubStatusParam === "all"
+  const selectedPublicationStatuses = isAllPublication
+    ? new Set<string>()
+    : pubStatusParam != null
+      ? csvSet("pub_status")
+      : new Set<string>([DEFAULT_PUB_STATUS])
+
+  const togglePublicationStatus = (status: string) => {
+    if (isAllPublication) {
+      updateParams({ pub_status: status })
+      return
+    }
+    if (pubStatusParam == null) {
+      if (status === DEFAULT_PUB_STATUS) {
+        updateParams({ pub_status: "all" })
+      } else {
+        updateParams({ pub_status: status })
+      }
+      return
+    }
+    toggleCsv("pub_status", status)
+  }
+
   const perStatusParam = searchParams.get("per_status")
   const isAllPersonal = perStatusParam === "all"
   const selectedPerStatuses = isAllPersonal
     ? new Set<string>()
-    : perStatusParam
+    : perStatusParam != null
       ? csvSet("per_status")
-      : new Set<string>()
+      : new Set<string>([DEFAULT_PER_STATUS])
+
+  const togglePersonalStatus = (status: string) => {
+    if (isAllPersonal) {
+      updateParams({ per_status: status })
+      return
+    }
+    if (perStatusParam == null) {
+      if (status === DEFAULT_PER_STATUS) {
+        updateParams({ per_status: "all" })
+      } else {
+        updateParams({ per_status: status })
+      }
+      return
+    }
+    toggleCsv("per_status", status)
+  }
 
   const [genreSearch, setGenreSearch] = useState("")
   const filteredGenres = useMemo(
@@ -1029,9 +1071,8 @@ export function RankingFilters({
       </div>
 
       <Tabs defaultValue="geral" className="gap-3">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-muted/60 p-1 sm:grid-cols-3 xl:grid-cols-6">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-muted/60 p-1 sm:grid-cols-3 xl:grid-cols-5">
           <TabsTrigger value="geral" className="h-9">Geral</TabsTrigger>
-          <TabsTrigger value="status" className="h-9">Status</TabsTrigger>
           <TabsTrigger value="notas" className="h-9">Notas</TabsTrigger>
           <TabsTrigger value="generos" className="h-9">Gêneros</TabsTrigger>
           <TabsTrigger value="tags" className="h-9">Tags</TabsTrigger>
@@ -1115,18 +1156,27 @@ export function RankingFilters({
 
             <SortLevelsSection searchParams={searchParams} updateParams={updateParams} />
           </div>
-        </TabsContent>
 
-        <TabsContent value="status" className="space-y-3">
           <div className="grid gap-3 xl:grid-cols-3">
-            <FilterSection title={`Publicação${selectedPublicationStatuses.size ? ` (${selectedPublicationStatuses.size})` : ""}`}>
+            <FilterSection title={`Publicação${isAllPublication ? " (todos)" : selectedPublicationStatuses.size ? ` (${selectedPublicationStatuses.size})` : ""}`}>
               <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => updateParams({ pub_status: isAllPublication ? null : "all" })}
+                >
+                  <Badge
+                    variant={isAllPublication ? "default" : "outline"}
+                    className="cursor-pointer rounded-full px-2.5 py-1 text-xs"
+                  >
+                    Todos
+                  </Badge>
+                </button>
                 {visiblePublicationStatuses.map((s) => (
                   <StatusButton
                     key={`publication-${s.status}`}
                     option={s}
-                    active={selectedPublicationStatuses.has(s.status)}
-                    onClick={() => toggleCsv("pub_status", s.status)}
+                    active={!isAllPublication && selectedPublicationStatuses.has(s.status)}
+                    onClick={() => togglePublicationStatus(s.status)}
                   />
                 ))}
               </div>
@@ -1151,13 +1201,7 @@ export function RankingFilters({
                     option={s}
                     active={!isAllPersonal && selectedPerStatuses.has(s.status)}
                     tooltip={s.comment}
-                    onClick={() => {
-                      if (isAllPersonal) {
-                        updateParams({ per_status: s.status })
-                      } else {
-                        toggleCsv("per_status", s.status)
-                      }
-                    }}
+                    onClick={() => togglePersonalStatus(s.status)}
                   />
                 ))}
               </div>

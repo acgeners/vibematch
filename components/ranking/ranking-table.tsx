@@ -1,11 +1,13 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { titleToSlug } from "@/lib/utils"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
+import { WorkTitleLink } from "@/components/titles/work-title-link"
+import type { WorkPreview } from "@/server/actions/works"
 import {
   getConfiguredRankingColumns,
   getDefaultRankingColumnConfig,
@@ -103,126 +105,29 @@ function ResizeHandle({ columnKey, onResize, startWidth }: ResizeHandleProps) {
   )
 }
 
-interface HoverPreviewProps {
-  entry: RankingEntry
-  anchorRect: DOMRect
-}
-
-function HoverPreview({ entry, anchorRect }: HoverPreviewProps) {
-  const margin = 2
-  const screenMargin = 8
-  const popupWidth = 420
-  const popupHeight = 240
-  const willOverflowRight = anchorRect.right + margin + popupWidth > window.innerWidth
-  const left = willOverflowRight
-    ? Math.max(screenMargin, anchorRect.left - popupWidth - margin)
-    : anchorRect.right + margin
-  const top = Math.min(
-    Math.max(screenMargin, anchorRect.top),
-    window.innerHeight - popupHeight - screenMargin
-  )
-
-  return (
-    <div
-      className="fixed z-50 w-[420px] rounded-lg border bg-popover text-popover-foreground shadow-lg overflow-hidden pointer-events-none"
-      style={{ left, top }}
-    >
-      <div className="flex gap-4 p-4">
-        {entry.coverUrl ? (
-          <div className="relative h-44 w-32 shrink-0 rounded-md overflow-hidden bg-muted">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={entry.coverUrl}
-              alt=""
-              className="h-full w-full object-cover"
-              loading="lazy"
-            />
-          </div>
-        ) : (
-          <div className="h-44 w-32 shrink-0 rounded-md bg-muted flex items-center justify-center text-xs text-muted-foreground">
-            Sem capa
-          </div>
-        )}
-        <div className="flex flex-col min-w-0 flex-1 h-44">
-          <p className="font-semibold text-[15px] leading-tight line-clamp-2 shrink-0 break-words">{entry.title}</p>
-          {(entry.year || entry.synopsisQuality || entry.publicationStatus) && (
-            <div className="flex items-center gap-1.5 flex-wrap text-xs font-medium text-foreground/70 mt-1.5 pb-1.5 shrink-0 border-b border-border/60">
-              {[entry.year, entry.synopsisQuality].filter(Boolean).join(" · ") && (
-                <span>{[entry.year, entry.synopsisQuality].filter(Boolean).join(" · ")}</span>
-              )}
-              {entry.publicationStatus && (
-                <>
-                  {(entry.year || entry.synopsisQuality) && <span className="text-foreground/40">·</span>}
-                  <PublicationStatusBadge status={entry.publicationStatus} />
-                </>
-              )}
-            </div>
-          )}
-          {entry.synopsis && (
-            <div className="flex-1 min-h-0 overflow-hidden mt-2">
-              <p className="text-[13px] italic text-muted-foreground line-clamp-6 break-words whitespace-normal leading-snug">{entry.synopsis}</p>
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="border-t px-4 py-2 flex items-center gap-3">
-        {entry.observations ? (
-          <p className="text-xs text-muted-foreground line-clamp-2 break-words whitespace-normal flex-1 min-w-0">{entry.observations}</p>
-        ) : (
-          <span className="flex-1" />
-        )}
-        <span className="text-xs shrink-0">
-          <span className="text-muted-foreground">Nota média: </span>
-          <span className="font-medium">
-            {entry.platformAvg != null ? entry.platformAvg.toFixed(1).replace(".", ",") : "—"}
-          </span>
-          <span className="text-muted-foreground"> ({formatVotes(entry.totalVotes)})</span>
-        </span>
-      </div>
-    </div>
-  )
-}
-
-interface TitleCellProps {
-  entry: RankingEntry
-}
-
-function TitleCell({ entry }: TitleCellProps) {
-  const ref = useRef<HTMLAnchorElement>(null)
-  const [hovered, setHovered] = useState(false)
-  const [rect, setRect] = useState<DOMRect | null>(null)
-  const enterTimer = useRef<number | null>(null)
-
-  const onEnter = () => {
-    if (enterTimer.current) window.clearTimeout(enterTimer.current)
-    enterTimer.current = window.setTimeout(() => {
-      if (ref.current) {
-        setRect(ref.current.getBoundingClientRect())
-        setHovered(true)
-      }
-    }, 280)
+function entryToPreview(entry: RankingEntry): WorkPreview {
+  return {
+    workId: entry.workId,
+    title: entry.title,
+    coverUrl: entry.coverUrl,
+    synopsis: entry.synopsis,
+    synopsisQuality: entry.synopsisQuality,
+    publicationStatusId: entry.publicationStatusId,
+    observations: entry.observations,
+    year: entry.year,
+    platformAvg: entry.platformAvg,
+    totalVotes: entry.totalVotes,
   }
-  const onLeave = () => {
-    if (enterTimer.current) {
-      window.clearTimeout(enterTimer.current)
-      enterTimer.current = null
-    }
-    setHovered(false)
-  }
+}
 
+function TitleCell({ entry }: { entry: RankingEntry }) {
   return (
-    <>
-      <Link
-        ref={ref}
-        href={`/titles/${titleToSlug(entry.title)}`}
-        onMouseEnter={onEnter}
-        onMouseLeave={onLeave}
-        className="font-medium hover:underline line-clamp-1 block"
-      >
-        {entry.title}
-      </Link>
-      {hovered && rect && <HoverPreview entry={entry} anchorRect={rect} />}
-    </>
+    <WorkTitleLink
+      title={entry.title}
+      workId={entry.workId}
+      preview={entryToPreview(entry)}
+      className="font-medium hover:underline line-clamp-1 block"
+    />
   )
 }
 
@@ -237,7 +142,7 @@ function formatVotes(votes: number): string {
 function renderCell(entry: RankingEntry, col: RankingColumnDef) {
   if (col.key === "rank") return <span className="font-mono text-sm text-muted-foreground">{entry.rank}</span>
   if (col.key === "title") return <TitleCell entry={entry} />
-  if (col.key === "pub") return <PublicationStatusBadge status={entry.publicationStatus} />
+  if (col.key === "pub") return <PublicationStatusBadge statusId={entry.publicationStatusId} compact />
   if (col.key === "per_status") return <span className="text-sm">{entry.personalStatusSymbol ?? entry.personalStatus}</span>
   if (col.key === "year") return <span className="font-mono text-sm text-muted-foreground">{entry.year ?? "—"}</span>
   if (col.key === "chapters") return <span className="font-mono text-sm">{entry.totalChapters ?? "—"}</span>
@@ -356,7 +261,7 @@ export function RankingTable({ entries }: RankingTableProps) {
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm truncate">{entry.title}</p>
                 <div className="flex flex-wrap gap-1 mt-1">
-                  <PublicationStatusBadge status={entry.publicationStatus} />
+                  <PublicationStatusBadge statusId={entry.publicationStatusId} />
                 </div>
                 <div className="flex gap-2 mt-2">
                   {KEY_CRITERIA.map((slug) => {

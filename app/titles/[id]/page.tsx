@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft, ChevronDown, Plus } from "lucide-react"
+import { ChevronDown, Plus } from "lucide-react"
 import { getWorkWithAiEvaluations, getWorkBySlug } from "@/server/queries/works"
 import { titleToSlug } from "@/lib/utils"
 import { ScoreBadge } from "@/components/ui/score-badge"
@@ -10,13 +10,19 @@ import {
 } from "@/components/ui/status-badge"
 import { CalculationBreakdown } from "@/components/titles/calculation-breakdown"
 import { WorkDetailActions } from "@/components/titles/work-detail-actions"
+import { WorkPersonalFields } from "@/components/titles/work-personal-fields"
 import { BatchCreatedNavigator } from "@/components/titles/batch-created-navigator"
 import { WorkCoverGallery } from "@/components/titles/work-cover-gallery"
+import { BackButton } from "@/components/titles/back-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ExpandableText } from "@/components/ui/expandable-text"
 import { CRITERIA_INFO, PLATFORM_LABELS } from "@/lib/constants/criteria"
+import { getPublicationStatusNameById, getPersonalStatusNameById } from "@/lib/constants/status-lookups"
+import type { WorkStatusValues } from "@/lib/validations/work.schema"
+import type { PersonalStatus } from "@/types/domain"
+import { pickPrimarySynopsis, pickPrimaryCover } from "@/lib/work-derived"
 import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 import { CRITERION_SLUGS } from "@/types/domain"
 import {
@@ -141,7 +147,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   }> = work.ai_evaluations ?? []
 
   const latestAiEval = aiEvaluations
-    .filter((e) => e.status === "completed")
+    .filter((e) => e.status !== "failed")
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
   const latestAiScoreMap = new Map(
     (latestAiEval?.ai_evaluation_scores ?? []).map((score) => [score.criterion_slug, score])
@@ -149,6 +155,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
   const genres = Array.isArray(work.genres) ? work.genres.filter(Boolean) : []
   const tags = Array.isArray(work.tags) ? work.tags.filter(Boolean) : []
+  const primaryCover = pickPrimaryCover(work.work_covers)
+  const primarySynopsis = pickPrimarySynopsis(work.work_synopses)
   const tagGroupMap = new Map<string, DetailTag[]>()
   for (const tag of tags as Array<WorkTagForDisplay | string>) {
     const label = typeof tag === "string" ? tag : tag.name
@@ -212,11 +220,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   return (
     <div className="max-w-6xl space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <Button asChild variant="outline" size="icon" aria-label="Voltar">
-          <Link href="/titles">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
+        <BackButton />
         <Button asChild size="sm">
           <Link href="/titles/new">
             <Plus className="h-4 w-4" />
@@ -227,42 +231,17 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
       {/* Header: capa + info */}
       <section className="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)]">
-        {/* Coluna esquerda: capa + status + capítulos */}
+        {/* Coluna esquerda: apenas capa */}
         <div className="flex flex-col gap-3 w-full max-w-[220px] justify-self-center md:max-w-none md:justify-self-start">
           <WorkCoverGallery
             title={work.title}
-            fallbackUrl={work.cover_url}
+            fallbackUrl={primaryCover}
             covers={work.work_covers ?? []}
           />
-
-          {/* Status badges abaixo da capa */}
-          <div className="flex flex-wrap gap-1.5">
-            <PublicationStatusBadge status={work.publication_status} />
-            <PersonalStatusBadge status={work.personal_status} />
-            {formatSynopsisInterest(work.synopsis_quality) && (
-              <span
-                className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-700"
-              >
-                {formatSynopsisInterest(work.synopsis_quality)}
-              </span>
-            )}
-            {work.is_archived && (
-              <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
-                Arquivada
-              </span>
-            )}
-          </div>
-
-          {/* Capítulos abaixo dos badges */}
-          {chapterText && (
-            <p className="rounded-md border bg-background px-3 py-2 text-sm font-semibold text-foreground shadow-sm">
-              <span className="font-mono">{chapterText}</span>
-            </p>
-          )}
         </div>
 
-        {/* Coluna direita: título, títulos alternativos, botões, sinopse */}
-        <div className="min-w-0 space-y-4">
+        {/* Coluna direita: título, badges, botões, sinopse (estica) */}
+        <div className="min-w-0 flex flex-col gap-4">
           <div className="space-y-1">
             <h1 className="text-3xl font-bold leading-tight tracking-tight text-foreground md:text-4xl">
               {work.title}
@@ -276,30 +255,76 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             )}
           </div>
 
-          {/* Botões de ação */}
-          <WorkDetailActions
-            workId={work.id}
-            workTitle={work.title}
-            isArchived={work.is_archived}
-            coverUrl={work.cover_url}
-            hasAiEvaluationData={Boolean(latestAiEval)}
-            className="min-w-0"
-            currentWork={{
-              title: work.title,
-              originalTitle: work.original_title,
-              synopsis: work.synopsis,
-              coverUrl: work.cover_url,
-              publicationStatus: work.publication_status,
-              totalChapters: work.total_chapters != null ? Number(work.total_chapters) : null,
-            }}
-          />
+          {/* Metadata abaixo do título: status + interesse sinopse + capítulos */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <PublicationStatusBadge statusId={work.publication_status_id} />
+            <PersonalStatusBadge statusId={work.personal_status_id} />
+            {formatSynopsisInterest(work.synopsis_quality) && (
+              <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-700">
+                {formatSynopsisInterest(work.synopsis_quality)}
+              </span>
+            )}
+            {chapterText && (
+              <span className="inline-flex items-center rounded-md border bg-background px-2.5 py-0.5 text-xs font-mono font-semibold text-foreground">
+                {chapterText}
+              </span>
+            )}
+            {work.is_archived && (
+              <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+                Arquivada
+              </span>
+            )}
+          </div>
 
-          {/* Sinopse */}
-          <div className="max-w-4xl">
-            {work.synopsis ? (
+          {/* Botões de ação */}
+          {(() => {
+            const statusInitial: WorkStatusValues = {
+              personal_status:
+                (getPersonalStatusNameById(work.personal_status_id) as PersonalStatus | undefined) ?? "To read",
+              personal_status_id: work.personal_status_id ?? null,
+              synopsis_quality: work.synopsis_quality ?? null,
+              observation_adjustment: work.observation_adjustment ?? 0,
+              observations: work.observations ?? null,
+              chapters_read: work.chapters_read != null ? Number(work.chapters_read) : null,
+              manual_score: work.manual_score ?? null,
+              post_story_score: work.post_story_score ?? null,
+              post_fl_score: work.post_fl_score ?? null,
+              post_ml_score: work.post_ml_score ?? null,
+              post_character_development_score: work.post_character_development_score ?? null,
+              post_pacing_score: work.post_pacing_score ?? null,
+              post_art_visual_score: work.post_art_visual_score ?? null,
+              post_impact_immersion_score: work.post_impact_immersion_score ?? null,
+              post_originality_score: work.post_originality_score ?? null,
+            }
+            return (
+              <WorkDetailActions
+                workId={work.id}
+                workSlug={id}
+                workTitle={work.title}
+                isArchived={work.is_archived}
+                coverUrl={primaryCover}
+                hasCriteriaScores={Object.keys(scoreMap).length > 0}
+                className="min-w-0"
+                currentWork={{
+                  title: work.title,
+                  originalTitle: work.original_title,
+                  synopsis: primarySynopsis,
+                  coverUrl: primaryCover,
+                  publicationStatus: getPublicationStatusNameById(work.publication_status_id) ?? "Unknown",
+                  totalChapters: work.total_chapters != null ? Number(work.total_chapters) : null,
+                }}
+                statusInitialValues={statusInitial}
+                totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
+              />
+            )
+          })()}
+
+          {/* Sinopse — line-clamp para alinhar com altura das capas */}
+          <div className="flex-1 max-w-4xl">
+            {primarySynopsis ? (
               <ExpandableText
-                text={String(work.synopsis).trim()}
-                limit={600}
+                text={String(primarySynopsis).trim()}
+                maxLines={11}
                 className="text-sm leading-7 text-foreground/85"
               />
             ) : (
@@ -308,6 +333,29 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           </div>
         </div>
       </section>
+
+      {/* Anotações pessoais (Ajuste, Interesse sinopse, Observações) */}
+      {(() => {
+        const personalInitial: WorkStatusValues = {
+          personal_status:
+            (getPersonalStatusNameById(work.personal_status_id) as PersonalStatus | undefined) ?? "To read",
+          personal_status_id: work.personal_status_id ?? null,
+          synopsis_quality: work.synopsis_quality ?? null,
+          observation_adjustment: work.observation_adjustment ?? 0,
+          observations: work.observations ?? null,
+          chapters_read: work.chapters_read != null ? Number(work.chapters_read) : null,
+          manual_score: work.manual_score ?? null,
+          post_story_score: work.post_story_score ?? null,
+          post_fl_score: work.post_fl_score ?? null,
+          post_ml_score: work.post_ml_score ?? null,
+          post_character_development_score: work.post_character_development_score ?? null,
+          post_pacing_score: work.post_pacing_score ?? null,
+          post_art_visual_score: work.post_art_visual_score ?? null,
+          post_impact_immersion_score: work.post_impact_immersion_score ?? null,
+          post_originality_score: work.post_originality_score ?? null,
+        }
+        return <WorkPersonalFields workId={work.id} initialValues={personalInitial} />
+      })()}
 
       <BatchCreatedNavigator currentId={work.id} />
 
@@ -403,51 +451,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Categorias */}
-      {(genres.length > 0 || tags.length > 0) && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Categorias</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-0">
-            {genres.length > 0 && (
-              <div>
-                <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Gêneros</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {genres.map((genre: string) => (
-                    <Badge key={genre} variant="secondary" className="font-normal text-xs py-0">
-                      {genre}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-            {tags.length > 0 && (
-              <div>
-                <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Tags</p>
-                <div className="space-y-2">
-                  {tagGroups.map((group) => (
-                    <div key={group.groupName}>
-                      <p className="mb-1 text-[11px] text-muted-foreground/70">
-                        {group.groupName}
-                        <span className="ml-1 text-muted-foreground/50">({group.tags.length})</span>
-                      </p>
-                      <div className="flex flex-wrap gap-1">
-                        {group.tags.map((tag) => (
-                          <Badge key={tag.key} variant="outline" className="font-normal text-xs py-0 h-5">
-                            {tag.label}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </CardContent>
         </Card>
       )}
@@ -550,9 +553,58 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         </CardContent>
       </Card>
 
+      {/* Categorias */}
+      {(genres.length > 0 || tags.length > 0) && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Categorias</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-0">
+            {genres.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Gêneros</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {genres.map((genre: string) => (
+                    <Badge key={genre} variant="secondary" className="font-normal text-xs py-0">
+                      {genre}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            {tags.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Tags</p>
+                <div className="space-y-2">
+                  {tagGroups.map((group) => (
+                    <div key={group.groupName}>
+                      <p className="mb-1 text-[11px] text-muted-foreground/70">
+                        {group.groupName}
+                        <span className="ml-1 text-muted-foreground/50">({group.tags.length})</span>
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {group.tags.map((tag) => (
+                          <Badge key={tag.key} variant="outline" className="font-normal text-xs py-0 h-5">
+                            {tag.label}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Detalhamento do cálculo */}
       {work.calculated_scores && (
-        <CalculationBreakdown calculatedScore={work.calculated_scores} />
+        <CalculationBreakdown
+          calculatedScore={work.calculated_scores}
+          aiConfidence={latestAiEval?.confidence ?? null}
+          criteriaCoverage={Object.keys(scoreMap).length / CRITERION_SLUGS.length}
+        />
       )}
 
       <div className="flex gap-3">

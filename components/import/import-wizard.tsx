@@ -56,7 +56,7 @@ const TARGET_FIELDS = [
   "chapters_read",
   "synopsis_quality",
   "personal_status",
-  "observation_penalty",
+  "observation_adjustment",
   "manual_score",
   "ia_eval",
   "ia_eval_normalized",

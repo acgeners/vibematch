@@ -19,17 +19,6 @@ export interface TagCatalogItem {
   groupLabel: string
 }
 
-type GenreJoinRow = {
-  id: string
-  tag_id: string | null
-  tags?: {
-    id?: string
-    name?: string
-    slug?: string
-    tag_group_id?: string | null
-  } | null
-}
-
 const TAG_GROUP_ID_TO_SLUG = Object.fromEntries(
   Object.entries(TAG_GROUP_IDS).map(([slug, id]) => [id, slug])
 ) as Record<string, TagGroupSlug>
@@ -66,29 +55,24 @@ export async function listGenreCatalog(): Promise<TagCatalogItem[]> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("genres")
-    .select("id, tag_id, tags(id, name, slug, tag_group_id)")
+    .select("id, name, slug")
+    .order("name")
     .limit(10000)
 
   if (error) {
-    console.error("[listGenreCatalog] genres query failed, falling back to tags filter", error.message)
+    console.error("[listGenreCatalog] genres query failed", error.message)
+    return []
   }
-  if (!error && data) {
-    return (data as GenreJoinRow[])
-      .map((row) => row.tags)
-      .filter((tag): tag is NonNullable<GenreJoinRow["tags"]> => Boolean(tag?.name))
-      .map((tag) => ({
-        id: tag.id ?? "",
-        name: tag.name ?? "",
-        slug: tag.slug ?? "",
-        tag_group_id: tag.tag_group_id ?? null,
-        groupSlug: "genre",
-        groupLabel: TAG_GROUP_LABELS.genre,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name))
-  }
-
-  const all = await listTagCatalog()
-  return all.filter((t) => t.groupSlug === "genre")
+  return (data ?? [])
+    .filter((row): row is { id: string; name: string; slug: string | null } => Boolean(row.name))
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      slug: row.slug ?? "",
+      tag_group_id: null,
+      groupSlug: "genre",
+      groupLabel: "Gênero",
+    }))
 }
 
 export async function searchExternalTitles(query: string): Promise<MergedCandidate[]> {

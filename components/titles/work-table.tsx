@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button"
 import { archiveWork, unarchiveWork } from "@/server/actions/works"
 import { toast } from "sonner"
 import Link from "next/link"
+import { WorkTitleLink } from "@/components/titles/work-title-link"
 
 interface WorkTableProps {
   works: WorkWithRelations[]
@@ -73,27 +74,27 @@ export function WorkTable({ works, total, page, pageSize }: WorkTableProps) {
       accessorKey: "title",
       header: "Título",
       cell: ({ row }) => (
-        <Link
-          href={`/titles/${titleToSlug(row.original.title)}`}
-          className="block max-w-[420px] text-sm font-semibold leading-snug text-foreground line-clamp-2 hover:underline"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {row.original.title}
-        </Link>
+        <span onClick={(e) => e.stopPropagation()} className="block max-w-[420px]">
+          <WorkTitleLink
+            title={row.original.title}
+            workId={row.original.id}
+            className="text-sm font-semibold leading-snug text-foreground line-clamp-2 hover:underline"
+          />
+        </span>
       ),
     },
     {
       id: "publication_status",
       header: "Publicação",
       cell: ({ row }) => (
-        <PublicationStatusBadge status={row.original.publication_status} />
+        <PublicationStatusBadge statusId={row.original.publication_status_id} />
       ),
     },
     {
       id: "personal_status",
       header: "Pessoal",
       cell: ({ row }) => (
-        <PersonalStatusBadge status={row.original.personal_status} />
+        <PersonalStatusBadge statusId={row.original.personal_status_id} />
       ),
     },
     {
@@ -320,12 +321,18 @@ export function WorkTable({ works, total, page, pageSize }: WorkTableProps) {
               onClick={() => router.push(`/titles/${titleToSlug(work.title)}`)}
             >
               <div className="flex items-start justify-between gap-2">
-                <span className="font-medium text-sm line-clamp-2">{work.title}</span>
+                <span onClick={(e) => e.stopPropagation()} className="min-w-0 flex-1">
+                  <WorkTitleLink
+                    title={work.title}
+                    workId={work.id}
+                    className="font-medium text-sm line-clamp-2 hover:underline"
+                  />
+                </span>
                 <ScoreBadge score={work.calculated_scores?.final_score ?? null} size="sm" />
               </div>
               <div className="flex flex-wrap gap-1">
-                <PublicationStatusBadge status={work.publication_status} />
-                <PersonalStatusBadge status={work.personal_status} />
+                <PublicationStatusBadge statusId={work.publication_status_id} />
+                <PersonalStatusBadge statusId={work.personal_status_id} />
                 <AiStatusBadge status={work.ai_eval_status} />
               </div>
               {(work.chapters_read != null || work.total_chapters != null) && (

@@ -187,7 +187,7 @@ export function ChipInput({
         onClick={() => inputRef.current?.focus()}
       >
         {groupedValues.length > 0 ? (
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div className="flex min-w-0 basis-full flex-col gap-2">
             {groupedValues.map((group) => (
               <div key={group.label} className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <span className="mr-1 shrink-0 text-xs font-medium text-muted-foreground">

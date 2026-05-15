@@ -11,7 +11,6 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { FormulaConfig } from "@/types/domain"
 import { unstable_cache } from "next/cache"
-import { GENRE_TAG_GROUP_ID } from "@/lib/constants/tag-groups"
 
 interface RankingPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -42,14 +41,13 @@ const getAllGenres = unstable_cache(async (): Promise<string[]> => {
   const supabase = createAdminClient()
   const { data } = await supabase
     .from("genres")
-    .select("tags(name)")
+    .select("name")
+    .order("name")
     .limit(1000)
-  const rows = (data ?? []) as unknown as Array<{ tags: { name: string | null } | null }>
-  return rows
-    .map((row) => row.tags?.name)
+  return (data ?? [])
+    .map((row) => row.name as string | null)
     .filter((name): name is string => Boolean(name))
-    .sort((a, b) => a.localeCompare(b))
-}, ["ranking-genres-table-v1"], { revalidate: 300 })
+}, ["ranking-genres-v2"], { revalidate: 300 })
 
 const getAllTags = unstable_cache(async (): Promise<Array<{
   slug: string
@@ -62,7 +60,6 @@ const getAllTags = unstable_cache(async (): Promise<Array<{
     supabase
       .from("tags")
       .select("slug, name, tag_group_id")
-      .or(`tag_group_id.is.null,tag_group_id.neq.${GENRE_TAG_GROUP_ID}`)
       .order("name")
       .limit(5000),
     supabase
@@ -89,7 +86,6 @@ interface StatusOption {
   slug: string
   color: string | null
   symbol: string | null
-  previous: string
   comment: string | null
 }
 
@@ -99,10 +95,7 @@ function mergeStatusOptions(fallbacks: StatusOption[], dbRows: StatusOption[] | 
 
   const byStatus = new Map<string, StatusOption>()
   for (const row of rows) {
-    byStatus.set(row.status, {
-      ...row,
-      previous: row.previous ?? row.status,
-    })
+    byStatus.set(row.status, row)
   }
   return [...byStatus.values()]
 }
@@ -110,8 +103,8 @@ function mergeStatusOptions(fallbacks: StatusOption[], dbRows: StatusOption[] | 
 const getStatusOptions = unstable_cache(async () => {
   const supabase = createAdminClient()
   const [{ data: pubData }, { data: perData }] = await Promise.all([
-    supabase.from("publication_status").select("id, status, slug, color, symbol, previous").order("id"),
-    supabase.from("personal_status").select("id, status, slug, color, symbol, previous, comment").order("id"),
+    supabase.from("publication_status").select("id, status, slug, color, symbol").order("id"),
+    supabase.from("personal_status").select("id, status, slug, color, symbol, comment").order("id"),
   ])
   const publicationFallbacks: StatusOption[] = PUBLICATION_STATUSES.map((status, index) => ({
     id: index + 1,
@@ -119,7 +112,6 @@ const getStatusOptions = unstable_cache(async () => {
     slug: status.toLowerCase(),
     color: null,
     symbol: null,
-    previous: status,
     comment: null,
   }))
   const personalFallbacks: StatusOption[] = PERSONAL_STATUSES.map((status, index) => ({
@@ -128,14 +120,13 @@ const getStatusOptions = unstable_cache(async () => {
     slug: status.toLowerCase().replaceAll(" ", "-"),
     color: null,
     symbol: null,
-    previous: status,
     comment: null,
   }))
   return {
     publicationStatuses: mergeStatusOptions(publicationFallbacks, pubData as StatusOption[] | null),
     personalStatuses: mergeStatusOptions(personalFallbacks, perData as StatusOption[] | null),
   }
-}, ["ranking-status-options-v3"], { revalidate: 300 })
+}, ["ranking-status-options-v4"], { revalidate: 300 })
 
 export default async function RankingPage({ searchParams }: RankingPageProps) {
   const params = await searchParams
@@ -187,7 +178,15 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
       ? undefined
       : perStatusParam
         ? perStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
-        : undefined
+        : ["To read"]
+
+  const pubStatusParam = str("pub_status")
+  const publicationStatus =
+    pubStatusParam === "all"
+      ? undefined
+      : pubStatusParam
+        ? pubStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
+        : ["Completed"]
 
   const [prefs, allGenres, allTags, statusOptions] = await Promise.all([
     getPreferences(),
@@ -205,7 +204,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   const filters: RankingFilters = {
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
     criterionMax: Object.keys(criterionMax).length ? criterionMax : undefined,
-    publicationStatus: multi("pub_status"),
+    publicationStatus,
     personalStatus: personalStatus?.length ? personalStatus : undefined,
     aiEvalStatus: aiStatus ? [aiStatus] : undefined,
     genreAll: multi("genres_all"),

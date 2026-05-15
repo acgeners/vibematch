@@ -6,17 +6,73 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import type { SourcedReview } from "@/lib/external/types"
 
+export interface AiEvaluationTag {
+  name: string
+  /** Slug do tag_group (ex: "content_indicator", "romance"). null/undefined quando a tag não tem grupo. */
+  group?: string | null
+}
+
 export interface AiEvaluationRequest {
   workId: string
   title: string
   synopsis?: string | null
+  /**
+   * Quando true, indica que a sinopse foi escrita/editada manualmente pelo usuário
+   * e deve ser tratada como autoridade máxima no prompt. Quando false (default),
+   * a sinopse vem de concatenação automática das fontes externas e será omitida
+   * caso `externalContext` já contenha os blocos [C1]…[Cn] equivalentes.
+   */
+  synopsisIsManual?: boolean
   genres?: string[]
-  tags?: string[]
+  /** Aceita string[] (legado) ou AiEvaluationTag[] (preferido). */
+  tags?: Array<string | AiEvaluationTag>
   /** Backwards-compatible. Para chamadas novas, prefira sourcedReviews. */
   reviews?: string[]
   sourcedReviews?: SourcedReview[]
   externalContext?: string[]
   promptVersion?: string
+  /** Override do modelo Claude (ex.: "claude-sonnet-4-6"). Default: claude-haiku-4-5. */
+  model?: string
+}
+
+interface NormalizedTag {
+  name: string
+  group: string | null
+}
+
+function normalizeTags(tags: AiEvaluationRequest["tags"]): NormalizedTag[] {
+  if (!tags?.length) return []
+  return tags
+    .map((tag) => {
+      if (typeof tag === "string") {
+        const name = tag.trim()
+        return name ? { name, group: null } : null
+      }
+      const name = tag.name?.trim()
+      if (!name) return null
+      const group = tag.group?.trim()
+      return { name, group: group ? group : null }
+    })
+    .filter((t): t is NormalizedTag => t !== null)
+}
+
+function groupTagsByGroup(tags: NormalizedTag[]): Array<{ group: string | null; names: string[] }> {
+  const map = new Map<string, string[]>()
+  const ungrouped: string[] = []
+  for (const tag of tags) {
+    if (!tag.group) {
+      ungrouped.push(tag.name)
+      continue
+    }
+    const list = map.get(tag.group)
+    if (list) list.push(tag.name)
+    else map.set(tag.group, [tag.name])
+  }
+  const grouped: Array<{ group: string | null; names: string[] }> = [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([group, names]) => ({ group, names }))
+  if (ungrouped.length) grouped.push({ group: null, names: ungrouped })
+  return grouped
 }
 
 export interface AiEvaluationResponse {
@@ -24,6 +80,7 @@ export interface AiEvaluationResponse {
   promptVersion: string
   summary: string
   confidence: number
+  reviewsUsed: number
   scores: Array<{
     criterionSlug: string
     suggestedScore: number
@@ -32,9 +89,9 @@ export interface AiEvaluationResponse {
   rawResponse: unknown
 }
 
-const MODEL = "claude-haiku-4-5-20251001"
-const PROMPT_VERSION = "v8"
-const MAX_REVIEW_CHARS = 500
+const MODEL = "claude-sonnet-4-6"
+const PROMPT_VERSION = "v9"
+const MAX_REVIEW_WORDS = 120
 
 // ============================================================================
 // System prompt (estático — beneficia-se de prompt caching)
@@ -69,6 +126,24 @@ REGRAS DE FIDELIDADE AO TÍTULO (críticas):
 - No campo "summary", refira-se à obra apenas pelo título fornecido. NÃO mencione títulos de outras obras, nem invente subtítulos ou nomes de personagens que não estejam na sinopse/tags.
 - Se a sinopse for vazia/curta e as reviews parecerem inconsistentes, baixe a "confidence" e prefira notas conservadoras nas faixas centrais (4-6) ou na faixa baixa, explicando a incerteza.
 
+REGRAS DE EVIDÊNCIA:
+- Trate a sinopse como apresentação de premissa/background. Ela normalmente descreve o ponto de partida e o cenário inicial, não o desenvolvimento. Priorize tom, ritmo, atmosfera e gênero que ela sugere — não a leia como sumário literal dos eventos centrais da obra.
+- Para cada critério, cruze ao menos 2 fontes (sinopse, tags por grupo, gêneros, reviews compatíveis). NÃO ancore a nota em uma única tag, uma única review ou um único fato isolado da sinopse. A avaliação deve ser conceitual e abrangente, refletindo o conjunto das evidências.
+- Quando tags E reviews estiverem disponíveis, use as duas simultaneamente. Não escolha uma em detrimento da outra; ambas são exigidas sempre que existirem.
+
+TAGS POR GRUPO — GUIA DE PESO POR CRITÉRIO:
+Use o grupo das tags fornecidas como sinal principal por critério. Peso entre parênteses indica o quanto o grupo é indicativo daquele critério:
+- romance: grupo "romance" (alto), grupo "relationship_dynamics" (médio — apenas quando a tag descreve o casal).
+- couple_dynamics: grupo "relationship_dynamics" (médio — apenas quando a tag descreve o casal), grupo "characters" (baixo — apenas quando a tag descreve como o personagem se relaciona amorosamente).
+- fantasy_nobility: grupo "fantasy" (alto), grupo "setting" (alto), grupo "scifi" (médio), grupo "cast" (médio).
+- action_adventure: grupo "superpowers" (médio/alto), grupo "characters" (médio — apenas quando a tag descreve habilidades dos protagonistas).
+- adult_content: grupo "content_indicator" (alto).
+- protagonist: grupo "characters" (alto).
+- humor: grupo "tone_mood" (alto).
+- drama: grupo "conflict" (médio), grupo "themes" (médio).
+- tragedy: grupo "tone_mood" (alto).
+Os grupos "activities", "conflict", "elements" e "themes" são amplos e podem trazer indícios de vários critérios — interprete pelo conteúdo específico da tag.
+
 REGRAS DE PONTUAÇÃO:
 - Use SOMENTE as faixas das rubricas abaixo. A nota deve refletir a faixa correspondente, NÃO uma impressão geral.
 - Use decimais (ex: 7.5) quando a obra estiver entre dois níveis.
@@ -89,10 +164,13 @@ REGRA OBRIGATÓRIA PARA FANTASY_NOBILITY:
 Obras ambientadas majoritariamente em corte, aristocracia, realeza, império, ducado, nobreza ou famílias nobres devem receber nota alta quando esse ambiente organiza a premissa e os conflitos. Se a obra combina nobreza/realeza com reencarnação, transmigração, isekai, regressão, segunda chance ou viagem no tempo, trate isso como evidência estrutural forte: em geral use 7-8, ou 9-10 se política nobre, magia, regras do mundo ou hierarquia social definirem a história. Não deixe em 4-6 quando a ambientação de nobreza/realeza for central.
 
 REGRA OBRIGATÓRIA PARA ADULT_CONTENT:
-Antes de pontuar adult_content, avalie normalmente sinopse, tags, gêneros e reviews compatíveis. Como evidência adicional, verifique se a sinopse ou as tags contêm exatamente o marcador "R19" (case-insensitive). Se "R19" aparecer na sinopse ou tags, trate como evidência explícita de conteúdo adulto/maduro: a nota de adult_content deve ser no mínimo 7.0. Use 9-10 se sinopse, tags ou reviews compatíveis indicarem smut/sexo explícito recorrente. A justificativa deve mencionar o marcador R19. Se R19 NÃO aparecer, pontue adult_content normalmente pelas demais evidências.
+Pontue adult_content com base em sinopse, tags (especialmente do grupo "content_indicator"), gêneros e reviews compatíveis. Como evidência adicional, considere o marcador "R19" (case-insensitive). Se "R19" aparecer em alguma evidência, a nota deve ser no mínimo 7.0. Use 9-10 se sinopse, tags ou reviews indicarem smut/sexo explícito recorrente. Se R19 não aparecer, NÃO mencione R19 na justificativa — avalie apenas pelas demais evidências disponíveis.
 
 REGRA OBRIGATÓRIA PARA TRAGEDY (leia com atenção):
-Considere tragédia SÓ o que ocorre NO MEIO/desenvolvimento da história, não o cenário inicial. Por exemplo: mesmo se a protagonista sofreu abuso na infância, foi abandonada, traída, largada e está buscando justiça — se a história em si se desenvolve DEPOIS que isso tudo aconteceu e esses fatos são apenas apresentados como CONTEXTO/BACKSTORY → nota baixa (0-3). Caso, no meio da história, o casal se depare com situações trágicas, se separem, fiquem vários capítulos em conflito/desarmonia, sofrendo → nota alta (7-10).
+Considere tragédia apenas o que ocorre NO DESENVOLVIMENTO (meio da obra), não o cenário inicial nem o background.
+EVITE citar na justificativa: infância, traumas passados, abandono/traição pré-história, premissa de revenge, regressão/segunda chance, transmigração ou qualquer fato anterior ao início da narrativa. Esses fatos podem indicar tom da obra, mas não devem ser usados como argumento direto para a nota de tragedy nem aparecer listados na justificativa.
+Se não houver eventos trágicos ativos no desenvolvimento, atribua nota baixa (0-3) e justifique com algo como "sem eventos trágicos ativos no desenvolvimento principal" — sem detalhar o background.
+Nota alta (7-10) só quando há perdas, separações, mortes, conflitos prolongados ou sofrimento que acontecem no meio da obra e impactam os personagens principais.
 Não infira tragédia ativa a partir de premissas tristes ou tropes de revenge/segunda chance.`
 
 // ============================================================================
@@ -228,20 +306,55 @@ function deduplicateReviews<T extends { text: string }>(reviews: T[]): T[] {
   })
 }
 
-function truncateReviewText(text: string): string {
-  if (text.length <= MAX_REVIEW_CHARS) return text
-  const sentences = text.split(/(?<=[.!?])\s+/)
-  const chunks: string[] = []
-  let len = 0
-  for (const sentence of sentences) {
-    if (len + sentence.length + 1 > MAX_REVIEW_CHARS) break
-    chunks.push(sentence)
-    len += sentence.length + 1
+function countWords(value: string): number {
+  return value.trim().split(/\s+/).filter(Boolean).length
+}
+
+/**
+ * Trunca uma review por fronteira de sentença, preservando o início + a última
+ * sentença (com " […] " no meio) quando há material remanescente. Mantém
+ * sentenças inteiras — nunca corta no meio. Budget em palavras (~120 default).
+ */
+function truncateReviewByWords(text: string, maxWords = MAX_REVIEW_WORDS): string {
+  const total = countWords(text)
+  if (total <= maxWords) return text.trim()
+
+  const sentences = text.trim().split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 0)
+  if (sentences.length === 0) {
+    const words = text.trim().split(/\s+/).slice(0, maxWords)
+    return `${words.join(" ")} […]`
   }
-  if (chunks.length === 0) {
-    return text.slice(0, MAX_REVIEW_CHARS) + "... [truncado]"
+
+  // Reserva ~20% do budget para a sentença final (preservar conclusão).
+  const tailReserve = Math.min(Math.floor(maxWords * 0.2), countWords(sentences[sentences.length - 1]))
+  const headBudget = Math.max(maxWords - tailReserve, Math.floor(maxWords * 0.6))
+
+  const head: string[] = []
+  let used = 0
+  let lastUsedIndex = -1
+  for (let i = 0; i < sentences.length; i++) {
+    const sw = countWords(sentences[i])
+    if (used + sw > headBudget) break
+    head.push(sentences[i])
+    used += sw
+    lastUsedIndex = i
   }
-  return `${chunks.join(" ")} [...]`
+  if (head.length === 0) {
+    head.push(sentences[0])
+    used = countWords(sentences[0])
+    lastUsedIndex = 0
+  }
+
+  const remaining = sentences.slice(lastUsedIndex + 1)
+  if (remaining.length === 0) return head.join(" ")
+
+  // Adiciona a última sentença quando ela cabe no orçamento restante.
+  const last = remaining[remaining.length - 1]
+  const lastWords = countWords(last)
+  if (lastWords <= Math.max(maxWords - used, tailReserve) && remaining.length >= 1) {
+    return `${head.join(" ")} […] ${last}`
+  }
+  return `${head.join(" ")} […]`
 }
 
 interface PreparedReviews {
@@ -282,7 +395,7 @@ function hasR19Marker(req: AiEvaluationRequest): boolean {
   const haystack = [
     req.synopsis ?? "",
     ...(req.genres ?? []),
-    ...(req.tags ?? []),
+    ...normalizeTags(req.tags).map((t) => t.name),
     ...(req.externalContext ?? []),
     ...(req.sourcedReviews?.map((review) => review.text) ?? []),
     ...(req.reviews ?? []),
@@ -301,11 +414,19 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     "(use SOMENTE este título nas suas respostas)",
   ]
 
-  if (req.synopsis?.trim()) {
-    lines.push(`\nSinopse:\n${req.synopsis.trim()}`)
-  } else {
+  const synopsis = req.synopsis?.trim() ?? ""
+  const hasExternalContext = (req.externalContext?.length ?? 0) > 0
+  if (req.synopsisIsManual && synopsis) {
+    lines.push(`\nSinopse (escrita/editada manualmente pelo usuário — autoridade máxima sobre a obra):\n${synopsis}`)
+  } else if (synopsis && !hasExternalContext) {
+    lines.push(`\nSinopse:\n${synopsis}`)
+  } else if (!synopsis && !hasExternalContext) {
     lines.push(
       `\nSinopse: (não fornecida — baseie-se em gêneros, tags e reviews compatíveis; mantenha confidence baixa)`
+    )
+  } else {
+    lines.push(
+      `\nSinopse: (não fornecida explicitamente — use os blocos [C1]…[Cn] de contexto externo abaixo como sinopse principal)`
     )
   }
 
@@ -313,8 +434,13 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     lines.push(`\nGêneros (todos os gêneros cadastrados): ${req.genres.join(", ")}`)
   }
 
-  if (req.tags?.length) {
-    lines.push(`Tags (todas as tags cadastradas): ${req.tags.join(", ")}`)
+  const normalizedTags = normalizeTags(req.tags)
+  if (normalizedTags.length) {
+    const grouped = groupTagsByGroup(normalizedTags)
+    const blocks = grouped
+      .map(({ group, names }) => `- ${group ?? "(sem grupo)"}: ${names.join(", ")}`)
+      .join("\n")
+    lines.push(`\nTags por grupo (use o grupo como sinal de a qual critério a tag mais contribui):\n${blocks}`)
   }
 
   if (req.externalContext?.length) {
@@ -326,12 +452,9 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     })
   }
 
-  lines.push(
-    `Marcador R19 detectado no conjunto de evidências (sinopse, gêneros, tags, contexto externo e reviews): ${r19Detected ? "SIM" : "NÃO"}`
-  )
   if (r19Detected) {
     lines.push(
-      `Para adult_content, aplique a regra obrigatória de R19: nota mínima 7.0 e justificativa mencionando R19.`
+      `\nMarcador R19 detectado nas evidências. Para adult_content, aplique a regra obrigatória: nota mínima 7.0.`
     )
   }
 
@@ -342,7 +465,7 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     prepared.sourcedReviews.forEach((r, i) => {
       const matchPct = Math.round(r.matchScore * 100)
       lines.push(
-        `[${prepared.ids[i]}] (fonte: ${r.source}, match com o título: ${matchPct}%, título-fonte: "${r.sourceTitle}")\n${truncateReviewText(r.text)}`
+        `[${prepared.ids[i]}] (fonte: ${r.source}, match com o título: ${matchPct}%, título-fonte: "${r.sourceTitle}")\n${truncateReviewByWords(r.text)}`
       )
     })
     lines.push(
@@ -354,7 +477,7 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
   } else if (prepared.legacyReviews?.length) {
     lines.push(
       `\nReviews de usuários externas:\n${prepared.legacyReviews
-        .map((review, index) => `[${prepared.ids[index]}] ${truncateReviewText(review)}`)
+        .map((review, index) => `[${prepared.ids[index]}] ${truncateReviewByWords(review)}`)
         .join("\n")}`
     )
     lines.push(
@@ -408,7 +531,8 @@ function extractUsedReviewIds(rawResponse: unknown): string[] {
 
 function buildResponseFromToolPayload(
   payload: EvaluationToolPayload,
-  title: string
+  title: string,
+  modelName: string
 ): AiEvaluationResponse {
   const scoreMap: Record<string, { score: number; justification: string }> = {}
   for (const s of payload.scores) {
@@ -425,10 +549,11 @@ function buildResponseFromToolPayload(
   }))
 
   return {
-    modelName: MODEL,
+    modelName,
     promptVersion: PROMPT_VERSION,
     summary: payload.summary || `Avaliação de "${title}" concluída.`,
     confidence: Math.max(0, Math.min(1, payload.confidence)),
+    reviewsUsed: 0,
     scores,
     rawResponse: payload,
   }
@@ -543,11 +668,20 @@ function attachEvaluationContext(
   req: AiEvaluationRequest,
   prepared: PreparedReviews
 ): AiEvaluationResponse {
+  const normalizedTags = normalizeTags(req.tags)
   return {
     ...response,
+    reviewsUsed: prepared.ids.length,
     rawResponse: {
       ...rawObject(response.rawResponse),
       evaluationContext: {
+        title: req.title,
+        synopsis: req.synopsis ?? null,
+        synopsisIsManual: req.synopsisIsManual ?? false,
+        synopsisOmittedFromPrompt:
+          !req.synopsisIsManual && !!req.synopsis?.trim() && (req.externalContext?.length ?? 0) > 0,
+        genres: req.genres ?? [],
+        tagsGrouped: groupTagsByGroup(normalizedTags),
         genresCount: req.genres?.length ?? 0,
         tagsCount: req.tags?.length ?? 0,
         sourcedReviewsCount: req.sourcedReviews?.length ?? 0,
@@ -556,13 +690,20 @@ function attachEvaluationContext(
         legacyReviewsAfterDedup: prepared.legacyReviews?.length ?? 0,
         externalContextCount: req.externalContext?.length ?? 0,
         reviewsIncludedInPrompt: prepared.ids.length > 0,
-        externalContext: req.externalContext?.map((context) => context.slice(0, 500)) ?? [],
+        externalContext: req.externalContext ?? [],
         sourcedReviews:
-          prepared.sourcedReviews?.map((review) => ({
+          prepared.sourcedReviews?.map((review, index) => ({
+            id: prepared.ids[index] ?? `R${index + 1}`,
             source: review.source,
             sourceTitle: review.sourceTitle,
             matchScore: review.matchScore,
-            excerpt: review.text.slice(0, 500),
+            text: review.text,
+            userRating: review.userRating,
+          })) ?? [],
+        legacyReviews:
+          prepared.legacyReviews?.map((text, index) => ({
+            id: prepared.ids[index] ?? `R${index + 1}`,
+            text,
           })) ?? [],
         r19Detected: hasR19Marker(req),
       },
@@ -600,13 +741,17 @@ interface CacheEntry {
 const evaluationCache = new Map<string, CacheEntry>()
 
 function canonicalInputHash(req: AiEvaluationRequest): string {
+  const normalizedTags = normalizeTags(req.tags)
+    .map((t) => `${t.group ?? ""}::${t.name}`)
+    .sort()
   const canonical = {
-    model: MODEL,
+    model: req.model ?? MODEL,
     promptVersion: PROMPT_VERSION,
     title: req.title,
     synopsis: req.synopsis ?? "",
+    synopsisIsManual: req.synopsisIsManual ?? false,
     genres: [...(req.genres ?? [])].sort(),
-    tags: [...(req.tags ?? [])].sort(),
+    tags: normalizedTags,
     externalContext: req.externalContext ?? [],
     sourcedReviews:
       req.sourcedReviews?.map((r) => ({
@@ -664,13 +809,17 @@ export async function requestAiEvaluation(
   const prepared = prepareReviews(req)
   const client = new Anthropic({ apiKey })
   const userPrompt = buildUserPrompt(req, prepared)
+  const modelToUse = req.model ?? MODEL
   let lastError: unknown = null
+
+  // Opus 4.7 não aceita o parâmetro temperature.
+  const supportsTemperature = !/opus-4-7/i.test(modelToUse)
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const message = await client.messages.create({
-      model: MODEL,
+      model: modelToUse,
       max_tokens: attempt === 0 ? 3500 : 4500,
-      temperature: attempt === 0 ? 0.2 : 0,
+      ...(supportsTemperature ? { temperature: attempt === 0 ? 0.2 : 0 } : {}),
       system: [
         {
           type: "text",
@@ -715,7 +864,7 @@ export async function requestAiEvaluation(
     }
 
     try {
-      const built = buildResponseFromToolPayload(parsed.data, req.title)
+      const built = buildResponseFromToolPayload(parsed.data, req.title, modelToUse)
       const final = postProcessEvaluation(built, req, prepared)
       writeCache(cacheKey, final)
       return final

@@ -3,14 +3,49 @@ import { cn } from "@/lib/utils"
 import {
   PUBLICATION_STATUS_LABELS,
   PERSONAL_STATUS_LABELS,
+  PUBLICATION_STATUSES_BY_ID,
+  PERSONAL_STATUSES_BY_ID,
+  type PublicationStatusInfo,
+  type PersonalStatusInfo,
 } from "@/lib/constants/criteria"
 
-interface PublicationStatusBadgeProps {
-  status: string
-  className?: string
+const PUBLICATION_STATUSES_BY_NAME: Record<string, PublicationStatusInfo> = Object.fromEntries(
+  Object.values(PUBLICATION_STATUSES_BY_ID).map((info) => [info.status, info])
+)
+
+const PERSONAL_STATUSES_BY_NAME: Record<string, PersonalStatusInfo> = Object.fromEntries(
+  Object.values(PERSONAL_STATUSES_BY_ID).map((info) => [info.status, info])
+)
+
+function resolvePublicationInfo(
+  statusId?: number | null,
+  status?: string | null
+): PublicationStatusInfo | null {
+  if (statusId != null && PUBLICATION_STATUSES_BY_ID[statusId]) {
+    return PUBLICATION_STATUSES_BY_ID[statusId]
+  }
+  if (!status) return null
+  const canonical = PUBLICATION_STATUS_LABELS[status] ?? status
+  return PUBLICATION_STATUSES_BY_NAME[canonical] ?? null
 }
 
-const PUB_STATUS_COLORS: Record<string, string> = {
+function resolvePersonalInfo(
+  statusId?: number | null,
+  status?: string | null
+): PersonalStatusInfo | null {
+  if (statusId != null && PERSONAL_STATUSES_BY_ID[statusId]) {
+    return PERSONAL_STATUSES_BY_ID[statusId]
+  }
+  if (!status) return null
+  const canonical = PERSONAL_STATUS_LABELS[status] ?? status
+  return PERSONAL_STATUSES_BY_NAME[canonical] ?? null
+}
+
+// Tailwind class palettes keyed by canonical status. DB stores hex colors,
+// which don't map cleanly to Tailwind utility classes — so we keep the
+// aesthetic palette here and rely on the DB only for the canonical name
+// and symbol.
+const PUB_STATUS_CLASSES: Record<string, string> = {
   Completed: "bg-blue-100 text-blue-800 border-blue-200",
   Hiatus: "bg-amber-100 text-amber-800 border-amber-200",
   Ongoing: "bg-green-100 text-green-800 border-green-200",
@@ -18,56 +53,7 @@ const PUB_STATUS_COLORS: Record<string, string> = {
   Unknown: "bg-gray-100 text-gray-600 border-gray-200",
 }
 
-const PUB_STATUS_ICONS: Record<string, string> = {
-  Completed: "✓",
-  Ongoing: "↻",
-  Hiatus: "Ⅱ",
-  Cancelled: "×",
-  Unknown: "?",
-}
-
-function normalizePublicationStatus(status: string) {
-  const normalized = PUBLICATION_STATUS_LABELS[status] ?? status
-  switch (normalized) {
-    case "C":
-    case "CMP":
-    case "Completed":
-      return "Completed"
-    case "O":
-    case "ONG":
-    case "Ongoing":
-      return "Ongoing"
-    case "H":
-    case "HIA":
-    case "Hiatus":
-      return "Hiatus"
-    case "D":
-    case "CXL":
-    case "Cancelled":
-      return "Cancelled"
-    default:
-      return "Unknown"
-  }
-}
-
-export function PublicationStatusBadge({
-  status,
-  className,
-}: PublicationStatusBadgeProps) {
-  const normalizedStatus = normalizePublicationStatus(status)
-
-  return (
-    <Badge
-      variant="outline"
-      className={cn("gap-1", PUB_STATUS_COLORS[normalizedStatus] ?? PUB_STATUS_COLORS.Unknown, className)}
-    >
-      <span aria-hidden>{PUB_STATUS_ICONS[normalizedStatus] ?? "?"}</span>
-      {normalizedStatus}
-    </Badge>
-  )
-}
-
-const PERSONAL_STATUS_COLORS: Record<string, string> = {
+const PERSONAL_STATUS_CLASSES: Record<string, string> = {
   Completed: "bg-blue-100 text-blue-800",
   Reading: "bg-green-100 text-green-800",
   "To read": "bg-gray-100 text-gray-700",
@@ -79,61 +65,46 @@ const PERSONAL_STATUS_COLORS: Record<string, string> = {
   "On-hold": "bg-slate-100 text-slate-700",
 }
 
-const PERSONAL_STATUS_ICONS: Record<string, string> = {
-  Completed: "✓",
-  Reading: "▶",
-  "To read": "+",
-  Paused: "Ⅱ",
-  Stalled: "!",
-  Dropped: "×",
-  Started: "•",
-  Hiatus: "⏱",
-  "On-hold": "…",
-}
-
-interface PersonalStatusBadgeProps {
-  status: string
+interface PublicationStatusBadgeProps {
+  /** Preferido após Fase 3.2; cai no `status` legado quando nulo. */
+  statusId?: number | null
+  status?: string | null
+  /** Quando true, mostra o código curto (`short` no DB) em vez do nome canônico. */
+  compact?: boolean
   className?: string
 }
 
-function normalizePersonalStatus(status: string) {
-  const normalized = PERSONAL_STATUS_LABELS[status] ?? status
-  switch (normalized) {
-    case "Completed":
-      return "Completed"
-    case "Reading":
-      return "Reading"
-    case "Started":
-      return "Started"
-    case "Stalled":
-      return "Stalled"
-    case "Paused":
-      return "Paused"
-    case "Hiatus":
-      return "Hiatus"
-    case "On-hold":
-      return "On-hold"
-    case "Dropped":
-      return "Dropped"
-    default:
-      return "To read"
-  }
+export function PublicationStatusBadge({ statusId, status, compact, className }: PublicationStatusBadgeProps) {
+  const info = resolvePublicationInfo(statusId, status)
+  const name = info?.status ?? "Unknown"
+  const display = compact ? (info?.short || name) : name
+  return (
+    <Badge
+      variant="outline"
+      className={cn("gap-1", PUB_STATUS_CLASSES[name] ?? PUB_STATUS_CLASSES.Unknown, className)}
+    >
+      <span aria-hidden>{info?.symbol || "?"}</span>
+      {display}
+    </Badge>
+  )
 }
 
-export function PersonalStatusBadge({ status, className }: PersonalStatusBadgeProps) {
-  const normalizedStatus = normalizePersonalStatus(status)
+interface PersonalStatusBadgeProps {
+  statusId?: number | null
+  status?: string | null
+  className?: string
+}
 
+export function PersonalStatusBadge({ statusId, status, className }: PersonalStatusBadgeProps) {
+  const info = resolvePersonalInfo(statusId, status)
+  const name = info?.status ?? "To read"
   return (
     <Badge
       variant="secondary"
-      className={cn(
-        "gap-1",
-        PERSONAL_STATUS_COLORS[normalizedStatus] ?? "bg-gray-100 text-gray-700",
-        className
-      )}
+      className={cn("gap-1", PERSONAL_STATUS_CLASSES[name] ?? "bg-gray-100 text-gray-700", className)}
     >
-      <span aria-hidden>{PERSONAL_STATUS_ICONS[normalizedStatus] ?? "•"}</span>
-      {normalizedStatus}
+      <span aria-hidden>{info?.symbol || "•"}</span>
+      {name}
     </Badge>
   )
 }
