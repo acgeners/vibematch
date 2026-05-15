@@ -279,7 +279,7 @@ function sourceDebug(result: ExternalSearchResult, accepted: boolean, reason?: s
   }
 }
 
-const EXCLUDED_TITLE_SUFFIXES = /\s*\((novel|promo|promotion)\)\s*$/i
+const EXCLUDED_TITLE_SUFFIXES = /\s*\((novel|promo|promotion|pre-serialization|preserialization|prequel|doujin|doujinshi|oneshot|one-shot)\)\s*$/i
 
 function isExcludedResult(result: ExternalSearchResult): boolean {
   return EXCLUDED_TITLE_SUFFIXES.test(result.title ?? "")

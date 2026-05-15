@@ -1,11 +1,13 @@
 "use client"
 
 import { useState } from "react"
+import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { Loader2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
 import {
   Dialog,
@@ -16,7 +18,7 @@ import {
 } from "@/components/ui/dialog"
 import { ExternalSearch } from "@/components/titles/external-search"
 import { updateWorkExternalData, refreshWorkExternalData } from "@/server/actions/works"
-import type { ExternalWorkData } from "@/lib/external/types"
+import type { ExternalSourceId, ExternalWorkData } from "@/lib/external/types"
 
 interface CurrentWork {
   title: string
@@ -70,15 +72,61 @@ function getConflicts(current: CurrentWork, external: ExternalWorkData): FieldCo
   return conflicts
 }
 
+interface SynopsisChoice {
+  source: ExternalSourceId
+  text: string
+  included: boolean
+  isPrimary: boolean
+}
+
+interface CoverChoice {
+  source: ExternalSourceId
+  url: string
+  included: boolean
+  isPrimary: boolean
+}
+
 export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
-  const [phase, setPhase] = useState<"refreshing" | "search" | "conflicts" | "saving">("refreshing")
+  const [phase, setPhase] = useState<"refreshing" | "search" | "multipick" | "conflicts" | "saving">("refreshing")
   const [pendingData, setPendingData] = useState<ExternalWorkData | null>(null)
   const [conflicts, setConflicts] = useState<FieldConflict[]>([])
   const [resolutions, setResolutions] = useState<Record<string, "current" | "external">>({})
+  const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
+  const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
 
   const handleSelect = (data: ExternalWorkData) => {
+    // Quando há múltiplas sinopses/capas vindas das fontes vinculadas, mostra
+    // picker antes do conflict resolver — assim user decide quais incluir e
+    // qual é primária, em vez de receber uma sinopse mesclada arbitrária.
+    const synopses = data.multiSynopses ?? []
+    const covers = data.multiCovers ?? []
+    if (synopses.length > 1 || covers.length > 1) {
+      setPendingData(data)
+      setSynopsisChoices(
+        synopses.map((s, i) => ({
+          source: s.source,
+          text: s.text,
+          included: i === 0,
+          isPrimary: i === 0,
+        }))
+      )
+      setCoverChoices(
+        covers.map((c, i) => ({
+          source: c.source,
+          url: c.url,
+          included: i === 0,
+          isPrimary: i === 0,
+        }))
+      )
+      setPhase("multipick")
+      return
+    }
+    proceedToConflictsOrApply(data)
+  }
+
+  const proceedToConflictsOrApply = (data: ExternalWorkData) => {
     const detected = getConflicts(currentWork, data)
     setPendingData(data)
     if (detected.length > 0) {
@@ -90,6 +138,45 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
     } else {
       applyUpdate(data, {})
     }
+  }
+
+  const handleConfirmMultiPick = () => {
+    if (!pendingData) return
+    const includedSynopses = synopsisChoices.filter((s) => s.included)
+    const includedCovers = coverChoices.filter((c) => c.included)
+    const primaryCover = includedCovers.find((c) => c.isPrimary) ?? includedCovers[0]
+    const next: ExternalWorkData = {
+      ...pendingData,
+      coverUrl: primaryCover?.url ?? pendingData.coverUrl,
+      multiCovers: includedCovers.map((c) => ({ url: c.url, source: c.source })),
+      synopsis: includedSynopses.length > 0
+        ? includedSynopses.map((s) => s.text).join("\n\n---\n\n")
+        : pendingData.synopsis,
+      multiSynopses: includedSynopses.map((s) => ({ source: s.source, text: s.text })),
+      synopsisIsMerged: includedSynopses.length > 1,
+    }
+    proceedToConflictsOrApply(next)
+  }
+
+  const toggleSynopsisIncluded = (source: ExternalSourceId) => {
+    setSynopsisChoices((prev) =>
+      prev.map((s) => (s.source === source ? { ...s, included: !s.included } : s))
+    )
+  }
+  const setSynopsisPrimary = (source: ExternalSourceId) => {
+    setSynopsisChoices((prev) =>
+      prev.map((s) => ({ ...s, isPrimary: s.source === source, included: s.source === source ? true : s.included }))
+    )
+  }
+  const toggleCoverIncluded = (url: string) => {
+    setCoverChoices((prev) =>
+      prev.map((c) => (c.url === url ? { ...c, included: !c.included } : c))
+    )
+  }
+  const setCoverPrimary = (url: string) => {
+    setCoverChoices((prev) =>
+      prev.map((c) => ({ ...c, isPrimary: c.url === url, included: c.url === url ? true : c.included }))
+    )
   }
 
   const handleOpen = async () => {
@@ -193,6 +280,8 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
     setPhase("refreshing")
     setPendingData(null)
     setConflicts([])
+    setSynopsisChoices([])
+    setCoverChoices([])
   }
 
   return (
@@ -221,6 +310,98 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
           {phase === "search" && (
             <div className="pt-2">
               <ExternalSearch titleQuery={currentWork.title} onSelect={handleSelect} evaluateAi={false} checkDuplicates={false} />
+            </div>
+          )}
+
+          {phase === "multipick" && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Múltiplas sinopses/capas vieram das fontes. Marque o que incluir e qual é a principal.
+              </p>
+
+              {synopsisChoices.length > 1 && (
+                <section className="space-y-2">
+                  <h3 className="text-sm font-medium">Sinopses</h3>
+                  {synopsisChoices.map((s) => (
+                    <div
+                      key={s.source}
+                      className={`rounded-md border p-3 space-y-2 ${
+                        s.included ? "border-primary/60 bg-primary/5" : ""
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <Badge variant="outline" className="text-[10px]">{s.source}</Badge>
+                        <div className="flex items-center gap-3 text-xs">
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <Checkbox
+                              checked={s.included}
+                              onCheckedChange={() => toggleSynopsisIncluded(s.source)}
+                            />
+                            Incluir
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="synopsis-primary"
+                              checked={s.isPrimary}
+                              onChange={() => setSynopsisPrimary(s.source)}
+                              className="accent-primary"
+                            />
+                            Principal
+                          </label>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-6 whitespace-pre-wrap">{s.text}</p>
+                    </div>
+                  ))}
+                </section>
+              )}
+
+              {coverChoices.length > 1 && (
+                <section className="space-y-2">
+                  <h3 className="text-sm font-medium">Capas</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {coverChoices.map((c) => (
+                      <div
+                        key={c.url}
+                        className={`rounded-md border p-2 space-y-1.5 ${
+                          c.included ? "border-primary/60 bg-primary/5" : ""
+                        }`}
+                      >
+                        <div className="relative w-full aspect-[2/3] overflow-hidden rounded bg-muted">
+                          <Image src={c.url} alt="" fill sizes="160px" unoptimized className="object-cover" />
+                        </div>
+                        <Badge variant="outline" className="text-[10px] w-full justify-center">{c.source}</Badge>
+                        <div className="flex items-center justify-between text-[11px]">
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <Checkbox
+                              checked={c.included}
+                              onCheckedChange={() => toggleCoverIncluded(c.url)}
+                            />
+                            Incluir
+                          </label>
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="cover-primary"
+                              checked={c.isPrimary}
+                              onChange={() => setCoverPrimary(c.url)}
+                              className="accent-primary"
+                            />
+                            Principal
+                          </label>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <Separator />
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={handleClose}>Cancelar</Button>
+                <Button onClick={handleConfirmMultiPick}>Continuar</Button>
+              </div>
             </div>
           )}
 
