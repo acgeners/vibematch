@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useFieldArray, useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
+import { titleToSlug } from "@/lib/utils"
 import { workFormSchema } from "@/lib/validations/work.schema"
 import type { WorkFormValues, WorkFormInput } from "@/lib/validations/work.schema"
 import { ChipInput } from "@/components/ui/chip-input"
@@ -867,7 +868,13 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     }
 
     toast.success(workId ? "Obra atualizada!" : "Obra criada!")
-    router.push(`/titles/${workSlug ?? result.data?.id ?? workId}`)
+    // Quando título muda em update, o slug derivado também muda — usar o novo
+    // slug evita 404 (page.tsx resolve por slug computado a partir do título).
+    const newSlug = values.title ? titleToSlug(values.title) : ""
+    const destination = workId
+      ? (newSlug || workSlug || workId)
+      : (newSlug || result.data?.id || workSlug || workId)
+    router.push(`/titles/${destination}`)
   }
 
   const persistDrafts = (drafts: BatchDraft[]) => {

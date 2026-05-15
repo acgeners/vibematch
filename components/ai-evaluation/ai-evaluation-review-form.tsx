@@ -148,12 +148,12 @@ export function AiEvaluationReviewForm({
     )
   }
 
-  const handleSubmit = async () => {
+  const submitScores = async (scoresToSubmit: typeof scores) => {
     setSubmitting(true)
     const result = await submitAiReview({
       evaluationId: evaluation.id,
       workId,
-      scores: scores.map((s) => ({
+      scores: scoresToSubmit.map((s) => ({
         criterionSlug: s.criterionSlug,
         acceptedScore: s.acceptedScore,
         wasEdited: s.wasEdited,
@@ -168,12 +168,31 @@ export function AiEvaluationReviewForm({
     }
 
     toast.success("Notas salvas.")
-    const scoreMap = Object.fromEntries(scores.map((s) => [s.criterionSlug, s.acceptedScore]))
+    const scoreMap = Object.fromEntries(scoresToSubmit.map((s) => [s.criterionSlug, s.acceptedScore]))
     onSaved(scoreMap)
+  }
+
+  const handleSubmit = () => submitScores(scores)
+
+  const handleAcceptAll = () => {
+    // Reseta todos pros valores sugeridos pela IA (descarta edits) e salva.
+    const allSuggested = scores.map((s) => ({
+      ...s,
+      acceptedScore: s.suggestedScore,
+      wasEdited: false,
+    }))
+    setScores(allSuggested)
+    void submitScores(allSuggested)
   }
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button size="sm" onClick={handleAcceptAll} disabled={submitting}>
+          {submitting ? "Salvando..." : "Aceitar todos"}
+        </Button>
+      </div>
+
       {evaluation.summary && (
         <div className="grid gap-3 rounded-md bg-muted/50 p-3 text-sm sm:grid-cols-[96px_1fr]">
           <div className="relative h-36 w-24 overflow-hidden rounded-md border bg-muted">

@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog"
 import { ExternalSearch } from "@/components/titles/external-search"
 import { updateWorkExternalData, refreshWorkExternalData } from "@/server/actions/works"
+import { titleToSlug } from "@/lib/utils"
 import type { ExternalSourceId, ExternalWorkData } from "@/lib/external/types"
 
 interface CurrentWork {
@@ -267,7 +268,15 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
     toast.success("Dados atualizados com sucesso.")
     setOpen(false)
     setPhase("refreshing")
-    router.refresh()
+    // Se o título mudou, o slug derivado também mudou — navegar pro novo slug
+    // pra evitar 404 (page.tsx resolve por slug derivado do título atual).
+    const newTitle = typeof updates.title === "string" ? updates.title : null
+    if (newTitle && newTitle !== currentWork.title) {
+      const newSlug = titleToSlug(newTitle) || workId
+      router.push(`/titles/${newSlug}`)
+    } else {
+      router.refresh()
+    }
   }
 
   const handleConfirm = () => {
