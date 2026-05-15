@@ -99,7 +99,7 @@ export interface AiEvaluationResponse {
 }
 
 export const MODEL = "claude-sonnet-4-6"
-export const PROMPT_VERSION = "v14"
+export const PROMPT_VERSION = "v15"
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
 export function parsePromptVersion(s: string | null | undefined): number | null {
@@ -186,6 +186,52 @@ PRINCÍPIO "AUSÊNCIA DE EVIDÊNCIA NÃO É EVIDÊNCIA DE AUSÊNCIA":
 
 EXCEÇÃO PRA CRITÉRIOS NEGATIVOS (drama, tragedy):
 - As regras "5 como piso" e "ausência de evidência" NÃO se aplicam. Pra esses, notas baixas (0-3) significam ausência saudável, não defeito. Drama 2 = "obra leve sem conflito intenso", o que é positivo. Silêncio sobre tragédia é razoavelmente interpretado como ausência (a maioria das obras não é trágica). Score esses pela rubrica normal sem viés de piso.
+
+INTERPRETAÇÃO DE REVIEWS DE USUÁRIOS:
+
+A) Sarcasmo, ironia e hipérbole — NÃO interpretar literalmente:
+- A NOTA NUMÉRICA do usuário (header da review, ex.: "nota do usuário: 3/10") é o sinal mais confiável da OPINIÃO do reviewer. Use-a pra calibrar o texto:
+  · Nota ≥7 + texto positivo → opinião genuinamente positiva
+  · Nota <5 + texto que SOA positivo ("Wow", "amazing!", "incredible") → quase certamente sarcasmo; leia o texto como NEGATIVO
+  · Nota <5 + texto crítico → opinião negativa coerente, sem sarcasmo
+  · Sem nota numérica → julgue só pelo texto, com mais cautela
+- Hipérboles ("trillion years", "muda twice por capítulo", "stable as someone in a hurricane") são ênfase retórica, não dados factuais. Interprete a intensidade emocional, não os números literais.
+- Boilerplate ("Was this comment useful?", "Last updated X ago", "I'll leave you with one line") é ruído de interface — ignore.
+
+B) Texto informa ASPECTOS, nota informa QUALIDADE:
+- O TEXTO da review é evidência sobre QUAIS ASPECTOS a obra tem (romance, drama, ação, etc).
+- A NOTA é evidência sobre QUALIDADE percebida desses aspectos.
+- Crítica negativa NÃO derruba o critério. Exemplo: "Romance cliches 101 for dummies" CONFIRMA que romance é elemento central da obra (sobe romance), mesmo que o reviewer ache ruim. A nota baixa só sinaliza qualidade fraca, não ausência.
+
+C) Sinais INDIRETOS de presença — especialmente romance e couple_dynamics:
+Reviewers raramente dizem "esta obra tem romance forte". Sinalizam de forma indireta. Trate como evidência POSITIVA de presença (sobe o critério, mesmo que sem comentar qualidade):
+
+Romance presente:
+- Termos de fandom: "OTP", "ship them", "endgame", "I'm shipping", "second lead syndrome", "love triangle"
+- Tropes nomeados: "ice prince x sunshine girl", "enemies to lovers", "fated mates", "marriage of convenience", "fake dating", "slow burn", "arranged marriage"
+- Tensão romântica: "chemistry off the charts", "dancing around each other", "the tension!!!", "kiss scene was everything"
+- Emoção em torno do casal: "I cried when they finally got together", "ML is everything", "FL deserves better than ML"
+- Críticas a QUALIDADE do romance ("rushed romance", "forced romance", "cringe romance") ainda confirmam que romance é elemento central — só com execução fraca.
+
+Couple dynamics:
+- "Banter is great" / "way they tease each other" → dinâmica leve/divertida
+- "Toxic ship", "yandere", "obsessive ML/FL", "possessive but I love it" → dinâmica tóxica/intensa (0-3)
+- "Mutual support", "communication goals", "they really get each other" → dinâmica saudável (7-8 ou 9-10)
+- "Misunderstandings drag on", "constant fighting" → conflituosa (4-6)
+- "Healing each other", "soft moments together" → carinhosa
+
+Drama:
+- "I cried", "tear-jerker", "emotional rollercoaster", "broke me", "angst", "suffering" → drama alto
+- "Heartbreak", "betrayal arc", "the way they hurt each other" → drama significativo
+
+Humor:
+- "Comedic relief", "I laughed out loud", "FL is hilarious", "crack fic vibes", "chaotic", "shenanigans" → humor presente
+- "Surprisingly funny", "didn't expect to laugh" → humor pontual
+
+D) Princípio geral:
+- Vocabulário de fandom é EVIDÊNCIA, não ruído. Quem usa "OTP" está declarando que romance é central pra sua experiência da obra.
+- Não exija menção literal ("a obra tem romance") quando há sinais indiretos abundantes ("FL deserves better than ML").
+- Lembre dos princípios anteriores: presença com ressalvas → mín 5; ausência de evidência → 5 + confidence baixa.
 
 USO DA CAPA (quando fornecida como imagem anexada antes do prompt):
 - A capa é um sinal AUXILIAR, não autoritativo. Convenções estéticas de manhwa criam capas românticas mesmo quando romance é subplot — não trate a capa isoladamente como prova.
@@ -569,8 +615,9 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     )
     prepared.sourcedReviews.forEach((r, i) => {
       const matchPct = Math.round(r.matchScore * 100)
+      const ratingLabel = r.userRating != null ? `, nota do usuário: ${r.userRating}/10` : ""
       lines.push(
-        `[${prepared.ids[i]}] (fonte: ${r.source}, match com o título: ${matchPct}%, título-fonte: "${r.sourceTitle}")\n${truncateReviewByWords(r.text)}`
+        `[${prepared.ids[i]}] (fonte: ${r.source}, match com o título: ${matchPct}%${ratingLabel}, título-fonte: "${r.sourceTitle}")\n${truncateReviewByWords(r.text)}`
       )
     })
     lines.push(

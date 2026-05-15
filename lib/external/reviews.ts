@@ -1,4 +1,5 @@
 import { searchAniList, fetchAniListById, fetchAniListReviews } from "./anilist"
+import { extractUserRating } from "./index"
 import { searchJikanManga, fetchJikanMangaByTitle, fetchJikanMangaReviews } from "./jikan"
 import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews } from "./mangaupdates"
 import type { ExternalSearchResult, SourcedReview } from "./types"
@@ -70,12 +71,16 @@ async function reviewsFromResult(workTitles: string[], result: ExternalSearchRes
   return reviews
     .filter((text) => text.trim().length >= 100)
     .slice(0, 4)
-    .map((text) => ({
-      source: result.source,
-      sourceTitle: result.title,
-      matchScore,
-      text,
-    }))
+    .map((text) => {
+      const { rating, cleanText } = extractUserRating(text)
+      return {
+        source: result.source,
+        sourceTitle: result.title,
+        matchScore,
+        text: cleanText,
+        userRating: rating,
+      }
+    })
 }
 
 async function contextFromResult(result: ExternalSearchResult): Promise<string[]> {
@@ -154,7 +159,7 @@ export async function fetchExternalEvaluationContextForWork(input: {
   ])
 
   return {
-    sourcedReviews: reviews.flat().slice(0, 8),
+    sourcedReviews: reviews.flat().slice(0, 12),
     externalContext: context.flat().slice(0, 6),
   }
 }

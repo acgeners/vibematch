@@ -693,7 +693,7 @@ const REVIEW_SOURCE_PRIORITY: Record<ExternalSourceId, number> = {
  * texto sem esse prefixo (para não duplicar no prompt). Quando o prefixo não
  * existe, devolve `{ cleanText: text }` sem rating.
  */
-function extractUserRating(text: string): { rating?: number; cleanText: string } {
+export function extractUserRating(text: string): { rating?: number; cleanText: string } {
   const match = text.match(/^\s*Nota do usu[áa]rio:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*10)?\s*\n+/i)
   if (!match) return { cleanText: text }
   const raw = Number(match[1])
