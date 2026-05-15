@@ -87,6 +87,10 @@ export interface AiEvaluationResponse {
     justification: string
   }>
   rawResponse: unknown
+  /** Hash canônico do input — usado pra cache persistente em ai_evaluations. */
+  inputHash: string
+  /** True quando veio do cache (memória ou DB). */
+  fromCache?: "memory" | "db"
 }
 
 const MODEL = "claude-sonnet-4-6"
@@ -581,7 +585,8 @@ function extractUsedReviewIds(rawResponse: unknown): string[] {
 function buildResponseFromToolPayload(
   payload: EvaluationToolPayload,
   title: string,
-  modelName: string
+  modelName: string,
+  inputHash: string
 ): AiEvaluationResponse {
   const scoreMap: Record<string, { score: number; justification: string }> = {}
   for (const s of payload.scores) {
@@ -605,6 +610,7 @@ function buildResponseFromToolPayload(
     reviewsUsed: 0,
     scores,
     rawResponse: payload,
+    inputHash,
   }
 }
 
@@ -857,6 +863,65 @@ function writeCache(hash: string, response: AiEvaluationResponse) {
 }
 
 // ============================================================================
+// DB cache lookup (L2) — usa ai_evaluations.input_hash da migration 032.
+// Falhas de DB são silenciosas: cache é otimização, não fonte de verdade.
+// ============================================================================
+
+async function readDbCache(
+  hash: string,
+  modelName: string
+): Promise<AiEvaluationResponse | null> {
+  try {
+    const { createAdminClient } = await import("@/lib/supabase/admin")
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from("ai_evaluations")
+      .select("model_name, prompt_version, summary, confidence, raw_response, ai_evaluation_scores(criterion_slug, suggested_score, justification)")
+      .eq("input_hash", hash)
+      .eq("model_name", modelName)
+      .eq("prompt_version", PROMPT_VERSION)
+      .eq("status", "completed")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (error || !data) return null
+
+    type ScoreRow = { criterion_slug: string; suggested_score: number | null; justification: string | null }
+    const rows = (data.ai_evaluation_scores as ScoreRow[] | null) ?? []
+    if (rows.length === 0) return null
+
+    const byCriterion = new Map(rows.map((r) => [r.criterion_slug, r]))
+    const scores = CRITERION_SLUGS.map((slug) => {
+      const row = byCriterion.get(slug)
+      return {
+        criterionSlug: slug,
+        suggestedScore: row?.suggested_score != null ? Number(row.suggested_score) : 5,
+        justification: row?.justification ?? "Não avaliado.",
+      }
+    })
+
+    const raw = data.raw_response as Record<string, unknown> | null
+    const evaluationContext = raw?.evaluationContext as { reviewsIncludedInPrompt?: boolean } | undefined
+    const reviewsUsed = evaluationContext?.reviewsIncludedInPrompt ? 1 : 0
+
+    return {
+      modelName: data.model_name ?? modelName,
+      promptVersion: data.prompt_version ?? PROMPT_VERSION,
+      summary: data.summary ?? "",
+      confidence: data.confidence != null ? Number(data.confidence) : 0.5,
+      reviewsUsed,
+      scores,
+      rawResponse: raw ?? {},
+      inputHash: hash,
+    }
+  } catch (err) {
+    console.warn("[AI] readDbCache falhou — caindo pra API call:", err)
+    return null
+  }
+}
+
+// ============================================================================
 // Public entry point
 // ============================================================================
 
@@ -872,8 +937,15 @@ export async function requestAiEvaluation(
   const cacheKey = canonicalInputHash(req)
   const cached = readCache(cacheKey)
   if (cached) {
-    console.info(`[AI] Cache hit para "${req.title}" (hash=${cacheKey.slice(0, 8)})`)
-    return cached
+    console.info(`[AI] Cache hit (memory) para "${req.title}" (hash=${cacheKey.slice(0, 8)})`)
+    return { ...cached, fromCache: "memory" }
+  }
+
+  const dbCached = await readDbCache(cacheKey, req.model ?? MODEL)
+  if (dbCached) {
+    console.info(`[AI] Cache hit (db) para "${req.title}" (hash=${cacheKey.slice(0, 8)})`)
+    writeCache(cacheKey, dbCached)
+    return { ...dbCached, fromCache: "db" }
   }
 
   const prepared = prepareReviews(req)
@@ -934,7 +1006,7 @@ export async function requestAiEvaluation(
     }
 
     try {
-      const built = buildResponseFromToolPayload(parsed.data, req.title, modelToUse)
+      const built = buildResponseFromToolPayload(parsed.data, req.title, modelToUse, cacheKey)
       const final = postProcessEvaluation(built, req, prepared)
       writeCache(cacheKey, final)
       return final

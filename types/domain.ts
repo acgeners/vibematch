@@ -95,6 +95,7 @@ export interface CalculatedScore {
   mae_predicted: number | null
   rmse_calc: number | null
   rmse_predicted: number | null
+  prediction_distance: number | null
   formula_version: string
   calculated_at: string
 }
@@ -212,6 +213,9 @@ export interface FormulaConfig {
   /** RMSE dos resíduos — usado em 1/RMSE² no peso de Nota.Final. */
   rmse_calc: number | null
   rmse_predicted: number | null
+  /** Estatísticas da distribuição de GPT, usadas pra z-score em normalizeGPT. */
+  gpt_mean: number
+  gpt_std: number
   pseudo_votes_nota_m: number
   pseudo_votes_blend: number
   /** Quantos itens exibir no ranking (null = todos). */

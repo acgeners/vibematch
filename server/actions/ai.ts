@@ -104,6 +104,7 @@ export async function triggerAiEvaluation(workId: string) {
         summary: response.summary,
         confidence: response.confidence,
         raw_response: response.rawResponse as Record<string, unknown>,
+        input_hash: response.inputHash,
       })
       .eq("id", evaluation.id)
 

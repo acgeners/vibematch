@@ -24,6 +24,12 @@ type ReviewUsageState =
   | { kind: "declined" }    // reviews disponíveis mas modelo não citou nenhuma
   | { kind: "used"; count: number }
 
+function confidenceBadgeClass(confidence: number): string {
+  if (confidence >= 0.75) return "border-emerald-300 bg-emerald-50 text-emerald-700"
+  if (confidence >= 0.5) return "border-amber-300 bg-amber-50 text-amber-700"
+  return "border-rose-300 bg-rose-50 text-rose-700"
+}
+
 function getReviewUsage(rawResponse: unknown): ReviewUsageState {
   if (typeof rawResponse !== "object" || rawResponse === null) {
     return { kind: "unavailable" }
@@ -194,6 +200,14 @@ export function AiEvaluationReviewForm({
               >
                 {reviewBadge.label}
               </span>
+              {evaluation.confidence != null && (
+                <span
+                  className={`rounded-full border px-2 py-0.5 text-xs font-medium ${confidenceBadgeClass(evaluation.confidence)}`}
+                  title="Confiança declarada pela IA: 0 = sem certeza, 1 = alta certeza"
+                >
+                  Confiança: {Math.round(evaluation.confidence * 100)}%
+                </span>
+              )}
             </div>
             {evaluation.summary}
           </div>

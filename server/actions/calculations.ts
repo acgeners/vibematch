@@ -55,6 +55,7 @@ interface WorkComputed {
   platformAvg: number | null
   calcScore: number
   predictedScore: number | null
+  predictionDistance: number | null
   finalScore: number | null
 }
 
@@ -90,6 +91,7 @@ function buildWork(raw: RawWork): WorkComputed {
     platformAvg: null,
     calcScore: 0,
     predictedScore: null,
+    predictionDistance: null,
     finalScore: null,
   }
 }
@@ -184,13 +186,32 @@ export async function recalculateAll() {
   for (const w of works) {
     const { value, diagnostics } = calculateGPTWithDiagnostics(w.categoryScores, weights)
     w.iaEvalRaw = value
-    w.iaEvalNormalized = normalizeGPT(value)
     w.chaptersNormalized = normalizeChapters(w.totalChapters)
     if (diagnostics.clampHit) gptClampHits += 1
     for (const [slug, activated] of Object.entries(diagnostics.negativeActivations)) {
       if (!activated) continue
       gptNegativeActivations[slug] = (gptNegativeActivations[slug] ?? 0) + 1
     }
+  }
+
+  // Calibrar estatísticas de GPT (z-score) a partir da base atual.
+  // Quando n<20 ou std≈0, mantém defaults pra evitar normalização instável.
+  const gptValues = works.map((w) => w.iaEvalRaw)
+  let gptMean = config.gpt_mean ?? 5
+  let gptStd = config.gpt_std ?? 4
+  if (gptValues.length >= 20) {
+    const mean = gptValues.reduce((a, b) => a + b, 0) / gptValues.length
+    const variance =
+      gptValues.reduce((a, b) => a + (b - mean) ** 2, 0) / gptValues.length
+    const std = Math.sqrt(variance)
+    if (std > 0.1) {
+      gptMean = Number(mean.toFixed(4))
+      gptStd = Number(std.toFixed(4))
+    }
+  }
+
+  for (const w of works) {
+    w.iaEvalNormalized = normalizeGPT(w.iaEvalRaw, gptMean, gptStd)
   }
 
   // Global mean precisa dos platform_avg de todos. Calcular em 2 passes:
@@ -228,9 +249,27 @@ export async function recalculateAll() {
 
   const predictor = trainPredictor(trainInputs, trainTargets)
   const allInputs = works.map(buildPredictionInput)
-  const predictions = predictor.predict(allInputs)
+  const { predictions, distances } = predictor.predictWithDistance(allInputs)
   for (let i = 0; i < works.length; i++) {
     works[i].predictedScore = predictions[i]
+    works[i].predictionDistance = distances[i]
+  }
+
+  // Escala da distância: usa a distância média do conjunto de treino como
+  // referência. Distância ≤ média → fator = 1. Distância 2× média → fator ≈ 0.5.
+  // Usamos exp(-d/scale): suaviza penalidade pra outliers moderados.
+  const trainDistances = predictor.isStub
+    ? []
+    : predictor.predictWithDistance(trainInputs).distances
+  const meanTrainDistance =
+    trainDistances.length > 0
+      ? trainDistances.reduce((a, b) => a + b, 0) / trainDistances.length
+      : 0
+  const distanceScale = meanTrainDistance > 0 ? meanTrainDistance : 1
+
+  function distanceFactor(distance: number | null): number {
+    if (distance == null || distance <= 0 || predictor.isStub) return 1
+    return Math.exp(-Math.max(0, distance - distanceScale) / distanceScale)
   }
 
   // ---------- 4) Calibrar MAEs com Nota.Calc + Nota.Pr ----------
@@ -252,6 +291,7 @@ export async function recalculateAll() {
   // ---------- 5) NotaFinal com RMSEs novos ----------
   // Quando calibração é insuficiente (RMSE null) ou predição é stub,
   // calculateNotaFinal cai pra calcScore puro — sem blend baseado em chute.
+  // Distância ao centróide reduz o peso de Nota.Pr pra outliers.
   for (const w of works) {
     if (w.predictedScore == null || predictor.isStub) {
       w.finalScore = w.calcScore
@@ -260,7 +300,8 @@ export async function recalculateAll() {
         w.calcScore,
         w.predictedScore,
         newRmseCalc,
-        newRmsePredicted
+        newRmsePredicted,
+        distanceFactor(w.predictionDistance)
       )
     }
   }
@@ -293,6 +334,7 @@ export async function recalculateAll() {
     mae_predicted: newMaePredicted,
     rmse_calc: newRmseCalc,
     rmse_predicted: newRmsePredicted,
+    prediction_distance: w.predictionDistance,
     formula_version: config.formula_version,
     calculated_at: new Date().toISOString(),
   }))
@@ -318,6 +360,8 @@ export async function recalculateAll() {
       mae_predicted: newMaePredicted,
       rmse_calc: newRmseCalc,
       rmse_predicted: newRmsePredicted,
+      gpt_mean: gptMean,
+      gpt_std: gptStd,
       pseudo_votes_nota_m: pseudoVotesNotaM,
       pseudo_votes_blend: pseudoVotesBlend,
     })

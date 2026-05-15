@@ -53,8 +53,22 @@ export interface PredictionInput {
   publicationStatus: string
 }
 
+export interface PredictionWithDistance {
+  predictions: number[]
+  /**
+   * Distância Euclidiana entre cada input e o centróide do conjunto de treino
+   * no espaço de features padronizadas (numéricas + one-hot). Pode ser usada
+   * pra ponderar a confiança da predição: distância alta → input fora-da-
+   * distribuição → menor peso pra Nota.Pr em Nota.Final.
+   *
+   * No fallback (stub), todas as distâncias são 0 (sem informação).
+   */
+  distances: number[]
+}
+
 export interface TrainedPredictor {
   predict(inputs: PredictionInput[]): number[]
+  predictWithDistance(inputs: PredictionInput[]): PredictionWithDistance
   model: RidgeModel
   trainSize: number
   featureNames: string[]
@@ -112,6 +126,10 @@ export function trainPredictor(
         : 7.0
     return {
       predict: (rows: PredictionInput[]) => rows.map(() => fallbackMean),
+      predictWithDistance: (rows: PredictionInput[]) => ({
+        predictions: rows.map(() => fallbackMean),
+        distances: rows.map(() => 0),
+      }),
       model: {
         coefficients: [],
         intercept: fallbackMean,
@@ -141,23 +159,54 @@ export function trainPredictor(
   const cvFolds = trainInputs.length < 50 ? trainInputs.length : 5
   const model = fitRidgeCV(Xtrain, trainTargets, undefined, cvFolds)
 
+  // Centróide do treino (features padronizadas têm média 0 nas numéricas).
+  // Pro one-hot a média é a frequência relativa de cada categoria.
+  const featureDim = Xtrain[0]?.length ?? 0
+  const centroid = new Array<number>(featureDim).fill(0)
+  for (const row of Xtrain) {
+    for (let j = 0; j < featureDim; j++) centroid[j] += row[j]
+  }
+  for (let j = 0; j < featureDim; j++) centroid[j] /= Xtrain.length
+
   const featureNames = [
     ...NUMERIC_FEATURE_NAMES,
     ...catEncoder.featureNames(CATEGORICAL_FEATURE_NAMES as unknown as string[]),
   ]
 
+  function transform(inputs: PredictionInput[]): number[][] {
+    const numRows = inputs.map(buildNumericRow)
+    const catRows = inputs.map(buildCategoricalRow)
+    const numImp = numImputer.transform(numRows)
+    const numSc = numScaler.transform(numImp)
+    const catImp = catImputer.transform(catRows)
+    const catEnc = catEncoder.transform(catImp)
+    return hstack(numSc, catEnc)
+  }
+
+  function euclideanToCentroid(row: number[]): number {
+    let sumSq = 0
+    for (let j = 0; j < row.length; j++) {
+      const d = row[j] - centroid[j]
+      sumSq += d * d
+    }
+    return Math.sqrt(sumSq)
+  }
+
   return {
     predict(inputs: PredictionInput[]) {
       if (inputs.length === 0) return []
-      const numRows = inputs.map(buildNumericRow)
-      const catRows = inputs.map(buildCategoricalRow)
-      const numImp = numImputer.transform(numRows)
-      const numSc = numScaler.transform(numImp)
-      const catImp = catImputer.transform(catRows)
-      const catEnc = catEncoder.transform(catImp)
-      const X = hstack(numSc, catEnc)
+      const X = transform(inputs)
       const raw = predictRidge(X, model)
       return raw.map((v) => Math.max(0, Math.min(10, v)))
+    },
+    predictWithDistance(inputs: PredictionInput[]) {
+      if (inputs.length === 0) return { predictions: [], distances: [] }
+      const X = transform(inputs)
+      const raw = predictRidge(X, model)
+      return {
+        predictions: raw.map((v) => Math.max(0, Math.min(10, v))),
+        distances: X.map(euclideanToCentroid),
+      }
     },
     model,
     trainSize: trainInputs.length,

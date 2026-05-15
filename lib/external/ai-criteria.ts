@@ -19,7 +19,6 @@ export async function evaluateCriteriaWithAI(params: {
       genres: params.genres,
       tags: params.tags,
       reviews: params.reviews,
-      promptVersion: "v9",
     })
 
     const result: Partial<Record<CriterionSlug, number>> = {}

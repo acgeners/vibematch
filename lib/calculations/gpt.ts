@@ -86,10 +86,21 @@ export function calculateGPT(
   return calculateGPTWithDiagnostics(scores, weights).value
 }
 
+/** Desvio-alvo na escala 0-10. Centro 5, ~1.5 σ ocupando boa parte da escala. */
+const NORMALIZE_TARGET_STD = 1.5
+
 /**
- * GPT.N = MAX(0, MIN(10, 5 + (GPT - 5) * 1.25))
- * Amplifica a diferença em relação à média (5), expandindo a escala.
+ * GPT.N = clamp(5 + (GPT - mean) / std * NORMALIZE_TARGET_STD, 0, 10)
+ *
+ * Z-score calibrado da distribuição real de GPT. `mean` e `std` vêm do
+ * `formula_config` (calibrados a cada `recalculateAll`). Quando omitidos,
+ * usa defaults (mean=5, std=4) que aproximam o comportamento antigo
+ * (`5 + (gpt - 5) * 1.25`).
  */
-export function normalizeGPT(gpt: number): number {
-  return Math.max(0, Math.min(10, 5 + (gpt - 5) * 1.25))
+export function normalizeGPT(gpt: number, mean = 5, std = 4): number {
+  const effectiveStd = std > 0 ? std : 4
+  return Math.max(
+    0,
+    Math.min(10, 5 + ((gpt - mean) / effectiveStd) * NORMALIZE_TARGET_STD)
+  )
 }
