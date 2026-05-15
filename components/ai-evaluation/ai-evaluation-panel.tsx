@@ -373,14 +373,14 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                   />
                 )}
 
-                {/* Cover thumb (esquerda) */}
-                <div className="relative h-[72px] w-12 shrink-0 overflow-hidden rounded-md border bg-muted">
+                {/* Cover thumb (esquerda) — aspect 2:3 de manga */}
+                <div className="relative h-28 w-[76px] shrink-0 overflow-hidden rounded-md border bg-muted">
                   {work.cover_url ? (
                     <Image
                       src={work.cover_url}
                       alt=""
                       fill
-                      sizes="48px"
+                      sizes="76px"
                       unoptimized
                       className="object-cover"
                     />
@@ -413,35 +413,33 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                   <EvaluationMetaLine evaluation={work.evaluation} />
                 </div>
 
-                {/* Ações + confiança (direita) — agrupadas verticalmente */}
+                {/* Confiança + ações (direita) — tudo na mesma linha */}
                 {!selectionMode && (
-                  <div className="flex shrink-0 flex-col items-end gap-2">
+                  <div className="flex shrink-0 items-center gap-2">
                     {work.evaluation?.confidence != null && (
                       <ConfidencePill confidence={work.evaluation.confidence} />
                     )}
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleSkip(work.id)}
-                        disabled={!!evaluatingId || !!skippingId || isInQueue}
-                        title="Pular"
-                      >
-                        <SkipForward className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => handleEvaluate(work)}
-                        disabled={!!evaluatingId || !!skippingId || isInQueue}
-                      >
-                        <Sparkles className="h-3.5 w-3.5 mr-1" />
-                        {evaluatingId === work.id
-                          ? "Avaliando..."
-                          : work.evaluation
-                            ? "Reavaliar"
-                            : "Avaliar"}
-                      </Button>
-                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleSkip(work.id)}
+                      disabled={!!evaluatingId || !!skippingId || isInQueue}
+                      title="Pular"
+                    >
+                      <SkipForward className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleEvaluate(work)}
+                      disabled={!!evaluatingId || !!skippingId || isInQueue}
+                    >
+                      <Sparkles className="h-3.5 w-3.5 mr-1" />
+                      {evaluatingId === work.id
+                        ? "Avaliando..."
+                        : work.evaluation
+                          ? "Reavaliar"
+                          : "Avaliar"}
+                    </Button>
                   </div>
                 )}
               </div>
