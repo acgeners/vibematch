@@ -579,7 +579,16 @@ export async function findDuplicateWorkByTitle(
  * Insere a obra completa no banco (works + category_scores + platform_ratings + tags)
  * mas NÃO dispara o recálculo. Usado tanto pelo fluxo normal quanto pelo batch.
  */
-async function persistNewWork(values: WorkFormValues): Promise<
+export interface CreateWorkAiMeta {
+  inputHash: string
+  modelName: string
+  promptVersion: string
+}
+
+async function persistNewWork(
+  values: WorkFormValues,
+  aiMeta?: CreateWorkAiMeta
+): Promise<
   | { ok: true; workId: string }
   | { ok: false; error: Record<string, string[]> }
 > {
@@ -658,11 +667,12 @@ async function persistNewWork(values: WorkFormValues): Promise<
       .insert({
         work_id: workId,
         status: "completed",
-        model_name: "external-ai-criteria",
-        prompt_version: "external-import",
+        model_name: aiMeta?.modelName ?? "external-ai-criteria",
+        prompt_version: aiMeta?.promptVersion ?? "external-import",
         summary: "Notas e explicações geradas durante a busca externa do título.",
         confidence: null,
         raw_response: { criteriaJustifications: aiJustifications },
+        input_hash: aiMeta?.inputHash ?? null,
       })
       .select("id")
       .single()
@@ -743,8 +753,8 @@ async function persistNewWork(values: WorkFormValues): Promise<
   return { ok: true, workId }
 }
 
-export async function createWork(values: WorkFormValues) {
-  const result = await persistNewWork(values)
+export async function createWork(values: WorkFormValues, aiMeta?: CreateWorkAiMeta) {
+  const result = await persistNewWork(values, aiMeta)
   if (!result.ok) return { error: result.error }
 
   // Recalcular todos: a média global muda quando um título é adicionado

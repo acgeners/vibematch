@@ -54,13 +54,6 @@ export async function updateScoreWeights(updates: ScoreWeightUpdate[]) {
   return result
 }
 
-export interface FormulaConfigUpdate {
-  mae_calc: number | null
-  mae_predicted: number | null
-  pseudo_votes_nota_m: number
-  pseudo_votes_blend: number
-}
-
 export interface RankingPreferencesUpdate {
   top_n: number | null
   min_calc_score: number | null
@@ -97,28 +90,23 @@ export async function updateRankingPreferences(update: RankingPreferencesUpdate)
   return { error: null }
 }
 
-export async function updateFormulaConfig(update: FormulaConfigUpdate) {
-  const supabase = createAdminClient()
-
-  await supabase
-    .from("formula_config")
-    .update({
-      ...update,
-      updated_at: new Date().toISOString(),
-    })
-    .limit(1)
-
-  const result = await recalculateAll()
-
-  revalidatePath("/settings")
-  revalidatePath("/ranking")
-  return result
-}
-
 /**
  * Lê uma "fotografia" da calibração atual diretamente do estado do DB —
  * sem retreinar nada. Útil pra exibir métricas em /settings.
  */
+const DISTANCE_BUCKETS = [
+  { label: "< 0.5", min: 0, max: 0.5 },
+  { label: "0.5–1", min: 0.5, max: 1 },
+  { label: "1–2", min: 1, max: 2 },
+  { label: "2–3", min: 2, max: 3 },
+  { label: "≥ 3", min: 3, max: Infinity },
+] as const
+
+export interface DistanceBucket {
+  label: string
+  count: number
+}
+
 export async function getCalibrationSnapshot() {
   const supabase = createAdminClient()
 
@@ -126,7 +114,7 @@ export async function getCalibrationSnapshot() {
     .from("works")
     .select(
       `id, title, manual_score,
-       calculated_scores(calc_score, predicted_score, final_score, total_votes, predicted_is_stub)`
+       calculated_scores(calc_score, predicted_score, final_score, total_votes, predicted_is_stub, prediction_distance)`
     )
     .eq("is_archived", false)
     .limit(2000)
@@ -145,10 +133,18 @@ export async function getCalibrationSnapshot() {
       finalScore: cs?.final_score == null ? null : Number(cs.final_score),
       totalVotes: Number(cs?.total_votes ?? 0),
       predictedIsStub: Boolean(cs?.predicted_is_stub ?? true),
+      predictionDistance: cs?.prediction_distance == null ? null : Number(cs.prediction_distance),
     }
   })
 
   const calibration = computeCalibration(items)
+
+  const distanceBuckets: DistanceBucket[] = DISTANCE_BUCKETS.map((b) => ({
+    label: b.label,
+    count: items.filter(
+      (it) => it.predictionDistance != null && it.predictionDistance >= b.min && it.predictionDistance < b.max
+    ).length,
+  }))
 
   return {
     totalWorks: items.length,
@@ -163,6 +159,8 @@ export async function getCalibrationSnapshot() {
     pseudoVotesBlend: calibration.pseudoVotesBlend,
     worstDiffs: calibration.worstDiffs as CalibrationDiff[],
     predictorIsStub: items.some((it) => it.predictedIsStub),
+    distanceBuckets,
+    worksWithDistance: items.filter((it) => it.predictionDistance != null).length,
   }
 }
 

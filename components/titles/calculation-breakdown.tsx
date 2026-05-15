@@ -55,6 +55,16 @@ function formatPct(value: number | null): string {
   return value == null ? "N/A" : `${(value * 100).toFixed(0)}%`
 }
 
+/**
+ * Rótulo qualitativo da distância ao centróide do treino. Thresholds absolutos
+ * baseados em features padronizadas (mean=0, std=1 por feature).
+ */
+function distanceLabel(distance: number): "perto" | "médio" | "longe" {
+  if (distance < 1.5) return "perto"
+  if (distance < 3) return "médio"
+  return "longe"
+}
+
 const STEPS: BreakdownStep[] = [
   {
     label: "IA(n) — Nota bruta IA",
@@ -173,6 +183,14 @@ export function CalculationBreakdown({
               <div>
                 <span className="font-medium text-foreground">MAE.Prev:</span>{" "}
                 {calculatedScore.mae_predicted?.toFixed(3) ?? "—"}
+              </div>
+              <div
+                title="Distância no espaço de features padronizadas. Quanto maior, mais 'fora da distribuição' do treino — Nota.Pr pesa menos em Nota.Final."
+              >
+                <span className="font-medium text-foreground">Distância:</span>{" "}
+                {calculatedScore.prediction_distance != null
+                  ? `${calculatedScore.prediction_distance.toFixed(2)} (${distanceLabel(calculatedScore.prediction_distance)})`
+                  : "—"}
               </div>
               <div>
                 <span className="font-medium text-foreground">Total votos:</span>{" "}

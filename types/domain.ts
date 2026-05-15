@@ -216,6 +216,10 @@ export interface FormulaConfig {
   /** Estatísticas da distribuição de GPT, usadas pra z-score em normalizeGPT. */
   gpt_mean: number
   gpt_std: number
+  /** Diagnósticos persistidos do último recálculo. */
+  gpt_clamp_hit_rate: number | null
+  negative_activation_rate: Record<string, number> | null
+  last_recalculated_at: string | null
   pseudo_votes_nota_m: number
   pseudo_votes_blend: number
   /** Quantos itens exibir no ranking (null = todos). */

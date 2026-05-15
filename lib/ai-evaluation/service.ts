@@ -93,8 +93,8 @@ export interface AiEvaluationResponse {
   fromCache?: "memory" | "db"
 }
 
-const MODEL = "claude-sonnet-4-6"
-const PROMPT_VERSION = "v11"
+export const MODEL = "claude-sonnet-4-6"
+export const PROMPT_VERSION = "v11"
 const MAX_REVIEW_WORDS = 120
 
 // ============================================================================

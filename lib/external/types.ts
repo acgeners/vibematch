@@ -114,6 +114,12 @@ export interface ExternalWorkData {
   externalIds?: Partial<Record<ExternalSourceId, string>>
   criteriaScores?: Partial<Record<CriterionSlug, number>>
   criteriaJustifications?: Partial<Record<CriterionSlug, string>>
+  /**
+   * Metadata da avaliação IA usada pra popular criteriaScores/Justifications.
+   * Plumbada até works.ts pra preencher ai_evaluations.input_hash, permitindo
+   * cache hit no Path A (página /ai-evaluation) do mesmo título.
+   */
+  aiMeta?: { inputHash: string; modelName: string; promptVersion: string }
   debug?: ExternalMergeDebug
 }
 

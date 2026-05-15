@@ -23,7 +23,28 @@ interface CalibrationPanelProps {
     pseudoVotesBlend: number | null
     worstDiffs: CalibrationDiff[]
     predictorIsStub: boolean
+    distanceBuckets: Array<{ label: string; count: number }>
+    worksWithDistance: number
   }
+}
+
+const CRITERIA_LABEL: Record<string, string> = {
+  drama: "Drama",
+  tragedy: "Tragédia",
+}
+
+function formatRelativeTime(iso: string | null): string {
+  if (!iso) return "nunca"
+  const date = new Date(iso)
+  const diffMs = Date.now() - date.getTime()
+  const minutes = Math.floor(diffMs / 60000)
+  if (minutes < 1) return "agora há pouco"
+  if (minutes < 60) return `há ${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `há ${hours}h`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `há ${days}d`
+  return date.toLocaleDateString("pt-BR")
 }
 
 function fmt(value: number | null | undefined, digits = 4): string {
@@ -88,9 +109,14 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
             )}
           </p>
         </div>
-        <Button onClick={handleRecalibrate} disabled={isPending}>
-          {isPending ? "Recalibrando..." : "Recalibrar agora"}
-        </Button>
+        <div className="flex flex-col items-end gap-1">
+          <Button onClick={handleRecalibrate} disabled={isPending}>
+            {isPending ? "Recalibrando..." : "Recalibrar agora"}
+          </Button>
+          <span className="text-[10px] text-muted-foreground">
+            Último recálculo: {formatRelativeTime(config.last_recalculated_at)}
+          </span>
+        </div>
       </div>
 
       {lastRun && (
@@ -131,21 +157,22 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
 
       {/* Pseudo-votos */}
       <div>
-        <h3 className="mb-2 text-sm font-medium">Pseudo-votos (percentis de #Votos)</h3>
+        <h3 className="mb-2 text-sm font-medium">Pseudo-votos (mediana × multiplicador)</h3>
         <p className="mb-3 text-xs text-muted-foreground">
-          Suavizam a média Bayesiana. Quanto maior, mais conservador o cálculo para títulos
-          com poucos votos.
+          Suavizam a média Bayesiana. Recalculados automaticamente após cada edição de título.
+          O badge &quot;desatualizado&quot; aparece quando a fórmula de cálculo mudou e o recálculo
+          ainda não rodou — clique em &quot;Recalibrar agora&quot; pra sincronizar.
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <MetricCard
-            label="Pseudo Nota.M (p75)"
+            label="Pseudo Nota.M (mediana × 2.0)"
             live={snapshot.pseudoVotesNotaM}
             stored={config.pseudo_votes_nota_m}
             digits={1}
             mismatch={hasMismatch(snapshot.pseudoVotesNotaM, config.pseudo_votes_nota_m, 0.10)}
           />
           <MetricCard
-            label="Pseudo blend (p60)"
+            label="Pseudo blend (mediana × 1.2)"
             live={snapshot.pseudoVotesBlend}
             stored={config.pseudo_votes_blend}
             digits={1}
@@ -153,6 +180,84 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
           />
         </div>
       </div>
+
+      {/* Diagnósticos do último recálculo */}
+      <div>
+        <h3 className="mb-2 text-sm font-medium">Diagnósticos do último recálculo</h3>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Valores persistidos pelo `recalculateAll`. Útil pra detectar regressões silenciosas
+          (e.g. clamp disparando demais, critérios negativos nunca ativando).
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Clamp 0–10 em Nota.IA (GPT)</p>
+            <p className="mt-1 font-mono text-base">
+              {config.gpt_clamp_hit_rate != null
+                ? `${(config.gpt_clamp_hit_rate * 100).toFixed(1)}%`
+                : "—"}
+            </p>
+            <p className="text-[10px] text-muted-foreground">
+              {config.gpt_clamp_hit_rate != null && config.gpt_clamp_hit_rate > 0.2
+                ? "alto: o bônus pode estar empurrando obras pra fora da escala"
+                : "abaixo de 20% = saudável"}
+            </p>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">Critérios negativos ativados</p>
+            <div className="mt-1 space-y-1">
+              {config.negative_activation_rate && Object.keys(config.negative_activation_rate).length > 0 ? (
+                Object.entries(config.negative_activation_rate)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([slug, rate]) => (
+                    <p key={slug} className="font-mono text-xs">
+                      {CRITERIA_LABEL[slug] ?? slug}:{" "}
+                      <span className="text-foreground">{(rate * 100).toFixed(1)}%</span>
+                    </p>
+                  ))
+              ) : (
+                <p className="text-xs text-muted-foreground">—</p>
+              )}
+            </div>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Fração de obras com score acima do threshold negativo.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Distribuição de prediction_distance */}
+      {snapshot.worksWithDistance > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-medium">
+            Distância ao centróide do treino (Nota.Pr)
+          </h3>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Distância Euclidiana nas features padronizadas. Distância alta = obra fora-da-
+            distribuição → Nota.Pr pesa menos em Nota.Final. {snapshot.worksWithDistance} obras com dado.
+          </p>
+          <div className="space-y-1">
+            {snapshot.distanceBuckets.map((bucket) => {
+              const pct = snapshot.worksWithDistance > 0
+                ? (bucket.count / snapshot.worksWithDistance) * 100
+                : 0
+              return (
+                <div key={bucket.label} className="flex items-center gap-2 text-xs">
+                  <span className="w-14 font-mono text-muted-foreground">{bucket.label}</span>
+                  <div className="flex-1 rounded-sm bg-muted/40 overflow-hidden">
+                    <div
+                      className="h-3 bg-primary/60"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="w-16 text-right font-mono">
+                    {bucket.count} ({pct.toFixed(0)}%)
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Top 10 piores diffs */}
       {snapshot.worstDiffs.length > 0 && (

@@ -352,6 +352,13 @@ export async function recalculateAll() {
     console.warn("[recalculateAll] refresh_calculated_scores_confidence falhou:", confidenceErr.message)
   }
 
+  // Agregar diagnósticos antes do persist
+  const negativeActivationRate: Record<string, number> = {}
+  for (const [slug, count] of Object.entries(gptNegativeActivations)) {
+    negativeActivationRate[slug] = count / works.length
+  }
+  const gptClampHitRate = gptClampHits / works.length
+
   // ---------- 7) Persistir novo formula_config ----------
   const { error: configUpdateErr } = await supabase
     .from("formula_config")
@@ -364,6 +371,9 @@ export async function recalculateAll() {
       gpt_std: gptStd,
       pseudo_votes_nota_m: pseudoVotesNotaM,
       pseudo_votes_blend: pseudoVotesBlend,
+      gpt_clamp_hit_rate: gptClampHitRate,
+      negative_activation_rate: negativeActivationRate,
+      last_recalculated_at: new Date().toISOString(),
     })
     .eq("id", config.id)
   if (configUpdateErr) throw new Error(configUpdateErr.message)
@@ -373,16 +383,11 @@ export async function recalculateAll() {
   revalidatePath("/settings")
   revalidatePath("/")
 
-  const negativeActivationRate: Record<string, number> = {}
-  for (const [slug, count] of Object.entries(gptNegativeActivations)) {
-    negativeActivationRate[slug] = count / works.length
-  }
-
   return {
     recalculated: works.length,
     diagnostics: {
       gptClampHits,
-      gptClampHitRate: gptClampHits / works.length,
+      gptClampHitRate,
       negativeActivationCounts: gptNegativeActivations,
       negativeActivationRate,
     },

@@ -512,6 +512,9 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     if (isCreating) setBatchDrafts(readBatchDrafts())
   }, [isCreating])
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null)
+  // Metadata da IA usada na busca externa (Path B). Não vai pro Zod schema
+  // — passa por canal paralelo no createWork pra preencher ai_evaluations.input_hash.
+  const [aiMeta, setAiMeta] = useState<{ inputHash: string; modelName: string; promptVersion: string } | null>(null)
   const [criteriaJustifications, setCriteriaJustifications] = useState<CriteriaJustifications>(() => {
     if (!aiEvaluation?.scores?.length) return {}
     const map: CriteriaJustifications = {}
@@ -829,6 +832,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     }
     setCriteriaJustifications(data.criteriaJustifications ?? {})
     setValue("ai_justifications", data.criteriaJustifications ?? {})
+    if (data.aiMeta) setAiMeta(data.aiMeta)
     if (data.externalIds && Object.keys(data.externalIds).length > 0) {
       const cleaned: Record<string, string> = {}
       for (const [source, id] of Object.entries(data.externalIds)) {
@@ -848,7 +852,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     setTopFeedback(workId ? "Atualizando obra..." : "Criando obra e recalculando notas...")
     const result = workId
       ? await updateWork(workId, values)
-      : await createWork(values)
+      : await createWork(values, aiMeta ?? undefined)
 
     if (result.error) {
       setTopFeedback(null)

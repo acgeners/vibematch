@@ -73,8 +73,8 @@ export default async function SettingsPage() {
       </CollapsibleCard>
 
       <CollapsibleCard
-        title="Parâmetros da fórmula (avançado)"
-        description="Edição manual: estes valores são sobrescritos a cada recálculo. Útil apenas para ajustes pontuais antes de uma reanálise."
+        title="Parâmetros calibrados (read-only)"
+        description="Snapshot dos valores atuais do formula_config. Sobrescritos a cada recálculo — exibidos pra debug."
         defaultOpen={false}
       >
         <FormulaConfigForm config={config} />

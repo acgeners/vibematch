@@ -254,6 +254,8 @@ export interface CandidateAiResult {
   confidence: number
   modelName: string
   promptVersion: string
+  /** Hash canônico do input — propagado pra ai_evaluations.input_hash no createWork. */
+  inputHash: string
 }
 
 /**
@@ -290,7 +292,6 @@ export async function evaluateCandidateForCreate(input: {
       tags: input.tags ?? [],
       sourcedReviews,
       externalContext,
-      promptVersion: "v8",
     })
 
     const scores: Partial<Record<CriterionSlug, number>> = {}
@@ -312,6 +313,7 @@ export async function evaluateCandidateForCreate(input: {
       confidence: response.confidence,
       modelName: response.modelName,
       promptVersion: response.promptVersion,
+      inputHash: response.inputHash,
     }
   } catch (err) {
     console.error("[evaluateCandidateForCreate] failed", err)

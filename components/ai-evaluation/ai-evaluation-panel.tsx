@@ -33,6 +33,12 @@ interface PendingWork {
   total_chapters: number | null
   cover_url?: string | null
   final_score: number | null
+  matchedFilters?: Array<"pending" | "low-confidence" | "outdated-model">
+  evaluation?: {
+    confidence: number | null
+    modelName: string | null
+    promptVersion: string | null
+  } | null
 }
 
 interface AiEvaluationPanelProps {
@@ -379,6 +385,10 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                     <PublicationStatusBadge statusId={work.publication_status_id ?? null} />
                     <PersonalStatusBadge statusId={work.personal_status_id ?? null} />
                   </div>
+                  <FilterBadges
+                    matchedFilters={work.matchedFilters}
+                    evaluation={work.evaluation}
+                  />
                   {work.total_chapters != null && (
                     <p className="text-xs text-muted-foreground mt-1">
                       {work.total_chapters} capítulos
@@ -445,5 +455,37 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
         </DialogContent>
       </Dialog>
     </>
+  )
+}
+
+function FilterBadges({
+  matchedFilters,
+  evaluation,
+}: {
+  matchedFilters?: PendingWork["matchedFilters"]
+  evaluation?: PendingWork["evaluation"]
+}) {
+  if (!matchedFilters?.length) return null
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {matchedFilters.includes("pending") && (
+        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 text-slate-700 px-2 py-0.5 text-[10px] font-medium">
+          sem avaliação IA
+        </span>
+      )}
+      {matchedFilters.includes("low-confidence") && evaluation?.confidence != null && (
+        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 text-amber-700 px-2 py-0.5 text-[10px] font-medium">
+          confiança {Math.round(evaluation.confidence * 100)}%
+        </span>
+      )}
+      {matchedFilters.includes("outdated-model") && evaluation && (
+        <span
+          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 text-rose-700 px-2 py-0.5 text-[10px] font-medium"
+          title={`Avaliado em ${evaluation.modelName ?? "?"} / ${evaluation.promptVersion ?? "?"}`}
+        >
+          modelo antigo: {evaluation.modelName ?? "?"}/{evaluation.promptVersion ?? "?"}
+        </span>
+      )}
+    </div>
   )
 }

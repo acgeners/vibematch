@@ -193,6 +193,11 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
         if (aiResult) {
           merged.criteriaScores = aiResult.scores
           merged.criteriaJustifications = aiResult.justifications
+          merged.aiMeta = {
+            inputHash: aiResult.inputHash,
+            modelName: aiResult.modelName,
+            promptVersion: aiResult.promptVersion,
+          }
         }
       }
 
