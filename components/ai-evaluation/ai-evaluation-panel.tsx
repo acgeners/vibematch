@@ -6,7 +6,6 @@ import { CheckSquare, ListChecks, Loader2, Sparkles, SkipForward, X } from "luci
 import { toast } from "sonner"
 import { triggerAiEvaluation, skipAiEvaluation } from "@/server/actions/ai"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
-import { ScoreBadge } from "@/components/ui/score-badge"
 import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -30,14 +29,13 @@ interface PendingWork {
   publication_status_id: number | null
   personal_status: string
   personal_status_id: number | null
-  total_chapters: number | null
   cover_url?: string | null
-  final_score: number | null
   matchedFilters?: Array<"pending" | "low-confidence" | "outdated-model">
   evaluation?: {
     confidence: number | null
     modelName: string | null
     promptVersion: string | null
+    evaluatedAt: string | null
   } | null
 }
 
@@ -389,15 +387,10 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                     matchedFilters={work.matchedFilters}
                     evaluation={work.evaluation}
                   />
-                  {work.total_chapters != null && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {work.total_chapters} capítulos
-                    </p>
-                  )}
+                  <EvaluationMetaLine evaluation={work.evaluation} />
                 </div>
                 {!selectionMode && (
                   <div className="flex items-center gap-2 shrink-0">
-                    <ScoreBadge score={work.final_score} size="sm" />
                     <Button
                       size="sm"
                       onClick={() => handleEvaluate(work)}
@@ -415,9 +408,6 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                       <SkipForward className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                )}
-                {selectionMode && (
-                  <ScoreBadge score={work.final_score} size="sm" />
                 )}
               </div>
             </CardContent>
@@ -455,6 +445,36 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
         </DialogContent>
       </Dialog>
     </>
+  )
+}
+
+function formatEvaluatedAt(iso: string | null): string {
+  if (!iso) return "—"
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return "—"
+  return date.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  })
+}
+
+function EvaluationMetaLine({ evaluation }: { evaluation?: PendingWork["evaluation"] }) {
+  if (!evaluation) {
+    return (
+      <p className="text-xs text-muted-foreground mt-1">Nunca avaliada pela IA</p>
+    )
+  }
+  const parts: string[] = []
+  parts.push(`Avaliada em ${formatEvaluatedAt(evaluation.evaluatedAt)}`)
+  if (evaluation.modelName || evaluation.promptVersion) {
+    parts.push(`${evaluation.modelName ?? "?"}/${evaluation.promptVersion ?? "?"}`)
+  }
+  if (evaluation.confidence != null) {
+    parts.push(`Confiança ${Math.round(evaluation.confidence * 100)}%`)
+  }
+  return (
+    <p className="text-xs text-muted-foreground mt-1">{parts.join(" • ")}</p>
   )
 }
 

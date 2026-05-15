@@ -28,15 +28,14 @@ interface EligibleWork {
   publication_status_id: number | null
   personal_status: string
   personal_status_id: number | null
-  total_chapters: number | null
   cover_url?: string | null
-  final_score: number | null
   /** Razões pelas quais a obra apareceu (intersecção com os filtros ativos). */
   matchedFilters: EvaluationFilter[]
   evaluation: {
     confidence: number | null
     modelName: string | null
     promptVersion: string | null
+    evaluatedAt: string | null
   } | null
 }
 
@@ -139,7 +138,7 @@ async function getEligibleWorks(filters: EvaluationFilter[]) {
       .limit(500),
     supabase
       .from("latest_ai_evaluation_per_work")
-      .select("work_id, confidence, model_name, prompt_version")
+      .select("work_id, confidence, model_name, prompt_version, updated_at, created_at")
       .in("work_id", eligibleIds),
   ])
 
@@ -153,6 +152,10 @@ async function getEligibleWorks(filters: EvaluationFilter[]) {
         confidence: e.confidence == null ? null : Number(e.confidence),
         modelName: (e.model_name as string | null) ?? null,
         promptVersion: (e.prompt_version as string | null) ?? null,
+        // updated_at reflete a última mudança da avaliação (substituição, edição
+        // de scores, etc.). Fallback pra created_at se a view não tiver updated.
+        evaluatedAt:
+          (e.updated_at as string | null) ?? (e.created_at as string | null) ?? null,
       },
     ])
   )
