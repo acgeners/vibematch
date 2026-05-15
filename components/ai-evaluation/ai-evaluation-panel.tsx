@@ -547,7 +547,7 @@ function FilterBadges({
     <div className="flex flex-wrap gap-1 mt-1">
       {matchedFilters.includes("pending") && (
         <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 text-slate-700 px-2 py-0.5 text-[10px] font-medium">
-          sem avaliação IA
+          {evaluation ? "marcada como pendente" : "sem avaliação IA"}
         </span>
       )}
       {matchedFilters.includes("low-confidence") && evaluation?.confidence != null && (
