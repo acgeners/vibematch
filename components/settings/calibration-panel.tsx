@@ -232,8 +232,17 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
             Distância ao centróide do treino (Nota.Pr)
           </h3>
           <p className="mb-3 text-xs text-muted-foreground">
-            Distância Euclidiana nas features padronizadas. Distância alta = obra fora-da-
-            distribuição → Nota.Pr pesa menos em Nota.Final. {snapshot.worksWithDistance} obras com dado.
+            Distância Euclidiana nas features padronizadas.{" "}
+            {config.distance_p95 != null ? (
+              <>
+                Threshold de outlier (P95 do treino):{" "}
+                <span className="font-mono text-foreground">{config.distance_p95.toFixed(2)}</span>.
+                Obras acima disso têm Nota.Pr com peso reduzido em Nota.Final.{" "}
+              </>
+            ) : (
+              "Threshold ainda não calibrado (rode 'Recalibrar agora'). "
+            )}
+            {snapshot.worksWithDistance} obras com dado.
           </p>
           <div className="space-y-1">
             {snapshot.distanceBuckets.map((bucket) => {

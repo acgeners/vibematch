@@ -15,6 +15,7 @@ import {
 import { calculateGPTWithDiagnostics } from "@/lib/calculations/gpt"
 import { trainPredictor, type PredictionInput } from "@/lib/calculations/prediction"
 import { computeCalibration } from "@/lib/calculations/calibration"
+import { percentile } from "@/lib/ml/preprocessing"
 import type {
   CategoryScoreMap,
   ScoreWeight,
@@ -186,32 +187,13 @@ export async function recalculateAll() {
   for (const w of works) {
     const { value, diagnostics } = calculateGPTWithDiagnostics(w.categoryScores, weights)
     w.iaEvalRaw = value
+    w.iaEvalNormalized = normalizeGPT(value)
     w.chaptersNormalized = normalizeChapters(w.totalChapters)
     if (diagnostics.clampHit) gptClampHits += 1
     for (const [slug, activated] of Object.entries(diagnostics.negativeActivations)) {
       if (!activated) continue
       gptNegativeActivations[slug] = (gptNegativeActivations[slug] ?? 0) + 1
     }
-  }
-
-  // Calibrar estatísticas de GPT (z-score) a partir da base atual.
-  // Quando n<20 ou std≈0, mantém defaults pra evitar normalização instável.
-  const gptValues = works.map((w) => w.iaEvalRaw)
-  let gptMean = config.gpt_mean ?? 5
-  let gptStd = config.gpt_std ?? 4
-  if (gptValues.length >= 20) {
-    const mean = gptValues.reduce((a, b) => a + b, 0) / gptValues.length
-    const variance =
-      gptValues.reduce((a, b) => a + (b - mean) ** 2, 0) / gptValues.length
-    const std = Math.sqrt(variance)
-    if (std > 0.1) {
-      gptMean = Number(mean.toFixed(4))
-      gptStd = Number(std.toFixed(4))
-    }
-  }
-
-  for (const w of works) {
-    w.iaEvalNormalized = normalizeGPT(w.iaEvalRaw, gptMean, gptStd)
   }
 
   // Global mean precisa dos platform_avg de todos. Calcular em 2 passes:
@@ -255,21 +237,20 @@ export async function recalculateAll() {
     works[i].predictionDistance = distances[i]
   }
 
-  // Escala da distância: usa a distância média do conjunto de treino como
-  // referência. Distância ≤ média → fator = 1. Distância 2× média → fator ≈ 0.5.
-  // Usamos exp(-d/scale): suaviza penalidade pra outliers moderados.
+  // Threshold de outlier por percentil: P95 das distâncias do treino ao
+  // próprio centróide. Robusto a dimensionalidade — não depende de "distância
+  // absoluta" que escala com √k. Obras com d ≤ P95 mantêm factor = 1 (sem
+  // penalidade); acima cai suavemente via exp(-(d - p95)/p95).
   const trainDistances = predictor.isStub
     ? []
     : predictor.predictWithDistance(trainInputs).distances
-  const meanTrainDistance =
-    trainDistances.length > 0
-      ? trainDistances.reduce((a, b) => a + b, 0) / trainDistances.length
-      : 0
-  const distanceScale = meanTrainDistance > 0 ? meanTrainDistance : 1
+  const distanceP95: number | null =
+    trainDistances.length > 0 ? Number(percentile(trainDistances, 0.95).toFixed(4)) : null
 
   function distanceFactor(distance: number | null): number {
-    if (distance == null || distance <= 0 || predictor.isStub) return 1
-    return Math.exp(-Math.max(0, distance - distanceScale) / distanceScale)
+    if (distance == null || distanceP95 == null || predictor.isStub) return 1
+    if (distance <= distanceP95) return 1
+    return Math.exp(-(distance - distanceP95) / distanceP95)
   }
 
   // ---------- 4) Calibrar MAEs com Nota.Calc + Nota.Pr ----------
@@ -367,12 +348,11 @@ export async function recalculateAll() {
       mae_predicted: newMaePredicted,
       rmse_calc: newRmseCalc,
       rmse_predicted: newRmsePredicted,
-      gpt_mean: gptMean,
-      gpt_std: gptStd,
       pseudo_votes_nota_m: pseudoVotesNotaM,
       pseudo_votes_blend: pseudoVotesBlend,
       gpt_clamp_hit_rate: gptClampHitRate,
       negative_activation_rate: negativeActivationRate,
+      distance_p95: distanceP95,
       last_recalculated_at: new Date().toISOString(),
     })
     .eq("id", config.id)

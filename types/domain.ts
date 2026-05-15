@@ -213,13 +213,19 @@ export interface FormulaConfig {
   /** RMSE dos resíduos — usado em 1/RMSE² no peso de Nota.Final. */
   rmse_calc: number | null
   rmse_predicted: number | null
-  /** Estatísticas da distribuição de GPT, usadas pra z-score em normalizeGPT. */
-  gpt_mean: number
-  gpt_std: number
+  /**
+   * @deprecated Resíduo do experimento de z-score em normalizeGPT.
+   * normalizeGPT foi revertido pra `5 + (gpt-5)*1.25` (single-arg).
+   * Colunas mantidas no DB pra não dropar dado; valores nunca atualizados.
+   */
+  gpt_mean: number | null
+  gpt_std: number | null
   /** Diagnósticos persistidos do último recálculo. */
   gpt_clamp_hit_rate: number | null
   negative_activation_rate: Record<string, number> | null
   last_recalculated_at: string | null
+  /** P95 das distâncias do treino — threshold de outlier em distanceFactor. */
+  distance_p95: number | null
   pseudo_votes_nota_m: number
   pseudo_votes_blend: number
   /** Quantos itens exibir no ranking (null = todos). */

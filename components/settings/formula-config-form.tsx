@@ -33,12 +33,11 @@ export function FormulaConfigForm({ config }: FormulaConfigFormProps) {
       { label: "RMSE Nota.Pr (peso em Nota.Final)", value: config.rmse_predicted, format: fmtDecimal(4) },
     ],
     [
-      { label: "GPT mean (z-score)", value: config.gpt_mean, format: fmtDecimal(4) },
-      { label: "GPT std (z-score)", value: config.gpt_std, format: fmtDecimal(4) },
-    ],
-    [
       { label: "Pseudo-votos Nota.M (mediana × 2.0)", value: config.pseudo_votes_nota_m, format: fmtDecimal(1) },
       { label: "Pseudo-votos blend (mediana × 1.2)", value: config.pseudo_votes_blend, format: fmtDecimal(1) },
+    ],
+    [
+      { label: "Distância P95 (threshold de outlier)", value: config.distance_p95, format: fmtDecimal(3) },
     ],
   ]
 

@@ -126,6 +126,17 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
   if (!work) notFound()
 
+  // Carrega só o distance_p95 do formula_config pro CalculationBreakdown
+  // mostrar rótulos de distância calibrados (perto/médio/longe relativos).
+  const configClient = createAdminClient()
+  const { data: configRow } = await configClient
+    .from("formula_config")
+    .select("distance_p95")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const distanceP95: number | null = configRow?.distance_p95 == null ? null : Number(configRow.distance_p95)
+
   const scoreMap: Record<string, number> = {}
   for (const cs of work.category_scores ?? []) {
     scoreMap[cs.criterion_slug] = cs.score
@@ -604,6 +615,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           calculatedScore={work.calculated_scores}
           aiConfidence={latestAiEval?.confidence ?? null}
           criteriaCoverage={Object.keys(scoreMap).length / CRITERION_SLUGS.length}
+          distanceP95={distanceP95}
         />
       )}
 

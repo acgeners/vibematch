@@ -40,11 +40,7 @@ export function calculateAll(inputs: CalculationInputs): CalculationResult {
   } = inputs
 
   const iaEvalRaw = calculateGPT(categoryScores, weights)
-  const iaEvalNormalized = normalizeGPT(
-    iaEvalRaw,
-    config.gpt_mean ?? 5,
-    config.gpt_std ?? 4
-  )
+  const iaEvalNormalized = normalizeGPT(iaEvalRaw)
 
   const totalVotes = sumVotes(platformRatings)
   const platformAvg = calculatePlatformAvg(

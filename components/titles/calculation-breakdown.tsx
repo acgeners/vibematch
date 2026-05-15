@@ -10,6 +10,8 @@ interface CalculationBreakdownProps {
   calculatedScore: CalculatedScore
   aiConfidence: number | null
   criteriaCoverage: number
+  /** P95 das distâncias do treino. Vem de formula_config.distance_p95. */
+  distanceP95?: number | null
 }
 
 interface BreakdownStep {
@@ -56,12 +58,17 @@ function formatPct(value: number | null): string {
 }
 
 /**
- * Rótulo qualitativo da distância ao centróide do treino. Thresholds absolutos
- * baseados em features padronizadas (mean=0, std=1 por feature).
+ * Rótulo qualitativo da distância ao centróide do treino, relativo ao
+ * P95 das distâncias do próprio treino (auto-calibra com a base):
+ *   - d ≤ P95 × 0.7  →  "perto"
+ *   - d ≤ P95        →  "médio"
+ *   - d > P95        →  "longe" (outlier por percentil)
+ * Quando p95 não está disponível, retorna null (caller exibe só o número).
  */
-function distanceLabel(distance: number): "perto" | "médio" | "longe" {
-  if (distance < 1.5) return "perto"
-  if (distance < 3) return "médio"
+function distanceLabel(distance: number, p95: number | null | undefined): "perto" | "médio" | "longe" | null {
+  if (p95 == null || p95 <= 0) return null
+  if (distance <= p95 * 0.7) return "perto"
+  if (distance <= p95) return "médio"
   return "longe"
 }
 
@@ -108,6 +115,7 @@ export function CalculationBreakdown({
   calculatedScore,
   aiConfidence,
   criteriaCoverage,
+  distanceP95,
 }: CalculationBreakdownProps) {
   const [open, setOpen] = useState(false)
 
@@ -185,11 +193,20 @@ export function CalculationBreakdown({
                 {calculatedScore.mae_predicted?.toFixed(3) ?? "—"}
               </div>
               <div
-                title="Distância no espaço de features padronizadas. Quanto maior, mais 'fora da distribuição' do treino — Nota.Pr pesa menos em Nota.Final."
+                title={
+                  distanceP95 != null
+                    ? `Distância Euclidiana nas features padronizadas. Threshold de outlier (P95 do treino): ${distanceP95.toFixed(2)}. Distância acima disso → Nota.Pr pesa menos em Nota.Final.`
+                    : "Distância Euclidiana nas features padronizadas. Quanto maior, mais 'fora da distribuição' do treino."
+                }
               >
                 <span className="font-medium text-foreground">Distância:</span>{" "}
                 {calculatedScore.prediction_distance != null
-                  ? `${calculatedScore.prediction_distance.toFixed(2)} (${distanceLabel(calculatedScore.prediction_distance)})`
+                  ? (() => {
+                      const label = distanceLabel(calculatedScore.prediction_distance, distanceP95)
+                      return label
+                        ? `${calculatedScore.prediction_distance.toFixed(2)} (${label})`
+                        : calculatedScore.prediction_distance.toFixed(2)
+                    })()
                   : "—"}
               </div>
               <div>

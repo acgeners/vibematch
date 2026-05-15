@@ -147,33 +147,19 @@ describe("calculateGPTWithDiagnostics", () => {
 })
 
 describe("normalizeGPT", () => {
-  it("GPT=mean → GPT.N=5 (ponto neutro)", () => {
-    expect(normalizeGPT(7.2, 7.2, 1.0)).toBe(5)
-  })
-
-  it("z-score positivo: GPT 1σ acima da média → 5 + 1.5", () => {
-    expect(normalizeGPT(8.2, 7.2, 1.0)).toBeCloseTo(6.5, 4)
-  })
-
-  it("z-score negativo: GPT 1σ abaixo → 5 - 1.5", () => {
-    expect(normalizeGPT(6.2, 7.2, 1.0)).toBeCloseTo(3.5, 4)
-  })
-
-  it("clamp inferior em 0 quando z muito negativo", () => {
-    expect(normalizeGPT(0, 7.2, 1.0)).toBe(0)
-  })
-
-  it("clamp superior em 10 quando z muito positivo", () => {
-    expect(normalizeGPT(15, 7.2, 1.0)).toBe(10)
-  })
-
-  it("std inválido (≤0) cai pra default 4", () => {
-    // mean=5, std=0 (inválido) → std efetivo = 4
-    // GPT=5 → 5 + 0/4 * 1.5 = 5
-    expect(normalizeGPT(5, 5, 0)).toBe(5)
-  })
-
-  it("defaults (mean=5, std=4): GPT=5 ainda mapeia pra 5", () => {
+  it("GPT=5 → GPT.N=5 (ponto neutro)", () => {
     expect(normalizeGPT(5)).toBe(5)
+  })
+
+  it("GPT=8 → GPT.N=8.75 (slope 1.25)", () => {
+    expect(normalizeGPT(8)).toBeCloseTo(5 + (8 - 5) * 1.25)
+  })
+
+  it("GPT=0 → GPT.N=0 (clamp inferior)", () => {
+    expect(normalizeGPT(0)).toBe(0)
+  })
+
+  it("GPT=10 → GPT.N=10 (clamp superior, sem clamp seria 11.25)", () => {
+    expect(normalizeGPT(10)).toBe(10)
   })
 })
