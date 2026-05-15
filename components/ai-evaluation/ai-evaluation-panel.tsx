@@ -362,25 +362,25 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
             ].filter(Boolean).join(" ")}
             onClick={selectionMode ? () => toggleItem(work.id) : undefined}
           >
-            <CardContent className="py-4">
-              <div className="flex items-start gap-3">
+            <CardContent className="py-3">
+              <div className="flex items-center gap-4">
                 {selectionMode && (
                   <Checkbox
                     checked={selected.has(work.id)}
                     onCheckedChange={() => toggleItem(work.id)}
                     onClick={(e) => e.stopPropagation()}
-                    className="mt-0.5 shrink-0"
+                    className="shrink-0"
                   />
                 )}
 
-                {/* Cover thumb */}
-                <div className="relative h-20 w-14 shrink-0 overflow-hidden rounded-md border bg-muted">
+                {/* Cover thumb (esquerda) */}
+                <div className="relative h-[72px] w-12 shrink-0 overflow-hidden rounded-md border bg-muted">
                   {work.cover_url ? (
                     <Image
                       src={work.cover_url}
                       alt=""
                       fill
-                      sizes="56px"
+                      sizes="48px"
                       unoptimized
                       className="object-cover"
                     />
@@ -391,20 +391,15 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                   )}
                 </div>
 
-                {/* Conteúdo principal */}
+                {/* Conteúdo central — centralizado verticalmente com cover/ações */}
                 <div className="flex-1 min-w-0 space-y-1.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <span onClick={(e) => e.stopPropagation()} className="min-w-0 flex-1">
-                      <WorkTitleLink
-                        title={work.title}
-                        workId={work.id}
-                        className="font-semibold hover:underline line-clamp-2 break-words"
-                      />
-                    </span>
-                    {work.evaluation?.confidence != null && (
-                      <ConfidencePill confidence={work.evaluation.confidence} />
-                    )}
-                  </div>
+                  <span onClick={(e) => e.stopPropagation()} className="block min-w-0">
+                    <WorkTitleLink
+                      title={work.title}
+                      workId={work.id}
+                      className="text-base font-semibold hover:underline line-clamp-2 break-words"
+                    />
+                  </span>
 
                   <div className="flex flex-wrap items-center gap-1.5">
                     <PublicationStatusBadge statusId={work.publication_status_id ?? null} />
@@ -416,9 +411,15 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                   </div>
 
                   <EvaluationMetaLine evaluation={work.evaluation} />
+                </div>
 
-                  {!selectionMode && (
-                    <div className="flex justify-end gap-1.5 pt-1">
+                {/* Ações + confiança (direita) — agrupadas verticalmente */}
+                {!selectionMode && (
+                  <div className="flex shrink-0 flex-col items-end gap-2">
+                    {work.evaluation?.confidence != null && (
+                      <ConfidencePill confidence={work.evaluation.confidence} />
+                    )}
+                    <div className="flex items-center gap-1.5">
                       <Button
                         size="sm"
                         variant="ghost"
@@ -441,8 +442,8 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                             : "Avaliar"}
                       </Button>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
