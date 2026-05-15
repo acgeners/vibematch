@@ -63,6 +63,10 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   const [queueProcessedCount, setQueueProcessedCount] = useState(0)
   const [queueSize, setQueueSize] = useState<number>(10)
   const queueCancelledRef = useRef(false)
+  // Cancela a avaliação atual (single ou item da fila). A chamada do server
+  // action continua e o resultado é salvo no DB; só ignoramos o resultado no
+  // cliente — usuário pode revisar depois pela página /ai-evaluation.
+  const evaluationCancelledRef = useRef(false)
   const reviewScrollRef = useRef<HTMLDivElement | null>(null)
 
   // Selection mode
@@ -93,9 +97,15 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
 
   // Queue logic
   const runEvaluation = async (work: PendingWork): Promise<ReviewData | null> => {
+    evaluationCancelledRef.current = false
     setEvaluatingId(work.id)
     const result = await triggerAiEvaluation(work.id)
     setEvaluatingId(null)
+
+    if (evaluationCancelledRef.current) {
+      evaluationCancelledRef.current = false
+      return null
+    }
 
     if (result.error) {
       toast.error(`Erro na avaliação de "${work.title}": ${result.error}`)
@@ -114,6 +124,14 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
       coverUrl: work.cover_url ?? null,
       currentScores: result.data.currentScores ?? {},
     }
+  }
+
+  const handleCancelEvaluation = () => {
+    evaluationCancelledRef.current = true
+    setEvaluatingId(null)
+    toast.info(
+      "Avaliação interrompida. Se a IA terminar, o resultado é salvo e fica disponível pra revisar depois."
+    )
   }
 
   const handleEvaluate = async (work: PendingWork) => {
@@ -270,7 +288,10 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(evaluatingWork) && !isQueueEvaluating} onOpenChange={() => undefined}>
+      <Dialog
+        open={Boolean(evaluatingWork) && !isQueueEvaluating}
+        onOpenChange={(open) => !open && handleCancelEvaluation()}
+      >
         <DialogContent className="max-w-sm" showCloseButton={false}>
           <DialogHeader className="items-center text-center">
             <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
@@ -283,6 +304,10 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                 : "Preparando reviews externas e notas."}
             </DialogDescription>
           </DialogHeader>
+          <Button variant="outline" onClick={handleCancelEvaluation}>
+            <X className="h-4 w-4 mr-1.5" />
+            Cancelar
+          </Button>
         </DialogContent>
       </Dialog>
 
