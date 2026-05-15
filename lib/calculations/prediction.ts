@@ -136,7 +136,10 @@ export function trainPredictor(
   const catEncoded = catEncoder.transform(catImputed)
 
   const Xtrain = hstack(numScaled, catEncoded)
-  const model = fitRidgeCV(Xtrain, trainTargets)
+  // CV híbrido: LOOCV (k=n) entre 20-49 samples por baixa razão amostras/features;
+  // 5-fold a partir de 50, balanceando custo (LOOCV é O(n) ajustes) e estabilidade do MAE.
+  const cvFolds = trainInputs.length < 50 ? trainInputs.length : 5
+  const model = fitRidgeCV(Xtrain, trainTargets, undefined, cvFolds)
 
   const featureNames = [
     ...NUMERIC_FEATURE_NAMES,
@@ -154,7 +157,7 @@ export function trainPredictor(
       const catEnc = catEncoder.transform(catImp)
       const X = hstack(numSc, catEnc)
       const raw = predictRidge(X, model)
-      return raw.map((v) => Math.max(0, Math.min(10, Math.round(v * 10) / 10)))
+      return raw.map((v) => Math.max(0, Math.min(10, v)))
     },
     model,
     trainSize: trainInputs.length,

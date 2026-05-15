@@ -55,8 +55,8 @@ export function FormulaConfigForm({ config }: FormulaConfigFormProps) {
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      mae_calc: config.mae_calc,
-      mae_predicted: config.mae_predicted,
+      mae_calc: config.mae_calc ?? undefined,
+      mae_predicted: config.mae_predicted ?? undefined,
       pseudo_votes_nota_m: config.pseudo_votes_nota_m,
       pseudo_votes_blend: config.pseudo_votes_blend,
     },

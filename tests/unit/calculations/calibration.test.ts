@@ -2,35 +2,59 @@ import { describe, it, expect } from "vitest"
 import { computeCalibration } from "@/lib/calculations/calibration"
 
 describe("computeCalibration", () => {
-  it("returns fallback values when there is no manual_score data", () => {
+  it("returns null MAE/RMSE when there is no manual_score data", () => {
     const cal = computeCalibration([
       { workId: "a", manualScore: null, calcScore: 7, predictedScore: 8, finalScore: 7.5, totalVotes: 100 },
     ])
     expect(cal.trainSize).toBe(0)
-    expect(cal.maeCalc).toBeCloseTo(1.2657, 3)
-    expect(cal.maePredicted).toBeCloseTo(0.9246, 3)
+    expect(cal.maeCalc).toBeNull()
+    expect(cal.maePredicted).toBeNull()
+    expect(cal.rmseCalc).toBeNull()
+    expect(cal.rmsePredicted).toBeNull()
   })
 
-  it("computes real MAE when enough data is present", () => {
+  it("returns null MAE/RMSE when train size is below MIN_TRAIN_FOR_MAE (20)", () => {
     const items = []
     for (let i = 0; i < 10; i++) {
       items.push({
         workId: `w${i}`,
         manualScore: 8.0,
-        calcScore: 7.0, // diff = 1
-        predictedScore: 7.5, // diff = 0.5
-        finalScore: 7.3, // diff = 0.7
+        calcScore: 7.0,
+        predictedScore: 7.5,
+        finalScore: 7.3,
         totalVotes: (i + 1) * 100,
       })
     }
     const cal = computeCalibration(items)
     expect(cal.trainSize).toBe(10)
+    expect(cal.maeCalc).toBeNull()
+    expect(cal.rmseCalc).toBeNull()
+  })
+
+  it("computes real MAE and RMSE when enough data is present", () => {
+    const items = []
+    for (let i = 0; i < 20; i++) {
+      items.push({
+        workId: `w${i}`,
+        manualScore: 8.0,
+        calcScore: 7.0, // signed diff = -1, abs = 1
+        predictedScore: 7.5, // diff = -0.5
+        finalScore: 7.3, // diff = -0.7
+        totalVotes: (i + 1) * 100,
+      })
+    }
+    const cal = computeCalibration(items)
+    expect(cal.trainSize).toBe(20)
     expect(cal.maeCalc).toBeCloseTo(1.0, 3)
     expect(cal.maePredicted).toBeCloseTo(0.5, 3)
     expect(cal.maeFinal).toBeCloseTo(0.7, 3)
+    // RMSE = sqrt(mean(diff²)). Com resíduos constantes, RMSE == |diff|.
+    expect(cal.rmseCalc).toBeCloseTo(1.0, 3)
+    expect(cal.rmsePredicted).toBeCloseTo(0.5, 3)
+    expect(cal.rmseFinal).toBeCloseTo(0.7, 3)
   })
 
-  it("computes percentile of vote counts", () => {
+  it("pseudo_votes derivam da mediana com multiplicador (não mais P75/P60)", () => {
     const items = Array.from({ length: 100 }, (_, i) => ({
       workId: `w${i}`,
       manualScore: null,
@@ -40,9 +64,9 @@ describe("computeCalibration", () => {
       totalVotes: i + 1, // 1..100
     }))
     const cal = computeCalibration(items)
-    // Percentile 75 of [1..100] ≈ 75.25
-    expect(cal.pseudoVotesNotaM).toBeGreaterThan(70)
-    expect(cal.pseudoVotesNotaM).toBeLessThan(80)
+    // Mediana de [1..100] ≈ 50.5. NotaM = 50.5 × 2.0 ≈ 101; Blend = 50.5 × 1.2 ≈ 60.6.
+    expect(cal.pseudoVotesNotaM).toBeGreaterThan(95)
+    expect(cal.pseudoVotesNotaM).toBeLessThan(110)
     expect(cal.pseudoVotesBlend).toBeGreaterThan(55)
     expect(cal.pseudoVotesBlend).toBeLessThan(65)
   })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { calculateGPT, normalizeGPT } from "@/lib/calculations/gpt"
+import { calculateGPT, normalizeGPT, calculateGPTWithDiagnostics } from "@/lib/calculations/gpt"
 import type { ScoreWeight, CategoryScoreMap } from "@/types/domain"
 
 const baseWeights: ScoreWeight[] = [
@@ -50,8 +50,8 @@ describe("calculateGPT", () => {
     expect(calculateGPT(scores, weights)).toBeCloseTo(7, 3)
   })
 
-  it("critério positivo acima do threshold ganha bônus dobrado", () => {
-    // Romance threshold=8, weight=10. Score=10 → 10*10 + (10-8)*10 = 120.
+  it("critério positivo acima do threshold ganha bônus de 0.5× o excesso", () => {
+    // Romance threshold=8, weight=10. Score=10 → 10*10 + 0.5*(10-8)*10 = 110.
     // Demais positivos com threshold=10 (sem bônus).
     const weights = baseWeights.map((w) => {
       if (w.weight < 0) return w
@@ -63,10 +63,10 @@ describe("calculateGPT", () => {
       action_adventure: 8, adult_content: 8, protagonist: 8,
       humor: 8, drama: 3, tragedy: 2,
     }
-    // numerador = (10*10 + 2*10) + 8 * (9+6+8+6+10+7) = 120 + 8*46 = 120 + 368 = 488
-    // positiveSum = 56 → GPT = 488/56 ≈ 8.714
+    // numerador = (10*10 + 0.5*2*10) + 8 * (9+6+8+6+10+7) = 110 + 368 = 478
+    // positiveSum = 56 → GPT = 478/56 ≈ 8.536
     const result = calculateGPT(scores, weights)
-    expect(result).toBeCloseTo(488 / 56, 3)
+    expect(result).toBeCloseTo(478 / 56, 3)
   })
 
   it("aplica penalidade de drama acima do threshold (negativo)", () => {
@@ -114,6 +114,35 @@ describe("calculateGPT", () => {
     // romance inativo não contribui nem para numerador nem denominador
     const result = calculateGPT(scores, weightsComInativo)
     expect(result).toBe(0)
+  })
+})
+
+describe("calculateGPTWithDiagnostics", () => {
+  it("sinaliza clamp quando o resultado pré-clamp passa de 10", () => {
+    // Forçar excedente alto + threshold baixo → numerador > 10*denominator.
+    const weights = baseWeights.map((w) =>
+      w.weight > 0 ? { ...w, threshold: 0 } : { ...w, threshold: 10 }
+    )
+    const scores: CategoryScoreMap = {
+      romance: 10, couple_dynamics: 10, fantasy_nobility: 10,
+      action_adventure: 10, adult_content: 10, protagonist: 10,
+      humor: 10, drama: 0, tragedy: 0,
+    }
+    const { value, diagnostics } = calculateGPTWithDiagnostics(scores, weights)
+    expect(value).toBe(10)
+    expect(diagnostics.clampHit).toBe(true)
+    expect(diagnostics.rawValue).toBeGreaterThan(10)
+  })
+
+  it("sinaliza ativação de critério negativo quando score > threshold", () => {
+    const scores: CategoryScoreMap = {
+      romance: 5, couple_dynamics: 5, fantasy_nobility: 5,
+      action_adventure: 5, adult_content: 5, protagonist: 5,
+      humor: 5, drama: 8, tragedy: 1,
+    }
+    const { diagnostics } = calculateGPTWithDiagnostics(scores, baseWeights)
+    expect(diagnostics.negativeActivations.drama).toBe(true)
+    expect(diagnostics.negativeActivations.tragedy).toBe(false)
   })
 })
 

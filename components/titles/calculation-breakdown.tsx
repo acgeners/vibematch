@@ -33,11 +33,11 @@ function confIA(
 }
 
 function confPr(
-  maePredicted: number,
+  maePredicted: number | null,
   predictedIsStub: boolean,
   coverage: number
 ): number | null {
-  if (predictedIsStub) return null
+  if (predictedIsStub || maePredicted == null) return null
   return maeToConf(maePredicted) * clamp01(coverage)
 }
 
@@ -168,11 +168,11 @@ export function CalculationBreakdown({
             <div className="mt-4 pt-3 border-t grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-muted-foreground">
               <div>
                 <span className="font-medium text-foreground">MAE.Calc:</span>{" "}
-                {calculatedScore.mae_calc.toFixed(3)}
+                {calculatedScore.mae_calc?.toFixed(3) ?? "—"}
               </div>
               <div>
                 <span className="font-medium text-foreground">MAE.Prev:</span>{" "}
-                {calculatedScore.mae_predicted.toFixed(3)}
+                {calculatedScore.mae_predicted?.toFixed(3) ?? "—"}
               </div>
               <div>
                 <span className="font-medium text-foreground">Total votos:</span>{" "}

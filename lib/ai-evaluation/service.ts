@@ -90,7 +90,7 @@ export interface AiEvaluationResponse {
 }
 
 const MODEL = "claude-sonnet-4-6"
-const PROMPT_VERSION = "v9"
+const PROMPT_VERSION = "v11"
 const MAX_REVIEW_WORDS = 120
 
 // ============================================================================
@@ -122,7 +122,7 @@ REGRAS DE FIDELIDADE AO TÍTULO (críticas):
 - Para cada critério, faça obrigatoriamente esta checagem interna: "há alguma review compatível que confirma, aumenta, reduz ou contradiz a nota deste critério?". Se sim, incorpore essa evidência na nota e cite a review/fonte na justificativa.
 - Se a review vier de um candidato com alto match de título e não contradisser a sinopse, trate-a como compatível. Não descarte reviews só por serem opinião geral de usuário; use-as para calibrar tom, ritmo, qualidade do romance, humor, drama e conteúdo adulto.
 - Quando reviews forem fornecidas, você DEVE preencher "review_usage" com os IDs das reviews usadas em cada critério. Se usar uma review na nota, também cite o ID na justificativa, por exemplo: "review R1".
-- Quando reviews forem fornecidas, a resposta será rejeitada automaticamente se "review_usage" não usar pelo menos uma review por ID válido.
+- Quando reviews forem fornecidas, a resposta será rejeitada automaticamente se: (a) declarar uso de IDs em "review_usage" sem citá-los nas justificativas, OU (b) não usar nenhuma review E não preencher "reviewsRejectedReason" com uma explicação concreta (mínimo ~10 caracteres, ex.: "reviews descrevem obra diferente — personagens X e Y não aparecem na sinopse").
 - No campo "summary", refira-se à obra apenas pelo título fornecido. NÃO mencione títulos de outras obras, nem invente subtítulos ou nomes de personagens que não estejam na sinopse/tags.
 - Se a sinopse for vazia/curta e as reviews parecerem inconsistentes, baixe a "confidence" e prefira notas conservadoras nas faixas centrais (4-6) ou na faixa baixa, explicando a incerteza.
 
@@ -157,14 +157,11 @@ CRITÉRIOS, DESCRIÇÕES E RUBRICAS (use a descrição para entender o que cada 
 
 ${buildCriteriaPromptSection()}
 
-REGRA OBRIGATÓRIA PARA COUPLE_DYNAMICS:
-Se a obra não envolver romance/casal identificável, não atribua nota baixa por "ausência de casal". Use uma nota neutra 5.0 e explique que o critério não é aplicável por falta de romance/casal evidente. Só use 0-3 quando houver evidência explícita de uma dinâmica romântica/casal tóxica, abusiva, obsessiva ou manipuladora.
-
 REGRA OBRIGATÓRIA PARA FANTASY_NOBILITY:
 Obras ambientadas majoritariamente em corte, aristocracia, realeza, império, ducado, nobreza ou famílias nobres devem receber nota alta quando esse ambiente organiza a premissa e os conflitos. Se a obra combina nobreza/realeza com reencarnação, transmigração, isekai, regressão, segunda chance ou viagem no tempo, trate isso como evidência estrutural forte: em geral use 7-8, ou 9-10 se política nobre, magia, regras do mundo ou hierarquia social definirem a história. Não deixe em 4-6 quando a ambientação de nobreza/realeza for central.
 
-REGRA OBRIGATÓRIA PARA ADULT_CONTENT:
-Pontue adult_content com base em sinopse, tags (especialmente do grupo "content_indicator"), gêneros e reviews compatíveis. Como evidência adicional, considere o marcador "R19" (case-insensitive). Se "R19" aparecer em alguma evidência, a nota deve ser no mínimo 7.0. Use 9-10 se sinopse, tags ou reviews indicarem smut/sexo explícito recorrente. Se R19 não aparecer, NÃO mencione R19 na justificativa — avalie apenas pelas demais evidências disponíveis.
+REGRA PARA ADULT_CONTENT:
+Pontue adult_content com base em sinopse, tags (especialmente do grupo "content_indicator"), gêneros e reviews compatíveis. Use 9-10 se sinopse, tags ou reviews indicarem smut/sexo explícito recorrente.
 
 REGRA OBRIGATÓRIA PARA TRAGEDY (leia com atenção):
 Considere tragédia apenas o que ocorre NO DESENVOLVIMENTO (meio da obra), não o cenário inicial nem o background.
@@ -237,6 +234,11 @@ const EVALUATION_TOOL = {
           required: ["criterion", "usedReviewIds", "impact"],
         },
       },
+      reviewsRejectedReason: {
+        type: "string",
+        description:
+          "OBRIGATÓRIO quando reviews foram fornecidas mas você decidiu não usar NENHUMA. Explique especificamente por quê (ex.: 'reviews descrevem obra diferente — personagens X e Y não aparecem na sinopse'). Deixe vazio se usou pelo menos uma review.",
+      },
     },
     required: ["summary", "confidence", "scores", "review_usage"],
   },
@@ -259,6 +261,7 @@ const evaluationToolPayloadSchema = z.object({
       impact: z.string(),
     })
   ),
+  reviewsRejectedReason: z.string().optional(),
 })
 
 type EvaluationToolPayload = z.infer<typeof evaluationToolPayloadSchema>
@@ -391,16 +394,58 @@ function prepareReviews(req: AiEvaluationRequest): PreparedReviews {
 // R19 detection
 // ============================================================================
 
-function hasR19Marker(req: AiEvaluationRequest): boolean {
+const R19_REGEX = /(?:^|[^a-z0-9])R\s*-?\s*19(?:[^a-z0-9]|$)/i
+
+const ADULT_GENRE_KEYWORDS = ["adult", "smut", "mature", "hentai", "ecchi"]
+const ADULT_SYNOPSIS_KEYWORDS = [
+  "explicit",
+  "explícito",
+  "smut",
+  "erotic",
+  "erótic",
+  "sexual",
+  "nsfw",
+]
+const ADULT_TAG_GROUP = "content_indicator"
+
+/**
+ * Detecção R19 em duas camadas:
+ *  - "weak" → regex match em qualquer evidência (sugestiva).
+ *  - "strong" → regex match + corroboração: tag do grupo content_indicator,
+ *    gênero adulto explícito ou keyword adulta na sinopse.
+ * Só "strong" aciona o enforcer de adult_content ≥ 7.
+ */
+function detectR19(req: AiEvaluationRequest): "none" | "weak" | "strong" {
+  const synopsis = req.synopsis ?? ""
+  const tags = normalizeTags(req.tags)
   const haystack = [
-    req.synopsis ?? "",
+    synopsis,
     ...(req.genres ?? []),
-    ...normalizeTags(req.tags).map((t) => t.name),
+    ...tags.map((t) => t.name),
     ...(req.externalContext ?? []),
     ...(req.sourcedReviews?.map((review) => review.text) ?? []),
     ...(req.reviews ?? []),
   ].join("\n")
-  return /(?:^|[^a-z0-9])R\s*-?\s*19(?:[^a-z0-9]|$)/i.test(haystack)
+
+  if (!R19_REGEX.test(haystack)) return "none"
+
+  const hasContentIndicatorTag = tags.some((t) => t.group === ADULT_TAG_GROUP)
+  const genresLower = (req.genres ?? []).map((g) => g.toLowerCase())
+  const hasAdultGenre = genresLower.some((g) =>
+    ADULT_GENRE_KEYWORDS.some((kw) => g.includes(kw))
+  )
+  const synopsisLower = synopsis.toLowerCase()
+  const hasAdultKeyword = ADULT_SYNOPSIS_KEYWORDS.some((kw) =>
+    synopsisLower.includes(kw)
+  )
+
+  return hasContentIndicatorTag || hasAdultGenre || hasAdultKeyword
+    ? "strong"
+    : "weak"
+}
+
+function hasR19Marker(req: AiEvaluationRequest): boolean {
+  return detectR19(req) === "strong"
 }
 
 // ============================================================================
@@ -408,7 +453,7 @@ function hasR19Marker(req: AiEvaluationRequest): boolean {
 // ============================================================================
 
 function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): string {
-  const r19Detected = hasR19Marker(req)
+  const r19Level = detectR19(req)
   const lines: string[] = [
     `Título oficial da obra a avaliar: "${req.title}"`,
     "(use SOMENTE este título nas suas respostas)",
@@ -452,9 +497,13 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     })
   }
 
-  if (r19Detected) {
+  if (r19Level === "strong") {
     lines.push(
-      `\nMarcador R19 detectado nas evidências. Para adult_content, aplique a regra obrigatória: nota mínima 7.0.`
+      `\nMarcador R19 detectado nas evidências com corroboração (tag content_indicator, gênero adulto ou termo explícito na sinopse). Para adult_content, aplique a regra obrigatória: nota mínima 7.0.`
+    )
+  } else if (r19Level === "weak") {
+    lines.push(
+      `\nMarcador R19 encontrado em alguma evidência, mas SEM corroboração de tag/gênero/termo adulto. Trate como pista fraca: considere ao pontuar adult_content, mas não force nota alta se as demais evidências não apoiarem.`
     )
   }
 
@@ -586,15 +635,22 @@ function enforceR19AdultContentRule(
   }
 }
 
+/**
+ * Quando romance é baixo (≤ 3), couple_dynamics é forçado a 5.0 — tanto pra
+ * cima (modelo deu nota baixa por "ausência de casal") quanto pra baixo (modelo
+ * alucinou dinâmica saudável sem evidência de casal). 5.0 sinaliza "não aplicável".
+ */
 function enforceNeutralCoupleDynamicsWhenNoRomance(
   response: AiEvaluationResponse
 ): AiEvaluationResponse {
   const romance = response.scores.find((score) => score.criterionSlug === "romance")
   const couple = response.scores.find((score) => score.criterionSlug === "couple_dynamics")
 
-  if (!romance || !couple || romance.suggestedScore > 3 || couple.suggestedScore >= 5) {
+  if (!romance || !couple || romance.suggestedScore > 3 || couple.suggestedScore === 5) {
     return response
   }
+
+  const direction = couple.suggestedScore < 5 ? "elevada" : "rebaixada"
 
   return {
     ...response,
@@ -605,7 +661,7 @@ function enforceNeutralCoupleDynamicsWhenNoRomance(
         suggestedScore: 5,
         justification: score.justification.includes("critério não é aplicável")
           ? score.justification
-          : `${score.justification} Como a avaliação de romance indica ausência/irrelevância de casal, couple_dynamics foi neutralizada em 5.0 para não penalizar uma obra sem romance/casal aplicável.`,
+          : `${score.justification} Como a avaliação de romance indica ausência/irrelevância de casal, couple_dynamics foi ${direction} para 5.0 (não aplicável).`,
       }
     }),
     rawResponse: {
@@ -648,6 +704,18 @@ function enforceAuditableReviewUsage(
     )
   }
 
+  const rejectionReason =
+    typeof (response.rawResponse as { reviewsRejectedReason?: unknown })
+      ?.reviewsRejectedReason === "string"
+      ? ((response.rawResponse as { reviewsRejectedReason: string }).reviewsRejectedReason).trim()
+      : ""
+
+  if (usedReviewIds.length === 0 && rejectionReason.length < 10) {
+    throw new Error(
+      `Reviews foram fornecidas mas a IA não usou nenhuma e não preencheu "reviewsRejectedReason" com explicação suficiente. Inconsistência rejeitada.`
+    )
+  }
+
   return {
     ...response,
     rawResponse: {
@@ -658,6 +726,7 @@ function enforceAuditableReviewUsage(
         expectedReviewIds: prepared.ids,
         usedReviewIds,
         reviewsDeclinedByModel: usedReviewIds.length === 0,
+        rejectionReason: rejectionReason || null,
       },
     },
   }
@@ -706,6 +775,7 @@ function attachEvaluationContext(
             text,
           })) ?? [],
         r19Detected: hasR19Marker(req),
+        r19Level: detectR19(req),
       },
     },
   }

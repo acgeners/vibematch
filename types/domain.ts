@@ -91,8 +91,10 @@ export interface CalculatedScore {
   predicted_score: number | null
   predicted_is_stub: boolean
   final_score: number | null
-  mae_calc: number
-  mae_predicted: number
+  mae_calc: number | null
+  mae_predicted: number | null
+  rmse_calc: number | null
+  rmse_predicted: number | null
   formula_version: string
   calculated_at: string
 }
@@ -205,8 +207,11 @@ export interface Import {
 export interface FormulaConfig {
   id: string
   formula_version: string
-  mae_calc: number
-  mae_predicted: number
+  mae_calc: number | null
+  mae_predicted: number | null
+  /** RMSE dos resíduos — usado em 1/RMSE² no peso de Nota.Final. */
+  rmse_calc: number | null
+  rmse_predicted: number | null
   pseudo_votes_nota_m: number
   pseudo_votes_blend: number
   /** Quantos itens exibir no ranking (null = todos). */

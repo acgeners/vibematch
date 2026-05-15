@@ -77,6 +77,11 @@ export function calculateAll(inputs: CalculationInputs): CalculationResult {
 
 /**
  * Versão completa com Nota.Pr disponível.
+ *
+ * Quando `predictedIsStub === true` (poucos dados de treino), o modelo
+ * de Nota.Pr é uma constante (média dos targets) e não agrega informação.
+ * Nesse caso Nota.Final = Nota.Calc, evitando que um "blend" enganoso
+ * arraste o resultado pra média global da base.
  */
 export function calculateAllWithPrediction(
   inputs: CalculationInputs,
@@ -84,12 +89,14 @@ export function calculateAllWithPrediction(
   predictedIsStub: boolean
 ): CalculationResult {
   const partial = calculateAll(inputs)
-  const finalScore = calculateNotaFinal(
-    partial.calcScore,
-    predictedScore,
-    inputs.config.mae_calc,
-    inputs.config.mae_predicted
-  )
+  const finalScore = predictedIsStub
+    ? partial.calcScore
+    : calculateNotaFinal(
+        partial.calcScore,
+        predictedScore,
+        inputs.config.rmse_calc,
+        inputs.config.rmse_predicted
+      )
   return {
     ...partial,
     predictedScore,

@@ -13,18 +13,21 @@ interface CalibrationPanelProps {
   snapshot: {
     totalWorks: number
     trainSize: number
-    maeCalc: number
-    maePredicted: number
-    maeFinal: number
-    pseudoVotesNotaM: number
-    pseudoVotesBlend: number
+    maeCalc: number | null
+    maePredicted: number | null
+    maeFinal: number | null
+    rmseCalc: number | null
+    rmsePredicted: number | null
+    rmseFinal: number | null
+    pseudoVotesNotaM: number | null
+    pseudoVotesBlend: number | null
     worstDiffs: CalibrationDiff[]
     predictorIsStub: boolean
   }
 }
 
-function fmt(value: number, digits = 4): string {
-  return Number.isFinite(value) ? value.toFixed(digits) : "—"
+function fmt(value: number | null | undefined, digits = 4): string {
+  return value != null && Number.isFinite(value) ? value.toFixed(digits) : "—"
 }
 
 function diffClass(value: number | null): string {
@@ -59,8 +62,14 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
     })
   }
 
-  const hasMismatch = (live: number, stored: number, threshold = 0.05) =>
-    Math.abs(live - stored) / Math.max(stored, 0.001) > threshold
+  const hasMismatch = (
+    live: number | null,
+    stored: number | null,
+    threshold = 0.05
+  ) => {
+    if (live == null || stored == null) return false
+    return Math.abs(live - stored) / Math.max(stored, 0.001) > threshold
+  }
 
   return (
     <div className="space-y-6">
@@ -194,7 +203,7 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
 
 interface MetricCardProps {
   label: string
-  live: number
+  live: number | null
   stored: number | null
   mismatch: boolean
   digits?: number

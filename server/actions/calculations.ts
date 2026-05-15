@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import {
-  calculateGPT,
   normalizeGPT,
   sumVotes,
   calculatePlatformAvg,
@@ -13,6 +12,7 @@ import {
   calculateNotaCalc,
   calculateNotaFinal,
 } from "@/lib/calculations"
+import { calculateGPTWithDiagnostics } from "@/lib/calculations/gpt"
 import { trainPredictor, type PredictionInput } from "@/lib/calculations/prediction"
 import { computeCalibration } from "@/lib/calculations/calibration"
 import type {
@@ -172,14 +172,25 @@ export async function recalculateAll() {
     }))
   )
 
-  const pseudoVotesNotaM = interimCalibration.pseudoVotesNotaM
-  const pseudoVotesBlend = interimCalibration.pseudoVotesBlend
+  // pseudo_votes pode ser null se houver <5 works com votos. Esse caso é
+  // extremamente improvável em produção, mas mantém defaults sanos pra não
+  // quebrar o Bayesian blend.
+  const pseudoVotesNotaM = interimCalibration.pseudoVotesNotaM ?? 1000
+  const pseudoVotesBlend = interimCalibration.pseudoVotesBlend ?? 600
 
   // ---------- 2) GPT, GPT.N, Cps.N, Nota.M, Nota.Calc ----------
+  let gptClampHits = 0
+  const gptNegativeActivations: Record<string, number> = {}
   for (const w of works) {
-    w.iaEvalRaw = calculateGPT(w.categoryScores, weights)
-    w.iaEvalNormalized = normalizeGPT(w.iaEvalRaw)
+    const { value, diagnostics } = calculateGPTWithDiagnostics(w.categoryScores, weights)
+    w.iaEvalRaw = value
+    w.iaEvalNormalized = normalizeGPT(value)
     w.chaptersNormalized = normalizeChapters(w.totalChapters)
+    if (diagnostics.clampHit) gptClampHits += 1
+    for (const [slug, activated] of Object.entries(diagnostics.negativeActivations)) {
+      if (!activated) continue
+      gptNegativeActivations[slug] = (gptNegativeActivations[slug] ?? 0) + 1
+    }
   }
 
   // Global mean precisa dos platform_avg de todos. Calcular em 2 passes:
@@ -235,13 +246,22 @@ export async function recalculateAll() {
   )
   const newMaeCalc = calibrationAfterPr.maeCalc
   const newMaePredicted = calibrationAfterPr.maePredicted
+  const newRmseCalc = calibrationAfterPr.rmseCalc
+  const newRmsePredicted = calibrationAfterPr.rmsePredicted
 
-  // ---------- 5) NotaFinal com MAEs novos ----------
+  // ---------- 5) NotaFinal com RMSEs novos ----------
+  // Quando calibração é insuficiente (RMSE null) ou predição é stub,
+  // calculateNotaFinal cai pra calcScore puro — sem blend baseado em chute.
   for (const w of works) {
-    if (w.predictedScore == null) {
-      w.finalScore = null
+    if (w.predictedScore == null || predictor.isStub) {
+      w.finalScore = w.calcScore
     } else {
-      w.finalScore = calculateNotaFinal(w.calcScore, w.predictedScore, newMaeCalc, newMaePredicted)
+      w.finalScore = calculateNotaFinal(
+        w.calcScore,
+        w.predictedScore,
+        newRmseCalc,
+        newRmsePredicted
+      )
     }
   }
 
@@ -271,6 +291,8 @@ export async function recalculateAll() {
     final_score: w.finalScore,
     mae_calc: newMaeCalc,
     mae_predicted: newMaePredicted,
+    rmse_calc: newRmseCalc,
+    rmse_predicted: newRmsePredicted,
     formula_version: config.formula_version,
     calculated_at: new Date().toISOString(),
   }))
@@ -294,6 +316,8 @@ export async function recalculateAll() {
     .update({
       mae_calc: newMaeCalc,
       mae_predicted: newMaePredicted,
+      rmse_calc: newRmseCalc,
+      rmse_predicted: newRmsePredicted,
       pseudo_votes_nota_m: pseudoVotesNotaM,
       pseudo_votes_blend: pseudoVotesBlend,
     })
@@ -305,8 +329,19 @@ export async function recalculateAll() {
   revalidatePath("/settings")
   revalidatePath("/")
 
+  const negativeActivationRate: Record<string, number> = {}
+  for (const [slug, count] of Object.entries(gptNegativeActivations)) {
+    negativeActivationRate[slug] = count / works.length
+  }
+
   return {
     recalculated: works.length,
+    diagnostics: {
+      gptClampHits,
+      gptClampHitRate: gptClampHits / works.length,
+      negativeActivationCounts: gptNegativeActivations,
+      negativeActivationRate,
+    },
     calibration: {
       trainSize: predictor.trainSize,
       isStub: predictor.isStub,
@@ -316,6 +351,9 @@ export async function recalculateAll() {
       maeCalc: newMaeCalc,
       maePredicted: newMaePredicted,
       maeFinal: finalCalibration.maeFinal,
+      rmseCalc: newRmseCalc,
+      rmsePredicted: newRmsePredicted,
+      rmseFinal: finalCalibration.rmseFinal,
       pseudoVotesNotaM,
       pseudoVotesBlend,
       featureNames: predictor.featureNames,

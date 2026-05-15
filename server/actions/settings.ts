@@ -55,8 +55,8 @@ export async function updateScoreWeights(updates: ScoreWeightUpdate[]) {
 }
 
 export interface FormulaConfigUpdate {
-  mae_calc: number
-  mae_predicted: number
+  mae_calc: number | null
+  mae_predicted: number | null
   pseudo_votes_nota_m: number
   pseudo_votes_blend: number
 }
@@ -156,6 +156,9 @@ export async function getCalibrationSnapshot() {
     maeCalc: calibration.maeCalc,
     maePredicted: calibration.maePredicted,
     maeFinal: calibration.maeFinal,
+    rmseCalc: calibration.rmseCalc,
+    rmsePredicted: calibration.rmsePredicted,
+    rmseFinal: calibration.rmseFinal,
     pseudoVotesNotaM: calibration.pseudoVotesNotaM,
     pseudoVotesBlend: calibration.pseudoVotesBlend,
     worstDiffs: calibration.worstDiffs as CalibrationDiff[],
