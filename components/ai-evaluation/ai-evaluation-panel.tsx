@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { CheckSquare, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
+import Image from "next/image"
+import { CalendarDays, CheckSquare, Cpu, Gauge, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation, skipAiEvaluation } from "@/server/actions/ai"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
@@ -371,44 +372,77 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                     className="mt-0.5 shrink-0"
                   />
                 )}
-                <div className="flex-1 min-w-0">
-                  <span onClick={(e) => e.stopPropagation()} className="block truncate">
-                    <WorkTitleLink
-                      title={work.title}
-                      workId={work.id}
-                      className="font-medium hover:underline"
+
+                {/* Cover thumb */}
+                <div className="relative h-20 w-14 shrink-0 overflow-hidden rounded-md border bg-muted">
+                  {work.cover_url ? (
+                    <Image
+                      src={work.cover_url}
+                      alt=""
+                      fill
+                      sizes="56px"
+                      unoptimized
+                      className="object-cover"
                     />
-                  </span>
-                  <div className="flex flex-wrap gap-1 mt-1">
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">
+                      —
+                    </div>
+                  )}
+                </div>
+
+                {/* Conteúdo principal */}
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <span onClick={(e) => e.stopPropagation()} className="min-w-0 flex-1">
+                      <WorkTitleLink
+                        title={work.title}
+                        workId={work.id}
+                        className="font-semibold hover:underline line-clamp-2 break-words"
+                      />
+                    </span>
+                    {work.evaluation?.confidence != null && (
+                      <ConfidencePill confidence={work.evaluation.confidence} />
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <PublicationStatusBadge statusId={work.publication_status_id ?? null} />
                     <PersonalStatusBadge statusId={work.personal_status_id ?? null} />
+                    <FilterBadges
+                      matchedFilters={work.matchedFilters}
+                      evaluation={work.evaluation}
+                    />
                   </div>
-                  <FilterBadges
-                    matchedFilters={work.matchedFilters}
-                    evaluation={work.evaluation}
-                  />
+
                   <EvaluationMetaLine evaluation={work.evaluation} />
+
+                  {!selectionMode && (
+                    <div className="flex justify-end gap-1.5 pt-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleSkip(work.id)}
+                        disabled={!!evaluatingId || !!skippingId || isInQueue}
+                        title="Pular"
+                      >
+                        <SkipForward className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => handleEvaluate(work)}
+                        disabled={!!evaluatingId || !!skippingId || isInQueue}
+                      >
+                        <Sparkles className="h-3.5 w-3.5 mr-1" />
+                        {evaluatingId === work.id
+                          ? "Avaliando..."
+                          : work.evaluation
+                            ? "Reavaliar"
+                            : "Avaliar"}
+                      </Button>
+                    </div>
+                  )}
                 </div>
-                {!selectionMode && (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button
-                      size="sm"
-                      onClick={() => handleEvaluate(work)}
-                      disabled={!!evaluatingId || !!skippingId || isInQueue}
-                    >
-                      <Sparkles className="h-3.5 w-3.5 mr-1" />
-                      {evaluatingId === work.id ? "Avaliando..." : "Avaliar"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleSkip(work.id)}
-                      disabled={!!evaluatingId || !!skippingId || isInQueue}
-                    >
-                      <SkipForward className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                )}
               </div>
             </CardContent>
           </Card>
@@ -462,19 +496,43 @@ function formatEvaluatedAt(iso: string | null): string {
 function EvaluationMetaLine({ evaluation }: { evaluation?: PendingWork["evaluation"] }) {
   if (!evaluation) {
     return (
-      <p className="text-xs text-muted-foreground mt-1">Nunca avaliada pela IA</p>
+      <p className="text-xs italic text-muted-foreground">Nunca avaliada pela IA</p>
     )
   }
-  const parts: string[] = []
-  parts.push(`Avaliada em ${formatEvaluatedAt(evaluation.evaluatedAt)}`)
-  if (evaluation.modelName || evaluation.promptVersion) {
-    parts.push(`${evaluation.modelName ?? "?"}/${evaluation.promptVersion ?? "?"}`)
-  }
-  if (evaluation.confidence != null) {
-    parts.push(`Confiança ${Math.round(evaluation.confidence * 100)}%`)
-  }
   return (
-    <p className="text-xs text-muted-foreground mt-1">{parts.join(" • ")}</p>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-1">
+        <CalendarDays className="h-3 w-3" />
+        {formatEvaluatedAt(evaluation.evaluatedAt)}
+      </span>
+      {(evaluation.modelName || evaluation.promptVersion) && (
+        <span className="inline-flex items-center gap-1">
+          <Cpu className="h-3 w-3" />
+          <span className="font-mono">
+            {evaluation.modelName ?? "?"}/{evaluation.promptVersion ?? "?"}
+          </span>
+        </span>
+      )}
+    </div>
+  )
+}
+
+function ConfidencePill({ confidence }: { confidence: number }) {
+  const pct = Math.round(confidence * 100)
+  const tone =
+    confidence >= 0.75
+      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+      : confidence >= 0.5
+        ? "border-amber-300 bg-amber-50 text-amber-700"
+        : "border-rose-300 bg-rose-50 text-rose-700"
+  return (
+    <span
+      title="Confiança declarada pela IA"
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${tone}`}
+    >
+      <Gauge className="h-3 w-3" />
+      {pct}%
+    </span>
   )
 }
 
