@@ -94,7 +94,7 @@ export interface AiEvaluationResponse {
 }
 
 export const MODEL = "claude-sonnet-4-6"
-export const PROMPT_VERSION = "v12"
+export const PROMPT_VERSION = "v13"
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
 export function parsePromptVersion(s: string | null | undefined): number | null {
@@ -170,8 +170,17 @@ INTERPRETAÇÃO DA ESCALA (regra crítica para evitar viés sistemático):
 - Críticas, tropos clichês ou execução fraca NÃO justificam baixar abaixo de 5 quando o critério genuinamente existe. Use ressalvas pra escolher entre 5 e 6 (ou 7 e 8), NUNCA pra ancorar no piso da faixa.
 - Dentro de uma faixa, prefira o valor CENTRAL salvo quando a evidência puxa claramente pra um extremo.
 
+PRINCÍPIO "AUSÊNCIA DE EVIDÊNCIA NÃO É EVIDÊNCIA DE AUSÊNCIA":
+- Reviews que não mencionam um critério NÃO comprovam que ele está ausente — só não comentaram. Gêneros/tags que não incluem um critério não são evidência negativa pra ele.
+- Pra justificar nota < 5 num critério (positivo), é preciso evidência POSITIVA de ausência ou negatividade, como:
+  · review afirmando explicitamente ("a obra não tem nenhum humor", "sem nenhum momento engraçado", "personagem genérico sem personalidade")
+  · sinopse descrevendo cenário incompatível ("história puramente política sem qualquer alívio")
+  · tag/gênero estruturalmente excludente do critério avaliado
+- "Drama domina o tom" indica drama PRESENTE, NÃO ausência de humor — critérios são independentes entre si. Não use a presença de um pra inferir a ausência de outro.
+- Quando faltam evidências em qualquer direção (positivas ou negativas), use 5 (neutro) e baixe a "confidence" pra refletir a incerteza. NÃO ancore no piso da escala só porque a evidência foi escassa ou silenciosa.
+
 EXCEÇÃO PRA CRITÉRIOS NEGATIVOS (drama, tragedy):
-- A regra "5 como piso" NÃO se aplica. Pra esses, notas baixas (0-3) significam ausência saudável, não defeito. Drama 2 = "obra leve sem conflito intenso", o que é positivo. Score esses pela rubrica normal sem viés de piso.
+- As regras "5 como piso" e "ausência de evidência" NÃO se aplicam. Pra esses, notas baixas (0-3) significam ausência saudável, não defeito. Drama 2 = "obra leve sem conflito intenso", o que é positivo. Silêncio sobre tragédia é razoavelmente interpretado como ausência (a maioria das obras não é trágica). Score esses pela rubrica normal sem viés de piso.
 
 IMPORTANTE: Use SEMPRE a tool "submit_evaluation" para responder. Não escreva texto fora da tool.
 
