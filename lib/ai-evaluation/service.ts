@@ -94,7 +94,16 @@ export interface AiEvaluationResponse {
 }
 
 export const MODEL = "claude-sonnet-4-6"
-export const PROMPT_VERSION = "v11"
+export const PROMPT_VERSION = "v12"
+
+/** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
+export function parsePromptVersion(s: string | null | undefined): number | null {
+  if (!s) return null
+  const m = /^v(\d+)$/.exec(s.trim())
+  return m ? parseInt(m[1], 10) : null
+}
+
+export const CURRENT_PROMPT_VERSION_NUM = parsePromptVersion(PROMPT_VERSION) ?? 0
 const MAX_REVIEW_WORDS = 120
 
 // ============================================================================
@@ -152,8 +161,17 @@ REGRAS DE PONTUAÇÃO:
 - Use SOMENTE as faixas das rubricas abaixo. A nota deve refletir a faixa correspondente, NÃO uma impressão geral.
 - Use decimais (ex: 7.5) quando a obra estiver entre dois níveis.
 - Não invente eventos de plot que não estejam explicitamente na sinopse, tags, gêneros ou reviews compatíveis.
-- Se a evidência for ambígua, prefira a faixa MAIS BAIXA e explique a incerteza.
+- Se a evidência for ambígua ENTRE DUAS FAIXAS adjacentes, escolha a faixa inferior MAS use o valor MAIS ALTO dela (ex.: incerteza entre 4-6 e 7-8 → 6, não 4). Essa regra só vale ENTRE FAIXAS, nunca dentro de uma faixa escolhida.
 - Em cada justificativa, cite EXPLICITAMENTE qual faixa foi escolhida (ex: "Faixa 4-6 (Subplot): ..." ou "Faixa 7-8 (Core Romance): ...") e o motivo baseado em evidência.
+
+INTERPRETAÇÃO DA ESCALA (regra crítica para evitar viés sistemático):
+- 5 é o ponto NEUTRO: significa "o critério está presente de forma reconhecível, mas não define a obra".
+- Notas 0-4 são RESERVADAS pra casos onde o critério é claramente ausente, irrelevante ou atua negativamente. Se há QUALQUER evidência (mesmo parcial, mesmo com ressalvas) de que o critério está presente, a nota deve ser ≥ 5.
+- Críticas, tropos clichês ou execução fraca NÃO justificam baixar abaixo de 5 quando o critério genuinamente existe. Use ressalvas pra escolher entre 5 e 6 (ou 7 e 8), NUNCA pra ancorar no piso da faixa.
+- Dentro de uma faixa, prefira o valor CENTRAL salvo quando a evidência puxa claramente pra um extremo.
+
+EXCEÇÃO PRA CRITÉRIOS NEGATIVOS (drama, tragedy):
+- A regra "5 como piso" NÃO se aplica. Pra esses, notas baixas (0-3) significam ausência saudável, não defeito. Drama 2 = "obra leve sem conflito intenso", o que é positivo. Score esses pela rubrica normal sem viés de piso.
 
 IMPORTANTE: Use SEMPRE a tool "submit_evaluation" para responder. Não escreva texto fora da tool.
 

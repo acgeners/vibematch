@@ -11,6 +11,8 @@ interface AiEvaluationFiltersProps {
   activeFilters: EvaluationFilter[]
   currentModel: string
   currentPromptVersion: string
+  currentPromptVersionNum: number
+  promptVersionTolerance: number
   lowConfidenceThreshold: number
 }
 
@@ -18,6 +20,8 @@ export function AiEvaluationFilters({
   activeFilters,
   currentModel,
   currentPromptVersion,
+  currentPromptVersionNum,
+  promptVersionTolerance,
   lowConfidenceThreshold,
 }: AiEvaluationFiltersProps) {
   const router = useRouter()
@@ -69,7 +73,13 @@ export function AiEvaluationFilters({
           checked={isOn("outdated-model")}
           onChange={(v) => setFilter("outdated-model", v)}
           label="Modelo/prompt antigos"
-          description={`Avaliações em modelo ≠ ${currentModel} ou prompt ≠ ${currentPromptVersion}`}
+          description={(() => {
+            if (promptVersionTolerance <= 0) {
+              return `Avaliações em modelo ≠ ${currentModel} ou prompt ≠ ${currentPromptVersion}`
+            }
+            const cutoff = Math.max(0, currentPromptVersionNum - promptVersionTolerance)
+            return `Avaliações em modelo ≠ ${currentModel} ou prompt ≤ v${cutoff} (tolerância ${promptVersionTolerance})`
+          })()}
         />
       </div>
     </div>

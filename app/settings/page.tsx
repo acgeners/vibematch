@@ -5,9 +5,11 @@ import { FormulaConfigForm } from "@/components/settings/formula-config-form"
 import { CalibrationPanel } from "@/components/settings/calibration-panel"
 import { PostReadingWeightsForm } from "@/components/settings/post-reading-weights-form"
 import { RankingPreferencesForm } from "@/components/settings/ranking-preferences-form"
+import { AiEvalPreferencesForm } from "@/components/settings/ai-eval-preferences-form"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { CollapsibleCard } from "@/components/ui/collapsible-card"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
+import { PROMPT_VERSION, CURRENT_PROMPT_VERSION_NUM } from "@/lib/ai-evaluation/service"
 import type { ScoreWeight, FormulaConfig } from "@/types/domain"
 
 async function getSettingsData() {
@@ -62,6 +64,18 @@ export default async function SettingsPage() {
         defaultOpen={false}
       >
         <CalibrationPanel config={config} snapshot={snapshot} />
+      </CollapsibleCard>
+
+      <CollapsibleCard
+        title="Preferências de avaliação IA"
+        description="Quanto tolerar versões antigas antes de marcar obras como desatualizadas no backlog de /ai-evaluation."
+        defaultOpen={false}
+      >
+        <AiEvalPreferencesForm
+          config={config}
+          currentPromptVersion={PROMPT_VERSION}
+          currentPromptVersionNum={CURRENT_PROMPT_VERSION_NUM}
+        />
       </CollapsibleCard>
 
       <CollapsibleCard

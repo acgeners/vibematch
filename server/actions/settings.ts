@@ -61,6 +61,37 @@ export interface RankingPreferencesUpdate {
   min_final_score: number | null
 }
 
+export interface AiEvalPreferencesUpdate {
+  prompt_version_tolerance: number
+}
+
+export async function updateAiEvalPreferences(update: AiEvalPreferencesUpdate) {
+  const supabase = createAdminClient()
+  const tolerance = Math.max(0, Math.floor(update.prompt_version_tolerance))
+
+  const { data: existing } = await supabase
+    .from("formula_config")
+    .select("id")
+    .limit(1)
+    .single()
+
+  if (!existing) return { error: "formula_config não encontrado" }
+
+  const { error } = await supabase
+    .from("formula_config")
+    .update({
+      prompt_version_tolerance: tolerance,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", existing.id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath("/settings")
+  revalidatePath("/ai-evaluation")
+  return { error: null }
+}
+
 export async function updateRankingPreferences(update: RankingPreferencesUpdate) {
   const supabase = createAdminClient()
 

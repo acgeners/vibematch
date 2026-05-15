@@ -4,7 +4,7 @@ import { AiEvaluationPanel } from "@/components/ai-evaluation/ai-evaluation-pane
 import { AiEvaluationFilters } from "@/components/ai-evaluation/ai-evaluation-filters"
 import { Badge } from "@/components/ui/badge"
 import { pickPrimaryCover } from "@/lib/work-derived"
-import { MODEL, PROMPT_VERSION } from "@/lib/ai-evaluation/service"
+import { MODEL, PROMPT_VERSION, CURRENT_PROMPT_VERSION_NUM, parsePromptVersion } from "@/lib/ai-evaluation/service"
 
 const ALL_FILTERS = ["pending", "low-confidence", "outdated-model"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
@@ -43,6 +43,16 @@ interface EligibleWork {
 async function getEligibleWorks(filters: EvaluationFilter[]) {
   const supabase = createAdminClient()
 
+  // Carrega tolerância de versão (compartilhada pelo filtro outdated-model
+  // e pela UI dos filtros). Default 0 (qualquer divergência conta).
+  const { data: configRow } = await supabase
+    .from("formula_config")
+    .select("prompt_version_tolerance")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const promptVersionTolerance = Math.max(0, Number(configRow?.prompt_version_tolerance ?? 0))
+
   // Pra cada filtro, descobrimos os work_ids elegíveis e depois unimos.
   // Mais eficiente que um único query com OR complexo (queries simples,
   // índices óbvios). Em paralelo.
@@ -78,12 +88,23 @@ async function getEligibleWorks(filters: EvaluationFilter[]) {
   if (filters.includes("outdated-model")) {
     queries.push(
       (async () => {
+        // Busca todas latest evals e filtra em JS — Postgres não tem helper
+        // ergonômico pra parsear "vXX" → int. Trivial em JS com ~milhares
+        // de rows.
         const { data, error } = await supabase
           .from("latest_ai_evaluation_per_work")
           .select("work_id, model_name, prompt_version")
-          .or(`model_name.neq.${MODEL},prompt_version.neq.${PROMPT_VERSION}`)
         if (error) throw new Error(error.message)
-        return { filter: "outdated-model" as const, ids: new Set((data ?? []).map((r) => r.work_id)) }
+        const ids = new Set<string>()
+        for (const row of data ?? []) {
+          const versionNum = parsePromptVersion(row.prompt_version as string | null)
+          const modelMismatch = (row.model_name as string | null) !== MODEL
+          const promptMismatch =
+            versionNum == null ||
+            CURRENT_PROMPT_VERSION_NUM - versionNum > promptVersionTolerance
+          if (modelMismatch || promptMismatch) ids.add(row.work_id as string)
+        }
+        return { filter: "outdated-model" as const, ids }
       })()
     )
   }
@@ -99,7 +120,7 @@ async function getEligibleWorks(filters: EvaluationFilter[]) {
   }
 
   if (matchedByWork.size === 0) {
-    return { works: [] as EligibleWork[], totalCount: 0, activeFilters: filters }
+    return { works: [] as EligibleWork[], totalCount: 0, activeFilters: filters, promptVersionTolerance }
   }
 
   const eligibleIds = [...matchedByWork.keys()]
@@ -154,7 +175,7 @@ async function getEligibleWorks(filters: EvaluationFilter[]) {
     }
   })
 
-  return { works, totalCount: works.length, activeFilters: filters }
+  return { works, totalCount: works.length, activeFilters: filters, promptVersionTolerance }
 }
 
 export default async function AiEvaluationPage({
@@ -164,7 +185,7 @@ export default async function AiEvaluationPage({
 }) {
   const params = await searchParams
   const activeFilters = parseFilters(params.filter)
-  const { works, totalCount } = await getEligibleWorks(activeFilters)
+  const { works, totalCount, promptVersionTolerance } = await getEligibleWorks(activeFilters)
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -182,6 +203,8 @@ export default async function AiEvaluationPage({
         activeFilters={activeFilters}
         currentModel={MODEL}
         currentPromptVersion={PROMPT_VERSION}
+        currentPromptVersionNum={CURRENT_PROMPT_VERSION_NUM}
+        promptVersionTolerance={promptVersionTolerance}
         lowConfidenceThreshold={LOW_CONFIDENCE_THRESHOLD}
       />
 

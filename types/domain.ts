@@ -226,6 +226,8 @@ export interface FormulaConfig {
   last_recalculated_at: string | null
   /** P95 das distâncias do treino — threshold de outlier em distanceFactor. */
   distance_p95: number | null
+  /** Quantas versões pra trás do prompt são aceitas sem marcar como outdated. */
+  prompt_version_tolerance: number
   pseudo_votes_nota_m: number
   pseudo_votes_blend: number
   /** Quantos itens exibir no ranking (null = todos). */
