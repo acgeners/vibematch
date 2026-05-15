@@ -135,7 +135,16 @@ function compositeAcceptScore(
 
 function cleanSynopsisPre(text: string | null | undefined): string {
   if (!text) return ""
-  return text
+
+  // Detecta marcadores de classificação ANTES da limpeza pra não perdê-los.
+  // Aparecem em vários contextos ("Original Webtoon: R19", "Official
+  // Translations (R19)", "R19 only", etc) e a maioria é removida pelas regras
+  // de boilerplate abaixo. Reinjetamos no fim se foram apagados.
+  const detectedRatings: string[] = []
+  if (/\bR\s*-?\s*19\b/i.test(text)) detectedRatings.push("R19")
+  if (/\bR\s*-?\s*18\b/i.test(text)) detectedRatings.push("R18")
+
+  let cleaned = text
     .replace(/\r\n?/g, "\n")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
@@ -160,6 +169,19 @@ function cleanSynopsisPre(text: string | null | undefined): string {
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim()
+
+  // Reinjeta marcadores ausentes — garante sinal pra enforceR19AdultContentRule
+  // e pra IA mesmo quando o bloco "Original Webtoon"/"Official Translations" foi
+  // removido pela limpeza.
+  for (const marker of detectedRatings) {
+    const re = new RegExp(`\\b${marker}\\b`, "i")
+    if (!re.test(cleaned)) {
+      cleaned = cleaned
+        ? `${cleaned}\n\n[${marker} disponível]`
+        : `[${marker} disponível]`
+    }
+  }
+  return cleaned
 }
 
 function splitSynopsisBlocks(text: string | null | undefined): string[] {
