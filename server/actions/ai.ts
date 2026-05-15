@@ -6,7 +6,7 @@ import { requestAiEvaluation } from "@/lib/ai-evaluation/service"
 import { fetchExternalEvaluationContextForWork } from "@/lib/external/index"
 import { recalculateWork } from "./calculations"
 import type { AiEvaluation } from "@/types/domain"
-import { pickPrimarySynopsis } from "@/lib/work-derived"
+import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
 import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
 
 const TAG_GROUP_ID_TO_SLUG: Record<string, string> = Object.fromEntries(
@@ -22,7 +22,8 @@ export async function triggerAiEvaluation(workId: string) {
       id, title, original_title, alternative_titles,
       work_tags(tags(name, tag_group_id)),
       work_genres(genres(name)),
-      work_synopses(source, text, is_primary, position)
+      work_synopses(source, text, is_primary, position),
+      work_covers(url, is_primary, position)
     `)
     .eq("id", workId)
     .single()
@@ -56,7 +57,6 @@ export async function triggerAiEvaluation(workId: string) {
     .insert({
       work_id: workId,
       status: "processing",
-      prompt_version: "v9",
     })
     .select("id")
     .single()
@@ -74,6 +74,9 @@ export async function triggerAiEvaluation(workId: string) {
     const primarySynopsisRow = synopses.find((s) => s?.is_primary) ?? null
     const synopsisIsManual = primarySynopsisRow?.source === "manual"
 
+    const covers = (work as { work_covers?: Array<{ url?: string | null; is_primary?: boolean | null; position?: number | null }> }).work_covers ?? []
+    const coverUrl = pickPrimaryCover(covers)
+
     const response = await requestAiEvaluation({
       workId,
       title: work.title,
@@ -83,7 +86,7 @@ export async function triggerAiEvaluation(workId: string) {
       tags,
       sourcedReviews,
       externalContext,
-      promptVersion: "v9",
+      coverUrl,
     })
 
     const scoresToInsert = response.scores.map((s) => ({

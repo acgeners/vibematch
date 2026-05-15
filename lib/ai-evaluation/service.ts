@@ -33,6 +33,11 @@ export interface AiEvaluationRequest {
   promptVersion?: string
   /** Override do modelo Claude (ex.: "claude-sonnet-4-6"). Default: claude-haiku-4-5. */
   model?: string
+  /**
+   * URL pública da capa primary. Quando presente, enviada como image content
+   * block alongside the user prompt. Sinal auxiliar — não dominante.
+   */
+  coverUrl?: string | null
 }
 
 interface NormalizedTag {
@@ -94,7 +99,7 @@ export interface AiEvaluationResponse {
 }
 
 export const MODEL = "claude-sonnet-4-6"
-export const PROMPT_VERSION = "v13"
+export const PROMPT_VERSION = "v14"
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
 export function parsePromptVersion(s: string | null | undefined): number | null {
@@ -181,6 +186,20 @@ PRINCÍPIO "AUSÊNCIA DE EVIDÊNCIA NÃO É EVIDÊNCIA DE AUSÊNCIA":
 
 EXCEÇÃO PRA CRITÉRIOS NEGATIVOS (drama, tragedy):
 - As regras "5 como piso" e "ausência de evidência" NÃO se aplicam. Pra esses, notas baixas (0-3) significam ausência saudável, não defeito. Drama 2 = "obra leve sem conflito intenso", o que é positivo. Silêncio sobre tragédia é razoavelmente interpretado como ausência (a maioria das obras não é trágica). Score esses pela rubrica normal sem viés de piso.
+
+USO DA CAPA (quando fornecida como imagem anexada antes do prompt):
+- A capa é um sinal AUXILIAR, não autoritativo. Convenções estéticas de manhwa criam capas românticas mesmo quando romance é subplot — não trate a capa isoladamente como prova.
+- Sinais visuais úteis (sempre cross-validar com sinopse/tags/reviews):
+  · Casal em destaque, abraço, troca de olhares → indício de romance presente
+  · Caricatura, expressões cômicas exageradas, poses descontraídas → indício de humor
+  · Paleta sombria, expressões sérias/tristes/raivosas → indício de drama/tragedy
+  · Armas, cenas de batalha, postura combativa → indício de action_adventure
+  · Vestimenta nobre/medieval, cenário de corte/palácio → indício de fantasy_nobility
+  · Roupas reveladoras, intimidade visual → indício fraco de adult_content (só sobe nota se corroborado por tag/review)
+- A capa SOZINHA não justifica nota ≥ 7 em nenhum critério. Confirme com outras evidências antes de subir.
+- A capa SOZINHA também não justifica nota < 5 (princípio "ausência de evidência" continua valendo).
+- Quando a capa contradiz outras evidências, prefira o texto. Capas são marketing — sinopse e reviews descrevem a obra de fato.
+- Mencione a capa nas justificativas apenas quando ela acrescentou evidência relevante (ex.: "a capa mostra o casal em destaque, reforçando o sinal de romance").
 
 IMPORTANTE: Use SEMPRE a tool "submit_evaluation" para responder. Não escreva texto fora da tool.
 
@@ -489,6 +508,12 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     `Título oficial da obra a avaliar: "${req.title}"`,
     "(use SOMENTE este título nas suas respostas)",
   ]
+
+  if (req.coverUrl) {
+    lines.push(
+      `\nUma imagem da capa primary foi anexada antes deste prompt. Use-a como sinal AUXILIAR conforme a seção "USO DA CAPA" do system prompt.`
+    )
+  }
 
   const synopsis = req.synopsis?.trim() ?? ""
   const hasExternalContext = (req.externalContext?.length ?? 0) > 0
@@ -809,6 +834,7 @@ function attachEvaluationContext(
           })) ?? [],
         r19Detected: hasR19Marker(req),
         r19Level: detectR19(req),
+        coverUrlSentToModel: req.coverUrl ?? null,
       },
     },
   }
@@ -864,6 +890,7 @@ function canonicalInputHash(req: AiEvaluationRequest): string {
         text: r.text,
       })) ?? [],
     reviews: req.reviews ?? [],
+    coverUrl: req.coverUrl ?? null,
   }
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex")
 }
@@ -984,30 +1011,60 @@ export async function requestAiEvaluation(
   // Opus 4.7 não aceita o parâmetro temperature.
   const supportsTemperature = !/opus-4-7/i.test(modelToUse)
 
+  // Tenta primeiro com cover (se fornecida); se Anthropic falhar com erro
+  // específico de imagem, retentamos sem ela (a segunda tentativa textual já
+  // é o flow padrão).
+  let imageFetchFailed = false
+
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const message = await client.messages.create({
-      model: modelToUse,
-      max_tokens: attempt === 0 ? 3500 : 4500,
-      ...(supportsTemperature ? { temperature: attempt === 0 ? 0.2 : 0 } : {}),
-      system: [
-        {
-          type: "text",
-          text: SYSTEM_PROMPT,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      tools: [EVALUATION_TOOL],
-      tool_choice: { type: "tool", name: EVALUATION_TOOL.name },
-      messages: [
-        {
-          role: "user",
-          content:
-            attempt === 0
-              ? userPrompt
-              : `${userPrompt}\n\nA tentativa anterior não passou na auditoria de uso de reviews ou retornou payload inválido. Se reviews foram fornecidas, use pelo menos uma review compatível, cite o ID dela nas justificativas como "review R1" e preencha "review_usage" com IDs válidos. Use SEMPRE a tool "submit_evaluation".`,
-        },
-      ],
-    })
+    const promptText =
+      attempt === 0
+        ? userPrompt
+        : `${userPrompt}\n\nA tentativa anterior não passou na auditoria de uso de reviews ou retornou payload inválido. Se reviews foram fornecidas, use pelo menos uma review compatível, cite o ID dela nas justificativas como "review R1" e preencha "review_usage" com IDs válidos. Use SEMPRE a tool "submit_evaluation".`
+
+    const includeImage = !!req.coverUrl && !imageFetchFailed
+    const messageContent: Anthropic.Messages.ContentBlockParam[] = includeImage
+      ? [
+          {
+            type: "image",
+            source: { type: "url", url: req.coverUrl! },
+          },
+          { type: "text", text: promptText },
+        ]
+      : [{ type: "text", text: promptText }]
+
+    let message: Anthropic.Messages.Message
+    try {
+      message = await client.messages.create({
+        model: modelToUse,
+        max_tokens: attempt === 0 ? 3500 : 4500,
+        ...(supportsTemperature ? { temperature: attempt === 0 ? 0.2 : 0 } : {}),
+        system: [
+          {
+            type: "text",
+            text: SYSTEM_PROMPT,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+        tools: [EVALUATION_TOOL],
+        tool_choice: { type: "tool", name: EVALUATION_TOOL.name },
+        messages: [{ role: "user", content: messageContent }],
+      })
+    } catch (err) {
+      // Erro relacionado à imagem (fetch falhou, formato inválido, URL privada).
+      // Retentar imediatamente sem a imagem em vez de rodar pra próxima attempt.
+      const errMessage = err instanceof Error ? err.message : String(err)
+      const looksLikeImageError =
+        includeImage &&
+        /image|url|fetch|media|content type/i.test(errMessage)
+      if (looksLikeImageError) {
+        console.warn(`[AI] Cover falhou (${errMessage}). Retentando sem imagem.`)
+        imageFetchFailed = true
+        attempt -= 1
+        continue
+      }
+      throw err
+    }
 
     const toolUseBlock = message.content.find(
       (b): b is Extract<typeof b, { type: "tool_use" }> => b.type === "tool_use"

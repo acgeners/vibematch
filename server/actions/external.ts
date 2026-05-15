@@ -276,6 +276,7 @@ export async function evaluateCandidateForCreate(input: {
   synopsis?: string | null
   genres?: string[]
   tags?: string[]
+  coverUrl?: string | null
 }): Promise<CandidateAiResult | null> {
   try {
     const { sourcedReviews, externalContext } = await fetchExternalEvaluationContextForWork({
@@ -292,6 +293,7 @@ export async function evaluateCandidateForCreate(input: {
       tags: input.tags ?? [],
       sourcedReviews,
       externalContext,
+      coverUrl: input.coverUrl ?? null,
     })
 
     const scores: Partial<Record<CriterionSlug, number>> = {}

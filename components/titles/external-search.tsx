@@ -189,6 +189,8 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
           synopsis: merged.synopsis ?? null,
           genres: merged.genres,
           tags: merged.tags,
+          // multiCovers vem ordenada pelo merge — primeiro é o candidato primary.
+          coverUrl: merged.multiCovers?.[0]?.url ?? null,
         })
         if (aiResult) {
           merged.criteriaScores = aiResult.scores
