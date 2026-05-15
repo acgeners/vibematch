@@ -54,14 +54,20 @@ function titleSimilarity(a: string, b: string) {
   if (!na || !nb) return 0
   if (na === nb) return 1
 
+  // Candidato contém a query inteira → score alto.
   if (nb.includes(na)) return 0.9
 
-  // Query contains the candidate. Only treat as high-confidence when the candidate
-  // is substantial — otherwise a common word inside a long query (e.g. "Marriage"
-  // inside "Elissa's Whirlwind Marriage") yields a false positive.
+  // Query contém o candidato (reverse substring) — situação onde mais falsos
+  // positivos acontecem. Ex.: buscar "The Fake Lady and Her Rabbit Duke" e
+  // encontrar "Fake Lady" (obra completamente diferente). Gradua o score pela
+  // proporção do candidato dentro da query + palavras significativas.
   if (na.includes(nb)) {
+    const ratio = nb.length / na.length
     const shortWords = nb.split(" ").filter((w) => w.length > 2).length
-    if (nb.length / na.length >= 0.6 || shortWords >= 2) return 0.9
+    if (ratio >= 0.6 || shortWords >= 4) return 0.9 // substring substancial
+    if (ratio >= 0.4 || shortWords >= 3) return 0.75 // palavras significativas
+    if (ratio >= 0.25 && shortWords >= 2) return 0.65 // marginal — passa só se outras evidências ajudarem
+    // Caso contrário cai pro Jaccard abaixo (provável rejeição pelo threshold)
   }
 
   const aw = new Set(na.split(" ").filter((w) => w.length > 2))
@@ -71,7 +77,7 @@ function titleSimilarity(a: string, b: string) {
   return intersection / new Set([...aw, ...bw]).size
 }
 
-function bestTitleMatch(query: string, result: Pick<ExternalSearchResult, "title" | "originalTitle" | "alternativeTitles">) {
+export function bestTitleMatch(query: string, result: Pick<ExternalSearchResult, "title" | "originalTitle" | "alternativeTitles">) {
   const names = [result.title, result.originalTitle, ...(result.alternativeTitles ?? [])]
   return Math.max(...names.map((name) => titleSimilarity(query, name ?? "")), 0)
 }
@@ -115,12 +121,12 @@ function compositeAcceptScore(
   const composite = 0.5 * titleScore + 0.3 * synScore + 0.15 * altOverlap + 0.05 * yearProximity - chapterPenalty
 
   let reason: string | undefined
-  if (titleScore < 0.62) reason = `título não bate (score=${titleScore.toFixed(2)})`
+  if (titleScore < 0.72) reason = `título não bate (score=${titleScore.toFixed(2)})`
   else if (synScore < 0.18) reason = `sinopse divergente (score=${synScore.toFixed(2)})`
-  else if (composite < 0.55) reason = `score composto baixo (${composite.toFixed(2)})`
+  else if (composite < 0.62) reason = `score composto baixo (${composite.toFixed(2)})`
   else if (chapterPenalty > 0) reason = `divergência forte de capítulos (penalidade aplicada)`
 
-  return { titleScore, synScore, composite, reason: composite < 0.55 || titleScore < 0.62 || synScore < 0.18 ? reason : undefined }
+  return { titleScore, synScore, composite, reason: composite < 0.62 || titleScore < 0.72 || synScore < 0.18 ? reason : undefined }
 }
 
 // ============================================================================
@@ -287,7 +293,7 @@ function mergeSearchResults(query: string, results: ExternalSearchResult[]): Mer
   const filtered = results
     .filter((result) => !isExcludedResult(result))
     .map((result) => ({ result, matchScore: bestTitleMatch(query, result) }))
-    .filter(({ matchScore }) => matchScore >= 0.62)
+    .filter(({ matchScore }) => matchScore >= 0.65)
     .sort((a, b) => b.matchScore - a.matchScore)
 
   const groups: Array<{ main: ExternalSearchResult; matchScore: number; results: ExternalSearchResult[] }> = []
@@ -376,7 +382,7 @@ type SearchConnector = {
   search: (query: string) => Promise<ExternalSearchResult[]>
 }
 
-const SEARCH_CONNECTORS = [
+export const SEARCH_CONNECTORS = [
   { source: "anilist", search: searchAniList },
   { source: "mangaupdates", search: searchMangaUpdates },
   { source: "comick", search: searchComicK },
@@ -551,7 +557,7 @@ function hoistCrossSourceIds(candidates: MergedCandidate[]): void {
  * final source list independent of which title variant the user typed in.
  *
  * Acceptance uses the same `compositeAcceptScore` thresholds as the hydrate
- * stage (titleScore ≥ 0.62, synScore ≥ 0.18, composite ≥ 0.55) so we don't
+ * stage (titleScore ≥ 0.72, synScore ≥ 0.18, composite ≥ 0.62) so we don't
  * pollute a candidate with results from same-named-but-different works.
  */
 function fillCandidateIdFromResult(candidate: MergedCandidate, result: ExternalSearchResult) {
@@ -848,12 +854,20 @@ export async function fetchExternalEvaluationContextForWork(input: {
   title: string
   originalTitle?: string | null
   alternativeTitles?: string[] | null
+  /**
+   * Fontes explicitamente rejeitadas pelo usuário via "Revalidar fontes"
+   * (work_external_ids.is_rejected). Reviews/synopses dessas fontes são
+   * filtradas após a coleta — evita propagação de matches errados.
+   */
+  rejectedSources?: ReadonlyArray<string>
 }): Promise<{ sourcedReviews: SourcedReview[]; externalContext: string[] }> {
   const queries = uniqueStrings([
     input.title,
     input.originalTitle,
     ...(input.alternativeTitles ?? []),
   ]).slice(0, 5)
+
+  const rejected = new Set((input.rejectedSources ?? []) as string[])
 
   for (const query of queries) {
     const candidates = await searchAllSources(query)
@@ -863,9 +877,15 @@ export async function fetchExternalEvaluationContextForWork(input: {
         hydrateCandidate(candidate),
         collectReviewsFromCandidate(candidate),
       ])
-      const sourcedReviews = selectReviewsForEvaluation(allReviews, { perSource: 6, total: 20 })
+      const filteredReviews = rejected.size > 0
+        ? allReviews.filter((r) => !rejected.has(r.source))
+        : allReviews
+      const filteredHydrated = rejected.size > 0
+        ? hydrated.filter((h: ExternalSearchResult) => !rejected.has(h.source))
+        : hydrated
+      const sourcedReviews = selectReviewsForEvaluation(filteredReviews, { perSource: 6, total: 20 })
       const externalContext = uniqueSynopsisBlocks(
-        hydrated.map((h: ExternalSearchResult) => h.synopsis)
+        filteredHydrated.map((h: ExternalSearchResult) => h.synopsis)
       ).slice(0, 6)
       if (sourcedReviews.length || externalContext.length) {
         return { sourcedReviews, externalContext }
@@ -1060,7 +1080,7 @@ export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promi
   const trustedSet = new Set(candidate.trustedSources ?? [])
   for (const result of hydrated) {
     const { titleScore, synScore, composite, reason } = compositeAcceptScore(candidate, result)
-    const passes = titleScore >= 0.62 && synScore >= 0.18 && composite >= 0.55
+    const passes = titleScore >= 0.72 && synScore >= 0.18 && composite >= 0.62
     if (passes || trustedSet.has(result.source)) accepted.push({ ...result, score: result.score })
     else rejected.push({ result, reason })
   }

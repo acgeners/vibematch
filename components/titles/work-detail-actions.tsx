@@ -9,6 +9,7 @@ import { triggerAiEvaluation } from "@/server/actions/ai"
 import { archiveWork, deleteWork, unarchiveWork } from "@/server/actions/works"
 import { AiEvaluationReviewForm } from "@/components/ai-evaluation/ai-evaluation-review-form"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
+import { RevalidateSourcesDialog } from "@/components/titles/revalidate-sources-dialog"
 import { StatusEditDialog } from "@/components/titles/status-edit-dialog"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
 import { Button } from "@/components/ui/button"
@@ -138,6 +139,7 @@ export function WorkDetailActions({
         {currentWork && (
           <UpdateDataDialog workId={workId} currentWork={currentWork} />
         )}
+        <RevalidateSourcesDialog workId={workId} />
         <Button variant="outline" size="sm" onClick={handleAiEvaluation} disabled={evaluating}>
           <Sparkles className="h-4 w-4" />
           {evaluating ? "Avaliando..." : hasCriteriaScores ? "Reavaliar IA" : "Avaliar IA"}

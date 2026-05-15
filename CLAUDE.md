@@ -117,8 +117,8 @@ The model is `claude-sonnet-4-6`, prompt version `v15`, up to 2 attempts (second
 ## External data sources
 
 `lib/external/index.ts` is the multi-source orchestration layer:
-- `searchAllSources(query)` — parallel search across AniList, MangaUpdates, ComicK, Kitsu, MyAnimeList; merges by title similarity (threshold 0.62)
-- `fetchMultiSourceDetails(candidate)` — hydrates a candidate from all platforms by ID, filters accepted sources (title ≥ 0.62 AND synopsis similarity ≥ 0.05), then calls the AI
+- `searchAllSources(query)` — parallel search across AniList, MangaUpdates, ComicK, Kitsu, MyAnimeList; merges by title similarity (threshold 0.65 for grouping, 0.72 for accepted)
+- `fetchMultiSourceDetails(candidate)` — hydrates a candidate from all platforms by ID, filters accepted sources (titleScore ≥ 0.72 AND synScore ≥ 0.18 AND composite ≥ 0.62), then calls the AI. Reverse-substring matches ("Fake Lady" inside "The Fake Lady and Her Rabbit Duke") são graduados por proporção pra evitar falsos positivos.
 
 Client-side fetches (ComicK ratings, AnimePlanet ratings) live in `lib/external/client-fetches.ts` and are called directly from `ExternalSearch` component to avoid the server action round-trip.
 

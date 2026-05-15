@@ -4,11 +4,12 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 import { TAG_GROUPS_CATALOG, GENRE_NAMES } from "@/lib/constants/tags"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
-import { searchAllSources, fetchMultiSourceDetails, fetchExternalEvaluationContextForWork } from "@/lib/external/index"
+import { searchAllSources, fetchMultiSourceDetails, fetchExternalEvaluationContextForWork, SEARCH_CONNECTORS, bestTitleMatch } from "@/lib/external/index"
 import { requestAiEvaluation } from "@/lib/ai-evaluation/service"
 import { classifyTagsByGroup } from "@/lib/ai-evaluation/tag-classifier"
-import type { MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField } from "@/lib/external/types"
+import type { ExternalSourceId, MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField } from "@/lib/external/types"
 import type { CriterionSlug } from "@/types/domain"
+import { revalidatePath } from "next/cache"
 
 export interface TagCatalogItem {
   id: string
@@ -321,4 +322,168 @@ export async function evaluateCandidateForCreate(input: {
     console.error("[evaluateCandidateForCreate] failed", err)
     return null
   }
+}
+
+// ============================================================================
+// Revalidação de fontes externas (fix de match errado em obras já criadas)
+// ============================================================================
+
+export interface SourceCandidateOption {
+  externalId: string
+  title: string
+  coverUrl: string | null
+  matchScore: number
+  synopsis: string | null
+  year: number | null
+  chapters: number | null
+}
+
+export interface CurrentSourceSelection {
+  source: ExternalSourceId
+  externalId: string | null
+  isRejected: boolean
+}
+
+export interface RevalidateSourcesResult {
+  query: string
+  candidatesPerSource: Partial<Record<ExternalSourceId, SourceCandidateOption[]>>
+  currentSelections: CurrentSourceSelection[]
+}
+
+export interface SourceSelectionInput {
+  source: ExternalSourceId
+  externalId: string | null
+  isRejected: boolean
+}
+
+/**
+ * Busca candidatos por fonte pra UI de revalidação. Top 3 por fonte com
+ * matchScore ≥ 0.65 (mesmo limiar inicial do mergeSearchResults). Marca
+ * as seleções atuais via work_external_ids.
+ */
+export async function revalidateWorkSources(workId: string): Promise<{ data?: RevalidateSourcesResult; error?: string }> {
+  const supabase = createAdminClient()
+
+  const { data: work, error: workError } = await supabase
+    .from("works")
+    .select("id, title, original_title, alternative_titles")
+    .eq("id", workId)
+    .single()
+
+  if (workError || !work) return { error: "Obra não encontrada" }
+
+  const queries: string[] = []
+  const pushUnique = (s: string | null | undefined) => {
+    const t = s?.trim()
+    if (t && !queries.includes(t)) queries.push(t)
+  }
+  pushUnique(work.title)
+  pushUnique(work.original_title as string | null)
+  for (const alt of (work.alternative_titles as string[] | null) ?? []) pushUnique(alt)
+
+  const primaryQuery = queries[0]
+  if (!primaryQuery) return { error: "Obra sem título pra buscar" }
+
+  // Executa search bruto por fonte em paralelo (mantém raw results pra UI).
+  const settled = await Promise.allSettled(
+    SEARCH_CONNECTORS.map((connector) => connector.search(primaryQuery))
+  )
+
+  const candidatesPerSource: Partial<Record<ExternalSourceId, SourceCandidateOption[]>> = {}
+  settled.forEach((entry, i) => {
+    const source = SEARCH_CONNECTORS[i].source
+    if (entry.status !== "fulfilled") return
+    const scored = entry.value
+      .map((result) => {
+        const matchScore = Math.max(
+          ...queries.map((q) => bestTitleMatch(q, result)),
+          0
+        )
+        return { result, matchScore }
+      })
+      .filter(({ matchScore }) => matchScore >= 0.5) // mostra mais opções pra revalidação
+      .sort((a, b) => b.matchScore - a.matchScore)
+      .slice(0, 3)
+    if (scored.length === 0) return
+    candidatesPerSource[source] = scored.map(({ result, matchScore }) => ({
+      externalId: result.id.split(":")[1] ?? result.id,
+      title: result.title,
+      coverUrl: result.coverUrl ?? null,
+      matchScore,
+      synopsis: result.synopsis ?? null,
+      year: result.year ?? null,
+      chapters: result.chapters ?? null,
+    }))
+  })
+
+  // Carrega seleções atuais pra pré-marcar UI.
+  const { data: existing } = await supabase
+    .from("work_external_ids")
+    .select("source, external_id, is_rejected")
+    .eq("work_id", workId)
+
+  const currentSelections: CurrentSourceSelection[] = (existing ?? []).map((row) => ({
+    source: row.source as ExternalSourceId,
+    externalId: row.external_id as string | null,
+    isRejected: Boolean(row.is_rejected),
+  }))
+
+  return {
+    data: {
+      query: primaryQuery,
+      candidatesPerSource,
+      currentSelections,
+    },
+  }
+}
+
+/**
+ * Persiste seleções do usuário em work_external_ids. Pra cada source no array:
+ *   - externalId + !rejected → upsert (linha ativa)
+ *   - rejected (com ou sem id) → upsert is_rejected=true
+ *   - "limpar" uma fonte (não enviar no array) → delete da linha existente
+ *
+ * Esse endpoint NÃO dispara refresh de dados nem reavaliação IA — UI controla.
+ */
+export async function saveWorkSourceSelections(
+  workId: string,
+  selections: SourceSelectionInput[]
+): Promise<{ error?: string }> {
+  const supabase = createAdminClient()
+
+  const rowsToUpsert = selections.map((s) => ({
+    work_id: workId,
+    source: s.source,
+    external_id: s.externalId,
+    is_rejected: s.isRejected,
+  }))
+
+  // Sources presentes no payload → upsert. Sources ausentes → delete (volta a "não avaliada").
+  const presentSources = new Set(selections.map((s) => s.source))
+  const { data: existing } = await supabase
+    .from("work_external_ids")
+    .select("source")
+    .eq("work_id", workId)
+  const toDelete = (existing ?? [])
+    .map((r) => r.source as ExternalSourceId)
+    .filter((s) => !presentSources.has(s))
+
+  if (toDelete.length > 0) {
+    const { error: delError } = await supabase
+      .from("work_external_ids")
+      .delete()
+      .eq("work_id", workId)
+      .in("source", toDelete)
+    if (delError) return { error: `Erro ao limpar fontes: ${delError.message}` }
+  }
+
+  if (rowsToUpsert.length > 0) {
+    const { error: upError } = await supabase
+      .from("work_external_ids")
+      .upsert(rowsToUpsert, { onConflict: "work_id,source" })
+    if (upError) return { error: `Erro ao salvar seleções: ${upError.message}` }
+  }
+
+  revalidatePath(`/titles/${workId}`)
+  return {}
 }

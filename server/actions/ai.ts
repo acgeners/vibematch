@@ -64,10 +64,21 @@ export async function triggerAiEvaluation(workId: string) {
   if (evalError) return { error: evalError.message }
 
   try {
+    // Fontes que o user explicitamente rejeitou via "Revalidar fontes" não
+    // entram na busca por reviews (evita reviews de matches errados).
+    const { data: extIds } = await supabase
+      .from("work_external_ids")
+      .select("source, is_rejected")
+      .eq("work_id", workId)
+    const rejectedSources = (extIds ?? [])
+      .filter((row) => row.is_rejected === true)
+      .map((row) => row.source as string)
+
     const { sourcedReviews, externalContext } = await fetchExternalEvaluationContextForWork({
       title: work.title,
       originalTitle: work.original_title,
       alternativeTitles: work.alternative_titles,
+      rejectedSources,
     })
 
     const synopses = (work as { work_synopses?: Array<{ source?: string | null; text?: string | null; is_primary?: boolean | null; position?: number | null }> }).work_synopses ?? []
