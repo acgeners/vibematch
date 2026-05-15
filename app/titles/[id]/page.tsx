@@ -146,6 +146,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     id: string
     status: string
     model_name: string | null
+    prompt_version: string | null
     summary: string | null
     confidence: number | null
     created_at: string
@@ -475,7 +476,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               {latestAiEval && (
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   <span>
-                    Modelo: <span className="font-medium text-foreground">{latestAiEval.model_name ?? "—"}</span>
+                    Modelo:{" "}
+                    <span className="font-medium text-foreground">
+                      {latestAiEval.model_name ?? "—"}
+                      {latestAiEval.prompt_version ? `/${latestAiEval.prompt_version}` : ""}
+                    </span>
                   </span>
                   <span>
                     Confiança:{" "}

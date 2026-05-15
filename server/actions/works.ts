@@ -1242,16 +1242,24 @@ function buildCandidateFromStoredIds(
   rows: Array<{ source: string; external_id: string }>
 ): MergedCandidate {
   const sources: ExternalSourceId[] = []
+  const trustedSources: ExternalSourceId[] = []
   const candidate: MergedCandidate = {
     title: work.title,
     originalTitle: work.original_title ?? undefined,
     alternativeTitles: work.alternative_titles ?? [],
     sources,
+    // Fontes vindas de work_external_ids foram explicitamente vinculadas pelo
+    // usuário (no create ou via "Revalidar fontes"). Marcamos como trusted
+    // pra bypass o composite check em fetchMultiSourceDetails — caso contrário
+    // fontes com título ligeiramente divergente (ex.: MangaUpdates) podem ser
+    // descartadas mesmo já tendo sido confirmadas pelo user.
+    trustedSources,
   }
   for (const row of rows) {
     const source = row.source as ExternalSourceId
     if (!SUPPORTED_SOURCES.has(source)) continue
     sources.push(source)
+    trustedSources.push(source)
     switch (source) {
       case "anilist": {
         const n = Number(row.external_id)
@@ -1302,8 +1310,10 @@ export async function refreshWorkExternalData(workId: string): Promise<RefreshWo
 
   const { data: idRows } = await supabase
     .from("work_external_ids")
-    .select("source, external_id")
+    .select("source, external_id, is_rejected")
     .eq("work_id", workId)
+    .not("external_id", "is", null)
+    .eq("is_rejected", false)
 
   if (!idRows || idRows.length === 0) {
     console.log(`[refreshWorkExternalData] no stored IDs for work=${workId}, falling back to search`)
