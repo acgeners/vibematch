@@ -1,15 +1,18 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
-import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
+import { TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
+import { TAG_GROUP_ID_TO_NORMALIZED_SLUG, normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { TAG_GROUPS_CATALOG, GENRE_NAMES } from "@/lib/constants/tags"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
-import { searchAllSources, fetchMultiSourceDetails, fetchExternalEvaluationContextForWork, SEARCH_CONNECTORS, bestTitleMatch } from "@/lib/external/index"
-import { requestAiEvaluation } from "@/lib/ai-evaluation/service"
+import { searchAllSources, fetchMultiSourceDetails, fetchExternalEvaluationContextForWork, fetchExternalEvaluationContextForCandidate, buildCandidateFromExternalIds, SEARCH_CONNECTORS, bestTitleMatch } from "@/lib/external/index"
+import { requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
 import { classifyTagsByGroup } from "@/lib/ai-evaluation/tag-classifier"
 import type { ExternalSourceId, MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField } from "@/lib/external/types"
 import type { CriterionSlug } from "@/types/domain"
 import { revalidatePath } from "next/cache"
+import { pickPrimaryCover } from "@/lib/work-derived"
+import { slugifyTagName } from "@/lib/utils"
 
 export interface TagCatalogItem {
   id: string
@@ -19,10 +22,6 @@ export interface TagCatalogItem {
   groupSlug: string
   groupLabel: string
 }
-
-const TAG_GROUP_ID_TO_SLUG = Object.fromEntries(
-  Object.entries(TAG_GROUP_IDS).map(([slug, id]) => [id, slug])
-) as Record<string, TagGroupSlug>
 
 export async function listTagCatalog(): Promise<TagCatalogItem[]> {
   const supabase = createAdminClient()
@@ -39,7 +38,7 @@ export async function listTagCatalog(): Promise<TagCatalogItem[]> {
   if (!data) return []
 
   return data.map((tag) => {
-    const groupSlug = tag.tag_group_id ? (TAG_GROUP_ID_TO_SLUG[tag.tag_group_id] ?? "") : ""
+    const groupSlug = tag.tag_group_id ? (TAG_GROUP_ID_TO_NORMALIZED_SLUG[tag.tag_group_id] ?? "") : ""
     const groupLabel = groupSlug ? (TAG_GROUP_LABELS[groupSlug as TagGroupSlug] ?? groupSlug) : ""
     return {
       id: tag.id,
@@ -156,6 +155,31 @@ const GENRE_NAME_BY_KEY: Map<string, string> = new Map(
   GENRE_NAMES.map((name) => [normalizeTagKey(name), name])
 )
 
+const TAG_GROUP_BY_TAG_KEY: Map<string, string> = (() => {
+  const map = new Map<string, string>()
+  for (const group of TAG_GROUPS_CATALOG) {
+    const groupSlug = normalizeTagGroupSlug(group.groupSlug)
+    if (!groupSlug) continue
+    for (const name of group.values) {
+      map.set(normalizeTagKey(name), groupSlug)
+    }
+  }
+  return map
+})()
+
+function tagsForAi(tagNames: string[] | undefined): AiEvaluationTag[] {
+  const seen = new Set<string>()
+  const out: AiEvaluationTag[] = []
+  for (const raw of tagNames ?? []) {
+    const name = raw.trim()
+    const key = normalizeTagKey(name)
+    if (!name || !key || seen.has(key)) continue
+    seen.add(key)
+    out.push({ name, group: TAG_GROUP_BY_TAG_KEY.get(key) ?? null })
+  }
+  return out
+}
+
 export async function fetchExternalData(
   candidate: MergedCandidate
 ): Promise<{ data: ExternalWorkData; conflicts: ConflictField[] }> {
@@ -197,20 +221,28 @@ export async function upsertExternalTags(tagNames: string[]): Promise<void> {
 
   const rows = tagNames.map((name) => ({
     name: name.trim(),
-    slug: name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""),
+    slug: slugifyTagName(name),
   })).filter((r) => r.slug)
 
   if (rows.length === 0) return
 
-  // Identifica quais slugs já existem para evitar tocar nas tags existentes
-  // (não sobrescreve tag_group_id já definido manualmente).
+  const slugs = rows.map((r) => r.slug)
+
+  // Resolve aliases — incoming slugs may already be known under canonical form.
+  const { data: aliasRows } = await supabase
+    .from("tag_alias")
+    .select("alias_slug")
+    .in("alias_slug", slugs)
+  const aliasedSlugs = new Set((aliasRows ?? []).map((row) => row.alias_slug as string))
+
+  // Then identify existing canonical tags so we don't reclassify them.
   const { data: existing } = await supabase
     .from("tags")
     .select("slug")
-    .in("slug", rows.map((r) => r.slug))
+    .in("slug", slugs)
   const existingSlugs = new Set((existing ?? []).map((row) => row.slug))
 
-  const newRows = rows.filter((r) => !existingSlugs.has(r.slug))
+  const newRows = rows.filter((r) => !existingSlugs.has(r.slug) && !aliasedSlugs.has(r.slug))
   if (newRows.length === 0) return
 
   // Classifica tags novas em tag_groups via IA antes de inserir. Tags que não
@@ -278,21 +310,34 @@ export async function evaluateCandidateForCreate(input: {
   genres?: string[]
   tags?: string[]
   coverUrl?: string | null
+  externalIds?: Partial<Record<ExternalSourceId, string>>
+  externalContext?: string[]
 }): Promise<CandidateAiResult | null> {
   try {
-    const { sourcedReviews, externalContext } = await fetchExternalEvaluationContextForWork({
-      title: input.title,
-      originalTitle: input.originalTitle ?? null,
-      alternativeTitles: input.alternativeTitles ?? null,
-    })
+    const hasExternalIds = input.externalIds && Object.values(input.externalIds).some(Boolean)
+    const contextResult = hasExternalIds
+      ? await fetchExternalEvaluationContextForCandidate(
+          buildCandidateFromExternalIds({
+            title: input.title,
+            originalTitle: input.originalTitle ?? null,
+            alternativeTitles: input.alternativeTitles ?? null,
+          }, input.externalIds ?? {}),
+          { perSource: 4, total: 12 }
+        )
+      : await fetchExternalEvaluationContextForWork({
+          title: input.title,
+          originalTitle: input.originalTitle ?? null,
+          alternativeTitles: input.alternativeTitles ?? null,
+        })
+    const externalContext = input.externalContext ?? contextResult.externalContext
 
     const response = await requestAiEvaluation({
       workId: `external:${input.title}`,
       title: input.title,
       synopsis: input.synopsis ?? undefined,
       genres: input.genres ?? [],
-      tags: input.tags ?? [],
-      sourcedReviews,
+      tags: tagsForAi(input.tags),
+      sourcedReviews: contextResult.sourcedReviews,
       externalContext,
       coverUrl: input.coverUrl ?? null,
     })
@@ -356,6 +401,43 @@ export interface SourceSelectionInput {
   isRejected: boolean
 }
 
+function animePlanetSlugFromTitle(title: string): string | null {
+  const slug = title
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[’'`]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-")
+  return slug || null
+}
+
+function addAnimePlanetFallbackCandidate(
+  candidatesPerSource: Partial<Record<ExternalSourceId, SourceCandidateOption[]>>,
+  queries: string[],
+  fallbackCoverUrl: string | null
+) {
+  if (candidatesPerSource.animeplanet?.length) return
+
+  const title = queries[0]?.trim()
+  if (!title) return
+
+  const slug = animePlanetSlugFromTitle(title)
+  if (!slug) return
+
+  candidatesPerSource.animeplanet = [{
+    externalId: slug,
+    title,
+    coverUrl: fallbackCoverUrl,
+    matchScore: 0.95,
+    synopsis: null,
+    year: null,
+    chapters: null,
+  }]
+}
+
 /**
  * Busca candidatos por fonte pra UI de revalidação. Top 3 por fonte com
  * matchScore ≥ 0.65 (mesmo limiar inicial do mergeSearchResults). Marca
@@ -366,7 +448,7 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
 
   const { data: work, error: workError } = await supabase
     .from("works")
-    .select("id, title, original_title, alternative_titles")
+    .select("id, title, original_title, alternative_titles, work_covers(url, is_primary, position)")
     .eq("id", workId)
     .single()
 
@@ -415,6 +497,15 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
       chapters: result.chapters ?? null,
     }))
   })
+
+  // AnimePlanet é frequentemente bloqueado por Cloudflare em server-side fetch.
+  // Na revalidação o usuário já está conferindo manualmente, então mostramos um
+  // candidato de slug canônico quando a busca HTML não conseguiu retornar cards.
+  addAnimePlanetFallbackCandidate(
+    candidatesPerSource,
+    queries,
+    pickPrimaryCover(work.work_covers)
+  )
 
   // Carrega seleções atuais pra pré-marcar UI.
   const { data: existing } = await supabase

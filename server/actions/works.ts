@@ -1,6 +1,6 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
+import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { workFormSchema, workStatusSchema } from "@/lib/validations/work.schema"
 import type { WorkFormValues, WorkStatusValues } from "@/lib/validations/work.schema"
@@ -11,12 +11,20 @@ import {
   getPublicationStatusNameById,
   getPersonalStatusNameById,
 } from "@/lib/constants/status-lookups"
-import { pickPrimarySynopsis, pickPrimaryCover } from "@/lib/work-derived"
+import {
+  dedupeSynopsisEntries,
+  pickPrimarySynopsis,
+  pickPrimaryCover,
+  splitSynopsesFromText,
+} from "@/lib/work-derived"
 import { recalculateAll } from "./calculations"
 import { fetchExternalData } from "./external"
+import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField } from "@/lib/external/types"
 import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
 import { TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
+import { slugifyTagName } from "@/lib/utils"
+import { titleToSlug } from "@/lib/utils"
 
 let cachedTagNameToGroupId: Map<string, string> | null = null
 function getTagNameToGroupId(): Map<string, string> {
@@ -211,38 +219,75 @@ function normalizeExternalPlatformUpdates(
   return [...normalized.values()]
 }
 
-async function upsertTag(
+// Resolves a list of tag names to ids in a few queries instead of 3 per tag.
+// Returns the ids of tags that exist or were created. Drops names whose slug is empty.
+// Each incoming slug is first resolved through `tag_alias` so historical/external
+// variants (e.g. snake_case) map to their canonical kebab-case tag.
+async function upsertTagsBatch(
   supabase: SupabaseAdminClient,
-  name: string,
-  tagGroupId: string | null
-): Promise<string | null> {
-  const trimmed = name.trim()
-  const slug = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
-  if (!slug) return null
+  names: string[],
+): Promise<string[]> {
+  const prepared = names
+    .map((name) => ({ name: name.trim(), slug: slugifyTagName(name) }))
+    .filter((t) => t.slug !== "")
 
-  const { data: existingBySlug, error: slugError } = await supabase
-    .from("tags").select("id").eq("slug", slug).maybeSingle()
-  if (slugError) {
-    console.error(`[upsertTag] select by slug failed (slug=${slug})`, slugError.message)
+  // Dedupe by slug, keeping first name occurrence.
+  const bySlug = new Map<string, { name: string; slug: string }>()
+  for (const t of prepared) {
+    if (!bySlug.has(t.slug)) bySlug.set(t.slug, t)
   }
-  if (existingBySlug) return existingBySlug.id
+  if (bySlug.size === 0) return []
 
-  const { data: existingByName, error: nameError } = await supabase
-    .from("tags").select("id").ilike("name", trimmed).limit(1).maybeSingle()
-  if (nameError) {
-    console.error(`[upsertTag] select by name failed (name=${trimmed})`, nameError.message)
-  }
-  if (existingByName) return existingByName.id
+  const slugs = [...bySlug.keys()]
 
-  const { data: created, error: insertError } = await supabase
-    .from("tags")
-    .insert({ slug, name: trimmed, tag_group_id: tagGroupId })
-    .select("id").single()
-  if (insertError) {
-    console.error(`[upsertTag] insert failed (slug=${slug}, name=${trimmed})`, insertError.message)
-    return null
+  // Resolve aliases first — incoming slug may point to a different canonical tag.
+  const idByInputSlug = new Map<string, string>()
+  const { data: aliasRows } = await supabase
+    .from("tag_alias")
+    .select("alias_slug, canonical_tag_id")
+    .in("alias_slug", slugs)
+  for (const row of aliasRows ?? []) {
+    idByInputSlug.set(row.alias_slug as string, row.canonical_tag_id as string)
   }
-  return created?.id ?? null
+
+  const slugsToLookup = slugs.filter((s) => !idByInputSlug.has(s))
+
+  if (slugsToLookup.length > 0) {
+    const { data: existing, error: selectError } = await supabase
+      .from("tags").select("id, slug").in("slug", slugsToLookup)
+    if (selectError) {
+      console.error(`[upsertTagsBatch] select failed`, selectError.message)
+      return []
+    }
+    for (const row of existing ?? []) {
+      idByInputSlug.set(row.slug as string, row.id as string)
+    }
+
+    const missing = slugsToLookup.filter((s) => !idByInputSlug.has(s))
+    if (missing.length > 0) {
+      const rows = missing.map((slug) => {
+        const t = bySlug.get(slug)!
+        return {
+          slug,
+          name: t.name,
+          tag_group_id: resolveTagGroupId(t.name),
+        }
+      })
+      const { data: inserted, error: insertError } = await supabase
+        .from("tags")
+        .upsert(rows, { onConflict: "slug", ignoreDuplicates: false })
+        .select("id, slug")
+      if (insertError) {
+        console.error(`[upsertTagsBatch] insert failed`, insertError.message)
+      } else {
+        for (const row of inserted ?? []) {
+          idByInputSlug.set(row.slug as string, row.id as string)
+        }
+      }
+    }
+  }
+
+  return slugs.map((slug) => idByInputSlug.get(slug)).filter((id): id is string => Boolean(id))
 }
 
 async function syncWorkTags(
@@ -252,13 +297,7 @@ async function syncWorkTags(
 ) {
   await supabase.from("work_tags").delete().eq("work_id", workId)
 
-  const tagIds: string[] = []
-  for (const name of tags) {
-    const id = await upsertTag(supabase, name, resolveTagGroupId(name))
-    if (id) tagIds.push(id)
-  }
-
-  const uniqueTagIds = [...new Set(tagIds)]
+  const uniqueTagIds = [...new Set(await upsertTagsBatch(supabase, tags))]
   if (uniqueTagIds.length > 0) {
     const { error } = await supabase
       .from("work_tags")
@@ -295,10 +334,21 @@ async function syncWorkCovers(
   supabase: SupabaseAdminClient,
   workId: string,
   covers: Array<{ url: string; source: string; isPrimary: boolean }> | undefined
-) {
-  if (!covers || covers.length === 0) return
+): Promise<{ error: string | null }> {
+  if (covers === undefined) return { error: null }
   // Replace all on save — the multi-pick UI is the authoritative source.
-  await supabase.from("work_covers").delete().eq("work_id", workId)
+  // Esvazia primeiro pra evitar conflitos no UNIQUE (work_id, url) e no
+  // índice parcial work_covers_one_primary quando o usuário reordena/altera
+  // primária. Sequência DELETE → INSERT acontece em duas requisições, mas
+  // pra esse fluxo single-user não tem race relevante.
+  const { error: deleteError } = await supabase
+    .from("work_covers")
+    .delete()
+    .eq("work_id", workId)
+  if (deleteError) return { error: `Falha ao limpar capas: ${deleteError.message}` }
+
+  if (covers.length === 0) return { error: null }
+
   const rows = covers.map((c, position) => ({
     work_id: workId,
     url: c.url,
@@ -306,34 +356,179 @@ async function syncWorkCovers(
     is_primary: c.isPrimary,
     position,
   }))
-  // Ensure only one primary (the table has a partial unique index enforcing this,
-  // but normalize defensively first).
-  const primaryIdx = rows.findIndex((r) => r.is_primary)
-  if (primaryIdx === -1 && rows.length > 0) rows[0].is_primary = true
-  for (let i = 0; i < rows.length; i++) if (i !== primaryIdx && primaryIdx !== -1) rows[i].is_primary = false
+  // Normaliza is_primary defensivamente: força exatamente um primário (o
+  // primeiro marcado, ou rows[0] se nenhum vier marcado). Sem isso, o índice
+  // parcial work_covers_one_primary rejeita o INSERT.
+  const firstPrimaryIdx = rows.findIndex((r) => r.is_primary)
+  const canonicalPrimaryIdx = firstPrimaryIdx === -1 ? 0 : firstPrimaryIdx
+  for (let i = 0; i < rows.length; i++) {
+    rows[i].is_primary = i === canonicalPrimaryIdx
+  }
+
   const { error } = await supabase.from("work_covers").insert(rows)
-  if (error) console.error("[syncWorkCovers] insert failed", error.message)
+  if (error) {
+    console.error("[syncWorkCovers] insert failed", error.message)
+    return { error: `Falha ao salvar capas: ${error.message}` }
+  }
+  return { error: null }
+}
+
+/**
+ * Upsert incremental para capas vindas do diálogo "Atualizar dados".
+ * Preserva capas pré-existentes não citadas na lista (apenas marca primária=false
+ * em todas as outras). Quando a URL já existe, só atualiza is_primary; quando
+ * é nova, faz INSERT.
+ */
+async function syncExternalCovers(
+  supabase: SupabaseAdminClient,
+  workId: string,
+  covers: Array<{ url: string; source: string; isPrimary: boolean }>
+): Promise<{ error: string | null }> {
+  if (covers.length === 0) return { error: null }
+
+  const normalizedPrimaryIdx = (() => {
+    const idx = covers.findIndex((c) => c.isPrimary)
+    return idx === -1 ? 0 : idx
+  })()
+  const primaryUrl = covers[normalizedPrimaryIdx].url
+
+  // Zera primária em tudo da obra antes de upsertar, pra não colidir com o
+  // índice parcial work_covers_one_primary durante os INSERTs.
+  const { error: clearErr } = await supabase
+    .from("work_covers")
+    .update({ is_primary: false })
+    .eq("work_id", workId)
+  if (clearErr) return { error: `Falha ao limpar capas primárias: ${clearErr.message}` }
+
+  const { data: existing, error: lookupErr } = await supabase
+    .from("work_covers")
+    .select("id, url")
+    .eq("work_id", workId)
+  if (lookupErr) return { error: `Falha ao consultar capas: ${lookupErr.message}` }
+
+  const existingByUrl = new Map((existing ?? []).map((r) => [r.url as string, r.id as string]))
+
+  for (const cover of covers) {
+    const isPrimary = cover.url === primaryUrl
+    const existingId = existingByUrl.get(cover.url)
+    if (existingId) {
+      const { error } = await supabase
+        .from("work_covers")
+        .update({ is_primary: isPrimary, source: cover.source })
+        .eq("id", existingId)
+      if (error) return { error: `Falha ao atualizar capa: ${error.message}` }
+    } else {
+      const { error } = await supabase.from("work_covers").insert({
+        work_id: workId,
+        url: cover.url,
+        source: cover.source,
+        is_primary: isPrimary,
+        position: 0,
+      })
+      if (error) return { error: `Falha ao inserir capa: ${error.message}` }
+    }
+  }
+  return { error: null }
+}
+
+async function syncExternalSynopses(
+  supabase: SupabaseAdminClient,
+  workId: string,
+  synopses: Array<{ text: string; source: string; isPrimary: boolean }>
+): Promise<{ error: string | null }> {
+  const normalizedSynopses = dedupeSynopsisEntries(synopses)
+  if (normalizedSynopses.length === 0) return { error: null }
+
+  const primaryIdx = (() => {
+    const idx = normalizedSynopses.findIndex((s) => s.isPrimary)
+    return idx === -1 ? 0 : idx
+  })()
+  const primaryText = normalizedSynopses[primaryIdx].text
+
+  const { error: clearErr } = await supabase
+    .from("work_synopses")
+    .update({ is_primary: false })
+    .eq("work_id", workId)
+  if (clearErr) return { error: `Falha ao limpar sinopses primárias: ${clearErr.message}` }
+
+  const { data: existing, error: lookupErr } = await supabase
+    .from("work_synopses")
+    .select("id, text")
+    .eq("work_id", workId)
+  if (lookupErr) return { error: `Falha ao consultar sinopses: ${lookupErr.message}` }
+
+  const existingByText = new Map((existing ?? []).map((r) => [r.text as string, r.id as string]))
+
+  for (const synopsis of normalizedSynopses) {
+    const isPrimary = synopsis.text === primaryText
+    const existingId = existingByText.get(synopsis.text)
+    if (existingId) {
+      const { error } = await supabase
+        .from("work_synopses")
+        .update({ is_primary: isPrimary, source: synopsis.source })
+        .eq("id", existingId)
+      if (error) return { error: `Falha ao atualizar sinopse: ${error.message}` }
+    } else {
+      const { error } = await supabase.from("work_synopses").insert({
+        work_id: workId,
+        source: synopsis.source,
+        text: synopsis.text,
+        is_primary: isPrimary,
+        position: 0,
+      })
+      if (error) return { error: `Falha ao inserir sinopse: ${error.message}` }
+    }
+  }
+  return { error: null }
+}
+
+function normalizeFormSynopses(values: Pick<WorkFormValues, "synopsis" | "synopses">) {
+  const fromEntries = dedupeSynopsisEntries(values.synopses)
+  if (fromEntries.length > 0) return fromEntries
+
+  return splitSynopsesFromText(values.synopsis).map((text, index) => ({
+    source: "manual",
+    text,
+    isPrimary: index === 0,
+  }))
 }
 
 async function syncWorkSynopses(
   supabase: SupabaseAdminClient,
   workId: string,
   synopses: Array<{ source: string; text: string; isPrimary: boolean }> | undefined
-) {
-  if (!synopses || synopses.length === 0) return
-  await supabase.from("work_synopses").delete().eq("work_id", workId)
-  const rows = synopses.map((s, position) => ({
+): Promise<{ error: string | null }> {
+  // undefined = o caller não controla sinopses; [] = o textarea foi esvaziado.
+  if (!synopses) return { error: null }
+  const normalizedSynopses = dedupeSynopsisEntries(synopses)
+
+  const { error: deleteError } = await supabase
+    .from("work_synopses")
+    .delete()
+    .eq("work_id", workId)
+  if (deleteError) return { error: `Falha ao limpar sinopses: ${deleteError.message}` }
+
+  if (normalizedSynopses.length === 0) return { error: null }
+
+  const rows = normalizedSynopses.map((s, position) => ({
     work_id: workId,
     source: s.source,
     text: s.text,
     is_primary: s.isPrimary,
     position,
   }))
-  const primaryIdx = rows.findIndex((r) => r.is_primary)
-  if (primaryIdx === -1 && rows.length > 0) rows[0].is_primary = true
-  for (let i = 0; i < rows.length; i++) if (i !== primaryIdx && primaryIdx !== -1) rows[i].is_primary = false
+  const firstPrimaryIdx = rows.findIndex((r) => r.is_primary)
+  const canonicalPrimaryIdx = firstPrimaryIdx === -1 ? 0 : firstPrimaryIdx
+  for (let i = 0; i < rows.length; i++) {
+    rows[i].is_primary = i === canonicalPrimaryIdx
+  }
+
   const { error } = await supabase.from("work_synopses").insert(rows)
-  if (error) console.error("[syncWorkSynopses] insert failed", error.message)
+  if (error) {
+    console.error("[syncWorkSynopses] insert failed", error.message)
+    return { error: `Falha ao salvar sinopses: ${error.message}` }
+  }
+  return { error: null }
 }
 
 // Adds external genres/tags without deleting existing work_tags.
@@ -345,13 +540,7 @@ async function syncWorkTagsPartial(
   knownGenreIds: string[] = []
 ) {
   if (tags !== undefined) {
-    const tagIdsToAdd: string[] = []
-    for (const name of tags) {
-      const id = await upsertTag(supabase, name, resolveTagGroupId(name))
-      if (id) tagIdsToAdd.push(id)
-    }
-
-    const uniqueIdsToAdd = [...new Set(tagIdsToAdd)]
+    const uniqueIdsToAdd = [...new Set(await upsertTagsBatch(supabase, tags))]
     if (uniqueIdsToAdd.length > 0) {
       const { data: existing } = await supabase
         .from("work_tags").select("tag_id").eq("work_id", workId)
@@ -740,8 +929,10 @@ async function persistNewWork(
 
   await syncWorkTags(supabase, workId, data.tags ?? [])
   await syncWorkGenres(supabase, workId, knownGenres.genreIds, "replace")
-  await syncWorkCovers(supabase, workId, data.covers)
-  await syncWorkSynopses(supabase, workId, data.synopses)
+  const coversResult = await syncWorkCovers(supabase, workId, data.covers)
+  if (coversResult.error) return { ok: false as const, error: { covers: [coversResult.error] } }
+  const synopsesResult = await syncWorkSynopses(supabase, workId, normalizeFormSynopses(data))
+  if (synopsesResult.error) return { ok: false as const, error: { synopses: [synopsesResult.error] } }
   await upsertWorkExternalIds(supabase, workId, data.external_ids)
 
   const hasScores = scores.length >= CRITERION_SLUGS.length
@@ -756,6 +947,7 @@ async function persistNewWork(
 export async function createWork(values: WorkFormValues, aiMeta?: CreateWorkAiMeta) {
   const result = await persistNewWork(values, aiMeta)
   if (!result.ok) return { error: result.error }
+  const slug = titleToSlug(values.title)
 
   // Recalcular todos: a média global muda quando um título é adicionado
   try {
@@ -768,14 +960,16 @@ export async function createWork(values: WorkFormValues, aiMeta?: CreateWorkAiMe
           "Obra criada, mas houve erro ao recalcular as notas. Tente recalcular em Configurações.",
         ],
       },
-      data: { id: result.workId },
+      data: { id: result.workId, slug },
     }
   }
 
   revalidatePath("/titles")
+  revalidatePath(`/titles/${slug}`)
+  revalidateTag("works-slug-index", "max")
   revalidatePath("/ranking")
   revalidatePath("/")
-  return { data: { id: result.workId } }
+  return { data: { id: result.workId, slug } }
 }
 
 /**
@@ -787,6 +981,7 @@ export async function createWorkPending(values: WorkFormValues) {
   if (!result.ok) return { error: result.error }
 
   revalidatePath("/titles")
+  revalidateTag("works-slug-index", "max")
   revalidatePath("/titles/new")
   return { data: { id: result.workId } }
 }
@@ -830,6 +1025,7 @@ export async function createWorksBatch(values: WorkFormValues[]) {
   }
 
   revalidatePath("/titles")
+  revalidateTag("works-slug-index", "max")
   revalidatePath("/titles/new")
   revalidatePath("/ranking")
   revalidatePath("/")
@@ -870,6 +1066,7 @@ export async function finalizePendingBatch() {
   await recalculateAll()
 
   revalidatePath("/titles")
+  revalidateTag("works-slug-index", "max")
   revalidatePath("/titles/new")
   revalidatePath("/ranking")
   revalidatePath("/")
@@ -884,6 +1081,13 @@ export async function updateWork(id: string, values: WorkFormValues) {
 
   const data = parsed.data
   const supabase = createAdminClient()
+  const { data: existingWork } = await supabase
+    .from("works")
+    .select("title")
+    .eq("id", id)
+    .maybeSingle()
+  const previousSlug = existingWork?.title ? titleToSlug(existingWork.title) : null
+  const nextSlug = titleToSlug(data.title)
   let knownGenres: Awaited<ReturnType<typeof filterKnownGenres>>
   try {
     knownGenres = await filterKnownGenres(supabase, data.genres ?? [])
@@ -901,9 +1105,9 @@ export async function updateWork(id: string, values: WorkFormValues) {
       year: data.year ?? null,
       year_end: data.year_end ?? null,
       publication_status_id:
-        data.publication_status_id ?? getPublicationStatusIdByName(data.publication_status),
+        getPublicationStatusIdByName(data.publication_status) ?? data.publication_status_id ?? null,
       personal_status_id:
-        data.personal_status_id ?? getPersonalStatusIdByName(data.personal_status),
+        getPersonalStatusIdByName(data.personal_status) ?? data.personal_status_id ?? null,
       total_chapters: data.total_chapters ?? null,
       chapters_read: data.chapters_read ?? null,
       synopsis_quality: data.synopsis_quality ?? null,
@@ -1004,8 +1208,10 @@ export async function updateWork(id: string, values: WorkFormValues) {
   // Salvar tags
   await syncWorkTags(supabase, id, data.tags ?? [])
   await syncWorkGenres(supabase, id, knownGenres.genreIds, "replace")
-  await syncWorkCovers(supabase, id, data.covers)
-  await syncWorkSynopses(supabase, id, data.synopses)
+  const coversResult = await syncWorkCovers(supabase, id, data.covers)
+  if (coversResult.error) return { error: { covers: [coversResult.error] } }
+  const synopsesResult = await syncWorkSynopses(supabase, id, normalizeFormSynopses(data))
+  if (synopsesResult.error) return { error: { synopses: [synopsesResult.error] } }
   await upsertWorkExternalIds(supabase, id, data.external_ids)
 
   // Atualizar status IA com base na cobertura de critérios
@@ -1021,10 +1227,18 @@ export async function updateWork(id: string, values: WorkFormValues) {
   recalculateAllInBackground("updateWork")
 
   revalidatePath(`/titles/${id}`)
+  revalidatePath(`/titles/${id}/edit`)
+  if (previousSlug) {
+    revalidatePath(`/titles/${previousSlug}`)
+    revalidatePath(`/titles/${previousSlug}/edit`)
+  }
+  revalidatePath(`/titles/${nextSlug}`)
+  revalidatePath(`/titles/${nextSlug}/edit`)
   revalidatePath("/titles")
+  revalidateTag("works-slug-index", "max")
   revalidatePath("/ranking")
   revalidatePath("/")
-  return { data: { id } }
+  return { data: { id, slug: nextSlug } }
 }
 
 export async function archiveWork(id: string) {
@@ -1036,6 +1250,7 @@ export async function archiveWork(id: string) {
 
   if (error) return { error: error.message }
   revalidatePath("/titles")
+  revalidateTag("works-slug-index", "max")
   revalidatePath("/")
   return { data: null }
 }
@@ -1050,6 +1265,7 @@ export async function unarchiveWork(id: string) {
   if (error) return { error: error.message }
   revalidatePath(`/titles/${id}`)
   revalidatePath("/titles")
+  revalidateTag("works-slug-index", "max")
   return { data: null }
 }
 
@@ -1089,6 +1305,7 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
 
   revalidatePath("/titles/[id]", "page")
   revalidatePath("/titles")
+  revalidateTag("works-slug-index", "max")
   revalidatePath("/ranking")
   revalidatePath("/")
   return { data: { id } }
@@ -1100,6 +1317,7 @@ export async function deleteWork(id: string) {
 
   if (error) return { error: error.message }
   revalidatePath("/titles")
+  revalidateTag("works-slug-index", "max")
   revalidatePath("/")
   return { data: null }
 }
@@ -1110,6 +1328,12 @@ export interface ExternalWorkUpdate {
   alternativeTitles?: string[]
   synopsis?: string | null
   coverUrl?: string | null
+  /** Lista completa de capas escolhidas no multipick. Quando presente, faz upsert
+   *  preservando capas existentes não listadas (apenas troca primária). Tem
+   *  precedência sobre coverUrl. */
+  covers?: Array<{ url: string; source: string; isPrimary: boolean }>
+  /** Idem capas, mas para sinopses (chave: texto). */
+  synopses?: Array<{ text: string; source: string; isPrimary: boolean }>
   publicationStatus?: string | null
   totalChapters?: number | null
   genres?: string[]
@@ -1121,6 +1345,12 @@ export interface ExternalWorkUpdate {
 export async function updateWorkExternalData(id: string, updates: ExternalWorkUpdate) {
   try {
     const supabase = createAdminClient()
+    const { data: existingWork } = await supabase
+      .from("works")
+      .select("title")
+      .eq("id", id)
+      .maybeSingle()
+    const previousSlug = existingWork?.title ? titleToSlug(existingWork.title) : null
     const knownGenres = updates.genres !== undefined
       ? await filterKnownGenres(supabase, updates.genres)
       : null
@@ -1139,27 +1369,27 @@ export async function updateWorkExternalData(id: string, updates: ExternalWorkUp
       if (error) return { error: error.message }
     }
 
-    // synopsis/coverUrl: gravar via work_synopses/work_covers como nova entrada
-    // primária (substitui a primária anterior).
-    if (typeof updates.synopsis === "string" && updates.synopsis.trim().length > 0) {
-      await supabase.from("work_synopses").update({ is_primary: false }).eq("work_id", id)
-      await supabase.from("work_synopses").insert({
-        work_id: id,
-        source: "manual",
-        text: updates.synopsis,
-        is_primary: true,
-        position: 0,
-      })
+    // Capas: se vier o array `covers` (multipick), upserta cada uma preservando
+    // capas existentes que não estão na lista (só zera primária delas). Caso
+    // contrário, cai no fallback de `coverUrl` único.
+    if (updates.covers !== undefined) {
+      const result = await syncExternalCovers(supabase, id, updates.covers)
+      if (result.error) return { error: result.error }
+    } else if (typeof updates.coverUrl === "string" && updates.coverUrl.trim().length > 0) {
+      const result = await syncExternalCovers(supabase, id, [
+        { url: updates.coverUrl, source: "manual", isPrimary: true },
+      ])
+      if (result.error) return { error: result.error }
     }
-    if (typeof updates.coverUrl === "string" && updates.coverUrl.trim().length > 0) {
-      await supabase.from("work_covers").update({ is_primary: false }).eq("work_id", id)
-      await supabase.from("work_covers").insert({
-        work_id: id,
-        url: updates.coverUrl,
-        source: "manual",
-        is_primary: true,
-        position: 0,
-      })
+
+    if (updates.synopses !== undefined) {
+      const result = await syncExternalSynopses(supabase, id, updates.synopses)
+      if (result.error) return { error: result.error }
+    } else if (typeof updates.synopsis === "string" && updates.synopsis.trim().length > 0) {
+      const result = await syncExternalSynopses(supabase, id, [
+        { text: updates.synopsis, source: "manual", isPrimary: true },
+      ])
+      if (result.error) return { error: result.error }
     }
 
     if (updates.platformRatings?.length) {
@@ -1208,9 +1438,22 @@ export async function updateWorkExternalData(id: string, updates: ExternalWorkUp
     await upsertWorkExternalIds(supabase, id, updates.externalIds)
 
     recalculateAllInBackground("updateWorkExternalData")
-    revalidatePath(`/titles`)
+    const nextSlug = titleToSlug(
+      typeof updates.title === "string" && updates.title.trim()
+        ? updates.title
+        : existingWork?.title ?? ""
+    )
+    revalidatePath(`/titles/${id}`)
+    if (previousSlug) {
+      revalidatePath(`/titles/${previousSlug}`)
+      revalidatePath(`/titles/${previousSlug}/edit`)
+    }
+    revalidatePath(`/titles/${nextSlug}`)
+    revalidatePath(`/titles/${nextSlug}/edit`)
+    revalidatePath("/titles")
+    revalidateTag("works-slug-index", "max")
     revalidatePath("/")
-    return { data: { id } }
+    return { data: { id, slug: nextSlug } }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error("[updateWorkExternalData] Uncaught error:", message)
@@ -1226,74 +1469,15 @@ export type RefreshWorkExternalDataResult =
   | { ok: true; data: ExternalWorkData; conflicts: ConflictField[]; sources: ExternalSourceId[] }
   | { ok: false; reason: "NO_IDS" | "ALL_404"; message?: string }
 
-const SUPPORTED_SOURCES: ReadonlySet<ExternalSourceId> = new Set([
-  "anilist",
-  "mangaupdates",
-  "myanimelist",
-  "kitsu",
-  "mangadex",
-  "comick",
-  "comix",
-  "animeplanet",
-])
-
 function buildCandidateFromStoredIds(
   work: { title: string; original_title: string | null; alternative_titles: string[] | null },
   rows: Array<{ source: string; external_id: string }>
 ): MergedCandidate {
-  const sources: ExternalSourceId[] = []
-  const trustedSources: ExternalSourceId[] = []
-  const candidate: MergedCandidate = {
+  return buildCandidateFromExternalIds({
     title: work.title,
     originalTitle: work.original_title ?? undefined,
     alternativeTitles: work.alternative_titles ?? [],
-    sources,
-    // Fontes vindas de work_external_ids foram explicitamente vinculadas pelo
-    // usuário (no create ou via "Revalidar fontes"). Marcamos como trusted
-    // pra bypass o composite check em fetchMultiSourceDetails — caso contrário
-    // fontes com título ligeiramente divergente (ex.: MangaUpdates) podem ser
-    // descartadas mesmo já tendo sido confirmadas pelo user.
-    trustedSources,
-  }
-  for (const row of rows) {
-    const source = row.source as ExternalSourceId
-    if (!SUPPORTED_SOURCES.has(source)) continue
-    sources.push(source)
-    trustedSources.push(source)
-    switch (source) {
-      case "anilist": {
-        const n = Number(row.external_id)
-        if (Number.isFinite(n)) candidate.anilistId = n
-        break
-      }
-      case "mangaupdates": {
-        const n = Number(row.external_id)
-        if (Number.isFinite(n)) candidate.muId = n
-        break
-      }
-      case "myanimelist": {
-        const n = Number(row.external_id)
-        if (Number.isFinite(n)) candidate.malId = n
-        break
-      }
-      case "kitsu":
-        candidate.kitsuId = row.external_id
-        break
-      case "mangadex":
-        candidate.mangadexId = row.external_id
-        break
-      case "comick":
-        candidate.comickHid = row.external_id
-        break
-      case "comix":
-        candidate.comixHid = row.external_id
-        break
-      case "animeplanet":
-        candidate.animePlanetSlug = row.external_id
-        break
-    }
-  }
-  return candidate
+  }, Object.fromEntries(rows.map((row) => [row.source, row.external_id])) as Partial<Record<ExternalSourceId, string>>)
 }
 
 export async function refreshWorkExternalData(workId: string): Promise<RefreshWorkExternalDataResult> {
