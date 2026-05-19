@@ -47,3 +47,6 @@ scripts/seed-from-xlsx 6.js
 
 # scripts locais de seed/import com chaves
 scripts/seed-from-xlsx*.js
+
+# backups locais de arquivos duplicados por sync (iCloud/Google Drive)
+*.bak

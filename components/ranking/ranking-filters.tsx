@@ -2,18 +2,16 @@
 
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useMemo, useState, useSyncExternalStore, useTransition } from "react"
-import { ArrowDown, ArrowUp, ChevronDown, Filter, Minus, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ChevronDown, Filter, Minus, Plus, Save, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Slider } from "@/components/ui/slider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { updateRankingPreferences } from "@/server/actions/settings"
 import {
@@ -41,8 +39,6 @@ const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
   { value: "final_score", label: "Nota.Final" },
   { value: "calc_score", label: "Nota.IA" },
   { value: "pred_score", label: "Nota.Pr" },
-  { value: "platform_avg", label: "Nota.M" },
-  { value: "total_votes", label: "Votos" },
   { value: "title", label: "Título" },
   { value: "chapters", label: "Capítulos" },
   ...CRITERION_SLUGS.map((slug) => ({
@@ -75,10 +71,9 @@ function encodeSortLevels(levels: SortLevel[]): string {
 interface SortLevelsSectionProps {
   searchParams: Pick<URLSearchParams, "get">
   updateParams: (updates: Record<string, string | null>) => void
-  className?: string
 }
 
-function SortLevelsSection({ searchParams, updateParams, className }: SortLevelsSectionProps) {
+function SortLevelsSection({ searchParams, updateParams }: SortLevelsSectionProps) {
   const levels = parseSortLevels(searchParams.get("sort"))
 
   const setLevels = (next: SortLevel[]) => {
@@ -108,13 +103,13 @@ function SortLevelsSection({ searchParams, updateParams, className }: SortLevels
   }
 
   return (
-    <FilterSection title="Ordenação" className={className}>
+    <FilterSection title="Ordenação">
       <div className="space-y-2">
         {levels.map((level, i) => (
-          <div key={i} className="grid grid-cols-[1.25rem_minmax(0,1fr)_4.5rem_2rem] items-center gap-2 rounded-lg border border-border/55 bg-background/45 p-1.5">
+          <div key={i} className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground w-4 shrink-0 text-right">{i + 1}.</span>
             <Select value={level.field} onValueChange={(v) => updateField(i, v)}>
-              <SelectTrigger className="h-8 w-full text-xs">
+              <SelectTrigger className="h-8 text-xs flex-1">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -128,19 +123,18 @@ function SortLevelsSection({ searchParams, updateParams, className }: SortLevels
             <button
               type="button"
               onClick={() => toggleDir(i)}
-              className="flex h-8 items-center justify-center gap-1 rounded-lg border border-border/70 bg-background/45 px-2 text-xs transition-colors hover:bg-muted"
+              className="flex items-center gap-1 h-8 px-2 rounded border text-xs hover:bg-muted transition-colors shrink-0"
               title={level.dir === "desc" ? "Decrescente" : "Crescente"}
             >
               {level.dir === "desc"
-                ? <><ArrowDown className="h-3 w-3" /><span>Desc</span></>
-                : <><ArrowUp className="h-3 w-3" /><span>Asc</span></>}
+                ? <><ArrowDown className="h-3 w-3" /><span>Dec</span></>
+                : <><ArrowUp className="h-3 w-3" /><span>Cre</span></>}
             </button>
             <button
               type="button"
               onClick={() => remove(i)}
               disabled={levels.length === 1}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/70 bg-background/45 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-30"
-              aria-label="Remover ordenação"
+              className="h-8 w-8 flex items-center justify-center rounded border hover:bg-destructive/10 hover:text-destructive transition-colors shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>
@@ -179,44 +173,28 @@ interface RankingFiltersProps {
 interface FilterSectionProps {
   title: string
   defaultOpen?: boolean
-  headerAction?: React.ReactNode
   children: React.ReactNode
   className?: string
-  contentClassName?: string
 }
 
-function FilterSection({
-  title,
-  defaultOpen = true,
-  headerAction,
-  children,
-  className,
-  contentClassName,
-}: FilterSectionProps) {
+function FilterSection({ title, defaultOpen = true, children, className }: FilterSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className={`overflow-hidden rounded-lg border border-border/65 bg-background/40 ${className ?? ""}`}>
-      <div className="flex items-center gap-3 bg-card/60 px-3 py-2.5 transition-colors hover:bg-card/80 sm:px-4 sm:py-3">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
-        >
-          <span className="truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {title}
-          </span>
-          <ChevronDown
-            className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`}
-          />
-        </button>
-        {headerAction && <div className="shrink-0">{headerAction}</div>}
-      </div>
-      {open && (
-        <div className={`border-t border-border/60 px-3 py-3 sm:px-4 sm:py-4 xl:px-5 xl:py-5 ${contentClassName ?? ""}`}>
-          {children}
-        </div>
-      )}
+    <div className={`rounded-lg border bg-background shadow-sm ${className ?? ""}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+      >
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+      </button>
+      {open && <div className="border-t px-4 py-4">{children}</div>}
     </div>
   )
 }
@@ -240,236 +218,47 @@ function FilterField({
   )
 }
 
-function ScoreRangeCard({
-  emoji,
+function RangeFilterRow({
   label,
-  tooltip,
   minKey,
   maxKey,
   searchParams,
   updateParams,
   step = 0.5,
-  min = 0,
   max = 10,
-  className,
 }: {
-  emoji?: string
   label: string
-  tooltip?: string
   minKey: string
   maxKey: string
   searchParams: Pick<URLSearchParams, "get">
   updateParams: (updates: Record<string, string | null>) => void
   step?: number
-  min?: number
   max?: number
-  className?: string
 }) {
-  const urlMin = num(searchParams.get(minKey))
-  const urlMax = num(searchParams.get(maxKey))
-  const committed: [number, number] = [urlMin ?? min, urlMax ?? max]
-  const [dragValue, setDragValue] = useState<[number, number] | null>(null)
-  const display = dragValue ?? committed
-
-  const isActive = urlMin !== undefined || urlMax !== undefined
-  const decimals = step < 1 ? (step.toString().split(".")[1]?.length ?? 1) : 0
-  const fmt = (v: number) => v.toFixed(decimals)
-  const rangeLabel = dragValue || isActive ? `${fmt(display[0])} – ${fmt(display[1])}` : "Qualquer"
-
-  const commit = (next: number[]) => {
-    const [lo, hi] = next as [number, number]
-    updateParams({
-      [minKey]: lo > min ? String(lo) : null,
-      [maxKey]: hi < max ? String(hi) : null,
-    })
-    setDragValue(null)
-  }
-
-  const reset = () => {
-    setDragValue(null)
-    updateParams({ [minKey]: null, [maxKey]: null })
-  }
-
-  const heading = (
-    <div className="flex min-w-0 items-center gap-2">
-      {emoji && <span className="text-base leading-none">{emoji}</span>}
-      <span className="truncate text-sm font-medium">{label}</span>
-    </div>
-  )
-
   return (
-    <div
-      className={`group rounded-lg border bg-background/45 px-3 py-2.5 transition-colors ${
-        isActive ? "border-primary/55 bg-primary/[0.04]" : "border-border/65 hover:border-border"
-      } ${className ?? ""}`}
-    >
-      <div className="mb-2.5 flex items-center justify-between gap-2">
-        {tooltip ? (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button type="button" className="min-w-0 cursor-help text-left">
-                  {heading}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-xs whitespace-pre-line text-xs">{tooltip}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : (
-          heading
-        )}
-        <div className="flex shrink-0 items-center gap-1">
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
-              isActive ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground"
-            }`}
-          >
-            {rangeLabel}
-          </span>
-          <button
-            type="button"
-            onClick={reset}
-            disabled={!isActive}
-            aria-label="Limpar"
-            className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:cursor-default disabled:opacity-0"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-      <Slider
-        value={display}
-        min={min}
+    <div className="grid grid-cols-[minmax(7rem,1fr)_4.75rem_auto_4.75rem] items-center gap-2 rounded-lg border bg-muted/10 p-2">
+      <Label className="truncate text-xs font-medium">{label}</Label>
+      <Input
+        type="number"
+        min={0}
         max={max}
         step={step}
-        minStepsBetweenThumbs={1}
-        onValueChange={(v) => setDragValue([v[0], v[1]] as [number, number])}
-        onValueCommit={commit}
-        className="px-1"
+        placeholder="Mín"
+        className="h-8 text-xs"
+        value={searchParams.get(minKey) ?? ""}
+        onChange={(e) => updateParams({ [minKey]: e.target.value || null })}
       />
-    </div>
-  )
-}
-
-const VOTES_PRESETS: Array<{ label: string; min: number | null }> = [
-  { label: "Qualquer", min: null },
-  { label: "≥100", min: 100 },
-  { label: "≥500", min: 500 },
-  { label: "≥1k", min: 1000 },
-  { label: "≥5k", min: 5000 },
-  { label: "≥10k", min: 10000 },
-]
-
-function formatVotes(n: number): string {
-  if (n >= 1000 && n % 1000 === 0) return `${n / 1000}k`
-  if (n >= 10000) return `${(n / 1000).toFixed(0)}k`
-  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`
-  return String(n)
-}
-
-function VotesPresetCard({
-  searchParams,
-  updateParams,
-  className,
-}: {
-  searchParams: Pick<URLSearchParams, "get">
-  updateParams: (updates: Record<string, string | null>) => void
-  className?: string
-}) {
-  const currentMin = num(searchParams.get("min_votes"))
-  const currentMax = num(searchParams.get("max_votes"))
-  const isActive = currentMin !== undefined || currentMax !== undefined
-
-  let activeLabel = "Qualquer"
-  if (currentMin !== undefined && currentMax !== undefined) {
-    activeLabel = `${formatVotes(currentMin)} – ${formatVotes(currentMax)}`
-  } else if (currentMin !== undefined) {
-    activeLabel = `≥${formatVotes(currentMin)}`
-  } else if (currentMax !== undefined) {
-    activeLabel = `≤${formatVotes(currentMax)}`
-  }
-
-  const activePreset = currentMax === undefined ? currentMin ?? null : undefined
-
-  return (
-    <div
-      className={`rounded-lg border bg-background/45 px-3 py-2.5 transition-colors ${
-        isActive ? "border-primary/55 bg-primary/[0.04]" : "border-border/65"
-      } ${className ?? ""}`}
-    >
-      <div className="mb-2.5 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-base leading-none">🗳️</span>
-          <span className="truncate text-sm font-medium">Votos</span>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
-              isActive ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground"
-            }`}
-          >
-            {activeLabel}
-          </span>
-          <button
-            type="button"
-            onClick={() => updateParams({ min_votes: null, max_votes: null })}
-            disabled={!isActive}
-            aria-label="Limpar"
-            className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:cursor-default disabled:opacity-0"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {VOTES_PRESETS.map((preset) => {
-          const active =
-            activePreset !== undefined &&
-            preset.min === activePreset &&
-            (preset.min !== null || !isActive)
-          return (
-            <button
-              key={preset.label}
-              type="button"
-              onClick={() =>
-                updateParams({
-                  min_votes: preset.min !== null ? String(preset.min) : null,
-                  max_votes: null,
-                })
-              }
-            >
-              <Badge
-                variant={active ? "default" : "outline"}
-                className="inline-flex h-7 cursor-pointer items-center rounded-full px-3 text-xs font-medium transition-transform hover:-translate-y-px"
-              >
-                {preset.label}
-              </Badge>
-            </button>
-          )
-        })}
-      </div>
-      <div className="mt-2.5 flex items-center gap-2">
-        <Label className="shrink-0 text-xs font-medium text-muted-foreground">Manual</Label>
-        <Input
-          type="number"
-          min={0}
-          step={1}
-          placeholder="Mín"
-          className="h-8 w-24 text-xs"
-          value={searchParams.get("min_votes") ?? ""}
-          onChange={(e) => updateParams({ min_votes: e.target.value || null })}
-        />
-        <span className="text-xs text-muted-foreground">–</span>
-        <Input
-          type="number"
-          min={0}
-          step={1}
-          placeholder="Máx"
-          className="h-8 w-24 text-xs"
-          value={searchParams.get("max_votes") ?? ""}
-          onChange={(e) => updateParams({ max_votes: e.target.value || null })}
-        />
-      </div>
+      <span className="text-xs text-muted-foreground">-</span>
+      <Input
+        type="number"
+        min={0}
+        max={max}
+        step={step}
+        placeholder="Máx"
+        className="h-8 text-xs"
+        value={searchParams.get(maxKey) ?? ""}
+        onChange={(e) => updateParams({ [maxKey]: e.target.value || null })}
+      />
     </div>
   )
 }
@@ -506,13 +295,13 @@ function StatusButton({
       ? { borderColor: option.color, color: option.color }
       : undefined
   const button = (
-    <button onClick={onClick} type="button" className="shrink-0">
+    <button onClick={onClick} type="button">
       <Badge
         variant={active ? "default" : "outline"}
-        className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-transform hover:-translate-y-px"
+        className="cursor-pointer gap-1 rounded-full px-2.5 py-1 text-xs"
         style={style}
       >
-        {option.symbol && <span className="text-xs">{option.symbol}</span>}
+        {option.symbol && <span className="text-[10px]">{option.symbol}</span>}
         {option.status}
       </Badge>
     </button>
@@ -529,23 +318,6 @@ function StatusButton({
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
-  )
-}
-
-function FacetLegend() {
-  return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/55 bg-background/45 px-3 py-2 text-xs text-muted-foreground">
-      <span className="font-semibold text-foreground/80">Seleção</span>
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-emerald-300">
-        <Plus className="h-3 w-3" /> obrigatório
-      </span>
-      <span className="inline-flex items-center gap-1 rounded-full bg-sky-400/10 px-2 py-0.5 text-sky-300">
-        <Plus className="h-3 w-3" /> opcional
-      </span>
-      <span className="inline-flex items-center gap-1 rounded-full bg-rose-400/10 px-2 py-0.5 text-rose-300">
-        <Minus className="h-3 w-3" /> excluir
-      </span>
-    </div>
   )
 }
 
@@ -627,10 +399,10 @@ function GenreRuleGrid({
     : orderedItems.slice(0, Math.max(visibleLimit, selectedCount))
 
   const stateClass: Record<Exclude<FacetRule, null> | "none", string> = {
-    none: "border-border/70 bg-background/45 text-foreground",
-    all: "border-emerald-300 bg-emerald-50 text-emerald-950 dark:border-emerald-400/25 dark:bg-emerald-400/12 dark:text-emerald-100",
-    any: "border-sky-300 bg-sky-50 text-sky-950 dark:border-sky-400/25 dark:bg-sky-400/12 dark:text-sky-100",
-    exclude: "border-rose-300 bg-rose-50 text-rose-950 dark:border-rose-400/25 dark:bg-rose-400/12 dark:text-rose-100",
+    none: "border-border bg-background text-foreground",
+    all: "border-emerald-300 bg-emerald-50 text-emerald-950",
+    any: "border-sky-300 bg-sky-50 text-sky-950",
+    exclude: "border-rose-300 bg-rose-50 text-rose-950",
   }
 
   const stateLabel: Record<Exclude<FacetRule, null>, string> = {
@@ -641,9 +413,27 @@ function GenreRuleGrid({
 
   return (
     <div className="space-y-3">
-      <FacetLegend />
+      <div className="rounded-lg border bg-muted/20 p-3">
+        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1">
+            <Plus className="h-3 w-3 text-emerald-600" /> 1 clique: AND
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1">
+            <Plus className="h-3 w-3 text-sky-600" /> 2 cliques: OR
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1">
+            <Minus className="h-3 w-3 text-rose-600" /> remover: EXCLUDE
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1">
+            clique no gênero marcado: desmarcar
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1">
+            sem marca: não selecionado
+          </span>
+        </div>
+      </div>
 
-      <div className="rounded-lg border border-border/65 bg-background/45 p-3">
+      <div className="rounded-lg border bg-background p-3">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {visibleItems.map((item) => {
             const rule = getRule(item)
@@ -730,42 +520,20 @@ function GenreRuleGrid({
 
 interface GroupedTagRuleGridProps {
   items: GroupedFacetedChoice[]
-  allItems?: GroupedFacetedChoice[]
   selectedAll: Set<string>
   selectedAny: Set<string>
   selectedExclude: Set<string>
   onSetRule: (value: string, rule: FacetRule) => void
-  searchActive?: boolean
-}
-
-const TAG_STATE_CLASS: Record<Exclude<FacetRule, null> | "none", string> = {
-  none: "border-border/70 bg-background/45 text-foreground",
-  all: "border-emerald-300 bg-emerald-50 text-emerald-950 dark:border-emerald-400/25 dark:bg-emerald-400/12 dark:text-emerald-100",
-  any: "border-sky-300 bg-sky-50 text-sky-950 dark:border-sky-400/25 dark:bg-sky-400/12 dark:text-sky-100",
-  exclude: "border-rose-300 bg-rose-50 text-rose-950 dark:border-rose-400/25 dark:bg-rose-400/12 dark:text-rose-100",
-}
-
-const TAG_STATE_LABEL: Record<Exclude<FacetRule, null>, string> = {
-  all: "AND",
-  any: "OR",
-  exclude: "EXCLUDE",
-}
-
-const TAG_CHIP_CLASS: Record<Exclude<FacetRule, null>, string> = {
-  all: "border-emerald-400/60 bg-emerald-400/15 text-emerald-100",
-  any: "border-sky-400/60 bg-sky-400/15 text-sky-100",
-  exclude: "border-rose-400/60 bg-rose-400/15 text-rose-100",
 }
 
 function GroupedTagRuleGrid({
   items,
-  allItems,
   selectedAll,
   selectedAny,
   selectedExclude,
   onSetRule,
-  searchActive = false,
 }: GroupedTagRuleGridProps) {
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const getRule = (value: string): FacetRule => {
     if (selectedAll.has(value)) return "all"
     if (selectedAny.has(value)) return "any"
@@ -797,61 +565,20 @@ function GroupedTagRuleGrid({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, selectedAll, selectedAny, selectedExclude])
 
-  // Lookup: slug -> { label, groupName } for the selection strip.
-  // Uses the unfiltered list so selected chips keep their labels under active search.
-  const itemBySlug = useMemo(() => {
-    const map = new Map<string, GroupedFacetedChoice>()
-    const source = allItems ?? items
-    for (const item of source) map.set(item.value, item)
-    return map
-  }, [allItems, items])
-
-  const selectedEntries = useMemo(() => {
-    const rows: Array<{ slug: string; label: string; groupName: string; rule: Exclude<FacetRule, null> }> = []
-    const push = (slug: string, rule: Exclude<FacetRule, null>) => {
-      const item = itemBySlug.get(slug)
-      rows.push({
-        slug,
-        label: item?.label ?? slug,
-        groupName: item?.groupName ?? "—",
-        rule,
-      })
-    }
-    selectedAll.forEach((s) => push(s, "all"))
-    selectedAny.forEach((s) => push(s, "any"))
-    selectedExclude.forEach((s) => push(s, "exclude"))
-    const ruleOrder = { all: 0, any: 1, exclude: 2 } as const
-    rows.sort((a, b) => {
-      const diff = ruleOrder[a.rule] - ruleOrder[b.rule]
-      return diff !== 0 ? diff : a.label.localeCompare(b.label)
-    })
-    return rows
-  }, [selectedAll, selectedAny, selectedExclude, itemBySlug])
-
-  // Active group state. Initially: group with most selections, else first alphabetical.
-  const computeDefaultGroup = () => {
-    if (groups.length === 0) return null
-    let best = groups[0].groupName
-    let bestCount = -1
-    for (const g of groups) {
-      const count = g.items.filter((it) => Boolean(getRule(it.value))).length
-      if (count > bestCount) {
-        bestCount = count
-        best = g.groupName
-      }
-    }
-    return best
+  const stateClass: Record<Exclude<FacetRule, null> | "none", string> = {
+    none: "border-border bg-background text-foreground",
+    all: "border-emerald-300 bg-emerald-50 text-emerald-950",
+    any: "border-sky-300 bg-sky-50 text-sky-950",
+    exclude: "border-rose-300 bg-rose-50 text-rose-950",
   }
-  const [activeGroup, setActiveGroup] = useState<string | null>(computeDefaultGroup)
 
-  // If the active group disappears (e.g., dataset changed), fall back to first.
-  const activeGroupExists = activeGroup !== null && groups.some((g) => g.groupName === activeGroup)
-  const effectiveActiveGroup = activeGroupExists ? activeGroup : groups[0]?.groupName ?? null
+  const stateLabel: Record<Exclude<FacetRule, null>, string> = {
+    all: "AND",
+    any: "OR",
+    exclude: "EXCLUDE",
+  }
 
-  const cycleRule = (rule: FacetRule): FacetRule =>
-    rule === "all" ? "any" : rule === "any" ? "exclude" : rule === "exclude" ? null : "all"
-
-  const renderItem = (item: GroupedFacetedChoice, withGroupHint = false) => {
+  const renderItem = (item: GroupedFacetedChoice) => {
     const rule = getRule(item.value)
     const addTitle =
       rule === "all"
@@ -866,8 +593,7 @@ function GroupedTagRuleGrid({
     return (
       <div
         key={item.value}
-        title={item.label}
-        className={`grid h-10 grid-cols-[2rem_minmax(0,1fr)_2rem] items-center overflow-hidden rounded-lg border text-sm transition-colors ${TAG_STATE_CLASS[rule ?? "none"]}`}
+        className={`grid h-10 grid-cols-[2rem_minmax(0,1fr)_2rem] items-center overflow-hidden rounded-lg border text-sm transition-colors ${stateClass[rule ?? "none"]}`}
       >
         <button
           type="button"
@@ -887,18 +613,13 @@ function GroupedTagRuleGrid({
           }}
           disabled={!rule}
           aria-label={rule ? `Desmarcar ${item.label}` : `${item.label} não selecionado`}
-          title={rule ? `${item.label} — clique para desmarcar` : item.label}
+          title={rule ? `Desmarcar ${item.label}` : undefined}
           className="flex h-full min-w-0 items-center justify-between gap-2 px-2 text-left disabled:cursor-default"
         >
-          <span className="flex min-w-0 flex-col leading-tight">
-            <span className="truncate font-medium">{item.label}</span>
-            {withGroupHint && (
-              <span className="truncate text-[10px] font-normal text-muted-foreground">{item.groupName}</span>
-            )}
-          </span>
+          <span className="truncate font-medium">{item.label}</span>
           {rule && (
             <span className="shrink-0 rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] font-semibold">
-              {TAG_STATE_LABEL[rule]}
+              {stateLabel[rule]}
             </span>
           )}
         </button>
@@ -921,124 +642,67 @@ function GroupedTagRuleGrid({
     )
   }
 
-  const activeGroupData = effectiveActiveGroup
-    ? groups.find((g) => g.groupName === effectiveActiveGroup)
-    : null
-
   return (
     <div className="space-y-3">
-      <FacetLegend />
-
-      {selectedEntries.length > 0 && (
-        <div className="rounded-lg border border-border/65 bg-background/45 px-3 py-2.5">
-          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <span>Selecionadas</span>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-foreground">
-              {selectedEntries.length}
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {selectedEntries.map((entry) => (
-              <span
-                key={`${entry.rule}-${entry.slug}`}
-                className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium ${TAG_CHIP_CLASS[entry.rule]}`}
-              >
-                <button
-                  type="button"
-                  onClick={() => onSetRule(entry.slug, cycleRule(entry.rule))}
-                  title={`${entry.label} — clique para alternar (atual: ${TAG_STATE_LABEL[entry.rule]})`}
-                  className="flex items-center gap-1.5"
-                >
-                  <span className="truncate">{entry.label}</span>
-                  <span className="rounded-full bg-background/30 px-1.5 py-0.5 text-[9px] font-bold">
-                    {TAG_STATE_LABEL[entry.rule]}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onSetRule(entry.slug, null)}
-                  aria-label={`Remover ${entry.label}`}
-                  title={`Remover ${entry.label}`}
-                  className="-mr-1 flex h-5 w-5 items-center justify-center rounded-full hover:bg-background/30"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-          </div>
+      <div className="rounded-lg border bg-muted/20 p-3">
+        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1">
+            <Plus className="h-3 w-3 text-emerald-600" /> 1 clique: AND
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1">
+            <Plus className="h-3 w-3 text-sky-600" /> 2 cliques: OR
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1">
+            <Minus className="h-3 w-3 text-rose-600" /> remover: EXCLUDE
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1">
+            clique na tag marcada: desmarcar
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1">
+            sem marca: não selecionada
+          </span>
         </div>
-      )}
+      </div>
 
-      {searchActive ? (
-        items.length === 0 ? (
-          <div className="rounded-lg border bg-background p-3 text-xs text-muted-foreground">
-            Sem resultados
-          </div>
-        ) : (
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-            {[...items]
-              .sort((a, b) => a.label.localeCompare(b.label))
-              .slice(0, 200)
-              .map((item) => renderItem(item, true))}
-            {items.length > 200 && (
-              <div className="col-span-full rounded-lg border border-dashed border-border/60 p-2 text-center text-[11px] text-muted-foreground">
-                Mostrando 200 de {items.length} resultados — refine a busca para ver mais.
-              </div>
-            )}
-          </div>
-        )
-      ) : (
-        <>
-          {groups.length === 0 ? (
-            <div className="rounded-lg border bg-background p-3 text-xs text-muted-foreground">
-              Sem resultados
-            </div>
-          ) : (
-            <>
-              <div className="flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:thin]">
-                {groups.map((group) => {
-                  const selectedCount = group.items.filter((it) => Boolean(getRule(it.value))).length
-                  const isActive = group.groupName === effectiveActiveGroup
-                  return (
-                    <button
-                      key={group.groupName}
-                      type="button"
-                      onClick={() => setActiveGroup(group.groupName)}
-                      className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
-                        isActive
-                          ? "border-primary/60 bg-primary/15 text-primary"
-                          : "border-border/65 bg-background/45 text-foreground hover:border-border hover:bg-background/70"
-                      }`}
-                    >
-                      <span className="whitespace-nowrap">{group.groupName}</span>
-                      <span className={`text-xs tabular-nums ${isActive ? "text-primary/80" : "text-muted-foreground"}`}>
-                        {group.items.length}
-                      </span>
-                      {selectedCount > 0 && (
-                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-400/25 px-1.5 text-xs font-bold tabular-nums text-emerald-100">
-                          {selectedCount}
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-
-              {activeGroupData && (
-                <div className="rounded-lg border border-border/65 bg-background/45 p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2 text-xs">
-                    <span className="font-semibold">{activeGroupData.groupName}</span>
-                    <span className="text-muted-foreground tabular-nums">{activeGroupData.items.length} tags</span>
-                  </div>
+      <div className="space-y-2">
+        {groups.map((group) => {
+          const selectedCount = group.items.filter((item) => Boolean(getRule(item.value))).length
+          const isOpen = Boolean(openGroups[group.groupName])
+          return (
+            <div key={group.groupName} className="overflow-hidden rounded-lg border bg-background">
+              <button
+                type="button"
+                onClick={() => setOpenGroups((prev) => ({ ...prev, [group.groupName]: !prev[group.groupName] }))}
+                aria-expanded={isOpen}
+                className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+              >
+                <span className="min-w-0 truncate text-sm font-semibold">{group.groupName}</span>
+                <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                  {selectedCount > 0 && (
+                    <span className="rounded-full bg-muted px-2 py-0.5 font-medium">
+                      {selectedCount} selecionada{selectedCount !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                  <span>{group.items.length}</span>
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isOpen ? "" : "-rotate-90"}`} />
+                </span>
+              </button>
+              {isOpen && (
+                <div className="border-t p-3">
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-                    {activeGroupData.items.map((item) => renderItem(item))}
+                    {group.items.map(renderItem)}
                   </div>
                 </div>
               )}
-            </>
-          )}
-        </>
-      )}
+            </div>
+          )
+        })}
+        {items.length === 0 && (
+          <div className="rounded-lg border bg-background p-3 text-xs text-muted-foreground">
+            Sem resultados
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -1226,6 +890,8 @@ export function RankingFilters({
     startTransition(() => router.replace(target))
   }
 
+  const discardDraftFilters = () => setDraftSearch(appliedSearchString)
+
   const clearAll = () => setDraftSearch("")
 
   // Multi-select helpers (CSV em URL)
@@ -1306,8 +972,7 @@ export function RankingFilters({
       if (status === DEFAULT_PUB_STATUS) {
         updateParams({ pub_status: "all" })
       } else {
-        const seeded = new Set<string>([DEFAULT_PUB_STATUS, status])
-        updateParams({ pub_status: [...seeded].join(",") })
+        updateParams({ pub_status: status })
       }
       return
     }
@@ -1331,8 +996,7 @@ export function RankingFilters({
       if (status === DEFAULT_PER_STATUS) {
         updateParams({ per_status: "all" })
       } else {
-        const seeded = new Set<string>([DEFAULT_PER_STATUS, status])
-        updateParams({ per_status: [...seeded].join(",") })
+        updateParams({ per_status: status })
       }
       return
     }
@@ -1359,18 +1023,6 @@ export function RankingFilters({
     })),
     [filteredTags]
   )
-  const allTagChoices = useMemo(
-    () => availableTags.map((tag) => ({
-      value: tag.slug,
-      label: tag.name,
-      groupName: tag.groupName ?? "Sem grupo",
-    })),
-    [availableTags]
-  )
-  const tagNameBySlug = useMemo(
-    () => new Map(availableTags.map((tag) => [tag.slug, tag.name])),
-    [availableTags]
-  )
 
   const visiblePublicationStatuses = useMemo(
     () => dedupeStatusOptions(publicationStatuses),
@@ -1383,254 +1035,108 @@ export function RankingFilters({
     [personalStatuses]
   )
 
-  const activeFilterChips: Array<{ key: string; label: string; onRemove: () => void }> = []
-  const pushRangeChip = (key: string, label: string, minKey: string, maxKey: string) => {
-    const min = searchParams.get(minKey)
-    const max = searchParams.get(maxKey)
-    if (!min && !max) return
-    const suffix = min && max ? `${min} - ${max}` : min ? `>= ${min}` : `<= ${max}`
-    activeFilterChips.push({
-      key,
-      label: `${label}: ${suffix}`,
-      onRemove: () => updateParams({ [minKey]: null, [maxKey]: null }),
-    })
-  }
-
-  if (searchParams.has("top_n")) {
-    activeFilterChips.push({
-      key: "top_n",
-      label: `Top N: ${searchParams.get("top_n")}`,
-      onRemove: () => updateParams({ top_n: null }),
-    })
-  }
-  pushRangeChip("chapters", "Capítulos", "min_chapters", "max_chapters")
-  pushRangeChip("final", "Nota.Final", "min_final", "max_final")
-  pushRangeChip("calc", "Nota.IA", "min_calc", "max_calc")
-  pushRangeChip("pred", "Nota.Pr", "min_pr", "max_pr")
-  pushRangeChip("platform", "Nota.M", "min_platform_avg", "max_platform_avg")
-  pushRangeChip("votes", "Votos", "min_votes", "max_votes")
-  for (const slug of CRITERION_SLUGS) {
-    pushRangeChip(`crit-${slug}`, CRITERION_LABELS[slug] ?? slug, `min_${slug}`, `max_${slug}`)
-  }
-  if (isAllPublication) {
-    activeFilterChips.push({
-      key: "pub-all",
-      label: "Publicação: Todos",
-      onRemove: () => updateParams({ pub_status: null }),
-    })
-  } else {
-    selectedPublicationStatuses.forEach((status) => {
-      activeFilterChips.push({
-        key: `pub-${status}`,
-        label: `Publicação: ${status}`,
-        onRemove: () => togglePublicationStatus(status),
-      })
-    })
-  }
-  if (isAllPersonal) {
-    activeFilterChips.push({
-      key: "personal-all",
-      label: "Status: Todos",
-      onRemove: () => updateParams({ per_status: null }),
-    })
-  } else {
-    selectedPerStatuses.forEach((status) => {
-      activeFilterChips.push({
-        key: `personal-${status}`,
-        label: `Status: ${status}`,
-        onRemove: () => togglePersonalStatus(status),
-      })
-    })
-  }
-  selectedSynopsisQ.forEach((quality) => {
-    activeFilterChips.push({
-      key: `synopsis-${quality}`,
-      label: `Sinopse: ${quality}`,
-      onRemove: () => toggleCsv("synopsis_q", quality),
-    })
-  })
-  selectedGenreAll.forEach((genre) => {
-    activeFilterChips.push({
-      key: `genre-all-${genre}`,
-      label: `+ Gênero: ${genre}`,
-      onRemove: () => setGenreRule(genre, null),
-    })
-  })
-  selectedGenreAny.forEach((genre) => {
-    activeFilterChips.push({
-      key: `genre-any-${genre}`,
-      label: `Gênero opcional: ${genre}`,
-      onRemove: () => setGenreRule(genre, null),
-    })
-  })
-  selectedGenreExclude.forEach((genre) => {
-    activeFilterChips.push({
-      key: `genre-exclude-${genre}`,
-      label: `- Gênero: ${genre}`,
-      onRemove: () => setGenreRule(genre, null),
-    })
-  })
-  selectedTagAll.forEach((slug) => {
-    activeFilterChips.push({
-      key: `tag-all-${slug}`,
-      label: `+ Tag: ${tagNameBySlug.get(slug) ?? slug}`,
-      onRemove: () => setTagRule(slug, null),
-    })
-  })
-  selectedTagAny.forEach((slug) => {
-    activeFilterChips.push({
-      key: `tag-any-${slug}`,
-      label: `Tag opcional: ${tagNameBySlug.get(slug) ?? slug}`,
-      onRemove: () => setTagRule(slug, null),
-    })
-  })
-  selectedTagExclude.forEach((slug) => {
-    activeFilterChips.push({
-      key: `tag-exclude-${slug}`,
-      label: `- Tag: ${tagNameBySlug.get(slug) ?? slug}`,
-      onRemove: () => setTagRule(slug, null),
-    })
-  })
-
-  const activeFilterLabel =
-    activeFilterChips.length === 1 ? "1 seleção" : `${activeFilterChips.length} seleções`
-
   return (
-    <div className="rounded-xl border border-border/70 bg-card/58 p-4 shadow-sm shadow-black/5 backdrop-blur">
-      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-            <Filter className="h-4 w-4" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-base font-semibold">Filtros</h2>
-              {activeFilterChips.length > 0 && (
-                <span className="rounded-full border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                  {activeFilterLabel}
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Ajuste os critérios e aplique quando terminar.
-            </p>
-          </div>
+    <div className="rounded-xl border bg-muted/10 p-3 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Filter className="h-4 w-4 text-muted-foreground" />
+          Filtros
         </div>
-
-        <div className="flex items-center justify-end gap-2">
-          <Button size="sm" onClick={applyAllFilters} disabled={!filtersDirty}>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {filtersDirty && (
+            <Badge variant="secondary" className="h-9 rounded-md px-3 text-xs">
+              alterações pendentes
+            </Badge>
+          )}
+          {filtersDirty && (
+            <Button variant="ghost" size="sm" onClick={discardDraftFilters} className="h-9 px-2">
+              Descartar
+            </Button>
+          )}
+          <Button size="sm" onClick={applyAllFilters} disabled={!filtersDirty} className="h-9">
             Aplicar filtros
           </Button>
+          {prefsDirty && (
+            <Button variant="outline" size="sm" onClick={savePrefs} className="h-9">
+              <Save className="mr-1.5 h-3.5 w-3.5" /> Salvar padrão
+            </Button>
+          )}
           {hasFilters && (
-            <Button variant="ghost" size="sm" onClick={clearAll}>
-              <X className="mr-1 h-3.5 w-3.5" />
+            <Button variant="ghost" size="sm" onClick={clearAll} className="h-9 px-2">
+              <X className="mr-1.5 h-3.5 w-3.5" />
               Limpar
             </Button>
           )}
         </div>
       </div>
 
-      <Tabs defaultValue="geral" className="gap-4">
-        <TabsList className="!h-auto w-full justify-start gap-1 overflow-x-auto rounded-lg bg-background/40 p-1 [scrollbar-width:none] xl:grid xl:grid-cols-5 [&::-webkit-scrollbar]:hidden">
-          <TabsTrigger value="geral" className="h-9 min-w-20 flex-none text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">Geral</TabsTrigger>
-          <TabsTrigger value="notas" className="h-9 min-w-20 flex-none text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">Notas</TabsTrigger>
-          <TabsTrigger value="generos" className="h-9 min-w-20 flex-none text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">Gêneros</TabsTrigger>
-          <TabsTrigger value="tags" className="h-9 min-w-20 flex-none text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">Tags</TabsTrigger>
-          <TabsTrigger value="tabela" className="h-9 min-w-20 flex-none text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">Tabela</TabsTrigger>
+      <Tabs defaultValue="geral" className="gap-3">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-muted/60 p-1 sm:grid-cols-3 xl:grid-cols-5">
+          <TabsTrigger value="geral" className="h-9">Geral</TabsTrigger>
+          <TabsTrigger value="notas" className="h-9">Notas</TabsTrigger>
+          <TabsTrigger value="generos" className="h-9">Gêneros</TabsTrigger>
+          <TabsTrigger value="tags" className="h-9">Tags</TabsTrigger>
+          <TabsTrigger value="tabela" className="h-9">Tabela</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="geral">
-          <div className="grid grid-cols-12 gap-3">
-            <div className="col-span-12 grid gap-3 md:grid-cols-[44.5fr_55.5fr]">
-            <FilterSection
-              title={`Publicação${isAllPublication ? " (todos)" : selectedPublicationStatuses.size ? ` (${selectedPublicationStatuses.size})` : ""}`}
-              headerAction={
-                <button
-                  type="button"
-                  onClick={() => updateParams({ pub_status: isAllPublication ? null : "all" })}
-                >
-                  <Badge
-                    variant={isAllPublication ? "default" : "outline"}
-                    className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
-                  >
-                    Todos
-                  </Badge>
-                </button>
-              }
-            >
-              <div className="flex flex-wrap gap-2">
-                {visiblePublicationStatuses.map((s) => (
-                  <StatusButton
-                    key={`publication-${s.status}`}
-                    option={s}
-                    active={isAllPublication || selectedPublicationStatuses.has(s.status)}
-                    onClick={() => togglePublicationStatus(s.status)}
-                  />
-                ))}
-              </div>
-            </FilterSection>
-
-            <FilterSection
-              title={`Status pessoal${isAllPersonal ? " (todos)" : selectedPerStatuses.size ? ` (${selectedPerStatuses.size})` : ""}`}
-              headerAction={
-                <button
-                  type="button"
-                  onClick={() => updateParams({ per_status: isAllPersonal ? null : "all" })}
-                >
-                  <Badge
-                    variant={isAllPersonal ? "default" : "outline"}
-                    className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
-                  >
-                    Todos
-                  </Badge>
-                </button>
-              }
-            >
-              <div className="flex flex-wrap gap-2">
-                {visiblePersonalStatuses.map((s) => (
-                  <StatusButton
-                    key={`personal-${s.status}`}
-                    option={s}
-                    active={isAllPersonal || selectedPerStatuses.has(s.status)}
-                    tooltip={s.comment}
-                    onClick={() => togglePersonalStatus(s.status)}
-                  />
-                ))}
-              </div>
-            </FilterSection>
-            </div>
-
-            <FilterSection title="Critérios gerais" className="col-span-12 xl:col-span-7">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground">
-                  Preferências base do ranking e limites rápidos.
-                </p>
-                {prefsDirty && (
-                  <Button variant="outline" size="sm" onClick={savePrefs} className="h-8">
-                    <Save className="mr-1.5 h-3.5 w-3.5" /> Salvar como padrão
-                  </Button>
-                )}
-              </div>
-              <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
+        <TabsContent value="geral" className="space-y-3">
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <FilterSection title="Resultado">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 <FilterField label="Top N">
                   <Input
                     type="number"
                     min={1}
                     max={10000}
                     placeholder="Todas"
-                    size="sm"
-                    className="w-20"
+                    className="h-9"
                     value={urlTopN ?? defaultTopN ?? ""}
                     onChange={(e) => updateParams({ top_n: e.target.value || null })}
                   />
                 </FilterField>
+                <FilterField label="Mín Nota.Final">
+                  <Input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    max={10}
+                    placeholder="—"
+                    className="h-9"
+                    value={urlMinFinal ?? defaultMinFinal ?? ""}
+                    onChange={(e) => updateParams({ min_final: e.target.value || null })}
+                  />
+                </FilterField>
+                <FilterField label="Mín Calc">
+                  <Input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    max={10}
+                    placeholder="—"
+                    className="h-9"
+                    value={urlMinCalc ?? defaultMinCalc ?? ""}
+                    onChange={(e) => updateParams({ min_calc: e.target.value || null })}
+                  />
+                </FilterField>
+                <FilterField label="Mín PR">
+                  <Input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    max={10}
+                    placeholder="—"
+                    className="h-9"
+                    value={urlMinPr ?? defaultMinPredicted ?? ""}
+                    onChange={(e) => updateParams({ min_pr: e.target.value || null })}
+                  />
+                </FilterField>
                 <FilterField label="Capítulos">
-                  <div className="grid grid-cols-[4.5rem_auto_4.5rem] items-center gap-2">
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                     <Input
                       type="number"
                       min={0}
                       placeholder="Mín"
-                      size="sm"
+                      className="h-9"
                       value={searchParams.get("min_chapters") ?? ""}
                       onChange={(e) => updateParams({ min_chapters: e.target.value || null })}
                     />
@@ -1639,53 +1145,95 @@ export function RankingFilters({
                       type="number"
                       min={0}
                       placeholder="Máx"
-                      size="sm"
+                      className="h-9"
                       value={searchParams.get("max_chapters") ?? ""}
                       onChange={(e) => updateParams({ max_chapters: e.target.value || null })}
                     />
                   </div>
                 </FilterField>
-                <FilterField
-                  label={`Interesse na sinopse${selectedSynopsisQ.size ? ` (${selectedSynopsisQ.size})` : ""}`}
-                  className="min-w-0"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    {SYNOPSIS_QUALITIES.map((q) => (
-                      <button key={q} type="button" onClick={() => toggleCsv("synopsis_q", q)}>
-                        <Badge
-                          variant={selectedSynopsisQ.has(q) ? "default" : "outline"}
-                          className="inline-flex h-8 cursor-pointer items-center rounded-full px-3.5 text-sm font-medium transition-transform hover:-translate-y-px"
-                        >
-                          {q}
-                        </Badge>
-                      </button>
-                    ))}
-                  </div>
-                </FilterField>
               </div>
             </FilterSection>
 
-            <SortLevelsSection
-              searchParams={searchParams}
-              updateParams={updateParams}
-              className="col-span-12 xl:col-span-5"
-            />
+            <SortLevelsSection searchParams={searchParams} updateParams={updateParams} />
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-3">
+            <FilterSection title={`Publicação${isAllPublication ? " (todos)" : selectedPublicationStatuses.size ? ` (${selectedPublicationStatuses.size})` : ""}`}>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => updateParams({ pub_status: isAllPublication ? null : "all" })}
+                >
+                  <Badge
+                    variant={isAllPublication ? "default" : "outline"}
+                    className="cursor-pointer rounded-full px-2.5 py-1 text-xs"
+                  >
+                    Todos
+                  </Badge>
+                </button>
+                {visiblePublicationStatuses.map((s) => (
+                  <StatusButton
+                    key={`publication-${s.status}`}
+                    option={s}
+                    active={!isAllPublication && selectedPublicationStatuses.has(s.status)}
+                    onClick={() => togglePublicationStatus(s.status)}
+                  />
+                ))}
+              </div>
+            </FilterSection>
+
+            <FilterSection title={`Status pessoal${isAllPersonal ? " (todos)" : selectedPerStatuses.size ? ` (${selectedPerStatuses.size})` : ""}`}>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => updateParams({ per_status: isAllPersonal ? null : "all" })}
+                >
+                  <Badge
+                    variant={isAllPersonal ? "default" : "outline"}
+                    className="cursor-pointer rounded-full px-2.5 py-1 text-xs"
+                  >
+                    Todos
+                  </Badge>
+                </button>
+                {visiblePersonalStatuses.map((s) => (
+                  <StatusButton
+                    key={`personal-${s.status}`}
+                    option={s}
+                    active={!isAllPersonal && selectedPerStatuses.has(s.status)}
+                    tooltip={s.comment}
+                    onClick={() => togglePersonalStatus(s.status)}
+                  />
+                ))}
+              </div>
+            </FilterSection>
+
+            <FilterSection title={`Interesse na sinopse${selectedSynopsisQ.size ? ` (${selectedSynopsisQ.size})` : ""}`}>
+              <div className="flex flex-wrap gap-2">
+                {SYNOPSIS_QUALITIES.map((q) => (
+                  <button key={q} type="button" onClick={() => toggleCsv("synopsis_q", q)}>
+                    <Badge
+                      variant={selectedSynopsisQ.has(q) ? "default" : "outline"}
+                      className="cursor-pointer rounded-full px-2.5 py-1 text-xs"
+                    >
+                      {q}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+            </FilterSection>
           </div>
         </TabsContent>
 
         <TabsContent value="notas">
           <div className="grid gap-3 xl:grid-cols-2">
             <FilterSection title="Notas por critério">
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                 {CRITERION_SLUGS.map((slug) => (
-                  <ScoreRangeCard
+                  <RangeFilterRow
                     key={slug}
-                    emoji={CRITERIA_INFO[slug]?.emoji}
                     label={CRITERION_LABELS[slug]}
-                    tooltip={CRITERIA_INFO[slug]?.description}
                     minKey={`min_${slug}`}
                     maxKey={`max_${slug}`}
-                    step={0.5}
                     searchParams={searchParams}
                     updateParams={updateParams}
                   />
@@ -1694,47 +1242,47 @@ export function RankingFilters({
             </FilterSection>
 
             <FilterSection title="Notas gerais">
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                <ScoreRangeCard
-                  emoji="🏆"
+              <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                <RangeFilterRow
                   label="Nota.Final"
                   minKey="min_final"
                   maxKey="max_final"
-                  step={0.1}
                   searchParams={searchParams}
                   updateParams={updateParams}
+                  step={0.1}
                 />
-                <ScoreRangeCard
-                  emoji="📈"
+                <RangeFilterRow
                   label="Nota.Pr"
                   minKey="min_pr"
                   maxKey="max_pr"
-                  step={0.1}
                   searchParams={searchParams}
                   updateParams={updateParams}
+                  step={0.1}
                 />
-                <ScoreRangeCard
-                  emoji="🤖"
+                <RangeFilterRow
                   label="Nota.IA"
                   minKey="min_calc"
                   maxKey="max_calc"
-                  step={0.1}
                   searchParams={searchParams}
                   updateParams={updateParams}
+                  step={0.1}
                 />
-                <ScoreRangeCard
-                  emoji="🌐"
+                <RangeFilterRow
                   label="Nota.M"
                   minKey="min_platform_avg"
                   maxKey="max_platform_avg"
+                  searchParams={searchParams}
+                  updateParams={updateParams}
                   step={0.1}
-                  searchParams={searchParams}
-                  updateParams={updateParams}
                 />
-                <VotesPresetCard
+                <RangeFilterRow
+                  label="Votos"
+                  minKey="min_votes"
+                  maxKey="max_votes"
                   searchParams={searchParams}
                   updateParams={updateParams}
-                  className="lg:col-span-2"
+                  step={1}
+                  max={10000000}
                 />
               </div>
             </FilterSection>
@@ -1787,12 +1335,10 @@ export function RankingFilters({
             </div>
             <GroupedTagRuleGrid
               items={filteredTagChoices}
-              allItems={allTagChoices}
               selectedAll={selectedTagAll}
               selectedAny={selectedTagAny}
               selectedExclude={selectedTagExclude}
               onSetRule={setTagRule}
-              searchActive={tagSearch.trim().length > 0}
             />
           </FilterSection>
         </TabsContent>
@@ -1801,45 +1347,6 @@ export function RankingFilters({
           <TableColumnsSection />
         </TabsContent>
       </Tabs>
-
-      {(activeFilterChips.length > 0 || filtersDirty) && (
-        <div className="mt-4 border-t border-border/60 pt-3">
-          <div className="flex flex-wrap items-center gap-2">
-            {activeFilterChips.length > 0 && (
-              <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Filtros ativos
-              </span>
-            )}
-            {activeFilterChips.map((chip) => (
-              <button
-                key={chip.key}
-                type="button"
-                onClick={chip.onRemove}
-                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border/80 bg-background/55 px-2.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/10"
-                title="Remover filtro"
-              >
-                {chip.label}
-                <X className="h-3 w-3 text-muted-foreground" />
-              </button>
-            ))}
-            {activeFilterChips.length > 0 && (
-              <button
-                type="button"
-                onClick={clearAll}
-                className="h-7 px-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-              >
-                limpar filtros
-              </button>
-            )}
-            {filtersDirty && (
-              <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-amber-400/10 px-2.5 py-1 text-[11px] font-semibold text-amber-600 dark:text-amber-300">
-                <span className="size-1.5 rounded-full bg-amber-500 dark:bg-amber-300" />
-                não aplicados
-              </span>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

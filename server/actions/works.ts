@@ -1,6 +1,7 @@
 "use server"
 
 import { revalidatePath, revalidateTag } from "next/cache"
+import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { workFormSchema, workStatusSchema } from "@/lib/validations/work.schema"
 import type { WorkFormValues, WorkStatusValues } from "@/lib/validations/work.schema"
@@ -50,8 +51,12 @@ function resolveTagGroupId(name: string): string | null {
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>
 
 function recalculateAllInBackground(context: string) {
-  void recalculateAll().catch((error) => {
-    console.error(`[${context}] Failed to recalculate scores`, error)
+  after(async () => {
+    try {
+      await recalculateAll()
+    } catch (error) {
+      console.error(`[${context}] Failed to recalculate scores`, error)
+    }
   })
 }
 
