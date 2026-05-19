@@ -2,7 +2,7 @@
 
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { revalidatePath } from "next/cache"
+import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { recalculateAll } from "./calculations"
 import { computeCalibration, type CalibrationDiff } from "@/lib/calculations/calibration"
@@ -63,11 +63,13 @@ export interface RankingPreferencesUpdate {
 
 export interface AiEvalPreferencesUpdate {
   prompt_version_tolerance: number
+  low_confidence_threshold: number
 }
 
 export async function updateAiEvalPreferences(update: AiEvalPreferencesUpdate) {
   const supabase = createAdminClient()
   const tolerance = Math.max(0, Math.floor(update.prompt_version_tolerance))
+  const threshold = Math.min(1, Math.max(0, update.low_confidence_threshold))
 
   const { data: existing } = await supabase
     .from("formula_config")
@@ -81,6 +83,7 @@ export async function updateAiEvalPreferences(update: AiEvalPreferencesUpdate) {
     .from("formula_config")
     .update({
       prompt_version_tolerance: tolerance,
+      low_confidence_threshold: threshold,
       updated_at: new Date().toISOString(),
     })
     .eq("id", existing.id)
@@ -89,6 +92,54 @@ export async function updateAiEvalPreferences(update: AiEvalPreferencesUpdate) {
 
   revalidatePath("/settings")
   revalidatePath("/ai-evaluation")
+  return { error: null }
+}
+
+export interface ScoreColorPercentilesUpdate {
+  score_color_pct_top: number
+  score_color_pct_high: number
+  score_color_pct_mid: number
+  score_color_pct_low: number
+}
+
+export async function updateScoreColorPercentiles(update: ScoreColorPercentilesUpdate) {
+  const clamp = (v: number) => Math.min(100, Math.max(0, v))
+  const top = clamp(update.score_color_pct_top)
+  const high = clamp(update.score_color_pct_high)
+  const mid = clamp(update.score_color_pct_mid)
+  const low = clamp(update.score_color_pct_low)
+
+  if (!(low < mid && mid < high && high < top)) {
+    return { error: "Percentis devem ser estritamente crescentes: baixo < médio < alto < topo." }
+  }
+
+  const supabase = createAdminClient()
+  const { data: existing } = await supabase
+    .from("formula_config")
+    .select("id")
+    .limit(1)
+    .single()
+
+  if (!existing) return { error: "formula_config não encontrado" }
+
+  const { error } = await supabase
+    .from("formula_config")
+    .update({
+      score_color_pct_top: top,
+      score_color_pct_high: high,
+      score_color_pct_mid: mid,
+      score_color_pct_low: low,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", existing.id)
+
+  if (error) return { error: error.message }
+
+  revalidateTag("score-color-thresholds", "max")
+  revalidatePath("/preferences")
+  revalidatePath("/ranking")
+  revalidatePath("/titles")
+  revalidatePath("/")
   return { error: null }
 }
 

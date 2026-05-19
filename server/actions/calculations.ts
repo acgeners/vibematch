@@ -1,6 +1,6 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
+import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import {
@@ -362,6 +362,7 @@ export async function recalculateAll() {
   revalidatePath("/ranking")
   revalidatePath("/settings")
   revalidatePath("/")
+  revalidateTag("score-color-thresholds", "max")
 
   return {
     recalculated: works.length,
