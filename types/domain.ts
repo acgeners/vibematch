@@ -135,6 +135,7 @@ export interface Work {
   cover_url: string | null
   ai_eval_status: AiEvalStatus
   is_archived: boolean
+  is_favorite: boolean
   created_at: string
   updated_at: string
 }
@@ -228,6 +229,8 @@ export interface FormulaConfig {
   distance_p95: number | null
   /** Quantas versões pra trás do prompt são aceitas sem marcar como outdated. */
   prompt_version_tolerance: number
+  /** Threshold (0-1) do filtro "Confiança < X%" em /ai-evaluation. */
+  low_confidence_threshold: number
   pseudo_votes_nota_m: number
   pseudo_votes_blend: number
   /** Quantos itens exibir no ranking (null = todos). */
@@ -238,6 +241,14 @@ export interface FormulaConfig {
   min_predicted_score: number | null
   /** Nota.Final mínima exibida no ranking. */
   min_final_score: number | null
+  /** Percentil (0-100) acima do qual a nota agregada usa a cor de topo. Default 80. */
+  score_color_pct_top: number
+  /** Percentil (0-100) acima do qual a nota agregada usa a 2ª cor. Default 60. */
+  score_color_pct_high: number
+  /** Percentil (0-100) acima do qual a nota agregada usa a 3ª cor. Default 40. */
+  score_color_pct_mid: number
+  /** Percentil (0-100) acima do qual a nota agregada usa a 4ª cor; abaixo, a pior. Default 20. */
+  score_color_pct_low: number
 }
 
 // ============================================================
@@ -349,6 +360,7 @@ export interface WorkFilters {
   tagSlugs?: string[]
   year?: number
   isArchived?: boolean
+  isFavorite?: boolean
 }
 
 export type WorkSortField =
@@ -362,6 +374,7 @@ export type WorkSortField =
   | "ai_eval_status"
   | "updated_at"
   | "created_at"
+  | "is_favorite"
 
 export interface WorkSort {
   field: WorkSortField

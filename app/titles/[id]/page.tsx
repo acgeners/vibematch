@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
 import { ChevronDown, Plus } from "lucide-react"
 import { getWorkWithAiEvaluations, getWorkBySlug } from "@/server/queries/works"
+import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { titleToSlug } from "@/lib/utils"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import {
@@ -13,6 +14,7 @@ import { WorkDetailActions } from "@/components/titles/work-detail-actions"
 import { WorkPersonalFields } from "@/components/titles/work-personal-fields"
 import { BatchCreatedNavigator } from "@/components/titles/batch-created-navigator"
 import { WorkCoverGallery } from "@/components/titles/work-cover-gallery"
+import { SynopsesViewer } from "@/components/titles/synopses-viewer"
 import { BackButton } from "@/components/titles/back-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -129,12 +131,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // Carrega só o distance_p95 do formula_config pro CalculationBreakdown
   // mostrar rótulos de distância calibrados (perto/médio/longe relativos).
   const configClient = createAdminClient()
-  const { data: configRow } = await configClient
-    .from("formula_config")
-    .select("distance_p95")
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  const [{ data: configRow }, scoreThresholds] = await Promise.all([
+    configClient
+      .from("formula_config")
+      .select("distance_p95")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    getScoreColorThresholds(),
+  ])
   const distanceP95: number | null = configRow?.distance_p95 == null ? null : Number(configRow.distance_p95)
 
   const scoreMap: Record<string, number> = {}
@@ -314,6 +319,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 workSlug={id}
                 workTitle={work.title}
                 isArchived={work.is_archived}
+                isFavorite={work.is_favorite}
                 coverUrl={primaryCover}
                 hasCriteriaScores={Object.keys(scoreMap).length > 0}
                 className="min-w-0"
@@ -333,15 +339,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
           {/* Sinopse — line-clamp para alinhar com altura das capas */}
           <div className="flex-1 max-w-4xl">
-            {primarySynopsis ? (
-              <ExpandableText
-                text={String(primarySynopsis).trim()}
-                maxLines={11}
-                className="text-sm leading-7 text-foreground/85"
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">Sem sinopse cadastrada.</p>
-            )}
+            <SynopsesViewer
+              synopses={work.work_synopses}
+              maxLines={11}
+              className="text-sm leading-7 text-foreground/85"
+            />
           </div>
         </div>
       </section>
@@ -380,11 +382,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="flex flex-col items-center gap-1.5 p-3 rounded-md border bg-muted/20">
               <p className="text-xs font-medium text-muted-foreground">Nota.Final</p>
-              <ScoreBadge score={work.calculated_scores?.final_score ?? null} size="lg" />
+              <ScoreBadge score={work.calculated_scores?.final_score ?? null} size="lg" thresholds={scoreThresholds} />
             </div>
             <div className="flex flex-col items-center gap-1.5 p-3 rounded-md border bg-muted/20">
               <p className="text-xs font-medium text-muted-foreground">Nota.IA</p>
-              <ScoreBadge score={work.calculated_scores?.calc_score ?? null} size="lg" />
+              <ScoreBadge score={work.calculated_scores?.calc_score ?? null} size="lg" thresholds={scoreThresholds} />
             </div>
             <div className="flex flex-col items-center gap-1.5 p-3 rounded-md border bg-muted/20">
               <p className="text-xs font-medium text-muted-foreground">Prevista</p>
@@ -392,6 +394,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 score={work.calculated_scores?.predicted_score ?? null}
                 size="lg"
                 showStub={work.calculated_scores?.predicted_is_stub ?? false}
+                thresholds={scoreThresholds}
               />
             </div>
             {hasPostReadingScores ? (

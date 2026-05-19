@@ -93,18 +93,19 @@ Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evalu
 
 **Path A — "✨ Avaliar" page (`/ai-evaluation`)**
 `triggerAiEvaluation(workId)` → `fetchExternalEvaluationContextForWork()` → `requestAiEvaluation()`
-- Review sources: MangaUpdates + AniList + MyAnimeList (3 sources)
+- Uses saved work data (primary synopsis, genres, grouped tags, cover). If the work has accepted `work_external_ids`, reviews/context are fetched from those confirmed source IDs; otherwise it falls back to title search.
+- Review sources: MangaUpdates + AniList + MyAnimeList + AnimePlanet + Kitsu (where IDs are available)
 - Passes `sourcedReviews: SourcedReview[]` (rich format with source, matchScore, sourceTitle)
 - Also passes `externalContext` (synopsis strings from external sources)
 - Saves results to `ai_evaluations` + `ai_evaluation_scores` tables
 - User reviews and optionally edits scores before they're committed to `category_scores`
 
 **Path B — "✨ Buscar dados" form (`/titles/new`)**
-`fetchMultiSourceDetails()` in `lib/external/index.ts` → `evaluateCriteriaWithAI()` in `lib/external/ai-criteria.ts` → `requestAiEvaluation()`
-- Review sources: MangaUpdates only (if muId found)
-- Passes `reviews: string[]` (legacy plain-text format, no metadata)
-- No `externalContext`
-- Scores go into form fields; saved as `source: "manual"` on work creation
+`searchAllSources()` → user chooses candidate → `fetchMultiSourceDetails()` → user chooses final data → `evaluateCandidateForCreate()` → `requestAiEvaluation()`
+- "Buscar dados" only finds candidate/source matches. "Usar" extracts metadata, lets the user pick synopses/covers/conflicts, then runs AI against the final selected data.
+- Review/context sources come from the accepted external IDs for the selected candidate, not from a second independent title search.
+- Passes `sourcedReviews: SourcedReview[]`; final selected synopsis is sent as the primary synopsis. Extra external context is omitted when a selected synopsis exists to avoid evaluating unselected synopsis blocks.
+- Scores go into form fields; if saved unchanged they are persisted as `source: "ai_accepted"` with an `ai_evaluation_id`
 - Works with all 9 criteria set get `ai_eval_status = "done"` and skip the Avaliar queue
 
 Post-processing applied to every evaluation (in `service.ts`):
@@ -112,7 +113,7 @@ Post-processing applied to every evaluation (in `service.ts`):
 - `enforceNeutralCoupleDynamicsWhenNoRomance`: raises `couple_dynamics` to 5.0 when romance ≤ 3 and couple_dynamics < 5
 - `enforceAuditableReviewUsage`: **throws and retries** if reviews were passed but the model didn't cite review IDs (`R1`, `R2`…) both in `review_usage` and in justifications
 
-The model is `claude-sonnet-4-6`, prompt version `v15`, up to 2 attempts (second attempt uses temperature 0 and 4500 max tokens). Opus 4.7 is supported as override but doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
+The model is `claude-sonnet-4-6`, prompt version `v16`, up to 2 attempts (second attempt uses temperature 0 and 4500 max tokens). Opus 4.7 is supported as override but doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
 
 ## External data sources
 
@@ -122,7 +123,9 @@ The model is `claude-sonnet-4-6`, prompt version `v15`, up to 2 attempts (second
 
 Client-side fetches (ComicK ratings, AnimePlanet ratings) live in `lib/external/client-fetches.ts` and are called directly from `ExternalSearch` component to avoid the server action round-trip.
 
-`lib/external/reviews.ts` — dedicated review/context fetching for Path A. Searches MangaUpdates + AniList + MyAnimeList using all title variants; returns up to 8 `SourcedReview` objects and up to 6 external context synopsis strings.
+Review/context fetching is centralized in `lib/external/index.ts`:
+- `fetchExternalEvaluationContextForCandidate()` hydrates confirmed source IDs and gathers reviews/context only from accepted sources.
+- `fetchExternalEvaluationContextForWork()` is the fallback for works without confirmed IDs; it searches title variants, accepts a candidate, then delegates to the candidate-based context builder.
 
 ## Database schema summary
 

@@ -4,6 +4,7 @@ import "./globals.css"
 import { Sidebar } from "@/components/layout/sidebar"
 import { MobileNav } from "@/components/layout/mobile-nav"
 import { Toaster } from "@/components/ui/sonner"
+import { ThemeProvider } from "@/components/theme-provider"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,17 +27,20 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="h-dvh overflow-hidden flex bg-background text-foreground">
-        <Sidebar />
-        <div className="flex min-h-0 flex-1 flex-col min-w-0">
-          <main className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">
-            {children}
-          </main>
-        </div>
-        <MobileNav />
-        <Toaster />
+        <ThemeProvider>
+          <Sidebar />
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            <main className="relative z-10 min-h-0 flex-1 overflow-y-auto scroll-smooth px-4 py-5 pb-24 md:px-7 md:py-7 md:pb-7">
+              {children}
+            </main>
+          </div>
+          <MobileNav />
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   )

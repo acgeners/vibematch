@@ -10,7 +10,7 @@ import {
   getPublicationStatusNameById,
   getPersonalStatusNameById,
 } from "@/lib/constants/status-lookups"
-import { pickPrimarySynopsis, pickPrimaryCover } from "@/lib/work-derived"
+import { dedupeWorkSynopses, joinSynopsesForDisplay, pickPrimaryCover } from "@/lib/work-derived"
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -50,7 +50,12 @@ function workToFormValues(work: WorkWithRelations): Partial<WorkFormValues> {
     title: work.title,
     original_title: work.original_title ?? undefined,
     alternative_titles: work.alternative_titles ?? [],
-    synopsis: pickPrimarySynopsis(work.work_synopses) ?? undefined,
+    synopsis: joinSynopsesForDisplay(work.work_synopses) || undefined,
+    synopses: dedupeWorkSynopses(work.work_synopses).map((s) => ({
+      source: s.source,
+      text: s.text,
+      isPrimary: s.is_primary,
+    })),
     genres: work.genres ?? [],
     tags: work.tags.map((t) => t.name),
     year: work.year ?? undefined,
@@ -147,6 +152,7 @@ export default async function EditTitlePage({ params }: EditPageProps) {
   return (
     <div className="w-full max-w-6xl space-y-6">
       <Header
+        kicker="Catálogo"
         title={`Editar: ${work.title}`}
         description="Atualize os dados da obra"
       />

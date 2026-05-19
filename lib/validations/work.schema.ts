@@ -46,7 +46,7 @@ export const workFormSchema = z.object({
   title: z.string().min(1, "Título obrigatório").max(500),
   original_title: z.string().max(500).nullable().optional(),
   alternative_titles: z.array(z.string().trim().min(1).max(500)).default([]),
-  synopsis: z.string().max(5000).nullable().optional(),
+  synopsis: z.string().max(30000).nullable().optional(),
   genres: z.array(z.string().max(100)).default([]),
   tags: z.array(z.string().max(100)).default([]),
   year: z.number({ message: "Ano deve ser um número" }).int().min(1900).max(2100).nullable().optional(),

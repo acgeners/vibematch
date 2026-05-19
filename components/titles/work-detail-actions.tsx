@@ -3,10 +3,10 @@
 import { useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Archive, BookOpen, Edit, Loader2, Sparkles, Trash2 } from "lucide-react"
+import { Archive, BookOpen, Edit, Heart, Loader2, Sparkles, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation } from "@/server/actions/ai"
-import { archiveWork, deleteWork, unarchiveWork } from "@/server/actions/works"
+import { archiveWork, deleteWork, toggleFavorite, unarchiveWork } from "@/server/actions/works"
 import { AiEvaluationReviewForm } from "@/components/ai-evaluation/ai-evaluation-review-form"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import { RevalidateSourcesDialog } from "@/components/titles/revalidate-sources-dialog"
@@ -38,6 +38,7 @@ interface WorkDetailActionsProps {
   workSlug?: string
   workTitle: string
   isArchived: boolean
+  isFavorite: boolean
   coverUrl?: string | null
   hasCriteriaScores?: boolean
   className?: string
@@ -58,6 +59,7 @@ export function WorkDetailActions({
   workSlug,
   workTitle,
   isArchived,
+  isFavorite,
   coverUrl,
   hasCriteriaScores = false,
   className,
@@ -84,6 +86,19 @@ export function WorkDetailActions({
         return
       }
       toast.success(isArchived ? "Obra desarquivada." : "Obra arquivada.")
+      router.refresh()
+    })
+  }
+
+  const handleToggleFavorite = () => {
+    const next = !isFavorite
+    startTransition(async () => {
+      const result = await toggleFavorite(workId, next)
+      if (result.error) {
+        toast.error(result.error)
+        return
+      }
+      toast.success(next ? "Adicionado aos favoritos." : "Removido dos favoritos.")
       router.refresh()
     })
   }
@@ -124,6 +139,16 @@ export function WorkDetailActions({
   return (
     <>
       <div className={className ? `flex flex-wrap gap-2 ${className}` : "flex flex-wrap gap-2"}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleToggleFavorite}
+          disabled={isPending}
+          aria-pressed={isFavorite}
+        >
+          <Heart className={isFavorite ? "h-4 w-4 fill-rose-500 text-rose-500" : "h-4 w-4"} />
+          {isFavorite ? "Favorito" : "Favoritar"}
+        </Button>
         <Button asChild variant="outline" size="sm">
           <Link href={`/titles/${workSlug ?? workId}/edit`}>
             <Edit className="h-4 w-4" />

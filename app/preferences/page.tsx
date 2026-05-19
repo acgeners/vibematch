@@ -1,118 +1,130 @@
 import type { ReactNode } from "react"
 import {
-  ArrowRight,
-  Bug,
+  Brain,
   Compass,
-  Database,
-  Gauge,
-  Settings,
-  Tags,
+  Palette,
+  Scale,
+  SlidersHorizontal,
+  Sparkles,
+  Trophy,
 } from "lucide-react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { Header } from "@/components/layout/header"
 import { ScrollToTop } from "@/components/layout/scroll-to-top"
-import { FormulaConfigForm } from "@/components/settings/formula-config-form"
-import { CalibrationPanel } from "@/components/settings/calibration-panel"
-import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
-import { getCalibrationSnapshot } from "@/server/actions/settings"
-import type { FormulaConfig } from "@/types/domain"
+import { ScoreWeightsForm } from "@/components/settings/score-weights-form"
+import { PostReadingWeightsForm } from "@/components/settings/post-reading-weights-form"
+import { RankingPreferencesForm } from "@/components/settings/ranking-preferences-form"
+import { ScoreColorPercentilesForm } from "@/components/settings/score-color-percentiles-form"
+import { AiEvalPreferencesForm } from "@/components/settings/ai-eval-preferences-form"
+import { PROMPT_VERSION, CURRENT_PROMPT_VERSION_NUM } from "@/lib/ai-evaluation/service"
+import type { ScoreWeight, FormulaConfig } from "@/types/domain"
 import { cn } from "@/lib/utils"
 
-async function getSettingsData() {
+async function getPreferencesData() {
   const supabase = createAdminClient()
 
-  const [configRes, snapshot] = await Promise.all([
+  const [weightsRes, configRes] = await Promise.all([
+    supabase.from("score_weights").select("*").eq("is_active", true).order("display_order"),
     supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
-    getCalibrationSnapshot(),
   ])
 
+  if (weightsRes.error) throw new Error(weightsRes.error.message)
   if (configRes.error) throw new Error(configRes.error.message)
   if (!configRes.data?.[0]) throw new Error("formula_config não encontrado")
 
   return {
+    weights: weightsRes.data as ScoreWeight[],
     config: configRes.data?.[0] as FormulaConfig,
-    snapshot,
   }
 }
 
 const SECTIONS = [
-  { id: "calibration", title: "Calibração", icon: <Gauge />, accent: "cyan" as const },
-  { id: "tags", title: "Consolidação de tags", icon: <Tags />, accent: "violet" as const },
-  { id: "sync", title: "Sincronização", icon: <Database />, accent: "emerald" as const },
-  { id: "debug", title: "Parâmetros (debug)", icon: <Bug />, accent: "slate" as const },
+  { id: "ranking", title: "Ranking", icon: <Trophy />, accent: "primary" as const },
+  { id: "score-colors", title: "Cores das notas", icon: <Palette />, accent: "amber" as const },
+  { id: "weights", title: "Pesos dos critérios", icon: <Scale />, accent: "violet" as const },
+  { id: "post-reading", title: "Pesos pós-leitura", icon: <Sparkles />, accent: "emerald" as const },
+  { id: "ai-eval", title: "Avaliação IA", icon: <Brain />, accent: "cyan" as const },
 ]
 
-export default async function SettingsPage() {
-  const { config, snapshot } = await getSettingsData()
+export default async function PreferencesPage() {
+  const { weights, config } = await getPreferencesData()
 
   return (
     <div className="w-full max-w-6xl space-y-4">
       <Header
-        kicker="Sistema"
-        title="Configurações"
-        description="Manutenção, calibração e parâmetros derivados"
-        icon={<Settings />}
+        kicker="Você"
+        title="Preferências"
+        description="Ajustes pessoais que controlam scoring, ranking e backlog de IA"
+        icon={<SlidersHorizontal />}
       />
 
-      <SettingsIndex />
+      <PrefIndex />
 
       <IndexSpacer />
 
-      <SettingsSection
-        id="calibration"
-        title="Calibração automática"
-        description="MAEs e pseudo-votos são recalculados a partir dos dados reais sempre que um título é incluído ou alterado."
-        icon={<Gauge />}
-        accent="cyan"
+      <PrefSection
+        id="ranking"
+        title="Ranking"
+        description="Quantas obras mostrar e quais notas mínimas aplicar por padrão."
+        icon={<Trophy />}
+        accent="primary"
       >
-        <CalibrationPanel config={config} snapshot={snapshot} />
-      </SettingsSection>
+        <RankingPreferencesForm config={config} />
+      </PrefSection>
 
-      <SettingsSection
-        id="tags"
-        title="Consolidação de tags"
-        description="Revise clusters semânticos propostos pela IA e mescle tags duplicadas."
-        icon={<Tags />}
+      <PrefSection
+        id="score-colors"
+        title="Cores das notas"
+        description="Percentis da distribuição que definem as cores de Nota.Final / Nota.IA / Nota.Pr."
+        icon={<Palette />}
+        accent="amber"
+      >
+        <ScoreColorPercentilesForm config={config} />
+      </PrefSection>
+
+      <PrefSection
+        id="weights"
+        title="Pesos dos critérios"
+        description="Quanto cada critério IA vale na fórmula de scoring. Positivos amplificam, negativos penalizam."
+        icon={<Scale />}
         accent="violet"
       >
-        <a
-          href="/settings/tag-consolidation"
-          className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/55 bg-violet-500/10 px-3 py-1.5 text-sm font-medium text-violet-600 transition-colors hover:bg-violet-500/20 dark:text-violet-300"
-        >
-          Abrir página de consolidação
-          <ArrowRight className="h-3.5 w-3.5" />
-        </a>
-      </SettingsSection>
+        <ScoreWeightsForm weights={weights} />
+      </PrefSection>
 
-      <SettingsSection
-        id="sync"
-        title="Sincronização de constantes"
-        description="Regenera os arquivos locais de constantes a partir do Supabase."
-        icon={<Database />}
+      <PrefSection
+        id="post-reading"
+        title="Pesos pós-leitura"
+        description="Importância relativa de cada eixo na sua avaliação manual (salva neste navegador)."
+        icon={<Sparkles />}
         accent="emerald"
       >
-        <SyncConstantsPanel />
-      </SettingsSection>
+        <PostReadingWeightsForm />
+      </PrefSection>
 
-      <SettingsSection
-        id="debug"
-        title="Parâmetros calibrados (read-only)"
-        description="Snapshot dos valores atuais do formula_config. Sobrescritos a cada recálculo — exibidos pra debug."
-        icon={<Bug />}
-        accent="slate"
+      <PrefSection
+        id="ai-eval"
+        title="Avaliação IA"
+        description="Tolerância a versões antigas e threshold para flagar avaliações de baixa confiança."
+        icon={<Brain />}
+        accent="cyan"
       >
-        <FormulaConfigForm config={config} />
-      </SettingsSection>
+        <AiEvalPreferencesForm
+          config={config}
+          currentPromptVersion={PROMPT_VERSION}
+          currentPromptVersionNum={CURRENT_PROMPT_VERSION_NUM}
+        />
+      </PrefSection>
 
       <ScrollToTop />
     </div>
   )
 }
 
-function SettingsIndex() {
+function PrefIndex() {
   return (
     <nav
-      aria-label="Índice de configurações"
+      aria-label="Índice de preferências"
       className="relative overflow-hidden rounded-2xl border border-border/70 bg-card/60 p-3 shadow-md shadow-black/5 sm:p-4"
     >
       <div className="mb-3 flex items-center gap-2">
@@ -143,7 +155,7 @@ function SettingsIndex() {
             >
               <span
                 className={cn(
-                  "grid size-10 shrink-0 place-items-center rounded-lg ring-1 transition-transform [&_svg]:size-[18px]",
+                  "grid size-10 shrink-0 place-items-center rounded-lg ring-1 transition-colors [&_svg]:size-[18px]",
                   styles.iconBg,
                   styles.iconText,
                   styles.ring,
@@ -171,7 +183,7 @@ function IndexSpacer() {
   )
 }
 
-type Accent = "cyan" | "violet" | "emerald" | "slate"
+type Accent = "primary" | "violet" | "emerald" | "cyan" | "amber"
 
 const ACCENT_STYLES: Record<
   Accent,
@@ -180,27 +192,30 @@ const ACCENT_STYLES: Record<
     iconBg: string
     iconText: string
     ring: string
+    hoverBorder: string
     cardBg: string
     cardBorder: string
     cardHoverBorder: string
     cardHoverShadow: string
   }
 > = {
-  cyan: {
-    rail: "bg-gradient-to-b from-cyan-500/80 to-cyan-500/30",
-    iconBg: "bg-cyan-500/20",
-    iconText: "text-cyan-600 dark:text-cyan-300",
-    ring: "ring-cyan-500/30",
-    cardBg: "bg-cyan-500/15",
-    cardBorder: "border-cyan-500/40",
-    cardHoverBorder: "hover:border-cyan-500/70",
-    cardHoverShadow: "hover:shadow-cyan-500/25",
+  primary: {
+    rail: "bg-gradient-to-b from-primary/80 to-primary/30",
+    iconBg: "bg-primary/20",
+    iconText: "text-primary",
+    ring: "ring-primary/30",
+    hoverBorder: "hover:border-primary/45",
+    cardBg: "bg-primary/15",
+    cardBorder: "border-primary/40",
+    cardHoverBorder: "hover:border-primary/70",
+    cardHoverShadow: "hover:shadow-primary/25",
   },
   violet: {
     rail: "bg-gradient-to-b from-violet-500/80 to-violet-500/30",
     iconBg: "bg-violet-500/20",
     iconText: "text-violet-600 dark:text-violet-300",
     ring: "ring-violet-500/30",
+    hoverBorder: "hover:border-violet-500/45",
     cardBg: "bg-violet-500/15",
     cardBorder: "border-violet-500/40",
     cardHoverBorder: "hover:border-violet-500/70",
@@ -211,24 +226,37 @@ const ACCENT_STYLES: Record<
     iconBg: "bg-emerald-500/20",
     iconText: "text-emerald-600 dark:text-emerald-300",
     ring: "ring-emerald-500/30",
+    hoverBorder: "hover:border-emerald-500/45",
     cardBg: "bg-emerald-500/15",
     cardBorder: "border-emerald-500/40",
     cardHoverBorder: "hover:border-emerald-500/70",
     cardHoverShadow: "hover:shadow-emerald-500/25",
   },
-  slate: {
-    rail: "bg-gradient-to-b from-slate-500/70 to-slate-500/20",
-    iconBg: "bg-slate-500/20",
-    iconText: "text-slate-500 dark:text-slate-300",
-    ring: "ring-slate-500/30",
-    cardBg: "bg-slate-500/15",
-    cardBorder: "border-slate-500/40",
-    cardHoverBorder: "hover:border-slate-500/70",
-    cardHoverShadow: "hover:shadow-slate-500/20",
+  cyan: {
+    rail: "bg-gradient-to-b from-cyan-500/80 to-cyan-500/30",
+    iconBg: "bg-cyan-500/20",
+    iconText: "text-cyan-600 dark:text-cyan-300",
+    ring: "ring-cyan-500/30",
+    hoverBorder: "hover:border-cyan-500/45",
+    cardBg: "bg-cyan-500/15",
+    cardBorder: "border-cyan-500/40",
+    cardHoverBorder: "hover:border-cyan-500/70",
+    cardHoverShadow: "hover:shadow-cyan-500/25",
+  },
+  amber: {
+    rail: "bg-gradient-to-b from-amber-500/80 to-amber-500/30",
+    iconBg: "bg-amber-500/20",
+    iconText: "text-amber-600 dark:text-amber-300",
+    ring: "ring-amber-500/30",
+    hoverBorder: "hover:border-amber-500/45",
+    cardBg: "bg-amber-500/15",
+    cardBorder: "border-amber-500/40",
+    cardHoverBorder: "hover:border-amber-500/70",
+    cardHoverShadow: "hover:shadow-amber-500/25",
   },
 }
 
-function SettingsSection({
+function PrefSection({
   id,
   title,
   description,

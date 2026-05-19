@@ -84,6 +84,17 @@ export interface DuplicateWorkForForm {
   values: WorkFormValues
 }
 
+const DUPLICATE_WORK_SELECT = `
+  *,
+  category_scores(*),
+  platform_ratings(*),
+  work_tags(tag_id, tags(*)),
+  work_genres(genre_id, genres(id, name, slug)),
+  work_covers(id, url, source, is_primary, position),
+  work_synopses(id, source, text, is_primary, position),
+  work_external_ids(source, external_id, is_rejected)
+`
+
 function normalizePlatformName(name: string) {
   return name
     .trim()
@@ -602,6 +613,52 @@ function dbWorkToFormValues(work: any): WorkFormValues {
     .map((wg: { genres?: { name?: string } | null }) => wg.genres?.name)
     .filter(Boolean) as string[]
 
+  const covers = ((work.work_covers ?? []) as Array<{
+    url?: string | null
+    source?: string | null
+    is_primary?: boolean | null
+    position?: number | null
+  }>)
+    .slice()
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    .flatMap((cover) => {
+      if (!cover.url) return []
+      return [{
+        url: cover.url,
+        source: cover.source ?? "manual",
+        isPrimary: Boolean(cover.is_primary),
+      }]
+    })
+
+  const synopses = dedupeSynopsisEntries(
+    ((work.work_synopses ?? []) as Array<{
+      source?: string | null
+      text?: string | null
+      is_primary?: boolean | null
+      position?: number | null
+    }>)
+      .slice()
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+      .flatMap((synopsis) => {
+        if (!synopsis.text) return []
+        return [{
+          source: synopsis.source ?? "manual",
+          text: synopsis.text,
+          isPrimary: Boolean(synopsis.is_primary),
+        }]
+      })
+  )
+
+  const externalIds = Object.fromEntries(
+    ((work.work_external_ids ?? []) as Array<{
+      source?: string | null
+      external_id?: string | null
+      is_rejected?: boolean | null
+    }>)
+      .filter((row) => row.source && row.external_id && !row.is_rejected)
+      .map((row) => [row.source!, row.external_id!])
+  )
+
   const criterionValues = Object.fromEntries(
     CRITERION_SLUGS.map((slug) => [slug, scoreMap[slug] ?? null])
   )
@@ -642,6 +699,9 @@ function dbWorkToFormValues(work: any): WorkFormValues {
     cmx_rating: cmx?.rating ?? null,
     cmx_votes: cmx?.vote_count ?? null,
     extra_platform_ratings: extraPlatformRatings,
+    covers,
+    synopses,
+    external_ids: externalIds,
     ...criterionValues,
   })
 }
@@ -708,12 +768,7 @@ export async function findDuplicateWorkByTitle(
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("works")
-    .select(`
-      *,
-      category_scores(*),
-      platform_ratings(*),
-      work_tags(tag_id, tags(*))
-    `)
+    .select(DUPLICATE_WORK_SELECT)
     .ilike("title", normalizedTitle)
     .order("created_at", { ascending: true })
     .limit(1)
@@ -722,12 +777,7 @@ export async function findDuplicateWorkByTitle(
   if (!data && !error) {
     const { data: originalTitleMatch } = await supabase
       .from("works")
-      .select(`
-        *,
-        category_scores(*),
-        platform_ratings(*),
-        work_tags(tag_id, tags(*))
-      `)
+      .select(DUPLICATE_WORK_SELECT)
       .ilike("original_title", normalizedTitle)
       .order("created_at", { ascending: true })
       .limit(1)
@@ -743,12 +793,7 @@ export async function findDuplicateWorkByTitle(
 
     const { data: allData } = await supabase
       .from("works")
-      .select(`
-        *,
-        category_scores(*),
-        platform_ratings(*),
-        work_tags(tag_id, tags(*))
-      `)
+      .select(DUPLICATE_WORK_SELECT)
       .limit(1000)
     const aliasMatch = (allData ?? []).find((work) => workMatchesAnyName(work, incomingNames))
     if (aliasMatch) {
@@ -759,6 +804,23 @@ export async function findDuplicateWorkByTitle(
       }
     }
   }
+
+  if (error || !data) return null
+
+  return {
+    id: data.id,
+    title: data.title,
+    values: dbWorkToFormValues(data),
+  }
+}
+
+export async function findDuplicateWorkById(id: string): Promise<DuplicateWorkForForm | null> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("works")
+    .select(DUPLICATE_WORK_SELECT)
+    .eq("id", id)
+    .maybeSingle()
 
   if (error || !data) return null
 
@@ -973,6 +1035,8 @@ export async function createWork(values: WorkFormValues, aiMeta?: CreateWorkAiMe
   revalidatePath(`/titles/${slug}`)
   revalidateTag("works-slug-index", "max")
   revalidatePath("/ranking")
+  revalidateTag("tags-catalog", "max")
+  revalidateTag("score-color-thresholds", "max")
   revalidatePath("/")
   return { data: { id: result.workId, slug } }
 }
@@ -1078,7 +1142,7 @@ export async function finalizePendingBatch() {
   return { finalized: pending }
 }
 
-export async function updateWork(id: string, values: WorkFormValues) {
+export async function updateWork(id: string, values: WorkFormValues, aiMeta?: CreateWorkAiMeta) {
   const parsed = workFormSchema.safeParse(values)
   if (!parsed.success) {
     return { error: parsed.error.flatten().fieldErrors }
@@ -1145,25 +1209,71 @@ export async function updateWork(id: string, values: WorkFormValues) {
     (existingScoreRows ?? []).map((row) => [row.criterion_slug, row])
   )
 
+  const aiJustifications = data.ai_justifications ?? {}
+  const aiJustificationEntries = Object.entries(aiJustifications)
+    .filter(([slug, justification]) =>
+      CRITERION_SLUGS.includes(slug as (typeof CRITERION_SLUGS)[number]) &&
+      justification?.trim() &&
+      data[slug as keyof WorkFormValues] != null
+    )
+
+  let aiEvaluationId: string | null = null
+  if (aiJustificationEntries.length > 0) {
+    const { data: evaluation } = await supabase
+      .from("ai_evaluations")
+      .insert({
+        work_id: id,
+        status: "completed",
+        model_name: aiMeta?.modelName ?? "external-ai-criteria",
+        prompt_version: aiMeta?.promptVersion ?? "external-import-update",
+        summary: "Notas e explicações geradas durante a busca externa do título.",
+        confidence: null,
+        raw_response: { criteriaJustifications: aiJustifications },
+        input_hash: aiMeta?.inputHash ?? null,
+      })
+      .select("id")
+      .single()
+
+    if (evaluation) {
+      aiEvaluationId = evaluation.id
+      await supabase.from("ai_evaluation_scores").insert(
+        aiJustificationEntries.map(([slug, justification]) => ({
+          ai_evaluation_id: evaluation.id,
+          criterion_slug: slug,
+          suggested_score: Number(data[slug as keyof WorkFormValues]),
+          accepted_score: Number(data[slug as keyof WorkFormValues]),
+          was_accepted: true,
+          was_edited: false,
+          justification: justification.trim(),
+        }))
+      )
+    }
+  }
+
   const scores = CRITERION_SLUGS.flatMap((slug) => {
     const score = data[slug as keyof WorkFormValues]
     if (score == null) return []
     const numericScore = Number(score)
+    const hasNewAi = aiEvaluationId != null && Boolean(aiJustifications[slug]?.trim())
     const prev = existingByCriterion.get(slug)
     const prevSource = prev?.source ?? null
     const wasAi = prevSource === "ai_accepted" || prevSource === "ai_edited"
     const sameValue = prev != null && Number(prev.score) === numericScore
     const source: "manual" | "ai_accepted" | "ai_edited" = wasAi
-      ? sameValue
-        ? (prevSource as "ai_accepted" | "ai_edited")
-        : "ai_edited"
-      : "manual"
+      ? hasNewAi
+        ? "ai_accepted"
+        : sameValue
+          ? (prevSource as "ai_accepted" | "ai_edited")
+          : "ai_edited"
+      : hasNewAi
+        ? "ai_accepted"
+        : "manual"
     return [{
       work_id: id,
       criterion_slug: slug,
       score: numericScore,
       source,
-      ai_evaluation_id: wasAi ? prev?.ai_evaluation_id ?? null : null,
+      ai_evaluation_id: hasNewAi ? aiEvaluationId : wasAi ? prev?.ai_evaluation_id ?? null : null,
     }]
   })
 
@@ -1242,6 +1352,8 @@ export async function updateWork(id: string, values: WorkFormValues) {
   revalidatePath("/titles")
   revalidateTag("works-slug-index", "max")
   revalidatePath("/ranking")
+  revalidateTag("tags-catalog", "max")
+  revalidateTag("score-color-thresholds", "max")
   revalidatePath("/")
   return { data: { id, slug: nextSlug } }
 }
@@ -1256,6 +1368,7 @@ export async function archiveWork(id: string) {
   if (error) return { error: error.message }
   revalidatePath("/titles")
   revalidateTag("works-slug-index", "max")
+  revalidateTag("score-color-thresholds", "max")
   revalidatePath("/")
   return { data: null }
 }
@@ -1270,6 +1383,22 @@ export async function unarchiveWork(id: string) {
   if (error) return { error: error.message }
   revalidatePath(`/titles/${id}`)
   revalidatePath("/titles")
+  revalidateTag("works-slug-index", "max")
+  revalidateTag("score-color-thresholds", "max")
+  return { data: null }
+}
+
+export async function toggleFavorite(id: string, isFavorite: boolean) {
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from("works")
+    .update({ is_favorite: isFavorite })
+    .eq("id", id)
+
+  if (error) return { error: error.message }
+  revalidatePath(`/titles/${id}`)
+  revalidatePath("/titles")
+  revalidatePath("/ranking")
   revalidateTag("works-slug-index", "max")
   return { data: null }
 }
@@ -1312,6 +1441,7 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   revalidatePath("/titles")
   revalidateTag("works-slug-index", "max")
   revalidatePath("/ranking")
+  revalidateTag("tags-catalog", "max")
   revalidatePath("/")
   return { data: { id } }
 }

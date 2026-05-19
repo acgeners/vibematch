@@ -5,6 +5,7 @@ export default function ImportPage() {
   return (
     <div className="max-w-3xl space-y-6">
       <Header
+        kicker="Importação"
         title="Importar obras"
         description="Importe obras a partir de arquivos CSV ou XLSX"
       />

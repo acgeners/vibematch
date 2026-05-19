@@ -46,23 +46,23 @@ function resolvePersonalInfo(
 // aesthetic palette here and rely on the DB only for the canonical name
 // and symbol.
 const PUB_STATUS_CLASSES: Record<string, string> = {
-  Completed: "bg-blue-100 text-blue-800 border-blue-200",
-  Hiatus: "bg-amber-100 text-amber-800 border-amber-200",
-  Ongoing: "bg-green-100 text-green-800 border-green-200",
-  Cancelled: "bg-red-100 text-red-800 border-red-200",
-  Unknown: "bg-gray-100 text-gray-600 border-gray-200",
+  Completed: "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-400/12 dark:text-blue-200 dark:border-blue-400/25",
+  Hiatus: "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-400/12 dark:text-amber-200 dark:border-amber-400/25",
+  Ongoing: "bg-green-100 text-green-800 border-green-200 dark:bg-emerald-400/12 dark:text-emerald-200 dark:border-emerald-400/25",
+  Cancelled: "bg-red-100 text-red-800 border-red-200 dark:bg-red-400/12 dark:text-red-200 dark:border-red-400/25",
+  Unknown: "bg-gray-100 text-gray-600 border-gray-200 dark:bg-slate-400/10 dark:text-slate-300 dark:border-slate-400/20",
 }
 
 const PERSONAL_STATUS_CLASSES: Record<string, string> = {
-  Completed: "bg-blue-100 text-blue-800",
-  Reading: "bg-green-100 text-green-800",
-  "To read": "bg-gray-100 text-gray-700",
-  Paused: "bg-yellow-100 text-yellow-800",
-  Stalled: "bg-orange-100 text-orange-800",
-  Dropped: "bg-red-100 text-red-800",
-  Started: "bg-purple-100 text-purple-800",
-  Hiatus: "bg-cyan-100 text-cyan-800",
-  "On-hold": "bg-slate-100 text-slate-700",
+  Completed: "bg-blue-100 text-blue-800 dark:bg-blue-400/12 dark:text-blue-200",
+  Reading: "bg-green-100 text-green-800 dark:bg-emerald-400/12 dark:text-emerald-200",
+  "To read": "bg-gray-100 text-gray-700 dark:bg-slate-400/10 dark:text-slate-300",
+  Paused: "bg-yellow-100 text-yellow-800 dark:bg-yellow-400/12 dark:text-yellow-200",
+  Stalled: "bg-orange-100 text-orange-800 dark:bg-orange-400/12 dark:text-orange-200",
+  Dropped: "bg-red-100 text-red-800 dark:bg-red-400/12 dark:text-red-200",
+  Started: "bg-purple-100 text-purple-800 dark:bg-purple-400/12 dark:text-purple-200",
+  Hiatus: "bg-cyan-100 text-cyan-800 dark:bg-cyan-400/12 dark:text-cyan-200",
+  "On-hold": "bg-slate-100 text-slate-700 dark:bg-slate-400/10 dark:text-slate-300",
 }
 
 interface PublicationStatusBadgeProps {
@@ -115,9 +115,9 @@ interface AiStatusBadgeProps {
 }
 
 const AI_STATUS_COLORS: Record<string, string> = {
-  pending: "bg-amber-100 text-amber-800 border-amber-200",
-  done: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  skipped: "bg-gray-100 text-gray-600 border-gray-200",
+  pending: "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-400/12 dark:text-amber-200 dark:border-amber-400/25",
+  done: "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-400/12 dark:text-emerald-200 dark:border-emerald-400/25",
+  skipped: "bg-gray-100 text-gray-600 border-gray-200 dark:bg-slate-400/10 dark:text-slate-300 dark:border-slate-400/20",
 }
 
 const AI_STATUS_LABELS: Record<string, string> = {

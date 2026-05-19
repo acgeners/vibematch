@@ -1,6 +1,7 @@
 "use client"
 
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
+import { getCoverImageSrc } from "@/lib/image-proxy"
 import type { WorkPreview } from "@/server/actions/works"
 
 interface WorkHoverPreviewProps {
@@ -40,7 +41,7 @@ export function WorkHoverPreview({ preview, anchorRect }: WorkHoverPreviewProps)
           <div className="relative h-44 w-32 shrink-0 rounded-md overflow-hidden bg-muted">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={preview.coverUrl}
+              src={getCoverImageSrc(preview.coverUrl)}
               alt=""
               className="h-full w-full object-cover"
               loading="lazy"

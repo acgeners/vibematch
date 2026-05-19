@@ -1,57 +1,157 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
   BookOpen,
+  Heart,
   Upload,
   Trophy,
   Sparkles,
   Settings,
+  SlidersHorizontal,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const NAV_ITEMS = [
-  { href: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { href: "/titles", icon: BookOpen, label: "Títulos" },
-  { href: "/ranking", icon: Trophy, label: "Ranking" },
-  { href: "/ai-evaluation", icon: Sparkles, label: "Avaliação IA" },
-  { href: "/import", icon: Upload, label: "Importar" },
-  { href: "/settings", icon: Settings, label: "Configurações" },
+interface NavItem {
+  href: string
+  icon: typeof LayoutDashboard
+  label: string
+  // Marca o item como ativo apenas quando um query param específico está setado.
+  // Quando ausente, o item-base do mesmo path fica inativo (evita dupla seleção).
+  query?: { key: string; value: string }
+}
+
+interface NavSection {
+  title: string
+  items: NavItem[]
+}
+
+const NAV_SECTIONS: NavSection[] = [
+  {
+    title: "Principal",
+    items: [
+      { href: "/", icon: LayoutDashboard, label: "Dashboard" },
+      { href: "/titles", icon: BookOpen, label: "Títulos" },
+      { href: "/titles?fav=1", icon: Heart, label: "Favoritos", query: { key: "fav", value: "1" } },
+      { href: "/ranking", icon: Trophy, label: "Ranking" },
+      { href: "/ai-evaluation", icon: Sparkles, label: "Avaliação IA" },
+    ],
+  },
+  {
+    title: "Gerenciar",
+    items: [
+      { href: "/import", icon: Upload, label: "Importar" },
+      { href: "/preferences", icon: SlidersHorizontal, label: "Preferências" },
+      { href: "/settings", icon: Settings, label: "Configurações" },
+    ],
+  },
 ]
+
+// Lê window.location.search no client para refinar o estado ativo (item-com-query
+// vs item-base no mesmo path). useSearchParams() falha o prerender estático de
+// /_not-found mesmo sob Suspense, então usamos um efeito client-only.
+function useClientSearchParams(): URLSearchParams {
+  const pathname = usePathname()
+  const [params, setParams] = useState<URLSearchParams>(() => new URLSearchParams())
+
+  useEffect(() => {
+    setParams(new URLSearchParams(window.location.search))
+  }, [pathname])
+
+  return params
+}
 
 export function Sidebar() {
   const pathname = usePathname()
+  const searchParams = useClientSearchParams()
+
+  const isItemActive = (item: NavItem, siblings: NavItem[]): boolean => {
+    const basePath = item.href.split("?")[0]
+    const pathMatches = basePath === "/" ? pathname === "/" : pathname.startsWith(basePath)
+    if (!pathMatches) return false
+    if (item.query) {
+      return searchParams.get(item.query.key) === item.query.value
+    }
+    return !siblings.some(
+      (other) =>
+        other !== item &&
+        other.query &&
+        other.href.split("?")[0] === basePath &&
+        searchParams.get(other.query.key) === other.query.value
+    )
+  }
 
   return (
-    <aside className="hidden md:flex flex-col w-56 min-h-screen border-r border-border bg-sidebar shrink-0">
-      <div className="flex items-center h-14 px-4 border-b border-border">
-        <span className="font-bold text-foreground tracking-tight text-base">
-          VibeMatch
-        </span>
+    <aside className="relative z-20 hidden min-h-screen w-64 shrink-0 flex-col border-r border-sidebar-border/80 bg-sidebar/95 shadow-[10px_0_30px_hsl(220_30%_5%/0.14)] backdrop-blur md:flex">
+      <div className="flex h-16 items-center gap-3 border-b border-sidebar-border/70 px-4">
+        <div className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-primary to-[hsl(200_98%_50%)] text-white shadow-md shadow-primary/30 ring-1 ring-white/15">
+          <BookOpen className="size-4" />
+        </div>
+        <div className="min-w-0">
+          <span className="block text-base font-bold tracking-tight text-sidebar-foreground">
+            VibeMatch
+          </span>
+          <span className="block truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            Manhwa Library
+          </span>
+        </div>
       </div>
-      <nav className="flex flex-col gap-1 p-2 flex-1">
-        {NAV_ITEMS.map(({ href, icon: Icon, label }) => {
-          const active =
-            href === "/" ? pathname === "/" : pathname.startsWith(href)
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-                active
-                  ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                  : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <Icon className="size-4 shrink-0" />
-              {label}
-            </Link>
-          )
-        })}
+
+      <nav className="flex flex-1 flex-col gap-5 overflow-y-auto p-3">
+        {NAV_SECTIONS.map((section) => (
+          <div key={section.title} className="space-y-1">
+            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+              {section.title}
+            </p>
+            {section.items.map((item) => {
+              const { href, icon: Icon, label } = item
+              const active = isItemActive(item, section.items)
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={cn(
+                    "group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                    active
+                      ? "bg-gradient-to-r from-primary/25 via-primary/15 to-primary/5 text-sidebar-foreground shadow-sm shadow-primary/15"
+                      : "text-sidebar-foreground/75 hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground"
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "absolute left-0 top-1/2 h-7 w-[3px] -translate-y-1/2 rounded-r-full transition-all",
+                      active
+                        ? "bg-primary opacity-100 shadow-[0_0_10px_hsl(var(--primary)/0.5)]"
+                        : "opacity-0"
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      "grid size-7 place-items-center rounded-md transition-colors",
+                      active
+                        ? "bg-primary/25 text-primary ring-1 ring-primary/30"
+                        : "text-sidebar-foreground/55 group-hover:bg-sidebar-accent group-hover:text-sidebar-foreground"
+                    )}
+                  >
+                    <Icon className="size-4" />
+                  </span>
+                  <span className="truncate">{label}</span>
+                </Link>
+              )
+            })}
+          </div>
+        ))}
       </nav>
+
+      <div className="border-t border-sidebar-border/60 px-4 py-3">
+        <p className="text-[10px] font-medium text-muted-foreground/70">
+          v1 · catálogo pessoal
+        </p>
+      </div>
     </aside>
   )
 }

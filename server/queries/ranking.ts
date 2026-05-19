@@ -40,7 +40,15 @@ export interface RankingEntry {
   tags: Array<{ id: string; name: string; slug: string; tag_group_id: string | null }>
 }
 
-export type RankingSortBy = "final_score" | "calc_score" | "pred_score" | "chapters" | "title" | `crit_${string}`
+export type RankingSortBy =
+  | "final_score"
+  | "calc_score"
+  | "pred_score"
+  | "platform_avg"
+  | "total_votes"
+  | "chapters"
+  | "title"
+  | `crit_${string}`
 
 export interface SortLevel {
   field: RankingSortBy
@@ -77,6 +85,7 @@ export interface RankingFilters {
   topN?: number
   onlyWithFinalScore?: boolean
   onlyStubPrediction?: boolean
+  onlyFavorites?: boolean
   sortBy?: RankingSortBy
   sortDir?: "asc" | "desc"
   sortLevels?: SortLevel[]
@@ -130,6 +139,102 @@ export async function getRanking(
   const publicationStatusIdFilter = resolveStatusIds(filters.publicationStatus, getPublicationStatusIdByName)
   const personalStatusIdFilter = resolveStatusIds(filters.personalStatus, getPersonalStatusIdByName)
 
+  // Pre-resolve genre/tag id filters in parallel via pivot tables. Pushing this
+  // into Supabase narrows the heavy joined fetch below instead of loading 2000
+  // rows just to drop most in memory.
+  const genreAnyNames = filters.genreAny ?? filters.genres
+  const tagAnySlugs = filters.tagSlugsAny ?? filters.tagSlugs
+
+  const [
+    genreAllIds,
+    genreAnyIds,
+    genreExcludeIds,
+    tagAllIds,
+    tagAnyIds,
+    tagExcludeIds,
+  ] = await Promise.all([
+    filters.genreAll?.length
+      ? supabase
+          .from("work_genres")
+          .select("work_id, genres!inner(name)")
+          .in("genres.name", filters.genreAll)
+          .then(({ data }) => {
+            const countByWork: Record<string, number> = {}
+            for (const r of data ?? []) {
+              countByWork[r.work_id] = (countByWork[r.work_id] ?? 0) + 1
+            }
+            return Object.entries(countByWork)
+              .filter(([, c]) => c >= filters.genreAll!.length)
+              .map(([id]) => id)
+          })
+      : Promise.resolve(null),
+    genreAnyNames?.length
+      ? supabase
+          .from("work_genres")
+          .select("work_id, genres!inner(name)")
+          .in("genres.name", genreAnyNames)
+          .then(({ data }) => [...new Set((data ?? []).map((r) => r.work_id))])
+      : Promise.resolve(null),
+    filters.genreExclude?.length
+      ? supabase
+          .from("work_genres")
+          .select("work_id, genres!inner(name)")
+          .in("genres.name", filters.genreExclude)
+          .then(({ data }) => [...new Set((data ?? []).map((r) => r.work_id))])
+      : Promise.resolve(null),
+    filters.tagSlugsAll?.length
+      ? supabase
+          .from("work_tags")
+          .select("work_id, tags!inner(slug)")
+          .in("tags.slug", filters.tagSlugsAll)
+          .then(({ data }) => {
+            const countByWork: Record<string, number> = {}
+            for (const r of data ?? []) {
+              countByWork[r.work_id] = (countByWork[r.work_id] ?? 0) + 1
+            }
+            return Object.entries(countByWork)
+              .filter(([, c]) => c >= filters.tagSlugsAll!.length)
+              .map(([id]) => id)
+          })
+      : Promise.resolve(null),
+    tagAnySlugs?.length
+      ? supabase
+          .from("work_tags")
+          .select("work_id, tags!inner(slug)")
+          .in("tags.slug", tagAnySlugs)
+          .then(({ data }) => [...new Set((data ?? []).map((r) => r.work_id))])
+      : Promise.resolve(null),
+    filters.tagSlugsExclude?.length
+      ? supabase
+          .from("work_tags")
+          .select("work_id, tags!inner(slug)")
+          .in("tags.slug", filters.tagSlugsExclude)
+          .then(({ data }) => [...new Set((data ?? []).map((r) => r.work_id))])
+      : Promise.resolve(null),
+    ])
+
+  // Combine include sets via intersection; expand exclude set.
+  const includeSets: string[][] = []
+  if (genreAllIds) includeSets.push(genreAllIds)
+  if (genreAnyIds) includeSets.push(genreAnyIds)
+  if (tagAllIds) includeSets.push(tagAllIds)
+  if (tagAnyIds) includeSets.push(tagAnyIds)
+  const excludeIds = new Set<string>([
+    ...(genreExcludeIds ?? []),
+    ...(tagExcludeIds ?? []),
+  ])
+
+  let allowedIds: string[] | null = null
+  if (includeSets.length > 0) {
+    allowedIds = includeSets.reduce<string[]>((acc, set, i) => {
+      if (i === 0) return [...set]
+      const setLookup = new Set(set)
+      return acc.filter((id) => setLookup.has(id))
+    }, [])
+    if (excludeIds.size) allowedIds = allowedIds.filter((id) => !excludeIds.has(id))
+    if (allowedIds.length === 0) return []
+  }
+
   let worksQuery = supabase
     .from("works")
     .select(`
@@ -144,6 +249,12 @@ export async function getRanking(
       work_synopses(text, is_primary, position)
     `)
     .eq("is_archived", false)
+
+  if (allowedIds) worksQuery = worksQuery.in("id", allowedIds)
+  // If only exclude filters are present, apply them via .not(in)
+  if (!allowedIds && excludeIds.size > 0) {
+    worksQuery = worksQuery.not("id", "in", `(${[...excludeIds].join(",")})`)
+  }
 
   if (publicationStatusIdFilter && publicationStatusIdFilter.length > 0) {
     worksQuery = worksQuery.in("publication_status_id", publicationStatusIdFilter)
@@ -167,6 +278,9 @@ export async function getRanking(
   }
   if (filters.maxTotalChapters != null) {
     worksQuery = worksQuery.lte("total_chapters", filters.maxTotalChapters)
+  }
+  if (filters.onlyFavorites) {
+    worksQuery = worksQuery.eq("is_favorite", true)
   }
 
   const { data, error } = await worksQuery.order("title").limit(2000)
@@ -356,14 +470,18 @@ export async function getRanking(
 
   function compareByField(a: RankingEntry, b: RankingEntry, field: string, dir: "asc" | "desc"): number {
     const m = dir === "asc" ? 1 : -1
+    const roundedScore = (value: number | null | undefined) =>
+      value == null ? -Infinity : Math.round(value * 10) / 10
     if (field === "title") return m * a.title.localeCompare(b.title)
     if (field === "final_score") {
-      const av = a.finalScore ?? a.calcScore ?? -Infinity
-      const bv = b.finalScore ?? b.calcScore ?? -Infinity
+      const av = roundedScore(a.finalScore ?? a.calcScore)
+      const bv = roundedScore(b.finalScore ?? b.calcScore)
       return m * (av - bv)
     }
-    if (field === "calc_score") return m * ((a.calcScore ?? -Infinity) - (b.calcScore ?? -Infinity))
-    if (field === "pred_score") return m * ((a.predictedScore ?? -Infinity) - (b.predictedScore ?? -Infinity))
+    if (field === "calc_score") return m * (roundedScore(a.calcScore) - roundedScore(b.calcScore))
+    if (field === "pred_score") return m * (roundedScore(a.predictedScore) - roundedScore(b.predictedScore))
+    if (field === "platform_avg") return m * (roundedScore(a.platformAvg) - roundedScore(b.platformAvg))
+    if (field === "total_votes") return m * (a.totalVotes - b.totalVotes)
     if (field === "chapters") return m * ((a.totalChapters ?? -Infinity) - (b.totalChapters ?? -Infinity))
     if (field.startsWith("crit_")) {
       const slug = field.slice(5)

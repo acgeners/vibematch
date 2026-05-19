@@ -1,4 +1,5 @@
 import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } from "@/server/queries/ranking"
+import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { Header } from "@/components/layout/header"
 import { RankingTable } from "@/components/ranking/ranking-table"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
@@ -47,7 +48,7 @@ const getAllGenres = unstable_cache(async (): Promise<string[]> => {
   return (data ?? [])
     .map((row) => row.name as string | null)
     .filter((name): name is string => Boolean(name))
-}, ["ranking-genres-v2"], { revalidate: 300 })
+}, ["ranking-genres-v2"], { revalidate: 300, tags: ["genres-catalog"] })
 
 const getAllTags = unstable_cache(async (): Promise<Array<{
   slug: string
@@ -56,29 +57,42 @@ const getAllTags = unstable_cache(async (): Promise<Array<{
   groupName: string
 }>> => {
   const supabase = createAdminClient()
-  const [{ data: tags }, { data: groups }] = await Promise.all([
-    supabase
+  // Supabase has a default 1000-row cap per request that `.limit()` does not
+  // override — paginate explicitly to fetch every tag.
+  const PAGE = 1000
+  const allTags: Array<{ slug: string; name: string; tag_group_id: string | null }> = []
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await supabase
       .from("tags")
       .select("slug, name, tag_group_id")
       .order("name")
-      .limit(5000),
-    supabase
-      .from("tag_group")
-      .select("id, group, slug"),
-  ])
+      .range(offset, offset + PAGE - 1)
+    if (error) break
+    if (!data || data.length === 0) break
+    for (const row of data) {
+      allTags.push({
+        slug: row.slug,
+        name: row.name,
+        tag_group_id: row.tag_group_id ?? null,
+      })
+    }
+    if (data.length < PAGE) break
+  }
+
+  const { data: groups } = await supabase.from("tag_group").select("id, group, slug")
   const groupById = new Map(
     (groups ?? []).map((group) => [
       group.id as string,
       ((group.group as string | null) ?? (group.slug as string | null) ?? "Sem grupo"),
     ])
   )
-  return (tags ?? []).map((tag) => ({
+  return allTags.map((tag) => ({
     slug: tag.slug,
     name: tag.name,
-    tag_group_id: tag.tag_group_id ?? null,
+    tag_group_id: tag.tag_group_id,
     groupName: tag.tag_group_id ? groupById.get(tag.tag_group_id) ?? "Sem grupo" : "Sem grupo",
   }))
-}, ["ranking-tags"], { revalidate: 300 })
+}, ["ranking-tags-v2"], { revalidate: 300, tags: ["tags-catalog"] })
 
 interface StatusOption {
   id: number
@@ -159,7 +173,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   }
 
   const validSortFields = new Set<string>([
-    "final_score", "calc_score", "pred_score", "chapters", "title",
+    "final_score", "calc_score", "pred_score", "platform_avg", "total_votes", "chapters", "title",
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
   const rawSort = str("sort") ?? "final_score:desc"
@@ -228,14 +242,19 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     maxTotalVotes: num("max_votes"),
     topN: overrideTopN ?? prefs.topN ?? undefined,
     onlyWithFinalScore: str("only_scored") === "1",
+    onlyFavorites: str("fav") === "1",
     sortLevels,
   }
 
-  const entries = await getRanking(filters)
+  const [entries, scoreThresholds] = await Promise.all([
+    getRanking(filters),
+    getScoreColorThresholds(),
+  ])
 
   return (
     <div className="space-y-4">
       <Header
+        kicker="Ranking"
         title="Ranking"
         description="Obras ordenadas pela Nota.Final"
         actions={
@@ -256,7 +275,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         defaultMinFinal={prefs.minFinal}
       />
 
-      <RankingTable entries={entries} />
+      <RankingTable entries={entries} scoreThresholds={scoreThresholds} />
     </div>
   )
 }

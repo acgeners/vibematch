@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { Plus } from "lucide-react"
 import { getWorks } from "@/server/queries/works"
+import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { Header } from "@/components/layout/header"
 import { WorkFilters } from "@/components/titles/work-filters"
 import { WorkTable } from "@/components/titles/work-table"
@@ -16,6 +17,7 @@ interface TitlesPageProps {
     personal?: string | string[]
     ai?: string | string[]
     archived?: string
+    fav?: string
     page?: string
     sort?: string
     min_score?: string
@@ -45,6 +47,7 @@ function parseSort(raw: string | undefined): import("@/types/domain").WorkSort {
     "ai_eval_status",
     "updated_at",
     "created_at",
+    "is_favorite",
   ]
   return {
     field: (validFields.includes(field) ? field : "final_score") as import("@/types/domain").WorkSortField,
@@ -75,6 +78,7 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     personalStatus: toArray(params.personal) as PersonalStatus[],
     aiEvalStatus: toArray(params.ai) as AiEvalStatus[],
     isArchived: params.archived === "1" ? undefined : false,
+    isFavorite: params.fav === "1" ? true : undefined,
     minFinalScore: params.min_score ? parseFloat(params.min_score) : undefined,
     maxFinalScore: params.max_score ? parseFloat(params.max_score) : undefined,
     minChapters: params.min_chapters ? parseInt(params.min_chapters, 10) : undefined,
@@ -83,14 +87,16 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     tagSlugs: toArray(params.tag).length ? toArray(params.tag) : undefined,
   }
 
-  const [result, genreOptions] = await Promise.all([
+  const [result, genreOptions, scoreThresholds] = await Promise.all([
     getWorks(filters, parseSort(params.sort), page, pageSize),
     getGenreOptions(),
+    getScoreColorThresholds(),
   ])
 
   return (
     <div className="space-y-4">
       <Header
+        kicker="Catálogo"
         title="Títulos"
         description={`${result.total} obra${result.total !== 1 ? "s" : ""} no catálogo`}
         actions={
@@ -110,6 +116,8 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
         total={result.total}
         page={result.page}
         pageSize={result.pageSize}
+        searchQuery={params.search}
+        scoreThresholds={scoreThresholds}
       />
     </div>
   )
