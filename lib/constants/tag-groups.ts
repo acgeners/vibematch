@@ -6,7 +6,9 @@ export const TAG_GROUP_IDS = {
   "﻿content_indicator": "90edf1bb-a80e-459e-b421-ebca4e493128",
   "elements": "9f18fecc-5a0a-46ab-93b0-eb9c1c8f804f",
   "fantasy": "d86c1b07-5f44-4526-9416-70ddc80c6927",
+  "female_lead": "fa630f4b-1a82-4398-9906-d685cb8ed363",
   "format": "575383cc-8464-40e0-91dd-b0689903fb66",
+  "male_lead": "23286f93-ca6f-477d-8ef4-8857bf07d672",
   "other": "606e6239-515b-46c5-b985-9f41f948cdc9",
   "relationship_dynamics": "b66edefb-67f3-4c8d-8c16-b6f00ab07ddf",
   "romance": "1dd17228-8315-41e1-9ab9-9eaa3b4a3f4f",
@@ -29,7 +31,9 @@ export const TAG_GROUP_LABELS: Record<TagGroupSlug, string> = {
   "﻿content_indicator": "﻿Content Indicator",
   "elements": "Elements",
   "fantasy": "Fantasy",
+  "female_lead": "Female Lead",
   "format": "Format",
+  "male_lead": "Male Lead",
   "other": "Other",
   "relationship_dynamics": "Relationship Dynamics",
   "romance": "Romance",
@@ -49,7 +53,9 @@ export const CONFLICT_TAG_GROUP_ID = TAG_GROUP_IDS["conflict"]
 export const CONTENT_INDICATOR_TAG_GROUP_ID = TAG_GROUP_IDS["﻿content_indicator"]
 export const ELEMENTS_TAG_GROUP_ID = TAG_GROUP_IDS["elements"]
 export const FANTASY_TAG_GROUP_ID = TAG_GROUP_IDS["fantasy"]
+export const FEMALE_LEAD_TAG_GROUP_ID = TAG_GROUP_IDS["female_lead"]
 export const FORMAT_TAG_GROUP_ID = TAG_GROUP_IDS["format"]
+export const MALE_LEAD_TAG_GROUP_ID = TAG_GROUP_IDS["male_lead"]
 export const OTHER_TAG_GROUP_ID = TAG_GROUP_IDS["other"]
 export const RELATIONSHIP_DYNAMICS_TAG_GROUP_ID = TAG_GROUP_IDS["relationship_dynamics"]
 export const ROMANCE_TAG_GROUP_ID = TAG_GROUP_IDS["romance"]
