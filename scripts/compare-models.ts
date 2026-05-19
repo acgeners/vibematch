@@ -12,7 +12,7 @@ import { createClient } from "@supabase/supabase-js"
 import { requestAiEvaluation } from "@/lib/ai-evaluation/service"
 import { fetchExternalEvaluationContextForWork } from "@/lib/external/index"
 import { pickPrimarySynopsis } from "@/lib/work-derived"
-import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
+import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { CRITERION_SLUGS } from "@/types/domain"
 
 const TITLES = [
@@ -31,10 +31,6 @@ const MODELS = (process.env.COMPARE_MODELS ?? "haiku,sonnet,opus")
     return null
   })
   .filter((m): m is { id: string; label: string } => m !== null)
-
-const TAG_GROUP_ID_TO_SLUG: Record<string, string> = Object.fromEntries(
-  Object.entries(TAG_GROUP_IDS).map(([slug, id]) => [id, slug.replace(/^﻿/, "")])
-)
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -95,7 +91,7 @@ async function loadWork(title: string): Promise<WorkPayload | null> {
     .filter((t): t is { name: string; tag_group_id?: string | null } => Boolean(t?.name))
     .map((t) => ({
       name: t.name,
-      group: t.tag_group_id ? (TAG_GROUP_ID_TO_SLUG[t.tag_group_id] ?? null) : null,
+      group: t.tag_group_id ? (TAG_GROUP_ID_TO_NORMALIZED_SLUG[t.tag_group_id] ?? null) : null,
     }))
 
   const genres = (work.work_genres ?? [])

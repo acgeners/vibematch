@@ -1,3 +1,4 @@
+import { Sparkles } from "lucide-react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { Header } from "@/components/layout/header"
 import { AiEvaluationPanel } from "@/components/ai-evaluation/ai-evaluation-panel"
@@ -5,11 +6,22 @@ import { AiEvaluationFilters } from "@/components/ai-evaluation/ai-evaluation-fi
 import { Badge } from "@/components/ui/badge"
 import { pickPrimaryCover } from "@/lib/work-derived"
 import { MODEL, PROMPT_VERSION, CURRENT_PROMPT_VERSION_NUM, parsePromptVersion } from "@/lib/ai-evaluation/service"
+import {
+  PUBLICATION_STATUSES_BY_ID,
+  PERSONAL_STATUSES_BY_ID,
+} from "@/lib/constants/criteria"
 
 const ALL_FILTERS = ["pending", "low-confidence", "outdated-model"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
 
-const LOW_CONFIDENCE_THRESHOLD = 0.8
+const DEFAULT_LOW_CONFIDENCE_THRESHOLD = 0.8
+
+const PUB_STATUS_NAME_TO_ID: Record<string, number> = Object.fromEntries(
+  Object.values(PUBLICATION_STATUSES_BY_ID).map((info) => [info.status, info.id])
+)
+const PERSONAL_STATUS_NAME_TO_ID: Record<string, number> = Object.fromEntries(
+  Object.values(PERSONAL_STATUSES_BY_ID).map((info) => [info.status, info.id])
+)
 
 function parseFilters(raw: string | string[] | undefined): EvaluationFilter[] {
   const value = Array.isArray(raw) ? raw.join(",") : raw
@@ -21,6 +33,20 @@ function parseFilters(raw: string | string[] | undefined): EvaluationFilter[] {
   return valid.length > 0 ? valid : ["pending"]
 }
 
+function parseStatusList(
+  raw: string | string[] | undefined,
+  nameToId: Record<string, number>
+): { names: string[]; ids: number[] } {
+  const value = Array.isArray(raw) ? raw.join(",") : raw
+  if (!value) return { names: [], ids: [] }
+  const names = value
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p in nameToId)
+  const ids = names.map((n) => nameToId[n])
+  return { names, ids }
+}
+
 interface EligibleWork {
   id: string
   title: string
@@ -29,6 +55,7 @@ interface EligibleWork {
   personal_status: string
   personal_status_id: number | null
   cover_url?: string | null
+  final_score: number | null
   /** Razões pelas quais a obra apareceu (intersecção com os filtros ativos). */
   matchedFilters: EvaluationFilter[]
   evaluation: {
@@ -39,18 +66,26 @@ interface EligibleWork {
   } | null
 }
 
-async function getEligibleWorks(filters: EvaluationFilter[]) {
+async function getEligibleWorks(
+  filters: EvaluationFilter[],
+  pubStatusIds: number[],
+  personalStatusIds: number[]
+) {
   const supabase = createAdminClient()
 
   // Carrega tolerância de versão (compartilhada pelo filtro outdated-model
   // e pela UI dos filtros). Default 0 (qualquer divergência conta).
   const { data: configRow } = await supabase
     .from("formula_config")
-    .select("prompt_version_tolerance")
+    .select("prompt_version_tolerance, low_confidence_threshold")
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle()
   const promptVersionTolerance = Math.max(0, Number(configRow?.prompt_version_tolerance ?? 0))
+  const lowConfidenceThreshold = Math.min(
+    1,
+    Math.max(0, Number(configRow?.low_confidence_threshold ?? DEFAULT_LOW_CONFIDENCE_THRESHOLD))
+  )
 
   // Pra cada filtro, descobrimos os work_ids elegíveis e depois unimos.
   // Mais eficiente que um único query com OR complexo (queries simples,
@@ -77,7 +112,7 @@ async function getEligibleWorks(filters: EvaluationFilter[]) {
         const { data, error } = await supabase
           .from("latest_ai_evaluation_per_work")
           .select("work_id")
-          .lt("confidence", LOW_CONFIDENCE_THRESHOLD)
+          .lt("confidence", lowConfidenceThreshold)
         if (error) throw new Error(error.message)
         return { filter: "low-confidence" as const, ids: new Set((data ?? []).map((r) => r.work_id)) }
       })()
@@ -119,23 +154,35 @@ async function getEligibleWorks(filters: EvaluationFilter[]) {
   }
 
   if (matchedByWork.size === 0) {
-    return { works: [] as EligibleWork[], totalCount: 0, activeFilters: filters, promptVersionTolerance }
+    return {
+      works: [] as EligibleWork[],
+      totalCount: 0,
+      activeFilters: filters,
+      promptVersionTolerance,
+      lowConfidenceThreshold,
+    }
   }
 
   const eligibleIds = [...matchedByWork.keys()]
 
+  let worksQuery = supabase
+    .from("works")
+    .select(`
+      id, title, publication_status_id, personal_status_id, total_chapters,
+      work_covers(url, is_primary, position),
+      calculated_scores(final_score)
+    `)
+    .in("id", eligibleIds)
+    .eq("is_archived", false)
+  if (pubStatusIds.length > 0) {
+    worksQuery = worksQuery.in("publication_status_id", pubStatusIds)
+  }
+  if (personalStatusIds.length > 0) {
+    worksQuery = worksQuery.in("personal_status_id", personalStatusIds)
+  }
+
   const [worksResult, evalsResult] = await Promise.all([
-    supabase
-      .from("works")
-      .select(`
-        id, title, publication_status_id, personal_status_id, total_chapters,
-        work_covers(url, is_primary, position),
-        calculated_scores(final_score)
-      `)
-      .in("id", eligibleIds)
-      .eq("is_archived", false)
-      .order("title")
-      .limit(500),
+    worksQuery.order("title").limit(500),
     supabase
       .from("latest_ai_evaluation_per_work")
       .select("work_id, confidence, model_name, prompt_version, updated_at, created_at")
@@ -175,28 +222,49 @@ async function getEligibleWorks(filters: EvaluationFilter[]) {
       final_score: row.calculated_scores?.final_score ?? null,
       matchedFilters: matchedByWork.get(row.id) ?? [],
       evaluation: evalByWork.get(row.id) ?? null,
-    }
+    } as EligibleWork
   })
 
-  return { works, totalCount: works.length, activeFilters: filters, promptVersionTolerance }
+  return {
+    works,
+    totalCount: works.length,
+    activeFilters: filters,
+    promptVersionTolerance,
+    lowConfidenceThreshold,
+  }
 }
 
 export default async function AiEvaluationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string | string[] }>
+  searchParams: Promise<{
+    filter?: string | string[]
+    pub?: string | string[]
+    personal?: string | string[]
+  }>
 }) {
   const params = await searchParams
   const activeFilters = parseFilters(params.filter)
-  const { works, totalCount, promptVersionTolerance } = await getEligibleWorks(activeFilters)
+  const { names: pubStatusNames, ids: pubStatusIds } = parseStatusList(
+    params.pub,
+    PUB_STATUS_NAME_TO_ID
+  )
+  const { names: personalStatusNames, ids: personalStatusIds } = parseStatusList(
+    params.personal,
+    PERSONAL_STATUS_NAME_TO_ID
+  )
+  const { works, totalCount, promptVersionTolerance, lowConfidenceThreshold } =
+    await getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds)
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="space-y-4">
       <Header
+        kicker="Avaliação"
         title="Avaliação IA"
         description="Obras elegíveis para avaliação, revisão ou re-avaliação por IA"
+        icon={<Sparkles />}
         actions={
-          <Badge variant="outline" className="text-base px-3 py-1">
+          <Badge variant="outline" className="text-xs">
             {totalCount} obra{totalCount !== 1 ? "s" : ""}
           </Badge>
         }
@@ -208,7 +276,9 @@ export default async function AiEvaluationPage({
         currentPromptVersion={PROMPT_VERSION}
         currentPromptVersionNum={CURRENT_PROMPT_VERSION_NUM}
         promptVersionTolerance={promptVersionTolerance}
-        lowConfidenceThreshold={LOW_CONFIDENCE_THRESHOLD}
+        lowConfidenceThreshold={lowConfidenceThreshold}
+        activePubStatuses={pubStatusNames}
+        activePersonalStatuses={personalStatusNames}
       />
 
       <AiEvaluationPanel pendingWorks={works} />

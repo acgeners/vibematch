@@ -14,6 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
+import { ScoreBadge } from "@/components/ui/score-badge"
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,7 @@ interface PendingWork {
   personal_status: string
   personal_status_id: number | null
   cover_url?: string | null
+  final_score?: number | null
   matchedFilters?: Array<"pending" | "low-confidence" | "outdated-model">
   evaluation?: {
     confidence: number | null
@@ -243,9 +245,9 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   if (pendingWorks.length === 0) {
     return (
       <Card>
-        <CardContent className="py-12 text-center text-muted-foreground">
-          <Sparkles className="h-10 w-10 mx-auto mb-3 opacity-30" />
-          <p>Nenhuma obra pendente de avaliação IA.</p>
+        <CardContent className="py-10 text-center text-muted-foreground">
+          <Sparkles className="mx-auto mb-3 h-8 w-8 opacity-30" />
+          <p className="text-sm">Nenhuma obra pendente de avaliação IA.</p>
         </CardContent>
       </Card>
     )
@@ -254,7 +256,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   return (
     <>
       {isInQueue && !isQueueEvaluating && (
-        <div className="flex items-center justify-between px-4 py-2 rounded-md bg-muted text-sm">
+        <div className="flex items-center justify-between rounded-lg border border-border/70 bg-card/58 px-4 py-2 text-sm shadow-sm">
           <span className="text-muted-foreground">
             Revisão: <strong>{queuePosition}</strong> de <strong>{queueResults.length}</strong>
           </span>
@@ -313,7 +315,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
 
       {/* Toolbar */}
       {!isInQueue && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-card/58 p-2.5 shadow-sm">
           {selectionMode ? (
             <>
               {/* Select all checkbox */}
@@ -330,29 +332,29 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
 
               <Button
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={handleSkipSelected}
                 disabled={selected.size === 0}
               >
-                <SkipForward className="h-3.5 w-3.5 mr-1.5" />
+                <SkipForward className="h-3 w-3" />
                 Pular selecionadas
               </Button>
               <Button
-                size="sm"
+                size="xs"
                 onClick={handleEvaluateSelected}
                 disabled={selected.size === 0}
               >
-                <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                <Sparkles className="h-3 w-3" />
                 Avaliar selecionadas ({selected.size})
               </Button>
-              <Button variant="ghost" size="sm" onClick={toggleSelectionMode}>
-                <X className="h-3.5 w-3.5" />
+              <Button variant="ghost" size="xs" onClick={toggleSelectionMode}>
+                <X className="h-3 w-3" />
               </Button>
             </>
           ) : (
             <>
-              <Button variant="outline" size="sm" onClick={toggleSelectionMode}>
-                <CheckSquare className="h-3.5 w-3.5 mr-1.5" />
+              <Button variant="outline" size="xs" onClick={toggleSelectionMode}>
+                <CheckSquare className="h-3 w-3" />
                 Selecionar
               </Button>
 
@@ -365,10 +367,10 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                 max={pendingWorks.length}
                 value={queueSize}
                 onChange={(e) => setQueueSize(Math.max(1, parseInt(e.target.value) || 1))}
-                className="h-8 w-20 text-xs"
+                className="h-7 w-16 text-xs"
               />
-              <Button variant="outline" size="sm" onClick={() => startQueue()}>
-                <ListChecks className="h-3.5 w-3.5 mr-1.5" />
+              <Button variant="outline" size="xs" onClick={() => startQueue()}>
+                <ListChecks className="h-3 w-3" />
                 Avaliar em fila
               </Button>
             </>
@@ -376,19 +378,20 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
         </div>
       )}
 
-      <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {pendingWorks.map((work) => (
           <Card
             key={work.id}
             className={[
+              "transition-all hover:border-primary/30 hover:bg-card hover:shadow-md hover:shadow-primary/10",
               evaluatingId === work.id ? "opacity-60" : "",
               selectionMode ? "cursor-pointer" : "",
               selectionMode && selected.has(work.id) ? "border-primary/60 bg-primary/5" : "",
             ].filter(Boolean).join(" ")}
             onClick={selectionMode ? () => toggleItem(work.id) : undefined}
           >
-            <CardContent className="py-3">
-              <div className="flex items-center gap-4">
+            <CardContent className="py-2.5">
+              <div className="flex items-center gap-3">
                 {selectionMode && (
                   <Checkbox
                     checked={selected.has(work.id)}
@@ -399,13 +402,13 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                 )}
 
                 {/* Cover thumb (esquerda) — aspect 2:3 de manga */}
-                <div className="relative h-28 w-[76px] shrink-0 overflow-hidden rounded-md border bg-muted">
+                <div className="relative h-20 w-[54px] shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted shadow-sm">
                   {work.cover_url ? (
                     <Image
                       src={work.cover_url}
                       alt=""
                       fill
-                      sizes="76px"
+                      sizes="54px"
                       unoptimized
                       className="object-cover"
                     />
@@ -416,15 +419,22 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                   )}
                 </div>
 
-                {/* Conteúdo central — centralizado verticalmente com cover/ações */}
+                {/* Conteúdo central */}
                 <div className="flex-1 min-w-0 space-y-1.5">
-                  <span onClick={(e) => e.stopPropagation()} className="block min-w-0">
-                    <WorkTitleLink
-                      title={work.title}
-                      workId={work.id}
-                      className="text-base font-semibold hover:underline line-clamp-2 break-words"
-                    />
-                  </span>
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <span onClick={(e) => e.stopPropagation()} className="min-w-0">
+                      <WorkTitleLink
+                        title={work.title}
+                        workId={work.id}
+                        className="text-sm font-semibold hover:underline line-clamp-2 break-words"
+                      />
+                    </span>
+                    {work.final_score != null && (
+                      <span title="Nota.Final" className="inline-flex shrink-0">
+                        <ScoreBadge score={work.final_score} size="sm" />
+                      </span>
+                    )}
+                  </div>
 
                   <div className="flex flex-wrap items-center gap-1.5">
                     <PublicationStatusBadge statusId={work.publication_status_id ?? null} />
@@ -438,32 +448,30 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                   <EvaluationMetaLine evaluation={work.evaluation} />
                 </div>
 
-                {/* Confiança + ações (direita) — tudo na mesma linha */}
+                {/* Ações (direita) — stack vertical, Reavaliar destaque */}
                 {!selectionMode && (
-                  <div className="flex shrink-0 items-center gap-2">
-                    {work.evaluation?.confidence != null && (
-                      <ConfidencePill confidence={work.evaluation.confidence} />
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleSkip(work.id)}
-                      disabled={!!evaluatingId || !!skippingId || isInQueue}
-                      title="Pular"
-                    >
-                      <SkipForward className="h-3.5 w-3.5" />
-                    </Button>
+                  <div className="flex shrink-0 flex-col items-stretch gap-1.5">
                     <Button
                       size="sm"
                       onClick={() => handleEvaluate(work)}
                       disabled={!!evaluatingId || !!skippingId || isInQueue}
                     >
-                      <Sparkles className="h-3.5 w-3.5 mr-1" />
+                      <Sparkles className="h-3.5 w-3.5" />
                       {evaluatingId === work.id
                         ? "Avaliando..."
                         : work.evaluation
                           ? "Reavaliar"
                           : "Avaliar"}
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => handleSkip(work.id)}
+                      disabled={!!evaluatingId || !!skippingId || isInQueue}
+                      title="Marcar para pular avaliação IA"
+                    >
+                      <SkipForward className="h-3 w-3" />
+                      Pular
                     </Button>
                   </div>
                 )}
@@ -523,6 +531,15 @@ function EvaluationMetaLine({ evaluation }: { evaluation?: PendingWork["evaluati
       <p className="text-xs italic text-muted-foreground">Nunca avaliada pela IA</p>
     )
   }
+  const confidence = evaluation.confidence
+  const confidenceTone =
+    confidence == null
+      ? ""
+      : confidence >= 0.75
+        ? "text-emerald-600 dark:text-emerald-300"
+        : confidence >= 0.5
+          ? "text-amber-600 dark:text-amber-300"
+          : "text-rose-600 dark:text-rose-300"
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
       <span className="inline-flex items-center gap-1">
@@ -537,26 +554,18 @@ function EvaluationMetaLine({ evaluation }: { evaluation?: PendingWork["evaluati
           </span>
         </span>
       )}
+      {confidence != null && (
+        <span
+          className="inline-flex items-center gap-1"
+          title="Confiança declarada pela IA"
+        >
+          <Gauge className="h-3 w-3" />
+          <span className={`font-semibold ${confidenceTone}`}>
+            {Math.round(confidence * 100)}%
+          </span>
+        </span>
+      )}
     </div>
-  )
-}
-
-function ConfidencePill({ confidence }: { confidence: number }) {
-  const pct = Math.round(confidence * 100)
-  const tone =
-    confidence >= 0.75
-      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-      : confidence >= 0.5
-        ? "border-amber-300 bg-amber-50 text-amber-700"
-        : "border-rose-300 bg-rose-50 text-rose-700"
-  return (
-    <span
-      title="Confiança declarada pela IA"
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${tone}`}
-    >
-      <Gauge className="h-3 w-3" />
-      {pct}%
-    </span>
   )
 }
 
@@ -571,18 +580,18 @@ function FilterBadges({
   return (
     <div className="flex flex-wrap gap-1 mt-1">
       {matchedFilters.includes("pending") && (
-        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 text-slate-700 px-2 py-0.5 text-[10px] font-medium">
+        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:border-slate-400/20 dark:bg-slate-400/10 dark:text-slate-300">
           {evaluation ? "marcada como pendente" : "sem avaliação IA"}
         </span>
       )}
       {matchedFilters.includes("low-confidence") && evaluation?.confidence != null && (
-        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 text-amber-700 px-2 py-0.5 text-[10px] font-medium">
+        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-200">
           confiança {Math.round(evaluation.confidence * 100)}%
         </span>
       )}
       {matchedFilters.includes("outdated-model") && evaluation && (
         <span
-          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 text-rose-700 px-2 py-0.5 text-[10px] font-medium"
+          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:border-rose-400/25 dark:bg-rose-400/12 dark:text-rose-200"
           title={`Avaliado em ${evaluation.modelName ?? "?"} / ${evaluation.promptVersion ?? "?"}`}
         >
           modelo antigo: {evaluation.modelName ?? "?"}/{evaluation.promptVersion ?? "?"}

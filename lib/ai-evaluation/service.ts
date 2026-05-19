@@ -4,6 +4,7 @@ import Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
+import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import type { SourcedReview } from "@/lib/external/types"
 
 export interface AiEvaluationTag {
@@ -55,8 +56,8 @@ function normalizeTags(tags: AiEvaluationRequest["tags"]): NormalizedTag[] {
       }
       const name = tag.name?.trim()
       if (!name) return null
-      const group = tag.group?.trim()
-      return { name, group: group ? group : null }
+      const group = normalizeTagGroupSlug(tag.group)
+      return { name, group }
     })
     .filter((t): t is NormalizedTag => t !== null)
 }
@@ -99,7 +100,7 @@ export interface AiEvaluationResponse {
 }
 
 export const MODEL = "claude-sonnet-4-6"
-export const PROMPT_VERSION = "v15"
+export const PROMPT_VERSION = "v16"
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
 export function parsePromptVersion(s: string | null | undefined): number | null {
@@ -565,8 +566,12 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
   const hasExternalContext = (req.externalContext?.length ?? 0) > 0
   if (req.synopsisIsManual && synopsis) {
     lines.push(`\nSinopse (escrita/editada manualmente pelo usuário — autoridade máxima sobre a obra):\n${synopsis}`)
-  } else if (synopsis && !hasExternalContext) {
-    lines.push(`\nSinopse:\n${synopsis}`)
+  } else if (synopsis) {
+    lines.push(
+      hasExternalContext
+        ? `\nSinopse principal cadastrada/selecionada pelo usuário (use como referência principal; os blocos [C1]…[Cn] abaixo são complemento):\n${synopsis}`
+        : `\nSinopse:\n${synopsis}`
+    )
   } else if (!synopsis && !hasExternalContext) {
     lines.push(
       `\nSinopse: (não fornecida — baseie-se em gêneros, tags e reviews compatíveis; mantenha confidence baixa)`
@@ -795,18 +800,42 @@ function enforceAuditableReviewUsage(
   }
 
   const expected = new Set(prepared.ids)
-  const usedReviewIds = extractUsedReviewIds(response.rawResponse).filter((id) =>
-    expected.has(id)
-  )
-  const justifications = response.scores.map((s) => s.justification).join(" ")
-  const citedInJustification = usedReviewIds.some((id) =>
-    new RegExp(`\\b${id}\\b`, "i").test(justifications)
+  const usage = rawObject(response.rawResponse).review_usage
+  const usedReviewIds = extractUsedReviewIds(response.rawResponse)
+  const invalidReviewIds = usedReviewIds.filter((id) => !expected.has(id))
+  if (invalidReviewIds.length > 0) {
+    throw new Error(
+      `A IA declarou IDs de reviews que não existem no prompt (${invalidReviewIds.join(", ")}). Inconsistência rejeitada.`
+    )
+  }
+
+  const validUsedReviewIds = usedReviewIds.filter((id) => expected.has(id))
+  const justificationByCriterion = new Map(
+    response.scores.map((s) => [s.criterionSlug, s.justification])
   )
 
-  if (usedReviewIds.length > 0 && !citedInJustification) {
-    throw new Error(
-      `A IA declarou uso de reviews em review_usage (${usedReviewIds.join(", ")}) mas não as citou nas justificativas. Inconsistência rejeitada.`
-    )
+  if (Array.isArray(usage)) {
+    for (const entry of usage) {
+      if (typeof entry !== "object" || entry === null) continue
+      const criterion = String((entry as Record<string, unknown>).criterion ?? "")
+      const declaredIdsRaw = (entry as Record<string, unknown>).usedReviewIds
+      if (!Array.isArray(declaredIdsRaw)) continue
+      const declaredIds = declaredIdsRaw
+        .map(normalizeReviewId)
+        .filter((id): id is string => id !== null)
+        .filter((id) => expected.has(id))
+      if (declaredIds.length === 0) continue
+
+      const justification = justificationByCriterion.get(criterion) ?? ""
+      const missingCitations = declaredIds.filter((id) =>
+        !new RegExp(`\\b${id}\\b`, "i").test(justification)
+      )
+      if (missingCitations.length > 0) {
+        throw new Error(
+          `A IA declarou uso de reviews em ${criterion} (${missingCitations.join(", ")}) mas não as citou na justificativa desse critério. Inconsistência rejeitada.`
+        )
+      }
+    }
   }
 
   const rejectionReason =
@@ -815,7 +844,7 @@ function enforceAuditableReviewUsage(
       ? ((response.rawResponse as { reviewsRejectedReason: string }).reviewsRejectedReason).trim()
       : ""
 
-  if (usedReviewIds.length === 0 && rejectionReason.length < 10) {
+  if (validUsedReviewIds.length === 0 && rejectionReason.length < 10) {
     throw new Error(
       `Reviews foram fornecidas mas a IA não usou nenhuma e não preencheu "reviewsRejectedReason" com explicação suficiente. Inconsistência rejeitada.`
     )
@@ -829,8 +858,8 @@ function enforceAuditableReviewUsage(
         required: true,
         passed: true,
         expectedReviewIds: prepared.ids,
-        usedReviewIds,
-        reviewsDeclinedByModel: usedReviewIds.length === 0,
+        usedReviewIds: validUsedReviewIds,
+        reviewsDeclinedByModel: validUsedReviewIds.length === 0,
         rejectionReason: rejectionReason || null,
       },
     },
@@ -843,17 +872,18 @@ function attachEvaluationContext(
   prepared: PreparedReviews
 ): AiEvaluationResponse {
   const normalizedTags = normalizeTags(req.tags)
+  const expected = new Set(prepared.ids)
+  const usedReviewIds = extractUsedReviewIds(response.rawResponse).filter((id) => expected.has(id))
   return {
     ...response,
-    reviewsUsed: prepared.ids.length,
+    reviewsUsed: usedReviewIds.length,
     rawResponse: {
       ...rawObject(response.rawResponse),
       evaluationContext: {
         title: req.title,
         synopsis: req.synopsis ?? null,
         synopsisIsManual: req.synopsisIsManual ?? false,
-        synopsisOmittedFromPrompt:
-          !req.synopsisIsManual && !!req.synopsis?.trim() && (req.externalContext?.length ?? 0) > 0,
+        synopsisOmittedFromPrompt: false,
         genres: req.genres ?? [],
         tagsGrouped: groupTagsByGroup(normalizedTags),
         genresCount: req.genres?.length ?? 0,
@@ -934,6 +964,7 @@ function canonicalInputHash(req: AiEvaluationRequest): string {
         source: r.source,
         sourceTitle: r.sourceTitle,
         matchScore: Math.round(r.matchScore * 1000) / 1000,
+        userRating: r.userRating ?? null,
         text: r.text,
       })) ?? [],
     reviews: req.reviews ?? [],
@@ -1003,8 +1034,11 @@ async function readDbCache(
     })
 
     const raw = data.raw_response as Record<string, unknown> | null
+    const reviewAudit = raw?.reviewAudit as { usedReviewIds?: unknown[] } | undefined
     const evaluationContext = raw?.evaluationContext as { reviewsIncludedInPrompt?: boolean } | undefined
-    const reviewsUsed = evaluationContext?.reviewsIncludedInPrompt ? 1 : 0
+    const reviewsUsed = Array.isArray(reviewAudit?.usedReviewIds)
+      ? reviewAudit.usedReviewIds.length
+      : evaluationContext?.reviewsIncludedInPrompt ? 1 : 0
 
     return {
       modelName: data.model_name ?? modelName,

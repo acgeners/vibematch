@@ -3,15 +3,16 @@
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requestAiEvaluation } from "@/lib/ai-evaluation/service"
-import { fetchExternalEvaluationContextForWork } from "@/lib/external/index"
+import {
+  buildCandidateFromExternalIds,
+  fetchExternalEvaluationContextForCandidate,
+  fetchExternalEvaluationContextForWork,
+} from "@/lib/external/index"
+import type { ExternalSourceId } from "@/lib/external/types"
 import { recalculateWork } from "./calculations"
 import type { AiEvaluation } from "@/types/domain"
 import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
-import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
-
-const TAG_GROUP_ID_TO_SLUG: Record<string, string> = Object.fromEntries(
-  Object.entries(TAG_GROUP_IDS).map(([slug, id]) => [id, slug.replace(/^﻿/, "")])
-)
+import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 
 export async function triggerAiEvaluation(workId: string) {
   const supabase = createAdminClient()
@@ -35,7 +36,7 @@ export async function triggerAiEvaluation(workId: string) {
     .filter((tag): tag is { name: string; tag_group_id?: string | null } => Boolean(tag?.name))
     .map((tag) => ({
       name: tag.name,
-      group: tag.tag_group_id ? (TAG_GROUP_ID_TO_SLUG[tag.tag_group_id] ?? null) : null,
+      group: tag.tag_group_id ? (TAG_GROUP_ID_TO_NORMALIZED_SLUG[tag.tag_group_id] ?? null) : null,
     }))
 
   const genreNames = ((work as { work_genres?: Array<{ genres?: { name?: string } | null }> }).work_genres ?? [])
@@ -68,18 +69,33 @@ export async function triggerAiEvaluation(workId: string) {
     // entram na busca por reviews (evita reviews de matches errados).
     const { data: extIds } = await supabase
       .from("work_external_ids")
-      .select("source, is_rejected")
+      .select("source, external_id, is_rejected")
       .eq("work_id", workId)
     const rejectedSources = (extIds ?? [])
       .filter((row) => row.is_rejected === true)
       .map((row) => row.source as string)
+    const acceptedExternalIds = Object.fromEntries(
+      (extIds ?? [])
+        .filter((row) => row.is_rejected !== true && row.external_id)
+        .map((row) => [row.source, String(row.external_id)])
+    ) as Partial<Record<ExternalSourceId, string>>
 
-    const { sourcedReviews, externalContext } = await fetchExternalEvaluationContextForWork({
-      title: work.title,
-      originalTitle: work.original_title,
-      alternativeTitles: work.alternative_titles,
-      rejectedSources,
-    })
+    const hasAcceptedExternalIds = Object.keys(acceptedExternalIds).length > 0
+    const { sourcedReviews, externalContext } = hasAcceptedExternalIds
+      ? await fetchExternalEvaluationContextForCandidate(
+          buildCandidateFromExternalIds({
+            title: work.title,
+            originalTitle: work.original_title,
+            alternativeTitles: work.alternative_titles,
+          }, acceptedExternalIds),
+          { rejectedSources, perSource: 6, total: 20 }
+        )
+      : await fetchExternalEvaluationContextForWork({
+          title: work.title,
+          originalTitle: work.original_title,
+          alternativeTitles: work.alternative_titles,
+          rejectedSources,
+        })
 
     const synopses = (work as { work_synopses?: Array<{ source?: string | null; text?: string | null; is_primary?: boolean | null; position?: number | null }> }).work_synopses ?? []
     const primarySynopsisRow = synopses.find((s) => s?.is_primary) ?? null
