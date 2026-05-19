@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { PLATFORMS } from "@/types/domain"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
+import { getCoverImageSrc } from "@/lib/image-proxy"
 
 export interface CoverEntry {
   url: string
@@ -33,6 +34,7 @@ function isHttpUrl(value: string): boolean {
 export function CoversManager({ value, onChange }: CoversManagerProps) {
   const [newUrl, setNewUrl] = useState("")
   const [newSource, setNewSource] = useState<string>("manual")
+  const [showAddForm, setShowAddForm] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [failedUrls, setFailedUrls] = useState<Set<string>>(new Set())
 
@@ -62,6 +64,7 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
     onChange([...value, next])
     setNewUrl("")
     setNewSource("manual")
+    setShowAddForm(false)
   }
 
   const handleDelete = (url: string) => {
@@ -84,11 +87,29 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <Label className="text-sm font-medium">Capas ({value.length})</Label>
-        <p className="text-xs text-muted-foreground">
-          Marque <strong>Primária</strong> para definir qual aparece nos cards.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-0.5">
+          <Label className="text-sm font-medium">Capas ({value.length})</Label>
+          <p className="text-xs text-muted-foreground">
+            Marque <strong>Primária</strong> para definir qual aparece nos cards.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setShowAddForm((current) => !current)
+            setError(null)
+          }}
+          className="h-8 shrink-0 gap-1 px-2.5"
+          aria-expanded={showAddForm}
+        >
+          <Plus className="h-4 w-4" />
+          <span className="sr-only sm:not-sr-only sm:text-xs">
+            {showAddForm ? "Ocultar" : "Adicionar"}
+          </span>
+        </Button>
       </div>
 
       {value.length === 0 ? (
@@ -98,7 +119,8 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {value.map((cover) => {
-            const failed = failedUrls.has(cover.url)
+            const imageSrc = getCoverImageSrc(cover.url)
+            const failed = failedUrls.has(imageSrc)
             return (
               <div
                 key={cover.url}
@@ -115,10 +137,10 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={cover.url}
+                      src={imageSrc}
                       alt={`Capa (${cover.source})`}
                       className="h-full w-full object-cover"
-                      onError={() => markFailed(cover.url)}
+                      onError={() => markFailed(imageSrc)}
                     />
                   )}
                 </div>
@@ -162,43 +184,51 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
         </div>
       )}
 
-      <div className="space-y-2 rounded-md border border-dashed p-3">
-        <Label className="text-xs text-muted-foreground">Adicionar nova capa</Label>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            type="url"
-            placeholder="https://..."
-            value={newUrl}
-            onChange={(e) => {
-              setNewUrl(e.target.value)
-              if (error) setError(null)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault()
-                handleAdd()
-              }
-            }}
-            className="flex-1"
-          />
-          <select
-            value={newSource}
-            onChange={(e) => setNewSource(e.target.value)}
-            className="rounded border bg-background px-2 text-xs uppercase tracking-wide sm:w-40"
-          >
-            {SOURCE_OPTIONS.map((opt) => (
-              <option key={opt} value={opt}>
-                {PLATFORM_LABELS[opt] ?? opt}
-              </option>
-            ))}
-          </select>
-          <Button type="button" variant="secondary" onClick={handleAdd} className="gap-1">
-            <Plus className="h-4 w-4" />
-            Adicionar
-          </Button>
+      {showAddForm && (
+        <div className="space-y-3 rounded-md border border-dashed p-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="new-cover-url" className="text-xs text-muted-foreground">
+              URL da capa
+            </Label>
+            <Input
+              id="new-cover-url"
+              type="url"
+              placeholder="https://..."
+              value={newUrl}
+              onChange={(e) => {
+                setNewUrl(e.target.value)
+                if (error) setError(null)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  handleAdd()
+                }
+              }}
+              className="w-full"
+              autoFocus
+            />
+          </div>
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <select
+              value={newSource}
+              onChange={(e) => setNewSource(e.target.value)}
+              className="h-10 w-full rounded-md border bg-background px-3 text-xs uppercase tracking-wide"
+            >
+              {SOURCE_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {PLATFORM_LABELS[opt] ?? opt}
+                </option>
+              ))}
+            </select>
+            <Button type="button" variant="secondary" onClick={handleAdd} className="gap-1">
+              <Plus className="h-4 w-4" />
+              Adicionar
+            </Button>
+          </div>
+          {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
-        {error && <p className="text-xs text-destructive">{error}</p>}
-      </div>
+      )}
     </div>
   )
 }

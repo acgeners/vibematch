@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type Ref } from "react"
 import { Search, Loader2, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -16,7 +16,16 @@ import { Separator } from "@/components/ui/separator"
 import { searchExternalTitles, fetchExternalData, upsertExternalTags, checkExistingWorkInDb, evaluateCandidateForCreate, type ExistingWorkMatch } from "@/server/actions/external"
 import { fetchComicKClient, fetchAnimePlanetClient } from "@/lib/external/client-fetches"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
-import type { MergedCandidate, ConflictField, ExternalWorkData, ExternalSourceId } from "@/lib/external/types"
+import { getCoverImageSrc } from "@/lib/image-proxy"
+import { dedupeSynopsisEntries } from "@/lib/work-derived"
+import type {
+  MergedCandidate,
+  ConflictField,
+  ExternalWorkData,
+  ExternalSourceId,
+  ExternalSourceCandidateOption,
+  ExternalSearchResult,
+} from "@/lib/external/types"
 
 function mergeTagArrays(...arrays: (string[] | undefined)[]): string[] {
   const seen = new Set<string>()
@@ -36,27 +45,237 @@ function mergeTagArrays(...arrays: (string[] | undefined)[]): string[] {
 interface ExternalSearchProps {
   titleQuery: string
   onSelect: (data: ExternalWorkData) => void
+  onDuplicateUpdate?: (match: ExistingWorkMatch, data: ExternalWorkData) => void | Promise<void>
+  searchButtonRef?: Ref<HTMLButtonElement>
   /** Quando false, pula a avaliação IA durante a seleção (usado pelo fallback do "Atualizar dados", onde os scores seriam descartados). Default: true. */
   evaluateAi?: boolean
   /** Quando false, pula a checagem de obra duplicada (usado pelo fallback do "Atualizar dados", onde a obra-alvo já existe). Default: true. */
   checkDuplicates?: boolean
 }
 
-type Phase = "idle" | "searching" | "results" | "duplicate" | "loading" | "multipick" | "conflicts"
+type Phase = "idle" | "searching" | "results" | "sourcepick" | "duplicate" | "loading" | "evaluating" | "multipick" | "conflicts"
 
 interface CoverChoice { url: string; source: string; included: boolean; isPrimary: boolean }
 interface SynopsisChoice { source: string; text: string; included: boolean; isPrimary: boolean }
+type SourceSelectionValue = string | "rejected" | "none"
 
 const SOURCE_COLORS: Partial<Record<string, string>> = {
   anilist: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
   mangaupdates: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
 }
 
+const SOURCE_ORDER: ExternalSourceId[] = [
+  "anilist",
+  "animeplanet",
+  "comix",
+  "comick",
+  "kitsu",
+  "mangadex",
+  "mangaupdates",
+  "myanimelist",
+]
+
 function getSourceLabel(source: string) {
   return PLATFORM_LABELS[source] ?? source
 }
 
-export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkDuplicates = true }: ExternalSearchProps) {
+function uniqueStringList(values: Array<string | null | undefined>) {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values) {
+    const trimmed = value?.trim()
+    if (!trimmed) continue
+    const key = trimmed.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(trimmed)
+  }
+  return result
+}
+
+function sourceResultExternalId(result: ExternalSearchResult) {
+  return result.id.split(":").slice(1).join(":")
+}
+
+function getCandidateExternalId(candidate: MergedCandidate, source: ExternalSourceId): string | null {
+  switch (source) {
+    case "anilist":
+      return candidate.anilistId != null ? String(candidate.anilistId) : null
+    case "mangaupdates":
+      return candidate.muId != null ? String(candidate.muId) : null
+    case "kitsu":
+      return candidate.kitsuId ?? null
+    case "mangadex":
+      return candidate.mangadexId ?? null
+    case "myanimelist":
+      return candidate.malId != null ? String(candidate.malId) : null
+    case "comick":
+      return candidate.comickHid ?? null
+    case "comix":
+      return candidate.comixHid ?? null
+    case "animeplanet":
+      return candidate.animePlanetSlug ?? null
+  }
+}
+
+function fallbackSourceOption(
+  candidate: MergedCandidate,
+  source: ExternalSourceId
+): ExternalSourceCandidateOption | null {
+  const externalId = getCandidateExternalId(candidate, source)
+  if (!externalId) return null
+  return {
+    source,
+    externalId,
+    title: candidate.title,
+    coverUrl: candidate.coverUrl ?? null,
+    matchScore: candidate.matchScore ?? 1,
+    synopsis: candidate.synopsis ?? null,
+    year: candidate.year ?? null,
+    chapters: candidate.chapters ?? null,
+    trusted: candidate.trustedSources?.includes(source),
+  }
+}
+
+function getSourceMatchGroups(candidate: MergedCandidate) {
+  const bySource = new Map<ExternalSourceId, ExternalSourceCandidateOption[]>()
+  for (const option of candidate.sourceCandidates ?? []) {
+    const current = bySource.get(option.source) ?? []
+    if (!current.some((item) => item.externalId === option.externalId)) {
+      current.push(option)
+      bySource.set(option.source, current)
+    }
+  }
+  for (const source of candidate.sources) {
+    if (bySource.has(source)) continue
+    const fallback = fallbackSourceOption(candidate, source)
+    if (fallback) bySource.set(source, [fallback])
+  }
+
+  return [...bySource.entries()]
+    .map(([source, options]) => ({
+      source,
+      options: [...options].sort((a, b) => b.matchScore - a.matchScore),
+    }))
+    .sort((a, b) => SOURCE_ORDER.indexOf(a.source) - SOURCE_ORDER.indexOf(b.source))
+}
+
+function buildInitialSourceSelection(candidate: MergedCandidate) {
+  const selection: Partial<Record<ExternalSourceId, SourceSelectionValue>> = {}
+  for (const group of getSourceMatchGroups(candidate)) {
+    selection[group.source] = group.options[0]?.externalId ?? "none"
+  }
+  return selection
+}
+
+function applySelectedId(
+  candidate: MergedCandidate,
+  option: ExternalSourceCandidateOption
+) {
+  switch (option.source) {
+    case "anilist": {
+      const id = Number(option.externalId)
+      if (Number.isFinite(id)) candidate.anilistId = id
+      break
+    }
+    case "mangaupdates": {
+      const id = Number(option.externalId)
+      if (Number.isFinite(id)) candidate.muId = id
+      break
+    }
+    case "kitsu":
+      candidate.kitsuId = option.externalId
+      break
+    case "mangadex":
+      candidate.mangadexId = option.externalId
+      break
+    case "myanimelist": {
+      const id = Number(option.externalId)
+      if (Number.isFinite(id)) candidate.malId = id
+      break
+    }
+    case "comick":
+      candidate.comickHid = option.externalId
+      break
+    case "comix":
+      candidate.comixHid = option.externalId
+      break
+    case "animeplanet":
+      candidate.animePlanetSlug = option.externalId
+      break
+  }
+}
+
+function buildCandidateFromSourceSelection(
+  candidate: MergedCandidate,
+  selection: Partial<Record<ExternalSourceId, SourceSelectionValue>>
+): MergedCandidate | null {
+  const groups = getSourceMatchGroups(candidate)
+  const selectedOptions = groups.flatMap((group) => {
+    const selected = selection[group.source]
+    if (!selected || selected === "none" || selected === "rejected") return []
+    const option = group.options.find((item) => item.externalId === selected)
+    return option ? [option] : []
+  })
+  if (selectedOptions.length === 0) return null
+
+  const resultBySourceId = new Map(
+    (candidate.sourceResults ?? []).map((result) => [
+      `${result.source}:${sourceResultExternalId(result)}`,
+      result,
+    ])
+  )
+  const selectedResults = selectedOptions
+    .map((option) => resultBySourceId.get(`${option.source}:${option.externalId}`))
+    .filter((result): result is ExternalSearchResult => Boolean(result))
+  const selectedSources = selectedOptions.map((option) => option.source)
+  const primaryOption =
+    selectedOptions.find((option) => option.source === "mangaupdates") ?? selectedOptions[0]
+  const primaryResult =
+    selectedResults.find((result) => result.source === primaryOption.source) ?? selectedResults[0]
+  const originalTitle =
+    primaryResult?.originalTitle ??
+    candidate.originalTitle ??
+    selectedResults.find((result) => result.originalTitle)?.originalTitle
+
+  const next: MergedCandidate = {
+    title: primaryResult?.title ?? primaryOption.title,
+    originalTitle,
+    alternativeTitles: uniqueStringList(selectedResults.flatMap((result) => [
+      candidate.originalTitle,
+      ...(candidate.alternativeTitles ?? []),
+      result.originalTitle,
+      ...(result.alternativeTitles ?? []),
+    ])),
+    synopsis: primaryResult?.synopsis ?? primaryOption.synopsis ?? undefined,
+    coverUrl: primaryResult?.coverUrl ?? primaryOption.coverUrl ?? undefined,
+    year: primaryResult?.year ?? primaryOption.year ?? undefined,
+    yearEnd: primaryResult?.yearEnd,
+    publicationStatus: primaryResult?.publicationStatus,
+    chapters: primaryResult?.chapters ?? primaryOption.chapters ?? undefined,
+    score: primaryResult?.score,
+    genres: uniqueStringList(selectedResults.flatMap((result) => result.genres ?? [])),
+    sources: selectedSources,
+    sourceResults: selectedResults,
+    sourceCandidates: selectedOptions,
+    trustedSources: selectedOptions
+      .filter((option) => option.trusted)
+      .map((option) => option.source),
+    matchScore: Math.max(...selectedOptions.map((option) => option.matchScore)),
+  }
+
+  for (const option of selectedOptions) applySelectedId(next, option)
+  return next
+}
+
+export function ExternalSearch({
+  titleQuery,
+  onSelect,
+  onDuplicateUpdate,
+  searchButtonRef,
+  evaluateAi = true,
+  checkDuplicates = true,
+}: ExternalSearchProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [phase, setPhase] = useState<Phase>("idle")
   const [candidates, setCandidates] = useState<MergedCandidate[]>([])
@@ -65,6 +284,8 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
   const [resolutions, setResolutions] = useState<Record<string, unknown>>({})
   const [duplicates, setDuplicates] = useState<ExistingWorkMatch[]>([])
   const [pendingCandidate, setPendingCandidate] = useState<MergedCandidate | null>(null)
+  const [duplicateUpdateTarget, setDuplicateUpdateTarget] = useState<ExistingWorkMatch | null>(null)
+  const [sourceSelection, setSourceSelection] = useState<Partial<Record<ExternalSourceId, SourceSelectionValue>>>({})
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
 
@@ -73,6 +294,7 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
     setIsOpen(true)
     setPhase("searching")
     setCandidates([])
+    setDuplicateUpdateTarget(null)
     try {
       const found = await searchExternalTitles(titleQuery)
       setCandidates(found)
@@ -85,6 +307,17 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
   }
 
   const handleSelect = async (candidate: MergedCandidate) => {
+    setPendingCandidate(candidate)
+    const groups = getSourceMatchGroups(candidate)
+    if (groups.length > 0) {
+      setSourceSelection(buildInitialSourceSelection(candidate))
+      setPhase("sourcepick")
+      return
+    }
+    await startCandidateImport(candidate)
+  }
+
+  const startCandidateImport = async (candidate: MergedCandidate) => {
     setPendingCandidate(candidate)
     setPhase("loading")
     if (checkDuplicates) {
@@ -107,22 +340,89 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
     await proceedWithCandidate(candidate)
   }
 
+  const handleConfirmSourceSelection = async () => {
+    if (!pendingCandidate) return
+    const selectedCandidate = buildCandidateFromSourceSelection(pendingCandidate, sourceSelection)
+    if (!selectedCandidate) return
+    await startCandidateImport(selectedCandidate)
+  }
+
   const handleProceedDespiteDuplicate = async () => {
     if (!pendingCandidate) {
       handleClose()
       return
     }
     setDuplicates([])
+    setDuplicateUpdateTarget(null)
     setPhase("loading")
     await proceedWithCandidate(pendingCandidate)
   }
 
-  const proceedWithCandidate = async (candidate: MergedCandidate) => {
+  const handleUseDuplicateForUpdate = async (match: ExistingWorkMatch) => {
+    if (!pendingCandidate) {
+      handleClose()
+      return
+    }
+    setDuplicateUpdateTarget(match)
+    setDuplicates([])
+    setPhase("loading")
+    await proceedWithCandidate(pendingCandidate, match)
+  }
+
+  const finalizeSelection = async (data: ExternalWorkData, updateTarget = duplicateUpdateTarget) => {
+    const merged: ExternalWorkData = { ...data }
+    if (evaluateAi) {
+      setPhase("evaluating")
+      try {
+        const aiResult = await evaluateCandidateForCreate({
+          title: merged.title,
+          originalTitle: merged.originalTitle ?? null,
+          alternativeTitles: merged.alternativeTitles ?? null,
+          synopsis: merged.synopsis ?? null,
+          genres: merged.genres,
+          tags: merged.tags,
+          coverUrl: merged.coverUrl ?? merged.multiCovers?.[0]?.url ?? null,
+          externalIds: merged.externalIds,
+          externalContext: merged.synopsis?.trim() ? [] : undefined,
+        })
+        if (aiResult) {
+          merged.criteriaScores = aiResult.scores
+          merged.criteriaJustifications = aiResult.justifications
+          merged.aiMeta = {
+            inputHash: aiResult.inputHash,
+            modelName: aiResult.modelName,
+            promptVersion: aiResult.promptVersion,
+          }
+        }
+      } catch (error) {
+        console.error("[ExternalSearch] evaluateCandidateForCreate failed", error)
+      }
+    }
+
+    if (updateTarget && onDuplicateUpdate) {
+      await onDuplicateUpdate(updateTarget, merged)
+    } else {
+      onSelect(merged)
+    }
+    setIsOpen(false)
+    setPhase("idle")
+    setPendingCandidate(null)
+    setDuplicateUpdateTarget(null)
+    setSourceSelection({})
+    setPendingData(null)
+    setConflicts([])
+    setCoverChoices([])
+    setSynopsisChoices([])
+  }
+
+  const proceedWithCandidate = async (candidate: MergedCandidate, updateTarget?: ExistingWorkMatch | null) => {
     try {
+      const wantsComicK = candidate.sources.includes("comick") || Boolean(candidate.comickHid)
+      const wantsAnimePlanet = candidate.sources.includes("animeplanet") || Boolean(candidate.animePlanetSlug)
       const [serverResult, cmxResult, apResult] = await Promise.allSettled([
         fetchExternalData(candidate),
-        fetchComicKClient(candidate.title),
-        fetchAnimePlanetClient(candidate.title),
+        wantsComicK ? fetchComicKClient(candidate.title, candidate.comickHid) : Promise.resolve(null),
+        wantsAnimePlanet ? fetchAnimePlanetClient(candidate.title, candidate.animePlanetSlug) : Promise.resolve(null),
       ])
 
       if (serverResult.status === "rejected") {
@@ -162,45 +462,15 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
       if (ap) {
         if (ap.rating != null) merged.apRating = ap.rating
         if (ap.votes != null) merged.apVotes = ap.votes
-        if (candidate.animePlanetSlug) {
-          merged.externalIds = { ...merged.externalIds, animeplanet: candidate.animePlanetSlug }
-        }
+      }
+      if (candidate.animePlanetSlug) {
+        merged.externalIds = { ...merged.externalIds, animeplanet: candidate.animePlanetSlug }
       }
 
       const allConflicts = result.conflicts.filter(c => c.field !== "totalChapters" || cmx?.chapters == null)
 
       if (merged.tags.length > 0) {
         upsertExternalTags(merged.tags).catch(() => {})
-      }
-
-      // Pre-compute AI evaluation using the merged metadata + reviews from all
-      // accepted sources. The form picks these up and persists them via
-      // createWork's ai_justifications path (creating an ai_evaluations row
-      // marked as model_name "claude-haiku-4-5-...", and category_scores with
-      // source "ai_accepted"). Failure is non-blocking — user can re-run via
-      // /ai-evaluation later.
-      // Pulado quando evaluateAi=false (ex.: fallback de "Atualizar dados",
-      // onde os scores seriam descartados pelo updateWorkExternalData).
-      if (evaluateAi) {
-        const aiResult = await evaluateCandidateForCreate({
-          title: merged.title,
-          originalTitle: merged.originalTitle ?? null,
-          alternativeTitles: merged.alternativeTitles ?? null,
-          synopsis: merged.synopsis ?? null,
-          genres: merged.genres,
-          tags: merged.tags,
-          // multiCovers vem ordenada pelo merge — primeiro é o candidato primary.
-          coverUrl: merged.multiCovers?.[0]?.url ?? null,
-        })
-        if (aiResult) {
-          merged.criteriaScores = aiResult.scores
-          merged.criteriaJustifications = aiResult.justifications
-          merged.aiMeta = {
-            inputHash: aiResult.inputHash,
-            modelName: aiResult.modelName,
-            promptVersion: aiResult.promptVersion,
-          }
-        }
       }
 
       const covers = merged.multiCovers ?? []
@@ -234,9 +504,7 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
         setResolutions(defaultResolutions)
         setPhase("conflicts")
       } else {
-        onSelect(merged)
-        setIsOpen(false)
-        setPhase("idle")
+        await finalizeSelection(merged, updateTarget)
       }
     } catch (error) {
       console.error("[ExternalSearch] proceedWithCandidate failed", error)
@@ -244,32 +512,31 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
     }
   }
 
-  const handleConfirmMultiPick = () => {
+  const handleConfirmMultiPick = async () => {
     if (!pendingData) return
     const includedCovers = coverChoices.filter((c) => c.included)
     const primaryCover = includedCovers.find((c) => c.isPrimary) ?? includedCovers[0]
     const includedSynopses = synopsisChoices.filter((s) => s.included)
     const primarySynopsis = includedSynopses.find((s) => s.isPrimary) ?? includedSynopses[0]
+    const orderedSynopses = primarySynopsis
+      ? [primarySynopsis, ...includedSynopses.filter((s) => s !== primarySynopsis)]
+      : includedSynopses
+    const selectedSynopses = dedupeSynopsisEntries(orderedSynopses)
 
     const next: ExternalWorkData = {
       ...pendingData,
       coverUrl: primaryCover?.url ?? pendingData.coverUrl,
       multiCovers: includedCovers.map((c) => ({ url: c.url, source: c.source as ExternalSourceId })),
-      synopsis: includedSynopses.length > 0
-        ? includedSynopses.map((s) => s.text).join("\n\n---\n\n")
-        : pendingData.synopsis,
-      multiSynopses: includedSynopses.map((s) => ({ source: s.source as ExternalSourceId, text: s.text })),
-      synopsisIsMerged: includedSynopses.length > 1,
+      synopsis: selectedSynopses.find((s) => s.isPrimary)?.text ?? selectedSynopses[0]?.text ?? pendingData.synopsis,
+      multiSynopses: selectedSynopses.map((s) => ({ source: s.source as ExternalSourceId, text: s.text })),
+      synopsisIsMerged: false,
     }
-    void primarySynopsis
 
     if (conflicts.length > 0) {
       setPendingData(next)
       setPhase("conflicts")
     } else {
-      onSelect(next)
-      setIsOpen(false)
-      setPhase("idle")
+      await finalizeSelection(next)
     }
   }
 
@@ -286,16 +553,14 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
     setSynopsisChoices((prev) => prev.map((s, i) => ({ ...s, isPrimary: i === idx, included: i === idx ? true : s.included })))
   }
 
-  const handleConfirmConflicts = () => {
+  const handleConfirmConflicts = async () => {
     if (!pendingData) return
     const finalData: ExternalWorkData = { ...pendingData }
     for (const [field, value] of Object.entries(resolutions)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(finalData as any)[field] = value
     }
-    onSelect(finalData)
-    setIsOpen(false)
-    setPhase("idle")
+    await finalizeSelection(finalData)
   }
 
   const handleClose = () => {
@@ -303,11 +568,27 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
     setPhase("idle")
     setDuplicates([])
     setPendingCandidate(null)
+    setDuplicateUpdateTarget(null)
+    setSourceSelection({})
+    setPendingData(null)
+    setConflicts([])
+    setCoverChoices([])
+    setSynopsisChoices([])
+  }
+
+  const sourceMatchGroups = pendingCandidate ? getSourceMatchGroups(pendingCandidate) : []
+  const hasSelectedSource = sourceMatchGroups.some((group) => {
+    const value = sourceSelection[group.source]
+    return Boolean(value && value !== "rejected" && value !== "none")
+  })
+  const setSourceMatchSelection = (source: ExternalSourceId, value: SourceSelectionValue) => {
+    setSourceSelection((prev) => ({ ...prev, [source]: value }))
   }
 
   return (
     <>
       <Button
+        ref={searchButtonRef}
         type="button"
         variant="default"
         size="lg"
@@ -360,22 +641,130 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
                   />
                 ))}
                 <p className="text-xs text-muted-foreground text-center pt-2 pb-4">
-                  Ao selecionar, dados de todas as fontes são buscados e mesclados automaticamente.
+                  Ao selecionar, você confere quais fontes entram na busca antes de mesclar os dados.
                 </p>
               </div>
             )
           )}
 
-          {phase === "loading" && (
+          {phase === "sourcepick" && pendingCandidate && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Confirme ou troque os matches por fonte antes de buscar e mesclar os dados.
+              </p>
+
+              {sourceMatchGroups.map((group) => {
+                const value = sourceSelection[group.source] ?? "none"
+                return (
+                  <div key={group.source} className="rounded-md border p-3 space-y-2">
+                    <p className="text-sm font-medium">{getSourceLabel(group.source)}</p>
+                    {group.options.map((option) => {
+                      const checked = value === option.externalId
+                      return (
+                        <label
+                          key={`${group.source}-${option.externalId}`}
+                          className={`flex items-start gap-3 rounded-md border p-2 cursor-pointer transition-colors ${
+                            checked ? "border-primary bg-primary/5" : "hover:bg-muted/40"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name={`source-${group.source}`}
+                            checked={checked}
+                            onChange={() => setSourceMatchSelection(group.source, option.externalId)}
+                            className="mt-1.5 accent-primary"
+                          />
+                          <div className="h-16 w-12 shrink-0 overflow-hidden rounded border bg-muted">
+                            {option.coverUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={getCoverImageSrc(option.coverUrl)}
+                                alt=""
+                                className="h-full w-full object-cover"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                <Search className="h-4 w-4" />
+                              </div>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="line-clamp-2 text-sm font-medium">{option.title}</p>
+                            <p className="mt-0.5 text-[10px] text-muted-foreground">
+                              match {Math.round(option.matchScore * 100)}%
+                              {option.year ? ` · ${option.year}` : ""}
+                              {option.chapters ? ` · ${option.chapters} cap.` : ""}
+                            </p>
+                          </div>
+                        </label>
+                      )
+                    })}
+                    <label
+                      className={`flex items-center gap-3 rounded-md border p-2 cursor-pointer transition-colors ${
+                        value === "rejected" ? "border-rose-300 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/30" : "hover:bg-muted/40"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name={`source-${group.source}`}
+                        checked={value === "rejected"}
+                        onChange={() => setSourceMatchSelection(group.source, "rejected")}
+                        className="accent-primary"
+                      />
+                      <span className="text-xs">Nenhum match válido — ignorar esta fonte</span>
+                    </label>
+                    <label
+                      className={`flex items-center gap-3 rounded-md border p-2 cursor-pointer transition-colors ${
+                        value === "none" ? "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30" : "hover:bg-muted/40"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name={`source-${group.source}`}
+                        checked={value === "none"}
+                        onChange={() => setSourceMatchSelection(group.source, "none")}
+                        className="accent-primary"
+                      />
+                      <span className="text-xs">Não decidir agora (refazer busca depois)</span>
+                    </label>
+                  </div>
+                )
+              })}
+
+              <Separator />
+              <div className="flex gap-2 justify-end pb-2">
+                <Button type="button" variant="outline" onClick={() => setPhase("results")}>
+                  Voltar
+                </Button>
+                <Button type="button" onClick={handleConfirmSourceSelection} disabled={!hasSelectedSource}>
+                  Buscar dados dessas fontes
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {(phase === "loading" || phase === "evaluating") && (
             <div className="flex flex-col items-center justify-center py-16 gap-4 text-muted-foreground">
               <Loader2 className="h-8 w-8 animate-spin" />
               <div className="text-center">
                 <p className="font-medium text-sm">
-                  {evaluateAi ? "Buscando dados e avaliando com IA..." : "Buscando dados externos..."}
+                  {phase === "evaluating"
+                    ? "Avaliando critérios com IA..."
+                    : duplicateUpdateTarget
+                      ? "Buscando dados para atualizar..."
+                      : "Buscando dados externos..."}
                 </p>
-                <p className="text-xs mt-1">AniList · MangaUpdates · ComicK · AnimePlanet · Comix · Kitsu · MangaDex · MAL</p>
-                {evaluateAi && (
-                  <p className="text-xs mt-1 text-muted-foreground">A IA pode levar ~10s — você não precisará reavaliar depois.</p>
+                {phase === "loading" ? (
+                  <p className="text-xs mt-1">
+                    {pendingCandidate?.sources.length
+                      ? pendingCandidate.sources.map(getSourceLabel).join(" · ")
+                      : "AniList · MangaUpdates · ComicK · AnimePlanet · Comix · Kitsu · MangaDex · MAL"}
+                  </p>
+                ) : (
+                  <p className="text-xs mt-1 text-muted-foreground">
+                    Usando os dados que você confirmou para preencher as notas iniciais.
+                  </p>
                 )}
               </div>
             </div>
@@ -393,11 +782,8 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
               </div>
               <div className="space-y-2">
                 {duplicates.map((dup) => (
-                  <a
+                  <div
                     key={dup.id}
-                    href={`/titles/${dup.id}`}
-                    target="_blank"
-                    rel="noreferrer"
                     className="flex items-start justify-between gap-3 rounded-md border bg-card p-3 hover:bg-accent/50 transition-colors"
                   >
                     <div className="flex-1 min-w-0">
@@ -413,13 +799,27 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
                         </p>
                       )}
                     </div>
-                    <Badge variant="outline" className="text-[10px] shrink-0">
-                      {dup.matchType === "exact_title" && "título exato"}
-                      {dup.matchType === "original_title" && "título original"}
-                      {dup.matchType === "exact_alt" && "alt exato"}
-                      {dup.matchType === "fuzzy" && `fuzzy ${Math.round(dup.similarity * 100)}%`}
-                    </Badge>
-                  </a>
+                    <div className="flex shrink-0 flex-col items-end gap-2">
+                      <Badge variant="outline" className="text-[10px]">
+                        {dup.matchType === "exact_title" && "título exato"}
+                        {dup.matchType === "original_title" && "título original"}
+                        {dup.matchType === "exact_alt" && "alt exato"}
+                        {dup.matchType === "fuzzy" && `fuzzy ${Math.round(dup.similarity * 100)}%`}
+                      </Badge>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button type="button" variant="outline" size="sm" asChild>
+                          <a href={`/titles/${dup.id}`} target="_blank" rel="noreferrer">
+                            Ver
+                          </a>
+                        </Button>
+                        {onDuplicateUpdate && (
+                          <Button type="button" size="sm" onClick={() => handleUseDuplicateForUpdate(dup)}>
+                            Atualizar esta obra
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </div>
               <Separator />
@@ -453,7 +853,7 @@ export function ExternalSearch({ titleQuery, onSelect, evaluateAi = true, checkD
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={cover.url}
+                          src={getCoverImageSrc(cover.url)}
                           alt={cover.source}
                           className="w-full h-40 object-cover"
                           onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
@@ -615,7 +1015,7 @@ function CandidateCard({ candidate, onSelect }: CandidateCardProps) {
         {candidate.coverUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={candidate.coverUrl}
+            src={getCoverImageSrc(candidate.coverUrl)}
             alt={candidate.title}
             className="h-full w-full object-cover"
             onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}

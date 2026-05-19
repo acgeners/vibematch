@@ -12,6 +12,7 @@ import type {
   ConflictOption,
   ExternalMergeDebug,
   ExternalSearchResult,
+  ExternalSourceCandidateOption,
   ExternalSourceDebug,
   ExternalSourceId,
   ExternalWorkData,
@@ -29,7 +30,10 @@ function normalizeText(value: string | null | undefined) {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
+    // Preserva letras/números de qualquer script (\p{L}/\p{N}) — antes
+    // [^a-z0-9] descartava coreano/japonês/chinês, fazendo buscas pelo
+    // título original retornarem 0 candidatos.
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim()
 }
@@ -48,14 +52,58 @@ function uniqueStrings(values: Array<string | null | undefined>) {
   return out
 }
 
-function titleSimilarity(a: string, b: string) {
+// Logger gated por DEBUG_EXTERNAL_SEARCH=1 — instrumentação temporária para
+// diagnosticar falsos positivos em buscas de título.
+const DEBUG_SEARCH = process.env.DEBUG_EXTERNAL_SEARCH === "1"
+function debugLog(...args: unknown[]) {
+  if (!DEBUG_SEARCH) return
+  console.log("[searchAllSources][debug]", ...args)
+}
+
+type TitleSimReason =
+  | "empty"
+  | "exact"
+  | "forward_substring"
+  | "forward_substring_partial"
+  | "reverse_substring_substantial"
+  | "reverse_substring_significant"
+  | "reverse_substring_marginal"
+  | "jaccard"
+  | "no_words"
+
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function titleSimilarityDetailed(a: string, b: string): { score: number; reason: TitleSimReason } {
   const na = normalizeText(a)
   const nb = normalizeText(b)
-  if (!na || !nb) return 0
-  if (na === nb) return 1
+  if (!na || !nb) return { score: 0, reason: "empty" }
+  if (na === nb) return { score: 1, reason: "exact" }
 
-  // Candidato contém a query inteira → score alto.
-  if (nb.includes(na)) return 0.9
+  // Candidato contém a query — exige (1) que a query apareça como sequência
+  // completa de palavras (word boundary) E (2) que não haja palavras extras
+  // significativas demais no candidato. Sem isso, "Lucia" casava "Lucian"
+  // (substring de palavra) e "Ending Maker" casava "Bad Ending Maker" (frase
+  // contida mas com prefixo adjetival que muda a obra).
+  if (nb.includes(na)) {
+    const naBoundary = new RegExp(`\\b${escapeRegExp(na)}\\b`)
+    if (naBoundary.test(nb)) {
+      const ratio = na.length / nb.length
+      const naWordSet = new Set(na.split(" ").filter((w) => w.length > 2))
+      const extraSignificantWords = nb
+        .split(" ")
+        .filter((w) => w.length > 2 && !naWordSet.has(w)).length
+      if (extraSignificantWords === 0 || ratio >= 0.85) {
+        return { score: 0.9, reason: "forward_substring" }
+      }
+      if (extraSignificantWords <= 1 && ratio >= 0.55) {
+        return { score: 0.78, reason: "forward_substring_partial" }
+      }
+      // Muitas palavras extras → cai pro Jaccard abaixo.
+    }
+    // Sem word boundary (ex.: "lucia" dentro de "lucian"), cai pro Jaccard.
+  }
 
   // Query contém o candidato (reverse substring) — situação onde mais falsos
   // positivos acontecem. Ex.: buscar "The Fake Lady and Her Rabbit Duke" e
@@ -64,22 +112,52 @@ function titleSimilarity(a: string, b: string) {
   if (na.includes(nb)) {
     const ratio = nb.length / na.length
     const shortWords = nb.split(" ").filter((w) => w.length > 2).length
-    if (ratio >= 0.6 || shortWords >= 4) return 0.9 // substring substancial
-    if (ratio >= 0.4 || shortWords >= 3) return 0.75 // palavras significativas
-    if (ratio >= 0.25 && shortWords >= 2) return 0.65 // marginal — passa só se outras evidências ajudarem
+    if (ratio >= 0.6 || shortWords >= 4) return { score: 0.9, reason: "reverse_substring_substantial" }
+    if (ratio >= 0.4 || shortWords >= 3) return { score: 0.75, reason: "reverse_substring_significant" }
+    if (ratio >= 0.25 && shortWords >= 2) return { score: 0.65, reason: "reverse_substring_marginal" }
     // Caso contrário cai pro Jaccard abaixo (provável rejeição pelo threshold)
   }
 
   const aw = new Set(na.split(" ").filter((w) => w.length > 2))
   const bw = new Set(nb.split(" ").filter((w) => w.length > 2))
-  if (!aw.size || !bw.size) return 0
+  if (!aw.size || !bw.size) return { score: 0, reason: "no_words" }
   const intersection = [...aw].filter((word) => bw.has(word)).length
-  return intersection / new Set([...aw, ...bw]).size
+  return { score: intersection / new Set([...aw, ...bw]).size, reason: "jaccard" }
+}
+
+function titleSimilarity(a: string, b: string): number {
+  return titleSimilarityDetailed(a, b).score
+}
+
+type MatchedNameKind = "title" | "originalTitle" | "alt"
+
+export function bestTitleMatchDetailed(
+  query: string,
+  result: Pick<ExternalSearchResult, "title" | "originalTitle" | "alternativeTitles">
+): { score: number; reason: TitleSimReason; matchedName: string | null; matchedKind: MatchedNameKind | null } {
+  const candidates: Array<{ name: string | null | undefined; kind: MatchedNameKind }> = [
+    { name: result.title, kind: "title" },
+    { name: result.originalTitle, kind: "originalTitle" },
+    ...(result.alternativeTitles ?? []).map((n) => ({ name: n, kind: "alt" as const })),
+  ]
+  let best: { score: number; reason: TitleSimReason; matchedName: string | null; matchedKind: MatchedNameKind | null } = {
+    score: 0,
+    reason: "empty",
+    matchedName: null,
+    matchedKind: null,
+  }
+  for (const { name, kind } of candidates) {
+    if (!name) continue
+    const sim = titleSimilarityDetailed(query, name)
+    if (sim.score > best.score) {
+      best = { score: sim.score, reason: sim.reason, matchedName: name, matchedKind: kind }
+    }
+  }
+  return best
 }
 
 export function bestTitleMatch(query: string, result: Pick<ExternalSearchResult, "title" | "originalTitle" | "alternativeTitles">) {
-  const names = [result.title, result.originalTitle, ...(result.alternativeTitles ?? [])]
-  return Math.max(...names.map((name) => titleSimilarity(query, name ?? "")), 0)
+  return bestTitleMatchDetailed(query, result).score
 }
 
 function altTitleOverlap(a: Array<string | null | undefined> = [], b: Array<string | null | undefined> = []): number {
@@ -277,6 +355,53 @@ function sourceId(result: ExternalSearchResult) {
   return result.id.split(":").slice(1).join(":")
 }
 
+function sourceCandidateOption(
+  result: ExternalSearchResult,
+  matchScore: number,
+  trusted = false
+): ExternalSourceCandidateOption {
+  return {
+    source: result.source,
+    externalId: sourceId(result),
+    title: result.title,
+    coverUrl: result.coverUrl ?? null,
+    matchScore,
+    synopsis: result.synopsis ?? null,
+    year: result.year ?? null,
+    chapters: result.chapters ?? null,
+    trusted,
+  }
+}
+
+function addSourceCandidateOption(
+  candidate: MergedCandidate,
+  option: ExternalSourceCandidateOption
+) {
+  const current = candidate.sourceCandidates ?? []
+  const exists = current.some((item) =>
+    item.source === option.source && item.externalId === option.externalId
+  )
+  if (!exists) candidate.sourceCandidates = [...current, option]
+}
+
+function addTrustedSourceCandidate(
+  candidate: MergedCandidate,
+  source: ExternalSourceId,
+  externalId: string
+) {
+  addSourceCandidateOption(candidate, {
+    source,
+    externalId,
+    title: candidate.title,
+    coverUrl: candidate.coverUrl ?? null,
+    matchScore: candidate.matchScore ?? 1,
+    synopsis: candidate.synopsis ?? null,
+    year: candidate.year ?? null,
+    chapters: candidate.chapters ?? null,
+    trusted: true,
+  })
+}
+
 function sourceDebug(result: ExternalSearchResult, accepted: boolean, reason?: string): ExternalSourceDebug {
   return {
     source: result.source,
@@ -314,14 +439,32 @@ function isExcludedResult(result: ExternalSearchResult): boolean {
 function mergeSearchResults(query: string, results: ExternalSearchResult[]): MergedCandidate[] {
   const filtered = results
     .filter((result) => !isExcludedResult(result))
-    .map((result) => ({ result, matchScore: bestTitleMatch(query, result) }))
+    .map((result) => {
+      const detail = bestTitleMatchDetailed(query, result)
+      return { result, matchScore: detail.score, matchDetail: detail }
+    })
     .filter(({ matchScore }) => matchScore >= 0.65)
     .sort((a, b) => b.matchScore - a.matchScore)
+
+  if (DEBUG_SEARCH) {
+    debugLog(`  scored (matchScore ≥ 0.65): ${filtered.length}`)
+    for (const item of filtered) {
+      debugLog(
+        `    [score=${item.matchScore.toFixed(2)}] ${item.result.title} (${item.result.source}) ` +
+        `via ${item.matchDetail.matchedKind ?? "?"}="${item.matchDetail.matchedName ?? ""}" reason=${item.matchDetail.reason}`
+      )
+    }
+  }
 
   const groups: Array<{ main: ExternalSearchResult; matchScore: number; results: ExternalSearchResult[] }> = []
   for (const item of filtered) {
     const group = groups.find((existing) => {
-      const sameTitle = bestTitleMatch(existing.main.title, item.result) >= 0.78
+      // Antes: 0.78. Subido pra 0.85 porque o forward_substring antigo entregava
+      // 0.9 fácil demais (qualquer obra com a query como substring caía no
+      // mesmo grupo). Com o Fix A do titleSimilarity (word boundary + cap),
+      // 0.85 ainda aceita matches exatos (1.0) e variantes próximas, mas
+      // rejeita "Princess Lucia"/"Host Tenshi Lucian" no grupo de "Lucia".
+      const sameTitle = bestTitleMatch(existing.main.title, item.result) >= 0.85
       // Lowered from 0.15 → 0.05: when title matches strongly, even minor synopsis
       // overlap should be enough. Some sources (Kitsu) return very different synopsis
       // formatting that gives spuriously low similarity.
@@ -329,9 +472,19 @@ function mergeSearchResults(query: string, results: ExternalSearchResult[]): Mer
       return sameTitle && compatibleSynopsis
     })
     if (group) {
+      if (DEBUG_SEARCH) {
+        const sim = bestTitleMatchDetailed(group.main.title, item.result)
+        debugLog(
+          `  merge: "${item.result.title}" (${item.result.source}) → group "${group.main.title}" ` +
+          `(titleSim=${sim.score.toFixed(2)} via ${sim.matchedKind}="${sim.matchedName}" reason=${sim.reason})`
+        )
+      }
       group.results.push(item.result)
       group.matchScore = Math.max(group.matchScore, item.matchScore)
     } else {
+      if (DEBUG_SEARCH) {
+        debugLog(`  new group: main="${item.result.title}" (${item.result.source}) matchScore=${item.matchScore.toFixed(2)}`)
+      }
       groups.push({ main: item.result, matchScore: item.matchScore, results: [item.result] })
     }
   }
@@ -341,7 +494,16 @@ function mergeSearchResults(query: string, results: ExternalSearchResult[]): Mer
   // "Newly-wed"), punctuation differences (": Vol" vs "Vol"), and whitespace variation.
   // Also tries every candidate's alternativeTitles for cross-matching.
   const stripAll = (s: string | null | undefined) =>
-    (s ?? "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "")
+    (s ?? "")
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "")
+      // Remove 's possessivo antes do strip — sem isso, "The Empress' Needle"
+      // (apóstrofo solto) e "The Empress's Needle" (apóstrofo + s) viravam
+      // stripped keys diferentes (theempressneedle vs theempresssneedle),
+      // impedindo o collapse de fundir a mesma obra entre fontes.
+      .replace(/[''`]s(?=\s|$)/g, "")
+      .replace(/[^a-z0-9]/g, "")
   const groupKeys = (g: { main: ExternalSearchResult; results: ExternalSearchResult[] }): Set<string> => {
     const titles = g.results.flatMap((r) => [r.title, r.originalTitle, ...(r.alternativeTitles ?? [])])
     return new Set(titles.map(stripAll).filter(Boolean))
@@ -353,8 +515,11 @@ function mergeSearchResults(query: string, results: ExternalSearchResult[]): Mer
     for (let j = groups.length - 1; j > i; j -= 1) {
       const b = groups[j]
       const bKeys = groupKeys(b)
-      const overlap = [...bKeys].some((k) => aKeys.has(k))
-      if (!overlap) continue
+      const sharedKey = [...bKeys].find((k) => aKeys.has(k))
+      if (!sharedKey) continue
+      if (DEBUG_SEARCH) {
+        debugLog(`  post-pass collapse: "${b.main.title}" → "${a.main.title}" (shared stripped key="${sharedKey}")`)
+      }
       // merge b into a, then remove b
       a.results.push(...b.results.filter((r) => !a.results.some((existing) => existing.id === r.id)))
       a.matchScore = Math.max(a.matchScore, b.matchScore)
@@ -364,8 +529,29 @@ function mergeSearchResults(query: string, results: ExternalSearchResult[]): Mer
     }
   }
 
+  if (DEBUG_SEARCH) {
+    debugLog(`  final groups (top 8 of ${groups.length}):`)
+    for (const g of groups.slice(0, 8)) {
+      const sources = [...new Set(g.results.map((r) => r.source))].join(", ")
+      debugLog(`    main="${g.main.title}" matchScore=${g.matchScore.toFixed(2)} sources=[${sources}] resultCount=${g.results.length}`)
+    }
+  }
+
   return groups.slice(0, 8).map(({ main, matchScore, results }) => {
-    const bySource = new Map(results.map((result) => [result.source, result]))
+    // Antes: `new Map(results.map(...))` sobrescrevia silenciosamente quando
+    // havia múltiplos resultados da mesma fonte no grupo, devolvendo o último
+    // inserido. Isso fazia o display title pular pra um resultado arbitrário
+    // (ex.: "Host Tenshi Lucian" quando havia 9 mangaupdates no grupo Lucia).
+    // Agora ordenamos por matchScore desc e ficamos com o de maior score
+    // por fonte.
+    const matchById = new Map(filtered.map((item) => [item.result.id, item.matchScore]))
+    const resultsByScore = [...results].sort(
+      (a, b) => (matchById.get(b.id) ?? 0) - (matchById.get(a.id) ?? 0)
+    )
+    const bySource = new Map<ExternalSourceId, ExternalSearchResult>()
+    for (const result of resultsByScore) {
+      if (!bySource.has(result.source)) bySource.set(result.source, result)
+    }
     const primary = bySource.get("mangaupdates") ?? main
     const muId = bySource.get("mangaupdates")?.id.split(":")[1]
     const malId = bySource.get("myanimelist")?.id.split(":")[1]
@@ -395,6 +581,9 @@ function mergeSearchResults(query: string, results: ExternalSearchResult[]): Mer
       matchScore,
       sources: [...new Set(results.map((result) => result.source))],
       sourceResults: results,
+      sourceCandidates: results.map((result) =>
+        sourceCandidateOption(result, matchById.get(result.id) ?? bestTitleMatch(query, result))
+      ),
     }
   })
 }
@@ -474,22 +663,114 @@ export const SEARCH_CONNECTORS = [
 ] satisfies SearchConnector[]
 
 export async function searchAllSources(query: string): Promise<MergedCandidate[]> {
+  if (DEBUG_SEARCH) debugLog(`query="${query}"`)
   const settled = await Promise.allSettled(
     SEARCH_CONNECTORS.map((connector) => connector.search(query))
   )
   const results = settled.flatMap((entry, i) => {
-    if (entry.status === "fulfilled") return entry.value
+    const connectorName = SEARCH_CONNECTORS[i].source
+    if (entry.status === "fulfilled") {
+      if (DEBUG_SEARCH) {
+        const titles = entry.value.slice(0, 6).map((r) => r.title).join(" | ")
+        debugLog(`  raw ${connectorName}: ${entry.value.length} results — [${titles}${entry.value.length > 6 ? ", …" : ""}]`)
+      }
+      return entry.value
+    }
     console.error(
-      `[searchAllSources] connector ${SEARCH_CONNECTORS[i].source} failed for query="${query}"`,
+      `[searchAllSources] connector ${connectorName} failed for query="${query}"`,
       entry.reason instanceof Error ? entry.reason.message : entry.reason
     )
+    if (DEBUG_SEARCH) {
+      debugLog(`  raw ${connectorName}: ERROR — ${entry.reason instanceof Error ? entry.reason.message : entry.reason}`)
+    }
     return []
   })
   const merged = mergeSearchResults(query, results)
   hoistCrossSourceIds(merged)
   const refined = await refineWithAlternativeTitles(merged, query)
   hoistCrossSourceIds(refined)
+  if (DEBUG_SEARCH) {
+    debugLog(`  returned ${refined.length} candidates after refine:`)
+    for (const c of refined) {
+      debugLog(`    "${c.title}" matchScore=${(c.matchScore ?? 0).toFixed(2)} sources=[${c.sources.join(", ")}]`)
+    }
+  }
   return refined
+}
+
+// ============================================================================
+// Candidate construction from persisted/accepted source IDs
+// ============================================================================
+
+const SUPPORTED_SOURCES: ReadonlySet<ExternalSourceId> = new Set([
+  "anilist",
+  "mangaupdates",
+  "myanimelist",
+  "kitsu",
+  "mangadex",
+  "comick",
+  "comix",
+  "animeplanet",
+])
+
+export function buildCandidateFromExternalIds(
+  work: { title: string; originalTitle?: string | null; alternativeTitles?: string[] | null },
+  externalIds: Partial<Record<ExternalSourceId, string | number | null | undefined>>
+): MergedCandidate {
+  const sources: ExternalSourceId[] = []
+  const trustedSources: ExternalSourceId[] = []
+  const candidate: MergedCandidate = {
+    title: work.title,
+    originalTitle: work.originalTitle ?? undefined,
+    alternativeTitles: work.alternativeTitles ?? [],
+    sources,
+    trustedSources,
+  }
+
+  const addSource = (source: ExternalSourceId) => {
+    if (!sources.includes(source)) sources.push(source)
+    if (!trustedSources.includes(source)) trustedSources.push(source)
+  }
+
+  for (const [source, rawId] of Object.entries(externalIds) as Array<[ExternalSourceId, string | number | null | undefined]>) {
+    if (!rawId || !SUPPORTED_SOURCES.has(source)) continue
+    const id = String(rawId)
+    addSource(source)
+    switch (source) {
+      case "anilist": {
+        const n = Number(id)
+        if (Number.isFinite(n)) candidate.anilistId = n
+        break
+      }
+      case "mangaupdates": {
+        const n = Number(id)
+        if (Number.isFinite(n)) candidate.muId = n
+        break
+      }
+      case "myanimelist": {
+        const n = Number(id)
+        if (Number.isFinite(n)) candidate.malId = n
+        break
+      }
+      case "kitsu":
+        candidate.kitsuId = id
+        break
+      case "mangadex":
+        candidate.mangadexId = id
+        break
+      case "comick":
+        candidate.comickHid = id
+        break
+      case "comix":
+        candidate.comixHid = id
+        break
+      case "animeplanet":
+        candidate.animePlanetSlug = id
+        break
+    }
+  }
+
+  return candidate
 }
 
 // ============================================================================
@@ -520,6 +801,7 @@ function hoistCrossSourceIds(candidates: MergedCandidate[]): void {
           candidate.anilistId = n
           if (!candidate.sources.includes("anilist")) candidate.sources = [...candidate.sources, "anilist"]
           trust("anilist")
+          addTrustedSourceCandidate(candidate, "anilist", cross.anilist)
         }
       }
       if (cross.mangaupdates && candidate.muId == null) {
@@ -528,6 +810,7 @@ function hoistCrossSourceIds(candidates: MergedCandidate[]): void {
           candidate.muId = n
           if (!candidate.sources.includes("mangaupdates")) candidate.sources = [...candidate.sources, "mangaupdates"]
           trust("mangaupdates")
+          addTrustedSourceCandidate(candidate, "mangaupdates", cross.mangaupdates)
         }
       }
       if (cross.myanimelist && candidate.malId == null) {
@@ -536,32 +819,38 @@ function hoistCrossSourceIds(candidates: MergedCandidate[]): void {
           candidate.malId = n
           if (!candidate.sources.includes("myanimelist")) candidate.sources = [...candidate.sources, "myanimelist"]
           trust("myanimelist")
+          addTrustedSourceCandidate(candidate, "myanimelist", cross.myanimelist)
         }
       }
       if (cross.kitsu && !candidate.kitsuId) {
         candidate.kitsuId = cross.kitsu
         if (!candidate.sources.includes("kitsu")) candidate.sources = [...candidate.sources, "kitsu"]
         trust("kitsu")
+        addTrustedSourceCandidate(candidate, "kitsu", cross.kitsu)
       }
       if (cross.animeplanet && !candidate.animePlanetSlug) {
         candidate.animePlanetSlug = cross.animeplanet
         if (!candidate.sources.includes("animeplanet")) candidate.sources = [...candidate.sources, "animeplanet"]
         trust("animeplanet")
+        addTrustedSourceCandidate(candidate, "animeplanet", cross.animeplanet)
       }
       if (cross.mangadex && !candidate.mangadexId) {
         candidate.mangadexId = cross.mangadex
         if (!candidate.sources.includes("mangadex")) candidate.sources = [...candidate.sources, "mangadex"]
         trust("mangadex")
+        addTrustedSourceCandidate(candidate, "mangadex", cross.mangadex)
       }
       if (cross.comick && !candidate.comickHid) {
         candidate.comickHid = cross.comick
         if (!candidate.sources.includes("comick")) candidate.sources = [...candidate.sources, "comick"]
         trust("comick")
+        addTrustedSourceCandidate(candidate, "comick", cross.comick)
       }
       if (cross.comix && !candidate.comixHid) {
         candidate.comixHid = cross.comix
         if (!candidate.sources.includes("comix")) candidate.sources = [...candidate.sources, "comix"]
         trust("comix")
+        addTrustedSourceCandidate(candidate, "comix", cross.comix)
       }
     }
   }
@@ -679,6 +968,7 @@ async function refineWithAlternativeTitles(
 
       candidate.sources = [...new Set([...candidate.sources, connector.source])]
       candidate.sourceResults = [...(candidate.sourceResults ?? []), best.result]
+      addSourceCandidateOption(candidate, sourceCandidateOption(best.result, best.titleScore))
       candidate.alternativeTitles = uniqueStrings([
         ...(candidate.alternativeTitles ?? []),
         best.result.originalTitle,
@@ -860,6 +1150,80 @@ export function selectReviewsForEvaluation(
   return result
 }
 
+function restrictCandidateToSources(candidate: MergedCandidate, sources: ReadonlySet<ExternalSourceId>): MergedCandidate {
+  return {
+    ...candidate,
+    sources: candidate.sources.filter((source) => sources.has(source)),
+    trustedSources: candidate.trustedSources?.filter((source) => sources.has(source)),
+    sourceResults: candidate.sourceResults?.filter((result) => sources.has(result.source)),
+    anilistId: sources.has("anilist") ? candidate.anilistId : undefined,
+    muId: sources.has("mangaupdates") ? candidate.muId : undefined,
+    kitsuId: sources.has("kitsu") ? candidate.kitsuId : undefined,
+    mangadexId: sources.has("mangadex") ? candidate.mangadexId : undefined,
+    malId: sources.has("myanimelist") ? candidate.malId : undefined,
+    comickHid: sources.has("comick") ? candidate.comickHid : undefined,
+    comixHid: sources.has("comix") ? candidate.comixHid : undefined,
+    animePlanetSlug: sources.has("animeplanet") ? candidate.animePlanetSlug : undefined,
+  }
+}
+
+async function hydrateAndFilterCandidate(candidate: MergedCandidate): Promise<{
+  hydrated: ExternalSearchResult[]
+  accepted: ExternalSearchResult[]
+  uniqueAccepted: ExternalSearchResult[]
+  rejected: Array<{ result: ExternalSearchResult; reason?: string }>
+  apDetail: AnimePlanetDetail | null
+}> {
+  const { hydrated, apDetail } = await hydrateCandidate(candidate)
+  const accepted: ExternalSearchResult[] = []
+  const rejected: Array<{ result: ExternalSearchResult; reason?: string }> = []
+  const trustedSet = new Set(candidate.trustedSources ?? [])
+
+  for (const result of hydrated) {
+    const { titleScore, synScore, composite, reason } = compositeAcceptScore(candidate, result)
+    const passes = titleScore >= 0.72 && synScore >= 0.18 && composite >= 0.62
+    if (passes || trustedSet.has(result.source)) accepted.push({ ...result, score: result.score })
+    else rejected.push({ result, reason })
+  }
+
+  const uniqueAccepted = Array.from(new Map(accepted.map((result) => [result.id, result])).values())
+    .sort((a, b) => {
+      if (a.source === "mangaupdates") return -1
+      if (b.source === "mangaupdates") return 1
+      return 0
+    })
+
+  return { hydrated, accepted, uniqueAccepted, rejected, apDetail }
+}
+
+export async function fetchExternalEvaluationContextForCandidate(
+  candidate: MergedCandidate,
+  opts: {
+    rejectedSources?: ReadonlyArray<string>
+    perSource?: number
+    total?: number
+  } = {}
+): Promise<{ sourcedReviews: SourcedReview[]; externalContext: string[] }> {
+  const { uniqueAccepted } = await hydrateAndFilterCandidate(candidate)
+  const rejected = new Set((opts.rejectedSources ?? []) as string[])
+  const filteredAccepted = rejected.size > 0
+    ? uniqueAccepted.filter((result) => !rejected.has(result.source))
+    : uniqueAccepted
+  const acceptedSources = new Set(filteredAccepted.map((result) => result.source))
+  const reviewCandidate = restrictCandidateToSources(candidate, acceptedSources)
+  const allReviews = await collectReviewsFromCandidate(reviewCandidate)
+
+  return {
+    sourcedReviews: selectReviewsForEvaluation(allReviews, {
+      perSource: opts.perSource ?? 6,
+      total: opts.total ?? 20,
+    }),
+    externalContext: uniqueSynopsisBlocks(
+      filteredAccepted.map((result) => result.synopsis)
+    ).slice(0, 6),
+  }
+}
+
 /**
  * Public entrypoint used by the AI evaluation flow ([server/actions/ai.ts]) to
  * gather user reviews + supplemental synopses for the work being scored.
@@ -895,20 +1259,11 @@ export async function fetchExternalEvaluationContextForWork(input: {
     const candidates = await searchAllSources(query)
     for (const candidate of candidates) {
       if ((candidate.matchScore ?? 0) < 0.72) break // candidates are sorted desc; no point continuing
-      const [{ hydrated }, allReviews] = await Promise.all([
-        hydrateCandidate(candidate),
-        collectReviewsFromCandidate(candidate),
-      ])
-      const filteredReviews = rejected.size > 0
-        ? allReviews.filter((r) => !rejected.has(r.source))
-        : allReviews
-      const filteredHydrated = rejected.size > 0
-        ? hydrated.filter((h: ExternalSearchResult) => !rejected.has(h.source))
-        : hydrated
-      const sourcedReviews = selectReviewsForEvaluation(filteredReviews, { perSource: 6, total: 20 })
-      const externalContext = uniqueSynopsisBlocks(
-        filteredHydrated.map((h: ExternalSearchResult) => h.synopsis)
-      ).slice(0, 6)
+      const { sourcedReviews, externalContext } = await fetchExternalEvaluationContextForCandidate(candidate, {
+        rejectedSources: [...rejected],
+        perSource: 6,
+        total: 20,
+      })
       if (sourcedReviews.length || externalContext.length) {
         return { sourcedReviews, externalContext }
       }
@@ -1017,7 +1372,7 @@ function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[],
 
   return {
     title: primary.title,
-    originalTitle: primary.originalTitle ?? candidate.originalTitle,
+    originalTitle: primary.originalTitle ?? candidate.originalTitle ?? accepted.find((result) => result.originalTitle)?.originalTitle,
     alternativeTitles: uniqueStrings([
       candidate.originalTitle,
       ...(candidate.alternativeTitles ?? []),
@@ -1096,28 +1451,13 @@ function detectConflict<K extends keyof ExternalSearchResult>(
 // ============================================================================
 
 export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promise<MultiSourceResult> {
-  const { hydrated, apDetail } = await hydrateCandidate(candidate)
-  const accepted: ExternalSearchResult[] = []
-  const rejected: Array<{ result: ExternalSearchResult; reason?: string }> = []
-  const trustedSet = new Set(candidate.trustedSources ?? [])
-  for (const result of hydrated) {
-    const { titleScore, synScore, composite, reason } = compositeAcceptScore(candidate, result)
-    const passes = titleScore >= 0.72 && synScore >= 0.18 && composite >= 0.62
-    if (passes || trustedSet.has(result.source)) accepted.push({ ...result, score: result.score })
-    else rejected.push({ result, reason })
-  }
-
-  const uniqueAccepted = Array.from(new Map(accepted.map((result) => [result.id, result])).values())
-    .sort((a, b) => {
-      if (a.source === "mangaupdates") return -1
-      if (b.source === "mangaupdates") return 1
-      return 0
-    })
+  const { apDetail, uniqueAccepted, rejected } = await hydrateAndFilterCandidate(candidate)
   const reviews = candidate.muId ? await fetchMangaUpdatesReviews(candidate.muId) : []
   const data = mergeData(candidate, uniqueAccepted, apDetail)
 
-  // Persist external IDs only for sources that passed the acceptance threshold,
-  // so future "Atualizar dados" refreshes can rehydrate without title search.
+  // Persist external IDs for accepted sources. Cross-linked/trusted IDs are also
+  // safe to keep even when a scraper is temporarily blocked (AnimePlanet/CF),
+  // so future refreshes can retry by canonical ID instead of losing the source.
   const candidateIds: Partial<Record<ExternalSourceId, string>> = {
     anilist: candidate.anilistId != null ? String(candidate.anilistId) : undefined,
     mangaupdates: candidate.muId != null ? String(candidate.muId) : undefined,
@@ -1129,9 +1469,10 @@ export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promi
     animeplanet: candidate.animePlanetSlug,
   }
   const acceptedSources = new Set(uniqueAccepted.map((r) => r.source))
+  const trustedSources = new Set(candidate.trustedSources ?? [])
   const externalIds: Partial<Record<ExternalSourceId, string>> = {}
   for (const [source, id] of Object.entries(candidateIds) as Array<[ExternalSourceId, string | undefined]>) {
-    if (id && acceptedSources.has(source)) externalIds[source] = id
+    if (id && (acceptedSources.has(source) || trustedSources.has(source))) externalIds[source] = id
   }
   if (Object.keys(externalIds).length > 0) data.externalIds = externalIds
 

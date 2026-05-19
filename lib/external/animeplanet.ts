@@ -6,7 +6,13 @@ const AP_BASE = "https://www.anime-planet.com"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  Accept: "text/html,application/xhtml+xml",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Cache-Control": "no-cache",
+  "Referer": `${AP_BASE}/manga/all`,
+  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Site": "same-origin",
 }
 
 export interface AnimePlanetDetail {
@@ -25,12 +31,31 @@ function cleanHtml(text: string | undefined): string | undefined {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&lsquo;|&rsquo;/g, "'")
+    .replace(/&ldquo;|&rdquo;/g, '"')
+    .replace(/&hellip;/g, "...")
+    .replace(/&#(?:039|x27);/gi, "'")
     .trim() || undefined
 }
 
 function decodeHtml(text: string | undefined): string | undefined {
   return cleanHtml(text)
+}
+
+function decodeHtmlAttribute(text: string | undefined): string | undefined {
+  if (!text) return undefined
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lsquo;|&rsquo;/g, "'")
+    .replace(/&ldquo;|&rdquo;/g, '"')
+    .replace(/&hellip;/g, "...")
+    .replace(/&#(?:039|x27);/gi, "'")
+    .trim() || undefined
 }
 
 function mapStatus(text: string | undefined): PublicationStatus | undefined {
@@ -52,10 +77,67 @@ function hasExcludedTitleSuffix(title: string | undefined) {
   return /\s\((?:Novel|Promo|Pre-serialization)\)$/.test(title?.trim() ?? "")
 }
 
+function normalizeTitleForMatch(value: string | undefined): string {
+  return (value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function titleLooksCompatible(search: string, title: string | undefined): boolean {
+  const query = normalizeTitleForMatch(search)
+  const candidate = normalizeTitleForMatch(title)
+  if (!query || !candidate) return false
+  if (query === candidate) return true
+  if (candidate.includes(query)) return true
+  if (query.includes(candidate) && candidate.length / query.length >= 0.75) return true
+
+  const queryWords = new Set(query.split(" ").filter((word) => word.length > 2))
+  const candidateWords = new Set(candidate.split(" ").filter((word) => word.length > 2))
+  if (!queryWords.size || !candidateWords.size) return false
+  const intersection = [...queryWords].filter((word) => candidateWords.has(word)).length
+  return intersection / new Set([...queryWords, ...candidateWords]).size >= 0.8
+}
+
+function slugifyTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[’'`]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-")
+}
+
+function directSlugCandidates(title: string): string[] {
+  const slug = slugifyTitle(title)
+  const withoutLeadingArticle = slug.replace(/^(?:the|a|an)-/, "")
+  return [...new Set([slug, withoutLeadingArticle].filter(Boolean))]
+}
+
+async function fetchDirectSearchResult(search: string): Promise<ExternalSearchResult | null> {
+  for (const slug of directSlugCandidates(search)) {
+    const result = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${slug}`, HEADERS)
+    if (!result) continue
+    const parsed = parseDetailPageAsSearchResult(result.html, slug)
+    if (parsed && titleLooksCompatible(search, parsed.title)) return parsed
+  }
+  return null
+}
+
 async function findSlug(title: string): Promise<string | null> {
   const url = `${AP_BASE}/manga/all?name=${encodeURIComponent(title)}`
   const result = await fetchHtmlWithCfFallback(url, HEADERS)
-  if (!result) return null
+  if (!result) {
+    const direct = await fetchDirectSearchResult(title)
+    return direct?.id.split(":")[1] ?? null
+  }
 
   // AP collapses single-result searches via 302 to the detail page.
   const META = new Set(["all", "tags", "genres", "top-100", "recommendations", "browse"])
@@ -69,7 +151,8 @@ async function findSlug(title: string): Promise<string | null> {
     const [, slug, title] = match
     if (!META.has(slug) && !hasExcludedTitleSuffix(title)) return slug
   }
-  return null
+  const direct = await fetchDirectSearchResult(title)
+  return direct?.id.split(":")[1] ?? null
 }
 
 export async function searchAnimePlanet(search: string): Promise<ExternalSearchResult[]> {
@@ -78,12 +161,25 @@ export async function searchAnimePlanet(search: string): Promise<ExternalSearchR
       `${AP_BASE}/manga/all?name=${encodeURIComponent(search)}`,
       HEADERS
     )
-    if (!result) return []
+    if (!result) {
+      const direct = await fetchDirectSearchResult(search)
+      return direct ? [direct] : []
+    }
     const html = result.html
 
     const results: ExternalSearchResult[] = []
     const seen = new Set<string>()
     const META = new Set(["all", "tags", "genres", "top-100", "recommendations", "browse"])
+
+    // AP collapses single-result searches via 302 to the detail page (mesmo
+    // comportamento já tratado em findSlug). Sem isso, cardRegex não casa nada
+    // na HTML de detalhes e a função devolve [].
+    const directMatch = result.finalUrl.match(/\/manga\/([a-z0-9][a-z0-9-]*)\/?$/)
+    if (directMatch && !META.has(directMatch[1])) {
+      const single = parseDetailPageAsSearchResult(html, directMatch[1])
+      if (single && titleLooksCompatible(search, single.title)) return [single]
+    }
+
     const cardRegex = /href="\/manga\/([a-z0-9][a-z0-9-]*)"[^>]*title="([^"]*)"([\s\S]*?)(?=href="\/manga\/[a-z0-9][a-z0-9-]*"|<\/ul>|<\/section>|$)/g
 
     let match: RegExpExecArray | null
@@ -113,9 +209,156 @@ export async function searchAnimePlanet(search: string): Promise<ExternalSearchR
       })
     }
 
-    return results
+    if (results.length > 0) return results
+
+    const direct = await fetchDirectSearchResult(search)
+    return direct ? [direct] : []
   } catch {
     return []
+  }
+}
+
+function parseDetailPageAsSearchResult(
+  html: string,
+  slug: string
+): ExternalSearchResult | null {
+  const ogTitle = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i)?.[1]
+  const title = decodeHtml(ogTitle)
+  if (!title) return null
+
+  const ogDesc = html.match(/<meta\s+property="og:description"\s+content="([^"]+)"/i)?.[1]
+  const synopsis = ogDesc ? cleanHtml(ogDesc) : undefined
+
+  const ogImage = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i)?.[1]
+  const coverUrl = ogImage ? new URL(ogImage, AP_BASE).toString() : undefined
+
+  // Year/status na AP ficam em microformatos no HTML, não em meta tags.
+  // Heurística leve; se falhar fica undefined (UI da revalidação só precisa
+  // de title + cover pra score e exibição).
+  const yearMatch =
+    html.match(/<span[^>]*class="iconYear"[^>]*>[\s\S]*?(\d{4})/) ??
+    html.match(/\b(19\d{2}|20\d{2})\b\s*-\s*(?:\?|\d{4})?/)
+  const year = yearMatch ? Number(yearMatch[1]) : undefined
+
+  const statusText = html.match(/Status[:\s]*<\/[^>]+>\s*<[^>]*>([^<]+)/i)?.[1]
+  const publicationStatus = mapStatus(statusText)
+
+  return {
+    id: `animeplanet:${slug}`,
+    source: "animeplanet",
+    title,
+    synopsis,
+    coverUrl,
+    year,
+    publicationStatus,
+    genres: undefined,
+  }
+}
+
+function numericValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value !== "string") return undefined
+  const parsed = parseFloat(value.replace(/,/g, ""))
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function integerValue(value: unknown): number | undefined {
+  const parsed = numericValue(value)
+  return parsed == null ? undefined : Math.floor(parsed)
+}
+
+function findAggregateRating(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") return null
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = findAggregateRating(entry)
+      if (found) return found
+    }
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  const aggregate = record.aggregateRating
+  if (aggregate && typeof aggregate === "object") return aggregate as Record<string, unknown>
+
+  for (const entry of Object.values(record)) {
+    const found = findAggregateRating(entry)
+    if (found) return found
+  }
+  return null
+}
+
+function parseJsonLdAggregateRating(html: string): { rating?: number; votes?: number } {
+  const scripts = html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)
+  for (const match of scripts) {
+    try {
+      const jsonText = decodeHtmlAttribute(match[1])
+      if (!jsonText) continue
+      const aggregate = findAggregateRating(JSON.parse(jsonText))
+      if (!aggregate) continue
+      return {
+        rating: numericValue(aggregate.ratingValue),
+        votes: integerValue(aggregate.ratingCount ?? aggregate.reviewCount),
+      }
+    } catch {
+      continue
+    }
+  }
+  return {}
+}
+
+function parseAnimePlanetRating(html: string): { rating?: number; votes?: number } {
+  const avgRatingMatch = html.match(/class=["'][^"']*avgRating[^"']*["'][^>]*title=["']([\d.]+) out of 5 from ([\d,]+) votes["']/i)
+  if (avgRatingMatch) {
+    return {
+      rating: numericValue(avgRatingMatch[1]),
+      votes: integerValue(avgRatingMatch[2]),
+    }
+  }
+
+  const schemaRating = html.match(/itemprop=["']ratingValue["'][^>]*content=["']([0-9.]+)["']/i)
+  const schemaVotes = html.match(/itemprop=["'](?:ratingCount|reviewCount)["'][^>]*content=["']([\d,]+)["']/i)
+  if (schemaRating || schemaVotes) {
+    return {
+      rating: numericValue(schemaRating?.[1]),
+      votes: integerValue(schemaVotes?.[1]),
+    }
+  }
+
+  const jsonLd = parseJsonLdAggregateRating(html)
+  if (jsonLd.rating != null || jsonLd.votes != null) return jsonLd
+
+  const looseRating = html.match(/["']ratingValue["']\s*:\s*["']?([0-9.]+)/i)
+  const looseVotes = html.match(/["'](?:ratingCount|reviewCount)["']\s*:\s*["']?([\d,]+)/i)
+  return {
+    rating: numericValue(looseRating?.[1]),
+    votes: integerValue(looseVotes?.[1]),
+  }
+}
+
+export function parseAnimePlanetDetailHtml(html: string): AnimePlanetDetail | null {
+  const parsedRating = parseAnimePlanetRating(html)
+  const rawRating = parsedRating.rating
+  const rawVotes = parsedRating.votes
+
+  // og:image is the canonical large cover URL. Fall back to first <img class="screenshots"> if absent.
+  const ogImage = html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i)?.[1]
+  const fallbackImage = ogImage ? undefined : html.match(/<img[^>]+class=["'][^"']*screenshots?[^"']*["'][^>]+src=["']([^"']+)["']/i)?.[1]
+  const coverPath = ogImage ?? fallbackImage
+  const coverUrl = coverPath ? new URL(coverPath, AP_BASE).toString() : undefined
+
+  // og:description carries the full synopsis on AP detail pages.
+  const ogDesc = html.match(/<meta\s+property=["']og:description["']\s+content=["']([^"']+)["']/i)?.[1]
+  const synopsis = ogDesc ? cleanHtml(decodeHtmlAttribute(ogDesc)) : undefined
+
+  // Return the detail even when rating is unavailable — cover/synopsis alone are useful signals.
+  if (rawRating == null && rawVotes == null && !coverUrl && !synopsis) return null
+
+  return {
+    rating: rawRating != null ? Math.round(rawRating * 2 * 10) / 10 : undefined,
+    votes: rawVotes,
+    coverUrl,
+    synopsis,
   }
 }
 
@@ -181,32 +424,7 @@ export async function fetchAnimePlanetByTitle(title: string, knownSlug?: string)
 
     const result = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${slug}`, HEADERS)
     if (!result) return null
-    const html = result.html
-
-    // <div class="avgRating" title="3.872 out of 5 from 819 votes">
-    const ratingMatch = html.match(/class="avgRating"[^>]*title="([\d.]+) out of 5 from ([\d,]+) votes"/)
-    const rawRating = ratingMatch ? parseFloat(ratingMatch[1]) : NaN
-    const rawVotes = ratingMatch ? parseInt(ratingMatch[2].replace(/,/g, ""), 10) : NaN
-
-    // og:image is the canonical large cover URL. Fall back to first <img class="screenshots"> if absent.
-    const ogImage = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i)?.[1]
-    const fallbackImage = ogImage ? undefined : html.match(/<img[^>]+class="[^"]*screenshots?[^"]*"[^>]+src="([^"]+)"/i)?.[1]
-    const coverPath = ogImage ?? fallbackImage
-    const coverUrl = coverPath ? new URL(coverPath, AP_BASE).toString() : undefined
-
-    // og:description carries the full synopsis on AP detail pages.
-    const ogDesc = html.match(/<meta\s+property="og:description"\s+content="([^"]+)"/i)?.[1]
-    const synopsis = ogDesc ? cleanHtml(ogDesc) : undefined
-
-    // Return the detail even when rating is unavailable — cover/synopsis alone are useful signals.
-    if (!ratingMatch && !coverUrl && !synopsis) return null
-
-    return {
-      rating: !isNaN(rawRating) ? Math.round(rawRating * 2 * 10) / 10 : undefined,
-      votes: !isNaN(rawVotes) ? rawVotes : undefined,
-      coverUrl,
-      synopsis,
-    }
+    return parseAnimePlanetDetailHtml(result.html)
   } catch {
     return null
   }

@@ -35,6 +35,18 @@ export interface ExternalSearchResult {
   crossIds?: Partial<Record<ExternalSourceId, string>>
 }
 
+export interface ExternalSourceCandidateOption {
+  source: ExternalSourceId
+  externalId: string
+  title: string
+  coverUrl: string | null
+  matchScore: number
+  synopsis: string | null
+  year: number | null
+  chapters: number | null
+  trusted?: boolean
+}
+
 /** One title deduplicated across sources — what the UI shows */
 export interface MergedCandidate {
   title: string
@@ -59,6 +71,7 @@ export interface MergedCandidate {
   comickHid?: string
   comixHid?: string
   sourceResults?: ExternalSearchResult[]
+  sourceCandidates?: ExternalSourceCandidateOption[]
   /** Sources whose IDs came from another source's canonical cross-link (e.g. MangaDex `attributes.links`). At hydrate time we skip the title/synopsis acceptance filter for these — the cross-link is the trust signal. */
   trustedSources?: ExternalSourceId[]
 }

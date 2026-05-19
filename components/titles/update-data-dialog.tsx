@@ -18,7 +18,8 @@ import {
 } from "@/components/ui/dialog"
 import { ExternalSearch } from "@/components/titles/external-search"
 import { updateWorkExternalData, refreshWorkExternalData } from "@/server/actions/works"
-import { titleToSlug } from "@/lib/utils"
+import { getCoverImageSrc } from "@/lib/image-proxy"
+import { dedupeSynopsisEntries } from "@/lib/work-derived"
 import type { ExternalSourceId, ExternalWorkData } from "@/lib/external/types"
 
 interface CurrentWork {
@@ -127,17 +128,20 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
     proceedToConflictsOrApply(data)
   }
 
-  const proceedToConflictsOrApply = (data: ExternalWorkData) => {
-    const detected = getConflicts(currentWork, data)
+  const proceedToConflictsOrApply = (
+    data: ExternalWorkData,
+    preResolved: Record<string, "current" | "external"> = {}
+  ) => {
+    const detected = getConflicts(currentWork, data).filter((c) => !(c.field in preResolved))
     setPendingData(data)
     if (detected.length > 0) {
-      const defaults: Record<string, "current" | "external"> = {}
+      const defaults: Record<string, "current" | "external"> = { ...preResolved }
       for (const c of detected) defaults[c.field] = "external"
       setResolutions(defaults)
       setConflicts(detected)
       setPhase("conflicts")
     } else {
-      applyUpdate(data, {})
+      applyUpdate(data, preResolved)
     }
   }
 
@@ -146,27 +150,36 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
     const includedSynopses = synopsisChoices.filter((s) => s.included)
     const includedCovers = coverChoices.filter((c) => c.included)
     const primaryCover = includedCovers.find((c) => c.isPrimary) ?? includedCovers[0]
+    const primarySynopsis = includedSynopses.find((s) => s.isPrimary) ?? includedSynopses[0]
+    const orderedSynopses = primarySynopsis
+      ? [primarySynopsis, ...includedSynopses.filter((s) => s !== primarySynopsis)]
+      : includedSynopses
+    const selectedSynopses = dedupeSynopsisEntries(orderedSynopses)
     const next: ExternalWorkData = {
       ...pendingData,
       coverUrl: primaryCover?.url ?? pendingData.coverUrl,
       multiCovers: includedCovers.map((c) => ({ url: c.url, source: c.source })),
-      synopsis: includedSynopses.length > 0
-        ? includedSynopses.map((s) => s.text).join("\n\n---\n\n")
-        : pendingData.synopsis,
-      multiSynopses: includedSynopses.map((s) => ({ source: s.source, text: s.text })),
-      synopsisIsMerged: includedSynopses.length > 1,
+      synopsis: selectedSynopses.find((s) => s.isPrimary)?.text ?? selectedSynopses[0]?.text ?? pendingData.synopsis,
+      multiSynopses: selectedSynopses.map((s) => ({ source: s.source as ExternalSourceId, text: s.text })),
+      synopsisIsMerged: false,
     }
-    proceedToConflictsOrApply(next)
+    // O usuário já escolheu sinopse/capa no multipick — não perguntar de novo
+    // na tela de conflitos (que comparava só o campo single e dava a impressão
+    // de que as outras escolhas estavam sendo descartadas).
+    const preResolved: Record<string, "current" | "external"> = {}
+    if (includedSynopses.length > 0) preResolved.synopsis = "external"
+    if (includedCovers.length > 0) preResolved.coverUrl = "external"
+    proceedToConflictsOrApply(next, preResolved)
   }
 
-  const toggleSynopsisIncluded = (source: ExternalSourceId) => {
+  const toggleSynopsisIncluded = (idx: number) => {
     setSynopsisChoices((prev) =>
-      prev.map((s) => (s.source === source ? { ...s, included: !s.included } : s))
+      prev.map((s, i) => (i === idx ? { ...s, included: !s.included } : s))
     )
   }
-  const setSynopsisPrimary = (source: ExternalSourceId) => {
+  const setSynopsisPrimary = (idx: number) => {
     setSynopsisChoices((prev) =>
-      prev.map((s) => ({ ...s, isPrimary: s.source === source, included: s.source === source ? true : s.included }))
+      prev.map((s, i) => ({ ...s, isPrimary: i === idx, included: i === idx ? true : s.included }))
     )
   }
   const toggleCoverIncluded = (url: string) => {
@@ -229,6 +242,29 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
     const coverUrl = pick("coverUrl", data.coverUrl)
     if (coverUrl !== undefined) updates.coverUrl = coverUrl
 
+    // Multipick: quando o usuário escolheu várias capas/sinopses, envia a lista
+    // completa pro server pra todas serem persistidas (não só a primária).
+    if (data.multiCovers && data.multiCovers.length > 0 && fieldResolutions["coverUrl"] !== "current") {
+      const primaryUrl = coverUrl ?? data.coverUrl ?? data.multiCovers[0]?.url
+      updates.covers = data.multiCovers.map((c) => ({
+        url: c.url,
+        source: c.source,
+        isPrimary: c.url === primaryUrl,
+      }))
+    }
+    if (data.multiSynopses && data.multiSynopses.length > 0 && fieldResolutions["synopsis"] !== "current") {
+      const selectedSynopses = dedupeSynopsisEntries(data.multiSynopses.map((s, index) => ({
+        text: s.text,
+        source: s.source,
+        isPrimary: s.text === data.synopsis || (data.synopsis == null && index === 0),
+      })))
+      updates.synopses = selectedSynopses.map((s) => ({
+        text: s.text,
+        source: s.source,
+        isPrimary: s.isPrimary,
+      }))
+    }
+
     const publicationStatus = pick("publicationStatus", data.publicationStatus)
     if (publicationStatus !== undefined) updates.publicationStatus = publicationStatus
 
@@ -250,7 +286,7 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
       if (Object.keys(cleaned).length > 0) updates.externalIds = cleaned
     }
 
-    let result: { data?: { id: string }; error?: string }
+    let result: { data?: { id: string; slug?: string }; error?: string }
     try {
       result = await updateWorkExternalData(workId, updates)
     } catch (err) {
@@ -268,12 +304,11 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
     toast.success("Dados atualizados com sucesso.")
     setOpen(false)
     setPhase("refreshing")
-    // Se o título mudou, o slug derivado também mudou — navegar pro novo slug
-    // pra evitar 404 (page.tsx resolve por slug derivado do título atual).
+    // Se o título mudou, navegar pelo UUID evita depender do cache slug->id.
+    // A rota /titles/{uuid} redireciona para o slug canônico lido do banco.
     const newTitle = typeof updates.title === "string" ? updates.title : null
     if (newTitle && newTitle !== currentWork.title) {
-      const newSlug = titleToSlug(newTitle) || workId
-      router.push(`/titles/${newSlug}`)
+      router.push(`/titles/${workId}`)
     } else {
       router.refresh()
     }
@@ -331,9 +366,9 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
               {synopsisChoices.length > 1 && (
                 <section className="space-y-2">
                   <h3 className="text-sm font-medium">Sinopses</h3>
-                  {synopsisChoices.map((s) => (
+                  {synopsisChoices.map((s, idx) => (
                     <div
-                      key={s.source}
+                      key={`${s.source}-${idx}`}
                       className={`rounded-md border p-3 space-y-2 ${
                         s.included ? "border-primary/60 bg-primary/5" : ""
                       }`}
@@ -344,7 +379,7 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
                           <label className="flex items-center gap-1.5 cursor-pointer">
                             <Checkbox
                               checked={s.included}
-                              onCheckedChange={() => toggleSynopsisIncluded(s.source)}
+                              onCheckedChange={() => toggleSynopsisIncluded(idx)}
                             />
                             Incluir
                           </label>
@@ -353,7 +388,7 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
                               type="radio"
                               name="synopsis-primary"
                               checked={s.isPrimary}
-                              onChange={() => setSynopsisPrimary(s.source)}
+                              onChange={() => setSynopsisPrimary(idx)}
                               className="accent-primary"
                             />
                             Principal
@@ -378,7 +413,7 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
                         }`}
                       >
                         <div className="relative w-full aspect-[2/3] overflow-hidden rounded bg-muted">
-                          <Image src={c.url} alt="" fill sizes="160px" unoptimized className="object-cover" />
+                          <Image src={getCoverImageSrc(c.url)} alt="" fill sizes="160px" unoptimized className="object-cover" />
                         </div>
                         <Badge variant="outline" className="text-[10px] w-full justify-center">{c.source}</Badge>
                         <div className="flex items-center justify-between text-[11px]">

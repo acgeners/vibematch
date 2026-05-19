@@ -1,5 +1,4 @@
 import { searchAniList, fetchAniListById, fetchAniListReviews } from "./anilist"
-import { extractUserRating } from "./index"
 import { searchJikanManga, fetchJikanMangaByTitle, fetchJikanMangaReviews } from "./jikan"
 import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews } from "./mangaupdates"
 import type { ExternalSearchResult, SourcedReview } from "./types"
@@ -71,16 +70,12 @@ async function reviewsFromResult(workTitles: string[], result: ExternalSearchRes
   return reviews
     .filter((text) => text.trim().length >= 100)
     .slice(0, 4)
-    .map((text) => {
-      const { rating, cleanText } = extractUserRating(text)
-      return {
-        source: result.source,
-        sourceTitle: result.title,
-        matchScore,
-        text: cleanText,
-        userRating: rating,
-      }
-    })
+    .map((text) => ({
+      source: result.source,
+      sourceTitle: result.title,
+      matchScore,
+      text,
+    }))
 }
 
 async function contextFromResult(result: ExternalSearchResult): Promise<string[]> {
@@ -102,21 +97,10 @@ async function contextFromResult(result: ExternalSearchResult): Promise<string[]
   ])
 }
 
-type ReviewSource = "mangaupdates" | "anilist" | "myanimelist"
-
-interface ReviewSourceFilter {
-  /**
-   * Fontes explicitamente marcadas como inválidas pelo usuário (work_external_ids.is_rejected).
-   * Sempre excluídas, mesmo que dêem match alto na busca por título.
-   */
-  rejectedSources?: ReadonlyArray<string>
-}
-
 async function findReviewCandidates(input: {
   title: string
   originalTitle?: string | null
   alternativeTitles?: string[] | null
-  filter?: ReviewSourceFilter
 }) {
   const queries = uniqueStrings([
     input.title,
@@ -124,37 +108,30 @@ async function findReviewCandidates(input: {
     ...(input.alternativeTitles ?? []),
   ]).slice(0, 5)
 
-  const isRejected = (source: ReviewSource): boolean =>
-    Boolean(input.filter?.rejectedSources?.includes(source))
-
   for (const query of queries) {
-    const fetchers: Array<Promise<ExternalSearchResult[]>> = []
-    if (!isRejected("mangaupdates")) fetchers.push(searchMangaUpdates(query))
-    if (!isRejected("anilist")) fetchers.push(searchAniList(query))
-    if (!isRejected("myanimelist")) {
-      fetchers.push(
-        searchJikanManga(query).then((items): ExternalSearchResult[] =>
-          items.map((item) => ({
-            id: `mal:${item.id}`,
-            source: "myanimelist",
-            title: item.title,
-            alternativeTitles: item.alternativeTitles,
-            synopsis: item.synopsis,
-            coverUrl: item.coverUrl,
-            year: item.year,
-            chapters: item.chapters,
-            score: item.score,
-            votes: item.scoredBy,
-          }))
-        )
-      )
-    }
+    const settled = await Promise.allSettled([
+      searchMangaUpdates(query),
+      searchAniList(query),
+      searchJikanManga(query).then((items): ExternalSearchResult[] =>
+        items.map((item) => ({
+          id: `mal:${item.id}`,
+          source: "myanimelist",
+          title: item.title,
+          alternativeTitles: item.alternativeTitles,
+          synopsis: item.synopsis,
+          coverUrl: item.coverUrl,
+          year: item.year,
+          chapters: item.chapters,
+          score: item.score,
+          votes: item.scoredBy,
+        }))
+      ),
+    ])
 
-    const settled = await Promise.allSettled(fetchers)
     const candidates = settled
       .flatMap((entry) => entry.status === "fulfilled" ? entry.value : [])
       .map((result) => ({ result, matchScore: bestTitleMatch(query, result) }))
-      .filter(({ matchScore }) => matchScore >= 0.72)
+      .filter(({ matchScore }) => matchScore >= 0.62)
       .sort((a, b) => b.matchScore - a.matchScore)
       .slice(0, 3)
 
@@ -168,18 +145,8 @@ export async function fetchExternalEvaluationContextForWork(input: {
   title: string
   originalTitle?: string | null
   alternativeTitles?: string[] | null
-  /**
-   * Fontes rejeitadas pelo user (work_external_ids.is_rejected). Quando presentes,
-   * são excluídas da busca por reviews/context.
-   */
-  rejectedSources?: ReadonlyArray<string>
 }): Promise<{ sourcedReviews: SourcedReview[]; externalContext: string[] }> {
-  const { candidates } = await findReviewCandidates({
-    title: input.title,
-    originalTitle: input.originalTitle,
-    alternativeTitles: input.alternativeTitles,
-    filter: { rejectedSources: input.rejectedSources },
-  })
+  const { candidates } = await findReviewCandidates(input)
   const workTitles = uniqueStrings([input.title, input.originalTitle, ...(input.alternativeTitles ?? [])])
   const [reviews, context] = await Promise.all([
     Promise.all(candidates.map(({ result }) => reviewsFromResult(workTitles, result))),
@@ -187,7 +154,7 @@ export async function fetchExternalEvaluationContextForWork(input: {
   ])
 
   return {
-    sourcedReviews: reviews.flat().slice(0, 12),
+    sourcedReviews: reviews.flat().slice(0, 8),
     externalContext: context.flat().slice(0, 6),
   }
 }

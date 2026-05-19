@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
+import { fetchHtmlWithCfFallback, isFlareSolverrEnabled } from "@/lib/external/flaresolverr"
 
 const COMICK_BASES = [
+  "https://api.comick.dev",
   "https://api.comick.io",
   "https://comick.dev",
   "https://api.comick.app",
@@ -21,12 +23,23 @@ async function fetchJson(url: URL) {
   for (const base of COMICK_BASES) {
     const nextUrl = new URL(url.pathname, base)
     nextUrl.search = url.search
+    const target = nextUrl.toString()
     try {
-      const res = await fetch(nextUrl.toString(), { headers: HEADERS, cache: "no-store" })
-      if (!res.ok) continue
-      const ct = res.headers.get("content-type") ?? ""
-      if (!ct.includes("json")) continue
-      return await res.json()
+      const res = await fetch(target, { headers: HEADERS, cache: "no-store" })
+      if (res.ok) {
+        const ct = res.headers.get("content-type") ?? ""
+        if (ct.includes("json")) return await res.json()
+      }
+    } catch {
+      // segue pro fallback
+    }
+    if (!isFlareSolverrEnabled()) continue
+    const fallback = await fetchHtmlWithCfFallback(target, HEADERS)
+    if (!fallback) continue
+    const preMatch = fallback.html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i)
+    const raw = (preMatch?.[1] ?? fallback.html).trim()
+    try {
+      return JSON.parse(raw)
     } catch {
       continue
     }

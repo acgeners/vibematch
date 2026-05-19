@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { ImageIcon } from "lucide-react"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
+import { getCoverImageSrc } from "@/lib/image-proxy"
 import type { WorkCover } from "@/types/domain"
 
 interface WorkCoverGalleryProps {
@@ -25,7 +26,7 @@ export function WorkCoverGallery({ title, fallbackUrl, covers }: WorkCoverGaller
       <div className="aspect-[2/3] overflow-hidden rounded-lg border bg-muted shadow-sm">
         {activeUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={activeUrl} alt={`Capa de ${title}`} className="h-full w-full object-cover" />
+          <img src={getCoverImageSrc(activeUrl)} alt={`Capa de ${title}`} className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-muted-foreground">
             <ImageIcon className="h-10 w-10" />
@@ -50,7 +51,7 @@ export function WorkCoverGallery({ title, fallbackUrl, covers }: WorkCoverGaller
                 title={PLATFORM_LABELS[cover.source] ?? cover.source}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={cover.url} alt={cover.source} className="h-full w-full object-cover" />
+                <img src={getCoverImageSrc(cover.url)} alt={cover.source} className="h-full w-full object-cover" />
                 <span className="absolute inset-x-0 bottom-0 bg-black/70 px-1 text-[8px] font-medium text-white truncate text-center">
                   {(PLATFORM_LABELS[cover.source] ?? cover.source).slice(0, 8)}
                 </span>

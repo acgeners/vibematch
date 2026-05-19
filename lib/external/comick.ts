@@ -1,7 +1,12 @@
 import type { PublicationStatus } from "@/types/domain"
 import type { ExternalSearchResult } from "./types"
+import { fetchHtmlWithCfFallback, isFlareSolverrEnabled } from "./flaresolverr"
 
 const COMICK_BASES = [
+  // api.comick.dev é o endpoint vivo (out 2026 em diante). api.comick.io
+  // passou a redirecionar pra comick.dev (frontend, 404). Mantemos os
+  // antigos como fallback caso voltem ao ar.
+  "https://api.comick.dev",
   "https://api.comick.io",
   "https://comick.dev",
   "https://api.comick.app",
@@ -53,17 +58,32 @@ function cleanText(value: unknown): string | undefined {
 
 async function fetchJson(pathname: string, search = "") {
   for (const base of COMICK_BASES) {
+    const url = new URL(pathname, base)
+    url.search = search
     try {
-      const url = new URL(pathname, base)
-      url.search = search
       const res = await fetch(url, {
         headers: HEADERS,
         cache: "no-store",
       })
-      if (!res.ok) continue
-      const contentType = res.headers.get("content-type") ?? ""
-      if (!contentType.includes("json")) continue
-      return await res.json()
+      if (res.ok) {
+        const contentType = res.headers.get("content-type") ?? ""
+        if (contentType.includes("json")) return await res.json()
+      }
+    } catch {
+      // segue pro fallback
+    }
+
+    // ComicK passou a entregar challenge Cloudflare nos 3 bases. Quando o
+    // FlareSolverr está configurado, tenta de novo via headless Chrome —
+    // a resposta vem como HTML envolvendo o JSON em <pre> (comportamento
+    // default do Chrome ao renderizar JSON cru).
+    if (!isFlareSolverrEnabled()) continue
+    const fallback = await fetchHtmlWithCfFallback(url.toString(), HEADERS)
+    if (!fallback) continue
+    const preMatch = fallback.html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i)
+    const raw = (preMatch?.[1] ?? fallback.html).trim()
+    try {
+      return JSON.parse(raw)
     } catch {
       continue
     }

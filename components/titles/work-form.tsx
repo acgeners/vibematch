@@ -1,11 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { useRouter } from "next/navigation"
-import { useFieldArray, useForm, useWatch } from "react-hook-form"
+import { useFieldArray, useForm, useWatch, type FieldPath } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
 import { titleToSlug } from "@/lib/utils"
+import { getCoverImageSrc } from "@/lib/image-proxy"
+import { dedupeSynopsisEntries, joinSynopsisBlocks, splitSynopsesFromText } from "@/lib/work-derived"
 import { workFormSchema } from "@/lib/validations/work.schema"
 import type { WorkFormValues, WorkFormInput } from "@/lib/validations/work.schema"
 import { ChipInput } from "@/components/ui/chip-input"
@@ -13,7 +15,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { ExternalSearch } from "@/components/titles/external-search"
 import { CoversManager } from "@/components/titles/covers-manager"
 import type { ExternalWorkData } from "@/lib/external/types"
-import { createWork, createWorksBatch, findDuplicateWorkByTitle, updateWork } from "@/server/actions/works"
+import type { ExistingWorkMatch } from "@/server/actions/external"
+import { createWork, createWorksBatch, findDuplicateWorkById, findDuplicateWorkByTitle, updateWork } from "@/server/actions/works"
 import type { DuplicateWorkForForm } from "@/server/actions/works"
 import { GENRE_NAMES, TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
 import { listGenreCatalog } from "@/server/actions/external"
@@ -274,9 +277,11 @@ const DUPLICATE_FIELD_CONFIGS = [
   { name: "title", label: "Título" },
   { name: "original_title", label: "Título original" },
   { name: "synopsis", label: "Sinopse" },
+  { name: "synopses", label: "Sinopses (todas as fontes)" },
   { name: "genres", label: "Gêneros" },
   { name: "tags", label: "Tags" },
   { name: "cover_url", label: "Capa" },
+  { name: "covers", label: "Capas (todas as fontes)" },
   { name: "publication_status", label: "Status de publicação" },
   { name: "year", label: "Ano de início" },
   { name: "year_end", label: "Ano de fim" },
@@ -293,10 +298,6 @@ const DUPLICATE_FIELD_CONFIGS = [
   { name: "cmx_rating", label: "ComicK - nota" },
   { name: "cmx_votes", label: "ComicK - votos" },
   { name: "extra_platform_ratings", label: "Outras fontes" },
-  ...CRITERION_SLUGS.map((slug) => ({
-    name: slug,
-    label: CRITERIA_INFO[slug]?.name ?? slug,
-  })),
 ] as const satisfies ReadonlyArray<{ name: keyof WorkFormValues; label: string }>
 
 type DuplicateFieldName = (typeof DUPLICATE_FIELD_CONFIGS)[number]["name"]
@@ -392,11 +393,19 @@ const formatDuplicateValue = (value: unknown): string => {
       .map((item) => {
         if (typeof item === "object" && item != null) {
           const record = item as Record<string, unknown>
+          if (record.text != null && record.source != null) {
+            const text = String(record.text)
+            const snippet = text.length > 80 ? `${text.slice(0, 80)}…` : text
+            return `[${record.source}] ${snippet}`
+          }
+          if (record.url != null && record.source != null) {
+            return `[${record.source}] ${record.url}`
+          }
           return [record.platform, record.rating, record.votes].filter((part) => part != null && part !== "").join(" · ")
         }
         return String(item)
       })
-      .join(", ")
+      .join("\n")
   }
   if (typeof normalized === "object") return JSON.stringify(normalized)
   return String(normalized)
@@ -474,6 +483,16 @@ const normalizePostReadingScoresInValues = (values: WorkFormValues): WorkFormVal
     const normalized = normalizePostReadingScore(next[field.name])
     next[field.name] = normalized
   }
+  if (typeof next.synopsis === "string") {
+    const parts = splitSynopsesFromText(next.synopsis)
+    const previousSynopses = next.synopses ?? []
+    next.synopses = dedupeSynopsisEntries(parts.map((text, index) => ({
+      source: previousSynopses.find((s) => s.text?.trim() === text)?.source ?? "manual",
+      text,
+      isPrimary: previousSynopses.find((s) => s.text?.trim() === text)?.isPrimary ?? index === 0,
+    })))
+    next.synopsis = joinSynopsisBlocks(next.synopses.map((s) => s.text))
+  }
   return next
 }
 
@@ -498,11 +517,13 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     control,
     getValues,
     reset,
+    trigger,
     formState: { errors, isSubmitting },
   } = useForm<WorkFormInput, unknown, WorkFormValues>({
     resolver: zodResolver(workFormSchema),
     defaultValues,
   })
+  const externalSearchButtonRef = useRef<HTMLButtonElement>(null)
 
   const [batchSubmitting, setBatchSubmitting] = useState(false)
   const [batchDrafts, setBatchDrafts] = useState<BatchDraft[]>([])
@@ -554,7 +575,8 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
   const [sourceOptions, setSourceOptions] = useState<ExternalSourceOption[]>([])
   const [genreSuggestions, setGenreSuggestions] = useState<string[]>(GENRE_NAMES)
   const [postReadingWeights] = useState<Record<PostReadingScoreField, number>>(readPostReadingWeights)
-  const coverPreviewFailed = coverPreviewFailedUrl === coverUrl
+  const coverPreviewSrc = getCoverImageSrc(coverUrl)
+  const coverPreviewFailed = coverPreviewFailedUrl === coverPreviewSrc
   const hasProgress = READING_STATUSES_WITH_PROGRESS.has(personalStatus ?? "")
   const postReadingScores = useWatch({
     control,
@@ -686,7 +708,10 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     mode: DuplicateResolutionMode
   ) => {
     if (workId) return false
-    const duplicate = await findDuplicateWorkByTitle(values.title, values.alternative_titles ?? [])
+    const duplicate = await findDuplicateWorkByTitle(
+      values.title,
+      [values.original_title ?? "", ...(values.alternative_titles ?? [])].filter(Boolean)
+    )
     if (!duplicate) return false
 
     setTopFeedback(null)
@@ -731,6 +756,12 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
       }
     }
 
+    mergedValues.external_ids = {
+      ...(duplicateResolution.existing.values.external_ids ?? {}),
+      ...(duplicateResolution.incoming.external_ids ?? {}),
+    }
+    mergedValues.ai_justifications = {}
+
     const result = await updateWork(duplicateResolution.existing.id, mergedValues)
     setTopFeedback(null)
 
@@ -762,7 +793,6 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     if (data.title) setValue("title", data.title)
     if (data.originalTitle) setValue("original_title", data.originalTitle)
     if (data.alternativeTitles?.length) setValue("alternative_titles", data.alternativeTitles)
-    if (data.synopsis) setValue("synopsis", data.synopsis)
     if (data.coverUrl) setValue("cover_url", data.coverUrl)
     if (data.multiCovers?.length) {
       const primaryUrl = data.coverUrl
@@ -773,12 +803,17 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
       })))
     }
     if (data.multiSynopses?.length) {
-      const primaryText = data.multiSynopses[0]?.text
-      setValue("synopses", data.multiSynopses.map((s) => ({
+      const synopses = dedupeSynopsisEntries(data.multiSynopses.map((s, index) => ({
         source: s.source,
         text: s.text,
-        isPrimary: s.text === primaryText,
+        isPrimary: index === 0,
       })))
+      setValue("synopses", synopses)
+      setValue("synopsis", joinSynopsisBlocks(synopses.map((s) => s.text)))
+    } else if (data.synopsis) {
+      const synopsis = joinSynopsisBlocks([data.synopsis])
+      setValue("synopsis", synopsis)
+      setValue("synopses", synopsis ? [{ source: "manual", text: synopsis, isPrimary: true }] : [])
     }
     if (data.year) setValue("year", data.year)
     if (data.yearEnd) setValue("year_end", data.yearEnd)
@@ -786,24 +821,16 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     if (data.totalChapters) setValue("total_chapters", data.totalChapters)
     if (data.genres?.length) setValue("genres", filterKnownGenres(data.genres), { shouldDirty: true, shouldValidate: true })
     if (data.tags?.length) setValue("tags", data.tags)
-    if (data.muRating != null) {
-      setValue("mu_rating", data.muRating)
-    }
-    if (data.muVotes != null) {
-      setValue("mu_votes", data.muVotes)
-    }
-    if (data.cmxRating != null) {
-      setValue("cmx_rating", data.cmxRating)
-    }
-    if (data.cmxVotes != null) {
-      setValue("cmx_votes", data.cmxVotes)
-    }
-    if (data.apRating != null) {
-      setValue("ap_rating", data.apRating)
-    }
-    if (data.apVotes != null) {
-      setValue("ap_votes", data.apVotes)
-    }
+    // "0 com 0 votos" significa "ainda sem rating" — não preenche o form pra
+    // não confundir com avaliação real.
+    const hasRealRating = (rating?: number | null, votes?: number | null) =>
+      rating != null && rating > 0 && (votes == null || votes > 0)
+    if (hasRealRating(data.muRating, data.muVotes)) setValue("mu_rating", data.muRating!)
+    if (data.muVotes != null && data.muVotes > 0) setValue("mu_votes", data.muVotes)
+    if (hasRealRating(data.cmxRating, data.cmxVotes)) setValue("cmx_rating", data.cmxRating!)
+    if (data.cmxVotes != null && data.cmxVotes > 0) setValue("cmx_votes", data.cmxVotes)
+    if (hasRealRating(data.apRating, data.apVotes)) setValue("ap_rating", data.apRating!)
+    if (data.apVotes != null && data.apVotes > 0) setValue("ap_votes", data.apVotes)
     if (data.externalPlatformRatings?.length) {
       const current = getValues("extra_platform_ratings") ?? []
       const currentByName = new Map(
@@ -843,6 +870,77 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     }
   }
 
+  const handleExternalDuplicateUpdate = async (match: ExistingWorkMatch, data: ExternalWorkData) => {
+    handleExternalSelect(data)
+    scrollToTop()
+    setTopFeedback("Preparando atualização da obra existente...")
+
+    try {
+      const existing = await findDuplicateWorkById(match.id)
+      if (!existing) {
+        toast.error("Não consegui carregar a obra existente para comparar os dados.")
+        return
+      }
+
+      const parsed = workFormSchema.safeParse(getValues())
+      if (!parsed.success) {
+        const firstError = Object.values(parsed.error.flatten().fieldErrors).flat()[0]
+        toast.error(firstError ?? "Confira os dados antes de atualizar a obra existente.")
+        return
+      }
+
+      const incoming = normalizePostReadingScoresInValues(parsed.data)
+      setDuplicateResolution({
+        mode: "create",
+        existing,
+        incoming,
+        choices: buildDuplicateChoices(existing.values, incoming),
+      })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao preparar atualização da obra existente.")
+    } finally {
+      setTopFeedback(null)
+    }
+  }
+
+  const validateEnteredField = (input: HTMLInputElement) => {
+    if (input.id === "year_range") {
+      void trigger(["year", "year_end"])
+      return
+    }
+    if (!input.name) return
+    void trigger(input.name as FieldPath<WorkFormValues>)
+  }
+
+  const handleFormKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key !== "Enter") return
+    if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return
+    if (event.nativeEvent.isComposing) return
+
+    const target = event.target
+    if (!(target instanceof HTMLInputElement)) return
+
+    const type = target.type.toLowerCase()
+    if (["button", "submit", "reset", "checkbox", "radio", "file", "image", "color", "range"].includes(type)) {
+      return
+    }
+
+    event.preventDefault()
+    validateEnteredField(target)
+    target.blur()
+  }
+
+  const handleTitleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return
+    if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return
+    if (event.nativeEvent.isComposing) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    void trigger("title")
+    externalSearchButtonRef.current?.click()
+  }
+
   const onSubmit = async (rawValues: WorkFormValues) => {
     const values = normalizePostReadingScoresInValues(rawValues)
     scrollToTop()
@@ -858,6 +956,12 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     if (result.error) {
       setTopFeedback(null)
       const firstError = Object.values(result.error as Record<string, string[]>).flat()[0]
+      const duplicateError = Object.values(result.error as Record<string, string[]>)
+        .flat()
+        .some((message) => message?.toLowerCase().includes("já existe"))
+      if (!workId && duplicateError && await checkDuplicateBeforeCreate(values, "create")) {
+        return
+      }
       if (!workId && result.data?.id) {
         toast.warning(firstError ?? "Obra criada, mas houve um aviso ao finalizar.")
         router.push(`/titles/${result.data.id}`)
@@ -870,9 +974,11 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     toast.success(workId ? "Obra atualizada!" : "Obra criada!")
     // Quando título muda em update, o slug derivado também muda — usar o novo
     // slug evita 404 (page.tsx resolve por slug computado a partir do título).
-    const newSlug = values.title ? titleToSlug(values.title) : ""
+    const newSlug = result.data?.slug ?? (values.title ? titleToSlug(values.title) : "")
     const destination = workId
-      ? (newSlug || workSlug || workId)
+      // Depois de renomear, navegar pelo UUID evita depender do cache slug->id.
+      // A página /titles/{uuid} busca direto e redireciona para o slug canônico novo.
+      ? workId
       : (newSlug || result.data?.id || workSlug || workId)
     router.push(`/titles/${destination}`)
   }
@@ -1145,7 +1251,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
   )
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+    <form onSubmit={handleSubmit(onSubmit)} onKeyDown={handleFormKeyDown} className="space-y-6">
       {actionButtons}
       {topFeedback && (
         <div
@@ -1258,6 +1364,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
                 <Input
                   id="title"
                   {...register("title")}
+                  onKeyDown={handleTitleKeyDown}
                   placeholder="Nome da obra"
                   className="pr-9"
                 />
@@ -1273,8 +1380,10 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
                 )}
               </div>
               <ExternalSearch
+                searchButtonRef={externalSearchButtonRef}
                 titleQuery={titleValue ?? ""}
                 onSelect={handleExternalSelect}
+                onDuplicateUpdate={handleExternalDuplicateUpdate}
               />
             </div>
             {errors.title && (
@@ -1455,10 +1564,10 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
                   {coverUrl && !coverPreviewFailed ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={coverUrl}
+                      src={coverPreviewSrc}
                       alt="Capa da obra"
                       className="h-full w-full object-cover"
-                      onError={() => setCoverPreviewFailedUrl(coverUrl ?? null)}
+                      onError={() => setCoverPreviewFailedUrl(coverPreviewSrc)}
                     />
                   ) : (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-center text-muted-foreground">

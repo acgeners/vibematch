@@ -13,20 +13,23 @@ export interface AnimePlanetClientResult {
   votes?: number
 }
 
-export async function fetchComicKClient(title: string): Promise<ComicKClientResult | null> {
+export async function fetchComicKClient(title: string, hid?: string): Promise<ComicKClientResult | null> {
   try {
-    const searchRes = await fetch(`/api/comick/search?q=${encodeURIComponent(title)}`)
-    if (!searchRes.ok) return null
+    let selectedHid = hid?.trim()
+    if (!selectedHid) {
+      const searchRes = await fetch(`/api/comick/search?q=${encodeURIComponent(title)}`)
+      if (!searchRes.ok) return null
 
-    const data: unknown[] = await searchRes.json()
-    if (!Array.isArray(data) || data.length === 0) return null
+      const data: unknown[] = await searchRes.json()
+      if (!Array.isArray(data) || data.length === 0) return null
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const item = data[0] as any
-    const hid: string = item.hid
-    if (!hid) return null
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const item = data[0] as any
+      selectedHid = item.hid
+      if (!selectedHid) return null
+    }
 
-    const detailRes = await fetch(`/api/comick/${hid}`)
+    const detailRes = await fetch(`/api/comick/${selectedHid}`)
     if (!detailRes.ok) return null
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,9 +62,12 @@ export async function fetchComicKClient(title: string): Promise<ComicKClientResu
   }
 }
 
-export async function fetchAnimePlanetClient(title: string): Promise<AnimePlanetClientResult | null> {
+export async function fetchAnimePlanetClient(title: string, slug?: string): Promise<AnimePlanetClientResult | null> {
   try {
-    const res = await fetch(`/api/animeplanet?title=${encodeURIComponent(title)}`)
+    const params = new URLSearchParams()
+    if (title) params.set("title", title)
+    if (slug) params.set("slug", slug)
+    const res = await fetch(`/api/animeplanet?${params.toString()}`)
     if (!res.ok) return null
     return await res.json()
   } catch {

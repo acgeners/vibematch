@@ -42,6 +42,21 @@ function cleanHtml(text: string | undefined): string | undefined {
     .trim() || undefined
 }
 
+function uniqueTitles(values: Array<string | null | undefined>, primary?: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  const primaryKey = primary?.trim().toLowerCase()
+  for (const value of values) {
+    const title = value?.trim()
+    if (!title) continue
+    const key = title.toLowerCase()
+    if (!key || key === primaryKey || seen.has(key)) continue
+    seen.add(key)
+    out.push(title)
+  }
+  return out
+}
+
 function parseMangaUpdatesComments(html: string): string[] {
   const comments: string[] = []
   const rowRegex = /<div class="row g-0" data-cy="comment-row">([\s\S]*?)(?=<div class="row g-0" data-cy="comment-row">|<div class="p-2 pt-2 pb-2 text">|<\/div><script nonce=)/g
@@ -83,7 +98,8 @@ export async function searchMangaUpdates(search: string): Promise<ExternalSearch
 
     return results.map((r) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rec = (r as any).record ?? {}
+      const item = r as any
+      const rec = item.record ?? {}
       // Prefer the real "rating" field (simple average) over "bayesian_rating" (smoothed
       // toward the global mean). Bayesian compresses the spread which makes high-vote
       // niche works look more average than they are.
@@ -96,12 +112,12 @@ export async function searchMangaUpdates(search: string): Promise<ExternalSearch
       const associatedTitles = (rec.associated ?? [])
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .map((item: any) => (item.title ?? item) as string)
-        .filter(Boolean)
+      const alternativeTitles = uniqueTitles([item.hit_title, ...associatedTitles], rec.title)
       return {
         id: `mu:${rec.series_id}`,
         source: "mangaupdates" as const,
         title: rec.title ?? "",
-        alternativeTitles: associatedTitles.length > 0 ? associatedTitles : undefined,
+        alternativeTitles: alternativeTitles.length > 0 ? alternativeTitles : undefined,
         synopsis: cleanHtml(rec.description),
         coverUrl: rec.image?.url?.original ?? undefined,
         year: rec.year ? parseInt(rec.year) : undefined,

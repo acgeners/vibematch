@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { fetchHtmlWithCfFallback } from "@/lib/external/flaresolverr"
+import { parseAnimePlanetDetailHtml } from "@/lib/external/animeplanet"
 
 const AP_BASE = "https://www.anime-planet.com"
 const AP_META = new Set(["all", "tags", "genres", "top-100", "recommendations", "browse"])
+const AP_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -17,9 +19,18 @@ const HEADERS = {
 
 export async function GET(req: NextRequest) {
   const title = req.nextUrl.searchParams.get("title")
-  if (!title) return NextResponse.json(null)
+  const knownSlug = req.nextUrl.searchParams.get("slug")
+  if (!title && !knownSlug) return NextResponse.json(null)
 
   try {
+    if (knownSlug && AP_SLUG_RE.test(knownSlug) && !AP_META.has(knownSlug)) {
+      const detailResult = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${knownSlug}`, HEADERS)
+      const parsed = detailResult ? parseAnimePlanetDetailHtml(detailResult.html) : null
+      if (parsed) return NextResponse.json(parsed)
+    }
+
+    if (!title) return NextResponse.json(null)
+
     const listResult = await fetchHtmlWithCfFallback(
       `${AP_BASE}/manga/all?name=${encodeURIComponent(title)}`,
       HEADERS
@@ -50,17 +61,7 @@ export async function GET(req: NextRequest) {
       detailHtml = detailResult.html
     }
 
-    const m = detailHtml.match(/class="avgRating"[^>]*title="([\d.]+) out of 5 from ([\d,]+) votes"/)
-    if (!m) return NextResponse.json(null)
-
-    const raw = parseFloat(m[1])
-    const votes = parseInt(m[2].replace(/,/g, ""), 10)
-    if (isNaN(raw) || isNaN(votes)) return NextResponse.json(null)
-
-    return NextResponse.json({
-      rating: Math.round(raw * 2 * 10) / 10,
-      votes,
-    })
+    return NextResponse.json(parseAnimePlanetDetailHtml(detailHtml))
   } catch {
     return NextResponse.json(null)
   }
