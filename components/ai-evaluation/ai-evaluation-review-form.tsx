@@ -5,9 +5,9 @@ import Image from "next/image"
 import { toast } from "sonner"
 import { submitAiReview } from "@/server/actions/ai"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { cn } from "@/lib/utils"
 import type { AiEvaluation } from "@/types/domain"
 
 interface AiEvaluationReviewFormProps {
@@ -97,6 +97,7 @@ export function AiEvaluationReviewForm({
         currentScore: currentScores?.[s.criterion_slug],
         justification: s.justification,
         wasEdited: false,
+        mode: "suggested" as "current" | "suggested" | "custom",
       })),
     [currentScores, evaluation.ai_evaluation_scores]
   )
@@ -128,11 +129,36 @@ export function AiEvaluationReviewForm({
     }
   })()
 
-  const updateScore = (slug: string, value: number) => {
+  const selectMode = (slug: string, mode: "current" | "suggested" | "custom") => {
+    setScores((prev) =>
+      prev.map((s) => {
+        if (s.criterionSlug !== slug) return s
+        const value =
+          mode === "current" && s.currentScore !== undefined
+            ? s.currentScore
+            : mode === "suggested"
+              ? s.suggestedScore
+              : s.acceptedScore
+        return {
+          ...s,
+          mode,
+          acceptedScore: value,
+          wasEdited: value !== s.suggestedScore,
+        }
+      })
+    )
+  }
+
+  const updateCustomScore = (slug: string, value: number) => {
     setScores((prev) =>
       prev.map((s) =>
         s.criterionSlug === slug
-          ? { ...s, acceptedScore: value, wasEdited: value !== s.suggestedScore }
+          ? {
+              ...s,
+              mode: "custom",
+              acceptedScore: value,
+              wasEdited: value !== s.suggestedScore,
+            }
           : s
       )
     )
@@ -142,6 +168,7 @@ export function AiEvaluationReviewForm({
     setScores((prev) =>
       prev.map((s) => ({
         ...s,
+        mode: "suggested",
         acceptedScore: s.suggestedScore,
         wasEdited: false,
       }))
@@ -150,26 +177,31 @@ export function AiEvaluationReviewForm({
 
   const submitScores = async (scoresToSubmit: typeof scores) => {
     setSubmitting(true)
-    const result = await submitAiReview({
-      evaluationId: evaluation.id,
-      workId,
-      scores: scoresToSubmit.map((s) => ({
-        criterionSlug: s.criterionSlug,
-        acceptedScore: s.acceptedScore,
-        wasEdited: s.wasEdited,
-      })),
-    })
+    try {
+      const result = await submitAiReview({
+        evaluationId: evaluation.id,
+        workId,
+        scores: scoresToSubmit.map((s) => ({
+          criterionSlug: s.criterionSlug,
+          acceptedScore: s.acceptedScore,
+          wasEdited: s.wasEdited,
+        })),
+      })
 
-    setSubmitting(false)
+      if (result.error) {
+        toast.error(`Erro ao salvar revisão: ${result.error}`)
+        return
+      }
 
-    if (result.error) {
-      toast.error(`Erro ao salvar revisão: ${result.error}`)
-      return
+      toast.success("Notas salvas.")
+      const scoreMap = Object.fromEntries(scoresToSubmit.map((s) => [s.criterionSlug, s.acceptedScore]))
+      onSaved(scoreMap)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(`Erro ao salvar revisão: ${message}`)
+    } finally {
+      setSubmitting(false)
     }
-
-    toast.success("Notas salvas.")
-    const scoreMap = Object.fromEntries(scoresToSubmit.map((s) => [s.criterionSlug, s.acceptedScore]))
-    onSaved(scoreMap)
   }
 
   const handleSubmit = () => submitScores(scores)
@@ -356,45 +388,101 @@ export function AiEvaluationReviewForm({
         {scores.map((s) => {
           const info = CRITERIA_INFO[s.criterionSlug]
           const hasCurrentScore = s.currentScore !== undefined
+          const isCurrent = s.mode === "current"
+          const isSuggested = s.mode === "suggested"
+          const isCustom = s.mode === "custom"
           return (
-            <div key={s.criterionSlug} className="grid grid-cols-1 gap-1 p-3 border rounded-md">
-              <div className="flex items-center justify-between">
+            <div key={s.criterionSlug} className="space-y-2 p-3 border rounded-md">
+              <div className="flex items-center justify-between gap-2">
                 <Label className="text-sm font-medium">
                   {info?.emoji} {info?.name ?? s.criterionSlug}
                 </Label>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  {hasCurrentScore && (
-                    <button
-                      type="button"
-                      className="hover:text-foreground transition-colors"
-                      title="Clique para usar nota atual"
-                      onClick={() => updateScore(s.criterionSlug, s.currentScore!)}
-                    >
-                      Atual: <strong>{s.currentScore!.toFixed(1)}</strong>
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="hover:text-foreground transition-colors"
-                    title="Clique para usar sugestão da IA"
-                    onClick={() => updateScore(s.criterionSlug, s.suggestedScore)}
-                  >
-                    Sugerido: <strong>{s.suggestedScore.toFixed(1)}</strong>
-                  </button>
-                  {s.wasEdited && (
-                    <span className="text-amber-600 font-medium">Editado</span>
-                  )}
-                </div>
+                {s.wasEdited && (
+                  <span className="text-xs text-amber-600 font-medium">Editado</span>
+                )}
               </div>
-              <Input
-                type="number"
-                step={0.5}
-                min={0}
-                max={10}
-                value={s.acceptedScore}
-                onChange={(e) => updateScore(s.criterionSlug, parseFloat(e.target.value) || 0)}
-                className="h-8 text-sm"
-              />
+
+              <div
+                className={cn(
+                  "grid gap-1 rounded-md border bg-muted/30 p-1",
+                  hasCurrentScore ? "grid-cols-3" : "grid-cols-2"
+                )}
+              >
+                {hasCurrentScore && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={isCurrent ? "default" : "ghost"}
+                    onClick={() => selectMode(s.criterionSlug, "current")}
+                    className="h-auto flex-col gap-0.5 py-1.5"
+                  >
+                    <span className="text-[10px] uppercase tracking-wide opacity-80">
+                      Atual
+                    </span>
+                    <span className="font-mono text-base font-bold leading-none">
+                      {s.currentScore!.toFixed(1)}
+                    </span>
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={isSuggested ? "default" : "ghost"}
+                  onClick={() => selectMode(s.criterionSlug, "suggested")}
+                  className="h-auto flex-col gap-0.5 py-1.5"
+                >
+                  <span className="text-[10px] uppercase tracking-wide opacity-80">
+                    Sugerido
+                  </span>
+                  <span className="font-mono text-base font-bold leading-none">
+                    {s.suggestedScore.toFixed(1)}
+                  </span>
+                </Button>
+                {isCustom ? (
+                  <div
+                    className={cn(
+                      buttonVariants({ variant: "default", size: "sm" }),
+                      "h-auto flex-col gap-0.5 py-1.5"
+                    )}
+                  >
+                    <span className="text-[10px] uppercase tracking-wide opacity-80">
+                      Personalizado
+                    </span>
+                    <input
+                      type="number"
+                      step={0.5}
+                      min={0}
+                      max={10}
+                      autoFocus
+                      value={s.acceptedScore}
+                      onChange={(e) =>
+                        updateCustomScore(
+                          s.criterionSlug,
+                          parseFloat(e.target.value) || 0
+                        )
+                      }
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-16 rounded bg-background/20 text-center font-mono text-base font-bold leading-none text-primary-foreground outline-none ring-1 ring-background/30 focus:ring-2 focus:ring-background/60"
+                    />
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => selectMode(s.criterionSlug, "custom")}
+                    className="h-auto flex-col gap-0.5 py-1.5"
+                  >
+                    <span className="text-[10px] uppercase tracking-wide opacity-80">
+                      Personalizado
+                    </span>
+                    <span className="font-mono text-base font-bold leading-none">
+                      —
+                    </span>
+                  </Button>
+                )}
+              </div>
+
               {s.justification && (
                 <p className="text-xs text-muted-foreground">{s.justification}</p>
               )}

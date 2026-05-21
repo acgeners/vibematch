@@ -1,9 +1,9 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
-import { CalendarDays, CheckSquare, Cpu, Gauge, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
+import { ArrowDown, ArrowUp, CalendarDays, CheckSquare, Cpu, Gauge, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation, skipAiEvaluation } from "@/server/actions/ai"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
@@ -13,6 +13,13 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import {
@@ -33,7 +40,7 @@ interface PendingWork {
   personal_status_id: number | null
   cover_url?: string | null
   final_score?: number | null
-  matchedFilters?: Array<"pending" | "low-confidence" | "outdated-model">
+  matchedFilters?: Array<"pending" | "review-pending" | "low-confidence" | "outdated-model">
   evaluation?: {
     confidence: number | null
     modelName: string | null
@@ -74,6 +81,45 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   // Selection mode
   const [selectionMode, setSelectionMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+
+  // Sort
+  type SortField = "default" | "final_score" | "confidence" | "evaluatedAt" | "modelName"
+  const [sortField, setSortField] = useState<SortField>("default")
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+
+  const sortedWorks = useMemo(() => {
+    if (sortField === "default") return pendingWorks
+
+    const mult = sortDir === "asc" ? 1 : -1
+
+    const getKey = (w: PendingWork): string | number | null => {
+      switch (sortField) {
+        case "final_score":
+          return w.final_score ?? null
+        case "confidence":
+          return w.evaluation?.confidence ?? null
+        case "evaluatedAt": {
+          const v = w.evaluation?.evaluatedAt
+          return v ? new Date(v).getTime() : null
+        }
+        case "modelName":
+          return w.evaluation?.modelName ?? null
+      }
+    }
+
+    return [...pendingWorks].sort((a, b) => {
+      const ka = getKey(a)
+      const kb = getKey(b)
+      // Nulos vão sempre para o fim, independente da direção.
+      if (ka == null && kb == null) return 0
+      if (ka == null) return 1
+      if (kb == null) return -1
+      if (typeof ka === "string" && typeof kb === "string") {
+        return ka.localeCompare(kb, "pt-BR") * mult
+      }
+      return ((ka as number) - (kb as number)) * mult
+    })
+  }, [pendingWorks, sortField, sortDir])
 
   const toggleSelectionMode = () => {
     setSelectionMode((v) => !v)
@@ -142,7 +188,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   }
 
   const startQueue = async (works?: PendingWork[]) => {
-    const source = works ?? pendingWorks.slice(0, Math.max(1, Math.min(queueSize, pendingWorks.length)))
+    const source = works ?? sortedWorks.slice(0, Math.max(1, Math.min(queueSize, sortedWorks.length)))
     if (source.length === 0) return
 
     queueCancelledRef.current = false
@@ -178,7 +224,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
     setReviewData(results[0])
   }
 
-  const handleSaved = async (_acceptedScores?: Record<string, number>) => {
+  const handleSaved = async () => {
     if (queueResults.length > 0 && queueReviewIndex < queueResults.length - 1) {
       const nextIndex = queueReviewIndex + 1
       setQueueReviewIndex(nextIndex)
@@ -358,6 +404,36 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                 Selecionar
               </Button>
 
+              <span className="text-xs text-muted-foreground ml-2">Ordenar:</span>
+              <Select
+                value={sortField}
+                onValueChange={(v) => setSortField(v as SortField)}
+              >
+                <SelectTrigger size="sm" className="h-7 w-[160px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">Padrão</SelectItem>
+                  <SelectItem value="final_score">Nota Final</SelectItem>
+                  <SelectItem value="confidence">Confiança IA</SelectItem>
+                  <SelectItem value="evaluatedAt">Data avaliação</SelectItem>
+                  <SelectItem value="modelName">Modelo</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="icon-xs"
+                onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+                disabled={sortField === "default"}
+                title={sortDir === "asc" ? "Crescente" : "Decrescente"}
+              >
+                {sortDir === "asc" ? (
+                  <ArrowUp className="h-3 w-3" />
+                ) : (
+                  <ArrowDown className="h-3 w-3" />
+                )}
+              </Button>
+
               <div className="flex-1" />
 
               <span className="text-xs text-muted-foreground">Quantos:</span>
@@ -379,7 +455,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
       )}
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        {pendingWorks.map((work) => (
+        {sortedWorks.map((work) => (
           <Card
             key={work.id}
             className={[
@@ -402,18 +478,18 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                 )}
 
                 {/* Cover thumb (esquerda) — aspect 2:3 de manga */}
-                <div className="relative h-20 w-[54px] shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted shadow-sm">
+                <div className="relative h-28 w-[76px] shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted shadow-sm">
                   {work.cover_url ? (
                     <Image
                       src={work.cover_url}
                       alt=""
                       fill
-                      sizes="54px"
+                      sizes="76px"
                       unoptimized
                       className="object-cover"
                     />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">
+                    <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
                       —
                     </div>
                   )}
@@ -426,6 +502,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                       <WorkTitleLink
                         title={work.title}
                         workId={work.id}
+                        href={`/titles/${work.id}`}
                         className="text-sm font-semibold hover:underline line-clamp-2 break-words"
                       />
                     </span>
@@ -450,7 +527,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
 
                 {/* Ações (direita) — stack vertical, Reavaliar destaque */}
                 {!selectionMode && (
-                  <div className="flex shrink-0 flex-col items-stretch gap-1.5">
+                  <div className="flex shrink-0 flex-col items-stretch gap-2.5">
                     <Button
                       size="sm"
                       onClick={() => handleEvaluate(work)}
@@ -581,7 +658,12 @@ function FilterBadges({
     <div className="flex flex-wrap gap-1 mt-1">
       {matchedFilters.includes("pending") && (
         <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:border-slate-400/20 dark:bg-slate-400/10 dark:text-slate-300">
-          {evaluation ? "marcada como pendente" : "sem avaliação IA"}
+          sem avaliação IA
+        </span>
+      )}
+      {matchedFilters.includes("review-pending") && (
+        <span className="inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:border-sky-400/25 dark:bg-sky-400/12 dark:text-sky-200">
+          aguardando revisão
         </span>
       )}
       {matchedFilters.includes("low-confidence") && evaluation?.confidence != null && (

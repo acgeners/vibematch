@@ -188,8 +188,14 @@ export async function searchAnimePlanet(search: string): Promise<ExternalSearchR
       if (META.has(slug) || hasExcludedTitleSuffix(rawTitle) || seen.has(slug)) continue
       seen.add(slug)
 
-      const img = chunk.match(/data-src="([^"]+)"|src="([^"]+)"/)
-      const coverPath = img?.[1] ?? img?.[2]
+      const dataSrc = chunk.match(/data-src="([^"]+)"/)?.[1]
+      const rawSrc = chunk.match(/<img[^>]+\ssrc="([^"]+)"/)?.[1]
+      const coverPath =
+        dataSrc && !dataSrc.startsWith("data:")
+          ? dataSrc
+          : rawSrc && !rawSrc.startsWith("data:")
+            ? rawSrc
+            : undefined
       const synopsis = cleanHtml(chunk.match(/<p[^>]*>([\s\S]*?)<\/p>/)?.[1])
       const statusText = cleanHtml(chunk.match(/(?:Status|Release):?<\/[^>]+>\s*<[^>]+>([^<]+)/i)?.[1])
       const title = decodeHtml(rawTitle) ?? rawTitle

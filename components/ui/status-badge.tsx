@@ -116,12 +116,14 @@ interface AiStatusBadgeProps {
 
 const AI_STATUS_COLORS: Record<string, string> = {
   pending: "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-400/12 dark:text-amber-200 dark:border-amber-400/25",
+  review_pending: "bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-400/12 dark:text-sky-200 dark:border-sky-400/25",
   done: "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-400/12 dark:text-emerald-200 dark:border-emerald-400/25",
   skipped: "bg-gray-100 text-gray-600 border-gray-200 dark:bg-slate-400/10 dark:text-slate-300 dark:border-slate-400/20",
 }
 
 const AI_STATUS_LABELS: Record<string, string> = {
-  pending: "Pendente IA",
+  pending: "Sem avaliação IA",
+  review_pending: "Aguardando revisão",
   done: "Avaliado",
   skipped: "Pulado",
 }

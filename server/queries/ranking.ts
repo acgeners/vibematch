@@ -19,6 +19,12 @@ export interface RankingEntry {
   platformAvg: number | null
   totalVotes: number
   predictedIsStub: boolean
+  personalFit: number | null
+  finalScoreConfidence: number | null
+  knnScore: number | null
+  alignmentScore: number | null
+  alignmentJustification: string | null
+  alignmentAt: string | null
   manualScore: number | null
   publicationStatus: string
   publicationStatusId: number | null
@@ -48,6 +54,10 @@ export type RankingSortBy =
   | "total_votes"
   | "chapters"
   | "title"
+  | "personal_fit"
+  | "final_confidence"
+  | "knn_score"
+  | "alignment_score"
   | `crit_${string}`
 
 export interface SortLevel {
@@ -56,6 +66,8 @@ export interface SortLevel {
 }
 
 export interface RankingFilters {
+  search?: string
+  includeArchived?: boolean
   criterionMin?: Partial<Record<string, number>>
   criterionMax?: Partial<Record<string, number>>
   publicationStatus?: string[]
@@ -241,14 +253,26 @@ export async function getRanking(
       id, title, publication_status_id, personal_status_id, ai_eval_status,
       total_chapters, chapters_read, manual_score, is_archived,
       synopsis_quality, observations, year,
-      calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, platform_avg, total_votes),
+      calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, platform_avg, total_votes, personal_fit, final_score_confidence, knn_score, alignment_score, alignment_justification, alignment_at),
       category_scores(criterion_slug, score),
       work_tags(tags(id, name, slug, tag_group_id)),
       work_genres(genres(name)),
       work_covers(url, is_primary, position),
       work_synopses(text, is_primary, position)
     `)
-    .eq("is_archived", false)
+
+  if (!filters.includeArchived) {
+    worksQuery = worksQuery.eq("is_archived", false)
+  }
+
+  if (filters.search?.trim()) {
+    const term = filters.search.trim().replace(/[%,]/g, " ").trim()
+    if (term) {
+      worksQuery = worksQuery.or(
+        `title.ilike.%${term}%,original_title.ilike.%${term}%`
+      )
+    }
+  }
 
   if (allowedIds) worksQuery = worksQuery.in("id", allowedIds)
   // If only exclude filters are present, apply them via .not(in)
@@ -328,6 +352,12 @@ export async function getRanking(
       platformAvg: w.calculated_scores?.platform_avg ?? null,
       totalVotes: w.calculated_scores?.total_votes ?? 0,
       predictedIsStub: w.calculated_scores?.predicted_is_stub ?? true,
+      personalFit: w.calculated_scores?.personal_fit ?? null,
+      finalScoreConfidence: w.calculated_scores?.final_score_confidence ?? null,
+      knnScore: w.calculated_scores?.knn_score ?? null,
+      alignmentScore: w.calculated_scores?.alignment_score ?? null,
+      alignmentJustification: w.calculated_scores?.alignment_justification ?? null,
+      alignmentAt: w.calculated_scores?.alignment_at ?? null,
       manualScore: w.manual_score,
       publicationStatus: getPublicationStatusNameById(publicationStatusId) ?? "Unknown",
       publicationStatusId,
@@ -481,6 +511,22 @@ export async function getRanking(
     if (field === "calc_score") return m * (roundedScore(a.calcScore) - roundedScore(b.calcScore))
     if (field === "pred_score") return m * (roundedScore(a.predictedScore) - roundedScore(b.predictedScore))
     if (field === "platform_avg") return m * (roundedScore(a.platformAvg) - roundedScore(b.platformAvg))
+    if (field === "personal_fit") {
+      const av = a.personalFit ?? -Infinity
+      const bv = b.personalFit ?? -Infinity
+      return m * (av - bv)
+    }
+    if (field === "final_confidence") {
+      const av = a.finalScoreConfidence ?? -Infinity
+      const bv = b.finalScoreConfidence ?? -Infinity
+      return m * (av - bv)
+    }
+    if (field === "knn_score") return m * (roundedScore(a.knnScore) - roundedScore(b.knnScore))
+    if (field === "alignment_score") {
+      const av = a.alignmentScore ?? -Infinity
+      const bv = b.alignmentScore ?? -Infinity
+      return m * (av - bv)
+    }
     if (field === "total_votes") return m * (a.totalVotes - b.totalVotes)
     if (field === "chapters") return m * ((a.totalChapters ?? -Infinity) - (b.totalChapters ?? -Infinity))
     if (field.startsWith("crit_")) {

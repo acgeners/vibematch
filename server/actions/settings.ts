@@ -9,6 +9,33 @@ import { computeCalibration, type CalibrationDiff } from "@/lib/calculations/cal
 
 const execFileAsync = promisify(execFile)
 
+/**
+ * Liga/desliga o stacker. Quando true, `recalculateAll` usa o Ridge segundo-nível
+ * pra produzir `final_score`; quando false, mantém inverse-variance legado.
+ * Dispara recalc automaticamente pra `final_score` refletir a escolha.
+ */
+export async function setStackerEnabled(enabled: boolean) {
+  const supabase = createAdminClient()
+  const { data: config } = await supabase
+    .from("formula_config")
+    .select("id")
+    .limit(1)
+    .single()
+  if (!config) throw new Error("formula_config não encontrado")
+
+  const { error } = await supabase
+    .from("formula_config")
+    .update({ stacker_enabled: enabled, updated_at: new Date().toISOString() })
+    .eq("id", config.id)
+  if (error) throw new Error(error.message)
+
+  const result = await recalculateAll()
+  revalidatePath("/settings")
+  revalidatePath("/ranking")
+  revalidatePath("/titles")
+  return result
+}
+
 export interface ScoreWeightUpdate {
   slug: string
   weight: number

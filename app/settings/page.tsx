@@ -1,11 +1,13 @@
 import type { ReactNode } from "react"
 import {
   ArrowRight,
+  Brain,
   Bug,
   Compass,
   Database,
   Gauge,
   Settings,
+  Sparkles,
   Tags,
 } from "lucide-react"
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -13,6 +15,8 @@ import { Header } from "@/components/layout/header"
 import { ScrollToTop } from "@/components/layout/scroll-to-top"
 import { FormulaConfigForm } from "@/components/settings/formula-config-form"
 import { CalibrationPanel } from "@/components/settings/calibration-panel"
+import { WeightSuggestionsPanel } from "@/components/settings/weight-suggestions-panel"
+import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
 import type { FormulaConfig } from "@/types/domain"
@@ -21,9 +25,18 @@ import { cn } from "@/lib/utils"
 async function getSettingsData() {
   const supabase = createAdminClient()
 
-  const [configRes, snapshot] = await Promise.all([
+  const [configRes, snapshot, embeddingsCount, worksCount] = await Promise.all([
     supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
     getCalibrationSnapshot(),
+    supabase
+      .from("work_embeddings")
+      .select("work_id", { count: "exact", head: true })
+      .then((r) => r.count ?? 0),
+    supabase
+      .from("works")
+      .select("id", { count: "exact", head: true })
+      .eq("is_archived", false)
+      .then((r) => r.count ?? 0),
   ])
 
   if (configRes.error) throw new Error(configRes.error.message)
@@ -32,18 +45,23 @@ async function getSettingsData() {
   return {
     config: configRes.data?.[0] as FormulaConfig,
     snapshot,
+    embeddingsCount,
+    worksCount,
   }
 }
 
 const SECTIONS = [
   { id: "calibration", title: "Calibração", icon: <Gauge />, accent: "cyan" as const },
+  { id: "weights", title: "Sugestão de pesos", icon: <Sparkles />, accent: "violet" as const },
+  { id: "embeddings", title: "Embeddings", icon: <Brain />, accent: "emerald" as const },
+  { id: "ai-calibration", title: "Calibração IA", icon: <Sparkles />, accent: "amber" as const },
   { id: "tags", title: "Consolidação de tags", icon: <Tags />, accent: "violet" as const },
   { id: "sync", title: "Sincronização", icon: <Database />, accent: "emerald" as const },
   { id: "debug", title: "Parâmetros (debug)", icon: <Bug />, accent: "slate" as const },
 ]
 
 export default async function SettingsPage() {
-  const { config, snapshot } = await getSettingsData()
+  const { config, snapshot, embeddingsCount, worksCount } = await getSettingsData()
 
   return (
     <div className="w-full max-w-6xl space-y-4">
@@ -66,6 +84,42 @@ export default async function SettingsPage() {
         accent="cyan"
       >
         <CalibrationPanel config={config} snapshot={snapshot} />
+      </SettingsSection>
+
+      <SettingsSection
+        id="weights"
+        title="Sugestão de pesos a partir do seu histórico"
+        description="Treina uma regressão restrita aos 9 critérios contra suas notas reais e sugere pesos que minimizam o erro. Você revisa antes de aplicar."
+        icon={<Sparkles />}
+        accent="violet"
+      >
+        <WeightSuggestionsPanel />
+      </SettingsSection>
+
+      <SettingsSection
+        id="embeddings"
+        title="Embeddings das obras"
+        description="Representação vetorial via OpenAI para 'obras parecidas' e kNN predictor. Cacheado por obra — só re-embeda quando sinopse/tags/critérios mudam."
+        icon={<Brain />}
+        accent="emerald"
+      >
+        <EmbeddingsPanel initialCachedCount={embeddingsCount} totalWorks={worksCount} />
+      </SettingsSection>
+
+      <SettingsSection
+        id="ai-calibration"
+        title="Calibração de critérios IA"
+        description="Auditoria por obra com auto-apply de sugestões e detecção de viés sistemático nos category_scores."
+        icon={<Sparkles />}
+        accent="amber"
+      >
+        <a
+          href="/settings/calibration"
+          className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/55 bg-amber-500/10 px-3 py-1.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-300"
+        >
+          Abrir página de calibração
+          <ArrowRight className="h-3.5 w-3.5" />
+        </a>
       </SettingsSection>
 
       <SettingsSection
@@ -171,7 +225,7 @@ function IndexSpacer() {
   )
 }
 
-type Accent = "cyan" | "violet" | "emerald" | "slate"
+type Accent = "cyan" | "violet" | "emerald" | "slate" | "amber"
 
 const ACCENT_STYLES: Record<
   Accent,
@@ -225,6 +279,16 @@ const ACCENT_STYLES: Record<
     cardBorder: "border-slate-500/40",
     cardHoverBorder: "hover:border-slate-500/70",
     cardHoverShadow: "hover:shadow-slate-500/20",
+  },
+  amber: {
+    rail: "bg-gradient-to-b from-amber-500/80 to-amber-500/30",
+    iconBg: "bg-amber-500/20",
+    iconText: "text-amber-600 dark:text-amber-300",
+    ring: "ring-amber-500/30",
+    cardBg: "bg-amber-500/15",
+    cardBorder: "border-amber-500/40",
+    cardHoverBorder: "hover:border-amber-500/70",
+    cardHoverShadow: "hover:shadow-amber-500/25",
   },
 }
 

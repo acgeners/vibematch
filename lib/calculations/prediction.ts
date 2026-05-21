@@ -37,6 +37,10 @@ const NUMERIC_FEATURE_NAMES = [
   "Cps.N",
   "SinopseScore",
   "ObsAdjustment",
+  "MeanPostScore",
+  "LovedTagOverlap",
+  "AvoidedTagOverlap",
+  "CriterionFitScore",
 ] as const
 
 const CATEGORICAL_FEATURE_NAMES = ["Status"] as const
@@ -51,6 +55,15 @@ export interface PredictionInput {
   synopsisQuality: string | null
   observationAdjustment: number
   publicationStatus: string
+  /**
+   * Sinais pré-computados a partir do TasteProfile + post-reading-scores.
+   * Todos podem ser `null` quando não há perfil ou dado correspondente —
+   * o MedianImputer lida no pipeline.
+   */
+  meanPostScore: number | null
+  lovedTagOverlap: number | null
+  avoidedTagOverlap: number | null
+  criterionFitScore: number | null
 }
 
 export interface PredictionWithDistance {
@@ -88,6 +101,10 @@ function buildNumericRow(input: PredictionInput): NumericRow {
   row.push(normalizeChapters(input.totalChapters))
   row.push(input.synopsisQuality ? SINOPSE_MAP[input.synopsisQuality] ?? null : null)
   row.push(Math.min(Math.max(input.observationAdjustment, -0.30), 0.30))
+  row.push(input.meanPostScore ?? null)
+  row.push(input.lovedTagOverlap ?? null)
+  row.push(input.avoidedTagOverlap ?? null)
+  row.push(input.criterionFitScore ?? null)
   return row
 }
 
@@ -216,3 +233,80 @@ export function trainPredictor(
 }
 
 export { NUMERIC_FEATURE_NAMES, CATEGORICAL_FEATURE_NAMES }
+
+/**
+ * Out-of-fold predictions: pra cada item, qual seria a predição do Ridge
+ * se ele *não estivesse* no conjunto de treino? Usado pelo stacker (final.ts)
+ * pra evitar leakage — sem isso, ridgeScore == manualScore nas obras de
+ * treino e o stacker decide overfit absurdo.
+ *
+ * Retorna `null` quando há poucas amostras pra fazer CV honesta. Caller deve
+ * cair pro inverse-variance nesse caso.
+ */
+export function ridgeOutOfFoldPredictions(
+  inputs: PredictionInput[],
+  targets: number[],
+  kFolds = 5,
+): number[] | null {
+  if (inputs.length !== targets.length) {
+    throw new Error("ridgeOutOfFoldPredictions: inputs/targets length mismatch")
+  }
+  const n = inputs.length
+  const MIN_FOR_OOF = 20
+  if (n < MIN_FOR_OOF) return null
+
+  // Mesmo critério de folds usado em trainPredictor: LOOCV abaixo de 50, k-fold acima.
+  const effectiveK = Math.max(2, Math.min(kFolds, n))
+  const useFolds = n < 50 ? n : effectiveK
+
+  // Shuffle determinístico (mesma seed do RidgeCV em ridge.ts)
+  const order = Array.from({ length: n }, (_, i) => i)
+  let state = 42
+  const rand = () => {
+    state = (state * 1664525 + 1013904223) >>> 0
+    return state / 0x100000000
+  }
+  for (let i = n - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1))
+    ;[order[i], order[j]] = [order[j], order[i]]
+  }
+
+  const folds: number[][] = Array.from({ length: useFolds }, () => [])
+  for (let i = 0; i < n; i++) folds[i % useFolds].push(order[i])
+
+  const predictions = new Array<number>(n).fill(NaN)
+  for (const fold of folds) {
+    const testIdx = new Set(fold)
+    const trainInputs: PredictionInput[] = []
+    const trainTargets: number[] = []
+    const testInputs: PredictionInput[] = []
+    const testOrder: number[] = []
+    for (let i = 0; i < n; i++) {
+      if (testIdx.has(i)) {
+        testInputs.push(inputs[i])
+        testOrder.push(i)
+      } else {
+        trainInputs.push(inputs[i])
+        trainTargets.push(targets[i])
+      }
+    }
+    if (trainInputs.length === 0 || testInputs.length === 0) continue
+    const predictor = trainPredictor(trainInputs, trainTargets)
+    if (predictor.isStub) {
+      // Treino do fold é pequeno demais — usa fallback constante (mean),
+      // nem é OOF honesto mas o stacker ainda funciona.
+      const fallback =
+        trainTargets.length > 0
+          ? trainTargets.reduce((a, b) => a + b, 0) / trainTargets.length
+          : 7.0
+      for (const idx of testOrder) predictions[idx] = fallback
+      continue
+    }
+    const preds = predictor.predict(testInputs)
+    for (let i = 0; i < testOrder.length; i++) {
+      predictions[testOrder[i]] = preds[i]
+    }
+  }
+
+  return predictions
+}

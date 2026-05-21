@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Image from "next/image"
-import { Loader2, ShieldCheck } from "lucide-react"
+import { ImageOff, Loader2, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import {
@@ -51,6 +51,7 @@ export function RevalidateSourcesDialog({ workId }: RevalidateSourcesDialogProps
     Partial<Record<ExternalSourceId, SourceCandidateOption[]>>
   >({})
   const [selection, setSelection] = useState<Partial<Record<ExternalSourceId, SelectionValue>>>({})
+  const [brokenCovers, setBrokenCovers] = useState<Set<string>>(new Set())
 
   const handleOpen = async () => {
     setOpen(true)
@@ -188,7 +189,7 @@ export function RevalidateSourcesDialog({ workId }: RevalidateSourcesDialogProps
                             className="mt-1.5"
                           />
                           <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded border bg-muted">
-                            {c.coverUrl ? (
+                            {c.coverUrl && !brokenCovers.has(c.coverUrl) ? (
                               <Image
                                 src={c.coverUrl}
                                 alt=""
@@ -196,8 +197,19 @@ export function RevalidateSourcesDialog({ workId }: RevalidateSourcesDialogProps
                                 sizes="48px"
                                 unoptimized
                                 className="object-cover"
+                                onError={() =>
+                                  setBrokenCovers((prev) => {
+                                    const next = new Set(prev)
+                                    next.add(c.coverUrl!)
+                                    return next
+                                  })
+                                }
                               />
-                            ) : null}
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                <ImageOff className="h-4 w-4" />
+                              </div>
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium line-clamp-2">{c.title}</p>
@@ -213,7 +225,9 @@ export function RevalidateSourcesDialog({ workId }: RevalidateSourcesDialogProps
                   )}
                   <label
                     className={`flex items-center gap-3 rounded-md border p-2 cursor-pointer transition-colors ${
-                      value === "rejected" ? "border-rose-300 bg-rose-50" : "hover:bg-muted/40"
+                      value === "rejected"
+                        ? "border-rose-500/60 bg-rose-500/15 text-rose-700 dark:text-rose-200"
+                        : "hover:bg-muted/40"
                     }`}
                   >
                     <input
@@ -228,7 +242,9 @@ export function RevalidateSourcesDialog({ workId }: RevalidateSourcesDialogProps
                   </label>
                   <label
                     className={`flex items-center gap-3 rounded-md border p-2 cursor-pointer transition-colors ${
-                      value === "none" ? "border-amber-300 bg-amber-50" : "hover:bg-muted/40"
+                      value === "none"
+                        ? "border-amber-500/60 bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                        : "hover:bg-muted/40"
                     }`}
                   >
                     <input

@@ -1,12 +1,4 @@
-import type { PublicationStatus, SynopsisQuality } from "@/types/domain"
-
-const STATUS_MULTIPLIER: Record<string, number> = {
-  Completed: 1.01,
-  Ongoing: 0.995,
-  Hiatus: 0.95,
-  Cancelled: 0.98,
-  Unknown: 0.98,
-}
+import type { SynopsisQuality } from "@/types/domain"
 
 const SYNOPSIS_MULTIPLIER: Record<string, number> = {
   "♥♥♥♥": 1.04,
@@ -19,8 +11,6 @@ export interface NotaCalcInputs {
   iaEvalNormalized: number
   platformAvg: number | null
   totalVotes: number
-  chaptersNormalized: number
-  publicationStatus: PublicationStatus
   synopsisQuality: SynopsisQuality | null
   observationAdjustment: number
   /** sqrt(pseudo_votes) para o blend IA(n) vs Nota.M */
@@ -31,20 +21,21 @@ export interface NotaCalcInputs {
  * Nota.IA — score determinístico principal.
  *
  * 1. Blend entre IA(n) e Nota.M usando sqrt dos votos como peso
- * 2. Multiplica por bônus de capítulos: (1 + Cps.N / 200)
- * 3. Multiplica por fator de status
- * 4. Multiplica por fator de sinopse
- * 5. Soma Obs adjustment em pontos de nota, clamp ∈ [-0.30, +0.30]
+ * 2. Multiplica por fator de sinopse (♥..♥♥♥♥)
+ * 3. Soma Obs adjustment em pontos de nota, clamp ∈ [-0.30, +0.30]
  *    (positivo = bônus, negativo = penalidade)
- * 6. Clamp 0–10
+ * 4. Clamp 0–10
+ *
+ * Status (`publication_status`) e capítulos (`Cps.N`) NÃO entram aqui — são
+ * features do Ridge (Nota.Pr), que aprende seus pesos contra `manual_score`.
+ * Aplicá-los também aqui criaria intervenção duplicada (multiplicador fixo
+ * em Nota.Calc + peso aprendido no Ridge) que enfraquece a calibração.
  */
 export function calculateNotaCalc(inputs: NotaCalcInputs): number {
   const {
     iaEvalNormalized,
     platformAvg,
     totalVotes,
-    chaptersNormalized,
-    publicationStatus,
     synopsisQuality,
     observationAdjustment,
     pseudoVotesBlend,
@@ -63,15 +54,12 @@ export function calculateNotaCalc(inputs: NotaCalcInputs): number {
     blend = iaEvalNormalized
   }
 
-  const chapterBonus = 1 + chaptersNormalized / 200
-  const statusMult = STATUS_MULTIPLIER[publicationStatus] ?? 0.98
   const synopsisMult = synopsisQuality
     ? (SYNOPSIS_MULTIPLIER[synopsisQuality] ?? 1)
     : 1
   const obsAdjustment = Math.min(Math.max(observationAdjustment, -0.30), 0.30)
 
-  const result =
-    blend * chapterBonus * statusMult * synopsisMult + obsAdjustment
+  const result = blend * synopsisMult + obsAdjustment
 
   return Math.max(0, Math.min(10, result))
 }

@@ -6,7 +6,7 @@ import {
   LayoutDashboard,
   BookOpen,
   Trophy,
-  Sparkles,
+  Wand2,
   Upload,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -15,7 +15,7 @@ const MOBILE_NAV = [
   { href: "/", icon: LayoutDashboard, label: "Início" },
   { href: "/titles", icon: BookOpen, label: "Títulos" },
   { href: "/ranking", icon: Trophy, label: "Ranking" },
-  { href: "/ai-evaluation", icon: Sparkles, label: "IA" },
+  { href: "/recommendations", icon: Wand2, label: "Recom." },
   { href: "/import", icon: Upload, label: "Import" },
 ]
 

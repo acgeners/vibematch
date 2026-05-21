@@ -10,20 +10,45 @@ import {
   computeGlobalPlatformMean,
   normalizeChapters,
   calculateNotaCalc,
-  calculateNotaFinal,
 } from "@/lib/calculations"
+import { calculateNotaFinalChoosing } from "@/lib/calculations/final"
 import { calculateGPTWithDiagnostics } from "@/lib/calculations/gpt"
-import { trainPredictor, type PredictionInput } from "@/lib/calculations/prediction"
+import {
+  ridgeOutOfFoldPredictions,
+  trainPredictor,
+  type PredictionInput,
+} from "@/lib/calculations/prediction"
 import { computeCalibration } from "@/lib/calculations/calibration"
+import { calculateFinalScoreConfidence } from "@/lib/calculations/confidence"
+import { fitStacker, type StackerCoefficients } from "@/lib/calculations/stacker"
+import { predictKnn, DEFAULT_K, type KnnNeighbor } from "@/lib/ml/knn-predictor"
+import { getKnnNeighborsBatch } from "@/server/queries/knn-neighbors"
 import { percentile } from "@/lib/ml/preprocessing"
+import {
+  computePersonalFit,
+  criterionAlignment,
+  weightedTagOverlap,
+} from "@/lib/ai-recommendation/personal-fit"
+import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
+import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import type {
   CategoryScoreMap,
   ScoreWeight,
   PlatformRating,
   FormulaConfig,
-  PublicationStatus,
   SynopsisQuality,
 } from "@/types/domain"
+
+const POST_SCORE_FIELDS = [
+  "post_story_score",
+  "post_fl_score",
+  "post_ml_score",
+  "post_character_development_score",
+  "post_pacing_score",
+  "post_art_visual_score",
+  "post_impact_immersion_score",
+  "post_originality_score",
+] as const
 
 interface RawWork {
   id: string
@@ -33,10 +58,20 @@ interface RawWork {
   observation_adjustment: number
   manual_score: number | null
   is_archived: boolean
+  post_story_score: number | null
+  post_fl_score: number | null
+  post_ml_score: number | null
+  post_character_development_score: number | null
+  post_pacing_score: number | null
+  post_art_visual_score: number | null
+  post_impact_immersion_score: number | null
+  post_originality_score: number | null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   category_scores: any[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   platform_ratings: any[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  work_tags?: any[]
 }
 
 interface WorkComputed {
@@ -49,6 +84,13 @@ interface WorkComputed {
   categoryScores: CategoryScoreMap
   platformRatings: PlatformRating[]
   totalVotes: number
+  tags: Array<{ name: string; group: string | null }>
+  /** Média simples dos 8 post-reading-scores setados. `null` se nenhum. */
+  meanPostScore: number | null
+  // sinais derivados do TasteProfile (preenchidos quando profile não é stub)
+  lovedTagOverlap: number | null
+  avoidedTagOverlap: number | null
+  criterionFitScore: number | null
   // calculados em memória
   iaEvalRaw: number
   iaEvalNormalized: number
@@ -58,6 +100,12 @@ interface WorkComputed {
   predictedScore: number | null
   predictionDistance: number | null
   finalScore: number | null
+  personalFit: number | null
+  finalScoreConfidence: number | null
+  // kNN sobre embeddings (Passo 5) — null quando obra não tem embedding ou < 3 vizinhos rotulados
+  knnScore: number | null
+  knnNeighbors: Array<KnnNeighbor & { weight: number }> | null
+  knnDistanceTo5thNeighbor: number | null
 }
 
 function buildWork(raw: RawWork): WorkComputed {
@@ -75,6 +123,25 @@ function buildWork(raw: RawWork): WorkComputed {
       vote_count: Number(p.vote_count ?? 0),
     })
   )
+  const tags: Array<{ name: string; group: string | null }> = (raw.work_tags ?? [])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((wt: any) => wt?.tags)
+    .filter((t: { name?: string | null } | null | undefined): t is { name: string; tag_group_id?: string | null } => Boolean(t?.name))
+    .map((t: { name: string; tag_group_id?: string | null }) => ({
+      name: t.name,
+      group: t.tag_group_id ? TAG_GROUP_ID_TO_NORMALIZED_SLUG[t.tag_group_id] ?? null : null,
+    }))
+
+  // Média simples dos post-reading-scores presentes. Quando nenhum é setado,
+  // fica null — o MedianImputer cuida no Ridge.
+  const postValues: number[] = []
+  for (const field of POST_SCORE_FIELDS) {
+    const v = raw[field]
+    if (v != null) postValues.push(Number(v))
+  }
+  const meanPostScore = postValues.length > 0
+    ? postValues.reduce((a, b) => a + b, 0) / postValues.length
+    : null
 
   return {
     id: raw.id,
@@ -86,6 +153,11 @@ function buildWork(raw: RawWork): WorkComputed {
     categoryScores,
     platformRatings,
     totalVotes: sumVotes(platformRatings),
+    tags,
+    meanPostScore,
+    lovedTagOverlap: null,
+    avoidedTagOverlap: null,
+    criterionFitScore: null,
     iaEvalRaw: 0,
     iaEvalNormalized: 0,
     chaptersNormalized: 0,
@@ -94,6 +166,11 @@ function buildWork(raw: RawWork): WorkComputed {
     predictedScore: null,
     predictionDistance: null,
     finalScore: null,
+    personalFit: null,
+    finalScoreConfidence: null,
+    knnScore: null,
+    knnNeighbors: null,
+    knnDistanceTo5thNeighbor: null,
   }
 }
 
@@ -107,6 +184,10 @@ function buildPredictionInput(w: WorkComputed): PredictionInput {
     synopsisQuality: w.synopsisQuality,
     observationAdjustment: w.observationAdjustment,
     publicationStatus: w.publicationStatus,
+    meanPostScore: w.meanPostScore,
+    lovedTagOverlap: w.lovedTagOverlap,
+    avoidedTagOverlap: w.avoidedTagOverlap,
+    criterionFitScore: w.criterionFitScore,
   }
 }
 
@@ -123,19 +204,25 @@ function buildPredictionInput(w: WorkComputed): PredictionInput {
 export async function recalculateAll() {
   const supabase = createAdminClient()
 
-  const [worksRes, weightsRes, configRes] = await Promise.all([
+  const [worksRes, weightsRes, configRes, tasteProfile] = await Promise.all([
     supabase
       .from("works")
       .select(
         `id, publication_status_id, total_chapters, synopsis_quality,
          observation_adjustment, manual_score, is_archived,
+         post_story_score, post_fl_score, post_ml_score,
+         post_character_development_score, post_pacing_score,
+         post_art_visual_score, post_impact_immersion_score,
+         post_originality_score,
          category_scores(criterion_slug, score),
-         platform_ratings(id, platform, rating, vote_count)`
+         platform_ratings(id, platform, rating, vote_count),
+         work_tags(tags(name, tag_group_id))`
       )
       .eq("is_archived", false)
       .limit(2000),
     supabase.from("score_weights").select("*").eq("is_active", true),
     supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
+    loadCurrentTasteProfile(),
   ])
 
   if (worksRes.error) throw new Error(worksRes.error.message)
@@ -216,12 +303,23 @@ export async function recalculateAll() {
       iaEvalNormalized: w.iaEvalNormalized,
       platformAvg: w.platformAvg,
       totalVotes: w.totalVotes,
-      chaptersNormalized: w.chaptersNormalized,
-      publicationStatus: (w.publicationStatus as PublicationStatus) ?? "Unknown",
       synopsisQuality: w.synopsisQuality,
       observationAdjustment: w.observationAdjustment,
       pseudoVotesBlend,
     })
+  }
+
+  // ---------- 2b) Features derivadas do TasteProfile pro Ridge ----------
+  // Pré-computa loved/avoided tag overlap e criterion_fit a partir do perfil
+  // atual. Quando o perfil é stub ou inexistente, todas ficam null e o
+  // MedianImputer lida no pipeline. Mesmo profile usado em personal_fit (5b).
+  const profileForFeatures = tasteProfile && !tasteProfile.is_stub ? tasteProfile.profile : null
+  if (profileForFeatures) {
+    for (const w of works) {
+      w.lovedTagOverlap = weightedTagOverlap(w.tags, profileForFeatures.loved_tags)
+      w.avoidedTagOverlap = weightedTagOverlap(w.tags, profileForFeatures.avoided_tags)
+      w.criterionFitScore = criterionAlignment(w.categoryScores, profileForFeatures.criterion_preferences)
+    }
   }
 
   // ---------- 3) Treinar Ridge e prever Nota.Pr ----------
@@ -253,6 +351,33 @@ export async function recalculateAll() {
     return Math.exp(-(distance - distanceP95) / distanceP95)
   }
 
+  // ---------- 3b) kNN sobre embeddings ----------
+  // Pra cada obra, busca os k vizinhos rotulados mais próximos no espaço
+  // de embeddings e prediz via kernel Gaussiano. Quando a obra-alvo também
+  // é rotulada, a RPC exclui ela mesma do conjunto candidato — efetivamente
+  // leave-one-out por construção (sem leakage no stacker).
+  //
+  // Tolerante a falhas: obras sem embedding (ou se a RPC falhar) ficam com
+  // knnScore = null e são tratadas pelo stacker como ausência de feature.
+  const allWorkIds = works.map((w) => w.id)
+  let knnBatch: Map<string, KnnNeighbor[]>
+  try {
+    knnBatch = await getKnnNeighborsBatch(allWorkIds, DEFAULT_K)
+  } catch (err) {
+    console.warn(
+      "[recalculateAll] kNN batch falhou — seguindo sem essa feature:",
+      err instanceof Error ? err.message : err,
+    )
+    knnBatch = new Map()
+  }
+  for (const w of works) {
+    const neighbors = knnBatch.get(w.id) ?? []
+    const knnResult = predictKnn(neighbors)
+    w.knnScore = knnResult.prediction
+    w.knnNeighbors = knnResult.neighbors.length > 0 ? knnResult.neighbors : null
+    w.knnDistanceTo5thNeighbor = knnResult.distanceTo5thNeighbor
+  }
+
   // ---------- 4) Calibrar MAEs com Nota.Calc + Nota.Pr ----------
   const calibrationAfterPr = computeCalibration(
     works.map((w) => ({
@@ -269,21 +394,60 @@ export async function recalculateAll() {
   const newRmseCalc = calibrationAfterPr.rmseCalc
   const newRmsePredicted = calibrationAfterPr.rmsePredicted
 
-  // ---------- 5) NotaFinal com RMSEs novos ----------
-  // Quando calibração é insuficiente (RMSE null) ou predição é stub,
-  // calculateNotaFinal cai pra calcScore puro — sem blend baseado em chute.
-  // Distância ao centróide reduz o peso de Nota.Pr pra outliers.
+  // ---------- 4b) Fit do stacker (Ridge segundo-nível) ----------
+  // Usa out-of-fold predictions do Ridge pra evitar leakage. Trainset == obras
+  // com manual_score. Stacker fica como NULL quando treino < 30 ou Ridge é stub.
+  //
+  // kNN entra como 3ª feature SE estiver disponível pra TODAS as obras de
+  // treino (knnScore não-null em todas). Caso contrário, treina com 2 features
+  // (Calc + Ridge) — fail-safe pra obras de treino sem embedding ou com poucos
+  // vizinhos rotulados.
+  let stackerCoefs: StackerCoefficients | null = null
+  if (!predictor.isStub && trainSet.length >= 30) {
+    const oofRidge = ridgeOutOfFoldPredictions(trainInputs, trainTargets)
+    if (oofRidge) {
+      const trainKnnComplete = trainSet.every((w) => w.knnScore != null)
+      stackerCoefs = fitStacker(
+        trainSet.map((w, i) => ({
+          calc: w.calcScore,
+          ridge: oofRidge[i],
+          knn: trainKnnComplete ? (w.knnScore as number) : null,
+          manual: w.manualScore as number,
+        })),
+      )
+    }
+  }
+
+  // ---------- 5) NotaFinal — stacker (se habilitado e disponível) ou inverse-variance ----------
+  const useStacker = (config.stacker_enabled ?? false) && stackerCoefs != null
   for (const w of works) {
     if (w.predictedScore == null || predictor.isStub) {
+      // Calibração insuficiente em qualquer caminho — cai pra Calc puro.
       w.finalScore = w.calcScore
     } else {
-      w.finalScore = calculateNotaFinal(
+      w.finalScore = calculateNotaFinalChoosing(
         w.calcScore,
         w.predictedScore,
         newRmseCalc,
         newRmsePredicted,
-        distanceFactor(w.predictionDistance)
+        distanceFactor(w.predictionDistance),
+        useStacker,
+        stackerCoefs,
+        w.knnScore,
       )
+    }
+  }
+
+  // ---------- 5b) Personal fit (determinístico, a partir do TasteProfile) ----------
+  // Quando o perfil é stub ou inexistente, personalFit fica null pra todas
+  // as obras — o ranking pode cair pra final_score como fallback.
+  const profilePayload = tasteProfile && !tasteProfile.is_stub ? tasteProfile.profile : null
+  if (profilePayload) {
+    for (const w of works) {
+      w.personalFit = computePersonalFit(profilePayload, {
+        tags: w.tags,
+        categoryScores: w.categoryScores,
+      })
     }
   }
 
@@ -298,6 +462,19 @@ export async function recalculateAll() {
       totalVotes: w.totalVotes,
     }))
   )
+
+  // ---------- 5c) Confiança individual na Nota.Final ----------
+  // Computada agora porque depende de rmse_final (vindo do calibration acima),
+  // distance_p95 e do flag de stub. Persistida pra evitar recomputar a cada
+  // render e permitir sort/filter "alta confiança".
+  for (const w of works) {
+    w.finalScoreConfidence = calculateFinalScoreConfidence({
+      rmseFinal: finalCalibration.rmseFinal,
+      predictedIsStub: predictor.isStub,
+      predictionDistance: w.predictionDistance,
+      distanceP95,
+    })
+  }
 
   // ---------- 6) Bulk upsert calculated_scores ----------
   const rows = works.map((w) => ({
@@ -316,6 +493,10 @@ export async function recalculateAll() {
     rmse_calc: newRmseCalc,
     rmse_predicted: newRmsePredicted,
     prediction_distance: w.predictionDistance,
+    personal_fit: w.personalFit,
+    final_score_confidence: w.finalScoreConfidence,
+    knn_score: w.knnScore,
+    knn_neighbors: w.knnNeighbors,
     formula_version: config.formula_version,
     calculated_at: new Date().toISOString(),
   }))
@@ -353,6 +534,16 @@ export async function recalculateAll() {
       gpt_clamp_hit_rate: gptClampHitRate,
       negative_activation_rate: negativeActivationRate,
       distance_p95: distanceP95,
+      stacker_coefficients: stackerCoefs
+        ? {
+            intercept: stackerCoefs.intercept,
+            calcWeight: stackerCoefs.calcWeight,
+            ridgeWeight: stackerCoefs.ridgeWeight,
+            knnWeight: stackerCoefs.knnWeight,
+            trainSize: stackerCoefs.trainSize,
+            cvMAE: stackerCoefs.cvMAE,
+          }
+        : null,
       last_recalculated_at: new Date().toISOString(),
     })
     .eq("id", config.id)
@@ -388,6 +579,17 @@ export async function recalculateAll() {
       pseudoVotesBlend,
       featureNames: predictor.featureNames,
       coefficients: predictor.model.coefficients,
+      stacker: stackerCoefs
+        ? {
+            enabled: useStacker,
+            intercept: stackerCoefs.intercept,
+            calcWeight: stackerCoefs.calcWeight,
+            ridgeWeight: stackerCoefs.ridgeWeight,
+            knnWeight: stackerCoefs.knnWeight,
+            trainSize: stackerCoefs.trainSize,
+            cvMAE: stackerCoefs.cvMAE,
+          }
+        : null,
     },
   }
 }

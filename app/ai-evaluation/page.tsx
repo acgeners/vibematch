@@ -11,9 +11,10 @@ import {
   PERSONAL_STATUSES_BY_ID,
 } from "@/lib/constants/criteria"
 
-const ALL_FILTERS = ["pending", "low-confidence", "outdated-model"] as const
+const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
 
+const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending"]
 const DEFAULT_LOW_CONFIDENCE_THRESHOLD = 0.8
 
 const PUB_STATUS_NAME_TO_ID: Record<string, number> = Object.fromEntries(
@@ -25,12 +26,12 @@ const PERSONAL_STATUS_NAME_TO_ID: Record<string, number> = Object.fromEntries(
 
 function parseFilters(raw: string | string[] | undefined): EvaluationFilter[] {
   const value = Array.isArray(raw) ? raw.join(",") : raw
-  if (!value) return ["pending"]
+  if (!value) return DEFAULT_FILTERS
   const parts = value.split(",").map((p) => p.trim()).filter(Boolean)
   const valid = parts.filter((p): p is EvaluationFilter =>
     (ALL_FILTERS as readonly string[]).includes(p)
   )
-  return valid.length > 0 ? valid : ["pending"]
+  return valid.length > 0 ? valid : DEFAULT_FILTERS
 }
 
 function parseStatusList(
@@ -102,6 +103,20 @@ async function getEligibleWorks(
           .eq("is_archived", false)
         if (error) throw new Error(error.message)
         return { filter: "pending" as const, ids: new Set((data ?? []).map((w) => w.id)) }
+      })()
+    )
+  }
+
+  if (filters.includes("review-pending")) {
+    queries.push(
+      (async () => {
+        const { data, error } = await supabase
+          .from("works")
+          .select("id")
+          .eq("ai_eval_status", "review_pending")
+          .eq("is_archived", false)
+        if (error) throw new Error(error.message)
+        return { filter: "review-pending" as const, ids: new Set((data ?? []).map((w) => w.id)) }
       })()
     )
   }

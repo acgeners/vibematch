@@ -60,7 +60,7 @@ export default async function DashboardPage() {
           value={stats.pendingAi}
           icon={<Brain />}
           href="/ai-evaluation"
-          description="Aguardando avaliação"
+          description="Aguardando avaliação ou revisão"
           accent="violet"
         />
         <StatCard

@@ -1,104 +1,131 @@
 import Link from "next/link"
 import { Plus } from "lucide-react"
-import { getWorks } from "@/server/queries/works"
+import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } from "@/server/queries/ranking"
+import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
+import { getAllGenres } from "@/server/queries/genres"
+import { getAllTags } from "@/server/queries/tags"
+import { getStatusOptions } from "@/server/queries/status-options"
 import { Header } from "@/components/layout/header"
-import { WorkFilters } from "@/components/titles/work-filters"
+import { TitleFilters } from "@/components/titles/title-filters"
 import { WorkTable } from "@/components/titles/work-table"
 import { Button } from "@/components/ui/button"
-import type { WorkFilters as WorkFiltersType, PublicationStatus, PersonalStatus, AiEvalStatus } from "@/types/domain"
-import { createAdminClient } from "@/lib/supabase/admin"
-import { unstable_cache } from "next/cache"
+import { CRITERION_SLUGS } from "@/types/domain"
 
 interface TitlesPageProps {
-  searchParams: Promise<{
-    search?: string
-    pub?: string | string[]
-    personal?: string | string[]
-    ai?: string | string[]
-    archived?: string
-    fav?: string
-    page?: string
-    sort?: string
-    min_score?: string
-    max_score?: string
-    min_chapters?: string
-    max_chapters?: string
-    genre?: string
-    tag?: string | string[]
-  }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }
-
-function toArray(value: string | string[] | undefined): string[] {
-  if (!value) return []
-  return Array.isArray(value) ? value : [value]
-}
-
-function parseSort(raw: string | undefined): import("@/types/domain").WorkSort {
-  const [field, dir] = (raw ?? "final_score:desc").split(":")
-  const validFields = [
-    "final_score",
-    "calc_score",
-    "predicted_score",
-    "title",
-    "publication_status",
-    "personal_status",
-    "total_chapters",
-    "ai_eval_status",
-    "updated_at",
-    "created_at",
-    "is_favorite",
-  ]
-  return {
-    field: (validFields.includes(field) ? field : "final_score") as import("@/types/domain").WorkSortField,
-    direction: dir === "asc" ? "asc" : "desc",
-  }
-}
-
-const getGenreOptions = unstable_cache(async (): Promise<string[]> => {
-  const supabase = createAdminClient()
-  const { data } = await supabase
-    .from("genres")
-    .select("name")
-    .order("name")
-    .limit(1000)
-
-  return (data ?? []).map((row) => row.name).filter(Boolean)
-}, ["titles-genres-v1"], { revalidate: 300 })
 
 export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   const params = await searchParams
 
-  const page = Math.max(1, parseInt(params.page ?? "1", 10))
-  const pageSize = 50
-
-  const filters: WorkFiltersType = {
-    search: params.search,
-    publicationStatus: toArray(params.pub) as PublicationStatus[],
-    personalStatus: toArray(params.personal) as PersonalStatus[],
-    aiEvalStatus: toArray(params.ai) as AiEvalStatus[],
-    isArchived: params.archived === "1" ? undefined : false,
-    isFavorite: params.fav === "1" ? true : undefined,
-    minFinalScore: params.min_score ? parseFloat(params.min_score) : undefined,
-    maxFinalScore: params.max_score ? parseFloat(params.max_score) : undefined,
-    minChapters: params.min_chapters ? parseInt(params.min_chapters, 10) : undefined,
-    maxChapters: params.max_chapters ? parseInt(params.max_chapters, 10) : undefined,
-    genres: params.genre ? [params.genre] : undefined,
-    tagSlugs: toArray(params.tag).length ? toArray(params.tag) : undefined,
+  function str(key: string): string | undefined {
+    const v = params[key]
+    return Array.isArray(v) ? v[0] : v
+  }
+  function num(key: string): number | undefined {
+    const v = str(key)
+    if (!v) return undefined
+    const n = parseFloat(v)
+    return isNaN(n) ? undefined : n
+  }
+  function multi(key: string): string[] | undefined {
+    const v = str(key)
+    if (!v) return undefined
+    return v.split(",").map((s) => s.trim()).filter(Boolean)
   }
 
-  const [result, genreOptions, scoreThresholds] = await Promise.all([
-    getWorks(filters, parseSort(params.sort), page, pageSize),
-    getGenreOptions(),
+  const criterionMin: Partial<Record<string, number>> = {}
+  const criterionMax: Partial<Record<string, number>> = {}
+  for (const slug of CRITERION_SLUGS) {
+    const mn = num(`min_${slug}`)
+    const mx = num(`max_${slug}`)
+    if (mn != null) criterionMin[slug] = mn
+    if (mx != null) criterionMax[slug] = mx
+  }
+
+  const validSortFields = new Set<string>([
+    "final_score", "calc_score", "pred_score", "platform_avg", "total_votes", "chapters", "title",
+    ...CRITERION_SLUGS.map((s) => `crit_${s}`),
+  ])
+  const rawSort = str("sort") ?? "final_score:desc"
+  const sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
+    const [field, dir] = seg.trim().split(":")
+    return {
+      field: (validSortFields.has(field) ? field : "final_score") as RankingSortBy,
+      dir: dir === "asc" ? "asc" : "desc",
+    }
+  })
+
+  const aiStatuses = multi("ai_status")
+  const perStatusParam = str("per_status")
+  // /titles default: sem filtro de status pessoal (mostra tudo).
+  const personalStatus =
+    perStatusParam === "all" || !perStatusParam
+      ? undefined
+      : perStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
+
+  const pubStatusParam = str("pub_status")
+  const publicationStatus =
+    pubStatusParam === "all" || !pubStatusParam
+      ? undefined
+      : pubStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
+
+  const filters: RankingFilters = {
+    search: str("search"),
+    includeArchived: str("archived") === "1",
+    criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
+    criterionMax: Object.keys(criterionMax).length ? criterionMax : undefined,
+    publicationStatus,
+    personalStatus,
+    aiEvalStatus: aiStatuses,
+    genreAll: multi("genres_all"),
+    genreAny: multi("genres_any") ?? multi("genres"),
+    genreExclude: multi("genres_exclude"),
+    tagSlugsAll: multi("tags_all"),
+    tagSlugsAny: multi("tags_any") ?? multi("tags"),
+    tagSlugsExclude: multi("tags_exclude"),
+    synopsisQualities: multi("synopsis_q"),
+    minTotalChapters: num("min_chapters"),
+    maxTotalChapters: num("max_chapters"),
+    minCalcScore: num("min_calc"),
+    maxCalcScore: num("max_calc"),
+    minPredictedScore: num("min_pr"),
+    maxPredictedScore: num("max_pr"),
+    minFinalScore: num("min_final"),
+    maxFinalScore: num("max_final"),
+    minPlatformAvg: num("min_platform_avg"),
+    maxPlatformAvg: num("max_platform_avg"),
+    minTotalVotes: num("min_votes"),
+    maxTotalVotes: num("max_votes"),
+    topN: num("top_n"),
+    onlyWithFinalScore: str("only_scored") === "1",
+    onlyFavorites: str("fav") === "1",
+    sortLevels,
+  }
+
+  const pageSize = 50
+  const page = Math.max(1, parseInt(str("page") ?? "1", 10))
+
+  const [entries, allGenres, allTags, statusOptions, scoreThresholds] = await Promise.all([
+    getRanking(filters),
+    getAllGenres(),
+    getAllTags(),
+    getStatusOptions(),
     getScoreColorThresholds(),
   ])
+
+  const total = entries.length
+  const offset = (page - 1) * pageSize
+  const pageIds = entries.slice(offset, offset + pageSize).map((e) => e.workId)
+  const works = await getWorksByIds(pageIds)
 
   return (
     <div className="space-y-4">
       <Header
         kicker="Catálogo"
         title="Títulos"
-        description={`${result.total} obra${result.total !== 1 ? "s" : ""} no catálogo`}
+        description={`${total} obra${total !== 1 ? "s" : ""} no catálogo`}
         actions={
           <Button asChild size="sm">
             <Link href="/titles/new">
@@ -109,15 +136,22 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
         }
       />
 
-      <WorkFilters availableGenres={genreOptions} />
+      <TitleFilters
+        availableGenres={allGenres}
+        availableTags={allTags}
+        publicationStatuses={statusOptions.publicationStatuses}
+        personalStatuses={statusOptions.personalStatuses}
+      />
 
       <WorkTable
-        works={result.data}
-        total={result.total}
-        page={result.page}
-        pageSize={result.pageSize}
-        searchQuery={params.search}
+        works={works}
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        searchQuery={str("search")}
         scoreThresholds={scoreThresholds}
+        enableCompare={false}
+        enableHeatmap={false}
       />
     </div>
   )

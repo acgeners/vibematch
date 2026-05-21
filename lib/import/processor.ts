@@ -100,6 +100,9 @@ async function processSingleRow(
   const hasScores = CRITERION_SLUGS.some(
     (slug) => row[slug as keyof MappedImportRow] != null
   )
+  const hasAllScores = CRITERION_SLUGS.every(
+    (slug) => row[slug as keyof MappedImportRow] != null
+  )
 
   if (hasScores) {
     await upsertCategoryScores(supabase, workId, row)
@@ -114,7 +117,7 @@ async function processSingleRow(
   }
 
   // Status de IA
-  if (!hasScores) {
+  if (!hasAllScores) {
     result.pendingAiCount++
   }
 
@@ -122,11 +125,27 @@ async function processSingleRow(
   await recordImportRow(supabase, options.importId, row, "imported", workId)
 
   // Atualizar status de IA no work
-  const aiStatus = hasScores ? "done" : "pending"
+  const hasCompletedEval = !hasAllScores && await hasCompletedAiEvaluation(supabase, workId)
+  const aiStatus = hasAllScores ? "done" : hasCompletedEval ? "review_pending" : "pending"
   await supabase
     .from("works")
     .update({ ai_eval_status: aiStatus })
     .eq("id", workId)
+}
+
+async function hasCompletedAiEvaluation(
+  supabase: AnySupabaseClient,
+  workId: string
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("ai_evaluations")
+    .select("id")
+    .eq("work_id", workId)
+    .eq("status", "completed")
+    .limit(1)
+    .maybeSingle()
+
+  return Boolean(data)
 }
 
 async function createWork(

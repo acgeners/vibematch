@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -12,6 +12,7 @@ import {
   Sparkles,
   Settings,
   SlidersHorizontal,
+  Wand2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -35,31 +36,35 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: "/", icon: LayoutDashboard, label: "Dashboard" },
       { href: "/titles", icon: BookOpen, label: "Títulos" },
-      { href: "/titles?fav=1", icon: Heart, label: "Favoritos", query: { key: "fav", value: "1" } },
       { href: "/ranking", icon: Trophy, label: "Ranking" },
-      { href: "/ai-evaluation", icon: Sparkles, label: "Avaliação IA" },
+      { href: "/favorites", icon: Heart, label: "Favoritos" },
+      { href: "/recommendations", icon: Wand2, label: "Recomendações" },
     ],
   },
   {
     title: "Gerenciar",
     items: [
-      { href: "/import", icon: Upload, label: "Importar" },
       { href: "/preferences", icon: SlidersHorizontal, label: "Preferências" },
       { href: "/settings", icon: Settings, label: "Configurações" },
+      { href: "/ai-evaluation", icon: Sparkles, label: "Avaliação IA" },
+      { href: "/import", icon: Upload, label: "Importar" },
     ],
   },
 ]
 
 // Lê window.location.search no client para refinar o estado ativo (item-com-query
 // vs item-base no mesmo path). useSearchParams() falha o prerender estático de
-// /_not-found mesmo sob Suspense, então usamos um efeito client-only.
+// /_not-found mesmo sob Suspense, então sincronizamos durante render com base
+// no pathname (padrão "adjust-during-render" — evita cascading renders do useEffect).
 function useClientSearchParams(): URLSearchParams {
   const pathname = usePathname()
   const [params, setParams] = useState<URLSearchParams>(() => new URLSearchParams())
+  const [lastPathname, setLastPathname] = useState<string | null>(null)
 
-  useEffect(() => {
+  if (typeof window !== "undefined" && pathname !== lastPathname) {
+    setLastPathname(pathname)
     setParams(new URLSearchParams(window.location.search))
-  }, [pathname])
+  }
 
   return params
 }

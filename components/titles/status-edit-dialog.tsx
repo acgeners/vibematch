@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { useForm, useWatch } from "react-hook-form"
+import { useForm, useWatch, type FieldErrors } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
 import {
@@ -106,7 +106,6 @@ export function StatusEditDialog({
     setValue,
     control,
     reset,
-    formState: { errors },
   } = useForm<WorkStatusInput, unknown, WorkStatusValues>({
     resolver: zodResolver(workStatusSchema),
     defaultValues: initialValues,
@@ -170,7 +169,7 @@ export function StatusEditDialog({
     router.refresh()
   }
 
-  const onInvalid = (formErrors: typeof errors) => {
+  const onInvalid = (formErrors: FieldErrors<WorkStatusInput>) => {
     const firstField = Object.keys(formErrors)[0]
     const firstMessage = firstField
       ? (formErrors[firstField as keyof typeof formErrors] as { message?: string } | undefined)?.message

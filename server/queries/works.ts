@@ -35,11 +35,15 @@ const WORK_LIST_SELECT = `
   total_chapters,
   is_archived,
   is_favorite,
+  year,
+  synopsis_quality,
   created_at,
   updated_at,
-  calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub),
+  calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, platform_avg, total_votes),
+  category_scores(criterion_slug, score),
   work_covers(url, is_primary, position),
-  work_tags(tag_id, tags(*))
+  work_tags(tag_id, tags(*)),
+  work_genres(genre_id, genres(id, name, slug))
 `
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -115,7 +119,9 @@ export async function getWorks(
     sort.field === "predicted_score" ||
     sort.field === "is_favorite" ||
     filters.minFinalScore != null ||
-    filters.maxFinalScore != null
+    filters.maxFinalScore != null ||
+    filters.minTotalVotes != null ||
+    filters.maxTotalVotes != null
 
   // Resolve genre/tag ID filters in parallel (each is its own pivot-table query).
   const [genreMatchIds, tagMatchIds] = await Promise.all([
@@ -151,7 +157,7 @@ export async function getWorks(
     // every matching work just to throw most of it away.
     let lightQuery = supabase
       .from("works")
-      .select("id, is_favorite, calculated_scores(final_score, calc_score, predicted_score)")
+      .select("id, is_favorite, calculated_scores(final_score, calc_score, predicted_score, total_votes)")
     lightQuery = applyWorkFilters(lightQuery, filters, searchTerm, genreMatchIds, tagMatchIds)
 
     const { data: lightData, error: lightError } = await lightQuery
@@ -164,6 +170,7 @@ export async function getWorks(
         final_score: number | null
         calc_score: number | null
         predicted_score: number | null
+        total_votes: number | null
       } | null
     }
 
@@ -182,6 +189,12 @@ export async function getWorks(
     }
     if (filters.maxFinalScore != null) {
       scored = scored.filter((w) => (w.calculated_scores?.final_score ?? 11) <= filters.maxFinalScore!)
+    }
+    if (filters.minTotalVotes != null) {
+      scored = scored.filter((w) => (w.calculated_scores?.total_votes ?? 0) >= filters.minTotalVotes!)
+    }
+    if (filters.maxTotalVotes != null) {
+      scored = scored.filter((w) => (w.calculated_scores?.total_votes ?? 0) <= filters.maxTotalVotes!)
     }
 
     if (sort.field === "is_favorite") {
@@ -306,6 +319,19 @@ export async function getWorkBySlug(slug: string) {
   return getWorkWithAiEvaluations(id)
 }
 
+export async function getWorkIdsBySlug(slug: string): Promise<string[]> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("works")
+    .select("id, title")
+
+  if (error) throw new Error(error.message)
+
+  return (data ?? [])
+    .filter((row) => titleToSlug(row.title ?? "") === slug)
+    .map((row) => row.id as string)
+}
+
 export async function getWorkWithAiEvaluations(id: string) {
   const supabase = createAdminClient()
 
@@ -355,6 +381,23 @@ export async function getWorkWithAiEvaluations(id: string) {
     ...normalizeWorkRelations(data),
     ai_evaluations: evaluationResult.data ? [evaluationResult.data] : [],
   }
+}
+
+export async function getWorksByIds(ids: string[]): Promise<WorkWithRelations[]> {
+  if (ids.length === 0) return []
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("works")
+    .select(WORK_WITH_RELATIONS_SELECT)
+    .in("id", ids)
+
+  if (error) throw new Error(error.message)
+
+  const byId = new Map(((data ?? []) as Array<{ id: string }>).map((row) => [row.id, row]))
+  return ids
+    .map((id) => byId.get(id))
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .map(normalizeWorkRelations)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

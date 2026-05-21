@@ -1,10 +1,12 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { toast } from "sonner"
+import { Layers } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { recalculateNow } from "@/server/actions/settings"
+import { recalculateNow, setStackerEnabled } from "@/server/actions/settings"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
+import { cn } from "@/lib/utils"
 import type { FormulaConfig } from "@/types/domain"
 import type { CalibrationDiff } from "@/lib/calculations/calibration"
 
@@ -60,7 +62,18 @@ function diffClass(value: number | null): string {
 
 export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
   const [isPending, startTransition] = useTransition()
+  const [isTogglingStacker, startStackerToggle] = useTransition()
   const [lastRun, setLastRun] = useState<string | null>(null)
+  // formatRelativeTime depende de Date.now(), que difere entre server-render
+  // e client-hydrate — evita hydration mismatch renderizando "—" no SSR e
+  // populando depois do mount. Atualiza a cada 30s pra ficar live.
+  const [relativeTime, setRelativeTime] = useState<string>("—")
+  useEffect(() => {
+    const update = () => setRelativeTime(formatRelativeTime(config.last_recalculated_at))
+    update()
+    const id = setInterval(update, 30_000)
+    return () => clearInterval(id)
+  }, [config.last_recalculated_at])
 
   const handleRecalibrate = () => {
     startTransition(async () => {
@@ -79,6 +92,22 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Erro ao recalibrar")
+      }
+    })
+  }
+
+  const handleToggleStacker = (next: boolean) => {
+    startStackerToggle(async () => {
+      try {
+        const result = await setStackerEnabled(next)
+        toast.success(
+          `Stacker ${next ? "ativado" : "desativado"}. MAE Final: ${fmt(
+            result.calibration?.maeFinal ?? null,
+            3,
+          )}`,
+        )
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Erro ao alternar stacker")
       }
     })
   }
@@ -113,8 +142,8 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
           <Button onClick={handleRecalibrate} disabled={isPending}>
             {isPending ? "Recalibrando..." : "Recalibrar agora"}
           </Button>
-          <span className="text-[10px] text-muted-foreground">
-            Último recálculo: {formatRelativeTime(config.last_recalculated_at)}
+          <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>
+            Último recálculo: {relativeTime}
           </span>
         </div>
       </div>
@@ -223,6 +252,90 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Stacker (Ridge segundo-nível) */}
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+            <h3 className="text-sm font-medium">Stacker (Ridge segundo-nível)</h3>
+          </div>
+          <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
+            <span className="text-muted-foreground">
+              {config.stacker_enabled ? "Ativo" : "Desativado"}
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={config.stacker_enabled}
+              disabled={isTogglingStacker || config.stacker_coefficients == null}
+              onClick={() => handleToggleStacker(!config.stacker_enabled)}
+              className={cn(
+                "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
+                config.stacker_enabled ? "bg-emerald-500" : "bg-muted",
+                (isTogglingStacker || config.stacker_coefficients == null) && "opacity-50 cursor-not-allowed",
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-block size-4 transform rounded-full bg-white transition-transform",
+                  config.stacker_enabled ? "translate-x-4" : "translate-x-0.5",
+                )}
+              />
+            </button>
+          </label>
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Substitui o blend por inverse-variance: aprende pesos pra Nota.Calc e Nota.Pr via Ridge
+          segundo-nível em out-of-fold predictions contra `manual_score`. Lida com correlação de
+          erros que inverse-variance assume não existir.
+        </p>
+        {config.stacker_coefficients ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="rounded-md border border-border p-3 space-y-1.5">
+              <p className="text-xs text-muted-foreground">Fórmula aprendida</p>
+              <p className="font-mono text-xs leading-relaxed">
+                Final = {config.stacker_coefficients.intercept.toFixed(3)}
+                {" + "}
+                <span className="text-foreground">
+                  {config.stacker_coefficients.calcWeight.toFixed(3)}
+                </span>
+                {" × Calc + "}
+                <span className="text-foreground">
+                  {config.stacker_coefficients.ridgeWeight.toFixed(3)}
+                </span>
+                {" × Pr"}
+                {config.stacker_coefficients.knnWeight != null && (
+                  <>
+                    {" + "}
+                    <span className="text-foreground">
+                      {config.stacker_coefficients.knnWeight.toFixed(3)}
+                    </span>
+                    {" × kNN"}
+                  </>
+                )}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                Pesos negativos indicam que o previsor está sendo penalizado (correlação com erro
+                do outro). Pesos ~0 = previsor irrelevante.
+              </p>
+            </div>
+            <div className="rounded-md border border-border p-3">
+              <p className="text-xs text-muted-foreground">MAE LOOCV do stacker</p>
+              <p className="mt-1 font-mono text-base">
+                {config.stacker_coefficients.cvMAE.toFixed(4)}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                Treino: {config.stacker_coefficients.trainSize} obras (leave-one-out).
+              </p>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Treino insuficiente (mínimo 30 obras com nota pessoal e Ridge real, não stub).
+          </p>
+        )}
       </div>
 
       {/* Distribuição de prediction_distance */}

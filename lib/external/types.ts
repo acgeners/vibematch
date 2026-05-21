@@ -132,7 +132,7 @@ export interface ExternalWorkData {
    * Plumbada até works.ts pra preencher ai_evaluations.input_hash, permitindo
    * cache hit no Path A (página /ai-evaluation) do mesmo título.
    */
-  aiMeta?: { inputHash: string; modelName: string; promptVersion: string }
+  aiMeta?: { inputHash: string; modelName: string; promptVersion: string; confidence: number | null }
   debug?: ExternalMergeDebug
 }
 

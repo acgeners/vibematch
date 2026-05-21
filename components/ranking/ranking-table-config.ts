@@ -39,8 +39,11 @@ export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
   { key: "platform_avg", label: "Nota.M", defaultWidth: 88, align: "center", group: "notas" },
   { key: "total_votes", label: "Votos", defaultWidth: 88, align: "center", group: "notas" },
   { key: "final", label: "Nota.Final", defaultWidth: 100, align: "center", group: "notas" },
+  { key: "final_confidence", label: "Conf.", configLabel: "Confiança da Nota.Final", defaultWidth: 96, align: "center", group: "notas" },
   { key: "calc", label: "Nota.IA", defaultWidth: 100, align: "center", group: "notas" },
   { key: "pred", label: "Nota.Pr", defaultWidth: 100, align: "center", group: "notas" },
+  { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento com perfil", defaultWidth: 110, align: "center", group: "notas" },
+  { key: "alignment_score", label: "IA Rk.", configLabel: "IA Re-rank (sob demanda)", defaultWidth: 80, align: "center", group: "notas" },
   ...CRITERION_SLUGS.map((slug) => ({
     key: `crit_${slug}`,
     label: CRITERIA_INFO[slug]?.emoji ?? slug,
@@ -147,7 +150,7 @@ const CRITERION_KEYS = CRITERION_SLUGS.map((slug) => `crit_${slug}`)
 const PRESET_VISIBLE_KEYS: Record<RankingColumnPreset, string[]> = {
   padrao: DEFAULT_COLUMN_KEYS,
   compacto: ["rank", "title", "pub", "per_status", "final", "calc", "pred"],
-  notas: ["rank", "title", "final", "calc", "pred", "platform_avg", "total_votes"],
+  notas: ["rank", "title", "final", "final_confidence", "personal_fit", "calc", "pred", "platform_avg", "total_votes"],
   criterios: ["rank", "title", "final", ...CRITERION_KEYS],
 }
 

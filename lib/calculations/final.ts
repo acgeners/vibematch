@@ -1,5 +1,28 @@
+import { predictWithStacker, type StackerCoefficients } from "./stacker"
+
 /**
- * NotaFinal — média ponderada por variância inversa entre Nota.Calc e Nota.Pr.
+ * NotaFinal — fachada que escolhe entre stacker (Passo 6+) e inverse-variance
+ * (legado). Quando `stackerCoefs` está disponível e `useStacker` é true, usa
+ * o stacker; caso contrário cai pro inverse-variance histórico.
+ */
+export function calculateNotaFinalChoosing(
+  calc: number,
+  ridge: number,
+  rmseCalc: number | null,
+  rmseRidge: number | null,
+  distanceFactor: number,
+  useStacker: boolean,
+  stackerCoefs: StackerCoefficients | null,
+  knn?: number | null,
+): number {
+  if (useStacker && stackerCoefs) {
+    return predictWithStacker(stackerCoefs, calc, ridge, knn)
+  }
+  return calculateNotaFinal(calc, ridge, rmseCalc, rmseRidge, distanceFactor)
+}
+
+/**
+ * NotaFinal (legado) — média ponderada por variância inversa entre Nota.Calc e Nota.Pr.
  *
  * weight_calc = 1 / RMSE_calc²
  * weight_pr   = 1 / RMSE_pr²  ×  distanceFactor
@@ -13,6 +36,8 @@
  * centróide do treino). Quando 0, o ensemble vira Nota.Calc puro.
  *
  * Quando `rmsePredicted` é null (calibração insuficiente), retorna calcScore.
+ *
+ * @deprecated Mantido como fallback quando o stacker não está disponível.
  */
 export function calculateNotaFinal(
   calcScore: number,

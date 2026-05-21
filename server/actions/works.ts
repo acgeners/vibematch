@@ -60,6 +60,21 @@ function recalculateAllInBackground(context: string) {
   })
 }
 
+async function hasCompletedAiEvaluation(
+  supabase: SupabaseAdminClient,
+  workId: string
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("ai_evaluations")
+    .select("id")
+    .eq("work_id", workId)
+    .eq("status", "completed")
+    .limit(1)
+    .maybeSingle()
+
+  return Boolean(data)
+}
+
 async function upsertWorkExternalIds(
   supabase: SupabaseAdminClient,
   workId: string,
@@ -839,6 +854,7 @@ export interface CreateWorkAiMeta {
   inputHash: string
   modelName: string
   promptVersion: string
+  confidence: number | null
 }
 
 async function persistNewWork(
@@ -926,7 +942,7 @@ async function persistNewWork(
         model_name: aiMeta?.modelName ?? "external-ai-criteria",
         prompt_version: aiMeta?.promptVersion ?? "external-import",
         summary: "Notas e explicações geradas durante a busca externa do título.",
-        confidence: null,
+        confidence: aiMeta?.confidence ?? null,
         raw_response: { criteriaJustifications: aiJustifications },
         input_hash: aiMeta?.inputHash ?? null,
       })
@@ -1005,7 +1021,9 @@ async function persistNewWork(
   const hasScores = scores.length >= CRITERION_SLUGS.length
   await supabase
     .from("works")
-    .update({ ai_eval_status: hasScores ? "done" : "pending" })
+    .update({
+      ai_eval_status: hasScores ? "done" : aiEvaluationId ? "review_pending" : "pending",
+    })
     .eq("id", workId)
 
   return { ok: true, workId }
@@ -1227,7 +1245,7 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
         model_name: aiMeta?.modelName ?? "external-ai-criteria",
         prompt_version: aiMeta?.promptVersion ?? "external-import-update",
         summary: "Notas e explicações geradas durante a busca externa do título.",
-        confidence: null,
+        confidence: aiMeta?.confidence ?? null,
         raw_response: { criteriaJustifications: aiJustifications },
         input_hash: aiMeta?.inputHash ?? null,
       })
@@ -1331,9 +1349,11 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
 
   // Atualizar status IA com base na cobertura de critérios
   const hasAllScores = scores.length >= CRITERION_SLUGS.length
+  const hasCompletedEval =
+    aiEvaluationId != null || (!hasAllScores && await hasCompletedAiEvaluation(supabase, id))
   await supabase
     .from("works")
-    .update({ ai_eval_status: hasAllScores ? "done" : "pending" })
+    .update({ ai_eval_status: hasAllScores ? "done" : hasCompletedEval ? "review_pending" : "pending" })
     .eq("id", id)
     .neq("ai_eval_status", "skipped")
 

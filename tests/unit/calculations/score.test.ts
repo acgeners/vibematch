@@ -7,8 +7,6 @@ describe("calculateNotaCalc", () => {
     iaEvalNormalized: 7.5,
     platformAvg: 8.0,
     totalVotes: 1000,
-    chaptersNormalized: 8.0,
-    publicationStatus: "Completed" as const,
     synopsisQuality: "♥♥♥" as const,
     observationAdjustment: 0,
     pseudoVotesBlend: 1024,
@@ -25,12 +23,6 @@ describe("calculateNotaCalc", () => {
     // blend = iaEvalNormalized puro
     expect(result).toBeGreaterThan(0)
     expect(result).toBeLessThan(10)
-  })
-
-  it("status Hiatus tem penalidade maior que Completed", () => {
-    const resC = calculateNotaCalc({ ...base, publicationStatus: "Completed" })
-    const resH = calculateNotaCalc({ ...base, publicationStatus: "Hiatus" })
-    expect(resC).toBeGreaterThan(resH)
   })
 
   it("sinopse ♥♥♥♥ > ♥♥♥ > ♥♥ > ♥", () => {

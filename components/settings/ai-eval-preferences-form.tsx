@@ -1,6 +1,6 @@
 "use client"
 
-import { useForm, Controller } from "react-hook-form"
+import { useForm, useWatch, Controller } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
@@ -33,7 +33,6 @@ export function AiEvalPreferencesForm({
     control,
     handleSubmit,
     reset,
-    watch,
     formState: { isSubmitting, isDirty },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -45,9 +44,9 @@ export function AiEvalPreferencesForm({
     },
   })
 
-  const tolerance = Number(watch("prompt_version_tolerance") ?? 0)
+  const tolerance = Number(useWatch({ control, name: "prompt_version_tolerance" }) ?? 0)
   const cutoff = Math.max(0, currentPromptVersionNum - tolerance)
-  const thresholdPct = Number(watch("low_confidence_threshold_pct") ?? 80)
+  const thresholdPct = Number(useWatch({ control, name: "low_confidence_threshold_pct" }) ?? 80)
 
   const onSubmit = async (values: FormValues) => {
     const result = await updateAiEvalPreferences({

@@ -1,0 +1,929 @@
+"use client"
+
+import { useCallback, useMemo, useState, useTransition } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { ArrowDown, ArrowUp, ChevronDown, Filter, RotateCcw, Search, X } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Slider } from "@/components/ui/slider"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { TagFilter } from "@/components/titles/tag-filter"
+import type { TagOption } from "@/server/queries/tags"
+import { AI_EVAL_STATUSES, CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
+import { cn } from "@/lib/utils"
+
+const CRITERION_LABELS: Record<string, string> = {
+  romance: "Romance",
+  couple_dynamics: "Casal",
+  fantasy_nobility: "Fantasia/Nobreza",
+  action_adventure: "Ação/Aventura",
+  adult_content: "Conteúdo adulto",
+  protagonist: "Protagonista",
+  humor: "Humor",
+  drama: "Drama",
+  tragedy: "Tragédia",
+}
+
+const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
+  { value: "final_score", label: "Nota.Final" },
+  { value: "calc_score", label: "Nota.IA" },
+  { value: "pred_score", label: "Nota.Pr" },
+  { value: "platform_avg", label: "Nota.M" },
+  { value: "total_votes", label: "Votos" },
+  { value: "title", label: "Título" },
+  { value: "chapters", label: "Capítulos" },
+]
+
+const AI_STATUS_LABELS: Record<string, string> = {
+  pending: "Sem avaliação IA",
+  review_pending: "Aguardando revisão",
+  done: "Avaliado",
+  skipped: "Pulado",
+}
+
+interface StatusOption {
+  id: number
+  status: string
+  slug: string
+  color: string | null
+  symbol: string | null
+  comment: string | null
+}
+
+interface TitleFiltersProps {
+  availableGenres: string[]
+  availableTags: TagOption[]
+  publicationStatuses?: StatusOption[]
+  personalStatuses?: StatusOption[]
+}
+
+function dedupeStatusOptions(options: StatusOption[]): StatusOption[] {
+  const byStatus = new Map<string, StatusOption>()
+  for (const option of options) {
+    const current = byStatus.get(option.status)
+    if (!current) {
+      byStatus.set(option.status, option)
+      continue
+    }
+    const currentHasDisplay = Boolean(current.color || current.symbol)
+    const nextHasDisplay = Boolean(option.color || option.symbol)
+    if (!currentHasDisplay && nextHasDisplay) {
+      byStatus.set(option.status, option)
+    }
+  }
+  return [...byStatus.values()]
+}
+
+function csvSet(searchParams: URLSearchParams, key: string): Set<string> {
+  const v = searchParams.get(key)
+  if (!v) return new Set()
+  return new Set(v.split(",").map((s) => s.trim()).filter(Boolean))
+}
+
+function StatusButton({
+  option,
+  active,
+  onClick,
+  tooltip,
+}: {
+  option: StatusOption
+  active: boolean
+  onClick: () => void
+  tooltip?: string | null
+}) {
+  const style = active && option.color
+    ? { backgroundColor: option.color, borderColor: option.color, color: "#fff" }
+    : option.color
+      ? { borderColor: option.color, color: option.color }
+      : undefined
+  const button = (
+    <button onClick={onClick} type="button">
+      <Badge
+        variant={active ? "default" : "outline"}
+        className="cursor-pointer gap-1 rounded-full px-2.5 py-1 text-xs"
+        style={style}
+      >
+        {option.symbol && <span className="text-[10px]">{option.symbol}</span>}
+        {option.status}
+      </Badge>
+    </button>
+  )
+  if (!tooltip?.trim()) return button
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs whitespace-pre-line text-left">
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+function FilterCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border bg-background p-3 shadow-sm">
+      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {title}
+      </p>
+      {children}
+    </div>
+  )
+}
+
+function num(v: string | null | undefined): number | undefined {
+  if (!v) return undefined
+  const n = parseFloat(v)
+  return isNaN(n) ? undefined : n
+}
+
+function ScoreRangeCard({
+  emoji,
+  label,
+  minKey,
+  maxKey,
+  searchParams,
+  updateParams,
+  step = 0.1,
+  min = 0,
+  max = 10,
+  className,
+}: {
+  emoji?: string
+  label: string
+  minKey: string
+  maxKey: string
+  searchParams: URLSearchParams
+  updateParams: (updates: Record<string, string | null>) => void
+  step?: number
+  min?: number
+  max?: number
+  className?: string
+}) {
+  const urlMin = num(searchParams.get(minKey))
+  const urlMax = num(searchParams.get(maxKey))
+  const committed: [number, number] = [urlMin ?? min, urlMax ?? max]
+  const [dragValue, setDragValue] = useState<[number, number] | null>(null)
+  const display = dragValue ?? committed
+
+  const isActive = urlMin !== undefined || urlMax !== undefined
+  const decimals = step < 1 ? (step.toString().split(".")[1]?.length ?? 1) : 0
+  const fmt = (v: number) => v.toFixed(decimals)
+  const rangeLabel = dragValue || isActive ? `${fmt(display[0])} – ${fmt(display[1])}` : "Qualquer"
+
+  const commit = (next: number[]) => {
+    const [lo, hi] = next as [number, number]
+    updateParams({
+      [minKey]: lo > min ? String(lo) : null,
+      [maxKey]: hi < max ? String(hi) : null,
+    })
+    setDragValue(null)
+  }
+
+  const reset = () => {
+    setDragValue(null)
+    updateParams({ [minKey]: null, [maxKey]: null })
+  }
+
+  return (
+    <div
+      className={cn(
+        "group rounded-lg border bg-background/45 px-3 py-2.5 transition-colors",
+        isActive ? "border-primary/55 bg-primary/[0.04]" : "border-border/65 hover:border-border",
+        className
+      )}
+    >
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          {emoji && <span className="text-base leading-none">{emoji}</span>}
+          <span className="truncate text-sm font-medium">{label}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
+              isActive ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground"
+            )}
+          >
+            {rangeLabel}
+          </span>
+          <button
+            type="button"
+            onClick={reset}
+            disabled={!isActive}
+            aria-label="Limpar"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:cursor-default disabled:opacity-0"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+      <Slider
+        value={display}
+        min={min}
+        max={max}
+        step={step}
+        minStepsBetweenThumbs={1}
+        onValueChange={(v) => setDragValue([v[0], v[1]] as [number, number])}
+        onValueCommit={commit}
+        className="px-1"
+      />
+    </div>
+  )
+}
+
+const VOTES_PRESETS: Array<{ label: string; min: number | null }> = [
+  { label: "Qualquer", min: null },
+  { label: "≥100", min: 100 },
+  { label: "≥500", min: 500 },
+  { label: "≥1k", min: 1000 },
+  { label: "≥5k", min: 5000 },
+  { label: "≥10k", min: 10000 },
+]
+
+function formatVotes(n: number): string {
+  if (n >= 1000 && n % 1000 === 0) return `${n / 1000}k`
+  if (n >= 10000) return `${(n / 1000).toFixed(0)}k`
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`
+  return String(n)
+}
+
+function VotesPresetCard({
+  searchParams,
+  updateParams,
+  className,
+}: {
+  searchParams: URLSearchParams
+  updateParams: (updates: Record<string, string | null>) => void
+  className?: string
+}) {
+  const currentMin = num(searchParams.get("min_votes"))
+  const currentMax = num(searchParams.get("max_votes"))
+  const isActive = currentMin !== undefined || currentMax !== undefined
+
+  let activeLabel = "Qualquer"
+  if (currentMin !== undefined && currentMax !== undefined) {
+    activeLabel = `${formatVotes(currentMin)} – ${formatVotes(currentMax)}`
+  } else if (currentMin !== undefined) {
+    activeLabel = `≥${formatVotes(currentMin)}`
+  } else if (currentMax !== undefined) {
+    activeLabel = `≤${formatVotes(currentMax)}`
+  }
+
+  const activePreset = currentMax === undefined ? currentMin ?? null : undefined
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border bg-background/45 px-3 py-2.5 transition-colors",
+        isActive ? "border-primary/55 bg-primary/[0.04]" : "border-border/65",
+        className
+      )}
+    >
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-base leading-none">🗳️</span>
+          <span className="truncate text-sm font-medium">Votos</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
+              isActive ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground"
+            )}
+          >
+            {activeLabel}
+          </span>
+          <button
+            type="button"
+            onClick={() => updateParams({ min_votes: null, max_votes: null })}
+            disabled={!isActive}
+            aria-label="Limpar"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:cursor-default disabled:opacity-0"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {VOTES_PRESETS.map((preset) => {
+          const active =
+            activePreset !== undefined &&
+            preset.min === activePreset &&
+            (preset.min !== null || !isActive)
+          return (
+            <button
+              key={preset.label}
+              type="button"
+              onClick={() =>
+                updateParams({
+                  min_votes: preset.min !== null ? String(preset.min) : null,
+                  max_votes: null,
+                })
+              }
+            >
+              <Badge
+                variant={active ? "default" : "outline"}
+                className="inline-flex h-7 cursor-pointer items-center rounded-full px-3 text-xs font-medium transition-transform hover:-translate-y-px"
+              >
+                {preset.label}
+              </Badge>
+            </button>
+          )
+        })}
+      </div>
+      <div className="mt-2.5 flex items-center gap-2">
+        <Label className="shrink-0 text-xs font-medium text-muted-foreground">Manual</Label>
+        <Input
+          type="number"
+          min={0}
+          step={1}
+          placeholder="Mín"
+          className="h-8 w-24 text-xs"
+          value={searchParams.get("min_votes") ?? ""}
+          onChange={(e) => updateParams({ min_votes: e.target.value || null })}
+        />
+        <span className="text-xs text-muted-foreground">–</span>
+        <Input
+          type="number"
+          min={0}
+          step={1}
+          placeholder="Máx"
+          className="h-8 w-24 text-xs"
+          value={searchParams.get("max_votes") ?? ""}
+          onChange={(e) => updateParams({ max_votes: e.target.value || null })}
+        />
+      </div>
+    </div>
+  )
+}
+
+function RangeRow({
+  label,
+  minKey,
+  maxKey,
+  searchParams,
+  updateParams,
+  step = 0.5,
+  max = 10,
+}: {
+  label: string
+  minKey: string
+  maxKey: string
+  searchParams: URLSearchParams
+  updateParams: (updates: Record<string, string | null>) => void
+  step?: number
+  max?: number
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(6rem,1fr)_4.5rem_auto_4.5rem] items-center gap-2">
+      <Label className="truncate text-xs font-medium">{label}</Label>
+      <Input
+        type="number"
+        min={0}
+        max={max}
+        step={step}
+        placeholder="Mín"
+        className="h-8 text-xs"
+        value={searchParams.get(minKey) ?? ""}
+        onChange={(e) => updateParams({ [minKey]: e.target.value || null })}
+      />
+      <span className="text-xs text-muted-foreground">-</span>
+      <Input
+        type="number"
+        min={0}
+        max={max}
+        step={step}
+        placeholder="Máx"
+        className="h-8 text-xs"
+        value={searchParams.get(maxKey) ?? ""}
+        onChange={(e) => updateParams({ [maxKey]: e.target.value || null })}
+      />
+    </div>
+  )
+}
+
+export function TitleFilters({
+  availableGenres,
+  availableTags,
+  publicationStatuses = [],
+  personalStatuses = [],
+}: TitleFiltersProps) {
+  const router = useRouter()
+  const appliedSearchParams = useSearchParams()
+  const appliedSearchString = appliedSearchParams.toString()
+  const [draftSearch, setDraftSearch] = useState(appliedSearchString)
+  const searchParams = useMemo(() => new URLSearchParams(draftSearch), [draftSearch])
+  const [, startTransition] = useTransition()
+  const [tabsExpanded, setTabsExpanded] = useState(false)
+  const [activeTab, setActiveTab] = useState("geral")
+
+  const updateParams = useCallback(
+    (updates: Record<string, string | null>) => {
+      setDraftSearch((current) => {
+        const params = new URLSearchParams(current)
+        for (const [key, value] of Object.entries(updates)) {
+          if (value === null || value === "") params.delete(key)
+          else params.set(key, value)
+        }
+        return params.toString()
+      })
+    },
+    []
+  )
+
+  const filtersDirty = draftSearch !== appliedSearchString
+  const hasFilters = draftSearch !== "" || appliedSearchString !== ""
+
+  const applyAllFilters = () => {
+    const target = draftSearch ? `/titles?${draftSearch}` : "/titles"
+    startTransition(() => router.replace(target))
+  }
+  const discardDraftFilters = () => setDraftSearch(appliedSearchString)
+  const clearAll = () => setDraftSearch("")
+
+  // Search
+  const currentSearch = searchParams.get("search") ?? ""
+
+  // Sort
+  const rawSort = searchParams.get("sort") ?? "final_score:desc"
+  const [sortField, sortDir] = (() => {
+    const [f, d] = rawSort.split(":")
+    const validField = SORTABLE_FIELDS.some((x) => x.value === f) ? f : "final_score"
+    return [validField, d === "asc" ? "asc" : "desc"] as const
+  })()
+  const setSort = (field: string, dir: "asc" | "desc") =>
+    updateParams({ sort: `${field}:${dir}` })
+
+  // Archived
+  const showArchived = searchParams.get("archived") === "1"
+
+  // Multi-select helpers
+  const toggleCsv = (key: string, item: string) => {
+    const set = csvSet(searchParams, key)
+    if (set.has(item)) set.delete(item)
+    else set.add(item)
+    updateParams({ [key]: set.size === 0 ? null : [...set].join(",") })
+  }
+
+  const visiblePublicationStatuses = useMemo(
+    () => dedupeStatusOptions(publicationStatuses),
+    [publicationStatuses]
+  )
+  const visiblePersonalStatuses = useMemo(
+    () => dedupeStatusOptions(personalStatuses),
+    [personalStatuses]
+  )
+
+  const pubStatusParam = searchParams.get("pub_status")
+  const isAllPub = pubStatusParam === "all"
+  const selectedPubStatuses = isAllPub
+    ? new Set<string>(visiblePublicationStatuses.map((s) => s.status))
+    : pubStatusParam != null
+      ? csvSet(searchParams, "pub_status")
+      : new Set<string>()
+  const togglePubStatus = (status: string) => {
+    const next = new Set(selectedPubStatuses)
+    if (next.has(status)) next.delete(status)
+    else next.add(status)
+    if (next.size === 0) updateParams({ pub_status: null })
+    else if (
+      next.size === visiblePublicationStatuses.length &&
+      visiblePublicationStatuses.every((s) => next.has(s.status))
+    ) {
+      updateParams({ pub_status: "all" })
+    } else {
+      updateParams({ pub_status: [...next].join(",") })
+    }
+  }
+
+  const perStatusParam = searchParams.get("per_status")
+  const isAllPer = perStatusParam === "all"
+  const selectedPerStatuses = isAllPer
+    ? new Set<string>(visiblePersonalStatuses.map((s) => s.status))
+    : perStatusParam != null
+      ? csvSet(searchParams, "per_status")
+      : new Set<string>()
+  const togglePerStatus = (status: string) => {
+    const next = new Set(selectedPerStatuses)
+    if (next.has(status)) next.delete(status)
+    else next.add(status)
+    if (next.size === 0) updateParams({ per_status: null })
+    else if (
+      next.size === visiblePersonalStatuses.length &&
+      visiblePersonalStatuses.every((s) => next.has(s.status))
+    ) {
+      updateParams({ per_status: "all" })
+    } else {
+      updateParams({ per_status: [...next].join(",") })
+    }
+  }
+
+  const selectedSynopsisQ = csvSet(searchParams, "synopsis_q")
+  const selectedAiStatuses = csvSet(searchParams, "ai_status")
+
+  const selectedGenreAny = csvSet(searchParams, "genres_any")
+  const selectedTagAny = csvSet(searchParams, "tags_any")
+
+  // Active filter chips
+  const activeChips: Array<{ key: string; label: string; onRemove: () => void }> = []
+  if (currentSearch.trim()) {
+    activeChips.push({
+      key: "search",
+      label: `Busca: "${currentSearch.trim()}"`,
+      onRemove: () => updateParams({ search: null }),
+    })
+  }
+  const pushRange = (key: string, label: string, minKey: string, maxKey: string) => {
+    const min = searchParams.get(minKey)
+    const max = searchParams.get(maxKey)
+    if (!min && !max) return
+    const suffix = min && max ? `${min} – ${max}` : min ? `≥ ${min}` : `≤ ${max}`
+    activeChips.push({
+      key,
+      label: `${label}: ${suffix}`,
+      onRemove: () => updateParams({ [minKey]: null, [maxKey]: null }),
+    })
+  }
+  pushRange("chapters", "Capítulos", "min_chapters", "max_chapters")
+  pushRange("final", "Nota.Final", "min_final", "max_final")
+  pushRange("pred", "Nota.Pr", "min_pr", "max_pr")
+  pushRange("calc", "Nota.IA", "min_calc", "max_calc")
+  pushRange("platform", "Nota.M", "min_platform_avg", "max_platform_avg")
+  pushRange("votes", "Votos", "min_votes", "max_votes")
+  for (const slug of CRITERION_SLUGS) {
+    pushRange(`crit-${slug}`, CRITERION_LABELS[slug] ?? slug, `min_${slug}`, `max_${slug}`)
+  }
+  if (isAllPub) {
+    activeChips.push({ key: "pub-all", label: "Publicação: Todos", onRemove: () => updateParams({ pub_status: null }) })
+  } else {
+    selectedPubStatuses.forEach((s) => activeChips.push({
+      key: `pub-${s}`, label: `Publicação: ${s}`, onRemove: () => togglePubStatus(s),
+    }))
+  }
+  if (isAllPer) {
+    activeChips.push({ key: "per-all", label: "Status: Todos", onRemove: () => updateParams({ per_status: null }) })
+  } else {
+    selectedPerStatuses.forEach((s) => activeChips.push({
+      key: `per-${s}`, label: `Status: ${s}`, onRemove: () => togglePerStatus(s),
+    }))
+  }
+  selectedSynopsisQ.forEach((q) => activeChips.push({
+    key: `syn-${q}`, label: `Sinopse: ${q}`, onRemove: () => toggleCsv("synopsis_q", q),
+  }))
+  selectedAiStatuses.forEach((s) => activeChips.push({
+    key: `ai-${s}`, label: `IA: ${AI_STATUS_LABELS[s] ?? s}`, onRemove: () => toggleCsv("ai_status", s),
+  }))
+  selectedGenreAny.forEach((g) => activeChips.push({
+    key: `genre-${g}`, label: `Gênero: ${g}`, onRemove: () => updateParams({ genres_any: null }),
+  }))
+  const tagNameBySlug = new Map(availableTags.map((t) => [t.slug, t.name]))
+  selectedTagAny.forEach((slug) => activeChips.push({
+    key: `tag-${slug}`, label: `Tag: ${tagNameBySlug.get(slug) ?? slug}`, onRemove: () => {
+      const next = new Set(selectedTagAny)
+      next.delete(slug)
+      updateParams({ tags_any: next.size === 0 ? null : [...next].join(",") })
+    },
+  }))
+
+  return (
+    <div className="rounded-xl border bg-muted/10 p-3 shadow-sm">
+      {/* Header */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Filter className="h-4 w-4 text-muted-foreground" />
+          Filtros
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <label className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-3 text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <Checkbox
+              checked={showArchived}
+              onCheckedChange={(checked) => updateParams({ archived: checked === true ? "1" : null })}
+            />
+            <span>Arquivadas</span>
+          </label>
+          {filtersDirty && (
+            <Badge variant="secondary" className="h-9 rounded-md px-3 text-xs">
+              alterações pendentes
+            </Badge>
+          )}
+          {filtersDirty && (
+            <Button variant="ghost" size="sm" onClick={discardDraftFilters} className="h-9 px-2">
+              Descartar
+            </Button>
+          )}
+          <Button size="sm" onClick={applyAllFilters} disabled={!filtersDirty} className="h-9">
+            Aplicar filtros
+          </Button>
+          {hasFilters && (
+            <Button variant="ghost" size="sm" onClick={clearAll} className="h-9 px-2">
+              <X className="mr-1.5 h-3.5 w-3.5" />
+              Limpar
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Busca + Ordenação */}
+      <div className="mb-3 grid gap-3 xl:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="title-filter-search" className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Busca por título
+          </Label>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id="title-filter-search"
+              placeholder="Digite o nome da obra e pressione Enter"
+              className="h-9 pl-9 pr-9 text-sm"
+              value={currentSearch}
+              onChange={(e) => updateParams({ search: e.target.value || null })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  applyAllFilters()
+                }
+              }}
+            />
+            {currentSearch && (
+              <button
+                type="button"
+                aria-label="Limpar busca por título"
+                onClick={() => {
+                  updateParams({ search: null })
+                  startTransition(() => {
+                    const next = new URLSearchParams(draftSearch)
+                    next.delete("search")
+                    const qs = next.toString()
+                    router.replace(qs ? `/titles?${qs}` : "/titles")
+                  })
+                }}
+                className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Ordenação
+          </Label>
+          <div className="flex items-center gap-2">
+            <Select value={sortField} onValueChange={(v) => setSort(v, sortDir)}>
+              <SelectTrigger className="h-9 flex-1 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SORTABLE_FIELDS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-sm">
+                    {f.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <button
+              type="button"
+              onClick={() => setSort(sortField, sortDir === "desc" ? "asc" : "desc")}
+              className="flex items-center gap-1 h-9 px-2.5 rounded-md border text-xs hover:bg-muted transition-colors shrink-0"
+              title={sortDir === "desc" ? "Decrescente" : "Crescente"}
+            >
+              {sortDir === "desc"
+                ? <><ArrowDown className="h-3 w-3" /><span>Dec</span></>
+                : <><ArrowUp className="h-3 w-3" /><span>Cre</span></>}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => { setActiveTab(v); setTabsExpanded(true) }}
+        className="gap-3"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <TabsList className="grid h-auto flex-1 grid-cols-2 gap-1 bg-muted/60 p-1">
+            <TabsTrigger value="geral" className="h-9">Geral</TabsTrigger>
+            <TabsTrigger value="notas" className="h-9">Notas</TabsTrigger>
+          </TabsList>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9 shrink-0"
+            onClick={() => setTabsExpanded((prev) => !prev)}
+            aria-expanded={tabsExpanded}
+          >
+            {tabsExpanded ? "Ocultar filtros" : "Filtros avançados"}
+            <ChevronDown
+              className={cn("ml-1 h-3.5 w-3.5 transition-transform", tabsExpanded && "rotate-180")}
+            />
+          </Button>
+        </div>
+
+        {tabsExpanded && (
+          <>
+            <TabsContent value="geral" className="space-y-3">
+              {/* Row 1: Publicação + Status Pessoal */}
+              <div className="grid gap-3 xl:grid-cols-2">
+                <FilterCard title={`Publicação${selectedPubStatuses.size ? ` (${selectedPubStatuses.size})` : ""}`}>
+                  <div className="flex flex-wrap gap-1.5">
+                    {visiblePublicationStatuses.map((s) => (
+                      <StatusButton
+                        key={`pub-${s.status}`}
+                        option={s}
+                        active={selectedPubStatuses.has(s.status)}
+                        onClick={() => togglePubStatus(s.status)}
+                      />
+                    ))}
+                  </div>
+                </FilterCard>
+
+                <FilterCard title={`Status Pessoal${selectedPerStatuses.size ? ` (${selectedPerStatuses.size})` : ""}`}>
+                  <div className="flex flex-wrap gap-1.5">
+                    {visiblePersonalStatuses.map((s) => (
+                      <StatusButton
+                        key={`per-${s.status}`}
+                        option={s}
+                        active={selectedPerStatuses.has(s.status)}
+                        tooltip={s.comment}
+                        onClick={() => togglePerStatus(s.status)}
+                      />
+                    ))}
+                  </div>
+                </FilterCard>
+              </div>
+
+              {/* Row 2: Sinopse + Capítulos + Status IA */}
+              <div className="grid gap-3 xl:grid-cols-3">
+                <FilterCard title={`Interesse na sinopse${selectedSynopsisQ.size ? ` (${selectedSynopsisQ.size})` : ""}`}>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {SYNOPSIS_QUALITIES.map((q) => (
+                      <button key={q} type="button" onClick={() => toggleCsv("synopsis_q", q)} className="w-full">
+                        <Badge
+                          variant={selectedSynopsisQ.has(q) ? "default" : "outline"}
+                          className="flex w-full cursor-pointer items-center justify-center rounded-full px-2 py-1.5 text-sm"
+                        >
+                          {q}
+                        </Badge>
+                      </button>
+                    ))}
+                  </div>
+                </FilterCard>
+
+                <FilterCard title="Capítulos">
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      placeholder="Mín"
+                      className="h-9"
+                      value={searchParams.get("min_chapters") ?? ""}
+                      onChange={(e) => updateParams({ min_chapters: e.target.value || null })}
+                    />
+                    <span className="text-xs text-muted-foreground">-</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      placeholder="Máx"
+                      className="h-9"
+                      value={searchParams.get("max_chapters") ?? ""}
+                      onChange={(e) => updateParams({ max_chapters: e.target.value || null })}
+                    />
+                  </div>
+                </FilterCard>
+
+                <FilterCard title={`Status IA${selectedAiStatuses.size ? ` (${selectedAiStatuses.size})` : ""}`}>
+                  <div className="flex flex-wrap gap-1.5">
+                    {AI_EVAL_STATUSES.map((status) => (
+                      <button
+                        key={status}
+                        type="button"
+                        onClick={() => toggleCsv("ai_status", status)}
+                      >
+                        <Badge
+                          variant={selectedAiStatuses.has(status) ? "default" : "outline"}
+                          className="cursor-pointer rounded-full px-2.5 py-1 text-xs"
+                        >
+                          {AI_STATUS_LABELS[status] ?? status}
+                        </Badge>
+                      </button>
+                    ))}
+                  </div>
+                </FilterCard>
+              </div>
+
+              {/* Row 3: Gênero + Tags */}
+              <div className="grid gap-3 xl:grid-cols-2">
+                <FilterCard title={`Gênero${selectedGenreAny.size ? ` (${selectedGenreAny.size})` : ""}`}>
+                  <Select
+                    value={[...selectedGenreAny][0] ?? "__none__"}
+                    onValueChange={(value) =>
+                      updateParams({ genres_any: value === "__none__" ? null : value })
+                    }
+                  >
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Selecionar gênero" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Todos os gêneros</SelectItem>
+                      {availableGenres.map((genre) => (
+                        <SelectItem key={genre} value={genre}>
+                          {genre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FilterCard>
+
+                <FilterCard title={`Tags${selectedTagAny.size ? ` (${selectedTagAny.size})` : ""}`}>
+                  <TagFilter
+                    selected={[...selectedTagAny]}
+                    onChange={(slugs) =>
+                      updateParams({ tags_any: slugs.length ? slugs.join(",") : null })
+                    }
+                    availableTags={availableTags}
+                  />
+                </FilterCard>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="notas">
+              <FilterCard title="Notas gerais">
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  <ScoreRangeCard
+                    emoji="🏆"
+                    label="Nota.Final"
+                    minKey="min_final"
+                    maxKey="max_final"
+                    searchParams={searchParams}
+                    updateParams={updateParams}
+                  />
+                  <ScoreRangeCard
+                    emoji="📈"
+                    label="Nota.Pr"
+                    minKey="min_pr"
+                    maxKey="max_pr"
+                    searchParams={searchParams}
+                    updateParams={updateParams}
+                  />
+                  <ScoreRangeCard
+                    emoji="🤖"
+                    label="Nota.IA"
+                    minKey="min_calc"
+                    maxKey="max_calc"
+                    searchParams={searchParams}
+                    updateParams={updateParams}
+                  />
+                  <ScoreRangeCard
+                    emoji="🌐"
+                    label="Nota.M"
+                    minKey="min_platform_avg"
+                    maxKey="max_platform_avg"
+                    searchParams={searchParams}
+                    updateParams={updateParams}
+                  />
+                  <VotesPresetCard
+                    searchParams={searchParams}
+                    updateParams={updateParams}
+                    className="lg:col-span-2"
+                  />
+                </div>
+              </FilterCard>
+            </TabsContent>
+          </>
+        )}
+      </Tabs>
+
+      {/* Active chips */}
+      {activeChips.length > 0 && (
+        <div className="mt-3 border-t border-border/60 pt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Filtros ativos
+            </span>
+            {activeChips.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={chip.onRemove}
+                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border/80 bg-background/55 px-2.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/10"
+                title="Remover filtro"
+              >
+                {chip.label}
+                <X className="h-3 w-3 text-muted-foreground" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

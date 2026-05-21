@@ -1,25 +1,30 @@
 import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
 import { ChevronDown, Plus } from "lucide-react"
-import { getWorkWithAiEvaluations, getWorkBySlug } from "@/server/queries/works"
+import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
-import { titleToSlug } from "@/lib/utils"
+import { getWorkReviews } from "@/server/queries/work-reviews"
+import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import {
   PublicationStatusBadge,
   PersonalStatusBadge,
 } from "@/components/ui/status-badge"
 import { CalculationBreakdown } from "@/components/titles/calculation-breakdown"
+import { SimilarWorksCard } from "@/components/titles/similar-works-card"
+import { getSimilarWorks } from "@/server/queries/similar-works"
 import { WorkDetailActions } from "@/components/titles/work-detail-actions"
 import { WorkPersonalFields } from "@/components/titles/work-personal-fields"
 import { BatchCreatedNavigator } from "@/components/titles/batch-created-navigator"
 import { WorkCoverGallery } from "@/components/titles/work-cover-gallery"
 import { SynopsesViewer } from "@/components/titles/synopses-viewer"
 import { BackButton } from "@/components/titles/back-button"
+import { CriterionTitleTooltip } from "@/components/titles/criterion-title-tooltip"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ExpandableText } from "@/components/ui/expandable-text"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CRITERIA_INFO, PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { getPublicationStatusNameById, getPersonalStatusNameById } from "@/lib/constants/status-lookups"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
@@ -32,7 +37,7 @@ import {
   POST_READING_WEIGHT_LABELS,
   type PostReadingScoreField,
 } from "@/lib/constants/post-reading-criteria"
-import { cn } from "@/lib/utils"
+import { cn, titleToSlug } from "@/lib/utils"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { unstable_cache } from "next/cache"
 
@@ -121,7 +126,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   let work: any = null
   if (UUID_RE.test(id)) {
     work = await getWorkWithAiEvaluations(id)
-    if (work) redirect(`/titles/${titleToSlug(work.title)}`)
+    if (work) {
+      const slug = titleToSlug(work.title)
+      const slugMatches = await getWorkIdsBySlug(slug)
+      if (slugMatches.length === 1 && slugMatches[0] === work.id) {
+        redirect(`/titles/${slug}`)
+      }
+    }
   } else {
     work = await getWorkBySlug(id)
   }
@@ -131,7 +142,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // Carrega só o distance_p95 do formula_config pro CalculationBreakdown
   // mostrar rótulos de distância calibrados (perto/médio/longe relativos).
   const configClient = createAdminClient()
-  const [{ data: configRow }, scoreThresholds] = await Promise.all([
+  const [{ data: configRow }, scoreThresholds, reviewsSnapshot, similarWorks] = await Promise.all([
     configClient
       .from("formula_config")
       .select("distance_p95")
@@ -139,6 +150,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       .limit(1)
       .maybeSingle(),
     getScoreColorThresholds(),
+    getWorkReviews(work.id as string),
+    getSimilarWorks(work.id as string, 8),
   ])
   const distanceP95: number | null = configRow?.distance_p95 == null ? null : Number(configRow.distance_p95)
 
@@ -246,6 +259,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         </Button>
       </div>
 
+      <Tabs defaultValue="overview" className="w-full">
+        <TabsList variant="line">
+          <TabsTrigger value="overview">Visão Geral</TabsTrigger>
+          <TabsTrigger value="scores">Notas & Avaliações</TabsTrigger>
+          <TabsTrigger value="reviews">Reviews & Categorias</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="mt-4 space-y-6">
       {/* Header: capa + info */}
       <section className="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)]">
         {/* Coluna esquerda: apenas capa */}
@@ -372,7 +393,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       })()}
 
       <BatchCreatedNavigator currentId={work.id} />
+        </TabsContent>
 
+        <TabsContent value="scores" className="mt-4 space-y-6">
       {/* Notas */}
       <Card>
         <CardHeader className="pb-3">
@@ -525,52 +548,72 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               return (
                 <div
                   key={slug}
-                  className="space-y-2 rounded-md border bg-muted/20 p-3"
+                  className="flex items-center gap-3 rounded-md border bg-muted/20 p-3"
                 >
-                  <div className="flex items-center gap-3">
-                    <span className="text-xl shrink-0" title={info.name}>
+                  <div className="shrink-0 flex flex-col items-center gap-1">
+                    <span className="text-4xl leading-none" aria-hidden>
                       {info.emoji}
                     </span>
-                    <div className="flex flex-1 min-w-0 items-center justify-between gap-2">
-                      <p className="text-xs font-medium truncate">{info.name}</p>
-                      {score != null ? (
-                        <span
-                          className={cn(
-                            "shrink-0 px-2 py-0.5 rounded text-lg font-mono font-semibold leading-none",
-                            getCriterionColor(score, slug)
-                          )}
-                        >
-                          {score.toFixed(1)}
-                        </span>
-                      ) : (
-                        <span className="shrink-0 text-xs text-muted-foreground">—</span>
-                      )}
-                    </div>
+                    {score != null ? (
+                      <div
+                        className={cn(
+                          "grid place-items-center w-14 h-9 rounded-md font-mono text-xl font-bold leading-none",
+                          getCriterionColor(score, slug)
+                        )}
+                      >
+                        {score.toFixed(1)}
+                      </div>
+                    ) : (
+                      <div className="grid place-items-center w-14 h-9 rounded-md border border-dashed text-muted-foreground text-base">
+                        —
+                      </div>
+                    )}
                   </div>
-                  {aiScore?.justification && (
-                    <div className="rounded-md bg-background/70 p-2">
-                      <p className="mb-1 text-[10px] font-medium uppercase text-muted-foreground">
-                        Explicação IA
-                      </p>
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <CriterionTitleTooltip
+                      name={info.name}
+                      description={info.description}
+                    />
+                    {aiScore?.justification && (
                       <ExpandableText
                         text={aiScore.justification}
-                        limit={170}
-                        className="text-xs leading-5 text-muted-foreground"
+                        limit={140}
+                        className="text-[11px] leading-4 text-muted-foreground/80"
                       />
-                    </div>
-                  )}
-                  {aiScore && aiScore.suggested_score != null && aiScore.suggested_score !== score && (
-                    <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                      <span>Última sugestão IA</span>
-                      <span className="font-mono font-semibold">{Number(aiScore.suggested_score).toFixed(1)}</span>
-                    </div>
-                  )}
+                    )}
+                    {aiScore && aiScore.suggested_score != null && aiScore.suggested_score !== score && (
+                      <p className="text-[10px] text-muted-foreground/70">
+                        Sugestão IA:{" "}
+                        <span className="font-mono font-semibold">
+                          {Number(aiScore.suggested_score).toFixed(1)}
+                        </span>
+                      </p>
+                    )}
+                  </div>
                 </div>
               )
             })}
           </div>
         </CardContent>
       </Card>
+
+      {/* Detalhamento do cálculo */}
+      {work.calculated_scores && (
+        <CalculationBreakdown
+          calculatedScore={work.calculated_scores}
+          aiConfidence={latestAiEval?.confidence ?? null}
+          criteriaCoverage={Object.keys(scoreMap).length / CRITERION_SLUGS.length}
+          distanceP95={distanceP95}
+        />
+      )}
+
+      {/* Obras semanticamente parecidas (via embeddings) */}
+      <SimilarWorksCard works={similarWorks} />
+        </TabsContent>
+
+        <TabsContent value="reviews" className="mt-4 space-y-6">
+      {/* Reviews externas */}
+      <WorkReviewsCard snapshot={reviewsSnapshot} />
 
       {/* Categorias */}
       {(genres.length > 0 || tags.length > 0) && (
@@ -616,16 +659,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           </CardContent>
         </Card>
       )}
-
-      {/* Detalhamento do cálculo */}
-      {work.calculated_scores && (
-        <CalculationBreakdown
-          calculatedScore={work.calculated_scores}
-          aiConfidence={latestAiEval?.confidence ?? null}
-          criteriaCoverage={Object.keys(scoreMap).length / CRITERION_SLUGS.length}
-          distanceP95={distanceP95}
-        />
-      )}
+        </TabsContent>
+      </Tabs>
 
       <div className="flex gap-3">
         <Link href="/titles" className="text-sm text-muted-foreground hover:underline">

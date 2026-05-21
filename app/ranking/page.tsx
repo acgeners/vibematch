@@ -3,6 +3,7 @@ import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { Header } from "@/components/layout/header"
 import { RankingTable } from "@/components/ranking/ranking-table"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
+import { RerankButton } from "@/components/ranking/rerank-button"
 import { Badge } from "@/components/ui/badge"
 import { CRITERION_SLUGS, PERSONAL_STATUSES, PUBLICATION_STATUSES } from "@/types/domain"
 import {
@@ -173,7 +174,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   }
 
   const validSortFields = new Set<string>([
-    "final_score", "calc_score", "pred_score", "platform_avg", "total_votes", "chapters", "title",
+    "final_score", "calc_score", "pred_score", "platform_avg", "total_votes", "chapters", "title", "personal_fit", "final_confidence", "knn_score", "alignment_score",
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
   const rawSort = str("sort") ?? "final_score:desc"
@@ -258,9 +259,12 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         title="Ranking"
         description="Obras ordenadas pela Nota.Final"
         actions={
-          <Badge variant="outline" className="text-sm">
-            {entries.length} obra{entries.length !== 1 ? "s" : ""}
-          </Badge>
+          <div className="flex items-center gap-3">
+            <Badge variant="outline" className="text-sm">
+              {entries.length} obra{entries.length !== 1 ? "s" : ""}
+            </Badge>
+            <RerankButton topN={Math.min(50, entries.length)} />
+          </div>
         }
       />
 

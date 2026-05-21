@@ -1,104 +1,155 @@
 "use client"
 
-import { useState, useCallback, useTransition, useRef } from "react"
-import { X, Tag, Loader2 } from "lucide-react"
+import { useMemo, useState } from "react"
+import { BookOpen, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import {
-  Popover,
-  PopoverContent,
-  PopoverAnchor,
-} from "@/components/ui/popover"
-import { searchTags } from "@/server/actions/external"
-import type { TagSuggestion } from "@/lib/external/types"
+import { Textarea } from "@/components/ui/textarea"
+import { cn } from "@/lib/utils"
+import { TagDictionaryDialog } from "@/components/titles/tag-dictionary-dialog"
+import type { TagOption } from "@/server/queries/tags"
 
 interface TagFilterProps {
-  selected: TagSuggestion[]
-  onAdd: (tag: TagSuggestion) => void
-  onRemove: (slug: string) => void
+  selected: string[]
+  onChange: (slugs: string[]) => void
+  availableTags: TagOption[]
 }
 
-export function TagFilter({ selected, onAdd, onRemove }: TagFilterProps) {
-  const [query, setQuery] = useState("")
-  const [suggestions, setSuggestions] = useState<TagSuggestion[]>([])
-  const [open, setOpen] = useState(false)
-  const [, startTransition] = useTransition()
-  const [searching, setSearching] = useState(false)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+interface ParsedTag {
+  input: string
+  slug: string | null
+  name: string | null
+}
 
-  const handleInput = useCallback((value: string) => {
-    setQuery(value)
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    if (!value.trim()) {
-      setSuggestions([])
-      setOpen(false)
+function slugifyInput(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+}
+
+function parseTagText(text: string, availableTags: TagOption[]): ParsedTag[] {
+  const bySlug = new Map(availableTags.map((t) => [t.slug, t]))
+  const byNameLc = new Map(availableTags.map((t) => [t.name.toLowerCase(), t]))
+
+  return text
+    .split(/[,;\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((input): ParsedTag => {
+      const lc = input.toLowerCase()
+      const bySlugMatch = bySlug.get(lc)
+      if (bySlugMatch) return { input, slug: bySlugMatch.slug, name: bySlugMatch.name }
+      const byNameMatch = byNameLc.get(lc)
+      if (byNameMatch) return { input, slug: byNameMatch.slug, name: byNameMatch.name }
+      const slugified = slugifyInput(input)
+      const fallback = bySlug.get(slugified)
+      if (fallback) return { input, slug: fallback.slug, name: fallback.name }
+      return { input, slug: null, name: null }
+    })
+}
+
+function slugsToText(slugs: string[], availableTags: TagOption[]): string {
+  const bySlug = new Map(availableTags.map((t) => [t.slug, t]))
+  return slugs.map((slug) => bySlug.get(slug)?.name ?? slug).join(", ")
+}
+
+export function TagFilter({ selected, onChange, availableTags }: TagFilterProps) {
+  const [text, setText] = useState(() => slugsToText(selected, availableTags))
+  const [dictOpen, setDictOpen] = useState(false)
+
+  const parsed = useMemo(() => parseTagText(text, availableTags), [text, availableTags])
+
+  const validSlugs = useMemo(() => {
+    const slugs: string[] = []
+    const seen = new Set<string>()
+    for (const p of parsed) {
+      if (p.slug && !seen.has(p.slug)) {
+        seen.add(p.slug)
+        slugs.push(p.slug)
+      }
+    }
+    return slugs
+  }, [parsed])
+
+  const validSlugsKey = [...validSlugs].sort().join("|")
+  const selectedKey = [...selected].sort().join("|")
+
+  const [lastSelectedKey, setLastSelectedKey] = useState(selectedKey)
+  if (selectedKey !== lastSelectedKey) {
+    setLastSelectedKey(selectedKey)
+    if (validSlugsKey !== selectedKey) {
+      setText(slugsToText(selected, availableTags))
+    }
+  }
+
+  const [lastEmittedKey, setLastEmittedKey] = useState(selectedKey)
+  if (validSlugsKey !== lastEmittedKey && validSlugsKey !== selectedKey) {
+    setLastEmittedKey(validSlugsKey)
+    onChange(validSlugs)
+  }
+
+  const invalidCount = parsed.filter((p) => !p.slug).length
+
+  const appendTag = (name: string) => {
+    const trimmed = text.trimEnd()
+    if (!trimmed) {
+      setText(name)
       return
     }
-    setSearching(true)
-    debounceRef.current = setTimeout(() => {
-      startTransition(async () => {
-        const results = await searchTags(value)
-        const selectedSlugs = new Set(selected.map(t => t.slug))
-        setSuggestions(results.filter(r => !selectedSlugs.has(r.slug)))
-        setOpen(results.length > 0)
-        setSearching(false)
-      })
-    }, 250)
-  }, [selected])
+    const needsSeparator = !trimmed.endsWith(",") && !trimmed.endsWith(";")
+    setText(`${trimmed}${needsSeparator ? ", " : " "}${name}`)
+  }
 
-  const handleSelect = (tag: TagSuggestion) => {
-    onAdd(tag)
-    setQuery("")
-    setSuggestions([])
-    setOpen(false)
+  const removeChipAt = (index: number) => {
+    const newParts = parsed
+      .filter((_, i) => i !== index)
+      .map((p) => p.name ?? p.input)
+    setText(newParts.join(", "))
   }
 
   return (
-    <div className="space-y-2">
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverAnchor asChild>
-          <div className="relative">
-            <Tag className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              placeholder="Buscar tag..."
-              className="h-8 text-sm pl-7 pr-7"
-              value={query}
-              onChange={e => handleInput(e.target.value)}
-              onFocus={() => suggestions.length > 0 && setOpen(true)}
-            />
-            {searching && (
-              <Loader2 className="absolute right-2.5 top-2 h-3.5 w-3.5 animate-spin text-muted-foreground" />
-            )}
-          </div>
-        </PopoverAnchor>
-        <PopoverContent
-          className="p-0 w-64 max-h-52 overflow-y-auto"
-          align="start"
-          onOpenAutoFocus={e => e.preventDefault()}
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[10px] text-muted-foreground">
+          Separe por vírgula, ponto e vírgula ou quebra de linha
+        </span>
+        <button
+          type="button"
+          onClick={() => setDictOpen(true)}
+          className="inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:underline"
         >
-          {suggestions.map(tag => (
-            <button
-              key={tag.slug}
-              className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors"
-              onMouseDown={e => {
-                e.preventDefault()
-                handleSelect(tag)
-              }}
-            >
-              {tag.name}
-            </button>
-          ))}
-        </PopoverContent>
-      </Popover>
-
-      {selected.length > 0 && (
+          <BookOpen className="h-3 w-3" />
+          Ver dicionário de tags
+        </button>
+      </div>
+      <Textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Ex: Romance, Drama, Magia"
+        rows={2}
+        className="min-h-[56px] text-sm"
+      />
+      {parsed.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {selected.map(tag => (
-            <Badge key={tag.slug} variant="secondary" className="text-xs gap-1 pr-1">
-              {tag.name}
+          {parsed.map((p, i) => (
+            <Badge
+              key={`${p.input}-${i}`}
+              variant="secondary"
+              className={cn(
+                "gap-1 pr-1 text-xs",
+                !p.slug && "border-destructive/40 bg-destructive/10 text-destructive"
+              )}
+              title={p.slug ? `Slug: ${p.slug}` : "Tag não encontrada no dicionário"}
+            >
+              {!p.slug && <span aria-hidden>⚠</span>}
+              {p.name ?? p.input}
               <button
-                className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5"
-                onClick={() => onRemove(tag.slug)}
+                type="button"
+                onClick={() => removeChipAt(i)}
+                className="ml-0.5 rounded-full p-0.5 hover:bg-foreground/15"
+                aria-label={`Remover ${p.name ?? p.input}`}
               >
                 <X className="h-2.5 w-2.5" />
               </button>
@@ -106,6 +157,20 @@ export function TagFilter({ selected, onAdd, onRemove }: TagFilterProps) {
           ))}
         </div>
       )}
+      {invalidCount > 0 && (
+        <p className="text-[10px] text-destructive/80">
+          {invalidCount === 1
+            ? "1 tag não existe no dicionário e será ignorada"
+            : `${invalidCount} tags não existem no dicionário e serão ignoradas`}
+        </p>
+      )}
+      <TagDictionaryDialog
+        open={dictOpen}
+        onOpenChange={setDictOpen}
+        availableTags={availableTags}
+        selectedSlugs={validSlugs}
+        onSelect={(tag) => appendTag(tag.name)}
+      />
     </div>
   )
 }

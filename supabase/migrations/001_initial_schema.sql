@@ -36,14 +36,14 @@ CREATE TABLE works (
   observation_penalty NUMERIC(4, 2) NOT NULL DEFAULT 0,
   manual_score        NUMERIC(3, 1),   -- M.Nota: nota pessoal, target do ML
   cover_url           TEXT,
-  ai_eval_status      TEXT NOT NULL DEFAULT 'pending',  -- pending done skipped
+  ai_eval_status      TEXT NOT NULL DEFAULT 'pending',  -- pending review_pending done skipped
   is_archived         BOOLEAN NOT NULL DEFAULT false,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT works_manual_score_range CHECK (manual_score IS NULL OR (manual_score >= 0 AND manual_score <= 10)),
   CONSTRAINT works_obs_penalty_range CHECK (observation_penalty >= 0 AND observation_penalty <= 1),
   CONSTRAINT works_publication_status_valid CHECK (publication_status IN ('C','H','O','D','Unknown')),
-  CONSTRAINT works_ai_eval_status_valid CHECK (ai_eval_status IN ('pending','done','skipped'))
+  CONSTRAINT works_ai_eval_status_valid CHECK (ai_eval_status IN ('pending','review_pending','done','skipped'))
 );
 
 CREATE UNIQUE INDEX works_title_lower_idx ON works (lower(title));

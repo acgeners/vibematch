@@ -107,6 +107,7 @@ Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evalu
 - Passes `sourcedReviews: SourcedReview[]`; final selected synopsis is sent as the primary synopsis. Extra external context is omitted when a selected synopsis exists to avoid evaluating unselected synopsis blocks.
 - Scores go into form fields; if saved unchanged they are persisted as `source: "ai_accepted"` with an `ai_evaluation_id`
 - Works with all 9 criteria set get `ai_eval_status = "done"` and skip the Avaliar queue
+- Completed AI evaluations that still need review use `ai_eval_status = "review_pending"`
 
 Post-processing applied to every evaluation (in `service.ts`):
 - `enforceR19AdultContentRule`: raises `adult_content` to ≥ 7.0 if R19 marker detected anywhere in input
@@ -133,7 +134,7 @@ Core tables: `works`, `category_scores`, `calculated_scores`, `platform_ratings`
 
 All DB access uses the service role key (`createAdminClient()`). RLS is enabled on all tables with no permissive policies — anon access is intentionally blocked.
 
-`works.ai_eval_status`: `"pending"` (needs AI review) | `"done"` (reviewed) | `"skipped"`.  
+`works.ai_eval_status`: `"pending"` (never evaluated / needs AI run) | `"review_pending"` (AI completed / needs review) | `"done"` (accepted/saved) | `"skipped"`.
 `ai_evaluations.status`: `"processing"` | `"completed"` | `"failed"` (separate from the work status).
 
 `category_scores.source`: `"manual"` | `"imported"` | `"ai_accepted"` | `"ai_edited"`.

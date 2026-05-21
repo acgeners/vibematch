@@ -1,6 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
+import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requestAiEvaluation } from "@/lib/ai-evaluation/service"
 import {
@@ -8,6 +9,7 @@ import {
   fetchExternalEvaluationContextForCandidate,
   fetchExternalEvaluationContextForWork,
 } from "@/lib/external/index"
+import { saveWorkReviews } from "@/lib/external/persist-reviews"
 import type { ExternalSourceId } from "@/lib/external/types"
 import { recalculateWork } from "./calculations"
 import type { AiEvaluation } from "@/types/domain"
@@ -97,6 +99,8 @@ export async function triggerAiEvaluation(workId: string) {
           rejectedSources,
         })
 
+    await saveWorkReviews(workId, sourcedReviews ?? [])
+
     const synopses = (work as { work_synopses?: Array<{ source?: string | null; text?: string | null; is_primary?: boolean | null; position?: number | null }> }).work_synopses ?? []
     const primarySynopsisRow = synopses.find((s) => s?.is_primary) ?? null
     const synopsisIsManual = primarySynopsisRow?.source === "manual"
@@ -148,7 +152,7 @@ export async function triggerAiEvaluation(workId: string) {
 
     await supabase
       .from("works")
-      .update({ ai_eval_status: "pending" })
+      .update({ ai_eval_status: "review_pending" })
       .eq("id", workId)
 
     revalidatePath(`/titles/${workId}`)
@@ -215,7 +219,13 @@ export async function submitAiReview(submission: AiReviewSubmission) {
 
   if (workError) return { data: null, error: workError.message }
 
-  await recalculateWork(submission.workId)
+  after(async () => {
+    try {
+      await recalculateWork(submission.workId)
+    } catch (error) {
+      console.error("[submitAiReview] Failed to recalculate scores", error)
+    }
+  })
 
   revalidatePath(`/titles/${submission.workId}`)
   revalidatePath("/ai-evaluation")

@@ -125,10 +125,6 @@ function titleSimilarityDetailed(a: string, b: string): { score: number; reason:
   return { score: intersection / new Set([...aw, ...bw]).size, reason: "jaccard" }
 }
 
-function titleSimilarity(a: string, b: string): number {
-  return titleSimilarityDetailed(a, b).score
-}
-
 type MatchedNameKind = "title" | "originalTitle" | "alt"
 
 export function bestTitleMatchDetailed(

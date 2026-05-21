@@ -55,7 +55,9 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 
   const active = works.filter((w) => !w.is_archived)
   const totalWorks = active.length
-  const pendingAi = active.filter((w) => w.ai_eval_status === "pending").length
+  const pendingAi = active.filter((w) =>
+    w.ai_eval_status === "pending" || w.ai_eval_status === "review_pending"
+  ).length
   const archived = works.filter((w) => w.is_archived).length
 
   const calcMap = new Map(calcs.map((c) => [c.work_id, c]))

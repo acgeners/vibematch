@@ -20,6 +20,10 @@ const baseInput = (overrides: Partial<PredictionInput> = {}): PredictionInput =>
   synopsisQuality: "♥♥♥",
   observationAdjustment: 0,
   publicationStatus: "Completed",
+  meanPostScore: null,
+  lovedTagOverlap: null,
+  avoidedTagOverlap: null,
+  criterionFitScore: null,
   ...overrides,
 })
 

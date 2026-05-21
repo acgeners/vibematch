@@ -1,7 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  async redirects() {
+    return [
+      {
+        source: "/titles",
+        has: [{ type: "query", key: "fav", value: "1" }],
+        destination: "/favorites",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

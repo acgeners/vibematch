@@ -8,6 +8,7 @@ import { getCoverImageSrc } from "@/lib/image-proxy"
 import { cn, titleToSlug } from "@/lib/utils"
 import { ScoreBadge, type ScoreColorThresholds } from "@/components/ui/score-badge"
 import { PublicationStatusBadge, PersonalStatusBadge } from "@/components/ui/status-badge"
+import { AlignmentCell, AlignmentScoreCell, ConfidenceCell } from "@/components/ranking/ranking-cells"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import type { WorkPreview } from "@/server/actions/works"
 import {
@@ -184,8 +185,12 @@ function renderCell(
   if (col.key === "platform_avg") return <span className="font-mono text-sm">{entry.platformAvg != null ? entry.platformAvg.toFixed(1) : "—"}</span>
   if (col.key === "total_votes") return <span className="font-mono text-sm">{formatVotes(entry.totalVotes)}</span>
   if (col.key === "final") return <ScoreBadge score={entry.finalScore} size="md" thresholds={scoreThresholds} />
+  if (col.key === "final_confidence") return <ConfidenceCell value={entry.finalScoreConfidence} />
   if (col.key === "calc") return <ScoreBadge score={entry.calcScore} size="md" thresholds={scoreThresholds} />
   if (col.key === "pred") return <ScoreBadge score={entry.predictedScore} size="md" showStub={entry.predictedIsStub} thresholds={scoreThresholds} />
+  if (col.key === "personal_fit") return <AlignmentCell value={entry.personalFit} />
+  if (col.key === "alignment_score")
+    return <AlignmentScoreCell score={entry.alignmentScore} justification={entry.alignmentJustification} />
   if (col.key.startsWith("crit_")) {
     const slug = col.key.slice(5)
     const score = entry.scores[slug]

@@ -392,6 +392,7 @@ export function ExternalSearch({
             inputHash: aiResult.inputHash,
             modelName: aiResult.modelName,
             promptVersion: aiResult.promptVersion,
+            confidence: aiResult.confidence,
           }
         }
       } catch (error) {
@@ -546,11 +547,29 @@ export function ExternalSearch({
   const setCoverPrimary = (url: string) => {
     setCoverChoices((prev) => prev.map((c) => ({ ...c, isPrimary: c.url === url, included: c.url === url ? true : c.included })))
   }
+  const allCoversIncluded = coverChoices.length > 0 && coverChoices.every((c) => c.included)
+  const toggleAllCovers = () => {
+    setCoverChoices((prev) => {
+      const next = allCoversIncluded
+        ? prev.map((c) => ({ ...c, included: c.isPrimary }))
+        : prev.map((c) => ({ ...c, included: true }))
+      return next
+    })
+  }
   const toggleSynopsisIncluded = (idx: number) => {
     setSynopsisChoices((prev) => prev.map((s, i) => i === idx ? { ...s, included: !s.included } : s))
   }
   const setSynopsisPrimary = (idx: number) => {
     setSynopsisChoices((prev) => prev.map((s, i) => ({ ...s, isPrimary: i === idx, included: i === idx ? true : s.included })))
+  }
+  const allSynopsesIncluded = synopsisChoices.length > 0 && synopsisChoices.every((s) => s.included)
+  const toggleAllSynopses = () => {
+    setSynopsisChoices((prev) => {
+      const next = allSynopsesIncluded
+        ? prev.map((s) => ({ ...s, included: s.isPrimary }))
+        : prev.map((s) => ({ ...s, included: true }))
+      return next
+    })
   }
 
   const handleConfirmConflicts = async () => {
@@ -842,7 +861,17 @@ export function ExternalSearch({
 
               {coverChoices.length > 1 && (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium">Capas</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">Capas</p>
+                    <label className="flex items-center gap-1.5 text-xs cursor-pointer text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={allCoversIncluded}
+                        onChange={toggleAllCovers}
+                      />
+                      Incluir todas
+                    </label>
+                  </div>
                   <div className="grid grid-cols-3 gap-3">
                     {coverChoices.map((cover) => (
                       <div
@@ -890,7 +919,17 @@ export function ExternalSearch({
 
               {synopsisChoices.length > 1 && (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium">Sinopses</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">Sinopses</p>
+                    <label className="flex items-center gap-1.5 text-xs cursor-pointer text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={allSynopsesIncluded}
+                        onChange={toggleAllSynopses}
+                      />
+                      Incluir todas
+                    </label>
+                  </div>
                   <div className="space-y-2">
                     {synopsisChoices.map((syn, idx) => (
                       <div

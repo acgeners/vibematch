@@ -21,7 +21,13 @@ import {
   type PersonalStatusInfo,
 } from "@/lib/constants/criteria"
 
-type EvaluationFilter = "pending" | "low-confidence" | "outdated-model"
+type EvaluationFilter = "pending" | "review-pending" | "low-confidence" | "outdated-model"
+const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending"]
+
+function isDefaultFilterSet(filters: Set<EvaluationFilter> | EvaluationFilter[]) {
+  const set = Array.isArray(filters) ? new Set(filters) : filters
+  return set.size === DEFAULT_FILTERS.length && DEFAULT_FILTERS.every((filter) => set.has(filter))
+}
 
 interface AiEvaluationFiltersProps {
   activeFilters: EvaluationFilter[]
@@ -67,7 +73,7 @@ export function AiEvaluationFilters({
     else next.delete(filter)
 
     updateParams((params) => {
-      if (next.size === 0 || (next.size === 1 && next.has("pending"))) {
+      if (next.size === 0 || isDefaultFilterSet(next)) {
         params.delete("filter")
       } else {
         params.set("filter", [...next].join(","))
@@ -111,6 +117,11 @@ export function AiEvaluationFilters({
       tooltip: "Obras com ai_eval_status = pending",
     },
     {
+      id: "review-pending",
+      label: "Aguardando revisão",
+      tooltip: "Obras com ai_eval_status = review_pending",
+    },
+    {
       id: "low-confidence",
       label: `Confiança < ${Math.round(lowConfidenceThreshold * 100)}%`,
       tooltip: "Avaliações de baixa confiança da IA",
@@ -123,12 +134,12 @@ export function AiEvaluationFilters({
   ]
 
   const activeCount =
-    (activeFilters.length === 1 && activeFilters[0] === "pending" ? 0 : activeFilters.length) +
+    (isDefaultFilterSet(activeFilters) ? 0 : activeFilters.length) +
     activePubStatuses.length +
     activePersonalStatuses.length
 
   const hasAnyActive =
-    activeFilters.some((f) => f !== "pending") ||
+    !isDefaultFilterSet(activeFilters) ||
     activePubStatuses.length > 0 ||
     activePersonalStatuses.length > 0
 

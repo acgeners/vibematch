@@ -1,0 +1,146 @@
+"use client"
+
+import { useState } from "react"
+import { ChevronDown, MessageSquareText } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ExpandableText } from "@/components/ui/expandable-text"
+import { PLATFORM_LABELS } from "@/lib/constants/criteria"
+import { cn } from "@/lib/utils"
+import type { WorkReviewsSnapshot } from "@/server/queries/work-reviews"
+
+interface WorkReviewsCardProps {
+  snapshot: WorkReviewsSnapshot
+}
+
+function formatFetchedAt(iso: string): string {
+  return new Date(iso).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+function ratingColor(rating: number | null): string {
+  if (rating == null) return "text-muted-foreground"
+  if (rating >= 8) return "text-emerald-600 dark:text-emerald-300"
+  if (rating >= 6) return "text-lime-600 dark:text-lime-300"
+  if (rating >= 4) return "text-amber-600 dark:text-amber-300"
+  return "text-rose-600 dark:text-rose-300"
+}
+
+export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (snapshot.total === 0) {
+    return (
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <MessageSquareText className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-base">Reviews externas</CardTitle>
+            </div>
+            <Badge variant="outline" className="text-[10px]">0 reviews</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Nenhuma review salva ainda. Reviews são extraídas e salvas quando a
+            Avaliação IA é executada nesta obra.
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex w-full items-center justify-between gap-3 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <MessageSquareText className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">Reviews externas</CardTitle>
+            <Badge variant="outline" className="text-[10px]">
+              {snapshot.total} de {snapshot.bySource.length} fonte(s)
+            </Badge>
+          </div>
+          <div className="flex items-center gap-3">
+            {snapshot.fetchedAt && (
+              <span className="text-xs text-muted-foreground">
+                buscado em {formatFetchedAt(snapshot.fetchedAt)}
+              </span>
+            )}
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 text-muted-foreground transition-transform",
+                expanded && "rotate-180",
+              )}
+            />
+          </div>
+        </button>
+      </CardHeader>
+      {expanded && (
+        <CardContent className="space-y-5">
+          {snapshot.bySource.map(({ source, reviews }) => (
+            <section key={source}>
+              <div className="mb-2 flex items-baseline justify-between gap-2">
+                <h3 className="text-sm font-semibold">
+                  {PLATFORM_LABELS[source] ?? source}
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  {reviews.length} review(s)
+                </span>
+              </div>
+              <ul className="space-y-2">
+                {reviews.map((review) => (
+                  <li
+                    key={review.id}
+                    className="rounded-md border bg-card/40 p-3"
+                  >
+                    <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
+                      <div className="flex items-baseline gap-2">
+                        {review.sourceTitle && (
+                          <span
+                            className="line-clamp-1 max-w-[28rem] text-muted-foreground"
+                            title={review.sourceTitle}
+                          >
+                            <span className="text-foreground/70">como </span>“{review.sourceTitle}”
+                          </span>
+                        )}
+                        <Badge variant="outline" className="text-[10px]">
+                          match {Math.round(review.matchScore * 100)}%
+                        </Badge>
+                      </div>
+                      {review.userRating != null && (
+                        <span
+                          className={cn(
+                            "font-mono font-semibold tabular-nums",
+                            ratingColor(review.userRating),
+                          )}
+                        >
+                          {review.userRating.toFixed(1)}/10
+                        </span>
+                      )}
+                    </div>
+                    <ExpandableText
+                      text={review.text}
+                      maxLines={4}
+                      className="mt-2 text-sm leading-relaxed text-foreground/90 whitespace-pre-line"
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </CardContent>
+      )}
+    </Card>
+  )
+}

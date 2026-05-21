@@ -21,7 +21,7 @@ export type PersonalStatus = (typeof PERSONAL_STATUSES)[number]
 export const SYNOPSIS_QUALITIES = ["♥", "♥♥", "♥♥♥", "♥♥♥♥"] as const
 export type SynopsisQuality = (typeof SYNOPSIS_QUALITIES)[number]
 
-export const AI_EVAL_STATUSES = ["pending", "done", "skipped"] as const
+export const AI_EVAL_STATUSES = ["pending", "review_pending", "done", "skipped"] as const
 export type AiEvalStatus = (typeof AI_EVAL_STATUSES)[number]
 
 export const PLATFORMS = ["mangaupdates", "comick", "anilist", "animeplanet", "comix", "mangadex", "kitsu", "myanimelist"] as const
@@ -45,6 +45,7 @@ export const SCORE_SOURCES = [
   "imported",
   "ai_accepted",
   "ai_edited",
+  "ai_calibrated",
 ] as const
 export type ScoreSource = (typeof SCORE_SOURCES)[number]
 
@@ -96,6 +97,24 @@ export interface CalculatedScore {
   rmse_calc: number | null
   rmse_predicted: number | null
   prediction_distance: number | null
+  /** Alinhamento determinístico (0–1) com o TasteProfile atual. NULL quando perfil é stub. */
+  personal_fit: number | null
+  /** Confiança (0–1) na Nota.Final. NULL quando calibração é insuficiente. */
+  final_score_confidence: number | null
+  /** Predição via kNN sobre embeddings (Passo 5). NULL quando sem embedding/vizinhos. */
+  knn_score: number | null
+  /** Top-k vizinhos usados na predição kNN (debug/explicabilidade). */
+  knn_neighbors: Array<{
+    workId: string
+    similarity: number
+    manualScore: number
+    weight: number
+  }> | null
+  /** Score 0–100 do LLM re-ranker (Passo 8). Atualizado sob demanda. */
+  alignment_score: number | null
+  alignment_run_id: string | null
+  alignment_justification: string | null
+  alignment_at: string | null
   formula_version: string
   calculated_at: string
 }
@@ -249,6 +268,20 @@ export interface FormulaConfig {
   score_color_pct_mid: number
   /** Percentil (0-100) acima do qual a nota agregada usa a 4ª cor; abaixo, a pior. Default 20. */
   score_color_pct_low: number
+  /**
+   * Coeficientes do Ridge segundo-nível (stacker) que combina Calc + Pr (+ kNN futuramente).
+   * NULL quando treino < 30 ou stacker desabilitado.
+   */
+  stacker_coefficients: {
+    intercept: number
+    calcWeight: number
+    ridgeWeight: number
+    knnWeight: number | null
+    trainSize: number
+    cvMAE: number
+  } | null
+  /** Quando true, Nota.Final usa stacker; quando false, inverse-variance legado. */
+  stacker_enabled: boolean
 }
 
 // ============================================================
@@ -356,6 +389,8 @@ export interface WorkFilters {
   maxFinalScore?: number
   minChapters?: number
   maxChapters?: number
+  minTotalVotes?: number
+  maxTotalVotes?: number
   genres?: string[]
   tagSlugs?: string[]
   year?: number

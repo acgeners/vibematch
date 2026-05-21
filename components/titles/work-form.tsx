@@ -536,7 +536,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null)
   // Metadata da IA usada na busca externa (Path B). Não vai pro Zod schema
   // — passa por canal paralelo no createWork pra preencher ai_evaluations.input_hash.
-  const [aiMeta, setAiMeta] = useState<{ inputHash: string; modelName: string; promptVersion: string } | null>(null)
+  const [aiMeta, setAiMeta] = useState<{ inputHash: string; modelName: string; promptVersion: string; confidence: number | null } | null>(null)
   const [criteriaJustifications, setCriteriaJustifications] = useState<CriteriaJustifications>(() => {
     if (!aiEvaluation?.scores?.length) return {}
     const map: CriteriaJustifications = {}
@@ -1394,14 +1394,14 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
       </Card>
 
       {isCreating && batchDrafts.length > 0 && (
-        <Card className="border-emerald-200 bg-emerald-50/70">
+        <Card>
           <CardContent className="space-y-4 pt-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-sm font-semibold text-emerald-950">
+                <p className="text-sm font-semibold">
                   {batchDrafts.length} obra{batchDrafts.length === 1 ? "" : "s"} em standby
                 </p>
-                <p className="text-sm text-emerald-900/80">
+                <p className="text-sm text-muted-foreground">
                   Elas estão salvas neste navegador e só serão enviadas ao banco ao criar o lote.
                 </p>
               </div>
@@ -1424,9 +1424,9 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
               {batchDrafts.map((draft, index) => (
                 <div
                   key={draft.localId}
-                  className="flex items-center gap-2 rounded-md border bg-background/80 p-2"
+                  className="flex items-center gap-2 rounded-md border bg-muted/40 p-2"
                 >
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-emerald-100 text-xs font-semibold text-emerald-900">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-xs font-semibold text-primary">
                     {index + 1}
                   </span>
                   <p className="min-w-0 flex-1 truncate text-sm font-medium">
