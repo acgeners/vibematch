@@ -1,9 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
-import { Loader2, RefreshCw } from "lucide-react"
+import { Loader2, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -29,11 +29,15 @@ interface CurrentWork {
   coverUrl?: string | null
   publicationStatus?: string | null
   totalChapters?: number | null
+  observations?: string | null
 }
 
 interface UpdateDataDialogProps {
   workId: string
   currentWork: CurrentWork
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  hideTrigger?: boolean
 }
 
 interface FieldConflict {
@@ -88,20 +92,34 @@ interface CoverChoice {
   isPrimary: boolean
 }
 
-export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps) {
+export function UpdateDataDialog({
+  workId,
+  currentWork,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
+}: UpdateDataDialogProps) {
   const router = useRouter()
-  const [open, setOpen] = useState(false)
-  const [phase, setPhase] = useState<"refreshing" | "search" | "multipick" | "conflicts" | "saving">("refreshing")
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const isControlled = controlledOpen !== undefined
+  const open = isControlled ? controlledOpen : uncontrolledOpen
+  const setOpen = (v: boolean) => {
+    if (!isControlled) setUncontrolledOpen(v)
+    onOpenChange?.(v)
+  }
+  const [phase, setPhase] = useState<"refreshing" | "search" | "synopses-pick" | "covers-pick" | "conflicts" | "saving">("refreshing")
   const [pendingData, setPendingData] = useState<ExternalWorkData | null>(null)
   const [conflicts, setConflicts] = useState<FieldConflict[]>([])
   const [resolutions, setResolutions] = useState<Record<string, "current" | "external">>({})
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [activeRefineUrl, setActiveRefineUrl] = useState<string | null>(null)
 
   const handleSelect = (data: ExternalWorkData) => {
     // Quando há múltiplas sinopses/capas vindas das fontes vinculadas, mostra
-    // picker antes do conflict resolver — assim user decide quais incluir e
-    // qual é primária, em vez de receber uma sinopse mesclada arbitrária.
+    // picker(s) antes do conflict resolver — passo separado pra cada tipo
+    // (sinopses → capas) pra dar espaço pra galeria de capas em tamanho grande.
     const synopses = data.multiSynopses ?? []
     const covers = data.multiCovers ?? []
     if (synopses.length > 1 || covers.length > 1) {
@@ -110,7 +128,7 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
         synopses.map((s, i) => ({
           source: s.source,
           text: s.text,
-          included: i === 0,
+          included: true,
           isPrimary: i === 0,
         }))
       )
@@ -118,11 +136,16 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
         covers.map((c, i) => ({
           source: c.source,
           url: c.url,
-          included: i === 0,
+          included: true,
           isPrimary: i === 0,
         }))
       )
-      setPhase("multipick")
+      if (synopses.length > 1) {
+        setPhase("synopses-pick")
+      } else {
+        setActiveRefineUrl(covers[0]?.url ?? null)
+        setPhase("covers-pick")
+      }
       return
     }
     proceedToConflictsOrApply(data)
@@ -145,7 +168,7 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
     }
   }
 
-  const handleConfirmMultiPick = () => {
+  const finalizeChoicesAndProceed = () => {
     if (!pendingData) return
     const includedSynopses = synopsisChoices.filter((s) => s.included)
     const includedCovers = coverChoices.filter((c) => c.included)
@@ -172,10 +195,34 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
     proceedToConflictsOrApply(next, preResolved)
   }
 
+  const handleConfirmSynopses = () => {
+    if (!pendingData) return
+    // Se há mais de uma capa pra escolher, vai pra galeria; senão pula direto.
+    if (coverChoices.length > 1) {
+      const initialUrl =
+        coverChoices.find((c) => c.isPrimary)?.url ?? coverChoices[0]?.url ?? null
+      setActiveRefineUrl(initialUrl)
+      setPhase("covers-pick")
+      return
+    }
+    finalizeChoicesAndProceed()
+  }
+
+  const handleConfirmCovers = () => {
+    if (!pendingData) return
+    finalizeChoicesAndProceed()
+  }
+
   const toggleSynopsisIncluded = (idx: number) => {
-    setSynopsisChoices((prev) =>
-      prev.map((s, i) => (i === idx ? { ...s, included: !s.included } : s))
-    )
+    setSynopsisChoices((prev) => {
+      const next = prev.map((s, i) => (i === idx ? { ...s, included: !s.included } : s))
+      // Se o item desmarcado era primary, transfere pra outro incluído (ou limpa).
+      if (prev[idx].isPrimary && !next[idx].included) {
+        const fallbackIdx = next.findIndex((s) => s.included)
+        return next.map((s, i) => ({ ...s, isPrimary: fallbackIdx >= 0 && i === fallbackIdx }))
+      }
+      return next
+    })
   }
   const setSynopsisPrimary = (idx: number) => {
     setSynopsisChoices((prev) =>
@@ -183,18 +230,72 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
     )
   }
   const toggleCoverIncluded = (url: string) => {
-    setCoverChoices((prev) =>
-      prev.map((c) => (c.url === url ? { ...c, included: !c.included } : c))
-    )
+    setCoverChoices((prev) => {
+      const next = prev.map((c) => (c.url === url ? { ...c, included: !c.included } : c))
+      const target = prev.find((c) => c.url === url)
+      const targetNext = next.find((c) => c.url === url)
+      if (target?.isPrimary && targetNext && !targetNext.included) {
+        const fallback = next.find((c) => c.included)
+        return next.map((c) => ({ ...c, isPrimary: fallback ? c.url === fallback.url : false }))
+      }
+      return next
+    })
   }
   const setCoverPrimary = (url: string) => {
     setCoverChoices((prev) =>
       prev.map((c) => ({ ...c, isPrimary: c.url === url, included: c.url === url ? true : c.included }))
     )
   }
+  const deleteCover = (url: string) => {
+    setCoverChoices((prev) => {
+      const removed = prev.find((c) => c.url === url)
+      const remaining = prev.filter((c) => c.url !== url)
+      if (removed?.isPrimary && remaining.length > 0) {
+        const fallbackIdx = remaining.findIndex((c) => c.included)
+        const promoteIdx = fallbackIdx >= 0 ? fallbackIdx : 0
+        return remaining.map((c, i) => ({ ...c, isPrimary: i === promoteIdx }))
+      }
+      return remaining
+    })
+    if (activeRefineUrl === url) {
+      const remaining = coverChoices.filter((c) => c.url !== url)
+      setActiveRefineUrl(remaining[0]?.url ?? null)
+    }
+  }
 
-  const handleOpen = async () => {
-    setOpen(true)
+  const allSynopsesIncluded = synopsisChoices.length > 0 && synopsisChoices.every((s) => s.included)
+  const someSynopsesIncluded = synopsisChoices.some((s) => s.included)
+  const allCoversIncluded = coverChoices.length > 0 && coverChoices.every((c) => c.included)
+  const someCoversIncluded = coverChoices.some((c) => c.included)
+
+  const toggleAllSynopses = () => {
+    setSynopsisChoices((prev) => {
+      if (prev.every((s) => s.included)) {
+        return prev.map((s) => ({ ...s, included: false, isPrimary: false }))
+      }
+      const hasPrimary = prev.some((s) => s.isPrimary)
+      return prev.map((s, i) => ({
+        ...s,
+        included: true,
+        isPrimary: hasPrimary ? s.isPrimary : i === 0,
+      }))
+    })
+  }
+  const toggleAllCovers = () => {
+    setCoverChoices((prev) => {
+      if (prev.every((c) => c.included)) {
+        return prev.map((c) => ({ ...c, included: false, isPrimary: false }))
+      }
+      const hasPrimary = prev.some((c) => c.isPrimary)
+      return prev.map((c, i) => ({
+        ...c,
+        included: true,
+        isPrimary: hasPrimary ? c.isPrimary : i === 0,
+      }))
+    })
+  }
+
+  const runRefresh = async () => {
     setPhase("refreshing")
     try {
       const result = await refreshWorkExternalData(workId)
@@ -213,6 +314,20 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
       setPhase("search")
     }
   }
+
+  const handleOpen = async () => {
+    setOpen(true)
+    await runRefresh()
+  }
+
+  // Quando controlado externamente, dispara o refresh ao abrir.
+  useEffect(() => {
+    if (isControlled && open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void runRefresh()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isControlled, open])
 
   const applyUpdate = async (
     data: ExternalWorkData,
@@ -286,6 +401,20 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
       if (Object.keys(cleaned).length > 0) updates.externalIds = cleaned
     }
 
+    // Pré-preenche Observações com "Status in Country of Origin" do MU quando
+    // a obra está em Hiatus E observações atual está vazia. Não sobrescreve
+    // nota manual existente.
+    const statusText = data.mangaUpdatesStatusText
+    if (statusText) {
+      const isHiatus =
+        data.publicationStatus === "Hiatus" ||
+        statusText.toLowerCase().includes("hiatus")
+      const currentObs = (currentWork.observations ?? "").trim()
+      if (isHiatus && !currentObs) {
+        updates.observations = statusText
+      }
+    }
+
     let result: { data?: { id: string; slug?: string }; error?: string }
     try {
       result = await updateWorkExternalData(workId, updates)
@@ -326,14 +455,18 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
     setConflicts([])
     setSynopsisChoices([])
     setCoverChoices([])
+    setPreviewUrl(null)
+    setActiveRefineUrl(null)
   }
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={handleOpen}>
-        <RefreshCw className="h-4 w-4" />
-        Atualizar dados
-      </Button>
+      {!hideTrigger && (
+        <Button variant="outline" size="sm" onClick={handleOpen}>
+          <RefreshCw className="h-4 w-4" />
+          Atualizar dados
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose() }}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
@@ -357,97 +490,201 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
             </div>
           )}
 
-          {phase === "multipick" && (
+          {phase === "synopses-pick" && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Múltiplas sinopses/capas vieram das fontes. Marque o que incluir e qual é a principal.
+                Múltiplas sinopses vieram das fontes. Marque quais incluir e qual é a principal.
               </p>
 
-              {synopsisChoices.length > 1 && (
-                <section className="space-y-2">
+              <section className="space-y-2">
+                <div className="flex items-center justify-between">
                   <h3 className="text-sm font-medium">Sinopses</h3>
-                  {synopsisChoices.map((s, idx) => (
-                    <div
-                      key={`${s.source}-${idx}`}
-                      className={`rounded-md border p-3 space-y-2 ${
-                        s.included ? "border-primary/60 bg-primary/5" : ""
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <Badge variant="outline" className="text-[10px]">{s.source}</Badge>
-                        <div className="flex items-center gap-3 text-xs">
-                          <label className="flex items-center gap-1.5 cursor-pointer">
-                            <Checkbox
-                              checked={s.included}
-                              onCheckedChange={() => toggleSynopsisIncluded(idx)}
-                            />
-                            Incluir
-                          </label>
-                          <label className="flex items-center gap-1.5 cursor-pointer">
-                            <input
-                              type="radio"
-                              name="synopsis-primary"
-                              checked={s.isPrimary}
-                              onChange={() => setSynopsisPrimary(idx)}
-                              className="accent-primary"
-                            />
-                            Principal
-                          </label>
-                        </div>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+                    <Checkbox
+                      checked={allSynopsesIncluded ? true : someSynopsesIncluded ? "indeterminate" : false}
+                      onCheckedChange={toggleAllSynopses}
+                    />
+                    Selecionar todas
+                  </label>
+                </div>
+                {synopsisChoices.map((s, idx) => (
+                  <div
+                    key={`${s.source}-${idx}`}
+                    className={`rounded-md border p-3 space-y-2 ${
+                      s.included ? "border-primary/60 bg-primary/5" : ""
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <Badge variant="outline" className="text-[10px]">{s.source}</Badge>
+                      <div className="flex items-center gap-3 text-xs">
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <Checkbox
+                            checked={s.included}
+                            onCheckedChange={() => toggleSynopsisIncluded(idx)}
+                          />
+                          Incluir
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="synopsis-primary"
+                            checked={s.isPrimary}
+                            onChange={() => setSynopsisPrimary(idx)}
+                            className="accent-primary"
+                          />
+                          Principal
+                        </label>
                       </div>
-                      <p className="text-xs text-muted-foreground line-clamp-6 whitespace-pre-wrap">{s.text}</p>
                     </div>
-                  ))}
-                </section>
-              )}
-
-              {coverChoices.length > 1 && (
-                <section className="space-y-2">
-                  <h3 className="text-sm font-medium">Capas</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {coverChoices.map((c) => (
-                      <div
-                        key={c.url}
-                        className={`rounded-md border p-2 space-y-1.5 ${
-                          c.included ? "border-primary/60 bg-primary/5" : ""
-                        }`}
-                      >
-                        <div className="relative w-full aspect-[2/3] overflow-hidden rounded bg-muted">
-                          <Image src={getCoverImageSrc(c.url)} alt="" fill sizes="160px" unoptimized className="object-cover" />
-                        </div>
-                        <Badge variant="outline" className="text-[10px] w-full justify-center">{c.source}</Badge>
-                        <div className="flex items-center justify-between text-[11px]">
-                          <label className="flex items-center gap-1 cursor-pointer">
-                            <Checkbox
-                              checked={c.included}
-                              onCheckedChange={() => toggleCoverIncluded(c.url)}
-                            />
-                            Incluir
-                          </label>
-                          <label className="flex items-center gap-1 cursor-pointer">
-                            <input
-                              type="radio"
-                              name="cover-primary"
-                              checked={c.isPrimary}
-                              onChange={() => setCoverPrimary(c.url)}
-                              className="accent-primary"
-                            />
-                            Principal
-                          </label>
-                        </div>
-                      </div>
-                    ))}
+                    <p className="text-xs text-muted-foreground line-clamp-6 whitespace-pre-wrap">{s.text}</p>
                   </div>
-                </section>
-              )}
+                ))}
+              </section>
 
               <Separator />
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" onClick={handleClose}>Cancelar</Button>
-                <Button onClick={handleConfirmMultiPick}>Continuar</Button>
+                <Button onClick={handleConfirmSynopses}>Continuar</Button>
               </div>
             </div>
           )}
+
+          {phase === "covers-pick" && (() => {
+            const activeCover =
+              coverChoices.find((c) => c.url === activeRefineUrl) ?? coverChoices[0] ?? null
+            const canGoBackToSynopses = synopsisChoices.length > 1
+            return (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm text-muted-foreground">
+                    {coverChoices.length > 0
+                      ? "Clique numa miniatura pra ver a capa em tamanho maior. Marque quais incluir."
+                      : "Nenhuma capa restante. Você pode continuar sem alterar a capa atual."}
+                  </p>
+                  {coverChoices.length > 0 && (
+                    <label className="flex items-center gap-1.5 cursor-pointer text-xs shrink-0">
+                      <Checkbox
+                        checked={allCoversIncluded ? true : someCoversIncluded ? "indeterminate" : false}
+                        onCheckedChange={toggleAllCovers}
+                      />
+                      Selecionar todas
+                    </label>
+                  )}
+                </div>
+
+                {activeCover && (
+                  <div className="space-y-3">
+                    <div className="relative mx-auto w-full max-w-xs aspect-[2/3] overflow-hidden rounded-lg border bg-muted shadow-sm">
+                      <Image
+                        src={getCoverImageSrc(activeCover.url)}
+                        alt=""
+                        fill
+                        sizes="(max-width: 640px) 90vw, 384px"
+                        unoptimized
+                        className="object-contain"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <Badge variant="outline" className="text-[10px]">{activeCover.source}</Badge>
+                      <div className="flex items-center gap-3 text-xs">
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <Checkbox
+                            checked={activeCover.included}
+                            onCheckedChange={() => toggleCoverIncluded(activeCover.url)}
+                          />
+                          Incluir
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="cover-primary-pick"
+                            checked={activeCover.isPrimary}
+                            onChange={() => setCoverPrimary(activeCover.url)}
+                            className="accent-primary"
+                          />
+                          Principal
+                        </label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 gap-1 px-2 text-muted-foreground hover:text-destructive"
+                          onClick={() => deleteCover(activeCover.url)}
+                          aria-label="Excluir esta capa"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Excluir
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-1.5 justify-center">
+                  {coverChoices.map((c) => {
+                    const isActive = c.url === activeCover?.url
+                    return (
+                      <div key={c.url} className="group/cover relative h-20 w-14">
+                        <button
+                          type="button"
+                          onClick={() => setActiveRefineUrl(c.url)}
+                          className={`absolute inset-0 overflow-hidden rounded border transition-all ${
+                            isActive
+                              ? "border-primary ring-2 ring-primary/40"
+                              : c.included
+                                ? "border-primary/40"
+                                : "border-muted opacity-60 hover:opacity-100"
+                          }`}
+                          title={c.source}
+                        >
+                          <Image
+                            src={getCoverImageSrc(c.url)}
+                            alt=""
+                            fill
+                            sizes="56px"
+                            unoptimized
+                            className="object-cover"
+                          />
+                          {c.included && (
+                            <span className="absolute top-0.5 left-0.5 rounded bg-emerald-500 px-1 text-[8px] font-semibold text-white">
+                              ✓
+                            </span>
+                          )}
+                          {c.isPrimary && (
+                            <span className="absolute top-0.5 right-0.5 rounded bg-primary px-1 text-[8px] font-semibold text-primary-foreground">
+                              P
+                            </span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteCover(c.url)}
+                          aria-label="Excluir esta capa"
+                          title="Excluir"
+                          className="absolute bottom-0.5 right-0.5 z-10 rounded bg-black/60 p-0.5 text-white opacity-0 transition-all group-hover/cover:opacity-100 hover:bg-destructive focus:opacity-100"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <Separator />
+                <div className="flex gap-2 justify-between">
+                  {canGoBackToSynopses ? (
+                    <Button variant="ghost" onClick={() => setPhase("synopses-pick")}>Voltar</Button>
+                  ) : (
+                    <span />
+                  )}
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={handleClose}>Cancelar</Button>
+                    <Button onClick={handleConfirmCovers}>Continuar</Button>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
 
           {phase === "conflicts" && (
             <div className="space-y-4">
@@ -495,6 +732,26 @@ export function UpdateDataDialog({ workId, currentWork }: UpdateDataDialogProps)
           {phase === "saving" && (
             <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
               Salvando dados...
+            </div>
+          )}
+
+          {previewUrl && (
+            <div
+              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-6 cursor-zoom-out"
+              onClick={() => setPreviewUrl(null)}
+              role="button"
+              aria-label="Fechar visualização"
+            >
+              <div className="relative w-full max-w-md aspect-[2/3]">
+                <Image
+                  src={getCoverImageSrc(previewUrl)}
+                  alt=""
+                  fill
+                  sizes="(max-width: 768px) 90vw, 480px"
+                  unoptimized
+                  className="object-contain"
+                />
+              </div>
             </div>
           )}
         </DialogContent>

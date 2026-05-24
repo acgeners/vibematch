@@ -4,11 +4,17 @@ import { useState, useTransition } from "react"
 import { RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { LastRunHint } from "@/components/settings/last-run-hint"
 import { syncConstantsNow } from "@/server/actions/settings"
 
-export function SyncConstantsPanel() {
+interface SyncConstantsPanelProps {
+  initialLastRun: string | null
+}
+
+export function SyncConstantsPanel({ initialLastRun }: SyncConstantsPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [output, setOutput] = useState<string | null>(null)
+  const [lastRun, setLastRun] = useState<string | null>(initialLastRun)
 
   const handleSync = () => {
     startTransition(async () => {
@@ -16,6 +22,7 @@ export function SyncConstantsPanel() {
       setOutput(result.output || null)
 
       if (result.ok) {
+        setLastRun(new Date().toISOString())
         toast.success("Constantes sincronizadas.")
       } else {
         toast.error(result.error)
@@ -31,10 +38,13 @@ export function SyncConstantsPanel() {
           <p>Também sincroniza grupos de tags e reconcilia gêneros legados em work_tags.</p>
           <p className="font-mono text-xs">npm run sync-constants</p>
         </div>
-        <Button type="button" onClick={handleSync} disabled={isPending}>
-          <RefreshCw className={isPending ? "animate-spin" : ""} />
-          {isPending ? "Sincronizando..." : "Sincronizar constantes"}
-        </Button>
+        <div className="flex flex-col items-end gap-1">
+          <Button type="button" onClick={handleSync} disabled={isPending}>
+            <RefreshCw className={isPending ? "animate-spin" : ""} />
+            {isPending ? "Sincronizando..." : "Sincronizar constantes"}
+          </Button>
+          <LastRunHint iso={lastRun} label="Última sincronização" />
+        </div>
       </div>
 
       {output && (

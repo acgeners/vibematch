@@ -7,21 +7,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { formatRelativeDateTime } from "@/lib/date-utils"
 import type { CalibrationRunRow } from "@/lib/ai-calibration/types"
 
 interface RunHistoryTableProps {
   runs: CalibrationRunRow[]
-}
-
-function formatDate(s: string | null): string {
-  if (!s) return "—"
-  return new Date(s).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
 }
 
 function tokens(n: number | null): string {
@@ -53,7 +43,7 @@ export function RunHistoryTable({ runs }: RunHistoryTableProps) {
           {runs.map((run) => (
             <TableRow key={run.id}>
               <TableCell className="whitespace-nowrap text-xs">
-                {formatDate(run.completed_at ?? run.created_at)}
+                {formatRelativeDateTime(run.completed_at ?? run.created_at)}
               </TableCell>
               <TableCell>
                 <Badge variant="outline" className="text-[10px]">

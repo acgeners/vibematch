@@ -1,20 +1,28 @@
 "use client"
 
-import { useCallback, useMemo, useState, useTransition } from "react"
+import { useCallback, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ArrowDown, ArrowUp, ChevronDown, Filter, RotateCcw, Search, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ChevronDown, Filter, RotateCcw, Search, Trash2, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { TagFilter } from "@/components/titles/tag-filter"
 import type { TagOption } from "@/server/queries/tags"
 import { AI_EVAL_STATUSES, CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
+import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { cn } from "@/lib/utils"
 
 const CRITERION_LABELS: Record<string, string> = {
@@ -364,48 +372,153 @@ function VotesPresetCard({
   )
 }
 
-function RangeRow({
-  label,
-  minKey,
-  maxKey,
-  searchParams,
-  updateParams,
-  step = 0.5,
-  max = 10,
+const SEARCH_HISTORY_KEY = "titles_search_history_v1"
+const SEARCH_HISTORY_LIMIT = 20
+
+function readSearchHistory(): string[] {
+  if (typeof window === "undefined") return []
+  try {
+    const raw = window.localStorage.getItem(SEARCH_HISTORY_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((v): v is string => typeof v === "string").slice(0, SEARCH_HISTORY_LIMIT)
+  } catch {
+    return []
+  }
+}
+
+function writeSearchHistory(history: string[]) {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(history.slice(0, SEARCH_HISTORY_LIMIT)))
+  } catch {
+    // ignore
+  }
+}
+
+function pushToSearchHistory(term: string): string[] {
+  const trimmed = term.trim()
+  if (!trimmed) return readSearchHistory()
+  const current = readSearchHistory()
+  const lower = trimmed.toLowerCase()
+  const filtered = current.filter((t) => t.toLowerCase() !== lower)
+  const next = [trimmed, ...filtered].slice(0, SEARCH_HISTORY_LIMIT)
+  writeSearchHistory(next)
+  return next
+}
+
+function SearchInputWithHistory({
+  value,
+  onChange,
+  onSubmit,
 }: {
-  label: string
-  minKey: string
-  maxKey: string
-  searchParams: URLSearchParams
-  updateParams: (updates: Record<string, string | null>) => void
-  step?: number
-  max?: number
+  value: string
+  onChange: (v: string) => void
+  onSubmit: (v: string) => void
 }) {
+  const [history, setHistory] = useState<string[]>(() => readSearchHistory())
+  const [open, setOpen] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const submit = (term: string) => {
+    setHistory(pushToSearchHistory(term))
+    setOpen(false)
+    onSubmit(term)
+  }
+
+  const filtered = useMemo(() => {
+    const q = value.trim().toLowerCase()
+    if (!q) return history
+    return history.filter((t) => t.toLowerCase().includes(q))
+  }, [history, value])
+
+  const showPopover = open && filtered.length > 0
+
+  const clearHistory = () => {
+    writeSearchHistory([])
+    setHistory([])
+    setOpen(false)
+  }
+
   return (
-    <div className="grid grid-cols-[minmax(6rem,1fr)_4.5rem_auto_4.5rem] items-center gap-2">
-      <Label className="truncate text-xs font-medium">{label}</Label>
-      <Input
-        type="number"
-        min={0}
-        max={max}
-        step={step}
-        placeholder="Mín"
-        className="h-8 text-xs"
-        value={searchParams.get(minKey) ?? ""}
-        onChange={(e) => updateParams({ [minKey]: e.target.value || null })}
-      />
-      <span className="text-xs text-muted-foreground">-</span>
-      <Input
-        type="number"
-        min={0}
-        max={max}
-        step={step}
-        placeholder="Máx"
-        className="h-8 text-xs"
-        value={searchParams.get(maxKey) ?? ""}
-        onChange={(e) => updateParams({ [maxKey]: e.target.value || null })}
-      />
-    </div>
+    <Popover open={showPopover} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="title-filter-search"
+            ref={inputRef}
+            placeholder="Digite o nome da obra e pressione Enter"
+            className="h-9 pl-9 pr-9 text-sm"
+            value={value}
+            onChange={(e) => {
+              onChange(e.target.value)
+              setOpen(true)
+            }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 120)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                submit(value)
+              } else if (e.key === "Escape") {
+                setOpen(false)
+              }
+            }}
+          />
+          {value && (
+            <button
+              type="button"
+              aria-label="Limpar busca por título"
+              onClick={() => {
+                onChange("")
+                inputRef.current?.focus()
+              }}
+              className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </PopoverAnchor>
+      <PopoverContent
+        align="start"
+        sideOffset={4}
+        className="w-[var(--radix-popover-trigger-width)] p-0"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <Command shouldFilter={false}>
+          <CommandList>
+            <CommandEmpty>Nenhuma busca recente</CommandEmpty>
+            {filtered.length > 0 && (
+              <CommandGroup heading="Buscas recentes">
+                {filtered.map((term) => (
+                  <CommandItem
+                    key={term}
+                    value={term}
+                    onSelect={() => submit(term)}
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <Search className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                    {term}
+                  </CommandItem>
+                ))}
+                <CommandItem
+                  value="__clear__"
+                  onSelect={clearHistory}
+                  onMouseDown={(e) => e.preventDefault()}
+                  className="text-muted-foreground"
+                >
+                  <Trash2 className="mr-2 h-3.5 w-3.5" />
+                  Limpar histórico
+                </CommandItem>
+              </CommandGroup>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -445,7 +558,6 @@ export function TitleFilters({
     const target = draftSearch ? `/titles?${draftSearch}` : "/titles"
     startTransition(() => router.replace(target))
   }
-  const discardDraftFilters = () => setDraftSearch(appliedSearchString)
   const clearAll = () => setDraftSearch("")
 
   // Search
@@ -460,9 +572,6 @@ export function TitleFilters({
   })()
   const setSort = (field: string, dir: "asc" | "desc") =>
     updateParams({ sort: `${field}:${dir}` })
-
-  // Archived
-  const showArchived = searchParams.get("archived") === "1"
 
   // Multi-select helpers
   const toggleCsv = (key: string, item: string) => {
@@ -592,38 +701,38 @@ export function TitleFilters({
     },
   }))
 
+  const activeFilterLabel =
+    activeChips.length === 1 ? "1 seleção" : `${activeChips.length} seleções`
+
   return (
-    <div className="rounded-xl border bg-muted/10 p-3 shadow-sm">
-      {/* Header */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <Filter className="h-4 w-4 text-muted-foreground" />
-          Filtros
+    <div className="rounded-xl border border-border/70 bg-card/58 p-4 shadow-sm shadow-black/5 backdrop-blur">
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+            <Filter className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-semibold">Filtros</h2>
+              {activeChips.length > 0 && (
+                <span className="rounded-full border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  {activeFilterLabel}
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Ajuste os critérios e aplique quando terminar.
+            </p>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <label className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-3 text-xs text-muted-foreground transition-colors hover:text-foreground">
-            <Checkbox
-              checked={showArchived}
-              onCheckedChange={(checked) => updateParams({ archived: checked === true ? "1" : null })}
-            />
-            <span>Arquivadas</span>
-          </label>
-          {filtersDirty && (
-            <Badge variant="secondary" className="h-9 rounded-md px-3 text-xs">
-              alterações pendentes
-            </Badge>
-          )}
-          {filtersDirty && (
-            <Button variant="ghost" size="sm" onClick={discardDraftFilters} className="h-9 px-2">
-              Descartar
-            </Button>
-          )}
-          <Button size="sm" onClick={applyAllFilters} disabled={!filtersDirty} className="h-9">
+
+        <div className="flex items-center justify-end gap-2">
+          <Button size="sm" onClick={applyAllFilters} disabled={!filtersDirty}>
             Aplicar filtros
           </Button>
           {hasFilters && (
-            <Button variant="ghost" size="sm" onClick={clearAll} className="h-9 px-2">
-              <X className="mr-1.5 h-3.5 w-3.5" />
+            <Button variant="ghost" size="sm" onClick={clearAll}>
+              <X className="mr-1 h-3.5 w-3.5" />
               Limpar
             </Button>
           )}
@@ -631,45 +740,33 @@ export function TitleFilters({
       </div>
 
       {/* Busca + Ordenação */}
-      <div className="mb-3 grid gap-3 xl:grid-cols-2">
+      <div className="mb-3 grid gap-3 md:grid-cols-[2fr_1fr]">
         <div className="space-y-1.5">
           <Label htmlFor="title-filter-search" className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             Busca por título
           </Label>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              id="title-filter-search"
-              placeholder="Digite o nome da obra e pressione Enter"
-              className="h-9 pl-9 pr-9 text-sm"
-              value={currentSearch}
-              onChange={(e) => updateParams({ search: e.target.value || null })}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  applyAllFilters()
-                }
-              }}
-            />
-            {currentSearch && (
-              <button
-                type="button"
-                aria-label="Limpar busca por título"
-                onClick={() => {
-                  updateParams({ search: null })
-                  startTransition(() => {
-                    const next = new URLSearchParams(draftSearch)
-                    next.delete("search")
-                    const qs = next.toString()
-                    router.replace(qs ? `/titles?${qs}` : "/titles")
-                  })
-                }}
-                className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
+          <SearchInputWithHistory
+            value={currentSearch}
+            onChange={(v) => {
+              updateParams({ search: v || null })
+              if (!v) {
+                startTransition(() => {
+                  const next = new URLSearchParams(draftSearch)
+                  next.delete("search")
+                  const qs = next.toString()
+                  router.replace(qs ? `/titles?${qs}` : "/titles")
+                })
+              }
+            }}
+            onSubmit={(term) => {
+              updateParams({ search: term || null })
+              const next = new URLSearchParams(draftSearch)
+              if (term) next.set("search", term)
+              else next.delete("search")
+              const qs = next.toString()
+              startTransition(() => router.replace(qs ? `/titles?${qs}` : "/titles"))
+            }}
+          />
         </div>
         <div className="space-y-1.5">
           <Label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -710,8 +807,42 @@ export function TitleFilters({
       >
         <div className="flex flex-wrap items-center gap-2">
           <TabsList className="grid h-auto flex-1 grid-cols-2 gap-1 bg-muted/60 p-1">
-            <TabsTrigger value="geral" className="h-9">Geral</TabsTrigger>
-            <TabsTrigger value="notas" className="h-9">Notas</TabsTrigger>
+            <TabsTrigger
+              value="geral"
+              className="h-9"
+              onMouseDown={(e) => {
+                if (e.button === 0 && !e.ctrlKey && activeTab === "geral") {
+                  e.preventDefault()
+                  setTabsExpanded((prev) => !prev)
+                }
+              }}
+              onKeyDown={(e) => {
+                if ((e.key === " " || e.key === "Enter") && activeTab === "geral") {
+                  e.preventDefault()
+                  setTabsExpanded((prev) => !prev)
+                }
+              }}
+            >
+              Geral
+            </TabsTrigger>
+            <TabsTrigger
+              value="notas"
+              className="h-9"
+              onMouseDown={(e) => {
+                if (e.button === 0 && !e.ctrlKey && activeTab === "notas") {
+                  e.preventDefault()
+                  setTabsExpanded((prev) => !prev)
+                }
+              }}
+              onKeyDown={(e) => {
+                if ((e.key === " " || e.key === "Enter") && activeTab === "notas") {
+                  e.preventDefault()
+                  setTabsExpanded((prev) => !prev)
+                }
+              }}
+            >
+              Notas
+            </TabsTrigger>
           </TabsList>
           <Button
             type="button"
@@ -753,7 +884,7 @@ export function TitleFilters({
                         key={`per-${s.status}`}
                         option={s}
                         active={selectedPerStatuses.has(s.status)}
-                        tooltip={s.comment}
+                        tooltip={getPersonalStatusDescription(s.status, s.comment)}
                         onClick={() => togglePerStatus(s.status)}
                       />
                     ))}

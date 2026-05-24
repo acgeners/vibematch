@@ -171,7 +171,7 @@ export async function fetchAniListById(anilistId: number) {
 const REVIEWS_QUERY = `
 query GetMangaReviews($id: Int) {
   Media(id: $id, type: MANGA) {
-    reviews(sort: SCORE_DESC, perPage: 25) {
+    reviews(sort: SCORE_DESC, perPage: 50) {
       nodes {
         summary
         body(asHtml: false)
@@ -181,6 +181,58 @@ query GetMangaReviews($id: Int) {
   }
 }
 `
+
+const RECOMMENDATIONS_QUERY = `
+query GetRecommendations($id: Int) {
+  Media(id: $id, type: MANGA) {
+    recommendations(sort: RATING_DESC, perPage: 10) {
+      nodes {
+        rating
+        mediaRecommendation {
+          title { romaji english }
+          genres
+          tags(sort: RANK_DESC) { name rank isGeneralSpoiler }
+        }
+      }
+    }
+  }
+}
+`
+
+export interface AniListRecommendation {
+  title: string
+  genres: string[]
+  tags: string[]
+  /** Rating dado pela comunidade AniList à recomendação (>0 = upvoted). */
+  rating: number
+}
+
+export async function fetchAniListRecommendations(anilistId: number): Promise<AniListRecommendation[]> {
+  try {
+    const json = await anilistRequest(RECOMMENDATIONS_QUERY, { id: anilistId })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nodes: any[] = json?.data?.Media?.recommendations?.nodes ?? []
+    return nodes
+      .map((node): AniListRecommendation | null => {
+        const media = node?.mediaRecommendation
+        if (!media) return null
+        const title = media.title?.english ?? media.title?.romaji ?? null
+        if (!title) return null
+        const genres: string[] = Array.isArray(media.genres) ? media.genres : []
+        const tags: string[] = Array.isArray(media.tags)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ? media.tags.filter((t: any) => !t.isGeneralSpoiler).slice(0, 5).map((t: any) => t.name as string)
+          : []
+        const rating = typeof node.rating === "number" ? node.rating : 0
+        return { title, genres, tags, rating }
+      })
+      .filter((entry): entry is AniListRecommendation => entry !== null)
+      .filter((entry) => entry.rating > 0)
+      .slice(0, 10)
+  } catch {
+    return []
+  }
+}
 
 export async function fetchAniListReviews(anilistId: number): Promise<string[]> {
   try {

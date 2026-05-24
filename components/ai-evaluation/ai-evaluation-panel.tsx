@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { ScoreBadge } from "@/components/ui/score-badge"
+import { getCoverImageSrc } from "@/lib/image-proxy"
 import {
   Dialog,
   DialogContent,
@@ -86,40 +87,49 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   type SortField = "default" | "final_score" | "confidence" | "evaluatedAt" | "modelName"
   const [sortField, setSortField] = useState<SortField>("default")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+  const [sortField2, setSortField2] = useState<SortField>("default")
+  const [sortDir2, setSortDir2] = useState<"asc" | "desc">("desc")
 
   const sortedWorks = useMemo(() => {
     if (sortField === "default") return pendingWorks
 
-    const mult = sortDir === "asc" ? 1 : -1
-
-    const getKey = (w: PendingWork): string | number | null => {
-      switch (sortField) {
+    const getKey = (w: PendingWork, field: SortField): string | number | null => {
+      switch (field) {
+        case "default":
+          return null
         case "final_score":
           return w.final_score ?? null
         case "confidence":
           return w.evaluation?.confidence ?? null
         case "evaluatedAt": {
           const v = w.evaluation?.evaluatedAt
-          return v ? new Date(v).getTime() : null
+          return v ? new Date(v).setHours(0, 0, 0, 0) : null
         }
         case "modelName":
           return w.evaluation?.modelName ?? null
       }
     }
 
-    return [...pendingWorks].sort((a, b) => {
-      const ka = getKey(a)
-      const kb = getKey(b)
+    const compareBy = (a: PendingWork, b: PendingWork, field: SortField, dir: "asc" | "desc") => {
+      const ka = getKey(a, field)
+      const kb = getKey(b, field)
       // Nulos vão sempre para o fim, independente da direção.
       if (ka == null && kb == null) return 0
       if (ka == null) return 1
       if (kb == null) return -1
+      const mult = dir === "asc" ? 1 : -1
       if (typeof ka === "string" && typeof kb === "string") {
         return ka.localeCompare(kb, "pt-BR") * mult
       }
       return ((ka as number) - (kb as number)) * mult
+    }
+
+    return [...pendingWorks].sort((a, b) => {
+      const primary = compareBy(a, b, sortField, sortDir)
+      if (primary !== 0 || sortField2 === "default") return primary
+      return compareBy(a, b, sortField2, sortDir2)
     })
-  }, [pendingWorks, sortField, sortDir])
+  }, [pendingWorks, sortField, sortDir, sortField2, sortDir2])
 
   const toggleSelectionMode = () => {
     setSelectionMode((v) => !v)
@@ -144,10 +154,13 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   const someSelected = selected.size > 0 && !allSelected
 
   // Queue logic
-  const runEvaluation = async (work: PendingWork): Promise<ReviewData | null> => {
+  const runEvaluation = async (
+    work: PendingWork,
+    opts?: { model?: "sonnet" | "opus" }
+  ): Promise<ReviewData | null> => {
     evaluationCancelledRef.current = false
     setEvaluatingId(work.id)
-    const result = await triggerAiEvaluation(work.id)
+    const result = await triggerAiEvaluation(work.id, opts)
     setEvaluatingId(null)
 
     if (evaluationCancelledRef.current) {
@@ -434,6 +447,40 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                 )}
               </Button>
 
+              {sortField !== "default" && (
+                <>
+                  <span className="text-xs text-muted-foreground ml-1">depois:</span>
+                  <Select
+                    value={sortField2}
+                    onValueChange={(v) => setSortField2(v as SortField)}
+                  >
+                    <SelectTrigger size="sm" className="h-7 w-[140px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Nenhum</SelectItem>
+                      <SelectItem value="final_score" disabled={sortField === "final_score"}>Nota Final</SelectItem>
+                      <SelectItem value="confidence" disabled={sortField === "confidence"}>Confiança IA</SelectItem>
+                      <SelectItem value="evaluatedAt" disabled={sortField === "evaluatedAt"}>Data avaliação</SelectItem>
+                      <SelectItem value="modelName" disabled={sortField === "modelName"}>Modelo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="icon-xs"
+                    onClick={() => setSortDir2((d) => (d === "asc" ? "desc" : "asc"))}
+                    disabled={sortField2 === "default"}
+                    title={sortDir2 === "asc" ? "Crescente" : "Decrescente"}
+                  >
+                    {sortDir2 === "asc" ? (
+                      <ArrowUp className="h-3 w-3" />
+                    ) : (
+                      <ArrowDown className="h-3 w-3" />
+                    )}
+                  </Button>
+                </>
+              )}
+
               <div className="flex-1" />
 
               <span className="text-xs text-muted-foreground">Quantos:</span>
@@ -478,13 +525,13 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                 )}
 
                 {/* Cover thumb (esquerda) — aspect 2:3 de manga */}
-                <div className="relative h-28 w-[76px] shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted shadow-sm">
+                <div className="relative h-36 w-24 shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted shadow-sm">
                   {work.cover_url ? (
                     <Image
-                      src={work.cover_url}
+                      src={getCoverImageSrc(work.cover_url)}
                       alt=""
                       fill
-                      sizes="76px"
+                      sizes="96px"
                       unoptimized
                       className="object-cover"
                     />
@@ -581,6 +628,29 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
               workId={reviewData.workId}
               coverUrl={reviewData.coverUrl}
               currentScores={reviewData.currentScores}
+              onReevaluate={async (model) => {
+                const pseudoWork: PendingWork = {
+                  id: reviewData.workId,
+                  title: reviewData.workTitle,
+                  publication_status: "",
+                  publication_status_id: null,
+                  personal_status: "",
+                  personal_status_id: null,
+                  cover_url: reviewData.coverUrl,
+                }
+                const next = await runEvaluation(pseudoWork, { model })
+                if (next) {
+                  setReviewData(next)
+                  // Substitui no buffer da fila (se aplicável) pra manter coerência da navegação.
+                  if (queueResults.length > 0) {
+                    setQueueResults((prev) => {
+                      const copy = prev.slice()
+                      copy[queueReviewIndex] = next
+                      return copy
+                    })
+                  }
+                }
+              }}
               onSaved={handleSaved}
               onCancel={handleCancel}
             />

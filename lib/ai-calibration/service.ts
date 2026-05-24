@@ -1,6 +1,7 @@
 import "server-only"
-import Anthropic from "@anthropic-ai/sdk"
+import type Anthropic from "@anthropic-ai/sdk"
 import { CRITERION_SLUGS } from "@/types/domain"
+import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import {
   AUDIT_SYSTEM_PROMPT,
   BIAS_SYSTEM_PROMPT,
@@ -91,23 +92,10 @@ const BIAS_TOOL: Anthropic.Messages.Tool = {
 }
 
 export interface TokenUsage {
-  inputTokens: number | null
-  outputTokens: number | null
-  cacheReadTokens: number | null
-  cacheCreationTokens: number | null
-}
-
-function extractUsage(message: Anthropic.Messages.Message): TokenUsage {
-  const u = message.usage as Anthropic.Messages.Usage & {
-    cache_creation_input_tokens?: number | null
-    cache_read_input_tokens?: number | null
-  }
-  return {
-    inputTokens: u?.input_tokens ?? null,
-    outputTokens: u?.output_tokens ?? null,
-    cacheReadTokens: u?.cache_read_input_tokens ?? null,
-    cacheCreationTokens: u?.cache_creation_input_tokens ?? null,
-  }
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
 }
 
 function findToolUse(message: Anthropic.Messages.Message, toolName: string) {
@@ -123,15 +111,18 @@ export interface AuditResult {
   promptVersion: string
   usage: TokenUsage
   rawResponse: unknown
+  apiCallId: string | null
+}
+
+export interface AuditCallMeta {
+  runId?: string | null
+  chunkIndex?: number | null
 }
 
 export async function requestCalibrationAudit(
   works: AuditWorkInput[],
+  callMeta: AuditCallMeta = {},
 ): Promise<AuditResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY não configurada — audit abortado.")
-  }
   if (works.length === 0) {
     return {
       suggestions: [],
@@ -139,27 +130,41 @@ export async function requestCalibrationAudit(
       promptVersion: PROMPT_VERSION,
       usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
       rawResponse: null,
+      apiCallId: null,
     }
   }
 
-  const client = new Anthropic({ apiKey })
+  const client = getAnthropicClient({ maxRetries: 6 })
   const workIdSet = new Set(works.map((w) => w.workId))
   const validSlugs = new Set<string>(CRITERION_SLUG_ENUM)
 
   let lastError: unknown = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const userPrompt = buildAuditUserPrompt(works)
-    const message = await client.messages.create({
-      model: MODEL,
-      max_tokens: attempt === 0 ? 4000 : 5000,
-      temperature: attempt === 0 ? 0.2 : 0,
-      system: [
-        { type: "text", text: AUDIT_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
-      ],
-      tools: [AUDIT_TOOL],
-      tool_choice: { type: "tool", name: AUDIT_TOOL.name },
-      messages: [{ role: "user", content: userPrompt }],
-    })
+    const { message, apiCallId, usage } = await createLoggedMessage(
+      client,
+      {
+        model: MODEL,
+        max_tokens: attempt === 0 ? 4000 : 5000,
+        temperature: attempt === 0 ? 0.2 : 0,
+        system: [
+          { type: "text", text: AUDIT_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+        ],
+        tools: [AUDIT_TOOL],
+        tool_choice: { type: "tool", name: AUDIT_TOOL.name },
+        messages: [{ role: "user", content: userPrompt }],
+      },
+      {
+        operation: "calibration_audit",
+        promptVersion: PROMPT_VERSION,
+        runId: callMeta.runId ?? null,
+        attempt,
+        metadata: {
+          nWorks: works.length,
+          chunkIndex: callMeta.chunkIndex ?? null,
+        },
+      },
+    )
 
     const toolUse = findToolUse(message, AUDIT_TOOL.name)
     if (!toolUse) {
@@ -201,8 +206,9 @@ export async function requestCalibrationAudit(
       suggestions: filtered,
       modelName: MODEL,
       promptVersion: PROMPT_VERSION,
-      usage: extractUsage(message),
+      usage,
       rawResponse: toolUse.input,
+      apiCallId,
     }
   }
 
@@ -215,37 +221,50 @@ export interface BiasResult {
   promptVersion: string
   usage: TokenUsage
   rawResponse: unknown
+  apiCallId: string | null
 }
 
-export async function requestBiasReport(args: {
-  stats: BiasStatsByCriterion[]
-  residuals: BiasResidualExample[]
-  correlations: BiasCorrelationEntry[]
-}): Promise<BiasResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY não configurada — bias abortado.")
-  }
+export async function requestBiasReport(
+  args: {
+    stats: BiasStatsByCriterion[]
+    residuals: BiasResidualExample[]
+    correlations: BiasCorrelationEntry[]
+  },
+  callMeta: { runId?: string | null } = {},
+): Promise<BiasResult> {
   if (args.stats.length === 0) {
     throw new Error("Sem estatísticas para gerar relatório de viés.")
   }
 
-  const client = new Anthropic({ apiKey })
+  const client = getAnthropicClient({ maxRetries: 6 })
 
   let lastError: unknown = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const userPrompt = buildBiasUserPrompt(args.stats, args.residuals, args.correlations)
-    const message = await client.messages.create({
-      model: MODEL,
-      max_tokens: attempt === 0 ? 3500 : 4500,
-      temperature: attempt === 0 ? 0.2 : 0,
-      system: [
-        { type: "text", text: BIAS_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
-      ],
-      tools: [BIAS_TOOL],
-      tool_choice: { type: "tool", name: BIAS_TOOL.name },
-      messages: [{ role: "user", content: userPrompt }],
-    })
+    const { message, apiCallId, usage } = await createLoggedMessage(
+      client,
+      {
+        model: MODEL,
+        max_tokens: attempt === 0 ? 3500 : 4500,
+        temperature: attempt === 0 ? 0.2 : 0,
+        system: [
+          { type: "text", text: BIAS_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+        ],
+        tools: [BIAS_TOOL],
+        tool_choice: { type: "tool", name: BIAS_TOOL.name },
+        messages: [{ role: "user", content: userPrompt }],
+      },
+      {
+        operation: "calibration_bias",
+        promptVersion: PROMPT_VERSION,
+        runId: callMeta.runId ?? null,
+        attempt,
+        metadata: {
+          nCriteria: args.stats.length,
+          nResiduals: args.residuals.length,
+        },
+      },
+    )
 
     const toolUse = findToolUse(message, BIAS_TOOL.name)
     if (!toolUse) {
@@ -282,8 +301,9 @@ export async function requestBiasReport(args: {
       report,
       modelName: MODEL,
       promptVersion: PROMPT_VERSION,
-      usage: extractUsage(message),
+      usage,
       rawResponse: toolUse.input,
+      apiCallId,
     }
   }
 

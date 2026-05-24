@@ -1,5 +1,8 @@
 import type { ReactNode } from "react"
+import { promises as fs } from "node:fs"
+import path from "node:path"
 import {
+  Activity,
   ArrowRight,
   Brain,
   Bug,
@@ -18,14 +21,35 @@ import { CalibrationPanel } from "@/components/settings/calibration-panel"
 import { WeightSuggestionsPanel } from "@/components/settings/weight-suggestions-panel"
 import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
+import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
 import type { FormulaConfig } from "@/types/domain"
 import { cn } from "@/lib/utils"
 
+async function getSyncConstantsMtime(): Promise<string | null> {
+  // criteria.ts is always rewritten by `npm run sync-constants`, so its mtime
+  // is the best proxy for "last triggered".
+  try {
+    const stat = await fs.stat(path.join(process.cwd(), "lib/constants/criteria.ts"))
+    return stat.mtime.toISOString()
+  } catch {
+    return null
+  }
+}
+
 async function getSettingsData() {
   const supabase = createAdminClient()
 
-  const [configRes, snapshot, embeddingsCount, worksCount] = await Promise.all([
+  const [
+    configRes,
+    snapshot,
+    embeddingsCount,
+    worksCount,
+    embeddingsLastRunRes,
+    weightsLastAppliedRes,
+    syncConstantsLastRun,
+    canonicalSynopsisPending,
+  ] = await Promise.all([
     supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
     getCalibrationSnapshot(),
     supabase
@@ -35,6 +59,25 @@ async function getSettingsData() {
     supabase
       .from("works")
       .select("id", { count: "exact", head: true })
+      .eq("is_archived", false)
+      .then((r) => r.count ?? 0),
+    supabase
+      .from("work_embeddings")
+      .select("updated_at")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("score_weights")
+      .select("updated_at")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    getSyncConstantsMtime(),
+    supabase
+      .from("works")
+      .select("id", { count: "exact", head: true })
+      .is("canonical_synopsis", null)
       .eq("is_archived", false)
       .then((r) => r.count ?? 0),
   ])
@@ -47,6 +90,10 @@ async function getSettingsData() {
     snapshot,
     embeddingsCount,
     worksCount,
+    embeddingsLastRun: (embeddingsLastRunRes.data?.updated_at as string | undefined) ?? null,
+    weightsLastApplied: (weightsLastAppliedRes.data?.updated_at as string | undefined) ?? null,
+    syncConstantsLastRun,
+    canonicalSynopsisPending,
   }
 }
 
@@ -54,14 +101,25 @@ const SECTIONS = [
   { id: "calibration", title: "Calibração", icon: <Gauge />, accent: "cyan" as const },
   { id: "weights", title: "Sugestão de pesos", icon: <Sparkles />, accent: "violet" as const },
   { id: "embeddings", title: "Embeddings", icon: <Brain />, accent: "emerald" as const },
+  { id: "synopsis-canonical", title: "Sinopse canônica", icon: <Brain />, accent: "violet" as const },
   { id: "ai-calibration", title: "Calibração IA", icon: <Sparkles />, accent: "amber" as const },
+  { id: "ai-usage", title: "Uso da API IA", icon: <Activity />, accent: "cyan" as const },
   { id: "tags", title: "Consolidação de tags", icon: <Tags />, accent: "violet" as const },
   { id: "sync", title: "Sincronização", icon: <Database />, accent: "emerald" as const },
   { id: "debug", title: "Parâmetros (debug)", icon: <Bug />, accent: "slate" as const },
 ]
 
 export default async function SettingsPage() {
-  const { config, snapshot, embeddingsCount, worksCount } = await getSettingsData()
+  const {
+    config,
+    snapshot,
+    embeddingsCount,
+    worksCount,
+    embeddingsLastRun,
+    weightsLastApplied,
+    syncConstantsLastRun,
+    canonicalSynopsisPending,
+  } = await getSettingsData()
 
   return (
     <div className="w-full max-w-6xl space-y-4">
@@ -93,7 +151,7 @@ export default async function SettingsPage() {
         icon={<Sparkles />}
         accent="violet"
       >
-        <WeightSuggestionsPanel />
+        <WeightSuggestionsPanel initialLastApplied={weightsLastApplied} />
       </SettingsSection>
 
       <SettingsSection
@@ -103,7 +161,24 @@ export default async function SettingsPage() {
         icon={<Brain />}
         accent="emerald"
       >
-        <EmbeddingsPanel initialCachedCount={embeddingsCount} totalWorks={worksCount} />
+        <EmbeddingsPanel
+          initialCachedCount={embeddingsCount}
+          totalWorks={worksCount}
+          initialLastRun={embeddingsLastRun}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        id="synopsis-canonical"
+        title="Sinopse canônica"
+        description="Consolida múltiplas sinopses por obra em uma única canônica via Haiku — usada nos prompts de recomendação."
+        icon={<Brain />}
+        accent="violet"
+      >
+        <SynopsisConsolidationPanel
+          pendingCount={canonicalSynopsisPending}
+          totalCount={worksCount}
+        />
       </SettingsSection>
 
       <SettingsSection
@@ -118,6 +193,22 @@ export default async function SettingsPage() {
           className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/55 bg-amber-500/10 px-3 py-1.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-300"
         >
           Abrir página de calibração
+          <ArrowRight className="h-3.5 w-3.5" />
+        </a>
+      </SettingsSection>
+
+      <SettingsSection
+        id="ai-usage"
+        title="Uso da API IA"
+        description="Custo estimado em USD, tokens consumidos e latência por operação/modelo. Consolidado de todas as chamadas Anthropic do app."
+        icon={<Activity />}
+        accent="cyan"
+      >
+        <a
+          href="/settings/ai-usage"
+          className="inline-flex items-center gap-1.5 rounded-md border border-cyan-500/55 bg-cyan-500/10 px-3 py-1.5 text-sm font-medium text-cyan-700 transition-colors hover:bg-cyan-500/20 dark:text-cyan-300"
+        >
+          Abrir página de uso
           <ArrowRight className="h-3.5 w-3.5" />
         </a>
       </SettingsSection>
@@ -145,7 +236,7 @@ export default async function SettingsPage() {
         icon={<Database />}
         accent="emerald"
       >
-        <SyncConstantsPanel />
+        <SyncConstantsPanel initialLastRun={syncConstantsLastRun} />
       </SettingsSection>
 
       <SettingsSection

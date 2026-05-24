@@ -45,7 +45,11 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   }
 
   const validSortFields = new Set<string>([
-    "final_score", "calc_score", "pred_score", "platform_avg", "total_votes", "chapters", "title",
+    "final_score", "calc_score", "predicted_score", "pred_score",
+    "platform_avg", "total_votes",
+    "chapters", "chapters_total", "chapters_read",
+    "title", "year", "synopsis_q", "updated_at", "last_read_at",
+    "publication_status", "personal_status", "ai_eval_status",
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
   const rawSort = str("sort") ?? "final_score:desc"
@@ -101,6 +105,7 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     topN: num("top_n"),
     onlyWithFinalScore: str("only_scored") === "1",
     onlyFavorites: str("fav") === "1",
+    includeFinishedDropped: true,
     sortLevels,
   }
 

@@ -1,13 +1,16 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState, useSyncExternalStore } from "react"
-import { ImageOff, LayoutGrid, List } from "lucide-react"
+import { ChevronDown, ChevronUp, ImageOff, LayoutGrid, List } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
+import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { cn, titleToSlug } from "@/lib/utils"
 import { ScoreBadge, type ScoreColorThresholds } from "@/components/ui/score-badge"
 import { PublicationStatusBadge, PersonalStatusBadge } from "@/components/ui/status-badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { AlignmentCell, AlignmentScoreCell, ConfidenceCell } from "@/components/ranking/ranking-cells"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import type { WorkPreview } from "@/server/actions/works"
@@ -19,6 +22,30 @@ import {
   RANKING_TABLE_COLUMNS,
 } from "@/components/ranking/ranking-table-config"
 import type { RankingColumnDef } from "@/components/ranking/ranking-table-config"
+import { RankingColumnPicker } from "@/components/ranking/ranking-column-picker"
+
+const COLUMN_TO_SORT_FIELD: Record<string, string> = {
+  title: "title",
+  pub: "publication_status",
+  per_status: "personal_status",
+  year: "year",
+  chapters: "chapters",
+  chapters_read: "chapters_read",
+  synopsis_q: "synopsis_q",
+  platform_avg: "platform_avg",
+  total_votes: "total_votes",
+  final: "final_score",
+  final_confidence: "final_confidence",
+  calc: "calc_score",
+  pred: "pred_score",
+  personal_fit: "personal_fit",
+  alignment_score: "alignment_score",
+}
+
+function getSortFieldForColumn(key: string): string | null {
+  if (key.startsWith("crit_")) return key
+  return COLUMN_TO_SORT_FIELD[key] ?? null
+}
 
 type ViewMode = "list" | "cards"
 const VIEW_STORAGE_KEY = "ranking_view_mode_v1"
@@ -209,6 +236,21 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
   const columns = getConfiguredRankingColumns(config)
   const viewMode = useSyncExternalStore(subscribeViewMode, readViewMode, () => "list" as const)
 
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const sortRaw = searchParams.get("sort") ?? "final_score:desc"
+  const [activeSortField, activeSortDirRaw = "desc"] = sortRaw.split(",")[0].split(":")
+  const activeSortDir: "asc" | "desc" = activeSortDirRaw === "asc" ? "asc" : "desc"
+
+  const updateSort = (field: string) => {
+    const params = new URLSearchParams(window.location.search)
+    const isActive = activeSortField === field
+    const nextDir = isActive && activeSortDir !== "asc" ? "asc" : "desc"
+    params.set("sort", `${field}:${nextDir}`)
+    params.delete("page")
+    router.push(`/ranking?${params.toString()}`)
+  }
+
   if (entries.length === 0) {
     return (
       <div className="space-y-3">
@@ -234,6 +276,7 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
       <ViewModeToolbar count={entries.length} viewMode={viewMode} onChange={writeViewMode} />
 
       {/* Desktop table */}
+      <TooltipProvider delayDuration={150}>
       <div className="hidden overflow-x-auto rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur lg:block">
         <table
           className="border-collapse"
@@ -252,14 +295,65 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
             <tr className="border-b border-border/70">
               {columns.map((col) => {
                 const w = widths[col.key] ?? col.defaultWidth
+                const sortField = getSortFieldForColumn(col.key)
+                const isSortable = sortField !== null
+                const isActive = isSortable && activeSortField === sortField
+                const slug = col.key.startsWith("crit_") ? col.key.slice(5) : null
+                const criterion = slug ? CRITERIA_INFO[slug] : null
+                const fullName = criterion?.name ?? col.configLabel ?? null
+                const description = criterion?.description ?? null
+                const showFullName = fullName && fullName !== col.label
+                const align = col.align ?? "left"
+                const justify =
+                  align === "center" ? "justify-center" : align === "right" ? "justify-end" : "justify-start"
+
+                const labelNode = isSortable ? (
+                  <button
+                    type="button"
+                    onClick={() => updateSort(sortField!)}
+                    className={cn(
+                      "inline-flex max-w-full items-center gap-0.5 rounded px-0.5 py-0.5 transition-colors hover:bg-background/60 hover:text-foreground",
+                      isActive && "text-foreground"
+                    )}
+                    aria-label={`Ordenar por ${fullName ?? col.label}`}
+                  >
+                    <span className="truncate">{col.label}</span>
+                    {isActive ? (
+                      activeSortDir === "asc"
+                        ? <ChevronUp className="h-3 w-3 shrink-0" />
+                        : <ChevronDown className="h-3 w-3 shrink-0" />
+                    ) : (
+                      <ChevronDown className="hidden h-3 w-3 shrink-0 opacity-40 group-hover/header:inline-block" />
+                    )}
+                  </button>
+                ) : (
+                  <span className="block truncate">{col.label}</span>
+                )
+
+                const wrapped = (showFullName || description) ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>{labelNode}</TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs whitespace-pre-line text-left">
+                      {showFullName && <span className="font-semibold">{fullName}</span>}
+                      {description && (
+                        <span className={cn("block text-xs text-muted-foreground", showFullName && "mt-1")}>
+                          {description}
+                        </span>
+                      )}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : labelNode
+
                 return (
                 <th
                   key={col.key}
-                  className="relative h-11 select-none px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                  style={{ textAlign: col.align ?? "left", width: w, minWidth: w, maxWidth: w }}
-                  title={col.configLabel ?? col.label}
+                  className={cn(
+                    "group/header relative h-11 select-none text-xs font-semibold uppercase tracking-wide text-muted-foreground",
+                    col.key.startsWith("crit_") ? "px-1" : "px-3"
+                  )}
+                  style={{ textAlign: align, width: w, minWidth: w, maxWidth: w }}
                 >
-                  <span className="block truncate pr-3">{col.label}</span>
+                  <div className={cn("flex items-center pr-3", justify)}>{wrapped}</div>
                   <ResizeHandle
                     columnKey={col.key}
                     onResize={setWidth}
@@ -276,7 +370,10 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
                 {columns.map((col) => (
                   <td
                     key={col.key}
-                    className="px-3 py-2.5 align-middle overflow-hidden"
+                    className={cn(
+                      "py-2.5 align-middle overflow-hidden",
+                      col.key.startsWith("crit_") ? "px-1" : "px-3"
+                    )}
                     style={{ textAlign: col.align ?? "left" }}
                   >
                     <div className="truncate" style={{ textAlign: col.align ?? "left" }}>
@@ -289,6 +386,7 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
           </tbody>
         </table>
       </div>
+      </TooltipProvider>
 
       {/* Mobile cards */}
       <div className="lg:hidden space-y-2">
@@ -357,37 +455,40 @@ function ViewModeToolbar({
       <p className="text-xs text-muted-foreground">
         {count} obra{count !== 1 ? "s" : ""} no ranking
       </p>
-      <div className="inline-flex items-center rounded-md border border-border/70 bg-background/60 p-0.5">
-        <button
-          type="button"
-          onClick={() => onChange("list")}
-          aria-label="Visualizar em lista"
-          aria-pressed={viewMode === "list"}
-          className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded px-2 text-xs font-medium transition-colors",
-            viewMode === "list"
-              ? "bg-primary/15 text-primary"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          <List className="h-3.5 w-3.5" />
-          Lista
-        </button>
-        <button
-          type="button"
-          onClick={() => onChange("cards")}
-          aria-label="Visualizar em cards"
-          aria-pressed={viewMode === "cards"}
-          className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded px-2 text-xs font-medium transition-colors",
-            viewMode === "cards"
-              ? "bg-primary/15 text-primary"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          <LayoutGrid className="h-3.5 w-3.5" />
-          Cards
-        </button>
+      <div className="flex items-center gap-2">
+        {viewMode === "list" && <RankingColumnPicker />}
+        <div className="inline-flex items-center rounded-md border border-border/70 bg-background/60 p-0.5">
+          <button
+            type="button"
+            onClick={() => onChange("list")}
+            aria-label="Visualizar em lista"
+            aria-pressed={viewMode === "list"}
+            className={cn(
+              "inline-flex h-7 items-center gap-1.5 rounded px-2 text-xs font-medium transition-colors",
+              viewMode === "list"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <List className="h-3.5 w-3.5" />
+            Lista
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange("cards")}
+            aria-label="Visualizar em cards"
+            aria-pressed={viewMode === "cards"}
+            className={cn(
+              "inline-flex h-7 items-center gap-1.5 rounded px-2 text-xs font-medium transition-colors",
+              viewMode === "cards"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            Cards
+          </button>
+        </div>
       </div>
     </div>
   )

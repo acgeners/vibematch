@@ -1,1 +1,1 @@
-export const MAX_COMPARE_WORKS = 4
+export const MAX_COMPARE_WORKS = 10

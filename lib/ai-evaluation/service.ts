@@ -1,11 +1,12 @@
 import "server-only"
 import { createHash } from "node:crypto"
-import Anthropic from "@anthropic-ai/sdk"
+import type Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
-import type { SourcedReview } from "@/lib/external/types"
+import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
+import type { SourcedReview, PlatformRating, SimilarWork } from "@/lib/external/types"
 
 export interface AiEvaluationTag {
   name: string
@@ -31,6 +32,10 @@ export interface AiEvaluationRequest {
   reviews?: string[]
   sourcedReviews?: SourcedReview[]
   externalContext?: string[]
+  /** Notas e votos da obra em plataformas externas aceitas (AniList, MAL, MU, etc.). Sinal de recepção/popularidade — não autoridade temática. */
+  platformRatings?: PlatformRating[]
+  /** Obras recomendadas pelas fontes a quem gostou desta. Sinal estrutural de cluster temático. */
+  similarWorks?: SimilarWork[]
   promptVersion?: string
   /** Override do modelo Claude (ex.: "claude-sonnet-4-6"). Default: claude-haiku-4-5. */
   model?: string
@@ -100,7 +105,7 @@ export interface AiEvaluationResponse {
 }
 
 export const MODEL = "claude-sonnet-4-6"
-export const PROMPT_VERSION = "v16"
+export const PROMPT_VERSION = "v17"
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
 export function parsePromptVersion(s: string | null | undefined): number | null {
@@ -111,6 +116,31 @@ export function parsePromptVersion(s: string | null | undefined): number | null 
 
 export const CURRENT_PROMPT_VERSION_NUM = parsePromptVersion(PROMPT_VERSION) ?? 0
 const MAX_REVIEW_WORDS = 120
+
+/**
+ * Caps usados pra alimentar reviews no prompt da IA. Compartilhado entre
+ * `triggerAiEvaluation` (Path A) e `evaluateCandidateForCreate` (Path B) pra
+ * garantir que a mesma obra avaliada nos dois fluxos receba o mesmo input
+ * (e portanto bata no mesmo `inputHash` do cache).
+ */
+export const AI_EVAL_REVIEW_CAPS = { perSource: 8, total: 30 } as const
+
+const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
+  mangaupdates: "MangaUpdates",
+  anilist: "AniList",
+  myanimelist: "MyAnimeList",
+  kitsu: "Kitsu",
+  mangadex: "MangaDex",
+  animeplanet: "AnimePlanet",
+  comick: "ComicK",
+  comix: "Comix",
+}
+
+function formatVotes(votes: number): string {
+  if (votes >= 1_000_000) return `${(votes / 1_000_000).toFixed(1)}M`
+  if (votes >= 1_000) return `${(votes / 1_000).toFixed(1)}k`
+  return String(votes)
+}
 
 // ============================================================================
 // System prompt (estático — beneficia-se de prompt caching)
@@ -233,6 +263,21 @@ D) Princípio geral:
 - Vocabulário de fandom é EVIDÊNCIA, não ruído. Quem usa "OTP" está declarando que romance é central pra sua experiência da obra.
 - Não exija menção literal ("a obra tem romance") quando há sinais indiretos abundantes ("FL deserves better than ML").
 - Lembre dos princípios anteriores: presença com ressalvas → mín 5; ausência de evidência → 5 + confidence baixa.
+
+USO DE AVALIAÇÕES DE PLATAFORMA (quando o bloco "Avaliações em plataformas externas" estiver presente):
+- São NOTAS NUMÉRICAS dadas pela comunidade de cada plataforma à obra (ex.: 7.8/10 no AniList com 12k votos). Tratam-se de sinal de RECEPÇÃO/POPULARIDADE, não de conteúdo temático.
+- Use para calibrar contexto de qualidade percebida: nota alta + muitos votos sugere obra bem recebida; nota média/baixa não derruba critérios temáticos.
+- NÃO infira critérios temáticos (romance, drama, tragedy, etc.) diretamente do valor numérico — eles informam apenas "quão bem aceita" a obra é.
+- Discrepâncias entre plataformas (ex.: 8.5 no MAL vs 6.2 no MU) são normais e refletem audiências diferentes; não tente "resolver" a discrepância na avaliação.
+- Não mencione plataformas/notas nas justificativas a menos que sejam diretamente relevantes (raro).
+
+USO DE OBRAS SIMILARES (quando o bloco "[S1]…[Sn] Obras frequentemente recomendadas" estiver presente):
+- São obras que outros usuários recomendam a quem gostou da obra avaliada (curadoria da comunidade — AniList, MAL, AnimePlanet). Sinal ESTRUTURAL de cluster temático.
+- Use para CONFIRMAR ou CALIBRAR a interpretação de tags/gêneros ambíguos. Exemplo: se a obra tem tag "drama" e 4 de 6 similares têm tags de "tragedy" e "dark", isso reforça que o drama é pesado e sugere tragedy ≥ 6.
+- Quanto MAIOR o consenso (ex.: "consenso: 3 fontes"), mais peso o sinal merece. Recomendações isoladas (1 fonte) são sinal fraco.
+- NUNCA copie eventos de plot das obras similares para a obra avaliada. As obras são RELACIONADAS, não idênticas.
+- NUNCA cite obras similares como autoridade sobre o conteúdo da obra avaliada. Se sinopse/tags/reviews contradizem o cluster, prefira o que descreve a obra direto.
+- Use no máximo nas justificativas em estilo "cluster temático sugere X" — não obrigatório.
 
 USO DA CAPA (quando fornecida como imagem anexada antes do prompt):
 - A capa é um sinal AUXILIAR, não autoritativo. Convenções estéticas de manhwa criam capas românticas mesmo quando romance é subplot — não trate a capa isoladamente como prova.
@@ -604,6 +649,36 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     })
   }
 
+  const validPlatformRatings = (req.platformRatings ?? []).filter(
+    (r) => typeof r.rating === "number" || typeof r.votes === "number"
+  )
+  if (validPlatformRatings.length) {
+    const items = validPlatformRatings.map((r) => {
+      const name = PLATFORM_DISPLAY_NAMES[r.platform] ?? r.platform
+      const parts: string[] = []
+      if (typeof r.rating === "number") parts.push(`${r.rating.toFixed(1)}/10`)
+      if (typeof r.votes === "number") parts.push(`${formatVotes(r.votes)} votos`)
+      return `- ${name}: ${parts.join(", ")}`
+    })
+    lines.push(
+      `\nAvaliações em plataformas externas (use como sinal AUXILIAR de recepção/popularidade — NÃO como autoridade sobre conteúdo temático; não infira critérios temáticos como romance ou drama diretamente do valor numérico):\n${items.join("\n")}`
+    )
+  }
+
+  const validSimilar = (req.similarWorks ?? []).filter((s) => s.title.trim().length > 0)
+  if (validSimilar.length) {
+    const items = validSimilar.map((s, index) => {
+      const sourcesLabel = s.sources.length > 1 ? `${s.sources.length} fontes` : `1 fonte`
+      const parts: string[] = [`"${s.title}"`]
+      if (s.genres.length) parts.push(`gêneros: ${s.genres.slice(0, 5).join(", ")}`)
+      if (s.tags?.length) parts.push(`tags: ${s.tags.slice(0, 5).join(", ")}`)
+      return `[S${index + 1}] ${parts.join(" — ")} (consenso: ${sourcesLabel})`
+    })
+    lines.push(
+      `\nObras frequentemente recomendadas a quem gostou desta (sinal estrutural de cluster temático — NÃO copie eventos de plot destas obras; use apenas como dica sobre tom, ritmo e temas predominantes):\n${items.join("\n")}`
+    )
+  }
+
   if (r19Level === "strong") {
     lines.push(
       `\nMarcador R19 detectado nas evidências com corroboração (tag content_indicator, gênero adulto ou termo explícito na sinopse). Para adult_content, aplique a regra obrigatória: nota mínima 7.0.`
@@ -781,6 +856,31 @@ function enforceNeutralCoupleDynamicsWhenNoRomance(
   }
 }
 
+const SYNOPSIS_MIN_CHARS = 50
+const LOW_EVIDENCE_CONFIDENCE_CAP = 0.55
+
+function enforceConfidenceCapWhenSynopsisAbsent(
+  response: AiEvaluationResponse,
+  req: AiEvaluationRequest
+): AiEvaluationResponse {
+  const synopsisLength = (req.synopsis ?? "").trim().length
+  const hasExternalContext = (req.externalContext?.length ?? 0) > 0
+  const synopsisIsAbsent = synopsisLength < SYNOPSIS_MIN_CHARS && !hasExternalContext
+
+  if (!synopsisIsAbsent) return response
+  if (response.confidence <= LOW_EVIDENCE_CONFIDENCE_CAP) return response
+
+  return {
+    ...response,
+    confidence: LOW_EVIDENCE_CONFIDENCE_CAP,
+    rawResponse: {
+      ...rawObject(response.rawResponse),
+      confidenceCapWhenSynopsisAbsentApplied: true,
+      confidenceBeforeCap: response.confidence,
+    },
+  }
+}
+
 function enforceAuditableReviewUsage(
   response: AiEvaluationResponse,
   prepared: PreparedReviews
@@ -924,7 +1024,10 @@ function postProcessEvaluation(
 ): AiEvaluationResponse {
   return attachEvaluationContext(
     enforceAuditableReviewUsage(
-      enforceNeutralCoupleDynamicsWhenNoRomance(enforceR19AdultContentRule(response, req)),
+      enforceConfidenceCapWhenSynopsisAbsent(
+        enforceNeutralCoupleDynamicsWhenNoRomance(enforceR19AdultContentRule(response, req)),
+        req
+      ),
       prepared
     ),
     req,
@@ -1063,12 +1166,6 @@ async function readDbCache(
 export async function requestAiEvaluation(
   req: AiEvaluationRequest
 ): Promise<AiEvaluationResponse> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY não configurada. Avaliação IA real não foi executada.")
-  }
-
   const cacheKey = canonicalInputHash(req)
   const cached = readCache(cacheKey)
   if (cached) {
@@ -1084,7 +1181,11 @@ export async function requestAiEvaluation(
   }
 
   const prepared = prepareReviews(req)
-  const client = new Anthropic({ apiKey })
+  // maxRetries: 8 absorve janelas longas de 529 "Overloaded" da Anthropic com
+  // backoff exponencial automático (~90s no worst-case). Mais alto que os
+  // outros callers porque a avaliação IA é a única que mostra o erro inline
+  // pro usuário no meio de um batch — vale aguentar mais antes de falhar.
+  const client = getAnthropicClient({ maxRetries: 8 })
   const userPrompt = buildUserPrompt(req, prepared)
   const modelToUse = req.model ?? MODEL
   let lastError: unknown = null
@@ -1116,21 +1217,36 @@ export async function requestAiEvaluation(
 
     let message: Anthropic.Messages.Message
     try {
-      message = await client.messages.create({
-        model: modelToUse,
-        max_tokens: attempt === 0 ? 3500 : 4500,
-        ...(supportsTemperature ? { temperature: attempt === 0 ? 0.2 : 0 } : {}),
-        system: [
-          {
-            type: "text",
-            text: SYSTEM_PROMPT,
-            cache_control: { type: "ephemeral" },
+      const logged = await createLoggedMessage(
+        client,
+        {
+          model: modelToUse,
+          max_tokens: attempt === 0 ? 3500 : 4500,
+          ...(supportsTemperature ? { temperature: attempt === 0 ? 0.2 : 0 } : {}),
+          system: [
+            {
+              type: "text",
+              text: SYSTEM_PROMPT,
+              cache_control: { type: "ephemeral" },
+            },
+          ],
+          tools: [EVALUATION_TOOL],
+          tool_choice: { type: "tool", name: EVALUATION_TOOL.name },
+          messages: [{ role: "user", content: messageContent }],
+        },
+        {
+          operation: "ai_evaluation",
+          promptVersion: PROMPT_VERSION,
+          workId: req.workId,
+          attempt,
+          metadata: {
+            hasImage: includeImage,
+            hasReviews: prepared.ids.length > 0,
+            isOverride: !!req.model,
           },
-        ],
-        tools: [EVALUATION_TOOL],
-        tool_choice: { type: "tool", name: EVALUATION_TOOL.name },
-        messages: [{ role: "user", content: messageContent }],
-      })
+        },
+      )
+      message = logged.message
     } catch (err) {
       // Erro relacionado à imagem (fetch falhou, formato inválido, URL privada).
       // Retentar imediatamente sem a imagem em vez de rodar pra próxima attempt.

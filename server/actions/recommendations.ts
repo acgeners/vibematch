@@ -3,9 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { generateTasteProfile, rankFavorites, MODEL, PROMPT_VERSION } from "@/lib/ai-recommendation/service"
-import { rankCandidates } from "@/lib/ai-recommendation/llm-reranker"
-import { getRanking, type RankingFilters } from "@/server/queries/ranking"
-import type { CriterionSlug } from "@/types/domain"
+import { type RankingFilters } from "@/server/queries/ranking"
 import {
   buildStubProfile,
   computeInputHash,
@@ -16,10 +14,12 @@ import {
 } from "@/lib/ai-recommendation/taste-profile"
 import {
   getFavoriteCandidates,
+  getRankingCandidates,
   getRatedWorksForProfile,
   getRunsToday,
   type FavoriteCandidate,
 } from "@/server/queries/recommendations"
+import { MAX_CANDIDATES_HARD_LIMIT } from "@/lib/ai-recommendation/limits"
 import type {
   RankedCandidate,
   RecommendationMode,
@@ -27,7 +27,6 @@ import type {
 } from "@/lib/ai-recommendation/types"
 
 const MAX_RUNS_PER_DAY = 20
-const MAX_CANDIDATES_PER_RUN = 50
 
 export interface ProfileStatus {
   hasProfile: boolean
@@ -131,6 +130,10 @@ async function ensureProfile(): Promise<{ profile: TasteProfileRow; ratedWorksCo
 export interface RunRecommendationArgs {
   mode: RecommendationMode
   userContext?: string | null
+  /** Quantos candidatos rankear. Default 20, max 30. */
+  n?: number
+  /** Filtros aplicados na /ranking. Obrigatório quando mode = "ranking". */
+  filters?: RankingFilters
 }
 
 export interface RunRecommendationResult {
@@ -139,6 +142,7 @@ export interface RunRecommendationResult {
   modeSummary: string
   ranked: RankedCandidate[]
   candidatesEvaluated: number
+  candidatesAvailable: number
   truncated: boolean
   modelName: string
   promptVersion: string
@@ -155,6 +159,8 @@ export async function runRecommendationAction(
       }
     }
 
+    const n = Math.min(Math.max(args.n ?? 20, 1), MAX_CANDIDATES_HARD_LIMIT)
+
     const profileResult = await ensureProfile()
     if ("error" in profileResult) return { error: profileResult.error }
     const profile = profileResult.profile
@@ -165,20 +171,32 @@ export async function runRecommendationAction(
       }
     }
 
-    const allCandidates = await getFavoriteCandidates(args.mode, 200)
+    // Busca o universo completo primeiro (sem aplicar `n`) pra reportar
+    // truncagem na UI; depois slice. Para ranking, getRanking sem topN
+    // retorna a base inteira filtrada.
+    let allCandidates: FavoriteCandidate[]
+    if (args.mode === "ranking") {
+      if (!args.filters) {
+        return { error: "Filtros do ranking são obrigatórios pra rodar nesse modo." }
+      }
+      allCandidates = await getRankingCandidates(args.filters, 200)
+    } else {
+      allCandidates = await getFavoriteCandidates(args.mode, 200)
+    }
+
     if (allCandidates.length === 0) {
       return {
         error:
           args.mode === "next_read"
             ? "Nenhum favorito sem manual_score encontrado. Marque alguns títulos como favoritos ou desfaça suas notas pra ver opções aqui."
-            : "Nenhum favorito encontrado. Marque títulos como favoritos pra rankeá-los.",
+            : args.mode === "full_analysis"
+              ? "Nenhum favorito encontrado. Marque títulos como favoritos pra rankeá-los."
+              : "Nenhuma obra encontrada com os filtros aplicados no ranking.",
       }
     }
 
-    const truncated = allCandidates.length > MAX_CANDIDATES_PER_RUN
-    const candidates = truncated
-      ? allCandidates.slice(0, MAX_CANDIDATES_PER_RUN)
-      : allCandidates
+    const truncated = allCandidates.length > n
+    const candidates = truncated ? allCandidates.slice(0, n) : allCandidates
 
     const result = await rankFavorites({
       profile: profile.profile,
@@ -210,6 +228,8 @@ export async function runRecommendationAction(
         taste_profile_id: profile.id,
         user_context: args.userContext?.trim() || null,
         n_candidates: candidates.length,
+        n_available: allCandidates.length,
+        source_meta: args.mode === "ranking" ? { filters: args.filters ?? null } : null,
         candidate_work_ids: candidates.map((c) => c.id),
         results: result.rankings,
         mode_summary: result.modeSummary,
@@ -219,12 +239,35 @@ export async function runRecommendationAction(
         output_tokens: result.usage.outputTokens,
         cache_read_tokens: result.usage.cacheReadTokens,
         cache_creation_tokens: result.usage.cacheCreationTokens,
+        ai_api_call_id: result.apiCallId,
       })
       .select("id")
       .single()
 
     if (insertError || !runRow) {
       console.error("[recommendations] falha persistindo run:", insertError)
+    }
+
+    // No modo "ranking", persiste o alignment_score em calculated_scores pra
+    // a coluna ficar disponível como ordenação na /ranking.
+    if (args.mode === "ranking" && runRow?.id) {
+      const now = new Date().toISOString()
+      const upsertRows = ranked.map((r) => ({
+        work_id: r.work_id,
+        alignment_score: r.alignment_score,
+        alignment_run_id: runRow.id,
+        alignment_justification: r.justification,
+        alignment_at: now,
+      }))
+      if (upsertRows.length > 0) {
+        const { error: upErr } = await supabase
+          .from("calculated_scores")
+          .upsert(upsertRows, { onConflict: "work_id" })
+        if (upErr) {
+          console.error("[recommendations] falha persistindo alignment_score:", upErr)
+        }
+      }
+      revalidatePath("/ranking")
     }
 
     revalidatePath("/recommendations")
@@ -237,6 +280,7 @@ export async function runRecommendationAction(
         modeSummary: result.modeSummary,
         ranked,
         candidatesEvaluated: candidates.length,
+        candidatesAvailable: allCandidates.length,
         truncated,
         modelName: result.modelName,
         promptVersion: result.promptVersion,
@@ -273,181 +317,5 @@ export async function rerunRecommendationFromExistingAction(
   })
 }
 
-// ============================================================
-// Passo 8 — LLM re-ranker generalizado
-// ============================================================
-
-const MAX_RERANK_CANDIDATES = 50
-
-export interface RerankTopNArgs {
-  filters: RankingFilters
-  /** Quantos candidatos top-N pegar do ranking pra rankear via LLM. Max 50. */
-  limit?: number
-  /** Descrição livre do contexto (ex: "drama + completed"). Aparece no prompt. */
-  modeLabel?: string
-  userContext?: string | null
-}
-
-export interface RerankTopNResultEntry {
-  workId: string
-  title: string
-  coverUrl: string | null
-  alignmentScore: number
-  justification: string
-  topMatchFactors: string[]
-  /** Posição original no ranking determinístico (antes do LLM re-rank). */
-  originalRank: number
-  /** Final.Score (informativo, pra ver o "antes vs depois"). */
-  finalScore: number | null
-  manualScore: number | null
-}
-
-export interface RerankTopNResult {
-  runId: string
-  modeSummary: string
-  modelName: string
-  promptVersion: string
-  entries: RerankTopNResultEntry[]
-}
-
-/**
- * Rankeia via LLM os top-N da página /ranking aplicando os filtros recebidos.
- * Persiste `alignment_score` em `calculated_scores` pra cada obra rankeada —
- * a coluna fica disponível em `/ranking` como sort option mesmo depois.
- */
-export async function rerankTopNAction(
-  args: RerankTopNArgs,
-): Promise<{ data?: RerankTopNResult; error?: string }> {
-  try {
-    const runsToday = await getRunsToday()
-    if (runsToday >= MAX_RUNS_PER_DAY) {
-      return {
-        error: `Limite diário de ${MAX_RUNS_PER_DAY} execuções IA atingido. Tente novamente amanhã.`,
-      }
-    }
-
-    const profileResult = await ensureProfile()
-    if ("error" in profileResult) return { error: profileResult.error }
-    if (profileResult.profile.is_stub) {
-      return {
-        error: "Perfil ainda em modo stub — avalie mais obras com manual_score pra desbloquear ranking IA.",
-      }
-    }
-    const profile = profileResult.profile
-
-    // Pega top-N do ranking com os filtros fornecidos
-    const limit = Math.min(args.limit ?? MAX_RERANK_CANDIDATES, MAX_RERANK_CANDIDATES)
-    const entries = await getRanking({ ...args.filters, topN: limit })
-    if (entries.length === 0) {
-      return {
-        error: "Nenhuma obra encontrada com os filtros aplicados pra rankear.",
-      }
-    }
-
-    // Converte RankingEntry → CandidateWorkInput
-    const candidates = entries.map((e) => ({
-      id: e.workId,
-      title: e.title,
-      synopsis: e.synopsis,
-      categoryScores: e.scores as Partial<Record<CriterionSlug, number>>,
-      tags: e.tags.map((t) => ({ name: t.name, group: t.tag_group_id })),
-      platformAvg: e.platformAvg,
-      totalVotes: e.totalVotes,
-      predictedScore: e.predictedScore,
-    }))
-
-    const modeLabel = args.modeLabel
-      ? `Subset filtrado em /ranking: ${args.modeLabel} (top-${entries.length}).`
-      : `Top-${entries.length} obras filtradas em /ranking. Rankeie cada uma pelo alinhamento com o perfil.`
-
-    const result = await rankCandidates({
-      profile: profile.profile,
-      candidates,
-      modeLabel,
-      userContext: args.userContext ?? null,
-    })
-
-    const supabase = createAdminClient()
-    const { data: runRow, error: insertError } = await supabase
-      .from("recommendation_runs")
-      .insert({
-        mode: "full_analysis",
-        taste_profile_id: profile.id,
-        user_context: args.userContext?.trim() || args.modeLabel || null,
-        n_candidates: candidates.length,
-        candidate_work_ids: candidates.map((c) => c.id),
-        results: result.rankings,
-        mode_summary: result.modeSummary,
-        model_name: result.modelName,
-        prompt_version: result.promptVersion,
-        input_tokens: result.usage.inputTokens,
-        output_tokens: result.usage.outputTokens,
-        cache_read_tokens: result.usage.cacheReadTokens,
-        cache_creation_tokens: result.usage.cacheCreationTokens,
-      })
-      .select("id")
-      .single()
-
-    if (insertError || !runRow) {
-      console.error("[rerankTopN] falha persistindo run:", insertError)
-    }
-    const runId = (runRow?.id as string) ?? null
-
-    // Persiste alignment_score por obra em calculated_scores (upsert seletivo)
-    const now = new Date().toISOString()
-    const rankingByWorkId = new Map(result.rankings.map((r) => [r.work_id, r]))
-    const upsertRows = entries
-      .map((e) => {
-        const r = rankingByWorkId.get(e.workId)
-        if (!r) return null
-        return {
-          work_id: e.workId,
-          alignment_score: r.alignment_score,
-          alignment_run_id: runId,
-          alignment_justification: r.justification,
-          alignment_at: now,
-        }
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null)
-
-    if (upsertRows.length > 0) {
-      const { error: upErr } = await supabase
-        .from("calculated_scores")
-        .upsert(upsertRows, { onConflict: "work_id" })
-      if (upErr) {
-        console.error("[rerankTopN] falha atualizando alignment_score:", upErr)
-      }
-    }
-
-    revalidatePath("/ranking")
-    revalidatePath("/recommendations")
-
-    const entryById = new Map(entries.map((e) => [e.workId, e]))
-    const ranked: RerankTopNResultEntry[] = result.rankings.map((r) => {
-      const e = entryById.get(r.work_id)
-      return {
-        workId: r.work_id,
-        title: e?.title ?? "(removida)",
-        coverUrl: e?.coverUrl ?? null,
-        alignmentScore: r.alignment_score,
-        justification: r.justification,
-        topMatchFactors: r.top_match_factors,
-        originalRank: e?.rank ?? -1,
-        finalScore: e?.finalScore ?? null,
-        manualScore: e?.manualScore ?? null,
-      }
-    })
-
-    return {
-      data: {
-        runId: runId ?? "unsaved",
-        modeSummary: result.modeSummary,
-        modelName: result.modelName,
-        promptVersion: result.promptVersion,
-        entries: ranked,
-      },
-    }
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Erro desconhecido" }
-  }
-}
+// (rerankTopNAction legacy removido — runRecommendationAction(mode: "ranking")
+// cobre o mesmo caso de uso com prompt enriquecido + reviews + UI unificada.)

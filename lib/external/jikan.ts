@@ -231,18 +231,61 @@ export async function fetchJikanMangaById(malId: number): Promise<JikanMangaDeta
   }
 }
 
-export async function fetchJikanMangaReviews(malId: number): Promise<string[]> {
-  try {
-    const url = new URL(`${JIKAN_BASE}/manga/${malId}/reviews`)
-    url.searchParams.set("page", "1")
+export interface JikanRecommendation {
+  title: string
+  /** Número de usuários que sugeriram esta recomendação. Sinal de consenso. */
+  votes: number
+}
 
-    const res = await fetch(url, { cache: "no-store" })
+export async function fetchJikanMangaRecommendations(malId: number): Promise<JikanRecommendation[]> {
+  try {
+    const res = await fetch(`${JIKAN_BASE}/manga/${malId}/recommendations`, { cache: "no-store" })
     if (!res.ok) return []
 
     const json = await res.json()
     const data: unknown[] = Array.isArray(json?.data) ? json.data : []
 
     return data
+      .map((item): JikanRecommendation | null => {
+        const record = item as Record<string, unknown>
+        const entry = record.entry as Record<string, unknown> | undefined
+        const title = typeof entry?.title === "string" ? entry.title : null
+        if (!title) return null
+        const votes = typeof record.votes === "number" ? record.votes : 0
+        return { title, votes }
+      })
+      .filter((entry): entry is JikanRecommendation => entry !== null)
+      .filter((entry) => entry.votes > 0)
+      .slice(0, 10)
+  } catch {
+    return []
+  }
+}
+
+export async function fetchJikanMangaReviews(malId: number): Promise<string[]> {
+  // Jikan retorna 25 reviews por página. Pegamos páginas 1 e 2 em sequência.
+  // `preliminary=true` é essencial pra manhwa em andamento — a maioria das
+  // reviews fica marcada como preliminary no MAL e seria filtrada por padrão.
+  // `spoiler=true` inclui reviews com spoiler (sinal valioso pra avaliação IA).
+  async function fetchPage(page: number): Promise<unknown[]> {
+    try {
+      const url = new URL(`${JIKAN_BASE}/manga/${malId}/reviews`)
+      url.searchParams.set("page", String(page))
+      url.searchParams.set("preliminary", "true")
+      url.searchParams.set("spoiler", "true")
+      const res = await fetch(url, { cache: "no-store" })
+      if (!res.ok) return []
+      const json = await res.json()
+      return Array.isArray(json?.data) ? json.data : []
+    } catch {
+      return []
+    }
+  }
+
+  try {
+    const [page1, page2] = await Promise.all([fetchPage(1), fetchPage(2)])
+    const combined = [...page1, ...page2]
+    return combined
       .map((item) => {
         const record = item as Record<string, unknown>
         const review = cleanText(record.review)
@@ -254,7 +297,7 @@ export async function fetchJikanMangaReviews(malId: number): Promise<string[]> {
           : review
       })
       .filter(Boolean)
-      .slice(0, 20)
+      .slice(0, 50)
       .map((review) => review.slice(0, 900))
   } catch {
     return []

@@ -43,17 +43,21 @@ export const WORK_TABLE_COLUMN_CONFIG_EVENT = eventNameFor("titles")
 export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   { key: "select", label: "", align: "center", locked: true, group: "basico" },
   { key: "title", label: "Título", locked: true, group: "basico" },
-  { key: "publication_status", label: "Publicação", align: "center", group: "basico" },
-  { key: "personal_status", label: "Pessoal", align: "center", group: "basico" },
-  { key: "chapters", label: "Caps.", align: "center", group: "basico" },
+  { key: "publication_status", label: "Pub.", configLabel: "Publicação", align: "center", group: "basico" },
+  { key: "personal_status", label: "Status", configLabel: "Status pessoal", align: "center", group: "basico" },
+  { key: "chapters_total", label: "Caps.", configLabel: "Capítulos totais", align: "center", group: "basico" },
+  { key: "chapters_read", label: "Lidos", configLabel: "Capítulos lidos", align: "center", group: "basico" },
   { key: "year", label: "Ano", align: "center", defaultHidden: true, group: "basico" },
-  { key: "synopsis_q", label: "Sinopse", align: "center", defaultHidden: true, group: "basico" },
-  { key: "calc_score", label: "Nota.IA", align: "center", group: "notas" },
-  { key: "predicted_score", label: "Nota.Pr", align: "center", group: "notas" },
-  { key: "final_score", label: "Nota.Final", align: "center", group: "notas" },
-  { key: "platform_avg", label: "Nota.M", align: "center", defaultHidden: true, group: "notas" },
-  { key: "total_votes", label: "Votos", align: "center", defaultHidden: true, group: "notas" },
-  { key: "ai_status", label: "IA", align: "center", group: "basico" },
+  { key: "synopsis_q", label: "Sinopse", configLabel: "Interesse na sinopse", align: "center", defaultHidden: true, group: "basico" },
+  { key: "calc_score", label: "N.IA", configLabel: "Nota.IA (calculada via avaliação da IA)", align: "center", group: "notas" },
+  { key: "predicted_score", label: "N.Pr", configLabel: "Nota.Pr (predição por regressão)", align: "center", group: "notas" },
+  { key: "final_score", label: "N.Final", configLabel: "Nota.Final (mistura ponderada de N.IA e N.Pr)", align: "center", group: "notas" },
+  { key: "platform_avg", label: "N.M", configLabel: "Nota.M (média ponderada das plataformas)", align: "center", defaultHidden: true, group: "notas" },
+  { key: "total_votes", label: "Votos", configLabel: "Total de votos nas plataformas", align: "center", defaultHidden: true, group: "notas" },
+  { key: "alignment_score", label: "IA Rk.", configLabel: "IA Re-rank (sob demanda)", align: "center", defaultHidden: true, group: "notas" },
+  { key: "ai_status", label: "IA", configLabel: "Status da avaliação IA", align: "center", group: "basico" },
+  { key: "updated_at", label: "Atual.", configLabel: "Atualizado em", align: "center", group: "basico" },
+  { key: "last_read_at", label: "Últ. leitura", configLabel: "Última leitura", align: "center", defaultHidden: true, group: "basico" },
   ...CRITERION_SLUGS.map((slug) => ({
     key: `crit_${slug}`,
     label: CRITERIA_INFO[slug]?.emoji ?? slug,
@@ -75,12 +79,13 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
     "calc_score",
     "predicted_score",
     "ai_status",
+    "alignment_score",
     ...CRITERION_SLUGS.map((slug) => `crit_${slug}`),
   ],
   // Visão exploratória: critérios + todas as notas visíveis; ano e ai_status fora.
-  favorites: ["synopsis_q", "year", "ai_status"],
+  favorites: ["synopsis_q", "year", "ai_status", "chapters_read"],
   // Ranking: foco em comparar notas; sinopse, ano e ai_status fora; critérios visíveis.
-  ranking: ["synopsis_q", "year", "ai_status"],
+  ranking: ["synopsis_q", "year", "ai_status", "chapters_read", "alignment_score"],
 }
 
 const DEFAULT_COLUMN_CONFIG_BY_NAMESPACE: Record<WorkColumnNamespace, WorkColumnConfig> = {
@@ -95,14 +100,31 @@ const DEFAULT_COLUMN_CONFIG: WorkColumnConfig = DEFAULT_COLUMN_CONFIG_BY_NAMESPA
 const cachedRawColumnConfig: Map<WorkColumnNamespace, string | null> = new Map()
 const cachedColumnConfig: Map<WorkColumnNamespace, WorkColumnConfig> = new Map()
 
+const LOCKED_KEYS = new Set(WORK_TABLE_COLUMNS.filter((c) => c.locked).map((c) => c.key))
+
 export function normalizeWorkColumnConfig(
   value: Partial<WorkColumnConfig> | null | undefined
 ): WorkColumnConfig {
   const knownKeys = new Set(DEFAULT_COLUMN_KEYS)
-  const order = [
-    ...(value?.order ?? []).filter((key) => knownKeys.has(key)),
-    ...DEFAULT_COLUMN_KEYS.filter((key) => !(value?.order ?? []).includes(key)),
-  ]
+  // User-controlled order applies only to non-locked columns. Locked columns
+  // are always placed at their canonical positions (select/title first,
+  // actions last) regardless of stored order — this protects against stale
+  // localStorage entries that predate columns being added.
+  const userNonLocked = (value?.order ?? []).filter(
+    (key) => knownKeys.has(key) && !LOCKED_KEYS.has(key)
+  )
+  const canonicalNonLocked = DEFAULT_COLUMN_KEYS.filter((key) => !LOCKED_KEYS.has(key))
+  const remainingNonLocked = canonicalNonLocked.filter((key) => !userNonLocked.includes(key))
+  const orderedNonLocked = [...userNonLocked, ...remainingNonLocked]
+  const order: string[] = []
+  let nonLockedIdx = 0
+  for (const key of DEFAULT_COLUMN_KEYS) {
+    if (LOCKED_KEYS.has(key)) {
+      order.push(key)
+    } else {
+      order.push(orderedNonLocked[nonLockedIdx++])
+    }
+  }
   const hidden = (value?.hidden ?? []).filter((key) => {
     const column = WORK_TABLE_COLUMNS.find((item) => item.key === key)
     return column && !column.locked
@@ -122,7 +144,8 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   title: 360,
   publication_status: 130,
   personal_status: 110,
-  chapters: 80,
+  chapters_total: 70,
+  chapters_read: 70,
   year: 70,
   synopsis_q: 90,
   calc_score: 80,
@@ -130,7 +153,10 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   final_score: 90,
   platform_avg: 80,
   total_votes: 70,
+  alignment_score: 70,
   ai_status: 80,
+  updated_at: 110,
+  last_read_at: 110,
   actions: 60,
 }
 
@@ -213,6 +239,7 @@ const SCORE_COLUMN_KEYS = new Set<string>([
   "calc_score",
   "predicted_score",
   "platform_avg",
+  "alignment_score",
   ...CRITERION_SLUGS.map((slug) => `crit_${slug}`),
 ])
 
@@ -220,54 +247,58 @@ export function isScoreColumn(key: string): boolean {
   return SCORE_COLUMN_KEYS.has(key)
 }
 
-export type WorkColumnPreset = "lista" | "heatmap" | "tudo"
+export type WorkColumnPreset = "tudo" | "geral" | "notas" | "criterios"
 
 export const WORK_COLUMN_PRESETS: Array<{ id: WorkColumnPreset; label: string }> = [
-  { id: "lista", label: "Lista padrão" },
-  { id: "heatmap", label: "Heatmap padrão" },
   { id: "tudo", label: "Tudo" },
+  { id: "geral", label: "Geral" },
+  { id: "notas", label: "Notas" },
+  { id: "criterios", label: "Critérios" },
 ]
 
 const PRESET_VISIBLE_KEYS: Record<WorkColumnPreset, string[]> = {
-  lista: [
-    "publication_status",
-    "personal_status",
-    "chapters",
-    "year",
-    "final_score",
-    "platform_avg",
-    "total_votes",
-  ],
-  heatmap: ["final_score", ...CRITERION_SLUGS.map((slug) => `crit_${slug}`)],
   tudo: WORK_TABLE_COLUMNS.filter((c) => !c.locked).map((c) => c.key),
+  geral: WORK_TABLE_COLUMNS.filter((c) => !c.locked && c.group === "basico").map((c) => c.key),
+  notas: WORK_TABLE_COLUMNS.filter((c) => !c.locked && c.group === "notas").map((c) => c.key),
+  criterios: WORK_TABLE_COLUMNS.filter((c) => !c.locked && c.group === "criterios").map((c) => c.key),
 }
 
-export function getPresetConfig(preset: WorkColumnPreset): WorkColumnConfig {
-  const visible = new Set(PRESET_VISIBLE_KEYS[preset])
-  const hidden = DEFAULT_COLUMN_KEYS.filter((key) => {
+function hiddenForVisible(visibleKeys: Iterable<string>): string[] {
+  const visible = new Set(visibleKeys)
+  return DEFAULT_COLUMN_KEYS.filter((key) => {
     if (visible.has(key)) return false
     const column = WORK_TABLE_COLUMNS.find((item) => item.key === key)
     return column ? !column.locked : false
   })
-  return normalizeWorkColumnConfig({ order: DEFAULT_COLUMN_KEYS, hidden })
 }
 
-export function getActivePreset(config: WorkColumnConfig): WorkColumnPreset | null {
-  const normalized = normalizeWorkColumnConfig(config)
-  const orderIsDefault =
-    normalized.order.length === DEFAULT_COLUMN_KEYS.length &&
-    normalized.order.every((key, index) => key === DEFAULT_COLUMN_KEYS[index])
-  if (!orderIsDefault) return null
-  const hiddenSet = new Set(normalized.hidden)
-  for (const preset of WORK_COLUMN_PRESETS) {
-    const expected = getPresetConfig(preset.id)
-    const expectedHidden = new Set(expected.hidden)
-    if (
-      expectedHidden.size === hiddenSet.size &&
-      [...expectedHidden].every((key) => hiddenSet.has(key))
-    ) {
-      return preset.id
-    }
+export function getPresetConfig(preset: WorkColumnPreset): WorkColumnConfig {
+  return normalizeWorkColumnConfig({
+    order: DEFAULT_COLUMN_KEYS,
+    hidden: hiddenForVisible(PRESET_VISIBLE_KEYS[preset]),
+  })
+}
+
+export function getPresetSetConfig(presets: Iterable<WorkColumnPreset>): WorkColumnConfig {
+  const union = new Set<string>()
+  for (const preset of presets) {
+    for (const key of PRESET_VISIBLE_KEYS[preset]) union.add(key)
   }
-  return null
+  return normalizeWorkColumnConfig({
+    order: DEFAULT_COLUMN_KEYS,
+    hidden: hiddenForVisible(union),
+  })
+}
+
+// Um preset está "ativo" quando todas as colunas que ele exporia estão visíveis.
+export function getActivePresetSet(config: WorkColumnConfig): Set<WorkColumnPreset> {
+  const normalized = normalizeWorkColumnConfig(config)
+  const hiddenSet = new Set(normalized.hidden)
+  const active = new Set<WorkColumnPreset>()
+  for (const preset of WORK_COLUMN_PRESETS) {
+    const keys = PRESET_VISIBLE_KEYS[preset.id]
+    if (keys.length === 0) continue
+    if (keys.every((key) => !hiddenSet.has(key))) active.add(preset.id)
+  }
+  return active
 }

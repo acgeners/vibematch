@@ -125,6 +125,9 @@ export interface ExternalWorkData {
   multiSynopses?: Array<{ source: ExternalSourceId; text: string }>
   /** Per-source external IDs from accepted sources, persisted to `work_external_ids` so future refreshes skip title search. */
   externalIds?: Partial<Record<ExternalSourceId, string>>
+  /** Texto cru de "Status in Country of Origin" do MU detail. Usado pra
+   * pré-preencher `observations` quando a obra está em Hiatus. */
+  mangaUpdatesStatusText?: string
   criteriaScores?: Partial<Record<CriterionSlug, number>>
   criteriaJustifications?: Partial<Record<CriterionSlug, string>>
   /**
@@ -132,7 +135,19 @@ export interface ExternalWorkData {
    * Plumbada até works.ts pra preencher ai_evaluations.input_hash, permitindo
    * cache hit no Path A (página /ai-evaluation) do mesmo título.
    */
-  aiMeta?: { inputHash: string; modelName: string; promptVersion: string; confidence: number | null }
+  aiMeta?: {
+    inputHash: string
+    modelName: string
+    promptVersion: string
+    confidence: number | null
+    /** Resumo gerado pela IA. Mostrado no work-form abaixo das notas por critério. */
+    summary?: string | null
+    /** Diagnóstico de por que não há reviews externas no prompt — usado na UI pra orientar a ação certa. */
+    noReviewsReason?: "no_external_ids" | "all_rejected" | "search_miss" | "sources_returned_empty" | null
+  }
+  /** Pool completo de reviews externos coletados durante a avaliação. Plumbado
+   * até `createWork` pra persistir em `work_reviews` depois da obra existir. */
+  externalReviews?: SourcedReview[]
   debug?: ExternalMergeDebug
 }
 
@@ -145,6 +160,25 @@ export interface SourcedReview {
   userRating?: number
   /** Comprimento do texto antes de qualquer truncamento — usado pelo sampler. */
   textLength?: number
+}
+
+/** Avaliação numérica de uma plataforma externa para a obra (rating 0-10 + nº de votos). Usada como sinal de recepção/popularidade no prompt da IA. */
+export interface PlatformRating {
+  platform: ExternalSourceId
+  rating?: number
+  votes?: number
+}
+
+/** Obra externa frequentemente recomendada a quem gostou da obra avaliada. Sinal estrutural de cluster temático para a IA — não autoridade sobre o conteúdo da obra avaliada. */
+export interface SimilarWork {
+  title: string
+  genres: string[]
+  /** Tags com nome (e rank quando a fonte fornece, ex.: AniList rank 0-100%). */
+  tags?: string[]
+  /** Fontes que recomendaram esta obra (uma obra pode aparecer em múltiplas listas). */
+  sources: ExternalSourceId[]
+  /** Soma dos pesos das recomendações (rating AniList ou nº de votos Jikan). Quanto maior, mais consenso. */
+  weight?: number
 }
 
 export interface ExternalSourceDebug {

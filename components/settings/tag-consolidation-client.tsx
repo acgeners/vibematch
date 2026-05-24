@@ -15,8 +15,11 @@ import {
   applyApprovedProposals,
   approveGroupMove,
   approveProposal,
+  bulkDeleteClusterProposals,
+  bulkDeleteGroupMoves,
   bulkSetGroupMoveStatus,
   bulkSetProposalStatus,
+  deleteClusterProposal,
   editGroupMove,
   editProposal,
   moveTagBetweenProposals,
@@ -104,26 +107,70 @@ export function TagConsolidationClient({
     router.replace(`/settings/tag-consolidation?${params.toString()}`, { scroll: false })
   }
 
-  const runBulkClusters = async (status: "approved" | "rejected") => {
+  const runBulkClusters = async (status: "approved" | "rejected" | "pending") => {
     if (selectedIds.size === 0) return
     setIsBulkRunning(true)
     const ids = [...selectedIds]
     const { updated, error } = await bulkSetProposalStatus(ids, status)
     setIsBulkRunning(false)
     if (error) toast.error(error)
-    else toast.success(`${updated} proposta${updated === 1 ? "" : "s"} ${status === "approved" ? "aprovada" : "rejeitada"}${updated === 1 ? "" : "s"}`)
+    else {
+      const verb =
+        status === "approved" ? "aprovada" : status === "rejected" ? "rejeitada" : "reaberta"
+      toast.success(`${updated} proposta${updated === 1 ? "" : "s"} ${verb}${updated === 1 ? "" : "s"}`)
+    }
     exitSelectionMode()
     refresh()
   }
 
-  const runBulkGroupMoves = async (status: "approved" | "rejected") => {
+  const runBulkDeleteClusters = async () => {
+    if (selectedIds.size === 0) return
+    if (
+      !confirm(
+        `Deletar ${selectedIds.size} proposta(s) definitivamente? A ação não pode ser desfeita.`,
+      )
+    )
+      return
+    setIsBulkRunning(true)
+    const ids = [...selectedIds]
+    const { deleted, error } = await bulkDeleteClusterProposals(ids)
+    setIsBulkRunning(false)
+    if (error) toast.error(error)
+    else toast.success(`${deleted} proposta${deleted === 1 ? "" : "s"} deletada${deleted === 1 ? "" : "s"}`)
+    exitSelectionMode()
+    refresh()
+  }
+
+  const runBulkGroupMoves = async (status: "approved" | "rejected" | "pending") => {
     if (selectedIds.size === 0) return
     setIsBulkRunning(true)
     const ids = [...selectedIds]
     const { updated, error } = await bulkSetGroupMoveStatus(ids, status)
     setIsBulkRunning(false)
     if (error) toast.error(error)
-    else toast.success(`${updated} mudança${updated === 1 ? "" : "s"} ${status === "approved" ? "aprovada" : "rejeitada"}${updated === 1 ? "" : "s"}`)
+    else {
+      const verb =
+        status === "approved" ? "aprovada" : status === "rejected" ? "rejeitada" : "reaberta"
+      toast.success(`${updated} mudança${updated === 1 ? "" : "s"} ${verb}${updated === 1 ? "" : "s"}`)
+    }
+    exitSelectionMode()
+    refresh()
+  }
+
+  const runBulkDeleteGroupMoves = async () => {
+    if (selectedIds.size === 0) return
+    if (
+      !confirm(
+        `Deletar ${selectedIds.size} mudança(s) de grupo definitivamente? A ação não pode ser desfeita.`,
+      )
+    )
+      return
+    setIsBulkRunning(true)
+    const ids = [...selectedIds]
+    const { deleted, error } = await bulkDeleteGroupMoves(ids)
+    setIsBulkRunning(false)
+    if (error) toast.error(error)
+    else toast.success(`${deleted} mudança${deleted === 1 ? "" : "s"} deletada${deleted === 1 ? "" : "s"}`)
     exitSelectionMode()
     refresh()
   }
@@ -179,6 +226,17 @@ export function TagConsolidationClient({
   }
 
   const approvedCount = initialStatus === "approved" ? proposals.length : null
+
+  const handleDeleteProposal = (id: string) => async () => {
+    if (!confirm("Deletar essa proposta de cluster definitivamente? A ação não pode ser desfeita.")) return
+    const { error } = await deleteClusterProposal(id)
+    if (error) {
+      toast.error(error)
+      return
+    }
+    toast.success("Proposta deletada.")
+    refresh()
+  }
 
   const handleApplyGroupMoves = async () => {
     if (!confirm("Aplicar todas as mudanças de grupo aprovadas?")) return
@@ -268,6 +326,25 @@ export function TagConsolidationClient({
               onClick={() => (view === "clusters" ? runBulkClusters("rejected") : runBulkGroupMoves("rejected"))}
             >
               <X className="mr-1 h-3.5 w-3.5" /> Rejeitar ({selectedIds.size})
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={selectedIds.size === 0 || isBulkRunning}
+              onClick={() => (view === "clusters" ? runBulkClusters("pending") : runBulkGroupMoves("pending"))}
+              title="Reabre propostas aprovadas ou rejeitadas (volta pra pendente)"
+            >
+              <RotateCcw className="mr-1 h-3.5 w-3.5" /> Reabrir ({selectedIds.size})
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={selectedIds.size === 0 || isBulkRunning}
+              onClick={() => (view === "clusters" ? runBulkDeleteClusters() : runBulkDeleteGroupMoves())}
+              className="text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"
+              title="Deleta as propostas selecionadas permanentemente"
+            >
+              <Trash2 className="mr-1 h-3.5 w-3.5" /> Deletar ({selectedIds.size})
             </Button>
             <Button size="sm" variant="ghost" onClick={exitSelectionMode} disabled={isBulkRunning}>
               Sair
@@ -417,6 +494,7 @@ export function TagConsolidationClient({
               onApprove={handleApprove(p.id)}
               onReject={handleReject(p.id)}
               onReopen={handleReopen(p.id)}
+              onDelete={handleDeleteProposal(p.id)}
               onSaveEdit={(name, memberIds) => handleEdit(p.id, name, memberIds)()}
               onRefresh={refresh}
               isPending={isPending}
@@ -793,6 +871,7 @@ interface CardProps {
   onApprove: () => void
   onReject: () => void
   onReopen: () => void
+  onDelete: () => void
   onSaveEdit: (canonicalName: string, memberIds: string[]) => void
   onRefresh: () => void
   isPending: boolean
@@ -809,6 +888,7 @@ function ProposalCard({
   onApprove,
   onReject,
   onReopen,
+  onDelete,
   onSaveEdit,
   onRefresh,
   isPending,
@@ -952,6 +1032,16 @@ function ProposalCard({
                     <RotateCcw className="mr-1 h-3.5 w-3.5" /> Reabrir
                   </Button>
                 )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={onDelete}
+                  disabled={isPending}
+                  title="Deletar proposta permanentemente"
+                  className="text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
               </>
             )}
           </div>
@@ -1051,12 +1141,20 @@ function MemberChip({
       return
     }
     setBusy(true)
-    const { error } = await moveTagToGroup(tagId, targetSlug)
+    const result = await moveTagToGroup(tagId, targetSlug)
     setBusy(false)
-    if (error) {
-      toast.error(error)
+    if (result.error) {
+      toast.error(result.error)
     } else {
-      toast.success(`"${name}" movido para o grupo ${targetSlug}`)
+      const extra: string[] = []
+      if (result.removedFromProposals && result.removedFromProposals > 0) {
+        extra.push(`removida de ${result.removedFromProposals} proposta(s)`)
+      }
+      if (result.autoRejectedProposals && result.autoRejectedProposals > 0) {
+        extra.push(`${result.autoRejectedProposals} proposta(s) auto-rejeitada(s)`)
+      }
+      const suffix = extra.length > 0 ? ` — ${extra.join(", ")}` : ""
+      toast.success(`"${name}" movido para ${targetSlug}${suffix}`)
       setOpen(false)
       onMoved()
     }

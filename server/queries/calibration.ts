@@ -342,7 +342,12 @@ export async function loadLastRun(mode: CalibrationMode): Promise<CalibrationRun
     .limit(1)
     .maybeSingle()
   if (error) {
-    console.error("[calibration] erro lendo último run:", error)
+    console.error("[calibration] erro lendo último run:", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    })
     return null
   }
   return (data as unknown as CalibrationRunRow | null) ?? null
@@ -356,7 +361,12 @@ export async function loadRunHistory(limit = 20): Promise<CalibrationRunRow[]> {
     .order("created_at", { ascending: false })
     .limit(limit)
   if (error) {
-    console.error("[calibration] erro lendo histórico:", error)
+    console.error("[calibration] erro lendo histórico:", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    })
     return []
   }
   return (data as unknown as CalibrationRunRow[]) ?? []
@@ -392,7 +402,12 @@ export async function loadSuggestions(filters: SuggestionFilters = {}): Promise<
 
   const { data, error } = await query
   if (error) {
-    console.error("[calibration] erro lendo sugestões:", error)
+    console.error("[calibration] erro lendo sugestões:", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    })
     return []
   }
 

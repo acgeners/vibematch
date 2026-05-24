@@ -18,8 +18,9 @@ import type { ExternalWorkData } from "@/lib/external/types"
 import type { ExistingWorkMatch } from "@/server/actions/external"
 import { createWork, createWorksBatch, findDuplicateWorkById, findDuplicateWorkByTitle, updateWork } from "@/server/actions/works"
 import type { DuplicateWorkForForm } from "@/server/actions/works"
+import { previewCanonicalSynopsis } from "@/server/actions/synopsis"
 import { GENRE_NAMES, TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
-import { listGenreCatalog } from "@/server/actions/external"
+import { evaluateCandidateForCreate, listGenreCatalog } from "@/server/actions/external"
 import {
   PUBLICATION_STATUSES,
   PERSONAL_STATUSES,
@@ -44,6 +45,7 @@ import {
   type PostReadingScoreField,
 } from "@/lib/constants/post-reading-criteria"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { StarRating } from "@/components/ui/star-rating"
 import { Label } from "@/components/ui/label"
@@ -230,7 +232,32 @@ const POST_READING_STAR_LEGEND = [
 
 type SectionKey = "new" | "basic" | "external" | "criteria" | "status" | "categorization"
 type ExternalSourceOption = { id: number; name: string; order?: number | string | null }
-type BatchDraft = { localId: string; values: WorkFormValues }
+type AiMetaSnapshot = {
+  inputHash: string
+  modelName: string
+  promptVersion: string
+  confidence: number | null
+  summary?: string | null
+  noReviewsReason?: "no_external_ids" | "all_rejected" | "search_miss" | "sources_returned_empty" | null
+}
+
+// Mesmo limiar usado no AiEvaluationReviewForm (Path A) pra "Aceitar todos".
+// Desacoplado do `formula_config.low_confidence_threshold` (que filtra a fila).
+const CREATE_FLOW_CONFIRM_THRESHOLD = 0.7
+
+const NO_REVIEWS_REASON_LABEL: Record<NonNullable<AiMetaSnapshot["noReviewsReason"]> & string, string> = {
+  no_external_ids: "obra ainda não foi linkada a fontes externas",
+  all_rejected: "todas as fontes desta obra foram rejeitadas",
+  search_miss: "busca por título não encontrou candidato confiável nas fontes",
+  sources_returned_empty: "fontes linkadas existem, mas não devolveram reviews",
+}
+type ExternalReviewsSnapshot = NonNullable<ExternalWorkData["externalReviews"]>
+type BatchDraft = {
+  localId: string
+  values: WorkFormValues
+  aiMeta?: AiMetaSnapshot | null
+  externalReviews?: ExternalReviewsSnapshot | null
+}
 type CriteriaJustifications = Partial<Record<import("@/types/domain").CriterionSlug, string>>
 type DuplicateResolutionMode = "create" | "addMore"
 type DuplicateChoice = "existing" | "incoming"
@@ -536,7 +563,15 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null)
   // Metadata da IA usada na busca externa (Path B). Não vai pro Zod schema
   // — passa por canal paralelo no createWork pra preencher ai_evaluations.input_hash.
-  const [aiMeta, setAiMeta] = useState<{ inputHash: string; modelName: string; promptVersion: string; confidence: number | null } | null>(null)
+  const [aiMeta, setAiMeta] = useState<AiMetaSnapshot | null>(null)
+  // Pool de reviews coletado durante "Buscar dados". Mantido em state pra
+  // persistir após createWork criar a obra (workId só existe pós-save).
+  const [pendingExternalReviews, setPendingExternalReviews] = useState<ExternalReviewsSnapshot | null>(null)
+  // Submit pendente quando a IA reportou confiança baixa — espera confirmação.
+  const [pendingLowConfidenceSubmit, setPendingLowConfidenceSubmit] = useState<
+    null | { kind: "create" | "create-and-add"; values: WorkFormValues }
+  >(null)
+  const [reevaluatingOpus, setReevaluatingOpus] = useState(false)
   const [criteriaJustifications, setCriteriaJustifications] = useState<CriteriaJustifications>(() => {
     if (!aiEvaluation?.scores?.length) return {}
     const map: CriteriaJustifications = {}
@@ -549,6 +584,49 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
   })
   const [topFeedback, setTopFeedback] = useState<string | null>(null)
   const [duplicateResolution, setDuplicateResolution] = useState<DuplicateResolutionState | null>(null)
+  const [canonicalPreview, setCanonicalPreview] = useState<string | null>(null)
+  const [canonicalLoading, setCanonicalLoading] = useState(false)
+  const [canonicalError, setCanonicalError] = useState<string | null>(null)
+  // Token monotônico que invalida respostas de gerações canceladas/superadas.
+  const canonicalRunIdRef = useRef(0)
+
+  const generateCanonicalPreview = useCallback(async (blocks: string[]) => {
+    const cleaned = blocks.map((b) => b.trim()).filter((b) => b.length > 0)
+    if (cleaned.length === 0) {
+      setCanonicalPreview(null)
+      setCanonicalError(null)
+      setCanonicalLoading(false)
+      return
+    }
+    const runId = ++canonicalRunIdRef.current
+    setCanonicalLoading(true)
+    setCanonicalError(null)
+    try {
+      const result = await previewCanonicalSynopsis(cleaned)
+      if (runId !== canonicalRunIdRef.current) return
+      if (result.canonical) {
+        setCanonicalPreview(result.canonical)
+        setCanonicalError(null)
+      } else {
+        setCanonicalError(result.error ?? "Falha ao consolidar.")
+      }
+    } catch (err) {
+      if (runId !== canonicalRunIdRef.current) return
+      setCanonicalError(err instanceof Error ? err.message : "Falha ao consolidar.")
+    } finally {
+      if (runId === canonicalRunIdRef.current) setCanonicalLoading(false)
+    }
+  }, [])
+
+  const regenerateCanonicalFromForm = useCallback(() => {
+    const current = getValues("synopses") ?? []
+    const blocks = current.map((s) => s.text).filter((t): t is string => Boolean(t?.trim()))
+    if (blocks.length === 0) {
+      const raw = (getValues("synopsis") ?? "").trim()
+      if (raw) blocks.push(raw)
+    }
+    void generateCanonicalPreview(blocks)
+  }, [generateCanonicalPreview, getValues])
   const {
     fields: extraPlatformFields,
     append: appendExtraPlatform,
@@ -625,6 +703,8 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
   const clearFormState = () => {
     setCriteriaJustifications({})
     setCoverPreviewFailedUrl(null)
+    setAiMeta(null)
+    setPendingExternalReviews(null)
   }
 
   const resetForNewEntry = () => {
@@ -802,6 +882,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
         isPrimary: c.url === primaryUrl,
       })))
     }
+    let synopsisBlocksForCanonical: string[] = []
     if (data.multiSynopses?.length) {
       const synopses = dedupeSynopsisEntries(data.multiSynopses.map((s, index) => ({
         source: s.source,
@@ -810,10 +891,15 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
       })))
       setValue("synopses", synopses)
       setValue("synopsis", joinSynopsisBlocks(synopses.map((s) => s.text)))
+      synopsisBlocksForCanonical = synopses.map((s) => s.text)
     } else if (data.synopsis) {
       const synopsis = joinSynopsisBlocks([data.synopsis])
       setValue("synopsis", synopsis)
       setValue("synopses", synopsis ? [{ source: "manual", text: synopsis, isPrimary: true }] : [])
+      if (synopsis) synopsisBlocksForCanonical = [synopsis]
+    }
+    if (synopsisBlocksForCanonical.length > 0) {
+      void generateCanonicalPreview(synopsisBlocksForCanonical)
     }
     if (data.year) setValue("year", data.year)
     if (data.yearEnd) setValue("year_end", data.yearEnd)
@@ -861,12 +947,28 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     setCriteriaJustifications(data.criteriaJustifications ?? {})
     setValue("ai_justifications", data.criteriaJustifications ?? {})
     if (data.aiMeta) setAiMeta(data.aiMeta)
+    if (data.externalReviews && data.externalReviews.length > 0) {
+      setPendingExternalReviews(data.externalReviews)
+    }
     if (data.externalIds && Object.keys(data.externalIds).length > 0) {
       const cleaned: Record<string, string> = {}
       for (const [source, id] of Object.entries(data.externalIds)) {
         if (id) cleaned[source] = String(id)
       }
       setValue("external_ids", cleaned, { shouldDirty: true })
+    }
+    // Pré-preenche Observações com o "Status in Country of Origin" do MU
+    // quando a obra está em Hiatus (status enum ou palavra no texto cru). Só
+    // toca se o usuário ainda não escreveu nada manualmente.
+    const statusText = data.mangaUpdatesStatusText
+    if (statusText) {
+      const isHiatus =
+        data.publicationStatus === "Hiatus" ||
+        statusText.toLowerCase().includes("hiatus")
+      const currentObs = (getValues("observations") ?? "").trim()
+      if (isHiatus && !currentObs) {
+        setValue("observations", statusText, { shouldDirty: true })
+      }
     }
   }
 
@@ -941,8 +1043,12 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     externalSearchButtonRef.current?.click()
   }
 
-  const onSubmit = async (rawValues: WorkFormValues) => {
-    const values = normalizePostReadingScoresInValues(rawValues)
+  const isLowConfidenceAiMeta =
+    !workId &&
+    aiMeta?.confidence != null &&
+    aiMeta.confidence < CREATE_FLOW_CONFIRM_THRESHOLD
+
+  const executeCreateSubmit = async (values: WorkFormValues) => {
     scrollToTop()
     const shouldCheckDuplicate = !workId && Object.keys(values.external_ids ?? {}).length === 0
     setTopFeedback(workId ? "Atualizando obra..." : shouldCheckDuplicate ? "Verificando duplicidade..." : "Criando obra e recalculando notas...")
@@ -951,7 +1057,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     setTopFeedback(workId ? "Atualizando obra..." : "Criando obra e recalculando notas...")
     const result = workId
       ? await updateWork(workId, values)
-      : await createWork(values, aiMeta ?? undefined)
+      : await createWork(values, aiMeta ?? undefined, pendingExternalReviews ?? undefined)
 
     if (result.error) {
       setTopFeedback(null)
@@ -983,14 +1089,23 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     router.push(`/titles/${destination}`)
   }
 
+  // Handler do react-hook-form. Quando a IA reportou confiança baixa, segura o
+  // submit e mostra o ConfirmDialog antes de prosseguir.
+  const onSubmit = async (rawValues: WorkFormValues) => {
+    const values = normalizePostReadingScoresInValues(rawValues)
+    if (isLowConfidenceAiMeta) {
+      setPendingLowConfidenceSubmit({ kind: "create", values })
+      return
+    }
+    await executeCreateSubmit(values)
+  }
+
   const persistDrafts = (drafts: BatchDraft[]) => {
     setBatchDrafts(drafts)
     window.localStorage.setItem(BATCH_DRAFTS_STORAGE_KEY, JSON.stringify(drafts))
   }
 
-  const onSubmitAddMore = async (rawValues: WorkFormValues) => {
-    if (workId) return
-    const values = normalizePostReadingScoresInValues(rawValues)
+  const executeAddMoreSubmit = async (values: WorkFormValues) => {
     scrollToTop()
     const shouldCheckDuplicate = Object.keys(values.external_ids ?? {}).length === 0
     if (shouldCheckDuplicate) {
@@ -1002,6 +1117,8 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     const draft: BatchDraft = {
       localId: editingDraftId ?? createLocalId(),
       values,
+      aiMeta: aiMeta ?? null,
+      externalReviews: pendingExternalReviews ?? null,
     }
 
     const nextDrafts = editingDraftId
@@ -1018,6 +1135,71 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     }, 0)
   }
 
+  const onSubmitAddMore = async (rawValues: WorkFormValues) => {
+    if (workId) return
+    const values = normalizePostReadingScoresInValues(rawValues)
+    if (isLowConfidenceAiMeta) {
+      setPendingLowConfidenceSubmit({ kind: "create-and-add", values })
+      return
+    }
+    await executeAddMoreSubmit(values)
+  }
+
+  const handleConfirmLowConfidenceSubmit = async () => {
+    if (!pendingLowConfidenceSubmit) return
+    const pending = pendingLowConfidenceSubmit
+    setPendingLowConfidenceSubmit(null)
+    if (pending.kind === "create") {
+      await executeCreateSubmit(pending.values)
+    } else {
+      await executeAddMoreSubmit(pending.values)
+    }
+  }
+
+  const handleReevaluateOpus = async () => {
+    if (reevaluatingOpus) return
+    const values = getValues()
+    const title = (values.title ?? "").trim()
+    if (!title) {
+      toast.error("Preencha o título antes de reavaliar com Opus.")
+      return
+    }
+    setReevaluatingOpus(true)
+    try {
+      const externalIds = values.external_ids as Record<string, string> | undefined
+      const result = await evaluateCandidateForCreate({
+        title,
+        originalTitle: values.original_title ?? null,
+        alternativeTitles: values.alternative_titles ?? null,
+        synopsis: values.synopsis ?? null,
+        genres: values.genres ?? [],
+        tags: values.tags ?? [],
+        coverUrl: values.cover_url ?? null,
+        externalIds: externalIds as Partial<Record<import("@/lib/external/types").ExternalSourceId, string>>,
+        model: "opus",
+      })
+      for (const [slug, score] of Object.entries(result.scores)) {
+        if (score != null) setValue(slug as import("@/types/domain").CriterionSlug, score)
+      }
+      setCriteriaJustifications(result.justifications ?? {})
+      setValue("ai_justifications", result.justifications ?? {})
+      setAiMeta({
+        inputHash: result.inputHash,
+        modelName: result.modelName,
+        promptVersion: result.promptVersion,
+        confidence: result.confidence,
+        summary: result.summary,
+        noReviewsReason: result.noReviewsReason,
+      })
+      toast.success("Reavaliação com Opus concluída.")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido"
+      toast.error(`Reavaliação falhou: ${message}`)
+    } finally {
+      setReevaluatingOpus(false)
+    }
+  }
+
   const handleEditDraft = (draft: BatchDraft) => {
     setEditingDraftId(draft.localId)
     reset({
@@ -1025,6 +1207,8 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
       extra_platform_ratings: buildFixedExtraPlatformRatings(draft.values.extra_platform_ratings),
     })
     setCriteriaJustifications({})
+    setAiMeta(draft.aiMeta ?? null)
+    setPendingExternalReviews(draft.externalReviews ?? null)
     setTimeout(() => {
       const titleField = document.getElementById("title") as HTMLInputElement | null
       titleField?.focus()
@@ -1048,7 +1232,15 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     try {
       const currentValues = getValues() as WorkFormValues
       const currentTitle = currentValues.title?.trim()
-      let valuesToCreate = batchDrafts.map((draft) => normalizePostReadingScoresInValues(draft.values))
+      let itemsToCreate: Array<{
+        values: WorkFormValues
+        aiMeta?: AiMetaSnapshot
+        externalReviews?: ExternalReviewsSnapshot
+      }> = batchDrafts.map((draft) => ({
+        values: normalizePostReadingScoresInValues(draft.values),
+        aiMeta: draft.aiMeta ?? undefined,
+        externalReviews: draft.externalReviews ?? undefined,
+      }))
 
       if (currentTitle) {
         const parsedCurrent = workFormSchema.safeParse(currentValues)
@@ -1064,10 +1256,17 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
           if (await checkDuplicateBeforeCreate(normalizedCurrent, "addMore")) return
         }
         setTopFeedback("Criando lote e recalculando notas...")
-        valuesToCreate = [...valuesToCreate, normalizedCurrent]
+        itemsToCreate = [
+          ...itemsToCreate,
+          {
+            values: normalizedCurrent,
+            aiMeta: aiMeta ?? undefined,
+            externalReviews: pendingExternalReviews ?? undefined,
+          },
+        ]
       }
 
-      const result = await createWorksBatch(valuesToCreate)
+      const result = await createWorksBatch(itemsToCreate)
       if (result.error) {
         if (result.data?.created?.length) {
           const created = result.data.created
@@ -1076,14 +1275,14 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
           ))
         }
         const firstError = Object.values(result.error as Record<string, string[]>).flat()[0]
-        if (result.data?.created?.length === valuesToCreate.length && result.data.created[0]) {
+        if (result.data?.created?.length === itemsToCreate.length && result.data.created[0]) {
           persistDrafts([])
           setEditingDraftId(null)
           resetForNewEntry()
           toast.warning(firstError ?? "Obras criadas, mas houve um aviso ao finalizar.")
           router.refresh()
-          const batchParam = encodeURIComponent(JSON.stringify(result.data.created))
-          router.push(`/titles/${result.data.created[0].id}?batch=${batchParam}&batchIndex=0`)
+          const idsParam = result.data.created.map((c) => c.id).join(",")
+          router.push(`/titles/batch?ids=${idsParam}`)
           return
         }
         toast.error(firstError ?? "Erro ao criar lote")
@@ -1098,8 +1297,8 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
       toast.success(`${created.length} obra${created.length === 1 ? "" : "s"} criada${created.length === 1 ? "" : "s"} e recalculada${created.length === 1 ? "" : "s"}.`)
       router.refresh()
       if (created[0]) {
-        const batchParam = encodeURIComponent(JSON.stringify(created))
-        router.push(`/titles/${created[0].id}?batch=${batchParam}&batchIndex=0`)
+        const idsParam = created.map((c) => c.id).join(",")
+        router.push(`/titles/batch?ids=${idsParam}`)
       }
     } finally {
       setBatchSubmitting(false)
@@ -1252,6 +1451,22 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} onKeyDown={handleFormKeyDown} className="space-y-6">
+      <ConfirmDialog
+        open={pendingLowConfidenceSubmit != null}
+        onOpenChange={(open) => {
+          if (!open) setPendingLowConfidenceSubmit(null)
+        }}
+        title="Confiança baixa"
+        description={`A IA declarou ${
+          aiMeta?.confidence != null ? `${Math.round(aiMeta.confidence * 100)}%` : "?"
+        } de confiança, abaixo do limiar de ${Math.round(
+          CREATE_FLOW_CONFIRM_THRESHOLD * 100
+        )}%. Salvar a obra com essas notas mesmo assim?`}
+        confirmText={pendingLowConfidenceSubmit?.kind === "create-and-add" ? "Salvar no lote" : "Criar obra"}
+        cancelText="Voltar"
+        onConfirm={() => void handleConfirmLowConfidenceSubmit()}
+      />
+
       {actionButtons}
       {topFeedback && (
         <div
@@ -1556,6 +1771,44 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
                     className="h-full min-h-[200px] flex-1 resize-none"
                   />
                 </div>
+
+                {/* Preview da sinopse canônica (consolidada via IA) */}
+                {(canonicalPreview || canonicalLoading || canonicalError) && (
+                  <div className="space-y-2 rounded-lg border border-border/60 bg-card/40 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Sinopse canônica (preview)
+                        </p>
+                        <p className="text-[11px] text-muted-foreground/70">
+                          Consolidação via IA — será salva ao criar a obra.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 gap-1.5 text-xs"
+                        disabled={canonicalLoading}
+                        onClick={regenerateCanonicalFromForm}
+                      >
+                        {canonicalLoading ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : null}
+                        {canonicalLoading ? "Gerando..." : "Regerar"}
+                      </Button>
+                    </div>
+                    {canonicalError ? (
+                      <p className="text-xs text-destructive">{canonicalError}</p>
+                    ) : canonicalLoading && !canonicalPreview ? (
+                      <p className="text-sm text-muted-foreground">Consolidando sinopses...</p>
+                    ) : canonicalPreview ? (
+                      <p className="whitespace-pre-line text-sm leading-6 text-foreground/85">
+                        {canonicalPreview}
+                      </p>
+                    ) : null}
+                  </div>
+                )}
               </div>
 
               {/* Capa (multi-source manager) */}
@@ -2027,6 +2280,71 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
                     </p>
                   </div>
                 )}
+              </div>
+            )}
+            {!aiEvaluation && aiMeta && (
+              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                  <span className="font-medium uppercase text-muted-foreground">
+                    Avaliação IA
+                  </span>
+                  <span className="text-muted-foreground">
+                    Modelo:{" "}
+                    <span className="font-mono font-medium text-foreground">
+                      {aiMeta.modelName}
+                    </span>
+                  </span>
+                  {aiMeta.confidence != null && (
+                    <span
+                      className={
+                        "rounded-full border px-2 py-0.5 font-medium " +
+                        (aiMeta.confidence >= 0.75
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                          : aiMeta.confidence >= 0.5
+                            ? "border-amber-300 bg-amber-50 text-amber-700"
+                            : "border-rose-300 bg-rose-50 text-rose-700")
+                      }
+                      title="Confiança declarada pela IA: 0 = sem certeza, 1 = alta certeza"
+                    >
+                      Confiança: {Math.round(aiMeta.confidence * 100)}%
+                    </span>
+                  )}
+                  {aiMeta.noReviewsReason && (
+                    <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+                      sem reviews externas
+                    </span>
+                  )}
+                </div>
+                {aiMeta.summary && (
+                  <p className="text-sm leading-6 text-foreground/80 whitespace-pre-line">
+                    {aiMeta.summary}
+                  </p>
+                )}
+                {aiMeta.noReviewsReason && (
+                  <p className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">Motivo:</span>{" "}
+                    {NO_REVIEWS_REASON_LABEL[aiMeta.noReviewsReason]}.
+                  </p>
+                )}
+                {aiMeta.confidence != null &&
+                  aiMeta.confidence < CREATE_FLOW_CONFIRM_THRESHOLD &&
+                  aiMeta.modelName !== "claude-opus-4-7" && (
+                    <div>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        disabled={reevaluatingOpus}
+                        onClick={() => void handleReevaluateOpus()}
+                        title="Modelo alternativo. Nota.Final continua usando calibração do Sonnet."
+                      >
+                        {reevaluatingOpus ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : null}
+                        Reavaliar com Opus 4.7
+                      </Button>
+                    </div>
+                  )}
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">

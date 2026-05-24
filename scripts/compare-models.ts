@@ -52,6 +52,8 @@ interface WorkPayload {
   tags: Array<{ name: string; group: string | null }>
   sourcedReviews: Awaited<ReturnType<typeof fetchExternalEvaluationContextForWork>>["sourcedReviews"]
   externalContext: string[]
+  platformRatings: Awaited<ReturnType<typeof fetchExternalEvaluationContextForWork>>["platformRatings"]
+  similarWorks: Awaited<ReturnType<typeof fetchExternalEvaluationContextForWork>>["similarWorks"]
 }
 
 async function loadWork(title: string): Promise<WorkPayload | null> {
@@ -101,7 +103,7 @@ async function loadWork(title: string): Promise<WorkPayload | null> {
   const synopsis = pickPrimarySynopsis(work.work_synopses) ?? undefined
 
   console.log(`  ➜ buscando reviews externas para "${work.title}"...`)
-  const { sourcedReviews, externalContext } = await fetchExternalEvaluationContextForWork({
+  const { sourcedReviews, externalContext, platformRatings, similarWorks } = await fetchExternalEvaluationContextForWork({
     title: work.title,
     originalTitle: work.original_title,
     alternativeTitles: work.alternative_titles,
@@ -115,6 +117,8 @@ async function loadWork(title: string): Promise<WorkPayload | null> {
     tags,
     sourcedReviews,
     externalContext,
+    platformRatings,
+    similarWorks,
   }
 }
 
@@ -155,6 +159,8 @@ async function main() {
           tags: work.tags,
           sourcedReviews: work.sourcedReviews,
           externalContext: work.externalContext,
+          platformRatings: work.platformRatings,
+          similarWorks: work.similarWorks,
           model: model.id,
         })
         const latencyMs = Date.now() - t0

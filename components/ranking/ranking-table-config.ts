@@ -28,33 +28,34 @@ export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v1"
 export const RANKING_TABLE_COLUMN_CONFIG_EVENT = "ranking-column-config-change"
 
 export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
-  { key: "rank", label: "#", defaultWidth: 48, align: "center", locked: true, group: "basico" },
+  { key: "rank", label: "#", configLabel: "Posição no ranking", defaultWidth: 48, align: "center", locked: true, group: "basico" },
   { key: "title", label: "Título", defaultWidth: 280, locked: true, group: "basico" },
-  { key: "pub", label: "Pub.", defaultWidth: 100, align: "center", group: "basico" },
-  { key: "per_status", label: "Status", defaultWidth: 64, align: "center", group: "basico" },
+  { key: "pub", label: "Pub.", configLabel: "Publicação", defaultWidth: 100, align: "center", group: "basico" },
+  { key: "per_status", label: "Status", configLabel: "Status pessoal", defaultWidth: 64, align: "center", group: "basico" },
   { key: "year", label: "Ano", defaultWidth: 70, align: "center", group: "basico" },
-  { key: "chapters", label: "Cap.", defaultWidth: 70, align: "center", group: "basico" },
-  { key: "chapters_read", label: "Lidos", defaultWidth: 70, align: "center", group: "basico" },
-  { key: "synopsis_q", label: "Sinopse", defaultWidth: 80, align: "center", group: "basico" },
-  { key: "platform_avg", label: "Nota.M", defaultWidth: 88, align: "center", group: "notas" },
-  { key: "total_votes", label: "Votos", defaultWidth: 88, align: "center", group: "notas" },
-  { key: "final", label: "Nota.Final", defaultWidth: 100, align: "center", group: "notas" },
+  { key: "chapters", label: "Caps.", configLabel: "Capítulos totais", defaultWidth: 70, align: "center", group: "basico" },
+  { key: "chapters_read", label: "Lidos", configLabel: "Capítulos lidos", defaultWidth: 70, align: "center", group: "basico" },
+  { key: "synopsis_q", label: "Sinopse", configLabel: "Interesse na sinopse", defaultWidth: 80, align: "center", group: "basico" },
+  { key: "platform_avg", label: "N.M", configLabel: "Nota.M (média ponderada das plataformas)", defaultWidth: 88, align: "center", group: "notas" },
+  { key: "total_votes", label: "Votos", configLabel: "Total de votos nas plataformas", defaultWidth: 88, align: "center", group: "notas" },
+  { key: "final", label: "N.Final", configLabel: "Nota.Final (mistura ponderada de N.IA e N.Pr)", defaultWidth: 100, align: "center", group: "notas" },
   { key: "final_confidence", label: "Conf.", configLabel: "Confiança da Nota.Final", defaultWidth: 96, align: "center", group: "notas" },
-  { key: "calc", label: "Nota.IA", defaultWidth: 100, align: "center", group: "notas" },
-  { key: "pred", label: "Nota.Pr", defaultWidth: 100, align: "center", group: "notas" },
+  { key: "calc", label: "N.IA", configLabel: "Nota.IA (calculada via avaliação da IA)", defaultWidth: 100, align: "center", group: "notas" },
+  { key: "pred", label: "N.Pr", configLabel: "Nota.Pr (predição por regressão)", defaultWidth: 100, align: "center", group: "notas" },
   { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento com perfil", defaultWidth: 110, align: "center", group: "notas" },
   { key: "alignment_score", label: "IA Rk.", configLabel: "IA Re-rank (sob demanda)", defaultWidth: 80, align: "center", group: "notas" },
   ...CRITERION_SLUGS.map((slug) => ({
     key: `crit_${slug}`,
     label: CRITERIA_INFO[slug]?.emoji ?? slug,
     configLabel: `${CRITERIA_INFO[slug]?.emoji ?? ""} ${CRITERIA_INFO[slug]?.name ?? slug}`.trim(),
-    defaultWidth: 56,
+    defaultWidth: 44,
     align: "center" as const,
     group: "criterios" as const,
   })),
 ]
 
 const DEFAULT_COLUMN_KEYS = RANKING_TABLE_COLUMNS.map((column) => column.key)
+const LOCKED_KEYS = new Set(RANKING_TABLE_COLUMNS.filter((c) => c.locked).map((c) => c.key))
 const DEFAULT_COLUMN_CONFIG: RankingColumnConfig = {
   order: DEFAULT_COLUMN_KEYS,
   hidden: [],
@@ -66,10 +67,24 @@ export function normalizeRankingColumnConfig(
   value: Partial<RankingColumnConfig> | null | undefined
 ): RankingColumnConfig {
   const knownKeys = new Set(DEFAULT_COLUMN_KEYS)
-  const order = [
-    ...(value?.order ?? []).filter((key) => knownKeys.has(key)),
-    ...DEFAULT_COLUMN_KEYS.filter((key) => !(value?.order ?? []).includes(key)),
-  ]
+  // Locked columns are pinned to their canonical positions; only non-locked
+  // columns honor the user's stored order. This guards against stale storage
+  // entries that predate columns being added/locked.
+  const userNonLocked = (value?.order ?? []).filter(
+    (key) => knownKeys.has(key) && !LOCKED_KEYS.has(key)
+  )
+  const canonicalNonLocked = DEFAULT_COLUMN_KEYS.filter((key) => !LOCKED_KEYS.has(key))
+  const remainingNonLocked = canonicalNonLocked.filter((key) => !userNonLocked.includes(key))
+  const orderedNonLocked = [...userNonLocked, ...remainingNonLocked]
+  const order: string[] = []
+  let nonLockedIdx = 0
+  for (const key of DEFAULT_COLUMN_KEYS) {
+    if (LOCKED_KEYS.has(key)) {
+      order.push(key)
+    } else {
+      order.push(orderedNonLocked[nonLockedIdx++])
+    }
+  }
   const hidden = (value?.hidden ?? []).filter((key) => {
     const column = RANKING_TABLE_COLUMNS.find((item) => item.key === key)
     return column && !column.locked

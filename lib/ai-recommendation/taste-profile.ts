@@ -24,7 +24,7 @@ export function computeInputHash(works: RatedWorkInput[]): string {
       ),
       tags: [...w.tags].map((t) => `${t.group ?? ""}::${t.name}`).sort(),
       personalStatus: w.personalStatus ?? null,
-      observationLen: w.observation?.length ?? 0,
+      synopsisLen: w.synopsis?.length ?? 0,
     }))
     .sort((a, b) => a.id.localeCompare(b.id))
 

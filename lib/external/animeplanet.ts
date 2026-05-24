@@ -423,6 +423,47 @@ export async function fetchAnimePlanetReviews(slug: string, limit = Infinity): P
   }
 }
 
+/**
+ * Scrapes "If you liked X, you might like..." from `/manga/{slug}/recommendations`.
+ * Returns titles only — AnimePlanet's recommendation page links to other manga
+ * pages without exposing genres/tags inline (would require N additional fetches).
+ *
+ * Heuristic: tries to find the recommendations section first, then pulls manga
+ * links with a `title` attribute. Falls back to all manga links on the page,
+ * with the source slug filtered out. Defensive — returns [] on any parse error.
+ */
+export async function fetchAnimePlanetRecommendations(slug: string): Promise<string[]> {
+  try {
+    const result = await fetchHtmlWithCfFallback(
+      `${AP_BASE}/manga/${slug}/recommendations`,
+      HEADERS
+    )
+    if (!result) return []
+
+    const html = result.html
+    const sectionMatch = html.match(/<section[^>]*class="[^"]*recommendation[^"]*"[\s\S]*?<\/section>/i)
+    const scope = sectionMatch?.[0] ?? html
+
+    const titles: string[] = []
+    const seen = new Set<string>()
+    const linkRegex = /<a[^>]+href="\/manga\/([^"/]+)"[^>]*title="([^"]+)"/gi
+
+    for (const match of scope.matchAll(linkRegex)) {
+      const recSlug = match[1]
+      if (!recSlug || recSlug === slug) continue
+      if (seen.has(recSlug)) continue
+      seen.add(recSlug)
+      const title = decodeHtmlAttribute(match[2])
+      if (title) titles.push(title)
+      if (titles.length >= 10) break
+    }
+
+    return titles
+  } catch {
+    return []
+  }
+}
+
 export async function fetchAnimePlanetByTitle(title: string, knownSlug?: string): Promise<AnimePlanetDetail | null> {
   try {
     const slug = knownSlug ?? await findSlug(title)

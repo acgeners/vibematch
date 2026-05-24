@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
@@ -17,17 +17,27 @@ import {
   ChevronUp,
   ExternalLink,
   Eye,
+  HeartOff,
   ImageOff,
   LayoutGrid,
   List,
-  MoreHorizontal,
   Pencil,
   Plus,
   Rows3,
+  Settings2,
   X,
 } from "lucide-react"
+import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { toast } from "sonner"
 import type { CategoryScore, WorkWithRelations, WorkCover } from "@/types/domain"
+import { CRITERION_SLUGS } from "@/types/domain"
 import { cn, titleToSlug } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { ScoreBadge, type ScoreColorThresholds } from "@/components/ui/score-badge"
@@ -52,8 +62,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { archiveWork, unarchiveWork } from "@/server/actions/works"
+import { archiveWork, setFavoriteMany, toggleFavorite, unarchiveWork } from "@/server/actions/works"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
+import { AlignmentScoreCell } from "@/components/ranking/ranking-cells"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { WorkHeatmapView } from "@/components/titles/work-heatmap-view"
 import { WorkColumnPicker } from "@/components/titles/work-column-picker"
@@ -116,6 +127,7 @@ interface WorkTableProps {
   basePath?: string
   enableCompare?: boolean
   enableHeatmap?: boolean
+  enableSelectAll?: boolean
 }
 
 function scoreFor(work: WorkWithRelations, slug: string): number | null {
@@ -148,6 +160,7 @@ export function WorkTable({
   basePath = "/titles",
   enableCompare = true,
   enableHeatmap = true,
+  enableSelectAll = false,
 }: WorkTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -160,39 +173,68 @@ export function WorkTable({
   const viewMode: ViewMode = !enableHeatmap && storedViewMode === "heatmap" ? "list" : storedViewMode
   const setViewModePersisted = (mode: ViewMode) => writeViewMode(namespace, mode)
 
-  const selectedSet = useMemo(() => new Set(selectedCompareIds), [selectedCompareIds])
+  // Selection lives in client state to avoid a full Next.js server re-render
+  // (which re-runs getRanking + getWorksByIds + …) on every checkbox click.
+  // The URL is updated via history.replaceState so refresh/share still works.
+  const [compareIds, setCompareIds] = useState<string[]>(selectedCompareIds)
+  const selectedSet = useMemo(() => new Set(compareIds), [compareIds])
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   const updateCompareIds = useCallback(
     (nextIds: string[]) => {
+      setCompareIds(nextIds)
+      if (typeof window === "undefined") return
       const params = new URLSearchParams(window.location.search)
       params.delete("compare")
       for (const id of nextIds) params.append("compare", id)
       const qs = params.toString()
-      router.replace(qs ? `${basePath}?${qs}` : basePath, { scroll: false })
+      const url = qs ? `${basePath}?${qs}` : basePath
+      window.history.replaceState(null, "", url)
     },
-    [router, basePath]
+    [basePath]
   )
 
   const toggleCompare = useCallback(
     (id: string) => {
       if (selectedSet.has(id)) {
-        updateCompareIds(selectedCompareIds.filter((x) => x !== id))
+        updateCompareIds(compareIds.filter((x) => x !== id))
         return
       }
-      if (selectedCompareIds.length >= MAX_COMPARE_WORKS) {
-        toast.error(`Máximo de ${MAX_COMPARE_WORKS} obras na comparação`)
-        return
-      }
-      updateCompareIds([...selectedCompareIds, id])
+      updateCompareIds([...compareIds, id])
     },
-    [selectedSet, selectedCompareIds, updateCompareIds]
+    [selectedSet, compareIds, updateCompareIds]
   )
 
   const clearCompare = useCallback(() => {
     updateCompareIds([])
     setDrawerOpen(false)
   }, [updateCompareIds])
+
+  const allVisibleIds = useMemo(() => works.map((w) => w.id), [works])
+  const allSelected =
+    allVisibleIds.length > 0 && allVisibleIds.every((id) => selectedSet.has(id))
+  const someSelected = !allSelected && selectedSet.size > 0
+  const selectAllVisible = useCallback(() => {
+    updateCompareIds(allVisibleIds)
+  }, [allVisibleIds, updateCompareIds])
+
+  const favoriteSelectedIds = useMemo(
+    () => works.filter((w) => selectedSet.has(w.id) && w.is_favorite).map((w) => w.id),
+    [works, selectedSet]
+  )
+
+  const handleBatchUnfavorite = useCallback(async () => {
+    if (favoriteSelectedIds.length === 0) return
+    const result = await setFavoriteMany(favoriteSelectedIds, false)
+    if (result.error) {
+      toast.error("Erro ao desfavoritar")
+      return
+    }
+    const n = favoriteSelectedIds.length
+    toast.success(`${n} obra${n !== 1 ? "s" : ""} desfavoritada${n !== 1 ? "s" : ""}`)
+    updateCompareIds([])
+    router.refresh()
+  }, [favoriteSelectedIds, updateCompareIds, router])
 
   const totalPages = Math.ceil(total / pageSize)
 
@@ -243,6 +285,11 @@ export function WorkTable({
           namespace={namespace}
           basePath={basePath}
           enableCompare={enableCompare}
+          enableSelectAll={enableSelectAll}
+          allSelected={allSelected}
+          someSelected={someSelected}
+          onSelectAll={selectAllVisible}
+          onClearAll={clearCompare}
         />
       )}
 
@@ -253,18 +300,20 @@ export function WorkTable({
       {enableCompare && (
         <>
           <CompareSelectionBar
-            count={selectedCompareIds.length}
+            count={compareIds.length}
+            favoriteCount={favoriteSelectedIds.length}
             onOpen={() => setDrawerOpen(true)}
             onClear={clearCompare}
+            onUnfavorite={handleBatchUnfavorite}
           />
 
           <WorkCompareDrawer
             open={drawerOpen}
             onOpenChange={setDrawerOpen}
-            ids={selectedCompareIds}
+            ids={compareIds}
             onClear={clearCompare}
             onRemoveId={(id) =>
-              updateCompareIds(selectedCompareIds.filter((x) => x !== id))
+              updateCompareIds(compareIds.filter((x) => x !== id))
             }
             scoreThresholds={scoreThresholds}
           />
@@ -276,14 +325,19 @@ export function WorkTable({
 
 function CompareSelectionBar({
   count,
+  favoriteCount,
   onOpen,
   onClear,
+  onUnfavorite,
 }: {
   count: number
+  favoriteCount: number
   onOpen: () => void
   onClear: () => void
+  onUnfavorite: () => void
 }) {
   if (count === 0) return null
+  const compareDisabled = count > MAX_COMPARE_WORKS
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-3">
       <div className="pointer-events-auto flex items-center gap-2 rounded-full border bg-card/95 px-3 py-2 shadow-lg backdrop-blur">
@@ -293,9 +347,26 @@ function CompareSelectionBar({
             obra{count !== 1 ? "s" : ""} selecionada{count !== 1 ? "s" : ""}
           </span>
         </span>
-        <Button size="sm" onClick={onOpen} className="h-7 text-xs">
+        <Button
+          size="sm"
+          onClick={onOpen}
+          disabled={compareDisabled}
+          title={compareDisabled ? `Máximo de ${MAX_COMPARE_WORKS} obras para comparar` : undefined}
+          className="h-7 text-xs"
+        >
           Comparar
         </Button>
+        {favoriteCount > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onUnfavorite}
+            className="h-7 gap-1.5 text-xs"
+          >
+            <HeartOff className="h-3.5 w-3.5" />
+            Desfavoritar {favoriteCount}
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon"
@@ -523,6 +594,11 @@ function WorkListView({
   namespace = "titles",
   basePath = "/titles",
   enableCompare = true,
+  enableSelectAll = false,
+  allSelected = false,
+  someSelected = false,
+  onSelectAll,
+  onClearAll,
 }: {
   works: WorkWithRelations[]
   searchParams: ReturnType<typeof useSearchParams>
@@ -533,6 +609,11 @@ function WorkListView({
   namespace?: WorkColumnNamespace
   enableCompare?: boolean
   basePath?: string
+  enableSelectAll?: boolean
+  allSelected?: boolean
+  someSelected?: boolean
+  onSelectAll?: () => void
+  onClearAll?: () => void
 }) {
   const columnConfig = useSyncExternalStore(
     (onChange) => subscribeWorkColumnConfig(onChange, namespace),
@@ -550,12 +631,29 @@ function WorkListView({
   const sortableColumns: Record<string, { field: string; label: string }> = {
     title: { field: "title", label: "Título" },
     publication_status: { field: "publication_status", label: "Publicação" },
-    personal_status: { field: "personal_status", label: "Pessoal" },
-    chapters: { field: "total_chapters", label: "Caps." },
+    personal_status: { field: "personal_status", label: "Status pessoal" },
+    chapters_total: { field: "chapters_total", label: "Capítulos totais" },
+    chapters_read: { field: "chapters_read", label: "Capítulos lidos" },
+    year: { field: "year", label: "Ano" },
+    synopsis_q: { field: "synopsis_q", label: "Sinopse" },
     calc_score: { field: "calc_score", label: "Nota.IA" },
     predicted_score: { field: "predicted_score", label: "Nota.Pr" },
     final_score: { field: "final_score", label: "Nota.Final" },
-    ai_status: { field: "ai_eval_status", label: "IA" },
+    platform_avg: { field: "platform_avg", label: "Nota.M" },
+    total_votes: { field: "total_votes", label: "Votos" },
+    alignment_score: { field: "alignment_score", label: "IA Re-rank" },
+    ai_status: { field: "ai_eval_status", label: "Status IA" },
+    updated_at: { field: "updated_at", label: "Atualizado" },
+    last_read_at: { field: "last_read_at", label: "Última leitura" },
+    ...Object.fromEntries(
+      CRITERION_SLUGS.map((slug) => [
+        `crit_${slug}`,
+        {
+          field: `crit_${slug}`,
+          label: CRITERIA_INFO[slug]?.emoji ?? slug,
+        },
+      ])
+    ),
   }
 
   const updateSort = (field: string) => {
@@ -587,15 +685,18 @@ function WorkListView({
     ),
     publication_status: (work) => <PublicationStatusBadge statusId={work.publication_status_id} compact />,
     personal_status: (work) => <PersonalStatusBadge statusId={work.personal_status_id} />,
-    chapters: (work) => {
-      if (work.chapters_read == null && work.total_chapters == null)
-        return <span className="text-muted-foreground">—</span>
-      return (
-        <span className="text-sm font-mono">
-          {work.chapters_read ?? "?"}/{work.total_chapters ?? "?"}
-        </span>
-      )
-    },
+    chapters_total: (work) =>
+      work.total_chapters != null ? (
+        <span className="text-sm font-mono tabular-nums">{work.total_chapters}</span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      ),
+    chapters_read: (work) =>
+      work.chapters_read != null ? (
+        <span className="text-sm font-mono tabular-nums">{work.chapters_read}</span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      ),
     year: (work) => {
       const year = (work as { year?: number | null }).year
       return year != null ? (
@@ -652,16 +753,59 @@ function WorkListView({
         <span className="text-muted-foreground">—</span>
       )
     },
+    alignment_score: (work) => (
+      <AlignmentScoreCell
+        score={work.calculated_scores?.alignment_score ?? null}
+        justification={work.calculated_scores?.alignment_justification ?? null}
+      />
+    ),
     ai_status: (work) => <AiStatusBadge status={work.ai_eval_status} />,
+    updated_at: (work) => {
+      if (!work.updated_at) return <span className="text-muted-foreground">—</span>
+      const d = new Date(work.updated_at)
+      if (Number.isNaN(d.getTime())) return <span className="text-muted-foreground">—</span>
+      return (
+        <span
+          className="text-xs tabular-nums text-muted-foreground"
+          title={formatFullDateTime(d)}
+        >
+          {formatRelativeDate(d)}
+        </span>
+      )
+    },
+    last_read_at: (work) => {
+      if (!work.last_read_at) return <span className="text-muted-foreground">—</span>
+      const d = new Date(`${work.last_read_at}T00:00:00`)
+      if (Number.isNaN(d.getTime())) return <span className="text-muted-foreground">—</span>
+      return (
+        <span
+          className="text-xs tabular-nums text-muted-foreground"
+          title={d.toLocaleDateString("pt-BR")}
+        >
+          {formatRelativeDate(d)}
+        </span>
+      )
+    },
     actions: (work) => {
       const slug = titleToSlug(work.title)
       return (
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Gerenciar obra"
+                >
+                  <Settings2 className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="top">Gerenciar</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="end">
             <DropdownMenuItem asChild>
               <Link href={`/titles/${slug}`} onClick={(e) => e.stopPropagation()}>
@@ -686,6 +830,23 @@ function WorkListView({
                 Editar
               </Link>
             </DropdownMenuItem>
+            {work.is_favorite && (
+              <DropdownMenuItem
+                onClick={async (e) => {
+                  e.stopPropagation()
+                  const result = await toggleFavorite(work.id, false)
+                  if (result.error) {
+                    toast.error("Erro ao desfavoritar")
+                  } else {
+                    toast.success("Obra desfavoritada")
+                    router.refresh()
+                  }
+                }}
+              >
+                <HeartOff className="h-4 w-4 mr-2" />
+                Desfavoritar
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               onClick={async (e) => {
                 e.stopPropagation()
@@ -713,7 +874,7 @@ function WorkListView({
 
   const columns: ColumnDef<WorkWithRelations>[] = configuredColumns.map((col) => {
     const renderer = columnRenderers[col.key] ?? makeCriterionRenderer(col.key)
-    const defaultSize = DEFAULT_COLUMN_WIDTHS[col.key] ?? (col.key.startsWith("crit_") ? 60 : 100)
+    const defaultSize = DEFAULT_COLUMN_WIDTHS[col.key] ?? (col.key.startsWith("crit_") ? 48 : 100)
     return {
       id: col.key,
       accessorKey: col.key === "title" ? "title" : undefined,
@@ -754,36 +915,104 @@ function WorkListView({
     },
   })
 
+  const tableWrapperRef = useRef<HTMLDivElement | null>(null)
+  const [tableContainerWidth, setTableContainerWidth] = useState(0)
+
+  useEffect(() => {
+    const el = tableWrapperRef.current
+    if (!el) return
+    const update = () => setTableContainerWidth(el.clientWidth)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const totalColumnSize = table.getTotalSize()
+  const headerSizes = table.getHeaderGroups()[0]?.headers ?? []
+  const fixedColumnsSize = headerSizes
+    .filter((h) => h.column.id.startsWith("crit_"))
+    .reduce((sum, h) => sum + h.getSize(), 0)
+  const expandableSize = totalColumnSize - fixedColumnsSize
+  const expandableTarget = Math.max(expandableSize, tableContainerWidth - fixedColumnsSize)
+  const expandableScale = expandableSize > 0 ? expandableTarget / expandableSize : 1
+  const tableWidth = expandableSize * expandableScale + fixedColumnsSize
+  const scaledColumnWidth = (id: string, size: number) =>
+    id.startsWith("crit_") ? size : Math.round(size * expandableScale)
+
   const numericCenterClass = "text-center"
+  const columnsByKey = useMemo(
+    () => new Map(configuredColumns.map((c) => [c.key, c])),
+    [configuredColumns]
+  )
   const renderHeaderContent = (columnId: string, fallback: ReactNode) => {
+    if (columnId === "select" && enableSelectAll) {
+      return (
+        <Checkbox
+          checked={allSelected ? true : someSelected ? "indeterminate" : false}
+          onCheckedChange={(value) => {
+            if (value) onSelectAll?.()
+            else onClearAll?.()
+          }}
+          aria-label="Selecionar todas as obras visíveis"
+        />
+      )
+    }
+    const col = columnsByKey.get(columnId)
     const sortable = sortableColumns[columnId]
+
+    const slug = columnId.startsWith("crit_") ? columnId.slice(5) : null
+    const criterion = slug ? CRITERIA_INFO[slug] : null
+    const fullName = criterion?.name ?? col?.configLabel ?? null
+    const description = criterion?.description ?? null
+    const displayLabel = col?.label ?? sortable?.label ?? ""
+
     if (!sortable) return fallback
 
     const isActive = activeSortField === sortable.field
     const isAsc = activeSortDirection === "asc"
 
-    return (
+    const button = (
       <button
         type="button"
         onClick={() => updateSort(sortable.field)}
-        className={`inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors hover:bg-background hover:text-foreground ${
-          isActive ? "text-foreground" : ""
-        }`}
-        aria-label={`Ordenar por ${sortable.label}`}
+        className={cn(
+          "inline-flex items-center gap-0.5 rounded-md px-1 py-1 transition-colors hover:bg-background hover:text-foreground",
+          isActive && "text-foreground"
+        )}
+        aria-label={`Ordenar por ${fullName ?? sortable.label}`}
       >
-        <span>{sortable.label}</span>
+        <span>{displayLabel}</span>
         {isActive ? (
-          isAsc ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
+          isAsc ? <ChevronUp className="h-3 w-3 shrink-0" /> : <ChevronDown className="h-3 w-3 shrink-0" />
         ) : (
-          <ChevronDown className="h-3.5 w-3.5 opacity-25" />
+          <ChevronDown className="hidden h-3 w-3 shrink-0 opacity-40 group-hover/header:inline-block" />
         )}
       </button>
+    )
+
+    const showFullName = fullName && fullName !== displayLabel
+    if (!showFullName && !description) return button
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs whitespace-pre-line text-left">
+          {showFullName && <span className="font-semibold">{fullName}</span>}
+          {description && (
+            <span className={cn("block text-xs text-muted-foreground", showFullName && "mt-1")}>
+              {description}
+            </span>
+          )}
+        </TooltipContent>
+      </Tooltip>
     )
   }
 
   const isCenterAligned = (key: string) =>
     key === "select" ||
-    key === "chapters" ||
+    key === "chapters_total" ||
+    key === "chapters_read" ||
     key === "year" ||
     key === "synopsis_q" ||
     key === "calc_score" ||
@@ -791,25 +1020,29 @@ function WorkListView({
     key === "final_score" ||
     key === "platform_avg" ||
     key === "total_votes" ||
+    key === "alignment_score" ||
     key === "ai_status" ||
+    key === "updated_at" ||
+    key === "last_read_at" ||
     key === "actions" ||
     key.startsWith("crit_")
 
   return (
-    <>
+    <TooltipProvider delayDuration={150}>
       {/* Desktop table */}
-      <div className="hidden overflow-x-auto rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur md:block">
-        <Table style={{ width: table.getTotalSize() }}>
+      <div ref={tableWrapperRef} className="hidden overflow-x-auto rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur md:block">
+        <Table style={{ width: tableWidth, tableLayout: "fixed" }}>
           <TableHeader className="bg-muted/60">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="border-b hover:bg-transparent">
                 {headerGroup.headers.map((header) => (
                   <TableHead
                     key={header.id}
-                    style={{ width: header.getSize() }}
+                    style={{ width: scaledColumnWidth(header.column.id, header.getSize()) }}
                     className={cn(
                       "group/header relative h-11 whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-muted-foreground",
-                      isCenterAligned(header.column.id) && numericCenterClass
+                      isCenterAligned(header.column.id) && numericCenterClass,
+                      header.column.id.startsWith("crit_") && "px-1"
                     )}
                   >
                     {renderHeaderContent(
@@ -856,10 +1089,11 @@ function WorkListView({
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
                       key={cell.id}
-                      style={{ width: cell.column.getSize() }}
+                      style={{ width: scaledColumnWidth(cell.column.id, cell.column.getSize()) }}
                       className={cn(
                         "h-14 py-3 align-middle",
                         cell.column.id === "title" && "whitespace-normal",
+                        cell.column.id.startsWith("crit_") && "px-1",
                         isCenterAligned(cell.column.id) && numericCenterClass
                       )}
                     >
@@ -875,6 +1109,21 @@ function WorkListView({
 
       {/* Mobile compact cards */}
       <div className="space-y-3 md:hidden">
+        {enableSelectAll && works.length > 0 && (
+          <button
+            type="button"
+            onClick={() => (allSelected ? onClearAll?.() : onSelectAll?.())}
+            className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-card/80 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-card hover:text-foreground"
+          >
+            <Checkbox
+              checked={allSelected ? true : someSelected ? "indeterminate" : false}
+              aria-hidden
+              tabIndex={-1}
+              className="pointer-events-none"
+            />
+            {allSelected ? "Limpar seleção" : "Selecionar todos"}
+          </button>
+        )}
         {works.map((work) => {
           const isSelected = selectedIds.has(work.id)
           return (
@@ -925,7 +1174,7 @@ function WorkListView({
           )
         })}
       </div>
-    </>
+    </TooltipProvider>
   )
 }
 

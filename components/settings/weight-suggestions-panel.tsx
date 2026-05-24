@@ -4,6 +4,7 @@ import { useState, useTransition } from "react"
 import { toast } from "sonner"
 import { ArrowDown, ArrowUp, Minus, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { LastRunHint } from "@/components/settings/last-run-hint"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
@@ -13,6 +14,10 @@ import {
   type WeightSuggestionApply,
 } from "@/server/actions/weight-suggestions"
 import type { WeightInferenceResult, WeightSuggestion } from "@/lib/ml/weight-inference"
+
+interface WeightSuggestionsPanelProps {
+  initialLastApplied: string | null
+}
 
 type Suggestion = WeightSuggestion & { selected: boolean }
 
@@ -58,11 +63,12 @@ function DeltaIndicator({ delta }: { delta: number }) {
   )
 }
 
-export function WeightSuggestionsPanel() {
+export function WeightSuggestionsPanel({ initialLastApplied }: WeightSuggestionsPanelProps) {
   const [result, setResult] = useState<WeightInferenceResult | null>(null)
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [isLoading, startLoading] = useTransition()
   const [isApplying, startApplying] = useTransition()
+  const [lastApplied, setLastApplied] = useState<string | null>(initialLastApplied)
 
   const handleSuggest = () => {
     startLoading(async () => {
@@ -106,6 +112,7 @@ export function WeightSuggestionsPanel() {
     startApplying(async () => {
       try {
         const res = await applyWeightSuggestions(applies)
+        setLastApplied(new Date().toISOString())
         toast.success(
           `${res.appliedCount} pesos aplicados. ${res.recalculated} obras recalculadas.`,
         )
@@ -147,15 +154,17 @@ export function WeightSuggestionsPanel() {
           super/subestimado nos pesos atuais. Não aplica nada sozinho — você revisa e marca o que
           aceita.
         </p>
-        <Button
-          onClick={handleSuggest}
-          disabled={isLoading || isApplying}
-          variant="secondary"
-          className="shrink-0"
-        >
-          <Sparkles className="mr-1 h-4 w-4" />
-          {isLoading ? "Analisando..." : "Gerar sugestões"}
-        </Button>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <Button
+            onClick={handleSuggest}
+            disabled={isLoading || isApplying}
+            variant="secondary"
+          >
+            <Sparkles className="mr-1 h-4 w-4" />
+            {isLoading ? "Analisando..." : "Gerar sugestões"}
+          </Button>
+          <LastRunHint iso={lastApplied} label="Última aplicação" />
+        </div>
       </div>
 
       {result?.isStub && (

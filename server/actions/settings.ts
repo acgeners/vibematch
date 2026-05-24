@@ -285,6 +285,111 @@ export async function recalculateNow() {
   return result
 }
 
+export interface ConsolidateSynopsesProgress {
+  attempted: number
+  consolidated: number
+  skipped: number
+  failed: number
+  tokensIn: number
+  tokensOut: number
+  /** Se true, o lote foi interrompido cedo por falhas consecutivas na API. */
+  abortedEarly?: boolean
+}
+
+/**
+ * Roda a consolidação de sinopse (via Haiku) pra todas as obras que ainda
+ * não têm `canonical_synopsis`. Limita por `maxWorks` (default 10 pra não
+ * travar a UI). Aborta cedo se houver 3 falhas consecutivas de API (sinal
+ * de Anthropic congestionada).
+ */
+export async function consolidatePendingSynopses(maxWorks = 10): Promise<{
+  data?: ConsolidateSynopsesProgress
+  error?: string
+}> {
+  try {
+    const { consolidateSynopsisDetailed, hashSynopsisInputs } = await import(
+      "@/lib/ai-recommendation/synopsis-consolidator"
+    )
+    const { splitSynopsesFromText } = await import("@/lib/work-derived")
+    const { createAdminClient } = await import("@/lib/supabase/admin")
+    const supabase = createAdminClient()
+
+    const { data: pending, error } = await supabase
+      .from("works")
+      .select("id, canonical_synopsis_inputs_hash, work_synopses(text)")
+      .is("canonical_synopsis", null)
+      .eq("is_archived", false)
+      .limit(maxWorks)
+    if (error) return { error: error.message }
+
+    const progress: ConsolidateSynopsesProgress = {
+      attempted: 0,
+      consolidated: 0,
+      skipped: 0,
+      failed: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+    }
+
+    let consecutiveApiFailures = 0
+    const MAX_CONSECUTIVE_API_FAILURES = 3
+
+    for (const row of pending ?? []) {
+      progress.attempted += 1
+      const rawTexts = (row.work_synopses as Array<{ text: string | null }> | null)
+        ?.map((r) => (r.text ?? "").trim())
+        .filter((t) => t.length > 0) ?? []
+      if (rawTexts.length === 0) {
+        progress.skipped += 1
+        continue
+      }
+      const expanded = rawTexts.flatMap((t) => {
+        const blocks = splitSynopsesFromText(t)
+        return blocks.length > 0 ? blocks : [t]
+      })
+      const hash = hashSynopsisInputs(expanded)
+      const status = await consolidateSynopsisDetailed(expanded, { workId: row.id as string })
+      if (status.kind === "skipped") {
+        progress.skipped += 1
+        consecutiveApiFailures = 0
+        continue
+      }
+      if (status.kind === "api_failed") {
+        progress.failed += 1
+        consecutiveApiFailures += 1
+        if (consecutiveApiFailures >= MAX_CONSECUTIVE_API_FAILURES) {
+          progress.abortedEarly = true
+          break
+        }
+        continue
+      }
+      consecutiveApiFailures = 0
+      const result = status.result
+      const { error: upErr } = await supabase
+        .from("works")
+        .update({
+          canonical_synopsis: result.canonical,
+          canonical_synopsis_at: new Date().toISOString(),
+          canonical_synopsis_inputs_hash: hash,
+        })
+        .eq("id", row.id)
+      if (upErr) {
+        console.error("[consolidatePendingSynopses] update falhou:", upErr)
+        progress.failed += 1
+        continue
+      }
+      progress.consolidated += 1
+      progress.tokensIn += result.tokensIn
+      progress.tokensOut += result.tokensOut
+    }
+
+    revalidatePath("/settings")
+    return { data: progress }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro ao consolidar sinopses" }
+  }
+}
+
 export async function syncConstantsNow() {
   try {
     const { stdout, stderr } = await execFileAsync("npm", ["run", "sync-constants"], {

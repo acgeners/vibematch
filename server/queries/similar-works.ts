@@ -10,6 +10,11 @@ export interface SimilarWork {
   finalScore: number | null
   personalFit: number | null
   manualScore: number | null
+  genres: string[]
+  year: number | null
+  totalChapters: number | null
+  publicationStatusId: number | null
+  personalStatusId: number | null
 }
 
 interface RpcRow {
@@ -23,12 +28,30 @@ interface RpcRow {
   synopsis: string | null
 }
 
+interface WorkMetaRow {
+  id: string
+  year: number | null
+  total_chapters: number | null
+  publication_status_id: number | null
+  personal_status_id: number | null
+}
+
+interface WorkGenreRow {
+  work_id: string
+  genres: { name: string } | { name: string }[] | null
+}
+
 /**
  * Top-K obras mais similares à obra alvo via cosine distance (`<=>`).
  *
  * Implementação via RPC `find_similar_works` (criada na migration 054) pra
  * permitir comparar embedding sem trafegar 1536 floats do server até o cliente
  * Supabase e voltar. Exclui a própria obra e obras arquivadas.
+ *
+ * Faz duas queries adicionais enxutas:
+ * - `works`: metadados básicos (ano, capítulos, status)
+ * - `work_genres` JOIN `genres`: gêneros reais (migration 014 substituiu o array
+ *   legado works.genres por essa junção; o array fica vazio na maioria das obras).
  */
 export async function getSimilarWorks(
   workId: string,
@@ -47,16 +70,60 @@ export async function getSimilarWorks(
     return []
   }
 
-  return (data as RpcRow[] | null ?? []).map((r) => ({
-    id: r.id,
-    title: r.title,
-    similarity: Number(r.similarity),
-    coverUrl: r.cover_url,
-    synopsis: r.synopsis,
-    finalScore: r.final_score == null ? null : Number(r.final_score),
-    personalFit: r.personal_fit == null ? null : Number(r.personal_fit),
-    manualScore: r.manual_score == null ? null : Number(r.manual_score),
-  }))
+  const rows = (data as RpcRow[] | null) ?? []
+  if (rows.length === 0) return []
+
+  const ids = rows.map((r) => r.id)
+  const [metaResult, genresResult] = await Promise.all([
+    supabase
+      .from("works")
+      .select("id, year, total_chapters, publication_status_id, personal_status_id")
+      .in("id", ids),
+    supabase
+      .from("work_genres")
+      .select("work_id, genres(name)")
+      .in("work_id", ids),
+  ])
+
+  if (metaResult.error) {
+    console.warn("[similar-works] meta query falhou:", metaResult.error.message)
+  }
+  if (genresResult.error) {
+    console.warn("[similar-works] genres query falhou:", genresResult.error.message)
+  }
+
+  const metaById = new Map<string, WorkMetaRow>(
+    ((metaResult.data as WorkMetaRow[] | null) ?? []).map((m) => [m.id, m]),
+  )
+
+  const genresByWorkId = new Map<string, string[]>()
+  for (const row of (genresResult.data as WorkGenreRow[] | null) ?? []) {
+    const list = Array.isArray(row.genres) ? row.genres : row.genres ? [row.genres] : []
+    const names = list.map((g) => g.name).filter(Boolean)
+    if (names.length === 0) continue
+    const existing = genresByWorkId.get(row.work_id) ?? []
+    existing.push(...names)
+    genresByWorkId.set(row.work_id, existing)
+  }
+
+  return rows.map((r) => {
+    const meta = metaById.get(r.id)
+    return {
+      id: r.id,
+      title: r.title,
+      similarity: Number(r.similarity),
+      coverUrl: r.cover_url,
+      synopsis: r.synopsis,
+      finalScore: r.final_score == null ? null : Number(r.final_score),
+      personalFit: r.personal_fit == null ? null : Number(r.personal_fit),
+      manualScore: r.manual_score == null ? null : Number(r.manual_score),
+      genres: genresByWorkId.get(r.id) ?? [],
+      year: meta?.year ?? null,
+      totalChapters: meta?.total_chapters ?? null,
+      publicationStatusId: meta?.publication_status_id ?? null,
+      personalStatusId: meta?.personal_status_id ?? null,
+    }
+  })
 }
 
 // Re-exports usados pelo componente cliente

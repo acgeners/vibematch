@@ -1,9 +1,12 @@
 "use client"
 
 import { useState, type Ref } from "react"
-import { Search, Loader2, Sparkles } from "lucide-react"
+import Image from "next/image"
+import { toast } from "sonner"
+import { Search, Loader2, Sparkles, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Sheet,
   SheetContent,
@@ -53,7 +56,7 @@ interface ExternalSearchProps {
   checkDuplicates?: boolean
 }
 
-type Phase = "idle" | "searching" | "results" | "sourcepick" | "duplicate" | "loading" | "evaluating" | "multipick" | "conflicts"
+type Phase = "idle" | "searching" | "results" | "sourcepick" | "duplicate" | "loading" | "evaluating" | "multipick-synopses" | "multipick-covers" | "conflicts"
 
 interface CoverChoice { url: string; source: string; included: boolean; isPrimary: boolean }
 interface SynopsisChoice { source: string; text: string; included: boolean; isPrimary: boolean }
@@ -288,6 +291,7 @@ export function ExternalSearch({
   const [sourceSelection, setSourceSelection] = useState<Partial<Record<ExternalSourceId, SourceSelectionValue>>>({})
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
+  const [activeRefineUrl, setActiveRefineUrl] = useState<string | null>(null)
 
   const handleSearch = async () => {
     if (!titleQuery.trim()) return
@@ -385,18 +389,21 @@ export function ExternalSearch({
           externalIds: merged.externalIds,
           externalContext: merged.synopsis?.trim() ? [] : undefined,
         })
-        if (aiResult) {
-          merged.criteriaScores = aiResult.scores
-          merged.criteriaJustifications = aiResult.justifications
-          merged.aiMeta = {
-            inputHash: aiResult.inputHash,
-            modelName: aiResult.modelName,
-            promptVersion: aiResult.promptVersion,
-            confidence: aiResult.confidence,
-          }
+        merged.criteriaScores = aiResult.scores
+        merged.criteriaJustifications = aiResult.justifications
+        merged.aiMeta = {
+          inputHash: aiResult.inputHash,
+          modelName: aiResult.modelName,
+          promptVersion: aiResult.promptVersion,
+          confidence: aiResult.confidence,
+          summary: aiResult.summary,
+          noReviewsReason: aiResult.noReviewsReason,
         }
+        merged.externalReviews = aiResult.externalReviews
       } catch (error) {
         console.error("[ExternalSearch] evaluateCandidateForCreate failed", error)
+        const message = error instanceof Error ? error.message : "Erro desconhecido"
+        toast.warning(`Avaliação IA falhou (${message}). A obra será criada sem notas — use "Reavaliar IA" no detalhe pra tentar novamente.`)
       }
     }
 
@@ -414,6 +421,7 @@ export function ExternalSearch({
     setConflicts([])
     setCoverChoices([])
     setSynopsisChoices([])
+    setActiveRefineUrl(null)
   }
 
   const proceedWithCandidate = async (candidate: MergedCandidate, updateTarget?: ExistingWorkMatch | null) => {
@@ -481,17 +489,18 @@ export function ExternalSearch({
 
       if (hasMultiCover || hasMultiSynopsis) {
         setCoverChoices(
-          covers.map((c, i) => ({ url: c.url, source: c.source, included: i === 0, isPrimary: i === 0 }))
+          covers.map((c, i) => ({ url: c.url, source: c.source, included: true, isPrimary: i === 0 }))
         )
         setSynopsisChoices(
-          synopses.map((s, i) => ({ source: s.source, text: s.text, included: i === 0, isPrimary: i === 0 }))
+          synopses.map((s, i) => ({ source: s.source, text: s.text, included: true, isPrimary: i === 0 }))
         )
         const defaultResolutions: Record<string, unknown> = {}
         for (const c of allConflicts) defaultResolutions[c.field] = c.options[0].value
         setPendingData(merged)
         setConflicts(allConflicts)
         setResolutions(defaultResolutions)
-        setPhase("multipick")
+        setActiveRefineUrl(covers[0]?.url ?? null)
+        setPhase(hasMultiSynopsis ? "multipick-synopses" : "multipick-covers")
         return
       }
 
@@ -513,7 +522,7 @@ export function ExternalSearch({
     }
   }
 
-  const handleConfirmMultiPick = async () => {
+  const finalizeMultiPickChoices = async () => {
     if (!pendingData) return
     const includedCovers = coverChoices.filter((c) => c.included)
     const primaryCover = includedCovers.find((c) => c.isPrimary) ?? includedCovers[0]
@@ -541,34 +550,83 @@ export function ExternalSearch({
     }
   }
 
+  const handleConfirmMultiPickSynopses = async () => {
+    if (coverChoices.length > 1) {
+      setActiveRefineUrl((prev) => prev ?? coverChoices[0]?.url ?? null)
+      setPhase("multipick-covers")
+      return
+    }
+    await finalizeMultiPickChoices()
+  }
+
+  const handleConfirmMultiPickCovers = async () => {
+    await finalizeMultiPickChoices()
+  }
+
   const toggleCoverIncluded = (url: string) => {
-    setCoverChoices((prev) => prev.map((c) => c.url === url ? { ...c, included: !c.included } : c))
+    setCoverChoices((prev) => {
+      const next = prev.map((c) => (c.url === url ? { ...c, included: !c.included } : c))
+      const target = prev.find((c) => c.url === url)
+      const targetNext = next.find((c) => c.url === url)
+      if (target?.isPrimary && targetNext && !targetNext.included) {
+        const fallback = next.find((c) => c.included)
+        return next.map((c) => ({ ...c, isPrimary: fallback ? c.url === fallback.url : false }))
+      }
+      return next
+    })
   }
   const setCoverPrimary = (url: string) => {
     setCoverChoices((prev) => prev.map((c) => ({ ...c, isPrimary: c.url === url, included: c.url === url ? true : c.included })))
   }
+  const deleteCover = (url: string) => {
+    setCoverChoices((prev) => {
+      const removed = prev.find((c) => c.url === url)
+      const remaining = prev.filter((c) => c.url !== url)
+      if (removed?.isPrimary && remaining.length > 0) {
+        const fallbackIdx = remaining.findIndex((c) => c.included)
+        const promoteIdx = fallbackIdx >= 0 ? fallbackIdx : 0
+        return remaining.map((c, i) => ({ ...c, isPrimary: i === promoteIdx }))
+      }
+      return remaining
+    })
+    if (activeRefineUrl === url) {
+      const remaining = coverChoices.filter((c) => c.url !== url)
+      setActiveRefineUrl(remaining[0]?.url ?? null)
+    }
+  }
   const allCoversIncluded = coverChoices.length > 0 && coverChoices.every((c) => c.included)
+  const someCoversIncluded = coverChoices.some((c) => c.included)
   const toggleAllCovers = () => {
     setCoverChoices((prev) => {
-      const next = allCoversIncluded
-        ? prev.map((c) => ({ ...c, included: c.isPrimary }))
-        : prev.map((c) => ({ ...c, included: true }))
-      return next
+      if (prev.every((c) => c.included)) {
+        return prev.map((c) => ({ ...c, included: false, isPrimary: false }))
+      }
+      const hasPrimary = prev.some((c) => c.isPrimary)
+      return prev.map((c, i) => ({ ...c, included: true, isPrimary: hasPrimary ? c.isPrimary : i === 0 }))
     })
   }
   const toggleSynopsisIncluded = (idx: number) => {
-    setSynopsisChoices((prev) => prev.map((s, i) => i === idx ? { ...s, included: !s.included } : s))
+    setSynopsisChoices((prev) => {
+      const next = prev.map((s, i) => (i === idx ? { ...s, included: !s.included } : s))
+      if (prev[idx].isPrimary && !next[idx].included) {
+        const fallbackIdx = next.findIndex((s) => s.included)
+        return next.map((s, i) => ({ ...s, isPrimary: fallbackIdx >= 0 && i === fallbackIdx }))
+      }
+      return next
+    })
   }
   const setSynopsisPrimary = (idx: number) => {
     setSynopsisChoices((prev) => prev.map((s, i) => ({ ...s, isPrimary: i === idx, included: i === idx ? true : s.included })))
   }
   const allSynopsesIncluded = synopsisChoices.length > 0 && synopsisChoices.every((s) => s.included)
+  const someSynopsesIncluded = synopsisChoices.some((s) => s.included)
   const toggleAllSynopses = () => {
     setSynopsisChoices((prev) => {
-      const next = allSynopsesIncluded
-        ? prev.map((s) => ({ ...s, included: s.isPrimary }))
-        : prev.map((s) => ({ ...s, included: true }))
-      return next
+      if (prev.every((s) => s.included)) {
+        return prev.map((s) => ({ ...s, included: false, isPrimary: false }))
+      }
+      const hasPrimary = prev.some((s) => s.isPrimary)
+      return prev.map((s, i) => ({ ...s, included: true, isPrimary: hasPrimary ? s.isPrimary : i === 0 }))
     })
   }
 
@@ -593,6 +651,7 @@ export function ExternalSearch({
     setConflicts([])
     setCoverChoices([])
     setSynopsisChoices([])
+    setActiveRefineUrl(null)
   }
 
   const sourceMatchGroups = pendingCandidate ? getSourceMatchGroups(pendingCandidate) : []
@@ -853,135 +912,203 @@ export function ExternalSearch({
             </div>
           )}
 
-          {phase === "multipick" && (
-            <div className="space-y-6">
+          {phase === "multipick-synopses" && (
+            <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Múltiplas fontes retornaram dados visuais e textuais. Marque o que quer manter e qual é a principal.
+                Múltiplas sinopses vieram das fontes. Marque quais incluir e qual é a principal.
               </p>
 
-              {coverChoices.length > 1 && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">Capas</p>
-                    <label className="flex items-center gap-1.5 text-xs cursor-pointer text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        checked={allCoversIncluded}
-                        onChange={toggleAllCovers}
-                      />
-                      Incluir todas
-                    </label>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    {coverChoices.map((cover) => (
-                      <div
-                        key={cover.url}
-                        className={`relative rounded-md border overflow-hidden ${
-                          cover.included ? "border-primary/60" : "border-muted opacity-50"
-                        }`}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={getCoverImageSrc(cover.url)}
-                          alt={cover.source}
-                          className="w-full h-40 object-cover"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
-                        />
-                        <div className="p-2 space-y-1 bg-card">
-                          <span className="text-[10px] font-medium uppercase text-muted-foreground">
-                            {getSourceLabel(cover.source)}
-                          </span>
-                          <div className="flex items-center gap-2 text-xs">
-                            <label className="flex items-center gap-1 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={cover.included}
-                                onChange={() => toggleCoverIncluded(cover.url)}
-                              />
-                              Incluir
-                            </label>
-                            <label className="flex items-center gap-1 cursor-pointer">
-                              <input
-                                type="radio"
-                                name="cover-primary"
-                                checked={cover.isPrimary}
-                                onChange={() => setCoverPrimary(cover.url)}
-                              />
-                              Principal
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              <section className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-medium">Sinopses</h3>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+                    <Checkbox
+                      checked={allSynopsesIncluded ? true : someSynopsesIncluded ? "indeterminate" : false}
+                      onCheckedChange={toggleAllSynopses}
+                    />
+                    Selecionar todas
+                  </label>
                 </div>
-              )}
-
-              {synopsisChoices.length > 1 && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">Sinopses</p>
-                    <label className="flex items-center gap-1.5 text-xs cursor-pointer text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        checked={allSynopsesIncluded}
-                        onChange={toggleAllSynopses}
-                      />
-                      Incluir todas
-                    </label>
-                  </div>
-                  <div className="space-y-2">
-                    {synopsisChoices.map((syn, idx) => (
-                      <div
-                        key={`${syn.source}-${idx}`}
-                        className={`rounded-md border p-3 space-y-2 ${
-                          syn.included ? "border-primary/60" : "border-muted opacity-60"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <Badge variant="outline" className="text-[10px]">
-                            {getSourceLabel(syn.source)}
-                          </Badge>
-                          <div className="flex items-center gap-3 text-xs">
-                            <label className="flex items-center gap-1 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={syn.included}
-                                onChange={() => toggleSynopsisIncluded(idx)}
-                              />
-                              Incluir
-                            </label>
-                            <label className="flex items-center gap-1 cursor-pointer">
-                              <input
-                                type="radio"
-                                name="syn-primary"
-                                checked={syn.isPrimary}
-                                onChange={() => setSynopsisPrimary(idx)}
-                              />
-                              Principal
-                            </label>
-                          </div>
-                        </div>
-                        <p className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-6">
-                          {syn.text}
-                        </p>
+                {synopsisChoices.map((s, idx) => (
+                  <div
+                    key={`${s.source}-${idx}`}
+                    className={`rounded-md border p-3 space-y-2 ${
+                      s.included ? "border-primary/60 bg-primary/5" : ""
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <Badge variant="outline" className="text-[10px]">{getSourceLabel(s.source)}</Badge>
+                      <div className="flex items-center gap-3 text-xs">
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <Checkbox
+                            checked={s.included}
+                            onCheckedChange={() => toggleSynopsisIncluded(idx)}
+                          />
+                          Incluir
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="multipick-syn-primary"
+                            checked={s.isPrimary}
+                            onChange={() => setSynopsisPrimary(idx)}
+                            className="accent-primary"
+                          />
+                          Principal
+                        </label>
                       </div>
-                    ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground line-clamp-6 whitespace-pre-wrap">{s.text}</p>
                   </div>
-                </div>
-              )}
+                ))}
+              </section>
 
               <Separator />
               <div className="flex gap-2 justify-end pb-2">
-                <Button type="button" variant="outline" onClick={handleClose}>
-                  Cancelar
-                </Button>
-                <Button type="button" onClick={handleConfirmMultiPick}>
-                  Continuar
-                </Button>
+                <Button type="button" variant="outline" onClick={handleClose}>Cancelar</Button>
+                <Button type="button" onClick={handleConfirmMultiPickSynopses}>Continuar</Button>
               </div>
             </div>
           )}
+
+          {phase === "multipick-covers" && (() => {
+            const activeCover =
+              coverChoices.find((c) => c.url === activeRefineUrl) ?? coverChoices[0] ?? null
+            const canGoBackToSynopses = synopsisChoices.length > 1
+            return (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm text-muted-foreground">
+                    {coverChoices.length > 0
+                      ? "Clique numa miniatura pra ver a capa em tamanho maior. Marque quais incluir."
+                      : "Nenhuma capa restante. Você pode continuar sem capa externa."}
+                  </p>
+                  {coverChoices.length > 0 && (
+                    <label className="flex items-center gap-1.5 cursor-pointer text-xs shrink-0">
+                      <Checkbox
+                        checked={allCoversIncluded ? true : someCoversIncluded ? "indeterminate" : false}
+                        onCheckedChange={toggleAllCovers}
+                      />
+                      Selecionar todas
+                    </label>
+                  )}
+                </div>
+
+                {activeCover && (
+                  <div className="space-y-3">
+                    <div className="relative mx-auto w-full max-w-xs aspect-[2/3] overflow-hidden rounded-lg border bg-muted shadow-sm">
+                      <Image
+                        src={getCoverImageSrc(activeCover.url)}
+                        alt=""
+                        fill
+                        sizes="(max-width: 640px) 90vw, 384px"
+                        unoptimized
+                        className="object-contain"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <Badge variant="outline" className="text-[10px]">{getSourceLabel(activeCover.source)}</Badge>
+                      <div className="flex items-center gap-3 text-xs">
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <Checkbox
+                            checked={activeCover.included}
+                            onCheckedChange={() => toggleCoverIncluded(activeCover.url)}
+                          />
+                          Incluir
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="multipick-cover-primary"
+                            checked={activeCover.isPrimary}
+                            onChange={() => setCoverPrimary(activeCover.url)}
+                            className="accent-primary"
+                          />
+                          Principal
+                        </label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 gap-1 px-2 text-muted-foreground hover:text-destructive"
+                          onClick={() => deleteCover(activeCover.url)}
+                          aria-label="Excluir esta capa"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Excluir
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-1.5 justify-center">
+                  {coverChoices.map((c) => {
+                    const isActive = c.url === activeCover?.url
+                    return (
+                      <div key={c.url} className="group/cover relative h-20 w-14">
+                        <button
+                          type="button"
+                          onClick={() => setActiveRefineUrl(c.url)}
+                          className={`absolute inset-0 overflow-hidden rounded border transition-all ${
+                            isActive
+                              ? "border-primary ring-2 ring-primary/40"
+                              : c.included
+                                ? "border-primary/40"
+                                : "border-muted opacity-60 hover:opacity-100"
+                          }`}
+                          title={getSourceLabel(c.source)}
+                        >
+                          <Image
+                            src={getCoverImageSrc(c.url)}
+                            alt=""
+                            fill
+                            sizes="56px"
+                            unoptimized
+                            className="object-cover"
+                          />
+                          {c.included && (
+                            <span className="absolute top-0.5 left-0.5 rounded bg-emerald-500 px-1 text-[8px] font-semibold text-white">
+                              ✓
+                            </span>
+                          )}
+                          {c.isPrimary && (
+                            <span className="absolute top-0.5 right-0.5 rounded bg-primary px-1 text-[8px] font-semibold text-primary-foreground">
+                              P
+                            </span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteCover(c.url)}
+                          aria-label="Excluir esta capa"
+                          title="Excluir"
+                          className="absolute bottom-0.5 right-0.5 z-10 rounded bg-black/60 p-0.5 text-white opacity-0 transition-all group-hover/cover:opacity-100 hover:bg-destructive focus:opacity-100"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <Separator />
+                <div className="flex gap-2 justify-between pb-2">
+                  {canGoBackToSynopses ? (
+                    <Button type="button" variant="ghost" onClick={() => setPhase("multipick-synopses")}>
+                      Voltar
+                    </Button>
+                  ) : (
+                    <span />
+                  )}
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" onClick={handleClose}>Cancelar</Button>
+                    <Button type="button" onClick={handleConfirmMultiPickCovers}>Continuar</Button>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
 
           {phase === "conflicts" && (
             <div className="space-y-5">

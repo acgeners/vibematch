@@ -213,23 +213,32 @@ export async function fetchKitsuMangaById(id: string): Promise<KitsuMangaDetail 
 }
 
 export async function fetchKitsuReactions(mangaId: string): Promise<string[]> {
+  // Kitsu limita 20/página. Pegamos 2 páginas em paralelo pra chegar a 40
+  // reações; a API aceita `page[offset]` pra paginação.
+  async function fetchPage(offset: number): Promise<unknown[]> {
+    try {
+      // Não usamos `fields[mediaReactions]=reaction,upVotesCount,likesCount` —
+      // URLSearchParams codifica as vírgulas como %2C e Kitsu interpreta o
+      // valor inteiro como um único nome de campo, retornando data:[]. O
+      // response sem `fields` traz mais campos mas continua pequeno.
+      const url = new URL(`${KITSU_BASE}/media-reactions`)
+      url.searchParams.set("filter[mangaId]", mangaId)
+      url.searchParams.set("sort", "-upVotesCount")
+      url.searchParams.set("page[limit]", "20")
+      if (offset > 0) url.searchParams.set("page[offset]", String(offset))
+
+      const res = await fetch(url, { cache: "no-store", headers: KITSU_HEADERS })
+      if (!res.ok) return []
+      const json = await res.json()
+      return Array.isArray(json?.data) ? json.data : []
+    } catch {
+      return []
+    }
+  }
+
   try {
-    const url = new URL(`${KITSU_BASE}/media-reactions`)
-    url.searchParams.set("filter[mangaId]", mangaId)
-    url.searchParams.set("fields[mediaReactions]", "reaction,upVotesCount,likesCount")
-    url.searchParams.set("sort", "-upVotesCount")
-    url.searchParams.set("page[limit]", "20")
-
-    const res = await fetch(url, {
-      cache: "no-store",
-      headers: KITSU_HEADERS,
-    })
-    if (!res.ok) return []
-
-    const json = await res.json()
-    const data: unknown[] = Array.isArray(json?.data) ? json.data : []
-
-    return data
+    const [page1, page2] = await Promise.all([fetchPage(0), fetchPage(20)])
+    return [...page1, ...page2]
       .map((item) => {
         const attributes = (item as { attributes?: Record<string, unknown> }).attributes ?? {}
         const reaction = cleanText(attributes.reaction)

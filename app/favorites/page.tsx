@@ -4,13 +4,14 @@ import { Badge } from "@/components/ui/badge"
 import { WorkTable } from "@/components/titles/work-table"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
 import { FavoritesStatsHeader } from "@/components/favorites/favorites-stats-header"
-import { FavoritesRecommendationsStrip } from "@/components/favorites/favorites-recommendations-strip"
+import { RecommendWithAiButton } from "@/components/recommendations/recommend-with-ai-button"
+import { ViewRecommendationsButton } from "@/components/recommendations/view-recommendations-button"
 import { getRanking, type RankingFilters, type SortLevel } from "@/server/queries/ranking"
 import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getFavoritesSummary } from "@/server/queries/favorites"
-import { listRecommendationRuns } from "@/server/queries/recommendations"
 import { CRITERION_SLUGS, PERSONAL_STATUSES, PUBLICATION_STATUSES } from "@/types/domain"
+import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import {
   PERSONAL_STATUS_LABELS,
   PUBLICATION_STATUS_LABELS,
@@ -168,7 +169,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
   }
 
   const validSortFields = new Set<string>([
-    "final_score", "calc_score", "pred_score", "platform_avg", "total_votes", "chapters", "title",
+    "final_score", "calc_score", "pred_score", "platform_avg", "total_votes", "chapters", "title", "alignment_score",
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
   const rawSort = str("sort") ?? "final_score:desc"
@@ -223,16 +224,16 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
     maxTotalVotes: num("max_votes"),
     onlyWithFinalScore: str("only_scored") === "1",
     onlyFavorites: true,
+    includeFinishedDropped: true,
     sortLevels,
   }
 
-  const [entries, allGenres, allTags, statusOptions, summary, runs, scoreThresholds] = await Promise.all([
+  const [entries, allGenres, allTags, statusOptions, summary, scoreThresholds] = await Promise.all([
     getRanking(filters),
     getAllGenres(),
     getAllTags(),
     getStatusOptions(),
     getFavoritesSummary(),
-    listRecommendationRuns(3),
     getScoreColorThresholds(),
   ])
 
@@ -255,7 +256,10 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
 
       <FavoritesStatsHeader summary={summary} />
 
-      <FavoritesRecommendationsStrip runs={runs} />
+      <div className="flex flex-wrap items-center gap-2">
+        <RecommendWithAiButton source="favorites" />
+        <ViewRecommendationsButton />
+      </div>
 
       <RankingFiltersComponent
         availableGenres={allGenres}
@@ -277,9 +281,10 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
         pageSize={works.length || 1}
         searchQuery={str("search")}
         scoreThresholds={scoreThresholds}
-        selectedCompareIds={toArray(params.compare).slice(0, 4)}
+        selectedCompareIds={toArray(params.compare).slice(0, MAX_COMPARE_WORKS)}
         namespace="favorites"
         basePath="/favorites"
+        enableSelectAll
       />
     </div>
   )

@@ -7,20 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ExpandableText } from "@/components/ui/expandable-text"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
+import { formatRelativeDateTime } from "@/lib/date-utils"
 import type { WorkReviewsSnapshot } from "@/server/queries/work-reviews"
 
 interface WorkReviewsCardProps {
   snapshot: WorkReviewsSnapshot
-}
-
-function formatFetchedAt(iso: string): string {
-  return new Date(iso).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
 }
 
 function ratingColor(rating: number | null): string {
@@ -74,7 +65,7 @@ export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
           <div className="flex items-center gap-3">
             {snapshot.fetchedAt && (
               <span className="text-xs text-muted-foreground">
-                buscado em {formatFetchedAt(snapshot.fetchedAt)}
+                buscado em {formatRelativeDateTime(snapshot.fetchedAt)}
               </span>
             )}
             <ChevronDown

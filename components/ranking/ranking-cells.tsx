@@ -21,9 +21,11 @@ export function AlignmentScoreCell({
           <TooltipTrigger asChild>
             <span className="font-mono text-sm text-muted-foreground cursor-help">—</span>
           </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-[260px]">
-            Esta obra ainda não passou pelo LLM re-rank. Use o botão &quot;Rerankear top-N com
-            IA&quot; em /ranking pra incluir.
+          <TooltipContent side="top" className="max-w-[280px]">
+            Esta obra ainda não passou pelo IA re-rank. Use o botão &quot;Recomendar do
+            ranking&quot; aqui no topo da página pra incluí-la numa run — o
+            <span className="font-semibold"> alignment_score</span> retornado fica salvo
+            nessa coluna.
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

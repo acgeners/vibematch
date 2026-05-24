@@ -6,6 +6,7 @@ import { useTransition } from "react"
 import { ChevronDown, Filter, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Tooltip,
@@ -97,6 +98,14 @@ export function AiEvaluationFilters({
       params.delete("filter")
       params.delete("pub")
       params.delete("personal")
+      params.delete("tolerance")
+    })
+  }
+
+  const setTolerance = (value: number) => {
+    updateParams((params) => {
+      if (value <= 0) params.delete("tolerance")
+      else params.set("tolerance", String(value))
     })
   }
 
@@ -179,7 +188,7 @@ export function AiEvaluationFilters({
         <div className="space-y-1.5">
           {/* Estado da avaliação */}
           <FilterSection title="Estado da avaliação">
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap items-center gap-1">
               {stateOptions.map((opt) => {
                 const active = isOn(opt.id)
                 return (
@@ -203,6 +212,27 @@ export function AiEvaluationFilters({
                   </Tooltip>
                 )
               })}
+              {isOn("outdated-model") && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="ml-1 flex items-center gap-1 rounded-md border border-border/70 px-2 py-0.5 text-xs text-muted-foreground">
+                      <span>Δ versão:</span>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={currentPromptVersionNum}
+                        value={promptVersionTolerance}
+                        onChange={(e) => setTolerance(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="h-5 w-12 px-1 py-0 text-xs"
+                        disabled={isPending}
+                      />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs text-xs">
+                    Quantas versões para trás ainda contam como atuais. 0 = só {currentPromptVersion}; 2 = ≥ v{Math.max(0, currentPromptVersionNum - 2)}.
+                  </TooltipContent>
+                </Tooltip>
+              )}
             </div>
           </FilterSection>
 

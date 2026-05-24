@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { requestAiEvaluation } from "@/lib/ai-evaluation/service"
+import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation } from "@/lib/ai-evaluation/service"
 import {
   buildCandidateFromExternalIds,
   fetchExternalEvaluationContextForCandidate,
@@ -16,7 +16,21 @@ import type { AiEvaluation } from "@/types/domain"
 import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 
-export async function triggerAiEvaluation(workId: string) {
+const OPUS_MODEL_ID = "claude-opus-4-7"
+const SONNET_MODEL_ID = "claude-sonnet-4-6"
+
+function resolveModelOverride(model: "sonnet" | "opus" | undefined): string | undefined {
+  if (model === "opus") return OPUS_MODEL_ID
+  if (model === "sonnet") return SONNET_MODEL_ID
+  return undefined
+}
+
+interface TriggerAiEvaluationOpts {
+  /** Override do modelo Claude. Default usa o MODEL configurado no service. */
+  model?: "sonnet" | "opus"
+}
+
+export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluationOpts = {}) {
   const supabase = createAdminClient()
 
   const { data: work, error: workError } = await supabase
@@ -82,15 +96,16 @@ export async function triggerAiEvaluation(workId: string) {
         .map((row) => [row.source, String(row.external_id)])
     ) as Partial<Record<ExternalSourceId, string>>
 
+    const hasAnyExternalIds = (extIds ?? []).length > 0
     const hasAcceptedExternalIds = Object.keys(acceptedExternalIds).length > 0
-    const { sourcedReviews, externalContext } = hasAcceptedExternalIds
+    const { sourcedReviews, allReviews, externalContext, platformRatings, similarWorks } = hasAcceptedExternalIds
       ? await fetchExternalEvaluationContextForCandidate(
           buildCandidateFromExternalIds({
             title: work.title,
             originalTitle: work.original_title,
             alternativeTitles: work.alternative_titles,
           }, acceptedExternalIds),
-          { rejectedSources, perSource: 6, total: 20 }
+          { rejectedSources, ...AI_EVAL_REVIEW_CAPS }
         )
       : await fetchExternalEvaluationContextForWork({
           title: work.title,
@@ -99,7 +114,37 @@ export async function triggerAiEvaluation(workId: string) {
           rejectedSources,
         })
 
-    await saveWorkReviews(workId, sourcedReviews ?? [])
+    // Diagnóstico do motivo de "sem reviews externas". Renderizado na UI de
+    // revisão para indicar a ação certa (atribuir fontes, revisar rejeições, etc.).
+    const noReviewsReason: "no_external_ids" | "all_rejected" | "search_miss" | "sources_returned_empty" | null =
+      (sourcedReviews?.length ?? 0) > 0
+        ? null
+        : hasAcceptedExternalIds
+          ? "sources_returned_empty"
+          : hasAnyExternalIds && rejectedSources.length === (extIds ?? []).length
+            ? "all_rejected"
+            : hasAnyExternalIds
+              ? "search_miss"
+              : "no_external_ids"
+
+    // Persiste o pool completo (pode passar de 100 reviews), não só o subset
+    // capeado que vai pro prompt — recomendação usa essa base pra escolher
+    // top reviews por candidato.
+    await saveWorkReviews(workId, allReviews ?? [])
+
+    // Debug: detalha o pipeline de reviews durante a avaliação. Útil pra
+    // entender por que a IA recebeu N reviews quando esperava-se mais.
+    const sourceCounts: Record<string, number> = {}
+    for (const r of allReviews ?? []) {
+      sourceCounts[r.source] = (sourceCounts[r.source] ?? 0) + 1
+    }
+    const sentCounts: Record<string, number> = {}
+    for (const r of sourcedReviews ?? []) {
+      sentCounts[r.source] = (sentCounts[r.source] ?? 0) + 1
+    }
+    console.log(
+      `[ai-eval reviews] work="${work.title}" hasAcceptedExternalIds=${hasAcceptedExternalIds} accepted=${JSON.stringify(acceptedExternalIds)} rejected=${JSON.stringify(rejectedSources)} pool=${allReviews?.length ?? 0} (${JSON.stringify(sourceCounts)}) sent=${sourcedReviews?.length ?? 0} (${JSON.stringify(sentCounts)})`
+    )
 
     const synopses = (work as { work_synopses?: Array<{ source?: string | null; text?: string | null; is_primary?: boolean | null; position?: number | null }> }).work_synopses ?? []
     const primarySynopsisRow = synopses.find((s) => s?.is_primary) ?? null
@@ -117,8 +162,26 @@ export async function triggerAiEvaluation(workId: string) {
       tags,
       sourcedReviews,
       externalContext,
+      platformRatings,
+      similarWorks,
       coverUrl,
+      model: resolveModelOverride(opts.model),
     })
+
+    // Injeta noReviewsReason no evaluationContext do raw_response. O service
+    // monta o evaluationContext mas não tem visibilidade do estado de
+    // work_external_ids — esse diagnóstico só faz sentido aqui.
+    const mergedRawResponse: Record<string, unknown> = (() => {
+      const base = (response.rawResponse ?? {}) as Record<string, unknown>
+      const existingCtx = (base.evaluationContext ?? {}) as Record<string, unknown>
+      return {
+        ...base,
+        evaluationContext: {
+          ...existingCtx,
+          noReviewsReason,
+        },
+      }
+    })()
 
     const scoresToInsert = response.scores.map((s) => ({
       ai_evaluation_id: evaluation.id,
@@ -137,7 +200,7 @@ export async function triggerAiEvaluation(workId: string) {
         prompt_version: response.promptVersion,
         summary: response.summary,
         confidence: response.confidence,
-        raw_response: response.rawResponse as Record<string, unknown>,
+        raw_response: mergedRawResponse,
         input_hash: response.inputHash,
       })
       .eq("id", evaluation.id)

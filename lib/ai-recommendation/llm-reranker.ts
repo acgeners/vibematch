@@ -1,11 +1,7 @@
 import "server-only"
-import Anthropic from "@anthropic-ai/sdk"
-import {
-  MODEL,
-  PROMPT_VERSION,
-  type RankingResult,
-  type TokenUsage,
-} from "./service"
+import type Anthropic from "@anthropic-ai/sdk"
+import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
+import { MODEL, PROMPT_VERSION, type RankingResult } from "./service"
 import {
   RANKING_SYSTEM_PROMPT,
   buildRankingUserPromptWithLabel,
@@ -54,37 +50,22 @@ function findToolUse(message: Anthropic.Messages.Message, toolName: string) {
   )
 }
 
-function extractUsage(message: Anthropic.Messages.Message): TokenUsage {
-  const u = message.usage as Anthropic.Messages.Usage & {
-    cache_creation_input_tokens?: number | null
-    cache_read_input_tokens?: number | null
-  }
-  return {
-    inputTokens: u?.input_tokens ?? null,
-    outputTokens: u?.output_tokens ?? null,
-    cacheReadTokens: u?.cache_read_input_tokens ?? null,
-    cacheCreationTokens: u?.cache_creation_input_tokens ?? null,
-  }
-}
-
 export interface RankCandidatesArgs {
   profile: TasteProfilePayload
   candidates: CandidateWorkInput[]
   /** Label livre que descreve o modo (ex: "Top-50 filtrado por drama+completed"). */
   modeLabel: string
   userContext?: string | null
+  /** Opcional — pra correlacionar com o run que originou a chamada. */
+  runId?: string | null
 }
 
 export async function rankCandidates(args: RankCandidatesArgs): Promise<RankingResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY não configurada — ranking abortado.")
-  }
   if (args.candidates.length === 0) {
     throw new Error("Nenhum candidato para rankear.")
   }
 
-  const client = new Anthropic({ apiKey })
+  const client = getAnthropicClient({ maxRetries: 6 })
   const { profileBlock, tailBlock } = buildRankingUserPromptWithLabel(
     args.profile,
     args.candidates,
@@ -96,25 +77,38 @@ export async function rankCandidates(args: RankCandidatesArgs): Promise<RankingR
 
   let lastError: unknown = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const message = await client.messages.create({
-      model: MODEL,
-      max_tokens: attempt === 0 ? 4000 : 5000,
-      temperature: attempt === 0 ? 0.2 : 0,
-      system: [
-        { type: "text", text: RANKING_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
-      ],
-      tools: [RANKING_TOOL],
-      tool_choice: { type: "tool", name: RANKING_TOOL.name },
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: profileBlock, cache_control: { type: "ephemeral" } },
-            { type: "text", text: tailBlock },
-          ],
+    const { message, apiCallId, usage } = await createLoggedMessage(
+      client,
+      {
+        model: MODEL,
+        max_tokens: attempt === 0 ? 4000 : 5000,
+        temperature: attempt === 0 ? 0.2 : 0,
+        system: [
+          { type: "text", text: RANKING_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+        ],
+        tools: [RANKING_TOOL],
+        tool_choice: { type: "tool", name: RANKING_TOOL.name },
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: profileBlock, cache_control: { type: "ephemeral" } },
+              { type: "text", text: tailBlock },
+            ],
+          },
+        ],
+      },
+      {
+        operation: "recommendation_llm_rerank",
+        promptVersion: PROMPT_VERSION,
+        runId: args.runId ?? null,
+        attempt,
+        metadata: {
+          modeLabel: args.modeLabel,
+          nCandidates: args.candidates.length,
         },
-      ],
-    })
+      },
+    )
 
     const toolUse = findToolUse(message, RANKING_TOOL.name)
     if (!toolUse) {
@@ -150,7 +144,8 @@ export async function rankCandidates(args: RankCandidatesArgs): Promise<RankingR
       modelName: MODEL,
       promptVersion: PROMPT_VERSION,
       rawResponse: toolUse.input,
-      usage: extractUsage(message),
+      usage,
+      apiCallId,
     }
   }
 

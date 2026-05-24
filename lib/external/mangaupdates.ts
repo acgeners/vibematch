@@ -144,6 +144,9 @@ export interface MangaUpdatesDetail {
   categories: string[]
   rating?: number
   votes?: number
+  /** Texto cru de "Status in Country of Origin" — preservado pra exibir/anotar
+   * info que `mapStatus` (enum) e `parseChaptersFromStatus` descartam. */
+  statusText?: string
 }
 
 export async function fetchMangaUpdatesReviews(id: number): Promise<string[]> {
@@ -160,7 +163,7 @@ export async function fetchMangaUpdatesReviews(id: number): Promise<string[]> {
     if (!pageUrl) return []
 
     const url = new URL(pageUrl)
-    url.searchParams.set("perpage", "30")
+    url.searchParams.set("perpage", "50")
     url.searchParams.set("method", "useful")
 
     const pageRes = await fetch(url, {
@@ -200,6 +203,26 @@ async function scrapeMangaUpdatesAverage(seriesUrl: string): Promise<number | un
   }
 }
 
+/**
+ * Lightweight alt-titles fetch — usado pelo refinamento de busca pra obter
+ * `associated[]` (que NÃO vem na resposta da search API, apenas no detail).
+ * Pula o scrape de rating do `fetchMangaUpdatesById` pra evitar latência
+ * desnecessária quando só queremos os títulos alternativos.
+ */
+export async function fetchMangaUpdatesAlternativeTitles(id: number): Promise<string[]> {
+  try {
+    const res = await fetch(`${MU_BASE}/series/${id}`, { cache: "no-store" })
+    if (!res.ok) return []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = await res.json()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const associated: unknown[] = (data?.associated ?? []).map((item: any) => item?.title)
+    return associated.filter((title): title is string => typeof title === "string" && Boolean(title.trim()))
+  } catch {
+    return []
+  }
+}
+
 export async function fetchMangaUpdatesById(id: number): Promise<MangaUpdatesDetail | null> {
   try {
     const res = await fetch(`${MU_BASE}/series/${id}`, {
@@ -230,6 +253,7 @@ export async function fetchMangaUpdatesById(id: number): Promise<MangaUpdatesDet
       categories: (data.categories ?? []).map((c: any) => c.category as string),
       rating,
       votes,
+      statusText: typeof data.status === "string" ? data.status : undefined,
     }
   } catch {
     return null

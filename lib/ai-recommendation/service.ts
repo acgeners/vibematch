@@ -1,6 +1,7 @@
 import "server-only"
-import Anthropic from "@anthropic-ai/sdk"
+import type Anthropic from "@anthropic-ai/sdk"
 import { CRITERION_SLUGS } from "@/types/domain"
+import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import {
   RANKING_SYSTEM_PROMPT,
   TASTE_PROFILE_SYSTEM_PROMPT,
@@ -113,6 +114,7 @@ export interface TasteProfileResult {
   promptVersion: string
   rawResponse: unknown
   usage: TokenUsage
+  apiCallId: string | null
 }
 
 export interface RankingResult {
@@ -122,26 +124,14 @@ export interface RankingResult {
   promptVersion: string
   rawResponse: unknown
   usage: TokenUsage
+  apiCallId: string | null
 }
 
 export interface TokenUsage {
-  inputTokens: number | null
-  outputTokens: number | null
-  cacheReadTokens: number | null
-  cacheCreationTokens: number | null
-}
-
-function extractUsage(message: Anthropic.Messages.Message): TokenUsage {
-  const u = message.usage as Anthropic.Messages.Usage & {
-    cache_creation_input_tokens?: number | null
-    cache_read_input_tokens?: number | null
-  }
-  return {
-    inputTokens: u?.input_tokens ?? null,
-    outputTokens: u?.output_tokens ?? null,
-    cacheReadTokens: u?.cache_read_input_tokens ?? null,
-    cacheCreationTokens: u?.cache_creation_input_tokens ?? null,
-  }
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
 }
 
 function findToolUse(message: Anthropic.Messages.Message, toolName: string) {
@@ -154,30 +144,35 @@ function findToolUse(message: Anthropic.Messages.Message, toolName: string) {
 export async function generateTasteProfile(
   works: RatedWorkInput[],
 ): Promise<TasteProfileResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY não configurada — geração de perfil de gosto abortada.")
-  }
   if (works.length === 0) {
     throw new Error("Nenhuma obra avaliada disponível para gerar perfil.")
   }
 
-  const client = new Anthropic({ apiKey })
+  const client = getAnthropicClient({ maxRetries: 6 })
   const userPrompt = buildTasteProfileUserPrompt(works)
 
   let lastError: unknown = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const message = await client.messages.create({
-      model: MODEL,
-      max_tokens: attempt === 0 ? 3000 : 4000,
-      temperature: attempt === 0 ? 0.2 : 0,
-      system: [
-        { type: "text", text: TASTE_PROFILE_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
-      ],
-      tools: [TASTE_PROFILE_TOOL],
-      tool_choice: { type: "tool", name: TASTE_PROFILE_TOOL.name },
-      messages: [{ role: "user", content: userPrompt }],
-    })
+    const { message, apiCallId, usage } = await createLoggedMessage(
+      client,
+      {
+        model: MODEL,
+        max_tokens: attempt === 0 ? 3000 : 4000,
+        temperature: attempt === 0 ? 0.2 : 0,
+        system: [
+          { type: "text", text: TASTE_PROFILE_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+        ],
+        tools: [TASTE_PROFILE_TOOL],
+        tool_choice: { type: "tool", name: TASTE_PROFILE_TOOL.name },
+        messages: [{ role: "user", content: userPrompt }],
+      },
+      {
+        operation: "recommendation_taste_profile",
+        promptVersion: PROMPT_VERSION,
+        attempt,
+        metadata: { nWorks: works.length },
+      },
+    )
 
     const toolUse = findToolUse(message, TASTE_PROFILE_TOOL.name)
     if (!toolUse) {
@@ -211,7 +206,8 @@ export async function generateTasteProfile(
       modelName: MODEL,
       promptVersion: PROMPT_VERSION,
       rawResponse: toolUse.input,
-      usage: extractUsage(message),
+      usage,
+      apiCallId,
     }
   }
 
@@ -228,15 +224,11 @@ export interface RankFavoritesArgs {
 }
 
 export async function rankFavorites(args: RankFavoritesArgs): Promise<RankingResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY não configurada — ranking abortado.")
-  }
   if (args.candidates.length === 0) {
     throw new Error("Nenhum candidato para rankear.")
   }
 
-  const client = new Anthropic({ apiKey })
+  const client = getAnthropicClient({ maxRetries: 6 })
   const { profileBlock, tailBlock } = buildRankingUserPrompt(
     args.profile,
     args.candidates,
@@ -248,25 +240,38 @@ export async function rankFavorites(args: RankFavoritesArgs): Promise<RankingRes
 
   let lastError: unknown = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const message = await client.messages.create({
-      model: MODEL,
-      max_tokens: attempt === 0 ? 4000 : 5000,
-      temperature: attempt === 0 ? 0.2 : 0,
-      system: [
-        { type: "text", text: RANKING_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
-      ],
-      tools: [RANKING_TOOL],
-      tool_choice: { type: "tool", name: RANKING_TOOL.name },
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: profileBlock, cache_control: { type: "ephemeral" } },
-            { type: "text", text: tailBlock },
-          ],
+    const { message, apiCallId, usage } = await createLoggedMessage(
+      client,
+      {
+        model: MODEL,
+        max_tokens: attempt === 0 ? 4000 : 5000,
+        temperature: attempt === 0 ? 0.2 : 0,
+        system: [
+          { type: "text", text: RANKING_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+        ],
+        tools: [RANKING_TOOL],
+        tool_choice: { type: "tool", name: RANKING_TOOL.name },
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: profileBlock, cache_control: { type: "ephemeral" } },
+              { type: "text", text: tailBlock },
+            ],
+          },
+        ],
+      },
+      {
+        operation: "recommendation_rank",
+        promptVersion: PROMPT_VERSION,
+        attempt,
+        metadata: {
+          mode: args.mode,
+          nCandidates: args.candidates.length,
+          hasUserContext: !!args.userContext,
         },
-      ],
-    })
+      },
+    )
 
     const toolUse = findToolUse(message, RANKING_TOOL.name)
     if (!toolUse) {
@@ -302,7 +307,8 @@ export async function rankFavorites(args: RankFavoritesArgs): Promise<RankingRes
       modelName: MODEL,
       promptVersion: PROMPT_VERSION,
       rawResponse: toolUse.input,
-      usage: extractUsage(message),
+      usage,
+      apiCallId,
     }
   }
 

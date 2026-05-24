@@ -1,6 +1,6 @@
 import "server-only"
-import Anthropic from "@anthropic-ai/sdk"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 
 // Fallback tag_group when classification can't decide or fails.
 const OTHER_TAG_GROUP_ID = "606e6239-515b-46c5-b985-9f41f948cdc9"
@@ -87,32 +87,38 @@ async function callClassifier(
   systemPrompt: string,
   tagNames: string[]
 ): Promise<Array<{ tag_name: string; group_slug: string }>> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
+  if (!process.env.ANTHROPIC_API_KEY) {
     console.warn("[tag-classifier] ANTHROPIC_API_KEY ausente; usando fallback")
     return []
   }
 
-  const client = new Anthropic({ apiKey })
-  const message = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1024,
-    system: [
-      {
-        type: "text",
-        text: systemPrompt,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    tools: [CLASSIFIER_TOOL],
-    tool_choice: { type: "tool", name: CLASSIFIER_TOOL.name },
-    messages: [
-      {
-        role: "user",
-        content: `Classifique as tags abaixo:\n\n${tagNames.map((n) => `- ${n}`).join("\n")}`,
-      },
-    ],
-  })
+  const client = getAnthropicClient({ maxRetries: 6 })
+  const { message } = await createLoggedMessage(
+    client,
+    {
+      model: MODEL,
+      max_tokens: 1024,
+      system: [
+        {
+          type: "text",
+          text: systemPrompt,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+      tools: [CLASSIFIER_TOOL],
+      tool_choice: { type: "tool", name: CLASSIFIER_TOOL.name },
+      messages: [
+        {
+          role: "user",
+          content: `Classifique as tags abaixo:\n\n${tagNames.map((n) => `- ${n}`).join("\n")}`,
+        },
+      ],
+    },
+    {
+      operation: "tag_classifier",
+      metadata: { nTags: tagNames.length },
+    },
+  )
 
   const toolUse = message.content.find(
     (b): b is Extract<typeof b, { type: "tool_use" }> => b.type === "tool_use"

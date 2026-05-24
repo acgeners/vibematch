@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { ExternalLink, ImageOff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { cn } from "@/lib/utils"
 import type { RankedCandidate } from "@/lib/ai-recommendation/types"
@@ -48,20 +49,36 @@ export function RankedWorkCard({ rank, ranked }: RankedWorkCardProps) {
         <div className="flex items-start justify-between gap-2">
           <Link
             href={`/titles/${work.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
             className="line-clamp-2 text-sm font-medium leading-tight hover:underline"
           >
             {work.title}
             <ExternalLink className="ml-1 inline h-3 w-3 text-muted-foreground" />
           </Link>
-          <span
-            className={cn(
-              "shrink-0 rounded-md border px-2 py-0.5 text-sm font-semibold tabular-nums",
-              alignmentColor(alignment_score),
-            )}
-            title="Alinhamento com seu perfil de gosto"
-          >
-            {Math.round(alignment_score)}
-          </span>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className={cn(
+                    "shrink-0 cursor-help rounded-md border px-2 py-0.5 text-sm font-semibold tabular-nums",
+                    alignmentColor(alignment_score),
+                  )}
+                >
+                  {Math.round(alignment_score)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-[320px] space-y-1.5">
+                <p className="text-xs font-semibold">IA Re-rank: {Math.round(alignment_score)}/100</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Score do Claude pra essa obra considerando seu perfil de gosto + contexto da run.
+                </p>
+                <p className="text-[10px] leading-relaxed text-muted-foreground">
+                  90+ excepcional · 70–89 forte · 50–69 moderado · 30–49 fraco · &lt;30 pouco alinhado
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
 
         <p className="text-xs leading-relaxed text-muted-foreground">{justification}</p>

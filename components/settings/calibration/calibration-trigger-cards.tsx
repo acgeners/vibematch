@@ -6,23 +6,13 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { runBiasReportAction, runCalibrationAuditAction } from "@/server/actions/calibration"
+import { formatRelativeDateTime } from "@/lib/date-utils"
 import type { CalibrationRunRow } from "@/lib/ai-calibration/types"
 
 interface CalibrationTriggerCardsProps {
   lastAudit: CalibrationRunRow | null
   lastBias: CalibrationRunRow | null
   ratedWorksCount: number
-}
-
-function formatDate(s: string | null | undefined): string {
-  if (!s) return "—"
-  return new Date(s).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
 }
 
 function estimateAuditCost(nWorks: number): string {
@@ -89,7 +79,7 @@ export function CalibrationTriggerCards({
             <div className="text-xs text-muted-foreground">
               {lastAudit ? (
                 <>
-                  <div>Último run: {formatDate(lastAudit.completed_at ?? lastAudit.created_at)}</div>
+                  <div>Último run: {formatRelativeDateTime(lastAudit.completed_at ?? lastAudit.created_at)}</div>
                   <div>
                     {lastAudit.n_works_scanned} obras · {lastAudit.n_auto_applied} auto-aplicadas
                     · {lastAudit.n_suggestions - lastAudit.n_auto_applied} pendentes
@@ -129,7 +119,7 @@ export function CalibrationTriggerCards({
           <CardContent className="space-y-3">
             <div className="text-xs text-muted-foreground">
               {lastBias ? (
-                <div>Último relatório: {formatDate(lastBias.completed_at ?? lastBias.created_at)}</div>
+                <div>Último relatório: {formatRelativeDateTime(lastBias.completed_at ?? lastBias.created_at)}</div>
               ) : (
                 <div>Ainda não executado.</div>
               )}

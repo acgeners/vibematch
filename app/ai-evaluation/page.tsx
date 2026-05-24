@@ -67,10 +67,66 @@ interface EligibleWork {
   } | null
 }
 
+/**
+ * Roda uma query Supabase em chunks de IDs e concatena. Necessário porque
+ * `.in("id", [...500+ uuids])` estoura o limite de URL do PostgREST (~16KB)
+ * e a request fica pendurada até dar timeout.
+ */
+async function chunkedInQuery<T>(
+  ids: string[],
+  chunkSize: number,
+  query: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<{ data: T[]; error: unknown }> {
+  if (ids.length === 0) return { data: [], error: null }
+  const out: T[] = []
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize)
+    const { data, error } = await query(chunk)
+    if (error) return { data: out, error }
+    if (data) out.push(...data)
+  }
+  return { data: out, error: null }
+}
+
+interface LatestEvalRow {
+  work_id: string
+  confidence: number | null
+  model_name: string | null
+  prompt_version: string | null
+  updated_at: string | null
+  created_at: string | null
+}
+
+/**
+ * Carrega a última avaliação completed por work_id, fazendo a dedup em JS em
+ * vez de via view `latest_ai_evaluation_per_work`. Evita o DISTINCT ON do
+ * Postgres que ficava no limite do statement timeout sob carga.
+ *
+ * Usa o índice `idx_ai_evaluations_status` (status='completed'), retorna todas
+ * as linhas ordenadas e mantém só a primeira por work_id.
+ */
+async function loadLatestEvalsMap(
+  supabase: ReturnType<typeof createAdminClient>,
+): Promise<Map<string, LatestEvalRow>> {
+  const { data, error } = await supabase
+    .from("ai_evaluations")
+    .select("work_id, confidence, model_name, prompt_version, created_at, updated_at")
+    .eq("status", "completed")
+    .order("created_at", { ascending: false })
+  if (error) throw new Error(error.message)
+
+  const latest = new Map<string, LatestEvalRow>()
+  for (const row of (data ?? []) as LatestEvalRow[]) {
+    if (!latest.has(row.work_id)) latest.set(row.work_id, row)
+  }
+  return latest
+}
+
 async function getEligibleWorks(
   filters: EvaluationFilter[],
   pubStatusIds: number[],
-  personalStatusIds: number[]
+  personalStatusIds: number[],
+  toleranceOverride: number | null
 ) {
   const supabase = createAdminClient()
 
@@ -82,11 +138,19 @@ async function getEligibleWorks(
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle()
-  const promptVersionTolerance = Math.max(0, Number(configRow?.prompt_version_tolerance ?? 0))
+  const promptVersionTolerance = toleranceOverride != null
+    ? Math.max(0, toleranceOverride)
+    : Math.max(0, Number(configRow?.prompt_version_tolerance ?? 0))
   const lowConfidenceThreshold = Math.min(
     1,
     Math.max(0, Number(configRow?.low_confidence_threshold ?? DEFAULT_LOW_CONFIDENCE_THRESHOLD))
   )
+
+  // Carrega o mapa de últimas avaliações uma vez se algum filtro precisar dele.
+  // Bem mais rápido que 3 chamadas separadas à view.
+  const needsLatestEvals =
+    filters.includes("low-confidence") || filters.includes("outdated-model")
+  const latestEvalsPromise = needsLatestEvals ? loadLatestEvalsMap(supabase) : null
 
   // Pra cada filtro, descobrimos os work_ids elegíveis e depois unimos.
   // Mais eficiente que um único query com OR complexo (queries simples,
@@ -124,12 +188,14 @@ async function getEligibleWorks(
   if (filters.includes("low-confidence")) {
     queries.push(
       (async () => {
-        const { data, error } = await supabase
-          .from("latest_ai_evaluation_per_work")
-          .select("work_id")
-          .lt("confidence", lowConfidenceThreshold)
-        if (error) throw new Error(error.message)
-        return { filter: "low-confidence" as const, ids: new Set((data ?? []).map((r) => r.work_id)) }
+        const latest = await latestEvalsPromise!
+        const ids = new Set<string>()
+        for (const [workId, row] of latest) {
+          if (row.confidence != null && Number(row.confidence) < lowConfidenceThreshold) {
+            ids.add(workId)
+          }
+        }
+        return { filter: "low-confidence" as const, ids }
       })()
     )
   }
@@ -137,21 +203,15 @@ async function getEligibleWorks(
   if (filters.includes("outdated-model")) {
     queries.push(
       (async () => {
-        // Busca todas latest evals e filtra em JS — Postgres não tem helper
-        // ergonômico pra parsear "vXX" → int. Trivial em JS com ~milhares
-        // de rows.
-        const { data, error } = await supabase
-          .from("latest_ai_evaluation_per_work")
-          .select("work_id, model_name, prompt_version")
-        if (error) throw new Error(error.message)
+        const latest = await latestEvalsPromise!
         const ids = new Set<string>()
-        for (const row of data ?? []) {
-          const versionNum = parsePromptVersion(row.prompt_version as string | null)
-          const modelMismatch = (row.model_name as string | null) !== MODEL
+        for (const [workId, row] of latest) {
+          const versionNum = parsePromptVersion(row.prompt_version)
+          const modelMismatch = row.model_name !== MODEL
           const promptMismatch =
             versionNum == null ||
             CURRENT_PROMPT_VERSION_NUM - versionNum > promptVersionTolerance
-          if (modelMismatch || promptMismatch) ids.add(row.work_id as string)
+          if (modelMismatch || promptMismatch) ids.add(workId)
         }
         return { filter: "outdated-model" as const, ids }
       })()
@@ -180,49 +240,91 @@ async function getEligibleWorks(
 
   const eligibleIds = [...matchedByWork.keys()]
 
-  let worksQuery = supabase
-    .from("works")
-    .select(`
-      id, title, publication_status_id, personal_status_id, total_chapters,
-      work_covers(url, is_primary, position),
-      calculated_scores(final_score)
-    `)
-    .in("id", eligibleIds)
-    .eq("is_archived", false)
-  if (pubStatusIds.length > 0) {
-    worksQuery = worksQuery.in("publication_status_id", pubStatusIds)
-  }
-  if (personalStatusIds.length > 0) {
-    worksQuery = worksQuery.in("personal_status_id", personalStatusIds)
-  }
+  // Carrega o mapa de últimas evals (uma chamada compartilhada com os filtros
+  // outdated/low-confidence acima).
+  const latestEvals = await (latestEvalsPromise ?? loadLatestEvalsMap(supabase))
 
-  const [worksResult, evalsResult] = await Promise.all([
-    worksQuery.order("title").limit(500),
-    supabase
-      .from("latest_ai_evaluation_per_work")
-      .select("work_id, confidence, model_name, prompt_version, updated_at, created_at")
-      .in("work_id", eligibleIds),
+  // Chunk size de 100 IDs por request. PostgREST `?id=in.(...)` codifica cada
+  // UUID em ~37 chars; 100 IDs ≈ 3.7KB de URL, confortavelmente abaixo de
+  // qualquer limite de proxy/cdn (~16KB). Sem chunk, 500+ IDs ultrapassam o
+  // limite e a request fica pendurada.
+  const CHUNK_SIZE = 100
+
+  type WorkRow = {
+    id: string
+    title: string
+    publication_status_id: number | null
+    personal_status_id: number | null
+    total_chapters: number | null
+  }
+  const worksResult = await chunkedInQuery<WorkRow>(eligibleIds, CHUNK_SIZE, (chunk) => {
+    let q = supabase
+      .from("works")
+      .select("id, title, publication_status_id, personal_status_id, total_chapters")
+      .in("id", chunk)
+      .eq("is_archived", false)
+    if (pubStatusIds.length > 0) q = q.in("publication_status_id", pubStatusIds)
+    if (personalStatusIds.length > 0) q = q.in("personal_status_id", personalStatusIds)
+    return q.then(({ data, error }) => ({ data: (data ?? []) as WorkRow[], error }))
+  })
+  if (worksResult.error) throw new Error(String((worksResult.error as { message?: string }).message ?? worksResult.error))
+
+  // Ordena por título em JS e limita aos 500 que serão exibidos.
+  const displayedWorks = worksResult.data
+    .slice()
+    .sort((a, b) => String(a.title ?? "").localeCompare(String(b.title ?? "")))
+    .slice(0, 500)
+  const displayedIds = displayedWorks.map((w) => w.id)
+
+  // Hidrata covers + calculated_scores em chunks também.
+  type CoverRow = { work_id: string; url: string | null; is_primary: boolean | null; position: number | null }
+  type ScoreRow = { work_id: string; final_score: number | null }
+  const [coversResult, scoresResult] = await Promise.all([
+    chunkedInQuery<CoverRow>(displayedIds, CHUNK_SIZE, (chunk) =>
+      supabase
+        .from("work_covers")
+        .select("work_id, url, is_primary, position")
+        .in("work_id", chunk)
+        .then(({ data, error }) => ({ data: (data ?? []) as CoverRow[], error })),
+    ),
+    chunkedInQuery<ScoreRow>(displayedIds, CHUNK_SIZE, (chunk) =>
+      supabase
+        .from("calculated_scores")
+        .select("work_id, final_score")
+        .in("work_id", chunk)
+        .then(({ data, error }) => ({ data: (data ?? []) as ScoreRow[], error })),
+    ),
   ])
 
-  if (worksResult.error) throw new Error(worksResult.error.message)
-  if (evalsResult.error) throw new Error(evalsResult.error.message)
+  const coversByWork = new Map<string, CoverRow[]>()
+  for (const c of coversResult.data) {
+    const list = coversByWork.get(c.work_id) ?? []
+    list.push(c)
+    coversByWork.set(c.work_id, list)
+  }
+  const scoreByWork = new Map<string, ScoreRow>()
+  for (const s of scoresResult.data) {
+    scoreByWork.set(s.work_id, s)
+  }
 
+  const eligibleIdSet = new Set(eligibleIds)
   const evalByWork = new Map(
-    (evalsResult.data ?? []).map((e) => [
-      e.work_id as string,
-      {
-        confidence: e.confidence == null ? null : Number(e.confidence),
-        modelName: (e.model_name as string | null) ?? null,
-        promptVersion: (e.prompt_version as string | null) ?? null,
-        // updated_at reflete a última mudança da avaliação (substituição, edição
-        // de scores, etc.). Fallback pra created_at se a view não tiver updated.
-        evaluatedAt:
-          (e.updated_at as string | null) ?? (e.created_at as string | null) ?? null,
-      },
-    ])
+    [...latestEvals.entries()]
+      .filter(([workId]) => eligibleIdSet.has(workId))
+      .map(([workId, e]) => [
+        workId,
+        {
+          confidence: e.confidence == null ? null : Number(e.confidence),
+          modelName: e.model_name ?? null,
+          promptVersion: e.prompt_version ?? null,
+          // updated_at reflete a última mudança da avaliação (substituição, edição
+          // de scores, etc.). Fallback pra created_at se updated_at faltar.
+          evaluatedAt: e.updated_at ?? e.created_at ?? null,
+        },
+      ])
   )
 
-  const works: EligibleWork[] = (worksResult.data ?? []).map((w) => {
+  const works: EligibleWork[] = displayedWorks.map((w) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const row = w as any
     return {
@@ -233,8 +335,8 @@ async function getEligibleWorks(
       personal_status: "",
       personal_status_id: row.personal_status_id ?? null,
       total_chapters: row.total_chapters,
-      cover_url: pickPrimaryCover(row.work_covers),
-      final_score: row.calculated_scores?.final_score ?? null,
+      cover_url: pickPrimaryCover(coversByWork.get(row.id) ?? []),
+      final_score: scoreByWork.get(row.id)?.final_score ?? null,
       matchedFilters: matchedByWork.get(row.id) ?? [],
       evaluation: evalByWork.get(row.id) ?? null,
     } as EligibleWork
@@ -256,6 +358,7 @@ export default async function AiEvaluationPage({
     filter?: string | string[]
     pub?: string | string[]
     personal?: string | string[]
+    tolerance?: string | string[]
   }>
 }) {
   const params = await searchParams
@@ -268,8 +371,12 @@ export default async function AiEvaluationPage({
     params.personal,
     PERSONAL_STATUS_NAME_TO_ID
   )
+  const toleranceRaw = Array.isArray(params.tolerance) ? params.tolerance[0] : params.tolerance
+  const toleranceOverride = toleranceRaw != null && /^\d+$/.test(toleranceRaw)
+    ? parseInt(toleranceRaw, 10)
+    : null
   const { works, totalCount, promptVersionTolerance, lowConfidenceThreshold } =
-    await getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds)
+    await getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, toleranceOverride)
 
   return (
     <div className="space-y-4">

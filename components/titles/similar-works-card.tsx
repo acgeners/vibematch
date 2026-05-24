@@ -1,7 +1,9 @@
 import Link from "next/link"
-import { Sparkles, Sparkle, Star, ImageOff } from "lucide-react"
+import { Sparkles, ImageOff, Info } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { ScoreBadge } from "@/components/ui/score-badge"
+import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { cn, titleToSlug } from "@/lib/utils"
@@ -47,85 +49,156 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
         <CardTitle className="text-base flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-violet-500" />
           Obras parecidas
-          <span className="ml-auto text-[10px] font-normal text-muted-foreground">
-            via embeddings semânticos
-          </span>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Como as recomendações são geradas"
+                  className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-[260px] text-xs leading-relaxed">
+                Recomendações geradas por similaridade semântica: comparamos os
+                <strong> embeddings vetoriais </strong>
+                das descrições, usando distância cosseno. Não depende de gênero ou tags.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
         <ul className="divide-y divide-border">
-          {works.map((w) => (
-            <li key={w.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-              <Link
-                href={`/titles/${titleToSlug(w.title)}`}
-                className="shrink-0 size-12 overflow-hidden rounded-md border border-border bg-muted relative"
-              >
-                {w.coverUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={getCoverImageSrc(w.coverUrl) ?? w.coverUrl}
-                    alt=""
-                    className="size-full object-cover"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="grid size-full place-items-center text-muted-foreground">
-                    <ImageOff className="h-4 w-4" />
-                  </div>
-                )}
-              </Link>
+          {works.map((w) => {
+            const topGenres = w.genres.slice(0, 3)
+            const metaParts = [
+              w.year != null ? String(w.year) : null,
+              w.totalChapters != null ? `${w.totalChapters} caps` : null,
+            ].filter(Boolean) as string[]
 
-              <div className="min-w-0 flex-1">
-                <WorkTitleLink
-                  title={w.title}
-                  workId={w.id}
-                  className="block font-medium text-sm hover:underline line-clamp-1"
-                />
-                {w.synopsis && (
-                  <p className="line-clamp-1 text-[11px] text-muted-foreground">{w.synopsis}</p>
-                )}
-              </div>
+            const hasAnyMeta =
+              topGenres.length > 0 ||
+              metaParts.length > 0 ||
+              w.publicationStatusId != null ||
+              w.personalStatusId != null
 
-              <div className="flex flex-col items-end gap-1 shrink-0">
-                <Badge
-                  variant="outline"
-                  className={cn("font-mono text-[10px] py-0 px-1.5", similarityClasses(w.similarity))}
+            const displayScore = w.manualScore ?? w.finalScore
+            const isManual = w.manualScore != null
+            return (
+              <li key={w.id} className="flex items-start gap-4 py-4 first:pt-0 last:pb-0">
+                <Link
+                  href={`/titles/${titleToSlug(w.title)}`}
+                  className="shrink-0 w-24 h-32 overflow-hidden rounded-md border border-border bg-muted relative shadow-sm transition-transform hover:scale-[1.03]"
                 >
-                  {formatSimilarity(w.similarity)}
-                </Badge>
-                {w.manualScore != null && (
+                  {w.coverUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={getCoverImageSrc(w.coverUrl) ?? w.coverUrl}
+                      alt=""
+                      className="size-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="grid size-full place-items-center text-muted-foreground">
+                      <ImageOff className="h-5 w-5" />
+                    </div>
+                  )}
+                </Link>
+
+                <div className="min-w-0 flex-1 space-y-2 pt-0.5">
+                  <WorkTitleLink
+                    title={w.title}
+                    workId={w.id}
+                    className="block font-semibold text-[15px] hover:underline line-clamp-1"
+                  />
+
+                  {topGenres.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {topGenres.map((g) => (
+                        <span
+                          key={g}
+                          className="rounded bg-muted px-2 py-0.5 text-[11px] font-medium text-foreground/80"
+                        >
+                          {g}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {(metaParts.length > 0 ||
+                    w.publicationStatusId != null ||
+                    w.personalStatusId != null) && (
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                      {metaParts.length > 0 && (
+                        <span className="tabular-nums">{metaParts.join(" · ")}</span>
+                      )}
+                      {w.publicationStatusId != null && (
+                        <PublicationStatusBadge
+                          statusId={w.publicationStatusId}
+                          compact
+                          className="px-1.5 py-0 text-[10px]"
+                        />
+                      )}
+                      {w.personalStatusId != null && (
+                        <PersonalStatusBadge
+                          statusId={w.personalStatusId}
+                          className="px-1.5 py-0 text-[10px]"
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Fallback: se não temos NENHUM metadado estruturado, mostra a sinopse pra não deixar a linha vazia */}
+                  {!hasAnyMeta && w.synopsis && (
+                    <p className="line-clamp-2 text-xs italic text-muted-foreground">
+                      {w.synopsis}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-col items-end gap-2 shrink-0 pt-0.5">
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 tabular-nums cursor-help">
-                          <Star className="h-3 w-3 fill-current" />
-                          {w.manualScore.toFixed(1)}
-                        </span>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "font-mono text-sm font-bold py-1 px-2.5 cursor-help",
+                            similarityClasses(w.similarity),
+                          )}
+                        >
+                          {formatSimilarity(w.similarity)}
+                        </Badge>
                       </TooltipTrigger>
-                      <TooltipContent side="left" className="max-w-[200px]">
-                        Sua nota pessoal (manual_score) — você já avaliou esta obra.
+                      <TooltipContent side="left" className="max-w-[220px] text-xs leading-relaxed">
+                        Similaridade semântica com esta obra ({formatSimilarity(w.similarity)}).
+                        Calculada por distância cosseno entre os embeddings das descrições.
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
-                )}
-                {w.manualScore == null && w.finalScore != null && (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground tabular-nums cursor-help">
-                          <Sparkle className="h-3 w-3" />
-                          {w.finalScore.toFixed(1)}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="left" className="max-w-[200px]">
-                        Nota.Final prevista pelo sistema — você ainda não avaliou.
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                )}
-              </div>
-            </li>
-          ))}
+
+                  {displayScore != null && (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help">
+                            <ScoreBadge score={displayScore} size="lg" variant="soft" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="left" className="max-w-[220px] text-xs leading-relaxed">
+                          {isManual
+                            ? "Sua nota pessoal (manual_score) — você já avaliou esta obra."
+                            : "Nota.Final prevista pelo sistema — você ainda não avaliou."}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
+                </div>
+              </li>
+            )
+          })}
         </ul>
       </CardContent>
     </Card>

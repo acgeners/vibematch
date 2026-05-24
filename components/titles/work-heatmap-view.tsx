@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
+import { AlignmentScoreCell } from "@/components/ranking/ranking-cells"
 import {
   getConfiguredWorkColumns,
   getDefaultWorkColumnConfig,
@@ -41,6 +42,7 @@ const NON_CRITERION_LABELS: Record<string, string> = {
   calc_score: "IA",
   predicted_score: "Pr",
   platform_avg: "Externa",
+  alignment_score: "IA Rk.",
 }
 
 const NON_CRITERION_TOOLTIPS: Record<string, string> = {
@@ -48,6 +50,7 @@ const NON_CRITERION_TOOLTIPS: Record<string, string> = {
   calc_score: "Nota.IA",
   predicted_score: "Nota.Pr",
   platform_avg: "Média externa",
+  alignment_score: "IA Re-rank (sob demanda)",
 }
 
 function pickPrimaryCover(covers: WorkCover[] | undefined): string | null {
@@ -82,6 +85,7 @@ function getValueForKey(work: WorkWithRelations, key: string): number | null {
     const v = work.calculated_scores?.platform_avg
     return v == null ? null : Number(v)
   }
+  if (key === "alignment_score") return work.calculated_scores?.alignment_score ?? null
   if (key.startsWith("crit_")) {
     return scoreFor(work, key.slice("crit_".length))
   }
@@ -336,6 +340,15 @@ function ScoreCell({
           {tooltipLabel}: {score.toFixed(2)}
         </TooltipContent>
       </Tooltip>
+    )
+  }
+
+  if (col.key === "alignment_score") {
+    return (
+      <AlignmentScoreCell
+        score={score}
+        justification={work.calculated_scores?.alignment_justification ?? null}
+      />
     )
   }
 

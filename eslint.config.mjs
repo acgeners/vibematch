@@ -18,6 +18,8 @@ const eslintConfig = defineConfig([
     "**/* [0-9].js",
     "**/* [0-9].tsbuildinfo",
     "scripts/seed-from-xlsx.js",
+    "**/.vibematch-next-cache/**",
+    "Users/**",
   ]),
 ]);
 

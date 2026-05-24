@@ -41,6 +41,8 @@ export interface RankingEntry {
   synopsisQuality: string | null
   observations: string | null
   year: number | null
+  updatedAt: string | null
+  lastReadAt: string | null
   genres: string[]
   scores: Record<string, number>
   tags: Array<{ id: string; name: string; slug: string; tag_group_id: string | null }>
@@ -50,10 +52,20 @@ export type RankingSortBy =
   | "final_score"
   | "calc_score"
   | "pred_score"
+  | "predicted_score"
   | "platform_avg"
   | "total_votes"
   | "chapters"
+  | "chapters_total"
+  | "chapters_read"
   | "title"
+  | "year"
+  | "synopsis_q"
+  | "updated_at"
+  | "publication_status"
+  | "personal_status"
+  | "ai_eval_status"
+  | "last_read_at"
   | "personal_fit"
   | "final_confidence"
   | "knn_score"
@@ -98,6 +110,10 @@ export interface RankingFilters {
   onlyWithFinalScore?: boolean
   onlyStubPrediction?: boolean
   onlyFavorites?: boolean
+  /** Quando true, não aplica o hard filter que esconde obras Completed/Dropped.
+   *  Default false (mantém semântica de "ranking de o que ler"). Páginas tipo
+   *  /titles e /favorites devem passar true. */
+  includeFinishedDropped?: boolean
   sortBy?: RankingSortBy
   sortDir?: "asc" | "desc"
   sortLevels?: SortLevel[]
@@ -252,7 +268,7 @@ export async function getRanking(
     .select(`
       id, title, publication_status_id, personal_status_id, ai_eval_status,
       total_chapters, chapters_read, manual_score, is_archived,
-      synopsis_quality, observations, year,
+      synopsis_quality, observations, year, updated_at, last_read_at,
       calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, platform_avg, total_votes, personal_fit, final_score_confidence, knn_score, alignment_score, alignment_justification, alignment_at),
       category_scores(criterion_slug, score),
       work_tags(tags(id, name, slug, tag_group_id)),
@@ -375,6 +391,8 @@ export async function getRanking(
       synopsisQuality: w.synopsis_quality ?? null,
       observations: w.observations ?? null,
       year: w.year ?? null,
+      updatedAt: w.updated_at ?? null,
+      lastReadAt: w.last_read_at ?? null,
       genres: genreNames,
       scores,
       tags: displayTags,
@@ -389,10 +407,13 @@ export async function getRanking(
     if (max != null) entries = entries.filter((e) => (e.scores[slug] ?? 10) <= max)
   }
 
-  // Hard filter: nunca mostrar obras já finalizadas/dropadas pelo usuário
-  entries = entries.filter(
-    (e) => !["Finalizado", "Droppado", "Completed", "Dropped"].includes(e.personalStatus)
-  )
+  // Hard filter: ranking/recomendações escondem obras já finalizadas/dropadas.
+  // Páginas tipo /titles e /favorites passam includeFinishedDropped=true.
+  if (!filters.includeFinishedDropped) {
+    entries = entries.filter(
+      (e) => !["Finalizado", "Droppado", "Completed", "Dropped"].includes(e.personalStatus)
+    )
+  }
 
   if (filters.publicationStatus?.length) {
     entries = entries.filter((e) => filters.publicationStatus!.includes(e.publicationStatus))
@@ -509,7 +530,8 @@ export async function getRanking(
       return m * (av - bv)
     }
     if (field === "calc_score") return m * (roundedScore(a.calcScore) - roundedScore(b.calcScore))
-    if (field === "pred_score") return m * (roundedScore(a.predictedScore) - roundedScore(b.predictedScore))
+    if (field === "predicted_score" || field === "pred_score")
+      return m * (roundedScore(a.predictedScore) - roundedScore(b.predictedScore))
     if (field === "platform_avg") return m * (roundedScore(a.platformAvg) - roundedScore(b.platformAvg))
     if (field === "personal_fit") {
       const av = a.personalFit ?? -Infinity
@@ -528,7 +550,24 @@ export async function getRanking(
       return m * (av - bv)
     }
     if (field === "total_votes") return m * (a.totalVotes - b.totalVotes)
-    if (field === "chapters") return m * ((a.totalChapters ?? -Infinity) - (b.totalChapters ?? -Infinity))
+    if (field === "chapters_total" || field === "chapters")
+      return m * ((a.totalChapters ?? -Infinity) - (b.totalChapters ?? -Infinity))
+    if (field === "chapters_read") return m * ((a.chaptersRead ?? -Infinity) - (b.chaptersRead ?? -Infinity))
+    if (field === "year") return m * ((a.year ?? -Infinity) - (b.year ?? -Infinity))
+    if (field === "synopsis_q") return m * (a.synopsisQuality ?? "").localeCompare(b.synopsisQuality ?? "")
+    if (field === "updated_at") {
+      const av = a.updatedAt ? Date.parse(a.updatedAt) : -Infinity
+      const bv = b.updatedAt ? Date.parse(b.updatedAt) : -Infinity
+      return m * (av - bv)
+    }
+    if (field === "last_read_at") {
+      const av = a.lastReadAt ? Date.parse(`${a.lastReadAt}T00:00:00Z`) : -Infinity
+      const bv = b.lastReadAt ? Date.parse(`${b.lastReadAt}T00:00:00Z`) : -Infinity
+      return m * (av - bv)
+    }
+    if (field === "publication_status") return m * a.publicationStatus.localeCompare(b.publicationStatus)
+    if (field === "personal_status") return m * a.personalStatus.localeCompare(b.personalStatus)
+    if (field === "ai_eval_status") return m * a.aiEvalStatus.localeCompare(b.aiEvalStatus)
     if (field.startsWith("crit_")) {
       const slug = field.slice(5)
       return m * ((a.scores[slug] ?? -Infinity) - (b.scores[slug] ?? -Infinity))

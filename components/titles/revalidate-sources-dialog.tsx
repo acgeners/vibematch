@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Image from "next/image"
 import { ImageOff, Loader2, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
@@ -21,10 +21,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { getCoverImageSrc } from "@/lib/image-proxy"
 import type { ExternalSourceId } from "@/lib/external/types"
 
 interface RevalidateSourcesDialogProps {
   workId: string
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  hideTrigger?: boolean
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -41,9 +45,20 @@ const SOURCE_LABEL: Record<string, string> = {
 // "rejected" representa o estado "nenhum match válido pra essa fonte".
 type SelectionValue = string | "rejected" | "none"
 
-export function RevalidateSourcesDialog({ workId }: RevalidateSourcesDialogProps) {
+export function RevalidateSourcesDialog({
+  workId,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
+}: RevalidateSourcesDialogProps) {
   const router = useRouter()
-  const [open, setOpen] = useState(false)
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const isControlled = controlledOpen !== undefined
+  const open = isControlled ? controlledOpen : uncontrolledOpen
+  const setOpen = (v: boolean) => {
+    if (!isControlled) setUncontrolledOpen(v)
+    onOpenChange?.(v)
+  }
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [query, setQuery] = useState<string>("")
@@ -53,8 +68,7 @@ export function RevalidateSourcesDialog({ workId }: RevalidateSourcesDialogProps
   const [selection, setSelection] = useState<Partial<Record<ExternalSourceId, SelectionValue>>>({})
   const [brokenCovers, setBrokenCovers] = useState<Set<string>>(new Set())
 
-  const handleOpen = async () => {
-    setOpen(true)
+  const runLoad = async () => {
     setLoading(true)
     try {
       const result = await revalidateWorkSources(workId)
@@ -121,6 +135,20 @@ export function RevalidateSourcesDialog({ workId }: RevalidateSourcesDialogProps
     setSelection((prev) => ({ ...prev, [source]: value }))
   }
 
+  const handleOpen = async () => {
+    setOpen(true)
+    await runLoad()
+  }
+
+  // Quando controlado externamente, dispara o load ao abrir.
+  useEffect(() => {
+    if (isControlled && open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void runLoad()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isControlled, open])
+
   const allSources = Array.from(
     new Set([
       ...(Object.keys(candidatesPerSource) as ExternalSourceId[]),
@@ -130,12 +158,14 @@ export function RevalidateSourcesDialog({ workId }: RevalidateSourcesDialogProps
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? handleOpen() : setOpen(false))}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <ShieldCheck className="h-4 w-4" />
-          Revalidar fontes
-        </Button>
-      </DialogTrigger>
+      {!hideTrigger && (
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm">
+            <ShieldCheck className="h-4 w-4" />
+            Revalidar fontes
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Revalidar fontes externas</DialogTitle>
@@ -191,7 +221,7 @@ export function RevalidateSourcesDialog({ workId }: RevalidateSourcesDialogProps
                           <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded border bg-muted">
                             {c.coverUrl && !brokenCovers.has(c.coverUrl) ? (
                               <Image
-                                src={c.coverUrl}
+                                src={getCoverImageSrc(c.coverUrl)}
                                 alt=""
                                 fill
                                 sizes="48px"

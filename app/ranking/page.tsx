@@ -3,7 +3,7 @@ import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { Header } from "@/components/layout/header"
 import { RankingTable } from "@/components/ranking/ranking-table"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
-import { RerankButton } from "@/components/ranking/rerank-button"
+import { RecommendWithAiButton } from "@/components/recommendations/recommend-with-ai-button"
 import { Badge } from "@/components/ui/badge"
 import { CRITERION_SLUGS, PERSONAL_STATUSES, PUBLICATION_STATUSES } from "@/types/domain"
 import {
@@ -263,7 +263,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
             <Badge variant="outline" className="text-sm">
               {entries.length} obra{entries.length !== 1 ? "s" : ""}
             </Badge>
-            <RerankButton topN={Math.min(50, entries.length)} />
+            <RecommendWithAiButton source="ranking" />
           </div>
         }
       />

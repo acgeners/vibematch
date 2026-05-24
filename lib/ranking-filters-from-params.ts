@@ -1,20 +1,12 @@
-"use client"
-
-import { useState, useTransition } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
-import { toast } from "sonner"
-import { Sparkles } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { rerankTopNAction } from "@/server/actions/recommendations"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { RankingFilters } from "@/server/queries/ranking"
 
-interface RerankButtonProps {
-  /** Quantos top-N do ranking atual rankear. Max 50. */
-  topN?: number
-}
-
-function parseFiltersFromSearchParams(sp: URLSearchParams): RankingFilters {
+/**
+ * Converte uma URLSearchParams da página /ranking em RankingFilters. Compartilhado
+ * entre componentes que querem rodar algo (LLM rerank, recomendação) respeitando
+ * o filtro que o usuário tem aplicado naquele momento.
+ */
+export function parseFiltersFromSearchParams(sp: URLSearchParams): RankingFilters {
   const num = (key: string) => {
     const v = sp.get(key)
     if (!v) return undefined
@@ -79,7 +71,7 @@ function parseFiltersFromSearchParams(sp: URLSearchParams): RankingFilters {
   }
 }
 
-function describeFilters(filters: RankingFilters): string {
+export function describeRankingFilters(filters: RankingFilters): string {
   const parts: string[] = []
   if (filters.genreAny?.length) parts.push(`gêneros: ${filters.genreAny.join(", ")}`)
   if (filters.tagSlugsAny?.length) parts.push(`tags: ${filters.tagSlugsAny.join(", ")}`)
@@ -87,59 +79,4 @@ function describeFilters(filters: RankingFilters): string {
     parts.push(`pub: ${filters.publicationStatus.join(", ")}`)
   if (filters.personalStatus?.length) parts.push(`status: ${filters.personalStatus.join(", ")}`)
   return parts.length > 0 ? parts.join(" | ") : "sem filtros específicos"
-}
-
-export function RerankButton({ topN = 50 }: RerankButtonProps) {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const [isPending, startTransition] = useTransition()
-  const [lastSummary, setLastSummary] = useState<string | null>(null)
-
-  const handleClick = () => {
-    const filters = parseFiltersFromSearchParams(new URLSearchParams(searchParams.toString()))
-    const modeLabel = describeFilters(filters)
-
-    startTransition(async () => {
-      try {
-        const result = await rerankTopNAction({
-          filters,
-          limit: topN,
-          modeLabel,
-        })
-        if (result.error) {
-          toast.error(result.error)
-          return
-        }
-        if (result.data) {
-          setLastSummary(result.data.modeSummary)
-          toast.success(
-            `${result.data.entries.length} obras rankeadas. Ordene por "IA Re-rank" pra ver.`,
-          )
-          router.refresh()
-        }
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao rerankear")
-      }
-    })
-  }
-
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <Button
-        variant="secondary"
-        size="sm"
-        onClick={handleClick}
-        disabled={isPending}
-        className="gap-1.5"
-      >
-        <Sparkles className="h-3.5 w-3.5" />
-        {isPending ? "Rerankeando…" : `Rerankear top ${topN} com IA`}
-      </Button>
-      {lastSummary && (
-        <p className="text-[10px] text-muted-foreground max-w-[280px] text-right line-clamp-2">
-          {lastSummary}
-        </p>
-      )}
-    </div>
-  )
 }

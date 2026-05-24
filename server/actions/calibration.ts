@@ -56,12 +56,12 @@ function chunk<T>(arr: T[], size: number): T[][] {
 async function runWithLimit<T, R>(
   items: T[],
   limit: number,
-  fn: (item: T) => Promise<R>,
+  fn: (item: T, index: number) => Promise<R>,
 ): Promise<R[]> {
   const results: R[] = []
   for (let i = 0; i < items.length; i += limit) {
     const slice = items.slice(i, i + limit)
-    const batch = await Promise.all(slice.map(fn))
+    const batch = await Promise.all(slice.map((item, j) => fn(item, i + j)))
     results.push(...batch)
   }
   return results
@@ -132,12 +132,14 @@ export async function runCalibrationAuditAction(): Promise<{
     }
 
     const allSuggestions: AuditSuggestionFromModel[] = []
-    const results = await runWithLimit(chunks, AUDIT_PARALLEL, (group) =>
-      requestCalibrationAudit(group),
+    const apiCallIds: string[] = []
+    const results = await runWithLimit(chunks, AUDIT_PARALLEL, (group, idx) =>
+      requestCalibrationAudit(group, { runId, chunkIndex: idx }),
     )
     for (const r of results) {
       allSuggestions.push(...r.suggestions)
       accumulateUsage(usage, r.usage)
+      if (r.apiCallId) apiCallIds.push(r.apiCallId)
     }
 
     const worksById = new Map<string, AuditWorkInput>(works.map((w) => [w.workId, w]))
@@ -215,6 +217,7 @@ export async function runCalibrationAuditAction(): Promise<{
         output_tokens: usage.outputTokens || null,
         cache_read_tokens: usage.cacheReadTokens || null,
         cache_creation_tokens: usage.cacheCreationTokens || null,
+        ai_api_call_ids: apiCallIds.length > 0 ? apiCallIds : null,
         completed_at: new Date().toISOString(),
       })
       .eq("id", runId)
@@ -290,7 +293,7 @@ export async function runBiasReportAction(): Promise<{
       return { error: errMsg }
     }
 
-    const result = await requestBiasReport(inputs)
+    const result = await requestBiasReport(inputs, { runId })
 
     const { data: updated, error: updError } = await supabase
       .from("calibration_runs")
@@ -302,6 +305,7 @@ export async function runBiasReportAction(): Promise<{
         output_tokens: result.usage.outputTokens,
         cache_read_tokens: result.usage.cacheReadTokens,
         cache_creation_tokens: result.usage.cacheCreationTokens,
+        ai_api_call_ids: result.apiCallId ? [result.apiCallId] : null,
         completed_at: new Date().toISOString(),
       })
       .eq("id", runId)

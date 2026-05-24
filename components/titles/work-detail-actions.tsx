@@ -3,16 +3,30 @@
 import { useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Archive, BookOpen, Edit, Heart, Loader2, Sparkles, Trash2 } from "lucide-react"
+import {
+  Archive,
+  BookOpen,
+  Edit,
+  Heart,
+  MoreHorizontal,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react"
 import { toast } from "sonner"
-import { triggerAiEvaluation } from "@/server/actions/ai"
 import { archiveWork, deleteWork, toggleFavorite, unarchiveWork } from "@/server/actions/works"
-import { AiEvaluationReviewForm } from "@/components/ai-evaluation/ai-evaluation-review-form"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import { RevalidateSourcesDialog } from "@/components/titles/revalidate-sources-dialog"
 import { StatusEditDialog } from "@/components/titles/status-edit-dialog"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,75 +36,21 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import type { AiEvaluation } from "@/types/domain"
+import { cn } from "@/lib/utils"
 
-interface WorkDetailActionsProps {
-  workId: string
-  workSlug?: string
-  workTitle: string
-  isArchived: boolean
-  isFavorite: boolean
-  coverUrl?: string | null
-  hasCriteriaScores?: boolean
-  className?: string
-  currentWork?: {
-    title: string
-    originalTitle?: string | null
-    synopsis?: string | null
-    coverUrl?: string | null
-    publicationStatus?: string | null
-    totalChapters?: number | null
-  }
-  statusInitialValues?: WorkStatusValues
-  totalChapters?: number | null
-}
-
-export function WorkDetailActions({
+export function FavoriteToggleButton({
   workId,
-  workSlug,
-  workTitle,
-  isArchived,
   isFavorite,
-  coverUrl,
-  hasCriteriaScores = false,
-  className,
-  currentWork,
-  statusInitialValues,
-  totalChapters,
-}: WorkDetailActionsProps) {
-  void workTitle
+  iconOnly = false,
+}: {
+  workId: string
+  isFavorite: boolean
+  iconOnly?: boolean
+}) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const [evaluating, setEvaluating] = useState(false)
-  const [reviewOpen, setReviewOpen] = useState(false)
-  const [statusOpen, setStatusOpen] = useState(false)
-  const [evaluation, setEvaluation] = useState<AiEvaluation | null>(null)
-  const [currentScores, setCurrentScores] = useState<Record<string, number>>({})
-
-  const handleArchive = () => {
-    startTransition(async () => {
-      const result = isArchived
-        ? await unarchiveWork(workId)
-        : await archiveWork(workId)
-      if (result.error) {
-        toast.error(result.error)
-        return
-      }
-      toast.success(isArchived ? "Obra desarquivada." : "Obra arquivada.")
-      router.refresh()
-    })
-  }
-
-  const handleToggleFavorite = () => {
+  const handleClick = () => {
     const next = !isFavorite
     startTransition(async () => {
       const result = await toggleFavorite(workId, next)
@@ -99,6 +59,140 @@ export function WorkDetailActions({
         return
       }
       toast.success(next ? "Adicionado aos favoritos." : "Removido dos favoritos.")
+      router.refresh()
+    })
+  }
+  return (
+    <Button
+      variant={isFavorite ? "default" : "outline"}
+      size={iconOnly ? "icon" : "sm"}
+      onClick={handleClick}
+      disabled={isPending}
+      aria-pressed={isFavorite}
+      aria-label={isFavorite ? "Remover dos favoritos" : "Favoritar"}
+      className={cn(isFavorite ? "bg-rose-500/90 hover:bg-rose-500 text-white" : undefined)}
+    >
+      <Heart className={isFavorite ? "h-4 w-4 fill-current" : "h-4 w-4"} />
+      {!iconOnly && (isFavorite ? "Favorito" : "Favoritar")}
+    </Button>
+  )
+}
+
+export function EditLinkButton({
+  workSlug,
+  workId,
+  iconOnly = false,
+}: {
+  workSlug?: string
+  workId: string
+  iconOnly?: boolean
+}) {
+  return (
+    <Button asChild variant="outline" size={iconOnly ? "icon" : "sm"} aria-label="Editar">
+      <Link href={`/titles/${workSlug ?? workId}/edit`}>
+        <Edit className="h-4 w-4" />
+        {!iconOnly && "Editar"}
+      </Link>
+    </Button>
+  )
+}
+
+export function StatusActionButton({
+  workId,
+  statusInitialValues,
+  totalChapters,
+  label = "Alterar Status",
+  variant = "outline",
+  size = "sm",
+  className,
+}: {
+  workId: string
+  statusInitialValues: WorkStatusValues
+  totalChapters?: number | null
+  label?: string
+  variant?: "outline" | "default" | "ghost"
+  size?: "sm" | "default" | "lg"
+  className?: string
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <Button variant={variant} size={size} onClick={() => setOpen(true)} className={className}>
+        <BookOpen className="h-4 w-4" />
+        {label}
+      </Button>
+      <StatusEditDialog
+        open={open}
+        onOpenChange={setOpen}
+        workId={workId}
+        totalChapters={totalChapters ?? null}
+        initialValues={statusInitialValues}
+      />
+    </>
+  )
+}
+
+export function UpdateDataActionButton({
+  workId,
+  currentWork,
+}: {
+  workId: string
+  currentWork: {
+    title: string
+    originalTitle?: string | null
+    synopsis?: string | null
+    coverUrl?: string | null
+    publicationStatus?: string | null
+    totalChapters?: number | null
+    observations?: string | null
+  }
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <RefreshCw className="h-4 w-4" />
+        Atualizar dados
+      </Button>
+      <UpdateDataDialog workId={workId} currentWork={currentWork} open={open} onOpenChange={setOpen} hideTrigger />
+    </>
+  )
+}
+
+export function RevalidateSourcesActionButton({ workId }: { workId: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <ShieldCheck className="h-4 w-4" />
+        Revalidar fontes
+      </Button>
+      <RevalidateSourcesDialog workId={workId} open={open} onOpenChange={setOpen} hideTrigger />
+    </>
+  )
+}
+
+export function MoreActionsMenu({
+  workId,
+  isArchived,
+  iconOnly = false,
+}: {
+  workId: string
+  isArchived: boolean
+  iconOnly?: boolean
+}) {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  const [deleteOpen, setDeleteOpen] = useState(false)
+
+  const handleArchive = () => {
+    startTransition(async () => {
+      const result = isArchived ? await unarchiveWork(workId) : await archiveWork(workId)
+      if (result.error) {
+        toast.error(result.error)
+        return
+      }
+      toast.success(isArchived ? "Obra desarquivada." : "Obra arquivada.")
       router.refresh()
     })
   }
@@ -115,138 +209,52 @@ export function WorkDetailActions({
     })
   }
 
-  const handleAiEvaluation = async () => {
-    setEvaluating(true)
-    const result = await triggerAiEvaluation(workId)
-    setEvaluating(false)
-
-    if (result.error || !result.data?.evaluation) {
-      toast.error(`Erro na avaliação IA: ${result.error ?? "resposta vazia"}`)
-      return
-    }
-
-    setEvaluation(result.data.evaluation)
-    setCurrentScores(result.data.currentScores ?? {})
-    setReviewOpen(true)
-    const reviewsUsed = result.data.reviewsUsed ?? 0
-    toast.success(
-      reviewsUsed === 0
-        ? "Avaliação IA gerada sem reviews externas."
-        : `Avaliação IA gerada usando ${reviewsUsed} review${reviewsUsed === 1 ? "" : "s"} externa${reviewsUsed === 1 ? "" : "s"}.`
-    )
-  }
-
   return (
     <>
-      <div className={className ? `flex flex-wrap gap-2 ${className}` : "flex flex-wrap gap-2"}>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleToggleFavorite}
-          disabled={isPending}
-          aria-pressed={isFavorite}
-        >
-          <Heart className={isFavorite ? "h-4 w-4 fill-rose-500 text-rose-500" : "h-4 w-4"} />
-          {isFavorite ? "Favorito" : "Favoritar"}
-        </Button>
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/titles/${workSlug ?? workId}/edit`}>
-            <Edit className="h-4 w-4" />
-            Editar
-          </Link>
-        </Button>
-        {statusInitialValues && (
-          <Button variant="outline" size="sm" onClick={() => setStatusOpen(true)}>
-            <BookOpen className="h-4 w-4" />
-            Status
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size={iconOnly ? "icon" : "sm"} aria-label="Mais ações">
+            <MoreHorizontal className="h-4 w-4" />
+            {!iconOnly && "Mais"}
           </Button>
-        )}
-        {currentWork && (
-          <UpdateDataDialog workId={workId} currentWork={currentWork} />
-        )}
-        <RevalidateSourcesDialog workId={workId} />
-        <Button variant="outline" size="sm" onClick={handleAiEvaluation} disabled={evaluating}>
-          <Sparkles className="h-4 w-4" />
-          {evaluating ? "Avaliando..." : hasCriteriaScores ? "Reavaliar IA" : "Avaliar IA"}
-        </Button>
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button variant="outline" size="sm" disabled={isPending}>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuItem onSelect={handleArchive} disabled={isPending}>
+            <Archive className="h-4 w-4" />
+            {isArchived ? "Desarquivar" : "Arquivar"}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => setDeleteOpen(true)}
+            disabled={isPending}
+            variant="destructive"
+          >
+            <Trash2 className="h-4 w-4" />
+            Deletar
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir obra permanentemente?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. A obra e todos os dados associados serão removidos.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:justify-between">
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDelete}
+            >
               <Trash2 className="h-4 w-4" />
-              Deletar
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>O que deseja fazer com esta obra?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Arquivar mantém a obra no banco, mas remove das listas principais. Excluir remove permanentemente.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter className="gap-2 sm:justify-between">
-              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <AlertDialogAction onClick={handleArchive}>
-                  <Archive className="h-4 w-4" />
-                  {isArchived ? "Desarquivar" : "Arquivar"}
-                </AlertDialogAction>
-                <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={handleDelete}>
-                  <Trash2 className="h-4 w-4" />
-                  Excluir permanentemente
-                </AlertDialogAction>
-              </div>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
-
-      <Dialog open={evaluating} onOpenChange={() => undefined}>
-        <DialogContent className="max-w-sm" showCloseButton={false}>
-          <DialogHeader className="items-center text-center">
-            <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
-              <Loader2 className="h-7 w-7 animate-spin text-primary" />
-            </div>
-            <DialogTitle>{hasCriteriaScores ? "Reavaliando com IA" : "Avaliando com IA"}</DialogTitle>
-            <DialogDescription>
-              Buscando reviews externas e gerando {hasCriteriaScores ? "uma nova avaliação" : "a avaliação"}. Isso pode levar alguns segundos.
-            </DialogDescription>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
-
-      {statusInitialValues && (
-        <StatusEditDialog
-          open={statusOpen}
-          onOpenChange={setStatusOpen}
-          workId={workId}
-          totalChapters={totalChapters ?? null}
-          initialValues={statusInitialValues}
-        />
-      )}
-
-      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Revisar avaliação IA</DialogTitle>
-            <DialogDescription>
-              Ajuste manualmente qualquer nota antes de aplicar na obra.
-            </DialogDescription>
-          </DialogHeader>
-          {evaluation && (
-            <AiEvaluationReviewForm
-              evaluation={evaluation}
-              workId={workId}
-              coverUrl={coverUrl}
-              currentScores={currentScores}
-              onSaved={() => {
-                setReviewOpen(false)
-                router.refresh()
-              }}
-              onCancel={() => setReviewOpen(false)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

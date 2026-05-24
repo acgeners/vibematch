@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter, useSearchParams } from "next/navigation"
-import { useCallback, useMemo, useState, useSyncExternalStore, useTransition } from "react"
+import { useCallback, useMemo, useState, useTransition } from "react"
 import { ArrowDown, ArrowUp, ChevronDown, Filter, Minus, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -11,19 +11,11 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
+import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { updateRankingPreferences } from "@/server/actions/settings"
-import {
-  getDefaultRankingColumnConfig,
-  normalizeRankingColumnConfig,
-  RANKING_TABLE_COLUMNS,
-  readRankingColumnConfig,
-  subscribeRankingColumnConfig,
-  writeRankingColumnConfig,
-} from "@/components/ranking/ranking-table-config"
 
 const CRITERION_LABELS: Record<string, string> = {
   romance: "Romance",
@@ -49,6 +41,13 @@ const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
   { value: "total_votes", label: "Votos" },
   { value: "title", label: "Título" },
   { value: "chapters", label: "Capítulos" },
+  { value: "chapters_read", label: "Capítulos lidos" },
+  { value: "year", label: "Ano" },
+  { value: "synopsis_q", label: "Sinopse" },
+  { value: "publication_status", label: "Publicação" },
+  { value: "personal_status", label: "Status pessoal" },
+  { value: "updated_at", label: "Atualizado" },
+  { value: "last_read_at", label: "Última leitura" },
   ...CRITERION_SLUGS.map((slug) => ({
     value: `crit_${slug}`,
     label: CRITERION_LABELS[slug] ?? slug,
@@ -1050,116 +1049,6 @@ function GroupedTagRuleGrid({
   )
 }
 
-function TableColumnsSection() {
-  const config = useSyncExternalStore(
-    subscribeRankingColumnConfig,
-    readRankingColumnConfig,
-    getDefaultRankingColumnConfig
-  )
-
-  const applyConfig = (next: ReturnType<typeof getDefaultRankingColumnConfig>) => {
-    const normalized = normalizeRankingColumnConfig(next)
-    writeRankingColumnConfig(normalized)
-  }
-
-  const columnsByKey = useMemo(
-    () => new Map(RANKING_TABLE_COLUMNS.map((column) => [column.key, column])),
-    []
-  )
-  const orderedColumns = config.order
-    .map((key) => columnsByKey.get(key))
-    .filter((column): column is (typeof RANKING_TABLE_COLUMNS)[number] => Boolean(column))
-  const hidden = new Set(config.hidden)
-
-  const toggleColumn = (key: string) => {
-    const column = columnsByKey.get(key)
-    if (column?.locked) return
-    const nextHidden = new Set(config.hidden)
-    if (nextHidden.has(key)) nextHidden.delete(key)
-    else nextHidden.add(key)
-    applyConfig({ ...config, hidden: [...nextHidden] })
-  }
-
-  const moveColumn = (key: string, direction: -1 | 1) => {
-    const index = config.order.indexOf(key)
-    const nextIndex = index + direction
-    if (index < 0 || nextIndex < 0 || nextIndex >= config.order.length) return
-    const nextOrder = [...config.order]
-    const [item] = nextOrder.splice(index, 1)
-    nextOrder.splice(nextIndex, 0, item)
-    applyConfig({ ...config, order: nextOrder })
-  }
-
-  const resetColumns = () => applyConfig(getDefaultRankingColumnConfig())
-
-  return (
-    <FilterSection title="Colunas da tabela">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">
-          Escolha quais colunas aparecem e ajuste a ordem de exibição.
-        </p>
-        <Button type="button" variant="outline" size="sm" className="h-8" onClick={resetColumns}>
-          Resetar
-        </Button>
-      </div>
-
-      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-        {orderedColumns.map((column, index) => {
-          const checked = column.locked || !hidden.has(column.key)
-          return (
-            <div
-              key={column.key}
-              className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border bg-muted/10 px-3 py-2"
-            >
-              <Checkbox
-                id={`ranking-column-${column.key}`}
-                checked={checked}
-                disabled={column.locked}
-                onCheckedChange={() => toggleColumn(column.key)}
-              />
-              <Label
-                htmlFor={`ranking-column-${column.key}`}
-                className="flex min-w-0 items-center gap-2 text-sm font-medium"
-              >
-                <span className="truncate">{column.configLabel ?? column.label}</span>
-                {column.locked && (
-                  <span className="rounded-full bg-background px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    fixa
-                  </span>
-                )}
-              </Label>
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  disabled={index === 0}
-                  onClick={() => moveColumn(column.key, -1)}
-                  title="Mover para cima"
-                >
-                  <ArrowUp className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  disabled={index === orderedColumns.length - 1}
-                  onClick={() => moveColumn(column.key, 1)}
-                  title="Mover para baixo"
-                >
-                  <ArrowDown className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </FilterSection>
-  )
-}
-
 export function RankingFilters({
   availableGenres,
   availableTags,
@@ -1540,12 +1429,11 @@ export function RankingFilters({
       </div>
 
       <Tabs defaultValue="geral" className="gap-4">
-        <TabsList className="!h-auto w-full justify-start gap-1 overflow-x-auto rounded-lg bg-background/40 p-1 [scrollbar-width:none] xl:grid xl:grid-cols-5 [&::-webkit-scrollbar]:hidden">
+        <TabsList className="!h-auto w-full justify-start gap-1 overflow-x-auto rounded-lg bg-background/40 p-1 [scrollbar-width:none] xl:grid xl:grid-cols-4 [&::-webkit-scrollbar]:hidden">
           <TabsTrigger value="geral" className="h-9 min-w-20 flex-none text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">Geral</TabsTrigger>
           <TabsTrigger value="notas" className="h-9 min-w-20 flex-none text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">Notas</TabsTrigger>
           <TabsTrigger value="generos" className="h-9 min-w-20 flex-none text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">Gêneros</TabsTrigger>
           <TabsTrigger value="tags" className="h-9 min-w-20 flex-none text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">Tags</TabsTrigger>
-          <TabsTrigger value="tabela" className="h-9 min-w-20 flex-none text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">Tabela</TabsTrigger>
         </TabsList>
 
         <TabsContent value="geral">
@@ -1601,7 +1489,7 @@ export function RankingFilters({
                     key={`personal-${s.status}`}
                     option={s}
                     active={isAllPersonal || selectedPerStatuses.has(s.status)}
-                    tooltip={s.comment}
+                    tooltip={getPersonalStatusDescription(s.status, s.comment)}
                     onClick={() => togglePersonalStatus(s.status)}
                   />
                 ))}
@@ -1804,10 +1692,6 @@ export function RankingFilters({
               searchActive={tagSearch.trim().length > 0}
             />
           </FilterSection>
-        </TabsContent>
-
-        <TabsContent value="tabela">
-          <TableColumnsSection />
         </TabsContent>
       </Tabs>
 

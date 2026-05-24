@@ -2,8 +2,9 @@
 // Used by `scripts/propose-tag-clusters.js` to populate the
 // `tag_cluster_proposal` table for human review.
 
-import Anthropic from "@anthropic-ai/sdk"
+import type Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
+import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 
 const MODEL = "claude-sonnet-4-6"
 
@@ -113,22 +114,33 @@ export async function proposeTagClusters(
     `Tag names (one per line):\n` +
     sorted.join("\n")
 
-  const client = new Anthropic({ apiKey })
+  const client = getAnthropicClient({ apiKey, maxRetries: 6 })
 
   let lastError: unknown = null
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const message = await client.messages.create({
-        model: MODEL,
-        max_tokens: 8000,
-        temperature: attempt === 0 ? 0.2 : 0,
-        system: [
-          { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
-        ],
-        tools: [TAG_CLUSTERING_TOOL],
-        tool_choice: { type: "tool", name: TAG_CLUSTERING_TOOL.name },
-        messages: [{ role: "user", content: userMessage }],
-      })
+      const { message } = await createLoggedMessage(
+        client,
+        {
+          model: MODEL,
+          max_tokens: 8000,
+          temperature: attempt === 0 ? 0.2 : 0,
+          system: [
+            { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+          ],
+          tools: [TAG_CLUSTERING_TOOL],
+          tool_choice: { type: "tool", name: TAG_CLUSTERING_TOOL.name },
+          messages: [{ role: "user", content: userMessage }],
+        },
+        {
+          operation: "tag_clustering",
+          attempt,
+          metadata: {
+            groupSlug: opts.groupSlug,
+            nTags: sorted.length,
+          },
+        },
+      )
 
       const toolUse = message.content.find(
         (block): block is Anthropic.Messages.ToolUseBlock => block.type === "tool_use",

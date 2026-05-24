@@ -121,6 +121,15 @@ export const workStatusSchema = z.object({
   observation_adjustment: z.number().min(-0.30).max(0.30).default(0),
   observations: z.string().max(2000).nullable().optional(),
   chapters_read: z.number().int().min(0).nullable().optional(),
+  last_read_at: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida")
+    .refine(
+      (v) => v <= new Date().toISOString().slice(0, 10),
+      { message: "A data não pode ser no futuro" }
+    )
+    .nullable()
+    .optional(),
   manual_score: scoreField("Nota pessoal"),
   post_story_score: scoreField("História"),
   post_fl_score: scoreField("Female Lead"),

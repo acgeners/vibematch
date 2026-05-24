@@ -155,6 +155,7 @@ export interface Work {
   ai_eval_status: AiEvalStatus
   is_archived: boolean
   is_favorite: boolean
+  last_read_at: string | null
   created_at: string
   updated_at: string
 }
@@ -410,6 +411,7 @@ export type WorkSortField =
   | "updated_at"
   | "created_at"
   | "is_favorite"
+  | "last_read_at"
 
 export interface WorkSort {
   field: WorkSortField

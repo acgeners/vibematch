@@ -39,6 +39,7 @@ const WORK_LIST_SELECT = `
   synopsis_quality,
   created_at,
   updated_at,
+  last_read_at,
   calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, platform_avg, total_votes),
   category_scores(criterion_slug, score),
   work_covers(url, is_primary, position),
@@ -49,10 +50,50 @@ const WORK_LIST_SELECT = `
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SupabaseFilterableQuery = any
 
+function normalizeTitleSearchMatch(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase()
+}
+
+function workMatchesSearchTerm(
+  work: { title: string | null; original_title: string | null; alternative_titles: string[] | null },
+  searchTerm: string,
+) {
+  const normalizedSearch = normalizeTitleSearchMatch(searchTerm)
+  if (!normalizedSearch) return false
+
+  return [
+    work.title,
+    work.original_title,
+    ...(work.alternative_titles ?? []),
+  ].some((name) => normalizeTitleSearchMatch(name).includes(normalizedSearch))
+}
+
+// Supabase/PostgREST does not support a simple ilike over text[] values, so
+// resolve title-search matches to IDs first and keep pagination/counts coherent.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getSearchMatchIds(supabase: any, searchTerm: string | undefined): Promise<string[] | null> {
+  if (!searchTerm) return null
+  const escaped = searchTerm.replace(/[%,]/g, " ").trim()
+  if (!escaped) return null
+
+  const { data, error } = await supabase
+    .from("works")
+    .select("id, title, original_title, alternative_titles")
+    .limit(1000)
+
+  if (error) throw new Error(error.message)
+
+  return (data ?? [])
+    .filter((work: { title: string | null; original_title: string | null; alternative_titles: string[] | null }) =>
+      workMatchesSearchTerm(work, escaped),
+    )
+    .map((work: { id: string }) => work.id)
+}
+
 function applyWorkFilters(
   query: SupabaseFilterableQuery,
   filters: WorkFilters,
-  searchTerm: string | undefined,
+  searchMatchIds: string[] | null,
   genreMatchIds: string[] | null,
   tagMatchIds: string[] | null,
 ): SupabaseFilterableQuery {
@@ -94,13 +135,8 @@ function applyWorkFilters(
   if (filters.isFavorite) {
     query = query.eq("is_favorite", true)
   }
-  if (searchTerm) {
-    const escaped = searchTerm.replace(/[%,]/g, " ").trim()
-    if (escaped) {
-      query = query.or(
-        `title.ilike.%${escaped}%,original_title.ilike.%${escaped}%`,
-      )
-    }
+  if (searchMatchIds) {
+    query = query.in("id", searchMatchIds.length ? searchMatchIds : ["00000000-0000-0000-0000-000000000000"])
   }
   return query
 }
@@ -123,8 +159,9 @@ export async function getWorks(
     filters.minTotalVotes != null ||
     filters.maxTotalVotes != null
 
-  // Resolve genre/tag ID filters in parallel (each is its own pivot-table query).
-  const [genreMatchIds, tagMatchIds] = await Promise.all([
+  // Resolve text/genre/tag ID filters in parallel, then apply them before paging.
+  const [searchMatchIds, genreMatchIds, tagMatchIds] = await Promise.all([
+    getSearchMatchIds(supabase, searchTerm),
     filters.genres?.length
       ? supabase
           .from("work_genres")
@@ -158,7 +195,7 @@ export async function getWorks(
     let lightQuery = supabase
       .from("works")
       .select("id, is_favorite, calculated_scores(final_score, calc_score, predicted_score, total_votes)")
-    lightQuery = applyWorkFilters(lightQuery, filters, searchTerm, genreMatchIds, tagMatchIds)
+    lightQuery = applyWorkFilters(lightQuery, filters, searchMatchIds, genreMatchIds, tagMatchIds)
 
     const { data: lightData, error: lightError } = await lightQuery
     if (lightError) throw new Error(lightError.message)
@@ -248,7 +285,7 @@ export async function getWorks(
   let query = supabase
     .from("works")
     .select(WORK_LIST_SELECT, { count: "exact" })
-  query = applyWorkFilters(query, filters, searchTerm, genreMatchIds, tagMatchIds)
+  query = applyWorkFilters(query, filters, searchMatchIds, genreMatchIds, tagMatchIds)
 
   if (sort.field === "title") {
     query = query.order("title", { ascending: sort.direction === "asc" })

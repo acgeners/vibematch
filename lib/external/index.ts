@@ -1,12 +1,12 @@
-import { searchAniList, fetchAniListById, fetchAniListReviews } from "./anilist"
-import { searchAnimePlanet, fetchAnimePlanetByTitle, fetchAnimePlanetReviews } from "./animeplanet"
+import { searchAniList, fetchAniListById, fetchAniListReviews, fetchAniListRecommendations } from "./anilist"
+import { searchAnimePlanet, fetchAnimePlanetByTitle, fetchAnimePlanetReviews, fetchAnimePlanetRecommendations } from "./animeplanet"
 import type { AnimePlanetDetail } from "./animeplanet"
 import { searchComicK, fetchComicKByHid } from "./comick"
 import { searchComix, fetchComixById } from "./comix"
-import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews } from "./jikan"
+import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews, fetchJikanMangaRecommendations } from "./jikan"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
-import { searchMangaDex, fetchMangaDexById } from "./mangadex"
-import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews } from "./mangaupdates"
+import { searchMangaDex, fetchMangaDexById, fetchMangaDexForumComments } from "./mangadex"
+import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews, fetchMangaUpdatesAlternativeTitles } from "./mangaupdates"
 import type {
   ConflictField,
   ConflictOption,
@@ -18,6 +18,8 @@ import type {
   ExternalWorkData,
   MergedCandidate,
   MultiSourceResult,
+  PlatformRating,
+  SimilarWork,
   SourcedReview,
 } from "./types"
 
@@ -162,6 +164,14 @@ function altTitleOverlap(a: Array<string | null | undefined> = [], b: Array<stri
   if (!setA.size || !setB.size) return 0
   const intersection = [...setA].filter((value) => setB.has(value)).length
   return intersection / Math.min(setA.size, setB.size)
+}
+
+function isLatinDominant(s: string | null | undefined): boolean {
+  if (!s) return false
+  const letters = s.replace(/[^\p{L}]/gu, "")
+  if (letters.length === 0) return false
+  const latin = letters.replace(/[^\p{Script=Latin}]/gu, "")
+  return latin.length / letters.length >= 0.7
 }
 
 /**
@@ -901,32 +911,84 @@ async function refineWithAlternativeTitles(
   candidates: MergedCandidate[],
   originalQuery: string,
   maxCandidates = 3,
-  maxVariantsPerCandidate = 4,
+  maxVariantsPerCandidate = 6,
 ): Promise<MergedCandidate[]> {
   const normalizedOriginal = normalizeText(originalQuery)
   const slice = candidates.slice(0, maxCandidates)
 
   await Promise.all(slice.map(async (candidate) => {
-    const missingConnectors = SEARCH_CONNECTORS.filter((c) => !candidate.sources.includes(c.source))
-    if (missingConnectors.length === 0) return
+    // Enriquece alt titles do candidato com o `associated[]` do MU detail —
+    // a search API do MU NÃO inclui associated names, só o endpoint de detalhe.
+    // Sem isso, variantes críticas como "What Caused This to Happen...?!" nunca
+    // entram no pool e o refinamento não acha a obra em fontes que só indexam
+    // pelo título alternativo (ex.: ComicK).
+    if (candidate.muId != null) {
+      const muAlts = await fetchMangaUpdatesAlternativeTitles(candidate.muId)
+      if (muAlts.length > 0) {
+        candidate.alternativeTitles = uniqueStrings([
+          ...(candidate.alternativeTitles ?? []),
+          ...muAlts,
+        ])
+      }
+    }
 
-    const variants = uniqueStrings([
+    // Skip inteligente: pula fontes onde algum título do resultado existente
+    // bate EXATO com algum nome conhecido do candidato (já enriquecido com MU
+    // associated names acima). Casos de falso positivo (ex.: ComicK retornando
+    // obra diferente com título parecido) NÃO batem exato → fonte é retried.
+    const candidateKeys = new Set(
+      [candidate.title, candidate.originalTitle, ...(candidate.alternativeTitles ?? [])]
+        .filter((n): n is string => Boolean(n))
+        .map((n) => normalizeText(n))
+        .filter((n) => n.length > 0)
+    )
+    const connectorsToTry = SEARCH_CONNECTORS.filter((c) => {
+      if (!candidate.sources.includes(c.source)) return true
+      const existingResults = candidate.sourceResults?.filter((r) => r.source === c.source) ?? []
+      if (existingResults.length === 0) return true
+      return !existingResults.some((result) => {
+        const resultKeys = [result.title, result.originalTitle, ...(result.alternativeTitles ?? [])]
+          .filter((n): n is string => Boolean(n))
+          .map((n) => normalizeText(n))
+        return resultKeys.some((k) => candidateKeys.has(k))
+      })
+    })
+    if (connectorsToTry.length === 0) return
+
+    const rawVariants = uniqueStrings([
       candidate.title,
       candidate.originalTitle,
       ...(candidate.alternativeTitles ?? []),
     ])
       .filter((v) => normalizeText(v) !== normalizedOriginal)
       .filter((v) => v.replace(/[^\p{L}\p{N}]/gu, "").length >= 3)
-      .slice(0, maxVariantsPerCandidate)
 
-    if (variants.length === 0) return
+    // Variantes em alfabeto latino primeiro — bancos ocidentais (ComicK,
+    // AnimePlanet) raramente indexam pinyin/CJK.
+    const baseVariants = [
+      ...rawVariants.filter(isLatinDominant),
+      ...rawVariants.filter((v) => !isLatinDominant(v)),
+    ].slice(0, maxVariantsPerCandidate)
 
-    await Promise.all(missingConnectors.map(async (connector) => {
-      const settled = await Promise.allSettled(variants.map((v) => connector.search(v)))
+    // Expande variantes só pras fontes strict-tokenize (ComicK, Kitsu) — outras
+    // APIs casam fine com pontuação, não precisam dobrar fan-out.
+    const stripPunct = (s: string) =>
+      s.replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim()
+    const STRICT_TOKENIZE: ReadonlySet<ExternalSourceId> = new Set(["comick", "kitsu"])
+    const variantsForSource = (source: ExternalSourceId): string[] =>
+      STRICT_TOKENIZE.has(source)
+        ? uniqueStrings([...baseVariants, ...baseVariants.map(stripPunct)])
+        : baseVariants
+
+    if (baseVariants.length === 0) return
+
+    await Promise.all(connectorsToTry.map(async (connector) => {
+      const queries = variantsForSource(connector.source)
+      const settled = await Promise.allSettled(queries.map((v) => connector.search(v)))
       const flatResults = settled.flatMap((entry, i) => {
-        if (entry.status === "fulfilled") return entry.value.map((result) => ({ result, variant: variants[i] }))
+        if (entry.status === "fulfilled") return entry.value.map((result) => ({ result, variant: queries[i] }))
         console.error(
-          `[searchAllSources] refine connector=${connector.source} variant="${variants[i]}" failed`,
+          `[searchAllSources] refine connector=${connector.source} variant="${queries[i]}" failed`,
           entry.reason instanceof Error ? entry.reason.message : entry.reason
         )
         return []
@@ -954,27 +1016,59 @@ async function refineWithAlternativeTitles(
 
       if (accepted.length === 0) {
         console.log(
-          `[searchAllSources] refine source=${connector.source}: ${flatResults.length} results, 0 accepted for candidate="${candidate.title}"`
+          `[searchAllSources] refine source=${connector.source}: ${flatResults.length} raw, 0 accepted ` +
+          `for candidate="${candidate.title}" — raw titles=[${flatResults.slice(0, 5).map((r) => r.result.title).join(" | ")}]`
         )
         return
       }
-      const best = accepted[0]
 
-      if (candidate.sourceResults?.some((r) => r.id === best.result.id)) return
+      const isNewSource = !candidate.sources.includes(connector.source)
+      // Snapshot do melhor matchScore atual ANTES de adicionar novas opções —
+      // pra decidir se o novo entry deve ser promovido a primário.
+      const priorBestScore = Math.max(
+        0,
+        ...((candidate.sourceCandidates ?? [])
+          .filter((o) => o.source === connector.source)
+          .map((o) => o.matchScore ?? 0))
+      )
 
-      candidate.sources = [...new Set([...candidate.sources, connector.source])]
-      candidate.sourceResults = [...(candidate.sourceResults ?? []), best.result]
+      // Adiciona apenas o MELHOR resultado novo como opção — adicionar todos os
+      // aceitos polui o picker com falsos positivos em fontes que devolveram
+      // muitos resultados parcialmente parecidos (ex.: várias obras "Pure Love"
+      // diferentes pra uma busca contendo "Pure Love" como variante).
+      const best = accepted.find((entry) => {
+        if (candidate.sourceResults?.some((r) => r.id === entry.result.id)) return false
+        const extId = sourceId(entry.result)
+        const dupOption = (candidate.sourceCandidates ?? []).some(
+          (o) => o.source === connector.source && o.externalId === extId
+        )
+        return !dupOption
+      })
+      if (!best) return
+
       addSourceCandidateOption(candidate, sourceCandidateOption(best.result, best.titleScore))
-      candidate.alternativeTitles = uniqueStrings([
-        ...(candidate.alternativeTitles ?? []),
-        best.result.originalTitle,
-        ...(best.result.alternativeTitles ?? []),
-      ])
-      candidate.genres = uniqueStrings([...(candidate.genres ?? []), ...(best.result.genres ?? [])])
-      fillCandidateIdFromResult(candidate, best.result)
+
+      // Promove pro `sourceResults`/IDs só se a fonte estava ausente OU se o
+      // novo match supera o existente por margem significativa. Caso contrário,
+      // mantém o primário atual e o novo fica como opção no picker.
+      const shouldPromote = isNewSource || best.titleScore >= priorBestScore + 0.1
+
+      if (shouldPromote) {
+        candidate.sources = [...new Set([...candidate.sources, connector.source])]
+        candidate.sourceResults = [...(candidate.sourceResults ?? []), best.result]
+        candidate.alternativeTitles = uniqueStrings([
+          ...(candidate.alternativeTitles ?? []),
+          best.result.originalTitle,
+          ...(best.result.alternativeTitles ?? []),
+        ])
+        candidate.genres = uniqueStrings([...(candidate.genres ?? []), ...(best.result.genres ?? [])])
+        if (isNewSource) fillCandidateIdFromResult(candidate, best.result)
+      }
 
       console.log(
-        `[searchAllSources] refine added source=${connector.source} via variant="${best.variant}" to candidate="${candidate.title}" (title=${best.titleScore.toFixed(2)} composite=${best.composite.toFixed(2)})`
+        `[searchAllSources] refine added source=${connector.source} via variant="${best.variant}" ` +
+        `to candidate="${candidate.title}" (title=${best.titleScore.toFixed(2)} ` +
+        `composite=${best.composite.toFixed(2)} promote=${shouldPromote})`
       )
     }))
   }))
@@ -1039,15 +1133,39 @@ async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<
     candidate.animePlanetSlug
       ? fetchAnimePlanetReviews(candidate.animePlanetSlug).then((reviews) => ({ source: "animeplanet" as const, reviews }))
       : Promise.resolve(null),
+    candidate.mangadexId
+      ? fetchMangaDexForumComments(candidate.mangadexId).then((reviews) => ({ source: "mangadex" as const, reviews }))
+      : Promise.resolve(null),
   ]
 
   const settled = await Promise.allSettled(fetchers)
 
+  // DEBUG: contar reviews raw por fonte antes de filtrar
+  const rawCounts = settled.map((entry, i) => {
+    const src = ["mangaupdates", "anilist", "myanimelist", "kitsu", "animeplanet", "mangadex"][i]
+    if (entry.status === "rejected") return `${src}=REJECTED(${entry.reason})`
+    if (!entry.value) return `${src}=skipped(no_id)`
+    const reviews = entry.value.reviews
+    const lens = reviews.map((r) => r.length).sort((a, b) => b - a).slice(0, 3)
+    return `${src}=${reviews.length}(top3lens=${lens.join(",")})`
+  })
+  console.log(`[collectReviews] candidate="${candidate.title}" ids={mu:${candidate.muId},ani:${candidate.anilistId},mal:${candidate.malId},kitsu:${candidate.kitsuId},ap:${candidate.animePlanetSlug},md:${candidate.mangadexId}} raw=${rawCounts.join(" ")}`)
+
+  // Kitsu expõe "reactions" (não reviews completos), tipicamente 40-90 chars.
+  // Pra outras fontes mantemos o threshold em 100 (reviews curtos demais
+  // adicionam ruído). Pra Kitsu baixamos pra 30 — uma frase como "great FL,
+  // dark psychological tone" já vira sinal útil pro modelo.
+  const minLengthBySource: Partial<Record<ExternalSourceId, number>> = {
+    kitsu: 30,
+    // mangadex já vem com filtro + dedup no fetcher (XenForo tem muito ruído);
+    // o threshold daqui é redundante mas explícito.
+    mangadex: 150,
+  }
   return settled
     .flatMap((entry) => (entry.status === "fulfilled" && entry.value ? [entry.value] : []))
     .flatMap((group) =>
       group.reviews
-        .filter((text) => text.trim().length >= 100)
+        .filter((text) => text.trim().length >= (minLengthBySource[group.source] ?? 100))
         .map((text): SourcedReview => {
           const { rating, cleanText } = extractUserRating(text)
           return {
@@ -1060,6 +1178,100 @@ async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<
           }
         })
     )
+}
+
+/**
+ * Normaliza título para dedup entre fontes (mesma obra pode aparecer com
+ * variações de capitalização, pontuação, espaços).
+ */
+function normalizeSimilarTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+}
+
+/**
+ * Coleta obras similares ("if you liked X, try Y") em paralelo das fontes que
+ * expõem recomendações curadas pela comunidade: AniList (rating + tags), Jikan/MAL
+ * (votos), AnimePlanet (apenas títulos via scrape).
+ *
+ * Faz merge por título normalizado: quando a mesma obra aparece em ≥2 fontes,
+ * soma os pesos e concatena `sources`. Ranqueia por (nº de fontes, peso) e
+ * devolve até `limit` (default 6). Nenhuma fonte é obrigatória — fail-soft.
+ */
+async function collectSimilarFromCandidate(candidate: MergedCandidate, limit = 6): Promise<SimilarWork[]> {
+  const fetchers: Array<Promise<unknown>> = [
+    candidate.anilistId
+      ? fetchAniListRecommendations(candidate.anilistId).then((recs) => ({ source: "anilist" as const, recs }))
+      : Promise.resolve(null),
+    candidate.malId
+      ? fetchJikanMangaRecommendations(candidate.malId).then((recs) => ({ source: "myanimelist" as const, recs }))
+      : Promise.resolve(null),
+    candidate.animePlanetSlug
+      ? fetchAnimePlanetRecommendations(candidate.animePlanetSlug).then((titles) => ({ source: "animeplanet" as const, titles }))
+      : Promise.resolve(null),
+  ]
+
+  const settled = await Promise.allSettled(fetchers)
+  const merged = new Map<string, SimilarWork>()
+
+  function upsert(title: string, source: ExternalSourceId, weight: number, genres?: string[], tags?: string[]) {
+    const key = normalizeSimilarTitle(title)
+    if (!key) return
+    const existing = merged.get(key)
+    if (existing) {
+      if (!existing.sources.includes(source)) existing.sources.push(source)
+      existing.weight = (existing.weight ?? 0) + weight
+      if (genres?.length) {
+        existing.genres = uniqueStrings([...existing.genres, ...genres])
+      }
+      if (tags?.length) {
+        existing.tags = uniqueStrings([...(existing.tags ?? []), ...tags])
+      }
+      return
+    }
+    merged.set(key, {
+      title,
+      genres: genres ?? [],
+      tags: tags && tags.length > 0 ? tags : undefined,
+      sources: [source],
+      weight,
+    })
+  }
+
+  for (const entry of settled) {
+    if (entry.status !== "fulfilled" || !entry.value) continue
+    const value = entry.value as
+      | { source: "anilist"; recs: Awaited<ReturnType<typeof fetchAniListRecommendations>> }
+      | { source: "myanimelist"; recs: Awaited<ReturnType<typeof fetchJikanMangaRecommendations>> }
+      | { source: "animeplanet"; titles: string[] }
+
+    if (value.source === "anilist") {
+      for (const rec of value.recs) {
+        upsert(rec.title, "anilist", rec.rating, rec.genres, rec.tags)
+      }
+    } else if (value.source === "myanimelist") {
+      for (const rec of value.recs) {
+        upsert(rec.title, "myanimelist", rec.votes)
+      }
+    } else {
+      // animeplanet — sem peso, atribui 1 fixo (sinal apenas de presença)
+      for (const title of value.titles) {
+        upsert(title, "animeplanet", 1)
+      }
+    }
+  }
+
+  return Array.from(merged.values())
+    .sort((a, b) => {
+      const sourceDiff = b.sources.length - a.sources.length
+      if (sourceDiff !== 0) return sourceDiff
+      return (b.weight ?? 0) - (a.weight ?? 0)
+    })
+    .slice(0, limit)
 }
 
 /**
@@ -1163,14 +1375,79 @@ function restrictCandidateToSources(candidate: MergedCandidate, sources: Readonl
   }
 }
 
+// ============================================================================
+// Review context cache (TTL 5min)
+// ============================================================================
+// Cobre o caso "fechei o popup da avaliação e cliquei em Reavaliar de novo":
+// os fetchers externos (MU/AniList/MAL/Kitsu/AnimePlanet/MangaDex) dominam o
+// tempo total (5-30s) e raramente mudam em janelas curtas. A chave deriva da
+// identidade do candidato (título + IDs externos) e dos filtros, NÃO do
+// workId — assim Path A e Path B compartilham cache quando os IDs batem.
+// Armazenamos a Promise (não o resultado) pra deduplicar chamadas concorrentes
+// pra mesma chave. Falhas evitam o cache pra a próxima call retentar fresh.
+
+const REVIEW_CONTEXT_CACHE_TTL_MS = 5 * 60 * 1000
+const REVIEW_CONTEXT_CACHE_MAX_ENTRIES = 100
+
+interface ReviewContextResult {
+  sourcedReviews: SourcedReview[]
+  allReviews: SourcedReview[]
+  externalContext: string[]
+  platformRatings: PlatformRating[]
+  similarWorks: SimilarWork[]
+}
+
+interface ReviewContextCacheEntry {
+  promise: Promise<ReviewContextResult>
+  expiresAt: number
+}
+
+const reviewContextCache = new Map<string, ReviewContextCacheEntry>()
+
+function reviewContextCacheKey(parts: Record<string, unknown>): string {
+  const ordered: Record<string, unknown> = {}
+  for (const k of Object.keys(parts).sort()) ordered[k] = parts[k]
+  return JSON.stringify(ordered)
+}
+
+function readReviewContextCache(key: string): Promise<ReviewContextResult> | null {
+  const entry = reviewContextCache.get(key)
+  if (!entry) return null
+  if (entry.expiresAt < Date.now()) {
+    reviewContextCache.delete(key)
+    return null
+  }
+  reviewContextCache.delete(key)
+  reviewContextCache.set(key, entry)
+  return entry.promise
+}
+
+function writeReviewContextCache(key: string, promise: Promise<ReviewContextResult>): void {
+  reviewContextCache.set(key, {
+    promise,
+    expiresAt: Date.now() + REVIEW_CONTEXT_CACHE_TTL_MS,
+  })
+  while (reviewContextCache.size > REVIEW_CONTEXT_CACHE_MAX_ENTRIES) {
+    const oldest = reviewContextCache.keys().next().value
+    if (oldest === undefined) break
+    reviewContextCache.delete(oldest)
+  }
+  promise.catch(() => {
+    if (reviewContextCache.get(key)?.promise === promise) {
+      reviewContextCache.delete(key)
+    }
+  })
+}
+
 async function hydrateAndFilterCandidate(candidate: MergedCandidate): Promise<{
   hydrated: ExternalSearchResult[]
   accepted: ExternalSearchResult[]
   uniqueAccepted: ExternalSearchResult[]
   rejected: Array<{ result: ExternalSearchResult; reason?: string }>
   apDetail: AnimePlanetDetail | null
+  muStatusText: string | undefined
 }> {
-  const { hydrated, apDetail } = await hydrateCandidate(candidate)
+  const { hydrated, apDetail, muStatusText } = await hydrateCandidate(candidate)
   const accepted: ExternalSearchResult[] = []
   const rejected: Array<{ result: ExternalSearchResult; reason?: string }> = []
   const trustedSet = new Set(candidate.trustedSources ?? [])
@@ -1189,7 +1466,7 @@ async function hydrateAndFilterCandidate(candidate: MergedCandidate): Promise<{
       return 0
     })
 
-  return { hydrated, accepted, uniqueAccepted, rejected, apDetail }
+  return { hydrated, accepted, uniqueAccepted, rejected, apDetail, muStatusText }
 }
 
 export async function fetchExternalEvaluationContextForCandidate(
@@ -1199,7 +1476,42 @@ export async function fetchExternalEvaluationContextForCandidate(
     perSource?: number
     total?: number
   } = {}
-): Promise<{ sourcedReviews: SourcedReview[]; externalContext: string[] }> {
+): Promise<ReviewContextResult> {
+  const cacheKey = reviewContextCacheKey({
+    fn: "candidate",
+    title: candidate.title,
+    anilistId: candidate.anilistId ?? null,
+    muId: candidate.muId ?? null,
+    malId: candidate.malId ?? null,
+    kitsuId: candidate.kitsuId ?? null,
+    mangadexId: candidate.mangadexId ?? null,
+    animePlanetSlug: candidate.animePlanetSlug ?? null,
+    comickHid: candidate.comickHid ?? null,
+    rejectedSources: [...(opts.rejectedSources ?? [])].sort(),
+    perSource: opts.perSource ?? 8,
+    total: opts.total ?? 30,
+  })
+  const cached = readReviewContextCache(cacheKey)
+  if (cached) {
+    console.info(`[reviews-cache] hit candidate "${candidate.title}"`)
+    return cached
+  }
+  const promise = fetchExternalEvaluationContextForCandidateUncached(candidate, opts)
+  writeReviewContextCache(cacheKey, promise)
+  return promise
+}
+
+/** Pool completo de reviews coletadas, antes do filtro de seleção pro prompt.
+ * `allReviews` é usado pra persistir em `work_reviews`; `sourcedReviews` é só
+ * o que cabe no prompt e perde sinal pra a recomendação. */
+async function fetchExternalEvaluationContextForCandidateUncached(
+  candidate: MergedCandidate,
+  opts: {
+    rejectedSources?: ReadonlyArray<string>
+    perSource?: number
+    total?: number
+  } = {}
+): Promise<ReviewContextResult> {
   const { uniqueAccepted } = await hydrateAndFilterCandidate(candidate)
   const rejected = new Set((opts.rejectedSources ?? []) as string[])
   const filteredAccepted = rejected.size > 0
@@ -1207,16 +1519,30 @@ export async function fetchExternalEvaluationContextForCandidate(
     : uniqueAccepted
   const acceptedSources = new Set(filteredAccepted.map((result) => result.source))
   const reviewCandidate = restrictCandidateToSources(candidate, acceptedSources)
-  const allReviews = await collectReviewsFromCandidate(reviewCandidate)
+  const [allReviews, similarWorks] = await Promise.all([
+    collectReviewsFromCandidate(reviewCandidate),
+    collectSimilarFromCandidate(reviewCandidate),
+  ])
+
+  const platformRatings: PlatformRating[] = filteredAccepted
+    .filter((result) => typeof result.score === "number" || typeof result.votes === "number")
+    .map((result) => ({
+      platform: result.source,
+      rating: typeof result.score === "number" ? result.score : undefined,
+      votes: typeof result.votes === "number" ? result.votes : undefined,
+    }))
 
   return {
     sourcedReviews: selectReviewsForEvaluation(allReviews, {
-      perSource: opts.perSource ?? 6,
-      total: opts.total ?? 20,
+      perSource: opts.perSource ?? 8,
+      total: opts.total ?? 30,
     }),
+    allReviews,
     externalContext: uniqueSynopsisBlocks(
       filteredAccepted.map((result) => result.synopsis)
     ).slice(0, 6),
+    platformRatings,
+    similarWorks,
   }
 }
 
@@ -1242,7 +1568,30 @@ export async function fetchExternalEvaluationContextForWork(input: {
    * filtradas após a coleta — evita propagação de matches errados.
    */
   rejectedSources?: ReadonlyArray<string>
-}): Promise<{ sourcedReviews: SourcedReview[]; externalContext: string[] }> {
+}): Promise<ReviewContextResult> {
+  const cacheKey = reviewContextCacheKey({
+    fn: "work",
+    title: input.title,
+    originalTitle: input.originalTitle ?? null,
+    alternativeTitles: [...(input.alternativeTitles ?? [])].sort(),
+    rejectedSources: [...(input.rejectedSources ?? [])].sort(),
+  })
+  const cached = readReviewContextCache(cacheKey)
+  if (cached) {
+    console.info(`[reviews-cache] hit work "${input.title}"`)
+    return cached
+  }
+  const promise = fetchExternalEvaluationContextForWorkUncached(input)
+  writeReviewContextCache(cacheKey, promise)
+  return promise
+}
+
+async function fetchExternalEvaluationContextForWorkUncached(input: {
+  title: string
+  originalTitle?: string | null
+  alternativeTitles?: string[] | null
+  rejectedSources?: ReadonlyArray<string>
+}): Promise<ReviewContextResult> {
   const queries = uniqueStrings([
     input.title,
     input.originalTitle,
@@ -1255,25 +1604,30 @@ export async function fetchExternalEvaluationContextForWork(input: {
     const candidates = await searchAllSources(query)
     for (const candidate of candidates) {
       if ((candidate.matchScore ?? 0) < 0.72) break // candidates are sorted desc; no point continuing
-      const { sourcedReviews, externalContext } = await fetchExternalEvaluationContextForCandidate(candidate, {
+      const result = await fetchExternalEvaluationContextForCandidate(candidate, {
         rejectedSources: [...rejected],
-        perSource: 6,
-        total: 20,
+        perSource: 8,
+        total: 30,
       })
-      if (sourcedReviews.length || externalContext.length) {
-        return { sourcedReviews, externalContext }
+      if (
+        result.sourcedReviews.length ||
+        result.externalContext.length ||
+        result.platformRatings.length ||
+        result.similarWorks.length
+      ) {
+        return result
       }
     }
   }
 
-  return { sourcedReviews: [], externalContext: [] }
+  return { sourcedReviews: [], allReviews: [], externalContext: [], platformRatings: [], similarWorks: [] }
 }
 
 // ============================================================================
 // Hydration
 // ============================================================================
 
-async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated: ExternalSearchResult[]; apDetail: AnimePlanetDetail | null }> {
+async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated: ExternalSearchResult[]; apDetail: AnimePlanetDetail | null; muStatusText: string | undefined }> {
   const base = candidate.sourceResults ?? []
   const settled = await Promise.allSettled([
     candidate.anilistId ? fetchAniListById(candidate.anilistId) : null,
@@ -1305,7 +1659,8 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
   if (md) hydrated.push({ id: `mangadex:${candidate.mangadexId}`, source: "mangadex", title: md.title, alternativeTitles: md.alternativeTitles, synopsis: md.synopsis, coverUrl: md.coverUrl, year: md.year, publicationStatus: md.publicationStatus, chapters: md.chapters, score: md.rating, votes: md.votes, genres: md.genres })
   if (cmx) hydrated.push({ id: `comick:${candidate.comickHid}`, source: "comick", title: cmx.title, alternativeTitles: cmx.alternativeTitles, synopsis: cmx.synopsis, coverUrl: cmx.coverUrl, publicationStatus: cmx.publicationStatus, chapters: cmx.lastChapter, score: cmx.rating, votes: cmx.votes, genres: cmx.tags })
   if (cmix) hydrated.push({ id: `comix:${candidate.comixHid}`, source: "comix", title: cmix.title, alternativeTitles: cmix.alternativeTitles, synopsis: cmix.synopsis, coverUrl: cmix.coverUrl, year: cmix.year, publicationStatus: cmix.publicationStatus, chapters: cmix.chapters, score: cmix.rating, votes: cmix.votes, genres: cmix.tags })
-  return { hydrated, apDetail: ap as AnimePlanetDetail | null }
+  const muStatusText = typeof mu?.statusText === "string" ? mu.statusText : undefined
+  return { hydrated, apDetail: ap as AnimePlanetDetail | null, muStatusText }
 }
 
 // ============================================================================
@@ -1333,7 +1688,7 @@ function bySourcePriority<T extends { source: ExternalSourceId }>(items: T[]): T
   )
 }
 
-function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[], apDetail?: AnimePlanetDetail | null): ExternalWorkData {
+function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[], apDetail?: AnimePlanetDetail | null, muStatusText?: string): ExternalWorkData {
   const primary = accepted[0] ?? candidate
   const synopsisInputs: Array<{ source: ExternalSourceId; text: string | null | undefined }> = accepted.map(
     (result) => ({ source: result.source, text: result.synopsis })
@@ -1392,6 +1747,7 @@ function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[],
     apRating: apDetail?.rating ?? undefined,
     apVotes: apDetail?.votes ?? undefined,
     externalPlatformRatings: [...ratings, ...apEntry],
+    mangaUpdatesStatusText: muStatusText,
   }
 }
 
@@ -1447,9 +1803,9 @@ function detectConflict<K extends keyof ExternalSearchResult>(
 // ============================================================================
 
 export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promise<MultiSourceResult> {
-  const { apDetail, uniqueAccepted, rejected } = await hydrateAndFilterCandidate(candidate)
+  const { apDetail, uniqueAccepted, rejected, muStatusText } = await hydrateAndFilterCandidate(candidate)
   const reviews = candidate.muId ? await fetchMangaUpdatesReviews(candidate.muId) : []
-  const data = mergeData(candidate, uniqueAccepted, apDetail)
+  const data = mergeData(candidate, uniqueAccepted, apDetail, muStatusText)
 
   // Persist external IDs for accepted sources. Cross-linked/trusted IDs are also
   // safe to keep even when a scraper is temporarily blocked (AnimePlanet/CF),

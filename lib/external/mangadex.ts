@@ -167,6 +167,92 @@ export async function searchMangaDex(title: string): Promise<MangaDexResult[]> {
   }
 }
 
+/**
+ * Comentários do fórum MangaDex (XenForo). A página principal da obra esconde
+ * os comments atrás de gating de supporter; o conteúdo público mora em
+ * `forums.mangadex.org/threads/{threadId}`. O `threadId` vem do endpoint
+ * `/statistics/manga/{id}`.
+ *
+ * Sinal de qualidade variável: a maioria dos posts são reações curtas ("OMG",
+ * "can't wait"). Filtramos por tamanho (>=200 chars depois de strip de HTML)
+ * pra ficar com os comentários substantivos. Pagamos custo de scraping em
+ * troca de cobertura — MangaDex tem 1000+ posts em obras populares.
+ */
+export async function fetchMangaDexForumComments(mangadexId: string): Promise<string[]> {
+  try {
+    // 1. Resolve threadId + total de replies via statistics endpoint.
+    const statsRes = await fetch(`${MD_BASE}/statistics/manga/${mangadexId}`, { cache: "no-store" })
+    if (!statsRes.ok) return []
+    const statsJson = await statsRes.json()
+    const stat = statsJson?.statistics?.[mangadexId] as { comments?: { threadId?: number; repliesCount?: number } } | undefined
+    const threadId = stat?.comments?.threadId
+    if (!threadId) return []
+    const repliesCount = stat?.comments?.repliesCount ?? 0
+
+    // 2. XenForo pagina 20 posts/página. As páginas iniciais costumam ser
+    // reações curtas ("OMG release!"); o meio/fim do thread concentra
+    // discussão substantiva. Em vez de pegar só 1-2, samplamos 5 páginas
+    // distribuídas pelo thread inteiro.
+    const totalPages = Math.max(1, Math.ceil(repliesCount / 20))
+    const pagesToFetch: number[] = totalPages <= 5
+      ? Array.from({ length: totalPages }, (_, i) => i + 1)
+      : [
+          1,
+          Math.max(2, Math.ceil(totalPages * 0.25)),
+          Math.max(3, Math.ceil(totalPages * 0.5)),
+          Math.max(4, Math.ceil(totalPages * 0.75)),
+          totalPages,
+        ]
+    const uniquePages = Array.from(new Set(pagesToFetch))
+
+    const fetchPage = async (page: number): Promise<string> => {
+      try {
+        const url = `https://forums.mangadex.org/threads/${threadId}/page-${page}`
+        const res = await fetch(url, {
+          cache: "no-store",
+          redirect: "follow",
+          headers: { "User-Agent": "Mozilla/5.0" },
+        })
+        if (!res.ok) return ""
+        return await res.text()
+      } catch {
+        return ""
+      }
+    }
+
+    const htmls = await Promise.all(uniquePages.map(fetchPage))
+    const combined = htmls.join("")
+
+    // 3. Extrai bodies dos posts (XenForo: <div class="bbWrapper">...</div>),
+    // filtra por tamanho (>=150 chars) e dedup por prefixo pra evitar quote-spam.
+    const bodyRegex = /<div class="bbWrapper">([\s\S]*?)<\/div>\s*\n/g
+    const posts: string[] = []
+    const seenPrefixes = new Set<string>()
+    let match: RegExpExecArray | null
+    while ((match = bodyRegex.exec(combined)) !== null) {
+      const raw = match[1]
+      const noHtml = raw.replace(/<[^>]+>/g, " ")
+      const decoded = noHtml
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#039;/g, "'")
+        .replace(/&nbsp;/g, " ")
+      const cleaned = decoded.replace(/\s+/g, " ").trim()
+      if (cleaned.length < 150) continue
+      const prefix = cleaned.slice(0, 80).toLowerCase()
+      if (seenPrefixes.has(prefix)) continue
+      seenPrefixes.add(prefix)
+      posts.push(cleaned.slice(0, 900))
+    }
+
+    return posts
+  } catch {
+    return []
+  }
+}
+
 export async function fetchMangaDexById(id: string): Promise<MangaDexDetail | null> {
   try {
     const url = new URL(`${MD_BASE}/manga/${id}`)

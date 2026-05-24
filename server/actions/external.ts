@@ -6,9 +6,10 @@ import { TAG_GROUP_ID_TO_NORMALIZED_SLUG, normalizeTagGroupSlug } from "@/lib/co
 import { TAG_GROUPS_CATALOG, GENRE_NAMES } from "@/lib/constants/tags"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { searchAllSources, fetchMultiSourceDetails, fetchExternalEvaluationContextForWork, fetchExternalEvaluationContextForCandidate, buildCandidateFromExternalIds, SEARCH_CONNECTORS, bestTitleMatch } from "@/lib/external/index"
-import { requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
+import { fetchMangaUpdatesAlternativeTitles } from "@/lib/external/mangaupdates"
+import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
 import { classifyTagsByGroup } from "@/lib/ai-evaluation/tag-classifier"
-import type { ExternalSourceId, MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField } from "@/lib/external/types"
+import type { ExternalSourceId, MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField, SourcedReview, ExternalSearchResult } from "@/lib/external/types"
 import type { CriterionSlug } from "@/types/domain"
 import { revalidatePath } from "next/cache"
 import { pickPrimaryCover } from "@/lib/work-derived"
@@ -289,6 +290,11 @@ export interface CandidateAiResult {
   promptVersion: string
   /** Hash canônico do input — propagado pra ai_evaluations.input_hash no createWork. */
   inputHash: string
+  /** Pool completo de reviews coletado durante a avaliação. O client carrega
+   * isto até o createWork, que persiste em work_reviews após a obra ser criada. */
+  externalReviews: SourcedReview[]
+  /** Diagnóstico de por que não há reviews externas no prompt. null quando ao menos 1 review foi enviada. */
+  noReviewsReason: "no_external_ids" | "all_rejected" | "search_miss" | "sources_returned_empty" | null
 }
 
 /**
@@ -297,11 +303,16 @@ export interface CandidateAiResult {
  * pre-filled with the 9 criterion scores by the time the user clicks "Salvar".
  *
  * The existing post-save evaluation flow ([triggerAiEvaluation] in server/actions/ai.ts,
- * used by /ai-evaluation and the "Reavaliar AI" button) is intentionally NOT changed.
- * Both paths converge on [requestAiEvaluation] but at different lifecycle points.
+ * used by /ai-evaluation and the "Reavaliar AI" button) converges on the same
+ * [requestAiEvaluation] with the same [AI_EVAL_REVIEW_CAPS], so a given input
+ * produces the same hash and hits the same cache entry across both flows.
  *
- * Fails soft: any error returns null so the create flow continues without AI.
+ * Errors propagate to the caller so the wizard can surface them to the user.
+ * The caller is responsible for deciding whether to continue without scores.
  */
+const CREATE_FLOW_OPUS_ID = "claude-opus-4-7"
+const CREATE_FLOW_SONNET_ID = "claude-sonnet-4-6"
+
 export async function evaluateCandidateForCreate(input: {
   title: string
   originalTitle?: string | null
@@ -312,60 +323,81 @@ export async function evaluateCandidateForCreate(input: {
   coverUrl?: string | null
   externalIds?: Partial<Record<ExternalSourceId, string>>
   externalContext?: string[]
-}): Promise<CandidateAiResult | null> {
-  try {
-    const hasExternalIds = input.externalIds && Object.values(input.externalIds).some(Boolean)
-    const contextResult = hasExternalIds
-      ? await fetchExternalEvaluationContextForCandidate(
-          buildCandidateFromExternalIds({
-            title: input.title,
-            originalTitle: input.originalTitle ?? null,
-            alternativeTitles: input.alternativeTitles ?? null,
-          }, input.externalIds ?? {}),
-          { perSource: 4, total: 12 }
-        )
-      : await fetchExternalEvaluationContextForWork({
+  /** Override do modelo Claude. Default usa o MODEL configurado no service. */
+  model?: "sonnet" | "opus"
+}): Promise<CandidateAiResult> {
+  const externalIdEntries = Object.entries(input.externalIds ?? {}).filter(([, id]) => Boolean(id))
+  const hasExternalIds = externalIdEntries.length > 0
+  const contextResult = hasExternalIds
+    ? await fetchExternalEvaluationContextForCandidate(
+        buildCandidateFromExternalIds({
           title: input.title,
           originalTitle: input.originalTitle ?? null,
           alternativeTitles: input.alternativeTitles ?? null,
-        })
-    const externalContext = input.externalContext ?? contextResult.externalContext
+        }, input.externalIds ?? {}),
+        { ...AI_EVAL_REVIEW_CAPS }
+      )
+    : await fetchExternalEvaluationContextForWork({
+        title: input.title,
+        originalTitle: input.originalTitle ?? null,
+        alternativeTitles: input.alternativeTitles ?? null,
+      })
+  const externalContext = input.externalContext ?? contextResult.externalContext
 
-    const response = await requestAiEvaluation({
-      workId: `external:${input.title}`,
-      title: input.title,
-      synopsis: input.synopsis ?? undefined,
-      genres: input.genres ?? [],
-      tags: tagsForAi(input.tags),
-      sourcedReviews: contextResult.sourcedReviews,
-      externalContext,
-      coverUrl: input.coverUrl ?? null,
-    })
+  const modelOverride =
+    input.model === "opus"
+      ? CREATE_FLOW_OPUS_ID
+      : input.model === "sonnet"
+        ? CREATE_FLOW_SONNET_ID
+        : undefined
 
-    const scores: Partial<Record<CriterionSlug, number>> = {}
-    const justifications: Partial<Record<CriterionSlug, string>> = {}
-    for (const entry of response.scores) {
-      const value = Number(entry.suggestedScore)
-      if (Number.isFinite(value)) {
-        scores[entry.criterionSlug as CriterionSlug] = Math.round(value * 10) / 10
-      }
-      if (entry.justification?.trim()) {
-        justifications[entry.criterionSlug as CriterionSlug] = entry.justification.trim()
-      }
+  const response = await requestAiEvaluation({
+    workId: `external:${input.title}`,
+    title: input.title,
+    synopsis: input.synopsis ?? undefined,
+    genres: input.genres ?? [],
+    tags: tagsForAi(input.tags),
+    sourcedReviews: contextResult.sourcedReviews,
+    externalContext,
+    platformRatings: contextResult.platformRatings,
+    similarWorks: contextResult.similarWorks,
+    coverUrl: input.coverUrl ?? null,
+    model: modelOverride,
+  })
+
+  const scores: Partial<Record<CriterionSlug, number>> = {}
+  const justifications: Partial<Record<CriterionSlug, string>> = {}
+  for (const entry of response.scores) {
+    const value = Number(entry.suggestedScore)
+    if (Number.isFinite(value)) {
+      scores[entry.criterionSlug as CriterionSlug] = Math.round(value * 10) / 10
     }
-
-    return {
-      scores,
-      justifications,
-      summary: response.summary,
-      confidence: response.confidence,
-      modelName: response.modelName,
-      promptVersion: response.promptVersion,
-      inputHash: response.inputHash,
+    if (entry.justification?.trim()) {
+      justifications[entry.criterionSlug as CriterionSlug] = entry.justification.trim()
     }
-  } catch (err) {
-    console.error("[evaluateCandidateForCreate] failed", err)
-    return null
+  }
+
+  // Aqui o create flow não tem ainda `work_external_ids` no DB; o conceito de
+  // "rejeitado" (is_rejected) só existe pós-criação via "Revalidar fontes".
+  // Por isso só distinguimos três casos no create — `all_rejected` é
+  // exclusivo do Path A.
+  const noReviewsReason: CandidateAiResult["noReviewsReason"] =
+    (contextResult.sourcedReviews?.length ?? 0) > 0
+      ? null
+      : hasExternalIds
+        ? "sources_returned_empty"
+        : "search_miss"
+
+  return {
+    scores,
+    justifications,
+    summary: response.summary,
+    confidence: response.confidence,
+    modelName: response.modelName,
+    promptVersion: response.promptVersion,
+    inputHash: response.inputHash,
+    externalReviews: contextResult.allReviews ?? [],
+    noReviewsReason,
   }
 }
 
@@ -466,27 +498,163 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
   const primaryQuery = queries[0]
   if (!primaryQuery) return { error: "Obra sem título pra buscar" }
 
-  // Executa search bruto por fonte em paralelo (mantém raw results pra UI).
-  const settled = await Promise.allSettled(
+  // Threshold pra considerar uma fonte "bem servida" pela busca primária.
+  // Abaixo disso, refazemos a busca com original_title + alt titles.
+  const STRONG_MATCH = 0.72
+  const KEEP_MATCH = 0.5
+  const MAX_RETRY_VARIANTS = 5
+
+  const scoreAgainst = (variants: string[], result: ExternalSearchResult) =>
+    Math.max(...variants.map((q) => bestTitleMatch(q, result)), 0)
+
+  // Pass 1: busca primária por fonte.
+  const primarySettled = await Promise.allSettled(
     SEARCH_CONNECTORS.map((connector) => connector.search(primaryQuery))
   )
+  const rawBySource = new Map<ExternalSourceId, ExternalSearchResult[]>()
+  primarySettled.forEach((entry, i) => {
+    const source = SEARCH_CONNECTORS[i].source
+    if (entry.status === "fulfilled") rawBySource.set(source, entry.value)
+  })
+
+  // Coleta variantes: do work + dos top matches fortes da Pass 1 (resolve o caso
+  // onde a obra no banco não tem alt_titles preenchidos mas alguma fonte já achou
+  // a obra certa e expôs seus títulos alternativos).
+  const variantSet = new Set<string>(queries)
+  let muTopId: number | null = null
+  for (const [source, results] of rawBySource) {
+    if (results.length === 0) continue
+    const top = results
+      .map((r) => ({ r, s: scoreAgainst(queries, r) }))
+      .sort((a, b) => b.s - a.s)[0]
+    if (!top || top.s < STRONG_MATCH) continue
+    const harvested = [top.r.title, top.r.originalTitle, ...(top.r.alternativeTitles ?? [])]
+    for (const t of harvested) {
+      const trimmed = t?.trim()
+      if (trimmed) variantSet.add(trimmed)
+    }
+    // MU search NÃO devolve `associated[]` — só o detail endpoint. Marca o ID
+    // pra enriquecer abaixo via fetch dedicado.
+    if (source === "mangaupdates") {
+      const idPart = top.r.id.split(":")[1]
+      const n = Number(idPart)
+      if (Number.isFinite(n)) muTopId = n
+    }
+  }
+
+  // Enriquece variantes com o `associated[]` do MU detail quando temos o ID.
+  // Crucial pra casos como "I Won't Be the Villain's Only Lover" → ComicK só
+  // indexa essa obra como "What Caused This to Happen...?!", título que só
+  // aparece nessa lista.
+  let muAltsFetched: string[] = []
+  if (muTopId != null) {
+    muAltsFetched = await fetchMangaUpdatesAlternativeTitles(muTopId)
+    for (const t of muAltsFetched) {
+      const trimmed = t?.trim()
+      if (trimmed) variantSet.add(trimmed)
+    }
+  }
+  // Variantes pra retry = tudo que sobrou depois de remover a query primária.
+  const variants = [...variantSet]
+    .filter((v) => v !== primaryQuery)
+    .slice(0, MAX_RETRY_VARIANTS)
+
+  console.log(
+    `[revalidateWorkSources] workId=${workId} primary="${primaryQuery}" ` +
+    `muTopId=${muTopId} muAltsFetched=[${muAltsFetched.join(" | ")}] ` +
+    `variants=[${variants.join(" | ")}]`
+  )
+
+  const allVariants = [primaryQuery, ...variants]
+  const scoreResult = (result: ExternalSearchResult) => ({
+    result,
+    matchScore: scoreAgainst(allVariants, result),
+  })
+
+  // Pass 2: retry com variantes enriquecidas (MU detail + alt titles do work).
+  // Otimizações:
+  //   - Pula fontes onde algum título do resultado existente bate EXATO com
+  //     alguma variante conhecida (skip inteligente — agora funciona porque
+  //     variantes incluem associated names do MU detail).
+  //   - Strip de pontuação só pras fontes strict-tokenize (ComicK, Kitsu).
+  //     Outras APIs casam com pontuação sem problema.
+  const stripPunct = (s: string) =>
+    s.replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim()
+  const STRICT_TOKENIZE: ReadonlySet<ExternalSourceId> = new Set(["comick", "kitsu"])
+  const normalizeForKey = (s: string) =>
+    s.toLowerCase()
+      .normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  const variantKeys = new Set(
+    [primaryQuery, ...variants].map(normalizeForKey).filter(Boolean)
+  )
+  const dedupVariants = (list: string[]): string[] => {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const v of list) {
+      const t = v.trim()
+      if (!t || seen.has(t.toLowerCase())) continue
+      seen.add(t.toLowerCase())
+      out.push(t)
+    }
+    return out
+  }
+  const variantsForSource = (source: ExternalSourceId): string[] =>
+    STRICT_TOKENIZE.has(source)
+      ? dedupVariants([...variants, ...variants.map(stripPunct)])
+      : variants
+
+  if (variants.length > 0) {
+    const connectorsToTry = SEARCH_CONNECTORS.filter((c) => {
+      const raw = rawBySource.get(c.source) ?? []
+      if (raw.length === 0) return true
+      return !raw.some((r) => {
+        const titles = [r.title, r.originalTitle, ...(r.alternativeTitles ?? [])]
+        return titles.some((t) => t && variantKeys.has(normalizeForKey(t)))
+      })
+    })
+
+    await Promise.all(connectorsToTry.map(async (connector) => {
+      const queries = variantsForSource(connector.source)
+      const settled = await Promise.allSettled(queries.map((v) => connector.search(v)))
+      const extras = settled.flatMap((entry, i) => {
+        if (entry.status === "fulfilled") return entry.value
+        console.error(
+          `[revalidateWorkSources] retry connector=${connector.source} variant="${queries[i]}" failed`,
+          entry.reason instanceof Error ? entry.reason.message : entry.reason
+        )
+        return []
+      })
+      const existing = rawBySource.get(connector.source) ?? []
+      const merged = [...existing]
+      const seen = new Set(existing.map((r) => r.id))
+      let added = 0
+      for (const r of extras) {
+        if (seen.has(r.id)) continue
+        seen.add(r.id)
+        merged.push(r)
+        added += 1
+      }
+      if (added > 0) rawBySource.set(connector.source, merged)
+      if (extras.length > 0 || added > 0) {
+        console.log(
+          `[revalidateWorkSources] retry source=${connector.source}: ${extras.length} raw, +${added} new`
+        )
+      }
+    }))
+  }
 
   const candidatesPerSource: Partial<Record<ExternalSourceId, SourceCandidateOption[]>> = {}
-  settled.forEach((entry, i) => {
-    const source = SEARCH_CONNECTORS[i].source
-    if (entry.status !== "fulfilled") return
-    const scored = entry.value
-      .map((result) => {
-        const matchScore = Math.max(
-          ...queries.map((q) => bestTitleMatch(q, result)),
-          0
-        )
-        return { result, matchScore }
-      })
-      .filter(({ matchScore }) => matchScore >= 0.5) // mostra mais opções pra revalidação
+  for (const [source, results] of rawBySource) {
+    const scored = results
+      .map(scoreResult)
+      .filter(({ matchScore }) => matchScore >= KEEP_MATCH)
       .sort((a, b) => b.matchScore - a.matchScore)
       .slice(0, 3)
-    if (scored.length === 0) return
+    if (scored.length === 0) continue
     candidatesPerSource[source] = scored.map(({ result, matchScore }) => ({
       externalId: result.id.split(":")[1] ?? result.id,
       title: result.title,
@@ -496,7 +664,7 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
       year: result.year ?? null,
       chapters: result.chapters ?? null,
     }))
-  })
+  }
 
   // AnimePlanet é frequentemente bloqueado por Cloudflare em server-side fetch.
   // Na revalidação o usuário já está conferindo manualmente, então mostramos um
@@ -506,6 +674,12 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
     queries,
     pickPrimaryCover(work.work_covers)
   )
+
+  for (const [source, opts] of Object.entries(candidatesPerSource)) {
+    console.log(
+      `[revalidateWorkSources] final candidatesPerSource.${source}: [${(opts ?? []).map((c) => `${c.title} (${(c.matchScore * 100).toFixed(0)}%)`).join(" | ")}]`
+    )
+  }
 
   // Carrega seleções atuais pra pré-marcar UI.
   const { data: existing } = await supabase

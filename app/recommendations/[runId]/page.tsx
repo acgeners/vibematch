@@ -10,6 +10,7 @@ import { RunDetailActions } from "@/components/recommendations/run-detail-action
 import { getRecommendationRun } from "@/server/queries/recommendations"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { formatRelativeDateTime } from "@/lib/date-utils"
 import type { RankedCandidate, TasteProfileRow } from "@/lib/ai-recommendation/types"
 
 export const dynamic = "force-dynamic"
@@ -42,16 +43,6 @@ interface PageProps {
   params: Promise<{ runId: string }>
 }
 
-function formatDate(s: string): string {
-  return new Date(s).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
-
 export default async function RunDetailPage({ params }: PageProps) {
   const { runId } = await params
   const run = await getRecommendationRun(runId)
@@ -65,8 +56,19 @@ export default async function RunDetailPage({ params }: PageProps) {
   const profileChanged =
     usedProfile != null && currentProfile != null && usedProfile.id !== currentProfile.id
 
-  const ModeIcon = run.mode === "next_read" ? BookOpen : ChartNoAxesCombined
-  const modeLabel = run.mode === "next_read" ? "Próxima leitura" : "Análise do gosto"
+  const ModeIcon =
+    run.mode === "next_read" ? BookOpen : run.mode === "ranking" ? Sparkles : ChartNoAxesCombined
+  const modeLabel =
+    run.mode === "next_read"
+      ? "Próxima leitura"
+      : run.mode === "ranking"
+        ? "Ranking (filtrado)"
+        : "Análise do gosto"
+
+  const droppedCount =
+    run.nAvailable != null && run.nAvailable > run.nCandidates
+      ? run.nAvailable - run.nCandidates
+      : 0
 
   return (
     <div className="w-full max-w-4xl space-y-4">
@@ -82,7 +84,7 @@ export default async function RunDetailPage({ params }: PageProps) {
       <Header
         kicker="IA"
         title="Execução de recomendação"
-        description={`${modeLabel} · ${formatDate(run.createdAt)}`}
+        description={`${modeLabel} · ${formatRelativeDateTime(run.createdAt)}`}
         icon={<Sparkles />}
       />
 
@@ -104,6 +106,15 @@ export default async function RunDetailPage({ params }: PageProps) {
           </Badge>
         )}
       </div>
+
+      {droppedCount > 0 && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          <strong>{droppedCount}</strong> obra{droppedCount === 1 ? "" : "s"} não entr
+          {droppedCount === 1 ? "ou" : "aram"} nesta run (limite de {run.nCandidates}{" "}
+          selecionado, total disponível: {run.nAvailable}). As com menor{" "}
+          <span className="font-mono">final_score</span> foram descartadas.
+        </div>
+      )}
 
       {run.userContext && (
         <Card>

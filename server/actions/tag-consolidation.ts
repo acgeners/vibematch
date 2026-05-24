@@ -81,20 +81,48 @@ export async function approveProposal(id: string): Promise<{ error?: string }> {
 
 export async function bulkSetProposalStatus(
   ids: string[],
-  status: "approved" | "rejected",
+  status: "approved" | "rejected" | "pending",
 ): Promise<{ updated: number; error?: string }> {
   if (ids.length === 0) return { updated: 0 }
   const supabase = createAdminClient()
-  const fromStatuses = status === "approved" ? ["pending"] : ["pending", "approved"]
+  const fromStatuses =
+    status === "approved"
+      ? ["pending"]
+      : status === "rejected"
+        ? ["pending", "approved"]
+        : ["approved", "rejected"]
+  const patch =
+    status === "pending"
+      ? { status, reviewed_at: null }
+      : { status, reviewed_at: new Date().toISOString() }
   const { data, error } = await supabase
     .from("tag_cluster_proposal")
-    .update({ status, reviewed_at: new Date().toISOString() })
+    .update(patch)
     .in("id", ids)
     .in("status", fromStatuses)
     .select("id")
   if (error) return { updated: 0, error: error.message }
   revalidatePath("/settings/tag-consolidation")
   return { updated: data?.length ?? 0 }
+}
+
+export async function bulkDeleteClusterProposals(
+  ids: string[],
+): Promise<{ deleted: number; error?: string }> {
+  if (ids.length === 0) return { deleted: 0 }
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("tag_cluster_proposal")
+    .delete()
+    .in("id", ids)
+    .neq("status", "applied")
+    .select("id")
+  if (error) {
+    console.error("[bulkDeleteClusterProposals] failed", { ids, error })
+    return { deleted: 0, error: error.message }
+  }
+  revalidatePath("/settings/tag-consolidation")
+  return { deleted: data?.length ?? 0 }
 }
 
 export async function rejectProposal(id: string): Promise<{ error?: string }> {
@@ -327,21 +355,146 @@ export async function moveTagBetweenProposals(
 export async function moveTagToGroup(
   tagId: string,
   targetGroupSlug: string,
-): Promise<{ error?: string }> {
-  const targetGroupId = (TAG_GROUP_IDS as Record<string, string>)[targetGroupSlug]
-  if (!targetGroupId) return { error: `Grupo "${targetGroupSlug}" não existe.` }
-
+): Promise<{ error?: string; removedFromProposals?: number; autoRejectedProposals?: number }> {
   const supabase = createAdminClient()
-  const { error } = await supabase
+
+  const { data: group, error: groupErr } = await supabase
+    .from("tag_group")
+    .select("id, slug")
+    .eq("slug", targetGroupSlug)
+    .maybeSingle()
+  if (groupErr) {
+    console.error("[moveTagToGroup] failed to resolve target group", {
+      tagId,
+      targetGroupSlug,
+      error: groupErr,
+    })
+    return { error: `Falha ao buscar grupo: ${groupErr.message}` }
+  }
+  if (!group) {
+    return { error: `Grupo "${targetGroupSlug}" não existe no Supabase.` }
+  }
+
+  const { data: currentTag, error: tagFetchErr } = await supabase
     .from("tags")
-    .update({ tag_group_id: targetGroupId })
+    .select("id, name, tag_group_id")
     .eq("id", tagId)
-  if (error) return { error: error.message }
+    .maybeSingle()
+  if (tagFetchErr) {
+    console.error("[moveTagToGroup] failed to fetch current tag", { tagId, error: tagFetchErr })
+    return { error: `Falha ao buscar tag: ${tagFetchErr.message}` }
+  }
+  if (!currentTag) {
+    return { error: `Tag id=${tagId} não encontrada.` }
+  }
+
+  let previousGroupSlug: string | null = null
+  if (currentTag.tag_group_id) {
+    const { data: prevGroup } = await supabase
+      .from("tag_group")
+      .select("slug")
+      .eq("id", currentTag.tag_group_id)
+      .maybeSingle()
+    previousGroupSlug = prevGroup?.slug ?? null
+  }
+  console.log("[moveTagToGroup] previous group resolved", {
+    tagId,
+    previousGroupSlug,
+    previousGroupId: currentTag.tag_group_id,
+  })
+
+  const { data: updated, error } = await supabase
+    .from("tags")
+    .update({ tag_group_id: group.id })
+    .eq("id", tagId)
+    .select("id, name, slug, tag_group_id")
+  if (error) {
+    console.error("[moveTagToGroup] update failed", {
+      tagId,
+      targetGroupSlug,
+      targetGroupId: group.id,
+      error,
+    })
+    const parts = [error.message, error.details, error.hint].filter(Boolean)
+    return { error: parts.join(" — ") }
+  }
+  if (!updated || updated.length === 0) {
+    console.error("[moveTagToGroup] update affected 0 rows", {
+      tagId,
+      targetGroupSlug,
+      targetGroupId: group.id,
+    })
+    return {
+      error: `Nenhuma linha atualizada. Tag id=${tagId} pode não existir, ou RLS bloqueou o UPDATE.`,
+    }
+  }
+
+  let removedFromProposals = 0
+  let autoRejectedProposals = 0
+
+  {
+    const { data: relatedProposals, error: relErr } = await supabase
+      .from("tag_cluster_proposal")
+      .select("id, group_slug, member_tag_ids, status")
+      .in("status", ["pending", "approved"])
+      .contains("member_tag_ids", [tagId])
+    const orphan = (relatedProposals ?? []).filter((p) => p.group_slug !== targetGroupSlug)
+    console.log("[moveTagToGroup] related proposals query", {
+      previousGroupSlug,
+      targetGroupSlug,
+      tagId,
+      foundTotal: relatedProposals?.length ?? 0,
+      orphanCount: orphan.length,
+      orphans: orphan.map((p) => ({ id: p.id, group_slug: p.group_slug, status: p.status })),
+    })
+    if (relErr) {
+      console.error("[moveTagToGroup] failed to fetch related proposals", { tagId, error: relErr })
+    } else if (orphan.length > 0) {
+      for (const p of orphan) {
+        const remaining = ((p.member_tag_ids as string[]) ?? []).filter((id) => id !== tagId)
+        if (remaining.length < 2) {
+          const { error: rejErr } = await supabase
+            .from("tag_cluster_proposal")
+            .update({
+              member_tag_ids: remaining,
+              status: "rejected",
+              reviewed_at: new Date().toISOString(),
+            })
+            .eq("id", p.id)
+          if (rejErr) {
+            console.error("[moveTagToGroup] failed to auto-reject proposal", { id: p.id, error: rejErr })
+          } else {
+            autoRejectedProposals += 1
+          }
+        } else {
+          const { error: updErr } = await supabase
+            .from("tag_cluster_proposal")
+            .update({ member_tag_ids: remaining })
+            .eq("id", p.id)
+          if (updErr) {
+            console.error("[moveTagToGroup] failed to remove tag from proposal", { id: p.id, error: updErr })
+          } else {
+            removedFromProposals += 1
+          }
+        }
+      }
+    }
+  }
+
+  console.log("[moveTagToGroup] success", {
+    tagId,
+    name: updated[0]?.name,
+    previousGroupSlug,
+    targetGroupSlug,
+    targetGroupId: group.id,
+    removedFromProposals,
+    autoRejectedProposals,
+  })
 
   revalidatePath("/settings/tag-consolidation")
   revalidatePath("/ranking")
   revalidateTag("tags-catalog", "max")
-  return {}
+  return { removedFromProposals, autoRejectedProposals }
 }
 
 // ============================================================
@@ -428,20 +581,48 @@ export async function approveGroupMove(id: string): Promise<{ error?: string }> 
 
 export async function bulkSetGroupMoveStatus(
   ids: string[],
-  status: "approved" | "rejected",
+  status: "approved" | "rejected" | "pending",
 ): Promise<{ updated: number; error?: string }> {
   if (ids.length === 0) return { updated: 0 }
   const supabase = createAdminClient()
-  const fromStatuses = status === "approved" ? ["pending"] : ["pending", "approved"]
+  const fromStatuses =
+    status === "approved"
+      ? ["pending"]
+      : status === "rejected"
+        ? ["pending", "approved"]
+        : ["approved", "rejected"]
+  const patch =
+    status === "pending"
+      ? { status, reviewed_at: null }
+      : { status, reviewed_at: new Date().toISOString() }
   const { data, error } = await supabase
     .from("tag_group_move_proposal")
-    .update({ status, reviewed_at: new Date().toISOString() })
+    .update(patch)
     .in("id", ids)
     .in("status", fromStatuses)
     .select("id")
   if (error) return { updated: 0, error: error.message }
   revalidatePath("/settings/tag-consolidation")
   return { updated: data?.length ?? 0 }
+}
+
+export async function bulkDeleteGroupMoves(
+  ids: string[],
+): Promise<{ deleted: number; error?: string }> {
+  if (ids.length === 0) return { deleted: 0 }
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("tag_group_move_proposal")
+    .delete()
+    .in("id", ids)
+    .neq("status", "applied")
+    .select("id")
+  if (error) {
+    console.error("[bulkDeleteGroupMoves] failed", { ids, error })
+    return { deleted: 0, error: error.message }
+  }
+  revalidatePath("/settings/tag-consolidation")
+  return { deleted: data?.length ?? 0 }
 }
 
 export async function rejectGroupMove(id: string): Promise<{ error?: string }> {
@@ -526,4 +707,39 @@ export async function applyApprovedGroupMoves(): Promise<ApplyGroupMovesResult> 
   revalidatePath("/ranking")
   revalidateTag("tags-catalog", "max")
   return result
+}
+
+// ============================================================
+// Delete cluster proposal (permanently)
+// ============================================================
+
+export async function deleteClusterProposal(
+  id: string,
+): Promise<{ ok?: true; error?: string }> {
+  const supabase = createAdminClient()
+
+  const { data: proposal, error: fetchErr } = await supabase
+    .from("tag_cluster_proposal")
+    .select("id, status, canonical_name")
+    .eq("id", id)
+    .maybeSingle()
+  if (fetchErr) return { error: `Falha ao buscar proposta: ${fetchErr.message}` }
+  if (!proposal) return { error: "Proposta não encontrada." }
+  if (proposal.status === "applied") {
+    return { error: "Propostas aplicadas não podem ser deletadas (registro de auditoria)." }
+  }
+
+  const { error: delErr } = await supabase
+    .from("tag_cluster_proposal")
+    .delete()
+    .eq("id", id)
+  if (delErr) {
+    console.error("[deleteClusterProposal] delete failed", { id, error: delErr })
+    const parts = [delErr.message, delErr.details, delErr.hint].filter(Boolean)
+    return { error: parts.join(" — ") }
+  }
+
+  console.log("[deleteClusterProposal] deleted", { id, canonical_name: proposal.canonical_name })
+  revalidatePath("/settings/tag-consolidation")
+  return { ok: true }
 }

@@ -1,6 +1,12 @@
 import type { CriterionSlug } from "@/types/domain"
 
-export type RecommendationMode = "next_read" | "full_analysis"
+export type RecommendationMode = "next_read" | "full_analysis" | "ranking"
+
+export interface CandidateReview {
+  source: string
+  rating: number | null
+  text: string
+}
 
 export interface ProfileTag {
   name: string
@@ -76,7 +82,6 @@ export interface RatedWorkInput {
   postScores: Partial<Record<string, number>>
   personalStatus: string | null
   synopsis: string | null
-  observation: string | null
   categoryScores: Partial<Record<CriterionSlug, number>>
   tags: Array<{ name: string; group: string | null }>
 }
@@ -90,6 +95,7 @@ export interface CandidateWorkInput {
   platformAvg: number | null
   totalVotes: number | null
   predictedScore: number | null
+  reviews: CandidateReview[]
 }
 
 export interface RankedCandidate extends RankedWork {

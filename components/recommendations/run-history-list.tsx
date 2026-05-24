@@ -2,38 +2,30 @@
 
 import Link from "next/link"
 import { useState, useTransition } from "react"
-import { BookOpen, ChartNoAxesCombined, ChevronRight, Loader2, Trash2 } from "lucide-react"
+import { BookOpen, ChartNoAxesCombined, ChevronRight, Loader2, Sparkles, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
+import { formatRelativeDateTime } from "@/lib/date-utils"
 import type { RecommendationRunSummary } from "@/server/queries/recommendations"
 import { deleteRecommendationRunAction } from "@/server/actions/recommendations"
+import type { RecommendationMode } from "@/lib/ai-recommendation/types"
 
 interface RunHistoryListProps {
   runs: RecommendationRunSummary[]
 }
 
-function modeLabel(mode: "next_read" | "full_analysis"): string {
-  return mode === "next_read" ? "Próxima leitura" : "Análise do gosto"
+function modeLabel(mode: RecommendationMode): string {
+  if (mode === "next_read") return "Próxima leitura"
+  if (mode === "ranking") return "Ranking (filtrado)"
+  return "Análise do gosto"
 }
 
-function ModeIcon({ mode }: { mode: "next_read" | "full_analysis" }) {
-  return mode === "next_read" ? (
-    <BookOpen className="h-3.5 w-3.5" />
-  ) : (
-    <ChartNoAxesCombined className="h-3.5 w-3.5" />
-  )
-}
-
-function formatDate(s: string): string {
-  return new Date(s).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+function ModeIcon({ mode }: { mode: RecommendationMode }) {
+  if (mode === "next_read") return <BookOpen className="h-3.5 w-3.5" />
+  if (mode === "ranking") return <Sparkles className="h-3.5 w-3.5" />
+  return <ChartNoAxesCombined className="h-3.5 w-3.5" />
 }
 
 function alignmentColor(score: number | null): string {
@@ -83,7 +75,7 @@ export function RunHistoryList({ runs }: RunHistoryListProps) {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
-                  <span>{formatDate(run.createdAt)}</span>
+                  <span>{formatRelativeDateTime(run.createdAt)}</span>
                   <span>•</span>
                   <span>{run.nCandidates} candidatos</span>
                   {run.topAlignment != null && (

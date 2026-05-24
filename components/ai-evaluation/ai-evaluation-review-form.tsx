@@ -2,27 +2,75 @@
 
 import { useMemo, useState } from "react"
 import Image from "next/image"
+import Link from "next/link"
+import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { submitAiReview } from "@/server/actions/ai"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
+import { getCoverImageSrc } from "@/lib/image-proxy"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import type { AiEvaluation } from "@/types/domain"
+
+// Limiar fixo de fricção no "Aceitar todos" e no botão "Reavaliar com Opus".
+// Desacoplado do `formula_config.low_confidence_threshold` (que controla o
+// filtro da fila): aqui o objetivo é só pedir confirmação quando há risco real,
+// alinhado com a faixa amarela/vermelha dos badges (≥75% = verde, sem fricção).
+const CONFIRM_THRESHOLD = 0.7
+
+type ReevalModel = "sonnet" | "opus"
 
 interface AiEvaluationReviewFormProps {
   evaluation: AiEvaluation
   workId: string
   coverUrl?: string | null
   currentScores?: Record<string, number>
+  /** Quando fornecido, mostra botão de re-avaliar com modelo alternativo em caso de confiança baixa. */
+  onReevaluate?: (model: ReevalModel) => Promise<void> | void
   onSaved: (acceptedScores: Record<string, number>) => void
   onCancel: () => void
 }
 
+interface NoReviewsContext {
+  reason: "no_external_ids" | "all_rejected" | "search_miss" | "sources_returned_empty"
+}
+
+function getNoReviewsReason(rawResponse: unknown): NoReviewsContext["reason"] | null {
+  if (typeof rawResponse !== "object" || rawResponse === null) return null
+  const ctx = (rawResponse as Record<string, unknown>).evaluationContext
+  if (typeof ctx !== "object" || ctx === null) return null
+  const value = (ctx as Record<string, unknown>).noReviewsReason
+  if (
+    value === "no_external_ids" ||
+    value === "all_rejected" ||
+    value === "search_miss" ||
+    value === "sources_returned_empty"
+  ) {
+    return value
+  }
+  return null
+}
+
+const NO_REVIEWS_REASON_LABEL: Record<NoReviewsContext["reason"], string> = {
+  no_external_ids: "obra ainda não foi linkada a fontes externas",
+  all_rejected: "todas as fontes desta obra foram rejeitadas",
+  search_miss: "busca por título não encontrou candidato confiável nas fontes",
+  sources_returned_empty: "fontes linkadas existem, mas não devolveram reviews",
+}
+
+const NO_REVIEWS_REASON_CTA: Record<NoReviewsContext["reason"], string | null> = {
+  no_external_ids: "Atribuir fontes",
+  all_rejected: "Revisar rejeições",
+  search_miss: "Atribuir fontes",
+  sources_returned_empty: null,
+}
+
 type ReviewUsageState =
   | { kind: "unavailable" } // sem reviews externas para essa obra
-  | { kind: "declined" }    // reviews disponíveis mas modelo não citou nenhuma
-  | { kind: "used"; count: number }
+  | { kind: "declined"; available: number }    // reviews disponíveis mas modelo não citou nenhuma
+  | { kind: "used"; count: number; available: number }
 
 function confidenceBadgeClass(confidence: number): string {
   if (confidence >= 0.75) return "border-emerald-300 bg-emerald-50 text-emerald-700"
@@ -43,14 +91,24 @@ function getReviewUsage(rawResponse: unknown): ReviewUsageState {
 
   const reviewAudit = audit as Record<string, unknown>
   const usedReviewIds = Array.isArray(reviewAudit.usedReviewIds) ? reviewAudit.usedReviewIds : []
+  const expectedIds = Array.isArray(reviewAudit.expectedReviewIds) ? reviewAudit.expectedReviewIds : []
+  // expectedReviewIds = todas as reviews enviadas pro prompt (R1..Rn).
+  // Fallback pra contar via evaluationContext.sourcedReviews quando não tem.
+  let available = expectedIds.length
+  if (!available) {
+    const ctx = (raw.evaluationContext ?? {}) as { sourcedReviews?: unknown[]; legacyReviews?: unknown[] }
+    available =
+      (Array.isArray(ctx.sourcedReviews) ? ctx.sourcedReviews.length : 0) +
+      (Array.isArray(ctx.legacyReviews) ? ctx.legacyReviews.length : 0)
+  }
 
   if (reviewAudit.required !== true) {
     return { kind: "unavailable" }
   }
   if (usedReviewIds.length === 0) {
-    return { kind: "declined" }
+    return { kind: "declined", available }
   }
-  return { kind: "used", count: usedReviewIds.length }
+  return { kind: "used", count: usedReviewIds.length, available }
 }
 
 interface EvaluationContextDebug {
@@ -85,6 +143,7 @@ export function AiEvaluationReviewForm({
   workId,
   coverUrl,
   currentScores,
+  onReevaluate,
   onSaved,
   onCancel,
 }: AiEvaluationReviewFormProps) {
@@ -105,19 +164,32 @@ export function AiEvaluationReviewForm({
   const [scores, setScores] = useState(initialScores)
   const [submitting, setSubmitting] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
+  const [confirmAcceptAllOpen, setConfirmAcceptAllOpen] = useState(false)
+  const [reevaluatingModel, setReevaluatingModel] = useState<ReevalModel | null>(null)
+  const [coverFailed, setCoverFailed] = useState(false)
   const reviewUsage = getReviewUsage(evaluation.raw_response)
   const debugContext = getEvaluationContext(evaluation.raw_response)
+  const noReviewsReason = getNoReviewsReason(evaluation.raw_response)
+  const isLowConfidence =
+    evaluation.confidence != null && evaluation.confidence < CONFIRM_THRESHOLD
+  const thresholdPct = Math.round(CONFIRM_THRESHOLD * 100)
 
   const reviewBadge = (() => {
     switch (reviewUsage.kind) {
-      case "used":
+      case "used": {
+        const ofTotal =
+          reviewUsage.available > 0 ? ` de ${reviewUsage.available}` : ""
         return {
-          label: `${reviewUsage.count} review${reviewUsage.count === 1 ? "" : "s"} usada${reviewUsage.count === 1 ? "" : "s"}`,
+          label: `${reviewUsage.count}${ofTotal} reviews citadas pela IA`,
           className: "border-emerald-300 bg-emerald-50 text-emerald-700",
         }
+      }
       case "declined":
         return {
-          label: "reviews disponíveis, mas não usadas",
+          label:
+            reviewUsage.available > 0
+              ? `${reviewUsage.available} reviews disponíveis, mas não usadas`
+              : "reviews disponíveis, mas não usadas",
           className: "border-amber-300 bg-amber-50 text-amber-700",
         }
       case "unavailable":
@@ -206,7 +278,7 @@ export function AiEvaluationReviewForm({
 
   const handleSubmit = () => submitScores(scores)
 
-  const handleAcceptAll = () => {
+  const doAcceptAll = () => {
     // Reseta todos pros valores sugeridos pela IA (descarta edits) e salva.
     const allSuggested = scores.map((s) => ({
       ...s,
@@ -217,8 +289,44 @@ export function AiEvaluationReviewForm({
     void submitScores(allSuggested)
   }
 
+  const handleAcceptAll = () => {
+    if (isLowConfidence) {
+      setConfirmAcceptAllOpen(true)
+      return
+    }
+    doAcceptAll()
+  }
+
+  const handleReevaluate = async (model: ReevalModel) => {
+    if (!onReevaluate || reevaluatingModel) return
+    setReevaluatingModel(model)
+    try {
+      await onReevaluate(model)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(`Erro ao reavaliar: ${message}`)
+    } finally {
+      setReevaluatingModel(null)
+    }
+  }
+
+  const showOpusButton =
+    !!onReevaluate && isLowConfidence && evaluation.model_name !== "claude-opus-4-7"
+
   return (
     <div className="space-y-4">
+      <ConfirmDialog
+        open={confirmAcceptAllOpen}
+        onOpenChange={setConfirmAcceptAllOpen}
+        title="Confiança baixa"
+        description={`A IA declarou ${
+          evaluation.confidence != null ? `${Math.round(evaluation.confidence * 100)}%` : "?"
+        } de confiança, abaixo do limiar configurado (${thresholdPct}%). Quer aceitar todas as notas mesmo assim?`}
+        confirmText="Aceitar todos"
+        cancelText="Voltar"
+        onConfirm={() => doAcceptAll()}
+      />
+
       <div className="flex justify-end">
         <Button size="sm" onClick={handleAcceptAll} disabled={submitting}>
           {submitting ? "Salvando..." : "Aceitar todos"}
@@ -228,14 +336,15 @@ export function AiEvaluationReviewForm({
       {evaluation.summary && (
         <div className="grid gap-3 rounded-md bg-muted/50 p-3 text-sm sm:grid-cols-[96px_1fr]">
           <div className="relative h-36 w-24 overflow-hidden rounded-md border bg-muted">
-            {coverUrl ? (
+            {coverUrl && !coverFailed ? (
               <Image
-                src={coverUrl}
+                src={getCoverImageSrc(coverUrl)}
                 alt={`Capa de ${workId}`}
                 fill
                 sizes="96px"
                 unoptimized
                 className="h-full w-full object-cover"
+                onError={() => setCoverFailed(true)}
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center px-2 text-center text-xs text-muted-foreground">
@@ -261,6 +370,36 @@ export function AiEvaluationReviewForm({
               )}
             </div>
             {evaluation.summary}
+            {reviewUsage.kind === "unavailable" && noReviewsReason && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Motivo:</span>{" "}
+                {NO_REVIEWS_REASON_LABEL[noReviewsReason]}.{" "}
+                {NO_REVIEWS_REASON_CTA[noReviewsReason] && (
+                  <Link
+                    href={`/titles/${workId}#external-sources`}
+                    className="font-medium text-primary underline-offset-2 hover:underline"
+                  >
+                    {NO_REVIEWS_REASON_CTA[noReviewsReason]}
+                  </Link>
+                )}
+              </p>
+            )}
+            {showOpusButton && (
+              <div className="mt-2">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={!!reevaluatingModel || submitting}
+                  onClick={() => void handleReevaluate("opus")}
+                  title="Modelo alternativo. Nota.Final continua usando calibração do Sonnet."
+                >
+                  {reevaluatingModel === "opus" ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : null}
+                  Reavaliar com Opus 4.7
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       )}

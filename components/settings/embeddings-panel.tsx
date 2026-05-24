@@ -4,6 +4,7 @@ import { useState, useTransition } from "react"
 import { toast } from "sonner"
 import { Brain, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { LastRunHint } from "@/components/settings/last-run-hint"
 import {
   refreshEmbeddings,
   type RefreshEmbeddingsResult,
@@ -13,6 +14,7 @@ interface EmbeddingsPanelProps {
   /** Quantas obras já têm embedding cacheado (lido do DB no server). */
   initialCachedCount: number
   totalWorks: number
+  initialLastRun: string | null
 }
 
 function formatTokens(n: number): string {
@@ -21,15 +23,17 @@ function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`
 }
 
-export function EmbeddingsPanel({ initialCachedCount, totalWorks }: EmbeddingsPanelProps) {
+export function EmbeddingsPanel({ initialCachedCount, totalWorks, initialLastRun }: EmbeddingsPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [lastResult, setLastResult] = useState<RefreshEmbeddingsResult | null>(null)
+  const [lastRun, setLastRun] = useState<string | null>(initialLastRun)
 
   const handleRefresh = () => {
     startTransition(async () => {
       try {
         const result = await refreshEmbeddings()
         setLastResult(result)
+        setLastRun(new Date().toISOString())
         if (result.refreshed === 0 && result.failed === 0) {
           toast.info("Tudo em dia — nenhum embedding precisava ser atualizado.")
         } else if (result.failed > 0) {
@@ -60,15 +64,17 @@ export function EmbeddingsPanel({ initialCachedCount, totalWorks }: EmbeddingsPa
           critérios mudam. Fundação pras features &quot;obras parecidas&quot; (Passo 4) e kNN
           predictor (Passo 5). Custo: ~$0.02 por milhão de tokens (~$0.10–1.00 pra base inteira).
         </p>
-        <Button
-          onClick={handleRefresh}
-          disabled={isPending}
-          variant="secondary"
-          className="shrink-0"
-        >
-          <Brain className="mr-1 h-4 w-4" />
-          {isPending ? "Embedando..." : "Atualizar embeddings"}
-        </Button>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <Button
+            onClick={handleRefresh}
+            disabled={isPending}
+            variant="secondary"
+          >
+            <Brain className="mr-1 h-4 w-4" />
+            {isPending ? "Embedando..." : "Atualizar embeddings"}
+          </Button>
+          <LastRunHint iso={lastRun} label="Última atualização" />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

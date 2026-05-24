@@ -1,9 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
+import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import type { CriterionSlug } from "@/types/domain"
-import type { CandidateWorkInput, RatedWorkInput, RecommendationMode } from "@/lib/ai-recommendation/types"
+import type { CandidateReview, CandidateWorkInput, RatedWorkInput, RecommendationMode } from "@/lib/ai-recommendation/types"
+import { getRanking, type RankingFilters } from "@/server/queries/ranking"
 
 const POST_SCORE_FIELDS = [
   "post_story_score",
@@ -20,7 +21,6 @@ const RATED_WORK_SELECT = `
   id,
   title,
   manual_score,
-  observations,
   personal_status_id,
   post_story_score,
   post_fl_score,
@@ -31,6 +31,7 @@ const RATED_WORK_SELECT = `
   post_impact_immersion_score,
   post_originality_score,
   updated_at,
+  canonical_synopsis,
   category_scores(criterion_slug, score),
   work_tags(tag_id, tags(name, tag_group_id)),
   work_synopses(text, is_primary, position)
@@ -41,6 +42,7 @@ const CANDIDATE_WORK_SELECT = `
   title,
   manual_score,
   is_favorite,
+  canonical_synopsis,
   category_scores(criterion_slug, score),
   calculated_scores(platform_avg, total_votes, predicted_score),
   work_tags(tag_id, tags(name, tag_group_id)),
@@ -89,6 +91,63 @@ function buildCategoryScores(rows: RawCategoryScore[] | null | undefined) {
   return out
 }
 
+/**
+ * Sinopse usada nos prompts de recomendação. Prefere `canonical_synopsis`
+ * (consolidada via IA). Se não existir, faz fallback split + bloco mais longo
+ * em cima da `pickPrimarySynopsis` — evita o problema antigo de truncar no
+ * meio da primeira sinopse concatenada.
+ */
+function pickRecommendationSynopsis(
+  canonical: string | null | undefined,
+  rawRows: RawSynopsisRow[] | null | undefined,
+): string | null {
+  if (canonical && canonical.trim()) return canonical.trim()
+  const raw = pickPrimarySynopsis(rawRows)
+  if (!raw) return null
+  const blocks = splitSynopsesFromText(raw)
+  if (blocks.length === 0) return raw
+  return [...blocks].sort((a, b) => b.length - a.length)[0] ?? raw
+}
+
+/**
+ * Top-N reviews por obra, batch. Ordenadas por `match_score * COALESCE(user_rating, 5)`
+ * descendente. Texto truncado pelo caller via prompts.formatReviews.
+ */
+async function fetchTopReviewsBatch(
+  workIds: string[],
+  perWork: number,
+): Promise<Map<string, CandidateReview[]>> {
+  const out = new Map<string, CandidateReview[]>()
+  if (workIds.length === 0) return out
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("work_reviews")
+    .select("work_id, source, text, user_rating, match_score")
+    .in("work_id", workIds)
+  if (error) {
+    console.error("[recommendations] erro lendo reviews:", error)
+    return out
+  }
+
+  const grouped = new Map<string, Array<{ source: string; text: string; rating: number | null; score: number }>>()
+  for (const row of data ?? []) {
+    const r = row as { work_id: string; source: string; text: string | null; user_rating: number | null; match_score: number | null }
+    if (!r.text || !r.text.trim()) continue
+    const score = (r.match_score ?? 0) * (r.user_rating ?? 5)
+    const list = grouped.get(r.work_id) ?? []
+    list.push({ source: r.source, text: r.text.trim(), rating: r.user_rating, score })
+    grouped.set(r.work_id, list)
+  }
+  for (const [workId, list] of grouped) {
+    list.sort((a, b) => b.score - a.score)
+    out.set(
+      workId,
+      list.slice(0, perWork).map((r) => ({ source: r.source, text: r.text, rating: r.rating })),
+    )
+  }
+  return out
+}
+
 export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInput[]> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
@@ -110,7 +169,8 @@ export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInp
       const v = work[field]
       if (v != null) postScores[field] = Number(v)
     }
-    const synopsis = pickPrimarySynopsis(
+    const synopsis = pickRecommendationSynopsis(
+      work.canonical_synopsis as string | null | undefined,
       (work.work_synopses as RawSynopsisRow[] | undefined)?.map((s) => ({
         text: s.text ?? null,
         is_primary: s.is_primary ?? null,
@@ -129,7 +189,6 @@ export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInp
       postScores,
       personalStatus,
       synopsis,
-      observation: (work.observations as string | null) ?? null,
       categoryScores: buildCategoryScores(work.category_scores as RawCategoryScore[] | null),
       tags: buildTags(work.work_tags as RawTagRow[] | null),
     } satisfies RatedWorkInput
@@ -141,9 +200,43 @@ export interface FavoriteCandidate extends CandidateWorkInput {
   isAlreadyRated: boolean
 }
 
+function mapRowToCandidate(row: unknown, reviews: CandidateReview[]): FavoriteCandidate {
+  const work = row as Record<string, unknown>
+  const calc = (work.calculated_scores as { platform_avg?: number | null; total_votes?: number | null; predicted_score?: number | null } | null) ?? null
+  const synopsis = pickRecommendationSynopsis(
+    work.canonical_synopsis as string | null | undefined,
+    (work.work_synopses as RawSynopsisRow[] | undefined)?.map((s) => ({
+      text: s.text ?? null,
+      is_primary: s.is_primary ?? null,
+      position: s.position ?? null,
+    })),
+  )
+  const coverUrl = pickPrimaryCover(
+    (work.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
+      url: c.url ?? null,
+      is_primary: c.is_primary ?? null,
+      position: c.position ?? null,
+    })),
+  )
+
+  return {
+    id: work.id as string,
+    title: work.title as string,
+    synopsis,
+    categoryScores: buildCategoryScores(work.category_scores as RawCategoryScore[] | null),
+    tags: buildTags(work.work_tags as RawTagRow[] | null),
+    platformAvg: calc?.platform_avg != null ? Number(calc.platform_avg) : null,
+    totalVotes: calc?.total_votes != null ? Number(calc.total_votes) : null,
+    predictedScore: calc?.predicted_score != null ? Number(calc.predicted_score) : null,
+    reviews,
+    coverUrl,
+    isAlreadyRated: work.manual_score != null,
+  } satisfies FavoriteCandidate
+}
+
 export async function getFavoriteCandidates(
-  mode: RecommendationMode,
-  limit = 80,
+  mode: Extract<RecommendationMode, "next_read" | "full_analysis">,
+  limit = 20,
 ): Promise<FavoriteCandidate[]> {
   const supabase = createAdminClient()
   let query = supabase
@@ -162,37 +255,41 @@ export async function getFavoriteCandidates(
     throw new Error(`Falha lendo favoritos: ${error.message}`)
   }
 
-  return (data ?? []).map((row) => {
-    const work = row as unknown as Record<string, unknown>
-    const calc = (work.calculated_scores as { platform_avg?: number | null; total_votes?: number | null; predicted_score?: number | null } | null) ?? null
-    const synopsis = pickPrimarySynopsis(
-      (work.work_synopses as RawSynopsisRow[] | undefined)?.map((s) => ({
-        text: s.text ?? null,
-        is_primary: s.is_primary ?? null,
-        position: s.position ?? null,
-      })),
-    )
-    const coverUrl = pickPrimaryCover(
-      (work.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
-        url: c.url ?? null,
-        is_primary: c.is_primary ?? null,
-        position: c.position ?? null,
-      })),
-    )
+  const rows = data ?? []
+  const ids = rows.map((r) => (r as { id: string }).id)
+  const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  return rows.map((row) => mapRowToCandidate(row, reviewsById.get((row as { id: string }).id) ?? []))
+}
 
-    return {
-      id: work.id as string,
-      title: work.title as string,
-      synopsis,
-      categoryScores: buildCategoryScores(work.category_scores as RawCategoryScore[] | null),
-      tags: buildTags(work.work_tags as RawTagRow[] | null),
-      platformAvg: calc?.platform_avg != null ? Number(calc.platform_avg) : null,
-      totalVotes: calc?.total_votes != null ? Number(calc.total_votes) : null,
-      predictedScore: calc?.predicted_score != null ? Number(calc.predicted_score) : null,
-      coverUrl,
-      isAlreadyRated: work.manual_score != null,
-    } satisfies FavoriteCandidate
-  })
+/**
+ * Candidatos do ranking: usa os filtros aplicados na página /ranking, pega os
+ * top-N por `final_score` (a ordenação default de `getRanking`) e hidrata os
+ * mesmos campos que `getFavoriteCandidates` retorna. Inclui obras NÃO
+ * favoritadas — foco em descoberta.
+ */
+export async function getRankingCandidates(
+  filters: RankingFilters,
+  limit = 20,
+): Promise<FavoriteCandidate[]> {
+  const entries = await getRanking({ ...filters, topN: limit })
+  if (entries.length === 0) return []
+  const ids = entries.map((e) => e.workId)
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("works")
+    .select(CANDIDATE_WORK_SELECT)
+    .in("id", ids)
+  if (error) throw new Error(`Falha hidratando candidatos do ranking: ${error.message}`)
+
+  const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  const byId = new Map<string, FavoriteCandidate>()
+  for (const row of data ?? []) {
+    const id = (row as { id: string }).id
+    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? []))
+  }
+  // Preserva a ordem do ranking original.
+  return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
 }
 
 export async function getRunsToday(): Promise<number> {
@@ -211,10 +308,12 @@ export async function getRunsToday(): Promise<number> {
 
 interface RawRunRow {
   id: string
-  mode: "next_read" | "full_analysis"
+  mode: RecommendationMode
   taste_profile_id: string | null
   user_context: string | null
   n_candidates: number
+  n_available: number | null
+  source_meta: Record<string, unknown> | null
   candidate_work_ids: string[]
   results: unknown
   mode_summary: string | null
@@ -229,7 +328,7 @@ interface RawRunRow {
 
 export interface RecommendationRunSummary {
   id: string
-  mode: "next_read" | "full_analysis"
+  mode: RecommendationMode
   userContext: string | null
   nCandidates: number
   topTitles: string[]
@@ -296,7 +395,7 @@ export async function listRecommendationRuns(limit = 50): Promise<Recommendation
 
 export interface RecommendationRunWithWorks {
   id: string
-  mode: "next_read" | "full_analysis"
+  mode: RecommendationMode
   userContext: string | null
   modeSummary: string | null
   createdAt: string
@@ -308,6 +407,8 @@ export interface RecommendationRunWithWorks {
   cacheReadTokens: number | null
   cacheCreationTokens: number | null
   nCandidates: number
+  nAvailable: number | null
+  sourceMeta: Record<string, unknown> | null
   ranked: Array<{
     work_id: string
     alignment_score: number
@@ -352,35 +453,12 @@ export async function getRecommendationRun(id: string): Promise<RecommendationRu
       .from("works")
       .select(CANDIDATE_WORK_SELECT)
       .in("id", workIds)
+    // Pra exibição da run histórica não recarregamos reviews — a justificativa
+    // já foi gerada e está congelada no `results`. Reviews entram só na hora
+    // de gerar uma run nova.
     for (const row of worksData ?? []) {
-      const work = row as unknown as Record<string, unknown>
-      const calc = (work.calculated_scores as { platform_avg?: number | null; total_votes?: number | null; predicted_score?: number | null } | null) ?? null
-      const synopsis = pickPrimarySynopsis(
-        (work.work_synopses as RawSynopsisRow[] | undefined)?.map((s) => ({
-          text: s.text ?? null,
-          is_primary: s.is_primary ?? null,
-          position: s.position ?? null,
-        })),
-      )
-      const coverUrl = pickPrimaryCover(
-        (work.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
-          url: c.url ?? null,
-          is_primary: c.is_primary ?? null,
-          position: c.position ?? null,
-        })),
-      )
-      worksById.set(work.id as string, {
-        id: work.id as string,
-        title: work.title as string,
-        synopsis,
-        categoryScores: buildCategoryScores(work.category_scores as RawCategoryScore[] | null),
-        tags: buildTags(work.work_tags as RawTagRow[] | null),
-        platformAvg: calc?.platform_avg != null ? Number(calc.platform_avg) : null,
-        totalVotes: calc?.total_votes != null ? Number(calc.total_votes) : null,
-        predictedScore: calc?.predicted_score != null ? Number(calc.predicted_score) : null,
-        coverUrl,
-        isAlreadyRated: work.manual_score != null,
-      } satisfies FavoriteCandidate)
+      const id = (row as { id: string }).id
+      worksById.set(id, mapRowToCandidate(row, []))
     }
   }
 
@@ -414,6 +492,8 @@ export async function getRecommendationRun(id: string): Promise<RecommendationRu
     cacheReadTokens: run.cache_read_tokens,
     cacheCreationTokens: run.cache_creation_tokens,
     nCandidates: run.n_candidates,
+    nAvailable: run.n_available,
+    sourceMeta: run.source_meta,
     ranked,
   }
 }

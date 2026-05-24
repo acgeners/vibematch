@@ -172,7 +172,7 @@ export const PERSONAL_STATUSES_BY_ID: Record<number, PersonalStatusInfo> = {
   4: { id: 4, status: "Stalled", slug: "stalled", color: "#64748B", symbol: "⏸️", comment: "Started reading, paused due to tension in the story - but plan to finish" },
   5: { id: 5, status: "Paused", slug: "paused", color: "#F97316", symbol: "⏯️", comment: "Started reading, plan to finish" },
   6: { id: 6, status: "Hiatus", slug: "hiatus", color: "#D97706", symbol: "🚏", comment: "Awaiting new season / return" },
-  7: { id: 7, status: "On-hold", slug: "on-hold", color: "#F97316", symbol: "📁", comment: "Started, planning to resume, but needs to be reread" },
+  7: { id: 7, status: "On-hold", slug: "on-hold", color: "#F97316", symbol: "📁", comment: "Started, planning to resume, but needs to read again" },
   8: { id: 8, status: "To read", slug: "to-read", color: "#8B5CF6", symbol: "📌", comment: "Not started, on my reading list" },
   9: { id: 9, status: "Dropped", slug: "dropped", color: "#DC2626", symbol: "🗑️", comment: "" },
 }
