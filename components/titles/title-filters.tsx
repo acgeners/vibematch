@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ArrowDown, ArrowUp, ChevronDown, Filter, RotateCcw, Search, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Filter, RotateCcw, Search, Trash2, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,6 +24,7 @@ import type { TagOption } from "@/server/queries/tags"
 import { AI_EVAL_STATUSES, CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { cn } from "@/lib/utils"
+import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 
 const CRITERION_LABELS: Record<string, string> = {
   romance: "Romance",
@@ -536,6 +537,7 @@ export function TitleFilters({
   const [, startTransition] = useTransition()
   const [tabsExpanded, setTabsExpanded] = useState(false)
   const [activeTab, setActiveTab] = useState("geral")
+  const [collapsed, setCollapsed] = useCollapsedFilters("titles")
 
   const updateParams = useCallback(
     (updates: Record<string, string | null>) => {
@@ -727,18 +729,32 @@ export function TitleFilters({
         </div>
 
         <div className="flex items-center justify-end gap-2">
-          <Button size="sm" onClick={applyAllFilters} disabled={!filtersDirty}>
-            Aplicar filtros
-          </Button>
-          {hasFilters && (
+          {!collapsed && (
+            <Button size="sm" onClick={applyAllFilters} disabled={!filtersDirty}>
+              Aplicar filtros
+            </Button>
+          )}
+          {!collapsed && hasFilters && (
             <Button variant="ghost" size="sm" onClick={clearAll}>
               <X className="mr-1 h-3.5 w-3.5" />
               Limpar
             </Button>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setCollapsed((v) => !v)}
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? "Mostrar filtros" : "Ocultar filtros"}
+            title={collapsed ? "Mostrar filtros" : "Ocultar filtros"}
+          >
+            {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+          </Button>
         </div>
       </div>
 
+      {!collapsed && (
+        <>
       {/* Busca + Ordenação */}
       <div className="mb-3 grid gap-3 md:grid-cols-[2fr_1fr]">
         <div className="space-y-1.5">
@@ -1054,6 +1070,8 @@ export function TitleFilters({
             ))}
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   )

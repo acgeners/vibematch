@@ -13,6 +13,7 @@ import {
   MIN_WORKS_FOR_FULL_PROFILE,
 } from "@/lib/ai-recommendation/taste-profile"
 import {
+  getCandidateById,
   getFavoriteCandidates,
   getRankingCandidates,
   getRatedWorksForProfile,
@@ -319,3 +320,86 @@ export async function rerunRecommendationFromExistingAction(
 
 // (rerankTopNAction legacy removido — runRecommendationAction(mode: "ranking")
 // cobre o mesmo caso de uso com prompt enriquecido + reviews + UI unificada.)
+
+export interface RerankSingleWorkResult {
+  alignmentScore: number
+  justification: string
+}
+
+/**
+ * Re-rank sob demanda de UMA obra específica. Disparado pelo botão "Rankear"
+ * que substitui o "—" na cell IA Rk quando `alignment_score` é NULL.
+ *
+ * Compartilha o limite diário com `runRecommendationAction` (cada chamada é 1
+ * LLM call). Não cria registro em `recommendation_runs` — só faz o upsert em
+ * `calculated_scores` (com `alignment_run_id = NULL`).
+ */
+export async function rerankSingleWorkAction(
+  workId: string,
+): Promise<{ data?: RerankSingleWorkResult; error?: string }> {
+  try {
+    const runsToday = await getRunsToday()
+    if (runsToday >= MAX_RUNS_PER_DAY) {
+      return {
+        error: `Limite diário de ${MAX_RUNS_PER_DAY} execuções atingido. Tente novamente amanhã.`,
+      }
+    }
+
+    const profileResult = await ensureProfile()
+    if ("error" in profileResult) return { error: profileResult.error }
+    const profile = profileResult.profile
+
+    if (profile.is_stub) {
+      return {
+        error: "Perfil ainda em modo stub — avalie mais obras com manual_score pra desbloquear o ranking IA.",
+      }
+    }
+
+    const candidate = await getCandidateById(workId)
+    if (!candidate) {
+      return { error: "Obra não encontrada (ou arquivada)." }
+    }
+
+    const result = await rankFavorites({
+      profile: profile.profile,
+      candidates: [candidate],
+      mode: "ranking",
+      userContext: null,
+    })
+
+    const ranking = result.rankings.find((r) => r.work_id === workId) ?? result.rankings[0]
+    if (!ranking) {
+      return { error: "O modelo não retornou ranking pra esta obra." }
+    }
+
+    const supabase = createAdminClient()
+    const now = new Date().toISOString()
+    const { error: upErr } = await supabase
+      .from("calculated_scores")
+      .upsert(
+        {
+          work_id: workId,
+          alignment_score: ranking.alignment_score,
+          alignment_run_id: null,
+          alignment_justification: ranking.justification,
+          alignment_at: now,
+        },
+        { onConflict: "work_id" },
+      )
+    if (upErr) {
+      return { error: `Falha persistindo alignment_score: ${upErr.message}` }
+    }
+
+    revalidatePath("/favorites")
+    revalidatePath("/ranking")
+
+    return {
+      data: {
+        alignmentScore: ranking.alignment_score,
+        justification: ranking.justification,
+      },
+    }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}

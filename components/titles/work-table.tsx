@@ -13,6 +13,7 @@ import {
 import {
   Archive,
   ArchiveRestore,
+  Check,
   ChevronDown,
   ChevronUp,
   ExternalLink,
@@ -21,6 +22,7 @@ import {
   ImageOff,
   LayoutGrid,
   List,
+  Minus,
   Pencil,
   Plus,
   Rows3,
@@ -757,6 +759,7 @@ function WorkListView({
       <AlignmentScoreCell
         score={work.calculated_scores?.alignment_score ?? null}
         justification={work.calculated_scores?.alignment_justification ?? null}
+        workId={work.id}
       />
     ),
     ai_status: (work) => <AiStatusBadge status={work.ai_eval_status} />,
@@ -934,11 +937,21 @@ function WorkListView({
     .filter((h) => h.column.id.startsWith("crit_"))
     .reduce((sum, h) => sum + h.getSize(), 0)
   const expandableSize = totalColumnSize - fixedColumnsSize
-  const expandableTarget = Math.max(expandableSize, tableContainerWidth - fixedColumnsSize)
-  const expandableScale = expandableSize > 0 ? expandableTarget / expandableSize : 1
-  const tableWidth = expandableSize * expandableScale + fixedColumnsSize
+  const extraSpace = Math.max(0, tableContainerWidth - totalColumnSize)
+  // Sobra (container > natural) é distribuída só para colunas não-crit; se só
+  // houver colunas crit, divide entre elas pra a tabela ainda preencher.
+  let expandableScale = 1
+  let critScale = 1
+  if (extraSpace > 0) {
+    if (expandableSize > 0) {
+      expandableScale = (expandableSize + extraSpace) / expandableSize
+    } else if (fixedColumnsSize > 0) {
+      critScale = (fixedColumnsSize + extraSpace) / fixedColumnsSize
+    }
+  }
+  const tableWidth = expandableSize * expandableScale + fixedColumnsSize * critScale
   const scaledColumnWidth = (id: string, size: number) =>
-    id.startsWith("crit_") ? size : Math.round(size * expandableScale)
+    Math.round(size * (id.startsWith("crit_") ? critScale : expandableScale))
 
   const numericCenterClass = "text-center"
   const columnsByKey = useMemo(
@@ -1115,12 +1128,19 @@ function WorkListView({
             onClick={() => (allSelected ? onClearAll?.() : onSelectAll?.())}
             className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-card/80 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-card hover:text-foreground"
           >
-            <Checkbox
-              checked={allSelected ? true : someSelected ? "indeterminate" : false}
+            <span
               aria-hidden
-              tabIndex={-1}
-              className="pointer-events-none"
-            />
+              className={cn(
+                "grid size-4 shrink-0 place-content-center rounded-[4px] border border-input/90 bg-background/55 shadow-xs",
+                (allSelected || someSelected) && "border-primary bg-primary text-primary-foreground"
+              )}
+            >
+              {allSelected ? (
+                <Check className="size-3.5" />
+              ) : someSelected ? (
+                <Minus className="size-3.5" />
+              ) : null}
+            </span>
             {allSelected ? "Limpar seleção" : "Selecionar todos"}
           </button>
         )}

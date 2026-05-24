@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useMemo, useState, useTransition } from "react"
-import { ArrowDown, ArrowUp, ChevronDown, Filter, Minus, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Filter, Minus, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
+import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { updateRankingPreferences } from "@/server/actions/settings"
 
 const CRITERION_LABELS: Record<string, string> = {
@@ -1067,6 +1068,7 @@ export function RankingFilters({
   const [draftSearch, setDraftSearch] = useState(appliedSearchString)
   const searchParams = useMemo(() => new URLSearchParams(draftSearch), [draftSearch])
   const [, startTransition] = useTransition()
+  const [collapsed, setCollapsed] = useCollapsedFilters(`ranking:${basePath}`)
 
   const updateParams = useCallback(
     (updates: Record<string, string | null>) => {
@@ -1416,18 +1418,31 @@ export function RankingFilters({
         </div>
 
         <div className="flex items-center justify-end gap-2">
-          <Button size="sm" onClick={applyAllFilters} disabled={!filtersDirty}>
-            Aplicar filtros
-          </Button>
-          {hasFilters && (
+          {!collapsed && (
+            <Button size="sm" onClick={applyAllFilters} disabled={!filtersDirty}>
+              Aplicar filtros
+            </Button>
+          )}
+          {!collapsed && hasFilters && (
             <Button variant="ghost" size="sm" onClick={clearAll}>
               <X className="mr-1 h-3.5 w-3.5" />
               Limpar
             </Button>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setCollapsed((v) => !v)}
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? "Mostrar filtros" : "Ocultar filtros"}
+            title={collapsed ? "Mostrar filtros" : "Ocultar filtros"}
+          >
+            {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+          </Button>
         </div>
       </div>
 
+      {!collapsed && (
       <Tabs defaultValue="geral" className="gap-4">
         <TabsList className="!h-auto w-full justify-start gap-1 overflow-x-auto rounded-lg bg-background/40 p-1 [scrollbar-width:none] xl:grid xl:grid-cols-4 [&::-webkit-scrollbar]:hidden">
           <TabsTrigger value="geral" className="h-9 min-w-20 flex-none text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">Geral</TabsTrigger>
@@ -1694,8 +1709,9 @@ export function RankingFilters({
           </FilterSection>
         </TabsContent>
       </Tabs>
+      )}
 
-      {(activeFilterChips.length > 0 || filtersDirty) && (
+      {!collapsed && (activeFilterChips.length > 0 || filtersDirty) && (
         <div className="mt-4 border-t border-border/60 pt-3">
           <div className="flex flex-wrap items-center gap-2">
             {activeFilterChips.length > 0 && (

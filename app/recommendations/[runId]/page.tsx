@@ -4,14 +4,17 @@ import { ArrowLeft, BookOpen, ChartNoAxesCombined, Sparkles } from "lucide-react
 import { Header } from "@/components/layout/header"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { RankedWorkCard } from "@/components/titles/recommendations/ranked-work-card"
+import { RankedWorksView } from "@/components/recommendations/ranked-works-view"
 import { TasteProfileSummary } from "@/components/titles/recommendations/taste-profile-summary"
 import { RunDetailActions } from "@/components/recommendations/run-detail-actions"
 import { getRecommendationRun } from "@/server/queries/recommendations"
+import { getWorksByIds } from "@/server/queries/works"
+import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { formatRelativeDateTime } from "@/lib/date-utils"
 import type { RankedCandidate, TasteProfileRow } from "@/lib/ai-recommendation/types"
+import type { WorkWithRelations } from "@/types/domain"
 
 export const dynamic = "force-dynamic"
 
@@ -48,10 +51,21 @@ export default async function RunDetailPage({ params }: PageProps) {
   const run = await getRecommendationRun(runId)
   if (!run) notFound()
 
-  const [usedProfile, currentProfile] = await Promise.all([
+  const validRanked = run.ranked.filter((r) => r.work != null)
+  const removedRanked = run.ranked.filter((r) => r.work == null)
+  const validRankedIds = validRanked.map((r) => r.work_id)
+
+  const [usedProfile, currentProfile, fullWorks, scoreThresholds] = await Promise.all([
     loadProfileById(run.tasteProfileId),
     loadCurrentTasteProfile(),
+    validRankedIds.length > 0
+      ? getWorksByIds(validRankedIds)
+      : Promise.resolve([] as WorkWithRelations[]),
+    getScoreColorThresholds(),
   ])
+
+  const worksById: Record<string, WorkWithRelations> = {}
+  for (const w of fullWorks) worksById[w.id] = w
 
   const profileChanged =
     usedProfile != null && currentProfile != null && usedProfile.id !== currentProfile.id
@@ -71,7 +85,7 @@ export default async function RunDetailPage({ params }: PageProps) {
       : 0
 
   return (
-    <div className="w-full max-w-4xl space-y-4">
+    <div className="w-full space-y-4">
       <div>
         <Link
           href="/recommendations"
@@ -146,28 +160,34 @@ export default async function RunDetailPage({ params }: PageProps) {
             Esta execução não retornou obras (ou todas foram removidas do catálogo).
           </p>
         ) : (
-          <div className="space-y-2">
-            {run.ranked.map((r, i) => {
-              if (!r.work) {
-                return (
-                  <div
-                    key={r.work_id}
-                    className="rounded-lg border bg-card/40 p-3 text-sm text-muted-foreground"
-                  >
-                    #{i + 1} — obra removida do catálogo · score {Math.round(r.alignment_score)}
-                  </div>
-                )
-              }
-              const ranked: RankedCandidate = {
+          <RankedWorksView
+            ranked={validRanked.map(
+              (r): RankedCandidate => ({
                 work_id: r.work_id,
                 alignment_score: r.alignment_score,
                 justification: r.justification,
                 top_match_factors: r.top_match_factors,
-                work: r.work,
+                work: r.work!,
                 coverUrl: r.coverUrl,
-              }
-              return <RankedWorkCard key={r.work_id} rank={i + 1} ranked={ranked} />
-            })}
+              }),
+            )}
+            worksById={worksById}
+            scoreThresholds={scoreThresholds}
+          />
+        )}
+        {removedRanked.length > 0 && (
+          <div className="space-y-1 pt-2">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+              Obras removidas do catálogo
+            </p>
+            {removedRanked.map((r) => (
+              <div
+                key={r.work_id}
+                className="rounded-lg border bg-card/40 p-3 text-sm text-muted-foreground"
+              >
+                score {Math.round(r.alignment_score)} — obra removida
+              </div>
+            ))}
           </div>
         )}
       </section>

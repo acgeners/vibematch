@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { ChevronDown, ChevronUp, ImageOff } from "lucide-react"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
@@ -35,6 +35,89 @@ interface WorkHeatmapViewProps {
   namespace?: WorkColumnNamespace
   basePath?: string
   enableCompare?: boolean
+}
+
+const HEATMAP_TITLE_COL_WIDTH = 280
+const HEATMAP_SCORE_COL_WIDTH = 64
+const HEATMAP_MIN_COL_WIDTH = 44
+
+function heatmapStorageKey(namespace: WorkColumnNamespace) {
+  return `heatmap_col_widths_${namespace}_v1`
+}
+
+function useHeatmapColumnWidths(namespace: WorkColumnNamespace) {
+  const [widths, setWidths] = useState<Record<string, number>>({})
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      const stored = window.localStorage.getItem(heatmapStorageKey(namespace))
+      if (!stored) return
+      const parsed = JSON.parse(stored) as Record<string, number>
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setWidths(parsed)
+    } catch {
+      // ignore
+    }
+  }, [namespace])
+
+  const setWidth = (key: string, width: number) => {
+    setWidths((prev) => {
+      const next = { ...prev, [key]: Math.max(HEATMAP_MIN_COL_WIDTH, Math.round(width)) }
+      try {
+        window.localStorage.setItem(heatmapStorageKey(namespace), JSON.stringify(next))
+      } catch {
+        // ignore
+      }
+      return next
+    })
+  }
+
+  return { widths, setWidth }
+}
+
+interface ResizeHandleProps {
+  columnKey: string
+  onResize: (key: string, width: number) => void
+  startWidth: number
+}
+
+function ResizeHandle({ columnKey, onResize, startWidth }: ResizeHandleProps) {
+  const onMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const initialWidth = startWidth
+    document.body.style.cursor = "col-resize"
+    document.body.style.userSelect = "none"
+
+    const handleMove = (ev: MouseEvent) => {
+      ev.preventDefault()
+      const delta = ev.clientX - startX
+      onResize(columnKey, initialWidth + delta)
+    }
+    const handleUp = () => {
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
+      document.removeEventListener("mousemove", handleMove)
+      document.removeEventListener("mouseup", handleUp)
+    }
+    document.addEventListener("mousemove", handleMove)
+    document.addEventListener("mouseup", handleUp)
+  }
+
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      onClick={(e) => e.stopPropagation()}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Redimensionar coluna"
+      className="absolute top-0 right-0 h-full w-3 cursor-col-resize flex items-center justify-center group z-20"
+    >
+      <span className="block h-4 w-px bg-border group-hover:bg-primary group-active:bg-primary transition-colors" />
+    </div>
+  )
 }
 
 const NON_CRITERION_LABELS: Record<string, string> = {
@@ -127,6 +210,39 @@ export function WorkHeatmapView({
     [columnConfig]
   )
 
+  const { widths, setWidth } = useHeatmapColumnWidths(namespace)
+
+  // Mede o container e expande proporcionalmente as colunas de notas pra
+  // preencher todo o espaço horizontal disponível (mesmo padrão de work-table).
+  const tableWrapperRef = useRef<HTMLDivElement | null>(null)
+  const [tableContainerWidth, setTableContainerWidth] = useState(0)
+  useEffect(() => {
+    const el = tableWrapperRef.current
+    if (!el) return
+    const update = () => setTableContainerWidth(el.clientWidth)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const naturalTitleWidth = widths["__title__"] ?? HEATMAP_TITLE_COL_WIDTH
+  const naturalScoreWidth = (key: string) => widths[key] ?? HEATMAP_SCORE_COL_WIDTH
+  const naturalScoreTotal = visibleScoreColumns.reduce(
+    (sum, c) => sum + naturalScoreWidth(c.key),
+    0,
+  )
+  const naturalTotal = naturalTitleWidth + naturalScoreTotal
+  const extraSpace = Math.max(0, tableContainerWidth - naturalTotal)
+  // Distribui sobra apenas nas colunas de notas (coluna do título mantém largura).
+  const scoreScale =
+    extraSpace > 0 && naturalScoreTotal > 0
+      ? (naturalScoreTotal + extraSpace) / naturalScoreTotal
+      : 1
+  const scaledScoreWidth = (key: string) => Math.round(naturalScoreWidth(key) * scoreScale)
+  const scaledTotal =
+    naturalTitleWidth + visibleScoreColumns.reduce((sum, c) => sum + scaledScoreWidth(c.key), 0)
+
   const [sortKey, setSortKey] = useState<string>("final_score")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
 
@@ -180,25 +296,41 @@ export function WorkHeatmapView({
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="overflow-auto rounded-lg border border-border/70 bg-card/80 shadow-sm">
+      <div ref={tableWrapperRef} className="overflow-auto rounded-lg border border-border/70 bg-card/80 shadow-sm">
         <p className="border-b bg-muted/40 px-3 py-1.5 text-[10px] text-muted-foreground">
           Heatmap ordena apenas as obras visíveis nesta página · use <span className="font-medium text-foreground">Colunas</span> para escolher as notas.
         </p>
-        <table className="min-w-full border-collapse text-sm">
+        <table className="border-collapse text-sm" style={{ tableLayout: "fixed", width: scaledTotal }}>
+          <colgroup>
+            <col style={{ width: naturalTitleWidth }} />
+            {visibleScoreColumns.map((col) => (
+              <col key={col.key} style={{ width: scaledScoreWidth(col.key) }} />
+            ))}
+          </colgroup>
           <thead className="bg-muted/60">
             <tr>
-              <th className="sticky left-0 z-20 min-w-[280px] border-b border-r bg-muted/60 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <th
+                className="group/header relative sticky left-0 z-20 border-b border-r bg-muted/60 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                style={{ width: naturalTitleWidth }}
+              >
                 Obra
+                <ResizeHandle
+                  columnKey="__title__"
+                  onResize={setWidth}
+                  startWidth={naturalTitleWidth}
+                />
               </th>
               {visibleScoreColumns.map((col) => {
                 const hasSeparator = columnSeparators.has(col.key)
+                const w = scaledScoreWidth(col.key)
                 return (
                   <th
                     key={col.key}
                     className={cn(
-                      "border-b px-1.5 py-2 text-center text-xs font-semibold text-muted-foreground",
+                      "group/header relative border-b px-1.5 py-2 text-center text-xs font-semibold text-muted-foreground",
                       hasSeparator && "border-l-2 border-l-primary/30"
                     )}
+                    style={{ width: w }}
                   >
                     <SortableHeader
                       label={getHeaderLabel(col)}
@@ -206,6 +338,11 @@ export function WorkHeatmapView({
                       asc={sortDir === "asc"}
                       onClick={() => handleSort(col.key)}
                       titleAttr={getTooltipLabel(col)}
+                    />
+                    <ResizeHandle
+                      columnKey={col.key}
+                      onResize={setWidth}
+                      startWidth={naturalScoreWidth(col.key)}
                     />
                   </th>
                 )
@@ -253,7 +390,7 @@ export function WorkHeatmapView({
                             </div>
                           )}
                         </div>
-                        <span className="line-clamp-2 max-w-[220px] text-xs font-medium text-foreground">
+                        <span className="line-clamp-2 min-w-0 flex-1 text-xs font-medium text-foreground">
                           {work.title}
                         </span>
                       </WorkTitleLink>
@@ -359,7 +496,7 @@ function ScoreCell({
       <TooltipTrigger asChild>
         <span
           className={cn(
-            "inline-grid h-9 w-12 place-items-center rounded-md font-mono text-sm font-bold",
+            "mx-auto inline-grid h-9 w-full min-w-0 max-w-[96px] place-items-center rounded-md font-mono text-sm font-bold",
             getCriterionColor(score, colorSlug)
           )}
         >
@@ -375,7 +512,7 @@ function ScoreCell({
 
 function EmptyCell() {
   return (
-    <span className="inline-flex h-9 w-12 items-center justify-center rounded-md border border-dashed text-xs text-muted-foreground">
+    <span className="mx-auto inline-flex h-9 w-full min-w-0 max-w-[96px] items-center justify-center rounded-md border border-dashed text-xs text-muted-foreground">
       —
     </span>
   )

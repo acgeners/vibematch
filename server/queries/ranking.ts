@@ -282,10 +282,18 @@ export async function getRanking(
   }
 
   if (filters.search?.trim()) {
-    const term = filters.search.trim().replace(/[%,]/g, " ").trim()
-    if (term) {
+    // Tokeniza separando por espaços e pontuação: o padrão `%a%b%c%` permite que
+    // o ILIKE atravesse vírgulas/`?`/etc. presentes no título mas ausentes na
+    // busca. Vírgulas também são separadores do filtro `or` do PostgREST, então
+    // não podem aparecer no valor.
+    const tokens = filters.search
+      .replace(/[%_]/g, "")
+      .split(/[\s,;:!?·•–—()[\]{}'"`]+/)
+      .filter(Boolean)
+    if (tokens.length) {
+      const pattern = `%${tokens.join("%")}%`
       worksQuery = worksQuery.or(
-        `title.ilike.%${term}%,original_title.ilike.%${term}%`
+        `title.ilike.${pattern},original_title.ilike.${pattern}`
       )
     }
   }

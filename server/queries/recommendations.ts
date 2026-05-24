@@ -292,6 +292,25 @@ export async function getRankingCandidates(
   return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
 }
 
+/**
+ * Hidrata uma obra única como `FavoriteCandidate`. Usado pelo re-rank
+ * sob demanda (1 obra) disparado do botão "Rankear" da cell IA Rk.
+ * Filtra obras arquivadas pra evitar consumir LLM call à toa.
+ */
+export async function getCandidateById(workId: string): Promise<FavoriteCandidate | null> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("works")
+    .select(CANDIDATE_WORK_SELECT)
+    .eq("id", workId)
+    .eq("is_archived", false)
+    .maybeSingle()
+  if (error) throw new Error(`Falha hidratando obra ${workId}: ${error.message}`)
+  if (!data) return null
+  const reviewsById = await fetchTopReviewsBatch([workId], 3)
+  return mapRowToCandidate(data, reviewsById.get(workId) ?? [])
+}
+
 export async function getRunsToday(): Promise<number> {
   const supabase = createAdminClient()
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()

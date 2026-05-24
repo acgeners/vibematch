@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { useEffect, useState, useSyncExternalStore } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ChevronDown, ChevronUp, ImageOff, LayoutGrid, List } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
@@ -217,7 +217,7 @@ function renderCell(
   if (col.key === "pred") return <ScoreBadge score={entry.predictedScore} size="md" showStub={entry.predictedIsStub} thresholds={scoreThresholds} />
   if (col.key === "personal_fit") return <AlignmentCell value={entry.personalFit} />
   if (col.key === "alignment_score")
-    return <AlignmentScoreCell score={entry.alignmentScore} justification={entry.alignmentJustification} />
+    return <AlignmentScoreCell score={entry.alignmentScore} justification={entry.alignmentJustification} workId={entry.workId} />
   if (col.key.startsWith("crit_")) {
     const slug = col.key.slice(5)
     const score = entry.scores[slug]
@@ -235,6 +235,46 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
   )
   const columns = getConfiguredRankingColumns(config)
   const viewMode = useSyncExternalStore(subscribeViewMode, readViewMode, () => "list" as const)
+
+  // Mede o container e expande proporcionalmente as colunas não-crit pra
+  // preencher todo o espaço horizontal (mesmo comportamento da /titles).
+  const tableWrapperRef = useRef<HTMLDivElement | null>(null)
+  const [tableContainerWidth, setTableContainerWidth] = useState(0)
+  useEffect(() => {
+    const el = tableWrapperRef.current
+    if (!el) return
+    const update = () => setTableContainerWidth(el.clientWidth)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const naturalWidthOf = (key: string): number => {
+    const stored = widths[key]
+    if (stored != null) return stored
+    return columns.find((c) => c.key === key)?.defaultWidth ?? 100
+  }
+  const totalNaturalWidth = columns.reduce((sum, c) => sum + naturalWidthOf(c.key), 0)
+  const fixedColumnsWidth = columns
+    .filter((c) => c.key.startsWith("crit_"))
+    .reduce((sum, c) => sum + naturalWidthOf(c.key), 0)
+  const expandableWidth = totalNaturalWidth - fixedColumnsWidth
+  const extraSpace = Math.max(0, tableContainerWidth - totalNaturalWidth)
+  let expandableScale = 1
+  let critScale = 1
+  if (extraSpace > 0) {
+    if (expandableWidth > 0) {
+      expandableScale = (expandableWidth + extraSpace) / expandableWidth
+    } else if (fixedColumnsWidth > 0) {
+      critScale = (fixedColumnsWidth + extraSpace) / fixedColumnsWidth
+    }
+  }
+  const scaledWidthOf = (key: string): number => {
+    const base = naturalWidthOf(key)
+    return Math.round(base * (key.startsWith("crit_") ? critScale : expandableScale))
+  }
+  const totalScaledWidth = columns.reduce((sum, c) => sum + scaledWidthOf(c.key), 0)
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -277,24 +317,24 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
 
       {/* Desktop table */}
       <TooltipProvider delayDuration={150}>
-      <div className="hidden overflow-x-auto rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur lg:block">
+      <div ref={tableWrapperRef} className="hidden overflow-x-auto rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur lg:block">
         <table
           className="border-collapse"
           style={{
             tableLayout: "fixed",
-            width: columns.reduce((sum, c) => sum + (widths[c.key] ?? c.defaultWidth), 0),
+            width: totalScaledWidth,
           }}
         >
           <colgroup>
             {columns.map((col) => {
-              const w = widths[col.key] ?? col.defaultWidth
+              const w = scaledWidthOf(col.key)
               return <col key={col.key} style={{ width: w }} />
             })}
           </colgroup>
           <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur">
             <tr className="border-b border-border/70">
               {columns.map((col) => {
-                const w = widths[col.key] ?? col.defaultWidth
+                const w = scaledWidthOf(col.key)
                 const sortField = getSortFieldForColumn(col.key)
                 const isSortable = sortField !== null
                 const isActive = isSortable && activeSortField === sortField

@@ -25,7 +25,7 @@ export const WORK_COLUMN_GROUP_LABELS: Record<WorkColumnGroup, string> = {
   criterios: "Critérios",
 }
 
-export type WorkColumnNamespace = "titles" | "favorites" | "ranking"
+export type WorkColumnNamespace = "titles" | "favorites" | "ranking" | "recommendations"
 export const DEFAULT_WORK_COLUMN_NAMESPACE: WorkColumnNamespace = "titles"
 
 function storageKeyFor(namespace: WorkColumnNamespace): string {
@@ -86,12 +86,23 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   favorites: ["synopsis_q", "year", "ai_status", "chapters_read"],
   // Ranking: foco em comparar notas; sinopse, ano e ai_status fora; critérios visíveis.
   ranking: ["synopsis_q", "year", "ai_status", "chapters_read", "alignment_score"],
+  // Recomendações: alignment_score + 9 critérios em destaque; resto enxuto.
+  recommendations: [
+    "synopsis_q",
+    "year",
+    "ai_status",
+    "chapters_read",
+    "total_votes",
+    "updated_at",
+    "last_read_at",
+  ],
 }
 
 const DEFAULT_COLUMN_CONFIG_BY_NAMESPACE: Record<WorkColumnNamespace, WorkColumnConfig> = {
   titles: { order: DEFAULT_COLUMN_KEYS, hidden: NAMESPACE_HIDDEN.titles },
   favorites: { order: DEFAULT_COLUMN_KEYS, hidden: NAMESPACE_HIDDEN.favorites },
   ranking: { order: DEFAULT_COLUMN_KEYS, hidden: NAMESPACE_HIDDEN.ranking },
+  recommendations: { order: DEFAULT_COLUMN_KEYS, hidden: NAMESPACE_HIDDEN.recommendations },
 }
 
 // Legado — alguns consumers ainda referenciam o default "global".

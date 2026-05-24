@@ -26,7 +26,7 @@ export default async function RecommendationsPage() {
       : null
 
   return (
-    <div className="w-full max-w-5xl space-y-4">
+    <div className="w-full space-y-4">
       <Header
         kicker="IA"
         title="Recomendações"

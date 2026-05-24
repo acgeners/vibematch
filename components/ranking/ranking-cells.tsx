@@ -1,20 +1,80 @@
 "use client"
 
+import { useTransition } from "react"
+import { useRouter } from "next/navigation"
+import { Loader2, Sparkles } from "lucide-react"
+import { toast } from "sonner"
+
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { rerankSingleWorkAction } from "@/server/actions/recommendations"
+
+/**
+ * Botão pequeno que substitui o "—" da `AlignmentScoreCell` quando há um
+ * `workId`. Dispara `rerankSingleWorkAction` (1 LLM call) e força refresh
+ * dos server components pra cell renderizar o badge com a nova nota.
+ */
+function RerankSingleWorkButton({ workId }: { workId: string }) {
+  const [isPending, startTransition] = useTransition()
+  const router = useRouter()
+
+  const handleClick = () => {
+    startTransition(async () => {
+      const result = await rerankSingleWorkAction(workId)
+      if (result.error || !result.data) {
+        toast.error(result.error ?? "Erro ao rankear obra.")
+        return
+      }
+      toast.success(`IA Rk: ${Math.round(result.data.alignmentScore)}`)
+      router.refresh()
+    })
+  }
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={handleClick}
+            disabled={isPending}
+            className="inline-flex items-center gap-1 rounded-md border border-dashed border-muted-foreground/40 px-1.5 py-0.5 text-xs text-muted-foreground hover:border-violet-500/60 hover:text-violet-600 dark:hover:text-violet-400 disabled:opacity-50 disabled:cursor-wait"
+          >
+            {isPending ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Sparkles className="h-3 w-3" />
+            )}
+            <span>{isPending ? "..." : "Rankear"}</span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[260px]">
+          Rodar IA re-rank só pra esta obra. Conta uma execução do limite diário.
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
 
 /**
  * Cell pra `alignment_score` (0–100) — badge azul/violet com tooltip da
- * justificativa do LLM. NULL vira "—" (obra ainda não passou pelo re-rank).
+ * justificativa do LLM. NULL vira "—" (obra ainda não passou pelo re-rank);
+ * se `workId` está presente, vira um botão "Rankear" que dispara o re-rank
+ * inline pra aquela obra.
  */
 export function AlignmentScoreCell({
   score,
   justification,
+  workId,
 }: {
   score: number | null
   justification: string | null
+  workId?: string
 }) {
   if (score == null) {
+    if (workId) {
+      return <RerankSingleWorkButton workId={workId} />
+    }
     return (
       <TooltipProvider>
         <Tooltip>
