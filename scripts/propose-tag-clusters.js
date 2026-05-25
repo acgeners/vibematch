@@ -6,8 +6,10 @@
  * `/settings/tag-consolidation`.
  *
  * Usage:
- *   ANTHROPIC_API_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
- *     node scripts/propose-tag-clusters.js --group characters [--min-confidence 0.7]
+ *   node scripts/propose-tag-clusters.js --group characters [--min-confidence 0.7]
+ *   node scripts/propose-tag-clusters.js --all              [--min-confidence 0.7]
+ *
+ * Envs are auto-loaded from `.env.local` at repo root.
  *
  * Prerequisites: migrations 040 + 041 applied.
  *
@@ -15,6 +17,9 @@
  * before inserting new ones. `approved` and `applied` proposals
  * are kept untouched (still consume their member tag ids).
  */
+
+const path = require("path")
+require("dotenv").config({ path: path.resolve(__dirname, "../.env.local") })
 
 const { createClient } = require("@supabase/supabase-js")
 const Anthropic = require("@anthropic-ai/sdk").default
@@ -24,11 +29,11 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
 
 if (!SUPABASE_KEY) {
-  console.error("ERROR: SUPABASE_SERVICE_ROLE_KEY is required.")
+  console.error("ERROR: SUPABASE_SERVICE_ROLE_KEY is required (set in .env.local or env).")
   process.exit(1)
 }
 if (!ANTHROPIC_API_KEY) {
-  console.error("ERROR: ANTHROPIC_API_KEY is required.")
+  console.error("ERROR: ANTHROPIC_API_KEY is required (set in .env.local or env).")
   process.exit(1)
 }
 
@@ -38,12 +43,20 @@ function getArg(name, fallback) {
   const i = args.indexOf(`--${name}`)
   return i >= 0 ? args[i + 1] : fallback
 }
+function hasFlag(name) {
+  return args.includes(`--${name}`)
+}
 const GROUP = getArg("group", null)
+const ALL = hasFlag("all")
 const MIN_CONFIDENCE = Number(getArg("min-confidence", "0.7"))
 const MODEL = "claude-sonnet-4-6"
 
-if (!GROUP) {
-  console.error("ERROR: --group <slug> is required (e.g. --group characters).")
+if (!GROUP && !ALL) {
+  console.error("ERROR: pass either --group <slug> (e.g. --group characters) or --all.")
+  process.exit(1)
+}
+if (GROUP && ALL) {
+  console.error("ERROR: --group and --all are mutually exclusive.")
   process.exit(1)
 }
 
@@ -197,19 +210,19 @@ async function callClaude(groupSlug, tagNames) {
   throw new Error(`Claude call failed: ${lastError && lastError.message ? lastError.message : String(lastError)}`)
 }
 
-async function main() {
-  console.log(`[propose-tag-clusters] group=${GROUP} min_confidence=${MIN_CONFIDENCE}`)
+async function processGroup(groupSlug) {
+  console.log(`[propose-tag-clusters] group=${groupSlug} min_confidence=${MIN_CONFIDENCE}`)
   console.log(`[propose-tag-clusters] fetching tags...`)
-  const { tags } = await fetchTagsInGroup(GROUP)
-  console.log(`[propose-tag-clusters] ${tags.length} tags in group "${GROUP}".`)
+  const { tags } = await fetchTagsInGroup(groupSlug)
+  console.log(`[propose-tag-clusters] ${tags.length} tags in group "${groupSlug}".`)
 
   if (tags.length < 2) {
     console.log(`[propose-tag-clusters] nothing to cluster.`)
-    return
+    return { tags: tags.length, proposals: 0, covered: 0, avgConf: 0, tokensIn: 0, tokensOut: 0, status: "skip" }
   }
 
   console.log(`[propose-tag-clusters] calling Claude (${MODEL})...`)
-  const { clusters: rawClusters, usage } = await callClaude(GROUP, tags.map((t) => t.name))
+  const { clusters: rawClusters, usage } = await callClaude(groupSlug, tags.map((t) => t.name))
   console.log(`[propose-tag-clusters] received ${rawClusters.length} clusters. tokens=${usage.input_tokens}/${usage.output_tokens}`)
 
   const filtered = rawClusters.filter((c) => c.confidence >= MIN_CONFIDENCE)
@@ -249,7 +262,7 @@ async function main() {
     if (!canonicalSlug) continue
 
     proposals.push({
-      group_slug: GROUP,
+      group_slug: groupSlug,
       canonical_name: canonicalName,
       canonical_slug: canonicalSlug,
       member_tag_ids: memberIds,
@@ -265,14 +278,17 @@ async function main() {
 
   if (proposals.length === 0) {
     console.log(`[propose-tag-clusters] nothing to insert.`)
-    return
+    return {
+      tags: tags.length, proposals: 0, covered: 0, avgConf: 0,
+      tokensIn: usage.input_tokens, tokensOut: usage.output_tokens, status: "ok",
+    }
   }
 
   // Wipe prior pending proposals for this group.
   const { error: delErr } = await supabase
     .from("tag_cluster_proposal")
     .delete()
-    .eq("group_slug", GROUP)
+    .eq("group_slug", groupSlug)
     .eq("status", "pending")
   if (delErr) throw delErr
 
@@ -287,10 +303,81 @@ async function main() {
   const avgConf =
     proposals.reduce((s, p) => s + Number(p.confidence), 0) / proposals.length
   const totalMembers = proposals.reduce((s, p) => s + p.member_tag_ids.length, 0)
-  console.log(`[propose-tag-clusters] DONE.`)
+  console.log(`[propose-tag-clusters] DONE for "${groupSlug}".`)
   console.log(`  Inserted proposals: ${proposals.length}`)
   console.log(`  Tags covered:       ${totalMembers}`)
   console.log(`  Avg confidence:     ${avgConf.toFixed(2)}`)
+
+  return {
+    tags: tags.length,
+    proposals: proposals.length,
+    covered: totalMembers,
+    avgConf,
+    tokensIn: usage.input_tokens,
+    tokensOut: usage.output_tokens,
+    status: "ok",
+  }
+}
+
+async function fetchAllGroupSlugs() {
+  const { data, error } = await supabase
+    .from("tag_group")
+    .select("slug")
+    .order("slug", { ascending: true })
+  if (error) throw error
+  return (data ?? []).map((r) => r.slug)
+}
+
+async function main() {
+  if (!ALL) {
+    await processGroup(GROUP)
+    return
+  }
+
+  const slugs = await fetchAllGroupSlugs()
+  console.log(`[propose-tag-clusters] --all: ${slugs.length} groups to process`)
+  console.log(`[propose-tag-clusters] groups: ${slugs.join(", ")}\n`)
+
+  const summary = []
+  for (let i = 0; i < slugs.length; i++) {
+    const slug = slugs[i]
+    console.log(`\n[${i + 1}/${slugs.length}] ====== ${slug} ======`)
+    try {
+      const result = await processGroup(slug)
+      summary.push({ group: slug, ...result })
+    } catch (err) {
+      console.error(`[propose-tag-clusters] FAILED group "${slug}":`, err && err.message ? err.message : err)
+      summary.push({
+        group: slug, tags: 0, proposals: 0, covered: 0, avgConf: 0,
+        tokensIn: 0, tokensOut: 0, status: "fail",
+      })
+    }
+  }
+
+  // Final summary table.
+  console.log(`\n\n========== SUMMARY ==========`)
+  const totals = { tags: 0, proposals: 0, covered: 0, tokensIn: 0, tokensOut: 0 }
+  const pad = (s, n) => String(s).padEnd(n)
+  console.log(
+    `${pad("group", 28)} ${pad("tags", 6)} ${pad("props", 6)} ${pad("covered", 8)} ${pad("avg_conf", 9)} status`,
+  )
+  console.log("-".repeat(72))
+  for (const row of summary) {
+    totals.tags += row.tags
+    totals.proposals += row.proposals
+    totals.covered += row.covered
+    totals.tokensIn += row.tokensIn
+    totals.tokensOut += row.tokensOut
+    const conf = row.avgConf ? row.avgConf.toFixed(2) : "-"
+    console.log(
+      `${pad(row.group, 28)} ${pad(row.tags, 6)} ${pad(row.proposals, 6)} ${pad(row.covered, 8)} ${pad(conf, 9)} ${row.status}`,
+    )
+  }
+  console.log("-".repeat(72))
+  console.log(
+    `${pad("TOTAL", 28)} ${pad(totals.tags, 6)} ${pad(totals.proposals, 6)} ${pad(totals.covered, 8)} ${pad("-", 9)}`,
+  )
+  console.log(`Tokens: in=${totals.tokensIn} out=${totals.tokensOut}`)
 }
 
 main().catch((err) => {
