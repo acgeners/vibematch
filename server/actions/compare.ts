@@ -5,6 +5,7 @@ import { getWorksByIds } from "@/server/queries/works"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug, WorkWithRelations } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
+import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 
 export interface CompareCriterionEntry {
   slug: CriterionSlug
@@ -34,9 +35,16 @@ export interface CompareWork {
   platformAvg: number | null
   totalVotes: number
   genres: string[]
-  tags: Array<{ slug: string; name: string; groupName: string }>
+  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null }>
   criteria: CompareCriterionEntry[]
 }
+
+const GROUP_ID_TO_LABEL: Record<string, string> = Object.fromEntries(
+  (Object.keys(TAG_GROUP_IDS) as TagGroupSlug[]).map((slug) => [
+    TAG_GROUP_IDS[slug],
+    TAG_GROUP_LABELS[slug],
+  ])
+)
 
 import { titleToSlug } from "@/lib/utils"
 import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
@@ -46,7 +54,7 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
   if (unique.length === 0) return []
 
   const supabase = createAdminClient()
-  const [works, aiJustifications, tagGroups] = await Promise.all([
+  const [works, aiJustifications] = await Promise.all([
     getWorksByIds(unique),
     supabase
       .from("ai_evaluations")
@@ -57,14 +65,7 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
       `)
       .in("work_id", unique)
       .order("created_at", { ascending: false }),
-    supabase.from("tag_group").select("id, group, slug"),
   ])
-
-  // Map tag_group_id -> groupName
-  const groupById = new Map<string, string>()
-  for (const g of tagGroups.data ?? []) {
-    groupById.set(g.id, g.group || g.slug || "Sem grupo")
-  }
 
   // For each work, pick the most recent ai_evaluation justifications by criterion.
   const justificationByWork = new Map<string, Map<string, string>>()
@@ -80,13 +81,12 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
     justificationByWork.set(row.work_id, map)
   }
 
-  return works.map((work) => mapWorkToCompare(work, justificationByWork.get(work.id), groupById))
+  return works.map((work) => mapWorkToCompare(work, justificationByWork.get(work.id)))
 }
 
 function mapWorkToCompare(
   work: WorkWithRelations,
-  justifications: Map<string, string> | undefined,
-  groupById: Map<string, string>
+  justifications: Map<string, string> | undefined
 ): CompareWork {
   const scoreByCrit: Record<string, number> = {}
   for (const cs of work.category_scores ?? []) {
@@ -95,11 +95,15 @@ function mapWorkToCompare(
 
   const tags = (work.tags as Array<{ slug?: string; name?: string; tag_group_id?: string | null }> ?? [])
     .filter(Boolean)
-    .map((t) => ({
-      slug: (t.slug ?? "") as string,
-      name: (t.name ?? "") as string,
-      groupName: t.tag_group_id ? groupById.get(t.tag_group_id) ?? "Sem grupo" : "Sem grupo",
-    }))
+    .map((t) => {
+      const groupId = (t.tag_group_id ?? null) as string | null
+      return {
+        slug: (t.slug ?? "") as string,
+        name: (t.name ?? "") as string,
+        groupId,
+        groupName: groupId ? GROUP_ID_TO_LABEL[groupId] ?? null : null,
+      }
+    })
     .filter((t) => t.name)
 
   const primaryCover = pickPrimaryCover(work.work_covers)

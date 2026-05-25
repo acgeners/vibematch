@@ -5,7 +5,6 @@ import {
   Activity,
   ArrowRight,
   Brain,
-  Bug,
   Compass,
   Database,
   Gauge,
@@ -16,7 +15,6 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin"
 import { Header } from "@/components/layout/header"
 import { ScrollToTop } from "@/components/layout/scroll-to-top"
-import { FormulaConfigForm } from "@/components/settings/formula-config-form"
 import { CalibrationPanel } from "@/components/settings/calibration-panel"
 import { WeightSuggestionsPanel } from "@/components/settings/weight-suggestions-panel"
 import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
@@ -97,16 +95,25 @@ async function getSettingsData() {
   }
 }
 
-const SECTIONS = [
-  { id: "calibration", title: "Calibração", icon: <Gauge />, accent: "cyan" as const },
-  { id: "weights", title: "Sugestão de pesos", icon: <Sparkles />, accent: "violet" as const },
-  { id: "embeddings", title: "Embeddings", icon: <Brain />, accent: "emerald" as const },
-  { id: "synopsis-canonical", title: "Sinopse canônica", icon: <Brain />, accent: "violet" as const },
-  { id: "ai-calibration", title: "Calibração IA", icon: <Sparkles />, accent: "amber" as const },
-  { id: "ai-usage", title: "Uso da API IA", icon: <Activity />, accent: "cyan" as const },
-  { id: "tags", title: "Consolidação de tags", icon: <Tags />, accent: "violet" as const },
-  { id: "sync", title: "Sincronização", icon: <Database />, accent: "emerald" as const },
-  { id: "debug", title: "Parâmetros (debug)", icon: <Bug />, accent: "slate" as const },
+const SECTION_GROUPS = [
+  {
+    label: "Operação contínua",
+    sections: [
+      { id: "calibration", title: "Calibração", icon: <Gauge />, accent: "cyan" as const },
+      { id: "embeddings", title: "Embeddings", icon: <Brain />, accent: "emerald" as const },
+      { id: "synopsis-canonical", title: "Sinopse canônica", icon: <Brain />, accent: "violet" as const },
+      { id: "ai-usage", title: "Uso da API IA", icon: <Activity />, accent: "cyan" as const },
+      { id: "sync", title: "Sincronização", icon: <Database />, accent: "emerald" as const },
+    ],
+  },
+  {
+    label: "Manutenção periódica",
+    sections: [
+      { id: "weights", title: "Sugestão de pesos", icon: <Sparkles />, accent: "violet" as const },
+      { id: "ai-calibration", title: "Calibração IA", icon: <Sparkles />, accent: "amber" as const },
+      { id: "tags", title: "Consolidação de tags", icon: <Tags />, accent: "violet" as const },
+    ],
+  },
 ]
 
 export default async function SettingsPage() {
@@ -145,16 +152,6 @@ export default async function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection
-        id="weights"
-        title="Sugestão de pesos a partir do seu histórico"
-        description="Treina uma regressão restrita aos 9 critérios contra suas notas reais e sugere pesos que minimizam o erro. Você revisa antes de aplicar."
-        icon={<Sparkles />}
-        accent="violet"
-      >
-        <WeightSuggestionsPanel initialLastApplied={weightsLastApplied} />
-      </SettingsSection>
-
-      <SettingsSection
         id="embeddings"
         title="Embeddings das obras"
         description="Representação vetorial via OpenAI para 'obras parecidas' e kNN predictor. Cacheado por obra — só re-embeda quando sinopse/tags/critérios mudam."
@@ -182,22 +179,6 @@ export default async function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection
-        id="ai-calibration"
-        title="Calibração de critérios IA"
-        description="Auditoria por obra com auto-apply de sugestões e detecção de viés sistemático nos category_scores."
-        icon={<Sparkles />}
-        accent="amber"
-      >
-        <a
-          href="/settings/calibration"
-          className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/55 bg-amber-500/10 px-3 py-1.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-300"
-        >
-          Abrir página de calibração
-          <ArrowRight className="h-3.5 w-3.5" />
-        </a>
-      </SettingsSection>
-
-      <SettingsSection
         id="ai-usage"
         title="Uso da API IA"
         description="Custo estimado em USD, tokens consumidos e latência por operação/modelo. Consolidado de todas as chamadas Anthropic do app."
@@ -209,6 +190,42 @@ export default async function SettingsPage() {
           className="inline-flex items-center gap-1.5 rounded-md border border-cyan-500/55 bg-cyan-500/10 px-3 py-1.5 text-sm font-medium text-cyan-700 transition-colors hover:bg-cyan-500/20 dark:text-cyan-300"
         >
           Abrir página de uso
+          <ArrowRight className="h-3.5 w-3.5" />
+        </a>
+      </SettingsSection>
+
+      <SettingsSection
+        id="sync"
+        title="Sincronização de constantes"
+        description="Regenera os arquivos locais de constantes a partir do Supabase."
+        icon={<Database />}
+        accent="emerald"
+      >
+        <SyncConstantsPanel initialLastRun={syncConstantsLastRun} />
+      </SettingsSection>
+
+      <SettingsSection
+        id="weights"
+        title="Sugestão de pesos a partir do seu histórico"
+        description="Treina uma regressão restrita aos 9 critérios contra suas notas reais e sugere pesos que minimizam o erro. Você revisa antes de aplicar."
+        icon={<Sparkles />}
+        accent="violet"
+      >
+        <WeightSuggestionsPanel initialLastApplied={weightsLastApplied} />
+      </SettingsSection>
+
+      <SettingsSection
+        id="ai-calibration"
+        title="Calibração de critérios IA"
+        description="Auditoria por obra com auto-apply de sugestões e detecção de viés sistemático nos category_scores."
+        icon={<Sparkles />}
+        accent="amber"
+      >
+        <a
+          href="/settings/calibration"
+          className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/55 bg-amber-500/10 px-3 py-1.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-300"
+        >
+          Abrir página de calibração
           <ArrowRight className="h-3.5 w-3.5" />
         </a>
       </SettingsSection>
@@ -227,26 +244,6 @@ export default async function SettingsPage() {
           Abrir página de consolidação
           <ArrowRight className="h-3.5 w-3.5" />
         </a>
-      </SettingsSection>
-
-      <SettingsSection
-        id="sync"
-        title="Sincronização de constantes"
-        description="Regenera os arquivos locais de constantes a partir do Supabase."
-        icon={<Database />}
-        accent="emerald"
-      >
-        <SyncConstantsPanel initialLastRun={syncConstantsLastRun} />
-      </SettingsSection>
-
-      <SettingsSection
-        id="debug"
-        title="Parâmetros calibrados (read-only)"
-        description="Snapshot dos valores atuais do formula_config. Sobrescritos a cada recálculo — exibidos pra debug."
-        icon={<Bug />}
-        accent="slate"
-      >
-        <FormulaConfigForm config={config} />
       </SettingsSection>
 
       <ScrollToTop />
@@ -270,39 +267,48 @@ function SettingsIndex() {
         <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
       </div>
 
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        {SECTIONS.map((section) => {
-          const styles = ACCENT_STYLES[section.accent]
-          return (
-            <a
-              key={section.id}
-              href={`#${section.id}`}
-              className={cn(
-                "group flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left shadow-sm shadow-black/5 transition-all",
-                "hover:-translate-y-0.5 hover:shadow-md",
-                styles.cardBg,
-                styles.cardBorder,
-                styles.cardHoverBorder,
-                styles.cardHoverShadow
-              )}
-            >
-              <span
-                className={cn(
-                  "grid size-10 shrink-0 place-items-center rounded-lg ring-1 transition-transform [&_svg]:size-[18px]",
-                  styles.iconBg,
-                  styles.iconText,
-                  styles.ring,
-                  "group-hover:scale-105"
-                )}
-              >
-                {section.icon}
-              </span>
-              <span className="min-w-0 text-sm font-semibold text-foreground">
-                {section.title}
-              </span>
-            </a>
-          )
-        })}
+      <div className="space-y-4">
+        {SECTION_GROUPS.map((group) => (
+          <div key={group.label} className="space-y-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">
+              {group.label}
+            </p>
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+              {group.sections.map((section) => {
+                const styles = ACCENT_STYLES[section.accent]
+                return (
+                  <a
+                    key={section.id}
+                    href={`#${section.id}`}
+                    className={cn(
+                      "group flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left shadow-sm shadow-black/5 transition-all",
+                      "hover:-translate-y-0.5 hover:shadow-md",
+                      styles.cardBg,
+                      styles.cardBorder,
+                      styles.cardHoverBorder,
+                      styles.cardHoverShadow
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "grid size-10 shrink-0 place-items-center rounded-lg ring-1 transition-transform [&_svg]:size-[18px]",
+                        styles.iconBg,
+                        styles.iconText,
+                        styles.ring,
+                        "group-hover:scale-105"
+                      )}
+                    >
+                      {section.icon}
+                    </span>
+                    <span className="min-w-0 text-sm font-semibold text-foreground">
+                      {section.title}
+                    </span>
+                  </a>
+                )
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </nav>
   )

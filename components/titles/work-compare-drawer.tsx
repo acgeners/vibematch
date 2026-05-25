@@ -766,7 +766,7 @@ function GenresTagsCell({
   tags,
 }: {
   genres: string[]
-  tags: Array<{ slug: string; name: string; groupName: string }>
+  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null }>
 }) {
   const total = genres.length + tags.length
   if (total === 0) {
@@ -777,6 +777,21 @@ function GenresTagsCell({
   const remainingForTags = Math.max(0, VISIBLE - visibleGenres.length)
   const visibleTags = tags.slice(0, remainingForTags)
   const remaining = total - visibleGenres.length - visibleTags.length
+
+  const groupedTags = (() => {
+    const groups = new Map<string, typeof tags>()
+    for (const tag of tags) {
+      const label = tag.groupName ?? "Sem grupo"
+      const list = groups.get(label) ?? []
+      list.push(tag)
+      groups.set(label, list)
+    }
+    return [...groups.entries()].sort(([a], [b]) => {
+      if (a === "Sem grupo") return 1
+      if (b === "Sem grupo") return -1
+      return a.localeCompare(b)
+    })
+  })()
 
   return (
     <div className="flex flex-wrap items-center gap-1">
@@ -808,11 +823,16 @@ function GenresTagsCell({
               +{remaining} ver
             </button>
           </PopoverTrigger>
-          <PopoverContent side="top" align="start" className="w-80 max-h-[350px] overflow-y-auto space-y-3 p-3">
+          <PopoverContent
+            side="top"
+            align="start"
+            className="max-h-[60vh] w-80 max-w-[90vw] space-y-3 overflow-y-auto p-3"
+          >
             {genres.length > 0 && (
               <div>
                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Gêneros
+                  Gêneros{" "}
+                  <span className="text-muted-foreground/60">({genres.length})</span>
                 </p>
                 <div className="flex flex-wrap gap-1">
                   {genres.map((g) => (
@@ -827,35 +847,25 @@ function GenresTagsCell({
                 </div>
               </div>
             )}
-            {tags.length > 0 && (
-              <div className="space-y-3">
-                {Object.entries(
-                  tags.reduce((acc, t) => {
-                    const g = t.groupName || "Outros"
-                    if (!acc[g]) acc[g] = []
-                    acc[g].push(t)
-                    return acc
-                  }, {} as Record<string, typeof tags>)
-                ).map(([group, groupTags]) => (
-                  <div key={group} className="space-y-1">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80 border-b pb-0.5 mb-1.5">
-                      {group}
-                    </p>
-                    <div className="flex flex-wrap gap-1">
-                      {groupTags.map((t) => (
-                        <Badge
-                          key={`t:${t.slug}`}
-                          variant="outline"
-                          className="h-5 py-0 text-[10px] font-normal"
-                        >
-                          {t.name}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+            {groupedTags.map(([groupName, groupTags]) => (
+              <div key={groupName}>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {groupName}{" "}
+                  <span className="text-muted-foreground/60">({groupTags.length})</span>
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {groupTags.map((t) => (
+                    <Badge
+                      key={`t:${t.slug}`}
+                      variant="outline"
+                      className="h-5 py-0 text-[10px] font-normal"
+                    >
+                      {t.name}
+                    </Badge>
+                  ))}
+                </div>
               </div>
-            )}
+            ))}
           </PopoverContent>
         </Popover>
       )}

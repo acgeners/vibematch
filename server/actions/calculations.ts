@@ -549,6 +549,32 @@ export async function recalculateAll() {
     .eq("id", config.id)
   if (configUpdateErr) throw new Error(configUpdateErr.message)
 
+  // Snapshot histórico — append-only. Falha aqui não invalida o recálculo;
+  // só perde uma entrada do gráfico de tendência.
+  const { error: historyErr } = await supabase.from("calibration_history").insert({
+    formula_version: config.formula_version,
+    stacker_enabled: useStacker,
+    mae_loocv_stacker: stackerCoefs?.cvMAE ?? null,
+    mae_final: finalCalibration.maeFinal,
+    mae_calc: newMaeCalc,
+    mae_predicted: newMaePredicted,
+    train_size: predictor.trainSize,
+    total_works: works.length,
+    stacker_coefficients: stackerCoefs
+      ? {
+          intercept: stackerCoefs.intercept,
+          calcWeight: stackerCoefs.calcWeight,
+          ridgeWeight: stackerCoefs.ridgeWeight,
+          knnWeight: stackerCoefs.knnWeight,
+          trainSize: stackerCoefs.trainSize,
+          cvMAE: stackerCoefs.cvMAE,
+        }
+      : null,
+  })
+  if (historyErr) {
+    console.warn("[recalculateAll] calibration_history insert falhou:", historyErr.message)
+  }
+
   revalidatePath("/titles")
   revalidatePath("/ranking")
   revalidatePath("/settings")

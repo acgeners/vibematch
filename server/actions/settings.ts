@@ -5,7 +5,12 @@ import { promisify } from "node:util"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { recalculateAll } from "./calculations"
-import { computeCalibration, type CalibrationDiff } from "@/lib/calculations/calibration"
+import {
+  computeCalibration,
+  computeBucketBreakdown,
+  type BucketBreakdown,
+  type CalibrationDiff,
+} from "@/lib/calculations/calibration"
 
 const execFileAsync = promisify(execFile)
 
@@ -216,21 +221,44 @@ export interface DistanceBucket {
   count: number
 }
 
+export interface CalibrationHistoryEntry {
+  recorded_at: string
+  formula_version: string | null
+  stacker_enabled: boolean | null
+  mae_loocv_stacker: number | null
+  mae_final: number | null
+  mae_calc: number | null
+  mae_predicted: number | null
+  train_size: number | null
+  total_works: number | null
+}
+
 export async function getCalibrationSnapshot() {
   const supabase = createAdminClient()
 
-  const { data, error } = await supabase
-    .from("works")
-    .select(
-      `id, title, manual_score,
-       calculated_scores(calc_score, predicted_score, final_score, total_votes, predicted_is_stub, prediction_distance)`
-    )
-    .eq("is_archived", false)
-    .limit(2000)
+  const [worksRes, historyRes] = await Promise.all([
+    supabase
+      .from("works")
+      .select(
+        `id, title, manual_score,
+         calculated_scores(calc_score, predicted_score, final_score, total_votes, predicted_is_stub, prediction_distance)`
+      )
+      .eq("is_archived", false)
+      .limit(2000),
+    supabase
+      .from("calibration_history")
+      .select(
+        "recorded_at, formula_version, stacker_enabled, mae_loocv_stacker, mae_final, mae_calc, mae_predicted, train_size, total_works",
+      )
+      .order("recorded_at", { ascending: false })
+      .limit(30),
+  ])
 
-  if (error) throw new Error(error.message)
+  if (worksRes.error) throw new Error(worksRes.error.message)
+  // history error é não-fatal: tabela pode estar vazia ou indisponível em ambientes legados.
+  const history = (historyRes.data ?? []) as CalibrationHistoryEntry[]
 
-  const items = (data ?? []).map((w) => {
+  const items = (worksRes.data ?? []).map((w) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cs = (w as any).calculated_scores as any
     return {
@@ -247,6 +275,7 @@ export async function getCalibrationSnapshot() {
   })
 
   const calibration = computeCalibration(items)
+  const buckets: BucketBreakdown = computeBucketBreakdown(items)
 
   const distanceBuckets: DistanceBucket[] = DISTANCE_BUCKETS.map((b) => ({
     label: b.label,
@@ -270,6 +299,8 @@ export async function getCalibrationSnapshot() {
     predictorIsStub: items.some((it) => it.predictedIsStub),
     distanceBuckets,
     worksWithDistance: items.filter((it) => it.predictionDistance != null).length,
+    buckets,
+    history,
   }
 }
 

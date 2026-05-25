@@ -49,7 +49,6 @@ import {
   PublicationStatusBadge,
 } from "@/components/ui/status-badge"
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -1043,9 +1042,13 @@ function WorkListView({
   return (
     <TooltipProvider delayDuration={150}>
       {/* Desktop table */}
-      <div ref={tableWrapperRef} className="hidden overflow-x-auto rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur md:block">
-        <Table style={{ width: tableWidth, tableLayout: "fixed" }}>
-          <TableHeader className="bg-muted/60">
+      <div
+        ref={tableWrapperRef}
+        className="hidden rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur md:block"
+        style={{ width: tableWidth }}
+      >
+        <table className="w-full caption-bottom text-sm" style={{ width: tableWidth, tableLayout: "fixed" }}>
+          <TableHeader className="sticky -top-5 z-30 md:-top-7 [&_th]:bg-muted [&_tr:first-child_th:first-child]:rounded-tl-lg [&_tr:first-child_th:last-child]:rounded-tr-lg">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="border-b hover:bg-transparent">
                 {headerGroup.headers.map((header) => (
@@ -1117,7 +1120,7 @@ function WorkListView({
               )
             })}
           </TableBody>
-        </Table>
+        </table>
       </div>
 
       {/* Mobile compact cards */}

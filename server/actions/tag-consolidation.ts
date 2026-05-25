@@ -283,6 +283,67 @@ export async function listUncoveredTags(groupSlug: string): Promise<UncoveredTag
   return ((tagsRes.data ?? []) as UncoveredTag[]).filter((t) => !covered.has(t.id))
 }
 
+// Returns all tags in the given group (ordered by name), regardless of
+// whether they are already members of a proposal. Used by the manual
+// cluster creation modal.
+export async function listAllTagsInGroup(groupSlug: string): Promise<UncoveredTag[]> {
+  const groupId = (TAG_GROUP_IDS as Record<string, string>)[groupSlug]
+  if (!groupId) return []
+
+  const supabase = createAdminClient()
+  const all: UncoveredTag[] = []
+  const PAGE = 1000
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await supabase
+      .from("tags")
+      .select("id, name, slug")
+      .eq("tag_group_id", groupId)
+      .order("name", { ascending: true })
+      .range(offset, offset + PAGE - 1)
+    if (error) throw new Error(error.message)
+    if (!data || data.length === 0) break
+    all.push(...(data as UncoveredTag[]))
+    if (data.length < PAGE) break
+  }
+  return all
+}
+
+// Create a cluster proposal manually (without AI). Inserts as `pending`
+// with confidence 1.0 so the operator can still review/edit/approve via
+// the same workflow as AI proposals.
+export async function createManualCluster(input: {
+  group_slug: string
+  canonical_name: string
+  member_tag_ids: string[]
+}): Promise<{ id?: string; error?: string }> {
+  const groupId = (TAG_GROUP_IDS as Record<string, string>)[input.group_slug]
+  if (!groupId) return { error: `grupo "${input.group_slug}" não encontrado` }
+  const canonicalName = input.canonical_name.trim()
+  if (!canonicalName) return { error: "canonical_name é obrigatório" }
+  const memberIds = [...new Set(input.member_tag_ids)]
+  if (memberIds.length < 2) return { error: "cluster precisa de pelo menos 2 tags" }
+  const canonicalSlug = slugifyTagName(canonicalName)
+  if (!canonicalSlug) return { error: "canonical_name inválido" }
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("tag_cluster_proposal")
+    .insert({
+      group_slug: input.group_slug,
+      canonical_name: canonicalName,
+      canonical_slug: canonicalSlug,
+      member_tag_ids: memberIds,
+      confidence: 1.0,
+      rationale: "Criado manualmente",
+      status: "pending",
+    })
+    .select("id")
+    .single()
+  if (error) return { error: error.message }
+  revalidatePath("/settings/tag-consolidation")
+  return { id: data.id as string }
+}
+
 // Moves a tag from one proposal to another within the same group.
 // - Removes the tag from the source proposal's member list (auto-rejects
 //   the source if it ends up with <2 members).
