@@ -211,10 +211,10 @@ function renderCell(
   if (col.key === "synopsis_q") return <span className="text-xs text-muted-foreground">{entry.synopsisQuality ?? "—"}</span>
   if (col.key === "platform_avg") return <span className="font-mono text-sm">{entry.platformAvg != null ? entry.platformAvg.toFixed(1) : "—"}</span>
   if (col.key === "total_votes") return <span className="font-mono text-sm">{formatVotes(entry.totalVotes)}</span>
-  if (col.key === "final") return <ScoreBadge score={entry.finalScore} size="md" thresholds={scoreThresholds} />
+  if (col.key === "final") return <ScoreBadge score={entry.finalScore} size="sm" thresholds={scoreThresholds} />
   if (col.key === "final_confidence") return <ConfidenceCell value={entry.finalScoreConfidence} />
-  if (col.key === "calc") return <ScoreBadge score={entry.calcScore} size="md" thresholds={scoreThresholds} />
-  if (col.key === "pred") return <ScoreBadge score={entry.predictedScore} size="md" showStub={entry.predictedIsStub} thresholds={scoreThresholds} />
+  if (col.key === "calc") return <ScoreBadge score={entry.calcScore} size="sm" thresholds={scoreThresholds} />
+  if (col.key === "pred") return <ScoreBadge score={entry.predictedScore} size="sm" showStub={entry.predictedIsStub} thresholds={scoreThresholds} />
   if (col.key === "personal_fit") return <AlignmentCell value={entry.personalFit} />
   if (col.key === "alignment_score")
     return <AlignmentScoreCell score={entry.alignmentScore} justification={entry.alignmentJustification} workId={entry.workId} />
@@ -317,9 +317,13 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
 
       {/* Desktop table */}
       <TooltipProvider delayDuration={150}>
-      <div ref={tableWrapperRef} className="hidden overflow-x-auto rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur lg:block">
+      <div
+        ref={tableWrapperRef}
+        className="hidden rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur lg:block"
+        style={{ width: totalScaledWidth }}
+      >
         <table
-          className="border-collapse"
+          className="border-separate border-spacing-0"
           style={{
             tableLayout: "fixed",
             width: totalScaledWidth,
@@ -331,8 +335,8 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
               return <col key={col.key} style={{ width: w }} />
             })}
           </colgroup>
-          <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur">
-            <tr className="border-b border-border/70">
+          <thead className="sticky -top-5 z-30 md:-top-7 [&_th]:bg-muted [&_tr:first-child_th:first-child]:rounded-tl-lg [&_tr:first-child_th:last-child]:rounded-tr-lg [&>tr>th]:border-b [&>tr>th]:border-border/70">
+            <tr>
               {columns.map((col) => {
                 const w = scaledWidthOf(col.key)
                 const sortField = getSortFieldForColumn(col.key)
@@ -406,12 +410,12 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
           </thead>
           <tbody>
             {entries.map((entry) => (
-              <tr key={entry.workId} className="border-b border-border/55 transition-colors last:border-0 hover:bg-primary/5">
+              <tr key={entry.workId} className="transition-colors hover:bg-primary/5 [&>td]:border-b [&>td]:border-border/55 last:[&>td]:border-0">
                 {columns.map((col) => (
                   <td
                     key={col.key}
                     className={cn(
-                      "py-2.5 align-middle overflow-hidden",
+                      "h-14 py-3 align-middle overflow-hidden",
                       col.key.startsWith("crit_") ? "px-1" : "px-3"
                     )}
                     style={{ textAlign: col.align ?? "left" }}

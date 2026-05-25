@@ -1,21 +1,15 @@
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { Badge } from "@/components/ui/badge"
+import { getScoreTextColor, type ScoreColorThresholds } from "@/components/ui/score-badge"
 import { cn } from "@/lib/utils"
 import type { FavoritesSummary } from "@/server/queries/favorites"
 
 interface FavoritesStatsHeaderProps {
   summary: FavoritesSummary
+  scoreThresholds: ScoreColorThresholds | null
 }
 
-function scoreColor(score: number | null): string {
-  if (score == null) return "text-muted-foreground"
-  if (score >= 8) return "text-emerald-600 dark:text-emerald-300"
-  if (score >= 6) return "text-lime-600 dark:text-lime-300"
-  if (score >= 4) return "text-amber-600 dark:text-amber-300"
-  return "text-rose-600 dark:text-rose-300"
-}
-
-export function FavoritesStatsHeader({ summary }: FavoritesStatsHeaderProps) {
+export function FavoritesStatsHeader({ summary, scoreThresholds }: FavoritesStatsHeaderProps) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       <div className="rounded-lg border bg-card/40 p-3">
@@ -33,7 +27,7 @@ export function FavoritesStatsHeader({ summary }: FavoritesStatsHeaderProps) {
         <p
           className={cn(
             "mt-1 text-2xl font-bold font-mono tabular-nums",
-            scoreColor(summary.avgFinalScore),
+            getScoreTextColor(summary.avgFinalScore, scoreThresholds),
           )}
         >
           {summary.avgFinalScore != null ? summary.avgFinalScore.toFixed(2) : "—"}

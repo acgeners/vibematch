@@ -60,6 +60,25 @@ function getSoftScoreColor(score: number, thresholds: ScoreColorThresholds | nul
   }
 }
 
+/**
+ * Variante text-only do score color — para casos onde a nota é exibida como
+ * número grande (stats headers, totais) e não como pílula. Usa a mesma lógica
+ * de tier de `ScoreBadge`, garantindo cores consistentes em todo o app.
+ */
+export function getScoreTextColor(
+  score: number | null | undefined,
+  thresholds: ScoreColorThresholds | null | undefined,
+): string {
+  if (score == null) return "text-muted-foreground"
+  switch (pickTier(score, thresholds)) {
+    case "top": return "text-green-600 dark:text-green-300"
+    case "high": return "text-emerald-600 dark:text-emerald-300"
+    case "mid": return "text-yellow-600 dark:text-yellow-300"
+    case "low": return "text-orange-600 dark:text-orange-300"
+    case "bottom": return "text-red-600 dark:text-red-300"
+  }
+}
+
 const sizeClasses = {
   sm: "text-xs px-1.5 py-0.5 min-w-[2rem]",
   md: "text-sm px-2 py-0.5 min-w-[2.5rem]",
