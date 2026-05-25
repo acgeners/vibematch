@@ -47,15 +47,14 @@ export function normalizePersonalStatus(
   if (value == null) return null
   const s = String(value).trim().toLowerCase()
   const map: Record<string, PersonalStatus> = {
-    "completed": "Completed",
+    "to-read": "To read",
+    "to read": "To read",
     "reading": "Reading",
     "started": "Started",
     "stalled": "Stalled",
-    "paused": "Paused",
-    "hiatus": "Hiatus",
     "on-hold": "On-hold",
-    "to-read": "To read",
-    "to read": "To read",
+    "completed": "Completed",
+    "hiatus": "Hiatus",
     "dropped": "Dropped",
   }
   return map[s] ?? null

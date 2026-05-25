@@ -5,6 +5,7 @@ import { getWorksByIds } from "@/server/queries/works"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug, WorkWithRelations } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
+import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 
 export interface CompareCriterionEntry {
   slug: CriterionSlug
@@ -34,9 +35,16 @@ export interface CompareWork {
   platformAvg: number | null
   totalVotes: number
   genres: string[]
-  tags: Array<{ slug: string; name: string }>
+  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null }>
   criteria: CompareCriterionEntry[]
 }
+
+const GROUP_ID_TO_LABEL: Record<string, string> = Object.fromEntries(
+  (Object.keys(TAG_GROUP_IDS) as TagGroupSlug[]).map((slug) => [
+    TAG_GROUP_IDS[slug],
+    TAG_GROUP_LABELS[slug],
+  ])
+)
 
 import { titleToSlug } from "@/lib/utils"
 import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
@@ -85,12 +93,17 @@ function mapWorkToCompare(
     scoreByCrit[cs.criterion_slug] = Number(cs.score)
   }
 
-  const tags = (work.tags ?? [])
+  const tags = (work.tags as Array<{ slug?: string; name?: string; tag_group_id?: string | null }> ?? [])
     .filter(Boolean)
-    .map((t) => ({
-      slug: (t.slug ?? "") as string,
-      name: (t.name ?? "") as string,
-    }))
+    .map((t) => {
+      const groupId = (t.tag_group_id ?? null) as string | null
+      return {
+        slug: (t.slug ?? "") as string,
+        name: (t.name ?? "") as string,
+        groupId,
+        groupName: groupId ? GROUP_ID_TO_LABEL[groupId] ?? null : null,
+      }
+    })
     .filter((t) => t.name)
 
   const primaryCover = pickPrimaryCover(work.work_covers)

@@ -68,6 +68,83 @@ export interface CalibrationInput {
   totalVotes: number
 }
 
+/**
+ * Análise de erro por faixa de distância ao centróide e por faixa de votos.
+ *
+ * Responde "onde o sistema acerta menos pra obras novas?". Obras com alta
+ * distância ou poucos votos são proxies pro perfil típico de obra ainda
+ * sem nota pessoal — se o MAE for muito pior nesses buckets, há ganho
+ * potencial em confidence-weighting per-instance.
+ */
+export interface BucketBreakdownEntry {
+  label: string
+  count: number
+  /** MAE da Nota.Final no bucket (null se < MIN_BUCKET_SIZE). */
+  maeFinal: number | null
+}
+
+export interface BucketBreakdown {
+  byDistance: BucketBreakdownEntry[]
+  byVotes: BucketBreakdownEntry[]
+}
+
+export interface BucketInput extends CalibrationInput {
+  predictionDistance: number | null
+}
+
+const DISTANCE_BUCKETS = [
+  { label: "< 3", min: 0, max: 3 },
+  { label: "3–6", min: 3, max: 6 },
+  { label: "≥ 6", min: 6, max: Infinity },
+] as const
+
+const VOTES_BUCKETS = [
+  { label: "< 100", min: 0, max: 100 },
+  { label: "100–1k", min: 100, max: 1_000 },
+  { label: "1k–10k", min: 1_000, max: 10_000 },
+  { label: "≥ 10k", min: 10_000, max: Infinity },
+] as const
+
+const MIN_BUCKET_SIZE = 5
+
+function bucketMae(
+  items: BucketInput[],
+  predicate: (it: BucketInput) => boolean,
+): { count: number; maeFinal: number | null } {
+  const filtered = items.filter(
+    (it) =>
+      predicate(it) && it.manualScore != null && it.finalScore != null,
+  )
+  if (filtered.length < MIN_BUCKET_SIZE) {
+    return { count: filtered.length, maeFinal: null }
+  }
+  const diffs = filtered.map((it) =>
+    Math.abs((it.finalScore as number) - (it.manualScore as number)),
+  )
+  return { count: filtered.length, maeFinal: round4(meanAbs(diffs)) }
+}
+
+export function computeBucketBreakdown(items: BucketInput[]): BucketBreakdown {
+  const byDistance: BucketBreakdownEntry[] = DISTANCE_BUCKETS.map((b) => {
+    const { count, maeFinal } = bucketMae(
+      items,
+      (it) =>
+        it.predictionDistance != null &&
+        it.predictionDistance >= b.min &&
+        it.predictionDistance < b.max,
+    )
+    return { label: b.label, count, maeFinal }
+  })
+  const byVotes: BucketBreakdownEntry[] = VOTES_BUCKETS.map((b) => {
+    const { count, maeFinal } = bucketMae(
+      items,
+      (it) => it.totalVotes >= b.min && it.totalVotes < b.max,
+    )
+    return { label: b.label, count, maeFinal }
+  })
+  return { byDistance, byVotes }
+}
+
 function meanAbs(diffs: number[]): number {
   return diffs.reduce((a, b) => a + b, 0) / diffs.length
 }

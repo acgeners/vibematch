@@ -10,6 +10,7 @@ import {
   Loader2,
   RotateCcw,
   Rows3,
+  Sparkles,
   X,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -349,6 +350,38 @@ function CompareRowPicker({
   )
 }
 
+function getUniqueBestWorst(
+  works: CompareWork[],
+  getValue: (w: CompareWork) => number | null,
+  negative = false
+): { bestIndex: number | null; worstIndex: number | null } {
+  const values = works.map(getValue)
+  const valid = values
+    .map((v, i) => ({ value: v, index: i }))
+    .filter((item): item is { value: number; index: number } => item.value != null)
+
+  if (valid.length < 2) return { bestIndex: null, worstIndex: null }
+
+  const nums = valid.map((item) => item.value)
+  const max = Math.max(...nums)
+  const min = Math.min(...nums)
+
+  if (Math.abs(max - min) < 0.0001) {
+    return { bestIndex: null, worstIndex: null }
+  }
+
+  const maxItems = valid.filter((item) => Math.abs(item.value - max) < 0.0001)
+  const minItems = valid.filter((item) => Math.abs(item.value - min) < 0.0001)
+
+  const bestItems = negative ? minItems : maxItems
+  const worstItems = negative ? maxItems : minItems
+
+  return {
+    bestIndex: bestItems.length === 1 ? bestItems[0].index : null,
+    worstIndex: worstItems.length === 1 ? worstItems[0].index : null,
+  }
+}
+
 interface CompareGridProps {
   works: CompareWork[]
   onRemoveId: (id: string) => void
@@ -380,35 +413,7 @@ function CompareGrid({
     })
   const isCollapsed = (key: SectionKey) => collapsed.has(key)
 
-  const bestWorstByRow = useMemo(() => {
-    const result: Record<string, { best: number; worst: number }> = {}
-    const baseRows: Array<{
-      key: string
-      getValue: (w: CompareWork) => number | null
-      negative?: boolean
-    }> = [
-      { key: "score:finalScore", getValue: (w) => w.finalScore },
-      { key: "score:calcScore", getValue: (w) => w.calcScore },
-      { key: "score:predictedScore", getValue: (w) => w.predictedScore },
-      { key: "score:manualScore", getValue: (w) => w.manualScore },
-      { key: "score:platformAvg", getValue: (w) => w.platformAvg },
-    ]
-    const critRows = CRITERION_SLUGS.map((slug) => ({
-      key: `crit:${slug}`,
-      getValue: (w: CompareWork) => w.criteria.find((c) => c.slug === slug)?.score ?? null,
-      negative: NEGATIVE_CRITERIA.has(slug),
-    }))
-    for (const row of [...baseRows, ...critRows]) {
-      const values = works
-        .map((w) => row.getValue(w))
-        .filter((v): v is number => v != null)
-      if (values.length === 0) continue
-      const max = Math.max(...values)
-      const min = Math.min(...values)
-      result[row.key] = row.negative ? { best: min, worst: max } : { best: max, worst: min }
-    }
-    return result
-  }, [works])
+
 
   const allEqualScore = (getter: (w: CompareWork) => number | null): boolean => {
     if (works.length < 2) return false
@@ -518,7 +523,7 @@ function CompareGrid({
         style={gridStyle}
       >
         {/* Header */}
-        <div className="sticky left-0 z-20 bg-background" />
+        <div className="sticky left-0 top-0 z-30 bg-background/95 backdrop-blur-md" />
         {works.map((w) => (
           <CompareHeaderCell key={w.id} work={w} onRemove={() => onRemoveId(w.id)} />
         ))}
@@ -543,9 +548,9 @@ function CompareGrid({
           <>
             <SectionLabel label="Capítulos" />
             {works.map((w) => (
-              <CompareCell key={w.id}>
+              <CompareCell key={w.id} horizontalAlign="center">
                 <span className="font-mono text-sm">
-                  {w.chaptersRead ?? "?"} / {w.totalChapters ?? "?"}
+                  {w.totalChapters ?? "—"}
                 </span>
               </CompareCell>
             ))}
@@ -557,7 +562,7 @@ function CompareGrid({
           <>
             <SectionLabel label="Ano" />
             {works.map((w) => (
-              <CompareCell key={w.id}>
+              <CompareCell key={w.id} horizontalAlign="center">
                 <span className="tabular-nums text-xs text-muted-foreground">
                   {w.year ?? "—"}
                 </span>
@@ -574,20 +579,24 @@ function CompareGrid({
             onToggle={() => toggleSection("notas")}
           />
         )}
-        {showNotasSection && !isCollapsed("notas") &&
-          visibleNotasRows.map((row) => (
-            <ScoreRow
-              key={row.key}
-              label={row.label}
-              works={works}
-              getScore={row.get}
-              bestWorst={bestWorstByRow[row.key]}
-              thresholds={row.thresholds}
-              formatScore={row.formatScore}
-              getStub={row.stub}
-              renderExtra={row.renderExtra}
-            />
-          ))}
+         {showNotasSection && !isCollapsed("notas") &&
+          visibleNotasRows.map((row) => {
+            const { bestIndex, worstIndex } = getUniqueBestWorst(works, row.get)
+            return (
+              <ScoreRow
+                key={row.key}
+                label={row.label}
+                works={works}
+                getScore={row.get}
+                bestIndex={bestIndex}
+                worstIndex={worstIndex}
+                thresholds={row.thresholds}
+                formatScore={row.formatScore}
+                getStub={row.stub}
+                renderExtra={row.renderExtra}
+              />
+            )
+          })}
 
         {/* Critérios */}
         {showCriteriosSection && (
@@ -600,6 +609,12 @@ function CompareGrid({
         {showCriteriosSection && !isCollapsed("criterios") &&
           visibleCritSlugs.map((slug) => {
             const info = CRITERIA_INFO[slug]
+            const isNegative = slug === "drama" || slug === "tragedy"
+            const { bestIndex, worstIndex } = getUniqueBestWorst(
+              works,
+              (w) => w.criteria.find((c) => c.slug === slug)?.score ?? null,
+              isNegative
+            )
             return (
               <CriterionRow
                 key={slug}
@@ -607,7 +622,8 @@ function CompareGrid({
                 label={info.name}
                 emoji={info.emoji}
                 works={works}
-                bestWorst={bestWorstByRow[`crit:${slug}`]}
+                bestIndex={bestIndex}
+                worstIndex={worstIndex}
               />
             )
           })}
@@ -643,12 +659,12 @@ function CompareHeaderCell({
   onRemove: () => void
 }) {
   return (
-    <div className="relative flex flex-col gap-2 rounded-lg border bg-card/60 p-2.5">
+    <div className="sticky top-0 z-20 relative flex flex-col gap-2 rounded-lg border border-border/80 bg-card/95 backdrop-blur-md p-2.5 shadow-sm transition-all hover:bg-card">
       <button
         type="button"
         onClick={onRemove}
         aria-label="Remover da comparação"
-        className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-border/40 bg-background/50 text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
       >
         <X className="h-3.5 w-3.5" />
       </button>
@@ -678,11 +694,6 @@ function CompareHeaderCell({
             <span className="line-clamp-3">{work.title}</span>
             <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-50 group-hover:opacity-100" />
           </Link>
-          {work.alternativeTitles.length > 0 && (
-            <p className="mt-1 line-clamp-1 text-[10px] text-muted-foreground/70">
-              {work.alternativeTitles.join(" · ")}
-            </p>
-          )}
           <SynopsisButton
             synopsis={work.synopsis}
             synopsisQuality={work.synopsisQuality}
@@ -755,7 +766,7 @@ function GenresTagsCell({
   tags,
 }: {
   genres: string[]
-  tags: Array<{ slug: string; name: string }>
+  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null }>
 }) {
   const total = genres.length + tags.length
   if (total === 0) {
@@ -766,6 +777,21 @@ function GenresTagsCell({
   const remainingForTags = Math.max(0, VISIBLE - visibleGenres.length)
   const visibleTags = tags.slice(0, remainingForTags)
   const remaining = total - visibleGenres.length - visibleTags.length
+
+  const groupedTags = (() => {
+    const groups = new Map<string, typeof tags>()
+    for (const tag of tags) {
+      const label = tag.groupName ?? "Sem grupo"
+      const list = groups.get(label) ?? []
+      list.push(tag)
+      groups.set(label, list)
+    }
+    return [...groups.entries()].sort(([a], [b]) => {
+      if (a === "Sem grupo") return 1
+      if (b === "Sem grupo") return -1
+      return a.localeCompare(b)
+    })
+  })()
 
   return (
     <div className="flex flex-wrap items-center gap-1">
@@ -797,11 +823,16 @@ function GenresTagsCell({
               +{remaining} ver
             </button>
           </PopoverTrigger>
-          <PopoverContent side="top" align="start" className="max-w-xs space-y-2 p-3">
+          <PopoverContent
+            side="top"
+            align="start"
+            className="max-h-[60vh] w-80 max-w-[90vw] space-y-3 overflow-y-auto p-3"
+          >
             {genres.length > 0 && (
               <div>
                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Gêneros
+                  Gêneros{" "}
+                  <span className="text-muted-foreground/60">({genres.length})</span>
                 </p>
                 <div className="flex flex-wrap gap-1">
                   {genres.map((g) => (
@@ -816,13 +847,14 @@ function GenresTagsCell({
                 </div>
               </div>
             )}
-            {tags.length > 0 && (
-              <div>
+            {groupedTags.map(([groupName, groupTags]) => (
+              <div key={groupName}>
                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Tags
+                  {groupName}{" "}
+                  <span className="text-muted-foreground/60">({groupTags.length})</span>
                 </p>
                 <div className="flex flex-wrap gap-1">
-                  {tags.map((t) => (
+                  {groupTags.map((t) => (
                     <Badge
                       key={`t:${t.slug}`}
                       variant="outline"
@@ -833,7 +865,7 @@ function GenresTagsCell({
                   ))}
                 </div>
               </div>
-            )}
+            ))}
           </PopoverContent>
         </Popover>
       )}
@@ -882,20 +914,24 @@ interface CompareCellProps {
   children: React.ReactNode
   highlightVariant?: "best" | "worst"
   verticalAlign?: "center" | "top"
+  horizontalAlign?: "center" | "left"
 }
 
 function CompareCell({
   children,
   highlightVariant,
   verticalAlign = "center",
+  horizontalAlign = "left",
 }: CompareCellProps) {
   return (
     <div
       className={cn(
-        "flex min-h-[2rem] rounded-md border border-transparent bg-card/40 px-2 py-1",
+        "flex min-h-[2.25rem] rounded-md border bg-card/30 px-2.5 py-1.5 transition-all duration-200 hover:bg-card/50",
         verticalAlign === "top" ? "items-start" : "items-center",
-        highlightVariant === "best" && "border-primary/40 bg-primary/5",
-        highlightVariant === "worst" && "border-rose-400/30 bg-rose-500/5"
+        horizontalAlign === "center" ? "justify-center" : "justify-start",
+        !highlightVariant && "border-border/30",
+        highlightVariant === "best" && "!bg-emerald-500/5 dark:!bg-emerald-500/10 !border-emerald-500/30 dark:!border-emerald-400/40 shadow-sm",
+        highlightVariant === "worst" && "!bg-rose-500/5 dark:!bg-rose-500/10 !border-rose-500/25 dark:!border-rose-400/30 shadow-sm"
       )}
     >
       {children}
@@ -907,7 +943,8 @@ interface ScoreRowProps {
   label: string
   works: CompareWork[]
   getScore: (w: CompareWork) => number | null
-  bestWorst: { best: number; worst: number } | undefined
+  bestIndex: number | null
+  worstIndex: number | null
   thresholds: ScoreColorThresholds | null
   formatScore?: (v: number) => string
   getStub?: (w: CompareWork) => boolean
@@ -918,7 +955,8 @@ function ScoreRow({
   label,
   works,
   getScore,
-  bestWorst,
+  bestIndex,
+  worstIndex,
   thresholds,
   formatScore,
   getStub,
@@ -927,11 +965,12 @@ function ScoreRow({
   return (
     <>
       <SectionLabel label={label} />
-      {works.map((w) => {
+      {works.map((w, index) => {
         const score = getScore(w)
-        const variant = getHighlightVariant(score, bestWorst, works.length)
+        const variant =
+          index === bestIndex ? "best" : index === worstIndex ? "worst" : undefined
         return (
-          <CompareCell key={w.id} highlightVariant={variant}>
+          <CompareCell key={w.id} highlightVariant={variant} horizontalAlign="center">
             <div className="flex items-baseline gap-2">
               {formatScore && score != null ? (
                 <span className="font-mono text-sm font-semibold">
@@ -959,10 +998,11 @@ interface CriterionRowProps {
   label: string
   emoji: string
   works: CompareWork[]
-  bestWorst: { best: number; worst: number } | undefined
+  bestIndex: number | null
+  worstIndex: number | null
 }
 
-function CriterionRow({ slug, label, emoji, works, bestWorst }: CriterionRowProps) {
+function CriterionRow({ slug, label, emoji, works, bestIndex, worstIndex }: CriterionRowProps) {
   return (
     <>
       <div className="sticky left-0 z-10 flex items-center gap-1.5 bg-background text-xs text-muted-foreground">
@@ -971,13 +1011,14 @@ function CriterionRow({ slug, label, emoji, works, bestWorst }: CriterionRowProp
         </span>
         <span className="truncate">{label}</span>
       </div>
-      {works.map((w) => {
+      {works.map((w, index) => {
         const entry = w.criteria.find((c) => c.slug === slug)
         const score = entry?.score ?? null
         const justification = entry?.aiJustification ?? null
-        const variant = getHighlightVariant(score, bestWorst, works.length)
+        const variant =
+          index === bestIndex ? "best" : index === worstIndex ? "worst" : undefined
         return (
-          <CompareCell key={w.id} highlightVariant={variant}>
+          <CompareCell key={w.id} highlightVariant={variant} horizontalAlign="center">
             <div className="flex items-center gap-2">
               {score == null ? (
                 <span className="font-mono text-sm text-muted-foreground">—</span>
@@ -996,9 +1037,10 @@ function CriterionRow({ slug, label, emoji, works, bestWorst }: CriterionRowProp
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      className="text-[10px] uppercase tracking-wide text-muted-foreground/70 hover:text-foreground"
+                      aria-label="Ver justificativa da IA"
+                      className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-accent-foreground"
                     >
-                      ver
+                      <Sparkles className="h-3.5 w-3.5 text-violet-500 dark:text-violet-400" />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent
@@ -1017,29 +1059,19 @@ function CriterionRow({ slug, label, emoji, works, bestWorst }: CriterionRowProp
   )
 }
 
-function getHighlightVariant(
-  score: number | null,
-  bestWorst: { best: number; worst: number } | undefined,
-  worksLength: number
-): "best" | "worst" | undefined {
-  if (score == null || bestWorst == null || worksLength < 2) return undefined
-  if (Math.abs(bestWorst.best - bestWorst.worst) < 0.0001) return undefined
-  if (Math.abs(score - bestWorst.best) < 0.0001) return "best"
-  if (Math.abs(score - bestWorst.worst) < 0.0001) return "worst"
-  return undefined
-}
+
 
 function getCriterionColor(score: number, slug: string): string {
   const isNegative = slug === "drama" || slug === "tragedy"
   if (isNegative) {
-    if (score <= 3) return "bg-green-100 text-green-800"
-    if (score <= 5) return "bg-yellow-100 text-yellow-800"
-    return "bg-red-100 text-red-800"
+    if (score <= 3) return "bg-green-100 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-400 dark:border-green-500/25"
+    if (score <= 5) return "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-400 dark:border-yellow-500/25"
+    return "bg-red-100 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25"
   }
-  if (score >= 8) return "bg-emerald-100 text-emerald-800"
-  if (score >= 6) return "bg-green-100 text-green-800"
-  if (score >= 4) return "bg-yellow-100 text-yellow-800"
-  return "bg-red-100 text-red-800"
+  if (score >= 8) return "bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25"
+  if (score >= 6) return "bg-green-100 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-400 dark:border-green-500/25"
+  if (score >= 4) return "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-400 dark:border-yellow-500/25"
+  return "bg-red-100 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25"
 }
 
 function formatVotes(count: number): string {

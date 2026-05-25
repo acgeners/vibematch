@@ -52,11 +52,30 @@ function getScoreColor(score: number, thresholds: ScoreColorThresholds | null | 
 
 function getSoftScoreColor(score: number, thresholds: ScoreColorThresholds | null | undefined): string {
   switch (pickTier(score, thresholds)) {
-    case "top": return "bg-green-500/15 text-green-700 border border-green-500/25"
-    case "high": return "bg-emerald-500/15 text-emerald-700 border border-emerald-500/25"
-    case "mid": return "bg-yellow-500/20 text-yellow-800 border border-yellow-500/30"
-    case "low": return "bg-orange-500/15 text-orange-700 border border-orange-500/25"
-    case "bottom": return "bg-red-500/15 text-red-700 border border-red-500/25"
+    case "top": return "bg-green-500/15 text-green-700 border border-green-500/25 dark:text-green-400 dark:border-green-500/30"
+    case "high": return "bg-emerald-500/15 text-emerald-700 border border-emerald-500/25 dark:text-emerald-400 dark:border-emerald-500/30"
+    case "mid": return "bg-yellow-500/20 text-yellow-800 border border-yellow-500/30 dark:text-yellow-400 dark:border-yellow-500/35"
+    case "low": return "bg-orange-500/15 text-orange-700 border border-orange-500/25 dark:text-orange-400 dark:border-orange-500/30"
+    case "bottom": return "bg-red-500/15 text-red-700 border border-red-500/25 dark:text-red-400 dark:border-red-500/30"
+  }
+}
+
+/**
+ * Variante text-only do score color — para casos onde a nota é exibida como
+ * número grande (stats headers, totais) e não como pílula. Usa a mesma lógica
+ * de tier de `ScoreBadge`, garantindo cores consistentes em todo o app.
+ */
+export function getScoreTextColor(
+  score: number | null | undefined,
+  thresholds: ScoreColorThresholds | null | undefined,
+): string {
+  if (score == null) return "text-muted-foreground"
+  switch (pickTier(score, thresholds)) {
+    case "top": return "text-green-600 dark:text-green-300"
+    case "high": return "text-emerald-600 dark:text-emerald-300"
+    case "mid": return "text-yellow-600 dark:text-yellow-300"
+    case "low": return "text-orange-600 dark:text-orange-300"
+    case "bottom": return "text-red-600 dark:text-red-300"
   }
 }
 

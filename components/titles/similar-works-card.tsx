@@ -25,6 +25,12 @@ function similarityClasses(s: number): string {
   return "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
 }
 
+function formatVotes(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`
+  return String(count)
+}
+
 export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
   if (works.length === 0) {
     return (
@@ -45,7 +51,7 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
 
   return (
     <Card className={className}>
-      <CardHeader className="pb-2">
+      <CardHeader className="pb-0">
         <CardTitle className="text-base flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-violet-500" />
           Obras parecidas
@@ -70,7 +76,32 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
-        <ul className="divide-y divide-border">
+        {/* Barra de Legenda */}
+        <div className="flex flex-col gap-2 border-b border-border/40 pb-4 mb-4 text-xs text-muted-foreground bg-muted/15 p-3 rounded-lg mt-1">
+          <div className="flex items-center gap-1">
+            <span className="font-bold text-foreground">Legenda das informações:</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 mt-1">
+            <div className="flex items-start gap-2">
+              <Badge variant="outline" className="font-mono text-[11px] font-bold py-0.5 px-2 border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300 shrink-0 mt-0.5">
+                80%
+              </Badge>
+              <p className="text-[11px] leading-relaxed">
+                <strong className="text-foreground">Similaridade:</strong> Similaridade semântica com esta obra. Calculada por distância cosseno entre os embeddings das descrições.
+              </p>
+            </div>
+            <div className="flex items-start gap-2">
+              <div className="flex gap-1 shrink-0 mt-0.5">
+                <ScoreBadge score={8.0} size="sm" variant="solid" className="h-6 min-w-[2rem] text-[10px] font-bold pointer-events-none" />
+              </div>
+              <p className="text-[11px] leading-relaxed">
+                <strong className="text-foreground">Nota pessoal/prevista:</strong> Sua nota pessoal se você já avaliou esta obra, ou a Nota Final prevista pelo sistema se você ainda não avaliou.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3">
           {works.map((w) => {
             const topGenres = w.genres.slice(0, 3)
             const metaParts = [
@@ -87,17 +118,20 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
             const displayScore = w.manualScore ?? w.finalScore
             const isManual = w.manualScore != null
             return (
-              <li key={w.id} className="flex items-start gap-4 py-4 first:pt-0 last:pb-0">
+              <div
+                key={w.id}
+                className="group flex gap-4 p-3.5 rounded-xl border border-border/50 bg-card/25 hover:bg-card/70 hover:border-primary/20 hover:shadow-md transition-all duration-300"
+              >
                 <Link
                   href={`/titles/${titleToSlug(w.title)}`}
-                  className="shrink-0 w-24 h-32 overflow-hidden rounded-md border border-border bg-muted relative shadow-sm transition-transform hover:scale-[1.03]"
+                  className="shrink-0 w-20 h-28 overflow-hidden rounded-lg border border-border bg-muted relative shadow-sm transition-transform group-hover:scale-[1.02]"
                 >
                   {w.coverUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={getCoverImageSrc(w.coverUrl) ?? w.coverUrl}
                       alt=""
-                      className="size-full object-cover"
+                      className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
                       loading="lazy"
                     />
                   ) : (
@@ -107,99 +141,108 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
                   )}
                 </Link>
 
-                <div className="min-w-0 flex-1 space-y-2 pt-0.5">
-                  <WorkTitleLink
-                    title={w.title}
-                    workId={w.id}
-                    className="block font-semibold text-[15px] hover:underline line-clamp-1"
-                  />
+                <div className="min-w-0 flex-1 flex flex-col justify-between py-0.5">
+                  <div className="space-y-1.5">
+                    <WorkTitleLink
+                      title={w.title}
+                      workId={w.id}
+                      className="block font-bold text-[16px] text-foreground group-hover:text-primary transition-colors hover:underline line-clamp-1"
+                    />
 
-                  {topGenres.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {topGenres.map((g) => (
-                        <span
-                          key={g}
-                          className="rounded bg-muted px-2 py-0.5 text-[11px] font-medium text-foreground/80"
-                        >
-                          {g}
+                    {topGenres.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {topGenres.map((g) => (
+                          <span
+                            key={g}
+                            className="rounded-md bg-muted/65 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider"
+                          >
+                            {g}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {w.platformAvg != null && (
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2">
+                      <span className="font-semibold text-foreground/85">Média externa:</span>
+                      <span className="font-mono font-bold text-foreground bg-muted/40 px-1.5 py-0.5 rounded text-[11px]">
+                        {w.platformAvg.toFixed(2)}
+                      </span>
+                      {w.totalVotes != null && w.totalVotes > 0 && (
+                        <span className="text-[11px] text-muted-foreground/70">
+                          ({formatVotes(w.totalVotes)} votos)
                         </span>
-                      ))}
+                      )}
                     </div>
                   )}
 
                   {(metaParts.length > 0 ||
                     w.publicationStatusId != null ||
                     w.personalStatusId != null) && (
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground mt-2">
                       {metaParts.length > 0 && (
-                        <span className="tabular-nums">{metaParts.join(" · ")}</span>
+                        <span className="tabular-nums font-medium bg-muted/40 px-2 py-0.5 rounded-md border border-border/30">{metaParts.join(" · ")}</span>
                       )}
                       {w.publicationStatusId != null && (
                         <PublicationStatusBadge
                           statusId={w.publicationStatusId}
                           compact
-                          className="px-1.5 py-0 text-[10px]"
+                          className="px-2 py-0.5 text-[10px] font-medium"
                         />
                       )}
                       {w.personalStatusId != null && (
                         <PersonalStatusBadge
                           statusId={w.personalStatusId}
-                          className="px-1.5 py-0 text-[10px]"
+                          className="px-2 py-0.5 text-[10px] font-medium"
                         />
                       )}
                     </div>
                   )}
 
-                  {/* Fallback: se não temos NENHUM metadado estruturado, mostra a sinopse pra não deixar a linha vazia */}
                   {!hasAnyMeta && w.synopsis && (
-                    <p className="line-clamp-2 text-xs italic text-muted-foreground">
+                    <p className="line-clamp-2 text-xs italic text-muted-foreground mt-2">
                       {w.synopsis}
                     </p>
                   )}
                 </div>
 
-                <div className="flex flex-col items-end gap-2 shrink-0 pt-0.5">
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "font-mono text-sm font-bold py-1 px-2.5 cursor-help",
-                            similarityClasses(w.similarity),
-                          )}
-                        >
-                          {formatSimilarity(w.similarity)}
-                        </Badge>
-                      </TooltipTrigger>
-                      <TooltipContent side="left" className="max-w-[220px] text-xs leading-relaxed">
-                        Similaridade semântica com esta obra ({formatSimilarity(w.similarity)}).
-                        Calculada por distância cosseno entre os embeddings das descrições.
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                <div className={cn(
+                  "flex flex-col items-center shrink-0 self-stretch pl-2 min-w-[80px] py-1",
+                  displayScore != null ? "justify-between" : "justify-center"
+                )}>
+                  <div className="flex flex-col items-center gap-1">
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-bold text-center block w-full leading-none">
+                      Similar
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "h-8 min-w-[3rem] font-mono text-sm font-bold px-2 py-0.5 rounded-md border flex items-center justify-center shadow-xs",
+                        similarityClasses(w.similarity),
+                      )}
+                    >
+                      {formatSimilarity(w.similarity)}
+                    </Badge>
+                  </div>
 
                   {displayScore != null && (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="cursor-help">
-                            <ScoreBadge score={displayScore} size="lg" variant="soft" />
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent side="left" className="max-w-[220px] text-xs leading-relaxed">
-                          {isManual
-                            ? "Sua nota pessoal (manual_score) — você já avaliou esta obra."
-                            : "Nota.Final prevista pelo sistema — você ainda não avaliou."}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-bold text-center block w-full leading-none">
+                        {isManual ? "pessoal" : "prevista"}
+                      </span>
+                      <ScoreBadge
+                        score={displayScore}
+                        variant="solid"
+                        className="h-8 min-w-[3rem] text-sm font-bold shadow-xs px-2"
+                      />
+                    </div>
                   )}
                 </div>
-              </li>
+              </div>
             )
           })}
-        </ul>
+        </div>
       </CardContent>
     </Card>
   )

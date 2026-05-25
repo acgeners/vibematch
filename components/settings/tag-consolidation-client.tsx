@@ -1,11 +1,18 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowRightLeft, Check, ChevronDown, ChevronUp, Pencil, RotateCcw, Trash2, X } from "lucide-react"
+import { ArrowRightLeft, Check, ChevronDown, ChevronUp, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -19,9 +26,11 @@ import {
   bulkDeleteGroupMoves,
   bulkSetGroupMoveStatus,
   bulkSetProposalStatus,
+  createManualCluster,
   deleteClusterProposal,
   editGroupMove,
   editProposal,
+  listAllTagsInGroup,
   moveTagBetweenProposals,
   moveTagToGroup,
   rejectGroupMove,
@@ -71,6 +80,7 @@ export function TagConsolidationClient({
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [isBulkRunning, setIsBulkRunning] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
 
   const toggleSelected = (id: string) => {
     setSelectedIds((prev) => {
@@ -449,6 +459,12 @@ export function TagConsolidationClient({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          {!selectionMode && (
+            <Button variant="outline" size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              Novo cluster
+            </Button>
+          )}
           {!selectionMode && initialStatus !== "applied" && proposals.length > 0 && (
             <Button variant="outline" size="sm" onClick={() => setSelectionMode(true)}>
               Selecionar
@@ -516,6 +532,287 @@ export function TagConsolidationClient({
         />
       )}
         </>
+      )}
+
+      {createOpen && (
+        <CreateClusterDialog
+          onClose={() => setCreateOpen(false)}
+          groups={groups}
+          defaultGroup={initialGroup}
+          onCreated={refresh}
+        />
+      )}
+    </div>
+  )
+}
+
+interface CreateClusterDialogProps {
+  onClose: () => void
+  groups: Array<{ slug: TagGroupSlug; label: string }>
+  defaultGroup: TagGroupSlug | null
+  onCreated: () => void
+}
+
+function CreateClusterDialog({
+  onClose,
+  groups,
+  defaultGroup,
+  onCreated,
+}: CreateClusterDialogProps) {
+  const [groupSlug, setGroupSlug] = useState<TagGroupSlug | null>(defaultGroup)
+  const [tags, setTags] = useState<UncoveredTag[]>([])
+  const [tagsLoading, setTagsLoading] = useState(defaultGroup !== null)
+  const [search, setSearch] = useState("")
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [canonicalId, setCanonicalId] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  // Load tags whenever group changes. Resets (tags/selection) live in the
+  // Select onValueChange handler so the effect body has no synchronous
+  // setState — only the async resolution updates state.
+  useEffect(() => {
+    if (!groupSlug) return
+    let cancelled = false
+    listAllTagsInGroup(groupSlug)
+      .then((rows) => {
+        if (cancelled) return
+        setTags(rows)
+        setTagsLoading(false)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        toast.error(err instanceof Error ? err.message : "Falha ao carregar tags")
+        setTagsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [groupSlug])
+
+  const changeGroup = (slug: TagGroupSlug) => {
+    setGroupSlug(slug)
+    setTags([])
+    setSelectedIds(new Set())
+    setCanonicalId(null)
+    setSearch("")
+    setTagsLoading(true)
+  }
+
+  const toggleId = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+        if (canonicalId === id) setCanonicalId(null)
+      } else {
+        next.add(id)
+        if (!canonicalId) setCanonicalId(id)
+      }
+      return next
+    })
+  }
+
+  const q = search.trim().toLowerCase()
+  const filtered = q
+    ? tags.filter((t) => t.name.toLowerCase().includes(q) || t.slug.toLowerCase().includes(q))
+    : tags
+  // Always show selected at top so they don't disappear when filtering.
+  const selectedTags = tags.filter((t) => selectedIds.has(t.id))
+  const unselectedFiltered = filtered.filter((t) => !selectedIds.has(t.id))
+
+  const canSubmit = !!groupSlug && selectedIds.size >= 2 && !!canonicalId && !submitting
+
+  const handleSubmit = async () => {
+    if (!groupSlug || !canonicalId) return
+    const canonicalTag = tags.find((t) => t.id === canonicalId)
+    if (!canonicalTag) return
+    setSubmitting(true)
+    const { error } = await createManualCluster({
+      group_slug: groupSlug,
+      canonical_name: canonicalTag.name,
+      member_tag_ids: [...selectedIds],
+    })
+    setSubmitting(false)
+    if (error) {
+      toast.error(error)
+      return
+    }
+    toast.success("Cluster criado")
+    onClose()
+    onCreated()
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Novo cluster manual</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Grupo
+            </label>
+            <Select
+              value={groupSlug ?? ""}
+              onValueChange={(v) => changeGroup(v as TagGroupSlug)}
+            >
+              <SelectTrigger className="w-72">
+                <SelectValue placeholder="Escolha um grupo" />
+              </SelectTrigger>
+              <SelectContent>
+                {groups.map((g) => (
+                  <SelectItem key={g.slug} value={g.slug}>
+                    {g.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {groupSlug && (
+            <>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Buscar tags
+                </label>
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={tagsLoading ? "Carregando..." : `${tags.length} tags no grupo`}
+                  disabled={tagsLoading}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>
+                    {selectedIds.size} selecionada{selectedIds.size === 1 ? "" : "s"}{" "}
+                    {selectedIds.size < 2 && (
+                      <span className="text-amber-300">(mínimo 2)</span>
+                    )}
+                  </span>
+                  {selectedIds.size > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedIds(new Set())
+                        setCanonicalId(null)
+                      }}
+                      className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+                    >
+                      Limpar
+                    </button>
+                  )}
+                </div>
+                <div className="max-h-72 overflow-y-auto rounded-md border border-border/65 bg-background/40 p-2">
+                  {tagsLoading ? (
+                    <div className="p-2 text-sm text-muted-foreground">Carregando tags...</div>
+                  ) : tags.length === 0 ? (
+                    <div className="p-2 text-sm text-muted-foreground">
+                      Nenhuma tag neste grupo.
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {selectedTags.length > 0 && (
+                        <div className="mb-2 border-b border-border/40 pb-2">
+                          {selectedTags.map((t) => (
+                            <TagRow
+                              key={t.id}
+                              tag={t}
+                              checked
+                              isCanonical={canonicalId === t.id}
+                              onToggle={() => toggleId(t.id)}
+                              onMakeCanonical={() => setCanonicalId(t.id)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                      {unselectedFiltered.slice(0, 200).map((t) => (
+                        <TagRow
+                          key={t.id}
+                          tag={t}
+                          checked={false}
+                          isCanonical={false}
+                          onToggle={() => toggleId(t.id)}
+                          onMakeCanonical={() => undefined}
+                        />
+                      ))}
+                      {unselectedFiltered.length > 200 && (
+                        <div className="px-2 py-1 text-xs text-muted-foreground">
+                          mostrando 200 de {unselectedFiltered.length} — refine a busca
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {selectedIds.size >= 2 && (
+                <div className="rounded-md border border-border/65 bg-background/40 p-3 text-sm">
+                  <span className="text-xs text-muted-foreground">Canonical: </span>
+                  <span className="font-semibold">
+                    {canonicalId
+                      ? tags.find((t) => t.id === canonicalId)?.name ?? "—"
+                      : "escolha clicando em ⭐ ao lado de uma tag selecionada"}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
+            Cancelar
+          </Button>
+          <Button onClick={handleSubmit} disabled={!canSubmit}>
+            {submitting ? "Criando..." : "Criar cluster"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface TagRowProps {
+  tag: UncoveredTag
+  checked: boolean
+  isCanonical: boolean
+  onToggle: () => void
+  onMakeCanonical: () => void
+}
+
+function TagRow({ tag, checked, isCanonical, onToggle, onMakeCanonical }: TagRowProps) {
+  return (
+    <div
+      className={`flex items-center gap-2 rounded px-2 py-1 hover:bg-muted/40 ${
+        checked ? "bg-primary/[0.05]" : ""
+      }`}
+    >
+      <Checkbox checked={checked} onCheckedChange={onToggle} />
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex-1 cursor-pointer text-left text-sm"
+      >
+        <span className="font-medium">{tag.name}</span>
+        <span className="ml-2 text-xs text-muted-foreground">{tag.slug}</span>
+      </button>
+      {checked && (
+        <button
+          type="button"
+          onClick={onMakeCanonical}
+          title="Definir como canonical"
+          className={`rounded px-1.5 py-0.5 text-xs ${
+            isCanonical
+              ? "bg-amber-400/20 text-amber-200"
+              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          }`}
+        >
+          {isCanonical ? "★ canonical" : "☆"}
+        </button>
       )}
     </div>
   )

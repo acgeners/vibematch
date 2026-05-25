@@ -33,6 +33,14 @@ import {
   starsToPostReadingScore,
   type PostReadingScoreField,
 } from "@/lib/constants/post-reading-criteria"
+import { cn } from "@/lib/utils"
+import { BookOpen, Users, Palette, Info, FileEdit, Calendar, Bookmark, Star, X } from "lucide-react"
+import {
+  Tooltip,
+  TooltipProvider,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 const POST_FIELDS: PostReadingScoreField[] = [
   "post_story_score",
@@ -46,11 +54,11 @@ const POST_FIELDS: PostReadingScoreField[] = [
 ]
 
 const STAR_LEGEND = [
-  { stars: "★", label: "Fraco" },
-  { stars: "★★", label: "Mediano" },
-  { stars: "★★★", label: "Bom" },
-  { stars: "★★★★", label: "Muito bom" },
-  { stars: "★★★★★", label: "Excelente" },
+  { stars: 1, value: 2.0, label: "Fraco", desc: "História confusa, personagens sem graça/irritantes ou visual fraco." },
+  { stars: 2, value: 4.0, label: "Mediano", desc: "Premissa aceitável, mas desenvolvimento raso, ritmo irregular ou clichês comuns." },
+  { stars: 3, value: 6.5, label: "Bom", desc: "Obra funcional, boa imersão e desenvolvimento satisfatório, mesmo sem ser brilhante." },
+  { stars: 4, value: 8.0, label: "Muito bom", desc: "História cativante, personagens marcantes, boa arte/visual e ritmo bem equilibrado." },
+  { stars: 5, value: 10.0, label: "Excelente", desc: "Excepcional em todos os aspectos: memorável, extremamente imersivo e original." },
 ]
 
 const CRITERION_GROUPS: Array<{ title: string; fields: PostReadingScoreField[] }> = [
@@ -80,6 +88,60 @@ const optionalNumber = (value: unknown) => {
   if (value === "" || value == null) return null
   const num = Number(value)
   return Number.isFinite(num) ? num : null
+}
+
+export const hasChanges = (initial: WorkStatusValues, current: Partial<WorkStatusValues>): boolean => {
+  const fields: Array<keyof WorkStatusValues> = [
+    "personal_status",
+    "personal_status_id",
+    "synopsis_quality",
+    "observation_adjustment",
+    "observations",
+    "chapters_read",
+    "last_read_at",
+    "manual_score",
+    "post_story_score",
+    "post_fl_score",
+    "post_ml_score",
+    "post_character_development_score",
+    "post_pacing_score",
+    "post_art_visual_score",
+    "post_impact_immersion_score",
+    "post_originality_score",
+  ]
+
+  for (const field of fields) {
+    const rawInit = initial[field]
+    const rawCurr = current[field] === undefined ? initial[field] : current[field]
+
+    // Normalize empty strings, null, undefined to a single "empty" state
+    const isInitEmpty = rawInit === null || rawInit === undefined || rawInit === ""
+    const isCurrEmpty = rawCurr === null || rawCurr === undefined || rawCurr === ""
+
+    if (isInitEmpty && isCurrEmpty) {
+      continue
+    }
+
+    if (isInitEmpty !== isCurrEmpty) {
+      return true
+    }
+
+    if (typeof rawInit === "number" || typeof rawCurr === "number") {
+      const numInit = Number(rawInit)
+      const numCurr = Number(rawCurr)
+      if (numInit !== numCurr) {
+        return true
+      }
+    } else {
+      const cleanInit = String(rawInit).replace(/\r\n/g, "\n").trim()
+      const cleanCurr = String(rawCurr).replace(/\r\n/g, "\n").trim()
+      if (cleanInit !== cleanCurr) {
+        return true
+      }
+    }
+  }
+
+  return false
 }
 
 export interface WorkStatusFormProps {
@@ -123,10 +185,20 @@ export function WorkStatusForm({
   const personalStatus = useWatch({ control, name: "personal_status" })
   const chaptersRead = useWatch({ control, name: "chapters_read" })
   const synopsisQuality = useWatch({ control, name: "synopsis_quality" })
+  const lastReadAt = useWatch({ control, name: "last_read_at" })
   const postScores = useWatch({
     control,
     name: POST_FIELDS,
   })
+  const currentManualScore = useWatch({ control, name: "manual_score" })
+  const currentValues = useWatch({ control })
+
+  const isDirty = useMemo(() => {
+    if (!currentValues) return false
+    return hasChanges(initialValues, currentValues as WorkStatusValues)
+  }, [initialValues, currentValues])
+
+  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
   const [postWeights] = useState<Record<PostReadingScoreField, number>>(readPostReadingWeights)
 
@@ -147,12 +219,16 @@ export function WorkStatusForm({
       scoreSum += normalized * weight
       weightSum += weight
     })
-    return weightSum > 0 ? Math.round((scoreSum / weightSum) * 10) / 10 : null
-  }, [postScores, postWeights])
+    return weightSum > 0
+      ? Math.round((scoreSum / weightSum) * 10) / 10
+      : initialValues.manual_score
+  }, [postScores, postWeights, initialValues.manual_score])
 
   useEffect(() => {
-    setValue("manual_score", computedManualScore, { shouldDirty: true })
-  }, [computedManualScore, setValue])
+    if (computedManualScore !== currentManualScore) {
+      setValue("manual_score", computedManualScore, { shouldDirty: true })
+    }
+  }, [computedManualScore, currentManualScore, setValue])
 
   const onSubmit = async (raw: WorkStatusValues) => {
     setSaving(true)
@@ -184,153 +260,233 @@ export function WorkStatusForm({
 
   return (
     <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-6">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,180px)_minmax(0,260px)]">
-        <div className="space-y-1.5">
-          <Label>Status leitura</Label>
-          <Select
-            value={personalStatus}
-            onValueChange={(v) =>
-              setValue("personal_status", v as WorkStatusValues["personal_status"], {
-                shouldDirty: true,
-              })
-            }
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PERSONAL_STATUSES.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {PERSONAL_STATUS_LABELS[s]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="status-chapters-read">Capítulos lidos</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              id="status-chapters-read"
-              type="number"
-              min={0}
-              {...register("chapters_read", { setValueAs: optionalNumber })}
-            />
-            <span className="text-muted-foreground">/</span>
-            <div className="flex h-9 min-w-12 items-center justify-center rounded-md border bg-muted px-2 text-sm text-muted-foreground">
-              {typeof totalChapters === "number" && totalChapters > 0 ? totalChapters : "?"}
-            </div>
-          </div>
-        </div>
-
-        {personalStatus !== "To read" && (
-          <div className="space-y-1.5">
-            <Label htmlFor="status-last-read-at">Última leitura</Label>
-            <div className="flex items-center gap-1">
-              <Input
-                id="status-last-read-at"
-                type="date"
-                max={new Date().toISOString().slice(0, 10)}
-                {...register("last_read_at", {
-                  setValueAs: (v) => (v === "" || v == null ? null : v),
-                })}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="px-2"
-                onClick={() =>
-                  setValue("last_read_at", new Date().toISOString().slice(0, 10), {
-                    shouldDirty: true,
-                  })
-                }
-              >
-                Hoje
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="px-2"
-                onClick={() =>
-                  setValue("last_read_at", null, {
-                    shouldDirty: true,
-                  })
-                }
-              >
-                Limpar
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
-
       <div className="space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h3 className="text-sm font-semibold">Critérios de avaliação</h3>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-              {STAR_LEGEND.map((item) => (
-                <span key={item.label} className="whitespace-nowrap">
-                  <span className="text-amber-500">{item.stars}</span>{" "}
-                  <span>{item.label}</span>
-                </span>
-              ))}
+        <div className="flex items-center gap-2">
+          <Bookmark className="h-4.5 w-4.5 text-muted-foreground" />
+          <h3 className="text-base font-bold text-foreground">Progresso de leitura</h3>
+        </div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+          <div className="space-y-1.5 w-full sm:w-[200px]">
+            <Label>Status leitura</Label>
+            <div className="w-full h-9">
+              <Select
+                value={personalStatus}
+                onValueChange={(v) =>
+                  setValue("personal_status", v as WorkStatusValues["personal_status"], {
+                    shouldDirty: true,
+                  })
+                }
+              >
+                <SelectTrigger className="w-full h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PERSONAL_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {PERSONAL_STATUS_LABELS[s]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-              Minha nota (calculada)
-            </span>
-            <ScoreBadge score={computedManualScore} size="md" />
-          </div>
-        </div>
 
-        <div className="space-y-5">
-          {CRITERION_GROUPS.map((group) => (
-            <div key={group.title} className="space-y-2">
-              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {group.title}
-              </h4>
-              <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
-                {group.fields.map((field) => {
-                  const valueIndex = POST_FIELDS.indexOf(field)
-                  const currentValue = postScores[valueIndex]
-                  return (
-                    <div key={field} className="min-w-0 space-y-1.5">
-                      <Label htmlFor={`status-${field}`} className="block truncate">
-                        {POST_READING_WEIGHT_LABELS[field]}
-                      </Label>
-                      <StarRating
-                        id={`status-${field}`}
-                        value={currentValue}
-                        valueForStars={starsToPostReadingScore}
-                        starsForValue={scoreToPostReadingStars}
-                        showValue={false}
-                        size="sm"
-                        starDescriptions={POST_READING_STAR_HINTS[field]}
-                        onChange={(value) =>
-                          setValue(field, value, {
-                            shouldDirty: true,
-                            shouldValidate: true,
-                          })
-                        }
-                      />
-                    </div>
-                  )
-                })}
+          <div className="space-y-1.5 w-full sm:w-auto">
+            <Label htmlFor="status-chapters-read">Capítulos lidos</Label>
+            <div className="flex items-center gap-2 h-9">
+              <Input
+                id="status-chapters-read"
+                type="number"
+                min={0}
+                className="w-20 h-9 text-center"
+                {...register("chapters_read", { setValueAs: optionalNumber })}
+              />
+              <span className="text-muted-foreground">/</span>
+              <div className="flex h-9 w-20 items-center justify-center rounded-md border bg-muted px-2 text-sm text-muted-foreground font-medium">
+                {typeof totalChapters === "number" && totalChapters > 0 ? totalChapters : "?"}
               </div>
             </div>
-          ))}
+          </div>
+
+          {personalStatus !== "To read" && (
+            <div className="space-y-1.5 w-full sm:w-[280px]">
+              <Label htmlFor="status-last-read-at">Última leitura</Label>
+              <div className="flex items-center gap-1 h-9">
+                <Input
+                  id="status-last-read-at"
+                  type="date"
+                  max={new Date().toISOString().slice(0, 10)}
+                  className="h-9"
+                  {...register("last_read_at", {
+                    setValueAs: (v) => (v === "" || v == null ? null : v),
+                  })}
+                />
+                {lastReadAt !== todayStr && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="px-2.5 h-8 text-xs font-medium border-dashed hover:border-solid hover:bg-primary/5 hover:text-primary transition-all duration-200"
+                    onClick={() =>
+                      setValue("last_read_at", todayStr, {
+                        shouldDirty: true,
+                      })
+                    }
+                  >
+                    Hoje
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="px-2 h-8 text-xs text-muted-foreground hover:bg-red-500/10 dark:hover:bg-red-500/20 hover:text-red-500 dark:hover:text-red-400 flex items-center gap-1 transition-colors duration-200"
+                  onClick={() =>
+                    setValue("last_read_at", null, {
+                      shouldDirty: true,
+                    })
+                  }
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Limpar
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="space-y-3 border-t pt-5">
-        <h3 className="text-sm font-semibold">Anotações pessoais</h3>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-          <div className="space-y-1.5">
+      {personalStatus !== "To read" && (
+        <div className="space-y-4 border-t border-border/40 pt-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2">
+                <Star className="h-4.5 w-4.5 text-muted-foreground fill-muted-foreground/10" />
+                <h3 className="text-base font-bold text-foreground">Critérios de avaliação</h3>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {STAR_LEGEND.map((item) => (
+                  <TooltipProvider key={item.label}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex items-center gap-1.5 rounded-full border bg-muted/30 px-2.5 py-0.5 text-[11px] font-medium transition-colors hover:bg-muted cursor-help">
+                          <span className="text-amber-500/45">{"★".repeat(item.stars)}</span>
+                          <span className="text-foreground">{item.label}</span>
+                          <span className="text-muted-foreground/60">({item.value.toFixed(1)})</span>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs whitespace-pre-line text-left p-3 shadow-md border bg-popover text-popover-foreground">
+                        <p className="font-semibold text-sm text-foreground">
+                          <span className="text-amber-500/45">{"★".repeat(item.stars)}</span> = {item.value.toFixed(1)} ({item.label})
+                        </p>
+                        <p className="mt-1 text-xs opacity-90 leading-relaxed text-muted-foreground">
+                          {item.desc}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4 bg-muted/40 border border-border/60 rounded-xl px-4 py-2.5 shadow-xs shrink-0 self-start sm:self-center">
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground leading-tight">
+                  Nota Pessoal
+                </span>
+                <span className="text-[10px] text-muted-foreground/80 leading-none">Calculada</span>
+              </div>
+              <ScoreBadge
+                score={computedManualScore}
+                size="lg"
+                className="h-10 w-14 text-lg font-bold shadow-xs shrink-0"
+              />
+              <StarRating
+                value={computedManualScore}
+                valueForStars={starsToPostReadingScore}
+                starsForValue={scoreToPostReadingStars}
+                readOnly={true}
+                showValue={false}
+                size="md"
+                className="gap-1 scale-110 origin-left drop-shadow-[0_0_6px_rgba(245,158,11,0.15)]"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+            {CRITERION_GROUPS.map((group) => {
+              const groupMeta = {
+                "Narrativa": { icon: BookOpen, color: "text-blue-500", bg: "bg-blue-500/10 border-blue-500/20" },
+                "Personagens": { icon: Users, color: "text-emerald-500", bg: "bg-emerald-500/10 border-emerald-500/20" },
+                "Apresentação": { icon: Palette, color: "text-purple-500", bg: "bg-purple-500/10 border-purple-500/20" },
+              }[group.title] || { icon: BookOpen, color: "text-muted-foreground", bg: "bg-muted" }
+              const Icon = groupMeta.icon
+
+              return (
+                <div
+                  key={group.title}
+                  className="rounded-xl border bg-card/45 p-4 shadow-sm space-y-4 hover:border-muted-foreground/20 transition-all duration-300"
+                >
+                  <div className="flex items-center gap-2 border-b border-border/40 pb-2">
+                    <div className={cn("p-1.5 rounded-lg border", groupMeta.bg)}>
+                      <Icon className={cn("h-4 w-4", groupMeta.color)} />
+                    </div>
+                    <h4 className="text-sm font-bold uppercase tracking-wider text-card-foreground">
+                      {group.title}
+                    </h4>
+                  </div>
+                  <div className="space-y-4">
+                    {group.fields.map((field) => {
+                      const valueIndex = POST_FIELDS.indexOf(field)
+                      const currentValue = postScores[valueIndex]
+                      return (
+                        <div key={field} className="min-w-0 space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <Label
+                              htmlFor={`status-${field}`}
+                              className="text-xs font-medium text-foreground cursor-pointer block truncate"
+                            >
+                              {POST_READING_WEIGHT_LABELS[field]}
+                            </Label>
+                            {currentValue != null && (
+                              <span className="text-[10px] font-mono font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded leading-none">
+                                {currentValue.toFixed(1)}
+                              </span>
+                            )}
+                          </div>
+                          <StarRating
+                            id={`status-${field}`}
+                            value={currentValue}
+                            valueForStars={starsToPostReadingScore}
+                            starsForValue={scoreToPostReadingStars}
+                            showValue={false}
+                            size="sm"
+                            starDescriptions={POST_READING_STAR_HINTS[field]}
+                            onChange={(value) =>
+                              setValue(field, value, {
+                                shouldDirty: true,
+                                shouldValidate: true,
+                              })
+                            }
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-4 border-t border-border/40 pt-6">
+        <div className="flex items-center gap-2">
+          <FileEdit className="h-4.5 w-4.5 text-muted-foreground" />
+          <h3 className="text-base font-bold text-foreground">Anotações pessoais</h3>
+        </div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <div className="space-y-1.5 w-full sm:w-[220px]">
             <Label htmlFor="personal-synopsis-quality">Interesse sinopse</Label>
             <Select
               value={synopsisQuality ?? "none"}
@@ -342,7 +498,7 @@ export function WorkStatusForm({
                 )
               }
             >
-              <SelectTrigger id="personal-synopsis-quality" className="w-full">
+              <SelectTrigger id="personal-synopsis-quality" className="w-full h-9">
                 <SelectValue placeholder="Não avaliada" />
               </SelectTrigger>
               <SelectContent>
@@ -356,10 +512,11 @@ export function WorkStatusForm({
             </Select>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 w-full sm:w-[120px]">
             <Label
               htmlFor="personal-adjustment"
               title="negativo = penalidade · positivo = bônus · em pontos de nota"
+              className="block truncate"
             >
               Ajuste
             </Label>
@@ -369,6 +526,7 @@ export function WorkStatusForm({
               step={0.05}
               min={-0.30}
               max={0.30}
+              className="text-center h-9"
               {...register("observation_adjustment", { valueAsNumber: true })}
             />
           </div>
@@ -395,7 +553,7 @@ export function WorkStatusForm({
               Cancelar
             </Button>
           )}
-          <Button type="submit" disabled={saving}>
+          <Button type="submit" disabled={saving || !isDirty}>
             {saving ? "Salvando…" : "Salvar"}
           </Button>
         </div>

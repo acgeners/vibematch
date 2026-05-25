@@ -21,6 +21,7 @@ import {
   type PublicationStatusInfo,
   type PersonalStatusInfo,
 } from "@/lib/constants/criteria"
+import { PERSONAL_STATUSES as PERSONAL_STATUS_NAMES } from "@/types/domain"
 
 type EvaluationFilter = "pending" | "review-pending" | "low-confidence" | "outdated-model"
 const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending"]
@@ -42,7 +43,9 @@ interface AiEvaluationFiltersProps {
 }
 
 const PUB_STATUSES = Object.values(PUBLICATION_STATUSES_BY_ID)
-const PERSONAL_STATUSES = Object.values(PERSONAL_STATUSES_BY_ID)
+const PERSONAL_STATUSES = PERSONAL_STATUS_NAMES.map((name) =>
+  Object.values(PERSONAL_STATUSES_BY_ID).find((info) => info.status === name)
+).filter((info): info is PersonalStatusInfo => !!info)
 
 export function AiEvaluationFilters({
   activeFilters,

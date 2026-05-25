@@ -254,7 +254,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
         }
       />
 
-      <FavoritesStatsHeader summary={summary} />
+      <FavoritesStatsHeader summary={summary} scoreThresholds={scoreThresholds} />
 
       <div className="flex flex-wrap items-center gap-2">
         <RecommendWithAiButton source="favorites" />

@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
-import { BarChart3, ChevronDown, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User } from "lucide-react"
+import { BarChart3, ChevronDown, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { WorkStatusForm } from "@/components/titles/work-status-form"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug } from "@/server/queries/works"
@@ -291,7 +291,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     "h-auto w-full flex flex-wrap justify-start gap-2 bg-transparent rounded-none p-0"
 
   const tabTriggerClass =
-    "flex-1 min-w-[120px] cursor-pointer gap-2.5 rounded-md border border-border bg-card px-4 py-5 text-base font-semibold tracking-normal text-foreground shadow-md transition-all duration-200 hover:bg-muted hover:border-foreground/30 hover:shadow-lg data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:border-primary data-[state=active]:shadow-[0_0_32px_-2px_hsl(var(--primary)/0.6),0_8px_22px_-6px_hsl(var(--primary)/0.65)] dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground [&_svg]:h-5 [&_svg]:w-5"
+    "flex-1 min-w-[120px] cursor-pointer gap-2.5 rounded-md border border-border bg-card px-4 py-5 text-base font-semibold tracking-normal text-foreground shadow-md transition-all duration-200 hover:bg-primary/5 hover:border-primary/40 hover:text-primary hover:-translate-y-0.5 hover:shadow-lg data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:border-primary data-[state=active]:shadow-[0_0_32px_-2px_hsl(var(--primary)/0.6),0_8px_22px_-6px_hsl(var(--primary)/0.65)] dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground [&_svg]:h-5 [&_svg]:w-5"
 
   return (
     <div className="max-w-6xl space-y-5">
@@ -481,7 +481,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 <Card className="gap-2 py-4 bg-card/50">
                   <CardHeader className="px-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <CardTitle className="text-sm">Resumo da última avaliação IA</CardTitle>
+                      <div className="flex items-center gap-2">
+                        <BrainCircuit className="h-4.5 w-4.5 text-muted-foreground" />
+                        <CardTitle className="text-base font-bold text-foreground">Resumo da última avaliação IA</CardTitle>
+                      </div>
                       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <span>
                           Modelo:{" "}
@@ -516,7 +519,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               )}
               <Card className="gap-2 py-4 bg-card/50">
                 <CardHeader className="px-4">
-                  <CardTitle className="text-sm">Sinopses</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4.5 w-4.5 text-muted-foreground" />
+                    <CardTitle className="text-base font-bold text-foreground">Sinopses</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent className="px-4">
                   <SynopsesViewer
@@ -548,124 +554,159 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         hasCriteriaScores={Object.keys(scoreMap).length > 0}
         coverUrl={primaryCover}
       />
-      {/* Notas */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Notas</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="flex flex-col items-center gap-1.5 p-3 rounded-md border bg-muted/20">
-              <ScoreLabelTooltip
-                name="Nota.Final"
-                description="Média ponderada de Nota.IA e Nota.Prevista usando o inverso da variância (MAE) de cada uma. É a nota oficial exibida nos rankings."
-              />
-              <ScoreBadge score={work.calculated_scores?.final_score ?? null} size="lg" thresholds={scoreThresholds} />
-            </div>
-            <div className="flex flex-col items-center gap-1.5 p-3 rounded-md border bg-muted/20">
-              <ScoreLabelTooltip
-                name="Nota.IA"
-                description="Soma ponderada das notas por critério dadas pela IA, ajustada por pesos e amplificada (5 + (nota − 5) × 1.25). Aplica penalidades por capítulos e observações."
-              />
-              <ScoreBadge score={work.calculated_scores?.calc_score ?? null} size="lg" thresholds={scoreThresholds} />
-            </div>
-            <div className="flex flex-col items-center gap-1.5 p-3 rounded-md border bg-muted/20">
-              <ScoreLabelTooltip
-                name="Prevista"
-                description="Previsão por Ridge Regression treinada nas suas próprias notas pessoais. Estima qual seria sua nota baseada nos critérios da IA + dados externos. Requer ≥20 obras avaliadas para ser ativada."
-              />
-              <ScoreBadge
-                score={work.calculated_scores?.predicted_score ?? null}
-                size="lg"
-                showStub={work.calculated_scores?.predicted_is_stub ?? false}
-                thresholds={scoreThresholds}
-              />
-            </div>
-            {hasPostReadingScores ? (
-              <details className="group rounded-md border bg-muted/20">
-                <summary className="flex cursor-pointer list-none flex-col items-center gap-1.5 p-3 text-center [&::-webkit-details-marker]:hidden">
-                  <div className="flex items-center gap-1.5">
-                    <ScoreLabelTooltip
-                      name="Pessoal"
-                      description="Média ponderada das suas avaliações por estrelas pós-leitura (Ritmo, Arte, Impacto, Originalidade, etc). Calculada automaticamente conforme você preenche os critérios."
-                    />
-                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
-                  </div>
-                  <ScoreBadge score={work.manual_score ?? null} size="lg" />
-                </summary>
-                <div className="border-t px-3 pb-3 pt-2">
-                  <div className="grid gap-2">
-                    {postReadingScores.map((item) => (
-                      <div key={item.field} className="flex items-center justify-between gap-3">
-                        <span className="min-w-0 truncate text-xs text-muted-foreground">
-                          {item.label}
-                        </span>
-                        <ScoreBadge score={item.score} size="sm" variant="soft" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </details>
-            ) : (
-              <div className="flex flex-col items-center gap-1.5 p-3 rounded-md border bg-muted/20">
-                <ScoreLabelTooltip
-                  name="Pessoal"
-                  description="Média ponderada das suas avaliações por estrelas pós-leitura (Ritmo, Arte, Impacto, Originalidade, etc). Calculada automaticamente conforme você preenche os critérios."
-                />
-                <ScoreBadge score={work.manual_score ?? null} size="lg" />
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Avaliações externas */}
-      {platformRatings.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
+      {/* Notas e Avaliações Externas side-by-side */}
+      <div className={cn(platformRatings.length > 0 && "grid grid-cols-1 lg:grid-cols-2 gap-5")}>
+        {/* Notas */}
+        <Card className={cn(platformRatings.length === 0 && "max-w-3xl")}>
+          <CardHeader className="pb-1.5">
             <div className="flex items-start justify-between gap-4">
-              <CardTitle className="text-base">Avaliações externas</CardTitle>
-              {bayesianAvg != null && (
+              <div className="flex items-center gap-2">
+                <Calculator className="h-4.5 w-4.5 text-muted-foreground" />
+                <CardTitle className="text-base font-bold text-foreground">Notas calculadas</CardTitle>
+              </div>
+              {work.calculated_scores?.final_score != null && (
                 <div className="text-right shrink-0">
-                  <p className="text-xs font-medium text-muted-foreground">Média externa</p>
-                  <p className="text-3xl font-black font-mono leading-none text-foreground">{bayesianAvg.toFixed(2)}</p>
-                  <p className="text-xs text-muted-foreground">{formatVotes(totalVotes)} votos</p>
+                  <p className="text-xs font-medium text-muted-foreground">Nota Final</p>
+                  <p className="text-3xl font-black font-mono leading-none text-foreground">
+                    {work.calculated_scores.final_score.toFixed(2)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">oficial nos rankings</p>
                 </div>
               )}
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-              {platformRatings.map((pr) => (
-                <div key={pr.platform} className="p-2.5 rounded-md border bg-muted/20">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <p className="text-xs font-medium text-muted-foreground truncate">
-                      {PLATFORM_LABELS[pr.platform] ?? pr.platform}
-                    </p>
-                    {pr.rating != null ? (
-                      <span className="text-base font-bold font-mono leading-none">
-                        {formatRating(Number(pr.rating))}
-                      </span>
-                    ) : (
-                      <span className="text-base font-bold text-muted-foreground leading-none">—</span>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    {formatVotes(pr.vote_count)} votos
-                  </p>
+          <CardContent className="pt-0">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
+                <div className="flex flex-col items-start gap-1">
+                  <ScoreLabelTooltip
+                    name="Nota.IA"
+                    description="Soma ponderada das notas por critério dadas pela IA, ajustada por pesos e amplificada (5 + (nota − 5) × 1.25). Aplica penalidades por capítulos e observações."
+                  />
+                  <span className="text-[10px] text-muted-foreground">Avaliação por inteligência artificial</span>
                 </div>
-              ))}
+                <ScoreBadge score={work.calculated_scores?.calc_score ?? null} size="lg" thresholds={scoreThresholds} className="h-10 w-14 text-lg font-bold shrink-0" />
+              </div>
+
+              <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
+                <div className="flex flex-col items-start gap-1">
+                  <ScoreLabelTooltip
+                    name="Prevista"
+                    description="Previsão por Ridge Regression treinada nas suas próprias notas pessoais. Estima qual seria sua nota baseada nos critérios da IA + dados externos. Requer ≥20 obras avaliadas para ser ativada."
+                  />
+                  <span className="text-[10px] text-muted-foreground">Previsão por aprendizado de máquina</span>
+                </div>
+                <ScoreBadge
+                  score={work.calculated_scores?.predicted_score ?? null}
+                  size="lg"
+                  showStub={work.calculated_scores?.predicted_is_stub ?? false}
+                  thresholds={scoreThresholds}
+                  className="h-10 w-14 text-lg font-bold shrink-0"
+                />
+              </div>
+
+              {work.manual_score != null && (
+                hasPostReadingScores ? (
+                  <details className="group rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm overflow-hidden sm:col-span-2">
+                    <summary className="flex cursor-pointer list-none items-center justify-between p-4 [&::-webkit-details-marker]:hidden">
+                      <div className="flex flex-col items-start gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <ScoreLabelTooltip
+                            name="Pessoal"
+                            description="Média ponderada das suas avaliações por estrelas pós-leitura (Ritmo, Arte, Impacto, Originalidade, etc). Calculada automaticamente conforme você preenche os critérios."
+                          />
+                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
+                        </div>
+                        <span className="text-[10px] text-muted-foreground">Sua nota pós-leitura</span>
+                      </div>
+                      <ScoreBadge score={work.manual_score ?? null} size="lg" className="h-10 w-14 text-lg font-bold shrink-0" />
+                    </summary>
+                    <div className="border-t border-border/40 px-4 pb-4 pt-3 bg-muted/10">
+                      <div className="grid gap-2">
+                        {postReadingScores.map((item) => (
+                          <div key={item.field} className="flex items-center justify-between gap-3">
+                            <span className="min-w-0 truncate text-xs text-muted-foreground">
+                              {item.label}
+                            </span>
+                            <ScoreBadge score={item.score} size="sm" variant="soft" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </details>
+                ) : (
+                  <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm sm:col-span-2">
+                    <div className="flex flex-col items-start gap-1">
+                      <ScoreLabelTooltip
+                        name="Pessoal"
+                        description="Média ponderada das suas avaliações por estrelas pós-leitura (Ritmo, Arte, Impacto, Originalidade, etc). Calculada automaticamente conforme você preenche os critérios."
+                      />
+                      <span className="text-[10px] text-muted-foreground">Sua nota pós-leitura</span>
+                    </div>
+                    <ScoreBadge score={work.manual_score ?? null} size="lg" className="h-10 w-14 text-lg font-bold shrink-0" />
+                  </div>
+                )
+              )}
             </div>
           </CardContent>
         </Card>
-      )}
+
+        {/* Avaliações externas */}
+        {platformRatings.length > 0 && (
+          <Card>
+            <CardHeader className="pb-1.5">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-4.5 w-4.5 text-muted-foreground" />
+                  <CardTitle className="text-base font-bold text-foreground">Avaliações externas</CardTitle>
+                </div>
+                {bayesianAvg != null && (
+                  <div className="text-right shrink-0">
+                    <p className="text-xs font-medium text-muted-foreground">Média externa</p>
+                    <p className="text-3xl font-black font-mono leading-none text-foreground">{bayesianAvg.toFixed(2)}</p>
+                    <p className="text-xs text-muted-foreground">{formatVotes(totalVotes)} votos</p>
+                  </div>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {platformRatings.map((pr) => (
+                  <div key={pr.platform} className="flex items-center justify-between p-3 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-semibold text-foreground truncate">
+                        {PLATFORM_LABELS[pr.platform] ?? pr.platform}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground mt-0.5">
+                        {formatVotes(pr.vote_count)} votos
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 pl-2 shrink-0">
+                      {pr.rating != null ? (
+                        <span className="inline-flex items-center justify-center rounded-md font-mono font-bold px-2 py-1 text-sm bg-muted/50 text-foreground ring-1 ring-inset ring-foreground/10 min-w-[2.25rem]">
+                          {formatRating(Number(pr.rating))}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center justify-center rounded-md font-mono font-bold px-2 py-1 text-sm bg-muted/30 text-muted-foreground min-w-[2.25rem]">—</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
 
       {/* Notas por critério */}
       <Card>
         <CardHeader className="pb-3">
           <div className="space-y-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <CardTitle className="text-base">Notas por critério</CardTitle>
+              <div className="flex items-center gap-2">
+                <Sliders className="h-4.5 w-4.5 text-muted-foreground" />
+                <CardTitle className="text-base font-bold text-foreground">Notas por critério</CardTitle>
+              </div>
               {latestAiEval && (
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   <span>
@@ -773,7 +814,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-baseline justify-between gap-3">
-                  <CardTitle className="text-base">Gêneros</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <TagsIcon className="h-4.5 w-4.5 text-muted-foreground" />
+                    <CardTitle className="text-base font-bold text-foreground">Gêneros</CardTitle>
+                  </div>
                   <span className="text-xs font-medium text-muted-foreground">
                     {genres.length} {genres.length === 1 ? "gênero" : "gêneros"}
                   </span>
@@ -799,7 +843,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-baseline justify-between gap-3">
-                  <CardTitle className="text-base">Tags</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <Hash className="h-4.5 w-4.5 text-muted-foreground" />
+                    <CardTitle className="text-base font-bold text-foreground">Tags</CardTitle>
+                  </div>
                   <span className="text-xs font-medium text-muted-foreground">
                     {tags.length} {tags.length === 1 ? "tag" : "tags"} em {tagGroups.length}{" "}
                     {tagGroups.length === 1 ? "grupo" : "grupos"}

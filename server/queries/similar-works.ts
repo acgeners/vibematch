@@ -15,6 +15,8 @@ export interface SimilarWork {
   totalChapters: number | null
   publicationStatusId: number | null
   personalStatusId: number | null
+  platformAvg: number | null
+  totalVotes: number | null
 }
 
 interface RpcRow {
@@ -74,7 +76,7 @@ export async function getSimilarWorks(
   if (rows.length === 0) return []
 
   const ids = rows.map((r) => r.id)
-  const [metaResult, genresResult] = await Promise.all([
+  const [metaResult, genresResult, ratingsResult] = await Promise.all([
     supabase
       .from("works")
       .select("id, year, total_chapters, publication_status_id, personal_status_id")
@@ -82,6 +84,10 @@ export async function getSimilarWorks(
     supabase
       .from("work_genres")
       .select("work_id, genres(name)")
+      .in("work_id", ids),
+    supabase
+      .from("platform_ratings")
+      .select("work_id, rating, vote_count")
       .in("work_id", ids),
   ])
 
@@ -91,10 +97,23 @@ export async function getSimilarWorks(
   if (genresResult.error) {
     console.warn("[similar-works] genres query falhou:", genresResult.error.message)
   }
+  if (ratingsResult.error) {
+    console.warn("[similar-works] ratings query falhou:", ratingsResult.error.message)
+  }
 
   const metaById = new Map<string, WorkMetaRow>(
     ((metaResult.data as WorkMetaRow[] | null) ?? []).map((m) => [m.id, m]),
   )
+
+  const ratingsByWorkId = new Map<string, Array<{ rating: number | null; vote_count: number }>>()
+  for (const r of (ratingsResult.data ?? [])) {
+    const list = ratingsByWorkId.get(r.work_id) ?? []
+    list.push({
+      rating: r.rating == null ? null : Number(r.rating),
+      vote_count: Number(r.vote_count ?? 0),
+    })
+    ratingsByWorkId.set(r.work_id, list)
+  }
 
   const genresByWorkId = new Map<string, string[]>()
   for (const row of (genresResult.data as WorkGenreRow[] | null) ?? []) {
@@ -108,6 +127,15 @@ export async function getSimilarWorks(
 
   return rows.map((r) => {
     const meta = metaById.get(r.id)
+    const ratings = ratingsByWorkId.get(r.id) ?? []
+    
+    const rated = ratings.filter((pr) => pr.rating != null && pr.vote_count > 0)
+    const totalVotes = ratings.reduce((sum, pr) => sum + pr.vote_count, 0)
+    const platformAvg = rated.length > 0
+      ? rated.reduce((sum, pr) => sum + (pr.rating as number) * pr.vote_count, 0) /
+        rated.reduce((sum, pr) => sum + pr.vote_count, 0)
+      : null
+
     return {
       id: r.id,
       title: r.title,
@@ -122,6 +150,8 @@ export async function getSimilarWorks(
       totalChapters: meta?.total_chapters ?? null,
       publicationStatusId: meta?.publication_status_id ?? null,
       personalStatusId: meta?.personal_status_id ?? null,
+      platformAvg,
+      totalVotes: totalVotes > 0 ? totalVotes : null,
     }
   })
 }

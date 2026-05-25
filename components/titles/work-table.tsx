@@ -49,7 +49,6 @@ import {
   PublicationStatusBadge,
 } from "@/components/ui/status-badge"
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -140,14 +139,14 @@ function scoreFor(work: WorkWithRelations, slug: string): number | null {
 function getCriterionColorClass(score: number, slug: string): string {
   const isNegative = slug === "drama" || slug === "tragedy"
   if (isNegative) {
-    if (score <= 3) return "bg-green-100 text-green-800"
-    if (score <= 5) return "bg-yellow-100 text-yellow-800"
-    return "bg-red-100 text-red-800"
+    if (score <= 3) return "bg-green-100 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-400 dark:border-green-500/25"
+    if (score <= 5) return "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-400 dark:border-yellow-500/25"
+    return "bg-red-100 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25"
   }
-  if (score >= 8) return "bg-emerald-100 text-emerald-800"
-  if (score >= 6) return "bg-green-100 text-green-800"
-  if (score >= 4) return "bg-yellow-100 text-yellow-800"
-  return "bg-red-100 text-red-800"
+  if (score >= 8) return "bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25"
+  if (score >= 6) return "bg-green-100 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-400 dark:border-green-500/25"
+  if (score >= 4) return "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-400 dark:border-yellow-500/25"
+  return "bg-red-100 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25"
 }
 
 export function WorkTable({
@@ -1043,9 +1042,13 @@ function WorkListView({
   return (
     <TooltipProvider delayDuration={150}>
       {/* Desktop table */}
-      <div ref={tableWrapperRef} className="hidden overflow-x-auto rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur md:block">
-        <Table style={{ width: tableWidth, tableLayout: "fixed" }}>
-          <TableHeader className="bg-muted/60">
+      <div
+        ref={tableWrapperRef}
+        className="hidden rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur md:block"
+        style={{ width: tableWidth }}
+      >
+        <table className="w-full caption-bottom text-sm" style={{ width: tableWidth, tableLayout: "fixed" }}>
+          <TableHeader className="sticky -top-5 z-30 md:-top-7 [&_th]:bg-muted [&_tr:first-child_th:first-child]:rounded-tl-lg [&_tr:first-child_th:last-child]:rounded-tr-lg">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="border-b hover:bg-transparent">
                 {headerGroup.headers.map((header) => (
@@ -1117,7 +1120,7 @@ function WorkListView({
               )
             })}
           </TableBody>
-        </Table>
+        </table>
       </div>
 
       {/* Mobile compact cards */}
