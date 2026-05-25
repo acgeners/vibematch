@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { ChevronDown } from "lucide-react"
 import { ExpandableText } from "@/components/ui/expandable-text"
 import { cn } from "@/lib/utils"
 import { joinSynopsesForDisplay, sortWorkSynopses } from "@/lib/work-derived"
@@ -40,9 +41,7 @@ export function SynopsesViewer({ synopses, canonical, maxLines = 11, className }
   const hasCanonical = canonicalText.length > 0
   const hasRaw = rawItems.length > 0
 
-  const [activeTab, setActiveTab] = useState<"canonical" | "raw">(
-    hasCanonical ? "canonical" : "raw"
-  )
+  const [showOriginals, setShowOriginals] = useState(false)
 
   if (!hasCanonical && !hasRaw) {
     return <p className="text-sm text-muted-foreground">Sem sinopse cadastrada.</p>
@@ -68,24 +67,46 @@ export function SynopsesViewer({ synopses, canonical, maxLines = 11, className }
     )
   }
 
-  const showingOriginals = activeTab === "raw"
   return (
-    <div className="space-y-2">
+    <div className="space-y-4">
       <ExpandableText
-        key={activeTab}
-        text={showingOriginals ? rawText : canonicalText}
+        text={canonicalText}
         maxLines={maxLines}
         className={cn("whitespace-pre-line", className)}
       />
-      <button
-        type="button"
-        onClick={() => setActiveTab(showingOriginals ? "canonical" : "raw")}
-        className="text-xs text-muted-foreground/70 hover:text-foreground transition-colors underline-offset-4 hover:underline"
-      >
-        {showingOriginals
-          ? "Ocultar originais"
-          : `Exibir originais (${rawItems.length})`}
-      </button>
+      <div className="pt-3 border-t border-border/30 space-y-2">
+        <button
+          type="button"
+          onClick={() => setShowOriginals(!showOriginals)}
+          className="flex items-center justify-between w-full text-left group"
+        >
+          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80 group-hover:text-foreground transition-colors">
+            Sinopses Originais ({rawItems.length})
+          </span>
+          <ChevronDown
+            className={cn(
+              "h-4 w-4 text-muted-foreground/70 group-hover:text-foreground transition-transform duration-200 shrink-0",
+              showOriginals && "rotate-180"
+            )}
+          />
+        </button>
+        {showOriginals && (
+          <div className="space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
+            <ExpandableText
+              text={rawText}
+              maxLines={maxLines}
+              className={cn("whitespace-pre-line text-sm text-muted-foreground/90", className)}
+            />
+            <button
+              type="button"
+              onClick={() => setShowOriginals(false)}
+              className="text-xs text-muted-foreground/70 hover:text-foreground transition-colors underline-offset-4 hover:underline block"
+            >
+              Ocultar originais
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
