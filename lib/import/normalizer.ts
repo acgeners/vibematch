@@ -51,7 +51,6 @@ export function normalizePersonalStatus(
     "reading": "Reading",
     "started": "Started",
     "stalled": "Stalled",
-    "paused": "Paused",
     "hiatus": "Hiatus",
     "on-hold": "On-hold",
     "to-read": "To read",

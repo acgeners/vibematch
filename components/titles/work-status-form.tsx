@@ -90,6 +90,58 @@ const optionalNumber = (value: unknown) => {
   return Number.isFinite(num) ? num : null
 }
 
+export const hasChanges = (initial: WorkStatusValues, current: Partial<WorkStatusValues>): boolean => {
+  const fields: Array<keyof WorkStatusValues> = [
+    "personal_status",
+    "personal_status_id",
+    "synopsis_quality",
+    "observation_adjustment",
+    "observations",
+    "chapters_read",
+    "last_read_at",
+    "manual_score",
+    "post_story_score",
+    "post_fl_score",
+    "post_ml_score",
+    "post_character_development_score",
+    "post_pacing_score",
+    "post_art_visual_score",
+    "post_impact_immersion_score",
+    "post_originality_score",
+  ]
+
+  for (const field of fields) {
+    const rawInit = initial[field]
+    const rawCurr = current[field] === undefined ? initial[field] : current[field]
+
+    // Normalize empty strings, null, undefined to a single "empty" state
+    const isInitEmpty = rawInit === null || rawInit === undefined || rawInit === ""
+    const isCurrEmpty = rawCurr === null || rawCurr === undefined || rawCurr === ""
+
+    if (isInitEmpty && isCurrEmpty) {
+      continue
+    }
+
+    if (isInitEmpty !== isCurrEmpty) {
+      return true
+    }
+
+    if (typeof rawInit === "number" || typeof rawCurr === "number") {
+      const numInit = Number(rawInit)
+      const numCurr = Number(rawCurr)
+      if (numInit !== numCurr) {
+        return true
+      }
+    } else {
+      if (String(rawInit).trim() !== String(rawCurr).trim()) {
+        return true
+      }
+    }
+  }
+
+  return false
+}
+
 export interface WorkStatusFormProps {
   workId: string
   totalChapters: number | null
@@ -136,6 +188,13 @@ export function WorkStatusForm({
     control,
     name: POST_FIELDS,
   })
+  const currentManualScore = useWatch({ control, name: "manual_score" })
+  const currentValues = useWatch({ control })
+
+  const isDirty = useMemo(() => {
+    if (!currentValues) return false
+    return hasChanges(initialValues, currentValues as WorkStatusValues)
+  }, [initialValues, currentValues])
 
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
@@ -158,12 +217,16 @@ export function WorkStatusForm({
       scoreSum += normalized * weight
       weightSum += weight
     })
-    return weightSum > 0 ? Math.round((scoreSum / weightSum) * 10) / 10 : null
-  }, [postScores, postWeights])
+    return weightSum > 0
+      ? Math.round((scoreSum / weightSum) * 10) / 10
+      : initialValues.manual_score
+  }, [postScores, postWeights, initialValues.manual_score])
 
   useEffect(() => {
-    setValue("manual_score", computedManualScore, { shouldDirty: true })
-  }, [computedManualScore, setValue])
+    if (computedManualScore !== currentManualScore) {
+      setValue("manual_score", computedManualScore, { shouldDirty: true })
+    }
+  }, [computedManualScore, currentManualScore, setValue])
 
   const onSubmit = async (raw: WorkStatusValues) => {
     setSaving(true)
@@ -233,11 +296,11 @@ export function WorkStatusForm({
                 id="status-chapters-read"
                 type="number"
                 min={0}
-                className="w-14 h-9 text-center"
+                className="w-20 h-9 text-center"
                 {...register("chapters_read", { setValueAs: optionalNumber })}
               />
               <span className="text-muted-foreground">/</span>
-              <div className="flex h-9 w-14 items-center justify-center rounded-md border bg-muted px-2 text-sm text-muted-foreground font-medium">
+              <div className="flex h-9 w-20 items-center justify-center rounded-md border bg-muted px-2 text-sm text-muted-foreground font-medium">
                 {typeof totalChapters === "number" && totalChapters > 0 ? totalChapters : "?"}
               </div>
             </div>
@@ -325,11 +388,22 @@ export function WorkStatusForm({
             </div>
 
             <div className="flex items-center gap-3 bg-muted/40 border border-border/60 rounded-xl px-4 py-2.5 shadow-xs shrink-0 self-start sm:self-center">
-              <div className="flex flex-col">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground leading-tight">
-                  Nota Pessoal
-                </span>
-                <span className="text-[10px] text-muted-foreground/80">Calculada</span>
+              <div className="flex flex-col gap-1">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground leading-tight">
+                    Nota Pessoal
+                  </span>
+                  <span className="text-[10px] text-muted-foreground/80">Calculada</span>
+                </div>
+                <StarRating
+                  value={computedManualScore}
+                  valueForStars={starsToPostReadingScore}
+                  starsForValue={scoreToPostReadingStars}
+                  readOnly={true}
+                  showValue={false}
+                  size="sm"
+                  className="gap-0.5"
+                />
               </div>
               <ScoreBadge
                 score={computedManualScore}
@@ -479,7 +553,7 @@ export function WorkStatusForm({
               Cancelar
             </Button>
           )}
-          <Button type="submit" disabled={saving}>
+          <Button type="submit" disabled={saving || !isDirty}>
             {saving ? "Salvando…" : "Salvar"}
           </Button>
         </div>

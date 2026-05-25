@@ -10,7 +10,6 @@ export const PERSONAL_STATUSES = [
   "Reading",
   "Started",
   "Stalled",
-  "Paused",
   "Hiatus",
   "On-hold",
   "To read",
