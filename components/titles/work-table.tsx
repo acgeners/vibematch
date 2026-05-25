@@ -140,14 +140,14 @@ function scoreFor(work: WorkWithRelations, slug: string): number | null {
 function getCriterionColorClass(score: number, slug: string): string {
   const isNegative = slug === "drama" || slug === "tragedy"
   if (isNegative) {
-    if (score <= 3) return "bg-green-100 text-green-800"
-    if (score <= 5) return "bg-yellow-100 text-yellow-800"
-    return "bg-red-100 text-red-800"
+    if (score <= 3) return "bg-green-100 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-400 dark:border-green-500/25"
+    if (score <= 5) return "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-400 dark:border-yellow-500/25"
+    return "bg-red-100 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25"
   }
-  if (score >= 8) return "bg-emerald-100 text-emerald-800"
-  if (score >= 6) return "bg-green-100 text-green-800"
-  if (score >= 4) return "bg-yellow-100 text-yellow-800"
-  return "bg-red-100 text-red-800"
+  if (score >= 8) return "bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25"
+  if (score >= 6) return "bg-green-100 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-400 dark:border-green-500/25"
+  if (score >= 4) return "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-400 dark:border-yellow-500/25"
+  return "bg-red-100 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25"
 }
 
 export function WorkTable({

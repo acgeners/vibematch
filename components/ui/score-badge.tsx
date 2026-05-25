@@ -52,11 +52,11 @@ function getScoreColor(score: number, thresholds: ScoreColorThresholds | null | 
 
 function getSoftScoreColor(score: number, thresholds: ScoreColorThresholds | null | undefined): string {
   switch (pickTier(score, thresholds)) {
-    case "top": return "bg-green-500/15 text-green-700 border border-green-500/25"
-    case "high": return "bg-emerald-500/15 text-emerald-700 border border-emerald-500/25"
-    case "mid": return "bg-yellow-500/20 text-yellow-800 border border-yellow-500/30"
-    case "low": return "bg-orange-500/15 text-orange-700 border border-orange-500/25"
-    case "bottom": return "bg-red-500/15 text-red-700 border border-red-500/25"
+    case "top": return "bg-green-500/15 text-green-700 border border-green-500/25 dark:text-green-400 dark:border-green-500/30"
+    case "high": return "bg-emerald-500/15 text-emerald-700 border border-emerald-500/25 dark:text-emerald-400 dark:border-emerald-500/30"
+    case "mid": return "bg-yellow-500/20 text-yellow-800 border border-yellow-500/30 dark:text-yellow-400 dark:border-yellow-500/35"
+    case "low": return "bg-orange-500/15 text-orange-700 border border-orange-500/25 dark:text-orange-400 dark:border-orange-500/30"
+    case "bottom": return "bg-red-500/15 text-red-700 border border-red-500/25 dark:text-red-400 dark:border-red-500/30"
   }
 }
 

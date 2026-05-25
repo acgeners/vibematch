@@ -34,7 +34,7 @@ export interface CompareWork {
   platformAvg: number | null
   totalVotes: number
   genres: string[]
-  tags: Array<{ slug: string; name: string }>
+  tags: Array<{ slug: string; name: string; groupName: string }>
   criteria: CompareCriterionEntry[]
 }
 
@@ -46,7 +46,7 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
   if (unique.length === 0) return []
 
   const supabase = createAdminClient()
-  const [works, aiJustifications] = await Promise.all([
+  const [works, aiJustifications, tagGroups] = await Promise.all([
     getWorksByIds(unique),
     supabase
       .from("ai_evaluations")
@@ -57,7 +57,14 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
       `)
       .in("work_id", unique)
       .order("created_at", { ascending: false }),
+    supabase.from("tag_group").select("id, group, slug"),
   ])
+
+  // Map tag_group_id -> groupName
+  const groupById = new Map<string, string>()
+  for (const g of tagGroups.data ?? []) {
+    groupById.set(g.id, g.group || g.slug || "Sem grupo")
+  }
 
   // For each work, pick the most recent ai_evaluation justifications by criterion.
   const justificationByWork = new Map<string, Map<string, string>>()
@@ -73,23 +80,25 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
     justificationByWork.set(row.work_id, map)
   }
 
-  return works.map((work) => mapWorkToCompare(work, justificationByWork.get(work.id)))
+  return works.map((work) => mapWorkToCompare(work, justificationByWork.get(work.id), groupById))
 }
 
 function mapWorkToCompare(
   work: WorkWithRelations,
-  justifications: Map<string, string> | undefined
+  justifications: Map<string, string> | undefined,
+  groupById: Map<string, string>
 ): CompareWork {
   const scoreByCrit: Record<string, number> = {}
   for (const cs of work.category_scores ?? []) {
     scoreByCrit[cs.criterion_slug] = Number(cs.score)
   }
 
-  const tags = (work.tags ?? [])
+  const tags = (work.tags as Array<{ slug?: string; name?: string; tag_group_id?: string | null }> ?? [])
     .filter(Boolean)
     .map((t) => ({
       slug: (t.slug ?? "") as string,
       name: (t.name ?? "") as string,
+      groupName: t.tag_group_id ? groupById.get(t.tag_group_id) ?? "Sem grupo" : "Sem grupo",
     }))
     .filter((t) => t.name)
 
