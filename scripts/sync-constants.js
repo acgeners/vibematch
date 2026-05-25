@@ -144,9 +144,26 @@ async function main() {
   const iaCriteria    = allCriteria.filter(c => c.eval_type === "IA")
   const userCriteria  = allCriteria.filter(c => c.eval_type === "User")
   const pubStatuses   = pubStatusRes.data
-  const persStatuses  = persStatusRes.data
+  const rawPersStatuses = persStatusRes.data
   const sources       = withCodeOnlySources(sourceRes.data)
   const tagGroups     = tagGroupRes.data
+
+  const PERSONAL_STATUS_ORDER = [
+    "To read",
+    "Reading",
+    "Started",
+    "Stalled",
+    "On-hold",
+    "Completed",
+    "Hiatus",
+    "Dropped"
+  ]
+
+  const persStatuses = [...rawPersStatuses].sort((a, b) => {
+    const idxA = PERSONAL_STATUS_ORDER.indexOf(a.status)
+    const idxB = PERSONAL_STATUS_ORDER.indexOf(b.status)
+    return idxA - idxB
+  })
 
   console.log(`  ${iaCriteria.length} critérios IA, ${userCriteria.length} critérios User`)
   console.log(`  ${pubStatuses.length} pub statuses, ${persStatuses.length} personal statuses, ${sources.length} sources`)

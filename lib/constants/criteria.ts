@@ -119,20 +119,20 @@ export const PUBLICATION_STATUS_LABELS: Record<string, string> = {
 }
 
 export const PERSONAL_STATUS_LABELS: Record<string, string> = {
-  "completed": "Completed",
-  "Completed": "Completed",
+  "to-read": "To read",
+  "To read": "To read",
   "reading": "Reading",
   "Reading": "Reading",
   "started": "Started",
   "Started": "Started",
   "stalled": "Stalled",
   "Stalled": "Stalled",
-  "hiatus": "Hiatus",
-  "Hiatus": "Hiatus",
   "on-hold": "On-hold",
   "On-hold": "On-hold",
-  "to-read": "To read",
-  "To read": "To read",
+  "completed": "Completed",
+  "Completed": "Completed",
+  "hiatus": "Hiatus",
+  "Hiatus": "Hiatus",
   "dropped": "Dropped",
   "Dropped": "Dropped",
 }
@@ -164,13 +164,13 @@ export interface PersonalStatusInfo {
 }
 
 export const PERSONAL_STATUSES_BY_ID: Record<number, PersonalStatusInfo> = {
-  1: { id: 1, status: "Completed", slug: "completed", color: "#16A34A", symbol: "✔", comment: "Finished reading" },
+  8: { id: 8, status: "To read", slug: "to-read", color: "#8B5CF6", symbol: "⭐️", comment: "Not started, on my reading list" },
   2: { id: 2, status: "Reading", slug: "reading", color: "#2563EB", symbol: "📖", comment: "Currently following the release of the title" },
   3: { id: 3, status: "Started", slug: "started", color: "#06B6D4", symbol: "▶️", comment: "Started reading recently, but haven't finished yet" },
   4: { id: 4, status: "Stalled", slug: "stalled", color: "#64748B", symbol: "⏸️", comment: "Started reading, paused due to tension in the story - but plan to finish" },
-  6: { id: 6, status: "Hiatus", slug: "hiatus", color: "#D97706", symbol: "⏳", comment: "Awaiting new season / return" },
   7: { id: 7, status: "On-hold", slug: "on-hold", color: "#F97316", symbol: "📁", comment: "Started, planning to resume, but needs to read again" },
-  8: { id: 8, status: "To read", slug: "to-read", color: "#8B5CF6", symbol: "⭐️", comment: "Not started, on my reading list" },
+  1: { id: 1, status: "Completed", slug: "completed", color: "#16A34A", symbol: "✔", comment: "Finished reading" },
+  6: { id: 6, status: "Hiatus", slug: "hiatus", color: "#D97706", symbol: "⏳", comment: "Awaiting new season / return" },
   9: { id: 9, status: "Dropped", slug: "dropped", color: "#DC2626", symbol: "🗑️", comment: "Dropped before finishing" },
 }
 

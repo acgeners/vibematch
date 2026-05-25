@@ -6,13 +6,13 @@ export const PUBLICATION_STATUSES = ["Completed", "Ongoing", "Hiatus", "Cancelle
 export type PublicationStatus = (typeof PUBLICATION_STATUSES)[number]
 
 export const PERSONAL_STATUSES = [
-  "Completed",
+  "To read",
   "Reading",
   "Started",
   "Stalled",
-  "Hiatus",
   "On-hold",
-  "To read",
+  "Completed",
+  "Hiatus",
   "Dropped",
 ] as const
 export type PersonalStatus = (typeof PERSONAL_STATUSES)[number]

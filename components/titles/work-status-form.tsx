@@ -133,7 +133,9 @@ export const hasChanges = (initial: WorkStatusValues, current: Partial<WorkStatu
         return true
       }
     } else {
-      if (String(rawInit).trim() !== String(rawCurr).trim()) {
+      const cleanInit = String(rawInit).replace(/\r\n/g, "\n").trim()
+      const cleanCurr = String(rawCurr).replace(/\r\n/g, "\n").trim()
+      if (cleanInit !== cleanCurr) {
         return true
       }
     }
@@ -368,14 +370,14 @@ export function WorkStatusForm({
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span className="inline-flex items-center gap-1.5 rounded-full border bg-muted/30 px-2.5 py-0.5 text-[11px] font-medium transition-colors hover:bg-muted cursor-help">
-                          <span className="text-amber-500">{"★".repeat(item.stars)}</span>
+                          <span className="text-amber-500/45">{"★".repeat(item.stars)}</span>
                           <span className="text-foreground">{item.label}</span>
                           <span className="text-muted-foreground/60">({item.value.toFixed(1)})</span>
                         </span>
                       </TooltipTrigger>
                       <TooltipContent side="top" className="max-w-xs whitespace-pre-line text-left p-3 shadow-md border bg-popover text-popover-foreground">
                         <p className="font-semibold text-sm text-foreground">
-                          {"★".repeat(item.stars)} = {item.value.toFixed(1)} ({item.label})
+                          <span className="text-amber-500/45">{"★".repeat(item.stars)}</span> = {item.value.toFixed(1)} ({item.label})
                         </p>
                         <p className="mt-1 text-xs opacity-90 leading-relaxed text-muted-foreground">
                           {item.desc}
@@ -387,28 +389,26 @@ export function WorkStatusForm({
               </div>
             </div>
 
-            <div className="flex items-center gap-3 bg-muted/40 border border-border/60 rounded-xl px-4 py-2.5 shadow-xs shrink-0 self-start sm:self-center">
-              <div className="flex flex-col gap-1">
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground leading-tight">
-                    Nota Pessoal
-                  </span>
-                  <span className="text-[10px] text-muted-foreground/80">Calculada</span>
-                </div>
-                <StarRating
-                  value={computedManualScore}
-                  valueForStars={starsToPostReadingScore}
-                  starsForValue={scoreToPostReadingStars}
-                  readOnly={true}
-                  showValue={false}
-                  size="sm"
-                  className="gap-0.5"
-                />
+            <div className="flex flex-wrap items-center gap-4 bg-muted/40 border border-border/60 rounded-xl px-4 py-2.5 shadow-xs shrink-0 self-start sm:self-center">
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground leading-tight">
+                  Nota Pessoal
+                </span>
+                <span className="text-[10px] text-muted-foreground/80 leading-none">Calculada</span>
               </div>
               <ScoreBadge
                 score={computedManualScore}
                 size="lg"
                 className="h-10 w-14 text-lg font-bold shadow-xs shrink-0"
+              />
+              <StarRating
+                value={computedManualScore}
+                valueForStars={starsToPostReadingScore}
+                starsForValue={scoreToPostReadingStars}
+                readOnly={true}
+                showValue={false}
+                size="md"
+                className="gap-1 scale-110 origin-left drop-shadow-[0_0_6px_rgba(245,158,11,0.15)]"
               />
             </div>
           </div>
