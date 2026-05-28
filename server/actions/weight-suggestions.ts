@@ -21,9 +21,9 @@ export async function suggestScoreWeights(): Promise<WeightInferenceResult> {
     supabase
       .from("works")
       .select(
-        `id, manual_score, category_scores(criterion_slug, score)`
+        `id, user_score, category_scores(criterion_slug, score)`
       )
-      .not("manual_score", "is", null)
+      .not("user_score", "is", null)
       .eq("is_archived", false)
       .limit(2000),
     supabase.from("score_weights").select("slug, weight").eq("is_active", true),
@@ -41,7 +41,7 @@ export async function suggestScoreWeights(): Promise<WeightInferenceResult> {
     }
     return {
       workId: r.id as string,
-      manualScore: Number(r.manual_score),
+      userScore: Number(r.user_score),
       categoryScores,
     }
   })

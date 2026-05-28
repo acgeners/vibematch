@@ -281,7 +281,7 @@ export async function runBiasReportAction(): Promise<{
   try {
     const inputs = await loadInputsForBias()
     if (inputs.stats.every((s) => s.n === 0)) {
-      const errMsg = "Nenhuma obra com manual_score — não há sinal pra detectar viés."
+      const errMsg = "Nenhuma obra com user_score — não há sinal pra detectar viés."
       await supabase
         .from("calibration_runs")
         .update({

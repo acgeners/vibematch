@@ -18,7 +18,7 @@ import { percentile } from "@/lib/ml/preprocessing"
 export interface CalibrationDiff {
   workId: string
   title?: string
-  manualScore: number
+  userScore: number
   calcScore: number | null
   predictedScore: number | null
   finalScore: number | null
@@ -28,7 +28,7 @@ export interface CalibrationDiff {
 }
 
 export interface CalibrationResult {
-  /** Quantidade de títulos com manual_score preenchido (treino + validação). */
+  /** Quantidade de títulos com user_score preenchido (treino + validação). */
   trainSize: number
   maeCalc: number | null
   maePredicted: number | null
@@ -61,7 +61,7 @@ const MIN_VOTES_FOR_PERCENTILE = 5
 export interface CalibrationInput {
   workId: string
   title?: string
-  manualScore: number | null
+  userScore: number | null
   calcScore: number | null
   predictedScore: number | null
   finalScore: number | null
@@ -113,13 +113,13 @@ function bucketMae(
 ): { count: number; maeFinal: number | null } {
   const filtered = items.filter(
     (it) =>
-      predicate(it) && it.manualScore != null && it.finalScore != null,
+      predicate(it) && it.userScore != null && it.finalScore != null,
   )
   if (filtered.length < MIN_BUCKET_SIZE) {
     return { count: filtered.length, maeFinal: null }
   }
   const diffs = filtered.map((it) =>
-    Math.abs((it.finalScore as number) - (it.manualScore as number)),
+    Math.abs((it.finalScore as number) - (it.userScore as number)),
   )
   return { count: filtered.length, maeFinal: round4(meanAbs(diffs)) }
 }
@@ -159,7 +159,7 @@ function round4(v: number): number {
 }
 
 export function computeCalibration(items: CalibrationInput[]): CalibrationResult {
-  const withManual = items.filter((it) => it.manualScore != null)
+  const withManual = items.filter((it) => it.userScore != null)
 
   const signedDiffsCalc: number[] = []
   const signedDiffsPredicted: number[] = []
@@ -167,7 +167,7 @@ export function computeCalibration(items: CalibrationInput[]): CalibrationResult
   const allDiffs: CalibrationDiff[] = []
 
   for (const it of withManual) {
-    const m = it.manualScore as number
+    const m = it.userScore as number
     const sCalc = it.calcScore != null ? it.calcScore - m : null
     const sPr = it.predictedScore != null ? it.predictedScore - m : null
     const sFin = it.finalScore != null ? it.finalScore - m : null
@@ -177,7 +177,7 @@ export function computeCalibration(items: CalibrationInput[]): CalibrationResult
     allDiffs.push({
       workId: it.workId,
       title: it.title,
-      manualScore: m,
+      userScore: m,
       calcScore: it.calcScore,
       predictedScore: it.predictedScore,
       finalScore: it.finalScore,

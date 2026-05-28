@@ -119,7 +119,7 @@ export interface CalculatedScore {
   knn_neighbors: Array<{
     workId: string
     similarity: number
-    manualScore: number
+    userScore: number
     weight: number
   }> | null
   /** Score 0–100 do LLM re-ranker (Passo 8). Atualizado sob demanda. */
@@ -165,7 +165,7 @@ export interface Work {
   chapters_read: number | null
   synopsis_quality: SynopsisQuality | null
   observation_adjustment: number
-  manual_score: number | null
+  user_score: number | null
   post_story_score: number | null
   post_fl_score: number | null
   post_ml_score: number | null
@@ -323,7 +323,7 @@ export interface FormulaConfig {
   score_weights_auto: boolean
   /**
    * Última inferência (snapshot). NULL quando treino insuficiente (< 20 obras
-   * com manual_score). Migration 069.
+   * com user_score). Migration 069.
    */
   score_weights_inferred: {
     suggestions: Array<{
@@ -422,7 +422,7 @@ export interface MappedImportRow {
   synopsis_quality?: SynopsisQuality
   personal_status?: PersonalStatus
   observation_adjustment?: number
-  manual_score?: number
+  user_score?: number
   ia_eval?: number
   ia_eval_normalized?: number
   calc_score?: number

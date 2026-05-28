@@ -31,7 +31,7 @@ export interface CompareWork {
   calcScore: number | null
   predictedScore: number | null
   predictedIsStub: boolean
-  manualScore: number | null
+  userScore: number | null
   platformAvg: number | null
   totalVotes: number
   alignmentScore: number | null
@@ -130,7 +130,7 @@ function mapWorkToCompare(
     calcScore: work.calculated_scores?.calc_score ?? null,
     predictedScore: work.calculated_scores?.predicted_score ?? null,
     predictedIsStub: work.calculated_scores?.predicted_is_stub ?? false,
-    manualScore: (work as { manual_score?: number | null }).manual_score ?? null,
+    userScore: (work as { user_score?: number | null }).user_score ?? null,
     platformAvg: work.calculated_scores?.platform_avg ?? null,
     totalVotes: work.calculated_scores?.total_votes ?? 0,
     alignmentScore: work.calculated_scores?.alignment_score ?? null,

@@ -60,12 +60,12 @@ const RANKING_TOOL: Anthropic.Messages.Tool = {
             similar_loved: {
               type: "array",
               items: { type: "string" },
-              description: "1–2 work_id de obras que o user AMA (manual_score ≥ 8) e que esta lembra. Use APENAS IDs reais do bloco profile/biblioteca.",
+              description: "1–2 work_id de obras que o user AMA (user_score ≥ 8) e que esta lembra. Use APENAS IDs reais do bloco profile/biblioteca.",
             },
             similar_avoided: {
               type: "array",
               items: { type: "string" },
-              description: "1–2 work_id de obras que o user AVALIOU MAL (manual_score ≤ 5) e que esta lembra.",
+              description: "1–2 work_id de obras que o user AVALIOU MAL (user_score ≤ 5) e que esta lembra.",
             },
             review_quotes: {
               type: "array",

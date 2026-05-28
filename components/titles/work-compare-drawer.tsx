@@ -75,7 +75,7 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
       { key: "score:calcScore", label: "IA" },
       { key: "score:predictedScore", label: "Prevista" },
       { key: "score:alignmentScore", label: "IA Rk." },
-      { key: "score:manualScore", label: "Pessoal" },
+      { key: "score:userScore", label: "Pessoal" },
       { key: "score:platformAvg", label: "Média externa" },
     ],
   },
@@ -488,9 +488,9 @@ function CompareGrid({
         ) : node,
     },
     {
-      key: "score:manualScore",
+      key: "score:userScore",
       label: "Pessoal",
-      get: (w) => w.manualScore,
+      get: (w) => w.userScore,
       thresholds: null,
     },
     {

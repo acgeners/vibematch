@@ -56,9 +56,9 @@ export interface RankedWork {
   confidence?: number | null
   /** 1–3 razões pra NÃO ler (mesmo se match alto). */
   risks?: string[]
-  /** work_id de obras amadas (manual_score ≥ 8) similares. */
+  /** work_id de obras amadas (user_score ≥ 8) similares. */
   similar_loved?: string[]
-  /** work_id de obras evitadas (manual_score ≤ 5) similares — alerta. */
+  /** work_id de obras evitadas (user_score ≤ 5) similares — alerta. */
   similar_avoided?: string[]
   /** 1–2 quotes curtos das reviews fornecidas que sustentam match/risco. */
   review_quotes?: string[]
@@ -92,7 +92,7 @@ export interface RecommendationRunRow {
 export interface RatedWorkInput {
   id: string
   title: string
-  manualScore: number | null
+  userScore: number | null
   postScores: Partial<Record<string, number>>
   personalStatus: string | null
   synopsis: string | null
@@ -225,7 +225,7 @@ export interface DeepDiveSimilarsBundle {
     id: string
     title: string
     coverUrl: string | null
-    manualScore: number | null
+    userScore: number | null
     similarity: number
     synopsis: string | null
   }>
@@ -233,7 +233,7 @@ export interface DeepDiveSimilarsBundle {
     id: string
     title: string
     coverUrl: string | null
-    manualScore: number | null
+    userScore: number | null
     similarity: number
     synopsis: string | null
   }>
@@ -263,6 +263,6 @@ export interface DeepDiveContext {
   work: DeepDiveWorkBundle
   similars: DeepDiveSimilarsBundle
   alternatives: DeepDiveAlternativeCandidate[]
-  recentActivity: Array<{ id: string; title: string; manualScore: number | null; updatedAt: string }>
+  recentActivity: Array<{ id: string; title: string; userScore: number | null; updatedAt: string }>
   workCoverUrl: string | null
 }

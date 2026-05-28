@@ -64,13 +64,13 @@ export async function suggestPostReadingWeights(
 }
 
 /**
- * Aplica novos pesos pós-leitura: recalcula `works.manual_score` pra toda obra
+ * Aplica novos pesos pós-leitura: recalcula `works.user_score` pra toda obra
  * com pelo menos um `post_*_score` preenchido e dispara `recalculateAll()` pra
  * refrescar Nota.Calc/Pr/Final (que dependem direta ou indiretamente de
- * `manual_score`).
+ * `user_score`).
  *
  * Espelha a fórmula client-side em work-form.tsx:
- *   manual_score = round(Σ(post_i × w_i) / Σ(w_i), 1)
+ *   user_score = round(Σ(post_i × w_i) / Σ(w_i), 1)
  * Considera apenas eixos com `post_i != null` no numerador E denominador.
  */
 export async function applyPostReadingWeights(
@@ -78,7 +78,7 @@ export async function applyPostReadingWeights(
 ): Promise<{ recalculated: number; updatedManualScores: number }> {
   const supabase = createAdminClient()
 
-  const selectColumns = ["id", "manual_score", ...POST_READING_FIELDS].join(", ")
+  const selectColumns = ["id", "user_score", ...POST_READING_FIELDS].join(", ")
   const { data, error } = await supabase
     .from("works")
     .select(selectColumns)
@@ -87,7 +87,7 @@ export async function applyPostReadingWeights(
 
   if (error) throw new Error(error.message)
 
-  const updates: Array<{ id: string; manual_score: number | null }> = []
+  const updates: Array<{ id: string; user_score: number | null }> = []
   for (const row of data ?? []) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const r = row as any
@@ -106,9 +106,9 @@ export async function applyPostReadingWeights(
     }
     if (!hasAny) continue
     const newScore = weightSum > 0 ? Math.round((scoreSum / weightSum) * 10) / 10 : null
-    const currentScore = r.manual_score == null ? null : Number(r.manual_score)
+    const currentScore = r.user_score == null ? null : Number(r.user_score)
     if (newScore !== currentScore) {
-      updates.push({ id: r.id as string, manual_score: newScore })
+      updates.push({ id: r.id as string, user_score: newScore })
     }
   }
 
@@ -117,7 +117,7 @@ export async function applyPostReadingWeights(
     // Pra ~100-200 obras é instantâneo.
     const results = await Promise.all(
       updates.map((u) =>
-        supabase.from("works").update({ manual_score: u.manual_score }).eq("id", u.id),
+        supabase.from("works").update({ user_score: u.user_score }).eq("id", u.id),
       ),
     )
     const firstError = results.find((r) => r.error)

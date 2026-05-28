@@ -22,8 +22,8 @@ export interface KnnNeighbor {
   workId: string
   /** Cosine similarity 0–1 com a obra-alvo. */
   similarity: number
-  /** manual_score do vizinho (real, não previsto). */
-  manualScore: number
+  /** user_score do vizinho (real, não previsto). */
+  userScore: number
 }
 
 export interface KnnPrediction {
@@ -63,7 +63,7 @@ export function predictKnn(neighbors: KnnNeighbor[]): KnnPrediction {
   const valid = neighbors.filter(
     (n) =>
       Number.isFinite(n.similarity) &&
-      Number.isFinite(n.manualScore) &&
+      Number.isFinite(n.userScore) &&
       n.similarity >= 0 &&
       n.similarity <= 1,
   )
@@ -78,7 +78,7 @@ export function predictKnn(neighbors: KnnNeighbor[]): KnnPrediction {
 
   let weightedSum = 0
   for (let i = 0; i < valid.length; i++) {
-    weightedSum += weights[i] * valid[i].manualScore
+    weightedSum += weights[i] * valid[i].userScore
   }
   const prediction = Math.max(0, Math.min(10, weightedSum))
 

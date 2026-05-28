@@ -270,7 +270,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     observations: work.observations ?? null,
     chapters_read: work.chapters_read != null ? Number(work.chapters_read) : null,
     last_read_at: work.last_read_at ?? null,
-    manual_score: work.manual_score ?? null,
+    user_score: work.user_score ?? null,
     post_story_score: work.post_story_score ?? null,
     post_fl_score: work.post_fl_score ?? null,
     post_ml_score: work.post_ml_score ?? null,
@@ -609,7 +609,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className={cn("grid grid-cols-1 gap-4", work.manual_score != null && "sm:grid-cols-2")}>
+            <div className={cn("grid grid-cols-1 gap-4", work.user_score != null && "sm:grid-cols-2")}>
               <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
                 <div className="flex flex-col items-start gap-1">
                   <ScoreLabelTooltip
@@ -638,7 +638,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 />
               </div>
 
-              {work.manual_score != null && (
+              {work.user_score != null && (
                 hasPostReadingScores ? (
                   <details className="group rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm overflow-hidden sm:col-span-2">
                     <summary className="flex cursor-pointer list-none items-center justify-between p-4 [&::-webkit-details-marker]:hidden">
@@ -652,7 +652,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                         </div>
                         <span className="text-[10px] text-muted-foreground">Sua nota pós-leitura</span>
                       </div>
-                      <ScoreBadge score={work.manual_score ?? null} size="lg" className="h-10 w-14 text-lg font-bold shrink-0" />
+                      <ScoreBadge score={work.user_score ?? null} size="lg" className="h-10 w-14 text-lg font-bold shrink-0" />
                     </summary>
                     <div className="border-t border-border/40 px-4 pb-4 pt-3 bg-muted/10">
                       <div className="grid gap-2">
@@ -676,7 +676,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       />
                       <span className="text-[10px] text-muted-foreground">Sua nota pós-leitura</span>
                     </div>
-                    <ScoreBadge score={work.manual_score ?? null} size="lg" className="h-10 w-14 text-lg font-bold shrink-0" />
+                    <ScoreBadge score={work.user_score ?? null} size="lg" className="h-10 w-14 text-lg font-bold shrink-0" />
                   </div>
                 )
               )}

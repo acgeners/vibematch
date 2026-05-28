@@ -2,7 +2,7 @@
  * Stacker — Ridge segundo-nível que substitui o inverse-variance.
  *
  * Combina Nota.Calc + Nota.Pr (e futuramente kNN) com pesos aprendidos
- * via Ridge α=1 (regularização leve) contra `manual_score`. Lida com a
+ * via Ridge α=1 (regularização leve) contra `user_score`. Lida com a
  * correlação de erros que inverse-variance assume não existir.
  *
  * IMPORTANTE: o `fitStacker` recebe predições **out-of-fold** do Ridge

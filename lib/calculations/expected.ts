@@ -4,7 +4,7 @@
  * REVISÃO 2026-05-28: removidas as 8 features `post_*_score` do treino.
  * Motivo: elas só existem em obras LIDAS (treino), são median-imputadas em
  * obras não-lidas (inferência). O Ridge aprendia coefs altos (0.10-0.20)
- * delas porque correlacionam com `manual_score` no treino (próximo a leak
+ * delas porque correlacionam com `user_score` no treino (próximo a leak
  * de info), mas na inferência o valor imputado vira 0 após scaling →
  * contribuição zero. Resultado: predição cai no intercept ≈ 8.0 pra todas
  * as não-lidas, e os critérios IA + features do TasteProfile ficam com

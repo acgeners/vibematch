@@ -471,7 +471,7 @@ const getEmptyCreateValues = (): Partial<WorkFormValues> => ({
   chapters_read: null,
   synopsis_quality: null,
   observation_adjustment: 0,
-  manual_score: null,
+  user_score: null,
   post_story_score: null,
   post_fl_score: null,
   post_ml_score: null,
@@ -639,7 +639,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
   const personalStatus = useWatch({ control, name: "personal_status" })
   const coverUrl = useWatch({ control, name: "cover_url" })
   const covers = useWatch({ control, name: "covers" }) ?? []
-  const manualScore = useWatch({ control, name: "manual_score" })
+  const userScore = useWatch({ control, name: "user_score" })
   const titleValue = useWatch({ control, name: "title" })
   const yearValue = useWatch({ control, name: "year" })
   const yearEndValue = useWatch({ control, name: "year_end" })
@@ -774,15 +774,15 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
       ? Math.round((weightedScores.scoreSum / totalWeight) * 10) / 10
       : null
 
-    if (calculatedScore === manualScore) return
-    if (calculatedScore == null && initialValues?.manual_score != null) return
+    if (calculatedScore === userScore) return
+    if (calculatedScore == null && initialValues?.user_score != null) return
 
     setValue(
-      "manual_score",
+      "user_score",
       calculatedScore,
       { shouldValidate: true }
     )
-  }, [initialValues?.manual_score, manualScore, postReadingScores, postReadingWeights, setValue])
+  }, [initialValues?.user_score, userScore, postReadingScores, postReadingWeights, setValue])
 
   const checkDuplicateBeforeCreate = async (
     values: WorkFormValues,
@@ -2035,9 +2035,9 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
                 </div>
 
                 <div className="max-w-[280px] space-y-2 rounded-lg border bg-primary/5 p-4">
-                  {renderFieldLabel("manual_score", "Minha nota", "Calculada pela média dos ratings preenchidos.")}
+                  {renderFieldLabel("user_score", "Minha nota", "Calculada pela média dos ratings preenchidos.")}
                   <Input
-                    id="manual_score"
+                    id="user_score"
                     type="number"
                     step={0.5}
                     min={0}
@@ -2045,7 +2045,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
                     placeholder="—"
                     readOnly
                     className="bg-background text-base font-semibold"
-                    {...register("manual_score", {
+                    {...register("user_score", {
                       setValueAs: optionalNumber,
                     })}
                   />

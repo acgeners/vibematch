@@ -39,7 +39,7 @@ export function TasteProfileHealth({ tasteProfile }: TasteProfileHealthProps) {
             <h3 className="text-sm font-semibold text-foreground">Sem TasteProfile ainda</h3>
             <p className="text-xs text-muted-foreground">
               O <code className="font-mono">personal_fit</code> e features de perfil no L1 dependem
-              de um TasteProfile. Avalie pelo menos {5} obras com <code className="font-mono">manual_score</code>{" "}
+              de um TasteProfile. Avalie pelo menos {5} obras com <code className="font-mono">user_score</code>{" "}
               e use o botão de gerar perfil em <code className="font-mono">/settings</code> ou{" "}
               <code className="font-mono">/recommendations</code>.
             </p>
@@ -108,7 +108,7 @@ export function TasteProfileHealth({ tasteProfile }: TasteProfileHealthProps) {
           critérios com weight ≥ 0.5). Isso limita o TETO matemático do{" "}
           <code className="font-mono">personal_fit</code> — obras realmente alinhadas com seu
           gosto vão ainda pontuar 35-55% como máximo. Avaliar mais obras com{" "}
-          <code className="font-mono">manual_score</code> e regenerar o perfil enriquece os
+          <code className="font-mono">user_score</code> e regenerar o perfil enriquece os
           sinais.
         </div>
       )}

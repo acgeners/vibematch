@@ -130,7 +130,7 @@ async function ensureProfile(): Promise<{ profile: TasteProfileRow; ratedWorksCo
   const ratedWorks = await getRatedWorksForProfile()
   if (ratedWorks.length < MIN_WORKS_FOR_ANY_PROFILE) {
     return {
-      error: `Você precisa avaliar pelo menos ${MIN_WORKS_FOR_ANY_PROFILE} obras (manual_score) pra eu identificar seu gosto. Atualmente: ${ratedWorks.length}.`,
+      error: `Você precisa avaliar pelo menos ${MIN_WORKS_FOR_ANY_PROFILE} obras (user_score) pra eu identificar seu gosto. Atualmente: ${ratedWorks.length}.`,
     }
   }
   const existing = await loadCurrentTasteProfile()
@@ -205,7 +205,7 @@ export async function runRecommendationAction(
 
     if (profile.is_stub) {
       return {
-        error: "Perfil ainda em modo stub — avalie mais obras com manual_score pra desbloquear o ranking IA.",
+        error: "Perfil ainda em modo stub — avalie mais obras com user_score pra desbloquear o ranking IA.",
       }
     }
 
@@ -226,7 +226,7 @@ export async function runRecommendationAction(
       return {
         error:
           args.mode === "next_read"
-            ? "Nenhum favorito sem manual_score encontrado. Marque alguns títulos como favoritos ou desfaça suas notas pra ver opções aqui."
+            ? "Nenhum favorito sem user_score encontrado. Marque alguns títulos como favoritos ou desfaça suas notas pra ver opções aqui."
             : args.mode === "full_analysis"
               ? "Nenhum favorito encontrado. Marque títulos como favoritos pra rankeá-los."
               : "Nenhuma obra encontrada com os filtros aplicados no ranking.",
@@ -418,7 +418,7 @@ export async function rerankSingleWorkAction(
 
     if (profile.is_stub) {
       return {
-        error: "Perfil ainda em modo stub — avalie mais obras com manual_score pra desbloquear o ranking IA.",
+        error: "Perfil ainda em modo stub — avalie mais obras com user_score pra desbloquear o ranking IA.",
       }
     }
 

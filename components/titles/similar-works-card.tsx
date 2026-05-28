@@ -115,8 +115,8 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
               w.publicationStatusId != null ||
               w.personalStatusId != null
 
-            const displayScore = w.manualScore ?? w.finalScore
-            const isManual = w.manualScore != null
+            const displayScore = w.userScore ?? w.finalScore
+            const isManual = w.userScore != null
             return (
               <div
                 key={w.id}

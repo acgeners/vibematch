@@ -11,7 +11,7 @@ export function computeInputHash(works: RatedWorkInput[]): string {
   const canonical = works
     .map((w) => ({
       id: w.id,
-      manualScore: w.manualScore,
+      userScore: w.userScore,
       postScores: Object.fromEntries(
         Object.entries(w.postScores)
           .filter(([, v]) => v != null)

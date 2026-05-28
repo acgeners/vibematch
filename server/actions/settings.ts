@@ -271,7 +271,7 @@ export async function getCalibrationSnapshot() {
     supabase
       .from("works")
       .select(
-        `id, title, manual_score,
+        `id, title, user_score,
          calculated_scores(calc_score, predicted_score, final_score, total_votes, predicted_is_stub, prediction_distance, expected_score, expected_is_stub)`
       )
       .eq("is_archived", false)
@@ -295,7 +295,7 @@ export async function getCalibrationSnapshot() {
     return {
       workId: w.id as string,
       title: (w as { title: string }).title,
-      manualScore: w.manual_score == null ? null : Number(w.manual_score),
+      userScore: w.user_score == null ? null : Number(w.user_score),
       calcScore: cs?.calc_score == null ? null : Number(cs.calc_score),
       predictedScore: cs?.predicted_score == null ? null : Number(cs.predicted_score),
       finalScore: cs?.final_score == null ? null : Number(cs.final_score),
@@ -318,15 +318,15 @@ export async function getCalibrationSnapshot() {
   }))
 
   // MAE in-sample do expected_score (L1 shadow). Mesma metodologia que mae_calc/
-  // mae_predicted/mae_final: itens com manual_score e expected_score preenchidos.
+  // mae_predicted/mae_final: itens com user_score e expected_score preenchidos.
   // NULL quando ainda não há dado (pré-recálculo após migration 066) ou stub.
   let maeExpected: number | null = null
   let expectedCovered = 0
   let expectedSumAbs = 0
   for (const it of items) {
-    if (it.manualScore == null || it.expectedScore == null) continue
+    if (it.userScore == null || it.expectedScore == null) continue
     expectedCovered += 1
-    expectedSumAbs += Math.abs(it.expectedScore - it.manualScore)
+    expectedSumAbs += Math.abs(it.expectedScore - it.userScore)
   }
   if (expectedCovered > 0) maeExpected = expectedSumAbs / expectedCovered
 

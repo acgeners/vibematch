@@ -592,7 +592,7 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
                                 className="hover:underline line-clamp-1 block"
                               />
                             </td>
-                            <td className="px-3 py-2 text-right">{d.manualScore.toFixed(1)}</td>
+                            <td className="px-3 py-2 text-right">{d.userScore.toFixed(1)}</td>
                             <td className="px-3 py-2 text-right">{d.calcScore?.toFixed(2) ?? "—"}</td>
                             <td className="px-3 py-2 text-right">{d.predictedScore?.toFixed(2) ?? "—"}</td>
                             <td className="px-3 py-2 text-right">{d.finalScore?.toFixed(2) ?? "—"}</td>
@@ -1009,7 +1009,7 @@ function ShadowExpectedComparison({
       ) : isStub ? (
         <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
           Predictor L1 em modo stub — treino insuficiente (&lt; 20 obras com{" "}
-          <code className="font-mono">manual_score</code>).
+          <code className="font-mono">user_score</code>).
         </div>
       ) : (
         <>

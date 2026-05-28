@@ -50,7 +50,7 @@ export interface RankingEntry {
     review_quotes?: string[]
     mood_fit?: number
   } | null
-  manualScore: number | null
+  userScore: number | null
   isFavorite: boolean
   publicationStatus: string
   publicationStatusId: number | null
@@ -293,7 +293,7 @@ export async function getRanking(
     .from("works")
     .select(`
       id, title, publication_status_id, personal_status_id, ai_eval_status,
-      total_chapters, chapters_read, manual_score, is_archived, is_favorite,
+      total_chapters, chapters_read, user_score, is_archived, is_favorite,
       synopsis_quality, observations, year, updated_at, last_read_at,
       calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, platform_avg, total_votes, personal_fit, personal_fit_percentile, final_score_confidence, knn_score, alignment_score, alignment_justification, alignment_payload, alignment_at),
       category_scores(criterion_slug, score),
@@ -416,7 +416,7 @@ export async function getRanking(
       alignmentJustification: w.calculated_scores?.alignment_justification ?? null,
       alignmentAt: w.calculated_scores?.alignment_at ?? null,
       alignmentPayload: w.calculated_scores?.alignment_payload ?? null,
-      manualScore: w.manual_score,
+      userScore: w.user_score,
       isFavorite: Boolean(w.is_favorite),
       publicationStatus: getPublicationStatusNameById(publicationStatusId) ?? "Unknown",
       publicationStatusId,

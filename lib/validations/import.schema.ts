@@ -31,7 +31,7 @@ export const importRowSchema = z.object({
   synopsis_quality: z.enum(SYNOPSIS_QUALITIES).nullable().optional(),
   personal_status: z.enum(PERSONAL_STATUSES).nullable().optional(),
   observation_adjustment: z.number().min(-0.30).max(0.30).nullable().optional(),
-  manual_score: optionalScore,
+  user_score: optionalScore,
   predicted_score: optionalScore,
 })
 

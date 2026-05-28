@@ -25,7 +25,7 @@ async function countRatedWorks(): Promise<number> {
   const { count, error } = await supabase
     .from("works")
     .select("id", { count: "exact", head: true })
-    .not("manual_score", "is", null)
+    .not("user_score", "is", null)
     .eq("is_archived", false)
   if (error) return 0
   return count ?? 0

@@ -57,7 +57,7 @@ const TARGET_FIELDS = [
   "synopsis_quality",
   "personal_status",
   "observation_adjustment",
-  "manual_score",
+  "user_score",
   "ia_eval",
   "ia_eval_normalized",
   "calc_score",

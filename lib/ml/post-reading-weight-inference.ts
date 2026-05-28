@@ -8,7 +8,7 @@
  * bootstrap.
  *
  * IMPORTANTE — escolha de target:
- * `manual_score` é função direta dos próprios `post_*_score` ponderados pelos
+ * `user_score` é função direta dos próprios `post_*_score` ponderados pelos
  * pesos atuais (calculado client-side). Usá-lo como target seria circular —
  * Ridge apenas recuperaria os pesos atuais. Usamos `final_score`, que mistura
  * GPT + plataformas externas + penalidades + Ridge preditor; só uma fração dele

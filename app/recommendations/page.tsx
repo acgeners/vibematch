@@ -20,7 +20,7 @@ export default async function RecommendationsPage() {
   const stubBlocks = status.profile?.is_stub ?? false
   const disabled = insufficient || stubBlocks
   const disabledReason = insufficient
-    ? "Avalie pelo menos 5 obras com manual_score pra desbloquear o ranking."
+    ? "Avalie pelo menos 5 obras com user_score pra desbloquear o ranking."
     : stubBlocks
       ? "Perfil ainda em modo stub — avalie mais obras pra desbloquear o ranking."
       : null

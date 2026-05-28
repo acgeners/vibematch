@@ -73,7 +73,7 @@ function workToFormValues(work: WorkWithRelations): Partial<WorkFormValues> {
     synopsis_quality: work.synopsis_quality ?? undefined,
     observation_adjustment: work.observation_adjustment,
     observations: work.observations ?? undefined,
-    manual_score: work.manual_score ?? undefined,
+    user_score: work.user_score ?? undefined,
     post_story_score: work.post_story_score ?? undefined,
     post_fl_score: work.post_fl_score ?? undefined,
     post_ml_score: work.post_ml_score ?? undefined,

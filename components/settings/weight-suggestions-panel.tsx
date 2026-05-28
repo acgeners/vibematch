@@ -149,7 +149,7 @@ export function WeightSuggestionsPanel({ initialLastApplied }: WeightSuggestions
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <p className="text-xs text-muted-foreground max-w-2xl">
-          Treina uma regressão Ridge nos 9 critérios IA contra suas notas reais (manual_score) e
+          Treina uma regressão Ridge nos 9 critérios IA contra suas notas reais (user_score) e
           sugere pesos que minimizam o erro. Use isso pra descobrir se algum critério está
           super/subestimado nos pesos atuais. Não aplica nada sozinho — você revisa e marca o que
           aceita.

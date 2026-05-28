@@ -119,7 +119,7 @@ function ExpectedWaterfall({ calculatedScore }: { calculatedScore: CalculatedSco
                 <Info className="h-3.5 w-3.5 text-muted-foreground" />
               </TooltipTrigger>
               <TooltipContent className="max-w-sm text-xs">
-                A nota esperada é UM Ridge único treinado contra seu manual_score em 22 features. A decomposição em <strong>Perfil</strong> (Stage 1: 14 features de encaixe com seu tipo) + <strong>Qualidade</strong> (Stage 2: 8 dimensões pós-leitura) é calculada pós-hoc via atribuição linear (intercept + Σ coef × x agrupado).
+                A nota esperada é UM Ridge único treinado contra seu user_score em 22 features. A decomposição em <strong>Perfil</strong> (Stage 1: 14 features de encaixe com seu tipo) + <strong>Qualidade</strong> (Stage 2: 8 dimensões pós-leitura) é calculada pós-hoc via atribuição linear (intercept + Σ coef × x agrupado).
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

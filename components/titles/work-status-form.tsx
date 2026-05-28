@@ -99,7 +99,7 @@ export const hasChanges = (initial: WorkStatusValues, current: Partial<WorkStatu
     "observations",
     "chapters_read",
     "last_read_at",
-    "manual_score",
+    "user_score",
     "post_story_score",
     "post_fl_score",
     "post_ml_score",
@@ -190,7 +190,7 @@ export function WorkStatusForm({
     control,
     name: POST_FIELDS,
   })
-  const currentManualScore = useWatch({ control, name: "manual_score" })
+  const currentManualScore = useWatch({ control, name: "user_score" })
   const currentValues = useWatch({ control })
 
   const isDirty = useMemo(() => {
@@ -221,12 +221,12 @@ export function WorkStatusForm({
     })
     return weightSum > 0
       ? Math.round((scoreSum / weightSum) * 10) / 10
-      : initialValues.manual_score
-  }, [postScores, postWeights, initialValues.manual_score])
+      : initialValues.user_score
+  }, [postScores, postWeights, initialValues.user_score])
 
   useEffect(() => {
     if (computedManualScore !== currentManualScore) {
-      setValue("manual_score", computedManualScore, { shouldDirty: true })
+      setValue("user_score", computedManualScore, { shouldDirty: true })
     }
   }, [computedManualScore, currentManualScore, setValue])
 

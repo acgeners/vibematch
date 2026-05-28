@@ -59,7 +59,7 @@ export function TasteProfileCard({ status }: TasteProfileCardProps) {
             disabled={recompute || insufficient}
             title={
               insufficient
-                ? "Avalie pelo menos 5 obras com manual_score"
+                ? "Avalie pelo menos 5 obras com user_score"
                 : isStale
                   ? "Perfil pode estar defasado — recompute"
                   : "Recomputar perfil"
@@ -77,7 +77,7 @@ export function TasteProfileCard({ status }: TasteProfileCardProps) {
       <CardContent className="space-y-3">
         {insufficient && (
           <div className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
-            Avalie pelo menos 5 obras com manual_score pra desbloquear o ranking IA.
+            Avalie pelo menos 5 obras com user_score pra desbloquear o ranking IA.
           </div>
         )}
 

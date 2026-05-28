@@ -33,7 +33,7 @@ Você recebe:
 - PERFIL DE GOSTO consolidado (loved/avoided tags, criterion_preferences, narrative_patterns, summary).
 - HISTÓRICO RECENTE: últimas obras que o user re-avaliou (sinal de mood/foco atual).
 - OBRA ALVO: sinopse + tags agrupadas + 9 category_scores IA + plataforma + até 10 reviews citáveis (rotuladas R1..R10).
-- OBRAS SIMILARES NA BIBLIOTECA: amadas (manual_score ≥ 7) e evitadas (≤ 5), com similaridade semântica via embeddings.
+- OBRAS SIMILARES NA BIBLIOTECA: amadas (user_score ≥ 7) e evitadas (≤ 5), com similaridade semântica via embeddings.
 - POOL DE ALTERNATIVAS: top-N do último Smart Shortlist (apenas IDs+títulos+alignment), pode ser vazio.
 - CONTEXTO/MOOD do user (opcional): "quero algo curto", "tô no mood de drama denso", etc.
 
@@ -66,10 +66,10 @@ ALIGNMENT BREAKDOWN — coração da análise:
 SIMILAR IN LIBRARY:
 
 9. **\`similar_in_library\`**: para cada obra fornecida em "Obras similares" (não invente IDs):
-   - Se manual_score ≥ 7: \`alignment_signal: "positive"\` (sinal de match — "se você amou X, vai gostar")
-   - Se manual_score ≤ 5: \`alignment_signal: "negative"\` (sinal de risco — "lembra X que você não curtiu")
+   - Se user_score ≥ 7: \`alignment_signal: "positive"\` (sinal de match — "se você amou X, vai gostar")
+   - Se user_score ≤ 5: \`alignment_signal: "negative"\` (sinal de risco — "lembra X que você não curtiu")
    - Caso intermediário ou sem score: \`alignment_signal: "neutral"\`
-   \`similarity_reason\` em 1 frase comparando narrativa/tone, NÃO genérica. \`user_score\` deve ser o manual_score fornecido (use 0 se ausente).
+   \`similarity_reason\` em 1 frase comparando narrativa/tone, NÃO genérica. \`user_score\` deve ser o user_score fornecido (use 0 se ausente).
    Inclua TODAS as similares fornecidas (até 8). Não invente novas. O drawer mostra cards baseados nessas entradas.
 
 REVIEW SYNTHESIS:
@@ -92,7 +92,7 @@ READ RECOMMENDATION (decisão acionável):
 12. **\`read_recommendation.when\`**: classe da decisão:
     - \`"agora"\`: alignment forte + mood favorável + sem flags graves. Vale parar tudo e começar.
     - \`"guardar"\`: bom match mas com ressalvas (timing, drama denso quando mood é leve, capítulos demais). Vai entrar na lista, mas não é o próximo.
-    - \`"evitar"\`: contradições importantes — tag avoided forte presente, similar avoided com manual_score baixo, mood incompatível, flags graves.
+    - \`"evitar"\`: contradições importantes — tag avoided forte presente, similar avoided com user_score baixo, mood incompatível, flags graves.
     Seja honesto: não force "agora" só por educação. "Evitar" é informação útil.
 
 13. **\`reasoning\`** (2–4 frases): por que essa decisão. Sintetiza alignment + mood + risco. Use linguagem direta em PT-BR.
@@ -203,9 +203,9 @@ function formatSimilarsBundle(similars: DeepDiveSimilarsBundle): string {
   }
 
   if (similars.loved.length > 0) {
-    lines.push("", `AMADAS (manual_score ≥ 7):`)
+    lines.push("", `AMADAS (user_score ≥ 7):`)
     similars.loved.forEach((w) => {
-      const score = w.manualScore != null ? w.manualScore.toFixed(1) : "—"
+      const score = w.userScore != null ? w.userScore.toFixed(1) : "—"
       const sim = (w.similarity * 100).toFixed(0)
       lines.push(`  - work_id=${w.id} sim=${sim}% nota=${score} — "${w.title}"`)
       if (w.synopsis) lines.push(`    sinopse: ${truncate(w.synopsis, 250)}`)
@@ -213,9 +213,9 @@ function formatSimilarsBundle(similars: DeepDiveSimilarsBundle): string {
   }
 
   if (similars.avoided.length > 0) {
-    lines.push("", `EVITADAS (manual_score ≤ 5):`)
+    lines.push("", `EVITADAS (user_score ≤ 5):`)
     similars.avoided.forEach((w) => {
-      const score = w.manualScore != null ? w.manualScore.toFixed(1) : "—"
+      const score = w.userScore != null ? w.userScore.toFixed(1) : "—"
       const sim = (w.similarity * 100).toFixed(0)
       lines.push(`  - work_id=${w.id} sim=${sim}% nota=${score} — "${w.title}"`)
       if (w.synopsis) lines.push(`    sinopse: ${truncate(w.synopsis, 250)}`)
@@ -240,14 +240,14 @@ function formatAlternatives(alternatives: DeepDiveAlternativeCandidate[]): strin
 }
 
 function formatRecentActivity(
-  activity: Array<{ id: string; title: string; manualScore: number | null; updatedAt: string }>,
+  activity: Array<{ id: string; title: string; userScore: number | null; updatedAt: string }>,
 ): string {
   if (activity.length === 0) {
-    return `HISTÓRICO RECENTE\n(sem mudanças recentes em manual_score)`
+    return `HISTÓRICO RECENTE\n(sem mudanças recentes em user_score)`
   }
-  const lines = [`HISTÓRICO RECENTE (últimas ${activity.length} obras com manual_score atualizado — pode indicar mood/foco atual):`]
+  const lines = [`HISTÓRICO RECENTE (últimas ${activity.length} obras com user_score atualizado — pode indicar mood/foco atual):`]
   activity.forEach((a) => {
-    const score = a.manualScore != null ? a.manualScore.toFixed(1) : "—"
+    const score = a.userScore != null ? a.userScore.toFixed(1) : "—"
     const date = new Date(a.updatedAt).toISOString().slice(0, 10)
     lines.push(`  - ${date}: nota=${score} — "${a.title}"`)
   })

@@ -13,7 +13,7 @@ export type SuggestionStatus =
 export interface AuditWorkInput {
   workId: string
   title: string
-  manualScore: number
+  userScore: number
   isFavorite: boolean
   synopsis: string | null
   observation: string | null
@@ -46,7 +46,7 @@ export interface BiasStatsByCriterion {
 export interface BiasResidualExample {
   workId: string
   title: string
-  manualScore: number
+  userScore: number
   calcScore: number | null
   finalScore: number | null
   scoresBySlug: Partial<Record<CriterionSlug, number>>

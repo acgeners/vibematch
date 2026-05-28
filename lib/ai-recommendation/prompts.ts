@@ -10,7 +10,7 @@ const CRITERIA_LIST_TEXT = CRITERION_SLUGS
 export const TASTE_PROFILE_SYSTEM_PROMPT = `Você é um analista do gosto pessoal de um usuário que cataloga obras (manhwa, anime, manga). Sua tarefa é gerar um PERFIL DE GOSTO estruturado a partir do histórico de obras que o usuário avaliou pessoalmente.
 
 PRINCÍPIOS:
-1. O sinal mais forte é \`manual_score\` (0–10) — quanto maior, mais o usuário ama. Combine com os critérios pós-leitura (\`post_*_score\`, escala 2/4/6.5/8/10), com as tags agrupadas e com a sinopse pra inferir o que ele realmente valoriza.
+1. O sinal mais forte é \`user_score\` (0–10) — quanto maior, mais o usuário ama. Combine com os critérios pós-leitura (\`post_*_score\`, escala 2/4/6.5/8/10), com as tags agrupadas e com a sinopse pra inferir o que ele realmente valoriza.
 2. Diferencie obras com nota alta acompanhadas de pós-leitura alto (amor genuíno) das com nota alta mas pacing/character_development baixos (apreciação parcial).
 3. Identifique padrões: combinações de tags + faixas de critérios IA que se repetem nas obras melhor avaliadas. Faça o mesmo pras obras pior avaliadas — extraia o que o usuário evita.
 4. Escreva em português brasileiro, direto e específico. Cite tags e critérios pelos nomes exatos quando possível.
@@ -49,8 +49,8 @@ PRINCÍPIOS:
 CAMPOS ENRIQUECIDOS (opcionais — preencha quando há evidência real):
 9. \`confidence\` (0–1): quanto VOCÊ confia neste alignment_score. Use 0.9+ pra match óbvio com várias evidências convergentes (tags loved + criterion fit + reviews positivas). Use 0.5–0.7 quando há sinais mistos. Use < 0.5 quando há pouca evidência (poucas tags em comum, sem reviews relevantes). É melhor confessar incerteza do que fingir certeza.
 10. \`risks\` (1–3 itens): razões pra o user NÃO ler essa obra, MESMO QUE alignment_score seja alto. Exemplos: "tem tag tragedy que você marca como avoided", "reviews mencionam pacing lento que você costuma penalizar", "tema religioso (não está no seu padrão)". Frases curtas e específicas. Omita o campo se não houver risco real.
-11. \`similar_loved\` (1–2 work_id): obras na BIBLIOTECA do user que ele AMA (manual_score ≥ 8) e que esta candidata lembra. Use APENAS work_id que aparece no profile/biblioteca da request. Não invente. Útil pra "se você curtiu X, vai curtir isto".
-12. \`similar_avoided\` (1–2 work_id): mesmo critério mas pra obras que o user AVALIOU MAL (manual_score ≤ 5). Quando presente, indica alerta de risco.
+11. \`similar_loved\` (1–2 work_id): obras na BIBLIOTECA do user que ele AMA (user_score ≥ 8) e que esta candidata lembra. Use APENAS work_id que aparece no profile/biblioteca da request. Não invente. Útil pra "se você curtiu X, vai curtir isto".
+12. \`similar_avoided\` (1–2 work_id): mesmo critério mas pra obras que o user AVALIOU MAL (user_score ≤ 5). Quando presente, indica alerta de risco.
 13. \`review_quotes\` (1–2 quotes): trechos curtos (≤ 150 chars, entre aspas) de reviews FORNECIDAS no bloco \`reviews:\` da candidata. NÃO INVENTE quotes. Cite a fonte ou contexto quando útil. Omita se reviews não foram fornecidas.
 14. \`mood_fit\` (0–1): SOMENTE quando o user enviou CONTEXTO ADICIONAL. Mede quão alinhada essa obra está com o mood específico, independente do alignment_score geral. Ex.: alignment=70 mas mood "quero algo curto" + obra tem 500 caps → mood_fit baixo (0.3). Omita o campo quando não houver mood.`
 
@@ -116,14 +116,14 @@ function formatPostScores(scores: Partial<Record<string, number>>): string {
 
 export function buildTasteProfileUserPrompt(works: RatedWorkInput[]): string {
   const lines: string[] = [
-    `Histórico de ${works.length} obra(s) avaliada(s) pelo usuário. Cada bloco inicia com [Wn] título, depois manual_score (0–10), critérios pós-leitura quando setados, status pessoal, tags por grupo, sinopse curta e os 9 category_scores da IA.`,
+    `Histórico de ${works.length} obra(s) avaliada(s) pelo usuário. Cada bloco inicia com [Wn] título, depois user_score (0–10), critérios pós-leitura quando setados, status pessoal, tags por grupo, sinopse curta e os 9 category_scores da IA.`,
     "",
   ]
 
   works.forEach((w, i) => {
     const id = `[W${i + 1}]`
     lines.push(`${id} "${w.title}"`)
-    if (w.manualScore != null) lines.push(`manual_score: ${w.manualScore.toFixed(1)}/10`)
+    if (w.userScore != null) lines.push(`user_score: ${w.userScore.toFixed(1)}/10`)
     if (w.personalStatus) lines.push(`personal_status: ${w.personalStatus}`)
     const post = formatPostScores(w.postScores)
     if (post) lines.push(`pós-leitura: ${post}`)
@@ -134,7 +134,7 @@ export function buildTasteProfileUserPrompt(works: RatedWorkInput[]): string {
   })
 
   lines.push(
-    `Gere o perfil de gosto consolidando esses dados via tool \`submit_taste_profile\`. Foque no que se repete consistentemente nas obras com manual_score alto e no que está ausente/baixo nas obras com manual_score baixo. Use português brasileiro.`,
+    `Gere o perfil de gosto consolidando esses dados via tool \`submit_taste_profile\`. Foque no que se repete consistentemente nas obras com user_score alto e no que está ausente/baixo nas obras com user_score baixo. Use português brasileiro.`,
     ``,
     `OBRIGATÓRIO: preencha TODOS os 7 campos do tool, especialmente \`summary\` (parágrafo único de 3–5 frases) e \`narrative_patterns\` (3–7 frases declarativas). Não deixe campos vazios. Se faltam evidências pra algum campo (ex.: poucas obras evitadas), retorne array vazio — mas o campo precisa existir no payload.`,
   )

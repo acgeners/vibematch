@@ -62,7 +62,7 @@ export const workFormSchema = z.object({
   chapters_read: z.number().int().min(0).nullable().optional(),
   synopsis_quality: z.enum(SYNOPSIS_QUALITIES).nullable().optional(),
   observation_adjustment: z.number().min(-0.30).max(0.30).default(0),
-  manual_score: scoreField("Nota pessoal"),
+  user_score: scoreField("Nota pessoal"),
   post_story_score: scoreField("História"),
   post_fl_score: scoreField("Female Lead"),
   post_ml_score: scoreField("Male Lead"),
@@ -130,7 +130,7 @@ export const workStatusSchema = z.object({
     )
     .nullable()
     .optional(),
-  manual_score: scoreField("Nota pessoal"),
+  user_score: scoreField("Nota pessoal"),
   post_story_score: scoreField("História"),
   post_fl_score: scoreField("Female Lead"),
   post_ml_score: scoreField("Male Lead"),

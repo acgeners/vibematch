@@ -5,17 +5,17 @@ import type { KnnNeighbor } from "@/lib/ml/knn-predictor"
 interface RpcRow {
   work_id: string
   similarity: number
-  manual_score: number
+  user_score: number
 }
 
 /**
  * Busca os top-k vizinhos rotulados no espaço de embeddings. Wrap em torno
- * da RPC `find_knn_with_manual_score` (migration 055) — falha graciosamente
+ * da RPC `find_knn_with_user_score` (migration 055) — falha graciosamente
  * pra `[]` quando a tabela não tem embeddings ou a RPC não existe.
  */
 export async function getKnnNeighbors(workId: string, k: number): Promise<KnnNeighbor[]> {
   const supabase = createAdminClient()
-  const { data, error } = await supabase.rpc("find_knn_with_manual_score", {
+  const { data, error } = await supabase.rpc("find_knn_with_user_score", {
     target_work_id: workId,
     match_limit: k,
   })
@@ -26,7 +26,7 @@ export async function getKnnNeighbors(workId: string, k: number): Promise<KnnNei
   return (data as RpcRow[] | null ?? []).map((r) => ({
     workId: r.work_id,
     similarity: Number(r.similarity),
-    manualScore: Number(r.manual_score),
+    userScore: Number(r.user_score),
   }))
 }
 

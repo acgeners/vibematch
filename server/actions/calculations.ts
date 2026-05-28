@@ -68,7 +68,7 @@ interface RawWork {
   total_chapters: number | null
   synopsis_quality: string | null
   observation_adjustment: number
-  manual_score: number | null
+  user_score: number | null
   is_archived: boolean
   post_story_score: number | null
   post_fl_score: number | null
@@ -88,7 +88,7 @@ interface RawWork {
 
 interface WorkComputed {
   id: string
-  manualScore: number | null
+  userScore: number | null
   publicationStatus: string
   totalChapters: number | null
   synopsisQuality: SynopsisQuality | null
@@ -174,7 +174,7 @@ function buildWork(raw: RawWork): WorkComputed {
 
   return {
     id: raw.id,
-    manualScore: raw.manual_score == null ? null : Number(raw.manual_score),
+    userScore: raw.user_score == null ? null : Number(raw.user_score),
     publicationStatus: getPublicationStatusNameById(raw.publication_status_id) ?? "Unknown",
     totalChapters: raw.total_chapters,
     synopsisQuality: raw.synopsis_quality as SynopsisQuality | null,
@@ -253,7 +253,7 @@ function buildExpectedInput(w: WorkComputed): ExpectedScoreInput {
  * Reprocessa TODA a base:
  *   1. Calcula percentis de #Votos -> atualiza pseudo_votes_*
  *   2. Calcula GPT.N, Nota.M, Cps.N, Nota.Calc para todos
- *   3. Treina Ridge nos títulos com manual_score e prediz Nota.Pr para todos
+ *   3. Treina Ridge nos títulos com user_score e prediz Nota.Pr para todos
  *   4. Calcula MAEs reais -> atualiza mae_calc, mae_predicted
  *   5. Calcula NotaFinal com MAEs novos
  *   6. Bulk upsert em calculated_scores
@@ -267,7 +267,7 @@ export async function recalculateAll() {
       .from("works")
       .select(
         `id, publication_status_id, total_chapters, synopsis_quality,
-         observation_adjustment, manual_score, is_archived,
+         observation_adjustment, user_score, is_archived,
          post_story_score, post_fl_score, post_ml_score,
          post_character_development_score, post_pacing_score,
          post_art_visual_score, post_impact_immersion_score,
@@ -312,7 +312,7 @@ export async function recalculateAll() {
   const interimCalibration = computeCalibration(
     works.map((w) => ({
       workId: w.id,
-      manualScore: w.manualScore,
+      userScore: w.userScore,
       calcScore: null,
       predictedScore: null,
       finalScore: null,
@@ -328,7 +328,7 @@ export async function recalculateAll() {
 
   // ---------- 1b) Pesos automáticos (opcional) ----------
   // Quando config.score_weights_auto = true (default desde migration 069),
-  // inferimos pesos via Ridge sobre os 9 critérios contra manual_score e
+  // inferimos pesos via Ridge sobre os 9 critérios contra user_score e
   // usamos no lugar dos manuais persistidos em score_weights. Pesos manuais
   // ficam preservados na tabela como fallback. Inferência cai pra os manuais
   // automaticamente quando treino < 20 (isStub).
@@ -336,11 +336,11 @@ export async function recalculateAll() {
   let inferenceSnapshot: WeightInferenceResult | null = null
   if (config.score_weights_auto) {
     const inferenceInputs: WeightInferenceInput[] = works
-      .filter((w) => w.manualScore != null)
+      .filter((w) => w.userScore != null)
       .map((w) => ({
         workId: w.id,
         categoryScores: w.categoryScores,
-        manualScore: w.manualScore as number,
+        userScore: w.userScore as number,
       }))
     const knownSlugs = new Set<string>(CRITERION_SLUGS as readonly string[])
     const currentWeights: CurrentWeight[] = weights
@@ -413,9 +413,9 @@ export async function recalculateAll() {
   }
 
   // ---------- 3) Treinar Ridge e prever Nota.Pr ----------
-  const trainSet = works.filter((w) => w.manualScore != null)
+  const trainSet = works.filter((w) => w.userScore != null)
   const trainInputs = trainSet.map(buildPredictionInput)
-  const trainTargets = trainSet.map((w) => w.manualScore as number)
+  const trainTargets = trainSet.map((w) => w.userScore as number)
 
   const predictor = trainPredictor(trainInputs, trainTargets)
   const allInputs = works.map(buildPredictionInput)
@@ -443,7 +443,7 @@ export async function recalculateAll() {
 
   // ---------- 3c) L1 novo: expected_score (single Ridge + decomposição) ----------
   // UM Ridge com 22 features (14 baseline + 8 quality granulares + Status one-hot)
-  // treinado conjuntamente contra manual_score. Decomposição "baseline + quality"
+  // treinado conjuntamente contra user_score. Decomposição "baseline + quality"
   // é computada pós-hoc via atribuição linear (intercept + Σ coef × x por grupo).
   // Mantém precisão do legacy (ratio ~0.98×) E dá interpretabilidade da
   // contribuição de cada axis pra o waterfall.
@@ -470,7 +470,7 @@ export async function recalculateAll() {
     let sumSqCombined = 0
     let sumAbsBaseline = 0
     for (let i = 0; i < trainSet.length; i++) {
-      const manual = trainSet[i].manualScore as number
+      const manual = trainSet[i].userScore as number
       const diffCombined = trainPreds[i].expected - manual
       const diffBaseline = trainPreds[i].baseline - manual
       sumAbsCombined += Math.abs(diffCombined)
@@ -513,7 +513,7 @@ export async function recalculateAll() {
   const calibrationAfterPr = computeCalibration(
     works.map((w) => ({
       workId: w.id,
-      manualScore: w.manualScore,
+      userScore: w.userScore,
       calcScore: w.calcScore,
       predictedScore: w.predictedScore,
       finalScore: null,
@@ -527,7 +527,7 @@ export async function recalculateAll() {
 
   // ---------- 4b) Fit do stacker (Ridge segundo-nível) ----------
   // Usa out-of-fold predictions do Ridge pra evitar leakage. Trainset == obras
-  // com manual_score. Stacker fica como NULL quando treino < 30 ou Ridge é stub.
+  // com user_score. Stacker fica como NULL quando treino < 30 ou Ridge é stub.
   //
   // kNN entra como 3ª feature SE estiver disponível pra TODAS as obras de
   // treino (knnScore não-null em todas). Caso contrário, treina com 2 features
@@ -543,7 +543,7 @@ export async function recalculateAll() {
           calc: w.calcScore,
           ridge: oofRidge[i],
           knn: trainKnnComplete ? (w.knnScore as number) : null,
-          manual: w.manualScore as number,
+          manual: w.userScore as number,
         })),
       )
     }
@@ -612,7 +612,7 @@ export async function recalculateAll() {
   const finalCalibration = computeCalibration(
     works.map((w) => ({
       workId: w.id,
-      manualScore: w.manualScore,
+      userScore: w.userScore,
       calcScore: w.calcScore,
       predictedScore: w.predictedScore,
       finalScore: w.finalScore,

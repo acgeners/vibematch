@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest"
 import { computeCalibration } from "@/lib/calculations/calibration"
 
 describe("computeCalibration", () => {
-  it("returns null MAE/RMSE when there is no manual_score data", () => {
+  it("returns null MAE/RMSE when there is no user_score data", () => {
     const cal = computeCalibration([
-      { workId: "a", manualScore: null, calcScore: 7, predictedScore: 8, finalScore: 7.5, totalVotes: 100 },
+      { workId: "a", userScore: null, calcScore: 7, predictedScore: 8, finalScore: 7.5, totalVotes: 100 },
     ])
     expect(cal.trainSize).toBe(0)
     expect(cal.maeCalc).toBeNull()
@@ -18,7 +18,7 @@ describe("computeCalibration", () => {
     for (let i = 0; i < 10; i++) {
       items.push({
         workId: `w${i}`,
-        manualScore: 8.0,
+        userScore: 8.0,
         calcScore: 7.0,
         predictedScore: 7.5,
         finalScore: 7.3,
@@ -36,7 +36,7 @@ describe("computeCalibration", () => {
     for (let i = 0; i < 20; i++) {
       items.push({
         workId: `w${i}`,
-        manualScore: 8.0,
+        userScore: 8.0,
         calcScore: 7.0, // signed diff = -1, abs = 1
         predictedScore: 7.5, // diff = -0.5
         finalScore: 7.3, // diff = -0.7
@@ -57,7 +57,7 @@ describe("computeCalibration", () => {
   it("pseudo_votes derivam da mediana com multiplicador (não mais P75/P60)", () => {
     const items = Array.from({ length: 100 }, (_, i) => ({
       workId: `w${i}`,
-      manualScore: null,
+      userScore: null,
       calcScore: null,
       predictedScore: null,
       finalScore: null,
@@ -73,12 +73,12 @@ describe("computeCalibration", () => {
 
   it("returns top worst diffs sorted by diffFinal", () => {
     const items = [
-      { workId: "good", manualScore: 8, calcScore: 8, predictedScore: 8, finalScore: 8, totalVotes: 0 },
-      { workId: "ok", manualScore: 8, calcScore: 7.5, predictedScore: 7.5, finalScore: 7.5, totalVotes: 0 },
-      { workId: "bad", manualScore: 8, calcScore: 5, predictedScore: 5, finalScore: 5, totalVotes: 0 },
-      { workId: "worst", manualScore: 8, calcScore: 3, predictedScore: 3, finalScore: 3, totalVotes: 0 },
-      { workId: "x1", manualScore: 8, calcScore: 7.9, predictedScore: 7.9, finalScore: 7.9, totalVotes: 0 },
-      { workId: "x2", manualScore: 8, calcScore: 7.8, predictedScore: 7.8, finalScore: 7.8, totalVotes: 0 },
+      { workId: "good", userScore: 8, calcScore: 8, predictedScore: 8, finalScore: 8, totalVotes: 0 },
+      { workId: "ok", userScore: 8, calcScore: 7.5, predictedScore: 7.5, finalScore: 7.5, totalVotes: 0 },
+      { workId: "bad", userScore: 8, calcScore: 5, predictedScore: 5, finalScore: 5, totalVotes: 0 },
+      { workId: "worst", userScore: 8, calcScore: 3, predictedScore: 3, finalScore: 3, totalVotes: 0 },
+      { workId: "x1", userScore: 8, calcScore: 7.9, predictedScore: 7.9, finalScore: 7.9, totalVotes: 0 },
+      { workId: "x2", userScore: 8, calcScore: 7.8, predictedScore: 7.8, finalScore: 7.8, totalVotes: 0 },
     ]
     const cal = computeCalibration(items)
     expect(cal.worstDiffs[0].workId).toBe("worst")

@@ -164,7 +164,7 @@ async function createWork(
       chapters_read: row.chapters_read ?? null,
       synopsis_quality: row.synopsis_quality ?? null,
       observation_adjustment: row.observation_adjustment ?? 0,
-      manual_score: row.manual_score ?? null,
+      user_score: row.user_score ?? null,
       ai_eval_status: "pending",
     })
     .select("id")
@@ -190,7 +190,7 @@ async function updateWork(
   if (row.chapters_read != null) update.chapters_read = row.chapters_read
   if (row.synopsis_quality) update.synopsis_quality = row.synopsis_quality
   if (row.observation_adjustment != null) update.observation_adjustment = row.observation_adjustment
-  if (row.manual_score != null) update.manual_score = row.manual_score
+  if (row.user_score != null) update.user_score = row.user_score
 
   if (Object.keys(update).length > 0) {
     await supabase.from("works").update(update).eq("id", workId)

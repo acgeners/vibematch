@@ -7,7 +7,7 @@
  *     categorical: SimpleImputer(most_frequent) -> OneHotEncoder
  *   ) -> RidgeCV(alphas=[0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000], cv=5)
  *
- * Treina nos títulos com manual_score preenchido e prediz para todos.
+ * Treina nos títulos com user_score preenchido e prediz para todos.
  */
 
 import { CRITERION_SLUGS, type CategoryScoreMap, type CriterionSlug } from "@/types/domain"
@@ -115,7 +115,7 @@ function buildCategoricalRow(input: PredictionInput): string[] {
 /**
  * Treina o modelo de Nota.Pr.
  *
- * @param trainInputs títulos com manual_score preenchido
+ * @param trainInputs títulos com user_score preenchido
  * @param trainTargets vetor M.Nota correspondente
  *
  * Se trainInputs.length < 20, retorna um stub que devolve um valor neutro
@@ -237,7 +237,7 @@ export { NUMERIC_FEATURE_NAMES, CATEGORICAL_FEATURE_NAMES }
 /**
  * Out-of-fold predictions: pra cada item, qual seria a predição do Ridge
  * se ele *não estivesse* no conjunto de treino? Usado pelo stacker (final.ts)
- * pra evitar leakage — sem isso, ridgeScore == manualScore nas obras de
+ * pra evitar leakage — sem isso, ridgeScore == userScore nas obras de
  * treino e o stacker decide overfit absurdo.
  *
  * Retorna `null` quando há poucas amostras pra fazer CV honesta. Caller deve

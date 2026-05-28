@@ -91,7 +91,7 @@ export function calculateGPT(
  *
  * Amplificação simples em torno do ponto neutro 5. O slope 1.25 foi calibrado
  * empiricamente. Tentamos z-score adaptativo (mean/std da distribuição real)
- * mas afundava IA(n) porque recentrava o output em 5 — a média dos manual_score
+ * mas afundava IA(n) porque recentrava o output em 5 — a média dos user_score
  * fica em ~7–8, então recentrar GPT em 5 quebra a calibração contra o target.
  * As colunas formula_config.gpt_mean/gpt_std permanecem no DB como legacy.
  */

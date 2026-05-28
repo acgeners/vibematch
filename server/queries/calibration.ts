@@ -28,7 +28,7 @@ const POST_SCORE_FIELDS = [
 const AUDIT_WORK_SELECT = `
   id,
   title,
-  manual_score,
+  user_score,
   is_favorite,
   observations,
   post_story_score,
@@ -47,7 +47,7 @@ const AUDIT_WORK_SELECT = `
 const BIAS_WORK_SELECT = `
   id,
   title,
-  manual_score,
+  user_score,
   post_story_score,
   post_fl_score,
   post_ml_score,
@@ -92,7 +92,7 @@ export async function loadWorksForAudit(limit = 1000): Promise<AuditWorkInput[]>
   const { data, error } = await supabase
     .from("works")
     .select(AUDIT_WORK_SELECT)
-    .not("manual_score", "is", null)
+    .not("user_score", "is", null)
     .eq("is_archived", false)
     .order("updated_at", { ascending: false })
     .limit(limit)
@@ -124,7 +124,7 @@ export async function loadWorksForAudit(limit = 1000): Promise<AuditWorkInput[]>
     return {
       workId: work.id as string,
       title: work.title as string,
-      manualScore: Number(work.manual_score),
+      userScore: Number(work.user_score),
       isFavorite: Boolean(work.is_favorite),
       synopsis,
       observation: (work.observations as string | null) ?? null,
@@ -175,7 +175,7 @@ export async function loadInputsForBias(): Promise<BiasInputs> {
   const { data, error } = await supabase
     .from("works")
     .select(BIAS_WORK_SELECT)
-    .not("manual_score", "is", null)
+    .not("user_score", "is", null)
     .eq("is_archived", false)
     .limit(2000)
 
@@ -184,7 +184,7 @@ export async function loadInputsForBias(): Promise<BiasInputs> {
   type WorkRow = {
     id: string
     title: string
-    manual_score: number
+    user_score: number
     category_scores: RawCategoryScoreRow[] | null
     calculated_scores: { calc_score: number | null; final_score: number | null } | null
     [key: string]: unknown
@@ -215,7 +215,7 @@ export async function loadInputsForBias(): Promise<BiasInputs> {
   const residualBuckets: Array<{
     workId: string
     title: string
-    manualScore: number
+    userScore: number
     calcScore: number | null
     finalScore: number | null
     scoresBySlug: Partial<Record<CriterionSlug, number>>
@@ -223,7 +223,7 @@ export async function loadInputsForBias(): Promise<BiasInputs> {
   }> = []
 
   for (const w of works) {
-    const manual = Number(w.manual_score)
+    const manual = Number(w.user_score)
     const calc = w.calculated_scores?.calc_score
     const calcNum = calc != null ? Number(calc) : null
 
@@ -258,7 +258,7 @@ export async function loadInputsForBias(): Promise<BiasInputs> {
       residualBuckets.push({
         workId: w.id,
         title: w.title,
-        manualScore: manual,
+        userScore: manual,
         calcScore: calcNum,
         finalScore: w.calculated_scores?.final_score != null ? Number(w.calculated_scores.final_score) : null,
         scoresBySlug: csBySlug,
@@ -322,7 +322,7 @@ export async function loadInputsForBias(): Promise<BiasInputs> {
     .map((r) => ({
       workId: r.workId,
       title: r.title,
-      manualScore: r.manualScore,
+      userScore: r.userScore,
       calcScore: r.calcScore,
       finalScore: r.finalScore,
       scoresBySlug: r.scoresBySlug,

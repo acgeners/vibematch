@@ -20,7 +20,7 @@ const POST_SCORE_FIELDS = [
 const RATED_WORK_SELECT = `
   id,
   title,
-  manual_score,
+  user_score,
   personal_status_id,
   post_story_score,
   post_fl_score,
@@ -40,7 +40,7 @@ const RATED_WORK_SELECT = `
 const CANDIDATE_WORK_SELECT = `
   id,
   title,
-  manual_score,
+  user_score,
   is_favorite,
   canonical_synopsis,
   category_scores(criterion_slug, score),
@@ -153,7 +153,7 @@ export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInp
   const { data, error } = await supabase
     .from("works")
     .select(RATED_WORK_SELECT)
-    .not("manual_score", "is", null)
+    .not("user_score", "is", null)
     .eq("is_archived", false)
     .order("updated_at", { ascending: false })
     .limit(limit)
@@ -185,7 +185,7 @@ export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInp
     return {
       id: work.id as string,
       title: work.title as string,
-      manualScore: work.manual_score != null ? Number(work.manual_score) : null,
+      userScore: work.user_score != null ? Number(work.user_score) : null,
       postScores,
       personalStatus,
       synopsis,
@@ -230,7 +230,7 @@ function mapRowToCandidate(row: unknown, reviews: CandidateReview[]): FavoriteCa
     predictedScore: calc?.predicted_score != null ? Number(calc.predicted_score) : null,
     reviews,
     coverUrl,
-    isAlreadyRated: work.manual_score != null,
+    isAlreadyRated: work.user_score != null,
   } satisfies FavoriteCandidate
 }
 
@@ -246,7 +246,7 @@ export async function getFavoriteCandidates(
     .eq("is_archived", false)
 
   if (mode === "next_read") {
-    query = query.is("manual_score", null)
+    query = query.is("user_score", null)
   }
 
   const { data, error } = await query.order("updated_at", { ascending: false }).limit(limit)

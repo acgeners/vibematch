@@ -529,8 +529,8 @@ ${criteriaAliasLines}
   synopsis_quality: "synopsis_quality",
   Obs: "observation_penalty",
   observation_penalty: "observation_penalty",
-  "M.Nota": "manual_score",
-  manual_score: "manual_score",
+  "M.Nota": "user_score",
+  user_score: "user_score",
 
   // Scores calculados importados da planilha
   "IA": "ia_eval",
@@ -568,7 +568,7 @@ ${criteriaSlugCases}
       case "mu_rating":
       case "ap_rating":
       case "cmx_rating":
-      case "manual_score":
+      case "user_score":
       case "ia_eval":
       case "ia_eval_normalized":
       case "calc_score":

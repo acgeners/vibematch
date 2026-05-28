@@ -193,7 +193,7 @@ interface SimilarRow {
   id: string
   title: string
   similarity: number
-  manual_score: number | null
+  user_score: number | null
   cover_url: string | null
   synopsis: string | null
 }
@@ -212,12 +212,12 @@ async function fetchSimilarsForWork(workId: string): Promise<DeepDiveSimilarsBun
   const loved: DeepDiveSimilarsBundle["loved"] = []
   const avoided: DeepDiveSimilarsBundle["avoided"] = []
   for (const r of rows) {
-    const score = r.manual_score != null ? Number(r.manual_score) : null
+    const score = r.user_score != null ? Number(r.user_score) : null
     const entry = {
       id: r.id,
       title: r.title,
       coverUrl: r.cover_url,
-      manualScore: score,
+      userScore: score,
       similarity: Number(r.similarity ?? 0),
       synopsis: r.synopsis,
     }
@@ -232,13 +232,13 @@ async function fetchSimilarsForWork(workId: string): Promise<DeepDiveSimilarsBun
 }
 
 async function fetchRecentActivity(excludeWorkId: string): Promise<
-  Array<{ id: string; title: string; manualScore: number | null; updatedAt: string }>
+  Array<{ id: string; title: string; userScore: number | null; updatedAt: string }>
 > {
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("works")
-    .select("id, title, manual_score, updated_at")
-    .not("manual_score", "is", null)
+    .select("id, title, user_score, updated_at")
+    .not("user_score", "is", null)
     .eq("is_archived", false)
     .neq("id", excludeWorkId)
     .order("updated_at", { ascending: false })
@@ -248,11 +248,11 @@ async function fetchRecentActivity(excludeWorkId: string): Promise<
     return []
   }
   return (data ?? []).map((row) => {
-    const r = row as { id: string; title: string; manual_score: number | string | null; updated_at: string }
+    const r = row as { id: string; title: string; user_score: number | string | null; updated_at: string }
     return {
       id: r.id,
       title: r.title,
-      manualScore: r.manual_score != null ? Number(r.manual_score) : null,
+      userScore: r.user_score != null ? Number(r.user_score) : null,
       updatedAt: r.updated_at,
     }
   })
@@ -324,12 +324,12 @@ export async function getDeepDiveContext(workId: string): Promise<{
   if (!profileRow) {
     return {
       error:
-        "Perfil de gosto ainda não foi gerado. Acesse /preferences ou avalie obras com manual_score pra desbloquear o Deep Dive.",
+        "Perfil de gosto ainda não foi gerado. Acesse /preferences ou avalie obras com user_score pra desbloquear o Deep Dive.",
     }
   }
   if (profileRow.is_stub) {
     return {
-      error: "Perfil ainda em modo stub — avalie mais obras com manual_score pra desbloquear o Deep Dive.",
+      error: "Perfil ainda em modo stub — avalie mais obras com user_score pra desbloquear o Deep Dive.",
     }
   }
   if (!bundle) {

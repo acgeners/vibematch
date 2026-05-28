@@ -1,8 +1,8 @@
 /**
- * Inferência de `score_weights` a partir do histórico de `manual_score`.
+ * Inferência de `score_weights` a partir do histórico de `user_score`.
  *
  * Treina uma Ridge restrita aos 9 critérios IA (sem outras features) contra
- * `manual_score`. Os coeficientes resultantes traduzem "quanto cada critério
+ * `user_score`. Os coeficientes resultantes traduzem "quanto cada critério
  * importa pra prever a nota real do usuário". Normalizamos esses coeficientes
  * pra escala dos `score_weights` atuais (preservando intensidade total) e
  * estimamos confiança via bootstrap.
@@ -32,7 +32,7 @@ export interface WeightSuggestion {
   suggestedWeight: number
   delta: number
   confidence: WeightConfidence
-  /** Coeficiente médio do bootstrap em unidades de manual_score por 1 ponto no critério. */
+  /** Coeficiente médio do bootstrap em unidades de user_score por 1 ponto no critério. */
   coefficient: number
   /** Desvio-padrão do coeficiente entre bootstraps — base do nível de confiança. */
   stderr: number
@@ -41,7 +41,7 @@ export interface WeightSuggestion {
 export interface WeightInferenceInput {
   workId: string
   categoryScores: CategoryScoreMap
-  manualScore: number
+  userScore: number
 }
 
 export interface CurrentWeight {
@@ -85,7 +85,7 @@ function buildMatrices(
       row.push(v == null || !Number.isFinite(v) ? null : v)
     }
     X.push(row)
-    y.push(inp.manualScore)
+    y.push(inp.userScore)
   }
   return { X, y }
 }
@@ -164,7 +164,7 @@ function classifyConfidence(coef: number, stderr: number): WeightConfidence {
 }
 
 /**
- * Mapeia coeficientes (em escala "ponto-de-manual_score por ponto-de-critério")
+ * Mapeia coeficientes (em escala "ponto-de-user_score por ponto-de-critério")
  * pra escala dos `score_weights` (faixa típica ±10), preservando a magnitude
  * total dos pesos atuais. Isso evita que sugestões fiquem em escalas
  * incomparáveis com a edição manual.
@@ -186,9 +186,9 @@ export function inferScoreWeights(
   inputs: WeightInferenceInput[],
   currentWeights: CurrentWeight[],
 ): WeightInferenceResult {
-  // Filtra obras com todos os 9 critérios presentes E manual_score válido
+  // Filtra obras com todos os 9 critérios presentes E user_score válido
   const valid = inputs.filter((inp) => {
-    if (!Number.isFinite(inp.manualScore)) return false
+    if (!Number.isFinite(inp.userScore)) return false
     for (const slug of CRITERION_SLUGS) {
       const v = inp.categoryScores[slug as CriterionSlug]
       if (v == null || !Number.isFinite(v)) return false

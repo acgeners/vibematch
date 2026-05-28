@@ -29,7 +29,7 @@ export interface NotaCalcInputs {
  * 4. Clamp 0–10
  *
  * Status (`publication_status`) e capítulos (`Cps.N`) NÃO entram aqui — são
- * features do Ridge (Nota.Pr), que aprende seus pesos contra `manual_score`.
+ * features do Ridge (Nota.Pr), que aprende seus pesos contra `user_score`.
  * Aplicá-los também aqui criaria intervenção duplicada (multiplicador fixo
  * em Nota.Calc + peso aprendido no Ridge) que enfraquece a calibração.
  */

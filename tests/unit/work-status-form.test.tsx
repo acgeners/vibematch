@@ -22,7 +22,7 @@ const baseValues: WorkStatusValues = {
   observations: "É legal até, mas acho que foi ficando meio parado",
   chapters_read: null,
   last_read_at: null,
-  manual_score: null,
+  user_score: null,
   post_story_score: null,
   post_fl_score: null,
   post_ml_score: null,
