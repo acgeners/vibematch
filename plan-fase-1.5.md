@@ -125,14 +125,14 @@ Captura a avaliação do user pós-leitura sobre os 9 atributos, com snapshot do
 ```sql
 CREATE TABLE user_attribute_assessment (
   id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id                  UUID NOT NULL,                 -- single hoje, multi depois
+  user_id                  UUID NOT NULL,
   work_id                  UUID NOT NULL REFERENCES works(id) ON DELETE CASCADE,
-  attribute_slug           TEXT NOT NULL,                 -- referencia criteria.slug (eval_type='IA')
+  attribute_slug           TEXT NOT NULL,
   user_value               NUMERIC(3,1) NOT NULL CHECK (user_value BETWEEN 0 AND 10),
   source                   TEXT NOT NULL CHECK (source IN ('ai_accepted_post_read','user_edited_post_read')),
-  ia_value_at_assessment   NUMERIC(3,1) NOT NULL,         -- snapshot pra auditoria
-  ia_model_at_assessment   TEXT NOT NULL,                 -- guard 1: detectar mudança de modelo
-  ia_prompt_version        TEXT NOT NULL,                 -- guard 1: detectar mudança de prompt
+  ia_value_at_assessment   NUMERIC(3,1) NOT NULL,
+  ia_model_at_assessment   TEXT NOT NULL,           -- guard 1
+  ia_prompt_version        TEXT NOT NULL,           -- guard 1
   ia_evaluation_id         UUID REFERENCES ai_evaluations(id),
   created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -145,8 +145,6 @@ CREATE INDEX idx_user_attr_slug_user ON user_attribute_assessment(attribute_slug
 ALTER TABLE user_attribute_assessment ENABLE ROW LEVEL SECURITY;
 ```
 
-`ia_model_at_assessment` e `ia_prompt_version` são essenciais pra Fase 1.5.7 (guards).
-
 ### Nova tabela: `attribute_bias`
 
 Estado computado do bias por (user, atributo).
@@ -156,21 +154,26 @@ CREATE TABLE attribute_bias (
   user_id          UUID NOT NULL,
   attribute_slug   TEXT NOT NULL,
   n_samples        INTEGER NOT NULL DEFAULT 0,
-  mean_bias_raw    NUMERIC(4,2) NOT NULL DEFAULT 0,   -- avg(user_value - ia_value_at_assessment)
-  bias_applied     NUMERIC(4,2) NOT NULL DEFAULT 0,   -- mean_bias_raw × n/(n+10)
-  stddev_bias      NUMERIC(4,2),                       -- pra detectar inconsistência futura
+  mean_bias_raw    NUMERIC(4,2) NOT NULL DEFAULT 0,
+  bias_applied     NUMERIC(4,2) NOT NULL DEFAULT 0,
+  stddev_bias      NUMERIC(4,2),
   last_updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, attribute_slug)
 );
+
+ALTER TABLE attribute_bias ENABLE ROW LEVEL SECURITY;
 ```
 
 ### Backfill do `user_id`
 
-Como `user_id` é NOT NULL, precisa de UUID fixo no estado single-user. Sugestão:
+Como `user_id` é NOT NULL, precisa de UUID fixo no estado single-user.
 
-1. Adicionar coluna `current_user_id` em `user_settings` (default `gen_random_uuid()`).
-2. Migration popula uma vez. Server actions usam esse valor.
-3. Quando multi-user chegar: troca da fonte do `user_id` (auth session) sem migration.
+```sql
+ALTER TABLE user_settings 
+  ADD COLUMN current_user_id UUID NOT NULL DEFAULT gen_random_uuid();
+```
+
+Server actions usam esse UUID. Quando multi-user chegar: troca fonte (auth session) sem migration.
 
 ---
 
@@ -181,23 +184,32 @@ Toda leitura de `category_scores` pra uso em pipeline/predição deve passar por
 ```ts
 // lib/ai-recommendation/calibrated-scores.ts (novo)
 
-export interface AttributeBiasMap {
-  [slug: string]: number  // bias_applied
+export type AttributeBiasMap = Record<string, number>
+
+export interface CategoryScoreWithSource {
+  value: number
+  source: CategoryScoreSource  // 'ai_only' | 'ai_accepted' | 'ai_edited' | 'manual' | 'imported'
 }
 
-export async function loadBiasMap(userId: string): Promise<AttributeBiasMap> { ... }
+export async function loadBiasMap(userId: string): Promise<AttributeBiasMap>
 
 export function applyBiasToCategoryScores(
-  rawScores: Record<CriterionSlug, number>,
-  sources: Record<CriterionSlug, string>,  // 'ai_only', 'ai_accepted', 'ai_edited', 'manual'
+  rawScores: Partial<Record<CriterionSlug, CategoryScoreWithSource>>,
   biasMap: AttributeBiasMap,
-): Record<CriterionSlug, number> {
-  const result = { ...rawScores }
+): Record<CriterionSlug, number | null> {
+  const result = {} as Record<CriterionSlug, number | null>
   for (const slug of CRITERION_SLUGS) {
-    // Source-aware: pula valores já corrigidos pelo user
-    if (sources[slug] === 'ai_edited' || sources[slug] === 'manual') continue
-    if (rawScores[slug] == null) continue
-    result[slug] = rawScores[slug] - (biasMap[slug] ?? 0)
+    const entry = rawScores[slug]
+    if (entry == null) { result[slug] = null; continue }
+    
+    // Source-aware: pula valores que o user já corrigiu
+    if (entry.source === 'ai_edited' || entry.source === 'manual') {
+      result[slug] = entry.value
+      continue
+    }
+    
+    const bias = biasMap[slug] ?? 0
+    result[slug] = entry.value - bias
   }
   return result
 }
@@ -210,242 +222,704 @@ export function applyBiasToCategoryScores(
 
 ---
 
-## UX do questionário pós-leitura
+## Implementação em fases
 
-### Quando aparece
-
-Sub-aba opcional no [work-status-form.tsx](components/titles/work-status-form.tsx) — visível quando `personal_status ∈ {Completed, Dropped, On-hold, Stalled, Hiatus}`.
-
-Não força. Se user não preencher, sistema funciona como hoje.
-
-### Como preencher
-
-UI espelhando [ai-evaluation-review-form.tsx](components/ai-evaluation/ai-evaluation-review-form.tsx):
-
-```
-┌─ Atributos da obra (pós-leitura) ─────────────────────┐
-│  IA sugeriu / Você ajusta após ler                    │
-│                                                        │
-│  romance        [ 8.0 ]  ← editável                   │
-│  drama          [ 7.5 ]                               │
-│  tragédia       [ 5.0 ]                               │
-│  ...                                                  │
-│  qual. técnica  [ 8.0 ]                               │
-│                                                        │
-│  [ Aceitar tudo ]  [ Salvar ]                         │
-└────────────────────────────────────────────────────────┘
-```
-
-- Pré-preenchido com `ia_value` da última `ai_evaluations` aceita
-- User edita individualmente ou aceita tudo
-- `source = "ai_accepted_post_read"` se valor final == ia_value, senão `"user_edited_post_read"`
-- Se a obra **não tem AI evaluation ainda**: aba aparece disabled com tooltip "Rode a avaliação IA primeiro"
-
-### Save
-
-Server action `submitPostReadingAttributes(workId, values)`:
-1. UPSERT 9 rows em `user_attribute_assessment` (idempotente)
-2. Trigger `recomputeAttributeBias(userId)` (inline, leve)
-3. Trigger `recalculateWork(workId)` (reflete novo bias)
+**Ordem reorganizada**: UI antes de pipeline (sem dado, pipeline não roda).
 
 ---
 
-## UI de calibração de bias (`/settings/calibration`)
+### Fase 1.5.0 — Naming refactor (~1.5h)
 
-Novo card "Bias dos Atributos":
+**Pré-requisitos**: nada.
+
+#### Migration
+
+**`supabase/migrations/073_rename_manual_score_to_user_score.sql`**:
+```sql
+ALTER TABLE works RENAME COLUMN manual_score TO user_score;
+-- Verificar índices/views/RPCs dependentes
+```
+
+#### Find/replace de código
+
+Ordem importa — do mais específico pro genérico:
+
+```bash
+# 1. Strings óbvias primeiro (mais raras, sem ambiguidade)
+grep -rln "Manual Score\|Nota Manual\|manualScore\|manual_score" --include="*.ts" --include="*.tsx" --include="*.sql"
+
+# 2. camelCase
+sed -i '' 's/manualScore/userScore/g' <files>
+
+# 3. snake_case (cuidado: NÃO confundir com personal_score, final_score, expected_score)
+sed -i '' 's/manual_score/user_score/g' <files>
+```
+
+#### UI labels
+
+Atualizar 8 arquivos centrais com substituições contextuais:
+- "Critérios" → "Atributos da obra" quando refere aos 9 da IA
+- "Critérios pós-leitura" → "Critérios de avaliação"
+- "Calculada pela média dos ratings" → "Calculada pela média dos critérios"
+
+#### Verificação
+
+```bash
+npm run build && npm run test
+grep -r "manual_score\|manualScore" --exclude-dir=node_modules --exclude-dir=.next
+# Esperado: zero resultados fora de migrations
+```
+
+#### Commit
 
 ```
-┌─ Bias dos Atributos (correção da IA) ──────────────────┐
+refactor: rename manual_score → user_score + clarifica naming (Atributos vs Critérios)
+```
+
+---
+
+### Fase 1.5.1 — Schema + backend (~3h)
+
+**Pré-requisitos**: 1.5.0 mergeado.
+
+#### Migrations (4 novas)
+
+**`074_user_settings_current_user_id.sql`**:
+```sql
+ALTER TABLE user_settings 
+  ADD COLUMN current_user_id UUID NOT NULL DEFAULT gen_random_uuid();
+```
+
+**`075_user_attribute_assessment.sql`**: tabela completa (ver "Modelo de dados" acima).
+
+**`076_attribute_bias.sql`**: tabela completa (ver "Modelo de dados" acima).
+
+**`077_calculated_scores_alignment_stale.sql`**:
+```sql
+ALTER TABLE calculated_scores
+  ADD COLUMN alignment_stale BOOLEAN NOT NULL DEFAULT false;
+```
+
+#### Arquivos novos
+
+**`lib/calculations/attribute-bias.ts`** — cálculo do bias:
+
+```ts
+export const BIAS_SHRINKAGE_K = 10
+
+export interface BiasComputation {
+  attributeSlug: string
+  nSamples: number
+  meanBiasRaw: number
+  biasApplied: number   // = meanBiasRaw × n / (n + K)
+  stddev: number | null // null se n < 2
+}
+
+export async function computeBiasForSlug(
+  slug: string,
+  userId: string,
+  admin: SupabaseClient,
+): Promise<BiasComputation>
+
+export async function recomputeAttributeBias(
+  userId: string,
+  admin: SupabaseClient,
+): Promise<BiasComputation[]>  // 9 entries
+
+export async function getBiasMap(
+  userId: string,
+  admin: SupabaseClient,
+): Promise<AttributeBiasMap>
+```
+
+**`lib/ai-recommendation/calibrated-scores.ts`** — aplicação source-aware (ver helper acima).
+
+**`server/queries/current-user.ts`**:
+```ts
+export async function getCurrentUserId(admin: SupabaseClient): Promise<string>
+  // Lê user_settings.current_user_id, cache em memória pra reduzir queries
+```
+
+**`server/actions/post-reading-attributes.ts`**:
+```ts
+"use server"
+
+export async function submitPostReadingAttributes(
+  workId: string,
+  values: Record<CriterionSlug, {
+    userValue: number
+    source: 'ai_accepted_post_read' | 'user_edited_post_read'
+  }>,
+): Promise<{ ok: true } | { ok: false; error: string }>
+  // 1. Carrega latest ai_evaluations pra snapshotar ia_value + model + prompt
+  // 2. UPSERT 9 rows em user_attribute_assessment
+  // 3. recomputeAttributeBias(currentUserId)
+  // 4. recalculateWork(workId)
+  // 5. revalidatePath(`/titles/${workId}`)
+```
+
+#### Testes (`tests/unit/calculations/attribute-bias.test.ts`)
+
+- `computeBiasForSlug` com 0 amostras → `meanBiasRaw=0`, `biasApplied=0`
+- Com n=10, mean=2 → `biasApplied=2×10/20=1.0` (50%)
+- Com n=50, mean=2 → `biasApplied=2×50/60≈1.67` (83%)
+- `stddev` null com 1 amostra
+- `applyBiasToCategoryScores` pula `ai_edited` (testa com 4 sources distintas no mesmo input)
+- `applyBiasToCategoryScores` retorna null pra slugs ausentes
+
+#### Critério de fim
+
+- INSERT manual em `user_attribute_assessment` (1 obra, 9 rows com `user=6, ia=8` em drama): chamar `recomputeAttributeBias` popula `attribute_bias` corretamente — `drama` tem `n=1, mean=-2, applied≈-0.18`.
+- `getBiasMap(userId)` retorna 9 valores (zeros pra slugs sem amostra).
+- `applyBiasToCategoryScores` com source `ai_only` aplica; com `ai_edited` não.
+- Testes verde.
+
+#### Commit
+
+```
+feat: schema + backend de bias calibration (Fase 1.5.1)
+```
+
+---
+
+### Fase 1.5.2 — UI do questionário (~2.5h)
+
+**Pré-requisitos**: 1.5.1.
+
+#### Componente novo: `components/titles/post-attribute-assessment-form.tsx`
+
+```tsx
+interface PostAttributeAssessmentFormProps {
+  workId: string
+  latestAiEvaluation: {
+    evaluationId: string
+    modelName: string
+    promptVersion: string
+    attributes: Record<CriterionSlug, number>
+  } | null
+  existingAssessment: Record<CriterionSlug, number> | null
+}
+
+export function PostAttributeAssessmentForm(props): JSX.Element
+```
+
+**Estado interno**:
+- Form (react-hook-form): 9 valores 0-10 com Zod
+- Inicialização: `existingAssessment` se houver, senão `latestAiEvaluation.attributes`
+- Source derivado no submit: se `userValue === ia_value` → `ai_accepted_post_read`, senão `user_edited_post_read`
+
+**Layout**:
+```
+┌─ Atributos da obra (pós-leitura) ──────────────────────┐
+│  Como você viu a obra após ler                         │
 │                                                         │
+│  romance        [slider ▰▰▰▰▰▰▰▰░░] 8.0   IA: 7.5      │
+│  drama          [slider ▰▰▰▰▰▰▰░░░] 7.0   IA: 8.5      │
+│  tragédia       [slider ▰▰▰▰▰░░░░░] 5.0   IA: 4.0      │
+│  ...            ...                                    │
+│                                                         │
+│  [ Aceitar valores da IA ]  [ Salvar avaliação ]      │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Estado disabled** (sem AI evaluation):
+```
+"Esta obra ainda não foi avaliada pela IA.
+ Rode a avaliação primeiro pra poder calibrar."
+[ Avaliar com IA → ]  → link pra /ai-evaluation?work={workId}
+```
+
+#### Integração: `components/titles/work-status-form.tsx`
+
+Após bloco dos 8 critérios de avaliação (~linha 480), adicionar collapsible:
+
+```tsx
+{(['Completed', 'Dropped', 'On-hold', 'Stalled', 'Hiatus'] as const).includes(personalStatus) && (
+  <Collapsible>
+    <CollapsibleTrigger>Atributos da obra (pós-leitura)</CollapsibleTrigger>
+    <CollapsibleContent>
+      <PostAttributeAssessmentForm
+        workId={workId}
+        latestAiEvaluation={latestAiEvaluation}
+        existingAssessment={existingAssessment}
+      />
+    </CollapsibleContent>
+  </Collapsible>
+)}
+```
+
+#### Server queries novas: `server/queries/post-attribute-assessment.ts`
+
+```ts
+export async function getLatestAiEvaluationAttributes(workId: string): Promise<{
+  evaluationId, modelName, promptVersion, attributes: Record<CriterionSlug, number>
+} | null>
+
+export async function getExistingPostReadingAssessment(
+  workId: string,
+  userId: string,
+): Promise<Record<CriterionSlug, number> | null>
+```
+
+Carregadas em paralelo em [app/titles/[id]/page.tsx](app/titles/[id]/page.tsx) e passadas pro work-status-form via props.
+
+#### Validações
+
+- Zod: cada valor `z.number().min(0).max(10)`
+- Server action valida `workId` existe e tem `ai_evaluations` aceita — senão retorna erro "Sem IA pra comparar"
+- Quando salvar com `source='ai_accepted_post_read'`: verificar que `userValue` realmente é igual ao `ia_value` (proteção contra source inconsistente do client)
+
+#### Critério de fim
+
+- Marcar uma obra como Completed → ver collapsible "Atributos da obra (pós-leitura)" aparecer
+- Ajustar drama 8 → 6, clicar Salvar
+- Row em `user_attribute_assessment`: `user_value=6, ia_value_at_assessment=8, source='user_edited_post_read'`
+- `attribute_bias` para drama: `n=1, mean_bias_raw=-2, bias_applied≈-0.18`
+- Re-abrir form: mostra valor salvo (6) como pre-fill
+
+#### Commit
+
+```
+feat: questionário pós-leitura de atributos (Fase 1.5.2)
+```
+
+---
+
+### Fase 1.5.3 — Pipeline (propagação em 5 pontos) (~3h)
+
+**Pré-requisitos**: 1.5.1. **Recomendado após 1.5.2** pra haver dado real coletado.
+
+#### Carregamento centralizado do biasMap
+
+Em `recalculateAll` ([server/actions/calculations.ts](server/actions/calculations.ts)):
+
+```ts
+const userId = await getCurrentUserId(admin)
+const biasMap = await getBiasMap(userId, admin)
+// passa biasMap como parâmetro pra cada estágio
+```
+
+#### Ponto 1 — Ridge ([expected.ts:156-175](lib/calculations/expected.ts#L156))
+
+**Antes**:
+```ts
+function buildNumericRow(input: ExpectedScoreInput): NumericRow {
+  const row: (number | null)[] = []
+  for (const slug of CRITERION_SLUGS) {
+    const v = input.categoryScores[slug as CriterionSlug]
+    row.push(v == null || !Number.isFinite(v) ? null : v)
+  }
+  row.push(input.iaEvalNormalized ?? null)
+  // ...
+  row.push(input.criterionFitScore ?? null)
+}
+```
+
+**Depois**:
+```ts
+function buildNumericRow(
+  input: ExpectedScoreInput,
+  biasMap: AttributeBiasMap,
+): NumericRow {
+  const calibrated = applyBiasToCategoryScores(input.categoryScoresWithSource, biasMap)
+  const row: (number | null)[] = []
+  for (const slug of CRITERION_SLUGS) {
+    const v = calibrated[slug as CriterionSlug]
+    row.push(v == null || !Number.isFinite(v) ? null : v)
+  }
+  // IMPORTANTE: iaEvalNormalized e criterionFitScore precisam ser pre-calculados em cima do calibrated
+  // Isso significa modificar a função que monta ExpectedScoreInput pra usar calibrated
+  row.push(input.iaEvalNormalized ?? null)
+  row.push(input.criterionFitScore ?? null)
+}
+```
+
+**Mudanças adjacentes**:
+- `ExpectedScoreInput` ganha `categoryScoresWithSource: Record<CriterionSlug, CategoryScoreWithSource>` em vez (ou junto) de `categoryScores`.
+- Quem monta `iaEvalNormalized` e `criterionFitScore` precisa receber `calibrated` antes de chamar.
+- Atualizar callers em `server/actions/calculations.ts` (`buildExpectedScoreInput`).
+
+#### Ponto 2 — Personal Fit ([personal-fit.ts:97-130](lib/ai-recommendation/personal-fit.ts#L97))
+
+```ts
+// Antes
+export function computePersonalFit(
+  work: { categoryScores: Record<CriterionSlug, number>, tags: string[] },
+  profile: TasteProfile,
+): PersonalFit
+
+// Depois
+export function computePersonalFit(
+  work: {
+    categoryScores: Record<CriterionSlug, CategoryScoreWithSource>,
+    tags: string[],
+  },
+  profile: TasteProfile,
+  biasMap: AttributeBiasMap,
+): PersonalFit {
+  const calibrated = applyBiasToCategoryScores(work.categoryScores, biasMap)
+  return criterionAlignment(calibrated, profile.criterion_preferences)
+  // ...
+}
+```
+
+#### Ponto 3 — Smart Shortlist prompt ([prompts.ts:84,177](lib/ai-recommendation/prompts.ts#L84))
+
+```ts
+// Antes — formatCategoryScores(work.categoryScores)
+// Depois — formatCategoryScores(applyBiasToCategoryScores(work.categoryScoresWithSource, biasMap))
+```
+
+[server/queries/recommendations.ts:35,46](server/queries/recommendations.ts#L35) precisa carregar `source` junto:
+
+```ts
+// SELECT category_scores.value, category_scores.source FROM ...
+```
+
+#### Ponto 4 — Deep Dive prompt ([deep-dive-prompts.ts:146,177](lib/ai-recommendation/deep-dive-prompts.ts#L146))
+
+Mesmo padrão. `buildDeepDiveUserPrompt(bundle, biasMap)` recebe biasMap; aplica antes de formatar atributos.
+
+[server/queries/deep-dive.ts](server/queries/deep-dive.ts) carrega source e propaga no `bundle`.
+
+#### Ponto 5 — TasteProfile prompt ([prompts.ts:119,132](lib/ai-recommendation/prompts.ts#L119))
+
+Relevante quando modo LLM TasteProfile estiver ativo (futuro). Mesma propagação. Pode deixar com TODO inline com `applyBiasToCategoryScores` já wrapped, mas testar quando modo LLM ativar.
+
+#### Tooltip de UI display
+
+Em [components/titles/calculation-breakdown.tsx](components/titles/calculation-breakdown.tsx), nos valores brutos dos atributos:
+
+```tsx
+{biasMap[slug] !== 0 && (
+  <Tooltip content={`IA: ${rawValue}. Corrigido para ${calibratedValue.toFixed(1)} no cálculo (bias: ${biasMap[slug] > 0 ? '+' : ''}${biasMap[slug]}).`}>
+    <span className="text-muted-foreground italic">{rawValue}</span>
+  </Tooltip>
+)}
+```
+
+#### Testes (`tests/unit/calculations/expected.test.ts` + `personal-fit.test.ts`)
+
+- Regressão: com `biasMap` vazio, output idêntico ao pré-1.5.3
+- Com bias `drama=-1` e categoryScores.drama=8 source=ai_only: feature row carrega 9 pro drama
+- Com bias `drama=-1` e source=ai_edited: feature row carrega 8 (sem correção)
+- Personal Fit com bias muda fit_score conforme esperado
+
+#### Critério de fim
+
+- Após popular bias > 0 via 1.5.2, rodar `recalculateAll`: `expected_score` muda em ≥1 obra na direção esperada
+- Inspeção manual do prompt do Smart Shortlist (via log): atributos enviados são calibrados
+- Inspeção manual do prompt do Deep Dive: idem
+
+#### Commit
+
+```
+feat: aplica bias em pipeline (Ridge + Personal Fit + 3 LLM prompts) — Fase 1.5.3
+```
+
+---
+
+### Fase 1.5.4 — UI de calibração (~1.5h)
+
+**Pré-requisitos**: 1.5.1.
+
+#### Componente novo: `components/settings/calibration/attribute-bias-table.tsx`
+
+```tsx
+interface AttributeBiasTableProps {
+  rows: Array<{
+    attributeSlug: string
+    attributeLabel: string
+    nSamples: number
+    meanBiasRaw: number
+    biasApplied: number
+    shrinkagePct: number
+    stddev: number | null
+  }>
+}
+```
+
+Layout:
+```
+┌─ Bias dos Atributos (correção da IA) ──────────────────┐
 │  Total de obras com pós-leitura: 12                    │
 │                                                         │
-│  Atributo         IA vs User   Aplicação   n samples    │
-│  ──────────────   ──────────   ─────────   ─────────    │
-│  drama            +1.7         55%         12   ⚠       │
-│  romance          -0.3         50%         10           │
-│  tragédia         +0.8         54%         11           │
-│  ...                                                    │
+│  ┌─────────────┬──────────┬───────────┬───────────┐   │
+│  │ Atributo    │ IA vs Vc │ Aplicação │ Amostras  │   │
+│  ├─────────────┼──────────┼───────────┼───────────┤   │
+│  │ drama       │ +1.7     │ 55%       │ 12  ⓘ     │   │
+│  │ romance     │ −0.3     │ 50%       │ 10        │   │
+│  │ tragédia    │ +0.8     │ 54%       │ 11        │   │
+│  │ ...         │ ...      │ ...       │ ...       │   │
+│  └─────────────┴──────────┴───────────┴───────────┘   │
 │                                                         │
 │  💡 IA tende a superestimar drama em 1.7. Aplicando    │
 │     55% da correção observada (com 12 amostras).        │
 └─────────────────────────────────────────────────────────┘
 ```
 
-Tooltip por linha: "Com N amostras, aplicamos X% da correção observada (Bayesian shrinkage k=10)".
+#### Server query: `server/queries/attribute-bias.ts`
+
+```ts
+export async function getAttributeBiasOverview(userId: string): Promise<{
+  totalAssessments: number
+  rows: AttributeBiasTableProps['rows']
+}>
+  // Lê attribute_bias do user atual + labels de criteria table
+  // Calcula shrinkagePct = (n / (n + BIAS_SHRINKAGE_K)) × 100
+```
+
+#### Integração em `/settings/calibration`
+
+Card adicional após o card do MAE existente em [app/settings/calibration/page.tsx](app/settings/calibration/page.tsx).
+
+**Empty state** (todos `nSamples == 0`):
+> "Bias ainda não calibrado. Marque obras como Completed/Dropped e preencha o questionário pós-leitura pra começar a coletar dados."
+
+#### Tooltips
+
+- Por linha: "Com {n} amostras, aplicamos {pct}% da correção observada (Bayesian shrinkage k=10)"
+- No header "IA vs Vc": "Diferença média entre o que a IA avaliou e o que você respondeu pós-leitura"
+- No header "Aplicação": "Percentual da correção sendo aplicada pelas previsões. Aumenta com mais amostras."
+
+#### Critério de fim
+
+- Card aparece em `/settings/calibration` com estado correto (empty inicialmente)
+- Após 1.5.2 popular dados: linhas refletem `attribute_bias`
+- Coluna "Aplicação" matematicamente correta: `n / (n+10) × 100` arredondado
+
+#### Commit
+
+```
+feat: card de bias dos atributos em /settings/calibration (Fase 1.5.4)
+```
 
 ---
 
-## Implementação em fases
-
-**Ordem reorganizada**: UI antes de pipeline (sem dado, pipeline não roda).
-
-### Fase 1.5.0 — Naming refactor (~1.5h)
-
-**Pré-requisitos**: nada.
-
-1. Migration `073_rename_manual_score_to_user_score.sql`: `ALTER TABLE works RENAME COLUMN manual_score TO user_score;`
-2. Find/replace `manual_score → user_score`, `manualScore → userScore` em todo código.
-3. Atualizar labels UI conforme tabela acima.
-4. `npm run build` + `npm run test`.
-5. Commit: `refactor: rename manual_score → user_score + clarifica naming (Atributos vs Critérios)`
-
-**Critério de fim**: build ok, testes passam, UI mostra novos labels.
-
-### Fase 1.5.1 — Schema + backend (~2h)
-
-**Pré-requisitos**: 1.5.0.
-
-1. Migrations:
-   - `074_user_attribute_assessment.sql`
-   - `075_attribute_bias.sql`
-   - `076_user_settings_current_user_id.sql` (popula `current_user_id`)
-2. `lib/calculations/attribute-bias.ts`:
-   - `computeBiasForSlug(slug, userId)` — query + shrinkage + stddev
-   - `recomputeAttributeBias(userId)` — recalc 9 slugs
-   - `getBiasMap(userId)` — retorna `{slug: bias_applied}`
-3. `lib/ai-recommendation/calibrated-scores.ts`:
-   - `loadBiasMap(userId)`, `applyBiasToCategoryScores()` source-aware
-4. `server/actions/post-reading-attributes.ts`:
-   - `submitPostReadingAttributes(workId, values)` — UPSERT + recompute + recalculate
-5. Testes unitários do shrinkage e da aplicação source-aware.
-6. Commit: `feat: schema e backend de bias calibration (Fase 1.5)`
-
-**Critério de fim**: posso popular `user_attribute_assessment` via SQL e ver `attribute_bias` recalculado corretamente.
-
-### Fase 1.5.2 — UI do questionário (~2h) ⚡ **antes de 1.5.3**
-
-**Pré-requisitos**: 1.5.1.
-
-1. Componente `components/titles/post-attribute-assessment-form.tsx`:
-   - Pre-fill com `ia_value` da última `ai_evaluations` aceita
-   - 9 sliders/inputs 0-10
-   - "Aceitar tudo" + "Salvar"
-2. Integrar como sub-aba opcional em `work-status-form.tsx`.
-3. Estado disabled quando obra não tem AI evaluation.
-4. Commit: `feat: questionário pós-leitura de atributos (Fase 1.5)`
-
-**Critério de fim**: consigo marcar uma obra como Completed, abrir a aba, ajustar drama 8→6, salvar, e ver row em `user_attribute_assessment`. `attribute_bias` atualizado.
-
-### Fase 1.5.3 — Pipeline (propagação em 5 pontos) (~2.5h)
-
-**Pré-requisitos**: 1.5.1. **Recomendado executar após 1.5.2** pra haver dado coletado e ver efeito real.
-
-Aplicar `applyBiasToCategoryScores()` em 5 consumidores:
-
-1. **Ridge** [expected.ts:158](lib/calculations/expected.ts#L158):
-   - Carregar `biasMap` no início de `recalculateAll`
-   - Aplicar nos `categoryScores` ANTES de calcular `iaEvalNormalized` e `criterionFitScore` (isso resolve os 3 caminhos do Ridge de uma vez)
-
-2. **Personal Fit** [personal-fit.ts:97](lib/ai-recommendation/personal-fit.ts#L97):
-   - Aplicar bias nos `categoryScores` antes de `criterionAlignment`
-
-3. **Smart Shortlist prompt** [prompts.ts:84,177](lib/ai-recommendation/prompts.ts#L84):
-   - Enviar valores corrigidos pro LLM reranker
-
-4. **Deep Dive prompt** [deep-dive-prompts.ts:146,177](lib/ai-recommendation/deep-dive-prompts.ts#L146):
-   - Enviar valores corrigidos no bundle de obra
-
-5. **TasteProfile LLM prompt** [prompts.ts:119,132](lib/ai-recommendation/prompts.ts#L119):
-   - Enviar valores corrigidos quando gerar preferences (relevante quando modo LLM ativar)
-
-UI display permanece com valor cru + tooltip "Valor da IA antes de correção de bias".
-
-6. Commit: `feat: aplica bias dos atributos em pipeline + LLM prompts (Fase 1.5)`
-
-**Critério de fim**: após popular bias > 0 via 1.5.2, rodar `recalculateAll` muda `expected_score` na direção esperada. Smart Shortlist e Deep Dive recebem valores corrigidos.
-
-### Fase 1.5.4 — UI de calibração (~1h)
-
-**Pré-requisitos**: 1.5.1 (sem necessidade de dado pra mostrar estrutura).
-
-1. Componente `components/settings/calibration/attribute-bias-table.tsx`.
-2. Server query `getAttributeBias(userId)` — `n_samples`, `mean_bias_raw`, `bias_applied`, `shrinkage_pct`, `stddev`.
-3. Card em `/settings/calibration`.
-4. Tooltips explicando shrinkage.
-5. Estado vazio: "Bias ainda não calibrado. Preencha o questionário pós-leitura em obras já lidas pra começar."
-6. Commit: `feat: tabela de bias em /settings/calibration (Fase 1.5)`
-
-**Critério de fim**: card mostra dados reais. Valor "Aplicação" bate com formula.
-
-### Fase 1.5.5 — Regeneração de artefatos derivados (~1h)
+### Fase 1.5.5 — Regeneração de artefatos derivados (~1.5h)
 
 **Pré-requisitos**: 1.5.3.
 
-Após primeira ativação do bias com ≥5 amostras por atributo, artefatos pré-existentes ficam desatualizados:
+Bias muda → artefatos pré-computados ficam stale.
 
-1. **TasteProfile**: gerado a partir de category_scores brutos. Botão "Regenerar TasteProfile" em `/settings/calibration` que aciona `rebuildTasteProfile(userId)` com bias aplicado.
+#### Server action: `server/actions/calibration.ts` (estende existente)
 
-2. **`alignment_payload`** em `calculated_scores` (migration 070): foi populado pelo Smart Shortlist com prompt em valores brutos. Marcar `alignment_stale = true` quando bias muda > 0.3 em qualquer atributo.
+```ts
+export async function regenerateCalibratedArtifacts(): Promise<{
+  ok: true
+  tasteProfileRegenerated: boolean
+  alignmentRowsMarkedStale: number
+  worksRecalculated: number
+} | { ok: false; error: string }>
+```
 
-3. **`expected_score` e `personal_fit`**: recalculados automaticamente pelo próximo `recalculateAll`. Botão "Recompute all" como atalho.
+Passos:
+1. `rebuildTasteProfile(userId)` — função existente, agora usa `applyBiasToCategoryScores` internamente
+2. `UPDATE calculated_scores SET alignment_stale = true WHERE alignment_score IS NOT NULL`
+3. `recalculateAll()` — re-treina Ridge com bias atual
 
-4. Commit: `feat: regeneração de TasteProfile e marcação stale de alignment após bias change (Fase 1.5)`
+#### Componente: `components/settings/calibration/regenerate-calibrated-artifacts-button.tsx`
 
-**Critério de fim**: botão "Regenerar artefatos calibrados" funciona sem erro. Pós-execução, ranking reflete novo TasteProfile.
+```tsx
+export function RegenerateCalibratedArtifactsButton() {
+  const [isPending, startTransition] = useTransition()
+  
+  return (
+    <Button
+      disabled={isPending}
+      onClick={() => startTransition(async () => {
+        const result = await regenerateCalibratedArtifacts()
+        // toast com summary
+      })}
+    >
+      {isPending ? "Regenerando…" : "Regenerar artefatos calibrados"}
+    </Button>
+  )
+}
+```
+
+Coloca em `/settings/calibration` próximo ao card de bias.
+
+#### Auto-detection de stale em Smart Shortlist
+
+Em [lib/ai-recommendation/llm-reranker.ts](lib/ai-recommendation/llm-reranker.ts):
+- Se `calculated_scores.alignment_stale = true` pra uma obra: ignora `alignment_payload` cacheado, re-roda LLM
+- Após salvar novo payload: marca `alignment_stale = false`
+
+#### Critério de fim
+
+- Botão funciona sem erro
+- Após click: TasteProfile reflete categoryScores corrigidos
+- Toast mostra summary correto
+- `alignment_stale=true` se propaga: próximo Smart Shortlist pra uma obra stale re-roda
+
+#### Commit
+
+```
+feat: regeneração de TasteProfile + stale flag em alignment após bias change (Fase 1.5.5)
+```
+
+---
 
 ### Fase 1.5.6 — `ai_edited` como fonte secundária de bias (opcional)
 
-**Pré-requisitos**: 1.5.3, dados coletados.
+**Pré-requisitos**: 1.5.3, dados coletados, decisão futura.
 
-**Quando ativar**: se após 3-6 meses a cobertura de pós-leitura ficar baixa (<10 amostras por atributo). Sinal mais confiável dispensa.
+**Quando ativar**: se após 3-6 meses cobertura de pós-leitura < 10 amostras por atributo.
 
-Implementação:
-- Adicionar contribuição de `ai_edited` no compute de bias com peso reduzido (ex: 0.3).
-- UI alerta clara: "Bias inclui sinal de pré-leitura com confiança parcial".
+#### Implementação curta
 
-Esforço estimado: 0-1h se for ativar.
+Em `lib/calculations/attribute-bias.ts`, parametrizar `computeBiasForSlug`:
 
-### Fase 1.5.7 — Guards e alertas de degradação (~2.5h)
+```ts
+export interface BiasComputeOptions {
+  includeAiEdited: boolean  // default: false
+  aiEditedWeight: number    // default: 0.3
+}
+```
+
+Quando `includeAiEdited=true`:
+- Buscar também rows de `category_scores WHERE source='ai_edited'` (precisa da `ai_evaluations.criterion_scores` pra ter o `ia_value` original)
+- Contribuição com peso `aiEditedWeight`
+
+Feature flag em `user_settings.bias_include_ai_edited` (default false).
+
+UI label: "Bias inclui sinal pré-leitura com peso 30%".
+
+Esforço: 1h se ativar.
+
+#### Commit (se ativar)
+
+```
+feat: opção de incluir ai_edited como fonte secundária de bias (Fase 1.5.6)
+```
+
+---
+
+### Fase 1.5.7 — Guards e alertas de degradação (~3h)
 
 **Pré-requisitos**: 1.5.4.
 
 Sistema avisa quando bias/Ridge não estão aptos a performar bem.
 
-#### Guard 1 — Mismatch de modelo/prompt
+#### Guard 1 — Mismatch modelo/prompt
 
-**O que detecta**: quando `model_name` ou `prompt_version` das `ai_evaluations` recentes são diferentes do que foi usado pra coletar o bias.
+**Server query** (`server/queries/calibration-guards.ts`):
 
-**Implementação**:
-- Query: agregação de `ia_model_at_assessment` e `ia_prompt_version` em `user_attribute_assessment` → distribuição dominante.
-- Query: distribuição de `model_name` e `prompt_version` das `ai_evaluations` dos últimos 30 dias.
-- Se >50% das avaliações recentes usam modelo/prompt diferente do que populou o bias: alerta em `/settings/calibration`.
+```ts
+export async function checkGuard1ModelPromptMismatch(userId: string): Promise<{
+  status: 'ok' | 'warn'
+  biasCalibrationProfile: { model: string; promptVersion: string; pct: number }
+  recentEvaluationsProfile: { model: string; promptVersion: string; pct: number }
+  message: string | null
+}>
+```
 
-**Mensagem**: "Bias atual foi calibrado contra Claude Sonnet 4.6 / prompt v16. Avaliações recentes usam Opus 4.7 / v17. Considere re-coletar questionário pós-leitura em obras representativas."
+**Lógica**:
+```sql
+-- Query 1: profile dominante do dado de bias
+SELECT ia_model_at_assessment, ia_prompt_version, COUNT(*) AS n
+FROM user_attribute_assessment
+WHERE user_id = ?
+GROUP BY 1, 2
+ORDER BY n DESC LIMIT 1;
 
-#### Guard 2 — Drift de gênero/tags (cobertura insuficiente)
+-- Query 2: profile recente
+SELECT model_name, prompt_version, COUNT(*) AS n
+FROM ai_evaluations
+WHERE created_at > now() - interval '30 days'
+GROUP BY 1, 2
+ORDER BY n DESC LIMIT 1;
+```
 
-**O que detecta**: quando uma obra sendo predita tem gêneros/tags com pouca representação no training pool (obras lidas).
+Se profiles diferentes (model OU promptVersion): `status='warn'`.
 
-**Implementação simples** (versão inicial):
-- Pra cada obra com `expected_score`, pegar suas top-3 tags do `tag_group='genre'`.
-- Pra cada tag, contar quantas obras lidas (`user_score IS NOT NULL`) compartilham essa tag.
-- Se `min(coverage_count) < 5`: marcar obra como "baixa cobertura".
+**Mensagem**: "Bias atual foi calibrado contra {oldModel}/{oldPrompt}. Avaliações recentes usam {newModel}/{newPrompt}. Considere re-coletar pós-leitura em obras representativas."
 
-**Mensagem**: badge sutil na coluna `expected_score` no ranking quando baixa cobertura — "Predição com baixa confiança: sem obras lidas suficientes com gênero similar".
+#### Guard 2 — Cobertura de gênero
 
-Tooltip detalhado: "Tags da obra: drama, school, romance. Obras lidas com 'drama': 8 ✓. Obras lidas com 'school': 2 ⚠. Obras lidas com 'romance': 12 ✓."
+**Server query**:
 
-#### Guard 3 — Sample size baixo + correção sendo aplicada
+```ts
+export async function checkGuard2GenreCoverage(): Promise<{
+  totalWorksUnread: number
+  worksWithLowCoverage: number
+  pctLowCoverage: number
+  examples: Array<{ workId: string; title: string; lowCoverageTags: string[] }>
+  status: 'ok' | 'warn'
+}>
+```
 
-**O que detecta**: bias sendo aplicado em atributos com poucas amostras (correção parcial pode estar errada).
+**Lógica**:
+- Pra cada obra com `user_score IS NULL`: top-3 tags em `tag_group='genre'`
+- Pra cada tag: contar `works.user_score IS NOT NULL` que têm essa tag
+- Se `min(coverage_count) < 5`: obra entra em low_coverage
+- Threshold do guard: `status='warn'` se `pctLowCoverage > 15`
 
-**Implementação**: já implícito no shrinkage (n=2 aplica 17% só). Tornar visível:
-- Badge "Baixa confiança" na tabela de `/settings/calibration` quando `n < 10` por atributo.
-- Tooltip: "Adicione mais avaliações pós-leitura pra aumentar confiança da correção."
+**Mensagem**: "{N} obras ({pct}%) com cobertura baixa de gênero. Predições nessas obras têm confiança reduzida."
+
+#### Indicador no ranking: `components/ranking/low-coverage-indicator.tsx`
+
+Badge ⚠ sutil ao lado de `expected_score`:
+
+```tsx
+<Tooltip content={
+  `Predição com baixa confiança.\n\nTags da obra: ${tags.join(', ')}.\n` +
+  lowCoverageTags.map(t => `Obras lidas com '${t}': ${count[t]} ⚠`).join('\n')
+}>
+  <AlertTriangle className="h-3 w-3 text-amber-500" />
+</Tooltip>
+```
+
+Server query auxiliar `getLowCoverageWorks(): Promise<Set<workId>>` (cache 5min).
+
+#### Guard 3 — Sample size baixo
+
+Já implícito no shrinkage; tornar visível.
+
+Em `attribute-bias-table.tsx`:
+- Ícone ⚠ ao lado de atributos com `n < 10`
+- Tooltip: "Apenas {n} amostras. Adicione mais avaliações pós-leitura pra aumentar confiança da correção."
+
+Server query (computada inline):
+```ts
+const attrsLowConfidence = rows.filter(r => r.nSamples < 10).length
+const status = attrsLowConfidence > 3 ? 'warn' : 'ok'
+```
 
 #### Guard 4 — MAE degradado
 
-**O que detecta**: predição perdendo precisão ao longo do tempo. Pode indicar bias drift, mudança de prompt, ou outro problema.
+**Server query**:
 
-**Implementação**: já existe parcialmente em [components/settings/calibration/mae-history-chart.tsx](components/settings/calibration/mae-history-chart.tsx).
-- Adicionar regra: se MAE recente (últimas 5 medições) está > 20% acima do baseline (média dos 30 anteriores): alerta.
-- Mensagem: "Predições estão piorando comparado a períodos anteriores. Possíveis causas: mudança de modelo da IA, viés acumulado em correções, ou mudança brusca no perfil de obras avaliadas."
-- Linkar pra Guards 1 e 2 com botão "Investigar causas".
+```ts
+export async function checkGuard4MaeDegradation(): Promise<{
+  recentMae: number      // média últimas 5 medições em calibration_history
+  baselineMae: number    // média 30 anteriores
+  pctIncrease: number
+  status: 'ok' | 'warn'
+}>
+```
 
-#### Centralização
+**Lógica**: usa tabela `calibration_history` (migration 061). Pega últimas 35 linhas, divide em recent (top 5) e baseline (próximas 30). Calcula increase.
 
-Tudo no card "Saúde do Sistema de Previsão" em `/settings/calibration`:
+Threshold: `status='warn'` se `pctIncrease > 20`.
 
+**Mensagem**: "MAE recente {recent.toFixed(2)} é {pct}% maior que baseline {baseline.toFixed(2)}. Possíveis causas: bias drift, mudança de modelo, perfil de obras avaliadas mudou."
+
+Botão "Investigar causas" → expande Guards 1 e 2 inline.
+
+#### Card centralizador: `components/settings/calibration/prediction-health-card.tsx`
+
+```tsx
+interface PredictionHealthCardProps {
+  guard1: Awaited<ReturnType<typeof checkGuard1ModelPromptMismatch>>
+  guard2: Awaited<ReturnType<typeof checkGuard2GenreCoverage>>
+  guard3: { status: 'ok' | 'warn'; attributesWithLowConfidence: number }
+  guard4: Awaited<ReturnType<typeof checkGuard4MaeDegradation>>
+}
+```
+
+Layout:
 ```
 ┌─ Saúde do Sistema de Previsão ────────────────────────┐
 │  Geral: 🟢 Operacional                                │
@@ -459,29 +933,45 @@ Tudo no card "Saúde do Sistema de Previsão" em `/settings/calibration`:
 └────────────────────────────────────────────────────────┘
 ```
 
-Notificações sutis fora desse card:
-- Coluna `expected_score` no ranking: ícone ⚠ sutil pra obras com Guard 2 disparado.
-- Próxima ao botão "Avaliar IA" na obra: aviso se Guard 1 disparado.
+"Geral" = `🟢` se todos `ok`, `🟡` se 1 warn, `🔴` se 2+.
 
-Commit: `feat: guards de degradação do sistema de previsão (Fase 1.5)`
+Click em cada guard expande detalhes inline (sem modal).
 
-**Critério de fim**: posso forçar cada guard manualmente (alterando dados de teste) e ver o alerta aparecer corretamente.
+#### Notificações sutis fora do card
+
+- Ranking: badge ⚠ próximo a `expected_score` pra obras low-coverage (Guard 2 ativo)
+- Página da obra: ícone ⚠ próximo ao botão "Avaliar IA" se Guard 1 ativo
+
+#### Critério de fim
+
+- Forçar cada guard manualmente:
+  - Guard 1: UPDATE ai_evaluations recentes pra outro prompt_version → ver warn
+  - Guard 2: criar obra com tags sem representação no training → ver badge ⚠ no ranking
+  - Guard 3: ter <10 amostras em algum atributo → ver ⚠ na tabela de bias
+  - Guard 4: forçar MAE alto em calibration_history → ver warn no card
+- Sem regressão visual no ranking quando nenhum guard ativo
+
+#### Commit
+
+```
+feat: guards de degradação do sistema de previsão (Fase 1.5.7)
+```
 
 ---
 
-## Estado final proposto da Fase 1.5
+## Estado final atualizado
 
 | Fase | Pré-req | Esforço | Bloqueador? |
 |---|---|---|---|
 | 1.5.0 Naming refactor | — | 1.5h | — |
-| 1.5.1 Schema + backend | 1.5.0 | 2h | precisa pra 1.5.2 |
-| **1.5.2 UI questionário** | 1.5.1 | 2h | **precisa pra coletar dado** |
-| 1.5.3 Pipeline propagação 5 pontos | 1.5.1 + dado | 2.5h | usa bias coletado |
-| 1.5.4 UI de calibração | 1.5.1 | 1h | mostra dado |
-| 1.5.5 Regeneração derivados | 1.5.3 | 1h | só faz sentido após bias ativo |
-| 1.5.6 `ai_edited` (opcional) | dados baixos | 0-1h | futuro |
-| 1.5.7 Guards e alertas | 1.5.4 | 2.5h | usa estrutura existente |
-| **Total** | | **12-13h** | |
+| 1.5.1 Schema + backend | 1.5.0 | **3h** | precisa pra 1.5.2 |
+| 1.5.2 UI questionário | 1.5.1 | **2.5h** | precisa pra coletar dado |
+| 1.5.3 Pipeline 5 pontos | 1.5.1+dado | **3h** | usa bias coletado |
+| 1.5.4 UI de calibração | 1.5.1 | **1.5h** | — |
+| 1.5.5 Regeneração | 1.5.3 | **1.5h** | bias ativo |
+| 1.5.6 ai_edited (opc) | dados baixos | 0-1h | futuro |
+| 1.5.7 Guards | 1.5.4 | **3h** | — |
+| **Total** | | **15-16h** | |
 
 Pode parar após 1.5.4 (UI + dado coletado, sem aplicação) ou após 1.5.7 (sistema completo).
 
@@ -497,45 +987,54 @@ Pode parar após 1.5.4 (UI + dado coletado, sem aplicação) ou após 1.5.7 (sis
 | Mudança de modelo/prompt invalida bias | Guard 1 detecta + snapshot `ia_model_at_assessment` |
 | Avaliações em gênero novo (sem coverage) | Guard 2 alerta antes de o user confiar na predição |
 | Bias drift silencioso | Guard 4 monitora MAE |
+| `ExpectedScoreInput` mudança quebra callers | Atualizar todos em commit atômico; tipos do TS pegam |
+| Stale flag em `alignment_payload` cresce sem limite | Setado true→false na próxima execução do Smart Shortlist; não acumula |
 
 ---
 
 ## Verificação end-to-end
 
 ```bash
-# 1. Migrations
+# 1. Aplicar migrations
 psql ... -f supabase/migrations/073_rename_manual_score_to_user_score.sql
-psql ... -f supabase/migrations/074_user_attribute_assessment.sql
-psql ... -f supabase/migrations/075_attribute_bias.sql
-psql ... -f supabase/migrations/076_user_settings_current_user_id.sql
+psql ... -f supabase/migrations/074_user_settings_current_user_id.sql
+psql ... -f supabase/migrations/075_user_attribute_assessment.sql
+psql ... -f supabase/migrations/076_attribute_bias.sql
+psql ... -f supabase/migrations/077_calculated_scores_alignment_stale.sql
 
 # 2. Build + tests
 npm run build && npm run test
 
 # 3. Smoke 1 — questionário e bias
-# - Marcar uma obra Completed
-# - Abrir aba "Atributos da obra (pós-leitura)"
+# - Marcar obra como Completed
+# - Abrir collapsible "Atributos da obra (pós-leitura)"
 # - Ajustar drama 8 → 6, salvar
 # - Verificar row em user_attribute_assessment
-# - Verificar attribute_bias: drama deve ter mean_bias_raw=-2, bias_applied=-2/(1+10)≈-0.18
+# - Verificar attribute_bias: drama com n=1, mean_bias_raw=-2, bias_applied≈-0.18
 
 # 4. Smoke 2 — pipeline aplicado
 # - Rodar recalculateAll
-# - Conferir que expected_score muda nas obras com drama alto
-# - Conferir Smart Shortlist e Deep Dive recebem valores corrigidos no prompt
+# - Verificar expected_score muda nas obras com drama alto
+# - Logs do Smart Shortlist mostrando atributos corrigidos
+# - Logs do Deep Dive idem
 
 # 5. Smoke 3 — UI calibração
-# - Abrir /settings/calibration → card "Bias dos Atributos" com dados
-# - Tooltip mostra "Aplicando 9% da correção observada (1 amostra)"
+# - /settings/calibration → card "Bias dos Atributos" com dados
+# - Tooltip mostra "Aplicando 9% (1 amostra)"
 
-# 6. Smoke 4 — guards
-# - Guard 1: forçar prompt_version diferente nos ai_evaluations recentes → ver alerta
-# - Guard 2: obra com tags sem representação → ver badge "baixa cobertura"
-# - Guard 3: atributo com n=1 → ver "baixa confiança"
-# - Guard 4: simular MAE alto recente → ver "predições piorando"
+# 6. Smoke 4 — regeneração
+# - Click em "Regenerar artefatos calibrados"
+# - Toast confirma sucesso
+# - TasteProfile mudou (verificar via query)
 
-# 7. Validação refator
+# 7. Smoke 5 — guards
+# - Guard 1: alterar prompt_version em ai_evaluations recentes → ver warn
+# - Guard 2: criar obra com tags sem representação → ver badge ⚠ no ranking
+# - Guard 3: forçar n<10 em algum atributo → ver ⚠ na tabela
+# - Guard 4: simular MAE alto recente → ver warn no card
+
+# 8. Validação refactor
 # - grep -r "manual_score" — só em migrations
 # - grep -r "manualScore" — vazio
-# - UI mostra "Atributos" e "Critérios de avaliação" coerente
+# - UI mostra "Atributos da obra" e "Critérios de avaliação" coerentemente
 ```
