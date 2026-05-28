@@ -491,10 +491,10 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
                   </div>
                   <div className="rounded-md border border-border p-3">
                     <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <span>Critérios negativos ativados</span>
+                      <span>Atributos negativos ativados</span>
                       <InfoTooltip
-                        label="Critérios negativos"
-                        text="% de obras em que drama/tragédia ultrapassaram o threshold e penalizaram. Se ficar 0%, o critério virou decorativo."
+                        label="Atributos negativos"
+                        text="% de obras em que drama/tragédia ultrapassaram o threshold e penalizaram. Se ficar 0%, o atributo virou decorativo."
                       />
                     </p>
                     <div className="mt-1 space-y-1">
@@ -793,7 +793,7 @@ const RIDGE_FEATURE_GROUPS: Array<{
 }> = [
   {
     key: "ia",
-    label: "IA (9 critérios + agregado)",
+    label: "IA (9 atributos + agregado)",
     tone: "primary",
     belongs: (n) => (CRITERION_SLUGS as readonly string[]).includes(n) || n === "IA(n)",
   },

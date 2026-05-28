@@ -22,7 +22,7 @@ export interface WorkColumnConfig {
 export const WORK_COLUMN_GROUP_LABELS: Record<WorkColumnGroup, string> = {
   basico: "Básico",
   notas: "Notas",
-  criterios: "Critérios",
+  criterios: "Atributos",
   legado: "Legado",
 }
 
@@ -334,7 +334,7 @@ export const WORK_COLUMN_PRESETS: Array<{ id: WorkColumnPreset; label: string }>
   { id: "tudo", label: "Tudo" },
   { id: "geral", label: "Geral" },
   { id: "notas", label: "Notas" },
-  { id: "criterios", label: "Critérios" },
+  { id: "criterios", label: "Atributos" },
   { id: "legado", label: "Legado" },
 ]
 

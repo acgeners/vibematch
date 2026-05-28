@@ -79,8 +79,8 @@ function distanceLabel(distance: number, p95: number | null | undefined): "perto
  * Mostra a decomposição persistida (`expected_baseline` + `expected_quality_adj`)
  * em 2 barras visualmente proporcionais ao valor absoluto. Resposta direta à
  * pergunta "por que essa obra recebeu esta nota?":
- *   - Perfil (Stage 1): encaixe com o tipo de obra (9 critérios IA + tags + Nota.M + ...)
- *   - Qualidade (Stage 2): ajuste pelas 8 dimensões pós-leitura
+ *   - Perfil (Stage 1): encaixe com o tipo de obra (9 atributos IA + tags + Nota.M + ...)
+ *   - Qualidade (Stage 2): ajuste pelas 8 dimensões pós-leitura (critérios de avaliação)
  *
  * Quando expected_baseline/quality_adj não estão preenchidos (ex.: recalc ainda
  * não rodou após migration 068), mostra fallback informativo.
@@ -183,7 +183,7 @@ const STEPS: BreakdownStep[] = [
   {
     label: "IA(n) — Nota bruta IA",
     field: "ia_eval",
-    description: "Soma ponderada dos critérios, com penalidades de drama/tragédia aplicadas",
+    description: "Soma ponderada dos atributos, com penalidades de drama/tragédia aplicadas",
   },
   {
     label: "IA.Norm — IA normalizado",

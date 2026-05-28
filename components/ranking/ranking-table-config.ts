@@ -21,7 +21,7 @@ export interface RankingColumnConfig {
 export const RANKING_COLUMN_GROUP_LABELS: Record<RankingColumnGroup, string> = {
   basico: "Básico",
   notas: "Notas",
-  criterios: "Critérios",
+  criterios: "Atributos",
   legado: "Legado",
 }
 
@@ -186,7 +186,7 @@ export const RANKING_COLUMN_PRESETS: Array<{ id: RankingColumnPreset; label: str
   { id: "padrao", label: "Padrão" },
   { id: "compacto", label: "Compacto" },
   { id: "notas", label: "Foco em notas" },
-  { id: "criterios", label: "Foco em critérios" },
+  { id: "criterios", label: "Foco em atributos" },
   { id: "legado", label: "Legado (N.IA/Pr/Final)" },
 ]
 

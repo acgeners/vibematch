@@ -128,7 +128,7 @@ export function ScoreWeightsForm({ weights, readOnly = false, confidenceBySlug }
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        title="Salvar pesos dos critérios?"
+        title="Salvar pesos dos atributos?"
         description="Todas as obras ativas serão recalculadas. A operação pode levar alguns segundos."
         confirmText="Salvar e recalcular"
         onConfirm={onSubmit}

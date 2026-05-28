@@ -2035,7 +2035,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
                 </div>
 
                 <div className="max-w-[280px] space-y-2 rounded-lg border bg-primary/5 p-4">
-                  {renderFieldLabel("user_score", "Minha nota", "Calculada pela média dos ratings preenchidos.")}
+                  {renderFieldLabel("user_score", "Minha nota", "Calculada pela média ponderada dos 8 critérios de avaliação.")}
                   <Input
                     id="user_score"
                     type="number"
@@ -2241,9 +2241,9 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
         )}
       </Card>
 
-      {/* 4. Notas por critério */}
+      {/* 4. Notas por atributo */}
       <Card>
-        {renderSectionHeader("criteria", "Notas por critério", {
+        {renderSectionHeader("criteria", "Notas por atributo", {
           description: "Rating 0 - 10",
           action: (
             <Button
