@@ -580,11 +580,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         hasCriteriaScores={Object.keys(scoreMap).length > 0}
         coverUrl={primaryCover}
       />
-      <DeepDiveButton
-        workId={work.id}
-        workTitle={work.title}
-        lastDive={lastDeepDive}
-      />
+      {work.personal_status !== "Completed" && work.personal_status !== "Dropped" && (
+        <DeepDiveButton
+          workId={work.id}
+          workTitle={work.title}
+          lastDive={lastDeepDive}
+        />
+      )}
       {/* Notas e Avaliações Externas side-by-side */}
       <div className={cn(platformRatings.length > 0 && "grid grid-cols-1 lg:grid-cols-2 gap-5")}>
         {/* Notas */}
