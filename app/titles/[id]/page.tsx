@@ -2,10 +2,12 @@ import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
 import { BarChart3, ChevronDown, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
+import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { WorkStatusForm } from "@/components/titles/work-status-form"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
+import { getLastDeepDive } from "@/server/queries/deep-dive"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import {
@@ -99,8 +101,10 @@ function formatVotes(count: number): string {
   return String(count)
 }
 
+const DEFAULT_SYNOPSIS_INTEREST = "♥♥"
+
 function formatSynopsisInterest(value: string | null | undefined) {
-  return value?.trim() || null
+  return value?.trim() || DEFAULT_SYNOPSIS_INTEREST
 }
 
 function getTagGroupLabel(tagGroupId: string | null | undefined) {
@@ -151,7 +155,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // Carrega só o distance_p95 do formula_config pro CalculationBreakdown
   // mostrar rótulos de distância calibrados (perto/médio/longe relativos).
   const configClient = createAdminClient()
-  const [{ data: configRow }, scoreThresholds, reviewsSnapshot, similarWorks] = await Promise.all([
+  const [{ data: configRow }, scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources] = await Promise.all([
     configClient
       .from("formula_config")
       .select("distance_p95")
@@ -161,6 +165,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
+    getLastDeepDive(work.id as string),
+    getSourceRows(),
   ])
   const distanceP95: number | null = configRow?.distance_p95 == null ? null : Number(configRow.distance_p95)
 
@@ -221,7 +227,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   })).filter((item) => item.score != null && Number.isFinite(item.score))
   const hasPostReadingScores = postReadingScores.length > 0
 
-  const sources = await getSourceRows()
   const sourceOrder = new Map(
     sources.map((source, index) => [normalizePlatformName(source.name), index])
   )
@@ -353,17 +358,25 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         </TabsList>
 
         {/* Stat strip persistente — info ambiente, menos peso que as abas */}
-        <div className="mt-4 grid grid-cols-2 divide-x divide-border/40 rounded-lg border border-border/40 bg-card/20 overflow-hidden sm:grid-cols-3 lg:grid-cols-5">
-          {work.calculated_scores?.final_score != null && (
+        <div className="mt-4 grid grid-cols-2 divide-x divide-border/40 rounded-lg border border-border/40 bg-card/20 overflow-hidden sm:grid-cols-3 lg:grid-cols-6">
+          {work.year != null && (
             <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Nota.Final
+                Ano
               </span>
-              <ScoreBadge
-                score={work.calculated_scores.final_score}
-                size="sm"
-                thresholds={scoreThresholds}
-              />
+              <span className="text-sm font-mono font-semibold text-foreground">
+                {work.year}
+              </span>
+            </div>
+          )}
+          {chapterText && (
+            <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Capítulos
+              </span>
+              <span className="text-sm font-mono font-semibold text-foreground">
+                {chapterText}
+              </span>
             </div>
           )}
           <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
@@ -388,14 +401,16 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               </span>
             </div>
           )}
-          {chapterText && (
+          {work.calculated_scores?.final_score != null && (
             <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Capítulos
+                Nota.Final
               </span>
-              <span className="text-sm font-mono font-semibold text-foreground">
-                {chapterText}
-              </span>
+              <ScoreBadge
+                score={work.calculated_scores.final_score}
+                size="md"
+                thresholds={scoreThresholds?.final}
+              />
             </div>
           )}
         </div>
@@ -450,13 +465,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           {/* Coluna do conteúdo das abas */}
           <div className="min-w-0">
             <TabsContent value="overview" className="mt-0 space-y-4">
-              {work.alternative_titles?.length > 0 && (
-                <ExpandableText
-                  text={`Títulos alternativos: ${work.alternative_titles.join(" / ")}`}
-                  limit={220}
-                  className="text-xs leading-snug text-muted-foreground/70"
-                />
-              )}
               <div className="flex flex-wrap items-center gap-2">
                 <RevalidateSourcesActionButton workId={work.id} />
                 <UpdateDataActionButton
@@ -477,6 +485,23 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
                 />
               </div>
+              {(() => {
+                const alts = [
+                  work.original_title,
+                  ...(work.alternative_titles ?? []),
+                ]
+                  .map((t: string | null | undefined) => t?.trim())
+                  .filter((t): t is string => Boolean(t) && t !== work.title)
+                const unique = Array.from(new Set(alts))
+                if (unique.length === 0) return null
+                return (
+                  <ExpandableText
+                    text={`Títulos alternativos: ${unique.join(" / ")}`}
+                    limit={220}
+                    className="text-xs leading-snug text-muted-foreground/70"
+                  />
+                )
+              })()}
               {latestAiEval?.summary && (
                 <Card className="gap-2 py-4 bg-card/50">
                   <CardHeader className="px-4">
@@ -551,8 +576,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             <TabsContent value="scores" className="mt-0 space-y-6">
       <AiEvaluationButton
         workId={work.id}
+        workTitle={work.title}
         hasCriteriaScores={Object.keys(scoreMap).length > 0}
         coverUrl={primaryCover}
+      />
+      <DeepDiveButton
+        workId={work.id}
+        workTitle={work.title}
+        lastDive={lastDeepDive}
       />
       {/* Notas e Avaliações Externas side-by-side */}
       <div className={cn(platformRatings.length > 0 && "grid grid-cols-1 lg:grid-cols-2 gap-5")}>
@@ -576,7 +607,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className={cn("grid grid-cols-1 gap-4", work.manual_score != null && "sm:grid-cols-2")}>
               <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
                 <div className="flex flex-col items-start gap-1">
                   <ScoreLabelTooltip
@@ -585,7 +616,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   />
                   <span className="text-[10px] text-muted-foreground">Avaliação por inteligência artificial</span>
                 </div>
-                <ScoreBadge score={work.calculated_scores?.calc_score ?? null} size="lg" thresholds={scoreThresholds} className="h-10 w-14 text-lg font-bold shrink-0" />
+                <ScoreBadge score={work.calculated_scores?.calc_score ?? null} size="lg" thresholds={scoreThresholds?.calc} className="h-10 w-14 text-lg font-bold shrink-0" />
               </div>
 
               <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
@@ -600,7 +631,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   score={work.calculated_scores?.predicted_score ?? null}
                   size="lg"
                   showStub={work.calculated_scores?.predicted_is_stub ?? false}
-                  thresholds={scoreThresholds}
+                  thresholds={scoreThresholds?.predicted}
                   className="h-10 w-14 text-lg font-bold shrink-0"
                 />
               </div>
