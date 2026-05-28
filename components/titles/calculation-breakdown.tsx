@@ -1,9 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { ChevronDown, ChevronRight, Info } from "lucide-react"
 import type { CalculatedScore } from "@/types/domain"
 import { ScoreBadge } from "@/components/ui/score-badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 interface CalculationBreakdownProps {
@@ -70,6 +71,112 @@ function distanceLabel(distance: number, p95: number | null | undefined): "perto
   if (distance <= p95 * 0.7) return "perto"
   if (distance <= p95) return "médio"
   return "longe"
+}
+
+/**
+ * Waterfall do `expected_score` (L1 novo).
+ *
+ * Mostra a decomposição persistida (`expected_baseline` + `expected_quality_adj`)
+ * em 2 barras visualmente proporcionais ao valor absoluto. Resposta direta à
+ * pergunta "por que essa obra recebeu esta nota?":
+ *   - Perfil (Stage 1): encaixe com o tipo de obra (9 critérios IA + tags + Nota.M + ...)
+ *   - Qualidade (Stage 2): ajuste pelas 8 dimensões pós-leitura
+ *
+ * Quando expected_baseline/quality_adj não estão preenchidos (ex.: recalc ainda
+ * não rodou após migration 068), mostra fallback informativo.
+ */
+function ExpectedWaterfall({ calculatedScore }: { calculatedScore: CalculatedScore }) {
+  const expected = calculatedScore.expected_score
+  const baseline = calculatedScore.expected_baseline
+  const qualityAdj = calculatedScore.expected_quality_adj
+  const isStub = calculatedScore.expected_is_stub
+
+  if (expected == null) {
+    return (
+      <div className="mt-4 rounded-md border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+        Nota esperada ainda não calculada. Rode <strong>Recalcular agora</strong> no{" "}
+        <code className="font-mono">/settings</code>.
+      </div>
+    )
+  }
+
+  // Escala visual: maior valor absoluto = 100% da barra
+  const maxAbs = Math.max(Math.abs(baseline ?? 0), Math.abs(qualityAdj ?? 0), 0.01)
+  const baselineWidth = baseline != null ? (Math.abs(baseline) / maxAbs) * 100 : 0
+  const qualityWidth = qualityAdj != null ? (Math.abs(qualityAdj) / maxAbs) * 100 : 0
+
+  const qualitySign = qualityAdj != null && qualityAdj < 0 ? "−" : "+"
+  const qualityClass = qualityAdj != null && qualityAdj < 0 ? "bg-rose-500" : "bg-emerald-500"
+
+  return (
+    <div className="mt-4 space-y-3 rounded-md border border-primary/20 bg-primary/5 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="flex items-center gap-1.5 text-sm font-semibold">
+          Por que esta nota?
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info className="h-3.5 w-3.5 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-sm text-xs">
+                A nota esperada é UM Ridge único treinado contra seu manual_score em 22 features. A decomposição em <strong>Perfil</strong> (Stage 1: 14 features de encaixe com seu tipo) + <strong>Qualidade</strong> (Stage 2: 8 dimensões pós-leitura) é calculada pós-hoc via atribuição linear (intercept + Σ coef × x agrupado).
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </h4>
+        <ScoreBadge score={expected} size="sm" showStub={Boolean(isStub)} />
+      </div>
+
+      {baseline != null && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium">Perfil <span className="text-muted-foreground font-normal">(Stage 1 — encaixe com seu tipo)</span></span>
+            <span className="font-mono font-semibold">{baseline.toFixed(2)}</span>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-sm bg-muted/30">
+            <div className="h-full bg-primary" style={{ width: `${baselineWidth}%` }} />
+          </div>
+        </div>
+      )}
+
+      {qualityAdj != null && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium">
+              Qualidade <span className="text-muted-foreground font-normal">(Stage 2 — ajuste pós-leitura)</span>
+            </span>
+            <span className={cn("font-mono font-semibold", qualityAdj < 0 ? "text-rose-500" : "text-emerald-500")}>
+              {qualitySign}{Math.abs(qualityAdj).toFixed(2)}
+            </span>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-sm bg-muted/30">
+            <div className={cn("h-full", qualityClass)} style={{ width: `${qualityWidth}%` }} />
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between border-t border-border/40 pt-2 text-xs">
+        <span className="text-muted-foreground">
+          {baseline != null && qualityAdj != null ? (
+            <>
+              <span className="font-mono">{baseline.toFixed(2)}</span>
+              {" "}
+              {qualityAdj >= 0 ? "+" : "−"}
+              {" "}
+              <span className="font-mono">{Math.abs(qualityAdj).toFixed(2)}</span>
+              {" = "}
+              <span className="font-mono font-semibold text-foreground">{expected.toFixed(2)}</span>
+              {(baseline + qualityAdj > 10 || baseline + qualityAdj < 0) && (
+                <span className="ml-1 text-amber-500">(clamped em [0, 10])</span>
+              )}
+            </>
+          ) : (
+            <span>Decomposição completa requer recálculo após migration 068.</span>
+          )}
+        </span>
+      </div>
+    </div>
+  )
 }
 
 const STEPS: BreakdownStep[] = [
@@ -139,7 +246,23 @@ export function CalculationBreakdown({
 
       {open && (
         <div className="border-t px-4 pb-4">
-          <div className="mt-4 space-y-3">
+          {/* Waterfall do expected_score (L1 single Ridge + decomposição via atribuição linear) */}
+          <ExpectedWaterfall calculatedScore={calculatedScore} />
+
+          <div className="mt-4 mb-2 flex items-center gap-1 text-xs uppercase tracking-wider text-muted-foreground">
+            Pipeline legado (será removido após Fase 2)
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-3 w-3" />
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-xs">
+                  Os 7 stages abaixo são do pipeline antigo (Nota.IA → Nota.Calc → Nota.Pr → Nota.Final). Continua sendo calculado em shadow mode pra comparação no painel `/settings/calibration`. Vai ser removido quando a Fase 2 (consultor) ativar.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+          <div className="space-y-3">
             {STEPS.map((step) => {
               const value = calculatedScore[step.field]
               const isStubField = step.isStub && calculatedScore.predicted_is_stub

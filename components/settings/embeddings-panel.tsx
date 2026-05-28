@@ -13,6 +13,8 @@ import {
 interface EmbeddingsPanelProps {
   /** Quantas obras já têm embedding cacheado (lido do DB no server). */
   initialCachedCount: number
+  /** Quantas obras precisam re-embedar (sem linha OU com hash desatualizado). */
+  initialPendingCount: number
   totalWorks: number
   initialLastRun: string | null
 }
@@ -23,10 +25,11 @@ function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`
 }
 
-export function EmbeddingsPanel({ initialCachedCount, totalWorks, initialLastRun }: EmbeddingsPanelProps) {
+export function EmbeddingsPanel({ initialCachedCount, initialPendingCount, totalWorks, initialLastRun }: EmbeddingsPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [lastResult, setLastResult] = useState<RefreshEmbeddingsResult | null>(null)
   const [lastRun, setLastRun] = useState<string | null>(initialLastRun)
+  const [pendingCount, setPendingCount] = useState<number>(initialPendingCount)
 
   const handleRefresh = () => {
     startTransition(async () => {
@@ -34,6 +37,7 @@ export function EmbeddingsPanel({ initialCachedCount, totalWorks, initialLastRun
         const result = await refreshEmbeddings()
         setLastResult(result)
         setLastRun(new Date().toISOString())
+        setPendingCount(result.failed)
         if (result.refreshed === 0 && result.failed === 0) {
           toast.info("Tudo em dia — nenhum embedding precisava ser atualizado.")
         } else if (result.failed > 0) {
@@ -51,7 +55,6 @@ export function EmbeddingsPanel({ initialCachedCount, totalWorks, initialLastRun
     })
   }
 
-  const pendingCount = totalWorks - initialCachedCount
   const completionPct = totalWorks > 0 ? Math.round((initialCachedCount / totalWorks) * 100) : 0
 
   return (
@@ -86,7 +89,7 @@ export function EmbeddingsPanel({ initialCachedCount, totalWorks, initialLastRun
           <p className="text-[10px] text-muted-foreground">{completionPct}% da base</p>
         </div>
         <div className="rounded-md border border-border p-3">
-          <p className="text-xs text-muted-foreground">Pendentes (estimativa)</p>
+          <p className="text-xs text-muted-foreground">Pendentes</p>
           <p className="mt-1 font-mono text-base">{Math.max(0, pendingCount)}</p>
           <p className="text-[10px] text-muted-foreground">
             obras sem embedding ou com hash desatualizado

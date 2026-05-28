@@ -8,7 +8,7 @@ import {
 } from "@/server/actions/recommendations"
 import { listRecommendationRuns } from "@/server/queries/recommendations"
 
-export const dynamic = "force-dynamic"
+export const revalidate = 60
 
 export default async function RecommendationsPage() {
   const [status, runs] = await Promise.all([

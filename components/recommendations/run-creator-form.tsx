@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 import { runRecommendationAction } from "@/server/actions/recommendations"
+import { MOOD_PRESETS } from "@/lib/constants/mood-presets"
 
 interface RunCreatorFormProps {
   disabled?: boolean
@@ -29,7 +30,7 @@ export function RunCreatorForm({ disabled, disabledReason }: RunCreatorFormProps
       })
       if (res.error) setError(res.error)
       else if (res.data) {
-        router.push(`/recommendations/${res.data.runId}`)
+        router.push(`/recommendations/${res.data.runSlug}`)
         router.refresh()
       }
     } finally {
@@ -50,6 +51,21 @@ export function RunCreatorForm({ disabled, disabledReason }: RunCreatorFormProps
           <label htmlFor="user-context" className="text-sm font-medium">
             Contexto extra (opcional)
           </label>
+          <div className="flex flex-wrap gap-1.5">
+            {MOOD_PRESETS.filter((p) => p.userContextSnippet).map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => setUserContext(preset.userContextSnippet)}
+                disabled={disabled || running !== null}
+                className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-2.5 py-1 text-xs transition-colors hover:border-primary/50 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+                title={preset.description}
+              >
+                <span>{preset.emoji}</span>
+                <span>{preset.label}</span>
+              </button>
+            ))}
+          </div>
           <Textarea
             id="user-context"
             placeholder='Ex.: "quero algo leve hoje", "estou no mood de drama denso", "evitar tragédia"'

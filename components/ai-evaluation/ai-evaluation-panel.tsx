@@ -549,7 +549,6 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                       <WorkTitleLink
                         title={work.title}
                         workId={work.id}
-                        href={`/titles/${work.id}`}
                         className="text-sm font-semibold hover:underline line-clamp-2 break-words"
                       />
                     </span>
@@ -626,6 +625,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
               key={reviewData.evaluation.id}
               evaluation={reviewData.evaluation}
               workId={reviewData.workId}
+              workTitle={reviewData.workTitle}
               coverUrl={reviewData.coverUrl}
               currentScores={reviewData.currentScores}
               onReevaluate={async (model) => {

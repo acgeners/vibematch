@@ -51,6 +51,10 @@ interface ColumnPickerProps {
   activePresets?: Set<string>
   onTogglePreset?: (presetId: string) => void
   onReset?: () => void
+  /** Texto do botão que abre o popover. Default "Colunas". */
+  triggerLabel?: string
+  /** Ícone do botão que abre o popover. Default <Columns3 />. */
+  triggerIcon?: React.ReactNode
 }
 
 export function ColumnPicker({
@@ -62,6 +66,8 @@ export function ColumnPicker({
   activePresets,
   onTogglePreset,
   onReset,
+  triggerLabel = "Colunas",
+  triggerIcon,
 }: ColumnPickerProps) {
   const columnsByKey = useMemo(
     () => new Map(columns.map((column) => [column.key, column])),
@@ -122,8 +128,8 @@ export function ColumnPicker({
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
-          <Columns3 className="h-3.5 w-3.5" />
-          Colunas
+          {triggerIcon ?? <Columns3 className="h-3.5 w-3.5" />}
+          {triggerLabel}
           <span className="rounded-full bg-muted/70 px-1.5 py-0 text-[10px] font-medium tabular-nums text-muted-foreground">
             {visibleCount}/{togglableColumns.length}
           </span>

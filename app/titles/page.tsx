@@ -44,12 +44,22 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     if (mx != null) criterionMax[slug] = mx
   }
 
+  // Whitelist espelha `RankingSortBy` em server/queries/ranking.ts.
+  // Sem o expected_*, sort por "Esperada" caía silenciosamente em final_score.
   const validSortFields = new Set<string>([
-    "final_score", "calc_score", "predicted_score", "pred_score",
+    // Notas (novo pipeline)
+    "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
+    // Notas (legado)
+    "final_score", "calc_score", "predicted_score", "pred_score", "alignment_score",
+    "knn_score",
+    // Plataforma
     "platform_avg", "total_votes",
+    // Metadata
+    "title", "year", "synopsis_q",
     "chapters", "chapters_total", "chapters_read",
-    "title", "year", "synopsis_q", "updated_at", "last_read_at",
     "publication_status", "personal_status", "ai_eval_status",
+    "updated_at", "last_read_at",
+    // Critérios IA
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
   const rawSort = str("sort") ?? "final_score:desc"

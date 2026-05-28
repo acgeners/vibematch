@@ -9,23 +9,49 @@ import {
 } from "@/lib/constants/status-lookups"
 import { pickPrimarySynopsis, pickPrimaryCover } from "@/lib/work-derived"
 
+export interface RankingDifferentiator {
+  slug: string
+  diff: number
+}
+
 export interface RankingEntry {
   rank: number
+  percentile: number
+  differentiators: RankingDifferentiator[]
   workId: string
   title: string
   finalScore: number | null
   calcScore: number | null
   predictedScore: number | null
+  /** L1 novo (single Ridge + decomposição). Substitui finalScore na UI nova. */
+  expectedScore: number | null
+  /** Stage 1 da decomposição — contribuição das features de perfil/tipo. */
+  expectedBaseline: number | null
+  /** Stage 2 da decomposição — contribuição das 8 quality scores. */
+  expectedQualityAdj: number | null
+  expectedIsStub: boolean
   platformAvg: number | null
   totalVotes: number
   predictedIsStub: boolean
   personalFit: number | null
+  /** Percentil 0–100 dentro da biblioteca. NULL quando personalFit é NULL ou pré-migration 071. */
+  personalFitPercentile: number | null
   finalScoreConfidence: number | null
   knnScore: number | null
   alignmentScore: number | null
   alignmentJustification: string | null
   alignmentAt: string | null
+  /** Payload enriquecido (sub-fase 2.3.A). NULL pra runs antigas (prompt v1). */
+  alignmentPayload: {
+    confidence?: number
+    risks?: string[]
+    similar_loved?: string[]
+    similar_avoided?: string[]
+    review_quotes?: string[]
+    mood_fit?: number
+  } | null
   manualScore: number | null
+  isFavorite: boolean
   publicationStatus: string
   publicationStatusId: number | null
   publicationStatusShort: string | null
@@ -53,6 +79,7 @@ export type RankingSortBy =
   | "calc_score"
   | "pred_score"
   | "predicted_score"
+  | "expected_score"
   | "platform_avg"
   | "total_votes"
   | "chapters"
@@ -67,7 +94,6 @@ export type RankingSortBy =
   | "ai_eval_status"
   | "last_read_at"
   | "personal_fit"
-  | "final_confidence"
   | "knn_score"
   | "alignment_score"
   | `crit_${string}`
@@ -267,9 +293,9 @@ export async function getRanking(
     .from("works")
     .select(`
       id, title, publication_status_id, personal_status_id, ai_eval_status,
-      total_chapters, chapters_read, manual_score, is_archived,
+      total_chapters, chapters_read, manual_score, is_archived, is_favorite,
       synopsis_quality, observations, year, updated_at, last_read_at,
-      calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, platform_avg, total_votes, personal_fit, final_score_confidence, knn_score, alignment_score, alignment_justification, alignment_at),
+      calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, platform_avg, total_votes, personal_fit, personal_fit_percentile, final_score_confidence, knn_score, alignment_score, alignment_justification, alignment_payload, alignment_at),
       category_scores(criterion_slug, score),
       work_tags(tags(id, name, slug, tag_group_id)),
       work_genres(genres(name)),
@@ -368,21 +394,30 @@ export async function getRanking(
 
     return {
       rank: 0,
+      percentile: 0,
+      differentiators: [],
       workId: w.id,
       title: w.title,
       finalScore: w.calculated_scores?.final_score ?? null,
       calcScore: w.calculated_scores?.calc_score ?? null,
       predictedScore: w.calculated_scores?.predicted_score ?? null,
+      expectedScore: w.calculated_scores?.expected_score ?? null,
+      expectedBaseline: w.calculated_scores?.expected_baseline ?? null,
+      expectedQualityAdj: w.calculated_scores?.expected_quality_adj ?? null,
+      expectedIsStub: w.calculated_scores?.expected_is_stub ?? true,
       platformAvg: w.calculated_scores?.platform_avg ?? null,
       totalVotes: w.calculated_scores?.total_votes ?? 0,
       predictedIsStub: w.calculated_scores?.predicted_is_stub ?? true,
       personalFit: w.calculated_scores?.personal_fit ?? null,
+      personalFitPercentile: w.calculated_scores?.personal_fit_percentile ?? null,
       finalScoreConfidence: w.calculated_scores?.final_score_confidence ?? null,
       knnScore: w.calculated_scores?.knn_score ?? null,
       alignmentScore: w.calculated_scores?.alignment_score ?? null,
       alignmentJustification: w.calculated_scores?.alignment_justification ?? null,
       alignmentAt: w.calculated_scores?.alignment_at ?? null,
+      alignmentPayload: w.calculated_scores?.alignment_payload ?? null,
       manualScore: w.manual_score,
+      isFavorite: Boolean(w.is_favorite),
       publicationStatus: getPublicationStatusNameById(publicationStatusId) ?? "Unknown",
       publicationStatusId,
       publicationStatusShort: publicationStatusDisplay?.short ?? null,
@@ -529,29 +564,26 @@ export async function getRanking(
 
   function compareByField(a: RankingEntry, b: RankingEntry, field: string, dir: "asc" | "desc"): number {
     const m = dir === "asc" ? 1 : -1
-    const roundedScore = (value: number | null | undefined) =>
-      value == null ? -Infinity : Math.round(value * 10) / 10
+    const rawScore = (value: number | null | undefined) =>
+      value == null ? -Infinity : value
     if (field === "title") return m * a.title.localeCompare(b.title)
     if (field === "final_score") {
-      const av = roundedScore(a.finalScore ?? a.calcScore)
-      const bv = roundedScore(b.finalScore ?? b.calcScore)
+      const av = rawScore(a.finalScore ?? a.calcScore)
+      const bv = rawScore(b.finalScore ?? b.calcScore)
       return m * (av - bv)
     }
-    if (field === "calc_score") return m * (roundedScore(a.calcScore) - roundedScore(b.calcScore))
+    if (field === "calc_score") return m * (rawScore(a.calcScore) - rawScore(b.calcScore))
     if (field === "predicted_score" || field === "pred_score")
-      return m * (roundedScore(a.predictedScore) - roundedScore(b.predictedScore))
-    if (field === "platform_avg") return m * (roundedScore(a.platformAvg) - roundedScore(b.platformAvg))
+      return m * (rawScore(a.predictedScore) - rawScore(b.predictedScore))
+    if (field === "expected_score")
+      return m * (rawScore(a.expectedScore) - rawScore(b.expectedScore))
+    if (field === "platform_avg") return m * (rawScore(a.platformAvg) - rawScore(b.platformAvg))
     if (field === "personal_fit") {
       const av = a.personalFit ?? -Infinity
       const bv = b.personalFit ?? -Infinity
       return m * (av - bv)
     }
-    if (field === "final_confidence") {
-      const av = a.finalScoreConfidence ?? -Infinity
-      const bv = b.finalScoreConfidence ?? -Infinity
-      return m * (av - bv)
-    }
-    if (field === "knn_score") return m * (roundedScore(a.knnScore) - roundedScore(b.knnScore))
+    if (field === "knn_score") return m * (rawScore(a.knnScore) - rawScore(b.knnScore))
     if (field === "alignment_score") {
       const av = a.alignmentScore ?? -Infinity
       const bv = b.alignmentScore ?? -Infinity
@@ -562,7 +594,7 @@ export async function getRanking(
       return m * ((a.totalChapters ?? -Infinity) - (b.totalChapters ?? -Infinity))
     if (field === "chapters_read") return m * ((a.chaptersRead ?? -Infinity) - (b.chaptersRead ?? -Infinity))
     if (field === "year") return m * ((a.year ?? -Infinity) - (b.year ?? -Infinity))
-    if (field === "synopsis_q") return m * (a.synopsisQuality ?? "").localeCompare(b.synopsisQuality ?? "")
+    if (field === "synopsis_q") return m * ((a.synopsisQuality?.length ?? 0) - (b.synopsisQuality?.length ?? 0))
     if (field === "updated_at") {
       const av = a.updatedAt ? Date.parse(a.updatedAt) : -Infinity
       const bv = b.updatedAt ? Date.parse(b.updatedAt) : -Infinity
@@ -591,8 +623,51 @@ export async function getRanking(
     return a.title.localeCompare(b.title)
   })
 
-  // Top N (depois da ordenação) — registra rank antes de cortar
-  entries.forEach((e, i) => { e.rank = i + 1 })
+  // Top N (depois da ordenação) — registra rank e percentil antes de cortar
+  // Percentil é relativo ao pool FILTRADO (não ao DB inteiro). UX = "Top X% do que estou vendo".
+  const totalBeforeSlice = entries.length
+  entries.forEach((e, i) => {
+    e.rank = i + 1
+    e.percentile =
+      totalBeforeSlice > 0 ? ((totalBeforeSlice - e.rank + 1) / totalBeforeSlice) * 100 : 0
+  })
+
+  // Differentiators: pra cada obra, pega ±5 vizinhos no ranking visível, calcula
+  // média de cada critério, e identifica os top 2 critérios onde a obra excede
+  // a média dos vizinhos por mais de 1.0 ponto. Ajuda o usuário a entender por
+  // que essa obra está aqui versus as adjacentes.
+  const NEIGHBOR_WINDOW = 5
+  const MIN_DIFF = 1.0
+  const MAX_DIFFS = 2
+  for (let i = 0; i < entries.length; i++) {
+    const start = Math.max(0, i - NEIGHBOR_WINDOW)
+    const end = Math.min(entries.length, i + NEIGHBOR_WINDOW + 1)
+    const neighbors: RankingEntry[] = []
+    for (let j = start; j < end; j++) {
+      if (j !== i) neighbors.push(entries[j])
+    }
+    if (neighbors.length === 0) continue
+    const diffs: RankingDifferentiator[] = []
+    for (const slug of CRITERION_SLUGS) {
+      const own = entries[i].scores[slug]
+      if (own == null) continue
+      let sum = 0
+      let count = 0
+      for (const n of neighbors) {
+        const v = n.scores[slug]
+        if (v == null) continue
+        sum += v
+        count++
+      }
+      if (count === 0) continue
+      const avg = sum / count
+      const diff = own - avg
+      if (diff >= MIN_DIFF) diffs.push({ slug, diff })
+    }
+    diffs.sort((a, b) => b.diff - a.diff)
+    entries[i].differentiators = diffs.slice(0, MAX_DIFFS)
+  }
+
   if (filters.topN != null && filters.topN > 0) {
     entries = entries.slice(0, filters.topN)
   }

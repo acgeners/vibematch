@@ -18,7 +18,10 @@ import type {
 } from "./types"
 
 export const MODEL = "claude-sonnet-4-6"
-export const PROMPT_VERSION = "v1"
+// v2: Smart Shortlist enriquecido (sub-fase 2.3.A) — adicionados campos
+// opcionais ao tool submit_ranking: confidence, risks, similar_loved/avoided,
+// review_quotes, mood_fit. Sistema prompt instrui sobre cada um.
+export const PROMPT_VERSION = "v2"
 
 const CRITERION_SLUG_ENUM = [...CRITERION_SLUGS]
 
@@ -157,14 +160,26 @@ export async function generateTasteProfile(
       client,
       {
         model: MODEL,
-        max_tokens: attempt === 0 ? 3000 : 4000,
+        // Histórico: 3000/4000 cortava com ≥100 obras avaliadas, fazendo o
+        // summary ser truncado (o modelo produz primeiro tags+critérios e
+        // deixa summary por último). Subimos pra acomodar caudas longas.
+        max_tokens: attempt === 0 ? 6000 : 8000,
         temperature: attempt === 0 ? 0.2 : 0,
         system: [
           { type: "text", text: TASTE_PROFILE_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
         ],
         tools: [TASTE_PROFILE_TOOL],
         tool_choice: { type: "tool", name: TASTE_PROFILE_TOOL.name },
-        messages: [{ role: "user", content: userPrompt }],
+        // User prompt cacheado (ephemeral 5min) — quando attempt 1 dispara
+        // segundos depois do 0, evita re-criar 90K+ tokens de cache.
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: userPrompt, cache_control: { type: "ephemeral" } },
+            ],
+          },
+        ],
       },
       {
         operation: "recommendation_taste_profile",
@@ -244,7 +259,11 @@ export async function rankFavorites(args: RankFavoritesArgs): Promise<RankingRes
       client,
       {
         model: MODEL,
-        max_tokens: attempt === 0 ? 4000 : 5000,
+        // Histórico: 4000/5000 era suficiente pra ranking simples (v1), mas o
+        // v2 enriquecido (confidence/risks/similar_loved/avoided/review_quotes/
+        // mood_fit) gera ~250-300 tokens por candidato. Com 20 candidatos +
+        // mode_summary, precisamos de folga ≥ 8000.
+        max_tokens: attempt === 0 ? 8000 : 12000,
         temperature: attempt === 0 ? 0.2 : 0,
         system: [
           { type: "text", text: RANKING_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },

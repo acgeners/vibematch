@@ -1,7 +1,7 @@
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 
-export type RankingColumnGroup = "basico" | "notas" | "criterios"
+export type RankingColumnGroup = "basico" | "notas" | "criterios" | "legado"
 
 export interface RankingColumnDef {
   key: string
@@ -22,28 +22,40 @@ export const RANKING_COLUMN_GROUP_LABELS: Record<RankingColumnGroup, string> = {
   basico: "Básico",
   notas: "Notas",
   criterios: "Critérios",
+  legado: "Legado",
 }
 
-export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v1"
+// Bump v2 → v3 ao remover `final_confidence` e ocultar `synopsis_q` por padrão.
+// Quem tinha config v2 salva ganha a layout nova sem precisar mexer no picker.
+export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v3"
 export const RANKING_TABLE_COLUMN_CONFIG_EVENT = "ranking-column-config-change"
 
 export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
+  { key: "select", label: "", configLabel: "Selecionar para comparar", defaultWidth: 36, align: "center", locked: true, group: "basico" },
   { key: "rank", label: "#", configLabel: "Posição no ranking", defaultWidth: 48, align: "center", locked: true, group: "basico" },
+  { key: "percentile", label: "Pos.%", configLabel: "Percentil no pool filtrado (Top X%)", defaultWidth: 80, align: "center", group: "basico" },
+  { key: "fav", label: "Fav", configLabel: "Favorito", defaultWidth: 44, align: "center", group: "basico" },
   { key: "title", label: "Título", defaultWidth: 280, locked: true, group: "basico" },
   { key: "pub", label: "Pub.", configLabel: "Publicação", defaultWidth: 100, align: "center", group: "basico" },
   { key: "per_status", label: "Status", configLabel: "Status pessoal", defaultWidth: 64, align: "center", group: "basico" },
   { key: "year", label: "Ano", defaultWidth: 70, align: "center", group: "basico" },
   { key: "chapters", label: "Caps.", configLabel: "Capítulos totais", defaultWidth: 70, align: "center", group: "basico" },
   { key: "chapters_read", label: "Lidos", configLabel: "Capítulos lidos", defaultWidth: 70, align: "center", group: "basico" },
+  { key: "chapters_progress", label: "% Lido", configLabel: "% lido (capítulos lidos / total)", defaultWidth: 80, align: "center", group: "basico" },
   { key: "synopsis_q", label: "Sinopse", configLabel: "Interesse na sinopse", defaultWidth: 80, align: "center", group: "basico" },
   { key: "platform_avg", label: "N.M", configLabel: "Nota.M (média ponderada das plataformas)", defaultWidth: 88, align: "center", group: "notas" },
   { key: "total_votes", label: "Votos", configLabel: "Total de votos nas plataformas", defaultWidth: 88, align: "center", group: "notas" },
-  { key: "final", label: "N.Final", configLabel: "Nota.Final (mistura ponderada de N.IA e N.Pr)", defaultWidth: 100, align: "center", group: "notas" },
-  { key: "final_confidence", label: "Conf.", configLabel: "Confiança da Nota.Final", defaultWidth: 96, align: "center", group: "notas" },
-  { key: "calc", label: "N.IA", configLabel: "Nota.IA (calculada via avaliação da IA)", defaultWidth: 100, align: "center", group: "notas" },
-  { key: "pred", label: "N.Pr", configLabel: "Nota.Pr (predição por regressão)", defaultWidth: 100, align: "center", group: "notas" },
-  { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento com perfil", defaultWidth: 110, align: "center", group: "notas" },
-  { key: "alignment_score", label: "IA Rk.", configLabel: "IA Re-rank (sob demanda)", defaultWidth: 80, align: "center", group: "notas" },
+  // Novo (Fase 1.5): expected_score é o L1 que substitui o trio Nota.IA/Pr/Final
+  { key: "expected", label: "Esperada", configLabel: "Nota esperada (L1 single Ridge — substitui N.IA/N.Pr/N.Final)", defaultWidth: 100, align: "center", group: "notas" },
+  { key: "expected_baseline", label: "Perfil", configLabel: "Stage 1 da decomposição — contribuição do perfil (sem qualidade)", defaultWidth: 90, align: "center", group: "legado" },
+  { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Stage 2 da decomposição — ajuste pelas 8 dimensões de qualidade", defaultWidth: 90, align: "center", group: "legado" },
+  { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento com perfil (fit_score)", defaultWidth: 110, align: "center", group: "notas" },
+  // Legado — escondidos por padrão a partir do v2. Disponíveis via column picker
+  // ou via preset "Legado". Vão ser removidos quando Fase 2 (consultor) ativar.
+  { key: "final", label: "N.Final", configLabel: "[Legado] Nota.Final (mistura ponderada de N.IA e N.Pr)", defaultWidth: 100, align: "center", group: "legado" },
+  { key: "calc", label: "N.IA", configLabel: "[Legado] Nota.IA (calculada via avaliação da IA)", defaultWidth: 100, align: "center", group: "legado" },
+  { key: "pred", label: "N.Pr", configLabel: "[Legado] Nota.Pr (predição por regressão)", defaultWidth: 100, align: "center", group: "legado" },
+  { key: "alignment_score", label: "IA Rk.", configLabel: "IA Re-rank (0-100) — score que ordena 'Recomendar com IA' / 'Próxima leitura' / 'Recomendar do ranking'; preenche também ao clicar Rankear sob demanda", defaultWidth: 80, align: "center", group: "notas" },
   ...CRITERION_SLUGS.map((slug) => ({
     key: `crit_${slug}`,
     label: CRITERIA_INFO[slug]?.emoji ?? slug,
@@ -56,9 +68,26 @@ export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
 
 const DEFAULT_COLUMN_KEYS = RANKING_TABLE_COLUMNS.map((column) => column.key)
 const LOCKED_KEYS = new Set(RANKING_TABLE_COLUMNS.filter((c) => c.locked).map((c) => c.key))
+
+// Hidden por padrão a partir de v3:
+//   - chapters_progress: tradição (igual v1)
+//   - synopsis_q: pouco útil no contexto de ranking; reduz ruído
+//   - expected_baseline / expected_quality_adj: detalhe da decomposição;
+//     interessante pra debug mas polui a view padrão
+//   - calc/pred/final: legado escondido após cutover da Fase 1.5
+//     (acessível via column picker / preset "legado")
+//   - alignment_score: NÃO está aqui — continua ativo no fluxo de
+//     recomendação, fica visível por padrão em /ranking
+const LEGACY_HIDDEN_KEYS = ["calc", "pred", "final"] as const
 const DEFAULT_COLUMN_CONFIG: RankingColumnConfig = {
   order: DEFAULT_COLUMN_KEYS,
-  hidden: [],
+  hidden: [
+    "chapters_progress",
+    "synopsis_q",
+    "expected_baseline",
+    "expected_quality_adj",
+    ...LEGACY_HIDDEN_KEYS,
+  ],
 }
 let cachedRawColumnConfig: string | null = null
 let cachedColumnConfig: RankingColumnConfig = DEFAULT_COLUMN_CONFIG
@@ -151,22 +180,35 @@ export function writeRankingColumnConfig(config: RankingColumnConfig) {
   window.dispatchEvent(new CustomEvent(RANKING_TABLE_COLUMN_CONFIG_EVENT, { detail: normalized }))
 }
 
-export type RankingColumnPreset = "padrao" | "compacto" | "notas" | "criterios"
+export type RankingColumnPreset = "padrao" | "compacto" | "notas" | "criterios" | "legado"
 
 export const RANKING_COLUMN_PRESETS: Array<{ id: RankingColumnPreset; label: string }> = [
   { id: "padrao", label: "Padrão" },
   { id: "compacto", label: "Compacto" },
   { id: "notas", label: "Foco em notas" },
   { id: "criterios", label: "Foco em critérios" },
+  { id: "legado", label: "Legado (N.IA/Pr/Final)" },
 ]
 
 const CRITERION_KEYS = CRITERION_SLUGS.map((slug) => `crit_${slug}`)
 
+// `padrao` agora reflete o novo default (sem legado, sem decomposição):
+//   tudo do DEFAULT exceto as colunas explicitamente escondidas.
+const PADRAO_VISIBLE = DEFAULT_COLUMN_KEYS.filter(
+  (k) => !DEFAULT_COLUMN_CONFIG.hidden.includes(k),
+)
+
 const PRESET_VISIBLE_KEYS: Record<RankingColumnPreset, string[]> = {
-  padrao: DEFAULT_COLUMN_KEYS,
-  compacto: ["rank", "title", "pub", "per_status", "final", "calc", "pred"],
-  notas: ["rank", "title", "final", "final_confidence", "personal_fit", "calc", "pred", "platform_avg", "total_votes"],
-  criterios: ["rank", "title", "final", ...CRITERION_KEYS],
+  padrao: PADRAO_VISIBLE,
+  compacto: ["rank", "title", "pub", "per_status", "expected", "personal_fit"],
+  notas: [
+    "rank", "title",
+    "expected", "expected_baseline", "expected_quality_adj",
+    "personal_fit", "platform_avg", "total_votes",
+  ],
+  criterios: ["rank", "title", "expected", ...CRITERION_KEYS],
+  // Pra debug/comparação: mostra TUDO incluindo legado + decomposição.
+  legado: DEFAULT_COLUMN_KEYS.filter((k) => k !== "chapters_progress"),
 }
 
 export function getPresetConfig(preset: RankingColumnPreset): RankingColumnConfig {

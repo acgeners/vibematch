@@ -44,7 +44,15 @@ PRINCÍPIOS:
 5. Para cada candidato, escreva 1–2 frases justificando o score, citando NOMES de tags e critérios específicos. Quando o candidato tiver bloco \`reviews:\`, vale citar trechos curtos (entre aspas) que reforcem o match ou exponham um risco. Em \`top_match_factors\`, liste 2–4 chips curtos (tags, critérios, padrões ou observações de reviews) que sustentam o score.
 6. Escreva em português brasileiro. Sempre use a tool \`submit_ranking\`. Não retorne texto livre.
 7. Inclua TODOS os candidatos fornecidos em \`rankings\`, ordenados do mais alinhado pro menos alinhado. Não invente \`work_id\`.
-8. \`mode_summary\`: parágrafo curto (2–3 frases) explicando o padrão dos top resultados — útil pro usuário entender o "porquê" do ranking.`
+8. \`mode_summary\`: parágrafo curto (2–3 frases) explicando o padrão dos top resultados — útil pro usuário entender o "porquê" do ranking.
+
+CAMPOS ENRIQUECIDOS (opcionais — preencha quando há evidência real):
+9. \`confidence\` (0–1): quanto VOCÊ confia neste alignment_score. Use 0.9+ pra match óbvio com várias evidências convergentes (tags loved + criterion fit + reviews positivas). Use 0.5–0.7 quando há sinais mistos. Use < 0.5 quando há pouca evidência (poucas tags em comum, sem reviews relevantes). É melhor confessar incerteza do que fingir certeza.
+10. \`risks\` (1–3 itens): razões pra o user NÃO ler essa obra, MESMO QUE alignment_score seja alto. Exemplos: "tem tag tragedy que você marca como avoided", "reviews mencionam pacing lento que você costuma penalizar", "tema religioso (não está no seu padrão)". Frases curtas e específicas. Omita o campo se não houver risco real.
+11. \`similar_loved\` (1–2 work_id): obras na BIBLIOTECA do user que ele AMA (manual_score ≥ 8) e que esta candidata lembra. Use APENAS work_id que aparece no profile/biblioteca da request. Não invente. Útil pra "se você curtiu X, vai curtir isto".
+12. \`similar_avoided\` (1–2 work_id): mesmo critério mas pra obras que o user AVALIOU MAL (manual_score ≤ 5). Quando presente, indica alerta de risco.
+13. \`review_quotes\` (1–2 quotes): trechos curtos (≤ 150 chars, entre aspas) de reviews FORNECIDAS no bloco \`reviews:\` da candidata. NÃO INVENTE quotes. Cite a fonte ou contexto quando útil. Omita se reviews não foram fornecidas.
+14. \`mood_fit\` (0–1): SOMENTE quando o user enviou CONTEXTO ADICIONAL. Mede quão alinhada essa obra está com o mood específico, independente do alignment_score geral. Ex.: alignment=70 mas mood "quero algo curto" + obra tem 500 caps → mood_fit baixo (0.3). Omita o campo quando não houver mood.`
 
 function truncate(text: string | null | undefined, maxChars: number): string {
   if (!text) return ""
@@ -127,6 +135,8 @@ export function buildTasteProfileUserPrompt(works: RatedWorkInput[]): string {
 
   lines.push(
     `Gere o perfil de gosto consolidando esses dados via tool \`submit_taste_profile\`. Foque no que se repete consistentemente nas obras com manual_score alto e no que está ausente/baixo nas obras com manual_score baixo. Use português brasileiro.`,
+    ``,
+    `OBRIGATÓRIO: preencha TODOS os 7 campos do tool, especialmente \`summary\` (parágrafo único de 3–5 frases) e \`narrative_patterns\` (3–7 frases declarativas). Não deixe campos vazios. Se faltam evidências pra algum campo (ex.: poucas obras evitadas), retorne array vazio — mas o campo precisa existir no payload.`,
   )
   return lines.join("\n")
 }

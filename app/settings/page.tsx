@@ -16,10 +16,10 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { Header } from "@/components/layout/header"
 import { ScrollToTop } from "@/components/layout/scroll-to-top"
 import { CalibrationPanel } from "@/components/settings/calibration-panel"
-import { WeightSuggestionsPanel } from "@/components/settings/weight-suggestions-panel"
 import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
+import { countStaleEmbeddings } from "@/server/actions/embeddings"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
 import type { FormulaConfig } from "@/types/domain"
 import { cn } from "@/lib/utils"
@@ -44,9 +44,9 @@ async function getSettingsData() {
     embeddingsCount,
     worksCount,
     embeddingsLastRunRes,
-    weightsLastAppliedRes,
     syncConstantsLastRun,
     canonicalSynopsisPending,
+    embeddingsPending,
   ] = await Promise.all([
     supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
     getCalibrationSnapshot(),
@@ -65,12 +65,6 @@ async function getSettingsData() {
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
-    supabase
-      .from("score_weights")
-      .select("updated_at")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
     getSyncConstantsMtime(),
     supabase
       .from("works")
@@ -78,6 +72,7 @@ async function getSettingsData() {
       .is("canonical_synopsis", null)
       .eq("is_archived", false)
       .then((r) => r.count ?? 0),
+    countStaleEmbeddings().then((r) => r.pending).catch(() => 0),
   ])
 
   if (configRes.error) throw new Error(configRes.error.message)
@@ -89,9 +84,9 @@ async function getSettingsData() {
     embeddingsCount,
     worksCount,
     embeddingsLastRun: (embeddingsLastRunRes.data?.updated_at as string | undefined) ?? null,
-    weightsLastApplied: (weightsLastAppliedRes.data?.updated_at as string | undefined) ?? null,
     syncConstantsLastRun,
     canonicalSynopsisPending,
+    embeddingsPending,
   }
 }
 
@@ -109,7 +104,6 @@ const SECTION_GROUPS = [
   {
     label: "Manutenção periódica",
     sections: [
-      { id: "weights", title: "Sugestão de pesos", icon: <Sparkles />, accent: "violet" as const },
       { id: "ai-calibration", title: "Calibração IA", icon: <Sparkles />, accent: "amber" as const },
       { id: "tags", title: "Consolidação de tags", icon: <Tags />, accent: "violet" as const },
     ],
@@ -123,9 +117,9 @@ export default async function SettingsPage() {
     embeddingsCount,
     worksCount,
     embeddingsLastRun,
-    weightsLastApplied,
     syncConstantsLastRun,
     canonicalSynopsisPending,
+    embeddingsPending,
   } = await getSettingsData()
 
   return (
@@ -160,6 +154,7 @@ export default async function SettingsPage() {
       >
         <EmbeddingsPanel
           initialCachedCount={embeddingsCount}
+          initialPendingCount={embeddingsPending}
           totalWorks={worksCount}
           initialLastRun={embeddingsLastRun}
         />
@@ -202,16 +197,6 @@ export default async function SettingsPage() {
         accent="emerald"
       >
         <SyncConstantsPanel initialLastRun={syncConstantsLastRun} />
-      </SettingsSection>
-
-      <SettingsSection
-        id="weights"
-        title="Sugestão de pesos a partir do seu histórico"
-        description="Treina uma regressão restrita aos 9 critérios contra suas notas reais e sugere pesos que minimizam o erro. Você revisa antes de aplicar."
-        icon={<Sparkles />}
-        accent="violet"
-      >
-        <WeightSuggestionsPanel initialLastApplied={weightsLastApplied} />
       </SettingsSection>
 
       <SettingsSection

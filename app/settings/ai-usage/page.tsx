@@ -11,7 +11,7 @@ import {
 } from "@/server/queries/ai-usage"
 import type { UsageAggregate } from "@/server/queries/ai-usage"
 
-export const dynamic = "force-dynamic"
+export const revalidate = 60
 
 function formatUsd(value: number): string {
   if (!Number.isFinite(value) || value === 0) return "$0.00"

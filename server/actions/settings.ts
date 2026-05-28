@@ -41,6 +41,35 @@ export async function setStackerEnabled(enabled: boolean) {
   return result
 }
 
+/**
+ * Liga/desliga o uso de pesos inferidos automaticamente no GPT calc.
+ * Quando true (default), recalculateAll usa pesos do weight-inference.
+ * Quando false, usa pesos manuais persistidos em `score_weights`.
+ * Dispara recálculo automático pra refletir a mudança imediatamente.
+ */
+export async function setScoreWeightsAuto(enabled: boolean) {
+  const supabase = createAdminClient()
+  const { data: config } = await supabase
+    .from("formula_config")
+    .select("id")
+    .limit(1)
+    .single()
+  if (!config) throw new Error("formula_config não encontrado")
+
+  const { error } = await supabase
+    .from("formula_config")
+    .update({ score_weights_auto: enabled, updated_at: new Date().toISOString() })
+    .eq("id", config.id)
+  if (error) throw new Error(error.message)
+
+  const result = await recalculateAll()
+  revalidatePath("/settings")
+  revalidatePath("/preferences")
+  revalidatePath("/ranking")
+  revalidatePath("/titles")
+  return result
+}
+
 export interface ScoreWeightUpdate {
   slug: string
   weight: number
@@ -229,6 +258,8 @@ export interface CalibrationHistoryEntry {
   mae_final: number | null
   mae_calc: number | null
   mae_predicted: number | null
+  /** Fase 1 shadow mode: MAE do expected_score (L1 Ridge cleaned). NULL em snapshots anteriores à migration 066. */
+  mae_expected: number | null
   train_size: number | null
   total_works: number | null
 }
@@ -241,17 +272,17 @@ export async function getCalibrationSnapshot() {
       .from("works")
       .select(
         `id, title, manual_score,
-         calculated_scores(calc_score, predicted_score, final_score, total_votes, predicted_is_stub, prediction_distance)`
+         calculated_scores(calc_score, predicted_score, final_score, total_votes, predicted_is_stub, prediction_distance, expected_score, expected_is_stub)`
       )
       .eq("is_archived", false)
       .limit(2000),
     supabase
       .from("calibration_history")
       .select(
-        "recorded_at, formula_version, stacker_enabled, mae_loocv_stacker, mae_final, mae_calc, mae_predicted, train_size, total_works",
+        "recorded_at, formula_version, stacker_enabled, mae_loocv_stacker, mae_final, mae_calc, mae_predicted, mae_expected, train_size, total_works",
       )
       .order("recorded_at", { ascending: false })
-      .limit(30),
+      .limit(1000),
   ])
 
   if (worksRes.error) throw new Error(worksRes.error.message)
@@ -271,6 +302,8 @@ export async function getCalibrationSnapshot() {
       totalVotes: Number(cs?.total_votes ?? 0),
       predictedIsStub: Boolean(cs?.predicted_is_stub ?? true),
       predictionDistance: cs?.prediction_distance == null ? null : Number(cs.prediction_distance),
+      expectedScore: cs?.expected_score == null ? null : Number(cs.expected_score),
+      expectedIsStub: cs?.expected_is_stub == null ? null : Boolean(cs.expected_is_stub),
     }
   })
 
@@ -284,12 +317,26 @@ export async function getCalibrationSnapshot() {
     ).length,
   }))
 
+  // MAE in-sample do expected_score (L1 shadow). Mesma metodologia que mae_calc/
+  // mae_predicted/mae_final: itens com manual_score e expected_score preenchidos.
+  // NULL quando ainda não há dado (pré-recálculo após migration 066) ou stub.
+  let maeExpected: number | null = null
+  let expectedCovered = 0
+  let expectedSumAbs = 0
+  for (const it of items) {
+    if (it.manualScore == null || it.expectedScore == null) continue
+    expectedCovered += 1
+    expectedSumAbs += Math.abs(it.expectedScore - it.manualScore)
+  }
+  if (expectedCovered > 0) maeExpected = expectedSumAbs / expectedCovered
+
   return {
     totalWorks: items.length,
     trainSize: calibration.trainSize,
     maeCalc: calibration.maeCalc,
     maePredicted: calibration.maePredicted,
     maeFinal: calibration.maeFinal,
+    maeExpected,
     rmseCalc: calibration.rmseCalc,
     rmsePredicted: calibration.rmsePredicted,
     rmseFinal: calibration.rmseFinal,
@@ -297,6 +344,8 @@ export async function getCalibrationSnapshot() {
     pseudoVotesBlend: calibration.pseudoVotesBlend,
     worstDiffs: calibration.worstDiffs as CalibrationDiff[],
     predictorIsStub: items.some((it) => it.predictedIsStub),
+    expectedPredictorIsStub: items.length > 0 && items.every((it) => it.expectedScore == null || it.expectedIsStub === true),
+    expectedCoveredCount: expectedCovered,
     distanceBuckets,
     worksWithDistance: items.filter((it) => it.predictionDistance != null).length,
     buckets,

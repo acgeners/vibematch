@@ -66,7 +66,7 @@ export function RunHistoryList({ runs }: RunHistoryListProps) {
             key={run.id}
             className="group relative rounded-lg border bg-card/40 p-3 transition hover:bg-card/70"
           >
-            <Link href={`/recommendations/${run.id}`} className="flex items-start gap-3">
+            <Link href={`/recommendations/${run.slug}`} className="flex items-start gap-3">
               <div className="flex flex-col items-center gap-1 pt-0.5">
                 <Badge variant="outline" className="gap-1 text-[10px]">
                   <ModeIcon mode={run.mode} />

@@ -40,7 +40,7 @@ const WORK_LIST_SELECT = `
   created_at,
   updated_at,
   last_read_at,
-  calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, platform_avg, total_votes),
+  calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, personal_fit, personal_fit_percentile, alignment_score, alignment_justification, alignment_payload, platform_avg, total_votes),
   category_scores(criterion_slug, score),
   work_covers(url, is_primary, position),
   work_tags(tag_id, tags(*)),
@@ -153,6 +153,7 @@ export async function getWorks(
     sort.field === "final_score" ||
     sort.field === "calc_score" ||
     sort.field === "predicted_score" ||
+    sort.field === "expected_score" ||
     sort.field === "is_favorite" ||
     filters.minFinalScore != null ||
     filters.maxFinalScore != null ||
@@ -194,7 +195,7 @@ export async function getWorks(
     // every matching work just to throw most of it away.
     let lightQuery = supabase
       .from("works")
-      .select("id, is_favorite, calculated_scores(final_score, calc_score, predicted_score, total_votes)")
+      .select("id, is_favorite, calculated_scores(final_score, calc_score, predicted_score, expected_score, total_votes)")
     lightQuery = applyWorkFilters(lightQuery, filters, searchMatchIds, genreMatchIds, tagMatchIds)
 
     const { data: lightData, error: lightError } = await lightQuery
@@ -207,6 +208,7 @@ export async function getWorks(
         final_score: number | null
         calc_score: number | null
         predicted_score: number | null
+        expected_score: number | null
         total_votes: number | null
       } | null
     }
@@ -249,7 +251,9 @@ export async function getWorks(
           ? "calc_score"
           : sort.field === "predicted_score"
             ? "predicted_score"
-            : "final_score"
+            : sort.field === "expected_score"
+              ? "expected_score"
+              : "final_score"
 
       scored.sort((a, b) => {
         const aScore = a.calculated_scores?.[sortKey] ?? -1
@@ -403,6 +407,7 @@ export async function getWorkWithAiEvaluations(id: string) {
         )
       `)
       .eq("work_id", id)
+      .eq("status", "completed")
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),

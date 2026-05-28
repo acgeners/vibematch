@@ -133,7 +133,7 @@ export function RecommendWithAiButton({
             toast.success(`${result.data.candidatesEvaluated} obras rankeadas.`)
           }
           setOpen(false)
-          router.push(`/recommendations/${result.data.runId}`)
+          router.push(`/recommendations/${result.data.runSlug}`)
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Erro ao gerar recomendação")

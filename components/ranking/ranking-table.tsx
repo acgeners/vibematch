@@ -2,17 +2,24 @@
 
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { useEffect, useRef, useState, useSyncExternalStore } from "react"
-import { ChevronDown, ChevronUp, ImageOff, LayoutGrid, List } from "lucide-react"
+import { useEffect, useState, useSyncExternalStore } from "react"
+import { ChevronDown, ChevronUp, ImageOff, LayoutGrid, List, X } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
+import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { getCoverImageSrc } from "@/lib/image-proxy"
-import { cn, titleToSlug } from "@/lib/utils"
-import { ScoreBadge, type ScoreColorThresholds } from "@/components/ui/score-badge"
+import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
+import { formatPercentile } from "@/lib/calculations/percentile"
+import { ScoreBadge } from "@/components/ui/score-badge"
+import type { ColumnThresholds } from "@/components/ui/score-badge"
 import { PublicationStatusBadge, PersonalStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { AlignmentCell, AlignmentScoreCell, ConfidenceCell } from "@/components/ranking/ranking-cells"
+import { AlignmentCell, AlignmentScoreCell } from "@/components/ranking/ranking-cells"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
+import { FavoriteCell } from "@/components/titles/favorite-cell"
 import type { WorkPreview } from "@/server/actions/works"
 import {
   getConfiguredRankingColumns,
@@ -35,7 +42,6 @@ const COLUMN_TO_SORT_FIELD: Record<string, string> = {
   platform_avg: "platform_avg",
   total_votes: "total_votes",
   final: "final_score",
-  final_confidence: "final_confidence",
   calc: "calc_score",
   pred: "pred_score",
   personal_fit: "personal_fit",
@@ -75,7 +81,7 @@ function writeViewMode(mode: ViewMode) {
 
 interface RankingTableProps {
   entries: RankingEntry[]
-  scoreThresholds?: ScoreColorThresholds | null
+  scoreThresholds?: ColumnThresholds | null
 }
 
 const KEY_CRITERIA = ["romance", "fantasy_nobility", "protagonist", "drama", "tragedy"]
@@ -179,12 +185,37 @@ function entryToPreview(entry: RankingEntry): WorkPreview {
 
 function TitleCell({ entry }: { entry: RankingEntry }) {
   return (
-    <WorkTitleLink
-      title={entry.title}
-      workId={entry.workId}
-      preview={entryToPreview(entry)}
-      className="font-medium hover:underline line-clamp-1 block"
-    />
+    <div className="flex flex-col gap-0.5 min-w-0">
+      <WorkTitleLink
+        title={entry.title}
+        workId={entry.workId}
+        preview={entryToPreview(entry)}
+        className="font-medium hover:underline line-clamp-1 block"
+      />
+      {entry.differentiators.length > 0 ? (
+        <TooltipProvider delayDuration={150}>
+          <div className="flex flex-wrap gap-1">
+            {entry.differentiators.map((d) => {
+              const info = CRITERIA_INFO[d.slug]
+              if (!info) return null
+              return (
+                <Tooltip key={d.slug}>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex items-center gap-0.5 rounded bg-muted/60 px-1 py-0.5 text-[10px] font-mono text-muted-foreground">
+                      <span>{info.emoji}</span>
+                      <span>+{d.diff.toFixed(1)}</span>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {info.name}: destaca-se em +{d.diff.toFixed(1)} vs. obras vizinhas no ranking
+                  </TooltipContent>
+                </Tooltip>
+              )
+            })}
+          </div>
+        </TooltipProvider>
+      ) : null}
+    </div>
   )
 }
 
@@ -199,25 +230,44 @@ function formatVotes(votes: number): string {
 function renderCell(
   entry: RankingEntry,
   col: RankingColumnDef,
-  scoreThresholds: ScoreColorThresholds | null | undefined
+  scoreThresholds: ColumnThresholds | null | undefined
 ) {
   if (col.key === "rank") return <span className="font-mono text-sm text-muted-foreground">{entry.rank}</span>
+  if (col.key === "percentile")
+    return <span className="font-mono text-xs text-muted-foreground">{formatPercentile(entry.percentile)}</span>
+  if (col.key === "fav")
+    return <FavoriteCell workId={entry.workId} workTitle={entry.title} isFavorite={entry.isFavorite} />
   if (col.key === "title") return <TitleCell entry={entry} />
   if (col.key === "pub") return <PublicationStatusBadge statusId={entry.publicationStatusId} compact />
   if (col.key === "per_status") return <span className="text-sm">{entry.personalStatusSymbol ?? entry.personalStatus}</span>
   if (col.key === "year") return <span className="font-mono text-sm text-muted-foreground">{entry.year ?? "—"}</span>
   if (col.key === "chapters") return <span className="font-mono text-sm">{entry.totalChapters ?? "—"}</span>
   if (col.key === "chapters_read") return <span className="font-mono text-sm">{entry.chaptersRead ?? "—"}</span>
+  if (col.key === "chapters_progress") {
+    const pct = readingProgressPercent(entry.chaptersRead, entry.totalChapters)
+    return <span className="font-mono text-sm">{pct != null ? `${pct}%` : "—"}</span>
+  }
   if (col.key === "synopsis_q") return <span className="text-xs text-muted-foreground">{entry.synopsisQuality ?? "—"}</span>
   if (col.key === "platform_avg") return <span className="font-mono text-sm">{entry.platformAvg != null ? entry.platformAvg.toFixed(1) : "—"}</span>
   if (col.key === "total_votes") return <span className="font-mono text-sm">{formatVotes(entry.totalVotes)}</span>
-  if (col.key === "final") return <ScoreBadge score={entry.finalScore} size="sm" thresholds={scoreThresholds} />
-  if (col.key === "final_confidence") return <ConfidenceCell value={entry.finalScoreConfidence} />
-  if (col.key === "calc") return <ScoreBadge score={entry.calcScore} size="sm" thresholds={scoreThresholds} />
-  if (col.key === "pred") return <ScoreBadge score={entry.predictedScore} size="sm" showStub={entry.predictedIsStub} thresholds={scoreThresholds} />
-  if (col.key === "personal_fit") return <AlignmentCell value={entry.personalFit} />
+  if (col.key === "expected")
+    return <ScoreBadge score={entry.expectedScore} size="sm" showStub={entry.expectedIsStub} thresholds={scoreThresholds?.final} />
+  if (col.key === "expected_baseline")
+    return <span className="font-mono text-sm text-muted-foreground">{entry.expectedBaseline != null ? entry.expectedBaseline.toFixed(2) : "—"}</span>
+  if (col.key === "expected_quality_adj") {
+    const v = entry.expectedQualityAdj
+    if (v == null) return <span className="font-mono text-sm text-muted-foreground">—</span>
+    const sign = v >= 0 ? "+" : ""
+    const cls = v >= 0 ? "text-emerald-500" : "text-rose-500"
+    return <span className={`font-mono text-sm ${cls}`}>{sign}{v.toFixed(2)}</span>
+  }
+  if (col.key === "final") return <ScoreBadge score={entry.finalScore} size="sm" thresholds={scoreThresholds?.final} />
+  if (col.key === "calc") return <ScoreBadge score={entry.calcScore} size="sm" thresholds={scoreThresholds?.calc} />
+  if (col.key === "pred") return <ScoreBadge score={entry.predictedScore} size="sm" showStub={entry.predictedIsStub} thresholds={scoreThresholds?.predicted} />
+  if (col.key === "personal_fit")
+    return <AlignmentCell value={entry.personalFit} percentile={entry.personalFitPercentile} />
   if (col.key === "alignment_score")
-    return <AlignmentScoreCell score={entry.alignmentScore} justification={entry.alignmentJustification} workId={entry.workId} />
+    return <AlignmentScoreCell score={entry.alignmentScore} justification={entry.alignmentJustification} workId={entry.workId} payload={entry.alignmentPayload} />
   if (col.key.startsWith("crit_")) {
     const slug = col.key.slice(5)
     const score = entry.scores[slug]
@@ -236,49 +286,43 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
   const columns = getConfiguredRankingColumns(config)
   const viewMode = useSyncExternalStore(subscribeViewMode, readViewMode, () => "list" as const)
 
-  // Mede o container e expande proporcionalmente as colunas não-crit pra
-  // preencher todo o espaço horizontal (mesmo comportamento da /titles).
-  const tableWrapperRef = useRef<HTMLDivElement | null>(null)
-  const [tableContainerWidth, setTableContainerWidth] = useState(0)
-  useEffect(() => {
-    const el = tableWrapperRef.current
-    if (!el) return
-    const update = () => setTableContainerWidth(el.clientWidth)
-    update()
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
+  // Multi-select pra comparação. Estado local (não persiste entre páginas) —
+  // suficiente porque o WorkCompareDrawer busca os dados completos por ID, então
+  // a seleção sobrevive a mudanças de filtro mesmo se a obra sair do pool visível.
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const selectedSet = new Set(selectedIds)
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id)
+      if (prev.length >= MAX_COMPARE_WORKS) return prev
+      return [...prev, id]
+    })
+  }
+  const clearSelection = () => {
+    setSelectedIds([])
+    setDrawerOpen(false)
+  }
+  const removeSelection = (id: string) => {
+    setSelectedIds((prev) => prev.filter((x) => x !== id))
+  }
 
+  // Larguras naturais viram percentagens do total. Com `tableLayout: fixed` +
+  // `width: 100%` no wrapper sem overflow-x, a tabela sempre cabe exatamente no
+  // container: colunas encolhem proporcionalmente em telas estreitas (mantendo
+  // o sticky header funcionando, já que não há scroll context intermediário).
   const naturalWidthOf = (key: string): number => {
     const stored = widths[key]
     if (stored != null) return stored
     return columns.find((c) => c.key === key)?.defaultWidth ?? 100
   }
   const totalNaturalWidth = columns.reduce((sum, c) => sum + naturalWidthOf(c.key), 0)
-  const fixedColumnsWidth = columns
-    .filter((c) => c.key.startsWith("crit_"))
-    .reduce((sum, c) => sum + naturalWidthOf(c.key), 0)
-  const expandableWidth = totalNaturalWidth - fixedColumnsWidth
-  const extraSpace = Math.max(0, tableContainerWidth - totalNaturalWidth)
-  let expandableScale = 1
-  let critScale = 1
-  if (extraSpace > 0) {
-    if (expandableWidth > 0) {
-      expandableScale = (expandableWidth + extraSpace) / expandableWidth
-    } else if (fixedColumnsWidth > 0) {
-      critScale = (fixedColumnsWidth + extraSpace) / fixedColumnsWidth
-    }
-  }
-  const scaledWidthOf = (key: string): number => {
-    const base = naturalWidthOf(key)
-    return Math.round(base * (key.startsWith("crit_") ? critScale : expandableScale))
-  }
-  const totalScaledWidth = columns.reduce((sum, c) => sum + scaledWidthOf(c.key), 0)
+  const widthPercentOf = (key: string): string =>
+    `${((naturalWidthOf(key) / totalNaturalWidth) * 100).toFixed(4)}%`
 
   const router = useRouter()
   const searchParams = useSearchParams()
-  const sortRaw = searchParams.get("sort") ?? "final_score:desc"
+  const sortRaw = searchParams.get("sort") ?? "alignment_score:desc,personal_fit:desc,expected_score:desc"
   const [activeSortField, activeSortDirRaw = "desc"] = sortRaw.split(",")[0].split(":")
   const activeSortDir: "asc" | "desc" = activeSortDirRaw === "asc" ? "asc" : "desc"
 
@@ -317,28 +361,22 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
 
       {/* Desktop table */}
       <TooltipProvider delayDuration={150}>
-      <div
-        ref={tableWrapperRef}
-        className="hidden rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur lg:block"
-        style={{ width: totalScaledWidth }}
-      >
+      <div className="hidden w-full rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur lg:block">
         <table
           className="border-separate border-spacing-0"
           style={{
             tableLayout: "fixed",
-            width: totalScaledWidth,
+            width: "100%",
           }}
         >
           <colgroup>
-            {columns.map((col) => {
-              const w = scaledWidthOf(col.key)
-              return <col key={col.key} style={{ width: w }} />
-            })}
+            {columns.map((col) => (
+              <col key={col.key} style={{ width: widthPercentOf(col.key) }} />
+            ))}
           </colgroup>
           <thead className="sticky -top-5 z-30 md:-top-7 [&_th]:bg-muted [&_tr:first-child_th:first-child]:rounded-tl-lg [&_tr:first-child_th:last-child]:rounded-tr-lg [&>tr>th]:border-b [&>tr>th]:border-border/70">
             <tr>
               {columns.map((col) => {
-                const w = scaledWidthOf(col.key)
                 const sortField = getSortFieldForColumn(col.key)
                 const isSortable = sortField !== null
                 const isActive = isSortable && activeSortField === sortField
@@ -395,7 +433,7 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
                     "group/header relative h-11 select-none text-xs font-semibold uppercase tracking-wide text-muted-foreground",
                     col.key.startsWith("crit_") ? "px-1" : "px-3"
                   )}
-                  style={{ textAlign: align, width: w, minWidth: w, maxWidth: w }}
+                  style={{ textAlign: align }}
                 >
                   <div className={cn("flex items-center pr-3", justify)}>{wrapped}</div>
                   <ResizeHandle
@@ -421,7 +459,16 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
                     style={{ textAlign: col.align ?? "left" }}
                   >
                     <div className="truncate" style={{ textAlign: col.align ?? "left" }}>
-                      {renderCell(entry, col, scoreThresholds)}
+                      {col.key === "select" ? (
+                        <Checkbox
+                          checked={selectedSet.has(entry.workId)}
+                          disabled={!selectedSet.has(entry.workId) && selectedIds.length >= MAX_COMPARE_WORKS}
+                          onCheckedChange={() => toggleSelect(entry.workId)}
+                          aria-label={`Selecionar ${entry.title} para comparar`}
+                        />
+                      ) : (
+                        renderCell(entry, col, scoreThresholds)
+                      )}
                     </div>
                   </td>
                 ))}
@@ -472,7 +519,7 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
                 </div>
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">
-                <ScoreBadge score={entry.finalScore} size="md" thresholds={scoreThresholds} />
+                <ScoreBadge score={entry.finalScore} size="md" thresholds={scoreThresholds?.final} />
                 <span className="text-xs text-muted-foreground">
                   Calc: {entry.calcScore?.toFixed(1) ?? "—"}
                 </span>
@@ -480,6 +527,70 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
             </div>
           </Link>
         ))}
+      </div>
+
+      <CompareFloatingBar
+        count={selectedIds.length}
+        onOpen={() => setDrawerOpen(true)}
+        onClear={clearSelection}
+      />
+
+      <WorkCompareDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        ids={sortIdsByVisibleOrder(selectedIds, entries)}
+        onClear={clearSelection}
+        onRemoveId={removeSelection}
+        scoreThresholds={scoreThresholds}
+      />
+    </div>
+  )
+}
+
+/**
+ * Reordena `ids` de seleção (cronológica) pra refletir a ordem visível na
+ * tabela. Garante que o drawer de comparação apresente as obras na mesma
+ * sequência do ranking, não na ordem em que o usuário clicou. IDs que não
+ * estão no pool visível vão pro fim, preservando seleção entre filtros.
+ */
+function sortIdsByVisibleOrder(ids: string[], entries: RankingEntry[]): string[] {
+  const indexById = new Map(entries.map((e, i) => [e.workId, i]))
+  return [...ids].sort(
+    (a, b) => (indexById.get(a) ?? Number.MAX_SAFE_INTEGER) - (indexById.get(b) ?? Number.MAX_SAFE_INTEGER)
+  )
+}
+
+function CompareFloatingBar({
+  count,
+  onOpen,
+  onClear,
+}: {
+  count: number
+  onOpen: () => void
+  onClear: () => void
+}) {
+  if (count === 0) return null
+  return (
+    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-3">
+      <div className="pointer-events-auto flex items-center gap-2 rounded-full border bg-card/95 px-3 py-2 shadow-lg backdrop-blur">
+        <span className="text-sm">
+          <span className="font-semibold">{count}</span>
+          <span className="ml-1 text-muted-foreground">
+            obra{count !== 1 ? "s" : ""} selecionada{count !== 1 ? "s" : ""}
+          </span>
+        </span>
+        <Button size="sm" onClick={onOpen} className="h-7 text-xs">
+          Comparar
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={onClear}
+          aria-label="Limpar seleção"
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
       </div>
     </div>
   )
@@ -564,7 +675,7 @@ function RankingCardsView({
   scoreThresholds,
 }: {
   entries: RankingEntry[]
-  scoreThresholds: ScoreColorThresholds | null
+  scoreThresholds: ColumnThresholds | null
 }) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
@@ -580,7 +691,7 @@ function RankingCard({
   scoreThresholds,
 }: {
   entry: RankingEntry
-  scoreThresholds: ScoreColorThresholds | null
+  scoreThresholds: ColumnThresholds | null
 }) {
   const slug = titleToSlug(entry.title)
   const isTop3 = entry.rank <= 3
@@ -626,7 +737,7 @@ function RankingCard({
         {/* Score badge */}
         {entry.finalScore != null && (
           <div className="absolute right-1.5 top-1.5">
-            <ScoreBadge score={entry.finalScore} size="sm" thresholds={scoreThresholds} />
+            <ScoreBadge score={entry.finalScore} size="sm" thresholds={scoreThresholds?.final} />
           </div>
         )}
 

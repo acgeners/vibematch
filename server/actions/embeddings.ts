@@ -81,14 +81,13 @@ function buildWorkFromRow(row: Record<string, unknown>): WorkForEmbedding {
   }
 }
 
-/**
- * Identifica obras com embedding desatualizado e re-embeda apenas elas.
- *
- * Critério "desatualizado": `input_hash` da obra atual difere do que está
- * persistido em `work_embeddings`, OU não existe registro pra essa obra,
- * OU `model_name` mudou.
- */
-export async function refreshEmbeddings(): Promise<RefreshEmbeddingsResult> {
+type Candidate = WorkForEmbedding & { hash: string; text: string }
+
+async function loadEmbeddingCandidates(): Promise<{
+  totalWorks: number
+  skipped: number
+  candidates: Candidate[]
+}> {
   const supabase = createAdminClient()
 
   const [worksRes, existingRes] = await Promise.all([
@@ -117,7 +116,6 @@ export async function refreshEmbeddings(): Promise<RefreshEmbeddingsResult> {
   const works = (worksRes.data as Array<Record<string, unknown>>).map(buildWorkFromRow)
   const totalWorks = works.length
 
-  type Candidate = WorkForEmbedding & { hash: string; text: string }
   const candidates: Candidate[] = []
   let skipped = 0
 
@@ -131,6 +129,35 @@ export async function refreshEmbeddings(): Promise<RefreshEmbeddingsResult> {
     }
     candidates.push({ ...w, hash, text })
   }
+
+  return { totalWorks, skipped, candidates }
+}
+
+export interface EmbeddingsPendingCount {
+  totalWorks: number
+  pending: number
+}
+
+/**
+ * Conta obras com embedding desatualizado (sem chamar a OpenAI). Usa o mesmo
+ * critério do refresh: hash atual difere do persistido, modelo mudou, ou não
+ * há linha em work_embeddings.
+ */
+export async function countStaleEmbeddings(): Promise<EmbeddingsPendingCount> {
+  const { totalWorks, candidates } = await loadEmbeddingCandidates()
+  return { totalWorks, pending: candidates.length }
+}
+
+/**
+ * Identifica obras com embedding desatualizado e re-embeda apenas elas.
+ *
+ * Critério "desatualizado": `input_hash` da obra atual difere do que está
+ * persistido em `work_embeddings`, OU não existe registro pra essa obra,
+ * OU `model_name` mudou.
+ */
+export async function refreshEmbeddings(): Promise<RefreshEmbeddingsResult> {
+  const supabase = createAdminClient()
+  const { totalWorks, skipped, candidates } = await loadEmbeddingCandidates()
 
   if (candidates.length === 0) {
     return {

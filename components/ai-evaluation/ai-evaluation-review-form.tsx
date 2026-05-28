@@ -11,7 +11,7 @@ import { getCoverImageSrc } from "@/lib/image-proxy"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Label } from "@/components/ui/label"
-import { cn } from "@/lib/utils"
+import { cn, titleToSlug } from "@/lib/utils"
 import type { AiEvaluation } from "@/types/domain"
 
 // Limiar fixo de fricção no "Aceitar todos" e no botão "Reavaliar com Opus".
@@ -25,6 +25,7 @@ type ReevalModel = "sonnet" | "opus"
 interface AiEvaluationReviewFormProps {
   evaluation: AiEvaluation
   workId: string
+  workTitle: string
   coverUrl?: string | null
   currentScores?: Record<string, number>
   /** Quando fornecido, mostra botão de re-avaliar com modelo alternativo em caso de confiança baixa. */
@@ -141,6 +142,7 @@ function getEvaluationContext(rawResponse: unknown): EvaluationContextDebug | nu
 export function AiEvaluationReviewForm({
   evaluation,
   workId,
+  workTitle,
   coverUrl,
   currentScores,
   onReevaluate,
@@ -376,7 +378,7 @@ export function AiEvaluationReviewForm({
                 {NO_REVIEWS_REASON_LABEL[noReviewsReason]}.{" "}
                 {NO_REVIEWS_REASON_CTA[noReviewsReason] && (
                   <Link
-                    href={`/titles/${workId}#external-sources`}
+                    href={`/titles/${titleToSlug(workTitle)}#external-sources`}
                     className="font-medium text-primary underline-offset-2 hover:underline"
                   >
                     {NO_REVIEWS_REASON_CTA[noReviewsReason]}

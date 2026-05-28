@@ -25,7 +25,7 @@ const optionalNumber = (max?: number) =>
     .pipe(z.number().min(0).max(max ?? 1_000_000).nullable())
 
 const schema = z.object({
-  top_n: optionalNumber(10000),
+  top_n: optionalNumber(30),
   min_calc_score: optionalNumber(10),
   min_predicted_score: optionalNumber(10),
   min_final_score: optionalNumber(10),
@@ -33,7 +33,7 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>
 
-const TOP_N_SLIDER_MAX = 200
+const TOP_N_SLIDER_MAX = 30
 
 export function RankingPreferencesForm({ config }: RankingPreferencesFormProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -100,7 +100,7 @@ export function RankingPreferencesForm({ config }: RankingPreferencesFormProps) 
               action={
                 <button
                   type="button"
-                  onClick={() => field.onChange(isAll ? 50 : null)}
+                  onClick={() => field.onChange(isAll ? 30 : null)}
                   className={cn(
                     "text-[11px] font-medium underline-offset-2 transition-colors hover:underline",
                     isAll ? "text-muted-foreground" : "text-primary"
@@ -208,7 +208,7 @@ function ScoreMinSlider({ control, name, label, hint }: ScoreMinSliderProps) {
               value={[numeric]}
               min={0}
               max={10}
-              step={0.1}
+              step={0.5}
               onValueChange={(v) => field.onChange(v[0] === 0 ? null : v[0])}
               className="px-1"
             />

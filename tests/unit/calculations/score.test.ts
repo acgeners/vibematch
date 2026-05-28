@@ -35,6 +35,15 @@ describe("calculateNotaCalc", () => {
     expect(r2).toBeGreaterThan(r1)
   })
 
+  it("saltos do interesse de sinopse são progressivos (côncavo-pra-cima)", () => {
+    const r4 = calculateNotaCalc({ ...base, synopsisQuality: "♥♥♥♥" })
+    const r3 = calculateNotaCalc({ ...base, synopsisQuality: "♥♥♥" })
+    const r2 = calculateNotaCalc({ ...base, synopsisQuality: "♥♥" })
+    const r1 = calculateNotaCalc({ ...base, synopsisQuality: "♥" })
+    expect(r4 - r3).toBeGreaterThan(r3 - r2)
+    expect(r3 - r2).toBeGreaterThan(r2 - r1)
+  })
+
   it("observationAdjustment=-0.30 reduz nota em 0.30 ponto", () => {
     const resZero = calculateNotaCalc({ ...base, observationAdjustment: 0 })
     const resNeg = calculateNotaCalc({ ...base, observationAdjustment: -0.30 })

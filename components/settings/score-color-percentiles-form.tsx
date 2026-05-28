@@ -116,8 +116,9 @@ export function ScoreColorPercentilesForm({ config }: ScoreColorPercentilesFormP
   return (
     <form onSubmit={handleSubmit(askConfirm)} className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Define a posição relativa (no catálogo de obras não-arquivadas) acima da qual a Nota.Final / Nota.IA / Nota.Pr ganha cada cor.
-        Defaults = quintis (20/40/60/80), cada cor cobrindo 20% das obras.
+        Define a posição relativa <strong>em cada coluna</strong> (Nota.Final / Nota.IA / Nota.Pr) acima da qual a nota ganha cada cor.
+        Cada coluna usa sua própria distribuição — o mesmo percentil pode resultar em valores de corte diferentes entre elas.
+        Defaults = quintis (20/40/60/80), cada cor cobrindo 20% das obras dentro da coluna.
       </p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

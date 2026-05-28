@@ -33,7 +33,7 @@ import {
   starsToPostReadingScore,
   type PostReadingScoreField,
 } from "@/lib/constants/post-reading-criteria"
-import { cn } from "@/lib/utils"
+import { cn, readingProgressPercent } from "@/lib/utils"
 import { BookOpen, Users, Palette, Info, FileEdit, Calendar, Bookmark, Star, X } from "lucide-react"
 import {
   Tooltip,
@@ -305,6 +305,16 @@ export function WorkStatusForm({
               <div className="flex h-9 w-20 items-center justify-center rounded-md border bg-muted px-2 text-sm text-muted-foreground font-medium">
                 {typeof totalChapters === "number" && totalChapters > 0 ? totalChapters : "?"}
               </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5 w-full sm:w-auto">
+            <Label>% lido</Label>
+            <div className="flex h-9 w-20 items-center justify-center rounded-md border bg-muted px-2 text-sm text-muted-foreground font-medium">
+              {(() => {
+                const pct = readingProgressPercent(chaptersRead, totalChapters)
+                return pct != null ? `${pct}%` : "—"
+              })()}
             </div>
           </div>
 

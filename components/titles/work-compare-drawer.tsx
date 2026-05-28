@@ -8,14 +8,12 @@ import {
   ExternalLink,
   ImageOff,
   Loader2,
-  RotateCcw,
   Rows3,
   Sparkles,
   X,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Sheet,
@@ -23,7 +21,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { ScoreBadge, type ScoreColorThresholds } from "@/components/ui/score-badge"
+import { ScoreBadge, type ColumnThresholds, type ScoreColorThresholds } from "@/components/ui/score-badge"
 import {
   PersonalStatusBadge,
   PublicationStatusBadge,
@@ -39,8 +37,14 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import { cn } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { fetchCompareWorks, type CompareWork } from "@/server/actions/compare"
+import {
+  ColumnPicker,
+  type ColumnPickerColumnDef,
+  type ColumnPickerConfig,
+} from "@/components/ui/column-picker"
 
 const HIDDEN_ROWS_STORAGE_KEY = "compare_hidden_rows_v1"
+const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v2"
 
 interface CompareRowDef {
   key: string
@@ -70,6 +74,7 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
       { key: "score:finalScore", label: "Final" },
       { key: "score:calcScore", label: "IA" },
       { key: "score:predictedScore", label: "Prevista" },
+      { key: "score:alignmentScore", label: "IA Rk." },
       { key: "score:manualScore", label: "Pessoal" },
       { key: "score:platformAvg", label: "Média externa" },
     ],
@@ -90,25 +95,59 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
 ]
 
 const ALL_ROW_KEYS = COMPARE_ROW_GROUPS.flatMap((g) => g.rows.map((r) => r.key))
-const TOTAL_ROW_COUNT = ALL_ROW_KEYS.length
 
-function readHiddenRows(): Set<string> {
-  if (typeof window === "undefined") return new Set()
+const COMPARE_ROW_GROUP_LABELS: Record<string, string> = Object.fromEntries(
+  COMPARE_ROW_GROUPS.map((g) => [g.id, g.label])
+)
+
+const COMPARE_ROW_COLUMN_DEFS: ColumnPickerColumnDef[] = COMPARE_ROW_GROUPS.flatMap((g) =>
+  g.rows.map((r) => ({ key: r.key, label: r.label, group: g.id }))
+)
+
+const DEFAULT_ROWS_CONFIG: ColumnPickerConfig = {
+  order: ALL_ROW_KEYS,
+  hidden: [],
+}
+
+/**
+ * Normaliza o config armazenado: descarta chaves desconhecidas, completa
+ * rows novas (adicionadas em versões posteriores) no fim mantendo a ordem
+ * canônica do grupo.
+ */
+function normalizeRowsConfig(value: Partial<ColumnPickerConfig> | null | undefined): ColumnPickerConfig {
+  const known = new Set(ALL_ROW_KEYS)
+  const userOrder = (value?.order ?? []).filter((k) => known.has(k))
+  const missing = ALL_ROW_KEYS.filter((k) => !userOrder.includes(k))
+  const hidden = (value?.hidden ?? []).filter((k) => known.has(k))
+  return { order: [...userOrder, ...missing], hidden }
+}
+
+function readRowsConfig(): ColumnPickerConfig {
+  if (typeof window === "undefined") return DEFAULT_ROWS_CONFIG
   try {
-    const raw = window.localStorage.getItem(HIDDEN_ROWS_STORAGE_KEY)
-    if (!raw) return new Set()
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return new Set()
-    return new Set(parsed.filter((k): k is string => typeof k === "string"))
+    const raw = window.localStorage.getItem(ROWS_CONFIG_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<ColumnPickerConfig>
+      return normalizeRowsConfig(parsed)
+    }
+    // Migração suave: se tem o storage antigo (só hidden), aproveita.
+    const legacy = window.localStorage.getItem(HIDDEN_ROWS_STORAGE_KEY)
+    if (legacy) {
+      const parsed = JSON.parse(legacy)
+      if (Array.isArray(parsed)) {
+        return normalizeRowsConfig({ order: ALL_ROW_KEYS, hidden: parsed.filter((k): k is string => typeof k === "string") })
+      }
+    }
+    return DEFAULT_ROWS_CONFIG
   } catch {
-    return new Set()
+    return DEFAULT_ROWS_CONFIG
   }
 }
 
-function writeHiddenRows(rows: Set<string>) {
+function writeRowsConfig(config: ColumnPickerConfig) {
   if (typeof window === "undefined") return
   try {
-    window.localStorage.setItem(HIDDEN_ROWS_STORAGE_KEY, JSON.stringify([...rows]))
+    window.localStorage.setItem(ROWS_CONFIG_STORAGE_KEY, JSON.stringify(config))
   } catch {
     // ignore quota / privacy mode errors
   }
@@ -120,7 +159,7 @@ interface WorkCompareDrawerProps {
   ids: string[]
   onClear: () => void
   onRemoveId: (id: string) => void
-  scoreThresholds: ScoreColorThresholds | null
+  scoreThresholds: ColumnThresholds | null
 }
 
 export function WorkCompareDrawer({
@@ -135,7 +174,8 @@ export function WorkCompareDrawer({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [diffOnly, setDiffOnly] = useState(false)
-  const [hiddenRows, setHiddenRows] = useState<Set<string>>(() => readHiddenRows())
+  const [rowsConfig, setRowsConfig] = useState<ColumnPickerConfig>(() => readRowsConfig())
+  const hiddenRows = useMemo(() => new Set(rowsConfig.hidden), [rowsConfig.hidden])
   const idsKey = ids.join(",")
 
   useEffect(() => {
@@ -162,26 +202,19 @@ export function WorkCompareDrawer({
     }
   }, [open, idsKey, ids])
 
-  const toggleRow = (key: string) =>
-    setHiddenRows((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      writeHiddenRows(next)
-      return next
-    })
-
-  const resetRows = () => {
-    const next = new Set<string>()
-    writeHiddenRows(next)
-    setHiddenRows(next)
+  const updateRowsConfig = (next: ColumnPickerConfig) => {
+    const normalized = normalizeRowsConfig(next)
+    setRowsConfig(normalized)
+    writeRowsConfig(normalized)
   }
+
+  const resetRows = () => updateRowsConfig(DEFAULT_ROWS_CONFIG)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="h-[92vh] max-h-[92vh] gap-0 overflow-hidden p-0"
+        className="h-screen max-h-screen gap-0 overflow-hidden p-0"
         showCloseButton={false}
       >
         <SheetHeader className="flex flex-row items-center justify-between gap-2 border-b bg-card/80 px-4 py-3">
@@ -196,10 +229,14 @@ export function WorkCompareDrawer({
             )}
           </SheetTitle>
           <div className="flex items-center gap-2">
-            <CompareRowPicker
-              hiddenRows={hiddenRows}
-              onToggle={toggleRow}
+            <ColumnPicker
+              columns={COMPARE_ROW_COLUMN_DEFS}
+              groupLabels={COMPARE_ROW_GROUP_LABELS}
+              config={rowsConfig}
+              onChange={updateRowsConfig}
               onReset={resetRows}
+              triggerLabel="Linhas"
+              triggerIcon={<Rows3 className="h-3.5 w-3.5" />}
             />
             {works.length >= 2 && (
               <Button
@@ -247,6 +284,7 @@ export function WorkCompareDrawer({
               scoreThresholds={scoreThresholds}
               diffOnly={diffOnly}
               hiddenRows={hiddenRows}
+              rowOrder={rowsConfig.order}
             />
           )}
         </div>
@@ -255,99 +293,30 @@ export function WorkCompareDrawer({
   )
 }
 
-function CompareRowPicker({
-  hiddenRows,
-  onToggle,
-  onReset,
-}: {
-  hiddenRows: Set<string>
-  onToggle: (key: string) => void
-  onReset: () => void
-}) {
-  const visibleCount = TOTAL_ROW_COUNT - hiddenRows.size
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
-          <Rows3 className="h-3.5 w-3.5" />
-          Linhas
-          <span className="rounded-full bg-muted/70 px-1.5 py-0 text-[10px] font-medium tabular-nums text-muted-foreground">
-            {visibleCount}/{TOTAL_ROW_COUNT}
-          </span>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        className="flex w-72 flex-col p-3 max-h-[var(--radix-popover-content-available-height)]"
-      >
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Linhas visíveis
-          </p>
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={onReset}
-            className="h-6 gap-1 text-[10px] text-muted-foreground hover:text-foreground"
-          >
-            <RotateCcw className="h-3 w-3" />
-            Padrão
-          </Button>
-        </div>
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-          {COMPARE_ROW_GROUPS.map((group) => {
-            const groupVisibleCount = group.rows.filter(
-              (r) => !hiddenRows.has(r.key)
-            ).length
-            const allVisible = groupVisibleCount === group.rows.length
-            return (
-              <div key={group.id} className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-                    {group.label}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // Toggle all in group: if any visible → hide all; else show all
-                      for (const r of group.rows) {
-                        const isCurrentlyHidden = hiddenRows.has(r.key)
-                        if (allVisible && !isCurrentlyHidden) onToggle(r.key)
-                        if (!allVisible && isCurrentlyHidden) onToggle(r.key)
-                      }
-                    }}
-                    className="text-[10px] text-muted-foreground/70 hover:text-foreground"
-                  >
-                    {allVisible ? "ocultar todos" : "mostrar todos"}
-                  </button>
-                </div>
-                <div className="space-y-0.5">
-                  {group.rows.map((row) => {
-                    const id = `compare-row-${row.key}`
-                    const checked = !hiddenRows.has(row.key)
-                    return (
-                      <label
-                        key={row.key}
-                        htmlFor={id}
-                        className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-muted/60"
-                      >
-                        <Checkbox
-                          id={id}
-                          checked={checked}
-                          onCheckedChange={() => onToggle(row.key)}
-                        />
-                        <span className="truncate">{row.label}</span>
-                      </label>
-                    )
-                  })}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </PopoverContent>
-    </Popover>
-  )
+/**
+ * Identifica os critérios com maior amplitude (max - min) entre as obras
+ * comparadas. Útil pra um sumário "O que diferencia" no topo do drawer —
+ * o usuário foca direto nos eixos onde as obras de fato divergem.
+ */
+function getMaxAmplitudeCriteria(
+  works: CompareWork[],
+  threshold = 1.5
+): Array<{ slug: string; max: number; min: number; amplitude: number }> {
+  if (works.length < 2) return []
+  const results: Array<{ slug: string; max: number; min: number; amplitude: number }> = []
+  const slugs = works[0].criteria.map((c) => c.slug)
+  for (const slug of slugs) {
+    const values = works
+      .map((w) => w.criteria.find((c) => c.slug === slug)?.score)
+      .filter((v): v is number => v != null)
+    if (values.length < 2) continue
+    const max = Math.max(...values)
+    const min = Math.min(...values)
+    const amplitude = max - min
+    if (amplitude >= threshold) results.push({ slug, max, min, amplitude })
+  }
+  results.sort((a, b) => b.amplitude - a.amplitude)
+  return results.slice(0, 3)
 }
 
 function getUniqueBestWorst(
@@ -385,14 +354,28 @@ function getUniqueBestWorst(
 interface CompareGridProps {
   works: CompareWork[]
   onRemoveId: (id: string) => void
-  scoreThresholds: ScoreColorThresholds | null
+  scoreThresholds: ColumnThresholds | null
   diffOnly: boolean
   hiddenRows: Set<string>
+  /** Ordem das linhas escolhida pelo usuário (lista achatada de keys).
+   *  Aplicada às seções iteradas (Notas, Critérios). */
+  rowOrder: string[]
 }
 
 type SectionKey = "notas" | "criterios" | "tags-generos"
 
 const NEGATIVE_CRITERIA = new Set<string>(["drama", "tragedy"])
+
+/** Reordena `items` pra refletir a posição da sua key em `order`. Items
+ *  cuja key não está em `order` vão pro fim mantendo ordem canônica. */
+function sortByOrder<T>(items: T[], getKey: (item: T) => string, order: string[]): T[] {
+  const index = new Map(order.map((k, i) => [k, i]))
+  return [...items].sort((a, b) => {
+    const ai = index.get(getKey(a)) ?? Number.MAX_SAFE_INTEGER
+    const bi = index.get(getKey(b)) ?? Number.MAX_SAFE_INTEGER
+    return ai - bi
+  })
+}
 
 function CompareGrid({
   works,
@@ -400,6 +383,7 @@ function CompareGrid({
   scoreThresholds,
   diffOnly,
   hiddenRows,
+  rowOrder,
 }: CompareGridProps) {
   const n = works.length
   const [collapsed, setCollapsed] = useState<Set<SectionKey>>(new Set())
@@ -458,25 +442,50 @@ function CompareGrid({
     formatScore?: (v: number) => string
     thresholds: ScoreColorThresholds | null
     renderExtra?: (w: CompareWork) => React.ReactNode
+    wrapScore?: (node: React.ReactNode, w: CompareWork) => React.ReactNode
   }> = [
     {
       key: "score:finalScore",
       label: "Final",
       get: (w) => w.finalScore,
-      thresholds: scoreThresholds,
+      thresholds: scoreThresholds?.final ?? null,
     },
     {
       key: "score:calcScore",
       label: "IA",
       get: (w) => w.calcScore,
-      thresholds: scoreThresholds,
+      thresholds: scoreThresholds?.calc ?? null,
     },
     {
       key: "score:predictedScore",
       label: "Prevista",
       get: (w) => w.predictedScore,
       stub: (w) => w.predictedIsStub,
-      thresholds: scoreThresholds,
+      thresholds: scoreThresholds?.predicted ?? null,
+    },
+    {
+      // IA Rk usa escala 0–100 (diferente dos demais 0–10). thresholds=null
+      // pula o ScoreBadge colorido por percentil; formatScore mostra inteiro.
+      // wrapScore anexa tooltip com a justificativa do LLM no hover do score
+      // (em vez de inline, que ocupava muito espaço vertical).
+      key: "score:alignmentScore",
+      label: "IA Rk.",
+      get: (w) => w.alignmentScore,
+      thresholds: null,
+      formatScore: (v) => `${Math.round(v)}/100`,
+      wrapScore: (node, w) =>
+        w.alignmentJustification ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-2">
+                {node}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-sm whitespace-pre-wrap text-xs leading-relaxed">
+              {w.alignmentJustification}
+            </TooltipContent>
+          </Tooltip>
+        ) : node,
     },
     {
       key: "score:manualScore",
@@ -499,10 +508,12 @@ function CompareGrid({
     },
   ]
 
-  const visibleNotasRows = notasRowDefs.filter((r) =>
+  const orderedNotasRows = sortByOrder(notasRowDefs, (r) => r.key, rowOrder)
+  const visibleNotasRows = orderedNotasRows.filter((r) =>
     isRowVisible(r.key, () => allEqualScore(r.get))
   )
-  const visibleCritSlugs = CRITERION_SLUGS.filter((slug) =>
+  const orderedCritSlugs = sortByOrder([...CRITERION_SLUGS], (slug) => `crit:${slug}`, rowOrder)
+  const visibleCritSlugs = orderedCritSlugs.filter((slug) =>
     isRowVisible(`crit:${slug}`, () =>
       allEqualScore((w) => w.criteria.find((c) => c.slug === slug)?.score ?? null)
     )
@@ -518,6 +529,11 @@ function CompareGrid({
 
   return (
     <TooltipProvider delayDuration={150}>
+      {/* "O que diferencia" — sumário independente acima do grid, alinhado
+          com o padding lateral pra não conflitar visualmente com as colunas. */}
+      <div className="mx-auto w-fit px-4 pt-4 sm:px-6">
+        <DifferentialsSummary works={works} />
+      </div>
       <div
         className="mx-auto grid w-fit gap-x-2 px-4 py-4 text-sm sm:px-6"
         style={gridStyle}
@@ -594,6 +610,7 @@ function CompareGrid({
                 formatScore={row.formatScore}
                 getStub={row.stub}
                 renderExtra={row.renderExtra}
+                wrapScore={row.wrapScore}
               />
             )
           })}
@@ -651,6 +668,48 @@ function CompareGrid({
   )
 }
 
+function DifferentialsSummary({ works }: { works: CompareWork[] }) {
+  const diffs = getMaxAmplitudeCriteria(works)
+  if (diffs.length === 0) return null
+  return (
+    <div className="rounded-lg border border-amber-300/40 bg-amber-50/40 p-3 dark:bg-amber-500/5">
+      <div className="mb-2 flex items-baseline gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Onde elas se diferenciam
+        </span>
+        <span className="text-[10px] text-muted-foreground">
+          critérios com pelo menos 1.5 ponto de diferença entre maior e menor nota
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {diffs.map((d) => {
+          const info = CRITERIA_INFO[d.slug]
+          return (
+            <div
+              key={d.slug}
+              className="flex flex-col gap-0.5 rounded-md border border-amber-300/40 bg-background/60 px-2.5 py-1.5 text-xs"
+              title={info?.description ?? undefined}
+            >
+              <div className="flex items-center gap-1.5">
+                <span>{info?.emoji}</span>
+                <span className="font-medium">{info?.name ?? d.slug}</span>
+                <span className="ml-1 rounded-sm bg-amber-200/60 px-1 font-mono text-[10px] font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
+                  diferença {d.amplitude.toFixed(1)}
+                </span>
+              </div>
+              <div className="font-mono text-[11px] text-muted-foreground">
+                menor {d.min.toFixed(1)}
+                <span className="mx-1.5 opacity-60">→</span>
+                maior {d.max.toFixed(1)}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function CompareHeaderCell({
   work,
   onRemove,
@@ -660,14 +719,25 @@ function CompareHeaderCell({
 }) {
   return (
     <div className="sticky top-0 z-20 relative flex flex-col gap-2 rounded-lg border border-border/80 bg-card/95 backdrop-blur-md p-2.5 shadow-sm transition-all hover:bg-card">
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label="Remover da comparação"
-        className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-border/40 bg-background/50 text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
+      <div className="absolute right-1.5 top-1.5 flex items-center gap-1">
+        <Link
+          href={`/titles/${work.slug}`}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Abrir página da obra"
+          className="flex h-6 w-6 items-center justify-center rounded-full border border-border/40 bg-background/50 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground hover:border-primary/40"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Remover da comparação"
+          className="flex h-6 w-6 items-center justify-center rounded-full border border-border/40 bg-background/50 text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
       <div className="flex gap-2.5">
         <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded-md border bg-muted/40">
           {work.coverUrl ? (
@@ -689,10 +759,9 @@ function CompareHeaderCell({
             href={`/titles/${work.slug}`}
             target="_blank"
             rel="noreferrer"
-            className="group inline-flex items-start gap-1 pr-6 text-sm font-semibold leading-tight hover:underline"
+            className="block pr-14 text-sm font-semibold leading-tight hover:underline"
           >
             <span className="line-clamp-3">{work.title}</span>
-            <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-50 group-hover:opacity-100" />
           </Link>
           <SynopsisButton
             synopsis={work.synopsis}
@@ -734,12 +803,14 @@ function SynopsisButton({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="mt-2 inline-flex h-6 items-center gap-1 rounded-md border bg-background/60 px-2 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:bg-background hover:text-foreground"
+          className="mt-2 inline-flex flex-col items-start gap-0 rounded-md border bg-background/60 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:bg-background hover:text-foreground"
         >
-          <BookOpen className="h-3 w-3" />
-          Sinopse
+          <span className="inline-flex items-center gap-1">
+            <BookOpen className="h-3 w-3" />
+            Sinopse
+          </span>
           {synopsisQuality && (
-            <span className="ml-0.5 text-rose-600">{synopsisQuality}</span>
+            <span className="text-rose-600 leading-tight">{synopsisQuality}</span>
           )}
         </button>
       </PopoverTrigger>
@@ -949,6 +1020,9 @@ interface ScoreRowProps {
   formatScore?: (v: number) => string
   getStub?: (w: CompareWork) => boolean
   renderExtra?: (w: CompareWork) => React.ReactNode
+  /** Quando definido, envolve o elemento do score com este wrapper — útil
+   *  pra anexar tooltip/popover (ex.: justificativa do IA Rk no hover). */
+  wrapScore?: (node: React.ReactNode, w: CompareWork) => React.ReactNode
 }
 
 function ScoreRow({
@@ -961,6 +1035,7 @@ function ScoreRow({
   formatScore,
   getStub,
   renderExtra,
+  wrapScore,
 }: ScoreRowProps) {
   return (
     <>
@@ -969,21 +1044,23 @@ function ScoreRow({
         const score = getScore(w)
         const variant =
           index === bestIndex ? "best" : index === worstIndex ? "worst" : undefined
+        const baseScoreNode = formatScore && score != null ? (
+          <span className="font-mono text-sm font-semibold">
+            {formatScore(score)}
+          </span>
+        ) : (
+          <ScoreBadge
+            score={score}
+            size="sm"
+            thresholds={thresholds}
+            showStub={getStub?.(w) ?? false}
+          />
+        )
+        const scoreNode = wrapScore ? wrapScore(baseScoreNode, w) : baseScoreNode
         return (
           <CompareCell key={w.id} highlightVariant={variant} horizontalAlign="center">
             <div className="flex items-baseline gap-2">
-              {formatScore && score != null ? (
-                <span className="font-mono text-sm font-semibold">
-                  {formatScore(score)}
-                </span>
-              ) : (
-                <ScoreBadge
-                  score={score}
-                  size="sm"
-                  thresholds={thresholds}
-                  showStub={getStub?.(w) ?? false}
-                />
-              )}
+              {scoreNode}
               {renderExtra?.(w)}
             </div>
           </CompareCell>

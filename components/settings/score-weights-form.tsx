@@ -16,13 +16,30 @@ import { cn } from "@/lib/utils"
 
 interface ScoreWeightsFormProps {
   weights: ScoreWeight[]
+  /**
+   * Quando true, o form é exibido como read-only — usado pelo modo "pesos
+   * automáticos" pra mostrar os valores inferidos sem permitir edição.
+   * Sliders ficam disabled; botão "Salvar" some.
+   */
+  readOnly?: boolean
+  /**
+   * Confidence por slug (apenas usado quando readOnly=true). Mostra um chip
+   * "alta/média/baixa" ao lado do peso pra sinalizar quão estável é a
+   * inferência via bootstrap.
+   */
+  confidenceBySlug?: Record<string, "high" | "medium" | "low">
 }
 
+// Bounds generosos: sugestões da IA preservam a magnitude total dos pesos
+// (rescaleSuggestions em lib/ml/weight-inference.ts), então valores >20 são
+// esperados depois de aplicar sugestões. Manter o schema apertado faz
+// "Salvar" virar no-op silencioso.
+const WEIGHT_RANGE = 100
 const schema = z.object({
   weights: z.array(
     z.object({
       slug: z.string(),
-      weight: z.number().min(-20).max(20),
+      weight: z.number().min(-WEIGHT_RANGE).max(WEIGHT_RANGE),
       threshold: z.number().min(0).max(10).nullable().optional(),
     })
   ),
@@ -30,7 +47,7 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>
 
-export function ScoreWeightsForm({ weights }: ScoreWeightsFormProps) {
+export function ScoreWeightsForm({ weights, readOnly = false, confidenceBySlug }: ScoreWeightsFormProps) {
   const sorted = useMemo(
     () => [...weights].sort((a, b) => a.display_order - b.display_order),
     [weights]
@@ -42,10 +59,11 @@ export function ScoreWeightsForm({ weights }: ScoreWeightsFormProps) {
     control,
     register,
     handleSubmit,
-    formState: { isSubmitting, isDirty },
+    formState: { isSubmitting, isDirty, errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: {
+    // Re-sincroniza quando os pesos do servidor mudam (ex.: alternar auto on/off).
+    values: {
       weights: sorted.map((w) => ({
         slug: w.slug,
         weight: w.weight,
@@ -83,17 +101,29 @@ export function ScoreWeightsForm({ weights }: ScoreWeightsFormProps) {
             index={i}
             control={control}
             register={register}
+            readOnly={readOnly}
+            confidence={confidenceBySlug?.[w.slug]}
           />
         ))}
       </div>
 
-      <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        Ao salvar, todas as obras ativas serão recalculadas automaticamente.
-      </div>
+      {!readOnly && (
+        <>
+          <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            Ao salvar, todas as obras ativas serão recalculadas automaticamente.
+          </div>
 
-      <Button type="submit" disabled={isSubmitting || !isDirty}>
-        {isSubmitting ? "Salvando e recalculando..." : "Salvar pesos"}
-      </Button>
+          <Button type="submit" disabled={isSubmitting || !isDirty}>
+            {isSubmitting ? "Salvando e recalculando..." : "Salvar pesos"}
+          </Button>
+
+          {errors.weights && (
+            <p className="text-xs text-destructive">
+              Algum peso está fora da faixa permitida (±{WEIGHT_RANGE}). Ajuste os valores e tente novamente.
+            </p>
+          )}
+        </>
+      )}
 
       <ConfirmDialog
         open={confirmOpen}
@@ -112,9 +142,28 @@ interface CriterionWeightCardProps {
   index: number
   control: ReturnType<typeof useForm<FormValues>>["control"]
   register: ReturnType<typeof useForm<FormValues>>["register"]
+  readOnly?: boolean
+  confidence?: "high" | "medium" | "low"
 }
 
-function CriterionWeightCard({ slug, index, control, register }: CriterionWeightCardProps) {
+function ConfidenceChip({ confidence }: { confidence: "high" | "medium" | "low" }) {
+  const map = {
+    high: { label: "alta", cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300" },
+    medium: { label: "média", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-300" },
+    low: { label: "baixa", cls: "bg-muted/60 text-muted-foreground" },
+  }
+  const { label, cls } = map[confidence]
+  return (
+    <span
+      className={cn("inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide", cls)}
+      title={`Confiança da inferência: ${label}. Razão sinal/ruído via bootstrap.`}
+    >
+      {label}
+    </span>
+  )
+}
+
+function CriterionWeightCard({ slug, index, control, register, readOnly, confidence }: CriterionWeightCardProps) {
   const info = CRITERIA_INFO[slug]
 
   return (
@@ -159,6 +208,7 @@ function CriterionWeightCard({ slug, index, control, register }: CriterionWeight
                 </p>
                 <p className="truncate font-mono text-[10px] text-muted-foreground">{slug}</p>
               </div>
+              {readOnly && confidence && <ConfidenceChip confidence={confidence} />}
               <span
                 className={cn(
                   "inline-flex shrink-0 items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
@@ -172,13 +222,18 @@ function CriterionWeightCard({ slug, index, control, register }: CriterionWeight
             </div>
             <Slider
               value={[weight]}
-              min={-20}
-              max={20}
+              min={-WEIGHT_RANGE}
+              max={WEIGHT_RANGE}
               step={0.5}
+              disabled={readOnly}
               onValueChange={(v) => weightField.onChange(v[0])}
-              className={cn("px-1", isNegative && "[&_[data-slot=slider-range]]:bg-rose-500 [&_[data-slot=slider-thumb]]:border-rose-500")}
+              className={cn(
+                "px-1",
+                isNegative && "[&_[data-slot=slider-range]]:bg-rose-500 [&_[data-slot=slider-thumb]]:border-rose-500",
+                readOnly && "pointer-events-none opacity-70",
+              )}
             />
-            <ThresholdField index={index} control={control} weight={weight} />
+            <ThresholdField index={index} control={control} weight={weight} readOnly={readOnly} />
           </div>
         )
       }}
@@ -190,10 +245,12 @@ function ThresholdField({
   index,
   control,
   weight,
+  readOnly,
 }: {
   index: number
   control: ReturnType<typeof useForm<FormValues>>["control"]
   weight: number
+  readOnly?: boolean
 }) {
   const isNegative = weight < 0
   return (
@@ -217,14 +274,18 @@ function ThresholdField({
                 min={0}
                 max={10}
                 value={field.value ?? ""}
+                disabled={readOnly}
                 onChange={(e) => {
                   const v = e.target.value
                   field.onChange(v === "" ? null : Number(v))
                 }}
                 placeholder="—"
-                className="h-6 w-14 rounded-md border border-input/80 bg-background/70 px-1.5 text-center font-mono text-xs tabular-nums outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                className={cn(
+                  "h-6 w-14 rounded-md border border-input/80 bg-background/70 px-1.5 text-center font-mono text-xs tabular-nums outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30",
+                  readOnly && "opacity-70 cursor-not-allowed",
+                )}
               />
-              {hasThreshold && (
+              {hasThreshold && !readOnly && (
                 <button
                   type="button"
                   onClick={() => field.onChange(null)}

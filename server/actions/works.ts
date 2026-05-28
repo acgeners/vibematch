@@ -886,6 +886,7 @@ export interface CreateWorkAiMeta {
   modelName: string
   promptVersion: string
   confidence: number | null
+  summary?: string | null
 }
 
 async function persistNewWork(
@@ -983,7 +984,7 @@ async function persistNewWork(
         status: "completed",
         model_name: aiMeta?.modelName ?? "external-ai-criteria",
         prompt_version: aiMeta?.promptVersion ?? "external-import",
-        summary: "Notas e explicações geradas durante a busca externa do título.",
+        summary: aiMeta?.summary?.trim() || "Notas e explicações geradas durante a busca externa do título.",
         confidence: aiMeta?.confidence ?? null,
         raw_response: { criteriaJustifications: aiJustifications },
         input_hash: aiMeta?.inputHash ?? null,
@@ -1326,7 +1327,7 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
         status: "completed",
         model_name: aiMeta?.modelName ?? "external-ai-criteria",
         prompt_version: aiMeta?.promptVersion ?? "external-import-update",
-        summary: "Notas e explicações geradas durante a busca externa do título.",
+        summary: aiMeta?.summary?.trim() || "Notas e explicações geradas durante a busca externa do título.",
         confidence: aiMeta?.confidence ?? null,
         raw_response: { criteriaJustifications: aiJustifications },
         input_hash: aiMeta?.inputHash ?? null,

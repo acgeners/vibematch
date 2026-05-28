@@ -62,14 +62,26 @@ function RerankSingleWorkButton({ workId }: { workId: string }) {
  * se `workId` está presente, vira um botão "Rankear" que dispara o re-rank
  * inline pra aquela obra.
  */
+/** Payload enriquecido (sub-fase 2.3.A — Smart Shortlist v2+). */
+export interface AlignmentPayload {
+  confidence?: number
+  risks?: string[]
+  similar_loved?: string[]
+  similar_avoided?: string[]
+  review_quotes?: string[]
+  mood_fit?: number
+}
+
 export function AlignmentScoreCell({
   score,
   justification,
   workId,
+  payload,
 }: {
   score: number | null
   justification: string | null
   workId?: string
+  payload?: AlignmentPayload | null
 }) {
   if (score == null) {
     if (workId) {
@@ -98,22 +110,93 @@ export function AlignmentScoreCell({
     : score >= 40 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
     : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
 
+  const hasEnriched = Boolean(
+    payload && (
+      payload.confidence != null ||
+      (payload.risks?.length ?? 0) > 0 ||
+      (payload.similar_loved?.length ?? 0) > 0 ||
+      (payload.similar_avoided?.length ?? 0) > 0 ||
+      (payload.review_quotes?.length ?? 0) > 0 ||
+      payload.mood_fit != null
+    ),
+  )
+
+  // Confidence dot: indicador visual sutil ao lado do score. Verde = ≥0.75 (alta),
+  // âmbar = 0.5-0.75 (média), cinza = <0.5 (baixa). Omitido quando ausente.
+  const confidenceDot = payload?.confidence != null
+    ? payload.confidence >= 0.75 ? "bg-emerald-500"
+    : payload.confidence >= 0.5 ? "bg-amber-500"
+    : "bg-slate-400"
+    : null
+
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
           <span
             className={cn(
-              "inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-medium cursor-help tabular-nums",
+              "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs font-medium cursor-help tabular-nums",
               colorClass,
             )}
           >
+            {confidenceDot && (
+              <span
+                className={cn("h-1.5 w-1.5 rounded-full", confidenceDot)}
+                title={`Confiança: ${(payload!.confidence! * 100).toFixed(0)}%`}
+              />
+            )}
             {Math.round(score)}
           </span>
         </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-[320px] space-y-1">
-          <p className="font-semibold text-xs">IA Re-rank: {Math.round(score)}/100</p>
+        <TooltipContent side="top" className="max-w-[400px] space-y-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-semibold text-xs">IA Re-rank: {Math.round(score)}/100</p>
+            {payload?.confidence != null && (
+              <span className="text-[10px] text-muted-foreground">
+                Confiança: <span className="font-semibold text-foreground">{(payload.confidence * 100).toFixed(0)}%</span>
+              </span>
+            )}
+          </div>
+          {payload?.mood_fit != null && (
+            <p className="text-[10px] text-muted-foreground">
+              Fit com mood: <span className="font-mono font-semibold text-foreground">{(payload.mood_fit * 100).toFixed(0)}%</span>
+            </p>
+          )}
           {justification && <p className="text-xs leading-relaxed">{justification}</p>}
+          {hasEnriched && (
+            <div className="border-t border-border/40 pt-1.5 space-y-1.5">
+              {payload?.risks && payload.risks.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-500">⚠ Riscos</p>
+                  <ul className="mt-0.5 text-xs space-y-0.5">
+                    {payload.risks.map((r, i) => (
+                      <li key={i} className="leading-snug">• {r}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {payload?.review_quotes && payload.review_quotes.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Reviews citadas</p>
+                  <ul className="mt-0.5 text-xs italic space-y-0.5">
+                    {payload.review_quotes.map((q, i) => (
+                      <li key={i} className="leading-snug">&ldquo;{q}&rdquo;</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {payload?.similar_loved && payload.similar_loved.length > 0 && (
+                <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                  Lembra de obras que você ama ({payload.similar_loved.length} similar{payload.similar_loved.length > 1 ? "es" : ""})
+                </p>
+              )}
+              {payload?.similar_avoided && payload.similar_avoided.length > 0 && (
+                <p className="text-[10px] text-rose-600 dark:text-rose-400">
+                  Lembra de obras que você não curtiu ({payload.similar_avoided.length})
+                </p>
+              )}
+            </div>
+          )}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -121,10 +204,22 @@ export function AlignmentScoreCell({
 }
 
 /**
- * Cell pra `personal_fit` (0–1) — barra horizontal com valor numérico.
- * NULL vira "—" (perfil de gosto é stub ou não há dados de critério).
+ * Cell pra `personal_fit` — agora mostra o PERCENTIL dentro da biblioteca
+ * (0-100) em vez do valor cru. O personal_fit cru tem teto matemático
+ * baixo (~0.55 mesmo nas melhores obras), então "55%" lê como mediano
+ * quando na verdade é o topo. Percentil comunica "Top X%" e é mais honesto.
+ *
+ * Fallback pro valor cru quando percentile é NULL (pré-migration 071 ou
+ * perfil stub).
  */
-export function AlignmentCell({ value }: { value: number | null }) {
+export function AlignmentCell({
+  value,
+  percentile,
+}: {
+  value: number | null
+  /** Percentil (0-100) dentro da biblioteca. Quando presente, usado como display. */
+  percentile?: number | null
+}) {
   if (value == null) {
     return (
       <TooltipProvider>
@@ -141,9 +236,24 @@ export function AlignmentCell({ value }: { value: number | null }) {
     )
   }
 
-  const pct = Math.round(value * 100)
+  // Display preference: percentile (mais honesto) > valor cru (fallback)
+  const displayPct = percentile != null ? Math.round(percentile) : Math.round(value * 100)
+  const rawPct = Math.round(value * 100)
   const color =
-    pct >= 75 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-500" : pct >= 25 ? "bg-orange-500" : "bg-slate-400"
+    displayPct >= 75 ? "bg-emerald-500"
+    : displayPct >= 50 ? "bg-amber-500"
+    : displayPct >= 25 ? "bg-orange-500"
+    : "bg-slate-400"
+
+  // Top label quando estamos exibindo percentile
+  const topLabel =
+    percentile == null ? null
+    : percentile >= 95 ? "Top 5%"
+    : percentile >= 90 ? "Top 10%"
+    : percentile >= 75 ? "Top 25%"
+    : percentile >= 50 ? "Acima da mediana"
+    : percentile >= 25 ? "Abaixo da mediana"
+    : "Bottom 25%"
 
   return (
     <TooltipProvider>
@@ -151,73 +261,33 @@ export function AlignmentCell({ value }: { value: number | null }) {
         <TooltipTrigger asChild>
           <div className="inline-flex items-center gap-1.5 cursor-help">
             <div className="h-1.5 w-12 rounded-full bg-muted overflow-hidden">
-              <div className={cn("h-full transition-all", color)} style={{ width: `${pct}%` }} />
+              <div className={cn("h-full transition-all", color)} style={{ width: `${displayPct}%` }} />
             </div>
-            <span className="font-mono text-xs tabular-nums">{pct}%</span>
+            <span className="font-mono text-xs tabular-nums">{displayPct}%</span>
           </div>
         </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-[260px]">
-          Alinhamento determinístico (0–100%) com seu perfil de gosto: combina tags amadas/evitadas
-          (40%), faixas ideais de critério (30%) e consistência geral (30%).
+        <TooltipContent side="top" className="max-w-[280px] space-y-1">
+          {percentile != null ? (
+            <>
+              <p className="text-xs font-semibold">{topLabel} da sua biblioteca</p>
+              <p className="text-[11px] text-muted-foreground">
+                Alinhamento bruto: <span className="font-mono">{rawPct}%</span> (escala 0–55% típica).
+                Percentil mostra onde essa obra está RELATIVO ao resto da sua biblioteca — mais
+                honesto que o valor cru, que tem teto matemático baixo.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-xs">Alinhamento determinístico com seu perfil de gosto.</p>
+              <p className="text-[11px] text-muted-foreground">
+                Combina tags amadas/evitadas (40%), faixas ideais de critério (30%) e consistência
+                geral (30%). Re-rode o cálculo pra ganhar a versão percentil (Top X%).
+              </p>
+            </>
+          )}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )
 }
 
-/**
- * Cell pra `final_score_confidence` (0–1) — badge tri-state Alta/Média/Baixa.
- * NULL vira "—" (calibração insuficiente).
- */
-export function ConfidenceCell({ value }: { value: number | null }) {
-  if (value == null) {
-    return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="font-mono text-sm text-muted-foreground cursor-help">—</span>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-[280px]">
-            Calibração insuficiente — não há manual_scores o bastante (mínimo 20) pra estimar o erro
-            do modelo.
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    )
-  }
-
-  const pct = Math.round(value * 100)
-  let label: string
-  let colorClasses: string
-  if (value >= 0.75) {
-    label = "Alta"
-    colorClasses = "bg-emerald-500/15 text-emerald-700 border-emerald-500/30 dark:text-emerald-300"
-  } else if (value >= 0.5) {
-    label = "Média"
-    colorClasses = "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-300"
-  } else {
-    label = "Baixa"
-    colorClasses = "bg-slate-500/15 text-slate-700 border-slate-500/30 dark:text-slate-300"
-  }
-
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span
-            className={cn(
-              "inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-medium cursor-help tabular-nums",
-              colorClasses,
-            )}
-          >
-            {label} · {pct}%
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-[280px]">
-          Confiança na Nota.Final: combina o erro médio do modelo (RMSE) com a distância dessa obra
-          em relação ao que ele já viu treinado. Stub (poucos dados) ou outlier reduz a confiança.
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  )
-}

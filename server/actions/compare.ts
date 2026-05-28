@@ -34,6 +34,9 @@ export interface CompareWork {
   manualScore: number | null
   platformAvg: number | null
   totalVotes: number
+  alignmentScore: number | null
+  alignmentJustification: string | null
+  alignmentAt: string | null
   genres: string[]
   tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null }>
   criteria: CompareCriterionEntry[]
@@ -130,6 +133,9 @@ function mapWorkToCompare(
     manualScore: (work as { manual_score?: number | null }).manual_score ?? null,
     platformAvg: work.calculated_scores?.platform_avg ?? null,
     totalVotes: work.calculated_scores?.total_votes ?? 0,
+    alignmentScore: work.calculated_scores?.alignment_score ?? null,
+    alignmentJustification: work.calculated_scores?.alignment_justification ?? null,
+    alignmentAt: work.calculated_scores?.alignment_at ?? null,
     genres: work.genres ?? [],
     tags,
     criteria: CRITERION_SLUGS.map((slug) => ({

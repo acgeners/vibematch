@@ -31,9 +31,53 @@ const RANKING_TOOL: Anthropic.Messages.Tool = {
           type: "object",
           properties: {
             work_id: { type: "string" },
-            alignment_score: { type: "number", minimum: 0, maximum: 100 },
-            justification: { type: "string" },
-            top_match_factors: { type: "array", items: { type: "string" } },
+            alignment_score: {
+              type: "number",
+              minimum: 0,
+              maximum: 100,
+              description: "Score de alinhamento 0–100. Use a escala inteira.",
+            },
+            justification: {
+              type: "string",
+              description: "1–2 frases citando tags/critérios/quotes que sustentam o score.",
+            },
+            top_match_factors: {
+              type: "array",
+              items: { type: "string" },
+              description: "2–4 chips curtos (tags, critérios, padrões).",
+            },
+            confidence: {
+              type: "number",
+              minimum: 0,
+              maximum: 1,
+              description: "Quanto VOCÊ confia neste alignment_score. 0.9+ = match óbvio; 0.5–0.8 = razoável; <0.5 = pouca evidência.",
+            },
+            risks: {
+              type: "array",
+              items: { type: "string" },
+              description: "1–3 razões pra NÃO ler (mesmo se match alto). Ex.: tag evitada presente, MeanPostScore baixo em similares.",
+            },
+            similar_loved: {
+              type: "array",
+              items: { type: "string" },
+              description: "1–2 work_id de obras que o user AMA (manual_score ≥ 8) e que esta lembra. Use APENAS IDs reais do bloco profile/biblioteca.",
+            },
+            similar_avoided: {
+              type: "array",
+              items: { type: "string" },
+              description: "1–2 work_id de obras que o user AVALIOU MAL (manual_score ≤ 5) e que esta lembra.",
+            },
+            review_quotes: {
+              type: "array",
+              items: { type: "string" },
+              description: "1–2 quotes curtos das reviews fornecidas (entre aspas) que sustentam o match ou expõem risco. NÃO INVENTAR.",
+            },
+            mood_fit: {
+              type: "number",
+              minimum: 0,
+              maximum: 1,
+              description: "Fit com o mood/contexto do user. APENAS quando houver CONTEXTO ADICIONAL na request — caso contrário, omita.",
+            },
           },
           required: ["work_id", "alignment_score", "justification", "top_match_factors"],
         },
@@ -81,7 +125,10 @@ export async function rankCandidates(args: RankCandidatesArgs): Promise<RankingR
       client,
       {
         model: MODEL,
-        max_tokens: attempt === 0 ? 4000 : 5000,
+        // Mantém consistência com `rankFavorites` em service.ts — o output
+        // enriquecido (v2) por candidato é grande e o teto antigo cortava
+        // o mode_summary final em runs com ≥15 candidatos.
+        max_tokens: attempt === 0 ? 8000 : 12000,
         temperature: attempt === 0 ? 0.2 : 0,
         system: [
           { type: "text", text: RANKING_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },

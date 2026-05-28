@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useFieldArray, useForm, useWatch, type FieldPath } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
-import { titleToSlug } from "@/lib/utils"
+import { titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { dedupeSynopsisEntries, joinSynopsisBlocks, splitSynopsesFromText } from "@/lib/work-derived"
 import { workFormSchema } from "@/lib/validations/work.schema"
@@ -644,6 +644,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
   const yearValue = useWatch({ control, name: "year" })
   const yearEndValue = useWatch({ control, name: "year_end" })
   const totalChapters = useWatch({ control, name: "total_chapters" })
+  const chaptersReadValue = useWatch({ control, name: "chapters_read" })
   const alternativeTitlesValue = useWatch({ control, name: "alternative_titles" })
   const genresValue = useWatch({ control, name: "genres" })
   const tagsValue = useWatch({ control, name: "tags" })
@@ -866,7 +867,8 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
       return
     }
 
-    router.push(`/titles/${result.data?.id ?? duplicateResolution.existing.id}`)
+    const finalTitle = mergedValues.title || title
+    router.push(`/titles/${finalTitle ? titleToSlug(finalTitle) : (result.data?.id ?? duplicateResolution.existing.id)}`)
   }
 
   const handleExternalSelect = (data: ExternalWorkData) => {
@@ -1070,7 +1072,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
       }
       if (!workId && result.data?.id) {
         toast.warning(firstError ?? "Obra criada, mas houve um aviso ao finalizar.")
-        router.push(`/titles/${result.data.id}`)
+        router.push(`/titles/${values.title ? titleToSlug(values.title) : result.data.id}`)
         return
       }
       toast.error(firstError ?? "Erro ao salvar obra")
@@ -1934,18 +1936,30 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
 
             {hasProgress && (
               <div className="space-y-4 border-t pt-6">
-                <div className="max-w-[260px] space-y-1.5">
-                  <Label htmlFor="chapters_read">Capítulos lidos</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="chapters_read"
-                      type="number"
-                      min={0}
-                      {...register("chapters_read", { setValueAs: optionalNumber })}
-                    />
-                    <span className="text-muted-foreground">/</span>
+                <div className="flex flex-wrap items-end gap-4">
+                  <div className="max-w-[260px] space-y-1.5">
+                    <Label htmlFor="chapters_read">Capítulos lidos</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="chapters_read"
+                        type="number"
+                        min={0}
+                        {...register("chapters_read", { setValueAs: optionalNumber })}
+                      />
+                      <span className="text-muted-foreground">/</span>
+                      <div className="flex h-9 min-w-16 items-center justify-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">
+                        {typeof totalChapters === "number" && Number.isFinite(totalChapters) ? totalChapters : "?"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>% lido</Label>
                     <div className="flex h-9 min-w-16 items-center justify-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">
-                      {typeof totalChapters === "number" && Number.isFinite(totalChapters) ? totalChapters : "?"}
+                      {(() => {
+                        const pct = readingProgressPercent(chaptersReadValue, totalChapters)
+                        return pct != null ? `${pct}%` : "—"
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -2025,7 +2039,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
                   <Input
                     id="manual_score"
                     type="number"
-                    step={0.1}
+                    step={0.5}
                     min={0}
                     max={10}
                     placeholder="—"

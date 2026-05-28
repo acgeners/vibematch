@@ -27,7 +27,7 @@ export function RunDetailActions({ runId }: RunDetailActionsProps) {
       const res = await rerunRecommendationFromExistingAction(runId)
       if (res.error) setError(res.error)
       else if (res.data) {
-        router.push(`/recommendations/${res.data.runId}`)
+        router.push(`/recommendations/${res.data.runSlug}`)
         router.refresh()
       }
     })

@@ -91,6 +91,13 @@ export interface CalculatedScore {
   predicted_score: number | null
   predicted_is_stub: boolean
   final_score: number | null
+  /** L1 novo (single Ridge + decomposição). Migration 066. */
+  expected_score: number | null
+  expected_is_stub: boolean | null
+  /** Stage 1 da decomposição (perfil). Migration 068. */
+  expected_baseline: number | null
+  /** Stage 2 da decomposição (qualidade granular). Migration 068. */
+  expected_quality_adj: number | null
   mae_calc: number | null
   mae_predicted: number | null
   rmse_calc: number | null
@@ -98,6 +105,12 @@ export interface CalculatedScore {
   prediction_distance: number | null
   /** Alinhamento determinístico (0–1) com o TasteProfile atual. NULL quando perfil é stub. */
   personal_fit: number | null
+  /**
+   * Percentil (0–100) do personal_fit dentro da biblioteca. 95 = está nos
+   * 5% mais alinhados. UI mostra esse valor pra comunicar relativo, já que
+   * o personal_fit cru tem teto matemático baixo (~0.55). Migration 071.
+   */
+  personal_fit_percentile: number | null
   /** Confiança (0–1) na Nota.Final. NULL quando calibração é insuficiente. */
   final_score_confidence: number | null
   /** Predição via kNN sobre embeddings (Passo 5). NULL quando sem embedding/vizinhos. */
@@ -114,6 +127,18 @@ export interface CalculatedScore {
   alignment_run_id: string | null
   alignment_justification: string | null
   alignment_at: string | null
+  /**
+   * Payload enriquecido do consultor (sub-fase 2.3.A, prompt v2+). Campos
+   * opcionais — runs antigas (v1) ficam NULL.
+   */
+  alignment_payload: {
+    confidence?: number
+    risks?: string[]
+    similar_loved?: string[]
+    similar_avoided?: string[]
+    review_quotes?: string[]
+    mood_fit?: number
+  } | null
   formula_version: string
   calculated_at: string
 }
@@ -282,6 +307,56 @@ export interface FormulaConfig {
   } | null
   /** Quando true, Nota.Final usa stacker; quando false, inverse-variance legado. */
   stacker_enabled: boolean
+  /**
+   * Pesos do Ridge (Nota.Pr) com featureNames alinhados. NULL quando treino < 20
+   * (predictor é stub). Usado pra surfacing de feature importance na UI.
+   */
+  ridge_coefficients: {
+    featureNames: string[]
+    coefficients: number[]
+  } | null
+  /**
+   * Quando TRUE, recalculateAll usa pesos inferidos via weight-inference no GPT
+   * (em vez dos pesos manuais em score_weights). Pesos manuais ficam como
+   * fallback. Default TRUE. Migration 069.
+   */
+  score_weights_auto: boolean
+  /**
+   * Última inferência (snapshot). NULL quando treino insuficiente (< 20 obras
+   * com manual_score). Migration 069.
+   */
+  score_weights_inferred: {
+    suggestions: Array<{
+      slug: string
+      currentWeight: number
+      suggestedWeight: number
+      delta: number
+      confidence: "high" | "medium" | "low"
+      coefficient: number
+      stderr: number
+    }>
+    trainSize: number
+    alpha: number
+    cvMAE: number
+  } | null
+  /**
+   * Fase 1 da re-arquitetura (shadow mode): MAE/RMSE do `expected_score` (L1
+   * 2-stage). Convive com mae_calc/mae_predicted até validação MAE ≤
+   * 1.05× MAE Nota.Final. Migration 066/067.
+   */
+  mae_expected: number | null
+  rmse_expected: number | null
+  /** MAE só do Stage 1 (baseline) — diferença pra mae_expected mostra ganho do Stage 2. */
+  mae_expected_baseline: number | null
+  cv_mae_expected_stage1: number | null
+  cv_mae_expected_stage2: number | null
+  expected_stage2_train_size: number | null
+  expected_ridge_coefficients: {
+    featureNames: string[]
+    coefficients: number[]
+    stage2FeatureNames?: string[]
+    stage2Coefficients?: number[] | null
+  } | null
 }
 
 // ============================================================
@@ -402,6 +477,7 @@ export type WorkSortField =
   | "final_score"
   | "calc_score"
   | "predicted_score"
+  | "expected_score"
   | "title"
   | "publication_status"
   | "personal_status"

@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { ChevronDown, ChevronUp, ImageOff } from "lucide-react"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
-import { ScoreBadge, type ScoreColorThresholds } from "@/components/ui/score-badge"
+import { ScoreBadge, type ColumnThresholds, type ScoreColorThresholds } from "@/components/ui/score-badge"
 import {
   Tooltip,
   TooltipContent,
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
+import { FavoriteCell } from "@/components/titles/favorite-cell"
 import { AlignmentScoreCell } from "@/components/ranking/ranking-cells"
 import {
   getConfiguredWorkColumns,
@@ -29,7 +30,7 @@ import type { WorkWithRelations, WorkCover, CategoryScore } from "@/types/domain
 
 interface WorkHeatmapViewProps {
   works: WorkWithRelations[]
-  scoreThresholds: ScoreColorThresholds | null
+  scoreThresholds: ColumnThresholds | null
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
   namespace?: WorkColumnNamespace
@@ -124,16 +125,32 @@ const NON_CRITERION_LABELS: Record<string, string> = {
   final_score: "Final",
   calc_score: "IA",
   predicted_score: "Pr",
+  expected_score: "Esperada",
+  expected_baseline: "Perfil",
+  expected_quality_adj: "Δ Qual.",
   platform_avg: "Externa",
+  total_votes: "Votos",
   alignment_score: "IA Rk.",
+  synopsis_q: "Sinopse",
 }
 
 const NON_CRITERION_TOOLTIPS: Record<string, string> = {
   final_score: "Nota.Final",
   calc_score: "Nota.IA",
   predicted_score: "Nota.Pr",
+  expected_score: "Nota esperada (L1 single Ridge — substitui N.IA/N.Pr/N.Final)",
+  expected_baseline: "Stage 1 da decomposição — contribuição do perfil (sem qualidade)",
+  expected_quality_adj: "Stage 2 da decomposição — ajuste pelas 8 dimensões de qualidade",
   platform_avg: "Média externa",
-  alignment_score: "IA Re-rank (sob demanda)",
+  total_votes: "Total de votos nas plataformas",
+  alignment_score: "IA Re-rank — score 0-100 que ordena os resultados das ações 'Recomendar com IA'. Preenchido em batch pela run ou sob demanda pelo botão Rankear.",
+  synopsis_q: "Interesse na sinopse (♥ a ♥♥♥♥) — preenchido manualmente",
+}
+
+function formatVoteCount(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`
+  return String(count)
 }
 
 function pickPrimaryCover(covers: WorkCover[] | undefined): string | null {
@@ -164,9 +181,34 @@ function getValueForKey(work: WorkWithRelations, key: string): number | null {
   if (key === "final_score") return work.calculated_scores?.final_score ?? null
   if (key === "calc_score") return work.calculated_scores?.calc_score ?? null
   if (key === "predicted_score") return work.calculated_scores?.predicted_score ?? null
+  if (key === "expected_score") {
+    const v = work.calculated_scores?.expected_score
+    return v == null ? null : Number(v)
+  }
+  if (key === "expected_baseline") {
+    const v = work.calculated_scores?.expected_baseline
+    return v == null ? null : Number(v)
+  }
+  if (key === "expected_quality_adj") {
+    const v = work.calculated_scores?.expected_quality_adj
+    return v == null ? null : Number(v)
+  }
   if (key === "platform_avg") {
     const v = work.calculated_scores?.platform_avg
     return v == null ? null : Number(v)
+  }
+  if (key === "total_votes") {
+    const v = work.calculated_scores?.total_votes
+    // total_votes=0 é dado real ("sem votos contabilizados"), mantém o 0.
+    return v == null ? null : Number(v)
+  }
+  if (key === "synopsis_q") {
+    // String ♥..♥♥♥♥ → 1..4 pra permitir ordenação numérica.
+    // Render real continua via path próprio em ScoreCell.
+    const v = (work as { synopsis_quality?: string | null }).synopsis_quality?.trim()
+    if (!v) return null
+    const n = v.length // 1 char por coração
+    return n > 0 && n <= 4 ? n : null
   }
   if (key === "alignment_score") return work.calculated_scores?.alignment_score ?? null
   if (key.startsWith("crit_")) {
@@ -212,20 +254,9 @@ export function WorkHeatmapView({
 
   const { widths, setWidth } = useHeatmapColumnWidths(namespace)
 
-  // Mede o container e expande proporcionalmente as colunas de notas pra
-  // preencher todo o espaço horizontal disponível (mesmo padrão de work-table).
-  const tableWrapperRef = useRef<HTMLDivElement | null>(null)
-  const [tableContainerWidth, setTableContainerWidth] = useState(0)
-  useEffect(() => {
-    const el = tableWrapperRef.current
-    if (!el) return
-    const update = () => setTableContainerWidth(el.clientWidth)
-    update()
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-
+  // CSS-based fill: tabela = 100% do container, sem overflow no wrapper, pra
+  // manter o sticky header funcionando. Colunas encolhem proporcionalmente em
+  // telas estreitas (sem scroll horizontal).
   const naturalTitleWidth = widths["__title__"] ?? HEATMAP_TITLE_COL_WIDTH
   const naturalScoreWidth = (key: string) => widths[key] ?? HEATMAP_SCORE_COL_WIDTH
   const naturalScoreTotal = visibleScoreColumns.reduce(
@@ -233,15 +264,8 @@ export function WorkHeatmapView({
     0,
   )
   const naturalTotal = naturalTitleWidth + naturalScoreTotal
-  const extraSpace = Math.max(0, tableContainerWidth - naturalTotal)
-  // Distribui sobra apenas nas colunas de notas (coluna do título mantém largura).
-  const scoreScale =
-    extraSpace > 0 && naturalScoreTotal > 0
-      ? (naturalScoreTotal + extraSpace) / naturalScoreTotal
-      : 1
-  const scaledScoreWidth = (key: string) => Math.round(naturalScoreWidth(key) * scoreScale)
-  const scaledTotal =
-    naturalTitleWidth + visibleScoreColumns.reduce((sum, c) => sum + scaledScoreWidth(c.key), 0)
+  const widthPercent = (px: number): string =>
+    `${((px / naturalTotal) * 100).toFixed(4)}%`
 
   const [sortKey, setSortKey] = useState<string>("final_score")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
@@ -296,15 +320,18 @@ export function WorkHeatmapView({
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div ref={tableWrapperRef} className="overflow-auto rounded-lg border border-border/70 bg-card/80 shadow-sm">
+      <div className="rounded-lg border border-border/70 bg-card/80 shadow-sm">
         <p className="border-b bg-muted/40 px-3 py-1.5 text-[10px] text-muted-foreground">
           Heatmap ordena apenas as obras visíveis nesta página · use <span className="font-medium text-foreground">Colunas</span> para escolher as notas.
         </p>
-        <table className="border-collapse text-sm" style={{ tableLayout: "fixed", width: scaledTotal }}>
+        <table
+          className="border-collapse text-sm"
+          style={{ tableLayout: "fixed", width: "100%" }}
+        >
           <colgroup>
-            <col style={{ width: naturalTitleWidth }} />
+            <col style={{ width: widthPercent(naturalTitleWidth) }} />
             {visibleScoreColumns.map((col) => (
-              <col key={col.key} style={{ width: scaledScoreWidth(col.key) }} />
+              <col key={col.key} style={{ width: widthPercent(naturalScoreWidth(col.key)) }} />
             ))}
           </colgroup>
           <thead className="bg-muted/60">
@@ -322,15 +349,13 @@ export function WorkHeatmapView({
               </th>
               {visibleScoreColumns.map((col) => {
                 const hasSeparator = columnSeparators.has(col.key)
-                const w = scaledScoreWidth(col.key)
                 return (
                   <th
                     key={col.key}
                     className={cn(
-                      "group/header relative border-b px-1.5 py-2 text-center text-xs font-semibold text-muted-foreground",
+                      "group/header relative overflow-hidden border-b px-1.5 py-2 text-center text-xs font-semibold text-muted-foreground",
                       hasSeparator && "border-l-2 border-l-primary/30"
                     )}
-                    style={{ width: w }}
                   >
                     <SortableHeader
                       label={getHeaderLabel(col)}
@@ -370,6 +395,11 @@ export function WorkHeatmapView({
                           aria-label={`Selecionar ${work.title}`}
                         />
                       )}
+                      <FavoriteCell
+                        workId={work.id}
+                        workTitle={work.title}
+                        isFavorite={Boolean(work.is_favorite)}
+                      />
                       <WorkTitleLink
                         title={work.title}
                         workId={work.id}
@@ -402,7 +432,7 @@ export function WorkHeatmapView({
                       <td
                         key={col.key}
                         className={cn(
-                          "px-1 py-1.5 text-center",
+                          "overflow-hidden px-1 py-1.5 text-center",
                           hasSeparator && "border-l-2 border-l-primary/30"
                         )}
                       >
@@ -431,10 +461,30 @@ function ScoreCell({
 }: {
   col: WorkColumnDef
   work: WorkWithRelations
-  scoreThresholds: ScoreColorThresholds | null
+  scoreThresholds: ColumnThresholds | null
 }) {
-  const score = getValueForKey(work, col.key)
   const tooltipLabel = getTooltipLabel(col)
+
+  // synopsis_q é string (♥..♥♥♥♥), não número — render path próprio antes
+  // do fluxo numérico padrão.
+  if (col.key === "synopsis_q") {
+    const v = (work as { synopsis_quality?: string | null }).synopsis_quality?.trim()
+    if (!v) return <EmptyCell />
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center justify-center font-medium text-rose-600 dark:text-rose-300">
+            {v}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">
+          {tooltipLabel}: {v}
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
+
+  const score = getValueForKey(work, col.key)
 
   if (score == null) return <EmptyCell />
 
@@ -444,6 +494,13 @@ function ScoreCell({
     col.key === "calc_score" ||
     col.key === "predicted_score"
   ) {
+    const colThresholds: ScoreColorThresholds | null = scoreThresholds
+      ? col.key === "final_score"
+        ? scoreThresholds.final
+        : col.key === "calc_score"
+          ? scoreThresholds.calc
+          : scoreThresholds.predicted
+      : null
     return (
       <Tooltip>
         <TooltipTrigger asChild>
@@ -451,7 +508,7 @@ function ScoreCell({
             <ScoreBadge
               score={score}
               size="sm"
-              thresholds={scoreThresholds}
+              thresholds={colThresholds}
               showStub={
                 col.key === "predicted_score"
                   ? work.calculated_scores?.predicted_is_stub ?? false
@@ -480,11 +537,27 @@ function ScoreCell({
     )
   }
 
+  if (col.key === "total_votes") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="font-mono text-sm text-muted-foreground">
+            {formatVoteCount(score)}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">
+          {tooltipLabel}: {score.toLocaleString("pt-BR")}
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
+
   if (col.key === "alignment_score") {
     return (
       <AlignmentScoreCell
         score={score}
         justification={work.calculated_scores?.alignment_justification ?? null}
+        payload={work.calculated_scores?.alignment_payload ?? null}
       />
     )
   }

@@ -25,3 +25,11 @@ export function slugifyTagName(name: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
 }
+
+export function readingProgressPercent(
+  read: number | null | undefined,
+  total: number | null | undefined,
+): number | null {
+  if (read == null || total == null || total <= 0) return null
+  return Math.min(100, Math.max(0, Math.round((read / total) * 100)))
+}

@@ -14,10 +14,17 @@ interface RunHistoryTableProps {
   runs: CalibrationRunRow[]
 }
 
-function tokens(n: number | null): string {
+function fmt(n: number | null): string {
   if (!n) return "—"
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
   return n.toString()
+}
+
+function tokensWithCache(input: number | null, cache: number | null): string {
+  if (!input && !cache) return "—"
+  if (cache && input) return `${fmt(input)} (${fmt(cache)} cache)`
+  if (cache) return `— (${fmt(cache)} cache)`
+  return fmt(input)
 }
 
 export function RunHistoryTable({ runs }: RunHistoryTableProps) {
@@ -35,8 +42,7 @@ export function RunHistoryTable({ runs }: RunHistoryTableProps) {
             <TableHead className="text-right">Obras</TableHead>
             <TableHead className="text-right">Sugestões</TableHead>
             <TableHead className="text-right">Auto</TableHead>
-            <TableHead className="text-right">Input tok</TableHead>
-            <TableHead className="text-right">Cache</TableHead>
+            <TableHead className="text-right">Tokens</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -67,8 +73,7 @@ export function RunHistoryTable({ runs }: RunHistoryTableProps) {
               <TableCell className="text-right tabular-nums">{run.n_works_scanned}</TableCell>
               <TableCell className="text-right tabular-nums">{run.n_suggestions}</TableCell>
               <TableCell className="text-right tabular-nums">{run.n_auto_applied}</TableCell>
-              <TableCell className="text-right tabular-nums">{tokens(run.input_tokens)}</TableCell>
-              <TableCell className="text-right tabular-nums">{tokens(run.cache_read_tokens)}</TableCell>
+              <TableCell className="text-right tabular-nums whitespace-nowrap">{tokensWithCache(run.input_tokens, run.cache_read_tokens)}</TableCell>
             </TableRow>
           ))}
         </TableBody>

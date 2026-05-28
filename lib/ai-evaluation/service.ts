@@ -105,7 +105,7 @@ export interface AiEvaluationResponse {
 }
 
 export const MODEL = "claude-sonnet-4-6"
-export const PROMPT_VERSION = "v17"
+export const PROMPT_VERSION = "v18"
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
 export function parsePromptVersion(s: string | null | undefined): number | null {
@@ -200,6 +200,10 @@ REGRAS DE PONTUAÇÃO:
 - Se a evidência for ambígua ENTRE DUAS FAIXAS adjacentes, escolha a faixa inferior MAS use o valor MAIS ALTO dela (ex.: incerteza entre 4-6 e 7-8 → 6, não 4). Essa regra só vale ENTRE FAIXAS, nunca dentro de uma faixa escolhida.
 - Em cada justificativa, cite EXPLICITAMENTE qual faixa foi escolhida (ex: "Faixa 4-6 (Subplot): ..." ou "Faixa 7-8 (Core Romance): ...") e o motivo baseado em evidência.
 
+COERÊNCIA JUSTIFICATIVA × FAIXA (obrigatória):
+- A justificativa deve ser semanticamente consistente com a faixa escolhida. Se a justificativa contém expressões como "presença constante", "frequente", "recorrente", "um dos pilares", "elemento central", "abundante", a nota NÃO pode terminar em faixa 4-6 (pontual/subplot) — deve ser 7-8 ou 9-10. Se diz "pontual", "esporádico", "leve", "sutil", "subliminar", NÃO pode terminar em 7-8.
+- A regra de incerteza entre faixas adjacentes (acima) NÃO autoriza ancorar a nota em 5 quando a própria justificativa lista evidências claras de presença. Ela só vale pra borderline real — quando duas faixas adjacentes são ambas plausíveis a partir do mesmo conjunto de evidências. Não use essa regra como "atalho" pro neutro.
+
 INTERPRETAÇÃO DA ESCALA (regra crítica para evitar viés sistemático):
 - 5 é o ponto NEUTRO: significa "o critério está presente de forma reconhecível, mas não define a obra".
 - Notas 0-4 são RESERVADAS pra casos onde o critério é claramente ausente, irrelevante ou atua negativamente. Se há QUALQUER evidência (mesmo parcial, mesmo com ressalvas) de que o critério está presente, a nota deve ser ≥ 5.
@@ -214,6 +218,10 @@ PRINCÍPIO "AUSÊNCIA DE EVIDÊNCIA NÃO É EVIDÊNCIA DE AUSÊNCIA":
   · tag/gênero estruturalmente excludente do critério avaliado
 - "Drama domina o tom" indica drama PRESENTE, NÃO ausência de humor — critérios são independentes entre si. Não use a presença de um pra inferir a ausência de outro.
 - Quando faltam evidências em qualquer direção (positivas ou negativas), use 5 (neutro) e baixe a "confidence" pra refletir a incerteza. NÃO ancore no piso da escala só porque a evidência foi escassa ou silenciosa.
+
+SANITY CHECK CRUZADO (não-vinculante):
+- Combinações extremas em critérios opostos (humor 9-10 + tragedy 9-10; protagonist 9-10 + drama 0-3; romance 9-10 + couple_dynamics 0-3) são RARAS mas POSSÍVEIS. Antes de finalizar, releia a evidência e baixe a "confidence" se a combinação não estiver bem suportada por sinais explícitos.
+- NÃO force ajuste de score. Critérios continuam INDEPENDENTES — esta regra só pede mais cautela e confidence menor em combinações incomuns, nunca alteração do valor.
 
 EXCEÇÃO PRA CRITÉRIOS NEGATIVOS (drama, tragedy):
 - As regras "5 como piso" e "ausência de evidência" NÃO se aplicam. Pra esses, notas baixas (0-3) significam ausência saudável, não defeito. Drama 2 = "obra leve sem conflito intenso", o que é positivo. Silêncio sobre tragédia é razoavelmente interpretado como ausência (a maioria das obras não é trágica). Score esses pela rubrica normal sem viés de piso.
@@ -233,6 +241,7 @@ B) Texto informa ASPECTOS, nota informa QUALIDADE:
 - O TEXTO da review é evidência sobre QUAIS ASPECTOS a obra tem (romance, drama, ação, etc).
 - A NOTA é evidência sobre QUALIDADE percebida desses aspectos.
 - Crítica negativa NÃO derruba o critério. Exemplo: "Romance cliches 101 for dummies" CONFIRMA que romance é elemento central da obra (sobe romance), mesmo que o reviewer ache ruim. A nota baixa só sinaliza qualidade fraca, não ausência.
+- PROTAGONISTA MARCANTE mede presença e agência, NÃO qualidade percebida. Reviews chamando a FL/ML de "Mary Sue", "OP", "broken", "insensível", "inconsistente", "plana", "irritante", "fria", "blasé" ou descrevendo poderes excessivos/cabeça-dura/atitudes polêmicas CONFIRMAM presença forte (sobe protagonist), mesmo que o reviewer critique a execução. Tags como "Confident Female Lead", "Strong-Willed Female Lead", "Determined Female Lead", "Smart Female Lead", "Delusional Female Lead", "Yandere ML" são evidência DIRETA de protagonista marcante. Só vá para 0-3 quando reviews ou sinopse descrevem o protagonista como ESQUECÍVEL, GENÉRICO, SEM PERSONALIDADE RECONHECÍVEL ou SUBSTITUÍVEL por outro qualquer. "Personagem desagradável de acompanhar" continua sendo 7-8.
 
 C) Sinais INDIRETOS de presença — especialmente romance e couple_dynamics:
 Reviewers raramente dizem "esta obra tem romance forte". Sinalizam de forma indireta. Trate como evidência POSITIVA de presença (sobe o critério, mesmo que sem comentar qualidade):
@@ -303,14 +312,26 @@ REGRA OBRIGATÓRIA PARA FANTASY_NOBILITY:
 Obras ambientadas majoritariamente em corte, aristocracia, realeza, império, ducado, nobreza ou famílias nobres devem receber nota alta quando esse ambiente organiza a premissa e os conflitos. Se a obra combina nobreza/realeza com reencarnação, transmigração, isekai, regressão, segunda chance ou viagem no tempo, trate isso como evidência estrutural forte: em geral use 7-8, ou 9-10 se política nobre, magia, regras do mundo ou hierarquia social definirem a história. Não deixe em 4-6 quando a ambientação de nobreza/realeza for central.
 
 REGRA PARA ADULT_CONTENT:
-Pontue adult_content com base em sinopse, tags (especialmente do grupo "content_indicator"), gêneros e reviews compatíveis. Use 9-10 se sinopse, tags ou reviews indicarem smut/sexo explícito recorrente.
+Pontue adult_content com base em sinopse, tags (especialmente do grupo "content_indicator"), gêneros e reviews compatíveis. Use 9-10 se sinopse, tags ou reviews indicarem smut/sexo explícito recorrente. Marcador R19 disponível na obra é evidência POSITIVA de conteúdo adulto mesmo sem corroboração de tag/review — aplique o princípio "ausência de evidência ≠ ausência".
+
+REGRA PARA COUPLE_DYNAMICS (leia com atenção):
+Couple_dynamics é avaliada pelo RESULTADO EMOCIONAL do casal na obra, NÃO pela forma da dinâmica. Tags como BDSM, Femdom, Dom/Sub, Master-Pet, posse, ciúme intenso, "Yandere ML/FL", "Masochistic ML", "Submissive ML/FL", "Crazy ML/FL" NÃO determinam automaticamente 0-3. Antes de pontuar, avalie:
+(a) há CONSENSO mútuo entre os parceiros na dinâmica retratada?
+(b) ambos demonstram SATISFAÇÃO/prazer na dinâmica conforme o desenvolvimento?
+(c) o TOM geral indicado por sinopse/tags/reviews é romântico, cômico, fluffy — ou angustiante, sofrido, abusivo?
+Dinâmica não-tradicional + consensual + tom romântico/cômico/fluffy → faixa 7-8 ou 9-10 (relação saudável dentro da dinâmica que ambos escolheram).
+Reserve 0-3 para abuso real (manipulação contra a vontade do outro, sofrimento ativo do parceiro abusado, controle não-consensual) presente NO DESENVOLVIMENTO. Tropes "dark romance" com consenso retratado ou comédia BDSM ficam em 7-8/9-10, NÃO em 0-3.
 
 REGRA OBRIGATÓRIA PARA TRAGEDY (leia com atenção):
 Considere tragédia apenas o que ocorre NO DESENVOLVIMENTO (meio da obra), não o cenário inicial nem o background.
 EVITE citar na justificativa: infância, traumas passados, abandono/traição pré-história, premissa de revenge, regressão/segunda chance, transmigração ou qualquer fato anterior ao início da narrativa. Esses fatos podem indicar tom da obra, mas não devem ser usados como argumento direto para a nota de tragedy nem aparecer listados na justificativa.
 Se não houver eventos trágicos ativos no desenvolvimento, atribua nota baixa (0-3) e justifique com algo como "sem eventos trágicos ativos no desenvolvimento principal" — sem detalhar o background.
 Nota alta (7-10) só quando há perdas, separações, mortes, conflitos prolongados ou sofrimento que acontecem no meio da obra e impactam os personagens principais.
-Não infira tragédia ativa a partir de premissas tristes ou tropes de revenge/segunda chance.`
+Não infira tragédia ativa a partir de premissas tristes ou tropes de revenge/segunda chance.
+
+AVALIE O DESENVOLVIMENTO, NÃO O PONTO DE PARTIDA (generaliza pra couple_dynamics e romance):
+- COUPLE_DYNAMICS: se a premissa coloca FL e ML como inimigos, rivais, contratantes hostis, transmigrada/regressora com ressentimento, casamento arranjado tenso — ou qualquer dinâmica negativa INICIAL que evolui ao longo da obra para parceria/romance — avalie pelo ESTADO PREDOMINANTE do desenvolvimento, não pela cena inicial. "Enemies to lovers" não é couple_dynamics 0-3; é 7-8/9-10 quando o arco é eles se entendendo e amadurecendo a relação.
+- ROMANCE: "slow burn" é um TROPO POSITIVO indicando romance core com desenvolvimento gradual. NÃO rebaixe romance para subplot só por ser slow burn. Se a obra tem foco romântico claro (mesmo que desenvolvimento gradual), está em 7-8 (Core romance). Subplot (4-6) é sobre QUANTO FOCO recebe na narrativa, não sobre velocidade do desenvolvimento romântico.`
 
 // ============================================================================
 // Structured output: tool definition + Zod payload schema
@@ -552,10 +573,9 @@ const ADULT_TAG_GROUP = "content_indicator"
 
 /**
  * Detecção R19 em duas camadas:
- *  - "weak" → regex match em qualquer evidência (sugestiva).
+ *  - "weak" → regex match em qualquer evidência (sugestiva). Aciona piso 6.0.
  *  - "strong" → regex match + corroboração: tag do grupo content_indicator,
- *    gênero adulto explícito ou keyword adulta na sinopse.
- * Só "strong" aciona o enforcer de adult_content ≥ 7.
+ *    gênero adulto explícito ou keyword adulta na sinopse. Aciona piso 7.0.
  */
 function detectR19(req: AiEvaluationRequest): "none" | "weak" | "strong" {
   const synopsis = req.synopsis ?? ""
@@ -685,7 +705,7 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     )
   } else if (r19Level === "weak") {
     lines.push(
-      `\nMarcador R19 encontrado em alguma evidência, mas SEM corroboração de tag/gênero/termo adulto. Trate como pista fraca: considere ao pontuar adult_content, mas não force nota alta se as demais evidências não apoiarem.`
+      `\nMarcador R19 encontrado em alguma evidência, sem corroboração explícita de tag/gênero/termo adulto. A presença do marcador é, ainda assim, evidência POSITIVA de conteúdo adulto — reviews/tags podem simplesmente não ter mencionado. Aplique o princípio "ausência de evidência ≠ ausência": adult_content tem nota mínima 6.0. Pode subir mais conforme outras evidências.`
     )
   }
 
@@ -797,25 +817,31 @@ function enforceR19AdultContentRule(
   response: AiEvaluationResponse,
   req: AiEvaluationRequest
 ): AiEvaluationResponse {
-  if (!hasR19Marker(req)) return response
+  const level = detectR19(req)
+  if (level === "none") return response
+
+  const floor = level === "strong" ? 7 : 6
 
   return {
     ...response,
     scores: response.scores.map((score) => {
-      if (score.criterionSlug !== "adult_content" || score.suggestedScore >= 7) {
+      if (score.criterionSlug !== "adult_content" || score.suggestedScore >= floor) {
         return score
       }
+      const reason =
+        level === "strong"
+          ? `Marcador R19 corroborado por tag/gênero/termo adulto; pela regra obrigatória, adult_content não pode ficar abaixo de 7.0.`
+          : `Marcador R19 detectado na sinopse/tags/reviews; presença do marcador é evidência positiva de conteúdo adulto, adult_content não pode ficar abaixo de 6.0.`
       return {
         ...score,
-        suggestedScore: 7,
-        justification: score.justification.includes("R19")
-          ? score.justification
-          : `${score.justification} Marcador R19 encontrado na sinopse/tags; pela regra obrigatória, adult_content não pode ficar abaixo de 7.0.`,
+        suggestedScore: floor,
+        justification: score.justification.includes("R19") ? score.justification : `${score.justification} ${reason}`,
       }
     }),
     rawResponse: {
       ...rawObject(response.rawResponse),
       r19AdultContentRuleApplied: true,
+      r19AdultContentLevel: level,
     },
   }
 }

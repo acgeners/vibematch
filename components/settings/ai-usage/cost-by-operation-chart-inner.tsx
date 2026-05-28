@@ -1,0 +1,86 @@
+"use client"
+
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts"
+
+interface Props {
+  data: Array<{ operation: string; totalCostUsd: number; nCalls: number }>
+}
+
+const COLORS = [
+  "hsl(217 91% 60%)",
+  "hsl(271 76% 65%)",
+  "hsl(160 60% 50%)",
+  "hsl(35 92% 60%)",
+  "hsl(0 84% 65%)",
+  "hsl(199 89% 55%)",
+  "hsl(310 76% 65%)",
+]
+
+function formatUsd(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return "$0.00"
+  if (value < 0.005) return `$${value.toFixed(3)}`
+  return `$${value.toFixed(2)}`
+}
+
+export function CostByOperationChart({ data }: Props) {
+  const filtered = data.filter((d) => d.totalCostUsd > 0).slice(0, 8)
+  if (filtered.length === 0) {
+    return (
+      <div className="flex h-44 items-center justify-center text-xs text-muted-foreground">
+        Sem chamadas com custo nos últimos 30 dias.
+      </div>
+    )
+  }
+  return (
+    <div className="h-44 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart
+          data={filtered}
+          layout="vertical"
+          margin={{ top: 4, right: 16, bottom: 0, left: 0 }}
+        >
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} horizontal={false} />
+          <XAxis
+            type="number"
+            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            tickFormatter={formatUsd}
+          />
+          <YAxis
+            type="category"
+            dataKey="operation"
+            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            width={130}
+          />
+          <Tooltip
+            cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }}
+            contentStyle={{
+              background: "hsl(var(--popover))",
+              border: "1px solid hsl(var(--border))",
+              borderRadius: 8,
+              fontSize: 12,
+            }}
+            formatter={(value, _name, item) => {
+              const num = typeof value === "number" ? value : Number(value)
+              const calls = (item?.payload as { nCalls?: number } | undefined)?.nCalls ?? 0
+              return [`${formatUsd(num)} · ${calls} chamadas`, "Custo"]
+            }}
+          />
+          <Bar dataKey="totalCostUsd" radius={[0, 4, 4, 0]}>
+            {filtered.map((_, i) => (
+              <Cell key={i} fill={COLORS[i % COLORS.length]} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}

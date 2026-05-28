@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
@@ -40,9 +40,9 @@ import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { toast } from "sonner"
 import type { CategoryScore, WorkWithRelations, WorkCover } from "@/types/domain"
 import { CRITERION_SLUGS } from "@/types/domain"
-import { cn, titleToSlug } from "@/lib/utils"
+import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
-import { ScoreBadge, type ScoreColorThresholds } from "@/components/ui/score-badge"
+import { ScoreBadge, type ColumnThresholds } from "@/components/ui/score-badge"
 import {
   AiStatusBadge,
   PersonalStatusBadge,
@@ -65,7 +65,8 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { archiveWork, setFavoriteMany, toggleFavorite, unarchiveWork } from "@/server/actions/works"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
-import { AlignmentScoreCell } from "@/components/ranking/ranking-cells"
+import { FavoriteCell } from "@/components/titles/favorite-cell"
+import { AlignmentCell, AlignmentScoreCell } from "@/components/ranking/ranking-cells"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { WorkHeatmapView } from "@/components/titles/work-heatmap-view"
 import { WorkColumnPicker } from "@/components/titles/work-column-picker"
@@ -122,7 +123,7 @@ interface WorkTableProps {
   page: number
   pageSize: number
   searchQuery?: string
-  scoreThresholds?: ScoreColorThresholds | null
+  scoreThresholds?: ColumnThresholds | null
   selectedCompareIds?: string[]
   namespace?: WorkColumnNamespace
   basePath?: string
@@ -311,7 +312,17 @@ export function WorkTable({
           <WorkCompareDrawer
             open={drawerOpen}
             onOpenChange={setDrawerOpen}
-            ids={compareIds}
+            ids={(() => {
+              // Reordena pra refletir a ordem visível da tabela atual, não a
+              // ordem cronológica de cliques. IDs fora do pool visível (caso o
+              // usuário tenha filtrado depois de selecionar) vão pro fim.
+              const indexById = new Map(works.map((w, i) => [w.id, i]))
+              return [...compareIds].sort(
+                (a, b) =>
+                  (indexById.get(a) ?? Number.MAX_SAFE_INTEGER) -
+                  (indexById.get(b) ?? Number.MAX_SAFE_INTEGER)
+              )
+            })()}
             onClear={clearCompare}
             onRemoveId={(id) =>
               updateCompareIds(compareIds.filter((x) => x !== id))
@@ -491,7 +502,7 @@ function WorkCardsView({
   enableCompare = true,
 }: {
   works: WorkWithRelations[]
-  scoreThresholds: ScoreColorThresholds | null
+  scoreThresholds: ColumnThresholds | null
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
   enableCompare?: boolean
@@ -559,7 +570,7 @@ function WorkCardsView({
                 )}
                 {finalScore != null && (
                   <div className="absolute right-1.5 top-1.5">
-                    <ScoreBadge score={finalScore} size="sm" thresholds={scoreThresholds} />
+                    <ScoreBadge score={finalScore} size="sm" thresholds={scoreThresholds?.final} />
                   </div>
                 )}
                 <div className="absolute inset-x-0 bottom-0 flex items-end gap-1 bg-gradient-to-t from-black/75 via-black/30 to-transparent p-1.5">
@@ -573,7 +584,11 @@ function WorkCardsView({
                 </p>
                 {(work.chapters_read != null || work.total_chapters != null) && (
                   <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                    Caps {work.chapters_read ?? "?"}/{work.total_chapters ?? "?"}
+                    {(() => {
+                      const pct = readingProgressPercent(work.chapters_read, work.total_chapters)
+                      const base = `Caps ${work.chapters_read ?? "?"}/${work.total_chapters ?? "?"}`
+                      return pct != null ? `${base} · ${pct}%` : base
+                    })()}
                   </p>
                 )}
               </div>
@@ -604,7 +619,7 @@ function WorkListView({
   works: WorkWithRelations[]
   searchParams: ReturnType<typeof useSearchParams>
   router: ReturnType<typeof useRouter>
-  scoreThresholds: ScoreColorThresholds | null
+  scoreThresholds: ColumnThresholds | null
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
   namespace?: WorkColumnNamespace
@@ -637,12 +652,16 @@ function WorkListView({
     chapters_read: { field: "chapters_read", label: "Capítulos lidos" },
     year: { field: "year", label: "Ano" },
     synopsis_q: { field: "synopsis_q", label: "Sinopse" },
-    calc_score: { field: "calc_score", label: "Nota.IA" },
-    predicted_score: { field: "predicted_score", label: "Nota.Pr" },
-    final_score: { field: "final_score", label: "Nota.Final" },
+    expected_score: { field: "expected_score", label: "Nota esperada" },
+    expected_baseline: { field: "expected_baseline", label: "Perfil (Stage 1)" },
+    expected_quality_adj: { field: "expected_quality_adj", label: "Δ Qualidade" },
+    personal_fit: { field: "personal_fit", label: "Alinhamento" },
+    calc_score: { field: "calc_score", label: "[Legado] Nota.IA" },
+    predicted_score: { field: "predicted_score", label: "[Legado] Nota.Pr" },
+    final_score: { field: "final_score", label: "[Legado] Nota.Final" },
     platform_avg: { field: "platform_avg", label: "Nota.M" },
     total_votes: { field: "total_votes", label: "Votos" },
-    alignment_score: { field: "alignment_score", label: "IA Re-rank" },
+    alignment_score: { field: "alignment_score", label: "[Legado] IA Re-rank" },
     ai_status: { field: "ai_eval_status", label: "Status IA" },
     updated_at: { field: "updated_at", label: "Atualizado" },
     last_read_at: { field: "last_read_at", label: "Última leitura" },
@@ -668,11 +687,26 @@ function WorkListView({
 
   const columnRenderers: Record<string, (work: WorkWithRelations) => ReactNode> = {
     select: (work) => (
-      <Checkbox
-        checked={selectedIds.has(work.id)}
-        onCheckedChange={() => onToggleSelect(work.id)}
-        aria-label={`Selecionar ${work.title}`}
-        onClick={(e) => e.stopPropagation()}
+      <div
+        onClick={(e) => {
+          e.stopPropagation()
+          onToggleSelect(work.id)
+        }}
+        className="flex h-full w-full cursor-pointer items-center justify-center"
+      >
+        <Checkbox
+          checked={selectedIds.has(work.id)}
+          onCheckedChange={() => onToggleSelect(work.id)}
+          aria-label={`Selecionar ${work.title}`}
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
+    ),
+    fav: (work) => (
+      <FavoriteCell
+        workId={work.id}
+        workTitle={work.title}
+        isFavorite={Boolean(work.is_favorite)}
       />
     ),
     title: (work) => (
@@ -698,6 +732,14 @@ function WorkListView({
       ) : (
         <span className="text-muted-foreground">—</span>
       ),
+    chapters_progress: (work) => {
+      const pct = readingProgressPercent(work.chapters_read, work.total_chapters)
+      return pct != null ? (
+        <span className="text-sm font-mono tabular-nums">{pct}%</span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      )
+    },
     year: (work) => {
       const year = (work as { year?: number | null }).year
       return year != null ? (
@@ -720,7 +762,7 @@ function WorkListView({
       <ScoreBadge
         score={work.calculated_scores?.calc_score ?? null}
         size="sm"
-        thresholds={scoreThresholds}
+        thresholds={scoreThresholds?.calc}
       />
     ),
     predicted_score: (work) => (
@@ -728,14 +770,44 @@ function WorkListView({
         score={work.calculated_scores?.predicted_score ?? null}
         size="sm"
         showStub={work.calculated_scores?.predicted_is_stub ?? false}
-        thresholds={scoreThresholds}
+        thresholds={scoreThresholds?.predicted}
       />
     ),
     final_score: (work) => (
       <ScoreBadge
         score={work.calculated_scores?.final_score ?? null}
         size="sm"
-        thresholds={scoreThresholds}
+        thresholds={scoreThresholds?.final}
+      />
+    ),
+    expected_score: (work) => (
+      <ScoreBadge
+        score={work.calculated_scores?.expected_score ?? null}
+        size="sm"
+        showStub={work.calculated_scores?.expected_is_stub ?? false}
+        thresholds={scoreThresholds?.final}
+      />
+    ),
+    expected_baseline: (work) => {
+      const v = work.calculated_scores?.expected_baseline
+      return v != null ? (
+        <span className="font-mono text-sm text-muted-foreground">{Number(v).toFixed(2)}</span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      )
+    },
+    expected_quality_adj: (work) => {
+      const v = work.calculated_scores?.expected_quality_adj
+      if (v == null) return <span className="text-muted-foreground">—</span>
+      const num = Number(v)
+      const sign = num >= 0 ? "+" : ""
+      const cls = num >= 0 ? "text-emerald-500" : "text-rose-500"
+      return <span className={`font-mono text-sm ${cls}`}>{sign}{num.toFixed(2)}</span>
+    },
+    personal_fit: (work) => (
+      <AlignmentCell
+        value={work.calculated_scores?.personal_fit ?? null}
+        percentile={work.calculated_scores?.personal_fit_percentile ?? null}
       />
     ),
     platform_avg: (work) => {
@@ -759,6 +831,7 @@ function WorkListView({
         score={work.calculated_scores?.alignment_score ?? null}
         justification={work.calculated_scores?.alignment_justification ?? null}
         workId={work.id}
+        payload={work.calculated_scores?.alignment_payload ?? null}
       />
     ),
     ai_status: (work) => <AiStatusBadge status={work.ai_eval_status} />,
@@ -827,7 +900,7 @@ function WorkListView({
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href={`/titles/${work.id}/edit`} onClick={(e) => e.stopPropagation()}>
+              <Link href={`/titles/${slug}/edit`} onClick={(e) => e.stopPropagation()}>
                 <Pencil className="h-4 w-4 mr-2" />
                 Editar
               </Link>
@@ -917,40 +990,13 @@ function WorkListView({
     },
   })
 
-  const tableWrapperRef = useRef<HTMLDivElement | null>(null)
-  const [tableContainerWidth, setTableContainerWidth] = useState(0)
-
-  useEffect(() => {
-    const el = tableWrapperRef.current
-    if (!el) return
-    const update = () => setTableContainerWidth(el.clientWidth)
-    update()
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-
+  // CSS-based fill: tabela = 100% do container, sem overflow no wrapper, pra
+  // manter o sticky header funcionando. Colunas encolhem proporcionalmente em
+  // telas estreitas (sem scroll horizontal).
   const totalColumnSize = table.getTotalSize()
   const headerSizes = table.getHeaderGroups()[0]?.headers ?? []
-  const fixedColumnsSize = headerSizes
-    .filter((h) => h.column.id.startsWith("crit_"))
-    .reduce((sum, h) => sum + h.getSize(), 0)
-  const expandableSize = totalColumnSize - fixedColumnsSize
-  const extraSpace = Math.max(0, tableContainerWidth - totalColumnSize)
-  // Sobra (container > natural) é distribuída só para colunas não-crit; se só
-  // houver colunas crit, divide entre elas pra a tabela ainda preencher.
-  let expandableScale = 1
-  let critScale = 1
-  if (extraSpace > 0) {
-    if (expandableSize > 0) {
-      expandableScale = (expandableSize + extraSpace) / expandableSize
-    } else if (fixedColumnsSize > 0) {
-      critScale = (fixedColumnsSize + extraSpace) / fixedColumnsSize
-    }
-  }
-  const tableWidth = expandableSize * expandableScale + fixedColumnsSize * critScale
-  const scaledColumnWidth = (id: string, size: number) =>
-    Math.round(size * (id.startsWith("crit_") ? critScale : expandableScale))
+  const columnWidthPercent = (size: number): string =>
+    `${((size / totalColumnSize) * 100).toFixed(4)}%`
 
   const numericCenterClass = "text-center"
   const columnsByKey = useMemo(
@@ -1023,8 +1069,10 @@ function WorkListView({
 
   const isCenterAligned = (key: string) =>
     key === "select" ||
+    key === "fav" ||
     key === "chapters_total" ||
     key === "chapters_read" ||
+    key === "chapters_progress" ||
     key === "year" ||
     key === "synopsis_q" ||
     key === "calc_score" ||
@@ -1042,21 +1090,24 @@ function WorkListView({
   return (
     <TooltipProvider delayDuration={150}>
       {/* Desktop table */}
-      <div
-        ref={tableWrapperRef}
-        className="hidden rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur md:block"
-        style={{ width: tableWidth }}
-      >
-        <table className="w-full caption-bottom text-sm" style={{ width: tableWidth, tableLayout: "fixed" }}>
+      <div className="hidden w-full rounded-lg border border-border/70 bg-card/80 shadow-sm shadow-black/5 backdrop-blur md:block">
+        <table
+          className="caption-bottom text-sm"
+          style={{ width: "100%", tableLayout: "fixed" }}
+        >
+          <colgroup>
+            {headerSizes.map((h) => (
+              <col key={h.id} style={{ width: columnWidthPercent(h.getSize()) }} />
+            ))}
+          </colgroup>
           <TableHeader className="sticky -top-5 z-30 md:-top-7 [&_th]:bg-muted [&_tr:first-child_th:first-child]:rounded-tl-lg [&_tr:first-child_th:last-child]:rounded-tr-lg">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="border-b hover:bg-transparent">
                 {headerGroup.headers.map((header) => (
                   <TableHead
                     key={header.id}
-                    style={{ width: scaledColumnWidth(header.column.id, header.getSize()) }}
                     className={cn(
-                      "group/header relative h-11 whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-muted-foreground",
+                      "group/header relative h-11 overflow-hidden whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-muted-foreground",
                       isCenterAligned(header.column.id) && numericCenterClass,
                       header.column.id.startsWith("crit_") && "px-1"
                     )}
@@ -1105,13 +1156,13 @@ function WorkListView({
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
                       key={cell.id}
-                      style={{ width: scaledColumnWidth(cell.column.id, cell.column.getSize()) }}
                       className={cn(
-                        "h-14 py-3 align-middle",
+                        "h-14 overflow-hidden py-3 align-middle",
                         cell.column.id === "title" && "whitespace-normal",
                         cell.column.id.startsWith("crit_") && "px-1",
                         isCenterAligned(cell.column.id) && numericCenterClass
                       )}
+                      onClick={cell.column.id === "select" || cell.column.id === "fav" ? (e) => e.stopPropagation() : undefined}
                     >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
@@ -1180,7 +1231,7 @@ function WorkListView({
                 <ScoreBadge
                   score={work.calculated_scores?.final_score ?? null}
                   size="sm"
-                  thresholds={scoreThresholds}
+                  thresholds={scoreThresholds?.final}
                 />
               </div>
               <div className="flex flex-wrap gap-1">

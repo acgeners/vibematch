@@ -7,6 +7,18 @@ export interface ScoreColorThresholds {
   p_low: number
 }
 
+/**
+ * Thresholds calculados por coluna. Cada coluna (N.Final, N.IA, N.Pr) usa
+ * sua própria distribuição — então o mesmo percentil pode resultar em
+ * cutoffs diferentes em cada uma. Consumidores que exibem uma única nota
+ * devem fatiar o slice apropriado antes de passar pro ScoreBadge.
+ */
+export interface ColumnThresholds {
+  final: ScoreColorThresholds
+  calc: ScoreColorThresholds
+  predicted: ScoreColorThresholds
+}
+
 interface ScoreBadgeProps {
   score: number | null | undefined
   size?: "sm" | "md" | "lg"
@@ -33,10 +45,13 @@ function pickTier(
   const cuts = thresholds
     ? { top: thresholds.p_top, high: thresholds.p_high, mid: thresholds.p_mid, low: thresholds.p_low }
     : FIXED_CUTOFFS
-  if (score >= cuts.top) return "top"
-  if (score >= cuts.high) return "high"
-  if (score >= cuts.mid) return "mid"
-  if (score >= cuts.low) return "low"
+  // Arredonda pra 1 casa decimal antes de comparar — mesma granularidade do
+  // display (`score.toFixed(1)`), evita "flips invisíveis" perto da fronteira.
+  const s = Math.round(score * 10) / 10
+  if (s >= cuts.top) return "top"
+  if (s >= cuts.high) return "high"
+  if (s >= cuts.mid) return "mid"
+  if (s >= cuts.low) return "low"
   return "bottom"
 }
 

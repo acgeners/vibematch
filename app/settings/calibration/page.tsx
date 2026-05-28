@@ -1,7 +1,5 @@
 import { Sparkles } from "lucide-react"
 import { Header } from "@/components/layout/header"
-
-export const dynamic = "force-dynamic"
 import {
   Tabs,
   TabsContent,
@@ -19,6 +17,8 @@ import {
   loadSuggestions,
 } from "@/server/queries/calibration"
 import { createAdminClient } from "@/lib/supabase/admin"
+
+export const revalidate = 60
 
 async function countRatedWorks(): Promise<number> {
   const supabase = createAdminClient()

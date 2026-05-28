@@ -31,14 +31,14 @@ const CRITERION_LABELS: Record<string, string> = {
 }
 
 const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
-  { value: "final_score", label: "Nota.Final" },
+  { value: "expected_score", label: "Nota Esperada" },
   { value: "personal_fit", label: "Alinhamento" },
-  { value: "final_confidence", label: "Confiança" },
-  { value: "knn_score", label: "Nota.kNN" },
   { value: "alignment_score", label: "IA Re-rank" },
-  { value: "calc_score", label: "Nota.IA" },
-  { value: "pred_score", label: "Nota.Pr" },
   { value: "platform_avg", label: "Nota.M" },
+  { value: "final_score", label: "Nota.Final (Legado)" },
+  { value: "calc_score", label: "Nota.IA (Legado)" },
+  { value: "pred_score", label: "Nota.Pr (Legado)" },
+  { value: "knn_score", label: "Nota.kNN" },
   { value: "total_votes", label: "Votos" },
   { value: "title", label: "Título" },
   { value: "chapters", label: "Capítulos" },
@@ -63,13 +63,23 @@ interface SortLevel {
   dir: "asc" | "desc"
 }
 
+const SMART_CASCADE_SORT = "alignment_score:desc,personal_fit:desc,expected_score:desc"
+const CLASSIC_SORT = "final_score:desc"
+
 function parseSortLevels(raw: string | null): SortLevel[] {
-  const src = raw ?? "final_score:desc"
+  const src = raw ?? SMART_CASCADE_SORT
   return src.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
     const validField = SORTABLE_FIELDS.some((f) => f.value === field) ? field : "final_score"
     return { field: validField, dir: dir === "asc" ? "asc" : "desc" }
   })
+}
+
+function detectSortMode(raw: string | null): "smart" | "classic" | "custom" {
+  const normalized = raw ?? SMART_CASCADE_SORT
+  if (normalized === SMART_CASCADE_SORT) return "smart"
+  if (normalized === CLASSIC_SORT) return "classic"
+  return "custom"
 }
 
 function encodeSortLevels(levels: SortLevel[]): string {
@@ -83,10 +93,16 @@ interface SortLevelsSectionProps {
 }
 
 function SortLevelsSection({ searchParams, updateParams, className }: SortLevelsSectionProps) {
-  const levels = parseSortLevels(searchParams.get("sort"))
+  const rawSort = searchParams.get("sort")
+  const levels = parseSortLevels(rawSort)
+  const mode = detectSortMode(rawSort)
 
   const setLevels = (next: SortLevel[]) => {
     updateParams({ sort: encodeSortLevels(next) })
+  }
+
+  const applyPreset = (preset: "smart" | "classic") => {
+    updateParams({ sort: preset === "smart" ? SMART_CASCADE_SORT : CLASSIC_SORT })
   }
 
   const updateField = (i: number, field: string) => {
@@ -114,6 +130,41 @@ function SortLevelsSection({ searchParams, updateParams, className }: SortLevels
   return (
     <FilterSection title="Ordenação" className={className}>
       <div className="space-y-2">
+        <TooltipProvider delayDuration={200}>
+          <div className="flex items-center gap-1 rounded-lg border border-border/55 bg-background/45 p-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => applyPreset("smart")}
+                  className={`flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+                    mode === "smart" ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground"
+                  }`}
+                >
+                  Inteligente
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>IA Re-rank → Alinhamento → Nota.Final → Confiança</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => applyPreset("classic")}
+                  className={`flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+                    mode === "classic" ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground"
+                  }`}
+                >
+                  Por nota
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Apenas Nota.Final descendente (clássico)</TooltipContent>
+            </Tooltip>
+            {mode === "custom" && (
+              <span className="px-2 text-[10px] text-muted-foreground italic">customizado</span>
+            )}
+          </div>
+        </TooltipProvider>
         {levels.map((level, i) => (
           <div key={i} className="grid grid-cols-[1.25rem_minmax(0,1fr)_4.5rem_2rem] items-center gap-2 rounded-lg border border-border/55 bg-background/45 p-1.5">
             <span className="text-xs text-muted-foreground w-4 shrink-0 text-right">{i + 1}.</span>
@@ -1528,7 +1579,7 @@ export function RankingFilters({
                   <Input
                     type="number"
                     min={1}
-                    max={10000}
+                    max={30}
                     placeholder="Todas"
                     size="sm"
                     className="w-20"
@@ -1612,7 +1663,7 @@ export function RankingFilters({
                   label="Nota.Final"
                   minKey="min_final"
                   maxKey="max_final"
-                  step={0.1}
+                  step={0.5}
                   searchParams={searchParams}
                   updateParams={updateParams}
                 />
@@ -1621,7 +1672,7 @@ export function RankingFilters({
                   label="Nota.Pr"
                   minKey="min_pr"
                   maxKey="max_pr"
-                  step={0.1}
+                  step={0.5}
                   searchParams={searchParams}
                   updateParams={updateParams}
                 />
@@ -1630,7 +1681,7 @@ export function RankingFilters({
                   label="Nota.IA"
                   minKey="min_calc"
                   maxKey="max_calc"
-                  step={0.1}
+                  step={0.5}
                   searchParams={searchParams}
                   updateParams={updateParams}
                 />
@@ -1639,7 +1690,7 @@ export function RankingFilters({
                   label="Nota.M"
                   minKey="min_platform_avg"
                   maxKey="max_platform_avg"
-                  step={0.1}
+                  step={0.5}
                   searchParams={searchParams}
                   updateParams={updateParams}
                 />

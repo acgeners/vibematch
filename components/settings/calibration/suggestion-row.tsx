@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
-import { cn } from "@/lib/utils"
+import { cn, titleToSlug } from "@/lib/utils"
 import {
   acceptSuggestionAction,
   editSuggestionAction,
@@ -121,7 +121,7 @@ export function SuggestionRow({ suggestion }: SuggestionRowProps) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <Link
-              href={`/titles/${suggestion.work_id}`}
+              href={`/titles/${titleToSlug(suggestion.work_title)}`}
               className="line-clamp-1 text-sm font-medium hover:underline"
             >
               {suggestion.work_title}
@@ -169,7 +169,7 @@ export function SuggestionRow({ suggestion }: SuggestionRowProps) {
                     <p className="text-xs text-muted-foreground">Aceitar com valor customizado:</p>
                     <Input
                       type="number"
-                      step="0.1"
+                      step="0.5"
                       min="0"
                       max="10"
                       value={editValue}

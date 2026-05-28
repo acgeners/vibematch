@@ -23,10 +23,10 @@ import { fitRidgeCV, predictRidge, type RidgeModel } from "@/lib/ml/ridge"
 import { normalizeChapters } from "./chapters"
 
 const SINOPSE_MAP: Record<string, number> = {
-  "♥": 3,
-  "♥♥": 6,
+  "♥": 2,
+  "♥♥": 5,
   "♥♥♥": 8,
-  "♥♥♥♥": 10,
+  "♥♥♥♥": 13,
 }
 
 const NUMERIC_FEATURE_NAMES = [

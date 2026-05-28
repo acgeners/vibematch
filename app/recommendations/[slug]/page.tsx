@@ -16,7 +16,7 @@ import { formatRelativeDateTime } from "@/lib/date-utils"
 import type { RankedCandidate, TasteProfileRow } from "@/lib/ai-recommendation/types"
 import type { WorkWithRelations } from "@/types/domain"
 
-export const dynamic = "force-dynamic"
+export const revalidate = 300
 
 async function loadProfileById(id: string | null): Promise<TasteProfileRow | null> {
   if (!id) return null
@@ -43,12 +43,12 @@ async function loadProfileById(id: string | null): Promise<TasteProfileRow | nul
 }
 
 interface PageProps {
-  params: Promise<{ runId: string }>
+  params: Promise<{ slug: string }>
 }
 
 export default async function RunDetailPage({ params }: PageProps) {
-  const { runId } = await params
-  const run = await getRecommendationRun(runId)
+  const { slug } = await params
+  const run = await getRecommendationRun(slug)
   if (!run) notFound()
 
   const validRanked = run.ranked.filter((r) => r.work != null)

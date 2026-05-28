@@ -18,6 +18,16 @@ import {
   trainPredictor,
   type PredictionInput,
 } from "@/lib/calculations/prediction"
+import {
+  trainExpectedPredictor,
+  type ExpectedScoreInput,
+} from "@/lib/calculations/expected"
+import {
+  inferScoreWeights,
+  type WeightInferenceInput,
+  type CurrentWeight,
+  type WeightInferenceResult,
+} from "@/lib/ml/weight-inference"
 import { computeCalibration } from "@/lib/calculations/calibration"
 import { calculateFinalScoreConfidence } from "@/lib/calculations/confidence"
 import { fitStacker, type StackerCoefficients } from "@/lib/calculations/stacker"
@@ -31,12 +41,14 @@ import {
 } from "@/lib/ai-recommendation/personal-fit"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
-import type {
-  CategoryScoreMap,
-  ScoreWeight,
-  PlatformRating,
-  FormulaConfig,
-  SynopsisQuality,
+import {
+  CRITERION_SLUGS,
+  type CategoryScoreMap,
+  type CriterionSlug,
+  type ScoreWeight,
+  type PlatformRating,
+  type FormulaConfig,
+  type SynopsisQuality,
 } from "@/types/domain"
 
 const POST_SCORE_FIELDS = [
@@ -87,6 +99,8 @@ interface WorkComputed {
   tags: Array<{ name: string; group: string | null }>
   /** Média simples dos 8 post-reading-scores setados. `null` se nenhum. */
   meanPostScore: number | null
+  /** Map field → value pros 8 post-reading scores (input do Stage 2). */
+  postScores: Partial<Record<(typeof POST_SCORE_FIELDS)[number], number | null>>
   // sinais derivados do TasteProfile (preenchidos quando profile não é stub)
   lovedTagOverlap: number | null
   avoidedTagOverlap: number | null
@@ -100,7 +114,16 @@ interface WorkComputed {
   predictedScore: number | null
   predictionDistance: number | null
   finalScore: number | null
+  /** Shadow mode: L1 expected_score (2-stage: baseline + quality adj). */
+  expectedScore: number | null
+  /** Stage 1 puro (baseline a partir do perfil). */
+  expectedBaseline: number | null
+  /** Stage 2 puro (ajuste de qualidade ±). 0 quando Stage 2 não rodou. */
+  expectedQualityAdj: number | null
+  expectedIsStub: boolean
   personalFit: number | null
+  /** Percentil (0–100) do personalFit dentro da biblioteca (migration 071). */
+  personalFitPercentile: number | null
   finalScoreConfidence: number | null
   // kNN sobre embeddings (Passo 5) — null quando obra não tem embedding ou < 3 vizinhos rotulados
   knnScore: number | null
@@ -143,6 +166,12 @@ function buildWork(raw: RawWork): WorkComputed {
     ? postValues.reduce((a, b) => a + b, 0) / postValues.length
     : null
 
+  const postScores: Partial<Record<(typeof POST_SCORE_FIELDS)[number], number | null>> = {}
+  for (const field of POST_SCORE_FIELDS) {
+    const v = raw[field]
+    postScores[field] = v == null ? null : Number(v)
+  }
+
   return {
     id: raw.id,
     manualScore: raw.manual_score == null ? null : Number(raw.manual_score),
@@ -155,6 +184,7 @@ function buildWork(raw: RawWork): WorkComputed {
     totalVotes: sumVotes(platformRatings),
     tags,
     meanPostScore,
+    postScores,
     lovedTagOverlap: null,
     avoidedTagOverlap: null,
     criterionFitScore: null,
@@ -166,7 +196,12 @@ function buildWork(raw: RawWork): WorkComputed {
     predictedScore: null,
     predictionDistance: null,
     finalScore: null,
+    expectedScore: null,
+    expectedBaseline: null,
+    expectedQualityAdj: null,
+    expectedIsStub: true,
     personalFit: null,
+    personalFitPercentile: null,
     finalScoreConfidence: null,
     knnScore: null,
     knnNeighbors: null,
@@ -188,6 +223,29 @@ function buildPredictionInput(w: WorkComputed): PredictionInput {
     lovedTagOverlap: w.lovedTagOverlap,
     avoidedTagOverlap: w.avoidedTagOverlap,
     criterionFitScore: w.criterionFitScore,
+  }
+}
+
+/**
+ * Input pro L1 (expected_score) — arquitetura 2-stage:
+ *   - Stage 1 (baseline) usa features de perfil/tipo (incl. IA(n), tag overlaps,
+ *     CriterionFitScore — tudo que descreve "que tipo de obra é essa").
+ *   - Stage 2 (quality adj) usa os 8 post-reading scores granulares.
+ */
+function buildExpectedInput(w: WorkComputed): ExpectedScoreInput {
+  return {
+    categoryScores: w.categoryScores,
+    iaEvalNormalized: w.iaEvalNormalized,
+    platformAvg: w.platformAvg,
+    totalVotes: w.totalVotes,
+    totalChapters: w.totalChapters,
+    synopsisQuality: w.synopsisQuality,
+    observationAdjustment: w.observationAdjustment,
+    publicationStatus: w.publicationStatus,
+    lovedTagOverlap: w.lovedTagOverlap,
+    avoidedTagOverlap: w.avoidedTagOverlap,
+    criterionFitScore: w.criterionFitScore,
+    postScores: w.postScores,
   }
 }
 
@@ -268,11 +326,43 @@ export async function recalculateAll() {
   const pseudoVotesNotaM = interimCalibration.pseudoVotesNotaM ?? 1000
   const pseudoVotesBlend = interimCalibration.pseudoVotesBlend ?? 600
 
+  // ---------- 1b) Pesos automáticos (opcional) ----------
+  // Quando config.score_weights_auto = true (default desde migration 069),
+  // inferimos pesos via Ridge sobre os 9 critérios contra manual_score e
+  // usamos no lugar dos manuais persistidos em score_weights. Pesos manuais
+  // ficam preservados na tabela como fallback. Inferência cai pra os manuais
+  // automaticamente quando treino < 20 (isStub).
+  let effectiveWeights: ScoreWeight[] = weights
+  let inferenceSnapshot: WeightInferenceResult | null = null
+  if (config.score_weights_auto) {
+    const inferenceInputs: WeightInferenceInput[] = works
+      .filter((w) => w.manualScore != null)
+      .map((w) => ({
+        workId: w.id,
+        categoryScores: w.categoryScores,
+        manualScore: w.manualScore as number,
+      }))
+    const knownSlugs = new Set<string>(CRITERION_SLUGS as readonly string[])
+    const currentWeights: CurrentWeight[] = weights
+      .filter((w): w is ScoreWeight & { slug: CriterionSlug } => knownSlugs.has(w.slug))
+      .map((w) => ({ slug: w.slug as CriterionSlug, weight: w.weight }))
+    inferenceSnapshot = inferScoreWeights(inferenceInputs, currentWeights)
+    if (!inferenceSnapshot.isStub) {
+      const weightBySlug = new Map<string, number>(
+        inferenceSnapshot.suggestions.map((s) => [s.slug, s.suggestedWeight]),
+      )
+      effectiveWeights = weights.map((w) => ({
+        ...w,
+        weight: weightBySlug.get(w.slug) ?? w.weight,
+      }))
+    }
+  }
+
   // ---------- 2) GPT, GPT.N, Cps.N, Nota.M, Nota.Calc ----------
   let gptClampHits = 0
   const gptNegativeActivations: Record<string, number> = {}
   for (const w of works) {
-    const { value, diagnostics } = calculateGPTWithDiagnostics(w.categoryScores, weights)
+    const { value, diagnostics } = calculateGPTWithDiagnostics(w.categoryScores, effectiveWeights)
     w.iaEvalRaw = value
     w.iaEvalNormalized = normalizeGPT(value)
     w.chaptersNormalized = normalizeChapters(w.totalChapters)
@@ -349,6 +439,47 @@ export async function recalculateAll() {
     if (distance == null || distanceP95 == null || predictor.isStub) return 1
     if (distance <= distanceP95) return 1
     return Math.exp(-(distance - distanceP95) / distanceP95)
+  }
+
+  // ---------- 3c) L1 novo: expected_score (single Ridge + decomposição) ----------
+  // UM Ridge com 22 features (14 baseline + 8 quality granulares + Status one-hot)
+  // treinado conjuntamente contra manual_score. Decomposição "baseline + quality"
+  // é computada pós-hoc via atribuição linear (intercept + Σ coef × x por grupo).
+  // Mantém precisão do legacy (ratio ~0.98×) E dá interpretabilidade da
+  // contribuição de cada axis pra o waterfall.
+  const expectedTrainInputs = trainSet.map(buildExpectedInput)
+  const expectedAllInputs = works.map(buildExpectedInput)
+  const expectedPredictor = trainExpectedPredictor(expectedTrainInputs, trainTargets)
+  const expectedPredictions = expectedPredictor.predict(expectedAllInputs)
+  for (let i = 0; i < works.length; i++) {
+    const p = expectedPredictions[i]
+    works[i].expectedScore = p.expected
+    works[i].expectedBaseline = p.baseline
+    works[i].expectedQualityAdj = p.qualityAdj
+    works[i].expectedIsStub = expectedPredictor.isStub
+  }
+
+  // MAE in-sample decomposto: baseline-only, combined (baseline+qualityAdj).
+  // Mesma metodologia de mae_calc/mae_predicted pra comparação direta.
+  let maeExpected: number | null = null
+  let rmseExpected: number | null = null
+  let maeExpectedBaseline: number | null = null
+  if (!expectedPredictor.isStub && trainSet.length > 0) {
+    const trainPreds = expectedPredictor.predict(expectedTrainInputs)
+    let sumAbsCombined = 0
+    let sumSqCombined = 0
+    let sumAbsBaseline = 0
+    for (let i = 0; i < trainSet.length; i++) {
+      const manual = trainSet[i].manualScore as number
+      const diffCombined = trainPreds[i].expected - manual
+      const diffBaseline = trainPreds[i].baseline - manual
+      sumAbsCombined += Math.abs(diffCombined)
+      sumSqCombined += diffCombined * diffCombined
+      sumAbsBaseline += Math.abs(diffBaseline)
+    }
+    maeExpected = sumAbsCombined / trainSet.length
+    rmseExpected = Math.sqrt(sumSqCombined / trainSet.length)
+    maeExpectedBaseline = sumAbsBaseline / trainSet.length
   }
 
   // ---------- 3b) kNN sobre embeddings ----------
@@ -449,6 +580,32 @@ export async function recalculateAll() {
         categoryScores: w.categoryScores,
       })
     }
+
+    // Percentil dentro da biblioteca (migration 071). O personalFit cru tem
+    // teto matematicamente baixo (~0.55 mesmo nas melhores obras) — o
+    // percentil comunica "Top X%" que é mais honesto na UI.
+    const fits = works
+      .map((w) => w.personalFit)
+      .filter((v): v is number => v != null)
+      .sort((a, b) => a - b)
+    if (fits.length > 0) {
+      // Ranks por valor (primeira ocorrência) — tie-break por midpoint.
+      const rankByValue = new Map<number, number>()
+      for (let i = 0; i < fits.length; i++) {
+        if (!rankByValue.has(fits[i])) rankByValue.set(fits[i], i)
+      }
+      const countByValue = new Map<number, number>()
+      for (const v of fits) countByValue.set(v, (countByValue.get(v) ?? 0) + 1)
+
+      for (const w of works) {
+        if (w.personalFit == null) continue
+        const firstIdx = rankByValue.get(w.personalFit) ?? 0
+        const tieCount = countByValue.get(w.personalFit) ?? 1
+        // Midpoint percentile: (firstIdx + tieCount/2) / N × 100
+        const pct = ((firstIdx + tieCount / 2) / fits.length) * 100
+        w.personalFitPercentile = Math.round(pct * 100) / 100
+      }
+    }
   }
 
   // Recalibração final só pra reportar mae_final (não vai pro config)
@@ -488,12 +645,17 @@ export async function recalculateAll() {
     predicted_score: w.predictedScore,
     predicted_is_stub: predictor.isStub,
     final_score: w.finalScore,
+    expected_score: w.expectedScore,
+    expected_baseline: w.expectedBaseline,
+    expected_quality_adj: w.expectedQualityAdj,
+    expected_is_stub: w.expectedIsStub,
     mae_calc: newMaeCalc,
     mae_predicted: newMaePredicted,
     rmse_calc: newRmseCalc,
     rmse_predicted: newRmsePredicted,
     prediction_distance: w.predictionDistance,
     personal_fit: w.personalFit,
+    personal_fit_percentile: w.personalFitPercentile,
     final_score_confidence: w.finalScoreConfidence,
     knn_score: w.knnScore,
     knn_neighbors: w.knnNeighbors,
@@ -544,6 +706,38 @@ export async function recalculateAll() {
             cvMAE: stackerCoefs.cvMAE,
           }
         : null,
+      ridge_coefficients: predictor.isStub
+        ? null
+        : {
+            featureNames: predictor.featureNames,
+            coefficients: predictor.model.coefficients,
+          },
+      score_weights_inferred: inferenceSnapshot && !inferenceSnapshot.isStub
+        ? {
+            suggestions: inferenceSnapshot.suggestions,
+            trainSize: inferenceSnapshot.trainSize,
+            alpha: inferenceSnapshot.alpha,
+            cvMAE: inferenceSnapshot.cvMAE,
+          }
+        : null,
+      mae_expected: maeExpected,
+      rmse_expected: rmseExpected,
+      mae_expected_baseline: maeExpectedBaseline,
+      cv_mae_expected_stage1: expectedPredictor.isStub
+        ? null
+        : expectedPredictor.model.cvMAE,
+      // Sem treino sequencial: stage2 cvMAE não existe mais; valor de baseline
+      // serve de proxy de "quanto o modelo erra sem qualidade" no painel.
+      cv_mae_expected_stage2: null,
+      expected_stage2_train_size: expectedPredictor.isStub
+        ? null
+        : expectedPredictor.trainWithPostScores,
+      expected_ridge_coefficients: expectedPredictor.isStub
+        ? null
+        : {
+            featureNames: expectedPredictor.featureNames,
+            coefficients: expectedPredictor.model.coefficients,
+          },
       last_recalculated_at: new Date().toISOString(),
     })
     .eq("id", config.id)
@@ -558,6 +752,7 @@ export async function recalculateAll() {
     mae_final: finalCalibration.maeFinal,
     mae_calc: newMaeCalc,
     mae_predicted: newMaePredicted,
+    mae_expected: maeExpected,
     train_size: predictor.trainSize,
     total_works: works.length,
     stacker_coefficients: stackerCoefs
@@ -598,9 +793,20 @@ export async function recalculateAll() {
       maeCalc: newMaeCalc,
       maePredicted: newMaePredicted,
       maeFinal: finalCalibration.maeFinal,
+      maeExpected,
+      maeExpectedBaseline,
       rmseCalc: newRmseCalc,
       rmsePredicted: newRmsePredicted,
       rmseFinal: finalCalibration.rmseFinal,
+      rmseExpected,
+      expectedIsStub: expectedPredictor.isStub,
+      expectedTrainSize: expectedPredictor.trainSize,
+      expectedTrainWithPostScores: expectedPredictor.trainWithPostScores,
+      expectedFeatureNames: expectedPredictor.featureNames,
+      expectedCoefficients: expectedPredictor.model.coefficients,
+      expectedCvMAE: expectedPredictor.model.cvMAE,
+      expectedBaselineIndices: expectedPredictor.baselineIndices,
+      expectedQualityIndices: expectedPredictor.qualityIndices,
       pseudoVotesNotaM,
       pseudoVotesBlend,
       featureNames: predictor.featureNames,

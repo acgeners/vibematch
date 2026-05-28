@@ -50,6 +50,20 @@ export interface RankedWork {
   alignment_score: number
   justification: string
   top_match_factors: string[]
+  // ============ Sub-fase 2.3.A — Smart Shortlist enriquecido ============
+  // Todos opcionais (back-compat com prompt v1 e runs antigas).
+  /** Confiança do modelo no alignment_score, 0–1. */
+  confidence?: number | null
+  /** 1–3 razões pra NÃO ler (mesmo se match alto). */
+  risks?: string[]
+  /** work_id de obras amadas (manual_score ≥ 8) similares. */
+  similar_loved?: string[]
+  /** work_id de obras evitadas (manual_score ≤ 5) similares — alerta. */
+  similar_avoided?: string[]
+  /** 1–2 quotes curtos das reviews fornecidas que sustentam match/risco. */
+  review_quotes?: string[]
+  /** Fit com mood/contexto, 0–1. NULL/omit quando sem mood na request. */
+  mood_fit?: number | null
 }
 
 export interface RecommendationResult {
@@ -101,4 +115,154 @@ export interface CandidateWorkInput {
 export interface RankedCandidate extends RankedWork {
   work: CandidateWorkInput
   coverUrl: string | null
+}
+
+// ============================================================
+// Deep Dive (Sub-fase 2.3.C) — análise profunda por obra com
+// extended thinking. Tipos derivados do Zod schema em
+// deep-dive-schema.ts; mantidos aqui pra ficar próximo dos demais
+// tipos de recomendação e facilitar imports nos clientes.
+// ============================================================
+
+export interface DeepDiveTagItem {
+  tag: string
+  impact: number
+  why: string
+}
+
+export interface DeepDiveCriterionItem {
+  criterion: string
+  score: number
+  ideal_range: [number, number]
+  why: string
+}
+
+export interface DeepDiveNarrativeItem {
+  pattern: string
+  evidence: string
+}
+
+export interface DeepDiveAlignmentBreakdown {
+  tags_pros: DeepDiveTagItem[]
+  tags_cons: DeepDiveTagItem[]
+  criteria_pros: DeepDiveCriterionItem[]
+  criteria_cons: DeepDiveCriterionItem[]
+  narrative_match: DeepDiveNarrativeItem[]
+}
+
+export type DeepDiveAlignmentSignal = "positive" | "negative" | "neutral"
+
+export interface DeepDiveSimilarItem {
+  work_id: string
+  similarity_reason: string
+  user_score: number
+  alignment_signal: DeepDiveAlignmentSignal
+  /** Hidratado server-side pós-parse pra evitar roundtrip no render. */
+  title?: string
+  coverUrl?: string | null
+}
+
+export interface DeepDiveReviewSynthesis {
+  consensus: string
+  divergence: string
+  flags: string[]
+}
+
+export interface DeepDiveMoodMatch {
+  fit: number
+  why: string
+}
+
+export type DeepDiveReadWhen = "agora" | "guardar" | "evitar"
+
+export interface DeepDiveReadRecommendation {
+  when: DeepDiveReadWhen
+  reasoning: string
+  suggested_alternative_id?: string
+  /** Hidratado server-side junto com suggested_alternative_id. */
+  suggested_alternative_title?: string
+}
+
+/**
+ * Payload do tool `submit_deep_analysis` após validação Zod e
+ * filtragem de IDs inválidos. Persistido em `deep_dive_results.payload`.
+ */
+export interface DeepDivePayload {
+  match_score: number
+  confidence: number
+  one_liner: string
+  alignment_breakdown: DeepDiveAlignmentBreakdown
+  similar_in_library: DeepDiveSimilarItem[]
+  review_synthesis: DeepDiveReviewSynthesis
+  mood_match: DeepDiveMoodMatch | null
+  read_recommendation: DeepDiveReadRecommendation
+}
+
+/** Linha da tabela `deep_dive_results` (com payload tipado). */
+export interface DeepDiveResultRow {
+  id: string
+  work_id: string
+  taste_profile_id: string | null
+  user_context: string | null
+  payload: DeepDivePayload
+  match_score: number | null
+  confidence: number | null
+  read_when: DeepDiveReadWhen | null
+  one_liner: string | null
+  model_name: string
+  prompt_version: string
+  input_tokens: number | null
+  output_tokens: number | null
+  cache_read_tokens: number | null
+  cache_creation_tokens: number | null
+  thinking_tokens: number | null
+  ai_api_call_id: string | null
+  created_at: string
+}
+
+export interface DeepDiveSimilarsBundle {
+  loved: Array<{
+    id: string
+    title: string
+    coverUrl: string | null
+    manualScore: number | null
+    similarity: number
+    synopsis: string | null
+  }>
+  avoided: Array<{
+    id: string
+    title: string
+    coverUrl: string | null
+    manualScore: number | null
+    similarity: number
+    synopsis: string | null
+  }>
+}
+
+export interface DeepDiveAlternativeCandidate {
+  id: string
+  title: string
+  alignmentScore: number | null
+}
+
+export interface DeepDiveWorkBundle {
+  id: string
+  title: string
+  synopsis: string | null
+  tags: Array<{ name: string; group: string | null }>
+  categoryScores: Partial<Record<CriterionSlug, number>>
+  postScores: Partial<Record<string, number>>
+  platformAvg: number | null
+  totalVotes: number | null
+  reviews: CandidateReview[]
+}
+
+export interface DeepDiveContext {
+  profile: TasteProfilePayload
+  profileId: string
+  work: DeepDiveWorkBundle
+  similars: DeepDiveSimilarsBundle
+  alternatives: DeepDiveAlternativeCandidate[]
+  recentActivity: Array<{ id: string; title: string; manualScore: number | null; updatedAt: string }>
+  workCoverUrl: string | null
 }

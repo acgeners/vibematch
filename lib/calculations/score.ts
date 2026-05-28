@@ -1,10 +1,12 @@
 import type { SynopsisQuality } from "@/types/domain"
 
+// Curva côncava-pra-cima: cada degrau salta mais que o anterior
+// (+2pp, +2.5pp, +3.5pp) para premiar progressivamente o interesse alto.
 const SYNOPSIS_MULTIPLIER: Record<string, number> = {
-  "♥♥♥♥": 1.04,
-  "♥♥♥": 1.025,
+  "♥♥♥♥": 1.07,
+  "♥♥♥": 1.035,
   "♥♥": 1.01,
-  "♥": 0.985,
+  "♥": 0.99,
 }
 
 export interface NotaCalcInputs {

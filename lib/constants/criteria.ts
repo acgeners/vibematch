@@ -7,7 +7,7 @@ export const CRITERIA_INFO: Record<
   fantasy_nobility: { name: "Fantasia/Nobreza", emoji: "👑", description: "Avalia o quanto elementos de fantasia, magia, nobreza, realeza ou política de corte fazem parte da obra.\nConsidera se esses elementos são só estética ou se realmente moldam o mundo, os conflitos e as decisões dos personagens." },
   action_adventure: { name: "Ação/Aventura", emoji: "⚔️", description: "Avalia o nível de movimento, tensão e eventos marcantes da história.\nConsidera se a obra é mais cotidiana/parada ou se envolve missões, conflitos externos, perigos, batalhas, viagens ou eventos de grande escala." },
   adult_content: { name: "Conteúdo Adulto", emoji: "🔥", description: "Avalia o nível de sexualização ou conteúdo sexual presente na obra.\nConsidera desde ausência quase total até cenas explícitas recorrentes, levando em conta frequência, intensidade e relevância para a narrativa." },
-  protagonist: { name: "Protagonista Marcante", emoji: "🦸", description: "Avalia o quanto o protagonista se destaca e carrega a obra.\nConsidera presença, personalidade, inteligência, força, habilidade, agência e capacidade de tornar a história mais interessante." },
+  protagonist: { name: "Protagonista Marcante", emoji: "🦸", description: "Avalia o quanto o protagonista se destaca e impacta a história — presença, agência, decisões marcantes, personalidade reconhecível.\nNÃO avalia se o protagonista é simpático, bem escrito, equilibrado ou agradável de acompanhar. Mary Sues, OPs, vilões marcantes, FLs frias/insensíveis/inconsistentes podem todos ser muito marcantes." },
   humor: { name: "Humor", emoji: "😂", description: "Avalia o quanto o humor está presente no tom da obra.\nConsidera se há apenas alívio cômico pontual ou se a comédia é parte frequente e importante da experiência." },
   drama: { name: "Drama", emoji: "🎭", description: "Avalia a intensidade dos conflitos emocionais da obra.\nConsidera sofrimento, tensão emocional, dilemas, conflitos de relacionamento e o quanto isso afeta o ritmo e as decisões dos personagens." },
   tragedy: { name: "Tragédia", emoji: "💔", description: "Avalia o peso de acontecimentos trágicos durante o desenvolvimento principal da história (não considera background nem acontecimentos no começo imediato da história).\nConsidera perdas, separações, mortes, injustiças e sofrimento que acontecem no meio da obra e impactam diretamente os personagens principais." },
@@ -21,7 +21,7 @@ export const CRITERIA_RUBRICS: Record<
     title: "Romance",
     ranges: [
       "0-3 | Ausente / irrelevante: não tem romance ou é totalmente secundário; pode ter crush leve que não impacta nada.",
-      "4-6 | Subplot: romance existe, mas não guia a história; desenvolvimento lento ou pouco foco.",
+      "4-6 | Subplot: romance existe, mas não guia a história; pouco foco ou em background. NOTA: slow burn com foco romântico claro NÃO é subplot — é core romance (7-8).",
       "7-8 | Core romance: romance é um dos pilares da história e impacta decisões, conflitos e evolução.",
       "9-10 | Romance-driven: a história é sobre o romance; o plot gira em torno do relacionamento.",
     ],
@@ -29,7 +29,7 @@ export const CRITERIA_RUBRICS: Record<
   couple_dynamics: {
     title: "Dinâmica do Casal",
     ranges: [
-      "0-3 | Dinâmica de obsessão, controle, toxicidade, abuso emocional, manipulação ou relação majoritariamente prejudicial.",
+      "0-3 | Dinâmica prejudicial ao parceiro contra sua vontade: abuso emocional ativo, manipulação não-consensual, sofrimento contínuo do parceiro abusado dentro do desenvolvimento. Dinâmicas não-tradicionais (BDSM, Dom/Sub, posse, ciúme intenso) com consenso mútuo e tom romântico/cômico NÃO se enquadram aqui — vão para 7-8 ou 9-10.",
       "4-6 | Há mal-entendidos eventuais, ciúme e algum nível de conflito.",
       "7-8 | Relacionamento saudável, com alguns conflitos eventuais, mas trabalhados e resolvidos relativamente rápido.",
       "9-10 | Dinâmica leve, divertida e saudável; parceria, desenvolvimento mútuo e boa comunicação.",
@@ -56,7 +56,7 @@ export const CRITERIA_RUBRICS: Record<
   adult_content: {
     title: "Conteúdo Adulto",
     ranges: [
-      "0-3 | Clean: sem sexualização relevante; no máximo beijo leve ou sugestão implícita.",
+      "0-3 | Clean: sem sexualização relevante; no máximo beijo leve ou sugestão implícita. NÃO use esta faixa se há marcador R19 disponível na obra, mesmo sem corroboração de tag/review (piso 6.0).",
       "4-6 | Suggestive: insinuação clara, roupas/situações/tensão sexual; pode ter cena cortada/fade to black.",
       "7-8 | Mature: sexo parcialmente mostrado, sem foco explícito; nudez e contexto sexual relevante para a trama.",
       "9-10 | Smut: sexo explícito recorrente; foco no ato, não só na narrativa.",

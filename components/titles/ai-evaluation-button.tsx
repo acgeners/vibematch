@@ -18,6 +18,7 @@ import type { AiEvaluation } from "@/types/domain"
 
 interface AiEvaluationButtonProps {
   workId: string
+  workTitle: string
   hasCriteriaScores: boolean
   coverUrl?: string | null
   /** Variante visual. "cta" (default) = botão grande dentro da aba; "compact" = botão pequeno. */
@@ -26,6 +27,7 @@ interface AiEvaluationButtonProps {
 
 export function AiEvaluationButton({
   workId,
+  workTitle,
   hasCriteriaScores,
   coverUrl,
   variant = "cta",
@@ -119,6 +121,7 @@ export function AiEvaluationButton({
             <AiEvaluationReviewForm
               evaluation={evaluation}
               workId={workId}
+              workTitle={workTitle}
               coverUrl={coverUrl}
               currentScores={currentScores}
               onReevaluate={async (model) => {

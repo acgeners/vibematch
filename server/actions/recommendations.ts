@@ -23,11 +23,47 @@ import {
 import { MAX_CANDIDATES_HARD_LIMIT } from "@/lib/ai-recommendation/limits"
 import type {
   RankedCandidate,
+  RankedWork,
   RecommendationMode,
   TasteProfileRow,
 } from "@/lib/ai-recommendation/types"
 
 const MAX_RUNS_PER_DAY = 20
+
+/**
+ * Extrai apenas os campos enriquecidos (sub-fase 2.3.A) pra persistir em
+ * `calculated_scores.alignment_payload`. Retorna NULL quando nenhum dos
+ * campos opcionais foi preenchido pelo modelo — evita upsert de JSONB vazio.
+ */
+function buildAlignmentPayload(r: RankedWork): Record<string, unknown> | null {
+  const payload: Record<string, unknown> = {}
+  if (r.confidence != null) payload.confidence = r.confidence
+  if (r.risks && r.risks.length > 0) payload.risks = r.risks
+  if (r.similar_loved && r.similar_loved.length > 0) payload.similar_loved = r.similar_loved
+  if (r.similar_avoided && r.similar_avoided.length > 0) payload.similar_avoided = r.similar_avoided
+  if (r.review_quotes && r.review_quotes.length > 0) payload.review_quotes = r.review_quotes
+  if (r.mood_fit != null) payload.mood_fit = r.mood_fit
+  return Object.keys(payload).length > 0 ? payload : null
+}
+
+// Gera slug único no formato YYYY-MM-DD-N. Tenta computar N olhando o máximo do
+// dia e re-tenta em colisão (race entre runs simultâneas — raro, mas garante a
+// unique constraint do índice).
+async function generateRunSlug(
+  supabase: ReturnType<typeof createAdminClient>,
+): Promise<string> {
+  const today = new Date().toISOString().slice(0, 10)
+  const { data: existing } = await supabase
+    .from("recommendation_runs")
+    .select("slug")
+    .like("slug", `${today}-%`)
+  const maxN = (existing ?? []).reduce((max, row) => {
+    const slug = (row.slug as string | null) ?? ""
+    const n = parseInt(slug.slice(today.length + 1), 10)
+    return Number.isFinite(n) && n > max ? n : max
+  }, 0)
+  return `${today}-${maxN + 1}`
+}
 
 export interface ProfileStatus {
   hasProfile: boolean
@@ -139,6 +175,7 @@ export interface RunRecommendationArgs {
 
 export interface RunRecommendationResult {
   runId: string
+  runSlug: string
   profile: TasteProfileRow
   modeSummary: string
   ranked: RankedCandidate[]
@@ -216,50 +253,77 @@ export async function runRecommendationAction(
         alignment_score: r.alignment_score,
         justification: r.justification,
         top_match_factors: r.top_match_factors,
+        confidence: r.confidence ?? null,
+        risks: r.risks ?? undefined,
+        similar_loved: r.similar_loved ?? undefined,
+        similar_avoided: r.similar_avoided ?? undefined,
+        review_quotes: r.review_quotes ?? undefined,
+        mood_fit: r.mood_fit ?? null,
         work,
         coverUrl: work.coverUrl,
       })
     }
 
     const supabase = createAdminClient()
-    const { data: runRow, error: insertError } = await supabase
-      .from("recommendation_runs")
-      .insert({
-        mode: args.mode,
-        taste_profile_id: profile.id,
-        user_context: args.userContext?.trim() || null,
-        n_candidates: candidates.length,
-        n_available: allCandidates.length,
-        source_meta: args.mode === "ranking" ? { filters: args.filters ?? null } : null,
-        candidate_work_ids: candidates.map((c) => c.id),
-        results: result.rankings,
-        mode_summary: result.modeSummary,
-        model_name: result.modelName,
-        prompt_version: result.promptVersion,
-        input_tokens: result.usage.inputTokens,
-        output_tokens: result.usage.outputTokens,
-        cache_read_tokens: result.usage.cacheReadTokens,
-        cache_creation_tokens: result.usage.cacheCreationTokens,
-        ai_api_call_id: result.apiCallId,
-      })
-      .select("id")
-      .single()
+    const baseInsert = {
+      mode: args.mode,
+      taste_profile_id: profile.id,
+      user_context: args.userContext?.trim() || null,
+      n_candidates: candidates.length,
+      n_available: allCandidates.length,
+      source_meta: args.mode === "ranking" ? { filters: args.filters ?? null } : null,
+      candidate_work_ids: candidates.map((c) => c.id),
+      results: result.rankings,
+      mode_summary: result.modeSummary,
+      model_name: result.modelName,
+      prompt_version: result.promptVersion,
+      input_tokens: result.usage.inputTokens,
+      output_tokens: result.usage.outputTokens,
+      cache_read_tokens: result.usage.cacheReadTokens,
+      cache_creation_tokens: result.usage.cacheCreationTokens,
+      ai_api_call_id: result.apiCallId,
+    }
+
+    let runRow: { id: string; slug: string } | null = null
+    let insertError: { code?: string; message: string } | null = null
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const slug = await generateRunSlug(supabase)
+      const { data, error } = await supabase
+        .from("recommendation_runs")
+        .insert({ ...baseInsert, slug })
+        .select("id, slug")
+        .single()
+      if (!error && data) {
+        runRow = { id: data.id as string, slug: data.slug as string }
+        insertError = null
+        break
+      }
+      insertError = error
+      if (error?.code !== "23505") break
+    }
 
     if (insertError || !runRow) {
       console.error("[recommendations] falha persistindo run:", insertError)
     }
 
-    // No modo "ranking", persiste o alignment_score em calculated_scores pra
-    // a coluna ficar disponível como ordenação na /ranking.
-    if (args.mode === "ranking" && runRow?.id) {
+    // Persiste alignment_score em calculated_scores pra a coluna "IA Rk." ficar
+    // disponível em qualquer tabela (ranking, favoritos, títulos) — independente
+    // do modo da run, já que sempre representa o re-rank mais recente da obra.
+    // alignment_payload guarda os campos enriquecidos (sub-fase 2.3.A) — pode
+    // ficar NULL se o modelo não preencheu nenhum opcional.
+    if (runRow?.id) {
       const now = new Date().toISOString()
-      const upsertRows = ranked.map((r) => ({
-        work_id: r.work_id,
-        alignment_score: r.alignment_score,
-        alignment_run_id: runRow.id,
-        alignment_justification: r.justification,
-        alignment_at: now,
-      }))
+      const upsertRows = ranked.map((r) => {
+        const payload = buildAlignmentPayload(r)
+        return {
+          work_id: r.work_id,
+          alignment_score: r.alignment_score,
+          alignment_run_id: runRow.id,
+          alignment_justification: r.justification,
+          alignment_payload: payload,
+          alignment_at: now,
+        }
+      })
       if (upsertRows.length > 0) {
         const { error: upErr } = await supabase
           .from("calculated_scores")
@@ -269,14 +333,17 @@ export async function runRecommendationAction(
         }
       }
       revalidatePath("/ranking")
+      revalidatePath("/favorites")
+      revalidatePath("/titles")
     }
 
     revalidatePath("/recommendations")
-    if (runRow?.id) revalidatePath(`/recommendations/${runRow.id}`)
+    if (runRow?.slug) revalidatePath(`/recommendations/${runRow.slug}`)
 
     return {
       data: {
-        runId: (runRow?.id as string) ?? "unsaved",
+        runId: runRow?.id ?? "unsaved",
+        runSlug: runRow?.slug ?? "unsaved",
         profile,
         modeSummary: result.modeSummary,
         ranked,
@@ -382,6 +449,7 @@ export async function rerankSingleWorkAction(
           alignment_score: ranking.alignment_score,
           alignment_run_id: null,
           alignment_justification: ranking.justification,
+          alignment_payload: buildAlignmentPayload(ranking),
           alignment_at: now,
         },
         { onConflict: "work_id" },

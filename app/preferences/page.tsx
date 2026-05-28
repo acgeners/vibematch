@@ -9,10 +9,14 @@ import {
   Trophy,
 } from "lucide-react"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
+import { TasteProfileHealth } from "@/components/settings/taste-profile-health"
 import { Header } from "@/components/layout/header"
 import { ScrollToTop } from "@/components/layout/scroll-to-top"
 import { ScoreWeightsForm } from "@/components/settings/score-weights-form"
+import { WeightSuggestionsPanel } from "@/components/settings/weight-suggestions-panel"
 import { PostReadingWeightsForm } from "@/components/settings/post-reading-weights-form"
+import { PostReadingWeightSuggestionsPanel } from "@/components/settings/post-reading-weight-suggestions-panel"
 import { RankingPreferencesForm } from "@/components/settings/ranking-preferences-form"
 import { ScoreColorPercentilesForm } from "@/components/settings/score-color-percentiles-form"
 import { AiEvalPreferencesForm } from "@/components/settings/ai-eval-preferences-form"
@@ -23,9 +27,16 @@ import { cn } from "@/lib/utils"
 async function getPreferencesData() {
   const supabase = createAdminClient()
 
-  const [weightsRes, configRes] = await Promise.all([
+  const [weightsRes, configRes, weightsLastAppliedRes, tasteProfile] = await Promise.all([
     supabase.from("score_weights").select("*").eq("is_active", true).order("display_order"),
     supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
+    supabase
+      .from("score_weights")
+      .select("updated_at")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    loadCurrentTasteProfile(),
   ])
 
   if (weightsRes.error) throw new Error(weightsRes.error.message)
@@ -35,6 +46,8 @@ async function getPreferencesData() {
   return {
     weights: weightsRes.data as ScoreWeight[],
     config: configRes.data?.[0] as FormulaConfig,
+    weightsLastApplied: (weightsLastAppliedRes.data?.updated_at as string | undefined) ?? null,
+    tasteProfile,
   }
 }
 
@@ -47,7 +60,28 @@ const SECTIONS = [
 ]
 
 export default async function PreferencesPage() {
-  const { weights, config } = await getPreferencesData()
+  const { weights, config, weightsLastApplied, tasteProfile } = await getPreferencesData()
+
+  // Quando "pesos auto" está ativo E houve inferência válida, sobrescrevemos
+  // os pesos exibidos com os inferidos — refletindo o que de fato vai ser usado
+  // no IA(n). Pesos manuais persistidos não são tocados (ficam como fallback
+  // pra quando o user desativar).
+  const autoActive =
+    config.score_weights_auto && Boolean(config.score_weights_inferred)
+  const effectiveWeights = autoActive
+    ? weights.map((w) => {
+        const suggestion = config.score_weights_inferred?.suggestions.find(
+          (s) => s.slug === w.slug,
+        )
+        return suggestion ? { ...w, weight: suggestion.suggestedWeight } : w
+      })
+    : weights
+  const confidenceBySlug: Record<string, "high" | "medium" | "low"> = {}
+  if (autoActive && config.score_weights_inferred) {
+    for (const s of config.score_weights_inferred.suggestions) {
+      confidenceBySlug[s.slug] = s.confidence
+    }
+  }
 
   return (
     <div className="w-full max-w-6xl space-y-4">
@@ -61,6 +95,8 @@ export default async function PreferencesPage() {
       <PrefIndex />
 
       <IndexSpacer />
+
+      <TasteProfileHealth tasteProfile={tasteProfile} />
 
       <PrefSection
         id="ranking"
@@ -89,7 +125,26 @@ export default async function PreferencesPage() {
         icon={<Scale />}
         accent="violet"
       >
-        <ScoreWeightsForm weights={weights} />
+        {autoActive ? (
+          <>
+            <div className="mb-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs text-emerald-700 dark:text-emerald-400">
+              <strong className="font-semibold">Pesos automáticos ativos</strong> ({config.score_weights_inferred?.trainSize ?? 0} obras com nota pessoal alimentaram a inferência).
+              Os valores abaixo são os <strong>pesos inferidos via Ridge</strong> sobre seu histórico — usados no IA(n) em vez dos seus pesos manuais.
+              Pra editar manualmente, desative o toggle em <code className="font-mono">/settings</code>.
+            </div>
+            <ScoreWeightsForm
+              weights={effectiveWeights}
+              readOnly
+              confidenceBySlug={confidenceBySlug}
+            />
+          </>
+        ) : (
+          <>
+            <WeightSuggestionsPanel initialLastApplied={weightsLastApplied} />
+            <div className="my-4 h-px bg-border/50" />
+            <ScoreWeightsForm weights={weights} />
+          </>
+        )}
       </PrefSection>
 
       <PrefSection
@@ -99,6 +154,8 @@ export default async function PreferencesPage() {
         icon={<Sparkles />}
         accent="emerald"
       >
+        <PostReadingWeightSuggestionsPanel />
+        <div className="my-4 h-px bg-border/50" />
         <PostReadingWeightsForm />
       </PrefSection>
 

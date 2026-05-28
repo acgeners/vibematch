@@ -1,15 +1,17 @@
 import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } from "@/server/queries/ranking"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
+import { getAllGenres } from "@/server/queries/genres"
+import { getAllTags } from "@/server/queries/tags"
+import { getStatusOptions } from "@/server/queries/status-options"
 import { Header } from "@/components/layout/header"
 import { RankingTable } from "@/components/ranking/ranking-table"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
+import { MoodBar } from "@/components/ranking/mood-bar"
+import { SurpriseMeButton } from "@/components/ranking/surprise-me-button"
+import { MOOD_PRESETS_BY_ID } from "@/lib/constants/mood-presets"
 import { RecommendWithAiButton } from "@/components/recommendations/recommend-with-ai-button"
 import { Badge } from "@/components/ui/badge"
-import { CRITERION_SLUGS, PERSONAL_STATUSES, PUBLICATION_STATUSES } from "@/types/domain"
-import {
-  PERSONAL_STATUS_LABELS,
-  PUBLICATION_STATUS_LABELS,
-} from "@/lib/constants/criteria"
+import { CRITERION_SLUGS } from "@/types/domain"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { FormulaConfig } from "@/types/domain"
 import { unstable_cache } from "next/cache"
@@ -38,110 +40,6 @@ const getPreferences = unstable_cache(async (): Promise<{
     minFinal: cfg?.min_final_score ?? null,
   }
 }, ["ranking-preferences"], { revalidate: 300 })
-
-const getAllGenres = unstable_cache(async (): Promise<string[]> => {
-  const supabase = createAdminClient()
-  const { data } = await supabase
-    .from("genres")
-    .select("name")
-    .order("name")
-    .limit(1000)
-  return (data ?? [])
-    .map((row) => row.name as string | null)
-    .filter((name): name is string => Boolean(name))
-}, ["ranking-genres-v2"], { revalidate: 300, tags: ["genres-catalog"] })
-
-const getAllTags = unstable_cache(async (): Promise<Array<{
-  slug: string
-  name: string
-  tag_group_id: string | null
-  groupName: string
-}>> => {
-  const supabase = createAdminClient()
-  // Supabase has a default 1000-row cap per request that `.limit()` does not
-  // override — paginate explicitly to fetch every tag.
-  const PAGE = 1000
-  const allTags: Array<{ slug: string; name: string; tag_group_id: string | null }> = []
-  for (let offset = 0; ; offset += PAGE) {
-    const { data, error } = await supabase
-      .from("tags")
-      .select("slug, name, tag_group_id")
-      .order("name")
-      .range(offset, offset + PAGE - 1)
-    if (error) break
-    if (!data || data.length === 0) break
-    for (const row of data) {
-      allTags.push({
-        slug: row.slug,
-        name: row.name,
-        tag_group_id: row.tag_group_id ?? null,
-      })
-    }
-    if (data.length < PAGE) break
-  }
-
-  const { data: groups } = await supabase.from("tag_group").select("id, group, slug")
-  const groupById = new Map(
-    (groups ?? []).map((group) => [
-      group.id as string,
-      ((group.group as string | null) ?? (group.slug as string | null) ?? "Sem grupo"),
-    ])
-  )
-  return allTags.map((tag) => ({
-    slug: tag.slug,
-    name: tag.name,
-    tag_group_id: tag.tag_group_id,
-    groupName: tag.tag_group_id ? groupById.get(tag.tag_group_id) ?? "Sem grupo" : "Sem grupo",
-  }))
-}, ["ranking-tags-v2"], { revalidate: 300, tags: ["tags-catalog"] })
-
-interface StatusOption {
-  id: number
-  status: string
-  slug: string
-  color: string | null
-  symbol: string | null
-  comment: string | null
-}
-
-function mergeStatusOptions(fallbacks: StatusOption[], dbRows: StatusOption[] | null | undefined) {
-  const rows = dbRows ?? []
-  if (rows.length === 0) return fallbacks
-
-  const byStatus = new Map<string, StatusOption>()
-  for (const row of rows) {
-    byStatus.set(row.status, row)
-  }
-  return [...byStatus.values()]
-}
-
-const getStatusOptions = unstable_cache(async () => {
-  const supabase = createAdminClient()
-  const [{ data: pubData }, { data: perData }] = await Promise.all([
-    supabase.from("publication_status").select("id, status, slug, color, symbol").order("id"),
-    supabase.from("personal_status").select("id, status, slug, color, symbol, comment").order("id"),
-  ])
-  const publicationFallbacks: StatusOption[] = PUBLICATION_STATUSES.map((status, index) => ({
-    id: index + 1,
-    status: PUBLICATION_STATUS_LABELS[status] ?? status,
-    slug: status.toLowerCase(),
-    color: null,
-    symbol: null,
-    comment: null,
-  }))
-  const personalFallbacks: StatusOption[] = PERSONAL_STATUSES.map((status, index) => ({
-    id: index + 1,
-    status: PERSONAL_STATUS_LABELS[status] ?? status,
-    slug: status.toLowerCase().replaceAll(" ", "-"),
-    color: null,
-    symbol: null,
-    comment: null,
-  }))
-  return {
-    publicationStatuses: mergeStatusOptions(publicationFallbacks, pubData as StatusOption[] | null),
-    personalStatuses: mergeStatusOptions(personalFallbacks, perData as StatusOption[] | null),
-  }
-}, ["ranking-status-options-v4"], { revalidate: 300 })
 
 export default async function RankingPage({ searchParams }: RankingPageProps) {
   const params = await searchParams
@@ -173,18 +71,60 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     if (mx != null) criterionMax[slug] = mx
   }
 
+  // Mood preset (?mood=ID) sobrescreve filtros de critério e sort de forma
+  // temporária (não persiste). Aplica somente nos critérios que o preset
+  // define — campos não-mencionados mantêm valor da URL/preferências.
+  const moodId = str("mood")
+  const moodPreset = moodId ? MOOD_PRESETS_BY_ID[moodId] : null
+  if (moodPreset) {
+    if (moodPreset.criterionMin) {
+      for (const [slug, value] of Object.entries(moodPreset.criterionMin)) {
+        if (value != null) criterionMin[slug] = value
+      }
+    }
+    if (moodPreset.criterionMax) {
+      for (const [slug, value] of Object.entries(moodPreset.criterionMax)) {
+        if (value != null) criterionMax[slug] = value
+      }
+    }
+  }
+
+  // Whitelist espelha `RankingSortBy` em server/queries/ranking.ts.
+  // Sem o expected_*, sort por "Esperada" caía silenciosamente em final_score.
   const validSortFields = new Set<string>([
-    "final_score", "calc_score", "pred_score", "platform_avg", "total_votes", "chapters", "title", "personal_fit", "final_confidence", "knn_score", "alignment_score",
+    // Notas (novo pipeline)
+    "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
+    // Notas (legado)
+    "final_score", "calc_score", "predicted_score", "pred_score", "alignment_score",
+    "knn_score",
+    // Plataforma
+    "platform_avg", "total_votes",
+    // Metadata
+    "title", "year", "synopsis_q",
+    "chapters", "chapters_total", "chapters_read",
+    "publication_status", "personal_status", "ai_eval_status",
+    "updated_at", "last_read_at",
+    // Critérios IA
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
-  const rawSort = str("sort") ?? "final_score:desc"
-  const sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
+  // Default "Smart": prioriza sinais contextuais (re-rank IA + perfil) e cai
+  // pra Nota Esperada. Obras sem alignment_score (a maioria) descem pra
+  // personal_fit; se também null, descem pra expected_score. Resultado: obras
+  // recém-rankeadas pelo LLM aparecem no topo, restante mantém ordem por nota.
+  const rawSort = str("sort") ?? "alignment_score:desc,personal_fit:desc,expected_score:desc"
+  let sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
     return {
       field: (validSortFields.has(field) ? field : "final_score") as RankingSortBy,
       dir: dir === "asc" ? "asc" : "desc",
     }
   })
+  // Mood com sortField sobrescreve o nível 1 (mais peso ao critério do mood)
+  // e mantém os demais níveis como fallback estável.
+  if (moodPreset?.sortField) {
+    const moodField = `crit_${moodPreset.sortField}` as RankingSortBy
+    sortLevels = [{ field: moodField, dir: "desc" }, ...sortLevels.filter((l) => l.field !== moodField)]
+  }
 
   const aiStatus = str("ai_status")
   const perStatusParam = str("per_status")
@@ -263,10 +203,13 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
             <Badge variant="outline" className="text-sm">
               {entries.length} obra{entries.length !== 1 ? "s" : ""}
             </Badge>
+            <SurpriseMeButton entries={entries} />
             <RecommendWithAiButton source="ranking" />
           </div>
         }
       />
+
+      <MoodBar />
 
       <RankingFiltersComponent
         availableGenres={allGenres}

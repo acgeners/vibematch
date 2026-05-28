@@ -327,6 +327,7 @@ export async function getRunsToday(): Promise<number> {
 
 interface RawRunRow {
   id: string
+  slug: string
   mode: RecommendationMode
   taste_profile_id: string | null
   user_context: string | null
@@ -347,6 +348,7 @@ interface RawRunRow {
 
 export interface RecommendationRunSummary {
   id: string
+  slug: string
   mode: RecommendationMode
   userContext: string | null
   nCandidates: number
@@ -361,7 +363,7 @@ export async function listRecommendationRuns(limit = 50): Promise<Recommendation
   const { data, error } = await supabase
     .from("recommendation_runs")
     .select(
-      "id, mode, taste_profile_id, user_context, n_candidates, results, created_at",
+      "id, slug, mode, taste_profile_id, user_context, n_candidates, results, created_at",
     )
     .order("created_at", { ascending: false })
     .limit(limit)
@@ -370,7 +372,7 @@ export async function listRecommendationRuns(limit = 50): Promise<Recommendation
     return []
   }
 
-  const rows = (data ?? []) as Array<Pick<RawRunRow, "id" | "mode" | "taste_profile_id" | "user_context" | "n_candidates" | "results" | "created_at">>
+  const rows = (data ?? []) as Array<Pick<RawRunRow, "id" | "slug" | "mode" | "taste_profile_id" | "user_context" | "n_candidates" | "results" | "created_at">>
   const topWorkIds = new Set<string>()
   const perRunTop: Array<{ runId: string; ids: string[]; alignment: number | null }> = []
   for (const row of rows) {
@@ -401,6 +403,7 @@ export async function listRecommendationRuns(limit = 50): Promise<Recommendation
     const topTitles = (meta?.ids ?? []).map((id) => titleById.get(id) ?? "(removida)")
     return {
       id: row.id,
+      slug: row.slug,
       mode: row.mode,
       userContext: row.user_context,
       nCandidates: row.n_candidates,
@@ -414,6 +417,7 @@ export async function listRecommendationRuns(limit = 50): Promise<Recommendation
 
 export interface RecommendationRunWithWorks {
   id: string
+  slug: string
   mode: RecommendationMode
   userContext: string | null
   modeSummary: string | null
@@ -439,12 +443,15 @@ export interface RecommendationRunWithWorks {
   }>
 }
 
-export async function getRecommendationRun(id: string): Promise<RecommendationRunWithWorks | null> {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export async function getRecommendationRun(idOrSlug: string): Promise<RecommendationRunWithWorks | null> {
   const supabase = createAdminClient()
+  const column = UUID_RE.test(idOrSlug) ? "id" : "slug"
   const { data, error } = await supabase
     .from("recommendation_runs")
     .select("*, mode_summary")
-    .eq("id", id)
+    .eq(column, idOrSlug)
     .maybeSingle()
   if (error) {
     console.error("[recommendations] erro lendo run:", error)
@@ -499,6 +506,7 @@ export async function getRecommendationRun(id: string): Promise<RecommendationRu
 
   return {
     id: run.id,
+    slug: run.slug,
     mode: run.mode,
     userContext: run.user_context,
     modeSummary: run.mode_summary,

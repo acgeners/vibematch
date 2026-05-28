@@ -10,130 +10,15 @@ import { getRanking, type RankingFilters, type SortLevel } from "@/server/querie
 import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getFavoritesSummary } from "@/server/queries/favorites"
-import { CRITERION_SLUGS, PERSONAL_STATUSES, PUBLICATION_STATUSES } from "@/types/domain"
+import { getAllGenres } from "@/server/queries/genres"
+import { getAllTags } from "@/server/queries/tags"
+import { getStatusOptions } from "@/server/queries/status-options"
+import { CRITERION_SLUGS } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
-import {
-  PERSONAL_STATUS_LABELS,
-  PUBLICATION_STATUS_LABELS,
-} from "@/lib/constants/criteria"
-import { createAdminClient } from "@/lib/supabase/admin"
-import { unstable_cache } from "next/cache"
-
-export const dynamic = "force-dynamic"
 
 interface FavoritesPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }
-
-const getAllGenres = unstable_cache(
-  async (): Promise<string[]> => {
-    const supabase = createAdminClient()
-    const { data } = await supabase
-      .from("genres")
-      .select("name")
-      .order("name")
-      .limit(1000)
-    return (data ?? [])
-      .map((row) => row.name as string | null)
-      .filter((name): name is string => Boolean(name))
-  },
-  ["favorites-genres-v1"],
-  { revalidate: 300, tags: ["genres-catalog"] },
-)
-
-const getAllTags = unstable_cache(
-  async (): Promise<Array<{
-    slug: string
-    name: string
-    tag_group_id: string | null
-    groupName: string
-  }>> => {
-    const supabase = createAdminClient()
-    const PAGE = 1000
-    const allTags: Array<{ slug: string; name: string; tag_group_id: string | null }> = []
-    for (let offset = 0; ; offset += PAGE) {
-      const { data, error } = await supabase
-        .from("tags")
-        .select("slug, name, tag_group_id")
-        .order("name")
-        .range(offset, offset + PAGE - 1)
-      if (error) break
-      if (!data || data.length === 0) break
-      for (const row of data) {
-        allTags.push({
-          slug: row.slug,
-          name: row.name,
-          tag_group_id: row.tag_group_id ?? null,
-        })
-      }
-      if (data.length < PAGE) break
-    }
-    const { data: groups } = await supabase.from("tag_group").select("id, group, slug")
-    const groupById = new Map(
-      (groups ?? []).map((group) => [
-        group.id as string,
-        ((group.group as string | null) ?? (group.slug as string | null) ?? "Sem grupo"),
-      ]),
-    )
-    return allTags.map((tag) => ({
-      slug: tag.slug,
-      name: tag.name,
-      tag_group_id: tag.tag_group_id,
-      groupName: tag.tag_group_id ? groupById.get(tag.tag_group_id) ?? "Sem grupo" : "Sem grupo",
-    }))
-  },
-  ["favorites-tags-v1"],
-  { revalidate: 300, tags: ["tags-catalog"] },
-)
-
-interface StatusOption {
-  id: number
-  status: string
-  slug: string
-  color: string | null
-  symbol: string | null
-  comment: string | null
-}
-
-function mergeStatusOptions(fallbacks: StatusOption[], dbRows: StatusOption[] | null | undefined) {
-  const rows = dbRows ?? []
-  if (rows.length === 0) return fallbacks
-  const byStatus = new Map<string, StatusOption>()
-  for (const row of rows) byStatus.set(row.status, row)
-  return [...byStatus.values()]
-}
-
-const getStatusOptions = unstable_cache(
-  async () => {
-    const supabase = createAdminClient()
-    const [{ data: pubData }, { data: perData }] = await Promise.all([
-      supabase.from("publication_status").select("id, status, slug, color, symbol").order("id"),
-      supabase.from("personal_status").select("id, status, slug, color, symbol, comment").order("id"),
-    ])
-    const publicationFallbacks: StatusOption[] = PUBLICATION_STATUSES.map((status, index) => ({
-      id: index + 1,
-      status: PUBLICATION_STATUS_LABELS[status] ?? status,
-      slug: status.toLowerCase(),
-      color: null,
-      symbol: null,
-      comment: null,
-    }))
-    const personalFallbacks: StatusOption[] = PERSONAL_STATUSES.map((status, index) => ({
-      id: index + 1,
-      status: PERSONAL_STATUS_LABELS[status] ?? status,
-      slug: status.toLowerCase().replaceAll(" ", "-"),
-      color: null,
-      symbol: null,
-      comment: null,
-    }))
-    return {
-      publicationStatuses: mergeStatusOptions(publicationFallbacks, pubData as StatusOption[] | null),
-      personalStatuses: mergeStatusOptions(personalFallbacks, perData as StatusOption[] | null),
-    }
-  },
-  ["favorites-status-options-v1"],
-  { revalidate: 300 },
-)
 
 function toArray(value: string | string[] | undefined): string[] {
   if (!value) return []
@@ -168,8 +53,24 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
     if (mx != null) criterionMax[slug] = mx
   }
 
+  // Whitelist de campos de sort permitidos via URL — espelha
+  // `RankingSortBy` em server/queries/ranking.ts (e os keys expostos em
+  // sortableColumns de work-table.tsx). Mantido como Set pra rejeitar
+  // valores inválidos vindos da URL sem cair em erro 500.
   const validSortFields = new Set<string>([
-    "final_score", "calc_score", "pred_score", "platform_avg", "total_votes", "chapters", "title", "alignment_score",
+    // Notas (novo pipeline)
+    "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
+    // Notas (legado)
+    "final_score", "calc_score", "predicted_score", "pred_score", "alignment_score",
+    "knn_score",
+    // Plataforma
+    "platform_avg", "total_votes",
+    // Metadata
+    "title", "year", "synopsis_q",
+    "chapters", "chapters_total", "chapters_read",
+    "publication_status", "personal_status", "ai_eval_status",
+    "updated_at", "last_read_at",
+    // Critérios IA
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
   const rawSort = str("sort") ?? "final_score:desc"
@@ -254,7 +155,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
         }
       />
 
-      <FavoritesStatsHeader summary={summary} scoreThresholds={scoreThresholds} />
+      <FavoritesStatsHeader summary={summary} scoreThresholds={scoreThresholds?.final ?? null} />
 
       <div className="flex flex-wrap items-center gap-2">
         <RecommendWithAiButton source="favorites" />

@@ -5,7 +5,7 @@ import { ExternalLink, ImageOff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { getCoverImageSrc } from "@/lib/image-proxy"
-import { cn } from "@/lib/utils"
+import { cn, titleToSlug } from "@/lib/utils"
 import type { RankedCandidate } from "@/lib/ai-recommendation/types"
 
 interface RankedWorkCardProps {
@@ -48,7 +48,7 @@ export function RankedWorkCard({ rank, ranked }: RankedWorkCardProps) {
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex items-start justify-between gap-2">
           <Link
-            href={`/titles/${work.id}`}
+            href={`/titles/${titleToSlug(work.title)}`}
             target="_blank"
             rel="noopener noreferrer"
             className="line-clamp-2 text-sm font-medium leading-tight hover:underline"

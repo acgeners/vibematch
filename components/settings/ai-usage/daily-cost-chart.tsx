@@ -1,87 +1,15 @@
 "use client"
 
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
-import type { DailyUsagePoint } from "@/server/queries/ai-usage"
+import dynamic from "next/dynamic"
 
-interface Props {
-  data: DailyUsagePoint[]
-}
-
-function formatDayShort(iso: string): string {
-  const d = new Date(`${iso}T00:00:00Z`)
-  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })
-}
-
-function formatUsd(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return "$0.00"
-  if (value < 0.005) return `$${value.toFixed(3)}`
-  return `$${value.toFixed(2)}`
-}
-
-export function DailyCostChart({ data }: Props) {
-  const hasData = data.some((d) => d.cost > 0 || d.calls > 0)
-  if (!hasData) {
-    return (
+export const DailyCostChart = dynamic(
+  () => import("./daily-cost-chart-inner").then((m) => m.DailyCostChart),
+  {
+    ssr: false,
+    loading: () => (
       <div className="flex h-44 items-center justify-center text-xs text-muted-foreground">
-        Sem dados nos últimos 30 dias.
+        Carregando gráfico…
       </div>
-    )
+    ),
   }
-  return (
-    <div className="h-44 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: -10 }}>
-          <defs>
-            <linearGradient id="costGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="hsl(217 91% 60%)" stopOpacity={0.45} />
-              <stop offset="100%" stopColor="hsl(217 91% 60%)" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
-          <XAxis
-            dataKey="day"
-            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-            tickFormatter={formatDayShort}
-            interval="preserveStartEnd"
-            minTickGap={24}
-          />
-          <YAxis
-            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-            tickFormatter={formatUsd}
-            width={56}
-          />
-          <Tooltip
-            cursor={{ stroke: "hsl(var(--border))", strokeWidth: 1 }}
-            contentStyle={{
-              background: "hsl(var(--popover))",
-              border: "1px solid hsl(var(--border))",
-              borderRadius: 8,
-              fontSize: 12,
-            }}
-            formatter={(value, name) => {
-              const num = typeof value === "number" ? value : Number(value)
-              if (name === "cost") return [formatUsd(num), "Custo"]
-              return [num, name as string]
-            }}
-            labelFormatter={(label) => formatDayShort(String(label))}
-          />
-          <Area
-            type="monotone"
-            dataKey="cost"
-            stroke="hsl(217 91% 60%)"
-            strokeWidth={2}
-            fill="url(#costGradient)"
-          />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
-  )
-}
+)

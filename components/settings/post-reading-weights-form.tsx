@@ -10,35 +10,19 @@ import {
   POST_READING_WEIGHT_STORAGE_KEY,
   type PostReadingScoreField,
 } from "@/lib/constants/post-reading-criteria"
+import {
+  POST_READING_WEIGHTS_CHANGED_EVENT,
+  readStoredPostReadingWeights,
+  type PostReadingWeights,
+} from "@/lib/post-reading-weights-storage"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
 
-type FormValues = Record<PostReadingScoreField, number>
+type FormValues = PostReadingWeights
 
 const FIELDS = Object.keys(DEFAULT_POST_READING_WEIGHTS) as PostReadingScoreField[]
-
-function readStoredWeights(): FormValues {
-  if (typeof window === "undefined") return { ...DEFAULT_POST_READING_WEIGHTS }
-
-  const stored = window.localStorage.getItem(POST_READING_WEIGHT_STORAGE_KEY)
-  if (!stored) return { ...DEFAULT_POST_READING_WEIGHTS }
-
-  try {
-    const parsed = JSON.parse(stored) as Partial<FormValues>
-    return {
-      ...DEFAULT_POST_READING_WEIGHTS,
-      ...Object.fromEntries(
-        Object.entries(parsed).filter(
-          ([, value]) => typeof value === "number" && Number.isFinite(value)
-        )
-      ),
-    } as FormValues
-  } catch {
-    return { ...DEFAULT_POST_READING_WEIGHTS }
-  }
-}
 
 export function PostReadingWeightsForm() {
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -54,7 +38,11 @@ export function PostReadingWeightsForm() {
   })
 
   useEffect(() => {
-    reset(readStoredWeights())
+    const refresh = () => reset(readStoredPostReadingWeights())
+    refresh()
+    if (typeof window === "undefined") return
+    window.addEventListener(POST_READING_WEIGHTS_CHANGED_EVENT, refresh)
+    return () => window.removeEventListener(POST_READING_WEIGHTS_CHANGED_EVENT, refresh)
   }, [reset])
 
   const askConfirm = (values: FormValues) => {
