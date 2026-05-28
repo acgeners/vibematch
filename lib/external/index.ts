@@ -3,6 +3,7 @@ import { searchAnimePlanet, fetchAnimePlanetByTitle, fetchAnimePlanetReviews, fe
 import type { AnimePlanetDetail } from "./animeplanet"
 import { searchComicK, fetchComicKByHid } from "./comick"
 import { searchComix, fetchComixById } from "./comix"
+import { isBlockedCoverUrl } from "./blocked-covers"
 import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews, fetchJikanMangaRecommendations } from "./jikan"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
 import { searchMangaDex, fetchMangaDexById, fetchMangaDexForumComments } from "./mangadex"
@@ -428,7 +429,6 @@ function sourceDebug(result: ExternalSearchResult, accepted: boolean, reason?: s
     votes: result.votes,
     genres: result.genres ?? [],
     tags: [],
-    reviews: [],
   }
 }
 
@@ -1703,12 +1703,13 @@ function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[],
   const seenCoverUrls = new Set<string>()
   for (const result of accepted) {
     if (!result.coverUrl) continue
+    if (isBlockedCoverUrl(result.coverUrl)) continue
     if (seenCoverUrls.has(result.coverUrl)) continue
     seenCoverUrls.add(result.coverUrl)
     multiCoversRaw.push({ url: result.coverUrl, source: result.source })
   }
   // AnimePlanet flows through apDetail (separate from accepted) — surface its cover here.
-  if (apDetail?.coverUrl && !seenCoverUrls.has(apDetail.coverUrl)) {
+  if (apDetail?.coverUrl && !isBlockedCoverUrl(apDetail.coverUrl) && !seenCoverUrls.has(apDetail.coverUrl)) {
     seenCoverUrls.add(apDetail.coverUrl)
     multiCoversRaw.push({ url: apDetail.coverUrl, source: "animeplanet" })
   }
@@ -1804,7 +1805,6 @@ function detectConflict<K extends keyof ExternalSearchResult>(
 
 export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promise<MultiSourceResult> {
   const { apDetail, uniqueAccepted, rejected, muStatusText } = await hydrateAndFilterCandidate(candidate)
-  const reviews = candidate.muId ? await fetchMangaUpdatesReviews(candidate.muId) : []
   const data = mergeData(candidate, uniqueAccepted, apDetail, muStatusText)
 
   // Persist external IDs for accepted sources. Cross-linked/trusted IDs are also
@@ -1840,7 +1840,7 @@ export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promi
 
   const debug: ExternalMergeDebug = {
     queryTitle: candidate.title,
-    acceptedSources: uniqueAccepted.map((result) => ({ ...sourceDebug(result, true), reviews: result.source === "mangaupdates" ? reviews : [] })),
+    acceptedSources: uniqueAccepted.map((result) => sourceDebug(result, true)),
     rejectedSources: rejected.map(({ result, reason }) => sourceDebug(result, false, reason ?? "Título/sinopse não bateram com o candidato principal")),
     mergedSynopses: uniqueAccepted.flatMap((result) =>
       splitSynopsisBlocks(result.synopsis).map((text) => ({ source: result.source as ExternalSourceId, text }))

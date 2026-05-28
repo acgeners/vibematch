@@ -20,6 +20,7 @@ import { searchExternalTitles, fetchExternalData, upsertExternalTags, checkExist
 import { fetchComicKClient, fetchAnimePlanetClient } from "@/lib/external/client-fetches"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { getCoverImageSrc } from "@/lib/image-proxy"
+import { titleToSlug } from "@/lib/utils"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
 import type {
   MergedCandidate,
@@ -886,7 +887,7 @@ export function ExternalSearch({
                       </Badge>
                       <div className="flex flex-wrap justify-end gap-2">
                         <Button type="button" variant="outline" size="sm" asChild>
-                          <a href={`/titles/${dup.id}`} target="_blank" rel="noreferrer">
+                          <a href={`/titles/${titleToSlug(dup.title)}`} target="_blank" rel="noreferrer">
                             Ver
                           </a>
                         </Button>

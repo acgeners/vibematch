@@ -24,6 +24,16 @@ export function isCloudflareChallenge(html: string): boolean {
  * on success (FlareSolverr follows redirects, so finalUrl may differ from the
  * requested url — useful when AP collapses single-result search → detail page).
  */
+// Loga uma única vez por processo pra evitar spam quando o container está fora
+// do ar — todos os calls subsequentes vão logar a mesma coisa.
+let flareSolverrFailureLogged = false
+
+function logFlareSolverrFailure(reason: string) {
+  if (flareSolverrFailureLogged) return
+  console.error(`[flareSolverr] ${ENDPOINT}: ${reason}`)
+  flareSolverrFailureLogged = true
+}
+
 export async function flareSolverrFetch(
   url: string,
   timeoutMs = 60000
@@ -40,12 +50,20 @@ export async function flareSolverrFetch(
       }),
       cache: "no-store",
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      logFlareSolverrFailure(`HTTP ${res.status} — container caído ou misconfigurado?`)
+      return null
+    }
     const json = await res.json()
     const html = json?.solution?.response
     const finalUrl = typeof json?.solution?.url === "string" ? json.solution.url : url
-    return typeof html === "string" && html.length > 0 ? { html, finalUrl } : null
-  } catch {
+    if (typeof html !== "string" || html.length === 0) {
+      logFlareSolverrFailure(`resposta sem solution.response (status=${json?.status ?? "?"} message="${json?.message ?? ""}")`)
+      return null
+    }
+    return { html, finalUrl }
+  } catch (err) {
+    logFlareSolverrFailure(`falha de rede (${err instanceof Error ? err.message : err}) — container provavelmente não está rodando`)
     return null
   }
 }

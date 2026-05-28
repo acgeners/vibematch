@@ -77,6 +77,13 @@ function hasExcludedTitleSuffix(title: string | undefined) {
   return /\s\((?:Novel|Promo|Pre-serialization)\)$/.test(title?.trim() ?? "")
 }
 
+// AP usa convenção de slug com sufixo `-novel`, `-promo`, `-pre-serialization`
+// pra distinguir versões. Quando só temos o slug (sem fetch da detail page),
+// usamos isso como heurística rápida pra evitar pegar a versão errada.
+function hasExcludedSlugSuffix(slug: string | undefined) {
+  return /-(?:novel|promo|pre-serialization)$/.test(slug?.trim() ?? "")
+}
+
 function normalizeTitleForMatch(value: string | undefined): string {
   return (value ?? "")
     .toLowerCase()
@@ -126,7 +133,9 @@ async function fetchDirectSearchResult(search: string): Promise<ExternalSearchRe
     const result = await fetchHtmlWithCfFallback(`${AP_BASE}/manga/${slug}`, HEADERS)
     if (!result) continue
     const parsed = parseDetailPageAsSearchResult(result.html, slug)
-    if (parsed && titleLooksCompatible(search, parsed.title)) return parsed
+    if (!parsed) continue
+    if (hasExcludedTitleSuffix(parsed.title)) continue
+    if (titleLooksCompatible(search, parsed.title)) return parsed
   }
   return null
 }
@@ -142,14 +151,17 @@ async function findSlug(title: string): Promise<string | null> {
   // AP collapses single-result searches via 302 to the detail page.
   const META = new Set(["all", "tags", "genres", "top-100", "recommendations", "browse"])
   const directMatch = result.finalUrl.match(/\/manga\/([a-z0-9][a-z0-9-]*)\/?$/)
-  if (directMatch && !META.has(directMatch[1])) return directMatch[1]
+  if (directMatch && !META.has(directMatch[1]) && !hasExcludedSlugSuffix(directMatch[1])) {
+    return directMatch[1]
+  }
 
   // Capture slug + title attribute to filter "(Novel)" entries by display name
   const slugRegex = /href="\/manga\/([a-z0-9][a-z0-9-]*)"[^>]*title="([^"]*)"/g
   let match: RegExpExecArray | null
   while ((match = slugRegex.exec(result.html)) !== null) {
     const [, slug, title] = match
-    if (!META.has(slug) && !hasExcludedTitleSuffix(title)) return slug
+    if (META.has(slug) || hasExcludedSlugSuffix(slug) || hasExcludedTitleSuffix(title)) continue
+    return slug
   }
   const direct = await fetchDirectSearchResult(title)
   return direct?.id.split(":")[1] ?? null
@@ -174,10 +186,17 @@ export async function searchAnimePlanet(search: string): Promise<ExternalSearchR
     // AP collapses single-result searches via 302 to the detail page (mesmo
     // comportamento já tratado em findSlug). Sem isso, cardRegex não casa nada
     // na HTML de detalhes e a função devolve [].
+    //
+    // CUIDADO: se o AP redirecionou pra página da Novel (existe Novel + Manhwa),
+    // o suffix "(Novel)" precisa ser filtrado aqui — caso contrário a Novel
+    // passa adiante. Quando filtramos, caímos no fetchDirectSearchResult abaixo
+    // que tenta o slug canônico do título (sem -novel) e pega o Manhwa.
     const directMatch = result.finalUrl.match(/\/manga\/([a-z0-9][a-z0-9-]*)\/?$/)
-    if (directMatch && !META.has(directMatch[1])) {
+    if (directMatch && !META.has(directMatch[1]) && !hasExcludedSlugSuffix(directMatch[1])) {
       const single = parseDetailPageAsSearchResult(html, directMatch[1])
-      if (single && titleLooksCompatible(search, single.title)) return [single]
+      if (single && !hasExcludedTitleSuffix(single.title) && titleLooksCompatible(search, single.title)) {
+        return [single]
+      }
     }
 
     const cardRegex = /href="\/manga\/([a-z0-9][a-z0-9-]*)"[^>]*title="([^"]*)"([\s\S]*?)(?=href="\/manga\/[a-z0-9][a-z0-9-]*"|<\/ul>|<\/section>|$)/g
@@ -185,7 +204,7 @@ export async function searchAnimePlanet(search: string): Promise<ExternalSearchR
     let match: RegExpExecArray | null
     while ((match = cardRegex.exec(html)) !== null && results.length < 8) {
       const [, slug, rawTitle, chunk] = match
-      if (META.has(slug) || hasExcludedTitleSuffix(rawTitle) || seen.has(slug)) continue
+      if (META.has(slug) || hasExcludedSlugSuffix(slug) || hasExcludedTitleSuffix(rawTitle) || seen.has(slug)) continue
       seen.add(slug)
 
       const dataSrc = chunk.match(/data-src="([^"]+)"/)?.[1]

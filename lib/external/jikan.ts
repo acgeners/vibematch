@@ -130,19 +130,88 @@ function genresFromRecord(record: Record<string, unknown>): string[] {
   return Array.from(new Set(out))
 }
 
+const DEBUG_SEARCH = process.env.DEBUG_EXTERNAL_SEARCH === "1"
+
+// Jikan é mais tolerante que ComicK, mas títulos longos com hífen às vezes
+// caem fora do top 5. Mesma estratégia de fallback: se a query tem pontuação,
+// dispara também variante stripada em paralelo e funde por mal_id.
+function stripPunctForQuery(s: string): string {
+  return s.replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim()
+}
+
+// Jikan retorna 504 ("Jikan failed to connect to MyAnimeList") e 429 (rate-limit)
+// com frequência. Antes o código engolia silenciosamente e a fonte aparecia como
+// "Nenhum match" sem distinguir API caída de obra inexistente. Agora loga e
+// tenta de novo com backoff curto pra status transientes.
+const TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504])
+
+async function fetchJikanSearchRows(query: string, maxAttempts = 3): Promise<unknown[]> {
+  const url = new URL(`${JIKAN_BASE}/manga`)
+  url.searchParams.set("q", query)
+  url.searchParams.set("limit", "5")
+
+  let lastStatus: number | undefined
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let res: Response
+    try {
+      res = await fetch(url, { cache: "no-store" })
+    } catch (err) {
+      console.error(`[searchJikanManga] network error attempt ${attempt}/${maxAttempts} q="${query}":`, err instanceof Error ? err.message : err)
+      if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, 400 * attempt))
+      continue
+    }
+    if (res.ok) {
+      const json = await res.json()
+      return Array.isArray(json?.data) ? json.data : []
+    }
+    lastStatus = res.status
+    if (!TRANSIENT_STATUSES.has(res.status)) {
+      console.error(`[searchJikanManga] non-retryable HTTP ${res.status} q="${query}"`)
+      return []
+    }
+    if (attempt < maxAttempts) {
+      const delay = res.status === 429 ? 1200 * attempt : 500 * attempt
+      await new Promise((r) => setTimeout(r, delay))
+    }
+  }
+  console.error(`[searchJikanManga] gave up after ${maxAttempts} attempts (last HTTP ${lastStatus}) q="${query}"`)
+  return []
+}
+
 export async function searchJikanManga(title: string): Promise<JikanMangaResult[]> {
   try {
-    const url = new URL(`${JIKAN_BASE}/manga`)
-    url.searchParams.set("q", title)
-    url.searchParams.set("limit", "5")
+    const stripped = stripPunctForQuery(title)
+    const queries = stripped && stripped.toLowerCase() !== title.toLowerCase()
+      ? [title, stripped]
+      : [title]
 
-    const res = await fetch(url, { cache: "no-store" })
-    if (!res.ok) return []
+    // Importante: NÃO usar queries.map(fetchJikanSearchRows) — Array.map passa
+    // (element, index, array), e o index sobrescreveria o param maxAttempts default.
+    const settled = await Promise.allSettled(queries.map((q) => fetchJikanSearchRows(q)))
+    const seenIds = new Set<number>()
+    const mergedRows: unknown[] = []
+    let rawCount = 0
+    let strippedRawCount = 0
+    settled.forEach((entry, i) => {
+      if (entry.status !== "fulfilled") return
+      if (i === 0) rawCount = entry.value.length
+      else strippedRawCount = entry.value.length
+      for (const item of entry.value) {
+        const malId = (item as Record<string, unknown>)?.mal_id
+        if (typeof malId !== "number" || seenIds.has(malId)) continue
+        seenIds.add(malId)
+        mergedRows.push(item)
+      }
+    })
 
-    const json = await res.json()
-    const data: unknown[] = Array.isArray(json?.data) ? json.data : []
+    if (DEBUG_SEARCH && queries.length > 1) {
+      console.log(
+        `[searchJikanManga][debug] q="${title}" stripped="${stripped}" ` +
+        `raw=${rawCount} stripped_raw=${strippedRawCount} merged=${mergedRows.length}`
+      )
+    }
 
-    return data
+    return mergedRows
       .map((item): JikanMangaResult | null => {
         const record = item as Record<string, unknown>
         const id = typeof record.mal_id === "number" ? record.mal_id : null

@@ -200,7 +200,6 @@ export interface ExternalSourceDebug {
   votes?: number
   genres: string[]
   tags: string[]
-  reviews: string[]
 }
 
 export interface ExternalMergeDebug {

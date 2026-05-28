@@ -57,9 +57,13 @@ function cleanText(value: unknown): string | undefined {
 }
 
 async function fetchJson(pathname: string, search = "") {
+  // Coleta motivos da falha por base pra log único no fim — assim fica claro
+  // se foi Cloudflare 403 (precisa FlareSolverr) vs network error vs JSON inválido.
+  const failures: string[] = []
   for (const base of COMICK_BASES) {
     const url = new URL(pathname, base)
     url.search = search
+    let directReason: string | undefined
     try {
       const res = await fetch(url, {
         headers: HEADERS,
@@ -68,27 +72,40 @@ async function fetchJson(pathname: string, search = "") {
       if (res.ok) {
         const contentType = res.headers.get("content-type") ?? ""
         if (contentType.includes("json")) return await res.json()
+        directReason = `non-json content-type=${contentType || "(none)"}`
+      } else {
+        directReason = `HTTP ${res.status}`
       }
-    } catch {
-      // segue pro fallback
+    } catch (err) {
+      directReason = `network error: ${err instanceof Error ? err.message : String(err)}`
     }
 
     // ComicK passou a entregar challenge Cloudflare nos 3 bases. Quando o
     // FlareSolverr está configurado, tenta de novo via headless Chrome —
     // a resposta vem como HTML envolvendo o JSON em <pre> (comportamento
     // default do Chrome ao renderizar JSON cru).
-    if (!isFlareSolverrEnabled()) continue
+    if (!isFlareSolverrEnabled()) {
+      failures.push(`${base} direct=${directReason ?? "?"} (FlareSolverr disabled)`)
+      continue
+    }
     const fallback = await fetchHtmlWithCfFallback(url.toString(), HEADERS)
-    if (!fallback) continue
+    if (!fallback) {
+      failures.push(`${base} direct=${directReason ?? "?"} flaresolverr=no-response`)
+      continue
+    }
     const preMatch = fallback.html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i)
     const raw = (preMatch?.[1] ?? fallback.html).trim()
     try {
       return JSON.parse(raw)
     } catch {
+      failures.push(`${base} direct=${directReason ?? "?"} flaresolverr=invalid-json`)
       continue
     }
   }
 
+  console.error(
+    `[comick.fetchJson] all bases failed for ${pathname}${search}: ${failures.join(" | ")}`
+  )
   return null
 }
 
@@ -120,16 +137,57 @@ function alternativeTitlesFromComic(comic: any, primary: string): string[] {
     .filter((value) => value.toLowerCase() !== primary.toLowerCase())))
 }
 
+const DEBUG_SEARCH = process.env.DEBUG_EXTERNAL_SEARCH === "1"
+
+// API do ComicK tem full-text strict — queries com apóstrofo curvo (') e hífen
+// frequentemente retornam 0 resultados mesmo com a obra indexada. Quando a query
+// tem pontuação, dispara também uma variante stripada em paralelo e funde.
+function stripPunctForQuery(s: string): string {
+  return s.replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim()
+}
+
+async function fetchComicKSearchRows(query: string): Promise<unknown[]> {
+  const url = new URL("/v1.0/search/", COMICK_BASES[0])
+  url.searchParams.set("q", query)
+  url.searchParams.set("limit", "5")
+  url.searchParams.set("type", "comic")
+  const data = await fetchJson(url.pathname, url.search)
+  return Array.isArray(data) ? data : []
+}
+
 export async function searchComicK(search: string): Promise<ExternalSearchResult[]> {
   try {
-    const url = new URL("/v1.0/search/", COMICK_BASES[0])
-    url.searchParams.set("q", search)
-    url.searchParams.set("limit", "5")
-    url.searchParams.set("type", "comic")
-    const data = await fetchJson(url.pathname, url.search)
-    const rows: unknown[] = Array.isArray(data) ? data : []
+    const stripped = stripPunctForQuery(search)
+    const queries = stripped && stripped.toLowerCase() !== search.toLowerCase()
+      ? [search, stripped]
+      : [search]
 
-    return rows
+    const settled = await Promise.allSettled(queries.map((q) => fetchComicKSearchRows(q)))
+    const seenHids = new Set<string>()
+    const mergedRows: unknown[] = []
+    let rawCount = 0
+    let strippedRawCount = 0
+    settled.forEach((entry, i) => {
+      if (entry.status !== "fulfilled") return
+      if (i === 0) rawCount = entry.value.length
+      else strippedRawCount = entry.value.length
+      for (const item of entry.value) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const hid = (item as any)?.hid
+        if (typeof hid !== "string" || seenHids.has(hid)) continue
+        seenHids.add(hid)
+        mergedRows.push(item)
+      }
+    })
+
+    if (DEBUG_SEARCH && queries.length > 1) {
+      console.log(
+        `[searchComicK][debug] q="${search}" stripped="${stripped}" ` +
+        `raw=${rawCount} stripped_raw=${strippedRawCount} merged=${mergedRows.length}`
+      )
+    }
+
+    return mergedRows
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((item: any): ExternalSearchResult | null => {
         const hid = item?.hid

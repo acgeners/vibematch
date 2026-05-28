@@ -14,6 +14,7 @@ import type { CriterionSlug } from "@/types/domain"
 import { revalidatePath } from "next/cache"
 import { pickPrimaryCover } from "@/lib/work-derived"
 import { slugifyTagName } from "@/lib/utils"
+import { isBlockedCoverUrl } from "@/lib/external/blocked-covers"
 
 export interface TagCatalogItem {
   id: string
@@ -470,6 +471,29 @@ function addAnimePlanetFallbackCandidate(
   }]
 }
 
+// Quando uma fonte aponta pra um CDN bloqueado por Cloudflare (ver
+// lib/external/blocked-covers), tentamos achar a mesma obra em outra fonte
+// via crossIds e roubamos a cover dela (CDNs como AniList são abertos).
+const CROSS_SOURCE_PRIORITY: ExternalSourceId[] = ["anilist", "myanimelist", "mangadex", "mangaupdates"]
+
+function resolveCrossSourceCover(
+  result: ExternalSearchResult,
+  rawBySource: Map<ExternalSourceId, ExternalSearchResult[]>
+): string | null {
+  const crossIds = result.crossIds
+  if (!crossIds) return null
+  for (const altSource of CROSS_SOURCE_PRIORITY) {
+    const externalId = crossIds[altSource]
+    if (!externalId) continue
+    const candidates = rawBySource.get(altSource) ?? []
+    const match = candidates.find(
+      (r) => r.id === `${altSource}:${externalId}` && r.coverUrl && !isBlockedCoverUrl(r.coverUrl)
+    )
+    if (match?.coverUrl) return match.coverUrl
+  }
+  return null
+}
+
 /**
  * Busca candidatos por fonte pra UI de revalidação. Top 3 por fonte com
  * matchScore ≥ 0.65 (mesmo limiar inicial do mergeSearchResults). Marca
@@ -655,15 +679,21 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
       .sort((a, b) => b.matchScore - a.matchScore)
       .slice(0, 3)
     if (scored.length === 0) continue
-    candidatesPerSource[source] = scored.map(({ result, matchScore }) => ({
-      externalId: result.id.split(":")[1] ?? result.id,
-      title: result.title,
-      coverUrl: result.coverUrl ?? null,
-      matchScore,
-      synopsis: result.synopsis ?? null,
-      year: result.year ?? null,
-      chapters: result.chapters ?? null,
-    }))
+    candidatesPerSource[source] = scored.map(({ result, matchScore }) => {
+      let coverUrl = result.coverUrl ?? null
+      if (isBlockedCoverUrl(coverUrl)) {
+        coverUrl = resolveCrossSourceCover(result, rawBySource)
+      }
+      return {
+        externalId: result.id.split(":")[1] ?? result.id,
+        title: result.title,
+        coverUrl,
+        matchScore,
+        synopsis: result.synopsis ?? null,
+        year: result.year ?? null,
+        chapters: result.chapters ?? null,
+      }
+    })
   }
 
   // AnimePlanet é frequentemente bloqueado por Cloudflare em server-side fetch.
