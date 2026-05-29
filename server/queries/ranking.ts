@@ -20,6 +20,12 @@ export interface RankingEntry {
   differentiators: RankingDifferentiator[]
   workId: string
   title: string
+  /**
+   * Obra não-lida com baixa cobertura de gênero (predição menos confiável).
+   * Enriquecido na página do ranking via getLowCoverageWorkIds — undefined
+   * quando não foi computado.
+   */
+  lowCoverage?: boolean
   finalScore: number | null
   calcScore: number | null
   predictedScore: number | null
@@ -80,6 +86,7 @@ export type RankingSortBy =
   | "pred_score"
   | "predicted_score"
   | "expected_score"
+  | "recommended"
   | "platform_avg"
   | "total_votes"
   | "chapters"
@@ -577,6 +584,13 @@ export async function getRanking(
       return m * (rawScore(a.predictedScore) - rawScore(b.predictedScore))
     if (field === "expected_score")
       return m * (rawScore(a.expectedScore) - rawScore(b.expectedScore))
+    if (field === "recommended") {
+      // Free default: Nota Esperada modulada pelo fit_score (0–1).
+      // expected × (0.6 + 0.4·fit). Sem expected, cai pro fim.
+      const reco = (e: RankingEntry) =>
+        e.expectedScore == null ? -Infinity : e.expectedScore * (0.6 + 0.4 * (e.personalFit ?? 0))
+      return m * (reco(a) - reco(b))
+    }
     if (field === "platform_avg") return m * (rawScore(a.platformAvg) - rawScore(b.platformAvg))
     if (field === "personal_fit") {
       const av = a.personalFit ?? -Infinity

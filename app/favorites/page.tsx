@@ -6,6 +6,8 @@ import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/
 import { FavoritesStatsHeader } from "@/components/favorites/favorites-stats-header"
 import { RecommendWithAiButton } from "@/components/recommendations/recommend-with-ai-button"
 import { ViewRecommendationsButton } from "@/components/recommendations/view-recommendations-button"
+import { getCurrentPlan } from "@/server/queries/current-user"
+import { planAllows } from "@/lib/plans/capabilities"
 import { getRanking, type RankingFilters, type SortLevel } from "@/server/queries/ranking"
 import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
@@ -140,6 +142,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
 
   const orderedIds = entries.map((e) => e.workId)
   const works = await getWorksByIds(orderedIds)
+  const isPaid = planAllows(await getCurrentPlan(), "smart_shortlist")
 
   return (
     <div className="space-y-4">
@@ -155,12 +158,16 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
         }
       />
 
-      <FavoritesStatsHeader summary={summary} scoreThresholds={scoreThresholds?.final ?? null} />
-
-      <div className="flex flex-wrap items-center gap-2">
-        <RecommendWithAiButton source="favorites" />
-        <ViewRecommendationsButton />
-      </div>
+      <FavoritesStatsHeader
+        summary={summary}
+        scoreThresholds={scoreThresholds?.final ?? null}
+        actions={
+          <>
+            <RecommendWithAiButton source="favorites" isPaid={isPaid} />
+            <ViewRecommendationsButton />
+          </>
+        }
+      />
 
       <RankingFiltersComponent
         availableGenres={allGenres}

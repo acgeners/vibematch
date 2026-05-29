@@ -12,7 +12,15 @@ import {
   calculateNotaCalc,
 } from "@/lib/calculations"
 import { calculateNotaFinalChoosing } from "@/lib/calculations/final"
-import { calculateGPTWithDiagnostics } from "@/lib/calculations/gpt"
+import { calculateGPTWithDiagnostics, calculateGPT } from "@/lib/calculations/gpt"
+import { getCurrentUserId, getCurrentPlan } from "@/server/queries/current-user"
+import { planAllows } from "@/lib/plans/capabilities"
+import { getBiasMap } from "@/lib/calculations/attribute-bias"
+import {
+  applyBiasToCategoryScores,
+  type AttributeBiasMap,
+  type CategoryScoreWithSource,
+} from "@/lib/ai-recommendation/calibrated-scores"
 import {
   ridgeOutOfFoldPredictions,
   trainPredictor,
@@ -94,6 +102,13 @@ interface WorkComputed {
   synopsisQuality: SynopsisQuality | null
   observationAdjustment: number
   categoryScores: CategoryScoreMap
+  /**
+   * categoryScores com offset de atributos aplicado (Fase 1.5). Usado nos
+   * features do Ridge, criterionFit e personalFit — NÃO no calc_score (Nota.IA
+   * fica como opinião crua da IA). Idêntico a categoryScores quando o biasMap
+   * é zero (obras sem nenhum atributo de origem IA, ou sem bias coletado).
+   */
+  categoryScoresCalibrated: CategoryScoreMap
   platformRatings: PlatformRating[]
   totalVotes: number
   tags: Array<{ name: string; group: string | null }>
@@ -108,6 +123,8 @@ interface WorkComputed {
   // calculados em memória
   iaEvalRaw: number
   iaEvalNormalized: number
+  /** iaEvalNormalized derivado dos categoryScoresCalibrated — feature do Ridge. */
+  iaEvalNormalizedCalibrated: number
   chaptersNormalized: number
   platformAvg: number | null
   calcScore: number
@@ -131,10 +148,24 @@ interface WorkComputed {
   knnDistanceTo5thNeighbor: number | null
 }
 
-function buildWork(raw: RawWork): WorkComputed {
+function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed {
   const categoryScores: CategoryScoreMap = {}
+  const withSource: Partial<Record<CriterionSlug, CategoryScoreWithSource>> = {}
   for (const cs of raw.category_scores ?? []) {
     categoryScores[cs.criterion_slug] = Number(cs.score)
+    withSource[cs.criterion_slug as CriterionSlug] = {
+      value: Number(cs.score),
+      source: (cs.source ?? "imported") as CategoryScoreWithSource["source"],
+    }
+  }
+  // Offset de atributos aplicado on-read (Fase 1.5). Só corrige notas de
+  // origem IA (ai_accepted/ai_calibrated); demais passam intactas. Slugs
+  // ausentes viram null → omitidos do map calibrado.
+  const calibrated = applyBiasToCategoryScores(withSource, biasMap)
+  const categoryScoresCalibrated: CategoryScoreMap = {}
+  for (const slug of CRITERION_SLUGS) {
+    const v = calibrated[slug as CriterionSlug]
+    if (v != null) categoryScoresCalibrated[slug] = v
   }
   const platformRatings: PlatformRating[] = (raw.platform_ratings ?? []).map(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -180,6 +211,7 @@ function buildWork(raw: RawWork): WorkComputed {
     synopsisQuality: raw.synopsis_quality as SynopsisQuality | null,
     observationAdjustment: Number(raw.observation_adjustment ?? 0),
     categoryScores,
+    categoryScoresCalibrated,
     platformRatings,
     totalVotes: sumVotes(platformRatings),
     tags,
@@ -190,6 +222,7 @@ function buildWork(raw: RawWork): WorkComputed {
     criterionFitScore: null,
     iaEvalRaw: 0,
     iaEvalNormalized: 0,
+    iaEvalNormalizedCalibrated: 0,
     chaptersNormalized: 0,
     platformAvg: null,
     calcScore: 0,
@@ -211,8 +244,8 @@ function buildWork(raw: RawWork): WorkComputed {
 
 function buildPredictionInput(w: WorkComputed): PredictionInput {
   return {
-    categoryScores: w.categoryScores,
-    iaEvalNormalized: w.iaEvalNormalized,
+    categoryScores: w.categoryScoresCalibrated,
+    iaEvalNormalized: w.iaEvalNormalizedCalibrated,
     platformAvg: w.platformAvg,
     totalVotes: w.totalVotes,
     totalChapters: w.totalChapters,
@@ -234,8 +267,8 @@ function buildPredictionInput(w: WorkComputed): PredictionInput {
  */
 function buildExpectedInput(w: WorkComputed): ExpectedScoreInput {
   return {
-    categoryScores: w.categoryScores,
-    iaEvalNormalized: w.iaEvalNormalized,
+    categoryScores: w.categoryScoresCalibrated,
+    iaEvalNormalized: w.iaEvalNormalizedCalibrated,
     platformAvg: w.platformAvg,
     totalVotes: w.totalVotes,
     totalChapters: w.totalChapters,
@@ -262,6 +295,21 @@ function buildExpectedInput(w: WorkComputed): ExpectedScoreInput {
 export async function recalculateAll() {
   const supabase = createAdminClient()
 
+  // Offset de atributos (Fase 1.5) — carregado uma vez e aplicado on-read.
+  const userId = await getCurrentUserId(supabase)
+  const biasMap = await getBiasMap(userId, supabase)
+
+  // L0+ (Bloco 2.1, Pago): incluiria as 8 features de qualidade no Ridge.
+  // DESLIGADO: medição honesta mostrou que o estimador de qualidade via
+  // sinopse/tags adiciona RUÍDO — MAE CV 0.63 vs baseline 0.54 (ver
+  // plan-arquitetura-notas.md). A qualidade de execução não é prevísivel
+  // pré-leitura a partir da mesma info que o modelo já tem. Infra (tabela,
+  // estimador, backfill) mantida parada; reativar SÓ com um estimador
+  // reviews-based (L0+ v2), flipando o flag abaixo.
+  const L0_QUALITY_ENABLED = false
+  const plan = await getCurrentPlan(supabase)
+  const includeQuality = L0_QUALITY_ENABLED && planAllows(plan, "l0_quality_eval")
+
   const [worksRes, weightsRes, configRes, tasteProfile] = await Promise.all([
     supabase
       .from("works")
@@ -272,7 +320,7 @@ export async function recalculateAll() {
          post_character_development_score, post_pacing_score,
          post_art_visual_score, post_impact_immersion_score,
          post_originality_score,
-         category_scores(criterion_slug, score),
+         category_scores(criterion_slug, score, source),
          platform_ratings(id, platform, rating, vote_count),
          work_tags(tags(name, tag_group_id))`
       )
@@ -287,7 +335,33 @@ export async function recalculateAll() {
   if (weightsRes.error) throw new Error(weightsRes.error.message)
   if (configRes.error) throw new Error(configRes.error.message)
 
-  const works = (worksRes.data as RawWork[]).map(buildWork)
+  const works = (worksRes.data as RawWork[]).map((raw) => buildWork(raw, biasMap))
+
+  // L0+ (Pago): pra obras SEM pós-leitura do user (não-lidas), preenche
+  // postScores com a estimativa de qualidade da IA (ai_quality_predictions).
+  // Só afeta as features de qualidade do expected_score (Nota.Pr usa meanPostScore,
+  // que NÃO é tocado). Read works mantêm os valores reais do user.
+  // Mapa work_id → qualidade estimada pela IA (todas as obras que tiverem).
+  // Usado pra (1) preencher postScores das não-lidas e (2) o MAE CV honesto.
+  const aiQualityByWork = new Map<string, Record<string, number>>()
+  if (includeQuality) {
+    const { data: qpred } = await supabase
+      .from("ai_quality_predictions")
+      .select("work_id, field, score")
+    for (const r of (qpred ?? []) as Array<{ work_id: string; field: string; score: number | string }>) {
+      const m = aiQualityByWork.get(r.work_id) ?? {}
+      m[r.field] = Number(r.score)
+      aiQualityByWork.set(r.work_id, m)
+    }
+    for (const w of works) {
+      if (w.meanPostScore != null) continue // lida (tem pós-leitura real) — não sobrescreve
+      const pred = aiQualityByWork.get(w.id)
+      if (!pred) continue
+      for (const field of POST_SCORE_FIELDS) {
+        if (pred[field] != null) w.postScores[field] = pred[field]
+      }
+    }
+  }
   const weights = weightsRes.data as ScoreWeight[]
   let config = (configRes.data?.[0] ?? null) as FormulaConfig | null
 
@@ -365,6 +439,11 @@ export async function recalculateAll() {
     const { value, diagnostics } = calculateGPTWithDiagnostics(w.categoryScores, effectiveWeights)
     w.iaEvalRaw = value
     w.iaEvalNormalized = normalizeGPT(value)
+    // Versão calibrada do mesmo agregado, só pra feature do Ridge. calc_score
+    // (Nota.IA) continua usando o valor cru acima.
+    w.iaEvalNormalizedCalibrated = normalizeGPT(
+      calculateGPT(w.categoryScoresCalibrated, effectiveWeights),
+    )
     w.chaptersNormalized = normalizeChapters(w.totalChapters)
     if (diagnostics.clampHit) gptClampHits += 1
     for (const [slug, activated] of Object.entries(diagnostics.negativeActivations)) {
@@ -408,7 +487,7 @@ export async function recalculateAll() {
     for (const w of works) {
       w.lovedTagOverlap = weightedTagOverlap(w.tags, profileForFeatures.loved_tags)
       w.avoidedTagOverlap = weightedTagOverlap(w.tags, profileForFeatures.avoided_tags)
-      w.criterionFitScore = criterionAlignment(w.categoryScores, profileForFeatures.criterion_preferences)
+      w.criterionFitScore = criterionAlignment(w.categoryScoresCalibrated, profileForFeatures.criterion_preferences)
     }
   }
 
@@ -449,7 +528,7 @@ export async function recalculateAll() {
   // contribuição de cada axis pra o waterfall.
   const expectedTrainInputs = trainSet.map(buildExpectedInput)
   const expectedAllInputs = works.map(buildExpectedInput)
-  const expectedPredictor = trainExpectedPredictor(expectedTrainInputs, trainTargets)
+  const expectedPredictor = trainExpectedPredictor(expectedTrainInputs, trainTargets, includeQuality)
   const expectedPredictions = expectedPredictor.predict(expectedAllInputs)
   for (let i = 0; i < works.length; i++) {
     const p = expectedPredictions[i]
@@ -480,6 +559,53 @@ export async function recalculateAll() {
     maeExpected = sumAbsCombined / trainSet.length
     rmseExpected = Math.sqrt(sumSqCombined / trainSet.length)
     maeExpectedBaseline = sumAbsBaseline / trainSet.length
+  }
+
+  // MAE CV HONESTO (Pago/includeQuality): k-fold onde as obras held-out são
+  // previstas com a qualidade ESTIMADA pela IA (como nas não-lidas), NÃO com os
+  // post-scores reais. Quebra a circularidade (user_score = média dos post-scores)
+  // que torna o cv_mae do modelo otimista. Sem estimativa IA pra a obra held-out,
+  // cai pra qualidade vazia (mediana) → conservador até o backfill cobrir as lidas.
+  let honestCvMae: number | null = null
+  if (includeQuality && !expectedPredictor.isStub && trainSet.length >= 20) {
+    const idx = trainSet.map((_, i) => i)
+    let state = 42
+    const rand = () => {
+      state = (state * 1664525 + 1013904223) >>> 0
+      return state / 0x100000000
+    }
+    for (let i = idx.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1))
+      ;[idx[i], idx[j]] = [idx[j], idx[i]]
+    }
+    const k = trainSet.length < 50 ? trainSet.length : 5
+    const folds: number[][] = Array.from({ length: k }, () => [])
+    idx.forEach((v, i) => folds[i % k].push(v))
+    let sumAbs = 0
+    let count = 0
+    for (const fold of folds) {
+      const testSet = new Set(fold)
+      const trIn: ExpectedScoreInput[] = []
+      const trTg: number[] = []
+      for (let i = 0; i < trainSet.length; i++) {
+        if (testSet.has(i)) continue
+        trIn.push(expectedTrainInputs[i]) // treino com qualidade real
+        trTg.push(trainSet[i].userScore as number)
+      }
+      if (trIn.length < 20) continue
+      const foldPred = trainExpectedPredictor(trIn, trTg, true)
+      if (foldPred.isStub) continue
+      const heldInputs = fold.map((i) => ({
+        ...expectedTrainInputs[i],
+        postScores: (aiQualityByWork.get(trainSet[i].id) ?? {}) as ExpectedScoreInput["postScores"],
+      }))
+      const preds = foldPred.predict(heldInputs)
+      for (let j = 0; j < fold.length; j++) {
+        sumAbs += Math.abs(preds[j].expected - (trainSet[fold[j]].userScore as number))
+        count++
+      }
+    }
+    if (count > 0) honestCvMae = sumAbs / count
   }
 
   // ---------- 3b) kNN sobre embeddings ----------
@@ -577,7 +703,7 @@ export async function recalculateAll() {
     for (const w of works) {
       w.personalFit = computePersonalFit(profilePayload, {
         tags: w.tags,
-        categoryScores: w.categoryScores,
+        categoryScores: w.categoryScoresCalibrated,
       })
     }
 
@@ -723,9 +849,14 @@ export async function recalculateAll() {
       mae_expected: maeExpected,
       rmse_expected: rmseExpected,
       mae_expected_baseline: maeExpectedBaseline,
+      // Headline "Precisão da previsão". Pago: MAE CV honesto (held-out com
+      // qualidade estimada pela IA — não-circular). Free: cvMAE do modelo
+      // (sem qualidade, já honesto). Fallback pro cvMAE se o honesto não rodou.
       cv_mae_expected_stage1: expectedPredictor.isStub
         ? null
-        : expectedPredictor.model.cvMAE,
+        : includeQuality
+          ? (honestCvMae ?? expectedPredictor.model.cvMAE)
+          : expectedPredictor.model.cvMAE,
       // Sem treino sequencial: stage2 cvMAE não existe mais; valor de baseline
       // serve de proxy de "quanto o modelo erra sem qualidade" no painel.
       cv_mae_expected_stage2: null,

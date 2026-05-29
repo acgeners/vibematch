@@ -154,6 +154,16 @@ export interface WorkStatusFormProps {
   hideFooter?: boolean
   /** Chamado quando usuário clica Cancelar (só usado quando hideFooter=false). */
   onCancel?: () => void
+  /** Chamado sempre que o status pessoal selecionado muda (mesmo antes de salvar).
+   *  Permite ao parent revelar a seção de atributos pós-leitura na hora, sem reload. */
+  onStatusChange?: (status: WorkStatusValues["personal_status"]) => void
+  /** Salvamento adicional encadeado no mesmo submit (ex.: atributos pós-leitura).
+   *  Roda após updateWorkStatus ter sucesso; se falhar, status já foi salvo (falha parcial). */
+  extraSave?: () => Promise<{ ok: boolean; error?: string } | null | void>
+  /** Considera o form "sujo" mesmo sem mudança nos campos de status (ex.: atributos mudaram). */
+  extraDirty?: boolean
+  /** Rótulo do botão de submit (default "Salvar"). */
+  submitLabel?: string
 }
 
 export function WorkStatusForm({
@@ -163,6 +173,10 @@ export function WorkStatusForm({
   onSaved,
   hideFooter = false,
   onCancel,
+  onStatusChange,
+  extraSave,
+  extraDirty = false,
+  submitLabel,
 }: WorkStatusFormProps) {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
@@ -202,6 +216,12 @@ export function WorkStatusForm({
 
   const [postWeights] = useState<Record<PostReadingScoreField, number>>(readPostReadingWeights)
 
+  // Avisa o parent da mudança de status na hora (antes de salvar) pra revelar
+  // a seção de atributos pós-leitura sem depender de reload.
+  useEffect(() => {
+    if (personalStatus) onStatusChange?.(personalStatus)
+  }, [personalStatus, onStatusChange])
+
   useEffect(() => {
     if (personalStatus !== "Completed") return
     if (typeof totalChapters !== "number" || totalChapters <= 0) return
@@ -237,14 +257,27 @@ export function WorkStatusForm({
       normalized[field] = normalizePostReadingScore(normalized[field])
     }
     const result = await updateWorkStatus(workId, normalized)
-    setSaving(false)
 
     if ("error" in result && result.error) {
+      setSaving(false)
       const firstError = Object.values(result.error).flat()[0] ?? "Erro ao salvar status"
       toast.error(typeof firstError === "string" ? firstError : "Erro ao salvar status")
       return
     }
-    toast.success("Status atualizado.")
+
+    // Salvamento encadeado (ex.: atributos pós-leitura). Status já foi salvo;
+    // se o extra falhar, avisa mas não reverte (falha parcial).
+    let extraOk = true
+    if (extraSave) {
+      const r = await extraSave()
+      if (r && "ok" in r && !r.ok) {
+        extraOk = false
+        toast.error(r.error ?? "Falha ao salvar a avaliação de atributos.")
+      }
+    }
+    setSaving(false)
+
+    if (extraOk) toast.success(extraSave ? "Tudo salvo." : "Status atualizado.")
     onSaved?.()
     router.refresh()
   }
@@ -563,8 +596,8 @@ export function WorkStatusForm({
               Cancelar
             </Button>
           )}
-          <Button type="submit" disabled={saving || !isDirty}>
-            {saving ? "Salvando…" : "Salvar"}
+          <Button type="submit" disabled={saving || (!isDirty && !extraDirty)}>
+            {saving ? "Salvando…" : (submitLabel ?? "Salvar")}
           </Button>
         </div>
       )}

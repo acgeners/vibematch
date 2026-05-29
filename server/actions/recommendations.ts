@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { generateTasteProfile, rankFavorites, MODEL, PROMPT_VERSION } from "@/lib/ai-recommendation/service"
 import { type RankingFilters } from "@/server/queries/ranking"
+import { ensureCapability, getCurrentPlan } from "@/server/queries/current-user"
+import { planAllows } from "@/lib/plans/capabilities"
+import { buildTasteProfileHeuristic } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import {
   buildStubProfile,
   computeInputHash,
@@ -110,6 +113,22 @@ export async function generateTasteProfileAction(): Promise<{
       return { data: saved }
     }
 
+    // Free: perfil heurístico (zero LLM). Pago: perfil LLM rico.
+    const plan = await getCurrentPlan()
+    if (!planAllows(plan, "llm_taste_profile")) {
+      const profile = buildTasteProfileHeuristic(ratedWorks)
+      const saved = await insertNewTasteProfile({
+        profile,
+        nWorks: ratedWorks.length,
+        inputHash,
+        isStub: false,
+        modelName: "heuristic",
+        promptVersion: "heuristic-v1",
+        rawResponse: null,
+      })
+      return { data: saved }
+    }
+
     const result = await generateTasteProfile(ratedWorks)
     const saved = await insertNewTasteProfile({
       profile: result.profile,
@@ -190,6 +209,10 @@ export async function runRecommendationAction(
   args: RunRecommendationArgs,
 ): Promise<{ data?: RunRecommendationResult; error?: string }> {
   try {
+    // Gate: Smart Shortlist (re-rank por IA + mood) é exclusivo do Pago.
+    const gate = await ensureCapability("smart_shortlist")
+    if (!gate.ok) return { error: gate.error }
+
     const runsToday = await getRunsToday()
     if (runsToday >= MAX_RUNS_PER_DAY) {
       return {
@@ -322,6 +345,7 @@ export async function runRecommendationAction(
           alignment_justification: r.justification,
           alignment_payload: payload,
           alignment_at: now,
+          alignment_stale: false, // recém-computado com bias/perfil atuais
         }
       })
       if (upsertRows.length > 0) {
@@ -405,6 +429,10 @@ export async function rerankSingleWorkAction(
   workId: string,
 ): Promise<{ data?: RerankSingleWorkResult; error?: string }> {
   try {
+    // Gate: re-rank por IA é exclusivo do Pago.
+    const gate = await ensureCapability("smart_shortlist")
+    if (!gate.ok) return { error: gate.error }
+
     const runsToday = await getRunsToday()
     if (runsToday >= MAX_RUNS_PER_DAY) {
       return {
@@ -451,6 +479,7 @@ export async function rerankSingleWorkAction(
           alignment_justification: ranking.justification,
           alignment_payload: buildAlignmentPayload(ranking),
           alignment_at: now,
+          alignment_stale: false, // recém-computado com bias/perfil atuais
         },
         { onConflict: "work_id" },
       )

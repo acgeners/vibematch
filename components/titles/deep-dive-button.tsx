@@ -13,6 +13,8 @@ interface DeepDiveButtonProps {
   lastDive: DeepDiveResultRow | null
   /** "cta" mostra um card explicativo; "compact" só botão. */
   variant?: "cta" | "compact"
+  /** Deep Dive é exclusivo do Pago — quando false, mostra CTA de upgrade. */
+  isPaid?: boolean
 }
 
 function timeAgo(iso: string): string {
@@ -34,6 +36,7 @@ export function DeepDiveButton({
   workTitle,
   lastDive,
   variant = "cta",
+  isPaid = true,
 }: DeepDiveButtonProps) {
   const [open, setOpen] = useState(false)
 
@@ -57,11 +60,12 @@ export function DeepDiveButton({
           <div className="flex shrink-0 flex-col items-end gap-1.5">
             <Button
               onClick={() => setOpen(true)}
+              disabled={!isPaid}
               variant="outline"
               className="border-violet-500/40 bg-violet-500/10 text-violet-700 hover:bg-violet-500/20 dark:text-violet-300"
             >
               <Sparkles className="h-4 w-4" />
-              {lastDive ? "Nova análise" : "Analisar"}
+              {!isPaid ? "Plano Pago" : lastDive ? "Nova análise" : "Analisar"}
             </Button>
             {lastDive && (
               <Badge

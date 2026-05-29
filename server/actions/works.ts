@@ -1664,10 +1664,12 @@ export async function updateWorkExternalData(id: string, updates: ExternalWorkUp
     if (updates.totalChapters !== undefined) workFields.total_chapters = updates.totalChapters ?? null
     if (updates.observations !== undefined) workFields.observations = updates.observations ?? null
 
-    if (Object.keys(workFields).length > 0) {
-      const { error } = await supabase.from("works").update(workFields).eq("id", id)
-      if (error) return { error: error.message }
-    }
+    // "Atualizar dados" sempre carimba o timestamp de refresh de dados —
+    // separado de updated_at (que o trigger toca em qualquer edição da linha).
+    workFields.data_refreshed_at = new Date().toISOString()
+
+    const { error } = await supabase.from("works").update(workFields).eq("id", id)
+    if (error) return { error: error.message }
 
     // Capas: se vier o array `covers` (multipick), upserta cada uma preservando
     // capas existentes que não estão na lista (só zera primária delas). Caso

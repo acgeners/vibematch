@@ -1,5 +1,8 @@
 import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } from "@/server/queries/ranking"
+import { getCurrentPlan } from "@/server/queries/current-user"
+import { planAllows } from "@/lib/plans/capabilities"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
+import { getLowCoverageWorkIds } from "@/server/queries/calibration-guards"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
@@ -93,6 +96,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // Sem o expected_*, sort por "Esperada" caía silenciosamente em final_score.
   const validSortFields = new Set<string>([
     // Notas (novo pipeline)
+    "recommended",
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
     // Notas (legado)
     "final_score", "calc_score", "predicted_score", "pred_score", "alignment_score",
@@ -107,15 +111,16 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     // Critérios IA
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
-  // Default "Smart": prioriza sinais contextuais (re-rank IA + perfil) e cai
-  // pra Nota Esperada. Obras sem alignment_score (a maioria) descem pra
-  // personal_fit; se também null, descem pra expected_score. Resultado: obras
-  // recém-rankeadas pelo LLM aparecem no topo, restante mantém ordem por nota.
-  const rawSort = str("sort") ?? "alignment_score:desc,personal_fit:desc,expected_score:desc"
+  // Default: Free ordena por "recommended" (expected × fit, sem LLM); Pago mantém
+  // a Nota Esperada crua como base (o re-rank por IA é opt-in via "Recomendar com IA").
+  const plan = await getCurrentPlan()
+  const isPaid = planAllows(plan, "smart_shortlist")
+  const defaultSort = isPaid ? "expected_score:desc" : "recommended:desc"
+  const rawSort = str("sort") ?? defaultSort
   let sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
     return {
-      field: (validSortFields.has(field) ? field : "final_score") as RankingSortBy,
+      field: (validSortFields.has(field) ? field : "expected_score") as RankingSortBy,
       dir: dir === "asc" ? "asc" : "desc",
     }
   })
@@ -187,10 +192,13 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     sortLevels,
   }
 
-  const [entries, scoreThresholds] = await Promise.all([
+  const [rawEntries, scoreThresholds, lowCoverageIds] = await Promise.all([
     getRanking(filters),
     getScoreColorThresholds(),
+    getLowCoverageWorkIds(),
   ])
+  // Marca obras não-lidas com baixa cobertura de gênero (badge ⚠ na Nota esperada).
+  const entries = rawEntries.map((e) => ({ ...e, lowCoverage: lowCoverageIds.has(e.workId) }))
 
   return (
     <div className="space-y-4">
@@ -204,7 +212,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
               {entries.length} obra{entries.length !== 1 ? "s" : ""}
             </Badge>
             <SurpriseMeButton entries={entries} />
-            <RecommendWithAiButton source="ranking" />
+            <RecommendWithAiButton source="ranking" isPaid={isPaid} />
           </div>
         }
       />
@@ -220,9 +228,10 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         defaultMinCalc={prefs.minCalc}
         defaultMinPredicted={prefs.minPredicted}
         defaultMinFinal={prefs.minFinal}
+        defaultSort={defaultSort}
       />
 
-      <RankingTable entries={entries} scoreThresholds={scoreThresholds} />
+      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} />
     </div>
   )
 }

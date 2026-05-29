@@ -93,18 +93,21 @@ interface PersonalStatusBadgeProps {
   statusId?: number | null
   status?: string | null
   className?: string
+  /** Quando true, mostra só o símbolo (sem o texto do status). */
+  iconOnly?: boolean
 }
 
-export function PersonalStatusBadge({ statusId, status, className }: PersonalStatusBadgeProps) {
+export function PersonalStatusBadge({ statusId, status, className, iconOnly }: PersonalStatusBadgeProps) {
   const info = resolvePersonalInfo(statusId, status)
   const name = info?.status ?? "To read"
   return (
     <Badge
       variant="secondary"
-      className={cn("gap-1", PERSONAL_STATUS_CLASSES[name] ?? "bg-gray-100 text-gray-700", className)}
+      className={cn("gap-1", iconOnly && "px-1.5", PERSONAL_STATUS_CLASSES[name] ?? "bg-gray-100 text-gray-700", className)}
+      title={iconOnly ? name : undefined}
     >
       <span aria-hidden>{info?.symbol || "•"}</span>
-      {name}
+      {!iconOnly && name}
     </Badge>
   )
 }

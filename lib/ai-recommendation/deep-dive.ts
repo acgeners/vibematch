@@ -10,7 +10,7 @@ import type { UsageTokens } from "@/lib/ai/pricing"
 // Versão do prompt — incremente quando mudar DEEP_DIVE_SYSTEM_PROMPT ou
 // o schema do tool. Importante porque o ai_api_calls.prompt_version é
 // usado pra A/B e auditoria de regressão.
-export const DEEP_DIVE_PROMPT_VERSION = "deep-dive-v1"
+export const DEEP_DIVE_PROMPT_VERSION = "deep-dive-v2"
 
 // Extended thinking budget tokens — escolhido em discussão com o user.
 // Reduz pra metade na segunda tentativa pra liberar headroom de output

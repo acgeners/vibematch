@@ -77,15 +77,35 @@ export function AlignmentScoreCell({
   justification,
   workId,
   payload,
+  isPaid = true,
 }: {
   score: number | null
   justification: string | null
   workId?: string
   payload?: AlignmentPayload | null
+  isPaid?: boolean
 }) {
   if (score == null) {
-    if (workId) {
+    if (workId && isPaid) {
       return <RerankSingleWorkButton workId={workId} />
+    }
+    if (workId && !isPaid) {
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex items-center gap-1 rounded-md border border-dashed border-muted-foreground/30 px-1.5 py-0.5 text-xs text-muted-foreground/70 cursor-help">
+                <Sparkles className="h-3 w-3" />
+                <span>Pago</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-[260px]">
+              O re-rank por IA (IA Rk) é uma feature do plano Pago. No Free o ranking usa
+              Nota Esperada × alinhamento.
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
     }
     return (
       <TooltipProvider>
@@ -215,10 +235,13 @@ export function AlignmentScoreCell({
 export function AlignmentCell({
   value,
   percentile,
+  showBar = true,
 }: {
   value: number | null
   /** Percentil (0-100) dentro da biblioteca. Quando presente, usado como display. */
   percentile?: number | null
+  /** Quando false, mostra só o número colorido por faixa (sem a barra). */
+  showBar?: boolean
 }) {
   if (value == null) {
     return (
@@ -244,6 +267,12 @@ export function AlignmentCell({
     : displayPct >= 50 ? "bg-amber-500"
     : displayPct >= 25 ? "bg-orange-500"
     : "bg-slate-400"
+  // Versão text-only (showBar=false): mesma faixa do bar mapeada pra cor de texto.
+  const textColor =
+    displayPct >= 75 ? "text-emerald-600 dark:text-emerald-400"
+    : displayPct >= 50 ? "text-amber-600 dark:text-amber-400"
+    : displayPct >= 25 ? "text-orange-600 dark:text-orange-400"
+    : "text-muted-foreground"
 
   // Top label quando estamos exibindo percentile
   const topLabel =
@@ -259,12 +288,18 @@ export function AlignmentCell({
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="inline-flex items-center gap-1.5 cursor-help">
-            <div className="h-1.5 w-12 rounded-full bg-muted overflow-hidden">
-              <div className={cn("h-full transition-all", color)} style={{ width: `${displayPct}%` }} />
+          {showBar ? (
+            <div className="inline-flex items-center gap-1.5 cursor-help">
+              <div className="h-1.5 w-12 rounded-full bg-muted overflow-hidden">
+                <div className={cn("h-full transition-all", color)} style={{ width: `${displayPct}%` }} />
+              </div>
+              <span className="font-mono text-xs tabular-nums">{displayPct}%</span>
             </div>
-            <span className="font-mono text-xs tabular-nums">{displayPct}%</span>
-          </div>
+          ) : (
+            <span className={cn("font-mono text-xs font-medium tabular-nums cursor-help", textColor)}>
+              {displayPct}%
+            </span>
+          )}
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[280px] space-y-1">
           {percentile != null ? (

@@ -108,6 +108,11 @@ export interface CandidateWorkInput {
   tags: Array<{ name: string; group: string | null }>
   platformAvg: number | null
   totalVotes: number | null
+  /** Nota Esperada (L1) — a previsão de referência enviada ao LLM. */
+  expectedScore: number | null
+  /** Alinhamento com o perfil (0–1). */
+  fitScore: number | null
+  /** @deprecated legado — mantido pra compat; não enviado mais ao prompt. */
   predictedScore: number | null
   reviews: CandidateReview[]
 }
@@ -255,6 +260,12 @@ export interface DeepDiveWorkBundle {
   platformAvg: number | null
   totalVotes: number | null
   reviews: CandidateReview[]
+  /** Nota Esperada (L1) — predição offline; âncora de previsão pro consultor. */
+  expectedScore: number | null
+  /** true quando o expected_score é stub/fallback (poucos labels). */
+  expectedIsStub: boolean
+  /** fit_score (0–1) — alinhamento determinístico com o TasteProfile. */
+  fit: number | null
 }
 
 export interface DeepDiveContext {

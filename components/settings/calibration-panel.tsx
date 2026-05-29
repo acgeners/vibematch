@@ -161,6 +161,15 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
   const stacker = config.stacker_coefficients
   const loocv = stacker?.cvMAE ?? null
 
+  // Precisão honesta da PREVISÃO (nota esperada / L1) — CV interno do RidgeCV.
+  // É o número que importa pros 2 objetivos: prediz obras NÃO-LIDAS sem usar
+  // sinal pós-leitura. O LOOCV da stacker (abaixo) é legado e otimista (usa
+  // meanPostScore ≈ user_score → quase circular nas obras já lidas).
+  const expectedCvMae =
+    config.cv_mae_expected_stage1 != null && !snapshot.expectedPredictorIsStub
+      ? Number(config.cv_mae_expected_stage1)
+      : null
+
   // Tendência: comparar LOOCV atual com o snapshot anterior do histórico.
   // history[0] é o snapshot mais recente; history[1] é o anterior.
   const previousLoocv = snapshot.history[1]?.mae_loocv_stacker ?? null
@@ -174,23 +183,32 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
         {/* ============================================================ */}
         <div className="rounded-lg border border-border bg-card/50 p-4 space-y-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            {/* MAE LOOCV em destaque */}
+            {/* Precisão da PREVISÃO (nota esperada / L1) em destaque */}
             <div className="flex-1 space-y-1">
               <p className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Precisão do sistema</span>
+                <span>Precisão da previsão</span>
                 <InfoTooltip
-                  label="MAE LOOCV"
-                  text="MAE LOOCV (Leave-One-Out Cross-Validation) — pra cada obra com nota pessoal, o sistema retreina sem ela e prevê. Mostra o erro médio esperado em obras NOVAS (sem nota). ↓ Menor = mais preciso. É o número mais honesto pra avaliar previsões futuras."
+                  label="MAE CV da Nota Esperada"
+                  text="Erro médio (cross-validation) da Nota Esperada (L1) — a previsão usada pra obras NÃO-LIDAS, sem usar sinal pós-leitura. É a precisão honesta pro objetivo de recomendar. ↓ Menor = mais preciso."
                 />
               </p>
               <div className="flex items-baseline gap-3">
-                <p className={cn("font-mono text-3xl font-semibold tabular-nums", maeColor(loocv))}>
-                  {fmt(loocv, 2)}
+                <p className={cn("font-mono text-3xl font-semibold tabular-nums", maeColor(expectedCvMae))}>
+                  {fmt(expectedCvMae, 2)}
                 </p>
-                {loocvDelta != null && <TrendBadge delta={loocvDelta} />}
               </div>
               <p className="text-xs text-muted-foreground">
-                MAE LOOCV do stacker · Treino: {stacker?.trainSize ?? snapshot.trainSize} / {snapshot.totalWorks} obras
+                MAE CV da Nota Esperada · Treino: {stacker?.trainSize ?? snapshot.trainSize} / {snapshot.totalWorks} obras
+              </p>
+              <p className="text-[10px] text-muted-foreground/70">
+                Legado: stacker LOOCV{" "}
+                <span className={cn("font-mono", maeColor(loocv))}>{fmt(loocv, 2)}</span>
+                {loocvDelta != null && (
+                  <span className="ml-1 align-middle">
+                    <TrendBadge delta={loocvDelta} />
+                  </span>
+                )}{" "}
+                <span className="italic">(otimista — usa sinal pós-leitura)</span>
               </p>
             </div>
 
@@ -208,18 +226,34 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
             </div>
           </div>
 
-          {/* Fórmula aprendida */}
+          {/* Origem do sinal na Nota Esperada (o modelo do headline) */}
+          {config.expected_ridge_coefficients && (
+            <RidgeFeatureImportance
+              ridge={config.expected_ridge_coefficients}
+              label="Origem do sinal na Nota Esperada"
+            />
+          )}
+
+          {/* Legado: fórmula da stacker (produz a Nota.Final, NÃO a Nota Esperada) */}
           {stacker ? (
-            <StackerFormula stacker={stacker} />
+            <details className="group rounded-md border border-border/50 bg-muted/10">
+              <summary className="flex cursor-pointer list-none items-center gap-1 px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground/70 [&::-webkit-details-marker]:hidden">
+                <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+                Legado — como a Nota.Final combina os previsores
+              </summary>
+              <div className="border-t border-border/40 px-3 pb-3 pt-2">
+                <StackerFormula stacker={stacker} />
+                {config.ridge_coefficients && (
+                  <div className="mt-2">
+                    <RidgeFeatureImportance ridge={config.ridge_coefficients} />
+                  </div>
+                )}
+              </div>
+            </details>
           ) : (
             <p className="text-xs text-amber-500">
               Stacker sem treino suficiente (mínimo 30 obras com nota pessoal). Usando inverse-variance.
             </p>
-          )}
-
-          {/* Importância das features no Nota.Pr */}
-          {config.ridge_coefficients && (
-            <RidgeFeatureImportance ridge={config.ridge_coefficients} />
           )}
 
           {/* Toggle stacker + Pseudo Nota.M + alerta de stub */}
@@ -839,8 +873,10 @@ function toneClasses(tone: "primary" | "muted" | "personal" | "neutral"): string
 
 function RidgeFeatureImportance({
   ridge,
+  label = "Origem do sinal no Nota.Pr",
 }: {
   ridge: { featureNames: string[]; coefficients: number[] }
+  label?: string
 }) {
   const [showLegend, setShowLegend] = useState(false)
   const { featureNames, coefficients } = ridge
@@ -880,7 +916,7 @@ function RidgeFeatureImportance({
     <div className="rounded-md border border-border/60 bg-muted/20 p-3 space-y-2">
       <p className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-muted-foreground">
         <Layers className="h-3 w-3" />
-        <span>Origem do sinal no Nota.Pr</span>
+        <span>{label}</span>
         <InfoTooltip
           label="Feature importance"
           text="Soma dos |coeficientes| do Ridge por grupo de feature, normalizada. Como as features são padronizadas antes do fit, isso mede importância relativa direta. Não é exatamente 'variância explicada', mas é a aproximação prática mais comum."
@@ -981,7 +1017,6 @@ function ShadowExpectedComparison({
     maeExpected != null && maeFinal != null && maeFinal > 0
       ? maeExpected / maeFinal
       : null
-  const meetsCriterion = ratio != null && ratio <= 1.05
   const stage2Gain =
     maeExpectedBaseline != null && maeExpected != null
       ? maeExpectedBaseline - maeExpected
@@ -997,8 +1032,10 @@ function ShadowExpectedComparison({
         />
       </h4>
       <p className="mb-3 text-xs text-muted-foreground">
-        Reflete o processo real de decisão: primeiro o perfil (encaixa no seu tipo?), depois
-        a qualidade (bem-feita?). Critério: ratio ≤ 1.05× libera Fase 2.
+        Diagnóstico in-sample. ⚠️ O ratio vs Nota.Final <strong>não é um gate válido</strong>: a
+        Nota.Final usa <code className="font-mono">meanPostScore</code> (≈ user_score) → é quase
+        circular nas obras lidas, então tem MAE artificialmente baixo. A precisão honesta da
+        previsão é o <strong>MAE CV da Nota Esperada</strong> lá no topo.
       </p>
 
       {coveredCount === 0 ? (
@@ -1047,26 +1084,17 @@ function ShadowExpectedComparison({
             />
             <div className="rounded-md border border-border p-3">
               <div className="flex items-center gap-1 text-xs uppercase tracking-wider text-muted-foreground">
-                Ratio L1 / Final
+                Ratio L1 / Final <span className="normal-case">(legado)</span>
                 <InfoTooltip
-                  label="Ratio"
-                  text="MAE(expected combined) ÷ MAE(Nota.Final). Critério ≤ 1.05× significa que o novo pipeline não piora a precisão em mais de 5%."
+                  label="Ratio (legado)"
+                  text="MAE(expected in-sample) ÷ MAE(Nota.Final in-sample). NÃO é gate válido: a Nota.Final é circular (usa meanPostScore≈user_score), então seu MAE é artificialmente baixo. Um ratio >1 aqui é esperado e não indica regressão. Use o MAE CV da Nota Esperada (topo) pra precisão real."
                 />
               </div>
-              <div className="mt-1 text-lg font-mono font-semibold">
+              <div className="mt-1 text-lg font-mono font-semibold text-muted-foreground">
                 {ratio != null ? `${ratio.toFixed(2)}×` : "—"}
               </div>
-              <div
-                className={cn(
-                  "mt-1 text-xs font-medium",
-                  meetsCriterion ? "text-emerald-500" : "text-amber-500",
-                )}
-              >
-                {ratio == null
-                  ? "Aguardando recálculo"
-                  : meetsCriterion
-                    ? "✓ Critério ≤ 1.05× atingido — libera Fase 2"
-                    : "⚠ Acima de 1.05× — investigar antes de avançar"}
+              <div className="mt-1 text-xs font-medium text-muted-foreground">
+                {ratio == null ? "Aguardando recálculo" : "comparação legada (não-gate)"}
               </div>
             </div>
           </div>

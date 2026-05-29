@@ -7,23 +7,30 @@ import {
   getTasteProfileStatusAction,
 } from "@/server/actions/recommendations"
 import { listRecommendationRuns } from "@/server/queries/recommendations"
+import { getCurrentPlan } from "@/server/queries/current-user"
+import { planAllows, paidOnlyMessage } from "@/lib/plans/capabilities"
 
 export const revalidate = 60
 
 export default async function RecommendationsPage() {
-  const [status, runs] = await Promise.all([
+  const [status, runs, plan] = await Promise.all([
     getTasteProfileStatusAction(),
     listRecommendationRuns(50),
+    getCurrentPlan(),
   ])
 
+  const isPaid = planAllows(plan, "smart_shortlist")
   const insufficient = status.ratedWorksCount < 5
   const stubBlocks = status.profile?.is_stub ?? false
-  const disabled = insufficient || stubBlocks
-  const disabledReason = insufficient
-    ? "Avalie pelo menos 5 obras com user_score pra desbloquear o ranking."
-    : stubBlocks
-      ? "Perfil ainda em modo stub — avalie mais obras pra desbloquear o ranking."
-      : null
+  const disabled = !isPaid || insufficient || stubBlocks
+  // Plano tem prioridade na razão (é o gate de produto, não de dados).
+  const disabledReason = !isPaid
+    ? paidOnlyMessage("smart_shortlist")
+    : insufficient
+      ? "Avalie pelo menos 5 obras com user_score pra desbloquear o ranking."
+      : stubBlocks
+        ? "Perfil ainda em modo stub — avalie mais obras pra desbloquear o ranking."
+        : null
 
   return (
     <div className="w-full space-y-4">

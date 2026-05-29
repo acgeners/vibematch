@@ -59,7 +59,7 @@ function getScoreColor(score: number, thresholds: ScoreColorThresholds | null | 
   switch (pickTier(score, thresholds)) {
     case "top": return "bg-green-500 text-white"
     case "high": return "bg-emerald-500 text-white"
-    case "mid": return "bg-yellow-500 text-white"
+    case "mid": return "bg-yellow-500 text-yellow-950"
     case "low": return "bg-orange-500 text-white"
     case "bottom": return "bg-red-500 text-white"
   }

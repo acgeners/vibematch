@@ -3,8 +3,16 @@ import Link from "next/link"
 import { BarChart3, ChevronDown, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
-import { WorkStatusForm } from "@/components/titles/work-status-form"
+import { PostReadingFlow } from "@/components/titles/post-reading-flow"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug } from "@/server/queries/works"
+import {
+  getLatestAiEvaluationAttributes,
+  getExistingPostReadingAssessment,
+} from "@/server/queries/post-attribute-assessment"
+import { getCurrentUserId, getCurrentPlan } from "@/server/queries/current-user"
+import { getBiasMap } from "@/lib/calculations/attribute-bias"
+import { getModelPromptDrift } from "@/server/queries/calibration-guards"
+import { planAllows } from "@/lib/plans/capabilities"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
@@ -155,7 +163,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // Carrega só o distance_p95 do formula_config pro CalculationBreakdown
   // mostrar rótulos de distância calibrados (perto/médio/longe relativos).
   const configClient = createAdminClient()
-  const [{ data: configRow }, scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources] = await Promise.all([
+  const [{ data: configRow }, scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, modelPromptDrift, plan] = await Promise.all([
     configClient
       .from("formula_config")
       .select("distance_p95")
@@ -167,13 +175,22 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getSimilarWorks(work.id as string, 8),
     getLastDeepDive(work.id as string),
     getSourceRows(),
+    getBiasMap(await getCurrentUserId(configClient), configClient),
+    getModelPromptDrift(),
+    getCurrentPlan(configClient),
   ])
+  const isPaidPlan = planAllows(plan, "deep_dive")
   const distanceP95: number | null = configRow?.distance_p95 == null ? null : Number(configRow.distance_p95)
 
   const scoreMap: Record<string, number> = {}
+  const sourceMap: Record<string, string> = {}
   for (const cs of work.category_scores ?? []) {
     scoreMap[cs.criterion_slug] = cs.score
+    sourceMap[cs.criterion_slug] = cs.source ?? "imported"
   }
+  // Atributos cuja nota da IA é calibrada on-read no pipeline (offset != 0 e
+  // origem IA). Mostra "→ Y no cálculo" no card de notas por critério.
+  const BIAS_APPLICABLE = new Set(["ai_accepted", "ai_calibrated"])
 
   const aiEvaluations: Array<{
     id: string
@@ -281,16 +298,28 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     post_originality_score: work.post_originality_score ?? null,
   }
 
+  // Questionário pós-leitura (atributos): carrega notas da IA + avaliação salva.
+  // Sempre carregado pra que o fluxo client-side (PostReadingFlow) possa revelar
+  // a seção de atributos na hora em que o status vira terminal — sem reload.
+  const postAttrUserId = await getCurrentUserId(configClient)
+  const [postAttrAi, postAttrExisting] = await Promise.all([
+    getLatestAiEvaluationAttributes(work.id as string, configClient),
+    getExistingPostReadingAssessment(work.id as string, postAttrUserId, configClient),
+  ])
+
   const categoriesCount = genres.length + tags.length
 
-  const lastUpdatedDate = (() => {
-    const candidates = [work.updated_at, latestAiEval?.created_at]
-      .filter((d): d is string => Boolean(d))
-      .map((d) => new Date(d))
-      .filter((d) => !Number.isNaN(d.getTime()))
-    if (candidates.length === 0) return null
-    return candidates.sort((a, b) => b.getTime() - a.getTime())[0]
-  })()
+  const toValidDate = (raw: string | null | undefined): Date | null => {
+    if (!raw) return null
+    const d = new Date(raw)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  // "Atualizada em" reflete só o último "Atualizar dados" (data_refreshed_at),
+  // distinto de "Última avaliação" (data da avaliação IA mais recente).
+  const dataRefreshedDate = toValidDate(
+    (work as { data_refreshed_at?: string | null }).data_refreshed_at
+  )
+  const lastAiEvalDate = toValidDate(latestAiEval?.created_at)
 
   const tabsListClass =
     "h-auto w-full flex flex-wrap justify-start gap-2 bg-transparent rounded-none p-0"
@@ -305,6 +334,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         <div className="flex flex-wrap items-center gap-2">
           <FavoriteToggleButton workId={work.id} isFavorite={work.is_favorite} />
           <EditLinkButton workSlug={id} workId={work.id} />
+          <StatusActionButton
+            workId={work.id}
+            statusInitialValues={statusInitial}
+            totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
+          />
           <MoreActionsMenu workId={work.id} isArchived={work.is_archived} />
           <Button asChild size="sm">
             <Link href="/titles/new">
@@ -357,62 +391,70 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           </TabsTrigger>
         </TabsList>
 
-        {/* Stat strip persistente — info ambiente, menos peso que as abas */}
-        <div className="mt-4 grid grid-cols-2 divide-x divide-border/40 rounded-lg border border-border/40 bg-card/20 overflow-hidden sm:grid-cols-3 lg:grid-cols-6">
-          {work.year != null && (
-            <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+        {/* Stat strip persistente — dividido discretamente em Geral | Pessoal */}
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {/* Geral: ano, capítulos, publicação */}
+          <div className="flex divide-x divide-border/40 rounded-lg border border-border/40 bg-card/20 overflow-hidden">
+            {work.year != null && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Ano
+                </span>
+                <span className="text-sm font-mono font-semibold text-foreground">
+                  {work.year}
+                </span>
+              </div>
+            )}
+            {chapterText && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Capítulos
+                </span>
+                <span className="text-sm font-mono font-semibold text-foreground">
+                  {chapterText}
+                </span>
+              </div>
+            )}
+            <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Ano
+                Publicação
               </span>
-              <span className="text-sm font-mono font-semibold text-foreground">
-                {work.year}
-              </span>
+              <PublicationStatusBadge statusId={work.publication_status_id} />
             </div>
-          )}
-          {chapterText && (
-            <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Capítulos
-              </span>
-              <span className="text-sm font-mono font-semibold text-foreground">
-                {chapterText}
-              </span>
-            </div>
-          )}
-          <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Publicação
-            </span>
-            <PublicationStatusBadge statusId={work.publication_status_id} />
           </div>
-          <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Pessoal
-            </span>
-            <PersonalStatusBadge statusId={work.personal_status_id} />
+
+          {/* Pessoal: status pessoal, interesse, nota esperada */}
+          <div className="flex divide-x divide-border/40 rounded-lg border border-border/40 bg-card/20 overflow-hidden">
+            <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Pessoal
+              </span>
+              <PersonalStatusBadge statusId={work.personal_status_id} />
+            </div>
+            {formatSynopsisInterest(work.synopsis_quality) && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Interesse
+                </span>
+                <span className="inline-flex items-center rounded-full border border-rose-400/30 bg-rose-500/10 px-2.5 py-0.5 text-xs font-semibold text-rose-600 dark:text-rose-300">
+                  {formatSynopsisInterest(work.synopsis_quality)}
+                </span>
+              </div>
+            )}
+            {work.calculated_scores?.expected_score != null && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Nota Esperada
+                </span>
+                <ScoreBadge
+                  score={work.calculated_scores.expected_score}
+                  size="md"
+                  showStub={work.calculated_scores?.expected_is_stub ?? false}
+                  thresholds={scoreThresholds?.final}
+                />
+              </div>
+            )}
           </div>
-          {formatSynopsisInterest(work.synopsis_quality) && (
-            <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Interesse
-              </span>
-              <span className="inline-flex items-center rounded-full border border-rose-400/30 bg-rose-500/10 px-2.5 py-0.5 text-xs font-semibold text-rose-600 dark:text-rose-300">
-                {formatSynopsisInterest(work.synopsis_quality)}
-              </span>
-            </div>
-          )}
-          {work.calculated_scores?.final_score != null && (
-            <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Nota.Final
-              </span>
-              <ScoreBadge
-                score={work.calculated_scores.final_score}
-                size="md"
-                thresholds={scoreThresholds?.final}
-              />
-            </div>
-          )}
         </div>
 
         {/* Layout principal: sidebar (capa + ações) | conteúdo da aba */}
@@ -427,7 +469,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               />
             </div>
 
-            {(lastUpdatedDate || work.is_archived || work.last_read_at) && (
+            {(dataRefreshedDate || lastAiEvalDate || work.is_archived || work.last_read_at) && (
               <div className="flex flex-col gap-1.5 rounded-md border bg-card/40 p-3 text-xs text-muted-foreground">
                 {work.last_read_at && (
                   <div>
@@ -441,11 +483,23 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </span>
                   </div>
                 )}
-                {lastUpdatedDate && (
-                  <div title={`Última atualização: ${lastUpdatedDate.toLocaleString("pt-BR")}`}>
+                {lastAiEvalDate && (
+                  <div title={`Última avaliação IA: ${lastAiEvalDate.toLocaleString("pt-BR")}`}>
+                    Última avaliação em{" "}
+                    <span className="font-medium text-foreground/80">
+                      {lastAiEvalDate.toLocaleDateString("pt-BR", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                      })}
+                    </span>
+                  </div>
+                )}
+                {dataRefreshedDate && (
+                  <div title={`Última atualização de dados: ${dataRefreshedDate.toLocaleString("pt-BR")}`}>
                     Atualizada em{" "}
                     <span className="font-medium text-foreground/80">
-                      {lastUpdatedDate.toLocaleDateString("pt-BR", {
+                      {dataRefreshedDate.toLocaleDateString("pt-BR", {
                         day: "2-digit",
                         month: "2-digit",
                         year: "numeric",
@@ -478,11 +532,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     totalChapters: work.total_chapters != null ? Number(work.total_chapters) : null,
                     observations: work.observations,
                   }}
-                />
-                <StatusActionButton
-                  workId={work.id}
-                  statusInitialValues={statusInitial}
-                  totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
                 />
               </div>
               {(() => {
@@ -562,10 +611,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </TabsContent>
 
             <TabsContent value="status" className="mt-0 space-y-5">
-              <WorkStatusForm
-                workId={work.id}
+              <PostReadingFlow
+                workId={work.id as string}
                 totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
-                initialValues={statusInitial}
+                statusInitial={statusInitial}
+                latestAiEvaluation={postAttrAi}
+                existingAssessment={postAttrExisting}
               />
             </TabsContent>
 
@@ -574,17 +625,33 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </TabsContent>
 
             <TabsContent value="scores" className="mt-0 space-y-6">
-      <AiEvaluationButton
-        workId={work.id}
-        workTitle={work.title}
-        hasCriteriaScores={Object.keys(scoreMap).length > 0}
-        coverUrl={primaryCover}
-      />
-      {work.personal_status !== "Completed" && work.personal_status !== "Dropped" && (
-        <DeepDiveButton
+      {modelPromptDrift.status === "warn" && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          <span aria-hidden>⚠</span>
+          <span>{modelPromptDrift.message}</span>
+        </div>
+      )}
+      {statusInitial.personal_status !== "Completed" && statusInitial.personal_status !== "Dropped" ? (
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-stretch">
+          <AiEvaluationButton
+            workId={work.id}
+            workTitle={work.title}
+            hasCriteriaScores={Object.keys(scoreMap).length > 0}
+            coverUrl={primaryCover}
+          />
+          <DeepDiveButton
+            workId={work.id}
+            workTitle={work.title}
+            lastDive={lastDeepDive}
+            isPaid={isPaidPlan}
+          />
+        </div>
+      ) : (
+        <AiEvaluationButton
           workId={work.id}
           workTitle={work.title}
-          lastDive={lastDeepDive}
+          hasCriteriaScores={Object.keys(scoreMap).length > 0}
+          coverUrl={primaryCover}
         />
       )}
       {/* Notas e Avaliações Externas side-by-side */}
@@ -597,46 +664,112 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 <Calculator className="h-4.5 w-4.5 text-muted-foreground" />
                 <CardTitle className="text-base font-bold text-foreground">Notas calculadas</CardTitle>
               </div>
-              {work.calculated_scores?.final_score != null && (
+              {work.calculated_scores?.expected_score != null && (
                 <div className="text-right shrink-0">
-                  <p className="text-xs font-medium text-muted-foreground">Nota Final</p>
+                  <p className="text-xs font-medium text-muted-foreground">Nota Esperada</p>
                   <p className="text-3xl font-black font-mono leading-none text-foreground">
-                    {work.calculated_scores.final_score.toFixed(2)}
+                    {work.calculated_scores.expected_score.toFixed(2)}
                   </p>
-                  <p className="text-xs text-muted-foreground">oficial nos rankings</p>
+                  <p className="text-xs text-muted-foreground">estimativa principal</p>
                 </div>
               )}
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className={cn("grid grid-cols-1 gap-4", work.user_score != null && "sm:grid-cols-2")}>
-              <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
-                <div className="flex flex-col items-start gap-1">
-                  <ScoreLabelTooltip
-                    name="Nota.IA"
-                    description="Soma ponderada das notas por critério dadas pela IA, ajustada por pesos e amplificada (5 + (nota − 5) × 1.25). Aplica penalidades por capítulos e observações."
-                  />
-                  <span className="text-[10px] text-muted-foreground">Avaliação por inteligência artificial</span>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {work.calculated_scores?.personal_fit != null && (
+                <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
+                  <div className="flex flex-col items-start gap-1">
+                    <ScoreLabelTooltip
+                      name="Alinhamento"
+                      description="fit_score (0–100%): alinhamento determinístico entre a obra e o seu TasteProfile (gêneros/tags amados e evitados + preferências por critério). Não usa LLM."
+                    />
+                    <span className="text-[10px] text-muted-foreground">Quão a obra combina com seu perfil</span>
+                  </div>
+                  {(() => {
+                    const fit = work.calculated_scores.personal_fit as number
+                    const cls =
+                      fit >= 0.75 ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-300"
+                      : fit >= 0.5 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
+                      : fit >= 0.3 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
+                      : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
+                    return (
+                      <span className={cn("flex h-10 w-14 items-center justify-center rounded-md border font-mono text-lg font-bold shrink-0", cls)}>
+                        {Math.round(fit * 100)}%
+                      </span>
+                    )
+                  })()}
                 </div>
-                <ScoreBadge score={work.calculated_scores?.calc_score ?? null} size="lg" thresholds={scoreThresholds?.calc} className="h-10 w-14 text-lg font-bold shrink-0" />
-              </div>
+              )}
 
-              <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
-                <div className="flex flex-col items-start gap-1">
-                  <ScoreLabelTooltip
-                    name="Prevista"
-                    description="Previsão por Ridge Regression treinada nas suas próprias notas pessoais. Estima qual seria sua nota baseada nos critérios da IA + dados externos. Requer ≥20 obras avaliadas para ser ativada."
-                  />
-                  <span className="text-[10px] text-muted-foreground">Previsão por aprendizado de máquina</span>
+              {work.calculated_scores?.alignment_score != null && (
+                <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
+                  <div className="flex flex-col items-start gap-1">
+                    <ScoreLabelTooltip
+                      name="Match (IA Rk)"
+                      description="match_score / IA Re-rank (0–100): veredito do consultor LLM sob demanda ('Recomendar com IA' / Deep Dive). Preenchido ao rodar o re-rank."
+                    />
+                    <span className="text-[10px] text-muted-foreground">Veredito do consultor IA (0–100)</span>
+                  </div>
+                  {(() => {
+                    const rk = work.calculated_scores.alignment_score
+                    const cls =
+                      rk >= 80 ? "bg-violet-500/15 text-violet-700 border-violet-500/40 dark:text-violet-300"
+                      : rk >= 60 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
+                      : rk >= 40 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
+                      : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
+                    return (
+                      <span className={cn("flex h-10 w-14 items-center justify-center rounded-md border font-mono text-lg font-bold shrink-0", cls)}>
+                        {Math.round(rk)}
+                      </span>
+                    )
+                  })()}
                 </div>
-                <ScoreBadge
-                  score={work.calculated_scores?.predicted_score ?? null}
-                  size="lg"
-                  showStub={work.calculated_scores?.predicted_is_stub ?? false}
-                  thresholds={scoreThresholds?.predicted}
-                  className="h-10 w-14 text-lg font-bold shrink-0"
-                />
-              </div>
+              )}
+
+              {(work.calculated_scores?.final_score != null ||
+                work.calculated_scores?.calc_score != null ||
+                work.calculated_scores?.predicted_score != null) && (
+                <details className="group rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm overflow-hidden sm:col-span-2">
+                  <summary className="flex cursor-pointer list-none items-center justify-between p-4 [&::-webkit-details-marker]:hidden">
+                    <div className="flex flex-col items-start gap-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-medium text-foreground">Notas legadas</span>
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">Pipeline antigo — substituído pela Nota Esperada</span>
+                    </div>
+                  </summary>
+                  <div className="grid gap-2 border-t border-border/40 px-4 pb-4 pt-3 bg-muted/10">
+                    <div className="flex items-center justify-between gap-3">
+                      <ScoreLabelTooltip
+                        name="Nota.Final"
+                        description="[Legado] Nota.Final — mistura ponderada (inverse-variance) de Nota.IA e Nota.Pr. Substituída pela Nota Esperada no novo pipeline."
+                      />
+                      <ScoreBadge score={work.calculated_scores?.final_score ?? null} size="sm" thresholds={scoreThresholds?.final} />
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <ScoreLabelTooltip
+                        name="Nota.IA"
+                        description="[Legado] Soma ponderada das notas por critério dadas pela IA, ajustada por pesos e amplificada (5 + (nota − 5) × 1.25)."
+                      />
+                      <ScoreBadge score={work.calculated_scores?.calc_score ?? null} size="sm" thresholds={scoreThresholds?.calc} />
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <ScoreLabelTooltip
+                        name="Prevista"
+                        description="[Legado] Previsão por Ridge Regression nas suas notas pessoais. Requer ≥20 obras avaliadas. Substituída pela Nota Esperada."
+                      />
+                      <ScoreBadge
+                        score={work.calculated_scores?.predicted_score ?? null}
+                        size="sm"
+                        showStub={work.calculated_scores?.predicted_is_stub ?? false}
+                        thresholds={scoreThresholds?.predicted}
+                      />
+                    </div>
+                  </div>
+                </details>
+              )}
 
               {work.user_score != null && (
                 hasPostReadingScores ? (
@@ -818,6 +951,20 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                         </span>
                       </p>
                     )}
+                    {score != null &&
+                      BIAS_APPLICABLE.has(sourceMap[slug]) &&
+                      (biasMap[slug] ?? 0) !== 0 && (
+                        <p
+                          className="text-[10px] text-sky-600/80 dark:text-sky-400/80"
+                          title={`Offset do seu perfil: ${biasMap[slug] > 0 ? "+" : ""}${biasMap[slug]}. O cálculo usa o valor calibrado, não o bruto da IA.`}
+                        >
+                          → calibrado p/{" "}
+                          <span className="font-mono font-semibold">
+                            {(score - biasMap[slug]).toFixed(1)}
+                          </span>{" "}
+                          no cálculo
+                        </p>
+                      )}
                   </div>
                 </div>
               )

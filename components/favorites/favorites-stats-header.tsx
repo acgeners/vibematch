@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { Badge } from "@/components/ui/badge"
 import { getScoreTextColor, type ScoreColorThresholds } from "@/components/ui/score-badge"
@@ -7,11 +8,14 @@ import type { FavoritesSummary } from "@/server/queries/favorites"
 interface FavoritesStatsHeaderProps {
   summary: FavoritesSummary
   scoreThresholds: ScoreColorThresholds | null
+  /** Ações (ex.: recomendar com IA) renderizadas na mesma linha dos cards. */
+  actions?: ReactNode
 }
 
-export function FavoritesStatsHeader({ summary, scoreThresholds }: FavoritesStatsHeaderProps) {
+export function FavoritesStatsHeader({ summary, scoreThresholds, actions }: FavoritesStatsHeaderProps) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
+      <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-3">
       <div className="rounded-lg border bg-card/40 p-3">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Total
@@ -64,6 +68,12 @@ export function FavoritesStatsHeader({ summary, scoreThresholds }: FavoritesStat
           </div>
         )}
       </div>
+      </div>
+      {actions && (
+        <div className="flex shrink-0 flex-col justify-center gap-2 lg:w-56">
+          {actions}
+        </div>
+      )}
     </div>
   )
 }
