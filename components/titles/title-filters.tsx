@@ -135,12 +135,23 @@ function StatusButton({
   )
 }
 
-function FilterCard({ title, children }: { title: string; children: React.ReactNode }) {
+function FilterCard({
+  title,
+  action,
+  children,
+}: {
+  title: string
+  action?: React.ReactNode
+  children: React.ReactNode
+}) {
   return (
     <div className="rounded-lg border bg-background p-3 shadow-sm">
-      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        {title}
-      </p>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {title}
+        </p>
+        {action}
+      </div>
       {children}
     </div>
   )
@@ -692,7 +703,11 @@ export function TitleFilters({
     key: `ai-${s}`, label: `IA: ${AI_STATUS_LABELS[s] ?? s}`, onRemove: () => toggleCsv("ai_status", s),
   }))
   selectedGenreAny.forEach((g) => activeChips.push({
-    key: `genre-${g}`, label: `Gênero: ${g}`, onRemove: () => updateParams({ genres_any: null }),
+    key: `genre-${g}`, label: `Gênero: ${g}`, onRemove: () => {
+      const next = new Set(selectedGenreAny)
+      next.delete(g)
+      updateParams({ genres_any: next.size === 0 ? null : [...next].join(",") })
+    },
   }))
   const tagNameBySlug = new Map(availableTags.map((t) => [t.slug, t.name]))
   selectedTagAny.forEach((slug) => activeChips.push({
@@ -880,7 +895,22 @@ export function TitleFilters({
             <TabsContent value="geral" className="space-y-3">
               {/* Row 1: Publicação + Status Pessoal */}
               <div className="grid gap-3 xl:grid-cols-2">
-                <FilterCard title={`Publicação${selectedPubStatuses.size ? ` (${selectedPubStatuses.size})` : ""}`}>
+                <FilterCard
+                  title={`Publicação${isAllPub ? " (todos)" : selectedPubStatuses.size ? ` (${selectedPubStatuses.size})` : ""}`}
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => updateParams({ pub_status: isAllPub ? null : "all" })}
+                    >
+                      <Badge
+                        variant={isAllPub ? "default" : "outline"}
+                        className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
+                      >
+                        Todos
+                      </Badge>
+                    </button>
+                  }
+                >
                   <div className="flex flex-wrap gap-1.5">
                     {visiblePublicationStatuses.map((s) => (
                       <StatusButton
@@ -893,7 +923,22 @@ export function TitleFilters({
                   </div>
                 </FilterCard>
 
-                <FilterCard title={`Status Pessoal${selectedPerStatuses.size ? ` (${selectedPerStatuses.size})` : ""}`}>
+                <FilterCard
+                  title={`Status Pessoal${isAllPer ? " (todos)" : selectedPerStatuses.size ? ` (${selectedPerStatuses.size})` : ""}`}
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => updateParams({ per_status: isAllPer ? null : "all" })}
+                    >
+                      <Badge
+                        variant={isAllPer ? "default" : "outline"}
+                        className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
+                      >
+                        Todos
+                      </Badge>
+                    </button>
+                  }
+                >
                   <div className="flex flex-wrap gap-1.5">
                     {visiblePersonalStatuses.map((s) => (
                       <StatusButton
@@ -968,26 +1013,28 @@ export function TitleFilters({
               </div>
 
               {/* Row 3: Gênero + Tags */}
-              <div className="grid gap-3 xl:grid-cols-2">
+              <div className="grid gap-3 xl:grid-cols-[48fr_52fr]">
                 <FilterCard title={`Gênero${selectedGenreAny.size ? ` (${selectedGenreAny.size})` : ""}`}>
-                  <Select
-                    value={[...selectedGenreAny][0] ?? "__none__"}
-                    onValueChange={(value) =>
-                      updateParams({ genres_any: value === "__none__" ? null : value })
-                    }
-                  >
-                    <SelectTrigger className="h-9 text-sm">
-                      <SelectValue placeholder="Selecionar gênero" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Todos os gêneros</SelectItem>
+                  {availableGenres.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Nenhum gênero disponível</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
                       {availableGenres.map((genre) => (
-                        <SelectItem key={genre} value={genre}>
-                          {genre}
-                        </SelectItem>
+                        <button
+                          key={genre}
+                          type="button"
+                          onClick={() => toggleCsv("genres_any", genre)}
+                        >
+                          <Badge
+                            variant={selectedGenreAny.has(genre) ? "default" : "outline"}
+                            className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
+                          >
+                            {genre}
+                          </Badge>
+                        </button>
                       ))}
-                    </SelectContent>
-                  </Select>
+                    </div>
+                  )}
                 </FilterCard>
 
                 <FilterCard title={`Tags${selectedTagAny.size ? ` (${selectedTagAny.size})` : ""}`}>

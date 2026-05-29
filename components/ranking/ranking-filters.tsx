@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
@@ -63,23 +64,15 @@ interface SortLevel {
   dir: "asc" | "desc"
 }
 
-const SMART_CASCADE_SORT = "alignment_score:desc,personal_fit:desc,expected_score:desc"
-const CLASSIC_SORT = "final_score:desc"
+const DEFAULT_SORT = "expected_score:desc"
 
 function parseSortLevels(raw: string | null): SortLevel[] {
-  const src = raw ?? SMART_CASCADE_SORT
+  const src = raw ?? DEFAULT_SORT
   return src.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
-    const validField = SORTABLE_FIELDS.some((f) => f.value === field) ? field : "final_score"
+    const validField = SORTABLE_FIELDS.some((f) => f.value === field) ? field : "expected_score"
     return { field: validField, dir: dir === "asc" ? "asc" : "desc" }
   })
-}
-
-function detectSortMode(raw: string | null): "smart" | "classic" | "custom" {
-  const normalized = raw ?? SMART_CASCADE_SORT
-  if (normalized === SMART_CASCADE_SORT) return "smart"
-  if (normalized === CLASSIC_SORT) return "classic"
-  return "custom"
 }
 
 function encodeSortLevels(levels: SortLevel[]): string {
@@ -95,14 +88,9 @@ interface SortLevelsSectionProps {
 function SortLevelsSection({ searchParams, updateParams, className }: SortLevelsSectionProps) {
   const rawSort = searchParams.get("sort")
   const levels = parseSortLevels(rawSort)
-  const mode = detectSortMode(rawSort)
 
   const setLevels = (next: SortLevel[]) => {
     updateParams({ sort: encodeSortLevels(next) })
-  }
-
-  const applyPreset = (preset: "smart" | "classic") => {
-    updateParams({ sort: preset === "smart" ? SMART_CASCADE_SORT : CLASSIC_SORT })
   }
 
   const updateField = (i: number, field: string) => {
@@ -117,7 +105,7 @@ function SortLevelsSection({ searchParams, updateParams, className }: SortLevels
 
   const remove = (i: number) => {
     const next = levels.filter((_, idx) => idx !== i)
-    setLevels(next.length ? next : [{ field: "final_score", dir: "desc" }])
+    setLevels(next.length ? next : [{ field: "expected_score", dir: "desc" }])
   }
 
   const add = () => {
@@ -130,41 +118,7 @@ function SortLevelsSection({ searchParams, updateParams, className }: SortLevels
   return (
     <FilterSection title="Ordenação" className={className}>
       <div className="space-y-2">
-        <TooltipProvider delayDuration={200}>
-          <div className="flex items-center gap-1 rounded-lg border border-border/55 bg-background/45 p-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => applyPreset("smart")}
-                  className={`flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-                    mode === "smart" ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground"
-                  }`}
-                >
-                  Inteligente
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>IA Re-rank → Alinhamento → Nota.Final → Confiança</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => applyPreset("classic")}
-                  className={`flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-                    mode === "classic" ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground"
-                  }`}
-                >
-                  Por nota
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Apenas Nota.Final descendente (clássico)</TooltipContent>
-            </Tooltip>
-            {mode === "custom" && (
-              <span className="px-2 text-[10px] text-muted-foreground italic">customizado</span>
-            )}
-          </div>
-        </TooltipProvider>
+        <div className={`grid gap-2 ${levels.length > 1 ? "sm:grid-cols-2" : "grid-cols-1"}`}>
         {levels.map((level, i) => (
           <div key={i} className="grid grid-cols-[1.25rem_minmax(0,1fr)_4.5rem_2rem] items-center gap-2 rounded-lg border border-border/55 bg-background/45 p-1.5">
             <span className="text-xs text-muted-foreground w-4 shrink-0 text-right">{i + 1}.</span>
@@ -201,6 +155,7 @@ function SortLevelsSection({ searchParams, updateParams, className }: SortLevels
             </button>
           </div>
         ))}
+        </div>
         {levels.length < 5 && (
           <Button type="button" variant="ghost" size="sm" onClick={add} className="h-7 text-xs px-2">
             <Plus className="h-3 w-3 mr-1" /> Adicionar nível
@@ -377,13 +332,46 @@ function ScoreRangeCard({
           heading
         )}
         <div className="flex shrink-0 items-center gap-1">
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
-              isActive ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground"
-            }`}
-          >
-            {rangeLabel}
-          </span>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                title="Editar manualmente"
+                className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums transition-colors hover:ring-1 hover:ring-primary/40 ${
+                  isActive ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {rangeLabel}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-auto p-2">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={min}
+                  max={max}
+                  step={step}
+                  placeholder="Mín"
+                  size="sm"
+                  className="h-8 w-20 text-xs"
+                  value={searchParams.get(minKey) ?? ""}
+                  onChange={(e) => updateParams({ [minKey]: e.target.value || null })}
+                />
+                <span className="text-xs text-muted-foreground">–</span>
+                <Input
+                  type="number"
+                  min={min}
+                  max={max}
+                  step={step}
+                  placeholder="Máx"
+                  size="sm"
+                  className="h-8 w-20 text-xs"
+                  value={searchParams.get(maxKey) ?? ""}
+                  onChange={(e) => updateParams({ [maxKey]: e.target.value || null })}
+                />
+              </div>
+            </PopoverContent>
+          </Popover>
           <button
             type="button"
             onClick={reset}
@@ -1563,7 +1551,7 @@ export function RankingFilters({
             </FilterSection>
             </div>
 
-            <FilterSection title="Critérios gerais" className="col-span-12 xl:col-span-7">
+            <FilterSection title="Critérios gerais" className="col-span-12 xl:col-span-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-muted-foreground">
                   Preferências base do ranking e limites rápidos.
@@ -1574,7 +1562,7 @@ export function RankingFilters({
                   </Button>
                 )}
               </div>
-              <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
+              <div className="flex flex-wrap items-end gap-x-5 gap-y-4">
                 <FilterField label="Top N">
                   <Input
                     type="number"
@@ -1582,13 +1570,13 @@ export function RankingFilters({
                     max={30}
                     placeholder="Todas"
                     size="sm"
-                    className="w-20"
+                    className="w-14"
                     value={urlTopN ?? defaultTopN ?? ""}
                     onChange={(e) => updateParams({ top_n: e.target.value || null })}
                   />
                 </FilterField>
                 <FilterField label="Capítulos">
-                  <div className="grid grid-cols-[4.5rem_auto_4.5rem] items-center gap-2">
+                  <div className="grid grid-cols-[4rem_auto_4rem] items-center gap-2">
                     <Input
                       type="number"
                       min={0}
@@ -1612,12 +1600,12 @@ export function RankingFilters({
                   label={`Interesse na sinopse${selectedSynopsisQ.size ? ` (${selectedSynopsisQ.size})` : ""}`}
                   className="min-w-0"
                 >
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-nowrap items-center gap-1.5">
                     {SYNOPSIS_QUALITIES.map((q) => (
                       <button key={q} type="button" onClick={() => toggleCsv("synopsis_q", q)}>
                         <Badge
                           variant={selectedSynopsisQ.has(q) ? "default" : "outline"}
-                          className="inline-flex h-8 cursor-pointer items-center rounded-full px-3.5 text-sm font-medium transition-transform hover:-translate-y-px"
+                          className="inline-flex h-7 cursor-pointer items-center rounded-full px-2.5 text-xs font-medium transition-transform hover:-translate-y-px"
                         >
                           {q}
                         </Badge>
@@ -1631,7 +1619,7 @@ export function RankingFilters({
             <SortLevelsSection
               searchParams={searchParams}
               updateParams={updateParams}
-              className="col-span-12 xl:col-span-5"
+              className="col-span-12 xl:col-span-7"
             />
           </div>
         </TabsContent>
@@ -1648,7 +1636,7 @@ export function RankingFilters({
                     tooltip={CRITERIA_INFO[slug]?.description}
                     minKey={`min_${slug}`}
                     maxKey={`max_${slug}`}
-                    step={0.5}
+                    step={1}
                     searchParams={searchParams}
                     updateParams={updateParams}
                   />

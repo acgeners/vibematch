@@ -34,10 +34,12 @@ export const DEFAULT_WORK_COLUMN_NAMESPACE: WorkColumnNamespace = "titles"
 //   - titles v4 → v5: oculta chapters_progress e ai_status do default
 //   - favorites v4 → v5: oculta publication_status, ai_status, updated_at,
 //     chapters_progress do default
+//   - favorites v5 → v6: oculta também a coluna "fav" (redundante: tudo aqui
+//     já é favorito)
 //   - ranking, recommendations: sem mudança de default, mantêm v4
 const NAMESPACE_STORAGE_VERSION: Record<WorkColumnNamespace, string> = {
   titles: "v5",
-  favorites: "v5",
+  favorites: "v6",
   ranking: "v4",
   recommendations: "v4",
 }
@@ -124,6 +126,7 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   // como publication_status, ai_status e updated_at saem do default por serem
   // pouco relevantes em obras já favoritadas.
   favorites: [
+    "fav",
     "synopsis_q",
     "year",
     "publication_status",
@@ -220,7 +223,7 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   expected_score: 90,
   expected_baseline: 80,
   expected_quality_adj: 80,
-  personal_fit: 90,
+  personal_fit: 64,
   calc_score: 80,
   predicted_score: 80,
   final_score: 90,

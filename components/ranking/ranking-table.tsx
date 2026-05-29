@@ -233,13 +233,22 @@ function renderCell(
   scoreThresholds: ColumnThresholds | null | undefined
 ) {
   if (col.key === "rank") return <span className="font-mono text-sm text-muted-foreground">{entry.rank}</span>
-  if (col.key === "percentile")
-    return <span className="font-mono text-xs text-muted-foreground">{formatPercentile(entry.percentile)}</span>
+  if (col.key === "percentile") {
+    const pct = entry.percentile
+    // Cor por faixa (mesma paleta do AlignmentCell): topo verde → base neutra.
+    const pctColor =
+      pct == null ? "text-muted-foreground"
+      : pct >= 75 ? "text-emerald-600 dark:text-emerald-400"
+      : pct >= 50 ? "text-amber-600 dark:text-amber-400"
+      : pct >= 25 ? "text-orange-600 dark:text-orange-400"
+      : "text-muted-foreground"
+    return <span className={cn("font-mono text-xs font-medium", pctColor)}>{formatPercentile(pct)}</span>
+  }
   if (col.key === "fav")
     return <FavoriteCell workId={entry.workId} workTitle={entry.title} isFavorite={entry.isFavorite} />
   if (col.key === "title") return <TitleCell entry={entry} />
   if (col.key === "pub") return <PublicationStatusBadge statusId={entry.publicationStatusId} compact />
-  if (col.key === "per_status") return <span className="text-sm">{entry.personalStatusSymbol ?? entry.personalStatus}</span>
+  if (col.key === "per_status") return <PersonalStatusBadge statusId={entry.personalStatusId} iconOnly />
   if (col.key === "year") return <span className="font-mono text-sm text-muted-foreground">{entry.year ?? "—"}</span>
   if (col.key === "chapters") return <span className="font-mono text-sm">{entry.totalChapters ?? "—"}</span>
   if (col.key === "chapters_read") return <span className="font-mono text-sm">{entry.chaptersRead ?? "—"}</span>
@@ -275,7 +284,7 @@ function renderCell(
   if (col.key === "calc") return <ScoreBadge score={entry.calcScore} size="sm" thresholds={scoreThresholds?.calc} />
   if (col.key === "pred") return <ScoreBadge score={entry.predictedScore} size="sm" showStub={entry.predictedIsStub} thresholds={scoreThresholds?.predicted} />
   if (col.key === "personal_fit")
-    return <AlignmentCell value={entry.personalFit} percentile={entry.personalFitPercentile} />
+    return <AlignmentCell value={entry.personalFit} percentile={entry.personalFitPercentile} showBar={false} />
   if (col.key === "alignment_score")
     return <AlignmentScoreCell score={entry.alignmentScore} justification={entry.alignmentJustification} workId={entry.workId} payload={entry.alignmentPayload} />
   if (col.key.startsWith("crit_")) {
@@ -332,7 +341,7 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
 
   const router = useRouter()
   const searchParams = useSearchParams()
-  const sortRaw = searchParams.get("sort") ?? "alignment_score:desc,personal_fit:desc,expected_score:desc"
+  const sortRaw = searchParams.get("sort") ?? "expected_score:desc"
   const [activeSortField, activeSortDirRaw = "desc"] = sortRaw.split(",")[0].split(":")
   const activeSortDir: "asc" | "desc" = activeSortDirRaw === "asc" ? "asc" : "desc"
 
@@ -346,11 +355,17 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
   }
 
   if (entries.length === 0) {
+    const hasActiveFilters = searchParams.size > 0
     return (
       <div className="space-y-3">
         <ViewModeToolbar count={0} viewMode={viewMode} onChange={writeViewMode} />
-        <div className="rounded-lg border border-border/70 bg-card/80 py-16 text-center text-sm text-muted-foreground shadow-sm">
-          Nenhuma obra encontrada com os filtros aplicados
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-border/70 bg-card/80 py-16 text-center text-sm text-muted-foreground shadow-sm">
+          <span>Nenhuma obra encontrada com os filtros aplicados</span>
+          {hasActiveFilters && (
+            <Button variant="outline" size="sm" onClick={() => router.push("/ranking")}>
+              Limpar filtros
+            </Button>
+          )}
         </div>
       </div>
     )

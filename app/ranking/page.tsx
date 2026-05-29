@@ -108,15 +108,12 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     // Critérios IA
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
-  // Default "Smart": prioriza sinais contextuais (re-rank IA + perfil) e cai
-  // pra Nota Esperada. Obras sem alignment_score (a maioria) descem pra
-  // personal_fit; se também null, descem pra expected_score. Resultado: obras
-  // recém-rankeadas pelo LLM aparecem no topo, restante mantém ordem por nota.
-  const rawSort = str("sort") ?? "alignment_score:desc,personal_fit:desc,expected_score:desc"
+  // Default: ordenação única por Nota Esperada (expected_score) descendente.
+  const rawSort = str("sort") ?? "expected_score:desc"
   let sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
     return {
-      field: (validSortFields.has(field) ? field : "final_score") as RankingSortBy,
+      field: (validSortFields.has(field) ? field : "expected_score") as RankingSortBy,
       dir: dir === "asc" ? "asc" : "desc",
     }
   })

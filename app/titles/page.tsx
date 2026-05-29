@@ -138,6 +138,7 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   return (
     <div className="space-y-4">
       <Header
+        className="sm:items-start"
         kicker="Catálogo"
         title="Títulos"
         description={`${total} obra${total !== 1 ? "s" : ""} no catálogo`}

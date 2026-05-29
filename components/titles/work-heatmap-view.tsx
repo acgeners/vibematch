@@ -395,11 +395,13 @@ export function WorkHeatmapView({
                           aria-label={`Selecionar ${work.title}`}
                         />
                       )}
-                      <FavoriteCell
-                        workId={work.id}
-                        workTitle={work.title}
-                        isFavorite={Boolean(work.is_favorite)}
-                      />
+                      {namespace !== "favorites" && (
+                        <FavoriteCell
+                          workId={work.id}
+                          workTitle={work.title}
+                          isFavorite={Boolean(work.is_favorite)}
+                        />
+                      )}
                       <WorkTitleLink
                         title={work.title}
                         workId={work.id}
