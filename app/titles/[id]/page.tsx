@@ -10,9 +10,10 @@ import {
   getLatestAiEvaluationAttributes,
   getExistingPostReadingAssessment,
 } from "@/server/queries/post-attribute-assessment"
-import { getCurrentUserId } from "@/server/queries/current-user"
+import { getCurrentUserId, getCurrentPlan } from "@/server/queries/current-user"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import { getModelPromptDrift } from "@/server/queries/calibration-guards"
+import { planAllows } from "@/lib/plans/capabilities"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
@@ -163,7 +164,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // Carrega só o distance_p95 do formula_config pro CalculationBreakdown
   // mostrar rótulos de distância calibrados (perto/médio/longe relativos).
   const configClient = createAdminClient()
-  const [{ data: configRow }, scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, modelPromptDrift] = await Promise.all([
+  const [{ data: configRow }, scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, modelPromptDrift, plan] = await Promise.all([
     configClient
       .from("formula_config")
       .select("distance_p95")
@@ -177,7 +178,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getSourceRows(),
     getBiasMap(await getCurrentUserId(configClient), configClient),
     getModelPromptDrift(),
+    getCurrentPlan(configClient),
   ])
+  const isPaidPlan = planAllows(plan, "deep_dive")
   const distanceP95: number | null = configRow?.distance_p95 == null ? null : Number(configRow.distance_p95)
 
   const scoreMap: Record<string, number> = {}
@@ -633,6 +636,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           workId={work.id}
           workTitle={work.title}
           lastDive={lastDeepDive}
+          isPaid={isPaidPlan}
         />
       )}
       {/* Notas e Avaliações Externas side-by-side */}
