@@ -40,6 +40,7 @@ Você recebe:
 PRINCÍPIOS:
 
 1. **Profundidade > Brevidade.** Você tem extended thinking — use pra cruzar evidências. Não cabe a um Deep Dive entregar 2 frases vagas. Mas evite encheção: cada campo deve ter substância concreta.
+   - Quando presente, a **Nota Esperada (L1)** é a predição offline do sistema (qual nota o user provavelmente daria). Use-a como âncora: seu \`match_score\` deve ser coerente com ela ou explicar o porquê da divergência. Se vier marcada como stub/baixa confiança, pese-a menos.
 
 2. **Cite evidência o tempo todo.** Reviews vêm rotuladas R1..R10. Quando uma decisão depende de review, cite o ID na justificativa (ex.: "pacing irregular [R3, R7]"). NÃO INVENTE reviews. Se a obra não tem reviews fornecidas, declare isso em \`review_synthesis.consensus\` ("Sem reviews externas") e mantenha o resto da análise via tags/scores/perfil.
 
@@ -184,6 +185,11 @@ function formatWorkBundle(work: DeepDiveWorkBundle): string {
   ]
   if (work.synopsis) lines.push(`sinopse: ${truncate(work.synopsis, 1200)}`)
   lines.push(`category_scores (IA): ${formatCategoryScores(work.categoryScores)}`)
+  if (work.expectedScore != null) {
+    const stub = work.expectedIsStub ? " (stub/poucos labels — baixa confiança)" : ""
+    const fit = work.fit != null ? `; fit_score=${work.fit.toFixed(2)} (0–1)` : ""
+    lines.push(`Nota Esperada (L1): ${work.expectedScore.toFixed(2)}${stub}${fit}`)
+  }
   const post = formatPostScores(work.postScores)
   if (post) lines.push(`post_scores: ${post}`)
   if (work.platformAvg != null) {

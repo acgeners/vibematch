@@ -260,6 +260,12 @@ export interface DeepDiveWorkBundle {
   platformAvg: number | null
   totalVotes: number | null
   reviews: CandidateReview[]
+  /** Nota Esperada (L1) — predição offline; âncora de previsão pro consultor. */
+  expectedScore: number | null
+  /** true quando o expected_score é stub/fallback (poucos labels). */
+  expectedIsStub: boolean
+  /** fit_score (0–1) — alinhamento determinístico com o TasteProfile. */
+  fit: number | null
 }
 
 export interface DeepDiveContext {

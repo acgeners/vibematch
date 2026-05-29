@@ -160,6 +160,7 @@ async function fetchWorkBundle(workId: string): Promise<{
       post_impact_immersion_score,
       post_originality_score,
       category_scores(criterion_slug, score, source),
+      calculated_scores(expected_score, expected_is_stub, personal_fit),
       work_tags(tags(name, tag_group_id)),
       work_synopses(text, is_primary, position),
       work_covers(url, is_primary, position),
@@ -196,6 +197,13 @@ async function fetchWorkBundle(workId: string): Promise<{
       ? rated.reduce((sum, r) => sum + Number(r.rating) * (r.vote_count ?? 0), 0) / totalVotes
       : null
 
+  const calc = (Array.isArray(row.calculated_scores)
+    ? row.calculated_scores[0]
+    : row.calculated_scores) as
+    | { expected_score: number | null; expected_is_stub: boolean | null; personal_fit: number | null }
+    | null
+    | undefined
+
   const work: DeepDiveWorkBundle = {
     id: row.id as string,
     title: row.title as string,
@@ -206,6 +214,9 @@ async function fetchWorkBundle(workId: string): Promise<{
     platformAvg,
     totalVotes: totalVotes > 0 ? totalVotes : null,
     reviews,
+    expectedScore: calc?.expected_score ?? null,
+    expectedIsStub: calc?.expected_is_stub ?? false,
+    fit: calc?.personal_fit ?? null,
   }
 
   return { work, coverUrl }
