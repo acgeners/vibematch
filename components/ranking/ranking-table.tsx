@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState, useSyncExternalStore } from "react"
-import { ChevronDown, ChevronUp, ImageOff, LayoutGrid, List, X } from "lucide-react"
+import { AlertTriangle, ChevronDown, ChevronUp, ImageOff, LayoutGrid, List, X } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -251,7 +251,17 @@ function renderCell(
   if (col.key === "platform_avg") return <span className="font-mono text-sm">{entry.platformAvg != null ? entry.platformAvg.toFixed(1) : "—"}</span>
   if (col.key === "total_votes") return <span className="font-mono text-sm">{formatVotes(entry.totalVotes)}</span>
   if (col.key === "expected")
-    return <ScoreBadge score={entry.expectedScore} size="sm" showStub={entry.expectedIsStub} thresholds={scoreThresholds?.final} />
+    return (
+      <span className="inline-flex items-center gap-1">
+        <ScoreBadge score={entry.expectedScore} size="sm" showStub={entry.expectedIsStub} thresholds={scoreThresholds?.final} />
+        {entry.lowCoverage && (
+          <AlertTriangle
+            className="h-3 w-3 text-amber-500"
+            aria-label="Baixa cobertura de gênero — predição menos confiável"
+          />
+        )}
+      </span>
+    )
   if (col.key === "expected_baseline")
     return <span className="font-mono text-sm text-muted-foreground">{entry.expectedBaseline != null ? entry.expectedBaseline.toFixed(2) : "—"}</span>
   if (col.key === "expected_quality_adj") {

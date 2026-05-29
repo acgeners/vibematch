@@ -12,7 +12,14 @@ import {
   calculateNotaCalc,
 } from "@/lib/calculations"
 import { calculateNotaFinalChoosing } from "@/lib/calculations/final"
-import { calculateGPTWithDiagnostics } from "@/lib/calculations/gpt"
+import { calculateGPTWithDiagnostics, calculateGPT } from "@/lib/calculations/gpt"
+import { getCurrentUserId } from "@/server/queries/current-user"
+import { getBiasMap } from "@/lib/calculations/attribute-bias"
+import {
+  applyBiasToCategoryScores,
+  type AttributeBiasMap,
+  type CategoryScoreWithSource,
+} from "@/lib/ai-recommendation/calibrated-scores"
 import {
   ridgeOutOfFoldPredictions,
   trainPredictor,
@@ -94,6 +101,13 @@ interface WorkComputed {
   synopsisQuality: SynopsisQuality | null
   observationAdjustment: number
   categoryScores: CategoryScoreMap
+  /**
+   * categoryScores com offset de atributos aplicado (Fase 1.5). Usado nos
+   * features do Ridge, criterionFit e personalFit — NÃO no calc_score (Nota.IA
+   * fica como opinião crua da IA). Idêntico a categoryScores quando o biasMap
+   * é zero (obras sem nenhum atributo de origem IA, ou sem bias coletado).
+   */
+  categoryScoresCalibrated: CategoryScoreMap
   platformRatings: PlatformRating[]
   totalVotes: number
   tags: Array<{ name: string; group: string | null }>
@@ -108,6 +122,8 @@ interface WorkComputed {
   // calculados em memória
   iaEvalRaw: number
   iaEvalNormalized: number
+  /** iaEvalNormalized derivado dos categoryScoresCalibrated — feature do Ridge. */
+  iaEvalNormalizedCalibrated: number
   chaptersNormalized: number
   platformAvg: number | null
   calcScore: number
@@ -131,10 +147,24 @@ interface WorkComputed {
   knnDistanceTo5thNeighbor: number | null
 }
 
-function buildWork(raw: RawWork): WorkComputed {
+function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed {
   const categoryScores: CategoryScoreMap = {}
+  const withSource: Partial<Record<CriterionSlug, CategoryScoreWithSource>> = {}
   for (const cs of raw.category_scores ?? []) {
     categoryScores[cs.criterion_slug] = Number(cs.score)
+    withSource[cs.criterion_slug as CriterionSlug] = {
+      value: Number(cs.score),
+      source: (cs.source ?? "imported") as CategoryScoreWithSource["source"],
+    }
+  }
+  // Offset de atributos aplicado on-read (Fase 1.5). Só corrige notas de
+  // origem IA (ai_accepted/ai_calibrated); demais passam intactas. Slugs
+  // ausentes viram null → omitidos do map calibrado.
+  const calibrated = applyBiasToCategoryScores(withSource, biasMap)
+  const categoryScoresCalibrated: CategoryScoreMap = {}
+  for (const slug of CRITERION_SLUGS) {
+    const v = calibrated[slug as CriterionSlug]
+    if (v != null) categoryScoresCalibrated[slug] = v
   }
   const platformRatings: PlatformRating[] = (raw.platform_ratings ?? []).map(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -180,6 +210,7 @@ function buildWork(raw: RawWork): WorkComputed {
     synopsisQuality: raw.synopsis_quality as SynopsisQuality | null,
     observationAdjustment: Number(raw.observation_adjustment ?? 0),
     categoryScores,
+    categoryScoresCalibrated,
     platformRatings,
     totalVotes: sumVotes(platformRatings),
     tags,
@@ -190,6 +221,7 @@ function buildWork(raw: RawWork): WorkComputed {
     criterionFitScore: null,
     iaEvalRaw: 0,
     iaEvalNormalized: 0,
+    iaEvalNormalizedCalibrated: 0,
     chaptersNormalized: 0,
     platformAvg: null,
     calcScore: 0,
@@ -211,8 +243,8 @@ function buildWork(raw: RawWork): WorkComputed {
 
 function buildPredictionInput(w: WorkComputed): PredictionInput {
   return {
-    categoryScores: w.categoryScores,
-    iaEvalNormalized: w.iaEvalNormalized,
+    categoryScores: w.categoryScoresCalibrated,
+    iaEvalNormalized: w.iaEvalNormalizedCalibrated,
     platformAvg: w.platformAvg,
     totalVotes: w.totalVotes,
     totalChapters: w.totalChapters,
@@ -234,8 +266,8 @@ function buildPredictionInput(w: WorkComputed): PredictionInput {
  */
 function buildExpectedInput(w: WorkComputed): ExpectedScoreInput {
   return {
-    categoryScores: w.categoryScores,
-    iaEvalNormalized: w.iaEvalNormalized,
+    categoryScores: w.categoryScoresCalibrated,
+    iaEvalNormalized: w.iaEvalNormalizedCalibrated,
     platformAvg: w.platformAvg,
     totalVotes: w.totalVotes,
     totalChapters: w.totalChapters,
@@ -262,6 +294,10 @@ function buildExpectedInput(w: WorkComputed): ExpectedScoreInput {
 export async function recalculateAll() {
   const supabase = createAdminClient()
 
+  // Offset de atributos (Fase 1.5) — carregado uma vez e aplicado on-read.
+  const userId = await getCurrentUserId(supabase)
+  const biasMap = await getBiasMap(userId, supabase)
+
   const [worksRes, weightsRes, configRes, tasteProfile] = await Promise.all([
     supabase
       .from("works")
@@ -272,7 +308,7 @@ export async function recalculateAll() {
          post_character_development_score, post_pacing_score,
          post_art_visual_score, post_impact_immersion_score,
          post_originality_score,
-         category_scores(criterion_slug, score),
+         category_scores(criterion_slug, score, source),
          platform_ratings(id, platform, rating, vote_count),
          work_tags(tags(name, tag_group_id))`
       )
@@ -287,7 +323,7 @@ export async function recalculateAll() {
   if (weightsRes.error) throw new Error(weightsRes.error.message)
   if (configRes.error) throw new Error(configRes.error.message)
 
-  const works = (worksRes.data as RawWork[]).map(buildWork)
+  const works = (worksRes.data as RawWork[]).map((raw) => buildWork(raw, biasMap))
   const weights = weightsRes.data as ScoreWeight[]
   let config = (configRes.data?.[0] ?? null) as FormulaConfig | null
 
@@ -365,6 +401,11 @@ export async function recalculateAll() {
     const { value, diagnostics } = calculateGPTWithDiagnostics(w.categoryScores, effectiveWeights)
     w.iaEvalRaw = value
     w.iaEvalNormalized = normalizeGPT(value)
+    // Versão calibrada do mesmo agregado, só pra feature do Ridge. calc_score
+    // (Nota.IA) continua usando o valor cru acima.
+    w.iaEvalNormalizedCalibrated = normalizeGPT(
+      calculateGPT(w.categoryScoresCalibrated, effectiveWeights),
+    )
     w.chaptersNormalized = normalizeChapters(w.totalChapters)
     if (diagnostics.clampHit) gptClampHits += 1
     for (const [slug, activated] of Object.entries(diagnostics.negativeActivations)) {
@@ -408,7 +449,7 @@ export async function recalculateAll() {
     for (const w of works) {
       w.lovedTagOverlap = weightedTagOverlap(w.tags, profileForFeatures.loved_tags)
       w.avoidedTagOverlap = weightedTagOverlap(w.tags, profileForFeatures.avoided_tags)
-      w.criterionFitScore = criterionAlignment(w.categoryScores, profileForFeatures.criterion_preferences)
+      w.criterionFitScore = criterionAlignment(w.categoryScoresCalibrated, profileForFeatures.criterion_preferences)
     }
   }
 
@@ -577,7 +618,7 @@ export async function recalculateAll() {
     for (const w of works) {
       w.personalFit = computePersonalFit(profilePayload, {
         tags: w.tags,
-        categoryScores: w.categoryScores,
+        categoryScores: w.categoryScoresCalibrated,
       })
     }
 

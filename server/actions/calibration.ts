@@ -16,6 +16,7 @@ import {
   loadWorksForAudit,
 } from "@/server/queries/calibration"
 import { recalculateAll, recalculateWork } from "@/server/actions/calculations"
+import { generateTasteProfileAction } from "@/server/actions/recommendations"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import type {
   AuditSuggestionFromModel,
@@ -548,4 +549,53 @@ export async function getLastRunsAction(): Promise<{
 }> {
   const [audit, bias] = await Promise.all([loadLastRun("audit"), loadLastRun("bias")])
   return { lastAudit: audit, lastBias: bias }
+}
+
+/**
+ * Regenera os artefatos derivados do offset de atributos (Fase 1.5.5).
+ * Disparar após mudanças relevantes no bias (novos questionários pós-leitura):
+ *   1. Reconstrói o TasteProfile — agora sobre categoryScores calibrados.
+ *   2. Marca os alignment_score persistidos como stale (foram computados com
+ *      bias/perfil antigos). Reset pra false na próxima run de Smart Shortlist.
+ *   3. recalculateAll() — re-treina o Ridge e re-prediz com o bias atual.
+ */
+export async function regenerateCalibratedArtifacts(): Promise<
+  | {
+      ok: true
+      tasteProfileRegenerated: boolean
+      alignmentRowsMarkedStale: number
+      worksRecalculated: number
+    }
+  | { ok: false; error: string }
+> {
+  const supabase = createAdminClient()
+
+  // 1. TasteProfile (LLM, sobre rated works calibrados).
+  const profileResult = await generateTasteProfileAction()
+  if (profileResult.error) {
+    return { ok: false, error: `Falha regenerando TasteProfile: ${profileResult.error}` }
+  }
+
+  // 2. Marca alignment stale onde há score persistido.
+  const { data: staleRows, error: staleErr } = await supabase
+    .from("calculated_scores")
+    .update({ alignment_stale: true })
+    .not("alignment_score", "is", null)
+    .select("work_id")
+  if (staleErr) {
+    return { ok: false, error: `Falha marcando alignment stale: ${staleErr.message}` }
+  }
+
+  // 3. Recalcula tudo com o bias atual.
+  const recalc = await recalculateAll()
+
+  revalidatePath("/settings/calibration")
+  revalidatePath("/ranking")
+
+  return {
+    ok: true,
+    tasteProfileRegenerated: profileResult.data?.is_stub === false,
+    alignmentRowsMarkedStale: staleRows?.length ?? 0,
+    worksRecalculated: recalc.recalculated ?? 0,
+  }
 }

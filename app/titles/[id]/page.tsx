@@ -4,7 +4,15 @@ import { BarChart3, ChevronDown, LayoutDashboard, Plus, Sparkles, Tags as TagsIc
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { WorkStatusForm } from "@/components/titles/work-status-form"
+import { PostAttributeAssessmentForm } from "@/components/titles/post-attribute-assessment-form"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug } from "@/server/queries/works"
+import {
+  getLatestAiEvaluationAttributes,
+  getExistingPostReadingAssessment,
+} from "@/server/queries/post-attribute-assessment"
+import { getCurrentUserId } from "@/server/queries/current-user"
+import { getBiasMap } from "@/lib/calculations/attribute-bias"
+import { getModelPromptDrift } from "@/server/queries/calibration-guards"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
@@ -155,7 +163,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // Carrega só o distance_p95 do formula_config pro CalculationBreakdown
   // mostrar rótulos de distância calibrados (perto/médio/longe relativos).
   const configClient = createAdminClient()
-  const [{ data: configRow }, scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources] = await Promise.all([
+  const [{ data: configRow }, scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, modelPromptDrift] = await Promise.all([
     configClient
       .from("formula_config")
       .select("distance_p95")
@@ -167,13 +175,20 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getSimilarWorks(work.id as string, 8),
     getLastDeepDive(work.id as string),
     getSourceRows(),
+    getBiasMap(await getCurrentUserId(configClient), configClient),
+    getModelPromptDrift(),
   ])
   const distanceP95: number | null = configRow?.distance_p95 == null ? null : Number(configRow.distance_p95)
 
   const scoreMap: Record<string, number> = {}
+  const sourceMap: Record<string, string> = {}
   for (const cs of work.category_scores ?? []) {
     scoreMap[cs.criterion_slug] = cs.score
+    sourceMap[cs.criterion_slug] = cs.source ?? "imported"
   }
+  // Atributos cuja nota da IA é calibrada on-read no pipeline (offset != 0 e
+  // origem IA). Mostra "→ Y no cálculo" no card de notas por critério.
+  const BIAS_APPLICABLE = new Set(["ai_accepted", "ai_calibrated"])
 
   const aiEvaluations: Array<{
     id: string
@@ -279,6 +294,26 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     post_art_visual_score: work.post_art_visual_score ?? null,
     post_impact_immersion_score: work.post_impact_immersion_score ?? null,
     post_originality_score: work.post_originality_score ?? null,
+  }
+
+  // Questionário pós-leitura: só faz sentido em status terminais (a obra
+  // já foi lida/abandonada). Carrega notas da IA + avaliação salva sob demanda.
+  const POST_ATTR_STATUSES: PersonalStatus[] = [
+    "Completed",
+    "Dropped",
+    "On-hold",
+    "Stalled",
+    "Hiatus",
+  ]
+  const showPostAttr = POST_ATTR_STATUSES.includes(statusInitial.personal_status)
+  let postAttrAi: Awaited<ReturnType<typeof getLatestAiEvaluationAttributes>> = null
+  let postAttrExisting: Awaited<ReturnType<typeof getExistingPostReadingAssessment>> = null
+  if (showPostAttr) {
+    const userId = await getCurrentUserId(configClient)
+    ;[postAttrAi, postAttrExisting] = await Promise.all([
+      getLatestAiEvaluationAttributes(work.id as string, configClient),
+      getExistingPostReadingAssessment(work.id as string, userId, configClient),
+    ])
   }
 
   const categoriesCount = genres.length + tags.length
@@ -567,6 +602,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
                 initialValues={statusInitial}
               />
+              {showPostAttr && (
+                <PostAttributeAssessmentForm
+                  workId={work.id as string}
+                  latestAiEvaluation={postAttrAi}
+                  existingAssessment={postAttrExisting}
+                />
+              )}
             </TabsContent>
 
             <TabsContent value="recommendations" className="mt-0 space-y-5">
@@ -574,6 +616,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </TabsContent>
 
             <TabsContent value="scores" className="mt-0 space-y-6">
+      {modelPromptDrift.status === "warn" && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          <span aria-hidden>⚠</span>
+          <span>{modelPromptDrift.message}</span>
+        </div>
+      )}
       <AiEvaluationButton
         workId={work.id}
         workTitle={work.title}
@@ -818,6 +866,20 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                         </span>
                       </p>
                     )}
+                    {score != null &&
+                      BIAS_APPLICABLE.has(sourceMap[slug]) &&
+                      (biasMap[slug] ?? 0) !== 0 && (
+                        <p
+                          className="text-[10px] text-sky-600/80 dark:text-sky-400/80"
+                          title={`Offset do seu perfil: ${biasMap[slug] > 0 ? "+" : ""}${biasMap[slug]}. O cálculo usa o valor calibrado, não o bruto da IA.`}
+                        >
+                          → calibrado p/{" "}
+                          <span className="font-mono font-semibold">
+                            {(score - biasMap[slug]).toFixed(1)}
+                          </span>{" "}
+                          no cálculo
+                        </p>
+                      )}
                   </div>
                 </div>
               )

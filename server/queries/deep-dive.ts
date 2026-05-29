@@ -3,6 +3,13 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
+import { getCurrentUserId } from "@/server/queries/current-user"
+import { getBiasMap } from "@/lib/calculations/attribute-bias"
+import {
+  applyBiasToCategoryScores,
+  type AttributeBiasMap,
+  type CategoryScoreWithSource,
+} from "@/lib/ai-recommendation/calibrated-scores"
 import type { CriterionSlug } from "@/types/domain"
 import type {
   CandidateReview,
@@ -41,6 +48,7 @@ interface RawTagRow {
 interface RawCategoryScoreRow {
   criterion_slug: string
   score: number | null
+  source?: string | null
 }
 
 interface RawSynopsisRow {
@@ -70,11 +78,24 @@ function buildTags(rows: RawTagRow[] | null | undefined): Array<{ name: string; 
     }))
 }
 
-function buildCategoryScores(rows: RawCategoryScoreRow[] | null | undefined): Partial<Record<CriterionSlug, number>> {
-  const out: Partial<Record<CriterionSlug, number>> = {}
+// Aplica o offset de atributos (Fase 1.5) on-read antes de enviar pro prompt
+// do Deep Dive — o LLM enxerga os atributos na percepção calibrada do usuário.
+function buildCategoryScores(
+  rows: RawCategoryScoreRow[] | null | undefined,
+  biasMap: AttributeBiasMap,
+): Partial<Record<CriterionSlug, number>> {
+  const withSource: Partial<Record<CriterionSlug, CategoryScoreWithSource>> = {}
   for (const row of rows ?? []) {
     if (row.score == null) continue
-    out[row.criterion_slug as CriterionSlug] = Number(row.score)
+    withSource[row.criterion_slug as CriterionSlug] = {
+      value: Number(row.score),
+      source: (row.source ?? "imported") as CategoryScoreWithSource["source"],
+    }
+  }
+  const calibrated = applyBiasToCategoryScores(withSource, biasMap)
+  const out: Partial<Record<CriterionSlug, number>> = {}
+  for (const [slug, v] of Object.entries(calibrated)) {
+    if (v != null) out[slug as CriterionSlug] = v
   }
   return out
 }
@@ -138,7 +159,7 @@ async function fetchWorkBundle(workId: string): Promise<{
       post_art_visual_score,
       post_impact_immersion_score,
       post_originality_score,
-      category_scores(criterion_slug, score),
+      category_scores(criterion_slug, score, source),
       work_tags(tags(name, tag_group_id)),
       work_synopses(text, is_primary, position),
       work_covers(url, is_primary, position),
@@ -159,6 +180,7 @@ async function fetchWorkBundle(workId: string): Promise<{
   )
   const coverUrl = pickPrimaryCover(row.work_covers as RawCoverRow[] | undefined)
   const reviews = await fetchReviewsForWork(workId)
+  const biasMap = await getBiasMap(await getCurrentUserId(supabase), supabase)
 
   const postScores: Partial<Record<string, number>> = {}
   for (const field of POST_SCORE_FIELDS) {
@@ -179,7 +201,7 @@ async function fetchWorkBundle(workId: string): Promise<{
     title: row.title as string,
     synopsis,
     tags: buildTags(row.work_tags as RawTagRow[] | null),
-    categoryScores: buildCategoryScores(row.category_scores as RawCategoryScoreRow[] | null),
+    categoryScores: buildCategoryScores(row.category_scores as RawCategoryScoreRow[] | null, biasMap),
     postScores,
     platformAvg,
     totalVotes: totalVotes > 0 ? totalVotes : null,

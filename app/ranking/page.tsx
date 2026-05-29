@@ -1,5 +1,6 @@
 import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } from "@/server/queries/ranking"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
+import { getLowCoverageWorkIds } from "@/server/queries/calibration-guards"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
@@ -187,10 +188,13 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     sortLevels,
   }
 
-  const [entries, scoreThresholds] = await Promise.all([
+  const [rawEntries, scoreThresholds, lowCoverageIds] = await Promise.all([
     getRanking(filters),
     getScoreColorThresholds(),
+    getLowCoverageWorkIds(),
   ])
+  // Marca obras não-lidas com baixa cobertura de gênero (badge ⚠ na Nota esperada).
+  const entries = rawEntries.map((e) => ({ ...e, lowCoverage: lowCoverageIds.has(e.workId) }))
 
   return (
     <div className="space-y-4">

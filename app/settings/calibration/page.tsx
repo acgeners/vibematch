@@ -10,12 +10,17 @@ import { CalibrationTriggerCards } from "@/components/settings/calibration/calib
 import { SuggestionsList } from "@/components/settings/calibration/suggestions-list"
 import { BiasReportView } from "@/components/settings/calibration/bias-report-view"
 import { RunHistoryTable } from "@/components/settings/calibration/run-history-table"
+import { AttributeBiasTable } from "@/components/settings/calibration/attribute-bias-table"
+import { RegenerateCalibratedArtifactsButton } from "@/components/settings/calibration/regenerate-calibrated-artifacts-button"
+import { PredictionHealthCard } from "@/components/settings/calibration/prediction-health-card"
+import { getPredictionHealth } from "@/server/queries/calibration-guards"
 import {
   countPendingSuggestions,
   loadLastRun,
   loadRunHistory,
   loadSuggestions,
 } from "@/server/queries/calibration"
+import { getAttributeBiasOverview } from "@/server/queries/attribute-bias"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 export const revalidate = 60
@@ -32,13 +37,15 @@ async function countRatedWorks(): Promise<number> {
 }
 
 export default async function CalibrationPage() {
-  const [lastAudit, lastBias, ratedWorksCount, suggestions, pendingCount, runHistory] = await Promise.all([
+  const [lastAudit, lastBias, ratedWorksCount, suggestions, pendingCount, runHistory, attributeBias, predictionHealth] = await Promise.all([
     loadLastRun("audit"),
     loadLastRun("bias"),
     countRatedWorks(),
     loadSuggestions({ limit: 300 }),
     countPendingSuggestions(),
     loadRunHistory(20),
+    getAttributeBiasOverview(),
+    getPredictionHealth(),
   ])
 
   return (
@@ -63,6 +70,7 @@ export default async function CalibrationPage() {
           </TabsTrigger>
           <TabsTrigger value="history">Histórico de sugestões</TabsTrigger>
           <TabsTrigger value="bias">Relatório de viés</TabsTrigger>
+          <TabsTrigger value="attribute-bias">Calibração de atributos</TabsTrigger>
           <TabsTrigger value="runs">Runs</TabsTrigger>
         </TabsList>
         <TabsContent value="pending" className="mt-4">
@@ -86,6 +94,17 @@ export default async function CalibrationPage() {
               Nenhum relatório gerado ainda. Use o botão acima.
             </p>
           )}
+        </TabsContent>
+        <TabsContent value="attribute-bias" className="mt-4 space-y-4">
+          <PredictionHealthCard health={predictionHealth} />
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              Após coletar ou alterar avaliações pós-leitura, regenere os artefatos pra propagar o
+              offset (TasteProfile + Ridge + alignment).
+            </p>
+            <RegenerateCalibratedArtifactsButton />
+          </div>
+          <AttributeBiasTable overview={attributeBias} />
         </TabsContent>
         <TabsContent value="runs" className="mt-4">
           <RunHistoryTable runs={runHistory} />

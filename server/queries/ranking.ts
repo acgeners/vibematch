@@ -20,6 +20,12 @@ export interface RankingEntry {
   differentiators: RankingDifferentiator[]
   workId: string
   title: string
+  /**
+   * Obra não-lida com baixa cobertura de gênero (predição menos confiável).
+   * Enriquecido na página do ranking via getLowCoverageWorkIds — undefined
+   * quando não foi computado.
+   */
+  lowCoverage?: boolean
   finalScore: number | null
   calcScore: number | null
   predictedScore: number | null
