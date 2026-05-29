@@ -335,19 +335,21 @@ export async function recalculateAll() {
   // postScores com a estimativa de qualidade da IA (ai_quality_predictions).
   // Só afeta as features de qualidade do expected_score (Nota.Pr usa meanPostScore,
   // que NÃO é tocado). Read works mantêm os valores reais do user.
+  // Mapa work_id → qualidade estimada pela IA (todas as obras que tiverem).
+  // Usado pra (1) preencher postScores das não-lidas e (2) o MAE CV honesto.
+  const aiQualityByWork = new Map<string, Record<string, number>>()
   if (includeQuality) {
     const { data: qpred } = await supabase
       .from("ai_quality_predictions")
       .select("work_id, field, score")
-    const byWork = new Map<string, Record<string, number>>()
     for (const r of (qpred ?? []) as Array<{ work_id: string; field: string; score: number | string }>) {
-      const m = byWork.get(r.work_id) ?? {}
+      const m = aiQualityByWork.get(r.work_id) ?? {}
       m[r.field] = Number(r.score)
-      byWork.set(r.work_id, m)
+      aiQualityByWork.set(r.work_id, m)
     }
     for (const w of works) {
       if (w.meanPostScore != null) continue // lida (tem pós-leitura real) — não sobrescreve
-      const pred = byWork.get(w.id)
+      const pred = aiQualityByWork.get(w.id)
       if (!pred) continue
       for (const field of POST_SCORE_FIELDS) {
         if (pred[field] != null) w.postScores[field] = pred[field]
@@ -551,6 +553,53 @@ export async function recalculateAll() {
     maeExpected = sumAbsCombined / trainSet.length
     rmseExpected = Math.sqrt(sumSqCombined / trainSet.length)
     maeExpectedBaseline = sumAbsBaseline / trainSet.length
+  }
+
+  // MAE CV HONESTO (Pago/includeQuality): k-fold onde as obras held-out são
+  // previstas com a qualidade ESTIMADA pela IA (como nas não-lidas), NÃO com os
+  // post-scores reais. Quebra a circularidade (user_score = média dos post-scores)
+  // que torna o cv_mae do modelo otimista. Sem estimativa IA pra a obra held-out,
+  // cai pra qualidade vazia (mediana) → conservador até o backfill cobrir as lidas.
+  let honestCvMae: number | null = null
+  if (includeQuality && !expectedPredictor.isStub && trainSet.length >= 20) {
+    const idx = trainSet.map((_, i) => i)
+    let state = 42
+    const rand = () => {
+      state = (state * 1664525 + 1013904223) >>> 0
+      return state / 0x100000000
+    }
+    for (let i = idx.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1))
+      ;[idx[i], idx[j]] = [idx[j], idx[i]]
+    }
+    const k = trainSet.length < 50 ? trainSet.length : 5
+    const folds: number[][] = Array.from({ length: k }, () => [])
+    idx.forEach((v, i) => folds[i % k].push(v))
+    let sumAbs = 0
+    let count = 0
+    for (const fold of folds) {
+      const testSet = new Set(fold)
+      const trIn: ExpectedScoreInput[] = []
+      const trTg: number[] = []
+      for (let i = 0; i < trainSet.length; i++) {
+        if (testSet.has(i)) continue
+        trIn.push(expectedTrainInputs[i]) // treino com qualidade real
+        trTg.push(trainSet[i].userScore as number)
+      }
+      if (trIn.length < 20) continue
+      const foldPred = trainExpectedPredictor(trIn, trTg, true)
+      if (foldPred.isStub) continue
+      const heldInputs = fold.map((i) => ({
+        ...expectedTrainInputs[i],
+        postScores: (aiQualityByWork.get(trainSet[i].id) ?? {}) as ExpectedScoreInput["postScores"],
+      }))
+      const preds = foldPred.predict(heldInputs)
+      for (let j = 0; j < fold.length; j++) {
+        sumAbs += Math.abs(preds[j].expected - (trainSet[fold[j]].userScore as number))
+        count++
+      }
+    }
+    if (count > 0) honestCvMae = sumAbs / count
   }
 
   // ---------- 3b) kNN sobre embeddings ----------
@@ -794,9 +843,14 @@ export async function recalculateAll() {
       mae_expected: maeExpected,
       rmse_expected: rmseExpected,
       mae_expected_baseline: maeExpectedBaseline,
+      // Headline "Precisão da previsão". Pago: MAE CV honesto (held-out com
+      // qualidade estimada pela IA — não-circular). Free: cvMAE do modelo
+      // (sem qualidade, já honesto). Fallback pro cvMAE se o honesto não rodou.
       cv_mae_expected_stage1: expectedPredictor.isStub
         ? null
-        : expectedPredictor.model.cvMAE,
+        : includeQuality
+          ? (honestCvMae ?? expectedPredictor.model.cvMAE)
+          : expectedPredictor.model.cvMAE,
       // Sem treino sequencial: stage2 cvMAE não existe mais; valor de baseline
       // serve de proxy de "quanto o modelo erra sem qualidade" no painel.
       cv_mae_expected_stage2: null,

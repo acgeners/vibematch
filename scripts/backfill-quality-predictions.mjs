@@ -19,6 +19,10 @@ import Anthropic from "@anthropic-ai/sdk"
 
 const APPLY = process.argv.includes("--apply")
 const FORCE = process.argv.includes("--force")
+// --include-read: estima também as obras JÁ LIDAS (user_score != null). Não é
+// usado na inferência (lidas têm post-scores reais), mas alimenta o MAE CV
+// honesto (held-out previsto com qualidade estimada). Custo extra ~$0.012/obra.
+const INCLUDE_READ = process.argv.includes("--include-read")
 const MODEL = "claude-sonnet-4-6"
 const PROMPT_VERSION = "quality-v1"
 const CONCURRENCY = 5
@@ -77,13 +81,14 @@ async function main() {
     auth: { persistSession: false },
   })
 
-  const { data: works, error } = await sb
+  let query = sb
     .from("works")
     .select(
       "id, title, canonical_synopsis, category_scores(criterion_slug, score), work_tags(tags(name)), calculated_scores(platform_avg, total_votes)",
     )
-    .is("user_score", null)
     .eq("is_archived", false)
+  if (!INCLUDE_READ) query = query.is("user_score", null)
+  const { data: works, error } = await query
   if (error) throw new Error(error.message)
 
   // Só obras com avaliação IA (tem atributos pra basear a estimativa).
@@ -95,7 +100,9 @@ async function main() {
     targets = targets.filter((w) => !done.has(w.id))
   }
 
-  console.log(`obras não-lidas com IA: ${(works ?? []).length} | a estimar: ${targets.length}`)
+  console.log(
+    `obras com IA${INCLUDE_READ ? " (lidas + não-lidas)" : " (não-lidas)"}: ${(works ?? []).length} | a estimar: ${targets.length}`,
+  )
   console.log(`custo estimado: ~$${(targets.length * 0.012).toFixed(2)} (Sonnet, ~$0.012/obra)`)
 
   if (!APPLY) {
