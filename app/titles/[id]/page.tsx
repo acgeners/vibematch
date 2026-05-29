@@ -3,8 +3,7 @@ import Link from "next/link"
 import { BarChart3, ChevronDown, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
-import { WorkStatusForm } from "@/components/titles/work-status-form"
-import { PostAttributeAssessmentForm } from "@/components/titles/post-attribute-assessment-form"
+import { PostReadingFlow } from "@/components/titles/post-reading-flow"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug } from "@/server/queries/works"
 import {
   getLatestAiEvaluationAttributes,
@@ -299,25 +298,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     post_originality_score: work.post_originality_score ?? null,
   }
 
-  // Questionário pós-leitura: só faz sentido em status terminais (a obra
-  // já foi lida/abandonada). Carrega notas da IA + avaliação salva sob demanda.
-  const POST_ATTR_STATUSES: PersonalStatus[] = [
-    "Completed",
-    "Dropped",
-    "On-hold",
-    "Stalled",
-    "Hiatus",
-  ]
-  const showPostAttr = POST_ATTR_STATUSES.includes(statusInitial.personal_status)
-  let postAttrAi: Awaited<ReturnType<typeof getLatestAiEvaluationAttributes>> = null
-  let postAttrExisting: Awaited<ReturnType<typeof getExistingPostReadingAssessment>> = null
-  if (showPostAttr) {
-    const userId = await getCurrentUserId(configClient)
-    ;[postAttrAi, postAttrExisting] = await Promise.all([
-      getLatestAiEvaluationAttributes(work.id as string, configClient),
-      getExistingPostReadingAssessment(work.id as string, userId, configClient),
-    ])
-  }
+  // Questionário pós-leitura (atributos): carrega notas da IA + avaliação salva.
+  // Sempre carregado pra que o fluxo client-side (PostReadingFlow) possa revelar
+  // a seção de atributos na hora em que o status vira terminal — sem reload.
+  const postAttrUserId = await getCurrentUserId(configClient)
+  const [postAttrAi, postAttrExisting] = await Promise.all([
+    getLatestAiEvaluationAttributes(work.id as string, configClient),
+    getExistingPostReadingAssessment(work.id as string, postAttrUserId, configClient),
+  ])
 
   const categoriesCount = genres.length + tags.length
 
@@ -623,18 +611,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </TabsContent>
 
             <TabsContent value="status" className="mt-0 space-y-5">
-              <WorkStatusForm
-                workId={work.id}
+              <PostReadingFlow
+                workId={work.id as string}
                 totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
-                initialValues={statusInitial}
+                statusInitial={statusInitial}
+                latestAiEvaluation={postAttrAi}
+                existingAssessment={postAttrExisting}
               />
-              {showPostAttr && (
-                <PostAttributeAssessmentForm
-                  workId={work.id as string}
-                  latestAiEvaluation={postAttrAi}
-                  existingAssessment={postAttrExisting}
-                />
-              )}
             </TabsContent>
 
             <TabsContent value="recommendations" className="mt-0 space-y-5">
@@ -648,7 +631,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           <span>{modelPromptDrift.message}</span>
         </div>
       )}
-      {work.personal_status !== "Completed" && work.personal_status !== "Dropped" ? (
+      {statusInitial.personal_status !== "Completed" && statusInitial.personal_status !== "Dropped" ? (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-stretch">
           <AiEvaluationButton
             workId={work.id}
@@ -681,74 +664,52 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 <Calculator className="h-4.5 w-4.5 text-muted-foreground" />
                 <CardTitle className="text-base font-bold text-foreground">Notas calculadas</CardTitle>
               </div>
-              {work.calculated_scores?.final_score != null && (
+              {work.calculated_scores?.expected_score != null && (
                 <div className="text-right shrink-0">
-                  <p className="text-xs font-medium text-muted-foreground">Nota Final</p>
+                  <p className="text-xs font-medium text-muted-foreground">Nota Esperada</p>
                   <p className="text-3xl font-black font-mono leading-none text-foreground">
-                    {work.calculated_scores.final_score.toFixed(2)}
+                    {work.calculated_scores.expected_score.toFixed(2)}
                   </p>
-                  <p className="text-xs text-muted-foreground">oficial nos rankings</p>
+                  <p className="text-xs text-muted-foreground">estimativa principal</p>
                 </div>
               )}
             </div>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {work.calculated_scores?.expected_score != null && (
+              {work.calculated_scores?.personal_fit != null && (
                 <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
                   <div className="flex flex-col items-start gap-1">
                     <ScoreLabelTooltip
-                      name="Esperada"
-                      description="Nota esperada (modelo L1 — Ridge único). É a estimativa principal do sistema, que substitui Nota.IA/Prevista/Final no novo pipeline."
+                      name="Alinhamento"
+                      description="fit_score (0–100%): alinhamento determinístico entre a obra e o seu TasteProfile (gêneros/tags amados e evitados + preferências por critério). Não usa LLM."
                     />
-                    <span className="text-[10px] text-muted-foreground">Estimativa principal do sistema</span>
+                    <span className="text-[10px] text-muted-foreground">Quão a obra combina com seu perfil</span>
                   </div>
-                  <ScoreBadge
-                    score={work.calculated_scores.expected_score}
-                    size="lg"
-                    showStub={work.calculated_scores?.expected_is_stub ?? false}
-                    thresholds={scoreThresholds?.final}
-                    className="h-10 w-14 text-lg font-bold shrink-0"
-                  />
+                  {(() => {
+                    const fit = work.calculated_scores.personal_fit as number
+                    const cls =
+                      fit >= 0.75 ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-300"
+                      : fit >= 0.5 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
+                      : fit >= 0.3 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
+                      : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
+                    return (
+                      <span className={cn("flex h-10 w-14 items-center justify-center rounded-md border font-mono text-lg font-bold shrink-0", cls)}>
+                        {Math.round(fit * 100)}%
+                      </span>
+                    )
+                  })()}
                 </div>
               )}
-
-              <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
-                <div className="flex flex-col items-start gap-1">
-                  <ScoreLabelTooltip
-                    name="Nota.IA"
-                    description="Soma ponderada das notas por critério dadas pela IA, ajustada por pesos e amplificada (5 + (nota − 5) × 1.25). Aplica penalidades por capítulos e observações."
-                  />
-                  <span className="text-[10px] text-muted-foreground">Avaliação por inteligência artificial</span>
-                </div>
-                <ScoreBadge score={work.calculated_scores?.calc_score ?? null} size="lg" thresholds={scoreThresholds?.calc} className="h-10 w-14 text-lg font-bold shrink-0" />
-              </div>
-
-              <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
-                <div className="flex flex-col items-start gap-1">
-                  <ScoreLabelTooltip
-                    name="Prevista"
-                    description="Previsão por Ridge Regression treinada nas suas próprias notas pessoais. Estima qual seria sua nota baseada nos critérios da IA + dados externos. Requer ≥20 obras avaliadas para ser ativada."
-                  />
-                  <span className="text-[10px] text-muted-foreground">Previsão por aprendizado de máquina</span>
-                </div>
-                <ScoreBadge
-                  score={work.calculated_scores?.predicted_score ?? null}
-                  size="lg"
-                  showStub={work.calculated_scores?.predicted_is_stub ?? false}
-                  thresholds={scoreThresholds?.predicted}
-                  className="h-10 w-14 text-lg font-bold shrink-0"
-                />
-              </div>
 
               {work.calculated_scores?.alignment_score != null && (
                 <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
                   <div className="flex flex-col items-start gap-1">
                     <ScoreLabelTooltip
-                      name="IA Rk"
-                      description="IA Re-rank (0–100): score do re-ranqueamento por LLM usado em 'Recomendar com IA' / 'Próxima leitura'. Preenchido ao rodar o re-rank."
+                      name="Match (IA Rk)"
+                      description="match_score / IA Re-rank (0–100): veredito do consultor LLM sob demanda ('Recomendar com IA' / Deep Dive). Preenchido ao rodar o re-rank."
                     />
-                    <span className="text-[10px] text-muted-foreground">Re-rank por IA (0–100)</span>
+                    <span className="text-[10px] text-muted-foreground">Veredito do consultor IA (0–100)</span>
                   </div>
                   {(() => {
                     const rk = work.calculated_scores.alignment_score
@@ -764,6 +725,50 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     )
                   })()}
                 </div>
+              )}
+
+              {(work.calculated_scores?.final_score != null ||
+                work.calculated_scores?.calc_score != null ||
+                work.calculated_scores?.predicted_score != null) && (
+                <details className="group rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm overflow-hidden sm:col-span-2">
+                  <summary className="flex cursor-pointer list-none items-center justify-between p-4 [&::-webkit-details-marker]:hidden">
+                    <div className="flex flex-col items-start gap-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-medium text-foreground">Notas legadas</span>
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">Pipeline antigo — substituído pela Nota Esperada</span>
+                    </div>
+                  </summary>
+                  <div className="grid gap-2 border-t border-border/40 px-4 pb-4 pt-3 bg-muted/10">
+                    <div className="flex items-center justify-between gap-3">
+                      <ScoreLabelTooltip
+                        name="Nota.Final"
+                        description="[Legado] Nota.Final — mistura ponderada (inverse-variance) de Nota.IA e Nota.Pr. Substituída pela Nota Esperada no novo pipeline."
+                      />
+                      <ScoreBadge score={work.calculated_scores?.final_score ?? null} size="sm" thresholds={scoreThresholds?.final} />
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <ScoreLabelTooltip
+                        name="Nota.IA"
+                        description="[Legado] Soma ponderada das notas por critério dadas pela IA, ajustada por pesos e amplificada (5 + (nota − 5) × 1.25)."
+                      />
+                      <ScoreBadge score={work.calculated_scores?.calc_score ?? null} size="sm" thresholds={scoreThresholds?.calc} />
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <ScoreLabelTooltip
+                        name="Prevista"
+                        description="[Legado] Previsão por Ridge Regression nas suas notas pessoais. Requer ≥20 obras avaliadas. Substituída pela Nota Esperada."
+                      />
+                      <ScoreBadge
+                        score={work.calculated_scores?.predicted_score ?? null}
+                        size="sm"
+                        showStub={work.calculated_scores?.predicted_is_stub ?? false}
+                        thresholds={scoreThresholds?.predicted}
+                      />
+                    </div>
+                  </div>
+                </details>
               )}
 
               {work.user_score != null && (

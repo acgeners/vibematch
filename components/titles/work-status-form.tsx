@@ -154,6 +154,9 @@ export interface WorkStatusFormProps {
   hideFooter?: boolean
   /** Chamado quando usuário clica Cancelar (só usado quando hideFooter=false). */
   onCancel?: () => void
+  /** Chamado sempre que o status pessoal selecionado muda (mesmo antes de salvar).
+   *  Permite ao parent revelar a seção de atributos pós-leitura na hora, sem reload. */
+  onStatusChange?: (status: WorkStatusValues["personal_status"]) => void
 }
 
 export function WorkStatusForm({
@@ -163,6 +166,7 @@ export function WorkStatusForm({
   onSaved,
   hideFooter = false,
   onCancel,
+  onStatusChange,
 }: WorkStatusFormProps) {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
@@ -201,6 +205,12 @@ export function WorkStatusForm({
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
   const [postWeights] = useState<Record<PostReadingScoreField, number>>(readPostReadingWeights)
+
+  // Avisa o parent da mudança de status na hora (antes de salvar) pra revelar
+  // a seção de atributos pós-leitura sem depender de reload.
+  useEffect(() => {
+    if (personalStatus) onStatusChange?.(personalStatus)
+  }, [personalStatus, onStatusChange])
 
   useEffect(() => {
     if (personalStatus !== "Completed") return
