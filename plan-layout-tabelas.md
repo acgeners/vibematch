@@ -48,19 +48,19 @@ Objetivo: melhorar **descobribilidade**, **densidade**, **consistência** e **re
 
 | # | Item | Onde | Risco |
 |---|------|------|-------|
-| A1 | `CompareFloatingBar` definido inline em 2 lugares (quase idênticos) | [ranking-table.tsx:563](components/ranking/ranking-table.tsx#L563), [work-table.tsx:340](components/titles/work-table.tsx#L340) | médio (ranking-table) |
+| A1 | ⚠️ **Divergiram, não idênticos**: `CompareSelectionBar` (work-table, com `favoriteCount`/`onUnfavorite`) ≠ `CompareFloatingBar` (ranking, 3 props). Extração exige reconciliar favoritos — adiar. | [ranking-table.tsx:563](components/ranking/ranking-table.tsx#L563), [work-table.tsx:337](components/titles/work-table.tsx#L337) | médio (ranking-table) |
 | A2 | `useMultiSelect` não é hook compartilhado — lógica copiada | ambas tabelas | médio |
 | A3 | `WorkTable` serve 4 namespaces (titles, favorites, recommendations, etc.) com comportamento sutil diferente entre eles | [work-table.tsx](components/titles/work-table.tsx) | seguro |
 | A4 | Sticky header behavior pode ser hook compartilhado | várias tabelas | seguro |
 
-**Sugestão**: extrair `<CompareFloatingBar>` pra `components/ui/compare-floating-bar.tsx` e hook `useMultiSelect()`. Reduz ~80 linhas duplicadas e centraliza ajustes futuros.
+**Sugestão (revisada)**: extrair `useMultiSelect()` e uma barra compartilhada é possível, mas ⚠️ as duas barras **divergiram** (`CompareSelectionBar` tem favoritos/batch que a `CompareFloatingBar` não tem). Não é dedup trivial — exige reconciliar a feature de favoritos. **Adiar** até a Fase 1.5 fechar.
 
 ### B. Descobribilidade
 
 | # | Item | Onde | Risco |
 |---|------|------|-------|
-| B1 | Colunas técnicas (`Pos.%`, `Alinh.`, `Esperada`, `N.IA`, `N.Pr`) sem tooltip explicativo no header | configs de coluna | médio |
-| B2 | Differentiator badges (abaixo do título no ranking) sem label "diferenciais" ou tooltip | [ranking-table.tsx:195-201](components/ranking/ranking-table.tsx#L195) | médio |
+| B1 | ✅ **Já feito** — header tooltips via `configLabel` em [work-table.tsx:1056](components/titles/work-table.tsx#L1056) e [ranking-table.tsx:416](components/ranking/ranking-table.tsx#L416) | configs de coluna | — |
+| B2 | ✅ Badges **já têm tooltip** ([ranking-table.tsx:196-216](components/ranking/ranking-table.tsx#L196)); falta só rótulo de grupo "diferenciais" (baixo valor) | [ranking-table.tsx:195-201](components/ranking/ranking-table.tsx#L195) | baixo |
 | B3 | Smart Cascade Sort sem indicador visual do que está priorizando | [ranking-filters.tsx](components/ranking/ranking-filters.tsx) | seguro |
 | B4 | Mood bar não indica claramente quando há mood ativo (cor sutil ou badge?) | [mood-bar.tsx](components/ranking/mood-bar.tsx) | seguro |
 
@@ -71,13 +71,13 @@ Objetivo: melhorar **descobribilidade**, **densidade**, **consistência** e **re
 | C1 | Sem toggle "compact view" (linhas com menos padding) — power users querem ver mais obras de uma vez | tabelas em geral | seguro |
 | C2 | Linhas têm padding vertical generoso por default | configs / cells | seguro |
 | C3 | Cabeçalho de coluna sem ellipsis consistente — pode quebrar em telas estreitas | configs / cells | seguro |
-| C4 | Cor do `ScoreBadge` em modo escuro pode estar com contraste sub-AA | [score-badge.tsx](components/ui/score-badge.tsx) | seguro |
+| C4 | ✅ **Feito (lote 1)** — tier "mid" solid trocado de `text-white` → `text-yellow-950` ([score-badge.tsx:62](components/ui/score-badge.tsx#L62)). Restam green/emerald/orange/red solid com branco (decisão de design — avaliar depois) | [score-badge.tsx](components/ui/score-badge.tsx) | seguro |
 
 ### D. Mobile e responsividade
 
 | # | Item | Onde | Risco |
 |---|------|------|-------|
-| D1 | Tabelas em scroll horizontal são UX ruim em mobile — considerar view "cards" como default mobile | tabelas em geral | seguro |
+| D1 | ✅ View "cards" **já existe** (`ViewMode "list" \| "cards"` nas duas tabelas). Resta só auto-selecionar "cards" em mobile (pendente) | tabelas em geral | seguro |
 | D2 | Mood bar + surprise-me + filtros expandidos ocupam muito vertical antes da tabela aparecer | [ranking-filters.tsx](components/ranking/ranking-filters.tsx), [mood-bar.tsx](components/ranking/mood-bar.tsx) | seguro |
 | D3 | Touch targets de checkbox de seleção podem estar pequenos em mobile | cells | seguro |
 | D4 | Filtros colapsam mas usabilidade no toque pode estar quebrada | [ranking-filters.tsx](components/ranking/ranking-filters.tsx) | seguro |
@@ -86,7 +86,7 @@ Objetivo: melhorar **descobribilidade**, **densidade**, **consistência** e **re
 
 | # | Item | Onde | Risco |
 |---|------|------|-------|
-| E1 | "Nenhuma obra encontrada com os filtros aplicados" sem CTA "Limpar filtros" inline | [ranking-table.tsx:343](components/ranking/ranking-table.tsx#L343) | médio |
+| E1 | ✅ **Feito (lote 1)** — CTA "Limpar filtros" (`router.push("/ranking")`) quando há filtros ativos | [ranking-table.tsx:343](components/ranking/ranking-table.tsx#L343) | médio |
 | E2 | Loading states inconsistentes (skeleton vs spinner) entre views | várias páginas | seguro |
 | E3 | Empty state quando ranking estiver carregando dados externos pode confundir | tabelas | seguro |
 
@@ -94,9 +94,9 @@ Objetivo: melhorar **descobribilidade**, **densidade**, **consistência** e **re
 
 | # | Item | Onde | Risco |
 |---|------|------|-------|
-| F1 | Coluna `Pos.%` (percentil) é texto puro — visual de barra horizontal ou cor por faixa seria mais escaneável | configs + cells | seguro |
+| F1 | ✅ **Feito (lote 1)** — `Pos.%` agora colorido por faixa (emerald/amber/orange) reusando paleta do AlignmentCell | [ranking-table.tsx:236](components/ranking/ranking-table.tsx#L236) | seguro |
 | F2 | Differentiator badges sem código de cor por direção (positive vs negative do critério) | [ranking-table.tsx:195](components/ranking/ranking-table.tsx#L195) | médio |
-| F3 | `ScoreBadge` em modo escuro — auditar contraste AA | [score-badge.tsx](components/ui/score-badge.tsx) | seguro |
+| F3 | ✅ Ver C4 — tier "mid" corrigido no lote 1; demais tiers solid pendentes de decisão | [score-badge.tsx](components/ui/score-badge.tsx) | seguro |
 | F4 | Threshold cutoffs (top/alto/médio/baixo) — visual da legenda em `/preferences` está claro? | [score-color-percentiles-form.tsx](components/settings/score-color-percentiles-form.tsx) | seguro |
 
 ### G. Refactors (sem mudança visual visível, mas higiene)
@@ -106,7 +106,37 @@ Objetivo: melhorar **descobribilidade**, **densidade**, **consistência** e **re
 | G1 | Extrair `<CompareFloatingBar>` pra `components/ui/` | duplicado | médio |
 | G2 | Hook `useMultiSelect()` compartilhado | duplicado | médio |
 | G3 | Hook `useStickyHeader()` se a lógica se repete | várias tabelas | seguro |
-| G4 | Componente `<ColumnHeaderTooltip>` reutilizável (resolve B1, B2) | configs | médio |
+| G4 | ✅ **Já resolvido** — padrão de header tooltip já inline nas duas tabelas (ver B1) | configs | — |
+
+---
+
+## Status do backlog (atualizado após lote 1)
+
+### ✅ Feitos no lote 1
+- **E1** — CTA "Limpar filtros" no empty state de `/ranking`
+- **F1** — `Pos.%` colorido por faixa
+- **C4/F3** — contraste do tier "mid" do `ScoreBadge` (`text-white` → `text-yellow-950`)
+
+### ✅ Já estavam feitos (descobertos na triagem — não precisam de trabalho)
+- **B1** / **G4** — header tooltips via `configLabel` nas duas tabelas
+- **B2** — differentiator badges já têm tooltip (falta só rótulo de grupo)
+- **D1** — view "cards" já existe nas duas tabelas
+
+### 🟡 Pendentes — fora do lote 1 por escopo (lotes futuros)
+- **C1/C2** (compacto/densidade): feature nova, mexe no padding de list **e** cards — merece lote próprio.
+- **D1 (resto)** (auto-selecionar "cards" em mobile): cards já existe; falta decidir breakpoint e se respeita escolha manual.
+- **B2 (resto)** (rótulo de grupo "diferenciais"): baixo valor.
+
+### 🔴 Pendentes — adiados por risco/baixo valor
+- **A1 / A2 / G1 / G2 / G3** (refactors: barra compartilhada, `useMultiSelect`, `useStickyHeader`): barras divergiram (favoritos), risco médio sem ganho visual. Adiar até Fase 1.5 fechar.
+
+### ⚪ Pendentes — NÃO verificados ainda (precisam de leitura antes de planejar)
+- **B3** (indicador do Smart Cascade Sort), **B4** (mood ativo na mood bar), **D2/D3/D4** (vertical/touch mobile), **F2** (cor por direção nos badges), **F4** (legenda de cutoffs em `/preferences`), **E2/E3** (loading/empty states), **C3** (ellipsis no header).
+  - *Por quê:* ficam em `ranking-filters.tsx` / `mood-bar.tsx` / outros que ainda não inspecionei. Podem já estar resolvidos (como B1/B2/D1) — triar antes de assumir pendência.
+
+### 🔬 Pendência de validação (não é código) do lote 1
+- Validar contraste em **dark mode** (axe/Lighthouse) do `ScoreBadge` e do percentil colorido.
+- Demais tiers solid do `ScoreBadge` (green/emerald/orange/red + branco) também não batem AA estrito — decisão de design, não alterado.
 
 ---
 
