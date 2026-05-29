@@ -112,6 +112,27 @@ describe("trainExpectedPredictor (single Ridge + decomposition)", () => {
     }
   })
 
+  it("includeQuality=true (Pago L0+): adiciona as 8 features de qualidade", () => {
+    const inputs: ExpectedScoreInput[] = []
+    const targets: number[] = []
+    for (let i = 0; i < 30; i++) {
+      const quality = 4 + (i % 6)
+      inputs.push(baseInput({ iaEvalNormalized: 6, postScores: allPostScores(quality) }))
+      targets.push(quality)
+    }
+    const predictor = trainExpectedPredictor(inputs, targets, true)
+    expect(predictor.isStub).toBe(false)
+    // As 8 features de qualidade entram no Ridge
+    expect(predictor.featureNames).toContain("post_story_score")
+    expect(predictor.featureNames).toContain("post_originality_score")
+    expect(predictor.qualityIndices.length).toBe(8)
+    // baseline + quality cobrem todo o vetor
+    expect(verifyDecompositionCovers(predictor)).toBe(true)
+    // qualityAdj pode ser ≠ 0 agora (post_scores são features)
+    const preds = predictor.predict(inputs.slice(0, 5))
+    expect(preds.some((p) => Math.abs(p.qualityAdj) > 1e-9)).toBe(true)
+  })
+
   it("decomposition: baseline + qualityAdj ≈ expected (pré-clamp)", () => {
     const inputs: ExpectedScoreInput[] = []
     const targets: number[] = []

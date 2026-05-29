@@ -13,7 +13,8 @@ import {
 } from "@/lib/calculations"
 import { calculateNotaFinalChoosing } from "@/lib/calculations/final"
 import { calculateGPTWithDiagnostics, calculateGPT } from "@/lib/calculations/gpt"
-import { getCurrentUserId } from "@/server/queries/current-user"
+import { getCurrentUserId, getCurrentPlan } from "@/server/queries/current-user"
+import { planAllows } from "@/lib/plans/capabilities"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import {
   applyBiasToCategoryScores,
@@ -298,6 +299,11 @@ export async function recalculateAll() {
   const userId = await getCurrentUserId(supabase)
   const biasMap = await getBiasMap(userId, supabase)
 
+  // L0+ (Bloco 2.1, Pago): inclui as 8 features de qualidade no Ridge,
+  // preenchidas por user pós-leitura (lidas) OU estimativa IA (não-lidas).
+  const plan = await getCurrentPlan(supabase)
+  const includeQuality = planAllows(plan, "l0_quality_eval")
+
   const [worksRes, weightsRes, configRes, tasteProfile] = await Promise.all([
     supabase
       .from("works")
@@ -324,6 +330,30 @@ export async function recalculateAll() {
   if (configRes.error) throw new Error(configRes.error.message)
 
   const works = (worksRes.data as RawWork[]).map((raw) => buildWork(raw, biasMap))
+
+  // L0+ (Pago): pra obras SEM pós-leitura do user (não-lidas), preenche
+  // postScores com a estimativa de qualidade da IA (ai_quality_predictions).
+  // Só afeta as features de qualidade do expected_score (Nota.Pr usa meanPostScore,
+  // que NÃO é tocado). Read works mantêm os valores reais do user.
+  if (includeQuality) {
+    const { data: qpred } = await supabase
+      .from("ai_quality_predictions")
+      .select("work_id, field, score")
+    const byWork = new Map<string, Record<string, number>>()
+    for (const r of (qpred ?? []) as Array<{ work_id: string; field: string; score: number | string }>) {
+      const m = byWork.get(r.work_id) ?? {}
+      m[r.field] = Number(r.score)
+      byWork.set(r.work_id, m)
+    }
+    for (const w of works) {
+      if (w.meanPostScore != null) continue // lida (tem pós-leitura real) — não sobrescreve
+      const pred = byWork.get(w.id)
+      if (!pred) continue
+      for (const field of POST_SCORE_FIELDS) {
+        if (pred[field] != null) w.postScores[field] = pred[field]
+      }
+    }
+  }
   const weights = weightsRes.data as ScoreWeight[]
   let config = (configRes.data?.[0] ?? null) as FormulaConfig | null
 
@@ -490,7 +520,7 @@ export async function recalculateAll() {
   // contribuição de cada axis pra o waterfall.
   const expectedTrainInputs = trainSet.map(buildExpectedInput)
   const expectedAllInputs = works.map(buildExpectedInput)
-  const expectedPredictor = trainExpectedPredictor(expectedTrainInputs, trainTargets)
+  const expectedPredictor = trainExpectedPredictor(expectedTrainInputs, trainTargets, includeQuality)
   const expectedPredictions = expectedPredictor.predict(expectedAllInputs)
   for (let i = 0; i < works.length; i++) {
     const p = expectedPredictions[i]

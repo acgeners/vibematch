@@ -94,9 +94,9 @@ const CATEGORICAL_FEATURE_NAMES = ["Status"] as const
 const MIN_TRAIN = 20
 
 // Quais índices do feature vector pertencem a cada grupo (pra decomposição).
-// Categorical (Status one-hot) é considerado baseline.
+// Categorical (Status one-hot) é considerado baseline. O número de quality
+// features é dinâmico por treino (includeQuality) — ver trainExpectedPredictor.
 const BASELINE_COUNT = BASELINE_NUMERIC_FEATURES.length
-const QUALITY_COUNT = QUALITY_NUMERIC_FEATURES.length
 
 export interface ExpectedScoreInput {
   // Baseline / perfil
@@ -153,7 +153,7 @@ export interface TrainedExpectedPredictor {
   isStub: boolean
 }
 
-function buildNumericRow(input: ExpectedScoreInput): NumericRow {
+function buildNumericRow(input: ExpectedScoreInput, includeQuality = false): NumericRow {
   const row: (number | null)[] = []
   for (const slug of CRITERION_SLUGS) {
     const v = input.categoryScores[slug as CriterionSlug]
@@ -168,9 +168,15 @@ function buildNumericRow(input: ExpectedScoreInput): NumericRow {
   row.push(input.lovedTagOverlap ?? null)
   row.push(input.avoidedTagOverlap ?? null)
   row.push(input.criterionFitScore ?? null)
-  // post_*_score REMOVIDOS do feature vector — ver doc-comment no topo.
-  // O loop foi mantido nos callers (consumindo `input.postScores`) mas aqui
-  // explicitamente NÃO entram no Ridge.
+  // post_*_score (8 quality) — só entram no Ridge no plano Pago (L0+), quando
+  // existem pra TODA obra (user pós-leitura OU estimativa IA pras não-lidas).
+  // No Free ficam de fora (imputação→colapso nas não-lidas). Ver doc-comment.
+  if (includeQuality) {
+    for (const field of POST_SCORE_FIELDS) {
+      const v = input.postScores[field]
+      row.push(v == null || !Number.isFinite(v) ? null : v)
+    }
+  }
   return row
 }
 
@@ -189,10 +195,17 @@ function hasAnyPostScore(input: ExpectedScoreInput): boolean {
 export function trainExpectedPredictor(
   trainInputs: ExpectedScoreInput[],
   trainTargets: number[],
+  includeQuality = false,
 ): TrainedExpectedPredictor {
   if (trainInputs.length !== trainTargets.length) {
     throw new Error("trainExpectedPredictor: inputs and targets length mismatch")
   }
+
+  // Feature set numérico depende do plano: Pago (includeQuality) adiciona os
+  // 8 quality granulares; Free fica só nos 14 baseline.
+  const qualityFeatureNames: readonly string[] = includeQuality ? POST_SCORE_FIELDS : []
+  const numericFeatureNames = [...BASELINE_NUMERIC_FEATURES, ...qualityFeatureNames]
+  const qualityCount = qualityFeatureNames.length
 
   // Stub fallback
   if (trainInputs.length < MIN_TRAIN) {
@@ -227,7 +240,7 @@ export function trainExpectedPredictor(
     }
   }
 
-  const numericRows = trainInputs.map(buildNumericRow)
+  const numericRows = trainInputs.map((inp) => buildNumericRow(inp, includeQuality))
   const categoricalRows = trainInputs.map(buildCategoricalRow)
 
   const numImputer = new MedianImputer().fit(numericRows)
@@ -251,9 +264,9 @@ export function trainExpectedPredictor(
   const featureDim = Xtrain[0]?.length ?? 0
   const baselineIndices: number[] = []
   for (let i = 0; i < BASELINE_COUNT; i++) baselineIndices.push(i)
-  for (let i = BASELINE_COUNT + QUALITY_COUNT; i < featureDim; i++) baselineIndices.push(i)
+  for (let i = BASELINE_COUNT + qualityCount; i < featureDim; i++) baselineIndices.push(i)
   const qualityIndices: number[] = []
-  for (let i = BASELINE_COUNT; i < BASELINE_COUNT + QUALITY_COUNT; i++) qualityIndices.push(i)
+  for (let i = BASELINE_COUNT; i < BASELINE_COUNT + qualityCount; i++) qualityIndices.push(i)
 
   // Centróide do treino pra distance factor
   const centroid = new Array<number>(featureDim).fill(0)
@@ -263,7 +276,7 @@ export function trainExpectedPredictor(
   for (let j = 0; j < featureDim; j++) centroid[j] /= Xtrain.length
 
   const featureNames = [
-    ...NUMERIC_FEATURE_NAMES,
+    ...numericFeatureNames,
     ...catEncoder.featureNames(CATEGORICAL_FEATURE_NAMES as unknown as string[]),
   ]
 
@@ -273,7 +286,7 @@ export function trainExpectedPredictor(
   }
 
   function transform(inputs: ExpectedScoreInput[]): number[][] {
-    const numRows = inputs.map(buildNumericRow)
+    const numRows = inputs.map((inp) => buildNumericRow(inp, includeQuality))
     const catRows = inputs.map(buildCategoricalRow)
     const numImp = numImputer.transform(numRows)
     const numSc = numScaler.transform(numImp)
