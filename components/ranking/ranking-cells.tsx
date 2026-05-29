@@ -77,15 +77,35 @@ export function AlignmentScoreCell({
   justification,
   workId,
   payload,
+  isPaid = true,
 }: {
   score: number | null
   justification: string | null
   workId?: string
   payload?: AlignmentPayload | null
+  isPaid?: boolean
 }) {
   if (score == null) {
-    if (workId) {
+    if (workId && isPaid) {
       return <RerankSingleWorkButton workId={workId} />
+    }
+    if (workId && !isPaid) {
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex items-center gap-1 rounded-md border border-dashed border-muted-foreground/30 px-1.5 py-0.5 text-xs text-muted-foreground/70 cursor-help">
+                <Sparkles className="h-3 w-3" />
+                <span>Pago</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-[260px]">
+              O re-rank por IA (IA Rk) é uma feature do plano Pago. No Free o ranking usa
+              Nota Esperada × alinhamento.
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
     }
     return (
       <TooltipProvider>

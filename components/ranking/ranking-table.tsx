@@ -82,6 +82,10 @@ function writeViewMode(mode: ViewMode) {
 interface RankingTableProps {
   entries: RankingEntry[]
   scoreThresholds?: ColumnThresholds | null
+  /** Sort default efetivo (depende do plano). Mantém o header de coluna coerente com o server. */
+  defaultSort?: string
+  /** Quando false, o re-rank por IA por-linha ("Rankear") é desabilitado (feature Pago). */
+  isPaid?: boolean
 }
 
 const KEY_CRITERIA = ["romance", "fantasy_nobility", "protagonist", "drama", "tragedy"]
@@ -230,7 +234,8 @@ function formatVotes(votes: number): string {
 function renderCell(
   entry: RankingEntry,
   col: RankingColumnDef,
-  scoreThresholds: ColumnThresholds | null | undefined
+  scoreThresholds: ColumnThresholds | null | undefined,
+  isPaid: boolean = true
 ) {
   if (col.key === "rank") return <span className="font-mono text-sm text-muted-foreground">{entry.rank}</span>
   if (col.key === "percentile") {
@@ -286,7 +291,7 @@ function renderCell(
   if (col.key === "personal_fit")
     return <AlignmentCell value={entry.personalFit} percentile={entry.personalFitPercentile} showBar={false} />
   if (col.key === "alignment_score")
-    return <AlignmentScoreCell score={entry.alignmentScore} justification={entry.alignmentJustification} workId={entry.workId} payload={entry.alignmentPayload} />
+    return <AlignmentScoreCell score={entry.alignmentScore} justification={entry.alignmentJustification} workId={entry.workId} payload={entry.alignmentPayload} isPaid={isPaid} />
   if (col.key.startsWith("crit_")) {
     const slug = col.key.slice(5)
     const score = entry.scores[slug]
@@ -295,7 +300,7 @@ function renderCell(
   return null
 }
 
-export function RankingTable({ entries, scoreThresholds = null }: RankingTableProps) {
+export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true }: RankingTableProps) {
   const { widths, setWidth } = useColumnWidths()
   const config = useSyncExternalStore(
     subscribeRankingColumnConfig,
@@ -341,7 +346,7 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
 
   const router = useRouter()
   const searchParams = useSearchParams()
-  const sortRaw = searchParams.get("sort") ?? "expected_score:desc"
+  const sortRaw = searchParams.get("sort") ?? defaultSort
   const [activeSortField, activeSortDirRaw = "desc"] = sortRaw.split(",")[0].split(":")
   const activeSortDir: "asc" | "desc" = activeSortDirRaw === "asc" ? "asc" : "desc"
 
@@ -492,7 +497,7 @@ export function RankingTable({ entries, scoreThresholds = null }: RankingTablePr
                           aria-label={`Selecionar ${entry.title} para comparar`}
                         />
                       ) : (
-                        renderCell(entry, col, scoreThresholds)
+                        renderCell(entry, col, scoreThresholds, isPaid)
                       )}
                     </div>
                   </td>

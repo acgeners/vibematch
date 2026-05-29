@@ -1,4 +1,6 @@
 import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } from "@/server/queries/ranking"
+import { getCurrentPlan } from "@/server/queries/current-user"
+import { planAllows } from "@/lib/plans/capabilities"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getLowCoverageWorkIds } from "@/server/queries/calibration-guards"
 import { getAllGenres } from "@/server/queries/genres"
@@ -94,6 +96,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // Sem o expected_*, sort por "Esperada" caía silenciosamente em final_score.
   const validSortFields = new Set<string>([
     // Notas (novo pipeline)
+    "recommended",
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
     // Notas (legado)
     "final_score", "calc_score", "predicted_score", "pred_score", "alignment_score",
@@ -108,8 +111,12 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     // Critérios IA
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
-  // Default: ordenação única por Nota Esperada (expected_score) descendente.
-  const rawSort = str("sort") ?? "expected_score:desc"
+  // Default: Free ordena por "recommended" (expected × fit, sem LLM); Pago mantém
+  // a Nota Esperada crua como base (o re-rank por IA é opt-in via "Recomendar com IA").
+  const plan = await getCurrentPlan()
+  const isPaid = planAllows(plan, "smart_shortlist")
+  const defaultSort = isPaid ? "expected_score:desc" : "recommended:desc"
+  const rawSort = str("sort") ?? defaultSort
   let sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
     return {
@@ -205,7 +212,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
               {entries.length} obra{entries.length !== 1 ? "s" : ""}
             </Badge>
             <SurpriseMeButton entries={entries} />
-            <RecommendWithAiButton source="ranking" />
+            <RecommendWithAiButton source="ranking" isPaid={isPaid} />
           </div>
         }
       />
@@ -221,9 +228,10 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         defaultMinCalc={prefs.minCalc}
         defaultMinPredicted={prefs.minPredicted}
         defaultMinFinal={prefs.minFinal}
+        defaultSort={defaultSort}
       />
 
-      <RankingTable entries={entries} scoreThresholds={scoreThresholds} />
+      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} />
     </div>
   )
 }

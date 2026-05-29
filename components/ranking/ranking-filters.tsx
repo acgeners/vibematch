@@ -32,6 +32,7 @@ const CRITERION_LABELS: Record<string, string> = {
 }
 
 const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
+  { value: "recommended", label: "Recomendado" },
   { value: "expected_score", label: "Nota Esperada" },
   { value: "personal_fit", label: "Alinhamento" },
   { value: "alignment_score", label: "IA Re-rank" },
@@ -66,8 +67,8 @@ interface SortLevel {
 
 const DEFAULT_SORT = "expected_score:desc"
 
-function parseSortLevels(raw: string | null): SortLevel[] {
-  const src = raw ?? DEFAULT_SORT
+function parseSortLevels(raw: string | null, defaultSort: string = DEFAULT_SORT): SortLevel[] {
+  const src = raw ?? defaultSort
   return src.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
     const validField = SORTABLE_FIELDS.some((f) => f.value === field) ? field : "expected_score"
@@ -83,11 +84,12 @@ interface SortLevelsSectionProps {
   searchParams: Pick<URLSearchParams, "get">
   updateParams: (updates: Record<string, string | null>) => void
   className?: string
+  defaultSort?: string
 }
 
-function SortLevelsSection({ searchParams, updateParams, className }: SortLevelsSectionProps) {
+function SortLevelsSection({ searchParams, updateParams, className, defaultSort }: SortLevelsSectionProps) {
   const rawSort = searchParams.get("sort")
-  const levels = parseSortLevels(rawSort)
+  const levels = parseSortLevels(rawSort, defaultSort)
 
   const setLevels = (next: SortLevel[]) => {
     updateParams({ sort: encodeSortLevels(next) })
@@ -187,6 +189,8 @@ interface RankingFiltersProps {
   basePath?: string
   /** Quando true, oculta o botão "Salvar padrão" — útil em /favorites onde defaults globais não fazem sentido. */
   hidePreferencesControls?: boolean
+  /** Sort default efetivo (depende do plano: Free="recommended:desc", Pago="expected_score:desc"). */
+  defaultSort?: string
 }
 
 interface FilterSectionProps {
@@ -1100,6 +1104,7 @@ export function RankingFilters({
   defaultMinFinal,
   basePath = "/ranking",
   hidePreferencesControls = false,
+  defaultSort,
 }: RankingFiltersProps) {
   const router = useRouter()
   const appliedSearchParams = useSearchParams()
@@ -1620,6 +1625,7 @@ export function RankingFilters({
               searchParams={searchParams}
               updateParams={updateParams}
               className="col-span-12 xl:col-span-7"
+              defaultSort={defaultSort}
             />
           </div>
         </TabsContent>

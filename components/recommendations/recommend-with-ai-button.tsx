@@ -43,6 +43,8 @@ interface RecommendWithAiButtonProps {
   size?: "sm" | "default" | "lg"
   /** Override do label. Default depende do source. */
   label?: string
+  /** Quando false, o gatilho fica desabilitado com selo "Pago" (re-rank por IA é feature Pago). */
+  isPaid?: boolean
 }
 
 const MODE_LABELS: Record<Exclude<RecommendationMode, "ranking">, string> = {
@@ -70,6 +72,7 @@ export function RecommendWithAiButton({
   variant = "default",
   size = "sm",
   label,
+  isPaid = true,
 }: RecommendWithAiButtonProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -146,6 +149,24 @@ export function RecommendWithAiButton({
         parseFiltersFromSearchParams(new URLSearchParams(searchParams.toString())),
       )
     : null
+
+  if (!isPaid) {
+    return (
+      <Button
+        variant={variant}
+        size={size}
+        className="gap-1.5"
+        disabled
+        title="Recomendação por IA é uma feature do plano Pago. No Free o ranking usa Nota Esperada × alinhamento."
+      >
+        <Sparkles className="h-3.5 w-3.5" />
+        {buttonLabel}
+        <span className="ml-1 rounded bg-muted px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Pago
+        </span>
+      </Button>
+    )
+  }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
