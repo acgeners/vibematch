@@ -322,6 +322,7 @@ export async function runRecommendationAction(
           alignment_justification: r.justification,
           alignment_payload: payload,
           alignment_at: now,
+          alignment_stale: false, // recém-computado com bias/perfil atuais
         }
       })
       if (upsertRows.length > 0) {
@@ -451,6 +452,7 @@ export async function rerankSingleWorkAction(
           alignment_justification: ranking.justification,
           alignment_payload: buildAlignmentPayload(ranking),
           alignment_at: now,
+          alignment_stale: false, // recém-computado com bias/perfil atuais
         },
         { onConflict: "work_id" },
       )
