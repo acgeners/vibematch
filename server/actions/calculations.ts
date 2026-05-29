@@ -299,10 +299,16 @@ export async function recalculateAll() {
   const userId = await getCurrentUserId(supabase)
   const biasMap = await getBiasMap(userId, supabase)
 
-  // L0+ (Bloco 2.1, Pago): inclui as 8 features de qualidade no Ridge,
-  // preenchidas por user pós-leitura (lidas) OU estimativa IA (não-lidas).
+  // L0+ (Bloco 2.1, Pago): incluiria as 8 features de qualidade no Ridge.
+  // DESLIGADO: medição honesta mostrou que o estimador de qualidade via
+  // sinopse/tags adiciona RUÍDO — MAE CV 0.63 vs baseline 0.54 (ver
+  // plan-arquitetura-notas.md). A qualidade de execução não é prevísivel
+  // pré-leitura a partir da mesma info que o modelo já tem. Infra (tabela,
+  // estimador, backfill) mantida parada; reativar SÓ com um estimador
+  // reviews-based (L0+ v2), flipando o flag abaixo.
+  const L0_QUALITY_ENABLED = false
   const plan = await getCurrentPlan(supabase)
-  const includeQuality = planAllows(plan, "l0_quality_eval")
+  const includeQuality = L0_QUALITY_ENABLED && planAllows(plan, "l0_quality_eval")
 
   const [worksRes, weightsRes, configRes, tasteProfile] = await Promise.all([
     supabase

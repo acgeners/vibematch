@@ -132,9 +132,22 @@ L1 expected_score, decomposição, pesos auto, fit_score+percentil, Deep Dive, b
 - Página da obra exibir **Esperada / Fit / Match** como principais; N.IA/Pr/Final em "Legado" recolhível (igual ranking já faz).
 - Fundir os dois forms pós-leitura num único fluxo "Terminei de ler" (8 qualidade + 9 atributos, um submit).
 
-### 🔜 Fase D — Plano Pago: L0+ *(a peça que falta pra "predição rica")*
-- Estender o prompt do AI Eval ([service.ts](lib/ai-evaluation/service.ts)) pra também estimar 8 quality_scores (`source='ai_predicted'`, +$0.012/obra) — sem call extra.
-- L1 Pago consome quality_scores → afina a faixa pra não-lidas (MAE ~0.3–0.5).
+### ⛔ Fase D — Plano Pago: L0+ *(IMPLEMENTADO E DESLIGADO — resultado negativo)*
+> **Veredito (medido, 2026-05-29):** o L0+ via sinopse/tags **adiciona ruído**, não ajuda.
+> MAE CV honesto (held-out previsto com qualidade estimada pela IA) = **0.63** vs baseline
+> **0.54**. Causa: "qualidade de execução" não é prevísivel pré-leitura a partir da mesma info
+> (sinopse/tags/atributos) que o modelo já tem — a IA só re-embala o que existe, com ruído.
+> O 0.11 visto antes era **circular** (post-scores reais ≈ user_score nas lidas).
+>
+> **Estado:** infra construída e mantida parada — tabela `ai_quality_predictions` (~4400 linhas
+> backfilladas), estimador, backfill script, Ridge condicional. Desligado via flag
+> `L0_QUALITY_ENABLED=false` em [calculations.ts](server/actions/calculations.ts). O headline
+> "Precisão da previsão" volta ao baseline honesto (~0.54).
+>
+> **Reativar SÓ com L0+ v2 baseado em REVIEWS:** reviews carregam sinal real de execução
+> ("final decepciona", "ritmo arrastado") que a sinopse não tem. É a única versão que poderia
+> genuinamente ajudar. Implementado: estender o estimador pra ler reviews → re-medir o MAE CV
+> honesto → só ligar o flag se < 0.54.
 - TasteProfile LLM popula `post_criterion_preferences`.
 - Flag `user_plan: free|paid` em `user_settings` (já tenho a tabela singleton da Fase 1.5).
 - **Critério:** ratio expected Pago ≤ 1.0× Free (qualidade deve ajudar).
