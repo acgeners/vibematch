@@ -155,12 +155,16 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
         }
       />
 
-      <FavoritesStatsHeader summary={summary} scoreThresholds={scoreThresholds?.final ?? null} />
-
-      <div className="flex flex-wrap items-center gap-2">
-        <RecommendWithAiButton source="favorites" />
-        <ViewRecommendationsButton />
-      </div>
+      <FavoritesStatsHeader
+        summary={summary}
+        scoreThresholds={scoreThresholds?.final ?? null}
+        actions={
+          <>
+            <RecommendWithAiButton source="favorites" />
+            <ViewRecommendationsButton />
+          </>
+        }
+      />
 
       <RankingFiltersComponent
         availableGenres={allGenres}
