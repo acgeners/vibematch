@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { generateTasteProfile, rankFavorites, MODEL, PROMPT_VERSION } from "@/lib/ai-recommendation/service"
 import { type RankingFilters } from "@/server/queries/ranking"
-import { ensureCapability } from "@/server/queries/current-user"
+import { ensureCapability, getCurrentPlan } from "@/server/queries/current-user"
+import { planAllows } from "@/lib/plans/capabilities"
+import { buildTasteProfileHeuristic } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import {
   buildStubProfile,
   computeInputHash,
@@ -106,6 +108,22 @@ export async function generateTasteProfileAction(): Promise<{
         isStub: true,
         modelName: MODEL,
         promptVersion: PROMPT_VERSION,
+        rawResponse: null,
+      })
+      return { data: saved }
+    }
+
+    // Free: perfil heurístico (zero LLM). Pago: perfil LLM rico.
+    const plan = await getCurrentPlan()
+    if (!planAllows(plan, "llm_taste_profile")) {
+      const profile = buildTasteProfileHeuristic(ratedWorks)
+      const saved = await insertNewTasteProfile({
+        profile,
+        nWorks: ratedWorks.length,
+        inputHash,
+        isStub: false,
+        modelName: "heuristic",
+        promptVersion: "heuristic-v1",
         rawResponse: null,
       })
       return { data: saved }
