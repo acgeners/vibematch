@@ -220,7 +220,7 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   expected_score: 90,
   expected_baseline: 80,
   expected_quality_adj: 80,
-  personal_fit: 90,
+  personal_fit: 64,
   calc_score: 80,
   predicted_score: 80,
   final_score: 90,

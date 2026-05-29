@@ -719,7 +719,7 @@ function WorkListView({
       </span>
     ),
     publication_status: (work) => <PublicationStatusBadge statusId={work.publication_status_id} compact />,
-    personal_status: (work) => <PersonalStatusBadge statusId={work.personal_status_id} />,
+    personal_status: (work) => <PersonalStatusBadge statusId={work.personal_status_id} iconOnly />,
     chapters_total: (work) =>
       work.total_chapters != null ? (
         <span className="text-sm font-mono tabular-nums">{work.total_chapters}</span>
@@ -808,6 +808,7 @@ function WorkListView({
       <AlignmentCell
         value={work.calculated_scores?.personal_fit ?? null}
         percentile={work.calculated_scores?.personal_fit_percentile ?? null}
+        showBar={false}
       />
     ),
     platform_avg: (work) => {
