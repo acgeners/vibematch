@@ -22,6 +22,12 @@ export interface PostAttributeAssessmentFormProps {
     attributes: Partial<Record<CriterionSlug, number>>
   } | null
   existingAssessment: Partial<Record<CriterionSlug, number>> | null
+  /** Modo controlado (embedded): valores vêm do parent. Quando presente junto de
+   *  onChange, substitui o estado interno — usado pelo fluxo "Terminei de ler". */
+  value?: Record<CriterionSlug, number>
+  onChange?: (next: Record<CriterionSlug, number>) => void
+  /** Esconde o botão "Salvar avaliação" (o parent salva via fluxo unificado). */
+  hideOwnSave?: boolean
 }
 
 function clamp(v: number): number {
@@ -32,9 +38,13 @@ export function PostAttributeAssessmentForm({
   workId,
   latestAiEvaluation,
   existingAssessment,
+  value,
+  onChange,
+  hideOwnSave = false,
 }: PostAttributeAssessmentFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const isControlled = value !== undefined && onChange !== undefined
 
   // Só os atributos que a IA avaliou entram no questionário — sem nota da
   // IA não há o que comparar (e o backend ignoraria de qualquer jeito).
@@ -56,7 +66,12 @@ export function PostAttributeAssessmentForm({
     return out
   }, [ratedSlugs, existingAssessment, latestAiEvaluation])
 
-  const [values, setValues] = useState<Record<CriterionSlug, number>>(initialValues)
+  const [internalValues, setInternalValues] = useState<Record<CriterionSlug, number>>(initialValues)
+  const values = isControlled ? (value as Record<CriterionSlug, number>) : internalValues
+  const writeValues = (next: Record<CriterionSlug, number>) => {
+    if (isControlled) onChange!(next)
+    else setInternalValues(next)
+  }
 
   if (!latestAiEvaluation || ratedSlugs.length === 0) {
     return (
@@ -85,7 +100,7 @@ export function PostAttributeAssessmentForm({
     for (const slug of ratedSlugs) {
       next[slug as CriterionSlug] = latestAiEvaluation.attributes[slug as CriterionSlug] ?? 0
     }
-    setValues(next)
+    writeValues(next)
   }
 
   const save = () => {
@@ -132,7 +147,7 @@ export function PostAttributeAssessmentForm({
                   step={0.5}
                   value={[value]}
                   onValueChange={([v]) =>
-                    setValues((prev) => ({ ...prev, [slug]: clamp(v) }))
+                    writeValues({ ...values, [slug as CriterionSlug]: clamp(v) })
                   }
                   aria-label={info.name}
                 />
@@ -160,9 +175,11 @@ export function PostAttributeAssessmentForm({
           <Button type="button" variant="outline" size="sm" onClick={acceptAiValues} disabled={isPending}>
             Aceitar valores da IA
           </Button>
-          <Button type="button" size="sm" onClick={save} disabled={isPending}>
-            {isPending ? "Salvando…" : "Salvar avaliação"}
-          </Button>
+          {!hideOwnSave && (
+            <Button type="button" size="sm" onClick={save} disabled={isPending}>
+              {isPending ? "Salvando…" : "Salvar avaliação"}
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>
