@@ -31,9 +31,7 @@ export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v3"
 export const RANKING_TABLE_COLUMN_CONFIG_EVENT = "ranking-column-config-change"
 
 export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
-  { key: "select", label: "", configLabel: "Selecionar para comparar", defaultWidth: 36, align: "center", locked: true, group: "basico" },
   { key: "rank", label: "#", configLabel: "Posição no ranking", defaultWidth: 48, align: "center", locked: true, group: "basico" },
-  { key: "percentile", label: "Pos.%", configLabel: "Percentil no pool filtrado (Top X%)", defaultWidth: 80, align: "center", group: "basico" },
   { key: "fav", label: "Fav", configLabel: "Favorito", defaultWidth: 44, align: "center", group: "basico" },
   { key: "title", label: "Título", defaultWidth: 280, locked: true, group: "basico" },
   { key: "pub", label: "Pub.", configLabel: "Publicação", defaultWidth: 100, align: "center", group: "basico" },
