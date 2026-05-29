@@ -95,8 +95,19 @@ async function main() {
   let targets = (works ?? []).filter((w) => (w.category_scores ?? []).length > 0)
 
   if (!FORCE) {
-    const { data: existing } = await sb.from("ai_quality_predictions").select("work_id")
-    const done = new Set((existing ?? []).map((r) => r.work_id))
+    // Pagina pra não ser truncado no limite default de 1000 linhas do PostgREST
+    // (senão re-estima obras já prontas).
+    const done = new Set()
+    const PAGE = 1000
+    for (let from = 0; ; from += PAGE) {
+      const { data, error: pErr } = await sb
+        .from("ai_quality_predictions")
+        .select("work_id")
+        .range(from, from + PAGE - 1)
+      if (pErr) throw new Error(pErr.message)
+      for (const r of data ?? []) done.add(r.work_id)
+      if (!data || data.length < PAGE) break
+    }
     targets = targets.filter((w) => !done.has(w.id))
   }
 
