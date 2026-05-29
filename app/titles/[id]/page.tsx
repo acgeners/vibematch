@@ -283,14 +283,17 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
   const categoriesCount = genres.length + tags.length
 
-  const lastUpdatedDate = (() => {
-    const candidates = [work.updated_at, latestAiEval?.created_at]
-      .filter((d): d is string => Boolean(d))
-      .map((d) => new Date(d))
-      .filter((d) => !Number.isNaN(d.getTime()))
-    if (candidates.length === 0) return null
-    return candidates.sort((a, b) => b.getTime() - a.getTime())[0]
-  })()
+  const toValidDate = (raw: string | null | undefined): Date | null => {
+    if (!raw) return null
+    const d = new Date(raw)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  // "Atualizada em" reflete só o último "Atualizar dados" (data_refreshed_at),
+  // distinto de "Última avaliação" (data da avaliação IA mais recente).
+  const dataRefreshedDate = toValidDate(
+    (work as { data_refreshed_at?: string | null }).data_refreshed_at
+  )
+  const lastAiEvalDate = toValidDate(latestAiEval?.created_at)
 
   const tabsListClass =
     "h-auto w-full flex flex-wrap justify-start gap-2 bg-transparent rounded-none p-0"
@@ -305,6 +308,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         <div className="flex flex-wrap items-center gap-2">
           <FavoriteToggleButton workId={work.id} isFavorite={work.is_favorite} />
           <EditLinkButton workSlug={id} workId={work.id} />
+          <StatusActionButton
+            workId={work.id}
+            statusInitialValues={statusInitial}
+            totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
+          />
           <MoreActionsMenu workId={work.id} isArchived={work.is_archived} />
           <Button asChild size="sm">
             <Link href="/titles/new">
@@ -357,62 +365,70 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           </TabsTrigger>
         </TabsList>
 
-        {/* Stat strip persistente — info ambiente, menos peso que as abas */}
-        <div className="mt-4 grid grid-cols-2 divide-x divide-border/40 rounded-lg border border-border/40 bg-card/20 overflow-hidden sm:grid-cols-3 lg:grid-cols-6">
-          {work.year != null && (
-            <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+        {/* Stat strip persistente — dividido discretamente em Geral | Pessoal */}
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {/* Geral: ano, capítulos, publicação */}
+          <div className="flex divide-x divide-border/40 rounded-lg border border-border/40 bg-card/20 overflow-hidden">
+            {work.year != null && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Ano
+                </span>
+                <span className="text-sm font-mono font-semibold text-foreground">
+                  {work.year}
+                </span>
+              </div>
+            )}
+            {chapterText && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Capítulos
+                </span>
+                <span className="text-sm font-mono font-semibold text-foreground">
+                  {chapterText}
+                </span>
+              </div>
+            )}
+            <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Ano
+                Publicação
               </span>
-              <span className="text-sm font-mono font-semibold text-foreground">
-                {work.year}
-              </span>
+              <PublicationStatusBadge statusId={work.publication_status_id} />
             </div>
-          )}
-          {chapterText && (
-            <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Capítulos
-              </span>
-              <span className="text-sm font-mono font-semibold text-foreground">
-                {chapterText}
-              </span>
-            </div>
-          )}
-          <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Publicação
-            </span>
-            <PublicationStatusBadge statusId={work.publication_status_id} />
           </div>
-          <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Pessoal
-            </span>
-            <PersonalStatusBadge statusId={work.personal_status_id} />
+
+          {/* Pessoal: status pessoal, interesse, nota esperada */}
+          <div className="flex divide-x divide-border/40 rounded-lg border border-border/40 bg-card/20 overflow-hidden">
+            <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Pessoal
+              </span>
+              <PersonalStatusBadge statusId={work.personal_status_id} />
+            </div>
+            {formatSynopsisInterest(work.synopsis_quality) && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Interesse
+                </span>
+                <span className="inline-flex items-center rounded-full border border-rose-400/30 bg-rose-500/10 px-2.5 py-0.5 text-xs font-semibold text-rose-600 dark:text-rose-300">
+                  {formatSynopsisInterest(work.synopsis_quality)}
+                </span>
+              </div>
+            )}
+            {work.calculated_scores?.expected_score != null && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Nota Esperada
+                </span>
+                <ScoreBadge
+                  score={work.calculated_scores.expected_score}
+                  size="md"
+                  showStub={work.calculated_scores?.expected_is_stub ?? false}
+                  thresholds={scoreThresholds?.final}
+                />
+              </div>
+            )}
           </div>
-          {formatSynopsisInterest(work.synopsis_quality) && (
-            <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Interesse
-              </span>
-              <span className="inline-flex items-center rounded-full border border-rose-400/30 bg-rose-500/10 px-2.5 py-0.5 text-xs font-semibold text-rose-600 dark:text-rose-300">
-                {formatSynopsisInterest(work.synopsis_quality)}
-              </span>
-            </div>
-          )}
-          {work.calculated_scores?.final_score != null && (
-            <div className="flex flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Nota.Final
-              </span>
-              <ScoreBadge
-                score={work.calculated_scores.final_score}
-                size="md"
-                thresholds={scoreThresholds?.final}
-              />
-            </div>
-          )}
         </div>
 
         {/* Layout principal: sidebar (capa + ações) | conteúdo da aba */}
@@ -427,7 +443,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               />
             </div>
 
-            {(lastUpdatedDate || work.is_archived || work.last_read_at) && (
+            {(dataRefreshedDate || lastAiEvalDate || work.is_archived || work.last_read_at) && (
               <div className="flex flex-col gap-1.5 rounded-md border bg-card/40 p-3 text-xs text-muted-foreground">
                 {work.last_read_at && (
                   <div>
@@ -441,11 +457,23 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </span>
                   </div>
                 )}
-                {lastUpdatedDate && (
-                  <div title={`Última atualização: ${lastUpdatedDate.toLocaleString("pt-BR")}`}>
+                {lastAiEvalDate && (
+                  <div title={`Última avaliação IA: ${lastAiEvalDate.toLocaleString("pt-BR")}`}>
+                    Última avaliação em{" "}
+                    <span className="font-medium text-foreground/80">
+                      {lastAiEvalDate.toLocaleDateString("pt-BR", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                      })}
+                    </span>
+                  </div>
+                )}
+                {dataRefreshedDate && (
+                  <div title={`Última atualização de dados: ${dataRefreshedDate.toLocaleString("pt-BR")}`}>
                     Atualizada em{" "}
                     <span className="font-medium text-foreground/80">
-                      {lastUpdatedDate.toLocaleDateString("pt-BR", {
+                      {dataRefreshedDate.toLocaleDateString("pt-BR", {
                         day: "2-digit",
                         month: "2-digit",
                         year: "numeric",
@@ -478,11 +506,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     totalChapters: work.total_chapters != null ? Number(work.total_chapters) : null,
                     observations: work.observations,
                   }}
-                />
-                <StatusActionButton
-                  workId={work.id}
-                  statusInitialValues={statusInitial}
-                  totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
                 />
               </div>
               {(() => {
@@ -574,17 +597,26 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </TabsContent>
 
             <TabsContent value="scores" className="mt-0 space-y-6">
-      <AiEvaluationButton
-        workId={work.id}
-        workTitle={work.title}
-        hasCriteriaScores={Object.keys(scoreMap).length > 0}
-        coverUrl={primaryCover}
-      />
-      {work.personal_status !== "Completed" && work.personal_status !== "Dropped" && (
-        <DeepDiveButton
+      {work.personal_status !== "Completed" && work.personal_status !== "Dropped" ? (
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-stretch">
+          <AiEvaluationButton
+            workId={work.id}
+            workTitle={work.title}
+            hasCriteriaScores={Object.keys(scoreMap).length > 0}
+            coverUrl={primaryCover}
+          />
+          <DeepDiveButton
+            workId={work.id}
+            workTitle={work.title}
+            lastDive={lastDeepDive}
+          />
+        </div>
+      ) : (
+        <AiEvaluationButton
           workId={work.id}
           workTitle={work.title}
-          lastDive={lastDeepDive}
+          hasCriteriaScores={Object.keys(scoreMap).length > 0}
+          coverUrl={primaryCover}
         />
       )}
       {/* Notas e Avaliações Externas side-by-side */}
@@ -609,7 +641,26 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className={cn("grid grid-cols-1 gap-4", work.user_score != null && "sm:grid-cols-2")}>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {work.calculated_scores?.expected_score != null && (
+                <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
+                  <div className="flex flex-col items-start gap-1">
+                    <ScoreLabelTooltip
+                      name="Esperada"
+                      description="Nota esperada (modelo L1 — Ridge único). É a estimativa principal do sistema, que substitui Nota.IA/Prevista/Final no novo pipeline."
+                    />
+                    <span className="text-[10px] text-muted-foreground">Estimativa principal do sistema</span>
+                  </div>
+                  <ScoreBadge
+                    score={work.calculated_scores.expected_score}
+                    size="lg"
+                    showStub={work.calculated_scores?.expected_is_stub ?? false}
+                    thresholds={scoreThresholds?.final}
+                    className="h-10 w-14 text-lg font-bold shrink-0"
+                  />
+                </div>
+              )}
+
               <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
                 <div className="flex flex-col items-start gap-1">
                   <ScoreLabelTooltip
@@ -637,6 +688,31 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   className="h-10 w-14 text-lg font-bold shrink-0"
                 />
               </div>
+
+              {work.calculated_scores?.alignment_score != null && (
+                <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
+                  <div className="flex flex-col items-start gap-1">
+                    <ScoreLabelTooltip
+                      name="IA Rk"
+                      description="IA Re-rank (0–100): score do re-ranqueamento por LLM usado em 'Recomendar com IA' / 'Próxima leitura'. Preenchido ao rodar o re-rank."
+                    />
+                    <span className="text-[10px] text-muted-foreground">Re-rank por IA (0–100)</span>
+                  </div>
+                  {(() => {
+                    const rk = work.calculated_scores.alignment_score
+                    const cls =
+                      rk >= 80 ? "bg-violet-500/15 text-violet-700 border-violet-500/40 dark:text-violet-300"
+                      : rk >= 60 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
+                      : rk >= 40 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
+                      : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
+                    return (
+                      <span className={cn("flex h-10 w-14 items-center justify-center rounded-md border font-mono text-lg font-bold shrink-0", cls)}>
+                        {Math.round(rk)}
+                      </span>
+                    )
+                  })()}
+                </div>
+              )}
 
               {work.user_score != null && (
                 hasPostReadingScores ? (
