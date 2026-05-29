@@ -179,7 +179,8 @@ ${JSON.stringify(profile, null, 2)}`
       ? `platform_avg=${c.platformAvg.toFixed(1)}${c.totalVotes ? ` (${c.totalVotes} votos)` : ""}`
       : null
     if (plat) tailLines.push(plat)
-    if (c.predictedScore != null) tailLines.push(`Nota.Pr (regressão atual)=${c.predictedScore.toFixed(2)}`)
+    if (c.expectedScore != null) tailLines.push(`Nota Esperada (previsão da sua nota)=${c.expectedScore.toFixed(2)}`)
+    if (c.fitScore != null) tailLines.push(`fit (alinhamento com seu perfil, 0–1)=${c.fitScore.toFixed(2)}`)
     const reviewsBlock = formatReviews(c.reviews)
     if (reviewsBlock) tailLines.push(reviewsBlock)
     tailLines.push("")

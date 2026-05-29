@@ -108,6 +108,11 @@ export interface CandidateWorkInput {
   tags: Array<{ name: string; group: string | null }>
   platformAvg: number | null
   totalVotes: number | null
+  /** Nota Esperada (L1) — a previsão de referência enviada ao LLM. */
+  expectedScore: number | null
+  /** Alinhamento com o perfil (0–1). */
+  fitScore: number | null
+  /** @deprecated legado — mantido pra compat; não enviado mais ao prompt. */
   predictedScore: number | null
   reviews: CandidateReview[]
 }

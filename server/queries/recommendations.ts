@@ -2,6 +2,13 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
+import { getCurrentUserId } from "@/server/queries/current-user"
+import { getBiasMap } from "@/lib/calculations/attribute-bias"
+import {
+  applyBiasToCategoryScores,
+  type AttributeBiasMap,
+  type CategoryScoreWithSource,
+} from "@/lib/ai-recommendation/calibrated-scores"
 import type { CriterionSlug } from "@/types/domain"
 import type { CandidateReview, CandidateWorkInput, RatedWorkInput, RecommendationMode } from "@/lib/ai-recommendation/types"
 import { getRanking, type RankingFilters } from "@/server/queries/ranking"
@@ -32,7 +39,7 @@ const RATED_WORK_SELECT = `
   post_originality_score,
   updated_at,
   canonical_synopsis,
-  category_scores(criterion_slug, score),
+  category_scores(criterion_slug, score, source),
   work_tags(tag_id, tags(name, tag_group_id)),
   work_synopses(text, is_primary, position)
 `
@@ -43,8 +50,8 @@ const CANDIDATE_WORK_SELECT = `
   user_score,
   is_favorite,
   canonical_synopsis,
-  category_scores(criterion_slug, score),
-  calculated_scores(platform_avg, total_votes, predicted_score),
+  category_scores(criterion_slug, score, source),
+  calculated_scores(platform_avg, total_votes, predicted_score, expected_score, personal_fit),
   work_tags(tag_id, tags(name, tag_group_id)),
   work_synopses(text, is_primary, position),
   work_covers(url, is_primary, position)
@@ -53,6 +60,7 @@ const CANDIDATE_WORK_SELECT = `
 interface RawCategoryScore {
   criterion_slug: string
   score: number | null
+  source?: string | null
 }
 
 interface RawTagRow {
@@ -82,13 +90,33 @@ function buildTags(rows: RawTagRow[] | null | undefined): Array<{ name: string; 
     }))
 }
 
-function buildCategoryScores(rows: RawCategoryScore[] | null | undefined) {
-  const out: Partial<Record<CriterionSlug, number>> = {}
+// Aplica o offset de atributos (Fase 1.5) on-read antes de mandar pros prompts
+// de recomendação — o LLM vê os atributos na percepção calibrada do usuário.
+function buildCategoryScores(
+  rows: RawCategoryScore[] | null | undefined,
+  biasMap: AttributeBiasMap,
+) {
+  const withSource: Partial<Record<CriterionSlug, CategoryScoreWithSource>> = {}
   for (const row of rows ?? []) {
     if (row.score == null) continue
-    out[row.criterion_slug as CriterionSlug] = Number(row.score)
+    withSource[row.criterion_slug as CriterionSlug] = {
+      value: Number(row.score),
+      source: (row.source ?? "imported") as CategoryScoreWithSource["source"],
+    }
+  }
+  const calibrated = applyBiasToCategoryScores(withSource, biasMap)
+  const out: Partial<Record<CriterionSlug, number>> = {}
+  for (const [slug, v] of Object.entries(calibrated)) {
+    if (v != null) out[slug as CriterionSlug] = v
   }
   return out
+}
+
+/** Carrega o offset de atributos do usuário atual (uma vez por consulta). */
+async function loadBiasMapForRecs(
+  supabase: ReturnType<typeof createAdminClient>,
+): Promise<AttributeBiasMap> {
+  return getBiasMap(await getCurrentUserId(supabase), supabase)
 }
 
 /**
@@ -162,6 +190,7 @@ export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInp
     throw new Error(`Falha lendo obras avaliadas: ${error.message}`)
   }
 
+  const biasMap = await loadBiasMapForRecs(supabase)
   return (data ?? []).map((row) => {
     const work = row as unknown as Record<string, unknown>
     const postScores: Partial<Record<string, number>> = {}
@@ -189,7 +218,7 @@ export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInp
       postScores,
       personalStatus,
       synopsis,
-      categoryScores: buildCategoryScores(work.category_scores as RawCategoryScore[] | null),
+      categoryScores: buildCategoryScores(work.category_scores as RawCategoryScore[] | null, biasMap),
       tags: buildTags(work.work_tags as RawTagRow[] | null),
     } satisfies RatedWorkInput
   })
@@ -200,9 +229,13 @@ export interface FavoriteCandidate extends CandidateWorkInput {
   isAlreadyRated: boolean
 }
 
-function mapRowToCandidate(row: unknown, reviews: CandidateReview[]): FavoriteCandidate {
+function mapRowToCandidate(
+  row: unknown,
+  reviews: CandidateReview[],
+  biasMap: AttributeBiasMap,
+): FavoriteCandidate {
   const work = row as Record<string, unknown>
-  const calc = (work.calculated_scores as { platform_avg?: number | null; total_votes?: number | null; predicted_score?: number | null } | null) ?? null
+  const calc = (work.calculated_scores as { platform_avg?: number | null; total_votes?: number | null; predicted_score?: number | null; expected_score?: number | null; personal_fit?: number | null } | null) ?? null
   const synopsis = pickRecommendationSynopsis(
     work.canonical_synopsis as string | null | undefined,
     (work.work_synopses as RawSynopsisRow[] | undefined)?.map((s) => ({
@@ -223,8 +256,10 @@ function mapRowToCandidate(row: unknown, reviews: CandidateReview[]): FavoriteCa
     id: work.id as string,
     title: work.title as string,
     synopsis,
-    categoryScores: buildCategoryScores(work.category_scores as RawCategoryScore[] | null),
+    categoryScores: buildCategoryScores(work.category_scores as RawCategoryScore[] | null, biasMap),
     tags: buildTags(work.work_tags as RawTagRow[] | null),
+    expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
+    fitScore: calc?.personal_fit != null ? Number(calc.personal_fit) : null,
     platformAvg: calc?.platform_avg != null ? Number(calc.platform_avg) : null,
     totalVotes: calc?.total_votes != null ? Number(calc.total_votes) : null,
     predictedScore: calc?.predicted_score != null ? Number(calc.predicted_score) : null,
@@ -258,7 +293,8 @@ export async function getFavoriteCandidates(
   const rows = data ?? []
   const ids = rows.map((r) => (r as { id: string }).id)
   const reviewsById = await fetchTopReviewsBatch(ids, 3)
-  return rows.map((row) => mapRowToCandidate(row, reviewsById.get((row as { id: string }).id) ?? []))
+  const biasMap = await loadBiasMapForRecs(supabase)
+  return rows.map((row) => mapRowToCandidate(row, reviewsById.get((row as { id: string }).id) ?? [], biasMap))
 }
 
 /**
@@ -271,7 +307,9 @@ export async function getRankingCandidates(
   filters: RankingFilters,
   limit = 20,
 ): Promise<FavoriteCandidate[]> {
-  const entries = await getRanking({ ...filters, topN: limit })
+  // Pool de candidatos = top-N por Nota Esperada (a previsão de referência),
+  // não por final_score legado. Sobrepõe o sort de exibição da página.
+  const entries = await getRanking({ ...filters, sortBy: "expected_score", sortDir: "desc", topN: limit })
   if (entries.length === 0) return []
   const ids = entries.map((e) => e.workId)
 
@@ -283,10 +321,11 @@ export async function getRankingCandidates(
   if (error) throw new Error(`Falha hidratando candidatos do ranking: ${error.message}`)
 
   const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  const biasMap = await loadBiasMapForRecs(supabase)
   const byId = new Map<string, FavoriteCandidate>()
   for (const row of data ?? []) {
     const id = (row as { id: string }).id
-    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? []))
+    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap))
   }
   // Preserva a ordem do ranking original.
   return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
@@ -308,7 +347,8 @@ export async function getCandidateById(workId: string): Promise<FavoriteCandidat
   if (error) throw new Error(`Falha hidratando obra ${workId}: ${error.message}`)
   if (!data) return null
   const reviewsById = await fetchTopReviewsBatch([workId], 3)
-  return mapRowToCandidate(data, reviewsById.get(workId) ?? [])
+  const biasMap = await loadBiasMapForRecs(supabase)
+  return mapRowToCandidate(data, reviewsById.get(workId) ?? [], biasMap)
 }
 
 export async function getRunsToday(): Promise<number> {
@@ -482,9 +522,10 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
     // Pra exibição da run histórica não recarregamos reviews — a justificativa
     // já foi gerada e está congelada no `results`. Reviews entram só na hora
     // de gerar uma run nova.
+    const biasMap = await loadBiasMapForRecs(supabase)
     for (const row of worksData ?? []) {
       const id = (row as { id: string }).id
-      worksById.set(id, mapRowToCandidate(row, []))
+      worksById.set(id, mapRowToCandidate(row, [], biasMap))
     }
   }
 
