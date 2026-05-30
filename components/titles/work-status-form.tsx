@@ -157,6 +157,8 @@ export interface WorkStatusFormProps {
   /** Chamado sempre que o status pessoal selecionado muda (mesmo antes de salvar).
    *  Permite ao parent revelar a seção de atributos pós-leitura na hora, sem reload. */
   onStatusChange?: (status: WorkStatusValues["personal_status"]) => void
+  /** Chamado sempre que chapters_read muda — revela atributos pós-leitura por % lido. */
+  onChaptersReadChange?: (chaptersRead: number | null) => void
   /** Salvamento adicional encadeado no mesmo submit (ex.: atributos pós-leitura).
    *  Roda após updateWorkStatus ter sucesso; se falhar, status já foi salvo (falha parcial). */
   extraSave?: () => Promise<{ ok: boolean; error?: string } | null | void>
@@ -174,6 +176,7 @@ export function WorkStatusForm({
   hideFooter = false,
   onCancel,
   onStatusChange,
+  onChaptersReadChange,
   extraSave,
   extraDirty = false,
   submitLabel,
@@ -221,6 +224,10 @@ export function WorkStatusForm({
   useEffect(() => {
     if (personalStatus) onStatusChange?.(personalStatus)
   }, [personalStatus, onStatusChange])
+
+  useEffect(() => {
+    onChaptersReadChange?.(chaptersRead ?? null)
+  }, [chaptersRead, onChaptersReadChange])
 
   useEffect(() => {
     if (personalStatus !== "Completed") return

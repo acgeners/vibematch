@@ -23,10 +23,22 @@ export interface WorkReviewsSnapshot {
   fetchedAt: string | null
   total: number
   bySource: WorkReviewsBySource[]
+  /** Resumo de consenso das reviews gerado por IA (Haiku). */
+  summary: string | null
+  summaryAt: string | null
 }
 
 export async function getWorkReviews(workId: string): Promise<WorkReviewsSnapshot> {
   const supabase = createAdminClient()
+
+  const { data: summaryRow } = await supabase
+    .from("works")
+    .select("review_summary, review_summary_at")
+    .eq("id", workId)
+    .maybeSingle()
+  const summary = (summaryRow?.review_summary as string | null) ?? null
+  const summaryAt = (summaryRow?.review_summary_at as string | null) ?? null
+
   const { data, error } = await supabase
     .from("work_reviews")
     .select("*")
@@ -36,7 +48,7 @@ export async function getWorkReviews(workId: string): Promise<WorkReviewsSnapsho
     .order("user_rating", { ascending: false, nullsFirst: false })
   if (error) {
     console.error("[work_reviews] erro lendo reviews:", error)
-    return { fetchedAt: null, total: 0, bySource: [] }
+    return { fetchedAt: null, total: 0, bySource: [], summary, summaryAt }
   }
 
   const reviews: WorkReview[] = (data ?? []).map((row) => {
@@ -70,5 +82,7 @@ export async function getWorkReviews(workId: string): Promise<WorkReviewsSnapsho
     fetchedAt: reviews[0]?.fetchedAt ?? null,
     total: reviews.length,
     bySource,
+    summary,
+    summaryAt,
   }
 }

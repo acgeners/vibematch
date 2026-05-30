@@ -470,6 +470,127 @@ export async function consolidatePendingSynopses(maxWorks = 10): Promise<{
   }
 }
 
+export interface ConsolidateReviewSummariesProgress {
+  attempted: number
+  summarized: number
+  skipped: number
+  failed: number
+  tokensIn: number
+  tokensOut: number
+  /** Se true, o lote foi interrompido cedo por falhas consecutivas na API. */
+  abortedEarly?: boolean
+}
+
+/**
+ * Gera o resumo IA das reviews (via Haiku) pras obras que têm reviews salvas
+ * mas ainda não têm `review_summary`. Espelha `consolidatePendingSynopses`:
+ * limita por `maxWorks` e aborta cedo após 3 falhas de API consecutivas.
+ */
+export async function consolidatePendingReviewSummaries(maxWorks = 10): Promise<{
+  data?: ConsolidateReviewSummariesProgress
+  error?: string
+}> {
+  try {
+    const { consolidateReviewsDetailed, hashReviewInputs } = await import(
+      "@/lib/ai-recommendation/review-summarizer"
+    )
+    const { createAdminClient } = await import("@/lib/supabase/admin")
+    const supabase = createAdminClient()
+
+    // Coleta os work_ids distintos com reviews. work_reviews pode ter milhares de
+    // linhas e o PostgREST capa em 1000 por página — então pagina até esgotar.
+    // (Sem paginar, só as obras cujas reviews caem nas primeiras 1000 linhas
+    // entrariam no lote, e o backfill nunca chegaria no resto.)
+    const reviewedIds = new Set<string>()
+    const PAGE = 1000
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("work_reviews")
+        .select("work_id")
+        .range(from, from + PAGE - 1)
+      if (error) return { error: error.message }
+      for (const r of data ?? []) reviewedIds.add(r.work_id as string)
+      if (!data || data.length < PAGE) break
+    }
+
+    const progress: ConsolidateReviewSummariesProgress = {
+      attempted: 0,
+      summarized: 0,
+      skipped: 0,
+      failed: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+    }
+    if (reviewedIds.size === 0) return { data: progress }
+
+    const ids = [...reviewedIds]
+    const { data: workRows, error: workErr } = await supabase
+      .from("works")
+      .select("id, review_summary")
+      .in("id", ids)
+    if (workErr) return { error: workErr.message }
+    const pendingIds = (workRows ?? [])
+      .filter((w) => (w as { review_summary: string | null }).review_summary == null)
+      .map((w) => w.id as string)
+      .slice(0, maxWorks)
+
+    let consecutiveApiFailures = 0
+    const MAX_CONSECUTIVE_API_FAILURES = 3
+
+    for (const id of pendingIds) {
+      progress.attempted += 1
+      // Reviews da obra por work_id — uma obra tem dezenas de reviews, bem abaixo
+      // do cap de 1000, então pega todas sem paginar.
+      const { data: revRows } = await supabase
+        .from("work_reviews")
+        .select("text, user_rating")
+        .eq("work_id", id)
+      const inputs = (revRows ?? []).map((r) => ({
+        text: (r.text as string | null) ?? "",
+        userRating: r.user_rating != null ? Number(r.user_rating) : null,
+      }))
+      const status = await consolidateReviewsDetailed(inputs, { workId: id })
+      if (status.kind === "skipped") {
+        progress.skipped += 1
+        consecutiveApiFailures = 0
+        continue
+      }
+      if (status.kind === "api_failed") {
+        progress.failed += 1
+        consecutiveApiFailures += 1
+        if (consecutiveApiFailures >= MAX_CONSECUTIVE_API_FAILURES) {
+          progress.abortedEarly = true
+          break
+        }
+        continue
+      }
+      consecutiveApiFailures = 0
+      const result = status.result
+      const { error: upErr } = await supabase
+        .from("works")
+        .update({
+          review_summary: result.summary,
+          review_summary_at: new Date().toISOString(),
+          review_summary_inputs_hash: hashReviewInputs(inputs),
+        })
+        .eq("id", id)
+      if (upErr) {
+        console.error("[consolidatePendingReviewSummaries] update falhou:", upErr)
+        progress.failed += 1
+        continue
+      }
+      progress.summarized += 1
+      progress.tokensIn += result.tokensIn
+      progress.tokensOut += result.tokensOut
+    }
+
+    revalidatePath("/settings")
+    return { data: progress }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro ao resumir reviews" }
+  }
+}
+
 export async function syncConstantsNow() {
   try {
     const { stdout, stderr } = await execFileAsync("npm", ["run", "sync-constants"], {

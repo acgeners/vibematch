@@ -19,6 +19,7 @@ import { CalibrationPanel } from "@/components/settings/calibration-panel"
 import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
+import { ReviewSummaryPanel } from "@/components/settings/review-summary-panel"
 import { countStaleEmbeddings } from "@/server/actions/embeddings"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
 import type { FormulaConfig } from "@/types/domain"
@@ -47,6 +48,7 @@ async function getSettingsData() {
     syncConstantsLastRun,
     canonicalSynopsisPending,
     embeddingsPending,
+    reviewSummaryPending,
   ] = await Promise.all([
     supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
     getCalibrationSnapshot(),
@@ -73,6 +75,7 @@ async function getSettingsData() {
       .eq("is_archived", false)
       .then((r) => r.count ?? 0),
     countStaleEmbeddings().then((r) => r.pending).catch(() => 0),
+    countPendingReviewSummaries(),
   ])
 
   if (configRes.error) throw new Error(configRes.error.message)
@@ -87,6 +90,7 @@ async function getSettingsData() {
     syncConstantsLastRun,
     canonicalSynopsisPending,
     embeddingsPending,
+    reviewSummaryPending,
   }
 }
 
@@ -97,6 +101,7 @@ const SECTION_GROUPS = [
       { id: "calibration", title: "Calibração", icon: <Gauge />, accent: "cyan" as const },
       { id: "embeddings", title: "Embeddings", icon: <Brain />, accent: "emerald" as const },
       { id: "synopsis-canonical", title: "Sinopse canônica", icon: <Brain />, accent: "violet" as const },
+      { id: "review-summary", title: "Resumo de reviews", icon: <Sparkles />, accent: "amber" as const },
       { id: "ai-usage", title: "Uso da API IA", icon: <Activity />, accent: "cyan" as const },
       { id: "sync", title: "Sincronização", icon: <Database />, accent: "emerald" as const },
     ],
@@ -110,6 +115,31 @@ const SECTION_GROUPS = [
   },
 ]
 
+async function countPendingReviewSummaries(): Promise<number> {
+  const supabase = createAdminClient()
+  // work_reviews pode passar de 1000 linhas (cap do PostgREST) — pagina até esgotar
+  // pra não subcontar as obras pendentes.
+  const reviewedIds = new Set<string>()
+  const PAGE = 1000
+  for (let from = 0; ; from += PAGE) {
+    const { data } = await supabase
+      .from("work_reviews")
+      .select("work_id")
+      .range(from, from + PAGE - 1)
+    for (const r of data ?? []) reviewedIds.add(r.work_id as string)
+    if (!data || data.length < PAGE) break
+  }
+  if (reviewedIds.size === 0) return 0
+  const { data: summarized } = await supabase
+    .from("works")
+    .select("id")
+    .not("review_summary", "is", null)
+  const summarizedIds = new Set<string>((summarized ?? []).map((r) => r.id as string))
+  let pending = 0
+  for (const id of reviewedIds) if (!summarizedIds.has(id)) pending += 1
+  return pending
+}
+
 export default async function SettingsPage() {
   const {
     config,
@@ -120,6 +150,7 @@ export default async function SettingsPage() {
     syncConstantsLastRun,
     canonicalSynopsisPending,
     embeddingsPending,
+    reviewSummaryPending,
   } = await getSettingsData()
 
   return (
@@ -169,6 +200,19 @@ export default async function SettingsPage() {
       >
         <SynopsisConsolidationPanel
           pendingCount={canonicalSynopsisPending}
+          totalCount={worksCount}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        id="review-summary"
+        title="Resumo de reviews"
+        description="Resume as reviews externas de cada obra em um parágrafo de consenso via Haiku — mostrado na aba Notas & Avaliações."
+        icon={<Sparkles />}
+        accent="amber"
+      >
+        <ReviewSummaryPanel
+          pendingCount={reviewSummaryPending}
           totalCount={worksCount}
         />
       </SettingsSection>

@@ -9,9 +9,10 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import type { PersonalStatus, CriterionSlug } from "@/types/domain"
 import { submitPostReadingAttributes } from "@/server/actions/post-reading-attributes"
 
-// Status terminais em que faz sentido avaliar os atributos pós-leitura
-// (a obra já foi lida/abandonada). Mantém em sincronia com a regra do server.
-const POST_ATTR_STATUSES: PersonalStatus[] = ["Completed", "Dropped", "On-hold", "Stalled", "Hiatus"]
+// Atributos pós-leitura aparecem quando a obra já tem leitura suficiente:
+// status terminal (Completed/Dropped) OU mais de 20% lido.
+const TERMINAL_STATUSES: PersonalStatus[] = ["Completed", "Dropped"]
+const MIN_READ_PCT_FOR_POST_ATTR = 20
 
 interface PostReadingFlowProps {
   workId: string
@@ -39,7 +40,19 @@ export function PostReadingFlow({
   const [liveStatus, setLiveStatus] = useState<WorkStatusValues["personal_status"]>(
     statusInitial.personal_status,
   )
-  const isTerminal = POST_ATTR_STATUSES.includes(liveStatus as PersonalStatus)
+  const [liveChaptersRead, setLiveChaptersRead] = useState<number | null>(
+    statusInitial.chapters_read ?? null,
+  )
+
+  // Revela ao vivo conforme o usuário muda status/capítulos no form (sem reload):
+  // status terminal OU % lido > 20%.
+  const readPct =
+    totalChapters != null && totalChapters > 0 && liveChaptersRead != null
+      ? (liveChaptersRead / totalChapters) * 100
+      : null
+  const isVisible =
+    TERMINAL_STATUSES.includes(liveStatus as PersonalStatus) ||
+    (readPct != null && readPct > MIN_READ_PCT_FOR_POST_ATTR)
 
   // Atributos que a IA avaliou (sem nota da IA não há o que comparar/salvar).
   const ratedSlugs = useMemo(
@@ -63,7 +76,7 @@ export function PostReadingFlow({
   const [attrValues, setAttrValues] = useState<Record<CriterionSlug, number>>(initialAttrValues)
 
   const hasEval = latestAiEvaluation != null && ratedSlugs.length > 0
-  const showAttributes = isTerminal && hasEval
+  const showAttributes = isVisible && hasEval
   const attrDirty = showAttributes && ratedSlugs.some(
     (slug) => attrValues[slug as CriterionSlug] !== initialAttrValues[slug as CriterionSlug],
   )
@@ -75,13 +88,14 @@ export function PostReadingFlow({
         totalChapters={totalChapters}
         initialValues={statusInitial}
         onStatusChange={setLiveStatus}
+        onChaptersReadChange={setLiveChaptersRead}
         extraSave={
           showAttributes ? () => submitPostReadingAttributes(workId, attrValues) : undefined
         }
         extraDirty={attrDirty}
         submitLabel={showAttributes ? "Terminei de ler" : undefined}
       />
-      {isTerminal && (
+      {isVisible && (
         <PostAttributeAssessmentForm
           workId={workId}
           latestAiEvaluation={latestAiEvaluation}

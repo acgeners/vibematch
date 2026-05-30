@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Slider } from "@/components/ui/slider"
+import { Input } from "@/components/ui/input"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug } from "@/types/domain"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
@@ -133,39 +133,48 @@ export function PostAttributeAssessmentForm({
             const ia = latestAiEvaluation.attributes[slug as CriterionSlug] ?? 0
             const value = values[slug as CriterionSlug] ?? 0
             const diff = Number((value - ia).toFixed(1))
+            // A nota da IA só aparece quando o usuário alterou o valor do atributo.
+            const changed = value !== ia
             return (
-              <div key={slug} className="grid grid-cols-[140px_1fr_auto] items-center gap-3">
-                <div className="flex items-center gap-2 min-w-0">
+              <div key={slug} className="flex items-center gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
                   <span className="text-lg leading-none" aria-hidden>
                     {info.emoji}
                   </span>
                   <span className="truncate text-sm font-medium">{info.name}</span>
                 </div>
-                <Slider
-                  min={0}
-                  max={10}
-                  step={0.5}
-                  value={[value]}
-                  onValueChange={([v]) =>
-                    writeValues({ ...values, [slug as CriterionSlug]: clamp(v) })
-                  }
-                  aria-label={info.name}
-                />
-                <div className="flex items-center gap-2 text-right font-mono text-sm tabular-nums">
-                  <span className="w-9 font-bold">{value.toFixed(1)}</span>
-                  <span
-                    className="w-20 text-[11px] text-muted-foreground"
-                    title="Nota da IA pra esse atributo"
-                  >
-                    IA: {ia.toFixed(1)}
-                    {diff !== 0 && (
-                      <span className={diff > 0 ? "text-emerald-600" : "text-amber-600"}>
-                        {" "}
-                        ({diff > 0 ? "+" : ""}
-                        {diff})
-                      </span>
-                    )}
-                  </span>
+                <div className="flex items-center gap-2">
+                  {changed && (
+                    <span
+                      className="text-[11px] text-muted-foreground tabular-nums"
+                      title="Nota sugerida pela IA"
+                    >
+                      IA: {ia.toFixed(1)}
+                      {diff !== 0 && (
+                        <span className={diff > 0 ? "text-emerald-600" : "text-amber-600"}>
+                          {" "}
+                          ({diff > 0 ? "+" : ""}
+                          {diff})
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  <Input
+                    type="number"
+                    min={0}
+                    max={10}
+                    step={0.5}
+                    value={value}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      const next = raw === "" ? ia : clamp(Number(raw))
+                      if (Number.isFinite(next)) {
+                        writeValues({ ...values, [slug as CriterionSlug]: next })
+                      }
+                    }}
+                    aria-label={info.name}
+                    className="w-20 text-right font-mono tabular-nums"
+                  />
                 </div>
               </div>
             )

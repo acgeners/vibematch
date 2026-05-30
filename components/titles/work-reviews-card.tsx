@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, MessageSquareText } from "lucide-react"
+import { ChevronDown, MessageSquareText, Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ExpandableText } from "@/components/ui/expandable-text"
@@ -77,6 +77,24 @@ export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
           </div>
         </button>
       </CardHeader>
+      {snapshot.summary && (
+        <CardContent className="pb-3 pt-0">
+          <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+            <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              <span className="text-xs font-semibold text-foreground">Resumo das reviews (IA)</span>
+              {snapshot.summaryAt && (
+                <span className="text-[10px] text-muted-foreground">
+                  · {formatRelativeDateTime(snapshot.summaryAt)}
+                </span>
+              )}
+            </div>
+            <p className="whitespace-pre-line text-sm leading-relaxed text-foreground/90">
+              {snapshot.summary}
+            </p>
+          </div>
+        </CardContent>
+      )}
       {expanded && (
         <CardContent className="space-y-5">
           {snapshot.bySource.map(({ source, reviews }) => (
