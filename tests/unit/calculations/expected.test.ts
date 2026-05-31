@@ -247,7 +247,6 @@ describe("trainExpectedPredictor (single Ridge + decomposition)", () => {
       "LogVotos",
       "Cps.N",
       "SinopseScore",
-      "ObsAdjustment",
       "LovedTagOverlap",
       "AvoidedTagOverlap",
       "CriterionFitScore",

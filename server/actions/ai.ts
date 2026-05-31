@@ -12,6 +12,7 @@ import {
 import { saveWorkReviews } from "@/lib/external/persist-reviews"
 import type { ExternalSourceId } from "@/lib/external/types"
 import { recalculateWork } from "./calculations"
+import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import type { AiEvaluation } from "@/types/domain"
 import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
@@ -281,6 +282,10 @@ export async function submitAiReview(submission: AiReviewSubmission) {
     .eq("id", submission.workId)
 
   if (workError) return { data: null, error: workError.message }
+
+  // Aceitar uma nova avaliação IA muda as notas por critério → invalida o IA Rk
+  // (alignment_score) persistido. Marca como desatualizado (re-rank é manual).
+  await markWorkAlignmentStale(submission.workId)
 
   after(async () => {
     try {

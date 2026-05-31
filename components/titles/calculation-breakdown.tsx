@@ -94,7 +94,7 @@ function ExpectedWaterfall({ calculatedScore }: { calculatedScore: CalculatedSco
   if (expected == null) {
     return (
       <div className="mt-4 rounded-md border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
-        Nota esperada ainda não calculada. Rode <strong>Recalcular agora</strong> no{" "}
+        Nota Prevista ainda não calculada. Rode <strong>Recalcular agora</strong> no{" "}
         <code className="font-mono">/settings</code>.
       </div>
     )
@@ -119,7 +119,7 @@ function ExpectedWaterfall({ calculatedScore }: { calculatedScore: CalculatedSco
                 <Info className="h-3.5 w-3.5 text-muted-foreground" />
               </TooltipTrigger>
               <TooltipContent className="max-w-sm text-xs">
-                A nota esperada é UM Ridge único treinado contra seu user_score em 22 features. A decomposição em <strong>Perfil</strong> (Stage 1: 14 features de encaixe com seu tipo) + <strong>Qualidade</strong> (Stage 2: 8 dimensões pós-leitura) é calculada pós-hoc via atribuição linear (intercept + Σ coef × x agrupado).
+                A nota prevista é UM Ridge único treinado contra seu user_score em 22 features. A decomposição em <strong>Perfil</strong> (Stage 1: 14 features de encaixe com seu tipo) + <strong>Qualidade</strong> (Stage 2: 8 dimensões pós-leitura) é calculada pós-hoc via atribuição linear (intercept + Σ coef × x agrupado). As 9 notas por critério que alimentam o Perfil vêm da avaliação da IA, que pontua cada critério pelas rubricas (não é o cálculo abaixo).
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -139,7 +139,11 @@ function ExpectedWaterfall({ calculatedScore }: { calculatedScore: CalculatedSco
         </div>
       )}
 
-      {qualityAdj != null && (
+      {/* Stage 2 (Qualidade) só aparece quando há ajuste não-nulo. Hoje as 8
+          dimensões pós-leitura NÃO entram no Ridge (qualityAdj ≈ 0 sempre): a
+          previsão é 100% Perfil. Mantido condicional caso o plano Pago (L0+)
+          reative as features de qualidade. */}
+      {qualityAdj != null && Math.abs(qualityAdj) >= 0.005 && (
         <div className="space-y-1">
           <div className="flex items-center justify-between text-xs">
             <span className="font-medium">
@@ -155,25 +159,27 @@ function ExpectedWaterfall({ calculatedScore }: { calculatedScore: CalculatedSco
         </div>
       )}
 
-      <div className="flex items-center justify-between border-t border-border/40 pt-2 text-xs">
-        <span className="text-muted-foreground">
-          {baseline != null && qualityAdj != null ? (
-            <>
-              <span className="font-mono">{baseline.toFixed(2)}</span>
-              {" "}
-              {qualityAdj >= 0 ? "+" : "−"}
-              {" "}
-              <span className="font-mono">{Math.abs(qualityAdj).toFixed(2)}</span>
-              {" = "}
-              <span className="font-mono font-semibold text-foreground">{expected.toFixed(2)}</span>
-              {(baseline + qualityAdj > 10 || baseline + qualityAdj < 0) && (
-                <span className="ml-1 text-amber-500">(clamped em [0, 10])</span>
-              )}
-            </>
-          ) : (
-            <span>Decomposição completa requer recálculo após migration 068.</span>
-          )}
-        </span>
+      <div className="flex flex-col gap-1 border-t border-border/40 pt-2 text-xs">
+        {baseline != null ? (
+          <span className="text-muted-foreground">
+            A previsão vem do <strong>Perfil</strong> (encaixe com seu tipo de obra):{" "}
+            <span className="font-mono font-semibold text-foreground">{expected.toFixed(2)}</span>
+            {qualityAdj != null && Math.abs(qualityAdj) >= 0.005 && (
+              <span className="ml-1">
+                = {baseline.toFixed(2)} {qualityAdj >= 0 ? "+" : "−"}{" "}
+                {Math.abs(qualityAdj).toFixed(2)} (qualidade)
+              </span>
+            )}
+            . As 9 notas por critério (que alimentam o Perfil) vêm da avaliação da
+            IA. As 8 dimensões pós-leitura que você preenche NÃO entram na previsão
+            — alimentam seu user_score e o ajuste de bias das notas-IA.
+          </span>
+        ) : (
+          <span className="text-muted-foreground">Decomposição completa requer recálculo.</span>
+        )}
+        <a href="/settings/calibration" className="text-primary hover:underline">
+          Ver pesos das features em Configurações › Calibração →
+        </a>
       </div>
     </div>
   )
@@ -208,7 +214,7 @@ const STEPS: BreakdownStep[] = [
   {
     label: "Nota.Pr — Score previsto",
     field: "predicted_score",
-    description: "Nota prevista por modelo ML/Ridge. Se marcado com ~, é estimativa stub",
+    description: "Nota Prevista por modelo ML/Ridge. Se marcado com ~, é estimativa stub",
     isStub: true,
   },
   {
@@ -249,20 +255,22 @@ export function CalculationBreakdown({
           {/* Waterfall do expected_score (L1 single Ridge + decomposição via atribuição linear) */}
           <ExpectedWaterfall calculatedScore={calculatedScore} />
 
-          <div className="mt-4 mb-2 flex items-center gap-1 text-xs uppercase tracking-wider text-muted-foreground">
-            Pipeline legado (será removido após Fase 2)
-            <TooltipProvider delayDuration={200}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Info className="h-3 w-3" />
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs text-xs">
-                  Os 7 stages abaixo são do pipeline antigo (Nota.IA → Nota.Calc → Nota.Pr → Nota.Final). Continua sendo calculado em shadow mode pra comparação no painel `/settings/calibration`. Vai ser removido quando a Fase 2 (consultor) ativar.
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-          <div className="space-y-3">
+          <details className="group mt-4">
+            <summary className="mb-2 flex cursor-pointer list-none items-center gap-1 text-xs uppercase tracking-wider text-muted-foreground [&::-webkit-details-marker]:hidden">
+              <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
+              Pipeline legado (debug — será removido após Fase 2)
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-3 w-3" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs text-xs">
+                    Os 7 stages abaixo são do pipeline antigo (Nota.IA → Nota.Calc → Nota.Pr → Nota.Final). Continua sendo calculado em shadow mode pra comparação no painel `/settings/calibration`. Vai ser removido quando a Fase 2 (consultor) ativar.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </summary>
+            <div className="space-y-3">
             {STEPS.map((step) => {
               const value = calculatedScore[step.field]
               const isStubField = step.isStub && calculatedScore.predicted_is_stub
@@ -342,6 +350,7 @@ export function CalculationBreakdown({
               </div>
             </div>
           </div>
+          </details>
         </div>
       )}
     </div>

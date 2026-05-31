@@ -124,7 +124,7 @@ async function main() {
     return { data: out, error: null }
   }
 
-  const [criteriaRes, pubStatusRes, persStatusRes, sourceRes, tagGroupRes, tagsRes, genresRes] = await Promise.all([
+  const [criteriaRes, pubStatusRes, persStatusRes, sourceRes, tagGroupRes, tagsRes, genresRes, tooltipsRes] = await Promise.all([
     supabase.from("criteria").select("eval_type, slug, criteria, emoji, description, weight, key, ranges").order("id"),
     supabase.from("publication_status").select("id, status, slug, short, color, symbol").order("id"),
     supabase.from("personal_status").select("id, status, slug, color, symbol, comment").order("id"),
@@ -132,10 +132,11 @@ async function main() {
     supabase.from("tag_group").select("id, slug, group, description, example").order("group"),
     fetchAllPaginated(() => supabase.from("tags").select("name, slug, tag_group_id").order("name")),
     fetchAllPaginated(() => supabase.from("genres").select("id, name, slug")),
+    supabase.from("tooltips").select("item, value, stars, description, type"),
   ])
 
   /** @type {Array<[string, { data: any, error: any }]>} */
-  const responses = [["criteria", criteriaRes], ["publication_status", pubStatusRes], ["personal_status", persStatusRes], ["source", sourceRes], ["tag_group", tagGroupRes], ["tags", tagsRes], ["genres", genresRes]]
+  const responses = [["criteria", criteriaRes], ["publication_status", pubStatusRes], ["personal_status", persStatusRes], ["source", sourceRes], ["tag_group", tagGroupRes], ["tags", tagsRes], ["genres", genresRes], ["tooltips", tooltipsRes]]
   for (const [name, res] of responses) {
     if (res.error) { console.error(`Erro em ${name}:`, res.error.message); process.exit(1) }
   }
@@ -147,6 +148,9 @@ async function main() {
   const rawPersStatuses = persStatusRes.data
   const sources       = withCodeOnlySources(sourceRes.data)
   const tagGroups     = tagGroupRes.data
+  const tooltipRows = tooltipsRes.data ?? []
+  const tooltipCriteria = tooltipRows.filter((t) => t.type === "criteria")
+  const tooltipSynopsis = tooltipRows.filter((t) => t.type === "synopsis")
 
   const PERSONAL_STATUS_ORDER = [
     "To read",
@@ -303,6 +307,39 @@ ${platformLabelEntries}
     })
     .join("\n")
 
+  // criteria.description dos critérios User → tooltip nos nomes dos atributos.
+  const criteriaDescEntries = userWithKey
+    .map(c => `  ${c.key}: ${JSON.stringify(c.description ?? "")},`)
+    .join("\n")
+
+  // Legenda global de estrelas — tabela `tooltips` (linhas type='criteria').
+  // `stars` no DB é string de glifos ("★★★"); deriva a contagem. `item` = rótulo.
+  const starLegendEntries = [...tooltipCriteria]
+    .map((t) => ({
+      stars: (String(t.stars ?? "").match(/★/g) || []).length,
+      value: Number(t.value),
+      label: t.item,
+      description: t.description ?? "",
+    }))
+    .filter((r) => r.stars >= 1 && Number.isFinite(r.value))
+    .sort((a, b) => a.value - b.value)
+    .map((r) => `  { stars: ${r.stars}, value: ${r.value}, label: ${JSON.stringify(r.label)}, description: ${JSON.stringify(r.description)} },`)
+    .join("\n")
+
+  // Legenda do "Interesse sinopse" — tabela `tooltips` (linhas type='synopsis').
+  // `stars` = glifos de coração (exibidos direto). `item` = rótulo. Ordena pela
+  // quantidade de corações.
+  const synopsisLegendEntries = [...tooltipSynopsis]
+    .map((t) => ({
+      glyph: String(t.stars ?? ""),
+      label: t.item,
+      description: t.description ?? "",
+      order: (String(t.stars ?? "").match(/[♥♡]/g) || []).length,
+    }))
+    .sort((a, b) => a.order - b.order)
+    .map((r) => `  { glyph: ${JSON.stringify(r.glyph)}, label: ${JSON.stringify(r.label)}, description: ${JSON.stringify(r.description)} },`)
+    .join("\n")
+
   write("lib/constants/post-reading-criteria.ts", `export const POST_READING_WEIGHT_STORAGE_KEY = "animedb:post-reading-weights"
 
 export const POST_READING_STAR_VALUES = [2, 4, 6.5, 8, 10] as const
@@ -321,6 +358,31 @@ ${weightLabelsEntries}
 export const POST_READING_STAR_HINTS: Record<PostReadingScoreField, string[]> = {
 ${starHintEntries}
 }
+
+export const POST_READING_CRITERIA_DESCRIPTIONS: Record<PostReadingScoreField, string> = {
+${criteriaDescEntries}
+}
+
+export interface PostReadingStarLegendEntry {
+  stars: number
+  value: number
+  label: string
+  description: string
+}
+
+export const POST_READING_STAR_LEGEND: PostReadingStarLegendEntry[] = [
+${starLegendEntries}
+]
+
+export interface SynopsisInterestLegendEntry {
+  glyph: string
+  label: string
+  description: string
+}
+
+export const SYNOPSIS_INTEREST_LEGEND: SynopsisInterestLegendEntry[] = [
+${synopsisLegendEntries}
+]
 
 export function starsToPostReadingScore(stars: number): PostReadingStarValue {
   const index = Math.min(Math.max(Math.round(stars), 1), POST_READING_STAR_VALUES.length) - 1

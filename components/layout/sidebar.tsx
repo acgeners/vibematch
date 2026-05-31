@@ -11,7 +11,7 @@ import {
   Trophy,
   Sparkles,
   Settings,
-  SlidersHorizontal,
+  UserCircle,
   Wand2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -44,7 +44,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "Gerenciar",
     items: [
-      { href: "/preferences", icon: SlidersHorizontal, label: "Preferências" },
+      { href: "/conta", icon: UserCircle, label: "Minha conta" },
       { href: "/settings", icon: Settings, label: "Configurações" },
       { href: "/ai-evaluation", icon: Sparkles, label: "Avaliação IA" },
       { href: "/import", icon: Upload, label: "Importar" },

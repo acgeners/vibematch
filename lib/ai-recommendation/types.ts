@@ -89,6 +89,56 @@ export interface RecommendationRunRow {
   created_at: string
 }
 
+// ============================================================
+// Chat de recomendação conversacional (plano Pago)
+// ============================================================
+// O chat é uma camada fina sobre o ranker: conversa em multi-turn e, quando
+// entende o mood, dispara `runRecommendationAction`. Cada turno do assistente
+// pode carregar um snapshot compacto da recomendação que gerou — auto-contido
+// pra render (sem re-fetch da run), espelhando `recommendation_runs.results`.
+
+export interface ChatRecommendationItem {
+  work_id: string
+  title: string
+  coverUrl: string | null
+  alignment_score: number
+  justification: string
+  top_match_factors: string[]
+}
+
+export interface ChatRecommendationSnapshot {
+  /** Slug da recommendation_run criada (link pro detalhe completo). */
+  runSlug: string
+  runId: string
+  modeSummary: string
+  /** Contexto/mood que o modelo derivou da conversa pra rodar o ranker. */
+  userContext: string | null
+  candidatesEvaluated: number
+  truncated: boolean
+  items: ChatRecommendationItem[]
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant"
+  /** Texto exibido e re-enviado ao modelo nos turnos seguintes. */
+  content: string
+  /** Presente quando o turno do assistente gerou recomendações. */
+  recommendation?: ChatRecommendationSnapshot
+  created_at?: string
+}
+
+export interface ChatRow {
+  id: string
+  slug: string
+  title: string | null
+  messages: ChatMessage[]
+  taste_profile_id: string | null
+  model_name: string
+  prompt_version: string
+  created_at: string
+  updated_at: string
+}
+
 export interface RatedWorkInput {
   id: string
   title: string

@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useMemo, useState, useTransition } from "react"
-import { ChevronDown, Filter, RotateCcw, X } from "lucide-react"
+import { Filter, RotateCcw, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -301,31 +301,17 @@ interface FilterSectionProps {
   children: React.ReactNode
 }
 
-function FilterSection({ title, defaultOpen = true, children }: FilterSectionProps) {
-  const [open, setOpen] = useState(defaultOpen)
+function FilterSection({ title, children }: FilterSectionProps) {
   return (
     <div className="overflow-hidden rounded-lg border border-border/65 bg-background/40">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 bg-card/60 px-3 py-1.5 text-left transition-colors hover:bg-card/80"
-      >
+      <div className="flex w-full items-center justify-between gap-3 bg-card/60 px-3 py-1.5 text-left">
         <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           {title}
         </span>
-        <ChevronDown
-          className={cn(
-            "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
-            open ? "" : "-rotate-90"
-          )}
-        />
-      </button>
-      {open && (
-        <div className="border-t border-border/60 px-3 py-2.5">
-          {children}
-        </div>
-      )}
+      </div>
+      <div className="border-t border-border/60 px-3 py-2.5">
+        {children}
+      </div>
     </div>
   )
 }

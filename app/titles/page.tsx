@@ -62,11 +62,11 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     // Critérios IA
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
-  const rawSort = str("sort") ?? "final_score:desc"
+  const rawSort = str("sort") ?? "expected_score:desc"
   const sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
     return {
-      field: (validSortFields.has(field) ? field : "final_score") as RankingSortBy,
+      field: (validSortFields.has(field) ? field : "expected_score") as RankingSortBy,
       dir: dir === "asc" ? "asc" : "desc",
     }
   })
@@ -102,12 +102,12 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     synopsisQualities: multi("synopsis_q"),
     minTotalChapters: num("min_chapters"),
     maxTotalChapters: num("max_chapters"),
-    minCalcScore: num("min_calc"),
-    maxCalcScore: num("max_calc"),
-    minPredictedScore: num("min_pr"),
-    maxPredictedScore: num("max_pr"),
-    minFinalScore: num("min_final"),
-    maxFinalScore: num("max_final"),
+    minExpectedScore: num("min_expected"),
+    maxExpectedScore: num("max_expected"),
+    minPersonalFitPct: num("min_fit"),
+    maxPersonalFitPct: num("max_fit"),
+    minAlignment: num("min_align"),
+    maxAlignment: num("max_align"),
     minPlatformAvg: num("min_platform_avg"),
     maxPlatformAvg: num("max_platform_avg"),
     minTotalVotes: num("min_votes"),

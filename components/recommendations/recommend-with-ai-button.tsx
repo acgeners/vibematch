@@ -157,7 +157,7 @@ export function RecommendWithAiButton({
         size={size}
         className="gap-1.5"
         disabled
-        title="Recomendação por IA é uma feature do plano Pago. No Free o ranking usa Nota Esperada × alinhamento."
+        title="Recomendação por IA é uma feature do plano Pago. No Free o ranking usa Nota Prevista × alinhamento."
       >
         <Sparkles className="h-3.5 w-3.5" />
         {buttonLabel}

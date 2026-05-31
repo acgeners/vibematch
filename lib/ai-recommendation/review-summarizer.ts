@@ -4,7 +4,7 @@ import { createHash } from "node:crypto"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 
 export const REVIEW_SUMMARIZER_MODEL = "claude-haiku-4-5-20251001"
-export const REVIEW_SUMMARIZER_PROMPT_VERSION = "v1"
+export const REVIEW_SUMMARIZER_PROMPT_VERSION = "v2"
 
 // Limites pra manter o prompt barato mesmo quando há 100+ reviews: amostra as
 // mais longas (mais informativas) e trunca cada uma.
@@ -16,6 +16,7 @@ const SYSTEM_PROMPT = `Você é um editor que resume as reviews de leitores de u
 REGRAS:
 - Saída: ~80-150 palavras em português brasileiro, texto corrido (sem listas, sem markdown, sem headers).
 - Capture o consenso: pontos fortes mais citados, críticas recorrentes e o tom geral (recepção positiva/mista/negativa).
+- Priorize o que ajuda a avaliar os atributos/critérios da obra: história e ritmo, originalidade, protagonistas (presença e carisma da FL/ML) e desenvolvimento dos personagens, romance e dinâmica do casal, humor, drama/tragédia, ação/aventura, arte/visual, conteúdo adulto e impacto/imersão. Ignore comentários que não ajudem a entender esses aspectos.
 - Se há divergência clara entre leitores, diga isso ("opiniões se dividem sobre X").
 - Não cite fontes nem números de review (nada de "[R1]", "segundo a AniList", etc.).
 - Sem spoilers profundos — fale da experiência de leitura, não de reviravoltas específicas.

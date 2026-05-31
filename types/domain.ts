@@ -294,6 +294,11 @@ export interface FormulaConfig {
   /** Percentil (0-100) acima do qual a nota agregada usa a 4ª cor; abaixo, a pior. Default 20. */
   score_color_pct_low: number
   /**
+   * Override opcional de percentis de cor POR critério (slug → {top,high,mid,low}).
+   * Slugs ausentes herdam os percentis globais acima. Default `{}`. Opcional no
+   * tipo pra compat com leituras antes da migration 082. */
+  criterion_color_pcts?: Record<string, { top: number; high: number; mid: number; low: number }> | null
+  /**
    * Coeficientes do Ridge segundo-nível (stacker) que combina Calc + Pr (+ kNN futuramente).
    * NULL quando treino < 30 ou stacker desabilitado.
    */
@@ -462,6 +467,12 @@ export interface WorkFilters {
   aiEvalStatus?: AiEvalStatus[]
   minFinalScore?: number
   maxFinalScore?: number
+  /** Nota prevista (expected_score, 0–10) — filtro headline do novo pipeline. */
+  minExpectedScore?: number
+  maxExpectedScore?: number
+  /** Alinhamento (personal_fit) pelo PERCENTIL 0–100 exibido na UI. */
+  minPersonalFitPct?: number
+  maxPersonalFitPct?: number
   minChapters?: number
   maxChapters?: number
   minTotalVotes?: number

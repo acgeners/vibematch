@@ -1,6 +1,7 @@
 "use server"
 
 import { revalidatePath, revalidateTag } from "next/cache"
+import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import {
@@ -69,6 +70,17 @@ const POST_SCORE_FIELDS = [
   "post_impact_immersion_score",
   "post_originality_score",
 ] as const
+
+/**
+ * Ajuste manual de observação aplicado de forma determinística sobre a Nota
+ * Esperada — clamp ∈ [-0.30, +0.30], soma direta em pontos de nota, resultado
+ * clampado em [0, 10]. Restaura o comportamento do legado Nota.Calc agora que
+ * `ObsAdjustment` não é mais feature do Ridge (ver lib/calculations/expected.ts).
+ */
+function applyObsAdjustment(expected: number, observationAdjustment: number): number {
+  const obs = Math.min(Math.max(observationAdjustment, -0.3), 0.3)
+  return Math.max(0, Math.min(10, expected + obs))
+}
 
 interface RawWork {
   id: string
@@ -532,7 +544,12 @@ export async function recalculateAll() {
   const expectedPredictions = expectedPredictor.predict(expectedAllInputs)
   for (let i = 0; i < works.length; i++) {
     const p = expectedPredictions[i]
-    works[i].expectedScore = p.expected
+    // observation_adjustment volta a ser um ajuste manual DETERMINÍSTICO (±0.30)
+    // somado sobre a Nota Esperada — não é mais feature do Ridge (ver
+    // lib/calculations/expected.ts). Embute só no expected_score entregue;
+    // baseline/qualityAdj permanecem a decomposição crua do modelo, e o MAE/CV
+    // continuam medindo só o poder preditivo do modelo (sem o nudge manual).
+    works[i].expectedScore = applyObsAdjustment(p.expected, works[i].observationAdjustment)
     works[i].expectedBaseline = p.baseline
     works[i].expectedQualityAdj = p.qualityAdj
     works[i].expectedIsStub = expectedPredictor.isStub
@@ -906,6 +923,7 @@ export async function recalculateAll() {
   revalidatePath("/settings")
   revalidatePath("/")
   revalidateTag("score-color-thresholds", "max")
+  revalidateTag("low-coverage", "max")
 
   return {
     recalculated: works.length,
@@ -965,4 +983,37 @@ export async function recalculateAll() {
 export async function recalculateWork(workId: string) {
   void workId
   return recalculateAll()
+}
+
+// Coalescing guard compartilhado: vários saves em sequência (ex.: o fluxo
+// "Terminei de ler" dispara updateWorkStatus + submitPostReadingAttributes, e o
+// usuário pode salvar várias vezes) não devem rodar N recalc-all completos em
+// paralelo. Se já há um em voo, marca um rerun e roda UMA vez ao final.
+let recalcInFlight = false
+let recalcRerunQueued = false
+
+/**
+ * Dispara `recalculateAll()` em background via `after()` (não bloqueia a resposta
+ * do server action) e coalesce chamadas concorrentes. Use isto em vez de
+ * `await recalculateAll()` em qualquer save que só precise que os scores
+ * atualizem "logo depois".
+ */
+export async function recalculateAllInBackground(context: string): Promise<void> {
+  after(async () => {
+    if (recalcInFlight) {
+      recalcRerunQueued = true
+      return
+    }
+    recalcInFlight = true
+    try {
+      do {
+        recalcRerunQueued = false
+        await recalculateAll()
+      } while (recalcRerunQueued)
+    } catch (error) {
+      console.error(`[${context}] Failed to recalculate scores`, error)
+    } finally {
+      recalcInFlight = false
+    }
+  })
 }

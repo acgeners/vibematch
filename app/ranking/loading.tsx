@@ -5,7 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 export default function RankingLoading() {
   return (
     <div className="space-y-4">
-      <Header title="Ranking" description="Obras ordenadas pela Nota.Final" />
+      <Header title="Ranking" description="Obras ordenadas pela Nota Prevista" />
 
       <Card>
         <CardContent className="p-4 flex flex-wrap gap-2">

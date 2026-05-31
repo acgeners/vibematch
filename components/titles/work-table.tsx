@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
@@ -17,7 +17,7 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
-  Eye,
+  Heart,
   HeartOff,
   ImageOff,
   LayoutGrid,
@@ -27,6 +27,7 @@ import {
   Plus,
   Rows3,
   Settings2,
+  Sparkles,
   X,
 } from "lucide-react"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
@@ -42,7 +43,7 @@ import type { CategoryScore, WorkWithRelations, WorkCover } from "@/types/domain
 import { CRITERION_SLUGS } from "@/types/domain"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
-import { ScoreBadge, type ColumnThresholds } from "@/components/ui/score-badge"
+import { ScoreBadge, getCriterionColorClass, type ColumnThresholds, type ScoreColorThresholds } from "@/components/ui/score-badge"
 import {
   AiStatusBadge,
   PersonalStatusBadge,
@@ -64,9 +65,11 @@ import {
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { archiveWork, setFavoriteMany, toggleFavorite, unarchiveWork } from "@/server/actions/works"
+import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
-import { AlignmentCell, AlignmentScoreCell } from "@/components/ranking/ranking-cells"
+import { AlignmentCell, AlignmentScoreCell, DecisionCell } from "@/components/ranking/ranking-cells"
+import { computeDecisionScore } from "@/lib/calculations/decision"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { WorkHeatmapView } from "@/components/titles/work-heatmap-view"
 import { WorkColumnPicker } from "@/components/titles/work-column-picker"
@@ -130,6 +133,8 @@ interface WorkTableProps {
   enableCompare?: boolean
   enableHeatmap?: boolean
   enableSelectAll?: boolean
+  /** Repassado ao drawer de comparação pra liberar o "Desempatar com IA" (Pago). */
+  isPaid?: boolean
 }
 
 function scoreFor(work: WorkWithRelations, slug: string): number | null {
@@ -137,17 +142,40 @@ function scoreFor(work: WorkWithRelations, slug: string): number | null {
   return cs?.score != null ? Number(cs.score) : null
 }
 
-function getCriterionColorClass(score: number, slug: string): string {
-  const isNegative = slug === "drama" || slug === "tragedy"
-  if (isNegative) {
-    if (score <= 3) return "bg-green-100 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-400 dark:border-green-500/25"
-    if (score <= 5) return "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-400 dark:border-yellow-500/25"
-    return "bg-red-100 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25"
+/** Acha o ancestral rolável (overflow-y auto/scroll). No layout do app o scroller
+ *  é o <main>, NÃO o window — por isso restaurar window.scrollY não funcionava. */
+function findScrollContainer(start: HTMLElement | null): HTMLElement | null {
+  let node: HTMLElement | null = start
+  while (node && node !== document.body) {
+    const overflowY = window.getComputedStyle(node).overflowY
+    if (overflowY === "auto" || overflowY === "scroll") return node
+    node = node.parentElement
   }
-  if (score >= 8) return "bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25"
-  if (score >= 6) return "bg-green-100 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-400 dark:border-green-500/25"
-  if (score >= 4) return "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-400 dark:border-yellow-500/25"
-  return "bg-red-100 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25"
+  return null
+}
+
+/**
+ * Roda `mutate` (que dispara um re-render via setState) preservando a posição de
+ * scroll do container rolável. `anchor` é qualquer elemento dentro do scroller.
+ * Reaplica o scrollTop nos 2 próximos frames (cobre o commit do React + o settle
+ * de layout); também trava o scroll síncrono se o browser mexer antes do rAF.
+ */
+function preserveScroll(anchor: HTMLElement | null, mutate: () => void) {
+  const container = findScrollContainer(anchor)
+  if (!container) {
+    mutate()
+    return
+  }
+  const top = container.scrollTop
+  mutate()
+  const restore = () => {
+    if (container.scrollTop !== top) container.scrollTop = top
+  }
+  restore()
+  requestAnimationFrame(() => {
+    restore()
+    requestAnimationFrame(restore)
+  })
 }
 
 export function WorkTable({
@@ -163,6 +191,7 @@ export function WorkTable({
   enableCompare = true,
   enableHeatmap = true,
   enableSelectAll = false,
+  isPaid = true,
 }: WorkTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -181,6 +210,7 @@ export function WorkTable({
   const [compareIds, setCompareIds] = useState<string[]>(selectedCompareIds)
   const selectedSet = useMemo(() => new Set(compareIds), [compareIds])
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
 
   const updateCompareIds = useCallback(
     (nextIds: string[]) => {
@@ -198,18 +228,22 @@ export function WorkTable({
 
   const toggleCompare = useCallback(
     (id: string) => {
-      if (selectedSet.has(id)) {
-        updateCompareIds(compareIds.filter((x) => x !== id))
-        return
-      }
-      updateCompareIds([...compareIds, id])
+      preserveScroll(rootRef.current, () => {
+        if (selectedSet.has(id)) {
+          updateCompareIds(compareIds.filter((x) => x !== id))
+        } else {
+          updateCompareIds([...compareIds, id])
+        }
+      })
     },
     [selectedSet, compareIds, updateCompareIds]
   )
 
   const clearCompare = useCallback(() => {
-    updateCompareIds([])
-    setDrawerOpen(false)
+    preserveScroll(rootRef.current, () => {
+      updateCompareIds([])
+      setDrawerOpen(false)
+    })
   }, [updateCompareIds])
 
   const allVisibleIds = useMemo(() => works.map((w) => w.id), [works])
@@ -217,7 +251,7 @@ export function WorkTable({
     allVisibleIds.length > 0 && allVisibleIds.every((id) => selectedSet.has(id))
   const someSelected = !allSelected && selectedSet.size > 0
   const selectAllVisible = useCallback(() => {
-    updateCompareIds(allVisibleIds)
+    preserveScroll(rootRef.current, () => updateCompareIds(allVisibleIds))
   }, [allVisibleIds, updateCompareIds])
 
   const favoriteSelectedIds = useMemo(
@@ -241,7 +275,7 @@ export function WorkTable({
   const totalPages = Math.ceil(total / pageSize)
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" ref={rootRef}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
           {total} obra{total !== 1 ? "s" : ""}
@@ -275,6 +309,11 @@ export function WorkTable({
           onToggleSelect={toggleCompare}
           namespace={namespace}
           enableCompare={enableCompare}
+          enableSelectAll={enableSelectAll}
+          allSelected={allSelected}
+          someSelected={someSelected}
+          onSelectAll={selectAllVisible}
+          onClearAll={clearCompare}
         />
       ) : (
         <WorkListView
@@ -328,6 +367,7 @@ export function WorkTable({
               updateCompareIds(compareIds.filter((x) => x !== id))
             }
             scoreThresholds={scoreThresholds}
+            isPaid={isPaid}
           />
         </>
       )}
@@ -652,7 +692,8 @@ function WorkListView({
     chapters_read: { field: "chapters_read", label: "Capítulos lidos" },
     year: { field: "year", label: "Ano" },
     synopsis_q: { field: "synopsis_q", label: "Sinopse" },
-    expected_score: { field: "expected_score", label: "Nota esperada" },
+    decision: { field: "decision", label: "Nota Final" },
+    expected_score: { field: "expected_score", label: "Nota Prevista" },
     expected_baseline: { field: "expected_baseline", label: "Perfil (Stage 1)" },
     expected_quality_adj: { field: "expected_quality_adj", label: "Δ Qualidade" },
     personal_fit: { field: "personal_fit", label: "Alinhamento" },
@@ -780,6 +821,25 @@ function WorkListView({
         thresholds={scoreThresholds?.final}
       />
     ),
+    decision: (work) => {
+      const cs = work.calculated_scores
+      const score = computeDecisionScore({
+        expected: cs?.expected_score ?? null,
+        fit: cs?.personal_fit ?? null,
+        alignment: cs?.alignment_score ?? null,
+        confidence: (cs?.alignment_payload as { confidence?: number } | null)?.confidence ?? null,
+      })
+      return (
+        <DecisionCell
+          score={score}
+          expected={cs?.expected_score ?? null}
+          fitPercentile={
+            cs?.personal_fit_percentile ?? (cs?.personal_fit != null ? cs.personal_fit * 100 : null)
+          }
+          alignment={cs?.alignment_score ?? null}
+        />
+      )
+    },
     expected_score: (work) => (
       <ScoreBadge
         score={work.calculated_scores?.expected_score ?? null}
@@ -884,12 +944,6 @@ function WorkListView({
           </Tooltip>
           <DropdownMenuContent align="end">
             <DropdownMenuItem asChild>
-              <Link href={`/titles/${slug}`} onClick={(e) => e.stopPropagation()}>
-                <Eye className="h-4 w-4 mr-2" />
-                Ver detalhes
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
               <Link
                 href={`/titles/${slug}`}
                 target="_blank"
@@ -906,23 +960,25 @@ function WorkListView({
                 Editar
               </Link>
             </DropdownMenuItem>
-            {work.is_favorite && (
-              <DropdownMenuItem
-                onClick={async (e) => {
-                  e.stopPropagation()
-                  const result = await toggleFavorite(work.id, false)
-                  if (result.error) {
-                    toast.error("Erro ao desfavoritar")
-                  } else {
-                    toast.success("Obra desfavoritada")
-                    router.refresh()
-                  }
-                }}
-              >
-                <HeartOff className="h-4 w-4 mr-2" />
-                Desfavoritar
-              </DropdownMenuItem>
-            )}
+            <DropdownMenuItem
+              onClick={async (e) => {
+                e.stopPropagation()
+                const next = !work.is_favorite
+                const result = await toggleFavorite(work.id, next)
+                if (result.error) {
+                  toast.error("Erro ao alterar favorito")
+                } else {
+                  toast.success(next ? "Obra favoritada" : "Obra desfavoritada")
+                  router.refresh()
+                }
+              }}
+            >
+              {work.is_favorite ? (
+                <><HeartOff className="h-4 w-4 mr-2" />Desfavoritar</>
+              ) : (
+                <><Heart className="h-4 w-4 mr-2" />Favoritar</>
+              )}
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={async (e) => {
                 e.stopPropagation()
@@ -942,6 +998,21 @@ function WorkListView({
                 <><Archive className="h-4 w-4 mr-2" />Arquivar</>
               )}
             </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={async (e) => {
+                e.stopPropagation()
+                const result = await rerankSingleWorkAction(work.id)
+                if (result.error || !result.data) {
+                  toast.error(result.error ?? "Erro ao avaliar IA Rk")
+                } else {
+                  toast.success(`IA Rk: ${Math.round(result.data.alignmentScore)}`)
+                  router.refresh()
+                }
+              }}
+            >
+              <Sparkles className="h-4 w-4 mr-2" />
+              Avaliar IA Rk
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       )
@@ -949,7 +1020,7 @@ function WorkListView({
   }
 
   const columns: ColumnDef<WorkWithRelations>[] = configuredColumns.map((col) => {
-    const renderer = columnRenderers[col.key] ?? makeCriterionRenderer(col.key)
+    const renderer = columnRenderers[col.key] ?? makeCriterionRenderer(col.key, scoreThresholds?.criteria)
     const defaultSize = DEFAULT_COLUMN_WIDTHS[col.key] ?? (col.key.startsWith("crit_") ? 48 : 100)
     return {
       id: col.key,
@@ -1253,14 +1324,18 @@ function WorkListView({
   )
 }
 
-function renderCriterionCell(slug: string, work: WorkWithRelations): ReactNode {
+function renderCriterionCell(
+  slug: string,
+  work: WorkWithRelations,
+  thresholds?: ScoreColorThresholds | null,
+): ReactNode {
   const score = scoreFor(work, slug)
   if (score == null) return <span className="text-muted-foreground">—</span>
   return (
     <span
       className={cn(
         "inline-grid h-8 w-12 place-items-center rounded-md font-mono text-xs font-bold",
-        getCriterionColorClass(score, slug)
+        getCriterionColorClass(score, slug, thresholds)
       )}
     >
       {score.toFixed(1)}
@@ -1268,11 +1343,14 @@ function renderCriterionCell(slug: string, work: WorkWithRelations): ReactNode {
   )
 }
 
-function makeCriterionRenderer(columnKey: string): (work: WorkWithRelations) => ReactNode {
+function makeCriterionRenderer(
+  columnKey: string,
+  criteriaThresholds?: Record<string, ScoreColorThresholds>,
+): (work: WorkWithRelations) => ReactNode {
   if (!columnKey.startsWith("crit_")) return renderEmpty
   const slug = columnKey.slice("crit_".length)
   return function renderCriterion(work: WorkWithRelations): ReactNode {
-    return renderCriterionCell(slug, work)
+    return renderCriterionCell(slug, work, criteriaThresholds?.[slug])
   }
 }
 

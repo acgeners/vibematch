@@ -25,22 +25,29 @@ import { PERSONAL_STATUSES, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { PERSONAL_STATUS_LABELS, SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import {
   DEFAULT_POST_READING_WEIGHTS,
+  POST_READING_CRITERIA_DESCRIPTIONS,
   POST_READING_STAR_HINTS,
+  POST_READING_STAR_LEGEND,
   POST_READING_WEIGHT_LABELS,
   POST_READING_WEIGHT_STORAGE_KEY,
+  SYNOPSIS_INTEREST_LEGEND,
   normalizePostReadingScore,
   scoreToPostReadingStars,
   starsToPostReadingScore,
   type PostReadingScoreField,
 } from "@/lib/constants/post-reading-criteria"
 import { cn, readingProgressPercent } from "@/lib/utils"
-import { BookOpen, Users, Palette, Info, FileEdit, Calendar, Bookmark, Star, X } from "lucide-react"
+import { BookOpen, Users, Palette, FileEdit, Bookmark, ChevronDown, Star, X } from "lucide-react"
 import {
   Tooltip,
   TooltipProvider,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+
+const SYNOPSIS_LEGEND_BY_LABEL = new Map(
+  SYNOPSIS_INTEREST_LEGEND.map((entry) => [entry.label, entry] as const),
+)
 
 const POST_FIELDS: PostReadingScoreField[] = [
   "post_story_score",
@@ -51,14 +58,6 @@ const POST_FIELDS: PostReadingScoreField[] = [
   "post_art_visual_score",
   "post_impact_immersion_score",
   "post_originality_score",
-]
-
-const STAR_LEGEND = [
-  { stars: 1, value: 2.0, label: "Fraco", desc: "História confusa, personagens sem graça/irritantes ou visual fraco." },
-  { stars: 2, value: 4.0, label: "Mediano", desc: "Premissa aceitável, mas desenvolvimento raso, ritmo irregular ou clichês comuns." },
-  { stars: 3, value: 6.5, label: "Bom", desc: "Obra funcional, boa imersão e desenvolvimento satisfatório, mesmo sem ser brilhante." },
-  { stars: 4, value: 8.0, label: "Muito bom", desc: "História cativante, personagens marcantes, boa arte/visual e ritmo bem equilibrado." },
-  { stars: 5, value: 10.0, label: "Excelente", desc: "Excepcional em todos os aspectos: memorável, extremamente imersivo e original." },
 ]
 
 const CRITERION_GROUPS: Array<{ title: string; fields: PostReadingScoreField[] }> = [
@@ -164,8 +163,19 @@ export interface WorkStatusFormProps {
   extraSave?: () => Promise<{ ok: boolean; error?: string } | null | void>
   /** Considera o form "sujo" mesmo sem mudança nos campos de status (ex.: atributos mudaram). */
   extraDirty?: boolean
+  /** Gate de exibição da seção "Critérios de avaliação". Quando omitido, usa a regra
+   *  antiga (status != "To read"). O PostReadingFlow passa a MESMA regra dos atributos
+   *  pós-leitura (status terminal OU > 20% lido) pra alinhar as duas seções. */
+  showEvaluationCriteria?: boolean
   /** Rótulo do botão de submit (default "Salvar"). */
   submitLabel?: string
+  /** Quando definido, o `<form>` recebe esse id e o footer interno é omitido —
+   *  o parent renderiza o botão "Salvar" com `form={formId}` onde quiser (ex.:
+   *  no fim de tudo, depois dos atributos pós-leitura). Use junto de onStateChange. */
+  formId?: string
+  /** Recebe o estado de submit (saving + canSubmit) sempre que muda — pro parent
+   *  controlar o botão externo de Salvar. */
+  onStateChange?: (state: { saving: boolean; canSubmit: boolean }) => void
 }
 
 export function WorkStatusForm({
@@ -179,10 +189,15 @@ export function WorkStatusForm({
   onChaptersReadChange,
   extraSave,
   extraDirty = false,
+  showEvaluationCriteria,
   submitLabel,
+  formId,
+  onStateChange,
 }: WorkStatusFormProps) {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
+  const [notesOpen, setNotesOpen] = useState(false)
+  const [hoveredSynopsis, setHoveredSynopsis] = useState<string | null>(null)
 
   const {
     register,
@@ -214,6 +229,18 @@ export function WorkStatusForm({
     if (!currentValues) return false
     return hasChanges(initialValues, currentValues as WorkStatusValues)
   }, [initialValues, currentValues])
+
+  const canSubmit = (isDirty || extraDirty) && !saving
+
+  // Reporta o estado do submit pro parent (que pode renderizar o botão Salvar fora
+  // do form, via form={formId}). Roda só quando o estado realmente muda.
+  useEffect(() => {
+    onStateChange?.({ saving, canSubmit })
+  }, [saving, canSubmit, onStateChange])
+
+  // Gate da seção "Critérios de avaliação": usa a regra passada pelo parent
+  // (mesma dos atributos pós-leitura) ou cai na regra antiga (status != "To read").
+  const criteriaVisible = showEvaluationCriteria ?? personalStatus !== "To read"
 
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
@@ -299,8 +326,115 @@ export function WorkStatusForm({
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-6">
-      <div className="space-y-4">
+    <form id={formId} onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-6">
+      {/* Anotações pessoais — acima do progresso, em container colapsável. */}
+      <div className="rounded-lg border border-border/40">
+        <button
+          type="button"
+          onClick={() => setNotesOpen((v) => !v)}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="flex items-center gap-2">
+            <FileEdit className="h-4.5 w-4.5 text-muted-foreground" />
+            <span className="text-base font-bold text-foreground">Anotações pessoais</span>
+          </span>
+          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", notesOpen && "rotate-180")} />
+        </button>
+        {notesOpen && (
+          <div className="space-y-4 border-t border-border/40 px-4 pb-4 pt-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+              <div className="space-y-1.5 w-full sm:w-[220px]">
+                <Label htmlFor="personal-synopsis-quality">Interesse sinopse</Label>
+                <Select
+                  value={synopsisQuality ?? "none"}
+                  onValueChange={(v) =>
+                    setValue(
+                      "synopsis_quality",
+                      v === "none" ? null : (v as WorkStatusValues["synopsis_quality"]),
+                      { shouldDirty: true }
+                    )
+                  }
+                >
+                  <SelectTrigger id="personal-synopsis-quality" className="w-full h-9">
+                    <SelectValue placeholder="Não avaliada" />
+                  </SelectTrigger>
+                  <SelectContent onMouseLeave={() => setHoveredSynopsis(null)} className="w-[300px]">
+                    <SelectItem
+                      value="none"
+                      onMouseEnter={() => setHoveredSynopsis("none")}
+                      onFocus={() => setHoveredSynopsis("none")}
+                    >
+                      Não avaliada
+                    </SelectItem>
+                    {SYNOPSIS_QUALITIES.map((q) => (
+                      <SelectItem
+                        key={q}
+                        value={q}
+                        onMouseEnter={() => setHoveredSynopsis(q)}
+                        onFocus={() => setHoveredSynopsis(q)}
+                      >
+                        {q} — {SYNOPSIS_QUALITY_LABELS[q]}
+                      </SelectItem>
+                    ))}
+                    {(() => {
+                      // Painel de detalhe: mostra a descrição do item sob o mouse
+                      // (ou, sem hover, do valor já selecionado). Fonte: tooltips/synopsis.
+                      const activeQ = hoveredSynopsis ?? synopsisQuality ?? null
+                      const label = activeQ ? SYNOPSIS_QUALITY_LABELS[activeQ] : undefined
+                      const entry = label ? SYNOPSIS_LEGEND_BY_LABEL.get(label) : null
+                      if (!entry) return null
+                      return (
+                        <div className="mt-1 border-t border-border/60 px-2 pb-1 pt-2">
+                          <p className="text-xs font-semibold text-foreground">
+                            <span className="text-rose-400">{entry.glyph}</span> {entry.label}
+                          </p>
+                          <p className="mt-0.5 whitespace-pre-line text-[11px] leading-relaxed text-muted-foreground">
+                            {entry.description}
+                          </p>
+                        </div>
+                      )
+                    })()}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5 w-full sm:w-[120px]">
+                <Label
+                  htmlFor="personal-adjustment"
+                  title="negativo = penalidade · positivo = bônus · em pontos de nota"
+                  className="block truncate"
+                >
+                  Ajuste
+                </Label>
+                <Input
+                  id="personal-adjustment"
+                  type="number"
+                  step={0.05}
+                  min={-0.30}
+                  max={0.30}
+                  className="text-center h-9"
+                  {...register("observation_adjustment", { valueAsNumber: true })}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="personal-observations">Observações</Label>
+              <Textarea
+                id="personal-observations"
+                placeholder="Notas pessoais sobre a obra..."
+                rows={3}
+                className="resize-none"
+                {...register("observations", {
+                  setValueAs: (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+                })}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-4 border-t border-border/40 pt-6">
         <div className="flex items-center gap-2">
           <Bookmark className="h-4.5 w-4.5 text-muted-foreground" />
           <h3 className="text-base font-bold text-foreground">Progresso de leitura</h3>
@@ -406,7 +540,7 @@ export function WorkStatusForm({
         </div>
       </div>
 
-      {personalStatus !== "To read" && (
+      {criteriaVisible && (
         <div className="space-y-4 border-t border-border/40 pt-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-2.5">
@@ -415,7 +549,7 @@ export function WorkStatusForm({
                 <h3 className="text-base font-bold text-foreground">Critérios de avaliação</h3>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {STAR_LEGEND.map((item) => (
+                {POST_READING_STAR_LEGEND.map((item) => (
                   <TooltipProvider key={item.label}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -427,10 +561,10 @@ export function WorkStatusForm({
                       </TooltipTrigger>
                       <TooltipContent side="top" className="max-w-xs whitespace-pre-line text-left p-3 shadow-md border bg-popover text-popover-foreground">
                         <p className="font-semibold text-sm text-foreground">
-                          <span className="text-amber-500/45">{"★".repeat(item.stars)}</span> = {item.value.toFixed(1)} ({item.label})
+                          {item.label}
                         </p>
                         <p className="mt-1 text-xs opacity-90 leading-relaxed text-muted-foreground">
-                          {item.desc}
+                          {item.description}
                         </p>
                       </TooltipContent>
                     </Tooltip>
@@ -492,12 +626,36 @@ export function WorkStatusForm({
                       return (
                         <div key={field} className="min-w-0 space-y-1">
                           <div className="flex items-center justify-between gap-2">
-                            <Label
-                              htmlFor={`status-${field}`}
-                              className="text-xs font-medium text-foreground cursor-pointer block truncate"
-                            >
-                              {POST_READING_WEIGHT_LABELS[field]}
-                            </Label>
+                            {(() => {
+                              const desc = POST_READING_CRITERIA_DESCRIPTIONS[field]
+                              if (!desc) {
+                                return (
+                                  <Label
+                                    htmlFor={`status-${field}`}
+                                    className="text-xs font-medium text-foreground cursor-pointer block truncate"
+                                  >
+                                    {POST_READING_WEIGHT_LABELS[field]}
+                                  </Label>
+                                )
+                              }
+                              return (
+                                <TooltipProvider delayDuration={150}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Label
+                                        htmlFor={`status-${field}`}
+                                        className="text-xs font-medium text-foreground cursor-help block truncate underline-offset-2 decoration-dotted hover:underline"
+                                      >
+                                        {POST_READING_WEIGHT_LABELS[field]}
+                                      </Label>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-xs whitespace-pre-line text-left leading-relaxed">
+                                      {desc}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              )
+                            })()}
                             {currentValue != null && (
                               <span className="text-[10px] font-mono font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded leading-none">
                                 {currentValue.toFixed(1)}
@@ -530,73 +688,10 @@ export function WorkStatusForm({
         </div>
       )}
 
-      <div className="space-y-4 border-t border-border/40 pt-6">
-        <div className="flex items-center gap-2">
-          <FileEdit className="h-4.5 w-4.5 text-muted-foreground" />
-          <h3 className="text-base font-bold text-foreground">Anotações pessoais</h3>
-        </div>
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <div className="space-y-1.5 w-full sm:w-[220px]">
-            <Label htmlFor="personal-synopsis-quality">Interesse sinopse</Label>
-            <Select
-              value={synopsisQuality ?? "none"}
-              onValueChange={(v) =>
-                setValue(
-                  "synopsis_quality",
-                  v === "none" ? null : (v as WorkStatusValues["synopsis_quality"]),
-                  { shouldDirty: true }
-                )
-              }
-            >
-              <SelectTrigger id="personal-synopsis-quality" className="w-full h-9">
-                <SelectValue placeholder="Não avaliada" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Não avaliada</SelectItem>
-                {SYNOPSIS_QUALITIES.map((q) => (
-                  <SelectItem key={q} value={q}>
-                    {q} — {SYNOPSIS_QUALITY_LABELS[q]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5 w-full sm:w-[120px]">
-            <Label
-              htmlFor="personal-adjustment"
-              title="negativo = penalidade · positivo = bônus · em pontos de nota"
-              className="block truncate"
-            >
-              Ajuste
-            </Label>
-            <Input
-              id="personal-adjustment"
-              type="number"
-              step={0.05}
-              min={-0.30}
-              max={0.30}
-              className="text-center h-9"
-              {...register("observation_adjustment", { valueAsNumber: true })}
-            />
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="personal-observations">Observações</Label>
-          <Textarea
-            id="personal-observations"
-            placeholder="Notas pessoais sobre a obra..."
-            rows={3}
-            className="resize-none"
-            {...register("observations", {
-              setValueAs: (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-            })}
-          />
-        </div>
-      </div>
-
-      {!hideFooter && (
+      {/* Footer interno: omitido quando `formId` está setado (o parent renderiza
+          o botão Salvar no fim de tudo, depois dos atributos pós-leitura) ou quando
+          hideFooter é true (dialog usa seus próprios botões). */}
+      {!hideFooter && !formId && (
         <div className="flex justify-end gap-2">
           {onCancel && (
             <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>

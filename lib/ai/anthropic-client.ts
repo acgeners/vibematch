@@ -110,7 +110,12 @@ export async function createLoggedMessage(
   const modelStr = typeof params.model === "string" ? params.model : String(params.model)
 
   try {
-    const message = await client.messages.create(params)
+    // Usa streaming internamente (.stream().finalMessage()) em vez de
+    // create(): a geração das respostas estruturadas longas (avaliação IA ~3-4k
+    // tokens) ultrapassa o limite recomendado de requests não-stream do SDK.
+    // O streaming evita esse risco e a interface segue idêntica — só o Message
+    // final importa pros callers. Latência é medida do start ao finalMessage.
+    const message = await client.messages.stream(params).finalMessage()
     const usage = extractUsage(message)
     const apiCallId = await persistLog({
       meta,

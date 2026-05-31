@@ -1,4 +1,5 @@
 import "server-only"
+import { unstable_cache } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getCurrentUserId } from "@/server/queries/current-user"
 
@@ -167,13 +168,27 @@ async function checkGuard2(
 }
 
 /**
+ * Lista (array — serializável p/ cache) de workIds não-lidos com baixa cobertura
+ * de gênero. Cacheada com tag `low-coverage`, invalidada no fim de `recalculateAll`
+ * (quando a base de obras/leituras muda). É um full-scan de works.genres — caro o
+ * suficiente pra não rodar em toda navegação do /ranking.
+ */
+const getLowCoverageWorkIdsCached = unstable_cache(
+  async (): Promise<string[]> => {
+    const supabase = createAdminClient()
+    const { lowCoverageIds } = await computeLowCoverage(supabase)
+    return [...lowCoverageIds]
+  },
+  ["low-coverage-work-ids"],
+  { revalidate: 300, tags: ["low-coverage"] },
+)
+
+/**
  * Conjunto de workIds não-lidos com baixa cobertura de gênero. Usado pelo badge
- * ⚠ no ranking. Cache leve recomendado pelo caller (recalcula barato).
+ * ⚠ no ranking.
  */
 export async function getLowCoverageWorkIds(): Promise<Set<string>> {
-  const supabase = createAdminClient()
-  const { lowCoverageIds } = await computeLowCoverage(supabase)
-  return lowCoverageIds
+  return new Set(await getLowCoverageWorkIdsCached())
 }
 
 /**

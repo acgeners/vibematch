@@ -135,7 +135,7 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
         toast.success(
           next
             ? "Pesos automáticos ativados — IA(n) usa pesos inferidos do seu histórico."
-            : "Pesos automáticos desativados — IA(n) usa pesos manuais de /preferences.",
+            : "Pesos automáticos desativados — IA(n) usa pesos manuais de /conta/preferencias.",
         )
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Erro ao alternar pesos automáticos")
@@ -246,7 +246,7 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
                   </span>
                   <InfoTooltip
                     label="Pesos automáticos"
-                    text="Quando ativo, o IA(n) usa pesos inferidos do seu histórico (weight-inference por Ridge) — menos input manual em /preferences. Quando desativa, usa os pesos que você configurou manualmente. Cai pra manual automaticamente se houver < 20 obras com nota pessoal."
+                    text="Quando ativo, o IA(n) usa pesos inferidos do seu histórico (weight-inference por Ridge) — menos input manual em /conta/preferencias. Quando desativa, usa os pesos que você configurou manualmente. Cai pra manual automaticamente se houver < 20 obras com nota pessoal."
                   />
                 </span>
                 <button

@@ -17,6 +17,13 @@ export interface ColumnThresholds {
   final: ScoreColorThresholds
   calc: ScoreColorThresholds
   predicted: ScoreColorThresholds
+  /**
+   * Cutoffs por critério (slug → thresholds), cada um calculado sobre a
+   * distribuição daquele atributo no catálogo. Usado pra colorir os 9
+   * atributos por percentil individual (em vez dos limiares fixos 8/6/4).
+   * Ausente/sem entrada pra um slug → cai nos limiares fixos.
+   */
+  criteria?: Record<string, ScoreColorThresholds>
 }
 
 interface ScoreBadgeProps {
@@ -30,7 +37,7 @@ interface ScoreBadgeProps {
   /**
    * Quando passado, as cores são definidas por bucket de percentil (top
    * 20% / 60-80% / 40-60% / 20-40% / bottom 20%, configurável em
-   * /preferences). Quando omitido, cai pros thresholds fixos abaixo —
+   * /conta/preferencias). Quando omitido, cai pros thresholds fixos abaixo —
    * mantém compat com badges de critério individual (escala absoluta).
    */
   thresholds?: ScoreColorThresholds | null
@@ -94,6 +101,54 @@ export function getScoreTextColor(
   }
 }
 
+// Critérios negativos: nota BAIXA é boa (drama/tragedy baixos = obra leve).
+const NEGATIVE_CRITERIA = new Set<string>(["drama", "tragedy"])
+
+// Pílulas soft por tier — usadas pelas células de atributo (escala 0–10).
+const CRITERION_TIER_CLASS: Record<"top" | "high" | "mid" | "low" | "bottom", string> = {
+  top: "bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25",
+  high: "bg-green-100 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-400 dark:border-green-500/25",
+  mid: "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-400 dark:border-yellow-500/25",
+  low: "bg-orange-100 text-orange-800 border border-orange-200 dark:bg-orange-500/15 dark:text-orange-400 dark:border-orange-500/25",
+  bottom: "bg-red-100 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25",
+}
+
+const TIER_ORDER = ["top", "high", "mid", "low", "bottom"] as const
+
+/**
+ * Classe de cor (pílula soft) pra uma nota de atributo (0–10).
+ *
+ * - Com `thresholds` (percentil daquele critério): usa `pickTier`. Pra critérios
+ *   negativos (drama/tragedy) o tier é INVERTIDO — percentil alto = ruim = vermelho.
+ * - Sem thresholds: cai nos limiares fixos históricos (positivo 8/6/4; negativo 3/5)
+ *   pra não regredir visualmente quando o pool é pequeno ou não há config.
+ */
+export function getCriterionColorClass(
+  score: number,
+  slug: string,
+  thresholds?: ScoreColorThresholds | null,
+): string {
+  const isNegative = NEGATIVE_CRITERIA.has(slug)
+  if (thresholds) {
+    const tier = pickTier(score, thresholds)
+    if (!isNegative) return CRITERION_TIER_CLASS[tier]
+    // Inverte: top↔bottom, high↔low, mid fica.
+    const idx = TIER_ORDER.indexOf(tier)
+    const inverted = TIER_ORDER[TIER_ORDER.length - 1 - idx]
+    return CRITERION_TIER_CLASS[inverted]
+  }
+  // Fallback fixo (comportamento histórico).
+  if (isNegative) {
+    if (score <= 3) return CRITERION_TIER_CLASS.high
+    if (score <= 5) return CRITERION_TIER_CLASS.mid
+    return CRITERION_TIER_CLASS.bottom
+  }
+  if (score >= 8) return CRITERION_TIER_CLASS.top
+  if (score >= 6) return CRITERION_TIER_CLASS.high
+  if (score >= 4) return CRITERION_TIER_CLASS.mid
+  return CRITERION_TIER_CLASS.bottom
+}
+
 const sizeClasses = {
   sm: "text-xs px-1.5 py-0.5 min-w-[2rem]",
   md: "text-sm px-2 py-0.5 min-w-[2.5rem]",
@@ -136,7 +191,7 @@ export function ScoreBadge({
         sizeClasses[size],
         className
       )}
-      title={showStub ? "Nota prevista estimada (sem modelo ML)" : undefined}
+      title={showStub ? "Nota Prevista estimada (sem modelo ML)" : undefined}
     >
       {roundUpDisplay
         ? String(Math.ceil(score))

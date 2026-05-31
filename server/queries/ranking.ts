@@ -8,6 +8,7 @@ import {
   getPersonalStatusNameById,
 } from "@/lib/constants/status-lookups"
 import { pickPrimarySynopsis, pickPrimaryCover } from "@/lib/work-derived"
+import { computeDecisionScore } from "@/lib/calculations/decision"
 
 export interface RankingDifferentiator {
   slug: string
@@ -36,6 +37,12 @@ export interface RankingEntry {
   /** Stage 2 da decomposição — contribuição das 8 quality scores. */
   expectedQualityAdj: number | null
   expectedIsStub: boolean
+  /**
+   * Nota de Decisão (0–10) — combina Prevista (âncora), fit (modulação limitada)
+   * e IA Rk. (quando há, ponderada pela confiança) num único número de
+   * PRIORIDADE. Ver lib/calculations/decision.ts. NULL quando não há Prevista.
+   */
+  decisionScore: number | null
   platformAvg: number | null
   totalVotes: number
   predictedIsStub: boolean
@@ -47,6 +54,8 @@ export interface RankingEntry {
   alignmentScore: number | null
   alignmentJustification: string | null
   alignmentAt: string | null
+  /** True quando o IA Rk persistido ficou desatualizado (obra editada/re-avaliada). */
+  alignmentStale: boolean
   /** Payload enriquecido (sub-fase 2.3.A). NULL pra runs antigas (prompt v1). */
   alignmentPayload: {
     confidence?: number
@@ -86,6 +95,7 @@ export type RankingSortBy =
   | "pred_score"
   | "predicted_score"
   | "expected_score"
+  | "decision"
   | "recommended"
   | "platform_avg"
   | "total_votes"
@@ -135,6 +145,15 @@ export interface RankingFilters {
   maxPredictedScore?: number
   minFinalScore?: number
   maxFinalScore?: number
+  /** Nota Prevista (expected_score, escala 0–10) — filtro headline do novo pipeline. */
+  minExpectedScore?: number
+  maxExpectedScore?: number
+  /** Alinhamento (personal_fit) filtrado pelo PERCENTIL 0–100 (o valor exibido na UI). */
+  minPersonalFitPct?: number
+  maxPersonalFitPct?: number
+  /** IA Rk (alignment_score, 0–100) — re-rank do consultor LLM. */
+  minAlignment?: number
+  maxAlignment?: number
   minPlatformAvg?: number
   maxPlatformAvg?: number
   minTotalVotes?: number
@@ -302,7 +321,7 @@ export async function getRanking(
       id, title, publication_status_id, personal_status_id, ai_eval_status,
       total_chapters, chapters_read, user_score, is_archived, is_favorite,
       synopsis_quality, observations, year, updated_at, last_read_at,
-      calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, platform_avg, total_votes, personal_fit, personal_fit_percentile, final_score_confidence, knn_score, alignment_score, alignment_justification, alignment_payload, alignment_at),
+      calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, platform_avg, total_votes, personal_fit, personal_fit_percentile, final_score_confidence, knn_score, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
       category_scores(criterion_slug, score),
       work_tags(tags(id, name, slug, tag_group_id)),
       work_genres(genres(name)),
@@ -412,6 +431,14 @@ export async function getRanking(
       expectedBaseline: w.calculated_scores?.expected_baseline ?? null,
       expectedQualityAdj: w.calculated_scores?.expected_quality_adj ?? null,
       expectedIsStub: w.calculated_scores?.expected_is_stub ?? true,
+      decisionScore: computeDecisionScore({
+        expected: w.calculated_scores?.expected_score ?? null,
+        fit: w.calculated_scores?.personal_fit ?? null,
+        alignment: w.calculated_scores?.alignment_score ?? null,
+        confidence:
+          (w.calculated_scores?.alignment_payload as { confidence?: number } | null)?.confidence ??
+          null,
+      }),
       platformAvg: w.calculated_scores?.platform_avg ?? null,
       totalVotes: w.calculated_scores?.total_votes ?? 0,
       predictedIsStub: w.calculated_scores?.predicted_is_stub ?? true,
@@ -422,6 +449,7 @@ export async function getRanking(
       alignmentScore: w.calculated_scores?.alignment_score ?? null,
       alignmentJustification: w.calculated_scores?.alignment_justification ?? null,
       alignmentAt: w.calculated_scores?.alignment_at ?? null,
+      alignmentStale: Boolean(w.calculated_scores?.alignment_stale),
       alignmentPayload: w.calculated_scores?.alignment_payload ?? null,
       userScore: w.user_score,
       isFavorite: Boolean(w.is_favorite),
@@ -541,6 +569,43 @@ export async function getRanking(
     const max = filters.maxFinalScore
     entries = entries.filter((e) => e.finalScore != null && e.finalScore <= max)
   }
+  if (filters.minExpectedScore != null) {
+    const min = filters.minExpectedScore
+    entries = entries.filter((e) => e.expectedScore != null && e.expectedScore >= min)
+  }
+  if (filters.maxExpectedScore != null) {
+    const max = filters.maxExpectedScore
+    entries = entries.filter((e) => e.expectedScore != null && e.expectedScore <= max)
+  }
+  // Alinhamento filtrado pelo percentil exibido (fallback: raw × 100, como na célula).
+  const fitPct = (e: RankingEntry) =>
+    e.personalFitPercentile != null
+      ? e.personalFitPercentile
+      : e.personalFit != null
+        ? e.personalFit * 100
+        : null
+  if (filters.minPersonalFitPct != null) {
+    const min = filters.minPersonalFitPct
+    entries = entries.filter((e) => {
+      const p = fitPct(e)
+      return p != null && p >= min
+    })
+  }
+  if (filters.maxPersonalFitPct != null) {
+    const max = filters.maxPersonalFitPct
+    entries = entries.filter((e) => {
+      const p = fitPct(e)
+      return p != null && p <= max
+    })
+  }
+  if (filters.minAlignment != null) {
+    const min = filters.minAlignment
+    entries = entries.filter((e) => e.alignmentScore != null && e.alignmentScore >= min)
+  }
+  if (filters.maxAlignment != null) {
+    const max = filters.maxAlignment
+    entries = entries.filter((e) => e.alignmentScore != null && e.alignmentScore <= max)
+  }
   if (filters.minPlatformAvg != null) {
     const min = filters.minPlatformAvg
     entries = entries.filter((e) => e.platformAvg != null && e.platformAvg >= min)
@@ -567,7 +632,7 @@ export async function getRanking(
   // Ordenação
   const levels: SortLevel[] = filters.sortLevels?.length
     ? filters.sortLevels
-    : [{ field: filters.sortBy ?? "final_score", dir: filters.sortDir ?? "desc" }]
+    : [{ field: filters.sortBy ?? "expected_score", dir: filters.sortDir ?? "desc" }]
 
   function compareByField(a: RankingEntry, b: RankingEntry, field: string, dir: "asc" | "desc"): number {
     const m = dir === "asc" ? 1 : -1
@@ -584,6 +649,8 @@ export async function getRanking(
       return m * (rawScore(a.predictedScore) - rawScore(b.predictedScore))
     if (field === "expected_score")
       return m * (rawScore(a.expectedScore) - rawScore(b.expectedScore))
+    if (field === "decision")
+      return m * (rawScore(a.decisionScore) - rawScore(b.decisionScore))
     if (field === "recommended") {
       // Free default: Nota Esperada modulada pelo fit_score (0–1).
       // expected × (0.6 + 0.4·fit). Sem expected, cai pro fim.

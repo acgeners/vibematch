@@ -126,7 +126,7 @@ export default async function RunDetailPage({ params }: PageProps) {
           <strong>{droppedCount}</strong> obra{droppedCount === 1 ? "" : "s"} não entr
           {droppedCount === 1 ? "ou" : "aram"} nesta run (limite de {run.nCandidates}{" "}
           selecionado, total disponível: {run.nAvailable}). As com menor{" "}
-          <span className="font-mono">expected_score</span> (Nota Esperada) foram descartadas.
+          <span className="font-mono">expected_score</span> (Nota Prevista) foram descartadas.
         </div>
       )}
 

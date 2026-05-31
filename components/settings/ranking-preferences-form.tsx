@@ -26,8 +26,9 @@ const optionalNumber = (max?: number) =>
 
 const schema = z.object({
   top_n: optionalNumber(30),
-  min_calc_score: optionalNumber(10),
-  min_predicted_score: optionalNumber(10),
+  // Repurposado no cutover Fase 1.5: a coluna min_final_score agora guarda a
+  // "Nota Prevista mínima" (filtra expected_score). Os legados min_calc/min_pr
+  // saíram da UI e são zerados ao salvar.
   min_final_score: optionalNumber(10),
 })
 
@@ -48,8 +49,6 @@ export function RankingPreferencesForm({ config }: RankingPreferencesFormProps) 
     resolver: zodResolver(schema),
     defaultValues: {
       top_n: config.top_n,
-      min_calc_score: config.min_calc_score,
-      min_predicted_score: config.min_predicted_score,
       min_final_score: config.min_final_score,
     },
   })
@@ -62,7 +61,13 @@ export function RankingPreferencesForm({ config }: RankingPreferencesFormProps) 
   const handleConfirm = async () => {
     if (!pending) return
     setConfirmOpen(false)
-    const result = await updateRankingPreferences(pending)
+    const result = await updateRankingPreferences({
+      top_n: pending.top_n,
+      // Legados removidos do pipeline visível — zerados ao salvar.
+      min_calc_score: null,
+      min_predicted_score: null,
+      min_final_score: pending.min_final_score,
+    })
     if (result.error) {
       toast.error(`Erro ao salvar: ${result.error}`)
       return
@@ -124,25 +129,13 @@ export function RankingPreferencesForm({ config }: RankingPreferencesFormProps) 
         }}
       />
 
-      {/* 3 score min sliders */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      {/* Nota Prevista mínima (única — legados Nota.IA/Pr removidos no cutover) */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <ScoreMinSlider
           control={control}
           name="min_final_score"
-          label="Nota.Final mínima"
-          hint="Esconde obras com Nota.Final abaixo desse valor."
-        />
-        <ScoreMinSlider
-          control={control}
-          name="min_calc_score"
-          label="Nota.IA mínima"
-          hint="Esconde obras com Nota.IA abaixo desse valor."
-        />
-        <ScoreMinSlider
-          control={control}
-          name="min_predicted_score"
-          label="Nota.Pr mínima"
-          hint="Esconde obras com Nota.Pr abaixo desse valor."
+          label="Nota Prevista mínima"
+          hint="Esconde obras com Nota Prevista abaixo desse valor."
         />
       </div>
 

@@ -2,7 +2,7 @@
 
 import { useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Loader2, Sparkles } from "lucide-react"
+import { Loader2, Sparkles, RotateCw } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
@@ -10,15 +10,14 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 
 /**
- * Botão pequeno que substitui o "—" da `AlignmentScoreCell` quando há um
- * `workId`. Dispara `rerankSingleWorkAction` (1 LLM call) e força refresh
- * dos server components pra cell renderizar o badge com a nova nota.
+ * Hook compartilhado pelo re-rank de uma obra. Dispara `rerankSingleWorkAction`
+ * (1 LLM call), avisa via toast e força refresh dos server components pra a cell
+ * renderizar o badge atualizado.
  */
-function RerankSingleWorkButton({ workId }: { workId: string }) {
+function useRerankSingleWork(workId: string) {
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
-
-  const handleClick = () => {
+  const run = () => {
     startTransition(async () => {
       const result = await rerankSingleWorkAction(workId)
       if (result.error || !result.data) {
@@ -29,6 +28,15 @@ function RerankSingleWorkButton({ workId }: { workId: string }) {
       router.refresh()
     })
   }
+  return { isPending, run }
+}
+
+/**
+ * Botão pequeno que substitui o "—" da `AlignmentScoreCell` quando há um
+ * `workId` mas ainda não há nota (primeiro re-rank da obra).
+ */
+function RerankSingleWorkButton({ workId }: { workId: string }) {
+  const { isPending, run } = useRerankSingleWork(workId)
 
   return (
     <TooltipProvider>
@@ -36,7 +44,7 @@ function RerankSingleWorkButton({ workId }: { workId: string }) {
         <TooltipTrigger asChild>
           <button
             type="button"
-            onClick={handleClick}
+            onClick={run}
             disabled={isPending}
             className="inline-flex items-center gap-1 rounded-md border border-dashed border-muted-foreground/40 px-1.5 py-0.5 text-xs text-muted-foreground hover:border-violet-500/60 hover:text-violet-600 dark:hover:text-violet-400 disabled:opacity-50 disabled:cursor-wait"
           >
@@ -50,6 +58,43 @@ function RerankSingleWorkButton({ workId }: { workId: string }) {
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[260px]">
           Rodar IA re-rank só pra esta obra. Conta uma execução do limite diário.
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+/**
+ * Ícone ⟳ clicável ao lado da nota quando o IA Rk está DESATUALIZADO. Roda o
+ * re-rank só desta obra (mesma action do "Rankear"), limpando o stale.
+ */
+function RerankStaleButton({ workId }: { workId: string }) {
+  const { isPending, run } = useRerankSingleWork(workId)
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              run()
+            }}
+            disabled={isPending}
+            aria-label="Atualizar IA Rk (desatualizado)"
+            className="inline-flex items-center justify-center rounded p-0.5 text-amber-500 hover:bg-amber-500/10 hover:text-amber-600 disabled:cursor-wait disabled:opacity-50 dark:hover:text-amber-400"
+          >
+            {isPending ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <RotateCw className="h-3 w-3" />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[260px]">
+          Desatualizado — a obra mudou desde este re-rank. Clique pra rodar o IA re-rank
+          só desta obra. Conta uma execução do limite diário.
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -78,12 +123,15 @@ export function AlignmentScoreCell({
   workId,
   payload,
   isPaid = true,
+  stale = false,
 }: {
   score: number | null
   justification: string | null
   workId?: string
   payload?: AlignmentPayload | null
   isPaid?: boolean
+  /** True quando o IA Rk ficou desatualizado (obra editada/re-avaliada). */
+  stale?: boolean
 }) {
   if (score == null) {
     if (workId && isPaid) {
@@ -101,7 +149,7 @@ export function AlignmentScoreCell({
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-[260px]">
               O re-rank por IA (IA Rk) é uma feature do plano Pago. No Free o ranking usa
-              Nota Esperada × alinhamento.
+              Nota Prevista × alinhamento.
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -149,7 +197,13 @@ export function AlignmentScoreCell({
     : "bg-slate-400"
     : null
 
+  // Quando desatualizado e o re-rank é possível (Pago + workId), o ⟳ vira um
+  // botão clicável ao lado do badge. Senão, fica como indicador estático dentro
+  // do badge (Free ou sem workId).
+  const canRerankStale = stale && !!workId && isPaid
+
   return (
+    <span className="inline-flex items-center gap-1">
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -157,6 +211,7 @@ export function AlignmentScoreCell({
             className={cn(
               "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs font-medium cursor-help tabular-nums",
               colorClass,
+              stale && "opacity-60",
             )}
           >
             {confidenceDot && (
@@ -166,9 +221,18 @@ export function AlignmentScoreCell({
               />
             )}
             {Math.round(score)}
+            {stale && !canRerankStale && (
+              <RotateCw className="h-3 w-3 text-amber-500" aria-label="Desatualizado" />
+            )}
           </span>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[400px] space-y-1.5">
+          {stale && (
+            <p className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+              <RotateCw className="h-3 w-3" />
+              Desatualizado — a obra mudou desde este re-rank. Rode o IA re-rank de novo pra atualizar.
+            </p>
+          )}
           <div className="flex items-center justify-between gap-3">
             <p className="font-semibold text-xs">IA Re-rank: {Math.round(score)}/100</p>
             {payload?.confidence != null && (
@@ -217,6 +281,85 @@ export function AlignmentScoreCell({
               )}
             </div>
           )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+      {canRerankStale && <RerankStaleButton workId={workId!} />}
+    </span>
+  )
+}
+
+/**
+ * Cell pra a Nota Final (0–10) — número de PRIORIDADE que combina Prevista,
+ * Alinhamento e (quando há) IA Rk. Distinta visualmente das outras notas (tom
+ * primary) porque é o critério default de ordenação. O tooltip abre a composição
+ * pra deixar claro que NÃO é uma previsão de nota, e sim "o que ler primeiro".
+ */
+export function DecisionCell({
+  score,
+  expected,
+  fitPercentile,
+  alignment,
+}: {
+  score: number | null
+  expected: number | null
+  fitPercentile: number | null
+  alignment: number | null
+}) {
+  if (score == null) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="font-mono text-sm text-muted-foreground cursor-help">—</span>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-[260px]">
+            Sem Nota Final — depende da Nota Prevista, que ainda não foi calculada pra esta obra.
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    )
+  }
+
+  const colorClass =
+    score >= 8 ? "bg-primary/15 text-primary border-primary/40"
+    : score >= 6 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
+    : score >= 4 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
+    : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className={cn(
+              "inline-flex items-center rounded-md border px-1.5 py-0.5 text-sm font-bold cursor-help tabular-nums",
+              colorClass,
+            )}
+          >
+            {score.toFixed(1)}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[300px] space-y-1.5">
+          <p className="text-xs font-semibold">Nota Final: {score.toFixed(1)}/10</p>
+          <p className="text-[11px] text-muted-foreground">
+            Prioridade pra escolher o que ler primeiro — combina as notas abaixo.
+            <span className="font-semibold"> Não é uma previsão de nota</span> (essa é a Prevista).
+          </p>
+          <div className="border-t border-border/40 pt-1.5 space-y-0.5 text-xs">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Prevista (âncora)</span>
+              <span className="font-mono font-semibold">{expected != null ? expected.toFixed(1) : "—"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Alinhamento (±10%)</span>
+              <span className="font-mono font-semibold">{fitPercentile != null ? `${Math.round(fitPercentile)}%` : "—"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">IA Rk. (quando há)</span>
+              <span className="font-mono font-semibold">{alignment != null ? Math.round(alignment) : "não rankeada"}</span>
+            </div>
+          </div>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

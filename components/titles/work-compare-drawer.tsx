@@ -1,27 +1,41 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { toast } from "sonner"
 import {
   BookOpen,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
+  GripVertical,
   ImageOff,
   Loader2,
+  Minus,
+  Plus,
   Rows3,
   Sparkles,
+  Trophy,
   X,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { ScoreBadge, type ColumnThresholds, type ScoreColorThresholds } from "@/components/ui/score-badge"
+import { ScoreBadge, getCriterionColorClass, type ColumnThresholds, type ScoreColorThresholds } from "@/components/ui/score-badge"
 import {
   PersonalStatusBadge,
   PublicationStatusBadge,
@@ -37,6 +51,7 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import { cn } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { fetchCompareWorks, type CompareWork } from "@/server/actions/compare"
+import { rerankClusterAction } from "@/server/actions/recommendations"
 import {
   ColumnPicker,
   type ColumnPickerColumnDef,
@@ -44,7 +59,9 @@ import {
 } from "@/components/ui/column-picker"
 
 const HIDDEN_ROWS_STORAGE_KEY = "compare_hidden_rows_v1"
-const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v2"
+// v3 → v4: adiciona as linhas "Nota Final" (decision) e "Alinhamento"
+// (personal_fit) ao grupo Notas, posicionadas na ordem canônica.
+const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v4"
 
 interface CompareRowDef {
   key: string
@@ -71,12 +88,15 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
     id: "notas",
     label: "Notas",
     rows: [
-      { key: "score:finalScore", label: "Final" },
-      { key: "score:calcScore", label: "IA" },
-      { key: "score:predictedScore", label: "Prevista" },
+      { key: "score:decision", label: "Nota Final" },
+      { key: "score:expectedScore", label: "Nota Prevista" },
+      { key: "score:personalFit", label: "Alinhamento" },
       { key: "score:alignmentScore", label: "IA Rk." },
-      { key: "score:userScore", label: "Pessoal" },
       { key: "score:platformAvg", label: "Média externa" },
+      { key: "score:userScore", label: "Pessoal" },
+      { key: "score:finalScore", label: "Final (legado)" },
+      { key: "score:calcScore", label: "IA (legado)" },
+      { key: "score:predictedScore", label: "Pr (legado)" },
     ],
   },
   {
@@ -104,9 +124,18 @@ const COMPARE_ROW_COLUMN_DEFS: ColumnPickerColumnDef[] = COMPARE_ROW_GROUPS.flat
   g.rows.map((r) => ({ key: r.key, label: r.label, group: g.id }))
 )
 
+// Default enxuto (cutover Fase 1.5): visíveis = Capítulos, Ano, Nota Prevista,
+// IA Rk, Média externa, todos os atributos e Gêneros/Tags. Escondidos por padrão:
+// Status, Pessoal e as notas legadas (Final/IA/Pr).
 const DEFAULT_ROWS_CONFIG: ColumnPickerConfig = {
   order: ALL_ROW_KEYS,
-  hidden: [],
+  hidden: [
+    "status",
+    "score:userScore",
+    "score:finalScore",
+    "score:calcScore",
+    "score:predictedScore",
+  ],
 }
 
 /**
@@ -153,6 +182,15 @@ function writeRowsConfig(config: ColumnPickerConfig) {
   }
 }
 
+interface VerdictItem {
+  workId: string
+  title: string
+  slug: string
+  coverUrl: string | null
+  alignmentScore: number
+  justification: string
+}
+
 interface WorkCompareDrawerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -160,6 +198,8 @@ interface WorkCompareDrawerProps {
   onClear: () => void
   onRemoveId: (id: string) => void
   scoreThresholds: ColumnThresholds | null
+  /** Quando false, o "Desempatar com IA" mostra upsell em vez de rodar (feature Pago). */
+  isPaid?: boolean
 }
 
 export function WorkCompareDrawer({
@@ -169,25 +209,98 @@ export function WorkCompareDrawer({
   onClear,
   onRemoveId,
   scoreThresholds,
+  isPaid = true,
 }: WorkCompareDrawerProps) {
   const [works, setWorks] = useState<CompareWork[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [diffOnly, setDiffOnly] = useState(false)
+  const [showBestWorst, setShowBestWorst] = useState(true)
+  const [reranking, setReranking] = useState(false)
+  // Bump pra forçar o re-fetch das obras após o desempate por IA (repovoar a
+  // linha "IA Rk." com os alignment_score recém-computados).
+  const [reloadKey, setReloadKey] = useState(0)
+  // Veredito do último desempate por IA (popup com 1º/2º/3º + justificativa).
+  const [verdict, setVerdict] = useState<VerdictItem[] | null>(null)
   const [rowsConfig, setRowsConfig] = useState<ColumnPickerConfig>(() => readRowsConfig())
   const hiddenRows = useMemo(() => new Set(rowsConfig.hidden), [rowsConfig.hidden])
-  const idsKey = ids.join(",")
+  
+  const [orderedIds, setOrderedIds] = useState<string[]>([])
+  const parentIdsSortedKey = useMemo(() => [...ids].sort().join(","), [ids])
+
+  // Espelho do `works` atual, lido dentro do effect de fetch sem precisar
+  // adicioná-lo às deps (o que causaria loop de re-fetch).
+  const worksRef = useRef<CompareWork[]>([])
+  useEffect(() => {
+    worksRef.current = works
+  }, [works])
+  // Último reloadKey já materializado por fetch — distingue "rerank pediu
+  // reload" de uma simples mudança de ids.
+  const appliedReloadKey = useRef(0)
+  // Cada abertura do drawer faz um fetch inicial; resetado ao fechar.
+  const fetchedForOpenRef = useRef(false)
+  useEffect(() => {
+    if (!open) fetchedForOpenRef.current = false
+  }, [open])
+
+  // Synchronize orderedIds with parent ids while preserving any custom ordering.
+  // Sync de estado a partir de props é intencional aqui (mantém a ordem custom
+  // do drag em dia quando a tabela pai é reordenada), por isso a supressão.
+  useEffect(() => {
+    if (!open) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOrderedIds((prev) => {
+      const filteredPrev = prev.filter((id) => ids.includes(id))
+      const newIds = ids.filter((id) => !prev.includes(id))
+      return [...filteredPrev, ...newIds]
+    })
+  }, [ids, open])
 
   useEffect(() => {
     if (!open || ids.length === 0) return
+
+    // Reconciliação ordem ↔ dados: preserva a ordem custom (drag) e joga ids
+    // novos pro fim. Usada tanto no caminho local quanto no de fetch.
+    const applyData = (dataById: Map<string, CompareWork>) => {
+      setOrderedIds((currentOrder) => {
+        const filteredOrder = currentOrder.filter((id) => dataById.has(id))
+        const newIds = ids.filter((id) => !currentOrder.includes(id))
+        const finalOrder = [...filteredOrder, ...newIds]
+
+        const sortedData = finalOrder
+          .map((id) => dataById.get(id))
+          .filter((w): w is CompareWork => Boolean(w))
+
+        setWorks(sortedData)
+        return finalOrder
+      })
+    }
+
+    // Remoção/reordenação dentro de uma sessão já carregada: já temos os dados
+    // de todos os ids pedidos e não é reload forçado (rerank) nem a primeira
+    // carga. Atualiza na hora — sem spinner nem round-trip — pra que o grid e o
+    // resumo "Onde diferenciam" reflitam imediatamente os itens exibidos.
+    const forcedReload = reloadKey !== appliedReloadKey.current
+    const haveAll = ids.every((id) => worksRef.current.some((w) => w.id === id))
+    if (fetchedForOpenRef.current && !forcedReload && haveAll) {
+      // Só os ids ainda pedidos — `applyData` descarta do finalOrder o que não
+      // está no mapa, então isto remove a coluna excluída.
+      const idSet = new Set(ids)
+      applyData(
+        new Map(worksRef.current.filter((w) => idSet.has(w.id)).map((w) => [w.id, w]))
+      )
+      return
+    }
+
     let cancelled = false
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setError(null)
     fetchCompareWorks(ids)
       .then((data) => {
         if (cancelled) return
-        setWorks(data)
+        fetchedForOpenRef.current = true
+        appliedReloadKey.current = reloadKey
+        applyData(new Map(data.map((w) => [w.id, w])))
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -200,7 +313,19 @@ export function WorkCompareDrawer({
     return () => {
       cancelled = true
     }
-  }, [open, idsKey, ids])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, parentIdsSortedKey, reloadKey])
+
+  const moveColumn = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return
+    const nextWorks = [...works]
+    const [draggedItem] = nextWorks.splice(fromIndex, 1)
+    nextWorks.splice(toIndex, 0, draggedItem)
+    setWorks(nextWorks)
+
+    const nextIds = nextWorks.map((w) => w.id)
+    setOrderedIds(nextIds)
+  }
 
   const updateRowsConfig = (next: ColumnPickerConfig) => {
     const normalized = normalizeRowsConfig(next)
@@ -210,7 +335,45 @@ export function WorkCompareDrawer({
 
   const resetRows = () => updateRowsConfig(DEFAULT_ROWS_CONFIG)
 
+  // Desempate por IA: roda o re-ranker comparando só as obras do drawer
+  // cabeça-a-cabeça (rerankClusterAction), depois re-fetcha pra repovoar a linha
+  // "IA Rk." com os scores/justificativas frescos. O destaque "Melhor/pior"
+  // marca o vencedor em verde automaticamente.
+  const handleRerank = () => {
+    if (ids.length < 2 || reranking) return
+    setReranking(true)
+    rerankClusterAction(ids)
+      .then((res) => {
+        if (res.error || !res.data) {
+          toast.error(res.error ?? "Erro ao desempatar com IA.")
+          return
+        }
+        // Monta o veredito: ordena (já vem desc) e enriquece com título/capa das
+        // obras carregadas (estáveis), pra abrir o popup 1º/2º/3º.
+        const worksById = new Map(works.map((w) => [w.id, w]))
+        const items: VerdictItem[] = res.data.rankings.map((r) => {
+          const w = worksById.get(r.workId)
+          return {
+            workId: r.workId,
+            title: w?.title ?? "Obra",
+            slug: w?.slug ?? "",
+            coverUrl: w?.coverUrl ?? null,
+            alignmentScore: r.alignmentScore,
+            justification: r.justification,
+          }
+        })
+        setVerdict(items)
+        // Re-fetch em paralelo pra atualizar as linhas IA Rk. / Nota Final no fundo.
+        setReloadKey((k) => k + 1)
+      })
+      .catch((err: unknown) =>
+        toast.error(err instanceof Error ? err.message : "Erro ao desempatar com IA."),
+      )
+      .finally(() => setReranking(false))
+  }
+
   return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
@@ -228,7 +391,12 @@ export function WorkCompareDrawer({
               </span>
             )}
           </SheetTitle>
-          <div className="flex items-center gap-2">
+          {!loading && works.length >= 2 && (
+            <div className="hidden min-w-0 flex-1 items-center justify-center overflow-x-auto px-2 lg:flex">
+              <DifferentialsSummary works={works} compact />
+            </div>
+          )}
+          <div className="flex shrink-0 items-center gap-2">
             <ColumnPicker
               columns={COMPARE_ROW_COLUMN_DEFS}
               groupLabels={COMPARE_ROW_GROUP_LABELS}
@@ -246,6 +414,38 @@ export function WorkCompareDrawer({
                 className="h-7 text-xs"
               >
                 Só diferenças
+              </Button>
+            )}
+            {works.length >= 2 && (
+              <Button
+                variant={showBestWorst ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowBestWorst((v) => !v)}
+                className="h-7 text-xs"
+                title="Mostra/oculta o destaque de melhor (verde) e pior (vermelho) por linha"
+              >
+                Melhor/pior
+              </Button>
+            )}
+            {works.length >= 2 && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleRerank}
+                disabled={reranking || !isPaid}
+                className="h-7 gap-1 text-xs"
+                title={
+                  isPaid
+                    ? "Roda o IA re-rank comparando estas obras entre si e desempata por veredito (IA Rk. + justificativa). Conta uma execução do limite diário."
+                    : "Desempate por IA é uma feature do plano Pago."
+                }
+              >
+                {reranking ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5" />
+                )}
+                {reranking ? "Desempatando…" : isPaid ? "Desempatar com IA" : "Desempatar com IA · Pago"}
               </Button>
             )}
             <Button variant="ghost" size="sm" onClick={onClear} className="h-7 text-xs">
@@ -281,8 +481,10 @@ export function WorkCompareDrawer({
             <CompareGrid
               works={works}
               onRemoveId={onRemoveId}
+              onMoveColumn={moveColumn}
               scoreThresholds={scoreThresholds}
               diffOnly={diffOnly}
+              highlightBestWorst={showBestWorst}
               hiddenRows={hiddenRows}
               rowOrder={rowsConfig.order}
             />
@@ -290,6 +492,162 @@ export function WorkCompareDrawer({
         </div>
       </SheetContent>
     </Sheet>
+
+    <VerdictDialog items={verdict} onClose={() => setVerdict(null)} />
+    </>
+  )
+}
+
+/**
+ * Popup do "Desempate por IA": ranking 1º/2º/3º das obras comparadas, com o
+ * vencedor destacado (🏆) e a justificativa do LLM por obra. Espelha o visual do
+ * "Surpreenda-me" (/ranking). Aberto quando `items` não é null.
+ */
+function VerdictDialog({
+  items,
+  onClose,
+}: {
+  items: VerdictItem[] | null
+  onClose: () => void
+}) {
+  const open = items != null && items.length > 0
+  const total = items?.length ?? 0
+  // Remonta a lista (resetando a contagem visível pro default) a cada novo
+  // veredito — a key muda quando o conjunto/ordem das obras muda.
+  const verdictKey = (items ?? []).map((i) => i.workId).join(",")
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="grid max-h-[85vh] grid-rows-[auto_minmax(0,1fr)] sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Trophy className="h-4 w-4 text-amber-500" />
+            Veredito da IA
+          </DialogTitle>
+          <DialogDescription>
+            Comparação cabeça-a-cabeça destas {total} obras. A IA Rk. (0–100)
+            ordena o desempate e já entrou na Nota Final de cada uma.
+          </DialogDescription>
+        </DialogHeader>
+
+        {items && items.length > 0 && <VerdictList key={verdictKey} items={items} />}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * Lista do veredito: por padrão mostra o top 3, com um stepper (− / +) pra
+ * ajustar manualmente quantas obras exibir, e um atalho "Ver todas". A área
+ * de cards rola sozinha quando excede a altura disponível do diálogo.
+ */
+function VerdictList({ items }: { items: VerdictItem[] }) {
+  const [visibleCount, setVisibleCount] = useState(() => Math.min(3, items.length))
+  const showControl = items.length > 3
+  const shown = items.slice(0, visibleCount)
+  const remaining = items.length - visibleCount
+
+  return (
+    <div className="flex min-h-0 flex-col gap-2.5">
+      {showControl && (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground">
+            Mostrando top{" "}
+            <span className="font-semibold tabular-nums text-foreground">{visibleCount}</span> de{" "}
+            {items.length}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-6 w-6"
+              disabled={visibleCount <= 1}
+              onClick={() => setVisibleCount((c) => Math.max(1, c - 1))}
+              aria-label="Mostrar menos obras"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-6 w-6"
+              disabled={visibleCount >= items.length}
+              onClick={() => setVisibleCount((c) => Math.min(items.length, c + 1))}
+              aria-label="Mostrar mais obras"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-1">
+        {shown.map((item, index) => (
+          <VerdictCard key={item.workId} item={item} position={index + 1} />
+        ))}
+        {remaining > 0 && (
+          <button
+            type="button"
+            onClick={() => setVisibleCount(items.length)}
+            className="mt-0.5 rounded-md border border-dashed border-border/70 py-2 text-center text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+          >
+            Ver todas as {items.length} obras (+{remaining})
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function VerdictCard({ item, position }: { item: VerdictItem; position: number }) {
+  const medal = position === 1 ? "🥇" : position === 2 ? "🥈" : position === 3 ? "🥉" : null
+  const isWinner = position === 1
+  const card = (
+    <div
+      className={cn(
+        "group flex gap-3 rounded-lg border bg-card/60 p-3 transition-colors",
+        isWinner
+          ? "border-amber-400/60 bg-amber-50/40 dark:bg-amber-500/5"
+          : "hover:border-primary/40 hover:bg-card",
+      )}
+    >
+      <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded border bg-muted">
+        {item.coverUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={getCoverImageSrc(item.coverUrl)}
+            alt={item.title}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+            <ImageOff className="h-4 w-4" />
+          </div>
+        )}
+        <span className="absolute left-0.5 top-0.5 text-base leading-none drop-shadow">
+          {medal ?? <span className="rounded bg-background/80 px-1 text-[10px] font-bold tabular-nums">{position}º</span>}
+        </span>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold leading-tight">
+          <span className="text-muted-foreground">{position}º</span>
+          <span className="line-clamp-2 group-hover:underline">{item.title}</span>
+          {item.slug && (
+            <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+          )}
+        </h3>
+        <span className="inline-flex w-fit items-center gap-1 rounded-md border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-violet-700 dark:text-violet-300">
+          IA Rk. {Math.round(item.alignmentScore)}
+        </span>
+        <p className="text-xs leading-relaxed text-muted-foreground">{item.justification}</p>
+      </div>
+    </div>
+  )
+  return item.slug ? (
+    <Link href={`/titles/${item.slug}`} target="_blank" rel="noreferrer" className="block">
+      {card}
+    </Link>
+  ) : (
+    card
   )
 }
 
@@ -354,8 +712,11 @@ function getUniqueBestWorst(
 interface CompareGridProps {
   works: CompareWork[]
   onRemoveId: (id: string) => void
+  onMoveColumn?: (fromIndex: number, toIndex: number) => void
   scoreThresholds: ColumnThresholds | null
   diffOnly: boolean
+  /** Liga/desliga o destaque visual de melhor (verde) / pior (vermelho) por linha. */
+  highlightBestWorst: boolean
   hiddenRows: Set<string>
   /** Ordem das linhas escolhida pelo usuário (lista achatada de keys).
    *  Aplicada às seções iteradas (Notas, Critérios). */
@@ -380,13 +741,16 @@ function sortByOrder<T>(items: T[], getKey: (item: T) => string, order: string[]
 function CompareGrid({
   works,
   onRemoveId,
+  onMoveColumn,
   scoreThresholds,
   diffOnly,
+  highlightBestWorst,
   hiddenRows,
   rowOrder,
 }: CompareGridProps) {
   const n = works.length
   const [collapsed, setCollapsed] = useState<Set<SectionKey>>(new Set())
+  const [draggedOverIndex, setDraggedOverIndex] = useState<number | null>(null)
 
   const toggleSection = (key: SectionKey) =>
     setCollapsed((prev) => {
@@ -443,22 +807,50 @@ function CompareGrid({
     thresholds: ScoreColorThresholds | null
     renderExtra?: (w: CompareWork) => React.ReactNode
     wrapScore?: (node: React.ReactNode, w: CompareWork) => React.ReactNode
+    /** Renderiza o número no mesmo box dos atributos (h-7 w-12, font-bold) em
+     *  vez do ScoreBadge pequeno — pra dar o mesmo destaque visual. */
+    asAttributeBox?: boolean
   }> = [
     {
+      // Nota Final (0–10) — número de prioridade que combina Prevista + Alinhamento
+      // + IA Rk. Mesmo box colorido dos atributos (escala 0–10).
+      key: "score:decision",
+      label: "Nota Final",
+      get: (w) => w.decisionScore,
+      thresholds: scoreThresholds?.final ?? null,
+      asAttributeBox: true,
+    },
+    {
+      key: "score:expectedScore",
+      label: "Nota Prevista",
+      get: (w) => w.expectedScore,
+      thresholds: scoreThresholds?.final ?? null,
+      asAttributeBox: true,
+    },
+    {
+      // Alinhamento — percentil na biblioteca (fallback pro cru × 100). Escala
+      // 0–100%, então formatScore mostra "%" e thresholds=null (sem ScoreBadge).
+      key: "score:personalFit",
+      label: "Alinhamento",
+      get: (w) => w.personalFitPercentile ?? (w.personalFit != null ? w.personalFit * 100 : null),
+      thresholds: null,
+      formatScore: (v) => `${Math.round(v)}%`,
+    },
+    {
       key: "score:finalScore",
-      label: "Final",
+      label: "Final (legado)",
       get: (w) => w.finalScore,
       thresholds: scoreThresholds?.final ?? null,
     },
     {
       key: "score:calcScore",
-      label: "IA",
+      label: "IA (legado)",
       get: (w) => w.calcScore,
       thresholds: scoreThresholds?.calc ?? null,
     },
     {
       key: "score:predictedScore",
-      label: "Prevista",
+      label: "Pr (legado)",
       get: (w) => w.predictedScore,
       stub: (w) => w.predictedIsStub,
       thresholds: scoreThresholds?.predicted ?? null,
@@ -529,19 +921,49 @@ function CompareGrid({
 
   return (
     <TooltipProvider delayDuration={150}>
-      {/* "O que diferencia" — sumário independente acima do grid, alinhado
-          com o padding lateral pra não conflitar visualmente com as colunas. */}
-      <div className="mx-auto w-fit px-4 pt-4 sm:px-6">
-        <DifferentialsSummary works={works} />
-      </div>
+      {/* O sumário "Onde elas se diferenciam" foi movido pra barra superior
+          (renderizado no WorkCompareDrawer, abaixo do header). */}
       <div
         className="mx-auto grid w-fit gap-x-2 px-4 py-4 text-sm sm:px-6"
         style={gridStyle}
       >
         {/* Header */}
         <div className="sticky left-0 top-0 z-30 bg-background/95 backdrop-blur-md" />
-        {works.map((w) => (
-          <CompareHeaderCell key={w.id} work={w} onRemove={() => onRemoveId(w.id)} />
+        {works.map((w, index) => (
+          <div
+            key={w.id}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("text/plain", String(index))
+              e.dataTransfer.effectAllowed = "move"
+            }}
+            onDragOver={(e) => {
+              e.preventDefault()
+            }}
+            onDragEnter={() => {
+              setDraggedOverIndex(index)
+            }}
+            onDragEnd={() => {
+              setDraggedOverIndex(null)
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              const fromIndex = Number(e.dataTransfer.getData("text/plain"))
+              if (!isNaN(fromIndex) && fromIndex !== index) {
+                onMoveColumn?.(fromIndex, index)
+              }
+              setDraggedOverIndex(null)
+            }}
+            className={cn(
+              "sticky top-0 z-20 transition-all duration-200",
+              draggedOverIndex === index && "ring-2 ring-dashed ring-primary ring-offset-2 rounded-lg scale-[0.98] opacity-70"
+            )}
+          >
+            <CompareHeaderCell
+              work={w}
+              onRemove={() => onRemoveId(w.id)}
+            />
+          </div>
         ))}
 
         {/* Status */}
@@ -597,7 +1019,9 @@ function CompareGrid({
         )}
          {showNotasSection && !isCollapsed("notas") &&
           visibleNotasRows.map((row) => {
-            const { bestIndex, worstIndex } = getUniqueBestWorst(works, row.get)
+            const { bestIndex, worstIndex } = highlightBestWorst
+              ? getUniqueBestWorst(works, row.get)
+              : { bestIndex: null, worstIndex: null }
             return (
               <ScoreRow
                 key={row.key}
@@ -611,6 +1035,7 @@ function CompareGrid({
                 getStub={row.stub}
                 renderExtra={row.renderExtra}
                 wrapScore={row.wrapScore}
+                asAttributeBox={row.asAttributeBox}
               />
             )
           })}
@@ -627,11 +1052,13 @@ function CompareGrid({
           visibleCritSlugs.map((slug) => {
             const info = CRITERIA_INFO[slug]
             const isNegative = slug === "drama" || slug === "tragedy"
-            const { bestIndex, worstIndex } = getUniqueBestWorst(
-              works,
-              (w) => w.criteria.find((c) => c.slug === slug)?.score ?? null,
-              isNegative
-            )
+            const { bestIndex, worstIndex } = highlightBestWorst
+              ? getUniqueBestWorst(
+                  works,
+                  (w) => w.criteria.find((c) => c.slug === slug)?.score ?? null,
+                  isNegative
+                )
+              : { bestIndex: null, worstIndex: null }
             return (
               <CriterionRow
                 key={slug}
@@ -641,6 +1068,7 @@ function CompareGrid({
                 works={works}
                 bestIndex={bestIndex}
                 worstIndex={worstIndex}
+                thresholds={scoreThresholds?.criteria?.[slug] ?? null}
               />
             )
           })}
@@ -668,9 +1096,32 @@ function CompareGrid({
   )
 }
 
-function DifferentialsSummary({ works }: { works: CompareWork[] }) {
+function DifferentialsSummary({ works, compact = false }: { works: CompareWork[]; compact?: boolean }) {
   const diffs = getMaxAmplitudeCriteria(works)
   if (diffs.length === 0) return null
+  if (compact) {
+    return (
+      <div className="flex min-w-0 items-center gap-1.5 text-xs">
+        <span className="shrink-0 font-semibold uppercase tracking-wide text-muted-foreground">
+          Onde diferenciam:
+        </span>
+        {diffs.map((d) => {
+          const info = CRITERIA_INFO[d.slug]
+          return (
+            <span
+              key={d.slug}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300/40 bg-background/60 px-1.5 py-0.5"
+              title={`${info?.name ?? d.slug}: ${d.min.toFixed(1)} → ${d.max.toFixed(1)}`}
+            >
+              <span>{info?.emoji}</span>
+              <span className="font-medium">{info?.name ?? d.slug}</span>
+              <span className="font-mono text-amber-700 dark:text-amber-300">Δ{d.amplitude.toFixed(1)}</span>
+            </span>
+          )
+        })}
+      </div>
+    )
+  }
   return (
     <div className="rounded-lg border border-amber-300/40 bg-amber-50/40 p-3 dark:bg-amber-500/5">
       <div className="mb-2 flex items-baseline gap-2">
@@ -718,28 +1169,43 @@ function CompareHeaderCell({
   onRemove: () => void
 }) {
   return (
-    <div className="sticky top-0 z-20 relative flex flex-col gap-2 rounded-lg border border-border/80 bg-card/95 backdrop-blur-md p-2.5 shadow-sm transition-all hover:bg-card">
-      <div className="absolute right-1.5 top-1.5 flex items-center gap-1">
-        <Link
-          href={`/titles/${work.slug}`}
-          target="_blank"
-          rel="noreferrer"
-          aria-label="Abrir página da obra"
-          className="flex h-6 w-6 items-center justify-center rounded-full border border-border/40 bg-background/50 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground hover:border-primary/40"
+    <div className="relative flex flex-col gap-2.5 rounded-lg border border-border/80 bg-card/95 backdrop-blur-md p-2.5 shadow-sm transition-all hover:bg-card">
+      {/* Top Actions Row: Drag handle & Action buttons */}
+      <div className="flex items-center justify-between border-b border-border/40 pb-2 text-muted-foreground select-none">
+        {/* Drag handle */}
+        <div 
+          className="flex items-center gap-1 cursor-grab active:cursor-grabbing hover:text-foreground transition-colors"
+          title="Arraste para reordenar"
         >
-          <ExternalLink className="h-3.5 w-3.5" />
-        </Link>
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label="Remover da comparação"
-          className="flex h-6 w-6 items-center justify-center rounded-full border border-border/40 bg-background/50 text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+          <GripVertical className="h-3.5 w-3.5" />
+          <span className="text-[10px] font-semibold uppercase tracking-wider">Mover</span>
+        </div>
+
+        {/* Action buttons (External link & Remove) */}
+        <div className="flex items-center gap-1">
+          <Link
+            href={`/titles/${work.slug}`}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Abrir página da obra"
+            className="flex h-6 w-6 items-center justify-center rounded-full border border-border/40 bg-background/50 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground hover:border-primary/40"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </Link>
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label="Remover da comparação"
+            className="flex h-6 w-6 items-center justify-center rounded-full border border-border/40 bg-background/50 text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
+
+      {/* Details Row (Cover + Title + Synopsis) */}
       <div className="flex gap-2.5">
-        <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded-md border bg-muted/40">
+        <div className="relative h-20 w-14 shrink-0 overflow-hidden rounded-md border bg-muted/40">
           {work.coverUrl ? (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
@@ -754,14 +1220,14 @@ function CompareHeaderCell({
             </div>
           )}
         </div>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 flex flex-col justify-between">
           <Link
             href={`/titles/${work.slug}`}
             target="_blank"
             rel="noreferrer"
-            className="block pr-14 text-sm font-semibold leading-tight hover:underline"
+            className="block text-xs font-semibold leading-snug hover:underline text-foreground hover:text-primary"
           >
-            <span className="line-clamp-3">{work.title}</span>
+            <span className="line-clamp-2">{work.title}</span>
           </Link>
           <SynopsisButton
             synopsis={work.synopsis}
@@ -817,6 +1283,7 @@ function SynopsisButton({
       <PopoverContent
         side="bottom"
         align="start"
+        portalled={false}
         className="max-w-sm space-y-2 p-3 text-sm"
       >
         {synopsisQuality && (
@@ -897,6 +1364,7 @@ function GenresTagsCell({
           <PopoverContent
             side="top"
             align="start"
+            portalled={false}
             className="max-h-[60vh] w-80 max-w-[90vw] space-y-3 overflow-y-auto p-3"
           >
             {genres.length > 0 && (
@@ -1023,6 +1491,9 @@ interface ScoreRowProps {
   /** Quando definido, envolve o elemento do score com este wrapper — útil
    *  pra anexar tooltip/popover (ex.: justificativa do IA Rk no hover). */
   wrapScore?: (node: React.ReactNode, w: CompareWork) => React.ReactNode
+  /** Renderiza o número no mesmo box dos atributos (CriterionRow) em vez do
+   *  ScoreBadge pequeno — usado por Nota Final / Nota Prevista. */
+  asAttributeBox?: boolean
 }
 
 function ScoreRow({
@@ -1036,6 +1507,7 @@ function ScoreRow({
   getStub,
   renderExtra,
   wrapScore,
+  asAttributeBox,
 }: ScoreRowProps) {
   return (
     <>
@@ -1048,6 +1520,21 @@ function ScoreRow({
           <span className="font-mono text-sm font-semibold">
             {formatScore(score)}
           </span>
+        ) : asAttributeBox ? (
+          // Mesmo box dos atributos (CriterionRow): escala 0–10 positiva, então
+          // passa um slug não-negativo pro getCriterionColorClass.
+          score == null ? (
+            <span className="font-mono text-sm text-muted-foreground">—</span>
+          ) : (
+            <span
+              className={cn(
+                "grid h-7 w-12 place-items-center rounded-md font-mono text-sm font-bold",
+                getCriterionColorClass(score, "decision", thresholds)
+              )}
+            >
+              {score.toFixed(1)}
+            </span>
+          )
         ) : (
           <ScoreBadge
             score={score}
@@ -1077,9 +1564,10 @@ interface CriterionRowProps {
   works: CompareWork[]
   bestIndex: number | null
   worstIndex: number | null
+  thresholds: ScoreColorThresholds | null
 }
 
-function CriterionRow({ slug, label, emoji, works, bestIndex, worstIndex }: CriterionRowProps) {
+function CriterionRow({ slug, label, emoji, works, bestIndex, worstIndex, thresholds }: CriterionRowProps) {
   return (
     <>
       <div className="sticky left-0 z-10 flex items-center gap-1.5 bg-background text-xs text-muted-foreground">
@@ -1103,7 +1591,7 @@ function CriterionRow({ slug, label, emoji, works, bestIndex, worstIndex }: Crit
                 <span
                   className={cn(
                     "grid h-7 w-12 place-items-center rounded-md font-mono text-sm font-bold",
-                    getCriterionColor(score, slug)
+                    getCriterionColorClass(score, slug, thresholds)
                   )}
                 >
                   {score.toFixed(1)}
@@ -1137,19 +1625,6 @@ function CriterionRow({ slug, label, emoji, works, bestIndex, worstIndex }: Crit
 }
 
 
-
-function getCriterionColor(score: number, slug: string): string {
-  const isNegative = slug === "drama" || slug === "tragedy"
-  if (isNegative) {
-    if (score <= 3) return "bg-green-100 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-400 dark:border-green-500/25"
-    if (score <= 5) return "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-400 dark:border-yellow-500/25"
-    return "bg-red-100 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25"
-  }
-  if (score >= 8) return "bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25"
-  if (score >= 6) return "bg-green-100 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-400 dark:border-green-500/25"
-  if (score >= 4) return "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-400 dark:border-yellow-500/25"
-  return "bg-red-100 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25"
-}
 
 function formatVotes(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`

@@ -1,9 +1,8 @@
 "use client"
 
-import { useState } from "react"
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { useTransition } from "react"
-import { ChevronDown, Filter, X } from "lucide-react"
+import { Filter, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -26,6 +25,11 @@ import { PERSONAL_STATUSES as PERSONAL_STATUS_NAMES } from "@/types/domain"
 type EvaluationFilter = "pending" | "review-pending" | "low-confidence" | "outdated-model"
 const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending"]
 
+const IA_RK_STATE_OPTIONS: Array<{ id: "stale" | "unranked"; label: string; tooltip: string }> = [
+  { id: "stale", label: "Desatualizado", tooltip: "Tem IA Rk, mas ficou velho (obra editada / re-avaliada / 'Atualizar dados')." },
+  { id: "unranked", label: "Não avaliado", tooltip: "Ainda não tem IA Rk (nunca passou pelo re-rank)." },
+]
+
 function isDefaultFilterSet(filters: Set<EvaluationFilter> | EvaluationFilter[]) {
   const set = Array.isArray(filters) ? new Set(filters) : filters
   return set.size === DEFAULT_FILTERS.length && DEFAULT_FILTERS.every((filter) => set.has(filter))
@@ -40,6 +44,12 @@ interface AiEvaluationFiltersProps {
   lowConfidenceThreshold: number
   activePubStatuses: string[]
   activePersonalStatuses: string[]
+  /** Quando false, esconde a seção "Estado da avaliação" (usado na aba IA Rk). */
+  showEvalState?: boolean
+  /** Mostra a seção "Estado do IA Rk" (Desatualizado/Não avaliado) — aba IA Rk. */
+  showIaRkState?: boolean
+  /** Estados de IA Rk ativos ("stale"/"unranked"). */
+  activeIaRkStates?: string[]
 }
 
 const PUB_STATUSES = Object.values(PUBLICATION_STATUSES_BY_ID)
@@ -56,6 +66,9 @@ export function AiEvaluationFilters({
   lowConfidenceThreshold,
   activePubStatuses,
   activePersonalStatuses,
+  showEvalState = true,
+  showIaRkState = false,
+  activeIaRkStates = [],
 }: AiEvaluationFiltersProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -96,12 +109,25 @@ export function AiEvaluationFilters({
     })
   }
 
+  const toggleIaRkState = (value: string) => {
+    const next = new Set(activeIaRkStates)
+    if (next.has(value)) next.delete(value)
+    else next.add(value)
+
+    updateParams((params) => {
+      if (next.size === IA_RK_STATE_OPTIONS.length) params.delete("rk")
+      else if (next.size === 0) params.set("rk", "none")
+      else params.set("rk", [...next].join(","))
+    })
+  }
+
   const clearAll = () => {
     updateParams((params) => {
       params.delete("filter")
       params.delete("pub")
       params.delete("personal")
       params.delete("tolerance")
+      params.delete("rk")
     })
   }
 
@@ -145,13 +171,19 @@ export function AiEvaluationFilters({
     },
   ]
 
+  const evalFilterCount =
+    showEvalState && !isDefaultFilterSet(activeFilters) ? activeFilters.length : 0
+  const iaRkFilterActive =
+    showIaRkState && activeIaRkStates.length !== IA_RK_STATE_OPTIONS.length
   const activeCount =
-    (isDefaultFilterSet(activeFilters) ? 0 : activeFilters.length) +
+    evalFilterCount +
+    (iaRkFilterActive ? 1 : 0) +
     activePubStatuses.length +
     activePersonalStatuses.length
 
   const hasAnyActive =
-    !isDefaultFilterSet(activeFilters) ||
+    (showEvalState && !isDefaultFilterSet(activeFilters)) ||
+    iaRkFilterActive ||
     activePubStatuses.length > 0 ||
     activePersonalStatuses.length > 0
 
@@ -190,6 +222,7 @@ export function AiEvaluationFilters({
 
         <div className="space-y-1.5">
           {/* Estado da avaliação */}
+          {showEvalState && (
           <FilterSection title="Estado da avaliação">
             <div className="flex flex-wrap items-center gap-1">
               {stateOptions.map((opt) => {
@@ -238,6 +271,32 @@ export function AiEvaluationFilters({
               )}
             </div>
           </FilterSection>
+          )}
+
+          {showIaRkState && (
+            <FilterSection title="Estado do IA Rk">
+              <div className="flex flex-wrap items-center gap-1">
+                {IA_RK_STATE_OPTIONS.map((opt) => {
+                  const active = activeIaRkStates.includes(opt.id)
+                  return (
+                    <Tooltip key={opt.id}>
+                      <TooltipTrigger asChild>
+                        <button type="button" onClick={() => toggleIaRkState(opt.id)}>
+                          <Badge
+                            variant={active ? "default" : "outline"}
+                            className="cursor-pointer text-xs"
+                          >
+                            {opt.label}
+                          </Badge>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs text-xs">{opt.tooltip}</TooltipContent>
+                    </Tooltip>
+                  )
+                })}
+              </div>
+            </FilterSection>
+          )}
 
           {/* Status */}
           <FilterSection title="Status">
@@ -304,31 +363,17 @@ interface FilterSectionProps {
   children: React.ReactNode
 }
 
-function FilterSection({ title, defaultOpen = true, children }: FilterSectionProps) {
-  const [open, setOpen] = useState(defaultOpen)
+function FilterSection({ title, children }: FilterSectionProps) {
   return (
     <div className="overflow-hidden rounded-lg border border-border/65 bg-background/40">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 bg-card/60 px-3 py-1.5 text-left transition-colors hover:bg-card/80"
-      >
+      <div className="flex w-full items-center justify-between gap-3 bg-card/60 px-3 py-1.5 text-left">
         <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           {title}
         </span>
-        <ChevronDown
-          className={cn(
-            "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
-            open ? "" : "-rotate-90"
-          )}
-        />
-      </button>
-      {open && (
-        <div className="border-t border-border/60 px-3 py-2.5">
-          {children}
-        </div>
-      )}
+      </div>
+      <div className="border-t border-border/60 px-3 py-2.5">
+        {children}
+      </div>
     </div>
   )
 }

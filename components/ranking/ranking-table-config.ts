@@ -25,9 +25,9 @@ export const RANKING_COLUMN_GROUP_LABELS: Record<RankingColumnGroup, string> = {
   legado: "Legado",
 }
 
-// Bump v2 → v3 ao remover `final_confidence` e ocultar `synopsis_q` por padrão.
-// Quem tinha config v2 salva ganha a layout nova sem precisar mexer no picker.
-export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v3"
+// Bump v3 → v4 to hide chapters_read by default and add missing columns.
+// Bump v4 → v5 to add the "Decisão" column (default sort) next to "Prevista".
+export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v5"
 export const RANKING_TABLE_COLUMN_CONFIG_EVENT = "ranking-column-config-change"
 
 export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
@@ -41,10 +41,16 @@ export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
   { key: "chapters_read", label: "Lidos", configLabel: "Capítulos lidos", defaultWidth: 70, align: "center", group: "basico" },
   { key: "chapters_progress", label: "% Lido", configLabel: "% lido (capítulos lidos / total)", defaultWidth: 80, align: "center", group: "basico" },
   { key: "synopsis_q", label: "Sinopse", configLabel: "Interesse na sinopse", defaultWidth: 80, align: "center", group: "basico" },
+  { key: "ai_status", label: "IA", configLabel: "Status da avaliação IA", defaultWidth: 80, align: "center", group: "basico" },
+  { key: "updated_at", label: "Atual.", configLabel: "Atualizado em", defaultWidth: 110, align: "center", group: "basico" },
+  { key: "last_read_at", label: "Últ. leitura", configLabel: "Última leitura", defaultWidth: 110, align: "center", group: "basico" },
   { key: "platform_avg", label: "N.M", configLabel: "Nota.M (média ponderada das plataformas)", defaultWidth: 88, align: "center", group: "notas" },
   { key: "total_votes", label: "Votos", configLabel: "Total de votos nas plataformas", defaultWidth: 88, align: "center", group: "notas" },
+  // Nota Final — combina Prevista + Alinhamento + IA Rk. num único número de
+  // prioridade. É o sort default; ajuda a escolher entre obras com Prevista parecida.
+  { key: "decision", label: "Nota Final", configLabel: "Nota Final — combina Prevista + Alinhamento + IA Rk. pra priorizar o que ler primeiro (prioridade, NÃO previsão de nota)", defaultWidth: 100, align: "center", group: "notas" },
   // Novo (Fase 1.5): expected_score é o L1 que substitui o trio Nota.IA/Pr/Final
-  { key: "expected", label: "Esperada", configLabel: "Nota esperada (L1 single Ridge — substitui N.IA/N.Pr/N.Final)", defaultWidth: 100, align: "center", group: "notas" },
+  { key: "expected", label: "Prevista", configLabel: "Nota Prevista (L1 single Ridge — substitui N.IA/N.Pr/N.Final)", defaultWidth: 100, align: "center", group: "notas" },
   { key: "expected_baseline", label: "Perfil", configLabel: "Stage 1 da decomposição — contribuição do perfil (sem qualidade)", defaultWidth: 90, align: "center", group: "legado" },
   { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Stage 2 da decomposição — ajuste pelas 8 dimensões de qualidade", defaultWidth: 90, align: "center", group: "legado" },
   { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento com perfil (fit_score)", defaultWidth: 110, align: "center", group: "notas" },
@@ -80,11 +86,16 @@ const LEGACY_HIDDEN_KEYS = ["calc", "pred", "final"] as const
 const DEFAULT_COLUMN_CONFIG: RankingColumnConfig = {
   order: DEFAULT_COLUMN_KEYS,
   hidden: [
+    "pub",
+    "per_status",
+    "chapters_read",
     "chapters_progress",
-    "synopsis_q",
     "expected_baseline",
     "expected_quality_adj",
     ...LEGACY_HIDDEN_KEYS,
+    "ai_status",
+    "updated_at",
+    "last_read_at",
   ],
 }
 let cachedRawColumnConfig: string | null = null
@@ -198,11 +209,12 @@ const PADRAO_VISIBLE = DEFAULT_COLUMN_KEYS.filter(
 
 const PRESET_VISIBLE_KEYS: Record<RankingColumnPreset, string[]> = {
   padrao: PADRAO_VISIBLE,
-  compacto: ["rank", "title", "pub", "per_status", "expected", "personal_fit"],
+  compacto: ["rank", "title", "pub", "per_status", "decision", "expected", "personal_fit"],
   notas: [
     "rank", "title",
+    "decision",
     "expected", "expected_baseline", "expected_quality_adj",
-    "personal_fit", "platform_avg", "total_votes",
+    "personal_fit", "alignment_score", "platform_avg", "total_votes",
   ],
   criterios: ["rank", "title", "expected", ...CRITERION_KEYS],
   // Pra debug/comparação: mostra TUDO incluindo legado + decomposição.

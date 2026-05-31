@@ -32,19 +32,35 @@ function hashString(s: string): number {
   return h >>> 0
 }
 
-function pickEntry(entries: RankingEntry[], rerollOffset: number): RankingEntry | null {
-  if (entries.length === 0) return null
+/**
+ * Sorteia `count` obras distintas do pool, de forma determinística por dia
+ * (seed = hoje:rerollOffset). Fisher-Yates seedado por um LCG simples — estável
+ * ao longo do dia, re-sorteia ao incrementar o offset ("tentar outras").
+ */
+function pickEntries(entries: RankingEntry[], count: number, rerollOffset: number): RankingEntry[] {
+  if (entries.length === 0) return []
   const today = new Date().toISOString().slice(0, 10)
-  const seed = hashString(`${today}:${rerollOffset}`)
-  return entries[seed % entries.length]
+  let state = hashString(`${today}:${rerollOffset}`)
+  const rand = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+    return state / 0x100000000
+  }
+  const idx = entries.map((_, i) => i)
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1))
+    ;[idx[i], idx[j]] = [idx[j], idx[i]]
+  }
+  return idx.slice(0, Math.min(count, entries.length)).map((i) => entries[i])
 }
+
+const PICK_COUNT = 3
 
 export function SurpriseMeButton({ entries, poolSize = 20 }: SurpriseMeButtonProps) {
   const [open, setOpen] = useState(false)
   const [reroll, setReroll] = useState(0)
 
   const pool = useMemo(() => entries.slice(0, poolSize), [entries, poolSize])
-  const pick = useMemo(() => pickEntry(pool, reroll), [pool, reroll])
+  const picks = useMemo(() => pickEntries(pool, PICK_COUNT, reroll), [pool, reroll])
 
   if (pool.length === 0) return null
 
@@ -56,30 +72,27 @@ export function SurpriseMeButton({ entries, poolSize = 20 }: SurpriseMeButtonPro
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-amber-500" />
-              Sua leitura de hoje
+              Suas leituras de hoje
             </DialogTitle>
             <DialogDescription>
-              Sorteada do top {pool.length} do ranking atual. Estável ao longo do dia; clique &quot;tentar outra&quot; pra re-sortear.
+              {picks.length} sugestões sorteadas do top {pool.length} do ranking atual. Estáveis ao longo do dia; clique &quot;tentar outras&quot; pra re-sortear.
             </DialogDescription>
           </DialogHeader>
 
-          {pick ? <SurprisePickCard entry={pick} /> : null}
+          <div className="flex flex-col gap-2.5">
+            {picks.map((entry) => (
+              <SurprisePickCard key={entry.workId} entry={entry} onNavigate={() => setOpen(false)} />
+            ))}
+          </div>
 
-          <DialogFooter className="flex-col gap-2 sm:flex-row">
+          <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setReroll((n) => n + 1)}>
-              Tentar outra
+              Tentar outras
             </Button>
-            {pick ? (
-              <Button asChild size="sm">
-                <Link href={`/titles/${titleToSlug(pick.title)}`} onClick={() => setOpen(false)}>
-                  Abrir <ExternalLink className="ml-1 h-3 w-3" />
-                </Link>
-              </Button>
-            ) : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -87,10 +100,14 @@ export function SurpriseMeButton({ entries, poolSize = 20 }: SurpriseMeButtonPro
   )
 }
 
-function SurprisePickCard({ entry }: { entry: RankingEntry }) {
+function SurprisePickCard({ entry, onNavigate }: { entry: RankingEntry; onNavigate: () => void }) {
   const justification = entry.alignmentJustification ?? buildSyntheticJustification(entry)
   return (
-    <div className="flex gap-3 rounded-lg border bg-card/60 p-3">
+    <Link
+      href={`/titles/${titleToSlug(entry.title)}`}
+      onClick={onNavigate}
+      className="group flex gap-3 rounded-lg border bg-card/60 p-3 transition-colors hover:border-primary/40 hover:bg-card"
+    >
       <div className="relative h-28 w-20 shrink-0 overflow-hidden rounded border bg-muted">
         {entry.coverUrl ? (
           /* eslint-disable-next-line @next/next/no-img-element */
@@ -106,15 +123,18 @@ function SurprisePickCard({ entry }: { entry: RankingEntry }) {
         )}
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <h3 className="text-sm font-semibold leading-tight line-clamp-2">{entry.title}</h3>
+        <h3 className="flex items-center gap-1 text-sm font-semibold leading-tight line-clamp-2">
+          <span className="line-clamp-2 group-hover:underline">{entry.title}</span>
+          <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+        </h3>
         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
           <span>#{entry.rank}</span>
-          {entry.finalScore != null && <span>Nota.Final {entry.finalScore.toFixed(1)}</span>}
+          {entry.expectedScore != null && <span>Nota Prevista {entry.expectedScore.toFixed(1)}</span>}
           {entry.year != null && <span>{entry.year}</span>}
         </div>
         <p className="text-xs leading-relaxed text-muted-foreground">{justification}</p>
       </div>
-    </div>
+    </Link>
   )
 }
 

@@ -127,7 +127,7 @@ export function PostAttributeAssessmentForm({
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           {ratedSlugs.map((slug) => {
             const info = CRITERIA_INFO[slug]
             const ia = latestAiEvaluation.attributes[slug as CriterionSlug] ?? 0
@@ -136,7 +136,10 @@ export function PostAttributeAssessmentForm({
             // A nota da IA só aparece quando o usuário alterou o valor do atributo.
             const changed = value !== ia
             return (
-              <div key={slug} className="flex items-center gap-3">
+              <div
+                key={slug}
+                className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2"
+              >
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   <span className="text-lg leading-none" aria-hidden>
                     {info.emoji}
@@ -173,7 +176,7 @@ export function PostAttributeAssessmentForm({
                       }
                     }}
                     aria-label={info.name}
-                    className="w-20 text-right font-mono tabular-nums"
+                    className="w-20 text-center font-mono tabular-nums pr-3"
                   />
                 </div>
               </div>

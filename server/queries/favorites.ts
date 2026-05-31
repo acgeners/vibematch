@@ -4,8 +4,8 @@ import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
 
 export interface FavoritesSummary {
   total: number
-  withFinalScore: number
-  avgFinalScore: number | null
+  withExpectedScore: number
+  avgExpectedScore: number | null
   topCriteria: Array<{ slug: CriterionSlug; avg: number; n: number }>
 }
 
@@ -21,7 +21,7 @@ async function _getFavoritesSummary(): Promise<FavoritesSummary> {
     .from("works")
     .select(`
       id,
-      calculated_scores(final_score),
+      calculated_scores(expected_score),
       category_scores(criterion_slug, score)
     `)
     .eq("is_favorite", true)
@@ -29,24 +29,24 @@ async function _getFavoritesSummary(): Promise<FavoritesSummary> {
 
   if (error) {
     console.error("[favorites] erro lendo stats:", error)
-    return { total: 0, withFinalScore: 0, avgFinalScore: null, topCriteria: [] }
+    return { total: 0, withExpectedScore: 0, avgExpectedScore: null, topCriteria: [] }
   }
 
   const rows = (works ?? []) as unknown as Array<{
     id: string
-    calculated_scores: { final_score: number | null } | null
+    calculated_scores: { expected_score: number | null } | null
     category_scores: Array<{ criterion_slug: string; score: number | null }> | null
   }>
 
-  let finalSum = 0
-  let finalCount = 0
+  let expectedSum = 0
+  let expectedCount = 0
   const critSum = new Map<string, number>()
   const critCount = new Map<string, number>()
   for (const w of rows) {
-    const f = w.calculated_scores?.final_score
+    const f = w.calculated_scores?.expected_score
     if (f != null) {
-      finalSum += Number(f)
-      finalCount += 1
+      expectedSum += Number(f)
+      expectedCount += 1
     }
     for (const cs of w.category_scores ?? []) {
       if (cs.score == null) continue
@@ -68,8 +68,8 @@ async function _getFavoritesSummary(): Promise<FavoritesSummary> {
 
   return {
     total: rows.length,
-    withFinalScore: finalCount,
-    avgFinalScore: finalCount > 0 ? finalSum / finalCount : null,
+    withExpectedScore: expectedCount,
+    avgExpectedScore: expectedCount > 0 ? expectedSum / expectedCount : null,
     topCriteria: avgByCriterion.slice(0, 3),
   }
 }

@@ -12,6 +12,9 @@ export function useCollapsedFilters(key: string) {
     if (typeof window === "undefined") return
     try {
       const raw = window.localStorage.getItem(storageKey)
+      // Hidratação do estado inicial a partir do localStorage no mount —
+      // setState no effect é intencional aqui.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (raw === "1") setCollapsed(true)
     } catch {}
   }, [storageKey])

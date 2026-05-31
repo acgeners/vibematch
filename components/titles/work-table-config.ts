@@ -37,10 +37,11 @@ export const DEFAULT_WORK_COLUMN_NAMESPACE: WorkColumnNamespace = "titles"
 //   - favorites v5 → v6: oculta também a coluna "fav" (redundante: tudo aqui
 //     já é favorito)
 //   - ranking, recommendations: sem mudança de default, mantêm v4
+// favorites v7 → v8: adiciona a coluna "Nota Final" (decision) visível por padrão.
 const NAMESPACE_STORAGE_VERSION: Record<WorkColumnNamespace, string> = {
-  titles: "v5",
-  favorites: "v6",
-  ranking: "v4",
+  titles: "v6",
+  favorites: "v8",
+  ranking: "v5",
   recommendations: "v4",
 }
 
@@ -67,8 +68,11 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   { key: "chapters_progress", label: "% Lido", configLabel: "% lido (capítulos lidos / total)", align: "center", group: "basico" },
   { key: "year", label: "Ano", align: "center", defaultHidden: true, group: "basico" },
   { key: "synopsis_q", label: "Sinopse", configLabel: "Interesse na sinopse", align: "center", defaultHidden: true, group: "basico" },
+  // Nota Final — combina Prevista + Alinhamento + IA Rk. num único número de
+  // prioridade. Default visível em /favorites; opcional nos demais namespaces.
+  { key: "decision", label: "Nota Final", configLabel: "Nota Final — combina Prevista + Alinhamento + IA Rk. pra priorizar o que ler (prioridade, NÃO previsão de nota)", align: "center", group: "notas" },
   // Novo (Fase 1.5): expected_score é o L1 que substitui o trio N.IA/N.Pr/N.Final
-  { key: "expected_score", label: "Esperada", configLabel: "Nota esperada (L1 single Ridge — substitui N.IA/N.Pr/N.Final)", align: "center", group: "notas" },
+  { key: "expected_score", label: "Prevista", configLabel: "Nota Prevista (L1 single Ridge — substitui N.IA/N.Pr/N.Final)", align: "center", group: "notas" },
   { key: "expected_baseline", label: "Perfil", configLabel: "Stage 1 da decomposição — contribuição do perfil (sem qualidade)", align: "center", defaultHidden: true, group: "legado" },
   { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Stage 2 da decomposição — ajuste pelas 8 dimensões de qualidade", align: "center", defaultHidden: true, group: "legado" },
   { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento com perfil (fit_score)", align: "center", group: "notas" },
@@ -115,10 +119,13 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   // dedicado por ai_eval_status); chapters_progress sai por redundância com
   // chapters_read+total.
   titles: [
-    "synopsis_q",
+    "fav",
+    "decision",
+    "chapters_read",
+    "personal_fit",
     "ai_status",
-    "chapters_progress",
-    "alignment_score",
+    "updated_at",
+    "last_read_at",
     ...LEGACY_AND_DECOMP_HIDDEN,
     ...CRITERION_SLUGS.map((slug) => `crit_${slug}`),
   ],
@@ -127,24 +134,31 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   // pouco relevantes em obras já favoritadas.
   favorites: [
     "fav",
-    "synopsis_q",
-    "year",
-    "publication_status",
-    "ai_status",
-    "updated_at",
+    "personal_status",
     "chapters_read",
     "chapters_progress",
+    "ai_status",
+    "updated_at",
+    "last_read_at",
     ...LEGACY_AND_DECOMP_HIDDEN,
   ],
   // Ranking: foco em comparar notas; sinopse, ano e ai_status fora; critérios visíveis.
   // IA Rk. visível — quem chega aqui geralmente quer ver o re-rank IA.
   ranking: [
-    "synopsis_q", "year", "ai_status", "chapters_read", "chapters_progress",
+    "decision",
+    "publication_status",
+    "personal_status",
+    "chapters_read",
+    "chapters_progress",
+    "ai_status",
+    "updated_at",
+    "last_read_at",
     ...LEGACY_AND_DECOMP_HIDDEN,
   ],
   // Recomendações: 9 critérios em destaque; resto enxuto.
   // IA Rk. visível — É a nota que ORDENA o próprio resultado da run.
   recommendations: [
+    "decision",
     "synopsis_q",
     "year",
     "ai_status",
@@ -220,6 +234,7 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   chapters_progress: 80,
   year: 70,
   synopsis_q: 90,
+  decision: 90,
   expected_score: 90,
   expected_baseline: 80,
   expected_quality_adj: 80,

@@ -7,16 +7,15 @@ import {
 export interface DashboardStats {
   totalWorks: number
   pendingAi: number
-  withoutFinalScore: number
+  withoutExpectedScore: number
   archived: number
-  avgFinalScore: number | null
+  avgExpectedScore: number | null
   byPublicationStatus: Record<string, number>
   byPersonalStatus: Record<string, number>
   topWorks: Array<{
     id: string
     title: string
-    finalScore: number | null
-    calcScore: number | null
+    expectedScore: number | null
     publicationStatus: string
     publicationStatusId: number | null
     personalStatus: string
@@ -34,12 +33,12 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       .select("id, ai_eval_status, is_archived, publication_status_id, personal_status_id"),
     supabase
       .from("calculated_scores")
-      .select("work_id, final_score, calc_score"),
+      .select("work_id, expected_score"),
     supabase
       .from("works")
       .select(`
         id, title, publication_status_id, personal_status_id, ai_eval_status, is_archived,
-        calculated_scores(final_score, calc_score)
+        calculated_scores(expected_score)
       `)
       .eq("is_archived", false)
       .order("title")
@@ -61,15 +60,15 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   const archived = works.filter((w) => w.is_archived).length
 
   const calcMap = new Map(calcs.map((c) => [c.work_id, c]))
-  const withoutFinalScore = active.filter(
-    (w) => (calcMap.get(w.id)?.final_score ?? null) == null
+  const withoutExpectedScore = active.filter(
+    (w) => (calcMap.get(w.id)?.expected_score ?? null) == null
   ).length
 
   const scoresWithValue = calcs
-    .map((c) => c.final_score)
+    .map((c) => c.expected_score)
     .filter((s): s is number => s != null)
 
-  const avgFinalScore =
+  const avgExpectedScore =
     scoresWithValue.length > 0
       ? scoresWithValue.reduce((a, b) => a + b, 0) / scoresWithValue.length
       : null
@@ -89,29 +88,28 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     publication_status_id: number | null
     personal_status_id: number | null
     ai_eval_status: string
-    calculated_scores?: { final_score?: number | null; calc_score?: number | null } | null
+    calculated_scores?: { expected_score?: number | null } | null
   }>)
     .map((w) => ({
       id: w.id,
       title: w.title,
-      finalScore: w.calculated_scores?.final_score ?? null,
-      calcScore: w.calculated_scores?.calc_score ?? null,
+      expectedScore: w.calculated_scores?.expected_score ?? null,
       publicationStatus: getPublicationStatusNameById(w.publication_status_id) ?? "Unknown",
       publicationStatusId: w.publication_status_id ?? null,
       personalStatus: getPersonalStatusNameById(w.personal_status_id) ?? "To read",
       personalStatusId: w.personal_status_id ?? null,
       aiEvalStatus: w.ai_eval_status,
     }))
-    .filter((w) => w.finalScore != null)
-    .sort((a, b) => (b.finalScore ?? 0) - (a.finalScore ?? 0))
+    .filter((w) => w.expectedScore != null)
+    .sort((a, b) => (b.expectedScore ?? 0) - (a.expectedScore ?? 0))
     .slice(0, 5)
 
   return {
     totalWorks,
     pendingAi,
-    withoutFinalScore,
+    withoutExpectedScore,
     archived,
-    avgFinalScore,
+    avgExpectedScore,
     byPublicationStatus,
     byPersonalStatus,
     topWorks,

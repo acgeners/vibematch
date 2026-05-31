@@ -22,6 +22,7 @@ export const PAID_CAPABILITIES = {
   smart_shortlist: "Re-rank por IA com match_score (Free ordena por expected×fit, sem LLM)",
   deep_dive: "Análise profunda de 1 obra (extended thinking)",
   mood_input: "Contexto/mood livre no ranking ('algo leve hoje')",
+  chat_recommend: "Recomendação conversacional por chat (Free usa o formulário one-shot)",
 } as const
 
 export type Capability = keyof typeof PAID_CAPABILITIES

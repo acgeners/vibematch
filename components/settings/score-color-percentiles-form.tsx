@@ -105,12 +105,18 @@ export function ScoreColorPercentilesForm({ config }: ScoreColorPercentilesFormP
   }
 
   const resetToDefaults = () => {
-    reset({
-      score_color_pct_top: DEFAULTS.top,
-      score_color_pct_high: DEFAULTS.high,
-      score_color_pct_mid: DEFAULTS.mid,
-      score_color_pct_low: DEFAULTS.low,
-    }, { keepDefaultValues: false })
+    // keepDefaultValues: true preserva os defaultValues originais (os valores
+    // salvos) — então o form fica `isDirty` quando os quintis diferem deles,
+    // habilitando o botão Salvar. Sem isso, reset zerava o dirty e travava o save.
+    reset(
+      {
+        score_color_pct_top: DEFAULTS.top,
+        score_color_pct_high: DEFAULTS.high,
+        score_color_pct_mid: DEFAULTS.mid,
+        score_color_pct_low: DEFAULTS.low,
+      },
+      { keepDefaultValues: true }
+    )
   }
 
   return (

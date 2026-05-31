@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getWorksByIds } from "@/server/queries/works"
+import { computeDecisionScore } from "@/lib/calculations/decision"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug, WorkWithRelations } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
@@ -27,6 +28,12 @@ export interface CompareWork {
   chaptersRead: number | null
   totalChapters: number | null
   isFavorite: boolean
+  expectedScore: number | null
+  /** Nota Final (0–10) — combina Prevista, Alinhamento e IA Rk. (ver lib/calculations/decision.ts). */
+  decisionScore: number | null
+  /** Alinhamento com o perfil: cru (0–1) e percentil na biblioteca (0–100). */
+  personalFit: number | null
+  personalFitPercentile: number | null
   finalScore: number | null
   calcScore: number | null
   predictedScore: number | null
@@ -111,6 +118,10 @@ function mapWorkToCompare(
 
   const primaryCover = pickPrimaryCover(work.work_covers)
   const primarySynopsis = pickPrimarySynopsis(work.work_synopses)
+  // Prefere a sinopse canônica (consolidada via IA) — mesma exibida na página
+  // de detalhe — e cai pra primária só quando ela ainda não foi gerada.
+  const canonicalSynopsis =
+    (work as { canonical_synopsis?: string | null }).canonical_synopsis?.trim() || null
 
   return {
     id: work.id,
@@ -118,7 +129,7 @@ function mapWorkToCompare(
     slug: titleToSlug(work.title),
     alternativeTitles: work.alternative_titles ?? [],
     coverUrl: primaryCover,
-    synopsis: primarySynopsis,
+    synopsis: canonicalSynopsis ?? primarySynopsis,
     year: (work as { year?: number | null }).year ?? null,
     synopsisQuality: (work as { synopsis_quality?: string | null }).synopsis_quality ?? null,
     publicationStatusId: work.publication_status_id ?? null,
@@ -126,6 +137,17 @@ function mapWorkToCompare(
     chaptersRead: work.chapters_read != null ? Number(work.chapters_read) : null,
     totalChapters: work.total_chapters != null ? Number(work.total_chapters) : null,
     isFavorite: Boolean(work.is_favorite),
+    expectedScore: work.calculated_scores?.expected_score ?? null,
+    decisionScore: computeDecisionScore({
+      expected: work.calculated_scores?.expected_score ?? null,
+      fit: work.calculated_scores?.personal_fit ?? null,
+      alignment: work.calculated_scores?.alignment_score ?? null,
+      confidence:
+        (work.calculated_scores?.alignment_payload as { confidence?: number } | null)?.confidence ??
+        null,
+    }),
+    personalFit: work.calculated_scores?.personal_fit ?? null,
+    personalFitPercentile: work.calculated_scores?.personal_fit_percentile ?? null,
     finalScore: work.calculated_scores?.final_score ?? null,
     calcScore: work.calculated_scores?.calc_score ?? null,
     predictedScore: work.calculated_scores?.predicted_score ?? null,

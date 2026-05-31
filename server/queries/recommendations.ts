@@ -137,9 +137,50 @@ function pickRecommendationSynopsis(
   return [...blocks].sort((a, b) => b.length - a.length)[0] ?? raw
 }
 
+// Review "crítica" = bucket negativo. Espelha a convenção do merge externo
+// (lib/external/index.ts: low = userRating <= 4) pra ficar consistente.
+const CRITICAL_RATING_MAX = 4
+
+interface ScoredReview {
+  source: string
+  text: string
+  rating: number | null
+  /** match_score × COALESCE(rating, 5): relevância (casamento × sentimento). */
+  relevance: number
+  /** match_score isolado: confiança de que a review é desta obra. */
+  match: number
+}
+
 /**
- * Top-N reviews por obra, batch. Ordenadas por `match_score * COALESCE(user_rating, 5)`
- * descendente. Texto truncado pelo caller via prompts.formatReviews.
+ * Escolhe `perWork` reviews por obra. A partir de 3 vagas, reserva 1 pra uma
+ * review CRÍTICA bem-casada (rating ≤ 4, match > 0) — assim o modelo recebe um
+ * contraponto pro campo `risks`, em vez de só as mais bem-avaliadas. As demais
+ * vagas vão pras de maior relevância. Sem review crítica relevante, cai no
+ * comportamento antigo (top-N por relevância).
+ */
+function pickBalancedReviews(list: ScoredReview[], perWork: number): CandidateReview[] {
+  const toReview = (r: ScoredReview): CandidateReview => ({
+    source: r.source,
+    text: r.text,
+    rating: r.rating,
+  })
+  const byRelevance = [...list].sort((a, b) => b.relevance - a.relevance)
+  if (perWork < 3 || list.length <= perWork) {
+    return byRelevance.slice(0, perWork).map(toReview)
+  }
+  const top = byRelevance.slice(0, perWork - 1)
+  const topSet = new Set(top)
+  const critical = list
+    .filter((r) => !topSet.has(r) && r.match > 0 && r.rating != null && r.rating <= CRITICAL_RATING_MAX)
+    .sort((a, b) => a.rating! - b.rating! || b.match - a.match)[0]
+  const chosen = critical ? [...top, critical] : byRelevance.slice(0, perWork)
+  return chosen.map(toReview)
+}
+
+/**
+ * Top-N reviews por obra, batch. Combina relevância (`match_score *
+ * COALESCE(user_rating, 5)`) com 1 vaga reservada pra uma review crítica (ver
+ * `pickBalancedReviews`). Texto truncado pelo caller via prompts.formatReviews.
  */
 async function fetchTopReviewsBatch(
   workIds: string[],
@@ -157,21 +198,18 @@ async function fetchTopReviewsBatch(
     return out
   }
 
-  const grouped = new Map<string, Array<{ source: string; text: string; rating: number | null; score: number }>>()
+  const grouped = new Map<string, ScoredReview[]>()
   for (const row of data ?? []) {
     const r = row as { work_id: string; source: string; text: string | null; user_rating: number | null; match_score: number | null }
     if (!r.text || !r.text.trim()) continue
-    const score = (r.match_score ?? 0) * (r.user_rating ?? 5)
+    const match = r.match_score ?? 0
+    const relevance = match * (r.user_rating ?? 5)
     const list = grouped.get(r.work_id) ?? []
-    list.push({ source: r.source, text: r.text.trim(), rating: r.user_rating, score })
+    list.push({ source: r.source, text: r.text.trim(), rating: r.user_rating, relevance, match })
     grouped.set(r.work_id, list)
   }
   for (const [workId, list] of grouped) {
-    list.sort((a, b) => b.score - a.score)
-    out.set(
-      workId,
-      list.slice(0, perWork).map((r) => ({ source: r.source, text: r.text, rating: r.rating })),
-    )
+    out.set(workId, pickBalancedReviews(list, perWork))
   }
   return out
 }
@@ -349,6 +387,200 @@ export async function getCandidateById(workId: string): Promise<FavoriteCandidat
   const reviewsById = await fetchTopReviewsBatch([workId], 3)
   const biasMap = await loadBiasMapForRecs(supabase)
   return mapRowToCandidate(data, reviewsById.get(workId) ?? [], biasMap)
+}
+
+export interface StaleAlignmentWork {
+  id: string
+  title: string
+  coverUrl: string | null
+  publicationStatusId: number | null
+  personalStatusId: number | null
+  alignmentScore: number | null
+  alignmentAt: string | null
+}
+
+/**
+ * Lista obras cujo IA Rk (alignment_score) ficou desatualizado — têm
+ * alignment_score persistido mas alignment_stale=true (a obra foi editada ou
+ * re-avaliada depois do último re-rank). Filtra arquivadas e ordena pelo
+ * re-rank mais antigo primeiro. Alimenta a fila de re-rank em lote.
+ */
+export async function getStaleAlignmentWorks(
+  limit = 200,
+  opts: { pubStatusIds?: number[]; personalStatusIds?: number[] } = {},
+): Promise<StaleAlignmentWork[]> {
+  const supabase = createAdminClient()
+  let query = supabase
+    .from("works")
+    .select(
+      "id, title, publication_status_id, personal_status_id, work_covers(url, is_primary, position), calculated_scores!inner(alignment_score, alignment_at, alignment_stale)",
+    )
+    .eq("is_archived", false)
+    .eq("calculated_scores.alignment_stale", true)
+    .not("calculated_scores.alignment_score", "is", null)
+  if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
+    query = query.in("publication_status_id", opts.pubStatusIds)
+  }
+  if (opts.personalStatusIds && opts.personalStatusIds.length > 0) {
+    query = query.in("personal_status_id", opts.personalStatusIds)
+  }
+  const { data, error } = await query.limit(limit)
+  if (error) throw new Error(`Falha listando IA Rk desatualizados: ${error.message}`)
+
+  const rows = (data ?? []).map((row) => {
+    const w = row as Record<string, unknown>
+    const calc =
+      (w.calculated_scores as { alignment_score?: number | null; alignment_at?: string | null } | null) ?? null
+    return {
+      id: w.id as string,
+      title: w.title as string,
+      publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
+      personalStatusId: w.personal_status_id != null ? Number(w.personal_status_id) : null,
+      coverUrl: pickPrimaryCover(
+        (w.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
+          url: c.url ?? null,
+          is_primary: c.is_primary ?? null,
+          position: c.position ?? null,
+        })),
+      ),
+      alignmentScore: calc?.alignment_score != null ? Number(calc.alignment_score) : null,
+      alignmentAt: calc?.alignment_at ?? null,
+    } satisfies StaleAlignmentWork
+  })
+  // Ordena por re-rank mais antigo primeiro (PostgREST não ordena por coluna
+  // embedada de forma confiável — ordena em JS).
+  rows.sort((a, b) => {
+    const at = a.alignmentAt ? new Date(a.alignmentAt).getTime() : 0
+    const bt = b.alignmentAt ? new Date(b.alignmentAt).getTime() : 0
+    return at - bt
+  })
+  return rows
+}
+
+export interface AlignmentQueueWork {
+  id: string
+  title: string
+  coverUrl: string | null
+  publicationStatusId: number | null
+  personalStatusId: number | null
+  expectedScore: number | null
+  alignmentScore: number | null
+  alignmentStale: boolean
+}
+
+/**
+ * Fila de IA Rk pra aba /ai-evaluation?tab=ia-rk. Dois estados:
+ *   - "stale": tem alignment_score mas alignment_stale=true (re-rank velho)
+ *   - "unranked": ainda não tem alignment_score (nunca passou pelo re-rank)
+ * Filtra por status (publicação/leitura) em SQL e por estado em JS. Sort é no
+ * client. Separada de getStaleAlignmentWorks, que segue alimentando só o
+ * re-rank em LOTE de desatualizados (re-rankear a biblioteca inteira de uma vez
+ * não faria sentido — custo de LLM).
+ */
+export async function getAlignmentQueueWorks(opts: {
+  states?: Array<"stale" | "unranked">
+  pubStatusIds?: number[]
+  personalStatusIds?: number[]
+  limit?: number
+}): Promise<AlignmentQueueWork[]> {
+  const states: Array<"stale" | "unranked"> = opts.states ?? ["stale", "unranked"]
+  const wantStale = states.includes("stale")
+  const wantUnranked = states.includes("unranked")
+  const supabase = createAdminClient()
+  let query = supabase
+    .from("works")
+    .select(
+      "id, title, publication_status_id, personal_status_id, work_covers(url, is_primary, position), calculated_scores(expected_score, alignment_score, alignment_stale)",
+    )
+    .eq("is_archived", false)
+  if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
+    query = query.in("publication_status_id", opts.pubStatusIds)
+  }
+  if (opts.personalStatusIds && opts.personalStatusIds.length > 0) {
+    query = query.in("personal_status_id", opts.personalStatusIds)
+  }
+  const { data, error } = await query.limit(opts.limit ?? 500)
+  if (error) throw new Error(`Falha listando fila de IA Rk: ${error.message}`)
+
+  const rows: AlignmentQueueWork[] = []
+  for (const row of data ?? []) {
+    const w = row as Record<string, unknown>
+    const calc =
+      (w.calculated_scores as {
+        expected_score?: number | null
+        alignment_score?: number | null
+        alignment_stale?: boolean | null
+      } | null) ?? null
+    const alignmentScore = calc?.alignment_score != null ? Number(calc.alignment_score) : null
+    const alignmentStale = Boolean(calc?.alignment_stale)
+    const isStale = alignmentScore != null && alignmentStale
+    const isUnranked = alignmentScore == null
+    if (!((wantStale && isStale) || (wantUnranked && isUnranked))) continue
+    rows.push({
+      id: w.id as string,
+      title: w.title as string,
+      coverUrl: pickPrimaryCover(
+        (w.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
+          url: c.url ?? null,
+          is_primary: c.is_primary ?? null,
+          position: c.position ?? null,
+        })),
+      ),
+      publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
+      personalStatusId: w.personal_status_id != null ? Number(w.personal_status_id) : null,
+      expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
+      alignmentScore,
+      alignmentStale,
+    })
+  }
+  return rows
+}
+
+/**
+ * Hidrata as obras com IA Rk desatualizado como `FavoriteCandidate` pra o
+ * re-rank em lote. Mesmo shape que `getRankingCandidates`, mas o pool vem da
+ * fila de stale em vez dos top-N do ranking.
+ */
+export async function getStaleAlignmentCandidates(limit = 200): Promise<FavoriteCandidate[]> {
+  const stale = await getStaleAlignmentWorks(limit)
+  const ids = stale.map((w) => w.id)
+  if (ids.length === 0) return []
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("works")
+    .select(CANDIDATE_WORK_SELECT)
+    .in("id", ids)
+    .eq("is_archived", false)
+  if (error) throw new Error(`Falha hidratando candidatos stale: ${error.message}`)
+
+  const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  const biasMap = await loadBiasMapForRecs(supabase)
+  const byId = new Map<string, FavoriteCandidate>()
+  for (const row of data ?? []) {
+    const id = (row as { id: string }).id
+    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap))
+  }
+  // Preserva a ordem da fila (re-rank mais antigo primeiro).
+  return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
+}
+
+/**
+ * Conta (head-count) quantas obras têm IA Rk desatualizado. Usado pra exibir o
+ * link/badge da fila no header do ranking só quando há o que processar.
+ */
+export async function countStaleAlignmentWorks(): Promise<number> {
+  const supabase = createAdminClient()
+  const { count, error } = await supabase
+    .from("calculated_scores")
+    .select("work_id", { count: "exact", head: true })
+    .eq("alignment_stale", true)
+    .not("alignment_score", "is", null)
+  if (error) {
+    console.warn("[alignment] countStaleAlignmentWorks falhou:", error.message)
+    return 0
+  }
+  return count ?? 0
 }
 
 export async function getRunsToday(): Promise<number> {

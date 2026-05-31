@@ -14,13 +14,14 @@
  * EXISTEM tanto em treino quanto inferência → predições passam a variar
  * informativamente entre obras leves e dramáticas.
  *
- * Features após revisão (14 numéricas + 1 categórica):
- *   Baseline / perfil (14):
+ * Features após revisão (13 numéricas + 1 categórica):
+ *   Baseline / perfil (13):
  *     - 9 category_scores (preference axis)
  *     - IA(n) — engineered non-linear summary
  *     - Nota.M, LogVotos, Cps.N
- *     - SinopseScore, ObsAdjustment
+ *     - SinopseScore
  *     - LovedTagOverlap, AvoidedTagOverlap, CriterionFitScore
+ *   (ObsAdjustment removido — agora soma determinística pós-predição.)
  *   Quality (0):
  *     - (removidas — ver acima)
  *   Categórica:
@@ -50,6 +51,12 @@ const SINOPSE_MAP: Record<string, number> = {
   "♥♥♥♥": 13,
 }
 
+// NOTA: `ObsAdjustment` foi REMOVIDO do Ridge (2026-05-29). Era padronizado e
+// quase sempre 0 → coeficiente ruidoso que não correspondia ao ajuste manual
+// que o usuário define. Agora é aplicado como soma determinística (±0.30) sobre
+// a Nota Esperada em `recalculateAll` (server/actions/calculations.ts), igual ao
+// comportamento do legado Nota.Calc. `ExpectedScoreInput.observationAdjustment`
+// continua existindo, mas não entra mais em `buildNumericRow`.
 const BASELINE_NUMERIC_FEATURES = [
   ...CRITERION_SLUGS,
   "IA(n)",
@@ -57,7 +64,6 @@ const BASELINE_NUMERIC_FEATURES = [
   "LogVotos",
   "Cps.N",
   "SinopseScore",
-  "ObsAdjustment",
   "LovedTagOverlap",
   "AvoidedTagOverlap",
   "CriterionFitScore",
@@ -164,7 +170,7 @@ function buildNumericRow(input: ExpectedScoreInput, includeQuality = false): Num
   row.push(Math.log1p(Math.max(input.totalVotes, 0)))
   row.push(normalizeChapters(input.totalChapters))
   row.push(input.synopsisQuality ? SINOPSE_MAP[input.synopsisQuality] ?? null : null)
-  row.push(Math.min(Math.max(input.observationAdjustment, -0.30), 0.30))
+  // ObsAdjustment removido do Ridge — agora é soma determinística pós-predição.
   row.push(input.lovedTagOverlap ?? null)
   row.push(input.avoidedTagOverlap ?? null)
   row.push(input.criterionFitScore ?? null)

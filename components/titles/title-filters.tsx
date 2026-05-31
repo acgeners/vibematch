@@ -18,7 +18,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { TagFilter } from "@/components/titles/tag-filter"
 import type { TagOption } from "@/server/queries/tags"
 import { AI_EVAL_STATUSES, CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
@@ -39,9 +39,7 @@ const CRITERION_LABELS: Record<string, string> = {
 }
 
 const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
-  { value: "final_score", label: "Nota.Final" },
-  { value: "calc_score", label: "Nota.IA" },
-  { value: "pred_score", label: "Nota.Pr" },
+  { value: "expected_score", label: "Nota Prevista" },
   { value: "platform_avg", label: "Nota.M" },
   { value: "total_votes", label: "Votos" },
   { value: "title", label: "Título" },
@@ -166,6 +164,7 @@ function num(v: string | null | undefined): number | undefined {
 function ScoreRangeCard({
   emoji,
   label,
+  tooltip,
   minKey,
   maxKey,
   searchParams,
@@ -177,6 +176,7 @@ function ScoreRangeCard({
 }: {
   emoji?: string
   label: string
+  tooltip?: string
   minKey: string
   maxKey: string
   searchParams: URLSearchParams
@@ -211,6 +211,13 @@ function ScoreRangeCard({
     updateParams({ [minKey]: null, [maxKey]: null })
   }
 
+  const heading = (
+    <div className="flex min-w-0 items-center gap-2">
+      {emoji && <span className="text-base leading-none">{emoji}</span>}
+      <span className="truncate text-sm font-medium">{label}</span>
+    </div>
+  )
+
   return (
     <div
       className={cn(
@@ -220,19 +227,60 @@ function ScoreRangeCard({
       )}
     >
       <div className="mb-2.5 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          {emoji && <span className="text-base leading-none">{emoji}</span>}
-          <span className="truncate text-sm font-medium">{label}</span>
-        </div>
+        {tooltip ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="min-w-0 cursor-help text-left">
+                  {heading}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs whitespace-pre-line text-xs">{tooltip}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          heading
+        )}
         <div className="flex shrink-0 items-center gap-1">
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
-              isActive ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground"
-            )}
-          >
-            {rangeLabel}
-          </span>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                title="Editar manualmente"
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums transition-colors hover:ring-1 hover:ring-primary/40",
+                  isActive ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground hover:bg-muted"
+                )}
+              >
+                {rangeLabel}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-auto p-2">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={min}
+                  max={max}
+                  step={step}
+                  placeholder="Mín"
+                  className="h-8 w-20 text-xs"
+                  value={searchParams.get(minKey) ?? ""}
+                  onChange={(e) => updateParams({ [minKey]: e.target.value || null })}
+                />
+                <span className="text-xs text-muted-foreground">–</span>
+                <Input
+                  type="number"
+                  min={min}
+                  max={max}
+                  step={step}
+                  placeholder="Máx"
+                  className="h-8 w-20 text-xs"
+                  value={searchParams.get(maxKey) ?? ""}
+                  onChange={(e) => updateParams({ [maxKey]: e.target.value || null })}
+                />
+              </div>
+            </PopoverContent>
+          </Popover>
           <button
             type="button"
             onClick={reset}
@@ -577,10 +625,10 @@ export function TitleFilters({
   const currentSearch = searchParams.get("search") ?? ""
 
   // Sort
-  const rawSort = searchParams.get("sort") ?? "final_score:desc"
+  const rawSort = searchParams.get("sort") ?? "expected_score:desc"
   const [sortField, sortDir] = (() => {
     const [f, d] = rawSort.split(":")
-    const validField = SORTABLE_FIELDS.some((x) => x.value === f) ? f : "final_score"
+    const validField = SORTABLE_FIELDS.some((x) => x.value === f) ? f : "expected_score"
     return [validField, d === "asc" ? "asc" : "desc"] as const
   })()
   const setSort = (field: string, dir: "asc" | "desc") =>
@@ -674,9 +722,8 @@ export function TitleFilters({
     })
   }
   pushRange("chapters", "Capítulos", "min_chapters", "max_chapters")
-  pushRange("final", "Nota.Final", "min_final", "max_final")
-  pushRange("pred", "Nota.Pr", "min_pr", "max_pr")
-  pushRange("calc", "Nota.IA", "min_calc", "max_calc")
+  pushRange("expected", "Nota Prevista", "min_expected", "max_expected")
+  pushRange("fit", "Alinhamento", "min_fit", "max_fit")
   pushRange("platform", "Nota.M", "min_platform_avg", "max_platform_avg")
   pushRange("votes", "Votos", "min_votes", "max_votes")
   for (const slug of CRITERION_SLUGS) {
@@ -1053,41 +1100,40 @@ export function TitleFilters({
               <FilterCard title="Notas gerais">
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                   <ScoreRangeCard
-                    emoji="🏆"
-                    label="Nota.Final"
-                    minKey="min_final"
-                    maxKey="max_final"
+                    emoji="🎯"
+                    label="Nota Prevista"
+                    tooltip="Nota que o modelo prevê que você daria à obra (0–10)."
+                    minKey="min_expected"
+                    maxKey="max_expected"
+                    step={0.5}
                     searchParams={searchParams}
                     updateParams={updateParams}
                   />
                   <ScoreRangeCard
-                    emoji="📈"
-                    label="Nota.Pr"
-                    minKey="min_pr"
-                    maxKey="max_pr"
-                    searchParams={searchParams}
-                    updateParams={updateParams}
-                  />
-                  <ScoreRangeCard
-                    emoji="🤖"
-                    label="Nota.IA"
-                    minKey="min_calc"
-                    maxKey="max_calc"
+                    emoji="🧭"
+                    label="Alinhamento"
+                    tooltip="Percentil de alinhamento com seu perfil de gosto (0–100). Top 25% = ≥ 75."
+                    minKey="min_fit"
+                    maxKey="max_fit"
+                    step={5}
+                    min={0}
+                    max={100}
                     searchParams={searchParams}
                     updateParams={updateParams}
                   />
                   <ScoreRangeCard
                     emoji="🌐"
-                    label="Nota.M"
+                    label="Média externa"
+                    tooltip="Nota.M — média ponderada das plataformas externas (0–10)."
                     minKey="min_platform_avg"
                     maxKey="max_platform_avg"
+                    step={0.5}
                     searchParams={searchParams}
                     updateParams={updateParams}
                   />
                   <VotesPresetCard
                     searchParams={searchParams}
                     updateParams={updateParams}
-                    className="lg:col-span-2"
                   />
                 </div>
               </FilterCard>

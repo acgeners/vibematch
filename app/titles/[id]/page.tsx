@@ -3,6 +3,7 @@ import Link from "next/link"
 import { BarChart3, ChevronDown, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
+import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug } from "@/server/queries/works"
 import {
@@ -11,18 +12,17 @@ import {
 } from "@/server/queries/post-attribute-assessment"
 import { getCurrentUserId, getCurrentPlan } from "@/server/queries/current-user"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
-import { getModelPromptDrift } from "@/server/queries/calibration-guards"
 import { planAllows } from "@/lib/plans/capabilities"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
-import { ScoreBadge } from "@/components/ui/score-badge"
+import { ScoreBadge, getCriterionColorClass } from "@/components/ui/score-badge"
 import {
   PublicationStatusBadge,
   PersonalStatusBadge,
 } from "@/components/ui/status-badge"
-import { CalculationBreakdown } from "@/components/titles/calculation-breakdown"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { SimilarWorksCard } from "@/components/titles/similar-works-card"
 import { getSimilarWorks } from "@/server/queries/similar-works"
 import {
@@ -76,19 +76,6 @@ type WorkTagForDisplay = {
   tag_group_id?: string | null
 }
 
-function getCriterionColor(score: number, slug: string): string {
-  const isNegative = slug === "drama" || slug === "tragedy"
-  if (isNegative) {
-    if (score <= 3) return "bg-green-100 text-green-800"
-    if (score <= 5) return "bg-yellow-100 text-yellow-800"
-    return "bg-red-100 text-red-800"
-  }
-  if (score >= 8) return "bg-emerald-100 text-emerald-800"
-  if (score >= 6) return "bg-green-100 text-green-800"
-  if (score >= 4) return "bg-yellow-100 text-yellow-800"
-  return "bg-red-100 text-red-800"
-}
-
 function normalizePlatformName(name: string) {
   return name
     .trim()
@@ -120,6 +107,37 @@ function getTagGroupLabel(tagGroupId: string | null | undefined) {
   const entry = Object.entries(TAG_GROUP_IDS).find(([, id]) => id === tagGroupId)
   if (!entry) return "Sem grupo"
   return TAG_GROUP_LABELS[entry[0] as TagGroupSlug] ?? entry[0]
+}
+
+/**
+ * Extrai a contagem de reviews da avaliação IA a partir do `raw_response`
+ * persistido (sem migration — o dado já está lá). `used` = reviews que a IA
+ * citou (reviewAudit.usedReviewIds); `provided` = reviews fornecidas no prompt
+ * após dedup (evaluationContext). Retorna null quando nenhuma review foi
+ * incluída no prompt (obras sem fonte externa).
+ */
+function extractReviewUsage(rawResponse: unknown): { used: number; provided: number } | null {
+  if (!rawResponse || typeof rawResponse !== "object") return null
+  const raw = rawResponse as Record<string, unknown>
+
+  const audit = raw.reviewAudit as { usedReviewIds?: unknown } | undefined
+  const ctx = raw.evaluationContext as
+    | {
+        reviewsIncludedInPrompt?: unknown
+        sourcedReviewsAfterDedup?: unknown
+        legacyReviewsAfterDedup?: unknown
+      }
+    | undefined
+
+  if (ctx?.reviewsIncludedInPrompt === false) return null
+
+  const used = Array.isArray(audit?.usedReviewIds) ? audit.usedReviewIds.length : 0
+  const provided =
+    (typeof ctx?.sourcedReviewsAfterDedup === "number" ? ctx.sourcedReviewsAfterDedup : 0) +
+    (typeof ctx?.legacyReviewsAfterDedup === "number" ? ctx.legacyReviewsAfterDedup : 0)
+
+  if (provided === 0 && used === 0) return null
+  return { used, provided }
 }
 
 const getSourceRows = unstable_cache(
@@ -160,27 +178,17 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
   if (!work) notFound()
 
-  // Carrega só o distance_p95 do formula_config pro CalculationBreakdown
-  // mostrar rótulos de distância calibrados (perto/médio/longe relativos).
   const configClient = createAdminClient()
-  const [{ data: configRow }, scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, modelPromptDrift, plan] = await Promise.all([
-    configClient
-      .from("formula_config")
-      .select("distance_p95")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
     getLastDeepDive(work.id as string),
     getSourceRows(),
     getBiasMap(await getCurrentUserId(configClient), configClient),
-    getModelPromptDrift(),
     getCurrentPlan(configClient),
   ])
   const isPaidPlan = planAllows(plan, "deep_dive")
-  const distanceP95: number | null = configRow?.distance_p95 == null ? null : Number(configRow.distance_p95)
 
   const scoreMap: Record<string, number> = {}
   const sourceMap: Record<string, string> = {}
@@ -200,6 +208,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     summary: string | null
     confidence: number | null
     created_at: string
+    raw_response?: unknown
     ai_evaluation_scores?: Array<{
       criterion_slug: string
       suggested_score: number | null
@@ -214,6 +223,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   const latestAiScoreMap = new Map(
     (latestAiEval?.ai_evaluation_scores ?? []).map((score) => [score.criterion_slug, score])
   )
+  const reviewUsage = extractReviewUsage(latestAiEval?.raw_response)
 
   const genres = Array.isArray(work.genres) ? work.genres.filter(Boolean) : []
   const tags = Array.isArray(work.tags) ? work.tags.filter(Boolean) : []
@@ -243,6 +253,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     score: work[field] == null ? null : Number(work[field]),
   })).filter((item) => item.score != null && Number.isFinite(item.score))
   const hasPostReadingScores = postReadingScores.length > 0
+
+  // Quantos cards aparecem em "Notas calculadas" (Alinhamento, Match/IA Rk,
+  // Pessoal). Com ≤2 cada um ocupa a linha toda; com 3 volta a 2 colunas.
+  const calcCardCount =
+    (work.calculated_scores?.personal_fit != null ? 1 : 0) +
+    (work.calculated_scores?.alignment_score != null ? 1 : 0) +
+    (work.user_score != null ? 1 : 0)
 
   const sourceOrder = new Map(
     sources.map((source, index) => [normalizePlatformName(source.name), index])
@@ -444,7 +461,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             {work.calculated_scores?.expected_score != null && (
               <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Nota Esperada
+                  Nota Prevista
                 </span>
                 <ScoreBadge
                   score={work.calculated_scores.expected_score}
@@ -554,12 +571,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               {latestAiEval?.summary && (
                 <Card className="gap-2 py-4 bg-card/50">
                   <CardHeader className="px-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
                       <div className="flex items-center gap-2">
                         <BrainCircuit className="h-4.5 w-4.5 text-muted-foreground" />
                         <CardTitle className="text-base font-bold text-foreground">Resumo da última avaliação IA</CardTitle>
                       </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <span>
                           Modelo:{" "}
                           <span className="font-medium text-foreground">
@@ -575,6 +592,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                               : "—"}
                           </span>
                         </span>
+                        {reviewUsage && (
+                          <span title="Reviews externas citadas pela IA / fornecidas no prompt">
+                            Reviews:{" "}
+                            <span className="font-medium text-foreground">
+                              {reviewUsage.used} de {reviewUsage.provided}
+                            </span>
+                          </span>
+                        )}
                         <span>
                           Data:{" "}
                           <span className="font-medium text-foreground">
@@ -625,35 +650,17 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </TabsContent>
 
             <TabsContent value="scores" className="mt-0 space-y-6">
-      {modelPromptDrift.status === "warn" && (
-        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-          <span aria-hidden>⚠</span>
-          <span>{modelPromptDrift.message}</span>
-        </div>
-      )}
-      {statusInitial.personal_status !== "Completed" && statusInitial.personal_status !== "Dropped" ? (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-stretch">
-          <AiEvaluationButton
-            workId={work.id}
-            workTitle={work.title}
-            hasCriteriaScores={Object.keys(scoreMap).length > 0}
-            coverUrl={primaryCover}
-          />
-          <DeepDiveButton
-            workId={work.id}
-            workTitle={work.title}
-            lastDive={lastDeepDive}
-            isPaid={isPaidPlan}
-          />
-        </div>
-      ) : (
-        <AiEvaluationButton
-          workId={work.id}
-          workTitle={work.title}
-          hasCriteriaScores={Object.keys(scoreMap).length > 0}
-          coverUrl={primaryCover}
-        />
-      )}
+      {/* O aviso de drift de modelo/prompt (Guard 1) é um sinal GLOBAL da
+          biblioteca — não desta obra. Vive em /settings/calibração →
+          "Calibração de atributos" (PredictionHealthCard). */}
+      {/* "Atualizar avaliação IA" sozinho numa linha. O Consultor IA (Deep Dive)
+          foi movido pra depois do "Detalhamento do cálculo". */}
+      <AiEvaluationButton
+        workId={work.id}
+        workTitle={work.title}
+        hasCriteriaScores={Object.keys(scoreMap).length > 0}
+        coverUrl={primaryCover}
+      />
       {/* Notas e Avaliações Externas side-by-side */}
       <div className={cn(platformRatings.length > 0 && "grid grid-cols-1 lg:grid-cols-2 gap-5")}>
         {/* Notas */}
@@ -665,20 +672,35 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 <CardTitle className="text-base font-bold text-foreground">Notas calculadas</CardTitle>
               </div>
               {work.calculated_scores?.expected_score != null && (
-                <div className="text-right shrink-0">
-                  <p className="text-xs font-medium text-muted-foreground">Nota Esperada</p>
-                  <p className="text-3xl font-black font-mono leading-none text-foreground">
-                    {work.calculated_scores.expected_score.toFixed(2)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">estimativa principal</p>
-                </div>
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="text-right shrink-0 cursor-help">
+                        <p className="text-xs font-medium text-muted-foreground underline-offset-4 decoration-dotted hover:underline">
+                          Nota Prevista
+                        </p>
+                        <p className="text-3xl font-black font-mono leading-none text-foreground">
+                          {work.calculated_scores.expected_score.toFixed(2)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">estimativa principal</p>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs whitespace-pre-line text-left leading-relaxed">
+                      {`A previsão vem do Perfil (encaixe com seu tipo de obra): ${work.calculated_scores.expected_score.toFixed(2)}. As 9 notas por critério (que alimentam o Perfil) vêm da avaliação da IA. As 8 dimensões pós-leitura que você preenche NÃO entram na previsão — alimentam seu user_score e o ajuste de bias das notas-IA.`}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               )}
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className={cn("grid grid-cols-1 gap-4", calcCardCount >= 3 && "sm:grid-cols-2")}>
               {work.calculated_scores?.personal_fit != null && (
-                <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
+                <div className={cn(
+                  "flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
+                  // Sem o par (IA Rk) ao lado, ocupa a linha toda pra não deixar célula vazia.
+                  work.calculated_scores?.alignment_score == null && "sm:col-span-2",
+                )}>
                   <div className="flex flex-col items-start gap-1">
                     <ScoreLabelTooltip
                       name="Alinhamento"
@@ -703,7 +725,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               )}
 
               {work.calculated_scores?.alignment_score != null && (
-                <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
+                <div className={cn(
+                  "flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
+                  work.calculated_scores?.personal_fit == null && "sm:col-span-2",
+                )}>
                   <div className="flex flex-col items-start gap-1">
                     <ScoreLabelTooltip
                       name="Match (IA Rk)"
@@ -725,50 +750,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     )
                   })()}
                 </div>
-              )}
-
-              {(work.calculated_scores?.final_score != null ||
-                work.calculated_scores?.calc_score != null ||
-                work.calculated_scores?.predicted_score != null) && (
-                <details className="group rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm overflow-hidden sm:col-span-2">
-                  <summary className="flex cursor-pointer list-none items-center justify-between p-4 [&::-webkit-details-marker]:hidden">
-                    <div className="flex flex-col items-start gap-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-medium text-foreground">Notas legadas</span>
-                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
-                      </div>
-                      <span className="text-[10px] text-muted-foreground">Pipeline antigo — substituído pela Nota Esperada</span>
-                    </div>
-                  </summary>
-                  <div className="grid gap-2 border-t border-border/40 px-4 pb-4 pt-3 bg-muted/10">
-                    <div className="flex items-center justify-between gap-3">
-                      <ScoreLabelTooltip
-                        name="Nota.Final"
-                        description="[Legado] Nota.Final — mistura ponderada (inverse-variance) de Nota.IA e Nota.Pr. Substituída pela Nota Esperada no novo pipeline."
-                      />
-                      <ScoreBadge score={work.calculated_scores?.final_score ?? null} size="sm" thresholds={scoreThresholds?.final} />
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <ScoreLabelTooltip
-                        name="Nota.IA"
-                        description="[Legado] Soma ponderada das notas por critério dadas pela IA, ajustada por pesos e amplificada (5 + (nota − 5) × 1.25)."
-                      />
-                      <ScoreBadge score={work.calculated_scores?.calc_score ?? null} size="sm" thresholds={scoreThresholds?.calc} />
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <ScoreLabelTooltip
-                        name="Prevista"
-                        description="[Legado] Previsão por Ridge Regression nas suas notas pessoais. Requer ≥20 obras avaliadas. Substituída pela Nota Esperada."
-                      />
-                      <ScoreBadge
-                        score={work.calculated_scores?.predicted_score ?? null}
-                        size="sm"
-                        showStub={work.calculated_scores?.predicted_is_stub ?? false}
-                        thresholds={scoreThresholds?.predicted}
-                      />
-                    </div>
-                  </div>
-                </details>
               )}
 
               {work.user_score != null && (
@@ -813,6 +794,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   </div>
                 )
               )}
+            </div>
+            <div className="mt-4 flex justify-end border-t border-border/40 pt-3">
+              <RerankAiRkButton
+                workId={work.id}
+                hasScore={work.calculated_scores?.alignment_score != null}
+                isPaid={isPaidPlan}
+              />
             </div>
           </CardContent>
         </Card>
@@ -896,6 +884,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       {new Date(latestAiEval.created_at).toLocaleDateString("pt-BR")}
                     </span>
                   </span>
+                  {reviewUsage && (
+                    <span title="Reviews externas citadas pela IA / fornecidas no prompt">
+                      Reviews:{" "}
+                      <span className="font-medium text-foreground">
+                        {reviewUsage.used} de {reviewUsage.provided}
+                      </span>
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -920,7 +916,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       <div
                         className={cn(
                           "grid place-items-center w-14 h-9 rounded-md font-mono text-xl font-bold leading-none",
-                          getCriterionColor(score, slug)
+                          getCriterionColorClass(score, slug, scoreThresholds?.criteria?.[slug])
                         )}
                       >
                         {score.toFixed(1)}
@@ -973,13 +969,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         </CardContent>
       </Card>
 
-      {/* Detalhamento do cálculo */}
-      {work.calculated_scores && (
-        <CalculationBreakdown
-          calculatedScore={work.calculated_scores}
-          aiConfidence={latestAiEval?.confidence ?? null}
-          criteriaCoverage={Object.keys(scoreMap).length / CRITERION_SLUGS.length}
-          distanceP95={distanceP95}
+      {/* Consultor IA — Deep Dive */}
+      {statusInitial.personal_status !== "Completed" && statusInitial.personal_status !== "Dropped" && (
+        <DeepDiveButton
+          workId={work.id}
+          workTitle={work.title}
+          lastDive={lastDeepDive}
+          isPaid={isPaidPlan}
         />
       )}
 

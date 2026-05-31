@@ -29,62 +29,101 @@ export const POST_READING_WEIGHT_LABELS: Record<PostReadingScoreField, string> =
 
 export const POST_READING_STAR_HINTS: Record<PostReadingScoreField, string[]> = {
   post_story_score: [
-    "★ → História fraca, confusa ou mal sustentada. Muitos furos, conflitos ruins ou sensação de que a obra não sabe para onde vai.",
-    "★★ → História básica ou irregular. Tem uma premissa ok, mas desenvolvimento previsível, raso ou com partes mal resolvidas.",
-    "★★★ → História boa e funcional. Faz sentido, mantém interesse e entrega uma progressão satisfatória, mesmo sem ser brilhante.",
-    "★★★★ → História muito boa. Conflitos bem construídos, boa progressão e momentos fortes que sustentam bem a obra.",
-    "★★★★★ → História excelente. Muito bem amarrada, envolvente, memorável e com resolução/construção que eleva a obra inteira.",
+    "★ → História fraca. Confusa, sem direção, cheia de furos ou com conflitos ruins. A trama atrapalha a experiência.",
+    "★★ → História limitada. A premissa até funciona, mas o desenvolvimento é fraco, previsível, raso ou mal resolvido.",
+    "★★★ → Use 3 quando a história funciona: faz sentido, mantém interesse e entrega o básico bem. Não sobe para 4 se a trama não for um ponto forte claro.",
+    "★★★★ → Use 4 quando a história é ponto forte: conflitos bem construídos, boa progressão, viradas eficientes e sustentação consistente. Não vira 5 se não for memorável.",
+    "★★★★★ → Só recebe 5 se a história for memorável: muito bem amarrada, envolvente e capaz de elevar a obra inteira.",
   ],
   post_fl_score: [
-    "★ → Female Lead apagada, irritante ou sem agência. Parece ser arrastada pela história e não tem presença própria.",
-    "★★ → Female Lead mediana ou pouco marcante. Cumpre sua função, mas não se destaca muito nem gera grande apego.",
-    "★★★ → Female Lead boa e funcional. Tem carisma, personalidade clara e participa bem do desenvolvimento da história.",
-    "★★★★ → Female Lead muito boa. Marcante, ativa, consistente e com decisões relevantes que influenciam a trama.",
-    "★★★★★ → Female Lead excelente. Carrega grande parte da obra, tem presença forte, identidade memorável e é um dos principais motivos para acompanhar a história.",
+    "★ → Female Lead fraca. Apagada, irritante, passiva demais ou incoerente. A protagonista atrapalha a experiência.",
+    "★★ → Female Lead limitada. Tem função na história, mas pouco destaque; reage mais do que age e gera pouco apego.",
+    "★★★ → Use 3 quando ela funciona bem: tem personalidade clara, participa da trama e sustenta seu papel. Não sobe para 4 se não influencia decisões ou conflitos relevantes.",
+    "★★★★ → Use 4 quando ela é ponto forte: marcante, ativa, consistente e com decisões que mudam a história. Não vira 5 se não for difícil imaginar a obra sem ela.",
+    "★★★★★ → Só recebe 5 se ela carrega a obra: memorável, carismática e essencial para o impacto da história.",
   ],
   post_ml_score: [
-    "★ → Male Lead sem graça, problemático ou mal construído. Pode parecer genérico, forçado ou prejudicar a dinâmica da obra.",
-    "★★ → Male Lead mediano. Cumpre sua função na história, mas não se destaca muito nem deixa grande impacto.",
-    "★★★ → Male Lead bom e consistente. Tem presença, personalidade clara e funciona bem dentro da trama ou da dinâmica romântica.",
-    "★★★★ → Male Lead muito bom. Marcante, interessante, com presença forte e influência real no desenvolvimento da história.",
-    "★★★★★ → Male Lead excelente. Memorável, carismático, essencial para o impacto da obra e um dos grandes pontos fortes da história.",
+    "★ → Male Lead fraco. Sem graça, genérico, mal construído ou problemático de um jeito que prejudica a obra.",
+    "★★ → Male Lead limitado. Cumpre função na história, mas tem pouca presença, profundidade ou impacto próprio.",
+    "★★★ → Use 3 quando ele funciona bem: tem personalidade clara, contribui para a trama ou dinâmica principal. Não sobe para 4 se ele só cumpre papel romântico/narrativo.",
+    "★★★★ → Use 4 quando ele é ponto forte: marcante, interessante e relevante para conflitos, relações ou decisões. Não vira 5 se não for memorável.",
+    "★★★★★ → Só recebe 5 se ele for essencial para o impacto da obra: memorável, bem construído e difícil de substituir por outro personagem parecido.",
   ],
   post_character_development_score: [
-    "★ → Personagens rasos, estáticos ou mal aproveitados. Relações pouco convincentes e quase nenhuma evolução.",
-    "★★ → Desenvolvimento limitado. Alguns personagens têm potencial, mas a obra explora pouco ou resolve tudo de forma superficial.",
-    "★★★ → Desenvolvimento bom. Há evolução perceptível, relações funcionam e os personagens têm alguma profundidade.",
-    "★★★★ → Desenvolvimento muito bom. Arcos bem construídos, relações interessantes e mudanças coerentes ao longo da obra.",
-    "★★★★★ → Desenvolvimento excelente. Personagens complexos, evolução forte, relações memoráveis e crescimento emocional muito bem trabalhado.",
+    "★ → Desenvolvimento fraco. Personagens rasos, estáticos ou mal aproveitados; relações pouco convincentes.",
+    "★★ → Desenvolvimento limitado. Existe potencial, mas os arcos são superficiais, apressados ou resolvidos de forma fácil demais.",
+    "★★★ → Use 3 quando há evolução perceptível, relações convincentes e alguma profundidade. Não sobe para 4 se as mudanças forem simples ou previsíveis demais.",
+    "★★★★ → Use 4 quando o desenvolvimento é ponto forte: arcos bem construídos, mudanças coerentes e relações que evoluem de forma interessante. Não vira 5 se não deixar impacto emocional.",
+    "★★★★★ → Só recebe 5 se o crescimento for memorável: personagens complexos, evolução marcante e relações com impacto emocional real.",
   ],
   post_pacing_score: [
-    "★ → Ritmo ruim. Muito arrastado, corrido, repetitivo ou cansativo. A experiência sofre bastante.",
-    "★★ → Ritmo irregular. Tem boas partes, mas alterna com enrolação, cortes bruscos ou trechos que quebram o interesse.",
-    "★★★ → Ritmo bom. A obra flui bem na maior parte do tempo, com poucos momentos cansativos.",
-    "★★★★ → Ritmo muito bom. Progressão equilibrada, bom controle de tensão e pouca sensação de desperdício.",
-    "★★★★★ → Ritmo excelente. Difícil parar de assistir/ler. Cada parte parece bem posicionada e a obra prende sem cansar.",
+    "★ → Ritmo ruim. Muito arrastado, corrido, repetitivo ou cansativo; prejudica bastante a experiência.",
+    "★★ → Ritmo irregular. Tem partes boas, mas alterna com enrolação, quedas de interesse ou aceleração brusca.",
+    "★★★ → Use 3 quando a obra flui bem na maior parte do tempo, com poucos trechos cansativos. Não sobe para 4 se você sentiu vontade de pular partes importantes.",
+    "★★★★ → Use 4 quando o ritmo é ponto forte: progressão equilibrada, bom controle de tensão e pouca sensação de desperdício. Não vira 5 se não prende com facilidade.",
+    "★★★★★ → Só recebe 5 se o ritmo prende muito: quase tudo parece bem posicionado e dá vontade de continuar sem parar.",
   ],
   post_art_visual_score: [
-    "★ → Visual fraco ou inconsistente. A arte/animação atrapalha a experiência.",
-    "★★ → Visual simples ou irregular. Não chega a estragar, mas também não valoriza muito a obra.",
-    "★★★ → Visual bom. Cumpre bem, é agradável e consistente na maior parte do tempo.",
-    "★★★★ → Visual muito bom. Bonito, expressivo, com boa composição de cenas e identidade visual clara.",
-    "★★★★★ → Visual excelente. Marcante, muito bem executado e um dos grandes pontos fortes da obra.",
+    "★ → Visual fraco. Inconsistente, pouco agradável ou mal executado a ponto de atrapalhar a experiência.",
+    "★★ → Visual limitado. Simples, irregular ou pouco expressivo; não estraga, mas também não valoriza muito a obra.",
+    "★★★ → Use 3 quando o visual é bom e funcional: agradável, claro e consistente o suficiente. Não sobe para 4 se for bonito, mas genérico ou pouco expressivo.",
+    "★★★★ → Use 4 quando o visual é ponto forte: bonito, expressivo, consistente e com boa composição ou identidade. Não vira 5 se não for memorável.",
+    "★★★★★ → Só recebe 5 se o visual for diferencial: marcante, memorável e um dos grandes motivos para gostar da obra.",
   ],
   post_impact_immersion_score: [
-    "★ → Pouco envolvente. Não prende, não emociona e é fácil largar ou esquecer.",
-    "★★ → Envolve pouco. Tem alguns momentos bons, mas o impacto geral é fraco ou passageiro.",
-    "★★★ → Boa imersão. A obra prende, gera interesse e tem momentos emocionalmente funcionais.",
-    "★★★★ → Muito imersiva. Dá vontade de continuar, cria apego e deixa cenas/momentos marcantes.",
-    "★★★★★ → Extremamente imersiva. A obra gruda na cabeça, gera forte envolvimento emocional e deixa impacto depois de terminar.",
+    "★ → Pouca imersão. Não prende, não emociona e é fácil largar ou esquecer.",
+    "★★ → Imersão fraca. Tem alguns momentos bons, mas o impacto geral é baixo ou passageiro.",
+    "★★★ → Use 3 quando a obra prende o suficiente, gera interesse e tem bons momentos. Não sobe para 4 se você gostou, mas não criou apego real.",
+    "★★★★ → Use 4 quando a imersão é ponto forte: dá vontade de continuar, cria apego e deixa cenas ou emoções marcantes. Não vira 5 se não fica na cabeça depois.",
+    "★★★★★ → Só recebe 5 se a obra gruda na cabeça: forte envolvimento emocional, apego alto e impacto que continua depois de terminar.",
   ],
   post_originality_score: [
-    "★ → Muito genérica. Usa clichês de forma preguiçosa e não apresenta identidade própria.",
-    "★★ → Pouco original. A base é conhecida, mas ainda tem um ou outro elemento interessante.",
-    "★★★ → Boa originalidade. Mesmo usando ideias comuns, executa bem ou combina elementos de forma agradável.",
-    "★★★★ → Muito original ou muito bem diferenciada. Tem identidade própria e usa clichês de forma inteligente.",
-    "★★★★★ → Altamente original/marcante. Traz algo raro, criativo ou executado de um jeito tão próprio que fica difícil confundir com outra obra.",
+    "★ → Muito genérica. Usa clichês de forma preguiçosa e parece cópia de várias outras obras.",
+    "★★ → Pouco original. A base é comum e a execução não diferencia muito, apesar de ter algum detalhe interessante.",
+    "★★★ → Use 3 quando a obra usa ideias conhecidas, mas executa bem ou combina elementos de forma agradável. Não sobe para 4 se não tiver identidade própria clara.",
+    "★★★★ → Use 4 quando há diferenciação real: identidade própria, boa criatividade ou clichês usados de forma inteligente. Não vira 5 se ainda parecer familiar demais.",
+    "★★★★★ → Só recebe 5 se for altamente marcante: raro, criativo ou executado de um jeito tão próprio que fica difícil confundir com outra obra.",
   ],
 }
+
+export const POST_READING_CRITERIA_DESCRIPTIONS: Record<PostReadingScoreField, string> = {
+  post_story_score: "• Coerência do enredo\n• Qualidade dos conflitos\n• Lógica interna\n• Progressão e construção/resolução da história\n\n→ A história se sustenta por conta própria ou funciona mais como suporte para personagens, romance ou estética?",
+  post_fl_score: "• Carisma e presença\n• Agência e decisões relevantes\n• Inteligência emocional/estratégica\n• Consistência de comportamento\n• Impacto na trama e nas relações\n\n→ A protagonista move a história com identidade própria ou só reage ao que acontece?",
+  post_ml_score: "• Carisma e presença\n• Construção como personagem\n• Agência e decisões relevantes\n• Consistência de comportamento\n• Impacto na trama, romance ou dinâmica principal\n\n→ O Male Lead acrescenta força à obra ou existe só como par romântico/apoio da protagonista?",
+  post_character_development_score: "• Evolução ao longo da história\n• Profundidade dos personagens\n• Arcos individuais\n• Relações, química e conflitos\n• Mudanças coerentes com as experiências vividas\n\n→ Os personagens crescem de forma convincente ou só mudam porque a trama precisa?",
+  post_pacing_score: "• Fluidez da leitura\n• Equilíbrio entre partes lentas e rápidas\n• Enrolação, repetição ou cortes bruscos\n• Controle de tensão e progressão\n\n→ A obra flui naturalmente ou dá vontade de pular, pausar ou abandonar partes?",
+  post_art_visual_score: "• Qualidade do desenho/animação\n• Consistência visual\n• Expressividade dos personagens\n• Composição de cenas\n• Identidade estética\n\n→ O visual apenas cumpre função ou realmente valoriza a experiência?",
+  post_impact_immersion_score: "• Envolvimento emocional\n• Vontade de continuar\n• Apego aos personagens\n• Cenas ou momentos memoráveis\n• Quanto a obra fica na cabeça depois\n\n→ A obra te puxou de verdade ou você só reconhece que ela é boa?",
+  post_originality_score: "• Identidade própria\n• Criatividade da premissa ou execução\n• Uso inteligente de clichês\n• Diferenciação dentro do gênero\n• Sensação de novidade ou personalidade\n\n→ A obra parece ter voz própria ou soa como mais uma versão do mesmo molde?",
+}
+
+export interface PostReadingStarLegendEntry {
+  stars: number
+  value: number
+  label: string
+  description: string
+}
+
+export const POST_READING_STAR_LEGEND: PostReadingStarLegendEntry[] = [
+  { stars: 1, value: 2, label: "Prejudica", description: "Prejudica a experiência. História confusa, personagens sem graça/irritantes ou visual fraco." },
+  { stars: 2, value: 4, label: "Fraco/limitado", description: "Tem problemas claros, mas ainda é aproveitável. Premissa aceitável, mas desenvolvimento raso, ritmo irregular ou clichês comuns." },
+  { stars: 3, value: 6.5, label: "Funciona", description: "Funciona bem, sem ser grande destaque.\nObra funcional, boa imersão e desenvolvimento satisfatório, mesmo sem ser brilhante." },
+  { stars: 4, value: 8, label: "Ponto forte", description: "É um ponto forte da obra.\nHistória cativante, personagens marcantes, boa arte/visual e ritmo bem equilibrado." },
+  { stars: 5, value: 10, label: "Diferencial/memorável", description: "É memorável ou um dos principais motivos para gostar da obra. Excepcional em todos os aspectos: memorável, extremamente imersivo e original." },
+]
+
+export interface SynopsisInterestLegendEntry {
+  glyph: string
+  label: string
+  description: string
+}
+
+export const SYNOPSIS_INTEREST_LEGEND: SynopsisInterestLegendEntry[] = [
+  { glyph: "♡", label: "Fraca", description: "A sinopse não me chamou atenção; parece pouco interessante ou fora do meu gosto." },
+  { glyph: "♥♥", label: "Regular", description: "Tem algum elemento interessante, mas não gerou muita vontade de começar." },
+  { glyph: "♥♥♥", label: "Boa", description: "A sinopse me interessou; parece uma obra que eu provavelmente testaria." },
+  { glyph: "♥♥♥♥", label: "Ótima", description: "A sinopse me deixou com muita vontade de ler; combina bastante com o que eu procuro." },
+]
 
 export function starsToPostReadingScore(stars: number): PostReadingStarValue {
   const index = Math.min(Math.max(Math.round(stars), 1), POST_READING_STAR_VALUES.length) - 1

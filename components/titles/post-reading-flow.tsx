@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { Button } from "@/components/ui/button"
 import { WorkStatusForm } from "./work-status-form"
 import { PostAttributeAssessmentForm } from "./post-attribute-assessment-form"
 import type { PostAttributeAssessmentFormProps } from "./post-attribute-assessment-form"
@@ -81,6 +82,11 @@ export function PostReadingFlow({
     (slug) => attrValues[slug as CriterionSlug] !== initialAttrValues[slug as CriterionSlug],
   )
 
+  const [formState, setFormState] = useState<{ saving: boolean; canSubmit: boolean }>({
+    saving: false,
+    canSubmit: false,
+  })
+
   return (
     <div className="space-y-5">
       <WorkStatusForm
@@ -93,7 +99,9 @@ export function PostReadingFlow({
           showAttributes ? () => submitPostReadingAttributes(workId, attrValues) : undefined
         }
         extraDirty={attrDirty}
-        submitLabel={showAttributes ? "Terminei de ler" : undefined}
+        showEvaluationCriteria={isVisible}
+        formId="work-status-form"
+        onStateChange={setFormState}
       />
       {isVisible && (
         <PostAttributeAssessmentForm
@@ -105,6 +113,12 @@ export function PostReadingFlow({
           hideOwnSave={hasEval}
         />
       )}
+      {/* Botão Salvar no fim de tudo — submete o WorkStatusForm via form={formId}. */}
+      <div className="flex justify-end border-t border-border/40 pt-4">
+        <Button type="submit" form="work-status-form" disabled={!formState.canSubmit}>
+          {formState.saving ? "Salvando…" : "Salvar"}
+        </Button>
+      </div>
     </div>
   )
 }

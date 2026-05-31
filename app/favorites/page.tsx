@@ -61,6 +61,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
   // valores inválidos vindos da URL sem cair em erro 500.
   const validSortFields = new Set<string>([
     // Notas (novo pipeline)
+    "decision",
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
     // Notas (legado)
     "final_score", "calc_score", "predicted_score", "pred_score", "alignment_score",
@@ -115,12 +116,12 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
     synopsisQualities: multi("synopsis_q"),
     minTotalChapters: num("min_chapters"),
     maxTotalChapters: num("max_chapters"),
-    minCalcScore: num("min_calc"),
-    maxCalcScore: num("max_calc"),
-    minPredictedScore: num("min_pr"),
-    maxPredictedScore: num("max_pr"),
-    minFinalScore: num("min_final"),
-    maxFinalScore: num("max_final"),
+    minExpectedScore: num("min_expected"),
+    maxExpectedScore: num("max_expected"),
+    minPersonalFitPct: num("min_fit"),
+    maxPersonalFitPct: num("max_fit"),
+    minAlignment: num("min_align"),
+    maxAlignment: num("max_align"),
     minPlatformAvg: num("min_platform_avg"),
     maxPlatformAvg: num("max_platform_avg"),
     minTotalVotes: num("min_votes"),
@@ -175,9 +176,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
         publicationStatuses={statusOptions.publicationStatuses}
         personalStatuses={statusOptions.personalStatuses}
         defaultTopN={null}
-        defaultMinCalc={null}
-        defaultMinPredicted={null}
-        defaultMinFinal={null}
+        defaultMinExpected={null}
         basePath="/favorites"
         hidePreferencesControls
       />
@@ -193,6 +192,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
         namespace="favorites"
         basePath="/favorites"
         enableSelectAll
+        isPaid={isPaid}
       />
     </div>
   )

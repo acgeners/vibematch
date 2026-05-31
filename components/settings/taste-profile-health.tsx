@@ -40,8 +40,8 @@ export function TasteProfileHealth({ tasteProfile }: TasteProfileHealthProps) {
             <p className="text-xs text-muted-foreground">
               O <code className="font-mono">personal_fit</code> e features de perfil no L1 dependem
               de um TasteProfile. Avalie pelo menos {5} obras com <code className="font-mono">user_score</code>{" "}
-              e use o botão de gerar perfil em <code className="font-mono">/settings</code> ou{" "}
-              <code className="font-mono">/recommendations</code>.
+              e use o botão <strong>Gerar perfil</strong> acima (ou em{" "}
+              <code className="font-mono">/recommendations</code>).
             </p>
           </div>
         </div>

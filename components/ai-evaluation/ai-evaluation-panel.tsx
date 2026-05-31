@@ -40,7 +40,7 @@ interface PendingWork {
   personal_status: string
   personal_status_id: number | null
   cover_url?: string | null
-  final_score?: number | null
+  expected_score?: number | null
   matchedFilters?: Array<"pending" | "review-pending" | "low-confidence" | "outdated-model">
   evaluation?: {
     confidence: number | null
@@ -53,6 +53,11 @@ interface PendingWork {
 interface AiEvaluationPanelProps {
   pendingWorks: PendingWork[]
 }
+
+// Quantas avaliações IA rodam em paralelo no lote. O gargalo é a chamada do
+// LLM (~50s cada); 3 simultâneas reduzem o tempo total sem martelar a API
+// (maxRetries no client absorve eventuais 529).
+const QUEUE_CONCURRENCY = 3
 
 interface ReviewData {
   evaluation: AiEvaluation
@@ -84,7 +89,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   // Sort
-  type SortField = "default" | "final_score" | "confidence" | "evaluatedAt" | "modelName"
+  type SortField = "default" | "expected_score" | "confidence" | "evaluatedAt" | "modelName"
   const [sortField, setSortField] = useState<SortField>("default")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [sortField2, setSortField2] = useState<SortField>("default")
@@ -97,8 +102,8 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
       switch (field) {
         case "default":
           return null
-        case "final_score":
-          return w.final_score ?? null
+        case "expected_score":
+          return w.expected_score ?? null
         case "confidence":
           return w.evaluation?.confidence ?? null
         case "evaluatedAt": {
@@ -187,6 +192,29 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
     }
   }
 
+  // Variante da avaliação usada no lote (fila): NÃO mexe em `evaluatingId`
+  // (que destaca uma única linha) porque rodam várias em paralelo. O progresso
+  // do lote é mostrado pelo overlay da fila (queueProcessedCount).
+  const runQueuedEvaluation = async (work: PendingWork): Promise<ReviewData | null> => {
+    const result = await triggerAiEvaluation(work.id)
+    if (queueCancelledRef.current) return null
+    if (result.error) {
+      toast.error(`Erro na avaliação de "${work.title}": ${result.error}`)
+      return null
+    }
+    if (!result.data?.evaluation) {
+      toast.error(`"${work.title}": notas não retornadas.`)
+      return null
+    }
+    return {
+      evaluation: result.data.evaluation,
+      workId: work.id,
+      workTitle: work.title,
+      coverUrl: work.cover_url ?? null,
+      currentScores: result.data.currentScores ?? {},
+    }
+  }
+
   const handleCancelEvaluation = () => {
     evaluationCancelledRef.current = true
     setEvaluatingId(null)
@@ -211,20 +239,32 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
     setQueueProcessedCount(0)
     setReviewData(null)
 
-    const results: ReviewData[] = []
+    // Avalia em PARALELO com concorrência limitada em vez de sequencial: o
+    // gargalo é a chamada do LLM (~50s cada), então rodar algumas ao mesmo tempo
+    // encurta bastante o tempo total do lote sem perder qualidade. Resultados
+    // mantêm a ordem original (por índice) e o cancelamento para de lançar novas.
+    const slots: (ReviewData | null)[] = new Array(source.length).fill(null)
+    let nextIndex = 0
+    let processed = 0
 
-    for (let index = 0; index < source.length; index += 1) {
-      if (queueCancelledRef.current) return
-
-      setQueueProcessedCount(index + 1)
-      const result = await runEvaluation(source[index])
-      if (queueCancelledRef.current) return
-
-      if (result) results.push(result)
+    const worker = async () => {
+      while (!queueCancelledRef.current) {
+        const index = nextIndex
+        nextIndex += 1
+        if (index >= source.length) return
+        const result = await runQueuedEvaluation(source[index])
+        processed += 1
+        setQueueProcessedCount(processed)
+        if (!queueCancelledRef.current && result) slots[index] = result
+      }
     }
+
+    const workerCount = Math.min(QUEUE_CONCURRENCY, source.length)
+    await Promise.all(Array.from({ length: workerCount }, () => worker()))
 
     if (queueCancelledRef.current) return
 
+    const results = slots.filter((r): r is ReviewData => r !== null)
     if (results.length === 0) {
       setQueue([])
       setQueueProcessedCount(0)
@@ -427,7 +467,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="default">Padrão</SelectItem>
-                  <SelectItem value="final_score">Nota Final</SelectItem>
+                  <SelectItem value="expected_score">Nota Prevista</SelectItem>
                   <SelectItem value="confidence">Confiança IA</SelectItem>
                   <SelectItem value="evaluatedAt">Data avaliação</SelectItem>
                   <SelectItem value="modelName">Modelo</SelectItem>
@@ -459,7 +499,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="default">Nenhum</SelectItem>
-                      <SelectItem value="final_score" disabled={sortField === "final_score"}>Nota Final</SelectItem>
+                      <SelectItem value="expected_score" disabled={sortField === "expected_score"}>Nota Prevista</SelectItem>
                       <SelectItem value="confidence" disabled={sortField === "confidence"}>Confiança IA</SelectItem>
                       <SelectItem value="evaluatedAt" disabled={sortField === "evaluatedAt"}>Data avaliação</SelectItem>
                       <SelectItem value="modelName" disabled={sortField === "modelName"}>Modelo</SelectItem>
@@ -552,9 +592,9 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                         className="text-sm font-semibold hover:underline line-clamp-2 break-words"
                       />
                     </span>
-                    {work.final_score != null && (
-                      <span title="Nota.Final" className="inline-flex shrink-0">
-                        <ScoreBadge score={work.final_score} size="sm" />
+                    {work.expected_score != null && (
+                      <span title="Nota Prevista" className="inline-flex shrink-0">
+                        <ScoreBadge score={work.expected_score} size="sm" />
                       </span>
                     )}
                   </div>

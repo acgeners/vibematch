@@ -36,6 +36,11 @@ interface WorkHeatmapViewProps {
   namespace?: WorkColumnNamespace
   basePath?: string
   enableCompare?: boolean
+  enableSelectAll?: boolean
+  allSelected?: boolean
+  someSelected?: boolean
+  onSelectAll?: () => void
+  onClearAll?: () => void
 }
 
 const HEATMAP_TITLE_COL_WIDTH = 280
@@ -125,7 +130,7 @@ const NON_CRITERION_LABELS: Record<string, string> = {
   final_score: "Final",
   calc_score: "IA",
   predicted_score: "Pr",
-  expected_score: "Esperada",
+  expected_score: "Prevista",
   expected_baseline: "Perfil",
   expected_quality_adj: "Δ Qual.",
   platform_avg: "Externa",
@@ -138,7 +143,7 @@ const NON_CRITERION_TOOLTIPS: Record<string, string> = {
   final_score: "Nota.Final",
   calc_score: "Nota.IA",
   predicted_score: "Nota.Pr",
-  expected_score: "Nota esperada (L1 single Ridge — substitui N.IA/N.Pr/N.Final)",
+  expected_score: "Nota Prevista (L1 single Ridge — substitui N.IA/N.Pr/N.Final)",
   expected_baseline: "Stage 1 da decomposição — contribuição do perfil (sem qualidade)",
   expected_quality_adj: "Stage 2 da decomposição — ajuste pelas 8 dimensões de qualidade",
   platform_avg: "Média externa",
@@ -240,6 +245,11 @@ export function WorkHeatmapView({
   onToggleSelect,
   namespace = "titles",
   enableCompare = true,
+  enableSelectAll = false,
+  allSelected = false,
+  someSelected = false,
+  onSelectAll,
+  onClearAll,
 }: WorkHeatmapViewProps) {
   const columnConfig = useSyncExternalStore(
     (onChange) => subscribeWorkColumnConfig(onChange, namespace),
@@ -340,7 +350,19 @@ export function WorkHeatmapView({
                 className="group/header relative sticky left-0 z-20 border-b border-r bg-muted/60 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                 style={{ width: naturalTitleWidth }}
               >
-                Obra
+                <div className="flex items-center gap-2">
+                  {enableCompare && enableSelectAll && (
+                    <Checkbox
+                      checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                      onCheckedChange={(value) => {
+                        if (value) onSelectAll?.()
+                        else onClearAll?.()
+                      }}
+                      aria-label="Selecionar todas as obras visíveis"
+                    />
+                  )}
+                  Obra
+                </div>
                 <ResizeHandle
                   columnKey="__title__"
                   onResize={setWidth}

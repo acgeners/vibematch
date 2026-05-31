@@ -357,7 +357,7 @@ export async function getDeepDiveContext(workId: string): Promise<{
   if (!profileRow) {
     return {
       error:
-        "Perfil de gosto ainda não foi gerado. Acesse /preferences ou avalie obras com user_score pra desbloquear o Deep Dive.",
+        "Perfil de gosto ainda não foi gerado. Acesse /conta/perfil ou avalie obras com user_score pra desbloquear o Deep Dive.",
     }
   }
   if (profileRow.is_stub) {

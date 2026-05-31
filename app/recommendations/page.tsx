@@ -3,6 +3,7 @@ import { Header } from "@/components/layout/header"
 import { TasteProfileCard } from "@/components/recommendations/taste-profile-card"
 import { RunCreatorForm } from "@/components/recommendations/run-creator-form"
 import { RunHistoryList } from "@/components/recommendations/run-history-list"
+import { ChatRecommendButton } from "@/components/recommendations/chat-recommend-button"
 import {
   getTasteProfileStatusAction,
 } from "@/server/actions/recommendations"
@@ -39,6 +40,7 @@ export default async function RecommendationsPage() {
         title="Recomendações"
         description="Perfil de gosto + ranking dos favoritos. Cada execução fica salva no histórico."
         icon={<Sparkles />}
+        actions={<ChatRecommendButton isPaid={isPaid} />}
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

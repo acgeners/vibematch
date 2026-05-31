@@ -33,14 +33,10 @@ const CRITERION_LABELS: Record<string, string> = {
 
 const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
   { value: "recommended", label: "Recomendado" },
-  { value: "expected_score", label: "Nota Esperada" },
+  { value: "expected_score", label: "Nota Prevista" },
   { value: "personal_fit", label: "Alinhamento" },
   { value: "alignment_score", label: "IA Re-rank" },
   { value: "platform_avg", label: "Nota.M" },
-  { value: "final_score", label: "Nota.Final (Legado)" },
-  { value: "calc_score", label: "Nota.IA (Legado)" },
-  { value: "pred_score", label: "Nota.Pr (Legado)" },
-  { value: "knn_score", label: "Nota.kNN" },
   { value: "total_votes", label: "Votos" },
   { value: "title", label: "Título" },
   { value: "chapters", label: "Capítulos" },
@@ -118,7 +114,22 @@ function SortLevelsSection({ searchParams, updateParams, className, defaultSort 
   }
 
   return (
-    <FilterSection title="Ordenação" className={className}>
+    <FilterSection
+      title="Ordenação"
+      className={className}
+      headerAction={
+        levels.length < 5 && (
+          <button type="button" onClick={add}>
+            <Badge
+              variant="outline"
+              className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
+            >
+              + nível
+            </Badge>
+          </button>
+        )
+      }
+    >
       <div className="space-y-2">
         <div className={`grid gap-2 ${levels.length > 1 ? "sm:grid-cols-2" : "grid-cols-1"}`}>
         {levels.map((level, i) => (
@@ -158,11 +169,6 @@ function SortLevelsSection({ searchParams, updateParams, className, defaultSort 
           </div>
         ))}
         </div>
-        {levels.length < 5 && (
-          <Button type="button" variant="ghost" size="sm" onClick={add} className="h-7 text-xs px-2">
-            <Plus className="h-3 w-3 mr-1" /> Adicionar nível
-          </Button>
-        )}
       </div>
     </FilterSection>
   )
@@ -183,11 +189,9 @@ interface RankingFiltersProps {
   publicationStatuses?: StatusOption[]
   personalStatuses?: StatusOption[]
   defaultTopN: number | null
-  defaultMinCalc: number | null
-  defaultMinPredicted: number | null
-  defaultMinFinal: number | null
+  /** Preferência "Nota Prevista mínima" (persistida na coluna min_final_score, repurposada). */
+  defaultMinExpected: number | null
   basePath?: string
-  /** Quando true, oculta o botão "Salvar padrão" — útil em /favorites onde defaults globais não fazem sentido. */
   hidePreferencesControls?: boolean
   /** Sort default efetivo (depende do plano: Free="recommended:desc", Pago="expected_score:desc"). */
   defaultSort?: string
@@ -204,36 +208,22 @@ interface FilterSectionProps {
 
 function FilterSection({
   title,
-  defaultOpen = true,
   headerAction,
   children,
   className,
   contentClassName,
 }: FilterSectionProps) {
-  const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className={`overflow-hidden rounded-lg border border-border/65 bg-background/40 ${className ?? ""}`}>
-      <div className="flex items-center gap-3 bg-card/60 px-3 py-2.5 transition-colors hover:bg-card/80 sm:px-4 sm:py-3">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
-        >
-          <span className="truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {title}
-          </span>
-          <ChevronDown
-            className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`}
-          />
-        </button>
+    <div className={`overflow-hidden rounded-lg border border-border/65 bg-background/45 ${className ?? ""}`}>
+      <div className="flex min-h-[40px] sm:min-h-[46px] items-center justify-between gap-3 bg-card/60 px-3 py-2.5 transition-colors hover:bg-card/80 sm:px-4 sm:py-3">
+        <span className="truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </span>
         {headerAction && <div className="shrink-0">{headerAction}</div>}
       </div>
-      {open && (
-        <div className={`border-t border-border/60 px-3 py-3 sm:px-4 sm:py-4 xl:px-5 xl:py-5 ${contentClassName ?? ""}`}>
-          {children}
-        </div>
-      )}
+      <div className={`border-t border-border/60 px-3 py-3 sm:px-4 sm:py-4 xl:px-5 xl:py-5 ${contentClassName ?? ""}`}>
+        {children}
+      </div>
     </div>
   )
 }
@@ -587,13 +577,17 @@ function FacetLegend() {
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/55 bg-background/45 px-3 py-2 text-xs text-muted-foreground">
       <span className="font-semibold text-foreground/80">Seleção</span>
       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-emerald-300">
-        <Plus className="h-3 w-3" /> obrigatório
+        <Plus className="h-3 w-3" /> obrigatório (AND)
       </span>
       <span className="inline-flex items-center gap-1 rounded-full bg-sky-400/10 px-2 py-0.5 text-sky-300">
-        <Plus className="h-3 w-3" /> opcional
+        <span className="inline-flex items-center gap-0.5">
+          <Plus className="h-3 w-3" />
+          <Plus className="h-3 w-3" />
+        </span>{" "}
+        opcional (OR)
       </span>
       <span className="inline-flex items-center gap-1 rounded-full bg-rose-400/10 px-2 py-0.5 text-rose-300">
-        <Minus className="h-3 w-3" /> excluir
+        <Minus className="h-3 w-3" /> excluir (NOT)
       </span>
     </div>
   )
@@ -1099,9 +1093,7 @@ export function RankingFilters({
   publicationStatuses = [],
   personalStatuses = [],
   defaultTopN,
-  defaultMinCalc,
-  defaultMinPredicted,
-  defaultMinFinal,
+  defaultMinExpected,
   basePath = "/ranking",
   hidePreferencesControls = false,
   defaultSort,
@@ -1134,29 +1126,25 @@ export function RankingFilters({
   const filtersDirty = draftSearch !== appliedSearchString
   const hasFilters = draftSearch !== "" || appliedSearchString !== ""
 
-  // Top N + min scores (URL pode sobrescrever as preferências do DB)
+  // Top N + nota prevista mínima (URL pode sobrescrever as preferências do DB).
+  // O legado min_calc/min_pr saiu — a preferência "Nota Prevista mínima" é
+  // persistida na coluna min_final_score (repurposada no cutover Fase 1.5).
   const urlTopN = num(searchParams.get("top_n"))
-  const urlMinCalc = num(searchParams.get("min_calc"))
-  const urlMinPr = num(searchParams.get("min_pr"))
-  const urlMinFinal = num(searchParams.get("min_final"))
+  const urlMinExpected = num(searchParams.get("min_expected"))
 
   const currentTopN = urlTopN ?? defaultTopN ?? undefined
-  const currentMinCalc = urlMinCalc ?? defaultMinCalc ?? undefined
-  const currentMinPr = urlMinPr ?? defaultMinPredicted ?? undefined
-  const currentMinFinal = urlMinFinal ?? defaultMinFinal ?? undefined
+  const currentMinExpected = urlMinExpected ?? defaultMinExpected ?? undefined
 
   const prefsDirty =
     (urlTopN !== undefined && urlTopN !== (defaultTopN ?? undefined)) ||
-    (urlMinCalc !== undefined && urlMinCalc !== (defaultMinCalc ?? undefined)) ||
-    (urlMinPr !== undefined && urlMinPr !== (defaultMinPredicted ?? undefined)) ||
-    (urlMinFinal !== undefined && urlMinFinal !== (defaultMinFinal ?? undefined))
+    (urlMinExpected !== undefined && urlMinExpected !== (defaultMinExpected ?? undefined))
 
   const savePrefs = async () => {
     const result = await updateRankingPreferences({
       top_n: currentTopN ?? null,
-      min_calc_score: currentMinCalc ?? null,
-      min_predicted_score: currentMinPr ?? null,
-      min_final_score: currentMinFinal ?? null,
+      min_calc_score: null,
+      min_predicted_score: null,
+      min_final_score: currentMinExpected ?? null,
     })
     if (result.error) {
       toast.error(`Erro ao salvar: ${result.error}`)
@@ -1348,9 +1336,9 @@ export function RankingFilters({
     })
   }
   pushRangeChip("chapters", "Capítulos", "min_chapters", "max_chapters")
-  pushRangeChip("final", "Nota.Final", "min_final", "max_final")
-  pushRangeChip("calc", "Nota.IA", "min_calc", "max_calc")
-  pushRangeChip("pred", "Nota.Pr", "min_pr", "max_pr")
+  pushRangeChip("expected", "Nota Prevista", "min_expected", "max_expected")
+  pushRangeChip("fit", "Alinhamento", "min_fit", "max_fit")
+  pushRangeChip("align", "IA Rk", "min_align", "max_align")
   pushRangeChip("platform", "Nota.M", "min_platform_avg", "max_platform_avg")
   pushRangeChip("votes", "Votos", "min_votes", "max_votes")
   for (const slug of CRITERION_SLUGS) {
@@ -1556,75 +1544,95 @@ export function RankingFilters({
             </FilterSection>
             </div>
 
-            <FilterSection title="Critérios gerais" className="col-span-12 xl:col-span-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground">
-                  Preferências base do ranking e limites rápidos.
-                </p>
-                {!hidePreferencesControls && prefsDirty && (
+            <FilterSection
+              title="Critérios gerais"
+              className="col-span-12 xl:col-span-6 flex flex-col"
+              contentClassName="flex-1 flex flex-col justify-center"
+            >
+              {!hidePreferencesControls && prefsDirty && (
+                <div className="mb-4 flex justify-end">
                   <Button variant="outline" size="sm" onClick={savePrefs} className="h-8">
                     <Save className="mr-1.5 h-3.5 w-3.5" /> Salvar como padrão
                   </Button>
-                )}
-              </div>
-              <div className="flex flex-wrap items-end gap-x-5 gap-y-4">
-                <FilterField label="Top N">
+                </div>
+              )}
+              <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
+                {/* Top N */}
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+                    Top N
+                  </Label>
                   <Input
                     type="number"
                     min={1}
                     max={30}
                     placeholder="Todas"
                     size="sm"
-                    className="w-14"
+                    className="w-16 text-center h-8"
                     value={urlTopN ?? defaultTopN ?? ""}
                     onChange={(e) => updateParams({ top_n: e.target.value || null })}
                   />
-                </FilterField>
-                <FilterField label="Capítulos">
-                  <div className="grid grid-cols-[4rem_auto_4rem] items-center gap-2">
+                </div>
+
+                {/* Divisor vertical */}
+                <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
+
+                {/* Capítulos */}
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+                    Capítulos
+                  </Label>
+                  <div className="flex items-center gap-1.5">
                     <Input
                       type="number"
                       min={0}
                       placeholder="Mín"
                       size="sm"
+                      className="w-16 text-center h-8"
                       value={searchParams.get("min_chapters") ?? ""}
                       onChange={(e) => updateParams({ min_chapters: e.target.value || null })}
                     />
-                    <span className="text-xs text-muted-foreground">-</span>
+                    <span className="text-xs font-semibold text-muted-foreground shrink-0">-</span>
                     <Input
                       type="number"
                       min={0}
                       placeholder="Máx"
                       size="sm"
+                      className="w-16 text-center h-8"
                       value={searchParams.get("max_chapters") ?? ""}
                       onChange={(e) => updateParams({ max_chapters: e.target.value || null })}
                     />
                   </div>
-                </FilterField>
-                <FilterField
-                  label={`Interesse na sinopse${selectedSynopsisQ.size ? ` (${selectedSynopsisQ.size})` : ""}`}
-                  className="min-w-0"
-                >
-                  <div className="flex flex-nowrap items-center gap-1.5">
+                </div>
+
+                {/* Divisor vertical */}
+                <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
+
+                {/* Interesse na Sinopse */}
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+                    Interesse
+                  </Label>
+                  <div className="flex items-center gap-1.5">
                     {SYNOPSIS_QUALITIES.map((q) => (
                       <button key={q} type="button" onClick={() => toggleCsv("synopsis_q", q)}>
                         <Badge
                           variant={selectedSynopsisQ.has(q) ? "default" : "outline"}
-                          className="inline-flex h-7 cursor-pointer items-center rounded-full px-2.5 text-xs font-medium transition-transform hover:-translate-y-px"
+                          className="inline-flex h-8 cursor-pointer items-center justify-center rounded-full px-3 text-xs font-semibold transition-all hover:scale-105 active:scale-95 duration-200"
                         >
                           {q}
                         </Badge>
                       </button>
                     ))}
                   </div>
-                </FilterField>
+                </div>
               </div>
             </FilterSection>
 
             <SortLevelsSection
               searchParams={searchParams}
               updateParams={updateParams}
-              className="col-span-12 xl:col-span-7"
+              className="col-span-12 xl:col-span-6"
               defaultSort={defaultSort}
             />
           </div>
@@ -1653,38 +1661,46 @@ export function RankingFilters({
             <FilterSection title="Notas gerais">
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 <ScoreRangeCard
-                  emoji="🏆"
-                  label="Nota.Final"
-                  minKey="min_final"
-                  maxKey="max_final"
+                  emoji="🎯"
+                  label="Nota Prevista"
+                  tooltip="Nota que o modelo prevê que você daria à obra (0–10). Headline do ranking."
+                  minKey="min_expected"
+                  maxKey="max_expected"
                   step={0.5}
                   searchParams={searchParams}
                   updateParams={updateParams}
                 />
                 <ScoreRangeCard
-                  emoji="📈"
-                  label="Nota.Pr"
-                  minKey="min_pr"
-                  maxKey="max_pr"
+                  emoji="🧭"
+                  label="Alinhamento"
+                  tooltip="Percentil de alinhamento com seu perfil de gosto (0–100). Top 25% = ≥ 75."
+                  minKey="min_fit"
+                  maxKey="max_fit"
+                  step={5}
+                  min={0}
+                  max={100}
+                  searchParams={searchParams}
+                  updateParams={updateParams}
+                />
+                <ScoreRangeCard
+                  emoji="🌐"
+                  label="Média externa"
+                  tooltip="Nota.M — média ponderada das plataformas externas (0–10)."
+                  minKey="min_platform_avg"
+                  maxKey="max_platform_avg"
                   step={0.5}
                   searchParams={searchParams}
                   updateParams={updateParams}
                 />
                 <ScoreRangeCard
                   emoji="🤖"
-                  label="Nota.IA"
-                  minKey="min_calc"
-                  maxKey="max_calc"
-                  step={0.5}
-                  searchParams={searchParams}
-                  updateParams={updateParams}
-                />
-                <ScoreRangeCard
-                  emoji="🌐"
-                  label="Nota.M"
-                  minKey="min_platform_avg"
-                  maxKey="max_platform_avg"
-                  step={0.5}
+                  label="IA Rk"
+                  tooltip="Re-rank do consultor IA (0–100), sob demanda. Só obras já rankeadas têm valor."
+                  minKey="min_align"
+                  maxKey="max_align"
+                  step={5}
+                  min={0}
+                  max={100}
                   searchParams={searchParams}
                   updateParams={updateParams}
                 />

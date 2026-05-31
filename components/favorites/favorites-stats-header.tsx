@@ -26,18 +26,18 @@ export function FavoritesStatsHeader({ summary, scoreThresholds, actions }: Favo
 
       <div className="rounded-lg border bg-card/40 p-3">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Média Nota.Final
+          Média Nota Prevista
         </p>
         <p
           className={cn(
             "mt-1 text-2xl font-bold font-mono tabular-nums",
-            getScoreTextColor(summary.avgFinalScore, scoreThresholds),
+            getScoreTextColor(summary.avgExpectedScore, scoreThresholds),
           )}
         >
-          {summary.avgFinalScore != null ? summary.avgFinalScore.toFixed(2) : "—"}
+          {summary.avgExpectedScore != null ? summary.avgExpectedScore.toFixed(2) : "—"}
         </p>
         <p className="text-xs text-muted-foreground">
-          {summary.withFinalScore} obra(s) com nota
+          {summary.withExpectedScore} obra(s) com nota
         </p>
       </div>
 
@@ -70,7 +70,7 @@ export function FavoritesStatsHeader({ summary, scoreThresholds, actions }: Favo
       </div>
       </div>
       {actions && (
-        <div className="flex shrink-0 flex-col justify-center gap-2 lg:w-56">
+        <div className="flex shrink-0 flex-col gap-2 lg:w-60 [&>*]:flex-1 [&_button]:h-full [&_button]:py-2.5">
           {actions}
         </div>
       )}

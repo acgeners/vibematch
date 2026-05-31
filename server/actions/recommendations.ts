@@ -7,12 +7,12 @@ import { type RankingFilters } from "@/server/queries/ranking"
 import { ensureCapability, getCurrentPlan } from "@/server/queries/current-user"
 import { planAllows } from "@/lib/plans/capabilities"
 import { buildTasteProfileHeuristic } from "@/lib/ai-recommendation/taste-profile-heuristic"
+import { loadOrEnsureProfile } from "@/lib/ai-recommendation/ensure-profile"
 import {
   buildStubProfile,
   computeInputHash,
   insertNewTasteProfile,
   loadCurrentTasteProfile,
-  MIN_WORKS_FOR_ANY_PROFILE,
   MIN_WORKS_FOR_FULL_PROFILE,
 } from "@/lib/ai-recommendation/taste-profile"
 import {
@@ -21,6 +21,7 @@ import {
   getRankingCandidates,
   getRatedWorksForProfile,
   getRunsToday,
+  getStaleAlignmentCandidates,
   type FavoriteCandidate,
 } from "@/server/queries/recommendations"
 import { MAX_CANDIDATES_HARD_LIMIT } from "@/lib/ai-recommendation/limits"
@@ -145,44 +146,6 @@ export async function generateTasteProfileAction(): Promise<{
   }
 }
 
-async function ensureProfile(): Promise<{ profile: TasteProfileRow; ratedWorksCount: number } | { error: string }> {
-  const ratedWorks = await getRatedWorksForProfile()
-  if (ratedWorks.length < MIN_WORKS_FOR_ANY_PROFILE) {
-    return {
-      error: `Você precisa avaliar pelo menos ${MIN_WORKS_FOR_ANY_PROFILE} obras (user_score) pra eu identificar seu gosto. Atualmente: ${ratedWorks.length}.`,
-    }
-  }
-  const existing = await loadCurrentTasteProfile()
-  if (existing) return { profile: existing, ratedWorksCount: ratedWorks.length }
-
-  const inputHash = computeInputHash(ratedWorks)
-  if (ratedWorks.length < MIN_WORKS_FOR_FULL_PROFILE) {
-    const stub = buildStubProfile(ratedWorks.length)
-    const saved = await insertNewTasteProfile({
-      profile: stub,
-      nWorks: ratedWorks.length,
-      inputHash,
-      isStub: true,
-      modelName: MODEL,
-      promptVersion: PROMPT_VERSION,
-      rawResponse: null,
-    })
-    return { profile: saved, ratedWorksCount: ratedWorks.length }
-  }
-
-  const result = await generateTasteProfile(ratedWorks)
-  const saved = await insertNewTasteProfile({
-    profile: result.profile,
-    nWorks: ratedWorks.length,
-    inputHash,
-    isStub: false,
-    modelName: result.modelName,
-    promptVersion: result.promptVersion,
-    rawResponse: result.rawResponse,
-  })
-  return { profile: saved, ratedWorksCount: ratedWorks.length }
-}
-
 export interface RunRecommendationArgs {
   mode: RecommendationMode
   userContext?: string | null
@@ -222,7 +185,7 @@ export async function runRecommendationAction(
 
     const n = Math.min(Math.max(args.n ?? 20, 1), MAX_CANDIDATES_HARD_LIMIT)
 
-    const profileResult = await ensureProfile()
+    const profileResult = await loadOrEnsureProfile()
     if ("error" in profileResult) return { error: profileResult.error }
     const profile = profileResult.profile
 
@@ -440,7 +403,7 @@ export async function rerankSingleWorkAction(
       }
     }
 
-    const profileResult = await ensureProfile()
+    const profileResult = await loadOrEnsureProfile()
     if ("error" in profileResult) return { error: profileResult.error }
     const profile = profileResult.profile
 
@@ -496,6 +459,202 @@ export async function rerankSingleWorkAction(
         justification: ranking.justification,
       },
     }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}
+
+export interface RerankStaleBatchResult {
+  /** Quantas obras foram re-rankeadas e tiveram a flag stale limpa. */
+  ranked: number
+  /** Total de obras desatualizadas disponíveis antes do corte por `n`. */
+  available: number
+  /** True quando havia mais stale do que o limite processado nesta run. */
+  truncated: boolean
+}
+
+/**
+ * Re-rankeia em LOTE as obras com IA Rk desatualizado (alignment_stale=true).
+ * Espelha o fluxo do re-rank por-obra, mas manda todos os candidatos numa única
+ * chamada `rankFavorites` (como a run de ranking) e limpa a flag stale de cada
+ * um. Não cria recommendation_run (alignment_run_id=null, como o re-rank
+ * sob-demanda). Respeita o gate Pago e o limite diário de execuções.
+ */
+export async function rerankStaleBatchAction(
+  n?: number,
+): Promise<{ data?: RerankStaleBatchResult; error?: string }> {
+  try {
+    const gate = await ensureCapability("smart_shortlist")
+    if (!gate.ok) return { error: gate.error }
+
+    const runsToday = await getRunsToday()
+    if (runsToday >= MAX_RUNS_PER_DAY) {
+      return {
+        error: `Limite diário de ${MAX_RUNS_PER_DAY} execuções atingido. Tente novamente amanhã.`,
+      }
+    }
+
+    const profileResult = await loadOrEnsureProfile()
+    if ("error" in profileResult) return { error: profileResult.error }
+    const profile = profileResult.profile
+    if (profile.is_stub) {
+      return {
+        error: "Perfil ainda em modo stub — avalie mais obras com user_score pra desbloquear o ranking IA.",
+      }
+    }
+
+    const limit = Math.min(Math.max(n ?? MAX_CANDIDATES_HARD_LIMIT, 1), MAX_CANDIDATES_HARD_LIMIT)
+    const allCandidates = await getStaleAlignmentCandidates(MAX_CANDIDATES_HARD_LIMIT)
+    if (allCandidates.length === 0) {
+      return { error: "Nenhuma obra com IA Rk desatualizado." }
+    }
+    const truncated = allCandidates.length > limit
+    const candidates = truncated ? allCandidates.slice(0, limit) : allCandidates
+
+    const result = await rankFavorites({
+      profile: profile.profile,
+      candidates,
+      mode: "ranking",
+      userContext: null,
+    })
+
+    const supabase = createAdminClient()
+    const now = new Date().toISOString()
+    const candidateIds = new Set(candidates.map((c) => c.id))
+    const upsertRows = result.rankings
+      .filter((r) => candidateIds.has(r.work_id))
+      .map((r) => ({
+        work_id: r.work_id,
+        alignment_score: r.alignment_score,
+        alignment_run_id: null,
+        alignment_justification: r.justification,
+        alignment_payload: buildAlignmentPayload(r),
+        alignment_at: now,
+        alignment_stale: false, // recém-computado com bias/perfil atuais
+      }))
+
+    if (upsertRows.length > 0) {
+      const { error: upErr } = await supabase
+        .from("calculated_scores")
+        .upsert(upsertRows, { onConflict: "work_id" })
+      if (upErr) {
+        return { error: `Falha persistindo alignment_score: ${upErr.message}` }
+      }
+    }
+
+    revalidatePath("/ranking")
+    revalidatePath("/ranking/desatualizados")
+    revalidatePath("/favorites")
+
+    return {
+      data: {
+        ranked: upsertRows.length,
+        available: allCandidates.length,
+        truncated,
+      },
+    }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}
+
+export interface RerankClusterResult {
+  /** Quantas obras do cluster receberam alignment_score nesta run. */
+  ranked: number
+  /** Quantas obras válidas foram efetivamente enviadas ao modelo. */
+  requested: number
+  /** Ranking do cluster (desc por alignment_score) — pro caller montar o veredito. */
+  rankings: Array<{ workId: string; alignmentScore: number; justification: string }>
+}
+
+/**
+ * Desempate sob demanda de um CLUSTER de obras tecnicamente empatadas na Nota de
+ * Decisão. Envia todas numa ÚNICA chamada `rankFavorites` (mode "ranking") pra o
+ * modelo compará-las cabeça-a-cabeça — é o que dá o veredito decisivo — e
+ * persiste o alignment_score de cada uma (como o re-rank por-obra:
+ * alignment_run_id=null, sem criar recommendation_run). Respeita o gate Pago e
+ * o limite diário (1 LLM call por clique).
+ */
+export async function rerankClusterAction(
+  workIds: string[],
+): Promise<{ data?: RerankClusterResult; error?: string }> {
+  try {
+    const gate = await ensureCapability("smart_shortlist")
+    if (!gate.ok) return { error: gate.error }
+
+    const ids = Array.from(new Set(workIds)).filter(Boolean)
+    if (ids.length < 2) {
+      return { error: "Desempate por IA precisa de pelo menos 2 obras." }
+    }
+    const limited = ids.slice(0, MAX_CANDIDATES_HARD_LIMIT)
+
+    const runsToday = await getRunsToday()
+    if (runsToday >= MAX_RUNS_PER_DAY) {
+      return {
+        error: `Limite diário de ${MAX_RUNS_PER_DAY} execuções atingido. Tente novamente amanhã.`,
+      }
+    }
+
+    const profileResult = await loadOrEnsureProfile()
+    if ("error" in profileResult) return { error: profileResult.error }
+    const profile = profileResult.profile
+    if (profile.is_stub) {
+      return {
+        error: "Perfil ainda em modo stub — avalie mais obras com user_score pra desbloquear o ranking IA.",
+      }
+    }
+
+    const candidates = (await Promise.all(limited.map((id) => getCandidateById(id)))).filter(
+      (c): c is NonNullable<typeof c> => c != null,
+    )
+    if (candidates.length < 2) {
+      return { error: "Obras do cluster não encontradas (ou arquivadas)." }
+    }
+
+    const result = await rankFavorites({
+      profile: profile.profile,
+      candidates,
+      mode: "ranking",
+      userContext: null,
+    })
+
+    const supabase = createAdminClient()
+    const now = new Date().toISOString()
+    const candidateIds = new Set(candidates.map((c) => c.id))
+    const upsertRows = result.rankings
+      .filter((r) => candidateIds.has(r.work_id))
+      .map((r) => ({
+        work_id: r.work_id,
+        alignment_score: r.alignment_score,
+        alignment_run_id: null,
+        alignment_justification: r.justification,
+        alignment_payload: buildAlignmentPayload(r),
+        alignment_at: now,
+        alignment_stale: false, // recém-computado com bias/perfil atuais
+      }))
+
+    if (upsertRows.length > 0) {
+      const { error: upErr } = await supabase
+        .from("calculated_scores")
+        .upsert(upsertRows, { onConflict: "work_id" })
+      if (upErr) {
+        return { error: `Falha persistindo alignment_score: ${upErr.message}` }
+      }
+    }
+
+    revalidatePath("/ranking")
+    revalidatePath("/favorites")
+
+    const rankings = result.rankings
+      .filter((r) => candidateIds.has(r.work_id))
+      .map((r) => ({
+        workId: r.work_id,
+        alignmentScore: r.alignment_score,
+        justification: r.justification,
+      }))
+      .sort((a, b) => b.alignmentScore - a.alignmentScore)
+
+    return { data: { ranked: upsertRows.length, requested: candidates.length, rankings } }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Erro desconhecido" }
   }

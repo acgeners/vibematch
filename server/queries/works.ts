@@ -157,6 +157,10 @@ export async function getWorks(
     sort.field === "is_favorite" ||
     filters.minFinalScore != null ||
     filters.maxFinalScore != null ||
+    filters.minExpectedScore != null ||
+    filters.maxExpectedScore != null ||
+    filters.minPersonalFitPct != null ||
+    filters.maxPersonalFitPct != null ||
     filters.minTotalVotes != null ||
     filters.maxTotalVotes != null
 
@@ -195,7 +199,7 @@ export async function getWorks(
     // every matching work just to throw most of it away.
     let lightQuery = supabase
       .from("works")
-      .select("id, is_favorite, calculated_scores(final_score, calc_score, predicted_score, expected_score, total_votes)")
+      .select("id, is_favorite, calculated_scores(final_score, calc_score, predicted_score, expected_score, personal_fit, personal_fit_percentile, total_votes)")
     lightQuery = applyWorkFilters(lightQuery, filters, searchMatchIds, genreMatchIds, tagMatchIds)
 
     const { data: lightData, error: lightError } = await lightQuery
@@ -209,6 +213,8 @@ export async function getWorks(
         calc_score: number | null
         predicted_score: number | null
         expected_score: number | null
+        personal_fit: number | null
+        personal_fit_percentile: number | null
         total_votes: number | null
       } | null
     }
@@ -228,6 +234,31 @@ export async function getWorks(
     }
     if (filters.maxFinalScore != null) {
       scored = scored.filter((w) => (w.calculated_scores?.final_score ?? 11) <= filters.maxFinalScore!)
+    }
+    if (filters.minExpectedScore != null) {
+      scored = scored.filter((w) => (w.calculated_scores?.expected_score ?? -1) >= filters.minExpectedScore!)
+    }
+    if (filters.maxExpectedScore != null) {
+      scored = scored.filter((w) => (w.calculated_scores?.expected_score ?? 11) <= filters.maxExpectedScore!)
+    }
+    // Alinhamento filtrado pelo percentil exibido (fallback: raw × 100, como na célula).
+    const fitPct = (cs: LightRow["calculated_scores"]): number | null =>
+      cs?.personal_fit_percentile != null
+        ? cs.personal_fit_percentile
+        : cs?.personal_fit != null
+          ? cs.personal_fit * 100
+          : null
+    if (filters.minPersonalFitPct != null) {
+      scored = scored.filter((w) => {
+        const p = fitPct(w.calculated_scores)
+        return p != null && p >= filters.minPersonalFitPct!
+      })
+    }
+    if (filters.maxPersonalFitPct != null) {
+      scored = scored.filter((w) => {
+        const p = fitPct(w.calculated_scores)
+        return p != null && p <= filters.maxPersonalFitPct!
+      })
     }
     if (filters.minTotalVotes != null) {
       scored = scored.filter((w) => (w.calculated_scores?.total_votes ?? 0) >= filters.minTotalVotes!)

@@ -6,6 +6,7 @@ import { getLowCoverageWorkIds } from "@/server/queries/calibration-guards"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
+import { countStaleAlignmentWorks } from "@/server/queries/recommendations"
 import { Header } from "@/components/layout/header"
 import { RankingTable } from "@/components/ranking/ranking-table"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
@@ -13,11 +14,14 @@ import { MoodBar } from "@/components/ranking/mood-bar"
 import { SurpriseMeButton } from "@/components/ranking/surprise-me-button"
 import { MOOD_PRESETS_BY_ID } from "@/lib/constants/mood-presets"
 import { RecommendWithAiButton } from "@/components/recommendations/recommend-with-ai-button"
-import { Badge } from "@/components/ui/badge"
+import { ChatRecommendButton } from "@/components/recommendations/chat-recommend-button"
+import { Button } from "@/components/ui/button"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { FormulaConfig } from "@/types/domain"
 import { unstable_cache } from "next/cache"
+import Link from "next/link"
+import { Heart, RotateCw } from "lucide-react"
 
 interface RankingPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -96,7 +100,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // Sem o expected_*, sort por "Esperada" caía silenciosamente em final_score.
   const validSortFields = new Set<string>([
     // Notas (novo pipeline)
-    "recommended",
+    "decision", "recommended",
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
     // Notas (legado)
     "final_score", "calc_score", "predicted_score", "pred_score", "alignment_score",
@@ -111,11 +115,12 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     // Critérios IA
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
-  // Default: Free ordena por "recommended" (expected × fit, sem LLM); Pago mantém
-  // a Nota Esperada crua como base (o re-rank por IA é opt-in via "Recomendar com IA").
+  // Default: ordena pela Nota de Decisão (combina Prevista, fit e IA Rk.) com
+  // a Prevista como desempate secundário. Pro Free a IA Rk. é sempre NULL, então
+  // a Decisão ≈ Prevista × fit (mesmo espírito do antigo "recommended").
   const plan = await getCurrentPlan()
   const isPaid = planAllows(plan, "smart_shortlist")
-  const defaultSort = isPaid ? "expected_score:desc" : "recommended:desc"
+  const defaultSort = "decision:desc,personal_fit:desc"
   const rawSort = str("sort") ?? defaultSort
   let sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
@@ -155,11 +160,10 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     getStatusOptions(),
   ])
 
-  // URL pode sobrescrever as preferências (ex: usuário ajusta direto na barra)
+  // URL pode sobrescrever as preferências (ex: usuário ajusta direto na barra).
+  // A preferência "Nota Prevista mínima" é persistida em min_final_score (repurposada).
   const overrideTopN = num("top_n")
-  const overrideMinCalc = num("min_calc")
-  const overrideMinPredicted = num("min_pr")
-  const overrideMinFinal = num("min_final")
+  const overrideMinExpected = num("min_expected")
 
   const filters: RankingFilters = {
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
@@ -176,12 +180,12 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     synopsisQualities: multi("synopsis_q"),
     minTotalChapters: num("min_chapters"),
     maxTotalChapters: num("max_chapters"),
-    minCalcScore: overrideMinCalc ?? prefs.minCalc ?? undefined,
-    maxCalcScore: num("max_calc"),
-    minPredictedScore: overrideMinPredicted ?? prefs.minPredicted ?? undefined,
-    maxPredictedScore: num("max_pr"),
-    minFinalScore: overrideMinFinal ?? prefs.minFinal ?? undefined,
-    maxFinalScore: num("max_final"),
+    minExpectedScore: overrideMinExpected ?? prefs.minFinal ?? undefined,
+    maxExpectedScore: num("max_expected"),
+    minPersonalFitPct: num("min_fit"),
+    maxPersonalFitPct: num("max_fit"),
+    minAlignment: num("min_align"),
+    maxAlignment: num("max_align"),
     minPlatformAvg: num("min_platform_avg"),
     maxPlatformAvg: num("max_platform_avg"),
     minTotalVotes: num("min_votes"),
@@ -192,26 +196,57 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     sortLevels,
   }
 
-  const [rawEntries, scoreThresholds, lowCoverageIds] = await Promise.all([
+  const [rawEntries, scoreThresholds, lowCoverageIds, staleAlignmentCount] = await Promise.all([
     getRanking(filters),
     getScoreColorThresholds(),
     getLowCoverageWorkIds(),
+    countStaleAlignmentWorks(),
   ])
   // Marca obras não-lidas com baixa cobertura de gênero (badge ⚠ na Nota esperada).
   const entries = rawEntries.map((e) => ({ ...e, lowCoverage: lowCoverageIds.has(e.workId) }))
+
+  const queryParams = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) {
+      if (Array.isArray(value)) {
+        value.forEach((v) => queryParams.append(key, v))
+      } else {
+        queryParams.set(key, value)
+      }
+    }
+  }
+  const queryString = queryParams.toString()
+  const favoritesUrl = `/favorites${queryString ? `?${queryString}` : ""}`
 
   return (
     <div className="space-y-4">
       <Header
         kicker="Ranking"
         title="Ranking"
-        description="Obras ordenadas pela Nota.Final"
+        description="Obras ordenadas pela Nota Prevista"
         actions={
           <div className="flex items-center gap-3">
-            <Badge variant="outline" className="text-sm">
-              {entries.length} obra{entries.length !== 1 ? "s" : ""}
-            </Badge>
+            <Button variant="outline" size="sm" asChild className="h-9 gap-1.5">
+              <Link href={favoritesUrl}>
+                <Heart className="h-4 w-4 text-rose-500 fill-rose-500/25" />
+                <span>Ir para Favoritos</span>
+              </Link>
+            </Button>
+            {staleAlignmentCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                asChild
+                className="h-9 gap-1.5 border-amber-500/50 text-amber-600 dark:text-amber-400"
+              >
+                <Link href="/ai-evaluation?tab=ia-rk">
+                  <RotateCw className="h-4 w-4" />
+                  <span>IA Rk desatualizados ({staleAlignmentCount})</span>
+                </Link>
+              </Button>
+            )}
             <SurpriseMeButton entries={entries} />
+            <ChatRecommendButton isPaid={isPaid} />
             <RecommendWithAiButton source="ranking" isPaid={isPaid} />
           </div>
         }
@@ -225,9 +260,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         publicationStatuses={statusOptions.publicationStatuses}
         personalStatuses={statusOptions.personalStatuses}
         defaultTopN={prefs.topN}
-        defaultMinCalc={prefs.minCalc}
-        defaultMinPredicted={prefs.minPredicted}
-        defaultMinFinal={prefs.minFinal}
+        defaultMinExpected={prefs.minFinal}
         defaultSort={defaultSort}
       />
 

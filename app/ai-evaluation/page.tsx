@@ -10,6 +10,12 @@ import {
   PUBLICATION_STATUSES_BY_ID,
   PERSONAL_STATUSES_BY_ID,
 } from "@/lib/constants/criteria"
+import Link from "next/link"
+import type { ReactNode } from "react"
+import { cn } from "@/lib/utils"
+import { StaleRerankPanel } from "@/components/ranking/stale-rerank-panel"
+import { getAlignmentQueueWorks } from "@/server/queries/recommendations"
+import type { AlignmentQueueWork } from "@/server/queries/recommendations"
 
 const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
@@ -56,7 +62,7 @@ interface EligibleWork {
   personal_status: string
   personal_status_id: number | null
   cover_url?: string | null
-  final_score: number | null
+  expected_score: number | null
   /** Razões pelas quais a obra apareceu (intersecção com os filtros ativos). */
   matchedFilters: EvaluationFilter[]
   evaluation: {
@@ -278,7 +284,7 @@ async function getEligibleWorks(
 
   // Hidrata covers + calculated_scores em chunks também.
   type CoverRow = { work_id: string; url: string | null; is_primary: boolean | null; position: number | null }
-  type ScoreRow = { work_id: string; final_score: number | null }
+  type ScoreRow = { work_id: string; expected_score: number | null }
   const [coversResult, scoresResult] = await Promise.all([
     chunkedInQuery<CoverRow>(displayedIds, CHUNK_SIZE, (chunk) =>
       supabase
@@ -290,7 +296,7 @@ async function getEligibleWorks(
     chunkedInQuery<ScoreRow>(displayedIds, CHUNK_SIZE, (chunk) =>
       supabase
         .from("calculated_scores")
-        .select("work_id, final_score")
+        .select("work_id, expected_score")
         .in("work_id", chunk)
         .then(({ data, error }) => ({ data: (data ?? []) as ScoreRow[], error })),
     ),
@@ -336,7 +342,7 @@ async function getEligibleWorks(
       personal_status_id: row.personal_status_id ?? null,
       total_chapters: row.total_chapters,
       cover_url: pickPrimaryCover(coversByWork.get(row.id) ?? []),
-      final_score: scoreByWork.get(row.id)?.final_score ?? null,
+      expected_score: scoreByWork.get(row.id)?.expected_score ?? null,
       matchedFilters: matchedByWork.get(row.id) ?? [],
       evaluation: evalByWork.get(row.id) ?? null,
     } as EligibleWork
@@ -351,27 +357,52 @@ async function getEligibleWorks(
   }
 }
 
-export default async function AiEvaluationPage({
-  searchParams,
+function EvalTabLink({
+  href,
+  active,
+  children,
 }: {
-  searchParams: Promise<{
-    filter?: string | string[]
-    pub?: string | string[]
-    personal?: string | string[]
-    tolerance?: string | string[]
-  }>
+  href: string
+  active: boolean
+  children: ReactNode
 }) {
-  const params = await searchParams
-  const activeFilters = parseFilters(params.filter)
-  const { names: pubStatusNames, ids: pubStatusIds } = parseStatusList(
-    params.pub,
-    PUB_STATUS_NAME_TO_ID
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+        active
+          ? "border-primary text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {children}
+    </Link>
   )
+}
+
+/**
+ * Aba "IA atributos" — fila de avaliação/revisão das 9 notas por critério.
+ * Mantém os filtros e o painel originais da página.
+ */
+async function IaAttributesTab({
+  filter,
+  pub,
+  personal,
+  tolerance,
+}: {
+  filter?: string | string[]
+  pub?: string | string[]
+  personal?: string | string[]
+  tolerance?: string | string[]
+}) {
+  const activeFilters = parseFilters(filter)
+  const { names: pubStatusNames, ids: pubStatusIds } = parseStatusList(pub, PUB_STATUS_NAME_TO_ID)
   const { names: personalStatusNames, ids: personalStatusIds } = parseStatusList(
-    params.personal,
-    PERSONAL_STATUS_NAME_TO_ID
+    personal,
+    PERSONAL_STATUS_NAME_TO_ID,
   )
-  const toleranceRaw = Array.isArray(params.tolerance) ? params.tolerance[0] : params.tolerance
+  const toleranceRaw = Array.isArray(tolerance) ? tolerance[0] : tolerance
   const toleranceOverride = toleranceRaw != null && /^\d+$/.test(toleranceRaw)
     ? parseInt(toleranceRaw, 10)
     : null
@@ -380,18 +411,6 @@ export default async function AiEvaluationPage({
 
   return (
     <div className="space-y-4">
-      <Header
-        kicker="Avaliação"
-        title="Avaliação IA"
-        description="Obras elegíveis para avaliação, revisão ou re-avaliação por IA"
-        icon={<Sparkles />}
-        actions={
-          <Badge variant="outline" className="text-xs">
-            {totalCount} obra{totalCount !== 1 ? "s" : ""}
-          </Badge>
-        }
-      />
-
       <AiEvaluationFilters
         activeFilters={activeFilters}
         currentModel={MODEL}
@@ -402,8 +421,156 @@ export default async function AiEvaluationPage({
         activePubStatuses={pubStatusNames}
         activePersonalStatuses={personalStatusNames}
       />
-
+      <div className="flex justify-end">
+        <Badge variant="outline" className="text-xs">
+          {totalCount} obra{totalCount !== 1 ? "s" : ""}
+        </Badge>
+      </div>
       <AiEvaluationPanel pendingWorks={works} />
+    </div>
+  )
+}
+
+const IA_RK_STATES = ["stale", "unranked"] as const
+type IaRkState = (typeof IA_RK_STATES)[number]
+
+function parseIaRkStates(raw: string | string[] | undefined): IaRkState[] {
+  const value = Array.isArray(raw) ? raw[0] : raw
+  if (value == null) return [...IA_RK_STATES] // default: ambos
+  if (value === "none") return []
+  const parts = value.split(",").map((p) => p.trim())
+  return IA_RK_STATES.filter((s) => parts.includes(s))
+}
+
+/**
+ * Aba "IA Rk" — fila de re-rank: obras com IA Rk desatualizado E/OU não avaliado
+ * (sem IA Rk ainda). Recebe a fila já buscada pelo pai (mesma query do badge, pra
+ * o contador da aba bater com a lista). Compartilha os filtros de Status com a aba
+ * de atributos; troca "Estado da avaliação" por "Estado do IA Rk". Sort é no painel.
+ */
+function IaRkTab({
+  works,
+  pubStatusNames,
+  personalStatusNames,
+  states,
+}: {
+  works: AlignmentQueueWork[]
+  pubStatusNames: string[]
+  personalStatusNames: string[]
+  states: IaRkState[]
+}) {
+  return (
+    <div className="space-y-4">
+      <AiEvaluationFilters
+        activeFilters={[]}
+        currentModel={MODEL}
+        currentPromptVersion={PROMPT_VERSION}
+        currentPromptVersionNum={CURRENT_PROMPT_VERSION_NUM}
+        promptVersionTolerance={0}
+        lowConfidenceThreshold={DEFAULT_LOW_CONFIDENCE_THRESHOLD}
+        activePubStatuses={pubStatusNames}
+        activePersonalStatuses={personalStatusNames}
+        showEvalState={false}
+        showIaRkState
+        activeIaRkStates={states}
+      />
+      <StaleRerankPanel works={works} />
+    </div>
+  )
+}
+
+function toParam(v: string | string[] | undefined): string | undefined {
+  if (v == null) return undefined
+  return Array.isArray(v) ? v.join(",") : v
+}
+
+export default async function AiEvaluationPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    filter?: string | string[]
+    pub?: string | string[]
+    personal?: string | string[]
+    tolerance?: string | string[]
+    tab?: string | string[]
+    rk?: string | string[]
+  }>
+}) {
+  const params = await searchParams
+  const tabRaw = Array.isArray(params.tab) ? params.tab[0] : params.tab
+  const activeTab: "atributos" | "ia-rk" = tabRaw === "ia-rk" ? "ia-rk" : "atributos"
+
+  // Filtros de Status compartilhados pelas 2 abas.
+  const { names: pubStatusNames, ids: pubStatusIds } = parseStatusList(params.pub, PUB_STATUS_NAME_TO_ID)
+  const { names: personalStatusNames, ids: personalStatusIds } = parseStatusList(
+    params.personal,
+    PERSONAL_STATUS_NAME_TO_ID,
+  )
+  const iaRkStates = parseIaRkStates(params.rk)
+
+  // Fila de IA Rk respeitando o filtro ativo (estado + status). Alimenta o badge
+  // da aba E o conteúdo da aba, então o contador bate com a lista. Query leve
+  // (~tamanho da biblioteca); roda nas duas abas pra o badge ficar sempre certo.
+  const iaRkQueue = await getAlignmentQueueWorks({
+    states: iaRkStates,
+    pubStatusIds,
+    personalStatusIds,
+  })
+  const iaRkCount = iaRkQueue.length
+
+  // Preserva os filtros ao trocar de aba.
+  const filter = toParam(params.filter)
+  const pub = toParam(params.pub)
+  const personal = toParam(params.personal)
+  const tolerance = toParam(params.tolerance)
+  const rk = toParam(params.rk)
+
+  const attrParams = new URLSearchParams()
+  if (filter) attrParams.set("filter", filter)
+  if (pub) attrParams.set("pub", pub)
+  if (personal) attrParams.set("personal", personal)
+  if (tolerance) attrParams.set("tolerance", tolerance)
+  const attrHref = attrParams.toString() ? `/ai-evaluation?${attrParams}` : "/ai-evaluation"
+
+  const rkParams = new URLSearchParams({ tab: "ia-rk" })
+  if (pub) rkParams.set("pub", pub)
+  if (personal) rkParams.set("personal", personal)
+  if (rk) rkParams.set("rk", rk)
+  const rkHref = `/ai-evaluation?${rkParams}`
+
+  return (
+    <div className="space-y-4">
+      <Header
+        kicker="Avaliação"
+        title="Avaliação IA"
+        description="Fila de avaliação/revisão das notas por IA (atributos) e de re-rank (IA Rk) desatualizado ou não avaliado."
+        icon={<Sparkles />}
+      />
+
+      <div className="flex items-center gap-1 border-b border-border/60">
+        <EvalTabLink href={attrHref} active={activeTab === "atributos"}>
+          IA atributos
+        </EvalTabLink>
+        <EvalTabLink href={rkHref} active={activeTab === "ia-rk"}>
+          IA Rk{iaRkCount > 0 ? ` (${iaRkCount})` : ""}
+        </EvalTabLink>
+      </div>
+
+      {activeTab === "ia-rk" ? (
+        <IaRkTab
+          works={iaRkQueue}
+          pubStatusNames={pubStatusNames}
+          personalStatusNames={personalStatusNames}
+          states={iaRkStates}
+        />
+      ) : (
+        <IaAttributesTab
+          filter={params.filter}
+          pub={params.pub}
+          personal={params.personal}
+          tolerance={params.tolerance}
+        />
+      )}
     </div>
   )
 }

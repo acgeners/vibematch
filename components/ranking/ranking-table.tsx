@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { useEffect, useState, useSyncExternalStore } from "react"
+import { Fragment, useEffect, useState, useSyncExternalStore } from "react"
 import { AlertTriangle, ChevronDown, ChevronUp, ImageOff, LayoutGrid, List, X } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { Button } from "@/components/ui/button"
@@ -15,9 +15,11 @@ import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { formatPercentile } from "@/lib/calculations/percentile"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import type { ColumnThresholds } from "@/components/ui/score-badge"
-import { PublicationStatusBadge, PersonalStatusBadge } from "@/components/ui/status-badge"
+import { PublicationStatusBadge, PersonalStatusBadge, AiStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { AlignmentCell, AlignmentScoreCell } from "@/components/ranking/ranking-cells"
+import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
+import { AlignmentCell, AlignmentScoreCell, DecisionCell } from "@/components/ranking/ranking-cells"
+import { TieBreakBand } from "@/components/ranking/tie-break-band"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
 import type { WorkPreview } from "@/server/actions/works"
@@ -41,6 +43,7 @@ const COLUMN_TO_SORT_FIELD: Record<string, string> = {
   synopsis_q: "synopsis_q",
   platform_avg: "platform_avg",
   total_votes: "total_votes",
+  decision: "decision",
   final: "final_score",
   calc: "calc_score",
   pred: "pred_score",
@@ -51,6 +54,49 @@ const COLUMN_TO_SORT_FIELD: Record<string, string> = {
 function getSortFieldForColumn(key: string): string | null {
   if (key.startsWith("crit_")) return key
   return COLUMN_TO_SORT_FIELD[key] ?? null
+}
+
+// Margem (em pontos 0–10) dentro da qual duas obras são tratadas como empatadas
+// na Nota de Decisão — fica dentro do erro do preditor (MAE ~0.9), então a
+// ordem entre elas é ruído sem um critério extra.
+const TIE_DELTA = 0.3
+
+interface TieCluster {
+  workIds: string[]
+  count: number
+}
+
+/**
+ * Agrupa entradas CONSECUTIVAS cuja Nota de Decisão cai dentro de `TIE_DELTA`
+ * do topo do cluster (ancoragem no primeiro). Retorna um mapa indexado pela
+ * posição de início do cluster → info do cluster, só pra clusters de 2+ obras.
+ * Pressupõe `entries` já ordenado por decisão desc (ordem de leitura).
+ */
+function computeTieClusters(entries: RankingEntry[]): Map<number, TieCluster> {
+  const clusters = new Map<number, TieCluster>()
+  let i = 0
+  while (i < entries.length) {
+    const anchor = entries[i].decisionScore
+    if (anchor == null) {
+      i++
+      continue
+    }
+    let j = i
+    while (j + 1 < entries.length) {
+      const next = entries[j + 1].decisionScore
+      if (next == null || Math.abs(anchor - next) > TIE_DELTA) break
+      j++
+    }
+    const size = j - i + 1
+    if (size >= 2) {
+      clusters.set(i, {
+        workIds: entries.slice(i, j + 1).map((e) => e.workId),
+        count: size,
+      })
+    }
+    i = j + 1
+  }
+  return clusters
 }
 
 type ViewMode = "list" | "cards"
@@ -262,8 +308,50 @@ function renderCell(
     return <span className="font-mono text-sm">{pct != null ? `${pct}%` : "—"}</span>
   }
   if (col.key === "synopsis_q") return <span className="text-xs text-muted-foreground">{entry.synopsisQuality ?? "—"}</span>
+  if (col.key === "ai_status") return <AiStatusBadge status={entry.aiEvalStatus} />
+  if (col.key === "updated_at") {
+    return entry.updatedAt ? (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <time className="text-xs text-muted-foreground tabular-nums" dateTime={entry.updatedAt}>
+            {formatRelativeDate(entry.updatedAt)}
+          </time>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {formatFullDateTime(entry.updatedAt)}
+        </TooltipContent>
+      </Tooltip>
+    ) : (
+      <span className="text-muted-foreground">—</span>
+    )
+  }
+  if (col.key === "last_read_at") {
+    return entry.lastReadAt ? (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <time className="text-xs text-muted-foreground tabular-nums" dateTime={entry.lastReadAt}>
+            {formatRelativeDate(entry.lastReadAt)}
+          </time>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {formatFullDateTime(entry.lastReadAt)}
+        </TooltipContent>
+      </Tooltip>
+    ) : (
+      <span className="text-muted-foreground">—</span>
+    )
+  }
   if (col.key === "platform_avg") return <span className="font-mono text-sm">{entry.platformAvg != null ? entry.platformAvg.toFixed(1) : "—"}</span>
   if (col.key === "total_votes") return <span className="font-mono text-sm">{formatVotes(entry.totalVotes)}</span>
+  if (col.key === "decision")
+    return (
+      <DecisionCell
+        score={entry.decisionScore}
+        expected={entry.expectedScore}
+        fitPercentile={entry.personalFitPercentile ?? (entry.personalFit != null ? entry.personalFit * 100 : null)}
+        alignment={entry.alignmentScore}
+      />
+    )
   if (col.key === "expected")
     return (
       <span className="inline-flex items-center gap-1">
@@ -291,7 +379,7 @@ function renderCell(
   if (col.key === "personal_fit")
     return <AlignmentCell value={entry.personalFit} percentile={entry.personalFitPercentile} showBar={false} />
   if (col.key === "alignment_score")
-    return <AlignmentScoreCell score={entry.alignmentScore} justification={entry.alignmentJustification} workId={entry.workId} payload={entry.alignmentPayload} isPaid={isPaid} />
+    return <AlignmentScoreCell score={entry.alignmentScore} justification={entry.alignmentJustification} workId={entry.workId} payload={entry.alignmentPayload} isPaid={isPaid} stale={entry.alignmentStale} />
   if (col.key.startsWith("crit_")) {
     const slug = col.key.slice(5)
     const score = entry.scores[slug]
@@ -317,18 +405,40 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   const [drawerOpen, setDrawerOpen] = useState(false)
   const selectedSet = new Set(selectedIds)
   const toggleSelect = (id: string) => {
+    const scrollY = window.scrollY
     setSelectedIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id)
       if (prev.length >= MAX_COMPARE_WORKS) return prev
       return [...prev, id]
     })
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY })
+    })
   }
   const clearSelection = () => {
+    const scrollY = window.scrollY
     setSelectedIds([])
     setDrawerOpen(false)
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY })
+    })
   }
   const removeSelection = (id: string) => {
+    const scrollY = window.scrollY
     setSelectedIds((prev) => prev.filter((x) => x !== id))
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY })
+    })
+  }
+  // Atalho da banda de empate: seleciona o cluster e abre o drawer de comparação
+  // (onde mora o "Desempatar com IA"). Respeita o teto de obras comparáveis.
+  const compareCluster = (workIds: string[]) => {
+    const scrollY = window.scrollY
+    setSelectedIds(workIds.slice(0, MAX_COMPARE_WORKS))
+    setDrawerOpen(true)
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY })
+    })
   }
 
   // Larguras naturais viram percentagens do total. Com `tableLayout: fixed` +
@@ -349,6 +459,13 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   const sortRaw = searchParams.get("sort") ?? defaultSort
   const [activeSortField, activeSortDirRaw = "desc"] = sortRaw.split(",")[0].split(":")
   const activeSortDir: "asc" | "desc" = activeSortDirRaw === "asc" ? "asc" : "desc"
+
+  // Bandas de empate só fazem sentido na ordem de leitura por Nota de Decisão
+  // (o default). Em qualquer outro sort, não há cluster a sinalizar.
+  const tieClusters =
+    activeSortField === "decision" && activeSortDir === "desc"
+      ? computeTieClusters(entries)
+      : null
 
   const updateSort = (field: string) => {
     const params = new URLSearchParams(window.location.search)
@@ -477,33 +594,46 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
             </tr>
           </thead>
           <tbody>
-            {entries.map((entry) => (
-              <tr key={entry.workId} className="transition-colors hover:bg-primary/5 [&>td]:border-b [&>td]:border-border/55 last:[&>td]:border-0">
-                {columns.map((col) => (
-                  <td
-                    key={col.key}
-                    className={cn(
-                      "h-14 py-3 align-middle overflow-hidden",
-                      col.key.startsWith("crit_") ? "px-1" : "px-3"
-                    )}
-                    style={{ textAlign: col.align ?? "left" }}
-                  >
-                    <div className="truncate" style={{ textAlign: col.align ?? "left" }}>
-                      {col.key === "select" ? (
-                        <Checkbox
-                          checked={selectedSet.has(entry.workId)}
-                          disabled={!selectedSet.has(entry.workId) && selectedIds.length >= MAX_COMPARE_WORKS}
-                          onCheckedChange={() => toggleSelect(entry.workId)}
-                          aria-label={`Selecionar ${entry.title} para comparar`}
-                        />
-                      ) : (
-                        renderCell(entry, col, scoreThresholds, isPaid)
+            {entries.map((entry, index) => {
+              const cluster = tieClusters?.get(index)
+              return (
+              <Fragment key={entry.workId}>
+                {cluster && (
+                  <TieBreakBand
+                    workIds={cluster.workIds}
+                    count={cluster.count}
+                    colSpan={columns.length}
+                    onCompare={compareCluster}
+                  />
+                )}
+                <tr className="transition-colors hover:bg-primary/5 [&>td]:border-b [&>td]:border-border/55 last:[&>td]:border-0">
+                  {columns.map((col) => (
+                    <td
+                      key={col.key}
+                      className={cn(
+                        "h-14 py-3 align-middle overflow-hidden",
+                        col.key.startsWith("crit_") ? "px-1" : "px-3"
                       )}
-                    </div>
-                  </td>
-                ))}
-              </tr>
-            ))}
+                      style={{ textAlign: col.align ?? "left" }}
+                    >
+                      <div className="truncate" style={{ textAlign: col.align ?? "left" }}>
+                        {col.key === "select" ? (
+                          <Checkbox
+                            checked={selectedSet.has(entry.workId)}
+                            disabled={!selectedSet.has(entry.workId) && selectedIds.length >= MAX_COMPARE_WORKS}
+                            onCheckedChange={() => toggleSelect(entry.workId)}
+                            aria-label={`Selecionar ${entry.title} para comparar`}
+                          />
+                        ) : (
+                          renderCell(entry, col, scoreThresholds, isPaid)
+                        )}
+                      </div>
+                    </td>
+                  ))}
+                </tr>
+              </Fragment>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -572,6 +702,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
         onClear={clearSelection}
         onRemoveId={removeSelection}
         scoreThresholds={scoreThresholds}
+        isPaid={isPaid}
       />
     </div>
   )

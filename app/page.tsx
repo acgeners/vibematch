@@ -64,10 +64,10 @@ export default async function DashboardPage() {
           accent="violet"
         />
         <StatCard
-          title="Sem nota final"
-          value={stats.withoutFinalScore}
+          title="Sem nota prevista"
+          value={stats.withoutExpectedScore}
           icon={<Star />}
-          description="Sem Nota.Final calculada"
+          description="Sem Nota Prevista calculada"
           accent="amber"
         />
         <StatCard
@@ -93,16 +93,16 @@ export default async function DashboardPage() {
           <CardHeader className="relative pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               <TrendingUp className="size-4 text-primary" />
-              Média Nota.Final
+              Média Nota Prevista
             </CardTitle>
           </CardHeader>
           <CardContent className="relative">
-            {stats.avgFinalScore != null ? (
+            {stats.avgExpectedScore != null ? (
               <div className="flex items-end gap-4">
-                <ScoreBadge score={stats.avgFinalScore} size="lg" className="text-2xl px-4 py-2" />
+                <ScoreBadge score={stats.avgExpectedScore} size="lg" className="text-2xl px-4 py-2" />
                 <div className="flex flex-col">
                   <span className="text-3xl font-bold tabular-nums tracking-tight">
-                    {stats.avgFinalScore.toFixed(2)}
+                    {stats.avgExpectedScore.toFixed(2)}
                   </span>
                   <span className="text-xs text-muted-foreground">de 10 pontos possíveis</span>
                 </div>
@@ -134,7 +134,7 @@ export default async function DashboardPage() {
           <CardHeader className="flex flex-row items-center justify-between pb-4">
             <CardTitle className="flex items-center gap-2 text-base">
               <Star className="size-4 text-amber-500" />
-              Top 5 obras por Nota.Final
+              Top 5 obras por Nota Prevista
             </CardTitle>
             <Button asChild variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
               <Link href="/ranking">
@@ -188,7 +188,7 @@ interface TopWorkCardProps {
   work: {
     id: string
     title: string
-    finalScore: number | null
+    expectedScore: number | null
     publicationStatusId: number | null
     personalStatusId: number | null
   }
@@ -213,7 +213,7 @@ function TopWorkCard({ rank, work, scoreThresholds }: TopWorkCardProps) {
         >
           {rank}
         </span>
-        <ScoreBadge score={work.finalScore} size="sm" thresholds={scoreThresholds} />
+        <ScoreBadge score={work.expectedScore} size="sm" thresholds={scoreThresholds} />
       </div>
       <WorkTitleLink
         title={work.title}

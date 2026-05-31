@@ -64,7 +64,7 @@ export async function setScoreWeightsAuto(enabled: boolean) {
 
   const result = await recalculateAll()
   revalidatePath("/settings")
-  revalidatePath("/preferences")
+  revalidatePath("/conta/preferencias")
   revalidatePath("/ranking")
   revalidatePath("/titles")
   return result
@@ -197,7 +197,76 @@ export async function updateScoreColorPercentiles(update: ScoreColorPercentilesU
   if (error) return { error: error.message }
 
   revalidateTag("score-color-thresholds", "max")
-  revalidatePath("/preferences")
+  revalidatePath("/conta/preferencias")
+  revalidatePath("/ranking")
+  revalidatePath("/titles")
+  revalidatePath("/")
+  return { error: null }
+}
+
+export interface CriterionColorPctsUpdate {
+  /** Percentis específicos do critério, ou null pra remover o override (usa global). */
+  top: number
+  high: number
+  mid: number
+  low: number
+}
+
+/**
+ * Define (ou remove, quando `pcts` é null) o override de percentis de cor de UM
+ * critério, dentro do jsonb `formula_config.criterion_color_pcts`. Tratamento
+ * amigável quando a coluna ainda não existe (pede pra rodar a migration 082).
+ */
+export async function updateCriterionColorPcts(
+  slug: string,
+  pcts: CriterionColorPctsUpdate | null,
+) {
+  if (pcts) {
+    const clamp = (v: number) => Math.min(100, Math.max(0, v))
+    const { top, high, mid, low } = {
+      top: clamp(pcts.top),
+      high: clamp(pcts.high),
+      mid: clamp(pcts.mid),
+      low: clamp(pcts.low),
+    }
+    if (!(low < mid && mid < high && high < top)) {
+      return { error: "Percentis devem ser estritamente crescentes: baixo < médio < alto < topo." }
+    }
+    pcts = { top, high, mid, low }
+  }
+
+  const supabase = createAdminClient()
+  const { data: existing, error: readErr } = await supabase
+    .from("formula_config")
+    .select("id, criterion_color_pcts")
+    .limit(1)
+    .single()
+
+  if (readErr || !existing) {
+    const msg = readErr?.message ?? "formula_config não encontrado"
+    if (/criterion_color_pcts/.test(msg)) {
+      return { error: "Coluna ausente — rode a migration 082_criterion_color_pcts.sql primeiro." }
+    }
+    return { error: msg }
+  }
+
+  const current = ((existing as Record<string, unknown>).criterion_color_pcts ?? {}) as Record<
+    string,
+    CriterionColorPctsUpdate
+  >
+  const next = { ...current }
+  if (pcts) next[slug] = pcts
+  else delete next[slug]
+
+  const { error } = await supabase
+    .from("formula_config")
+    .update({ criterion_color_pcts: next, updated_at: new Date().toISOString() })
+    .eq("id", existing.id)
+
+  if (error) return { error: error.message }
+
+  revalidateTag("score-color-thresholds", "max")
+  revalidatePath("/conta/preferencias")
   revalidatePath("/ranking")
   revalidatePath("/titles")
   revalidatePath("/")

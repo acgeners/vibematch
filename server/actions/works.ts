@@ -18,7 +18,11 @@ import {
   pickPrimaryCover,
   splitSynopsesFromText,
 } from "@/lib/work-derived"
-import { recalculateAll } from "./calculations"
+import {
+  recalculateAll,
+  recalculateAllInBackground as recalcAllInBackgroundShared,
+} from "./calculations"
+import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
@@ -50,14 +54,11 @@ function resolveTagGroupId(name: string): string | null {
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>
 
+// Wrapper sync (mantém os call sites existentes sem floating-promise) que delega
+// pro helper compartilhado em calculations.ts — assim o coalescing guard é único
+// entre updateWorkStatus, submitPostReadingAttributes, etc.
 function recalculateAllInBackground(context: string) {
-  after(async () => {
-    try {
-      await recalculateAll()
-    } catch (error) {
-      console.error(`[${context}] Failed to recalculate scores`, error)
-    }
-  })
+  void recalcAllInBackgroundShared(context)
 }
 
 /**
@@ -1441,6 +1442,11 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
     .eq("id", id)
     .neq("ai_eval_status", "skipped")
 
+  // Editar a obra invalida o IA Rk (alignment_score) persistido — os atributos
+  // que alimentam o re-rank mudaram. Marca como desatualizado (não recomputa;
+  // re-rank é manual). No-op se a obra nunca foi rankeada.
+  await markWorkAlignmentStale(id)
+
   // Recalcular todos sem bloquear a edição: a média global muda quando qualquer título é alterado,
   // mas esperar a base inteira aqui deixa o formulário preso quando o recálculo demora.
   recalculateAllInBackground("updateWork")
@@ -1742,6 +1748,11 @@ export async function updateWorkExternalData(id: string, updates: ExternalWorkUp
     }
 
     await upsertWorkExternalIds(supabase, id, updates.externalIds)
+
+    // "Atualizar dados" mexe em ratings/sinopse/tags que alimentam o re-rank →
+    // invalida o IA Rk (alignment_score) persistido. Marca como desatualizado
+    // (não recomputa; re-rank é manual). No-op se a obra nunca foi rankeada.
+    await markWorkAlignmentStale(id)
 
     recalculateAllInBackground("updateWorkExternalData")
     const nextSlug = titleToSlug(
