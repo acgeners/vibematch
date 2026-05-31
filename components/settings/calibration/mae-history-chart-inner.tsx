@@ -15,8 +15,7 @@ import type { CalibrationHistoryEntry } from "@/server/actions/settings"
 interface HistoryChartDatum {
   ts: string
   date: string
-  loocv: number | null
-  inSample: number | null
+  expected: number | null
   trainSize: number | null
 }
 
@@ -53,8 +52,7 @@ export function MaeHistoryChart({ history }: { history: CalibrationHistoryEntry[
     data.push({
       ts: h?.recorded_at ?? d.toISOString(),
       date: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`,
-      loocv: h?.mae_loocv_stacker ?? null,
-      inSample: h?.mae_final ?? null,
+      expected: h?.mae_expected ?? null,
       trainSize: h?.train_size ?? null,
     })
   }
@@ -98,21 +96,10 @@ export function MaeHistoryChart({ history }: { history: CalibrationHistoryEntry[
           />
           <Line
             type="monotone"
-            dataKey="loocv"
-            name="MAE LOOCV (honesto)"
+            dataKey="expected"
+            name="MAE Nota Prevista (in-sample)"
             stroke="hsl(var(--primary))"
             strokeWidth={2}
-            dot={{ r: 2 }}
-            activeDot={{ r: 4 }}
-            connectNulls
-          />
-          <Line
-            type="monotone"
-            dataKey="inSample"
-            name="MAE Final (in-sample)"
-            stroke="hsl(var(--muted-foreground))"
-            strokeWidth={1.5}
-            strokeDasharray="4 4"
             dot={{ r: 2 }}
             activeDot={{ r: 4 }}
             connectNulls

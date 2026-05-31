@@ -79,8 +79,8 @@ export interface CalibrationInput {
 export interface BucketBreakdownEntry {
   label: string
   count: number
-  /** MAE da Nota.Final no bucket (null se < MIN_BUCKET_SIZE). */
-  maeFinal: number | null
+  /** MAE da Nota Prevista (expected_score) no bucket (null se < MIN_BUCKET_SIZE). */
+  mae: number | null
 }
 
 export interface BucketBreakdown {
@@ -90,6 +90,8 @@ export interface BucketBreakdown {
 
 export interface BucketInput extends CalibrationInput {
   predictionDistance: number | null
+  /** Nota Prevista (expected_score) — métrica do bucket pós-remoção do legado. */
+  expectedScore: number | null
 }
 
 const DISTANCE_BUCKETS = [
@@ -105,42 +107,44 @@ const VOTES_BUCKETS = [
   { label: "≥ 10k", min: 10_000, max: Infinity },
 ] as const
 
-const MIN_BUCKET_SIZE = 5
+// Buckets com menos que isso viram "sem amostra" (mae=null) em vez de mostrar
+// um MAE confiante sobre 5-9 obras, que é essencialmente ruído.
+const MIN_BUCKET_SIZE = 10
 
 function bucketMae(
   items: BucketInput[],
   predicate: (it: BucketInput) => boolean,
-): { count: number; maeFinal: number | null } {
+): { count: number; mae: number | null } {
   const filtered = items.filter(
     (it) =>
-      predicate(it) && it.userScore != null && it.finalScore != null,
+      predicate(it) && it.userScore != null && it.expectedScore != null,
   )
   if (filtered.length < MIN_BUCKET_SIZE) {
-    return { count: filtered.length, maeFinal: null }
+    return { count: filtered.length, mae: null }
   }
   const diffs = filtered.map((it) =>
-    Math.abs((it.finalScore as number) - (it.userScore as number)),
+    Math.abs((it.expectedScore as number) - (it.userScore as number)),
   )
-  return { count: filtered.length, maeFinal: round4(meanAbs(diffs)) }
+  return { count: filtered.length, mae: round4(meanAbs(diffs)) }
 }
 
 export function computeBucketBreakdown(items: BucketInput[]): BucketBreakdown {
   const byDistance: BucketBreakdownEntry[] = DISTANCE_BUCKETS.map((b) => {
-    const { count, maeFinal } = bucketMae(
+    const { count, mae } = bucketMae(
       items,
       (it) =>
         it.predictionDistance != null &&
         it.predictionDistance >= b.min &&
         it.predictionDistance < b.max,
     )
-    return { label: b.label, count, maeFinal }
+    return { label: b.label, count, mae }
   })
   const byVotes: BucketBreakdownEntry[] = VOTES_BUCKETS.map((b) => {
-    const { count, maeFinal } = bucketMae(
+    const { count, mae } = bucketMae(
       items,
       (it) => it.totalVotes >= b.min && it.totalVotes < b.max,
     )
-    return { label: b.label, count, maeFinal }
+    return { label: b.label, count, mae }
   })
   return { byDistance, byVotes }
 }

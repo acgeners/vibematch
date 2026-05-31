@@ -115,7 +115,7 @@ export function parsePromptVersion(s: string | null | undefined): number | null 
 }
 
 export const CURRENT_PROMPT_VERSION_NUM = parsePromptVersion(PROMPT_VERSION) ?? 0
-const MAX_REVIEW_WORDS = 120
+const MAX_REVIEW_WORDS = 200
 
 /**
  * Caps usados pra alimentar reviews no prompt da IA. Compartilhado entre
@@ -1247,7 +1247,12 @@ export async function requestAiEvaluation(
         client,
         {
           model: modelToUse,
-          max_tokens: attempt === 0 ? 3500 : 4500,
+          // 4500 nas duas tentativas: a saída estruturada das 9 notas +
+          // justificativas + review_usage frequentemente passava de 3500 na
+          // attempt 0, truncava (stop_reason="max_tokens") e forçava a 2ª
+          // tentativa inteira (~2× o tempo). Subir o teto elimina esse retry
+          // desperdiçado sem custo extra quando a resposta cabe.
+          max_tokens: 4500,
           ...(supportsTemperature ? { temperature: attempt === 0 ? 0.2 : 0 } : {}),
           system: [
             {
