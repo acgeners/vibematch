@@ -2,8 +2,8 @@
 
 import { useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import Image from "next/image"
-import { ArrowDown, ArrowUp, CalendarDays, CheckSquare, Cpu, Gauge, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
+import Link from "next/link"
+import { ArrowDown, ArrowUp, CalendarDays, CheckSquare, Cpu, ExternalLink, Gauge, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation, skipAiEvaluation } from "@/server/actions/ai"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
@@ -22,7 +22,11 @@ import {
 } from "@/components/ui/select"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { ScoreBadge } from "@/components/ui/score-badge"
-import { getCoverImageSrc } from "@/lib/image-proxy"
+import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { titleToSlug } from "@/lib/utils"
+import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
+import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import {
   Dialog,
   DialogContent,
@@ -39,6 +43,7 @@ interface PendingWork {
   publication_status_id: number | null
   personal_status: string
   personal_status_id: number | null
+  synopsis_quality?: string | null
   cover_url?: string | null
   expected_score?: number | null
   matchedFilters?: Array<"pending" | "review-pending" | "low-confidence" | "outdated-model">
@@ -67,6 +72,13 @@ interface ReviewData {
   currentScores: Record<string, number>
 }
 
+/** Resultado de uma avaliação disparada: pronta pra revisar, precisa de
+ * confirmação (sem reviews externas), ou nada (erro/cancelada). */
+type EvalOutcome =
+  | { kind: "review"; data: ReviewData }
+  | { kind: "needs-confirm"; work: PendingWork; noReviewsReason: NoReviewsReason | null }
+  | { kind: "none" }
+
 export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   const router = useRouter()
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null)
@@ -77,6 +89,16 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   const [queueReviewIndex, setQueueReviewIndex] = useState(0)
   const [queueProcessedCount, setQueueProcessedCount] = useState(0)
   const [queueSize, setQueueSize] = useState<number>(10)
+  // Gate "sem reviews externas": confirmação antes de chamar o LLM.
+  const [noReviewConfirm, setNoReviewConfirm] = useState<{
+    work: PendingWork
+    noReviewsReason: NoReviewsReason | null
+  } | null>(null)
+  // Aviso agregado do lote: obras sem reviews + as que já têm review prontas.
+  const [batchNoReview, setBatchNoReview] = useState<{
+    works: PendingWork[]
+    reviews: ReviewData[]
+  } | null>(null)
   const queueCancelledRef = useRef(false)
   // Cancela a avaliação atual (single ou item da fila). A chamada do server
   // action continua e o resultado é salvo no DB; só ignoramos o resultado no
@@ -158,11 +180,39 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   const allSelected = selected.size === pendingWorks.length
   const someSelected = selected.size > 0 && !allSelected
 
+  // Normaliza o retorno (união) de triggerAiEvaluation num EvalOutcome.
+  const toOutcome = (
+    work: PendingWork,
+    result: Awaited<ReturnType<typeof triggerAiEvaluation>>
+  ): EvalOutcome => {
+    if ("needsReviewConfirmation" in result && result.needsReviewConfirmation) {
+      return { kind: "needs-confirm", work, noReviewsReason: result.noReviewsReason }
+    }
+    if ("error" in result && result.error) {
+      toast.error(`Erro na avaliação de "${work.title}": ${result.error}`)
+      return { kind: "none" }
+    }
+    if (!("data" in result) || !result.data?.evaluation) {
+      toast.error(`"${work.title}": notas não retornadas.`)
+      return { kind: "none" }
+    }
+    return {
+      kind: "review",
+      data: {
+        evaluation: result.data.evaluation,
+        workId: work.id,
+        workTitle: work.title,
+        coverUrl: work.cover_url ?? null,
+        currentScores: result.data.currentScores ?? {},
+      },
+    }
+  }
+
   // Queue logic
   const runEvaluation = async (
     work: PendingWork,
-    opts?: { model?: "sonnet" | "opus" }
-  ): Promise<ReviewData | null> => {
+    opts?: { model?: "sonnet" | "opus"; proceedWithoutReviews?: boolean }
+  ): Promise<EvalOutcome> => {
     evaluationCancelledRef.current = false
     setEvaluatingId(work.id)
     const result = await triggerAiEvaluation(work.id, opts)
@@ -170,49 +220,21 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
 
     if (evaluationCancelledRef.current) {
       evaluationCancelledRef.current = false
-      return null
+      return { kind: "none" }
     }
-
-    if (result.error) {
-      toast.error(`Erro na avaliação de "${work.title}": ${result.error}`)
-      return null
-    }
-
-    if (!result.data?.evaluation) {
-      toast.error("Avaliação concluída, mas as notas não foram retornadas.")
-      return null
-    }
-
-    return {
-      evaluation: result.data.evaluation,
-      workId: work.id,
-      workTitle: work.title,
-      coverUrl: work.cover_url ?? null,
-      currentScores: result.data.currentScores ?? {},
-    }
+    return toOutcome(work, result)
   }
 
   // Variante da avaliação usada no lote (fila): NÃO mexe em `evaluatingId`
   // (que destaca uma única linha) porque rodam várias em paralelo. O progresso
   // do lote é mostrado pelo overlay da fila (queueProcessedCount).
-  const runQueuedEvaluation = async (work: PendingWork): Promise<ReviewData | null> => {
-    const result = await triggerAiEvaluation(work.id)
-    if (queueCancelledRef.current) return null
-    if (result.error) {
-      toast.error(`Erro na avaliação de "${work.title}": ${result.error}`)
-      return null
-    }
-    if (!result.data?.evaluation) {
-      toast.error(`"${work.title}": notas não retornadas.`)
-      return null
-    }
-    return {
-      evaluation: result.data.evaluation,
-      workId: work.id,
-      workTitle: work.title,
-      coverUrl: work.cover_url ?? null,
-      currentScores: result.data.currentScores ?? {},
-    }
+  const runQueuedEvaluation = async (
+    work: PendingWork,
+    opts?: { proceedWithoutReviews?: boolean }
+  ): Promise<EvalOutcome> => {
+    const result = await triggerAiEvaluation(work.id, opts)
+    if (queueCancelledRef.current) return { kind: "none" }
+    return toOutcome(work, result)
   }
 
   const handleCancelEvaluation = () => {
@@ -224,26 +246,38 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   }
 
   const handleEvaluate = async (work: PendingWork) => {
-    const result = await runEvaluation(work)
-    if (result) setReviewData(result)
+    const outcome = await runEvaluation(work)
+    if (outcome.kind === "review") setReviewData(outcome.data)
+    else if (outcome.kind === "needs-confirm") {
+      setNoReviewConfirm({ work, noReviewsReason: outcome.noReviewsReason })
+    }
   }
 
-  const startQueue = async (works?: PendingWork[]) => {
-    const source = works ?? sortedWorks.slice(0, Math.max(1, Math.min(queueSize, sortedWorks.length)))
-    if (source.length === 0) return
+  // Confirma seguir uma avaliação single mesmo sem reviews externas.
+  const proceedSingleWithoutReviews = async () => {
+    if (!noReviewConfirm) return
+    const { work } = noReviewConfirm
+    setNoReviewConfirm(null)
+    const outcome = await runEvaluation(work, { proceedWithoutReviews: true })
+    if (outcome.kind === "review") setReviewData(outcome.data)
+  }
 
-    queueCancelledRef.current = false
-    setQueue(source)
+  // Roda um lote em PARALELO com concorrência limitada (o gargalo é o LLM,
+  // ~50s cada). Mantém a ordem original e atualiza o overlay de progresso.
+  // Retorna as avaliações prontas e as que precisam de confirmação (sem reviews).
+  const runBatch = async (
+    works: PendingWork[],
+    opts?: { proceedWithoutReviews?: boolean }
+  ): Promise<{
+    reviews: ReviewData[]
+    needConfirm: PendingWork[]
+  }> => {
+    setQueue(works)
     setQueueResults([])
     setQueueReviewIndex(0)
     setQueueProcessedCount(0)
-    setReviewData(null)
 
-    // Avalia em PARALELO com concorrência limitada em vez de sequencial: o
-    // gargalo é a chamada do LLM (~50s cada), então rodar algumas ao mesmo tempo
-    // encurta bastante o tempo total do lote sem perder qualidade. Resultados
-    // mantêm a ordem original (por índice) e o cancelamento para de lançar novas.
-    const slots: (ReviewData | null)[] = new Array(source.length).fill(null)
+    const slots: (EvalOutcome | null)[] = new Array(works.length).fill(null)
     let nextIndex = 0
     let processed = 0
 
@@ -251,30 +285,76 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
       while (!queueCancelledRef.current) {
         const index = nextIndex
         nextIndex += 1
-        if (index >= source.length) return
-        const result = await runQueuedEvaluation(source[index])
+        if (index >= works.length) return
+        const outcome = await runQueuedEvaluation(works[index], opts)
         processed += 1
         setQueueProcessedCount(processed)
-        if (!queueCancelledRef.current && result) slots[index] = result
+        if (!queueCancelledRef.current) slots[index] = outcome
       }
     }
 
-    const workerCount = Math.min(QUEUE_CONCURRENCY, source.length)
+    const workerCount = Math.min(QUEUE_CONCURRENCY, works.length)
     await Promise.all(Array.from({ length: workerCount }, () => worker()))
 
-    if (queueCancelledRef.current) return
+    const reviews: ReviewData[] = []
+    const needConfirm: PendingWork[] = []
+    for (const o of slots) {
+      if (!o) continue
+      if (o.kind === "review") reviews.push(o.data)
+      else if (o.kind === "needs-confirm") needConfirm.push(o.work)
+    }
+    return { reviews, needConfirm }
+  }
 
-    const results = slots.filter((r): r is ReviewData => r !== null)
-    if (results.length === 0) {
+  const finishQueueWithReviews = (reviews: ReviewData[]) => {
+    if (reviews.length === 0) {
       setQueue([])
       setQueueProcessedCount(0)
       router.refresh()
       return
     }
-
-    setQueueResults(results)
+    setQueueResults(reviews)
     setQueueReviewIndex(0)
-    setReviewData(results[0])
+    setReviewData(reviews[0])
+  }
+
+  const startQueue = async (works?: PendingWork[]) => {
+    const source = works ?? sortedWorks.slice(0, Math.max(1, Math.min(queueSize, sortedWorks.length)))
+    if (source.length === 0) return
+
+    queueCancelledRef.current = false
+    setReviewData(null)
+    setBatchNoReview(null)
+
+    const { reviews, needConfirm } = await runBatch(source)
+    if (queueCancelledRef.current) return
+
+    // Algumas obras sem reviews: pausa e mostra UM aviso agregado. As que têm
+    // review já ficam prontas; o usuário decide se avalia as demais mesmo assim.
+    if (needConfirm.length > 0) {
+      setBatchNoReview({ works: needConfirm, reviews })
+      return
+    }
+    finishQueueWithReviews(reviews)
+  }
+
+  // "Avaliar mesmo assim" no aviso agregado: roda as sem review com
+  // proceedWithoutReviews e junta ao buffer de revisão.
+  const proceedBatchWithoutReviews = async () => {
+    if (!batchNoReview) return
+    const { works, reviews } = batchNoReview
+    setBatchNoReview(null)
+    const { reviews: extra } = await runBatch(works, { proceedWithoutReviews: true })
+    if (queueCancelledRef.current) return
+    finishQueueWithReviews([...reviews, ...extra])
+  }
+
+  // "Pular essas": revisa só as obras que tinham reviews.
+  const skipBatchNoReview = () => {
+    if (!batchNoReview) return
+    const { reviews } = batchNoReview
+    setBatchNoReview(null)
+    finishQueueWithReviews(reviews)
   }
 
   const handleSaved = async () => {
@@ -302,6 +382,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
     setQueueResults([])
     setQueueReviewIndex(0)
     setQueueProcessedCount(0)
+    setBatchNoReview(null)
     router.refresh()
   }
 
@@ -335,7 +416,9 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   const queuePosition = isInQueue && reviewData && queueResults.length > 0
     ? queueReviewIndex + 1
     : 0
-  const isQueueEvaluating = isInQueue && queueResults.length === 0
+  // Enquanto o aviso agregado (batchNoReview) está aberto, suprime o overlay
+  // de "Avaliando em fila" e a barra de revisão.
+  const isQueueEvaluating = isInQueue && queueResults.length === 0 && !batchNoReview
   const evaluatingWork = evaluatingId
     ? pendingWorks.find((work) => work.id === evaluatingId)
     : null
@@ -354,7 +437,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
 
   return (
     <>
-      {isInQueue && !isQueueEvaluating && (
+      {isInQueue && !isQueueEvaluating && !batchNoReview && queueResults.length > 0 && (
         <div className="flex items-center justify-between rounded-lg border border-border/70 bg-card/58 px-4 py-2 text-sm shadow-sm">
           <span className="text-muted-foreground">
             Revisão: <strong>{queuePosition}</strong> de <strong>{queueResults.length}</strong>
@@ -565,22 +648,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                 )}
 
                 {/* Cover thumb (esquerda) — aspect 2:3 de manga */}
-                <div className="relative h-36 w-24 shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted shadow-sm">
-                  {work.cover_url ? (
-                    <Image
-                      src={getCoverImageSrc(work.cover_url)}
-                      alt=""
-                      fill
-                      sizes="96px"
-                      unoptimized
-                      className="object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-                      —
-                    </div>
-                  )}
-                </div>
+                <CoverThumb url={work.cover_url} />
 
                 {/* Conteúdo central */}
                 <div className="flex-1 min-w-0 space-y-1.5">
@@ -602,6 +670,14 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <PublicationStatusBadge statusId={work.publication_status_id ?? null} />
                     <PersonalStatusBadge statusId={work.personal_status_id ?? null} />
+                    {work.synopsis_quality && (
+                      <span
+                        title="Interesse na sinopse"
+                        className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300"
+                      >
+                        {work.synopsis_quality}
+                      </span>
+                    )}
                     <FilterBadges
                       matchedFilters={work.matchedFilters}
                       evaluation={work.evaluation}
@@ -651,7 +727,16 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
             <DialogTitle>Revisão da avaliação IA</DialogTitle>
             {reviewData && (
               <div className="flex items-start justify-between gap-4">
-                <p className="text-xl font-semibold leading-tight text-foreground">{reviewData.workTitle}</p>
+                <Link
+                  href={`/titles/${titleToSlug(reviewData.workTitle)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group inline-flex items-start gap-1.5 text-xl font-semibold leading-tight text-foreground hover:text-primary hover:underline"
+                  title="Abrir página da obra em nova aba"
+                >
+                  {reviewData.workTitle}
+                  <ExternalLink className="mt-1 h-4 w-4 shrink-0 opacity-50 transition-opacity group-hover:opacity-100" />
+                </Link>
                 {isInQueue && queuePosition > 0 && (
                   <p className="shrink-0 text-xs text-muted-foreground">
                     {queuePosition} de {queueResults.length}
@@ -678,8 +763,11 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                   personal_status_id: null,
                   cover_url: reviewData.coverUrl,
                 }
-                const next = await runEvaluation(pseudoWork, { model })
-                if (next) {
+                // Reavaliar a partir do modal: a obra já está aberta, então
+                // segue mesmo sem reviews (sem novo aviso).
+                const outcome = await runEvaluation(pseudoWork, { model, proceedWithoutReviews: true })
+                if (outcome.kind === "review") {
+                  const next = outcome.data
                   setReviewData(next)
                   // Substitui no buffer da fila (se aplicável) pra manter coerência da navegação.
                   if (queueResults.length > 0) {
@@ -695,6 +783,65 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
               onCancel={handleCancel}
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Gate single: sem reviews externas, confirma antes de chamar o LLM. */}
+      <ConfirmDialog
+        open={noReviewConfirm != null}
+        onOpenChange={(open) => !open && setNoReviewConfirm(null)}
+        title="Sem reviews externas"
+        description={
+          noReviewConfirm
+            ? `Não há reviews externas para "${noReviewConfirm.work.title}"${
+                noReviewConfirm.noReviewsReason
+                  ? ` (${NO_REVIEWS_REASON_LABEL[noReviewConfirm.noReviewsReason]})`
+                  : ""
+              }. A avaliação vai usar só sinopse, tags e gêneros. Avaliar mesmo assim?`
+            : undefined
+        }
+        confirmText="Avaliar mesmo assim"
+        cancelText="Cancelar"
+        onConfirm={proceedSingleWithoutReviews}
+      />
+
+      {/* Aviso agregado do lote: obras sem reviews externas. */}
+      <Dialog open={batchNoReview != null} onOpenChange={(open) => !open && handleCancel()}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Obras sem reviews externas</DialogTitle>
+            <DialogDescription>
+              {batchNoReview && (
+                <>
+                  {batchNoReview.works.length} obra
+                  {batchNoReview.works.length !== 1 ? "s" : ""} sem reviews externas.{" "}
+                  {batchNoReview.reviews.length > 0
+                    ? `${batchNoReview.reviews.length} com reviews já estão prontas pra revisar.`
+                    : ""}{" "}
+                  A avaliação dessas usaria só sinopse, tags e gêneros.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {batchNoReview && (
+            <ul className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border border-border/60 bg-muted/30 p-2 text-xs text-muted-foreground">
+              {batchNoReview.works.map((w) => (
+                <li key={w.id} className="truncate">{w.title}</li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button variant="ghost" onClick={handleCancel}>
+              Cancelar
+            </Button>
+            <Button variant="outline" onClick={skipBatchNoReview}>
+              Pular essas{batchNoReview && batchNoReview.reviews.length > 0 ? " e revisar o resto" : ""}
+            </Button>
+            <Button onClick={() => void proceedBatchWithoutReviews()}>
+              <Sparkles className="h-3.5 w-3.5" />
+              Avaliar mesmo assim
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </>

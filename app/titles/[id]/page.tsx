@@ -6,6 +6,7 @@ import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug } from "@/server/queries/works"
+import { getAllTags } from "@/server/queries/tags"
 import {
   getLatestAiEvaluationAttributes,
   getExistingPostReadingAssessment,
@@ -67,6 +68,7 @@ interface TitleDetailPageProps {
 type DetailTag = {
   key: string
   label: string
+  subGroupName?: string
 }
 
 type WorkTagForDisplay = {
@@ -179,7 +181,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -187,7 +189,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getSourceRows(),
     getBiasMap(await getCurrentUserId(configClient), configClient),
     getCurrentPlan(configClient),
+    getAllTags(),
   ])
+  const subGroupBySlug = new Map<string, string>()
+  for (const t of allTagsCatalog) {
+    if (t.subGroupName) subGroupBySlug.set(t.slug, t.subGroupName)
+  }
   const isPaidPlan = planAllows(plan, "deep_dive")
 
   const scoreMap: Record<string, number> = {}
@@ -234,18 +241,41 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     const label = typeof tag === "string" ? tag : tag.name
     if (!label) continue
     const groupLabel = typeof tag === "string" ? "Sem grupo" : getTagGroupLabel(tag.tag_group_id)
+    const slug = typeof tag === "string" ? undefined : tag.slug
     const groupTags = tagGroupMap.get(groupLabel) ?? []
     groupTags.push({
       key: typeof tag === "string" ? tag : tag.id ?? tag.slug ?? label,
       label,
+      subGroupName: slug ? subGroupBySlug.get(slug) : undefined,
     })
     tagGroupMap.set(groupLabel, groupTags)
   }
+  const byTagLabel = (a: DetailTag, b: DetailTag) => a.label.localeCompare(b.label)
   const tagGroups = Array.from(tagGroupMap.entries())
-    .map(([groupName, groupTags]) => ({
-      groupName,
-      tags: groupTags.sort((a, b) => a.label.localeCompare(b.label)),
-    }))
+    .map(([groupName, groupTags]) => {
+      // When the group has applied sub-groups, split into collapsible sections.
+      let subGroups: Array<{ name: string; tags: DetailTag[] }> | null = null
+      if (groupTags.some((t) => t.subGroupName)) {
+        const bySub = new Map<string, DetailTag[]>()
+        const ungrouped: DetailTag[] = []
+        for (const t of groupTags) {
+          if (t.subGroupName) {
+            const arr = bySub.get(t.subGroupName) ?? []
+            arr.push(t)
+            bySub.set(t.subGroupName, arr)
+          } else ungrouped.push(t)
+        }
+        subGroups = [...bySub.entries()]
+          .map(([name, tgs]) => ({ name, tags: tgs.sort(byTagLabel) }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+        if (ungrouped.length) subGroups.push({ name: "Outras", tags: ungrouped.sort(byTagLabel) })
+      }
+      return {
+        groupName,
+        tags: groupTags.sort(byTagLabel),
+        subGroups,
+      }
+    })
     .sort((a, b) => a.groupName.localeCompare(b.groupName))
   const postReadingScores = POST_READING_SCORE_FIELDS.map((field) => ({
     field,
@@ -355,6 +385,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             workId={work.id}
             statusInitialValues={statusInitial}
             totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
+            latestAiEvaluation={postAttrAi}
+            existingAssessment={postAttrExisting}
           />
           <MoreActionsMenu workId={work.id} isArchived={work.is_archived} />
           <Button asChild size="sm">
@@ -1041,17 +1073,42 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                           {group.tags.length}
                         </span>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {group.tags.map((tag) => (
-                          <Badge
-                            key={tag.key}
-                            variant="outline"
-                            className="rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors hover:bg-accent hover:text-accent-foreground"
-                          >
-                            {tag.label}
-                          </Badge>
-                        ))}
-                      </div>
+                      {group.subGroups ? (
+                        <div className="space-y-1.5">
+                          {group.subGroups.map((sg) => (
+                            <details key={sg.name} className="group rounded-md border border-border/45 bg-background/30">
+                              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground/65">
+                                <ChevronDown className="h-3 w-3 text-muted-foreground transition-transform group-open:rotate-180" />
+                                <span>{sg.name}</span>
+                                <span className="text-[10px] font-normal normal-case text-muted-foreground">{sg.tags.length}</span>
+                              </summary>
+                              <div className="flex flex-wrap gap-1.5 px-2 pb-2">
+                                {sg.tags.map((tag) => (
+                                  <Badge
+                                    key={tag.key}
+                                    variant="outline"
+                                    className="rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors hover:bg-accent hover:text-accent-foreground"
+                                  >
+                                    {tag.label}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </details>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {group.tags.map((tag) => (
+                            <Badge
+                              key={tag.key}
+                              variant="outline"
+                              className="rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors hover:bg-accent hover:text-accent-foreground"
+                            >
+                              {tag.label}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </section>
                   ))}
                 </div>

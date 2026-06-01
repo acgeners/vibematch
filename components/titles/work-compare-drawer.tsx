@@ -1304,7 +1304,7 @@ function GenresTagsCell({
   tags,
 }: {
   genres: string[]
-  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null }>
+  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName?: string | null }>
 }) {
   const total = genres.length + tags.length
   if (total === 0) {
@@ -1386,25 +1386,67 @@ function GenresTagsCell({
                 </div>
               </div>
             )}
-            {groupedTags.map(([groupName, groupTags]) => (
-              <div key={groupName}>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {groupName}{" "}
-                  <span className="text-muted-foreground/60">({groupTags.length})</span>
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  {groupTags.map((t) => (
-                    <Badge
-                      key={`t:${t.slug}`}
-                      variant="outline"
-                      className="h-5 py-0 text-[10px] font-normal"
-                    >
-                      {t.name}
-                    </Badge>
-                  ))}
+            {groupedTags.map(([groupName, groupTags]) => {
+              // Split into collapsible sub-group sections when the group has any.
+              const subSections = groupTags.some((t) => t.subGroupName)
+                ? (() => {
+                    const bySub = new Map<string, typeof groupTags>()
+                    const ungrouped: typeof groupTags = []
+                    for (const t of groupTags) {
+                      if (t.subGroupName) {
+                        const arr = bySub.get(t.subGroupName) ?? []
+                        arr.push(t)
+                        bySub.set(t.subGroupName, arr)
+                      } else ungrouped.push(t)
+                    }
+                    const out = [...bySub.entries()]
+                      .map(([name, tgs]) => ({ name, tags: tgs }))
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                    if (ungrouped.length) out.push({ name: "Outras", tags: ungrouped })
+                    return out
+                  })()
+                : null
+              return (
+                <div key={groupName}>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {groupName}{" "}
+                    <span className="text-muted-foreground/60">({groupTags.length})</span>
+                  </p>
+                  {subSections ? (
+                    <div className="space-y-1">
+                      {subSections.map((sg) => (
+                        <details key={sg.name} className="group">
+                          <summary className="flex cursor-pointer list-none items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                            <ChevronDown className="h-2.5 w-2.5 transition-transform group-open:rotate-180" />
+                            {sg.name}{" "}
+                            <span className="text-muted-foreground/60">({sg.tags.length})</span>
+                          </summary>
+                          <div className="mt-1 flex flex-wrap gap-1 pl-3.5">
+                            {sg.tags.map((t) => (
+                              <Badge key={`t:${t.slug}`} variant="outline" className="h-5 py-0 text-[10px] font-normal">
+                                {t.name}
+                              </Badge>
+                            ))}
+                          </div>
+                        </details>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1">
+                      {groupTags.map((t) => (
+                        <Badge
+                          key={`t:${t.slug}`}
+                          variant="outline"
+                          className="h-5 py-0 text-[10px] font-normal"
+                        >
+                          {t.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </PopoverContent>
         </Popover>
       )}

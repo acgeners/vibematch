@@ -22,7 +22,7 @@ import { workStatusSchema } from "@/lib/validations/work.schema"
 import type { WorkStatusInput, WorkStatusValues } from "@/lib/validations/work.schema"
 import { updateWorkStatus } from "@/server/actions/works"
 import { PERSONAL_STATUSES, SYNOPSIS_QUALITIES } from "@/types/domain"
-import { PERSONAL_STATUS_LABELS, SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
+import { PERSONAL_STATUS_LABELS, PERSONAL_STATUSES_BY_ID, SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import {
   DEFAULT_POST_READING_WEIGHTS,
   POST_READING_CRITERIA_DESCRIPTIONS,
@@ -47,6 +47,12 @@ import {
 
 const SYNOPSIS_LEGEND_BY_LABEL = new Map(
   SYNOPSIS_INTEREST_LEGEND.map((entry) => [entry.label, entry] as const),
+)
+
+// Descrição de cada status de leitura — vem da tabela `personal_status`
+// (campo `comment`, sincronizado em PERSONAL_STATUSES_BY_ID via sync-constants).
+const PERSONAL_STATUS_COMMENTS = new Map<string, string>(
+  Object.values(PERSONAL_STATUSES_BY_ID).map((info) => [info.status, info.comment] as const),
 )
 
 const POST_FIELDS: PostReadingScoreField[] = [
@@ -196,8 +202,10 @@ export function WorkStatusForm({
 }: WorkStatusFormProps) {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
-  const [notesOpen, setNotesOpen] = useState(false)
+  const [notesOpen, setNotesOpen] = useState(true)
+  const [criteriaOpen, setCriteriaOpen] = useState(true)
   const [hoveredSynopsis, setHoveredSynopsis] = useState<string | null>(null)
+  const [hoveredStatus, setHoveredStatus] = useState<string | null>(null)
 
   const {
     register,
@@ -454,12 +462,34 @@ export function WorkStatusForm({
                 <SelectTrigger className="w-full h-9">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent onMouseLeave={() => setHoveredStatus(null)} className="w-[300px]">
                   {PERSONAL_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>
+                    <SelectItem
+                      key={s}
+                      value={s}
+                      onMouseEnter={() => setHoveredStatus(s)}
+                      onFocus={() => setHoveredStatus(s)}
+                    >
                       {PERSONAL_STATUS_LABELS[s]}
                     </SelectItem>
                   ))}
+                  {(() => {
+                    // Painel de detalhe: descrição do status sob o mouse (ou, sem
+                    // hover, do valor selecionado). Fonte: personal_status.comment.
+                    const activeStatus = hoveredStatus ?? personalStatus ?? null
+                    const comment = activeStatus ? PERSONAL_STATUS_COMMENTS.get(activeStatus) : undefined
+                    if (!activeStatus || !comment) return null
+                    return (
+                      <div className="mt-1 border-t border-border/60 px-2 pb-1 pt-2">
+                        <p className="text-xs font-semibold text-foreground">
+                          {PERSONAL_STATUS_LABELS[activeStatus] ?? activeStatus}
+                        </p>
+                        <p className="mt-0.5 whitespace-pre-line text-[11px] leading-relaxed text-muted-foreground">
+                          {comment}
+                        </p>
+                      </div>
+                    )
+                  })()}
                 </SelectContent>
               </Select>
             </div>
@@ -543,35 +573,15 @@ export function WorkStatusForm({
       {criteriaVisible && (
         <div className="space-y-4 border-t border-border/40 pt-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-2">
-                <Star className="h-4.5 w-4.5 text-muted-foreground fill-muted-foreground/10" />
-                <h3 className="text-base font-bold text-foreground">Critérios de avaliação</h3>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {POST_READING_STAR_LEGEND.map((item) => (
-                  <TooltipProvider key={item.label}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex items-center gap-1.5 rounded-full border bg-muted/30 px-2.5 py-0.5 text-[11px] font-medium transition-colors hover:bg-muted cursor-help">
-                          <span className="text-amber-500/45">{"★".repeat(item.stars)}</span>
-                          <span className="text-foreground">{item.label}</span>
-                          <span className="text-muted-foreground/60">({item.value.toFixed(1)})</span>
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-xs whitespace-pre-line text-left p-3 shadow-md border bg-popover text-popover-foreground">
-                        <p className="font-semibold text-sm text-foreground">
-                          {item.label}
-                        </p>
-                        <p className="mt-1 text-xs opacity-90 leading-relaxed text-muted-foreground">
-                          {item.description}
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                ))}
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={() => setCriteriaOpen((v) => !v)}
+              className="flex items-center gap-2 text-left"
+            >
+              <Star className="h-4.5 w-4.5 text-muted-foreground fill-muted-foreground/10" />
+              <h3 className="text-base font-bold text-foreground">Critérios de avaliação</h3>
+              <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", criteriaOpen && "rotate-180")} />
+            </button>
 
             <div className="flex flex-wrap items-center gap-4 bg-muted/40 border border-border/60 rounded-xl px-4 py-2.5 shadow-xs shrink-0 self-start sm:self-center">
               <div className="flex flex-col">
@@ -597,7 +607,33 @@ export function WorkStatusForm({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+          {criteriaOpen && (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                {POST_READING_STAR_LEGEND.map((item) => (
+                  <TooltipProvider key={item.label}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex items-center gap-1.5 rounded-full border bg-muted/30 px-2.5 py-0.5 text-[11px] font-medium transition-colors hover:bg-muted cursor-help">
+                          <span className="text-amber-500/45">{"★".repeat(item.stars)}</span>
+                          <span className="text-foreground">{item.label}</span>
+                          <span className="text-muted-foreground/60">({item.value.toFixed(1)})</span>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs whitespace-pre-line text-left p-3 shadow-md border bg-popover text-popover-foreground">
+                        <p className="font-semibold text-sm text-foreground">
+                          {item.label}
+                        </p>
+                        <p className="mt-1 text-xs opacity-90 leading-relaxed text-muted-foreground">
+                          {item.description}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
             {CRITERION_GROUPS.map((group) => {
               const groupMeta = {
                 "Narrativa": { icon: BookOpen, color: "text-blue-500", bg: "bg-blue-500/10 border-blue-500/20" },
@@ -684,7 +720,9 @@ export function WorkStatusForm({
                 </div>
               )
             })}
-          </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 

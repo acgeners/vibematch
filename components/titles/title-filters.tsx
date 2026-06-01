@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Command,
@@ -47,8 +46,8 @@ const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
 ]
 
 const AI_STATUS_LABELS: Record<string, string> = {
-  pending: "Sem avaliação IA",
-  review_pending: "Aguardando revisão",
+  pending: "Pendente atributos",
+  review_pending: "Pendente IA Rk",
   done: "Avaliado",
   skipped: "Pulado",
 }
@@ -221,12 +220,12 @@ function ScoreRangeCard({
   return (
     <div
       className={cn(
-        "group rounded-lg border bg-background/45 px-3 py-2.5 transition-colors",
+        "group rounded-lg border bg-background/45 px-2.5 py-2 transition-colors",
         isActive ? "border-primary/55 bg-primary/[0.04]" : "border-border/65 hover:border-border",
         className
       )}
     >
-      <div className="mb-2.5 flex items-center justify-between gap-2">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
         {tooltip ? (
           <TooltipProvider>
             <Tooltip>
@@ -306,15 +305,6 @@ function ScoreRangeCard({
   )
 }
 
-const VOTES_PRESETS: Array<{ label: string; min: number | null }> = [
-  { label: "Qualquer", min: null },
-  { label: "≥100", min: 100 },
-  { label: "≥500", min: 500 },
-  { label: "≥1k", min: 1000 },
-  { label: "≥5k", min: 5000 },
-  { label: "≥10k", min: 10000 },
-]
-
 function formatVotes(n: number): string {
   if (n >= 1000 && n % 1000 === 0) return `${n / 1000}k`
   if (n >= 10000) return `${(n / 1000).toFixed(0)}k`
@@ -322,7 +312,7 @@ function formatVotes(n: number): string {
   return String(n)
 }
 
-function VotesPresetCard({
+function VotesRangeCard({
   searchParams,
   updateParams,
   className,
@@ -344,17 +334,15 @@ function VotesPresetCard({
     activeLabel = `≤${formatVotes(currentMax)}`
   }
 
-  const activePreset = currentMax === undefined ? currentMin ?? null : undefined
-
   return (
     <div
       className={cn(
-        "rounded-lg border bg-background/45 px-3 py-2.5 transition-colors",
+        "rounded-lg border bg-background/45 px-2.5 py-2 transition-colors",
         isActive ? "border-primary/55 bg-primary/[0.04]" : "border-border/65",
         className
       )}
     >
-      <div className="mb-2.5 flex items-center justify-between gap-2">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="text-base leading-none">🗳️</span>
           <span className="truncate text-sm font-medium">Votos</span>
@@ -379,41 +367,13 @@ function VotesPresetCard({
           </button>
         </div>
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {VOTES_PRESETS.map((preset) => {
-          const active =
-            activePreset !== undefined &&
-            preset.min === activePreset &&
-            (preset.min !== null || !isActive)
-          return (
-            <button
-              key={preset.label}
-              type="button"
-              onClick={() =>
-                updateParams({
-                  min_votes: preset.min !== null ? String(preset.min) : null,
-                  max_votes: null,
-                })
-              }
-            >
-              <Badge
-                variant={active ? "default" : "outline"}
-                className="inline-flex h-7 cursor-pointer items-center rounded-full px-3 text-xs font-medium transition-transform hover:-translate-y-px"
-              >
-                {preset.label}
-              </Badge>
-            </button>
-          )
-        })}
-      </div>
-      <div className="mt-2.5 flex items-center gap-2">
-        <Label className="shrink-0 text-xs font-medium text-muted-foreground">Manual</Label>
+      <div className="flex items-center gap-1.5">
         <Input
           type="number"
           min={0}
           step={1}
           placeholder="Mín"
-          className="h-8 w-24 text-xs"
+          className="h-8 w-full min-w-0 text-xs"
           value={searchParams.get("min_votes") ?? ""}
           onChange={(e) => updateParams({ min_votes: e.target.value || null })}
         />
@@ -423,7 +383,7 @@ function VotesPresetCard({
           min={0}
           step={1}
           placeholder="Máx"
-          className="h-8 w-24 text-xs"
+          className="h-8 w-full min-w-0 text-xs"
           value={searchParams.get("max_votes") ?? ""}
           onChange={(e) => updateParams({ max_votes: e.target.value || null })}
         />
@@ -595,7 +555,6 @@ export function TitleFilters({
   const searchParams = useMemo(() => new URLSearchParams(draftSearch), [draftSearch])
   const [, startTransition] = useTransition()
   const [tabsExpanded, setTabsExpanded] = useState(false)
-  const [activeTab, setActiveTab] = useState("geral")
   const [collapsed, setCollapsed] = useCollapsedFilters("titles")
 
   const updateParams = useCallback(
@@ -877,270 +836,218 @@ export function TitleFilters({
         </div>
       </div>
 
-      {/* Tabs */}
-      <Tabs
-        value={activeTab}
-        onValueChange={(v) => { setActiveTab(v); setTabsExpanded(true) }}
-        className="gap-3"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <TabsList className="grid h-auto flex-1 grid-cols-2 gap-1 bg-muted/60 p-1">
-            <TabsTrigger
-              value="geral"
-              className="h-9"
-              onMouseDown={(e) => {
-                if (e.button === 0 && !e.ctrlKey && activeTab === "geral") {
-                  e.preventDefault()
-                  setTabsExpanded((prev) => !prev)
-                }
-              }}
-              onKeyDown={(e) => {
-                if ((e.key === " " || e.key === "Enter") && activeTab === "geral") {
-                  e.preventDefault()
-                  setTabsExpanded((prev) => !prev)
-                }
-              }}
+      {/* Filtros avançados (aba única) */}
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-9"
+          onClick={() => setTabsExpanded((prev) => !prev)}
+          aria-expanded={tabsExpanded}
+        >
+          {tabsExpanded ? "Ocultar filtros" : "Filtros avançados"}
+          <ChevronDown
+            className={cn("ml-1 h-3.5 w-3.5 transition-transform", tabsExpanded && "rotate-180")}
+          />
+        </Button>
+      </div>
+
+      {tabsExpanded && (
+        <div className="mt-3 space-y-3">
+          {/* Linha 1: Publicação + Status Pessoal + Status IA (cards estreitos) */}
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <FilterCard
+              title={`Publicação${isAllPub ? " (todos)" : selectedPubStatuses.size ? ` (${selectedPubStatuses.size})` : ""}`}
+              action={
+                <button
+                  type="button"
+                  onClick={() => updateParams({ pub_status: isAllPub ? null : "all" })}
+                >
+                  <Badge
+                    variant={isAllPub ? "default" : "outline"}
+                    className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
+                  >
+                    Todos
+                  </Badge>
+                </button>
+              }
             >
-              Geral
-            </TabsTrigger>
-            <TabsTrigger
-              value="notas"
-              className="h-9"
-              onMouseDown={(e) => {
-                if (e.button === 0 && !e.ctrlKey && activeTab === "notas") {
-                  e.preventDefault()
-                  setTabsExpanded((prev) => !prev)
-                }
-              }}
-              onKeyDown={(e) => {
-                if ((e.key === " " || e.key === "Enter") && activeTab === "notas") {
-                  e.preventDefault()
-                  setTabsExpanded((prev) => !prev)
-                }
-              }}
+              <div className="flex flex-wrap gap-1.5">
+                {visiblePublicationStatuses.map((s) => (
+                  <StatusButton
+                    key={`pub-${s.status}`}
+                    option={s}
+                    active={selectedPubStatuses.has(s.status)}
+                    onClick={() => togglePubStatus(s.status)}
+                  />
+                ))}
+              </div>
+            </FilterCard>
+
+            <FilterCard
+              title={`Status Pessoal${isAllPer ? " (todos)" : selectedPerStatuses.size ? ` (${selectedPerStatuses.size})` : ""}`}
+              action={
+                <button
+                  type="button"
+                  onClick={() => updateParams({ per_status: isAllPer ? null : "all" })}
+                >
+                  <Badge
+                    variant={isAllPer ? "default" : "outline"}
+                    className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
+                  >
+                    Todos
+                  </Badge>
+                </button>
+              }
             >
-              Notas
-            </TabsTrigger>
-          </TabsList>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-9 shrink-0"
-            onClick={() => setTabsExpanded((prev) => !prev)}
-            aria-expanded={tabsExpanded}
-          >
-            {tabsExpanded ? "Ocultar filtros" : "Filtros avançados"}
-            <ChevronDown
-              className={cn("ml-1 h-3.5 w-3.5 transition-transform", tabsExpanded && "rotate-180")}
+              <div className="flex flex-wrap gap-1.5">
+                {visiblePersonalStatuses.map((s) => (
+                  <StatusButton
+                    key={`per-${s.status}`}
+                    option={s}
+                    active={selectedPerStatuses.has(s.status)}
+                    tooltip={getPersonalStatusDescription(s.status, s.comment)}
+                    onClick={() => togglePerStatus(s.status)}
+                  />
+                ))}
+              </div>
+            </FilterCard>
+
+            <FilterCard title={`Status IA${selectedAiStatuses.size ? ` (${selectedAiStatuses.size})` : ""}`}>
+              <div className="flex flex-wrap gap-1.5">
+                {AI_EVAL_STATUSES.map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => toggleCsv("ai_status", status)}
+                  >
+                    <Badge
+                      variant={selectedAiStatuses.has(status) ? "default" : "outline"}
+                      className="cursor-pointer rounded-full px-2.5 py-1 text-xs"
+                    >
+                      {AI_STATUS_LABELS[status] ?? status}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+            </FilterCard>
+          </div>
+
+          {/* Linha 2: Interesse + Capítulos + Notas + Votos (tudo na mesma linha) */}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1fr]">
+            <FilterCard title={`Interesse${selectedSynopsisQ.size ? ` (${selectedSynopsisQ.size})` : ""}`}>
+              <div className="grid grid-cols-4 gap-1.5">
+                {SYNOPSIS_QUALITIES.map((q) => (
+                  <button key={q} type="button" onClick={() => toggleCsv("synopsis_q", q)} className="w-full">
+                    <Badge
+                      variant={selectedSynopsisQ.has(q) ? "default" : "outline"}
+                      className="flex w-full cursor-pointer items-center justify-center rounded-full px-2 py-1.5 text-sm"
+                    >
+                      {q}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+            </FilterCard>
+
+            <FilterCard title="Capítulos">
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1.5">
+                <Input
+                  type="number"
+                  min={0}
+                  placeholder="Mín"
+                  className="h-9 min-w-0 px-2"
+                  value={searchParams.get("min_chapters") ?? ""}
+                  onChange={(e) => updateParams({ min_chapters: e.target.value || null })}
+                />
+                <span className="text-xs text-muted-foreground">-</span>
+                <Input
+                  type="number"
+                  min={0}
+                  placeholder="Máx"
+                  className="h-9 min-w-0 px-2"
+                  value={searchParams.get("max_chapters") ?? ""}
+                  onChange={(e) => updateParams({ max_chapters: e.target.value || null })}
+                />
+              </div>
+            </FilterCard>
+
+            <ScoreRangeCard
+              emoji="🎯"
+              label="Nota Prevista"
+              tooltip="Nota que o modelo prevê que você daria à obra (0–10)."
+              minKey="min_expected"
+              maxKey="max_expected"
+              step={0.5}
+              searchParams={searchParams}
+              updateParams={updateParams}
             />
-          </Button>
-        </div>
+            <ScoreRangeCard
+              emoji="🧭"
+              label="Alinhamento"
+              tooltip="Percentil de alinhamento com seu perfil de gosto (0–100). Top 25% = ≥ 75."
+              minKey="min_fit"
+              maxKey="max_fit"
+              step={5}
+              min={0}
+              max={100}
+              searchParams={searchParams}
+              updateParams={updateParams}
+            />
+            <ScoreRangeCard
+              emoji="🌐"
+              label="Média externa"
+              tooltip="Nota.M — média ponderada das plataformas externas (0–10)."
+              minKey="min_platform_avg"
+              maxKey="max_platform_avg"
+              step={0.5}
+              searchParams={searchParams}
+              updateParams={updateParams}
+            />
+            <VotesRangeCard
+              searchParams={searchParams}
+              updateParams={updateParams}
+            />
+          </div>
 
-        {tabsExpanded && (
-          <>
-            <TabsContent value="geral" className="space-y-3">
-              {/* Row 1: Publicação + Status Pessoal */}
-              <div className="grid gap-3 xl:grid-cols-2">
-                <FilterCard
-                  title={`Publicação${isAllPub ? " (todos)" : selectedPubStatuses.size ? ` (${selectedPubStatuses.size})` : ""}`}
-                  action={
+          {/* Linha 3: Gênero + Tags (estreitos) */}
+          <div className="grid gap-3 xl:grid-cols-2">
+            <FilterCard title={`Gênero${selectedGenreAny.size ? ` (${selectedGenreAny.size})` : ""}`}>
+              {availableGenres.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Nenhum gênero disponível</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {availableGenres.map((genre) => (
                     <button
+                      key={genre}
                       type="button"
-                      onClick={() => updateParams({ pub_status: isAllPub ? null : "all" })}
+                      onClick={() => toggleCsv("genres_any", genre)}
                     >
                       <Badge
-                        variant={isAllPub ? "default" : "outline"}
+                        variant={selectedGenreAny.has(genre) ? "default" : "outline"}
                         className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
                       >
-                        Todos
+                        {genre}
                       </Badge>
                     </button>
-                  }
-                >
-                  <div className="flex flex-wrap gap-1.5">
-                    {visiblePublicationStatuses.map((s) => (
-                      <StatusButton
-                        key={`pub-${s.status}`}
-                        option={s}
-                        active={selectedPubStatuses.has(s.status)}
-                        onClick={() => togglePubStatus(s.status)}
-                      />
-                    ))}
-                  </div>
-                </FilterCard>
-
-                <FilterCard
-                  title={`Status Pessoal${isAllPer ? " (todos)" : selectedPerStatuses.size ? ` (${selectedPerStatuses.size})` : ""}`}
-                  action={
-                    <button
-                      type="button"
-                      onClick={() => updateParams({ per_status: isAllPer ? null : "all" })}
-                    >
-                      <Badge
-                        variant={isAllPer ? "default" : "outline"}
-                        className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
-                      >
-                        Todos
-                      </Badge>
-                    </button>
-                  }
-                >
-                  <div className="flex flex-wrap gap-1.5">
-                    {visiblePersonalStatuses.map((s) => (
-                      <StatusButton
-                        key={`per-${s.status}`}
-                        option={s}
-                        active={selectedPerStatuses.has(s.status)}
-                        tooltip={getPersonalStatusDescription(s.status, s.comment)}
-                        onClick={() => togglePerStatus(s.status)}
-                      />
-                    ))}
-                  </div>
-                </FilterCard>
-              </div>
-
-              {/* Row 2: Sinopse + Capítulos + Status IA */}
-              <div className="grid gap-3 xl:grid-cols-3">
-                <FilterCard title={`Interesse na sinopse${selectedSynopsisQ.size ? ` (${selectedSynopsisQ.size})` : ""}`}>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {SYNOPSIS_QUALITIES.map((q) => (
-                      <button key={q} type="button" onClick={() => toggleCsv("synopsis_q", q)} className="w-full">
-                        <Badge
-                          variant={selectedSynopsisQ.has(q) ? "default" : "outline"}
-                          className="flex w-full cursor-pointer items-center justify-center rounded-full px-2 py-1.5 text-sm"
-                        >
-                          {q}
-                        </Badge>
-                      </button>
-                    ))}
-                  </div>
-                </FilterCard>
-
-                <FilterCard title="Capítulos">
-                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-                    <Input
-                      type="number"
-                      min={0}
-                      placeholder="Mín"
-                      className="h-9"
-                      value={searchParams.get("min_chapters") ?? ""}
-                      onChange={(e) => updateParams({ min_chapters: e.target.value || null })}
-                    />
-                    <span className="text-xs text-muted-foreground">-</span>
-                    <Input
-                      type="number"
-                      min={0}
-                      placeholder="Máx"
-                      className="h-9"
-                      value={searchParams.get("max_chapters") ?? ""}
-                      onChange={(e) => updateParams({ max_chapters: e.target.value || null })}
-                    />
-                  </div>
-                </FilterCard>
-
-                <FilterCard title={`Status IA${selectedAiStatuses.size ? ` (${selectedAiStatuses.size})` : ""}`}>
-                  <div className="flex flex-wrap gap-1.5">
-                    {AI_EVAL_STATUSES.map((status) => (
-                      <button
-                        key={status}
-                        type="button"
-                        onClick={() => toggleCsv("ai_status", status)}
-                      >
-                        <Badge
-                          variant={selectedAiStatuses.has(status) ? "default" : "outline"}
-                          className="cursor-pointer rounded-full px-2.5 py-1 text-xs"
-                        >
-                          {AI_STATUS_LABELS[status] ?? status}
-                        </Badge>
-                      </button>
-                    ))}
-                  </div>
-                </FilterCard>
-              </div>
-
-              {/* Row 3: Gênero + Tags */}
-              <div className="grid gap-3 xl:grid-cols-[48fr_52fr]">
-                <FilterCard title={`Gênero${selectedGenreAny.size ? ` (${selectedGenreAny.size})` : ""}`}>
-                  {availableGenres.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">Nenhum gênero disponível</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {availableGenres.map((genre) => (
-                        <button
-                          key={genre}
-                          type="button"
-                          onClick={() => toggleCsv("genres_any", genre)}
-                        >
-                          <Badge
-                            variant={selectedGenreAny.has(genre) ? "default" : "outline"}
-                            className="cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px"
-                          >
-                            {genre}
-                          </Badge>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </FilterCard>
-
-                <FilterCard title={`Tags${selectedTagAny.size ? ` (${selectedTagAny.size})` : ""}`}>
-                  <TagFilter
-                    selected={[...selectedTagAny]}
-                    onChange={(slugs) =>
-                      updateParams({ tags_any: slugs.length ? slugs.join(",") : null })
-                    }
-                    availableTags={availableTags}
-                  />
-                </FilterCard>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="notas">
-              <FilterCard title="Notas gerais">
-                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                  <ScoreRangeCard
-                    emoji="🎯"
-                    label="Nota Prevista"
-                    tooltip="Nota que o modelo prevê que você daria à obra (0–10)."
-                    minKey="min_expected"
-                    maxKey="max_expected"
-                    step={0.5}
-                    searchParams={searchParams}
-                    updateParams={updateParams}
-                  />
-                  <ScoreRangeCard
-                    emoji="🧭"
-                    label="Alinhamento"
-                    tooltip="Percentil de alinhamento com seu perfil de gosto (0–100). Top 25% = ≥ 75."
-                    minKey="min_fit"
-                    maxKey="max_fit"
-                    step={5}
-                    min={0}
-                    max={100}
-                    searchParams={searchParams}
-                    updateParams={updateParams}
-                  />
-                  <ScoreRangeCard
-                    emoji="🌐"
-                    label="Média externa"
-                    tooltip="Nota.M — média ponderada das plataformas externas (0–10)."
-                    minKey="min_platform_avg"
-                    maxKey="max_platform_avg"
-                    step={0.5}
-                    searchParams={searchParams}
-                    updateParams={updateParams}
-                  />
-                  <VotesPresetCard
-                    searchParams={searchParams}
-                    updateParams={updateParams}
-                  />
+                  ))}
                 </div>
-              </FilterCard>
-            </TabsContent>
-          </>
-        )}
-      </Tabs>
+              )}
+            </FilterCard>
+
+            <FilterCard title={`Tags${selectedTagAny.size ? ` (${selectedTagAny.size})` : ""}`}>
+              <TagFilter
+                selected={[...selectedTagAny]}
+                onChange={(slugs) =>
+                  updateParams({ tags_any: slugs.length ? slugs.join(",") : null })
+                }
+                availableTags={availableTags}
+              />
+            </FilterCard>
+          </div>
+        </div>
+      )}
 
       {/* Active chips */}
       {activeChips.length > 0 && (

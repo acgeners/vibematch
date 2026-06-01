@@ -21,6 +21,11 @@ interface PostReadingFlowProps {
   statusInitial: WorkStatusValues
   latestAiEvaluation: PostAttributeAssessmentFormProps["latestAiEvaluation"]
   existingAssessment: PostAttributeAssessmentFormProps["existingAssessment"]
+  /** Id do `<form>` do status (default "work-status-form"). Use um id distinto
+   *  quando houver outra instância montada ao mesmo tempo (ex.: aba + dialog). */
+  formId?: string
+  /** Chamado após salvar com sucesso (ex.: fechar o dialog). */
+  onSaved?: () => void
 }
 
 /**
@@ -37,6 +42,8 @@ export function PostReadingFlow({
   statusInitial,
   latestAiEvaluation,
   existingAssessment,
+  formId = "work-status-form",
+  onSaved,
 }: PostReadingFlowProps) {
   const [liveStatus, setLiveStatus] = useState<WorkStatusValues["personal_status"]>(
     statusInitial.personal_status,
@@ -100,7 +107,8 @@ export function PostReadingFlow({
         }
         extraDirty={attrDirty}
         showEvaluationCriteria={isVisible}
-        formId="work-status-form"
+        formId={formId}
+        onSaved={onSaved}
         onStateChange={setFormState}
       />
       {isVisible && (
@@ -115,7 +123,7 @@ export function PostReadingFlow({
       )}
       {/* Botão Salvar no fim de tudo — submete o WorkStatusForm via form={formId}. */}
       <div className="flex justify-end border-t border-border/40 pt-4">
-        <Button type="submit" form="work-status-form" disabled={!formState.canSubmit}>
+        <Button type="submit" form={formId} disabled={!formState.canSubmit}>
           {formState.saving ? "Salvando…" : "Salvar"}
         </Button>
       </div>

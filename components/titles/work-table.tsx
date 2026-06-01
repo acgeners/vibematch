@@ -1094,7 +1094,7 @@ function WorkListView({
     const slug = columnId.startsWith("crit_") ? columnId.slice(5) : null
     const criterion = slug ? CRITERIA_INFO[slug] : null
     const fullName = criterion?.name ?? col?.configLabel ?? null
-    const description = criterion?.description ?? null
+    const description = criterion?.description ?? col?.description ?? null
     const displayLabel = col?.label ?? sortable?.label ?? ""
 
     if (!sortable) return fallback

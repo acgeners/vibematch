@@ -16,6 +16,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { TagSubgroupsPanel } from "@/components/settings/tag-subgroups-panel"
+import type {
+  Subgroup,
+  SubgroupStatus,
+  SubgroupWithTags,
+  UnassignedTag as UnassignedSubgroupTag,
+} from "@/server/actions/tag-subgroups"
 import type { TagGroupSlug } from "@/lib/constants/tag-groups"
 import {
   applyApprovedGroupMoves,
@@ -44,7 +51,8 @@ import {
   type UncoveredTag,
 } from "@/server/actions/tag-consolidation"
 
-type View = "clusters" | "groupmoves"
+type View = "clusters" | "groupmoves" | "subgroups"
+type SubgroupPhase = "define" | "assign"
 
 interface Props {
   view: View
@@ -55,6 +63,11 @@ interface Props {
   uncoveredTags: UncoveredTag[]
   groupMoves: GroupMoveProposal[]
   pendingGroupMoveCount: number
+  subgroupPhase: SubgroupPhase
+  subgroupStatus: SubgroupStatus
+  subgroups: Subgroup[]
+  subgroupsWithTags: SubgroupWithTags[]
+  unassignedSubgroupTags: UnassignedSubgroupTag[]
 }
 
 const STATUSES: Array<{ value: ProposalStatus; label: string }> = [
@@ -73,6 +86,11 @@ export function TagConsolidationClient({
   uncoveredTags,
   groupMoves,
   pendingGroupMoveCount,
+  subgroupPhase,
+  subgroupStatus,
+  subgroups,
+  subgroupsWithTags,
+  unassignedSubgroupTags,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -391,9 +409,30 @@ export function TagConsolidationClient({
             </span>
           )}
         </button>
+        <button
+          type="button"
+          onClick={() => switchView("subgroups")}
+          className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+            view === "subgroups"
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          }`}
+        >
+          Sub-grupos
+        </button>
       </div>
 
-      {view === "groupmoves" ? (
+      {view === "subgroups" ? (
+        <TagSubgroupsPanel
+          groups={groups}
+          initialGroup={initialGroup}
+          phase={subgroupPhase}
+          initialStatus={subgroupStatus}
+          subgroups={subgroups}
+          subgroupsWithTags={subgroupsWithTags}
+          unassignedTags={unassignedSubgroupTags}
+        />
+      ) : view === "groupmoves" ? (
         <GroupMovesPanel
           groupMoves={groupMoves}
           groups={groups}

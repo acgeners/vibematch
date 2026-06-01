@@ -18,6 +18,7 @@ import { archiveWork, deleteWork, toggleFavorite, unarchiveWork } from "@/server
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import { RevalidateSourcesDialog } from "@/components/titles/revalidate-sources-dialog"
 import { StatusEditDialog } from "@/components/titles/status-edit-dialog"
+import type { PostAttributeAssessmentFormProps } from "@/components/titles/post-attribute-assessment-form"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
 import { Button } from "@/components/ui/button"
 import {
@@ -101,6 +102,8 @@ export function StatusActionButton({
   workId,
   statusInitialValues,
   totalChapters,
+  latestAiEvaluation,
+  existingAssessment,
   label = "Alterar Status",
   variant = "outline",
   size = "sm",
@@ -109,6 +112,8 @@ export function StatusActionButton({
   workId: string
   statusInitialValues: WorkStatusValues
   totalChapters?: number | null
+  latestAiEvaluation: PostAttributeAssessmentFormProps["latestAiEvaluation"]
+  existingAssessment: PostAttributeAssessmentFormProps["existingAssessment"]
   label?: string
   variant?: "outline" | "default" | "ghost"
   size?: "sm" | "default" | "lg"
@@ -127,6 +132,8 @@ export function StatusActionButton({
         workId={workId}
         totalChapters={totalChapters ?? null}
         initialValues={statusInitialValues}
+        latestAiEvaluation={latestAiEvaluation}
+        existingAssessment={existingAssessment}
       />
     </>
   )

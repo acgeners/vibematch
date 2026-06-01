@@ -463,6 +463,7 @@ export interface AlignmentQueueWork {
   coverUrl: string | null
   publicationStatusId: number | null
   personalStatusId: number | null
+  synopsisQuality: string | null
   expectedScore: number | null
   alignmentScore: number | null
   alignmentStale: boolean
@@ -481,6 +482,7 @@ export async function getAlignmentQueueWorks(opts: {
   states?: Array<"stale" | "unranked">
   pubStatusIds?: number[]
   personalStatusIds?: number[]
+  synopsisQualities?: string[]
   limit?: number
 }): Promise<AlignmentQueueWork[]> {
   const states: Array<"stale" | "unranked"> = opts.states ?? ["stale", "unranked"]
@@ -490,7 +492,7 @@ export async function getAlignmentQueueWorks(opts: {
   let query = supabase
     .from("works")
     .select(
-      "id, title, publication_status_id, personal_status_id, work_covers(url, is_primary, position), calculated_scores(expected_score, alignment_score, alignment_stale)",
+      "id, title, publication_status_id, personal_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score, alignment_score, alignment_stale)",
     )
     .eq("is_archived", false)
   if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
@@ -498,6 +500,9 @@ export async function getAlignmentQueueWorks(opts: {
   }
   if (opts.personalStatusIds && opts.personalStatusIds.length > 0) {
     query = query.in("personal_status_id", opts.personalStatusIds)
+  }
+  if (opts.synopsisQualities && opts.synopsisQualities.length > 0) {
+    query = query.in("synopsis_quality", opts.synopsisQualities)
   }
   const { data, error } = await query.limit(opts.limit ?? 500)
   if (error) throw new Error(`Falha listando fila de IA Rk: ${error.message}`)
@@ -528,6 +533,7 @@ export async function getAlignmentQueueWorks(opts: {
       ),
       publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
       personalStatusId: w.personal_status_id != null ? Number(w.personal_status_id) : null,
+      synopsisQuality: (w.synopsis_quality as string | null) ?? null,
       expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
       alignmentScore,
       alignmentStale,

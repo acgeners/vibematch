@@ -46,7 +46,10 @@ function TagsCol({
                   <Badge
                     variant="outline"
                     className={cn(
-                      "cursor-help rounded-full",
+                      // Tags do Deep Dive são frases longas (A + B + C): precisam
+                      // quebrar linha e não estourar a coluna. Sobrescreve o
+                      // whitespace-nowrap/h fixo do Badge.
+                      "h-auto max-w-full cursor-help whitespace-normal break-words rounded-2xl text-left leading-snug",
                       impactClass(item.impact),
                       variant === "pro"
                         ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"

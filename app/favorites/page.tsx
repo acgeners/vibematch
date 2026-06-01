@@ -15,6 +15,7 @@ import { getFavoritesSummary } from "@/server/queries/favorites"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
+import { getFilterPresets } from "@/server/queries/filter-presets"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 
@@ -132,13 +133,14 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
     sortLevels,
   }
 
-  const [entries, allGenres, allTags, statusOptions, summary, scoreThresholds] = await Promise.all([
+  const [entries, allGenres, allTags, statusOptions, summary, scoreThresholds, savedPresets] = await Promise.all([
     getRanking(filters),
     getAllGenres(),
     getAllTags(),
     getStatusOptions(),
     getFavoritesSummary(),
     getScoreColorThresholds(),
+    getFilterPresets("/favorites"),
   ])
 
   const orderedIds = entries.map((e) => e.workId)
@@ -179,6 +181,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
         defaultMinExpected={null}
         basePath="/favorites"
         hidePreferencesControls
+        savedPresets={savedPresets}
       />
 
       <WorkTable

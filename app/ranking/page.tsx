@@ -6,11 +6,11 @@ import { getLowCoverageWorkIds } from "@/server/queries/calibration-guards"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
+import { getFilterPresets } from "@/server/queries/filter-presets"
 import { countStaleAlignmentWorks } from "@/server/queries/recommendations"
 import { Header } from "@/components/layout/header"
 import { RankingTable } from "@/components/ranking/ranking-table"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
-import { MoodBar } from "@/components/ranking/mood-bar"
 import { SurpriseMeButton } from "@/components/ranking/surprise-me-button"
 import { MOOD_PRESETS_BY_ID } from "@/lib/constants/mood-presets"
 import { RecommendWithAiButton } from "@/components/recommendations/recommend-with-ai-button"
@@ -153,11 +153,12 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         ? pubStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
         : ["Completed"]
 
-  const [prefs, allGenres, allTags, statusOptions] = await Promise.all([
+  const [prefs, allGenres, allTags, statusOptions, savedPresets] = await Promise.all([
     getPreferences(),
     getAllGenres(),
     getAllTags(),
     getStatusOptions(),
+    getFilterPresets("/ranking"),
   ])
 
   // URL pode sobrescrever as preferências (ex: usuário ajusta direto na barra).
@@ -252,8 +253,6 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         }
       />
 
-      <MoodBar />
-
       <RankingFiltersComponent
         availableGenres={allGenres}
         availableTags={allTags}
@@ -262,6 +261,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         defaultTopN={prefs.topN}
         defaultMinExpected={prefs.minFinal}
         defaultSort={defaultSort}
+        savedPresets={savedPresets}
       />
 
       <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} />

@@ -155,12 +155,18 @@ export async function fetchMangaUpdatesReviews(id: number): Promise<string[]> {
       cache: "no-store",
       headers: MU_HEADERS,
     })
-    if (!detailRes.ok) return []
+    if (!detailRes.ok) {
+      console.warn(`[fetchMangaUpdatesReviews] MU id=${id}: detail HTTP ${detailRes.status}`)
+      return []
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const detail: any = await detailRes.json()
     const pageUrl = typeof detail?.url === "string" ? detail.url : null
-    if (!pageUrl) return []
+    if (!pageUrl) {
+      console.warn(`[fetchMangaUpdatesReviews] MU id=${id}: detail sem campo url (página de comentários não localizada)`)
+      return []
+    }
 
     const url = new URL(pageUrl)
     url.searchParams.set("perpage", "50")
@@ -170,12 +176,19 @@ export async function fetchMangaUpdatesReviews(id: number): Promise<string[]> {
       cache: "no-store",
       headers: MU_HEADERS,
     })
-    if (!pageRes.ok) return []
+    if (!pageRes.ok) {
+      console.warn(`[fetchMangaUpdatesReviews] MU id=${id}: página HTTP ${pageRes.status} (${url.href})`)
+      return []
+    }
 
     const html = await pageRes.text()
-    return parseMangaUpdatesComments(html)
-      .map((comment) => comment.slice(0, 900))
-  } catch {
+    const comments = parseMangaUpdatesComments(html)
+    if (comments.length === 0) {
+      console.warn(`[fetchMangaUpdatesReviews] MU id=${id}: scrape devolveu 0 comentários (HTML ${html.length} chars — possível mudança de layout/bloqueio)`)
+    }
+    return comments.map((comment) => comment.slice(0, 900))
+  } catch (err) {
+    console.warn(`[fetchMangaUpdatesReviews] MU id=${id} falhou:`, err instanceof Error ? err.message : err)
     return []
   }
 }

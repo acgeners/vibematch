@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { triggerAiEvaluation } from "@/server/actions/ai"
 import { AiEvaluationReviewForm } from "@/components/ai-evaluation/ai-evaluation-review-form"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   Dialog,
   DialogContent,
@@ -14,6 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
+import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import type { AiEvaluation } from "@/types/domain"
 
 interface AiEvaluationButtonProps {
@@ -37,14 +40,21 @@ export function AiEvaluationButton({
   const [reviewOpen, setReviewOpen] = useState(false)
   const [evaluation, setEvaluation] = useState<AiEvaluation | null>(null)
   const [currentScores, setCurrentScores] = useState<Record<string, number>>({})
+  const [noReviewConfirm, setNoReviewConfirm] = useState<NoReviewsReason | null | "none">(null)
 
-  const runEvaluation = async (opts?: { model?: "sonnet" | "opus" }) => {
+  const runEvaluation = async (opts?: { model?: "sonnet" | "opus"; proceedWithoutReviews?: boolean }) => {
     setEvaluating(true)
     const result = await triggerAiEvaluation(workId, opts)
     setEvaluating(false)
 
-    if (result.error || !result.data?.evaluation) {
-      toast.error(`Erro na avaliação IA: ${result.error ?? "resposta vazia"}`)
+    // Gate: sem reviews externas, confirma antes de chamar o LLM.
+    if ("needsReviewConfirmation" in result && result.needsReviewConfirmation) {
+      setNoReviewConfirm(result.noReviewsReason ?? "none")
+      return false
+    }
+
+    if (("error" in result && result.error) || !("data" in result) || !result.data?.evaluation) {
+      toast.error(`Erro na avaliação IA: ${("error" in result && result.error) || "resposta vazia"}`)
       return false
     }
 
@@ -125,7 +135,7 @@ export function AiEvaluationButton({
               coverUrl={coverUrl}
               currentScores={currentScores}
               onReevaluate={async (model) => {
-                await runEvaluation({ model })
+                await runEvaluation({ model, proceedWithoutReviews: true })
               }}
               onSaved={() => {
                 setReviewOpen(false)
@@ -136,6 +146,24 @@ export function AiEvaluationButton({
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Gate: sem reviews externas, confirma antes de chamar o LLM. */}
+      <ConfirmDialog
+        open={noReviewConfirm != null}
+        onOpenChange={(open) => !open && setNoReviewConfirm(null)}
+        title="Sem reviews externas"
+        description={`Não há reviews externas para "${workTitle}"${
+          noReviewConfirm && noReviewConfirm !== "none"
+            ? ` (${NO_REVIEWS_REASON_LABEL[noReviewConfirm]})`
+            : ""
+        }. A avaliação vai usar só sinopse, tags e gêneros. Avaliar mesmo assim?`}
+        confirmText="Avaliar mesmo assim"
+        cancelText="Cancelar"
+        onConfirm={() => {
+          setNoReviewConfirm(null)
+          void runEvaluation({ proceedWithoutReviews: true })
+        }}
+      />
     </>
   )
 }

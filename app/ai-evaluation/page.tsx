@@ -3,13 +3,13 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { Header } from "@/components/layout/header"
 import { AiEvaluationPanel } from "@/components/ai-evaluation/ai-evaluation-panel"
 import { AiEvaluationFilters } from "@/components/ai-evaluation/ai-evaluation-filters"
-import { Badge } from "@/components/ui/badge"
 import { pickPrimaryCover } from "@/lib/work-derived"
 import { MODEL, PROMPT_VERSION, CURRENT_PROMPT_VERSION_NUM, parsePromptVersion } from "@/lib/ai-evaluation/service"
 import {
   PUBLICATION_STATUSES_BY_ID,
   PERSONAL_STATUSES_BY_ID,
 } from "@/lib/constants/criteria"
+import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import Link from "next/link"
 import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
@@ -40,6 +40,16 @@ function parseFilters(raw: string | string[] | undefined): EvaluationFilter[] {
   return valid.length > 0 ? valid : DEFAULT_FILTERS
 }
 
+function parseSynopsisQualities(raw: string | string[] | undefined): string[] {
+  const value = Array.isArray(raw) ? raw.join(",") : raw
+  if (!value) return []
+  const valid = new Set<string>(SYNOPSIS_QUALITIES)
+  return value
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => valid.has(p))
+}
+
 function parseStatusList(
   raw: string | string[] | undefined,
   nameToId: Record<string, number>
@@ -61,6 +71,7 @@ interface EligibleWork {
   publication_status_id: number | null
   personal_status: string
   personal_status_id: number | null
+  synopsis_quality: string | null
   cover_url?: string | null
   expected_score: number | null
   /** Razões pelas quais a obra apareceu (intersecção com os filtros ativos). */
@@ -132,6 +143,7 @@ async function getEligibleWorks(
   filters: EvaluationFilter[],
   pubStatusIds: number[],
   personalStatusIds: number[],
+  synopsisQualities: string[],
   toleranceOverride: number | null
 ) {
   const supabase = createAdminClient()
@@ -261,16 +273,18 @@ async function getEligibleWorks(
     title: string
     publication_status_id: number | null
     personal_status_id: number | null
+    synopsis_quality: string | null
     total_chapters: number | null
   }
   const worksResult = await chunkedInQuery<WorkRow>(eligibleIds, CHUNK_SIZE, (chunk) => {
     let q = supabase
       .from("works")
-      .select("id, title, publication_status_id, personal_status_id, total_chapters")
+      .select("id, title, publication_status_id, personal_status_id, synopsis_quality, total_chapters")
       .in("id", chunk)
       .eq("is_archived", false)
     if (pubStatusIds.length > 0) q = q.in("publication_status_id", pubStatusIds)
     if (personalStatusIds.length > 0) q = q.in("personal_status_id", personalStatusIds)
+    if (synopsisQualities.length > 0) q = q.in("synopsis_quality", synopsisQualities)
     return q.then(({ data, error }) => ({ data: (data ?? []) as WorkRow[], error }))
   })
   if (worksResult.error) throw new Error(String((worksResult.error as { message?: string }).message ?? worksResult.error))
@@ -340,6 +354,7 @@ async function getEligibleWorks(
       publication_status_id: row.publication_status_id ?? null,
       personal_status: "",
       personal_status_id: row.personal_status_id ?? null,
+      synopsis_quality: row.synopsis_quality ?? null,
       total_chapters: row.total_chapters,
       cover_url: pickPrimaryCover(coversByWork.get(row.id) ?? []),
       expected_score: scoreByWork.get(row.id)?.expected_score ?? null,
@@ -383,32 +398,26 @@ function EvalTabLink({
 
 /**
  * Aba "IA atributos" — fila de avaliação/revisão das 9 notas por critério.
- * Mantém os filtros e o painel originais da página.
+ * Componente apresentacional: a fila já vem buscada pelo pai (a contagem
+ * alimenta o título da aba, então precisa rodar independente da aba ativa).
  */
-async function IaAttributesTab({
-  filter,
-  pub,
-  personal,
-  tolerance,
+function IaAttributesTab({
+  works,
+  activeFilters,
+  promptVersionTolerance,
+  lowConfidenceThreshold,
+  pubStatusNames,
+  personalStatusNames,
+  synopsisQualities,
 }: {
-  filter?: string | string[]
-  pub?: string | string[]
-  personal?: string | string[]
-  tolerance?: string | string[]
+  works: EligibleWork[]
+  activeFilters: EvaluationFilter[]
+  promptVersionTolerance: number
+  lowConfidenceThreshold: number
+  pubStatusNames: string[]
+  personalStatusNames: string[]
+  synopsisQualities: string[]
 }) {
-  const activeFilters = parseFilters(filter)
-  const { names: pubStatusNames, ids: pubStatusIds } = parseStatusList(pub, PUB_STATUS_NAME_TO_ID)
-  const { names: personalStatusNames, ids: personalStatusIds } = parseStatusList(
-    personal,
-    PERSONAL_STATUS_NAME_TO_ID,
-  )
-  const toleranceRaw = Array.isArray(tolerance) ? tolerance[0] : tolerance
-  const toleranceOverride = toleranceRaw != null && /^\d+$/.test(toleranceRaw)
-    ? parseInt(toleranceRaw, 10)
-    : null
-  const { works, totalCount, promptVersionTolerance, lowConfidenceThreshold } =
-    await getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, toleranceOverride)
-
   return (
     <div className="space-y-4">
       <AiEvaluationFilters
@@ -420,12 +429,8 @@ async function IaAttributesTab({
         lowConfidenceThreshold={lowConfidenceThreshold}
         activePubStatuses={pubStatusNames}
         activePersonalStatuses={personalStatusNames}
+        activeSynopsisQualities={synopsisQualities}
       />
-      <div className="flex justify-end">
-        <Badge variant="outline" className="text-xs">
-          {totalCount} obra{totalCount !== 1 ? "s" : ""}
-        </Badge>
-      </div>
       <AiEvaluationPanel pendingWorks={works} />
     </div>
   )
@@ -452,11 +457,13 @@ function IaRkTab({
   works,
   pubStatusNames,
   personalStatusNames,
+  synopsisQualities,
   states,
 }: {
   works: AlignmentQueueWork[]
   pubStatusNames: string[]
   personalStatusNames: string[]
+  synopsisQualities: string[]
   states: IaRkState[]
 }) {
   return (
@@ -470,6 +477,7 @@ function IaRkTab({
         lowConfidenceThreshold={DEFAULT_LOW_CONFIDENCE_THRESHOLD}
         activePubStatuses={pubStatusNames}
         activePersonalStatuses={personalStatusNames}
+        activeSynopsisQualities={synopsisQualities}
         showEvalState={false}
         showIaRkState
         activeIaRkStates={states}
@@ -491,6 +499,7 @@ export default async function AiEvaluationPage({
     filter?: string | string[]
     pub?: string | string[]
     personal?: string | string[]
+    synopsis_q?: string | string[]
     tolerance?: string | string[]
     tab?: string | string[]
     rk?: string | string[]
@@ -500,22 +509,35 @@ export default async function AiEvaluationPage({
   const tabRaw = Array.isArray(params.tab) ? params.tab[0] : params.tab
   const activeTab: "atributos" | "ia-rk" = tabRaw === "ia-rk" ? "ia-rk" : "atributos"
 
-  // Filtros de Status compartilhados pelas 2 abas.
+  // Filtros de Status + interesse compartilhados pelas 2 abas.
   const { names: pubStatusNames, ids: pubStatusIds } = parseStatusList(params.pub, PUB_STATUS_NAME_TO_ID)
   const { names: personalStatusNames, ids: personalStatusIds } = parseStatusList(
     params.personal,
     PERSONAL_STATUS_NAME_TO_ID,
   )
+  const synopsisQualities = parseSynopsisQualities(params.synopsis_q)
   const iaRkStates = parseIaRkStates(params.rk)
 
-  // Fila de IA Rk respeitando o filtro ativo (estado + status). Alimenta o badge
-  // da aba E o conteúdo da aba, então o contador bate com a lista. Query leve
-  // (~tamanho da biblioteca); roda nas duas abas pra o badge ficar sempre certo.
-  const iaRkQueue = await getAlignmentQueueWorks({
-    states: iaRkStates,
-    pubStatusIds,
-    personalStatusIds,
-  })
+  // Filtros específicos da aba de atributos.
+  const activeFilters = parseFilters(params.filter)
+  const toleranceRaw = Array.isArray(params.tolerance) ? params.tolerance[0] : params.tolerance
+  const toleranceOverride = toleranceRaw != null && /^\d+$/.test(toleranceRaw)
+    ? parseInt(toleranceRaw, 10)
+    : null
+
+  // Roda as duas filas em paralelo. Ambas alimentam o contador do título da aba
+  // (precisa estar certo mesmo na aba inativa) e o conteúdo. Queries leves
+  // (~tamanho da biblioteca).
+  const [attrResult, iaRkQueue] = await Promise.all([
+    getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, synopsisQualities, toleranceOverride),
+    getAlignmentQueueWorks({
+      states: iaRkStates,
+      pubStatusIds,
+      personalStatusIds,
+      synopsisQualities,
+    }),
+  ])
+  const attrCount = attrResult.works.length
   const iaRkCount = iaRkQueue.length
 
   // Preserva os filtros ao trocar de aba.
@@ -523,18 +545,21 @@ export default async function AiEvaluationPage({
   const pub = toParam(params.pub)
   const personal = toParam(params.personal)
   const tolerance = toParam(params.tolerance)
+  const synq = toParam(params.synopsis_q)
   const rk = toParam(params.rk)
 
   const attrParams = new URLSearchParams()
   if (filter) attrParams.set("filter", filter)
   if (pub) attrParams.set("pub", pub)
   if (personal) attrParams.set("personal", personal)
+  if (synq) attrParams.set("synopsis_q", synq)
   if (tolerance) attrParams.set("tolerance", tolerance)
   const attrHref = attrParams.toString() ? `/ai-evaluation?${attrParams}` : "/ai-evaluation"
 
   const rkParams = new URLSearchParams({ tab: "ia-rk" })
   if (pub) rkParams.set("pub", pub)
   if (personal) rkParams.set("personal", personal)
+  if (synq) rkParams.set("synopsis_q", synq)
   if (rk) rkParams.set("rk", rk)
   const rkHref = `/ai-evaluation?${rkParams}`
 
@@ -549,10 +574,10 @@ export default async function AiEvaluationPage({
 
       <div className="flex items-center gap-1 border-b border-border/60">
         <EvalTabLink href={attrHref} active={activeTab === "atributos"}>
-          IA atributos
+          IA atributos ({attrCount})
         </EvalTabLink>
         <EvalTabLink href={rkHref} active={activeTab === "ia-rk"}>
-          IA Rk{iaRkCount > 0 ? ` (${iaRkCount})` : ""}
+          IA Rk ({iaRkCount})
         </EvalTabLink>
       </div>
 
@@ -561,14 +586,18 @@ export default async function AiEvaluationPage({
           works={iaRkQueue}
           pubStatusNames={pubStatusNames}
           personalStatusNames={personalStatusNames}
+          synopsisQualities={synopsisQualities}
           states={iaRkStates}
         />
       ) : (
         <IaAttributesTab
-          filter={params.filter}
-          pub={params.pub}
-          personal={params.personal}
-          tolerance={params.tolerance}
+          works={attrResult.works}
+          activeFilters={activeFilters}
+          promptVersionTolerance={attrResult.promptVersionTolerance}
+          lowConfidenceThreshold={attrResult.lowConfidenceThreshold}
+          pubStatusNames={pubStatusNames}
+          personalStatusNames={personalStatusNames}
+          synopsisQualities={synopsisQualities}
         />
       )}
     </div>

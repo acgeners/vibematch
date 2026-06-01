@@ -11,22 +11,38 @@ import {
   type ProposalWithMembers,
   type UncoveredTag,
 } from "@/server/actions/tag-consolidation"
+import {
+  listSubgroupAssignments,
+  listSubgroups,
+  listUnassignedTags,
+  type Subgroup,
+  type SubgroupStatus,
+  type SubgroupWithTags,
+  type UnassignedTag as UnassignedSubgroupTag,
+} from "@/server/actions/tag-subgroups"
 import { TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 
 interface PageProps {
-  searchParams: Promise<{ view?: string; group?: string; status?: string }>
+  searchParams: Promise<{ view?: string; group?: string; status?: string; phase?: string }>
 }
 
 const VALID_STATUSES: ProposalStatus[] = ["pending", "approved", "rejected", "applied"]
-type View = "clusters" | "groupmoves"
+const VALID_SUBGROUP_STATUSES: SubgroupStatus[] = ["pending", "approved", "rejected"]
+type View = "clusters" | "groupmoves" | "subgroups"
+type SubgroupPhase = "define" | "assign"
 
 export default async function TagConsolidationPage({ searchParams }: PageProps) {
   const params = await searchParams
-  const view: View = params.view === "groupmoves" ? "groupmoves" : "clusters"
+  const view: View =
+    params.view === "groupmoves" ? "groupmoves" : params.view === "subgroups" ? "subgroups" : "clusters"
   const groupSlug = params.group && params.group !== "all" ? params.group : undefined
   const status = (params.status && VALID_STATUSES.includes(params.status as ProposalStatus)
     ? (params.status as ProposalStatus)
     : "pending") as ProposalStatus
+  const subgroupPhase: SubgroupPhase = params.phase === "assign" ? "assign" : "define"
+  const subgroupStatus = (params.status && VALID_SUBGROUP_STATUSES.includes(params.status as SubgroupStatus)
+    ? (params.status as SubgroupStatus)
+    : "pending") as SubgroupStatus
 
   const groups = await listGroupSlugs()
 
@@ -34,6 +50,9 @@ export default async function TagConsolidationPage({ searchParams }: PageProps) 
   let uncovered: UncoveredTag[] = []
   let groupMoves: GroupMoveProposal[] = []
   let pendingGroupMoveCount = 0
+  let subgroups: Subgroup[] = []
+  let subgroupsWithTags: SubgroupWithTags[] = []
+  let unassignedSubgroupTags: UnassignedSubgroupTag[] = []
 
   if (view === "clusters") {
     const [p, u, gmAll] = await Promise.all([
@@ -44,13 +63,26 @@ export default async function TagConsolidationPage({ searchParams }: PageProps) 
     proposals = p
     uncovered = u
     pendingGroupMoveCount = gmAll.length
-  } else {
+  } else if (view === "groupmoves") {
     const [gm, gmAll] = await Promise.all([
       listGroupMoveProposals(status as GroupMoveStatus),
       listGroupMoveProposals("pending"),
     ])
     groupMoves = gm
     pendingGroupMoveCount = gmAll.length
+  } else {
+    const gmAll = await listGroupMoveProposals("pending")
+    pendingGroupMoveCount = gmAll.length
+    if (subgroupPhase === "define") {
+      subgroups = await listSubgroups(groupSlug, subgroupStatus)
+    } else if (groupSlug) {
+      const [sw, un] = await Promise.all([
+        listSubgroupAssignments(groupSlug),
+        listUnassignedTags(groupSlug),
+      ])
+      subgroupsWithTags = sw
+      unassignedSubgroupTags = un
+    }
   }
 
   const groupOptions = groups.map((slug) => ({
@@ -63,7 +95,7 @@ export default async function TagConsolidationPage({ searchParams }: PageProps) 
       <Header
         kicker="Configurações"
         title="Consolidação de tags"
-        description="Revise os clusters semânticos propostos pela IA e aplique os aprovados. As tags membro são mescladas na canonical e os work_tags são redirecionados automaticamente."
+        description="Revise os clusters semânticos, as mudanças de grupo e os sub-grupos propostos pela IA."
       />
       <TagConsolidationClient
         view={view}
@@ -74,6 +106,11 @@ export default async function TagConsolidationPage({ searchParams }: PageProps) 
         uncoveredTags={uncovered}
         groupMoves={groupMoves}
         pendingGroupMoveCount={pendingGroupMoveCount}
+        subgroupPhase={subgroupPhase}
+        subgroupStatus={subgroupStatus}
+        subgroups={subgroups}
+        subgroupsWithTags={subgroupsWithTags}
+        unassignedSubgroupTags={unassignedSubgroupTags}
       />
     </div>
   )

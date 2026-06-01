@@ -7,6 +7,8 @@ export interface WorkColumnDef {
   key: string
   label: string
   configLabel?: string
+  /** Texto explicativo exibido na tooltip do cabeçalho (abaixo do título). */
+  description?: string
   align?: "left" | "right" | "center"
   locked?: boolean
   defaultHidden?: boolean
@@ -59,34 +61,34 @@ export const WORK_TABLE_COLUMN_CONFIG_EVENT = eventNameFor("titles")
 
 export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   { key: "select", label: "", align: "center", locked: true, group: "basico" },
-  { key: "fav", label: "Fav", configLabel: "Favorito", align: "center", group: "basico" },
+  { key: "fav", label: "Fav", configLabel: "Favorito", description: "Indica se a obra está marcada como favorita.", align: "center", group: "basico" },
   { key: "title", label: "Título", locked: true, group: "basico" },
-  { key: "publication_status", label: "Pub.", configLabel: "Publicação", align: "center", group: "basico" },
-  { key: "personal_status", label: "Status", configLabel: "Status pessoal", align: "center", group: "basico" },
-  { key: "chapters_total", label: "Caps.", configLabel: "Capítulos totais", align: "center", group: "basico" },
-  { key: "chapters_read", label: "Lidos", configLabel: "Capítulos lidos", align: "center", group: "basico" },
-  { key: "chapters_progress", label: "% Lido", configLabel: "% lido (capítulos lidos / total)", align: "center", group: "basico" },
-  { key: "year", label: "Ano", align: "center", defaultHidden: true, group: "basico" },
-  { key: "synopsis_q", label: "Sinopse", configLabel: "Interesse na sinopse", align: "center", defaultHidden: true, group: "basico" },
+  { key: "publication_status", label: "Pub.", configLabel: "Publicação", description: "Status de publicação da obra na fonte (em andamento, concluída, hiato, cancelada).", align: "center", group: "basico" },
+  { key: "personal_status", label: "Status", configLabel: "Status pessoal", description: "Seu status de leitura para a obra (pra ler, lendo, concluída, etc.).", align: "center", group: "basico" },
+  { key: "chapters_total", label: "Caps.", configLabel: "Capítulos totais", description: "Número total de capítulos da obra, quando conhecido.", align: "center", group: "basico" },
+  { key: "chapters_read", label: "Lidos", configLabel: "Capítulos lidos", description: "Quantos capítulos você já marcou como lidos.", align: "center", group: "basico" },
+  { key: "chapters_progress", label: "% Lido", configLabel: "% lido", description: "Progresso de leitura: capítulos lidos ÷ total de capítulos.", align: "center", group: "basico" },
+  { key: "year", label: "Ano", description: "Ano de lançamento/início da publicação.", align: "center", defaultHidden: true, group: "basico" },
+  { key: "synopsis_q", label: "Sinopse", configLabel: "Interesse na sinopse", description: "O quanto a sinopse te interessou (♥ a ♥♥♥♥), informado na triagem/avaliação.", align: "center", defaultHidden: true, group: "basico" },
   // Nota Final — combina Prevista + Alinhamento + IA Rk. num único número de
   // prioridade. Default visível em /favorites; opcional nos demais namespaces.
-  { key: "decision", label: "Nota Final", configLabel: "Nota Final — combina Prevista + Alinhamento + IA Rk. pra priorizar o que ler (prioridade, NÃO previsão de nota)", align: "center", group: "notas" },
+  { key: "decision", label: "Nota Final", configLabel: "Nota Final", description: "Combina Nota Prevista, Alinhamento e IA Rk num único número de prioridade (0–10). Serve pra decidir o que ler primeiro entre obras com Prevista parecida — é um score de PRIORIDADE, não uma previsão de nota.", align: "center", group: "notas" },
   // Novo (Fase 1.5): expected_score é o L1 que substitui o trio N.IA/N.Pr/N.Final
-  { key: "expected_score", label: "Prevista", configLabel: "Nota Prevista (L1 single Ridge — substitui N.IA/N.Pr/N.Final)", align: "center", group: "notas" },
-  { key: "expected_baseline", label: "Perfil", configLabel: "Stage 1 da decomposição — contribuição do perfil (sem qualidade)", align: "center", defaultHidden: true, group: "legado" },
-  { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Stage 2 da decomposição — ajuste pelas 8 dimensões de qualidade", align: "center", defaultHidden: true, group: "legado" },
-  { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento com perfil (fit_score)", align: "center", group: "notas" },
+  { key: "expected_score", label: "Prevista", configLabel: "Nota Prevista", description: "Nota que o modelo prevê que você daria à obra (0–10). É a âncora calibrada — um Ridge L1 que substituiu o antigo trio Nota.IA / Nota.Pr / Nota.Final.", align: "center", group: "notas" },
+  { key: "expected_baseline", label: "Perfil", configLabel: "Prevista — Perfil", description: "Decomposição da Nota Prevista (etapa 1): a parte vinda só do seu perfil de gosto, antes de considerar a qualidade da obra.", align: "center", defaultHidden: true, group: "legado" },
+  { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Prevista — Δ Qualidade", description: "Decomposição da Nota Prevista (etapa 2): o ajuste aplicado pelas 8 dimensões de qualidade sobre a parte do perfil.", align: "center", defaultHidden: true, group: "legado" },
+  { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento", description: "O quanto a obra combina com o seu perfil de gosto (fit_score). Quanto maior, mais alinhada às suas preferências de atributos e tags.", align: "center", group: "notas" },
   // Legado — escondidos por padrão após cutover Fase 1.5. Disponíveis via column
   // picker ou preset "Legado". Vão ser removidos quando Fase 2 (consultor) ativar.
-  { key: "calc_score", label: "N.IA", configLabel: "[Legado] Nota.IA (calculada via avaliação da IA)", align: "center", defaultHidden: true, group: "legado" },
-  { key: "predicted_score", label: "N.Pr", configLabel: "[Legado] Nota.Pr (predição por regressão)", align: "center", defaultHidden: true, group: "legado" },
-  { key: "final_score", label: "N.Final", configLabel: "[Legado] Nota.Final (mistura ponderada de N.IA e N.Pr)", align: "center", defaultHidden: true, group: "legado" },
-  { key: "platform_avg", label: "N.M", configLabel: "Nota.M (média ponderada das plataformas)", align: "center", defaultHidden: true, group: "notas" },
-  { key: "total_votes", label: "Votos", configLabel: "Total de votos nas plataformas", align: "center", defaultHidden: true, group: "notas" },
-  { key: "alignment_score", label: "IA Rk.", configLabel: "IA Re-rank (0-100) — score que ordena 'Recomendar com IA' / 'Próxima leitura' / 'Recomendar do ranking'", align: "center", defaultHidden: true, group: "notas" },
-  { key: "ai_status", label: "IA", configLabel: "Status da avaliação IA", align: "center", group: "basico" },
-  { key: "updated_at", label: "Atual.", configLabel: "Atualizado em", align: "center", group: "basico" },
-  { key: "last_read_at", label: "Últ. leitura", configLabel: "Última leitura", align: "center", defaultHidden: true, group: "basico" },
+  { key: "calc_score", label: "N.IA", configLabel: "Nota.IA (legado)", description: "[Legado] Nota calculada a partir da avaliação da IA (soma ponderada dos atributos). Substituída pela Nota Prevista.", align: "center", defaultHidden: true, group: "legado" },
+  { key: "predicted_score", label: "N.Pr", configLabel: "Nota.Pr (legado)", description: "[Legado] Predição por regressão sobre notas manuais. Substituída pela Nota Prevista.", align: "center", defaultHidden: true, group: "legado" },
+  { key: "final_score", label: "N.Final", configLabel: "Nota.Final (legado)", description: "[Legado] Mistura ponderada de Nota.IA e Nota.Pr. Substituída pela Nota Prevista no cutover da Fase 1.5; mantida só por compatibilidade.", align: "center", defaultHidden: true, group: "legado" },
+  { key: "platform_avg", label: "N.M", configLabel: "Nota.M", description: "Nota.M — média ponderada das notas das plataformas externas (AniList, MAL, etc.), na escala 0–10. Pondera mais as fontes com mais votos.", align: "center", defaultHidden: true, group: "notas" },
+  { key: "total_votes", label: "Votos", configLabel: "Votos", description: "Total de votos/avaliações somados nas plataformas externas. Quanto maior, mais confiável é a Nota.M.", align: "center", defaultHidden: true, group: "notas" },
+  { key: "alignment_score", label: "IA Rk.", configLabel: "IA Rk", description: "Re-rank do consultor IA (0–100), gerado sob demanda. Reordena as recomendações ('Recomendar com IA', 'Próxima leitura', 'Recomendar do ranking') e alimenta a Nota Final. A maioria das obras fica sem valor até passar pelo Rankear.", align: "center", defaultHidden: true, group: "notas" },
+  { key: "ai_status", label: "IA", configLabel: "Status da avaliação IA", description: "Estágio da avaliação por IA: pendente de atributos, pendente de IA Rk, avaliado ou pulado.", align: "center", group: "basico" },
+  { key: "updated_at", label: "Atual.", configLabel: "Atualizado em", description: "Quando o registro da obra foi atualizado pela última vez.", align: "center", group: "basico" },
+  { key: "last_read_at", label: "Últ. leitura", configLabel: "Última leitura", description: "Data da última vez que você leu algum capítulo desta obra.", align: "center", defaultHidden: true, group: "basico" },
   ...CRITERION_SLUGS.map((slug) => ({
     key: `crit_${slug}`,
     label: CRITERIA_INFO[slug]?.emoji ?? slug,

@@ -20,7 +20,8 @@ import {
   type PublicationStatusInfo,
   type PersonalStatusInfo,
 } from "@/lib/constants/criteria"
-import { PERSONAL_STATUSES as PERSONAL_STATUS_NAMES } from "@/types/domain"
+import { PERSONAL_STATUSES as PERSONAL_STATUS_NAMES, SYNOPSIS_QUALITIES } from "@/types/domain"
+import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 
 type EvaluationFilter = "pending" | "review-pending" | "low-confidence" | "outdated-model"
 const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending"]
@@ -44,6 +45,8 @@ interface AiEvaluationFiltersProps {
   lowConfidenceThreshold: number
   activePubStatuses: string[]
   activePersonalStatuses: string[]
+  /** Interesse na sinopse (♥–♥♥♥♥) ativos. Compartilhado pelas 2 abas. */
+  activeSynopsisQualities?: string[]
   /** Quando false, esconde a seção "Estado da avaliação" (usado na aba IA Rk). */
   showEvalState?: boolean
   /** Mostra a seção "Estado do IA Rk" (Desatualizado/Não avaliado) — aba IA Rk. */
@@ -66,6 +69,7 @@ export function AiEvaluationFilters({
   lowConfidenceThreshold,
   activePubStatuses,
   activePersonalStatuses,
+  activeSynopsisQualities = [],
   showEvalState = true,
   showIaRkState = false,
   activeIaRkStates = [],
@@ -109,6 +113,17 @@ export function AiEvaluationFilters({
     })
   }
 
+  const toggleSynopsisQuality = (value: string) => {
+    const next = new Set(activeSynopsisQualities)
+    if (next.has(value)) next.delete(value)
+    else next.add(value)
+
+    updateParams((params) => {
+      if (next.size === 0) params.delete("synopsis_q")
+      else params.set("synopsis_q", [...next].join(","))
+    })
+  }
+
   const toggleIaRkState = (value: string) => {
     const next = new Set(activeIaRkStates)
     if (next.has(value)) next.delete(value)
@@ -126,6 +141,7 @@ export function AiEvaluationFilters({
       params.delete("filter")
       params.delete("pub")
       params.delete("personal")
+      params.delete("synopsis_q")
       params.delete("tolerance")
       params.delete("rk")
     })
@@ -179,13 +195,15 @@ export function AiEvaluationFilters({
     evalFilterCount +
     (iaRkFilterActive ? 1 : 0) +
     activePubStatuses.length +
-    activePersonalStatuses.length
+    activePersonalStatuses.length +
+    activeSynopsisQualities.length
 
   const hasAnyActive =
     (showEvalState && !isDefaultFilterSet(activeFilters)) ||
     iaRkFilterActive ||
     activePubStatuses.length > 0 ||
-    activePersonalStatuses.length > 0
+    activePersonalStatuses.length > 0 ||
+    activeSynopsisQualities.length > 0
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -312,7 +330,29 @@ export function AiEvaluationFilters({
                 options={PERSONAL_STATUSES}
                 active={activePersonalStatuses}
                 onToggle={(value) => toggleStatus("personal", value, activePersonalStatuses)}
+                tooltipFor={(opt) =>
+                  getPersonalStatusDescription(opt.status, (opt as PersonalStatusInfo).comment)
+                }
               />
+            </div>
+          </FilterSection>
+
+          {/* Interesse na sinopse */}
+          <FilterSection title="Interesse na sinopse">
+            <div className="flex flex-wrap items-center gap-1">
+              {SYNOPSIS_QUALITIES.map((q) => {
+                const active = activeSynopsisQualities.includes(q)
+                return (
+                  <button key={q} type="button" onClick={() => toggleSynopsisQuality(q)}>
+                    <Badge
+                      variant={active ? "default" : "outline"}
+                      className="cursor-pointer text-sm"
+                    >
+                      {q}
+                    </Badge>
+                  </button>
+                )
+              })}
             </div>
           </FilterSection>
         </div>
@@ -326,11 +366,14 @@ function StatusGroup({
   options,
   active,
   onToggle,
+  tooltipFor,
 }: {
   label: string
   options: Array<PublicationStatusInfo | PersonalStatusInfo>
   active: string[]
   onToggle: (value: string) => void
+  /** Texto de tooltip por opção. Quando vazio/ausente, não renderiza tooltip. */
+  tooltipFor?: (opt: PublicationStatusInfo | PersonalStatusInfo) => string
 }) {
   return (
     <div className="space-y-1.5">
@@ -340,8 +383,9 @@ function StatusGroup({
       <div className="flex flex-wrap gap-1">
         {options.map((opt) => {
           const isActive = active.includes(opt.status)
-          return (
-            <button key={opt.id} type="button" onClick={() => onToggle(opt.status)}>
+          const tip = tooltipFor?.(opt)
+          const button = (
+            <button type="button" onClick={() => onToggle(opt.status)}>
               <Badge
                 variant={isActive ? "default" : "outline"}
                 className="cursor-pointer gap-1 text-xs"
@@ -350,6 +394,15 @@ function StatusGroup({
                 {opt.status}
               </Badge>
             </button>
+          )
+          if (!tip) return <span key={opt.id}>{button}</span>
+          return (
+            <Tooltip key={opt.id}>
+              <TooltipTrigger asChild>{button}</TooltipTrigger>
+              <TooltipContent className="max-w-xs whitespace-pre-line text-xs">
+                {tip}
+              </TooltipContent>
+            </Tooltip>
           )
         })}
       </div>

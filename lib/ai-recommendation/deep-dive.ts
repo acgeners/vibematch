@@ -18,8 +18,12 @@ export const DEEP_DIVE_PROMPT_VERSION = "deep-dive-v2"
 const THINKING_BUDGET_FIRST = 8000
 const THINKING_BUDGET_RETRY = 4000
 
-const MAX_TOKENS_FIRST = 5000
-const MAX_TOKENS_RETRY = 6000
+// max_tokens é o teto TOTAL de output (thinking + resposta visível). A API
+// exige max_tokens > thinking.budget_tokens; reservamos folga acima do budget
+// de thinking pra caber o payload estruturado (alignment_breakdown é grande).
+// É só um teto — não muda custo a menos que o modelo gere mais.
+const MAX_TOKENS_FIRST = 12000 // 8000 thinking + ~4000 output
+const MAX_TOKENS_RETRY = 10000 // 4000 thinking + ~6000 output
 
 const DEEP_DIVE_TOOL: Anthropic.Messages.Tool = {
   name: "submit_deep_analysis",
@@ -241,7 +245,11 @@ export async function runDeepDive(args: RunDeepDiveArgs): Promise<DeepDiveResult
           { type: "text", text: DEEP_DIVE_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
         ],
         tools: [DEEP_DIVE_TOOL],
-        tool_choice: { type: "tool", name: DEEP_DIVE_TOOL.name },
+        // Extended thinking não aceita tool_choice forçado (a API rejeita com
+        // "Thinking may not be enabled when tool_choice forces tool use").
+        // O prompt já manda "Sempre use a tool submit_deep_analysis", e o
+        // bloco `if (!toolUse)` abaixo trata o caso raro do modelo não chamar.
+        tool_choice: { type: "auto" },
         messages: [
           {
             role: "user",
@@ -272,7 +280,7 @@ export async function runDeepDive(args: RunDeepDiveArgs): Promise<DeepDiveResult
     if (!toolUse) {
       lastError = new Error(
         message.stop_reason === "max_tokens"
-          ? "Resposta do Deep Dive cortada por max_tokens (provavelmente thinking excedeu o budget)."
+          ? "Resposta do Deep Dive cortada por max_tokens (output estruturado não coube — retry com menos thinking)."
           : "Resposta não chamou a tool submit_deep_analysis.",
       )
       continue

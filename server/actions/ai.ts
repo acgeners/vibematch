@@ -29,6 +29,12 @@ function resolveModelOverride(model: "sonnet" | "opus" | undefined): string | un
 interface TriggerAiEvaluationOpts {
   /** Override do modelo Claude. Default usa o MODEL configurado no service. */
   model?: "sonnet" | "opus"
+  /**
+   * Quando true, segue com a avaliação mesmo sem reviews externas. Sem isso, o
+   * gate pré-análise retorna `needsReviewConfirmation` antes de chamar o LLM
+   * para o cliente confirmar.
+   */
+  proceedWithoutReviews?: boolean
 }
 
 export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluationOpts = {}) {
@@ -70,16 +76,10 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     (currentScoreRows ?? []).map((row) => [row.criterion_slug, Number(row.score)])
   )
 
-  const { data: evaluation, error: evalError } = await supabase
-    .from("ai_evaluations")
-    .insert({
-      work_id: workId,
-      status: "processing",
-    })
-    .select("id")
-    .single()
-
-  if (evalError) return { error: evalError.message }
+  // Setado após o insert (que agora ocorre depois do gate). Usado pelo catch
+  // pra marcar a avaliação como failed — se o erro acontecer antes do insert
+  // (ex.: busca de contexto externo), não há linha pra atualizar.
+  let evaluationId: string | null = null
 
   try {
     // Fontes que o user explicitamente rejeitou via "Revalidar fontes" não
@@ -154,6 +154,28 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     const covers = (work as { work_covers?: Array<{ url?: string | null; is_primary?: boolean | null; position?: number | null }> }).work_covers ?? []
     const coverUrl = pickPrimaryCover(covers)
 
+    // Gate pré-análise: sem reviews externas, deixa o cliente decidir se segue
+    // mesmo assim antes de gastar a chamada do LLM. Ainda não inserimos a linha
+    // de ai_evaluations aqui, então não fica avaliação órfã "processing".
+    if ((sourcedReviews?.length ?? 0) === 0 && !opts.proceedWithoutReviews) {
+      return {
+        needsReviewConfirmation: true as const,
+        noReviewsReason,
+        workTitle: work.title,
+      }
+    }
+
+    const { data: evaluation, error: evalError } = await supabase
+      .from("ai_evaluations")
+      .insert({
+        work_id: workId,
+        status: "processing",
+      })
+      .select("id")
+      .single()
+    if (evalError) return { error: evalError.message }
+    evaluationId = evaluation.id
+
     const response = await requestAiEvaluation({
       workId,
       title: work.title,
@@ -223,10 +245,12 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     revalidatePath("/ai-evaluation")
     return { data: { evaluation: completedEvaluation as AiEvaluation, currentScores, reviewsUsed: response.reviewsUsed } }
   } catch (err) {
-    await supabase
-      .from("ai_evaluations")
-      .update({ status: "failed" })
-      .eq("id", evaluation.id)
+    if (evaluationId) {
+      await supabase
+        .from("ai_evaluations")
+        .update({ status: "failed" })
+        .eq("id", evaluationId)
+    }
     return { error: err instanceof Error ? err.message : "Erro desconhecido" }
   }
 }

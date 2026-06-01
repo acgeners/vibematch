@@ -1,9 +1,10 @@
 export const TAG_GROUP_IDS = {
   "activities": "9b18e0be-5f31-499d-8cd7-f0ca12fe61cb",
   "cast": "af1a8bbc-48de-4ea3-bbb2-93f65f204814",
-  "characters": "1a95e7da-d669-4ebd-8bb6-54d52cdcc90a",
+  "character_context": "1a95e7da-d669-4ebd-8bb6-54d52cdcc90a",
+  "character_profile": "be3a6891-3065-470c-bfc2-622ff3abe363",
   "conflict": "b1940a99-7aaf-427b-82fa-4c2b27632ae7",
-  "﻿content_indicator": "90edf1bb-a80e-459e-b421-ebca4e493128",
+  "content_indicator": "90edf1bb-a80e-459e-b421-ebca4e493128",
   "elements": "9f18fecc-5a0a-46ab-93b0-eb9c1c8f804f",
   "fantasy": "d86c1b07-5f44-4526-9416-70ddc80c6927",
   "female_lead": "fa630f4b-1a82-4398-9906-d685cb8ed363",
@@ -26,9 +27,10 @@ export type TagGroupSlug = keyof typeof TAG_GROUP_IDS
 export const TAG_GROUP_LABELS: Record<TagGroupSlug, string> = {
   "activities": "Activities",
   "cast": "Cast",
-  "characters": "Characters",
+  "character_context": "Character Context",
+  "character_profile": "Character Profile",
   "conflict": "Conflict",
-  "﻿content_indicator": "﻿Content Indicator",
+  "content_indicator": "Content Indicator",
   "elements": "Elements",
   "fantasy": "Fantasy",
   "female_lead": "Female Lead",
@@ -48,9 +50,10 @@ export const TAG_GROUP_LABELS: Record<TagGroupSlug, string> = {
 
 export const ACTIVITIES_TAG_GROUP_ID = TAG_GROUP_IDS["activities"]
 export const CAST_TAG_GROUP_ID = TAG_GROUP_IDS["cast"]
-export const CHARACTERS_TAG_GROUP_ID = TAG_GROUP_IDS["characters"]
+export const CHARACTER_CONTEXT_TAG_GROUP_ID = TAG_GROUP_IDS["character_context"]
+export const CHARACTER_PROFILE_TAG_GROUP_ID = TAG_GROUP_IDS["character_profile"]
 export const CONFLICT_TAG_GROUP_ID = TAG_GROUP_IDS["conflict"]
-export const CONTENT_INDICATOR_TAG_GROUP_ID = TAG_GROUP_IDS["﻿content_indicator"]
+export const CONTENT_INDICATOR_TAG_GROUP_ID = TAG_GROUP_IDS["content_indicator"]
 export const ELEMENTS_TAG_GROUP_ID = TAG_GROUP_IDS["elements"]
 export const FANTASY_TAG_GROUP_ID = TAG_GROUP_IDS["fantasy"]
 export const FEMALE_LEAD_TAG_GROUP_ID = TAG_GROUP_IDS["female_lead"]

@@ -403,11 +403,12 @@ export function parseAnimePlanetDetailHtml(html: string): AnimePlanetDetail | nu
  */
 export async function fetchAnimePlanetReviews(slug: string, limit = Infinity): Promise<string[]> {
   try {
-    const result = await fetchHtmlWithCfFallback(
-      `${AP_BASE}/manga/${slug}/reviews`,
-      HEADERS
-    )
-    if (!result) return []
+    const url = `${AP_BASE}/manga/${slug}/reviews`
+    const result = await fetchHtmlWithCfFallback(url, HEADERS)
+    if (!result) {
+      console.warn(`[fetchAnimePlanetReviews] AP slug="${slug}": fetch falhou (CF/FlareSolverr não resolveu) ${url}`)
+      return []
+    }
 
     const html = result.html
     const bodyRegex = /<div[^>]+itemprop="reviewBody"[^>]*>([\s\S]*?)<\/div>/gi
@@ -436,8 +437,13 @@ export async function fetchAnimePlanetReviews(slug: string, limit = Infinity): P
       reviews.push(`${prefix}${text}`)
     }
 
+    if (reviews.length === 0) {
+      const blocks = (html.match(/itemprop="reviewBody"/g) ?? []).length
+      console.warn(`[fetchAnimePlanetReviews] AP slug="${slug}": 0 reviews extraídas (reviewBody encontrados=${blocks}, HTML ${html.length} chars)`)
+    }
     return reviews
-  } catch {
+  } catch (err) {
+    console.warn(`[fetchAnimePlanetReviews] AP slug="${slug}" falhou:`, err instanceof Error ? err.message : err)
     return []
   }
 }

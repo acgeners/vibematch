@@ -7,6 +7,7 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug, WorkWithRelations } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
+import { getAllTags } from "@/server/queries/tags"
 
 export interface CompareCriterionEntry {
   slug: CriterionSlug
@@ -45,7 +46,7 @@ export interface CompareWork {
   alignmentJustification: string | null
   alignmentAt: string | null
   genres: string[]
-  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null }>
+  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName: string | null }>
   criteria: CompareCriterionEntry[]
 }
 
@@ -64,7 +65,7 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
   if (unique.length === 0) return []
 
   const supabase = createAdminClient()
-  const [works, aiJustifications] = await Promise.all([
+  const [works, aiJustifications, tagCatalog] = await Promise.all([
     getWorksByIds(unique),
     supabase
       .from("ai_evaluations")
@@ -75,7 +76,12 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
       `)
       .in("work_id", unique)
       .order("created_at", { ascending: false }),
+    getAllTags(),
   ])
+  const subGroupBySlug = new Map<string, string>()
+  for (const t of tagCatalog) {
+    if (t.subGroupName) subGroupBySlug.set(t.slug, t.subGroupName)
+  }
 
   // For each work, pick the most recent ai_evaluation justifications by criterion.
   const justificationByWork = new Map<string, Map<string, string>>()
@@ -91,12 +97,13 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
     justificationByWork.set(row.work_id, map)
   }
 
-  return works.map((work) => mapWorkToCompare(work, justificationByWork.get(work.id)))
+  return works.map((work) => mapWorkToCompare(work, justificationByWork.get(work.id), subGroupBySlug))
 }
 
 function mapWorkToCompare(
   work: WorkWithRelations,
-  justifications: Map<string, string> | undefined
+  justifications: Map<string, string> | undefined,
+  subGroupBySlug: Map<string, string>
 ): CompareWork {
   const scoreByCrit: Record<string, number> = {}
   for (const cs of work.category_scores ?? []) {
@@ -107,11 +114,13 @@ function mapWorkToCompare(
     .filter(Boolean)
     .map((t) => {
       const groupId = (t.tag_group_id ?? null) as string | null
+      const slug = (t.slug ?? "") as string
       return {
-        slug: (t.slug ?? "") as string,
+        slug,
         name: (t.name ?? "") as string,
         groupId,
         groupName: groupId ? GROUP_ID_TO_LABEL[groupId] ?? null : null,
+        subGroupName: subGroupBySlug.get(slug) ?? null,
       }
     })
     .filter((t) => t.name)

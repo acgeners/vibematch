@@ -1179,7 +1179,10 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
         coverUrl: values.cover_url ?? null,
         externalIds: externalIds as Partial<Record<import("@/lib/external/types").ExternalSourceId, string>>,
         model: "opus",
+        // Reavaliação explícita: segue mesmo sem reviews externas.
+        proceedWithoutReviews: true,
       })
+      if ("needsReviewConfirmation" in result) return
       for (const [slug, score] of Object.entries(result.scores)) {
         if (score != null) setValue(slug as import("@/types/domain").CriterionSlug, score)
       }

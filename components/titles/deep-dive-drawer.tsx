@@ -1,15 +1,15 @@
 "use client"
 
-import { useEffect, useState, useTransition } from "react"
+import { useEffect, useRef, useState, useTransition } from "react"
 import { Loader2, Sparkles, RefreshCw, History } from "lucide-react"
 import { toast } from "sonner"
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
@@ -41,6 +41,9 @@ interface DeepDiveDrawerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   initialDive: DeepDiveResultRow | null
+  /** Modo ao abrir: "result" mostra a última análise (default); "form" abre direto
+   *  no formulário de nova análise mesmo havendo análise anterior. */
+  startView?: "result" | "form"
 }
 
 type DrawerState = "idle" | "loading" | "result" | "error"
@@ -51,6 +54,7 @@ export function DeepDiveDrawer({
   open,
   onOpenChange,
   initialDive,
+  startView = "result",
 }: DeepDiveDrawerProps) {
   // Estado local sobrevive aos re-renders do parent. Após `revalidatePath`,
   // o parent passa um novo `initialDive` — mas a essa altura `current` já é
@@ -62,6 +66,16 @@ export function DeepDiveDrawer({
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [loadingStepIdx, setLoadingStepIdx] = useState(0)
   const [isPending, startTransition] = useTransition()
+
+  // Ao abrir (transição fechado→aberto), escolhe a tela inicial conforme `startView`.
+  // Só age na abertura — não interfere quando `current` muda durante a sessão.
+  const prevOpenRef = useRef(open)
+  useEffect(() => {
+    const justOpened = open && !prevOpenRef.current
+    prevOpenRef.current = open
+    if (!justOpened) return
+    setState(startView === "form" ? "idle" : current ? "result" : "idle")
+  }, [open, startView, current])
 
   useEffect(() => {
     if (!isPending) return
@@ -108,20 +122,17 @@ export function DeepDiveDrawer({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
-      >
-        <SheetHeader className="border-b">
-          <SheetTitle className="flex items-center gap-2 text-base">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
+        <DialogHeader className="border-b px-4 py-3 text-left">
+          <DialogTitle className="flex items-center gap-2 text-base">
             <Sparkles className="h-4 w-4 text-violet-500" />
             Consultor IA — Deep Dive
-          </SheetTitle>
-          <SheetDescription className="text-xs">
+          </DialogTitle>
+          <DialogDescription className="text-xs">
             Análise profunda de <span className="font-medium text-foreground">{workTitle}</span>
-          </SheetDescription>
-        </SheetHeader>
+          </DialogDescription>
+        </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
           {state === "idle" && (
@@ -174,8 +185,8 @@ export function DeepDiveDrawer({
             </Button>
           </div>
         )}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   )
 }
 

@@ -12,6 +12,12 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Label } from "@/components/ui/label"
 import { cn, titleToSlug } from "@/lib/utils"
+import {
+  NO_REVIEWS_REASON_LABEL,
+  NO_REVIEWS_REASON_CTA,
+  isNoReviewsReason,
+} from "@/lib/ai-evaluation/no-reviews"
+import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import type { AiEvaluation } from "@/types/domain"
 
 // Limiar fixo de fricção no "Aceitar todos" e no botão "Reavaliar com Opus".
@@ -34,38 +40,13 @@ interface AiEvaluationReviewFormProps {
   onCancel: () => void
 }
 
-interface NoReviewsContext {
-  reason: "no_external_ids" | "all_rejected" | "search_miss" | "sources_returned_empty"
-}
 
-function getNoReviewsReason(rawResponse: unknown): NoReviewsContext["reason"] | null {
+function getNoReviewsReason(rawResponse: unknown): NoReviewsReason | null {
   if (typeof rawResponse !== "object" || rawResponse === null) return null
   const ctx = (rawResponse as Record<string, unknown>).evaluationContext
   if (typeof ctx !== "object" || ctx === null) return null
   const value = (ctx as Record<string, unknown>).noReviewsReason
-  if (
-    value === "no_external_ids" ||
-    value === "all_rejected" ||
-    value === "search_miss" ||
-    value === "sources_returned_empty"
-  ) {
-    return value
-  }
-  return null
-}
-
-const NO_REVIEWS_REASON_LABEL: Record<NoReviewsContext["reason"], string> = {
-  no_external_ids: "obra ainda não foi linkada a fontes externas",
-  all_rejected: "todas as fontes desta obra foram rejeitadas",
-  search_miss: "busca por título não encontrou candidato confiável nas fontes",
-  sources_returned_empty: "fontes linkadas existem, mas não devolveram reviews",
-}
-
-const NO_REVIEWS_REASON_CTA: Record<NoReviewsContext["reason"], string | null> = {
-  no_external_ids: "Atribuir fontes",
-  all_rejected: "Revisar rejeições",
-  search_miss: "Atribuir fontes",
-  sources_returned_empty: null,
+  return isNoReviewsReason(value) ? value : null
 }
 
 type ReviewUsageState =

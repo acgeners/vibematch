@@ -11,7 +11,8 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug } from "@/types/domain"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { submitPostReadingAttributes } from "@/server/actions/post-reading-attributes"
-import { Sparkles } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { ChevronDown, Sparkles } from "lucide-react"
 
 export interface PostAttributeAssessmentFormProps {
   workId: string
@@ -44,6 +45,7 @@ export function PostAttributeAssessmentForm({
 }: PostAttributeAssessmentFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const [open, setOpen] = useState(true)
   const isControlled = value !== undefined && onChange !== undefined
 
   // Só os atributos que a IA avaliou entram no questionário — sem nota da
@@ -77,20 +79,29 @@ export function PostAttributeAssessmentForm({
     return (
       <Card className="bg-card/50">
         <CardHeader>
-          <CardTitle className="text-base font-bold">Atributos da obra (pós-leitura)</CardTitle>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 text-left"
+          >
+            <CardTitle className="text-base font-bold">Atributos da obra</CardTitle>
+            <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
+          </button>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <p>
-            Esta obra ainda não foi avaliada pela IA. Rode a avaliação primeiro pra poder
-            calibrar como você viu os atributos depois de ler.
-          </p>
-          <Button asChild variant="outline" size="sm">
-            <Link href={`/ai-evaluation?work=${workId}`}>
-              <Sparkles className="h-4 w-4" />
-              Avaliar com IA
-            </Link>
-          </Button>
-        </CardContent>
+        {open && (
+          <CardContent className="space-y-3 text-sm text-muted-foreground">
+            <p>
+              Esta obra ainda não foi avaliada pela IA. Rode a avaliação primeiro pra poder
+              calibrar como você viu os atributos depois de ler.
+            </p>
+            <Button asChild variant="outline" size="sm">
+              <Link href={`/ai-evaluation?work=${workId}`}>
+                <Sparkles className="h-4 w-4" />
+                Avaliar com IA
+              </Link>
+            </Button>
+          </CardContent>
+        )}
       </Card>
     )
   }
@@ -120,12 +131,22 @@ export function PostAttributeAssessmentForm({
   return (
     <Card className="bg-card/50">
       <CardHeader className="space-y-1">
-        <CardTitle className="text-base font-bold">Atributos da obra (pós-leitura)</CardTitle>
-        <p className="text-xs text-muted-foreground">
-          Como você viu a obra <strong>depois de ler</strong>. A diferença pro que a IA avaliou
-          ({latestAiEvaluation.modelName}/{latestAiEvaluation.promptVersion}) calibra as previsões.
-        </p>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center justify-between gap-2 text-left"
+        >
+          <CardTitle className="text-base font-bold">Atributos da obra</CardTitle>
+          <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+        </button>
+        {open && (
+          <p className="text-xs text-muted-foreground">
+            Como você viu a obra <strong>depois de ler</strong>. A diferença pro que a IA avaliou
+            ({latestAiEvaluation.modelName}/{latestAiEvaluation.promptVersion}) calibra as previsões.
+          </p>
+        )}
       </CardHeader>
+      {open && (
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           {ratedSlugs.map((slug) => {
@@ -194,6 +215,7 @@ export function PostAttributeAssessmentForm({
           )}
         </div>
       </CardContent>
+      )}
     </Card>
   )
 }

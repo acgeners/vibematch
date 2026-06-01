@@ -2,7 +2,6 @@
 
 import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import Image from "next/image"
 import { ArrowDown, ArrowUp, Loader2, RotateCw } from "lucide-react"
 import { toast } from "sonner"
 
@@ -19,7 +18,7 @@ import { ScoreBadge } from "@/components/ui/score-badge"
 import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/status-badge"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
-import { getCoverImageSrc } from "@/lib/image-proxy"
+import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
 import { rerankStaleBatchAction } from "@/server/actions/recommendations"
 import type { AlignmentQueueWork } from "@/server/queries/recommendations"
 
@@ -137,22 +136,7 @@ export function StaleRerankPanel({ works }: { works: AlignmentQueueWork[] }) {
               <CardContent className="py-2.5">
                 <div className="flex items-center gap-3">
                   {/* Capa (esquerda) — aspect 2:3 de manga */}
-                  <div className="relative h-36 w-24 shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted shadow-sm">
-                    {w.coverUrl ? (
-                      <Image
-                        src={getCoverImageSrc(w.coverUrl)}
-                        alt=""
-                        fill
-                        sizes="96px"
-                        unoptimized
-                        className="object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-                        —
-                      </div>
-                    )}
-                  </div>
+                  <CoverThumb url={w.coverUrl} />
 
                   {/* Conteúdo central */}
                   <div className="flex-1 min-w-0 space-y-1.5">
@@ -172,6 +156,14 @@ export function StaleRerankPanel({ works }: { works: AlignmentQueueWork[] }) {
                     <div className="flex flex-wrap items-center gap-1.5">
                       <PublicationStatusBadge statusId={w.publicationStatusId} />
                       <PersonalStatusBadge statusId={w.personalStatusId} />
+                      {w.synopsisQuality && (
+                        <span
+                          title="Interesse na sinopse"
+                          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300"
+                        >
+                          {w.synopsisQuality}
+                        </span>
+                      )}
                       {isStale ? (
                         <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-200">
                           desatualizado

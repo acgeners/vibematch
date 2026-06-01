@@ -1455,7 +1455,11 @@ async function hydrateAndFilterCandidate(candidate: MergedCandidate): Promise<{
   for (const result of hydrated) {
     const { titleScore, synScore, composite, reason } = compositeAcceptScore(candidate, result)
     const passes = titleScore >= 0.72 && synScore >= 0.18 && composite >= 0.62
-    if (passes || trustedSet.has(result.source)) accepted.push({ ...result, score: result.score })
+    const acceptedBySource = passes || trustedSet.has(result.source)
+    console.info(
+      `[hydrateAccept] candidate="${candidate.title}" source=${result.source} title=${titleScore.toFixed(2)} syn=${synScore.toFixed(2)} composite=${composite.toFixed(2)} trusted=${trustedSet.has(result.source)} accept=${acceptedBySource}${reason ? ` reason="${reason}"` : ""}`
+    )
+    if (acceptedBySource) accepted.push({ ...result, score: result.score })
     else rejected.push({ result, reason })
   }
 
@@ -1518,7 +1522,17 @@ async function fetchExternalEvaluationContextForCandidateUncached(
     ? uniqueAccepted.filter((result) => !rejected.has(result.source))
     : uniqueAccepted
   const acceptedSources = new Set(filteredAccepted.map((result) => result.source))
-  const reviewCandidate = restrictCandidateToSources(candidate, acceptedSources)
+  // Fontes trusted (IDs externos confirmados) nem sempre entram em `hydrated`:
+  // o AnimePlanet, por design, é carregado via apDetail e nunca vira um
+  // ExternalSearchResult, então `acceptedSources` jamais o continha e o
+  // restrictCandidateToSources zerava o animePlanetSlug — fazendo as reviews do
+  // AnimePlanet nunca serem buscadas. Como trusted = identidade confirmada,
+  // coletamos reviews dessas fontes direto, respeitando só os rejectedSources.
+  const reviewSources = new Set([
+    ...acceptedSources,
+    ...(candidate.trustedSources ?? []).filter((source) => !rejected.has(source)),
+  ])
+  const reviewCandidate = restrictCandidateToSources(candidate, reviewSources)
   const [allReviews, similarWorks] = await Promise.all([
     collectReviewsFromCandidate(reviewCandidate),
     collectSimilarFromCandidate(reviewCandidate),

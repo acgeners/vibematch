@@ -298,6 +298,13 @@ export interface CandidateAiResult {
   noReviewsReason: "no_external_ids" | "all_rejected" | "search_miss" | "sources_returned_empty" | null
 }
 
+/** Retorno do gate pré-análise quando a obra não tem reviews externas e o
+ * cliente ainda não confirmou seguir mesmo assim. */
+export interface CandidateAiNeedsReviewConfirmation {
+  needsReviewConfirmation: true
+  noReviewsReason: CandidateAiResult["noReviewsReason"]
+}
+
 /**
  * Server action used ONLY by the create-work flow (external-search → Buscar dados).
  * Runs the AI evaluation against the candidate metadata so the form is already
@@ -326,7 +333,13 @@ export async function evaluateCandidateForCreate(input: {
   externalContext?: string[]
   /** Override do modelo Claude. Default usa o MODEL configurado no service. */
   model?: "sonnet" | "opus"
-}): Promise<CandidateAiResult> {
+  /**
+   * Quando true, segue com a avaliação mesmo sem reviews externas. Sem isso, o
+   * gate pré-análise retorna `needsReviewConfirmation` antes de chamar o LLM
+   * para o cliente confirmar.
+   */
+  proceedWithoutReviews?: boolean
+}): Promise<CandidateAiResult | CandidateAiNeedsReviewConfirmation> {
   const externalIdEntries = Object.entries(input.externalIds ?? {}).filter(([, id]) => Boolean(id))
   const hasExternalIds = externalIdEntries.length > 0
   const contextResult = hasExternalIds
@@ -344,6 +357,23 @@ export async function evaluateCandidateForCreate(input: {
         alternativeTitles: input.alternativeTitles ?? null,
       })
   const externalContext = input.externalContext ?? contextResult.externalContext
+
+  // Aqui o create flow não tem ainda `work_external_ids` no DB; o conceito de
+  // "rejeitado" (is_rejected) só existe pós-criação via "Revalidar fontes".
+  // Por isso só distinguimos três casos no create — `all_rejected` é
+  // exclusivo do Path A.
+  const noReviewsReason: CandidateAiResult["noReviewsReason"] =
+    (contextResult.sourcedReviews?.length ?? 0) > 0
+      ? null
+      : hasExternalIds
+        ? "sources_returned_empty"
+        : "search_miss"
+
+  // Gate pré-análise: sem reviews externas, deixa o cliente decidir se segue
+  // mesmo assim antes de gastar a chamada do LLM.
+  if ((contextResult.sourcedReviews?.length ?? 0) === 0 && !input.proceedWithoutReviews) {
+    return { needsReviewConfirmation: true, noReviewsReason }
+  }
 
   const modelOverride =
     input.model === "opus"
@@ -377,17 +407,6 @@ export async function evaluateCandidateForCreate(input: {
       justifications[entry.criterionSlug as CriterionSlug] = entry.justification.trim()
     }
   }
-
-  // Aqui o create flow não tem ainda `work_external_ids` no DB; o conceito de
-  // "rejeitado" (is_rejected) só existe pós-criação via "Revalidar fontes".
-  // Por isso só distinguimos três casos no create — `all_rejected` é
-  // exclusivo do Path A.
-  const noReviewsReason: CandidateAiResult["noReviewsReason"] =
-    (contextResult.sourcedReviews?.length ?? 0) > 0
-      ? null
-      : hasExternalIds
-        ? "sources_returned_empty"
-        : "search_miss"
 
   return {
     scores,
@@ -471,25 +490,66 @@ function addAnimePlanetFallbackCandidate(
   }]
 }
 
-// Quando uma fonte aponta pra um CDN bloqueado por Cloudflare (ver
-// lib/external/blocked-covers), tentamos achar a mesma obra em outra fonte
-// via crossIds e roubamos a cover dela (CDNs como AniList são abertos).
-const CROSS_SOURCE_PRIORITY: ExternalSourceId[] = ["anilist", "myanimelist", "mangadex", "mangaupdates"]
+// Chave canônica `source:externalId`. Usa `r.source` (ExternalSourceId) em vez
+// do prefixo do `r.id` — eles divergem (id "mal:789"/"mu:456" vs source
+// "myanimelist"/"mangaupdates"), e os crossIds usam o ExternalSourceId. Sem essa
+// normalização o empréstimo de cover nunca casava pra MyAnimeList/MangaUpdates.
+function canonicalKey(source: ExternalSourceId, id: string): string {
+  const externalId = id.includes(":") ? id.split(":").slice(1).join(":") : id
+  return `${source}:${externalId}`
+}
 
-function resolveCrossSourceCover(
-  result: ExternalSearchResult,
+interface CoverBorrowIndex {
+  coverByKey: Map<string, string>
+  adjacency: Map<string, Set<string>>
+}
+
+// Constrói um grafo de cross-links entre TODOS os resultados crus (bidirecional)
+// e um pool de covers utilizáveis (não-bloqueadas) por chave canônica. Permite
+// que uma fonte com cover bloqueada (ex.: Comix/Cloudflare) ou ausente "tome
+// emprestada" a cover de qualquer obra cross-referenciada — inclusive por links
+// reversos e transitivos. Tudo em memória, sem chamadas externas extras.
+function buildCoverBorrowIndex(
   rawBySource: Map<ExternalSourceId, ExternalSearchResult[]>
-): string | null {
-  const crossIds = result.crossIds
-  if (!crossIds) return null
-  for (const altSource of CROSS_SOURCE_PRIORITY) {
-    const externalId = crossIds[altSource]
-    if (!externalId) continue
-    const candidates = rawBySource.get(altSource) ?? []
-    const match = candidates.find(
-      (r) => r.id === `${altSource}:${externalId}` && r.coverUrl && !isBlockedCoverUrl(r.coverUrl)
-    )
-    if (match?.coverUrl) return match.coverUrl
+): CoverBorrowIndex {
+  const coverByKey = new Map<string, string>()
+  const adjacency = new Map<string, Set<string>>()
+  const addEdge = (a: string, b: string) => {
+    if (a === b) return
+    if (!adjacency.has(a)) adjacency.set(a, new Set())
+    if (!adjacency.has(b)) adjacency.set(b, new Set())
+    adjacency.get(a)!.add(b)
+    adjacency.get(b)!.add(a)
+  }
+  for (const [source, results] of rawBySource) {
+    for (const r of results) {
+      const key = canonicalKey(source, r.id)
+      if (r.coverUrl && !isBlockedCoverUrl(r.coverUrl) && !coverByKey.has(key)) {
+        coverByKey.set(key, r.coverUrl)
+      }
+      for (const [altSource, altId] of Object.entries(r.crossIds ?? {})) {
+        if (altId) addEdge(key, `${altSource}:${altId}`)
+      }
+    }
+  }
+  return { coverByKey, adjacency }
+}
+
+// BFS pelo grafo de cross-links (vizinhos diretos primeiro) buscando a primeira
+// cover utilizável conectada à chave da obra.
+function borrowCover(key: string, index: CoverBorrowIndex): string | null {
+  const seen = new Set<string>([key])
+  const queue = [key]
+  while (queue.length > 0) {
+    const cur = queue.shift()!
+    const cover = index.coverByKey.get(cur)
+    if (cover) return cover
+    for (const next of index.adjacency.get(cur) ?? []) {
+      if (!seen.has(next)) {
+        seen.add(next)
+        queue.push(next)
+      }
+    }
   }
   return null
 }
@@ -671,6 +731,7 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
     }))
   }
 
+  const coverBorrowIndex = buildCoverBorrowIndex(rawBySource)
   const candidatesPerSource: Partial<Record<ExternalSourceId, SourceCandidateOption[]>> = {}
   for (const [source, results] of rawBySource) {
     const scored = results
@@ -681,8 +742,11 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
     if (scored.length === 0) continue
     candidatesPerSource[source] = scored.map(({ result, matchScore }) => {
       let coverUrl = result.coverUrl ?? null
-      if (isBlockedCoverUrl(coverUrl)) {
-        coverUrl = resolveCrossSourceCover(result, rawBySource)
+      // Cover ausente ou bloqueada (Cloudflare): tenta emprestar de uma obra
+      // cross-referenciada em outra fonte com CDN aberto.
+      if (!coverUrl || isBlockedCoverUrl(coverUrl)) {
+        const borrowed = borrowCover(canonicalKey(source, result.id), coverBorrowIndex)
+        coverUrl = borrowed ?? (isBlockedCoverUrl(coverUrl) ? null : coverUrl)
       }
       return {
         externalId: result.id.split(":")[1] ?? result.id,

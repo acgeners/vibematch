@@ -7,7 +7,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { WorkStatusForm } from "@/components/titles/work-status-form"
+import { PostReadingFlow } from "@/components/titles/post-reading-flow"
+import type { PostAttributeAssessmentFormProps } from "@/components/titles/post-attribute-assessment-form"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
 
 export interface StatusEditDialogProps {
@@ -16,6 +17,8 @@ export interface StatusEditDialogProps {
   workId: string
   totalChapters: number | null
   initialValues: WorkStatusValues
+  latestAiEvaluation: PostAttributeAssessmentFormProps["latestAiEvaluation"]
+  existingAssessment: PostAttributeAssessmentFormProps["existingAssessment"]
 }
 
 export function StatusEditDialog({
@@ -24,23 +27,29 @@ export function StatusEditDialog({
   workId,
   totalChapters,
   initialValues,
+  latestAiEvaluation,
+  existingAssessment,
 }: StatusEditDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] sm:max-w-5xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Status</DialogTitle>
+          <DialogTitle>Meu Status</DialogTitle>
           <DialogDescription>
-            Atualize apenas as informações de status sem abrir o formulário completo.
+            Atualize status, anotações, critérios de avaliação e atributos da obra.
           </DialogDescription>
         </DialogHeader>
 
-        <WorkStatusForm
+        {/* Mesmo conteúdo da aba "Meu Status". formId distinto evita colisão de
+            id quando a aba também está montada. */}
+        <PostReadingFlow
           workId={workId}
           totalChapters={totalChapters}
-          initialValues={initialValues}
+          statusInitial={initialValues}
+          latestAiEvaluation={latestAiEvaluation}
+          existingAssessment={existingAssessment}
+          formId="work-status-form-dialog"
           onSaved={() => onOpenChange(false)}
-          onCancel={() => onOpenChange(false)}
         />
       </DialogContent>
     </Dialog>

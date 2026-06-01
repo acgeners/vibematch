@@ -117,20 +117,23 @@ function parseMedia(m: any) {
   }
 }
 
-async function anilistRequest(query: string, variables: Record<string, unknown>) {
+async function anilistRequest(query: string, variables: Record<string, unknown>, label = "anilist") {
   const res = await fetch(ANILIST_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ query, variables }),
     cache: "no-store",
   })
-  if (!res.ok) return null
+  if (!res.ok) {
+    console.warn(`[anilist:${label}] request falhou: HTTP ${res.status}`)
+    return null
+  }
   return res.json()
 }
 
 export async function searchAniList(search: string): Promise<ExternalSearchResult[]> {
   try {
-    const json = await anilistRequest(SEARCH_QUERY, { search })
+    const json = await anilistRequest(SEARCH_QUERY, { search }, "search")
     const media: unknown[] = json?.data?.Page?.media ?? []
     return media.map((m) => {
       const p = parseMedia(m)
@@ -159,7 +162,7 @@ export async function searchAniList(search: string): Promise<ExternalSearchResul
 
 export async function fetchAniListById(anilistId: number) {
   try {
-    const json = await anilistRequest(DETAIL_QUERY, { id: anilistId })
+    const json = await anilistRequest(DETAIL_QUERY, { id: anilistId }, "detail")
     const m = json?.data?.Media
     if (!m) return null
     return parseMedia(m)
@@ -209,7 +212,7 @@ export interface AniListRecommendation {
 
 export async function fetchAniListRecommendations(anilistId: number): Promise<AniListRecommendation[]> {
   try {
-    const json = await anilistRequest(RECOMMENDATIONS_QUERY, { id: anilistId })
+    const json = await anilistRequest(RECOMMENDATIONS_QUERY, { id: anilistId }, "recommendations")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nodes: any[] = json?.data?.Media?.recommendations?.nodes ?? []
     return nodes
@@ -236,7 +239,10 @@ export async function fetchAniListRecommendations(anilistId: number): Promise<An
 
 export async function fetchAniListReviews(anilistId: number): Promise<string[]> {
   try {
-    const json = await anilistRequest(REVIEWS_QUERY, { id: anilistId })
+    const json = await anilistRequest(REVIEWS_QUERY, { id: anilistId }, "reviews")
+    if (json && json?.data?.Media == null) {
+      console.warn(`[fetchAniListReviews] AniList id=${anilistId}: Media null (possível id de ANIME — a query usa type: MANGA)`)
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nodes: any[] = json?.data?.Media?.reviews?.nodes ?? []
     return nodes
@@ -252,7 +258,8 @@ export async function fetchAniListReviews(anilistId: number): Promise<string[]> 
         return score10 !== null ? `Nota do usuário: ${score10}/10\n${text}` : text
       })
       .filter(Boolean)
-  } catch {
+  } catch (err) {
+    console.warn(`[fetchAniListReviews] AniList id=${anilistId} falhou:`, err instanceof Error ? err.message : err)
     return []
   }
 }

@@ -17,6 +17,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
 import { searchExternalTitles, fetchExternalData, upsertExternalTags, checkExistingWorkInDb, evaluateCandidateForCreate, type ExistingWorkMatch } from "@/server/actions/external"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
+import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import { fetchComicKClient, fetchAnimePlanetClient } from "@/lib/external/client-fetches"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { getCoverImageSrc } from "@/lib/image-proxy"
@@ -293,6 +296,11 @@ export function ExternalSearch({
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
   const [activeRefineUrl, setActiveRefineUrl] = useState<string | null>(null)
+  // Gate "sem reviews externas": resolve a Promise quando o usuário decide.
+  const [noReviewGate, setNoReviewGate] = useState<{
+    noReviewsReason: NoReviewsReason | null
+    resolve: (proceed: boolean) => void
+  } | null>(null)
 
   const handleSearch = async () => {
     if (!titleQuery.trim()) return
@@ -379,7 +387,7 @@ export function ExternalSearch({
     if (evaluateAi) {
       setPhase("evaluating")
       try {
-        const aiResult = await evaluateCandidateForCreate({
+        const baseInput = {
           title: merged.title,
           originalTitle: merged.originalTitle ?? null,
           alternativeTitles: merged.alternativeTitles ?? null,
@@ -389,18 +397,36 @@ export function ExternalSearch({
           coverUrl: merged.coverUrl ?? merged.multiCovers?.[0]?.url ?? null,
           externalIds: merged.externalIds,
           externalContext: merged.synopsis?.trim() ? [] : undefined,
-        })
-        merged.criteriaScores = aiResult.scores
-        merged.criteriaJustifications = aiResult.justifications
-        merged.aiMeta = {
-          inputHash: aiResult.inputHash,
-          modelName: aiResult.modelName,
-          promptVersion: aiResult.promptVersion,
-          confidence: aiResult.confidence,
-          summary: aiResult.summary,
-          noReviewsReason: aiResult.noReviewsReason,
         }
-        merged.externalReviews = aiResult.externalReviews
+        let aiResult = await evaluateCandidateForCreate(baseInput)
+
+        // Gate: sem reviews externas, pergunta antes de seguir com a IA.
+        if ("needsReviewConfirmation" in aiResult && aiResult.needsReviewConfirmation) {
+          const reason = aiResult.noReviewsReason
+          const proceed = await new Promise<boolean>((resolve) => {
+            setNoReviewGate({ noReviewsReason: reason, resolve })
+          })
+          setNoReviewGate(null)
+          if (proceed) {
+            aiResult = await evaluateCandidateForCreate({ ...baseInput, proceedWithoutReviews: true })
+          } else {
+            toast.info('Avaliação IA pulada (sem reviews externas). A obra será criada sem notas — use "Reavaliar IA" no detalhe depois.')
+          }
+        }
+
+        if (!("needsReviewConfirmation" in aiResult)) {
+          merged.criteriaScores = aiResult.scores
+          merged.criteriaJustifications = aiResult.justifications
+          merged.aiMeta = {
+            inputHash: aiResult.inputHash,
+            modelName: aiResult.modelName,
+            promptVersion: aiResult.promptVersion,
+            confidence: aiResult.confidence,
+            summary: aiResult.summary,
+            noReviewsReason: aiResult.noReviewsReason,
+          }
+          merged.externalReviews = aiResult.externalReviews
+        }
       } catch (error) {
         console.error("[ExternalSearch] evaluateCandidateForCreate failed", error)
         const message = error instanceof Error ? error.message : "Erro desconhecido"
@@ -1166,6 +1192,21 @@ export function ExternalSearch({
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Gate: sem reviews externas, confirma antes de chamar o LLM. */}
+      <ConfirmDialog
+        open={noReviewGate != null}
+        onOpenChange={(open) => {
+          if (!open && noReviewGate) noReviewGate.resolve(false)
+        }}
+        title="Sem reviews externas"
+        description={`Não foram encontradas reviews externas para esta obra${
+          noReviewGate?.noReviewsReason ? ` (${NO_REVIEWS_REASON_LABEL[noReviewGate.noReviewsReason]})` : ""
+        }. A avaliação IA vai usar só sinopse, tags e gêneros. Avaliar mesmo assim?`}
+        confirmText="Avaliar mesmo assim"
+        cancelText="Pular IA"
+        onConfirm={() => noReviewGate?.resolve(true)}
+      />
     </>
   )
 }

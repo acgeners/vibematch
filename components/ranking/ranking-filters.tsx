@@ -2,7 +2,8 @@
 
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useMemo, useState, useTransition } from "react"
-import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Filter, Minus, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react"
+import type { ReactNode } from "react"
+import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, ChevronUp, Filter, Minus, Pencil, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -18,6 +19,13 @@ import { getPersonalStatusDescription } from "@/lib/constants/personal-status-de
 import { CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { updateRankingPreferences } from "@/server/actions/settings"
+import { saveFilterPreset, renameFilterPreset, deleteFilterPreset } from "@/server/actions/filter-presets"
+
+interface SavedFilterPreset {
+  id: string
+  name: string
+  query: string
+}
 
 const CRITERION_LABELS: Record<string, string> = {
   romance: "Romance",
@@ -33,9 +41,10 @@ const CRITERION_LABELS: Record<string, string> = {
 
 const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
   { value: "recommended", label: "Recomendado" },
+  { value: "decision", label: "Nota Final" },
   { value: "expected_score", label: "Nota Prevista" },
   { value: "personal_fit", label: "Alinhamento" },
-  { value: "alignment_score", label: "IA Re-rank" },
+  { value: "alignment_score", label: "IA Rk" },
   { value: "platform_avg", label: "Nota.M" },
   { value: "total_votes", label: "Votos" },
   { value: "title", label: "Título" },
@@ -185,7 +194,7 @@ interface StatusOption {
 
 interface RankingFiltersProps {
   availableGenres: string[]
-  availableTags: Array<{ slug: string; name: string; tag_group_id?: string | null; groupName?: string }>
+  availableTags: Array<{ slug: string; name: string; tag_group_id?: string | null; groupName?: string; subGroupName?: string; subGroupSlug?: string }>
   publicationStatuses?: StatusOption[]
   personalStatuses?: StatusOption[]
   defaultTopN: number | null
@@ -195,6 +204,8 @@ interface RankingFiltersProps {
   hidePreferencesControls?: boolean
   /** Sort default efetivo (depende do plano: Free="recommended:desc", Pago="expected_score:desc"). */
   defaultSort?: string
+  /** Conjuntos de filtros salvos do usuário para esta página (base_path). */
+  savedPresets?: SavedFilterPreset[]
 }
 
 interface FilterSectionProps {
@@ -620,6 +631,7 @@ interface FacetedChoice {
 
 interface GroupedFacetedChoice extends FacetedChoice {
   groupName: string
+  subGroupName?: string
 }
 
 type FacetRule = "all" | "any" | "exclude" | null
@@ -799,6 +811,105 @@ const TAG_CHIP_CLASS: Record<Exclude<FacetRule, null>, string> = {
   all: "border-emerald-400/60 bg-emerald-400/15 text-emerald-100",
   any: "border-sky-400/60 bg-sky-400/15 text-sky-100",
   exclude: "border-rose-400/60 bg-rose-400/15 text-rose-100",
+}
+
+const TAG_GRID_CLASS = "grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4"
+
+interface ActiveGroupBodyProps {
+  items: GroupedFacetedChoice[]
+  getRule: (value: string) => FacetRule
+  renderItem: (item: GroupedFacetedChoice, withGroupHint?: boolean) => ReactNode
+}
+
+// Renders the active group's tags. If the group has sub-groups (an applied
+// `tag_subgroup`), they become collapsible sections; otherwise the flat grid
+// is kept unchanged (graceful degradation for groups not yet organized).
+function ActiveGroupBody({ items, getRule, renderItem }: ActiveGroupBodyProps) {
+  const hasSubgroups = items.some((it) => it.subGroupName)
+
+  const sections = useMemo(() => {
+    const sortItems = (arr: GroupedFacetedChoice[]) =>
+      [...arr].sort((a, b) => {
+        const weight = (r: FacetRule) => (r === "all" ? 0 : r === "any" ? 1 : r === "exclude" ? 2 : 3)
+        const diff = weight(getRule(a.value)) - weight(getRule(b.value))
+        return diff !== 0 ? diff : a.label.localeCompare(b.label)
+      })
+    const bySub = new Map<string, GroupedFacetedChoice[]>()
+    const ungrouped: GroupedFacetedChoice[] = []
+    for (const it of items) {
+      if (it.subGroupName) {
+        const arr = bySub.get(it.subGroupName) ?? []
+        arr.push(it)
+        bySub.set(it.subGroupName, arr)
+      } else {
+        ungrouped.push(it)
+      }
+    }
+    const subs = [...bySub.entries()]
+      .map(([name, its]) => ({ name, items: sortItems(its) }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+    if (ungrouped.length > 0) subs.push({ name: "Outras", items: sortItems(ungrouped) })
+    return subs
+    // getRule depends on the parent's selection sets.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items])
+
+  // Default: collapsed, except sections that already have active selections.
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    const open = new Set<string>()
+    for (const s of sections) {
+      if (s.items.some((it) => Boolean(getRule(it.value)))) open.add(s.name)
+    }
+    return open
+  })
+  const toggle = (name: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+
+  if (!hasSubgroups) {
+    return <div className={TAG_GRID_CLASS}>{items.map((item) => renderItem(item))}</div>
+  }
+
+  return (
+    <div className="space-y-2">
+      {sections.map((section) => {
+        const selectedCount = section.items.filter((it) => Boolean(getRule(it.value))).length
+        const open = expanded.has(section.name)
+        return (
+          <div key={section.name} className="overflow-hidden rounded-lg border border-border/55 bg-background/30">
+            <button
+              type="button"
+              onClick={() => toggle(section.name)}
+              aria-expanded={open}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-background/50"
+            >
+              {open ? (
+                <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+              <span className="text-sm font-medium">{section.name}</span>
+              <span className="text-xs tabular-nums text-muted-foreground">{section.items.length}</span>
+              {selectedCount > 0 && (
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-400/25 px-1.5 text-[10px] font-bold tabular-nums text-emerald-100">
+                  {selectedCount}
+                </span>
+              )}
+            </button>
+            {open && (
+              <div className="px-3 pb-3">
+                <div className={TAG_GRID_CLASS}>{section.items.map((item) => renderItem(item))}</div>
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 function GroupedTagRuleGrid({
@@ -1074,9 +1185,12 @@ function GroupedTagRuleGrid({
                     <span className="font-semibold">{activeGroupData.groupName}</span>
                     <span className="text-muted-foreground tabular-nums">{activeGroupData.items.length} tags</span>
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-                    {activeGroupData.items.map((item) => renderItem(item))}
-                  </div>
+                  <ActiveGroupBody
+                    key={activeGroupData.groupName}
+                    items={activeGroupData.items}
+                    getRule={getRule}
+                    renderItem={renderItem}
+                  />
                 </div>
               )}
             </>
@@ -1084,6 +1198,221 @@ function GroupedTagRuleGrid({
         </>
       )}
     </div>
+  )
+}
+
+function SavedFiltersControl({
+  presets,
+  basePath,
+  currentQuery,
+  onApply,
+  onChange,
+}: {
+  presets: SavedFilterPreset[]
+  basePath: string
+  currentQuery: string
+  onApply: (query: string) => void
+  onChange: (next: SavedFilterPreset[]) => void
+}) {
+  const [saveOpen, setSaveOpen] = useState(false)
+  const [listOpen, setListOpen] = useState(false)
+  const [name, setName] = useState("")
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState("")
+  const [pending, startSaving] = useTransition()
+
+  const startRename = (preset: SavedFilterPreset) => {
+    setEditingId(preset.id)
+    setEditingName(preset.name)
+  }
+
+  const cancelRename = () => {
+    setEditingId(null)
+    setEditingName("")
+  }
+
+  const commitRename = (preset: SavedFilterPreset) => {
+    const trimmed = editingName.trim()
+    if (!trimmed || trimmed === preset.name) {
+      cancelRename()
+      return
+    }
+    startSaving(async () => {
+      const res = await renameFilterPreset({ id: preset.id, basePath, name: trimmed })
+      if (res.error !== null) {
+        toast.error(res.error)
+        return
+      }
+      onChange(presets.map((p) => (p.id === preset.id ? { ...p, name: res.preset.name } : p)))
+      cancelRename()
+      toast.success(`Renomeado para "${res.preset.name}"`)
+    })
+  }
+
+  const save = () => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    startSaving(async () => {
+      const res = await saveFilterPreset({ basePath, name: trimmed, query: currentQuery })
+      if (res.error !== null) {
+        toast.error(res.error)
+        return
+      }
+      const without = presets.filter((p) => p.name.toLowerCase() !== res.preset.name.toLowerCase())
+      onChange([res.preset, ...without])
+      setName("")
+      setSaveOpen(false)
+      toast.success(`Filtro "${res.preset.name}" salvo`)
+    })
+  }
+
+  const remove = (preset: SavedFilterPreset) => {
+    startSaving(async () => {
+      const res = await deleteFilterPreset({ id: preset.id, basePath })
+      if (res.error) {
+        toast.error(res.error)
+        return
+      }
+      onChange(presets.filter((p) => p.id !== preset.id))
+      toast.success(`Filtro "${preset.name}" removido`)
+    })
+  }
+
+  return (
+    <>
+      <Popover open={saveOpen} onOpenChange={setSaveOpen}>
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" title="Salvar filtros atuais">
+            <Save className="mr-1 h-3.5 w-3.5" />
+            Salvar
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-72 space-y-2 p-3">
+          <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Nome do conjunto
+          </Label>
+          <div className="flex items-center gap-2">
+            <Input
+              autoFocus
+              placeholder="Ex: Romance pendente"
+              className="h-8 text-xs"
+              value={name}
+              maxLength={60}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  save()
+                }
+              }}
+            />
+            <Button size="sm" className="h-8 shrink-0" onClick={save} disabled={pending || !name.trim()}>
+              Salvar
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Salva os filtros atuais (mesmo sem aplicar). Reusar um nome sobrescreve.
+          </p>
+        </PopoverContent>
+      </Popover>
+
+      <Popover open={listOpen} onOpenChange={setListOpen}>
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" title="Filtros salvos">
+            <Bookmark className="mr-1 h-3.5 w-3.5" />
+            Salvos{presets.length > 0 ? ` (${presets.length})` : ""}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-72 p-1.5">
+          {presets.length === 0 ? (
+            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+              Nenhum filtro salvo ainda.
+            </p>
+          ) : (
+            <div className="max-h-72 space-y-0.5 overflow-y-auto">
+              {presets.map((preset) => (
+                editingId === preset.id ? (
+                  <div key={preset.id} className="flex items-center gap-1 rounded-md p-1">
+                    <Input
+                      autoFocus
+                      className="h-7 text-sm"
+                      value={editingName}
+                      maxLength={60}
+                      onChange={(e) => setEditingName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault()
+                          commitRename(preset)
+                        } else if (e.key === "Escape") {
+                          e.preventDefault()
+                          cancelRename()
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => commitRename(preset)}
+                      disabled={pending || !editingName.trim()}
+                      aria-label="Confirmar novo nome"
+                      title="Confirmar"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-30"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelRename}
+                      aria-label="Cancelar"
+                      title="Cancelar"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    key={preset.id}
+                    className="group flex items-center gap-1 rounded-md transition-colors hover:bg-muted/60"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onApply(preset.query)
+                        setListOpen(false)
+                      }}
+                      title="Aplicar este conjunto de filtros"
+                      className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-sm"
+                    >
+                      {preset.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => startRename(preset)}
+                      disabled={pending}
+                      aria-label={`Renomear ${preset.name}`}
+                      title={`Renomear ${preset.name}`}
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-30"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => remove(preset)}
+                      disabled={pending}
+                      aria-label={`Remover ${preset.name}`}
+                      title={`Remover ${preset.name}`}
+                      className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-30"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )
+              ))}
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    </>
   )
 }
 
@@ -1097,6 +1426,7 @@ export function RankingFilters({
   basePath = "/ranking",
   hidePreferencesControls = false,
   defaultSort,
+  savedPresets = [],
 }: RankingFiltersProps) {
   const router = useRouter()
   const appliedSearchParams = useSearchParams()
@@ -1105,6 +1435,7 @@ export function RankingFilters({
   const searchParams = useMemo(() => new URLSearchParams(draftSearch), [draftSearch])
   const [, startTransition] = useTransition()
   const [collapsed, setCollapsed] = useCollapsedFilters(`ranking:${basePath}`)
+  const [presets, setPresets] = useState<SavedFilterPreset[]>(savedPresets)
 
   const updateParams = useCallback(
     (updates: Record<string, string | null>) => {
@@ -1159,6 +1490,12 @@ export function RankingFilters({
   }
 
   const clearAll = () => setDraftSearch("")
+
+  const applyPreset = (query: string) => {
+    setDraftSearch(query)
+    const target = query ? `${basePath}?${query}` : basePath
+    startTransition(() => router.replace(target))
+  }
 
   // Multi-select helpers (CSV em URL)
   const csvSet = (key: string): Set<string> => {
@@ -1288,6 +1625,7 @@ export function RankingFilters({
       value: tag.slug,
       label: tag.name,
       groupName: tag.groupName ?? "Sem grupo",
+      subGroupName: tag.subGroupName,
     })),
     [filteredTags]
   )
@@ -1296,6 +1634,7 @@ export function RankingFilters({
       value: tag.slug,
       label: tag.name,
       groupName: tag.groupName ?? "Sem grupo",
+      subGroupName: tag.subGroupName,
     })),
     [availableTags]
   )
@@ -1449,7 +1788,16 @@ export function RankingFilters({
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {!collapsed && (
+            <SavedFiltersControl
+              presets={presets}
+              basePath={basePath}
+              currentQuery={draftSearch}
+              onApply={applyPreset}
+              onChange={setPresets}
+            />
+          )}
           {!collapsed && (
             <Button size="sm" onClick={applyAllFilters} disabled={!filtersDirty}>
               Aplicar filtros

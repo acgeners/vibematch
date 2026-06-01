@@ -336,19 +336,38 @@ export async function fetchJikanMangaReviews(malId: number): Promise<string[]> {
   // `preliminary=true` é essencial pra manhwa em andamento — a maioria das
   // reviews fica marcada como preliminary no MAL e seria filtrada por padrão.
   // `spoiler=true` inclui reviews com spoiler (sinal valioso pra avaliação IA).
-  async function fetchPage(page: number): Promise<unknown[]> {
-    try {
-      const url = new URL(`${JIKAN_BASE}/manga/${malId}/reviews`)
-      url.searchParams.set("page", String(page))
-      url.searchParams.set("preliminary", "true")
-      url.searchParams.set("spoiler", "true")
-      const res = await fetch(url, { cache: "no-store" })
-      if (!res.ok) return []
-      const json = await res.json()
-      return Array.isArray(json?.data) ? json.data : []
-    } catch {
-      return []
+  async function fetchPage(page: number, maxAttempts = 3): Promise<unknown[]> {
+    const url = new URL(`${JIKAN_BASE}/manga/${malId}/reviews`)
+    url.searchParams.set("page", String(page))
+    url.searchParams.set("preliminary", "true")
+    url.searchParams.set("spoiler", "true")
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      let res: Response
+      try {
+        res = await fetch(url, { cache: "no-store" })
+      } catch (err) {
+        console.warn(`[fetchJikanMangaReviews] MAL id=${malId} page=${page} erro de rede (tentativa ${attempt}/${maxAttempts}):`, err instanceof Error ? err.message : err)
+        if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, 400 * attempt))
+        continue
+      }
+      if (res.ok) {
+        const json = await res.json()
+        return Array.isArray(json?.data) ? json.data : []
+      }
+      // 404 = página inexistente (fim das reviews); silencioso, não é erro.
+      if (res.status === 404) return []
+      if (!TRANSIENT_STATUSES.has(res.status)) {
+        console.warn(`[fetchJikanMangaReviews] MAL id=${malId} page=${page}: HTTP ${res.status} (não-retryable)`)
+        return []
+      }
+      if (attempt < maxAttempts) {
+        const delay = res.status === 429 ? 1200 * attempt : 500 * attempt
+        await new Promise((r) => setTimeout(r, delay))
+      } else {
+        console.warn(`[fetchJikanMangaReviews] MAL id=${malId} page=${page}: desistiu após ${maxAttempts} tentativas (último HTTP ${res.status})`)
+      }
     }
+    return []
   }
 
   try {
@@ -368,7 +387,8 @@ export async function fetchJikanMangaReviews(malId: number): Promise<string[]> {
       .filter(Boolean)
       .slice(0, 50)
       .map((review) => review.slice(0, 900))
-  } catch {
+  } catch (err) {
+    console.warn(`[fetchJikanMangaReviews] MAL id=${malId} falhou:`, err instanceof Error ? err.message : err)
     return []
   }
 }

@@ -44,6 +44,7 @@ const COLUMN_TO_SORT_FIELD: Record<string, string> = {
   platform_avg: "platform_avg",
   total_votes: "total_votes",
   decision: "decision",
+  expected: "expected_score",
   final: "final_score",
   calc: "calc_score",
   pred: "pred_score",
@@ -530,7 +531,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                 const slug = col.key.startsWith("crit_") ? col.key.slice(5) : null
                 const criterion = slug ? CRITERIA_INFO[slug] : null
                 const fullName = criterion?.name ?? col.configLabel ?? null
-                const description = criterion?.description ?? null
+                const description = criterion?.description ?? col.description ?? null
                 const showFullName = fullName && fullName !== col.label
                 const align = col.align ?? "left"
                 const justify =
