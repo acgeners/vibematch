@@ -141,7 +141,7 @@ async function fetchTagsInGroup(groupSlug) {
   for (let offset = 0; ; offset += PAGE) {
     const { data, error } = await supabase
       .from("tags")
-      .select("id, slug, name")
+      .select("id, slug, name, tag_subgroup_id")
       .eq("tag_group_id", groupId)
       .order("name", { ascending: true })
       .range(offset, offset + PAGE - 1)
@@ -221,56 +221,74 @@ async function processGroup(groupSlug) {
     return { tags: tags.length, proposals: 0, covered: 0, avgConf: 0, tokensIn: 0, tokensOut: 0, status: "skip" }
   }
 
-  console.log(`[propose-tag-clusters] calling Claude (${MODEL})...`)
-  const { clusters: rawClusters, usage } = await callClaude(groupSlug, tags.map((t) => t.name))
-  console.log(`[propose-tag-clusters] received ${rawClusters.length} clusters. tokens=${usage.input_tokens}/${usage.output_tokens}`)
+  // Partition by sub-group: a cluster may only group tags from the SAME
+  // sub-group. Tags without a sub-group (tag_subgroup_id null) form their own
+  // bucket (covers groups that don't use sub-groups too).
+  const buckets = new Map()
+  for (const t of tags) {
+    const key = t.tag_subgroup_id || "__none__"
+    const arr = buckets.get(key) || []
+    arr.push(t)
+    buckets.set(key, arr)
+  }
+  console.log(`[propose-tag-clusters] ${buckets.size} sub-bucket(s); clustering each within its sub-group.`)
 
-  const filtered = rawClusters.filter((c) => c.confidence >= MIN_CONFIDENCE)
-  console.log(`[propose-tag-clusters] ${filtered.length} above min_confidence ${MIN_CONFIDENCE}.`)
-
-  // Build name→id lookup (case-insensitive).
+  // Build name→id lookup (case-insensitive) over the whole group.
   const nameToId = new Map()
   for (const t of tags) nameToId.set(t.name.toLowerCase(), t.id)
 
   const proposals = []
-  let droppedForUnknownMember = 0
+  const droppedForUnknownMember = 0
   let droppedForFewMembers = 0
   const seenMember = new Set()
-  for (const cluster of filtered) {
-    const memberIds = []
-    const matched = []
-    for (const memberName of cluster.members) {
-      const id = nameToId.get(memberName.toLowerCase())
-      if (!id) continue
-      if (seenMember.has(id)) continue // tag already in earlier cluster — skip
-      memberIds.push(id)
-      matched.push(memberName)
-    }
-    if (memberIds.length < 2) {
-      droppedForFewMembers += 1
-      continue
-    }
-    if (matched.length !== cluster.members.length) {
-      droppedForUnknownMember += 1
-    }
-    for (const id of memberIds) seenMember.add(id)
+  let tokensIn = 0
+  let tokensOut = 0
 
-    // Canonical: prefer cluster.canonical_name if it's a member, else first matched.
-    const canonicalName =
-      nameToId.has(cluster.canonical_name.toLowerCase()) ? cluster.canonical_name : matched[0]
-    const canonicalSlug = slugifyTagName(canonicalName)
-    if (!canonicalSlug) continue
+  for (const [, bucket] of buckets) {
+    if (bucket.length < 2) continue
+    const bucketNames = new Set(bucket.map((t) => t.name.toLowerCase()))
+    console.log(`[propose-tag-clusters] calling Claude (${MODEL}) for sub-bucket of ${bucket.length} tags...`)
+    const { clusters: rawClusters, usage } = await callClaude(groupSlug, bucket.map((t) => t.name))
+    tokensIn += usage.input_tokens
+    tokensOut += usage.output_tokens
+    const filtered = rawClusters.filter((c) => c.confidence >= MIN_CONFIDENCE)
 
-    proposals.push({
-      group_slug: groupSlug,
-      canonical_name: canonicalName,
-      canonical_slug: canonicalSlug,
-      member_tag_ids: memberIds,
-      confidence: cluster.confidence,
-      rationale: cluster.rationale,
-      status: "pending",
-    })
+    for (const cluster of filtered) {
+      const memberIds = []
+      const matched = []
+      for (const memberName of cluster.members) {
+        const key = memberName.toLowerCase()
+        if (!bucketNames.has(key)) continue // member outside this sub-group — drop
+        const id = nameToId.get(key)
+        if (!id || seenMember.has(id)) continue
+        memberIds.push(id)
+        matched.push(memberName)
+      }
+      if (memberIds.length < 2) {
+        droppedForFewMembers += 1
+        continue
+      }
+      for (const id of memberIds) seenMember.add(id)
+
+      const canonicalName = bucketNames.has(cluster.canonical_name.toLowerCase())
+        ? cluster.canonical_name
+        : matched[0]
+      const canonicalSlug = slugifyTagName(canonicalName)
+      if (!canonicalSlug) continue
+
+      proposals.push({
+        group_slug: groupSlug,
+        canonical_name: canonicalName,
+        canonical_slug: canonicalSlug,
+        member_tag_ids: memberIds,
+        confidence: cluster.confidence,
+        rationale: cluster.rationale,
+        status: "pending",
+      })
+    }
   }
+
+  const usage = { input_tokens: tokensIn, output_tokens: tokensOut }
 
   console.log(`[propose-tag-clusters] valid proposals: ${proposals.length}`)
   if (droppedForUnknownMember) console.log(`  dropped (unknown member name): ${droppedForUnknownMember}`)

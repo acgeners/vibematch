@@ -24,6 +24,8 @@ export interface TagClusterProposal {
 
 export interface ProposalWithMembers extends TagClusterProposal {
   members: Array<{ id: string; name: string; slug: string }>
+  // Sub-group of the cluster (from its members; clusters are same-sub-group).
+  subgroup_id: string | null
 }
 
 export async function listProposals(
@@ -45,26 +47,32 @@ export async function listProposals(
 
   // Hydrate members.
   const allIds = [...new Set(proposals.flatMap((p) => p.member_tag_ids as string[]))]
-  if (allIds.length === 0) return proposals.map((p) => ({ ...(p as TagClusterProposal), members: [] }))
+  if (allIds.length === 0)
+    return proposals.map((p) => ({ ...(p as TagClusterProposal), members: [], subgroup_id: null }))
 
-  const tagsByChunk: Array<{ id: string; name: string; slug: string }> = []
+  type HydratedTag = { id: string; name: string; slug: string; tag_subgroup_id: string | null }
+  const tagsByChunk: HydratedTag[] = []
   const CHUNK = 100
   for (let i = 0; i < allIds.length; i += CHUNK) {
     const { data, error: tErr } = await supabase
       .from("tags")
-      .select("id, name, slug")
+      .select("id, name, slug, tag_subgroup_id")
       .in("id", allIds.slice(i, i + CHUNK))
     if (tErr) throw new Error(tErr.message)
-    tagsByChunk.push(...((data ?? []) as Array<{ id: string; name: string; slug: string }>))
+    tagsByChunk.push(...((data ?? []) as HydratedTag[]))
   }
   const byId = new Map(tagsByChunk.map((t) => [t.id, t]))
 
-  return proposals.map((p) => ({
-    ...(p as TagClusterProposal),
-    members: (p.member_tag_ids as string[])
+  return proposals.map((p) => {
+    const members = (p.member_tag_ids as string[])
       .map((id) => byId.get(id))
-      .filter((t): t is { id: string; name: string; slug: string } => Boolean(t)),
-  }))
+      .filter((t): t is HydratedTag => Boolean(t))
+    return {
+      ...(p as TagClusterProposal),
+      members: members.map((m) => ({ id: m.id, name: m.name, slug: m.slug })),
+      subgroup_id: members[0]?.tag_subgroup_id ?? null,
+    }
+  })
 }
 
 export async function approveProposal(id: string): Promise<{ error?: string }> {
@@ -193,6 +201,9 @@ export async function editProposal(
 export interface ApplyResult {
   applied: number
   failed: number
+  // Proposals skipped because <2 of their member tags still exist (members were
+  // deleted/merged away). Auto-rejected instead of throwing.
+  autoRejected: number
   errors: string[]
   tagsRemoved: number
   workTagsRedirected: number
@@ -207,28 +218,48 @@ export async function applyApprovedProposals(groupSlug?: string): Promise<ApplyR
   if (groupSlug) query = query.eq("group_slug", groupSlug)
 
   const { data: approved, error } = await query
-  if (error) return { applied: 0, failed: 0, errors: [error.message], tagsRemoved: 0, workTagsRedirected: 0 }
+  if (error) return { applied: 0, failed: 0, autoRejected: 0, errors: [error.message], tagsRemoved: 0, workTagsRedirected: 0 }
   if (!approved || approved.length === 0) {
-    return { applied: 0, failed: 0, errors: [], tagsRemoved: 0, workTagsRedirected: 0 }
+    return { applied: 0, failed: 0, autoRejected: 0, errors: [], tagsRemoved: 0, workTagsRedirected: 0 }
   }
 
   const result: ApplyResult = {
     applied: 0,
     failed: 0,
+    autoRejected: 0,
     errors: [],
     tagsRemoved: 0,
     workTagsRedirected: 0,
   }
+  const now = new Date().toISOString()
 
   for (const proposal of approved) {
     const p = proposal as TagClusterProposal
     const groupId = (TAG_GROUP_IDS as Record<string, string>)[p.group_slug] ?? null
+
+    // Guard: members may have been deleted/merged away (e.g. by an earlier apply
+    // in this same batch). Skip + auto-reject when <2 still exist, so the merge
+    // never throws "no member tags found".
+    const { data: existingMembers } = await supabase
+      .from("tags")
+      .select("id")
+      .in("id", p.member_tag_ids)
+    const validIds = (existingMembers ?? []).map((r) => r.id as string)
+    if (validIds.length < 2) {
+      await supabase
+        .from("tag_cluster_proposal")
+        .update({ status: "rejected", reviewed_at: now })
+        .eq("id", p.id)
+      result.autoRejected += 1
+      continue
+    }
+
     try {
       const merge = await mergeIntoCanonical(supabase, {
         canonicalName: p.canonical_name,
         canonicalSlug: p.canonical_slug,
         tagGroupId: groupId,
-        memberTagIds: p.member_tag_ids,
+        memberTagIds: validIds,
       })
       await supabase
         .from("tag_cluster_proposal")
@@ -257,6 +288,7 @@ export interface UncoveredTag {
   id: string
   name: string
   slug: string
+  subgroup_id?: string | null
 }
 
 // Returns tags in the given group that are NOT members of any proposal
@@ -269,7 +301,7 @@ export async function listUncoveredTags(groupSlug: string): Promise<UncoveredTag
 
   const supabase = createAdminClient()
   const [tagsRes, proposalsRes] = await Promise.all([
-    supabase.from("tags").select("id, name, slug").eq("tag_group_id", groupId).order("name"),
+    supabase.from("tags").select("id, name, slug, tag_subgroup_id").eq("tag_group_id", groupId).order("name"),
     supabase.from("tag_cluster_proposal").select("member_tag_ids").eq("group_slug", groupSlug),
   ])
   if (tagsRes.error) throw new Error(tagsRes.error.message)
@@ -280,7 +312,9 @@ export async function listUncoveredTags(groupSlug: string): Promise<UncoveredTag
     for (const id of (p.member_tag_ids as string[]) ?? []) covered.add(id)
   }
 
-  return ((tagsRes.data ?? []) as UncoveredTag[]).filter((t) => !covered.has(t.id))
+  return ((tagsRes.data ?? []) as Array<{ id: string; name: string; slug: string; tag_subgroup_id: string | null }>)
+    .filter((t) => !covered.has(t.id))
+    .map((t) => ({ id: t.id, name: t.name, slug: t.slug, subgroup_id: t.tag_subgroup_id ?? null }))
 }
 
 // Returns all tags in the given group (ordered by name), regardless of
@@ -377,6 +411,18 @@ export async function moveTagBetweenProposals(
     return { error: "proposta de destino não pode ser modificada" }
   }
 
+  // Same sub-group guard — clusters não cruzam sub-grupos.
+  const targetSample = ((target.member_tag_ids as string[]) ?? []).find((id) => id !== tagId)
+  if (targetSample) {
+    const { data: sgRows } = await supabase
+      .from("tags")
+      .select("id, tag_subgroup_id")
+      .in("id", [tagId, targetSample])
+    const movingSg = sgRows?.find((r) => r.id === tagId)?.tag_subgroup_id ?? null
+    const targetSg = sgRows?.find((r) => r.id === targetSample)?.tag_subgroup_id ?? null
+    if (movingSg !== targetSg) return { error: "a tag está em outro sub-grupo que o cluster de destino" }
+  }
+
   const sourceMembers = ((source.member_tag_ids as string[]) ?? []).filter((id) => id !== tagId)
   const targetMembers = (target.member_tag_ids as string[]) ?? []
   const newTargetMembers = targetMembers.includes(tagId) ? targetMembers : [...targetMembers, tagId]
@@ -411,6 +457,54 @@ export async function moveTagBetweenProposals(
 
   revalidatePath("/settings/tag-consolidation")
   return { sourceAutoRejected }
+}
+
+// Adds an uncovered tag to an existing cluster proposal of the same group, only
+// when the tag is in the same sub-group as the cluster.
+export async function addTagToProposal(
+  tagId: string,
+  proposalId: string,
+): Promise<{ error?: string }> {
+  const supabase = createAdminClient()
+  const { data: prop, error: pErr } = await supabase
+    .from("tag_cluster_proposal")
+    .select("id, group_slug, member_tag_ids, status")
+    .eq("id", proposalId)
+    .maybeSingle()
+  if (pErr) return { error: pErr.message }
+  if (!prop) return { error: "proposta não encontrada" }
+  if (!["pending", "approved"].includes(prop.status as string)) {
+    return { error: "proposta não pode ser modificada" }
+  }
+  const members = (prop.member_tag_ids as string[]) ?? []
+  if (members.includes(tagId)) return {}
+
+  // Same group + same sub-group guard.
+  const sample = members[0]
+  const { data: tagRows, error: tErr } = await supabase
+    .from("tags")
+    .select("id, tag_group_id, tag_subgroup_id")
+    .in("id", sample ? [tagId, sample] : [tagId])
+  if (tErr) return { error: tErr.message }
+  const tag = (tagRows ?? []).find((t) => t.id === tagId)
+  if (!tag) return { error: "tag não encontrada" }
+  const member = sample ? (tagRows ?? []).find((t) => t.id === sample) : null
+  if (member) {
+    if ((tag.tag_group_id ?? null) !== (member.tag_group_id ?? null)) {
+      return { error: "a tag está em outro grupo" }
+    }
+    if ((tag.tag_subgroup_id ?? null) !== (member.tag_subgroup_id ?? null)) {
+      return { error: "a tag está em outro sub-grupo que o cluster" }
+    }
+  }
+
+  const { error: uErr } = await supabase
+    .from("tag_cluster_proposal")
+    .update({ member_tag_ids: [...members, tagId] })
+    .eq("id", proposalId)
+  if (uErr) return { error: uErr.message }
+  revalidatePath("/settings/tag-consolidation")
+  return {}
 }
 
 export async function moveTagToGroup(

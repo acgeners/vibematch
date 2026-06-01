@@ -26,31 +26,8 @@ import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
-import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
-import { TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
-import { slugifyTagName } from "@/lib/utils"
+import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import { titleToSlug } from "@/lib/utils"
-
-let cachedTagNameToGroupId: Map<string, string> | null = null
-function getTagNameToGroupId(): Map<string, string> {
-  if (cachedTagNameToGroupId) return cachedTagNameToGroupId
-  const map = new Map<string, string>()
-  for (const group of TAG_GROUPS_CATALOG) {
-    const groupId = (TAG_GROUP_IDS as Record<string, string>)[group.groupSlug]
-    if (!groupId) continue
-    for (const value of group.values) {
-      const key = value.trim().toLowerCase()
-      if (!key || map.has(key)) continue
-      map.set(key, groupId)
-    }
-  }
-  cachedTagNameToGroupId = map
-  return map
-}
-
-function resolveTagGroupId(name: string): string | null {
-  return getTagNameToGroupId().get(name.trim().toLowerCase()) ?? null
-}
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>
 
@@ -349,75 +326,16 @@ function normalizeExternalPlatformUpdates(
   return [...normalized.values()]
 }
 
-// Resolves a list of tag names to ids in a few queries instead of 3 per tag.
-// Returns the ids of tags that exist or were created. Drops names whose slug is empty.
-// Each incoming slug is first resolved through `tag_alias` so historical/external
-// variants (e.g. snake_case) map to their canonical kebab-case tag.
+// Resolves tag names to ids (creating missing tags via the shared ingestion
+// helper) and schedules background classification (group/sub-group/cluster) for
+// any newly-created tag. Drops names whose slug is empty.
 async function upsertTagsBatch(
   supabase: SupabaseAdminClient,
   names: string[],
 ): Promise<string[]> {
-  const prepared = names
-    .map((name) => ({ name: name.trim(), slug: slugifyTagName(name) }))
-    .filter((t) => t.slug !== "")
-
-  // Dedupe by slug, keeping first name occurrence.
-  const bySlug = new Map<string, { name: string; slug: string }>()
-  for (const t of prepared) {
-    if (!bySlug.has(t.slug)) bySlug.set(t.slug, t)
-  }
-  if (bySlug.size === 0) return []
-
-  const slugs = [...bySlug.keys()]
-
-  // Resolve aliases first — incoming slug may point to a different canonical tag.
-  const idByInputSlug = new Map<string, string>()
-  const { data: aliasRows } = await supabase
-    .from("tag_alias")
-    .select("alias_slug, canonical_tag_id")
-    .in("alias_slug", slugs)
-  for (const row of aliasRows ?? []) {
-    idByInputSlug.set(row.alias_slug as string, row.canonical_tag_id as string)
-  }
-
-  const slugsToLookup = slugs.filter((s) => !idByInputSlug.has(s))
-
-  if (slugsToLookup.length > 0) {
-    const { data: existing, error: selectError } = await supabase
-      .from("tags").select("id, slug").in("slug", slugsToLookup)
-    if (selectError) {
-      console.error(`[upsertTagsBatch] select failed`, selectError.message)
-      return []
-    }
-    for (const row of existing ?? []) {
-      idByInputSlug.set(row.slug as string, row.id as string)
-    }
-
-    const missing = slugsToLookup.filter((s) => !idByInputSlug.has(s))
-    if (missing.length > 0) {
-      const rows = missing.map((slug) => {
-        const t = bySlug.get(slug)!
-        return {
-          slug,
-          name: t.name,
-          tag_group_id: resolveTagGroupId(t.name),
-        }
-      })
-      const { data: inserted, error: insertError } = await supabase
-        .from("tags")
-        .upsert(rows, { onConflict: "slug", ignoreDuplicates: false })
-        .select("id, slug")
-      if (insertError) {
-        console.error(`[upsertTagsBatch] insert failed`, insertError.message)
-      } else {
-        for (const row of inserted ?? []) {
-          idByInputSlug.set(row.slug as string, row.id as string)
-        }
-      }
-    }
-  }
-
-  return slugs.map((slug) => idByInputSlug.get(slug)).filter((id): id is string => Boolean(id))
+  const { ids, createdIds } = await resolveOrCreateTags(supabase, names)
+  scheduleTagEnrichment(createdIds)
+  return ids
 }
 
 async function syncWorkTags(

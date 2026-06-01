@@ -25,6 +25,7 @@ import type {
 } from "@/server/actions/tag-subgroups"
 import type { TagGroupSlug } from "@/lib/constants/tag-groups"
 import {
+  addTagToProposal,
   applyApprovedGroupMoves,
   applyApprovedProposals,
   approveGroupMove,
@@ -239,12 +240,16 @@ export function TagConsolidationClient({
     setIsApplying(true)
     try {
       const result = await applyApprovedProposals(initialGroup ?? undefined)
+      const autoNote =
+        result.autoRejected > 0
+          ? ` ${result.autoRejected} auto-rejeitada(s) (membros já não existiam).`
+          : ""
       if (result.errors.length > 0) {
-        toast.error(`Aplicados ${result.applied}, falharam ${result.failed}. Veja console.`)
+        toast.error(`Aplicados ${result.applied}, falharam ${result.failed}.${autoNote} Veja console.`)
         console.error(result.errors)
       } else {
         toast.success(
-          `${result.applied} clusters aplicados. ${result.tagsRemoved} tags removidas, ${result.workTagsRedirected} work_tags redirecionadas.`,
+          `${result.applied} clusters aplicados. ${result.tagsRemoved} tags removidas, ${result.workTagsRedirected} work_tags redirecionadas.${autoNote}`,
         )
       }
       refresh()
@@ -538,7 +543,7 @@ export function TagConsolidationClient({
                 other.group_slug === p.group_slug &&
                 (other.status === "pending" || other.status === "approved"),
             )
-            .map((other) => ({ id: other.id, canonical_name: other.canonical_name }))
+            .map((other) => ({ id: other.id, canonical_name: other.canonical_name, subgroup_id: other.subgroup_id }))
           return (
             <ProposalCard
               key={p.id}
@@ -566,6 +571,9 @@ export function TagConsolidationClient({
           groupSlug={initialGroup}
           tags={uncoveredTags}
           groups={groups}
+          candidateProposals={proposals
+            .filter((p) => p.status === "pending" || p.status === "approved")
+            .map((p) => ({ id: p.id, canonical_name: p.canonical_name, subgroup_id: p.subgroup_id }))}
           onMoved={refresh}
           isPending={isPending}
         />
@@ -1150,6 +1158,7 @@ interface UncoveredSectionProps {
   groupSlug: string
   tags: UncoveredTag[]
   groups: Array<{ slug: TagGroupSlug; label: string }>
+  candidateProposals: Array<{ id: string; canonical_name: string; subgroup_id: string | null }>
   onMoved: () => void
   isPending: boolean
 }
@@ -1158,6 +1167,7 @@ function UncoveredTagsSection({
   groupSlug,
   tags,
   groups,
+  candidateProposals,
   onMoved,
   isPending,
 }: UncoveredSectionProps) {
@@ -1189,6 +1199,8 @@ function UncoveredTagsSection({
               isCanonical={false}
               groups={groups}
               currentGroupSlug={groupSlug}
+              tagSubgroupId={t.subgroup_id ?? null}
+              siblingProposals={candidateProposals}
               disabled={isPending}
               onMoved={onMoved}
             />
@@ -1203,7 +1215,7 @@ interface CardProps {
   proposal: ProposalWithMembers
   groups: Array<{ slug: TagGroupSlug; label: string }>
   currentGroupSlug: string
-  siblingProposals: Array<{ id: string; canonical_name: string }>
+  siblingProposals: Array<{ id: string; canonical_name: string; subgroup_id: string | null }>
   onApprove: () => void
   onReject: () => void
   onReopen: () => void
@@ -1417,6 +1429,7 @@ function ProposalCard({
               currentGroupSlug={currentGroupSlug}
               sourceProposalId={p.id}
               siblingProposals={siblingProposals}
+              tagSubgroupId={p.subgroup_id}
               disabled={isLocked || isPending}
               onMoved={onRefresh}
             />
@@ -1451,7 +1464,8 @@ interface MemberChipProps {
   groups: Array<{ slug: TagGroupSlug; label: string }>
   currentGroupSlug: string
   sourceProposalId?: string
-  siblingProposals?: Array<{ id: string; canonical_name: string }>
+  siblingProposals?: Array<{ id: string; canonical_name: string; subgroup_id: string | null }>
+  tagSubgroupId?: string | null
   disabled: boolean
   onMoved: () => void
 }
@@ -1465,6 +1479,7 @@ function MemberChip({
   currentGroupSlug,
   sourceProposalId,
   siblingProposals = [],
+  tagSubgroupId = null,
   disabled,
   onMoved,
 }: MemberChipProps) {
@@ -1518,11 +1533,24 @@ function MemberChip({
     }
   }
 
+  const handleAddToProposal = async (targetProposalId: string) => {
+    setBusy(true)
+    const { error } = await addTagToProposal(tagId, targetProposalId)
+    setBusy(false)
+    if (error) {
+      toast.error(error)
+    } else {
+      toast.success(`"${name}" adicionada ao cluster`)
+      setOpen(false)
+      onMoved()
+    }
+  }
+
   const targetGroups = groups.filter((g) => g.slug !== currentGroupSlug)
-  const sortedSiblings = [...siblingProposals].sort((a, b) =>
-    a.canonical_name.localeCompare(b.canonical_name),
-  )
-  const canMoveBetweenProposals = sourceProposalId && sortedSiblings.length > 0
+  // Only clusters in the SAME sub-group as this tag (and not its own).
+  const eligibleProposals = [...siblingProposals]
+    .filter((s) => s.id !== sourceProposalId && (s.subgroup_id ?? null) === (tagSubgroupId ?? null))
+    .sort((a, b) => a.canonical_name.localeCompare(b.canonical_name))
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -1542,18 +1570,20 @@ function MemberChip({
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 p-1">
-        {canMoveBetweenProposals && (
+        {eligibleProposals.length > 0 && (
           <>
             <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Mover para outra proposta (mesmo grupo)
+              {sourceProposalId
+                ? "Mover para outro cluster (mesmo sub-grupo)"
+                : "Adicionar a um cluster (mesmo sub-grupo)"}
             </div>
             <div className="max-h-56 overflow-y-auto">
-              {sortedSiblings.map((s) => (
+              {eligibleProposals.map((s) => (
                 <button
                   key={s.id}
                   type="button"
                   disabled={busy}
-                  onClick={() => handleMoveProposal(s.id)}
+                  onClick={() => (sourceProposalId ? handleMoveProposal(s.id) : handleAddToProposal(s.id))}
                   className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/60 disabled:opacity-50"
                 >
                   <span className="truncate">{s.canonical_name}</span>

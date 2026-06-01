@@ -8,12 +8,11 @@ import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { searchAllSources, fetchMultiSourceDetails, fetchExternalEvaluationContextForWork, fetchExternalEvaluationContextForCandidate, buildCandidateFromExternalIds, SEARCH_CONNECTORS, bestTitleMatch } from "@/lib/external/index"
 import { fetchMangaUpdatesAlternativeTitles } from "@/lib/external/mangaupdates"
 import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
-import { classifyTagsByGroup } from "@/lib/ai-evaluation/tag-classifier"
+import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import type { ExternalSourceId, MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField, SourcedReview, ExternalSearchResult } from "@/lib/external/types"
 import type { CriterionSlug } from "@/types/domain"
 import { revalidatePath } from "next/cache"
 import { pickPrimaryCover } from "@/lib/work-derived"
-import { slugifyTagName } from "@/lib/utils"
 import { isBlockedCoverUrl } from "@/lib/external/blocked-covers"
 
 export interface TagCatalogItem {
@@ -217,51 +216,14 @@ export async function fetchExternalData(
   return { data: { ...result.data, genres, tags }, conflicts: result.conflicts }
 }
 
+// Pre-creates external tags through the shared ingestion pipeline: resolves
+// aliases/existing, creates missing (catalog group fast-path) and schedules
+// background classification (group via AI when needed + sub-group + cluster).
 export async function upsertExternalTags(tagNames: string[]): Promise<void> {
   if (!tagNames.length) return
   const supabase = createAdminClient()
-
-  const rows = tagNames.map((name) => ({
-    name: name.trim(),
-    slug: slugifyTagName(name),
-  })).filter((r) => r.slug)
-
-  if (rows.length === 0) return
-
-  const slugs = rows.map((r) => r.slug)
-
-  // Resolve aliases — incoming slugs may already be known under canonical form.
-  const { data: aliasRows } = await supabase
-    .from("tag_alias")
-    .select("alias_slug")
-    .in("alias_slug", slugs)
-  const aliasedSlugs = new Set((aliasRows ?? []).map((row) => row.alias_slug as string))
-
-  // Then identify existing canonical tags so we don't reclassify them.
-  const { data: existing } = await supabase
-    .from("tags")
-    .select("slug")
-    .in("slug", slugs)
-  const existingSlugs = new Set((existing ?? []).map((row) => row.slug))
-
-  const newRows = rows.filter((r) => !existingSlugs.has(r.slug) && !aliasedSlugs.has(r.slug))
-  if (newRows.length === 0) return
-
-  // Classifica tags novas em tag_groups via IA antes de inserir. Tags que não
-  // são classificáveis caem no grupo "Other".
-  const classification = await classifyTagsByGroup({
-    tagNames: newRows.map((r) => r.name),
-  })
-
-  const rowsToInsert = newRows.map((r) => ({
-    name: r.name,
-    slug: r.slug,
-    tag_group_id: classification.byName.get(r.name) ?? classification.fallbackGroupId,
-  }))
-
-  await supabase
-    .from("tags")
-    .upsert(rowsToInsert, { onConflict: "slug", ignoreDuplicates: true })
+  const { createdIds } = await resolveOrCreateTags(supabase, tagNames)
+  scheduleTagEnrichment(createdIds)
 }
 
 export async function listExternalSources() {
