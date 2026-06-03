@@ -39,7 +39,7 @@ export const DEFAULT_WORK_COLUMN_NAMESPACE: WorkColumnNamespace = "titles"
 //   - favorites v5 → v6: oculta também a coluna "fav" (redundante: tudo aqui
 //     já é favorito)
 //   - ranking, recommendations: sem mudança de default, mantêm v4
-// favorites v7 → v8: adiciona a coluna "Nota Final" (decision) visível por padrão.
+// favorites v7 → v8: adiciona a coluna "Prioridade" (decision) visível por padrão.
 const NAMESPACE_STORAGE_VERSION: Record<WorkColumnNamespace, string> = {
   titles: "v6",
   favorites: "v8",
@@ -70,9 +70,9 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   { key: "chapters_progress", label: "% Lido", configLabel: "% lido", description: "Progresso de leitura: capítulos lidos ÷ total de capítulos.", align: "center", group: "basico" },
   { key: "year", label: "Ano", description: "Ano de lançamento/início da publicação.", align: "center", defaultHidden: true, group: "basico" },
   { key: "synopsis_q", label: "Sinopse", configLabel: "Interesse na sinopse", description: "O quanto a sinopse te interessou (♥ a ♥♥♥♥), informado na triagem/avaliação.", align: "center", defaultHidden: true, group: "basico" },
-  // Nota Final — combina Prevista + Alinhamento + IA Rk. num único número de
-  // prioridade. Default visível em /favorites; opcional nos demais namespaces.
-  { key: "decision", label: "Nota Final", configLabel: "Nota Final", description: "Combina Nota Prevista, Alinhamento e IA Rk num único número de prioridade (0–10). Serve pra decidir o que ler primeiro entre obras com Prevista parecida — é um score de PRIORIDADE, não uma previsão de nota.", align: "center", group: "notas" },
+  // Prioridade — âncora na Prevista (que já embute o Alinhamento calibrado) +
+  // IA Rk quando há. Default visível em /favorites; opcional nos demais namespaces.
+  { key: "decision", label: "Prioridade", configLabel: "Prioridade", description: "Quão provável que você goste — número único pra decidir o que ler primeiro. Ancorado na Nota Prevista (que já embute o Alinhamento calibrado) e ajustado pela IA Rk quando existe. É um score de PRIORIDADE, não uma previsão de nota.", align: "center", group: "notas" },
   // Novo (Fase 1.5): expected_score é o L1 que substitui o trio N.IA/N.Pr/N.Final
   { key: "expected_score", label: "Prevista", configLabel: "Nota Prevista", description: "Nota que o modelo prevê que você daria à obra (0–10). É a âncora calibrada — um Ridge L1 que substituiu o antigo trio Nota.IA / Nota.Pr / Nota.Final.", align: "center", group: "notas" },
   { key: "expected_baseline", label: "Perfil", configLabel: "Prevista — Perfil", description: "Decomposição da Nota Prevista (etapa 1): a parte vinda só do seu perfil de gosto, antes de considerar a qualidade da obra.", align: "center", defaultHidden: true, group: "legado" },
@@ -85,7 +85,7 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   { key: "final_score", label: "N.Final", configLabel: "Nota.Final (legado)", description: "[Legado] Mistura ponderada de Nota.IA e Nota.Pr. Substituída pela Nota Prevista no cutover da Fase 1.5; mantida só por compatibilidade.", align: "center", defaultHidden: true, group: "legado" },
   { key: "platform_avg", label: "N.M", configLabel: "Nota.M", description: "Nota.M — média ponderada das notas das plataformas externas (AniList, MAL, etc.), na escala 0–10. Pondera mais as fontes com mais votos.", align: "center", defaultHidden: true, group: "notas" },
   { key: "total_votes", label: "Votos", configLabel: "Votos", description: "Total de votos/avaliações somados nas plataformas externas. Quanto maior, mais confiável é a Nota.M.", align: "center", defaultHidden: true, group: "notas" },
-  { key: "alignment_score", label: "IA Rk.", configLabel: "IA Rk", description: "Re-rank do consultor IA (0–100), gerado sob demanda. Reordena as recomendações ('Recomendar com IA', 'Próxima leitura', 'Recomendar do ranking') e alimenta a Nota Final. A maioria das obras fica sem valor até passar pelo Rankear.", align: "center", defaultHidden: true, group: "notas" },
+  { key: "alignment_score", label: "IA Rk.", configLabel: "IA Rk", description: "Re-rank do consultor IA (0–100), gerado sob demanda. Reordena as recomendações ('Recomendar com IA', 'Próxima leitura', 'Recomendar do ranking') e ajusta a Prioridade. A maioria das obras fica sem valor até passar pelo Rankear.", align: "center", defaultHidden: true, group: "notas" },
   { key: "ai_status", label: "IA", configLabel: "Status da avaliação IA", description: "Estágio da avaliação por IA: pendente de atributos, pendente de IA Rk, avaliado ou pulado.", align: "center", group: "basico" },
   { key: "updated_at", label: "Atual.", configLabel: "Atualizado em", description: "Quando o registro da obra foi atualizado pela última vez.", align: "center", group: "basico" },
   { key: "last_read_at", label: "Últ. leitura", configLabel: "Última leitura", description: "Data da última vez que você leu algum capítulo desta obra.", align: "center", defaultHidden: true, group: "basico" },

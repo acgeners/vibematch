@@ -41,7 +41,7 @@ const CRITERION_LABELS: Record<string, string> = {
 
 const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
   { value: "recommended", label: "Recomendado" },
-  { value: "decision", label: "Nota Final" },
+  { value: "decision", label: "Prioridade" },
   { value: "expected_score", label: "Nota Prevista" },
   { value: "personal_fit", label: "Alinhamento" },
   { value: "alignment_score", label: "IA Rk" },
@@ -1919,7 +1919,7 @@ export function RankingFilters({
                   </Button>
                 </div>
               )}
-              <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
+              <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-4">
                 {/* Top N */}
                 <div className="flex items-center gap-2">
                   <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">

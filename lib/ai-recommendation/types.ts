@@ -118,12 +118,35 @@ export interface ChatRecommendationSnapshot {
   items: ChatRecommendationItem[]
 }
 
+export interface ChatEvaluationScore {
+  criterionSlug: string
+  score: number | null
+  justification: string | null
+}
+
+/** Resultado da avaliação completa (9 critérios) disparada pelo chat. Os scores
+ * são SUGERIDOS (review_pending) — o usuário revisa/salva em /ai-evaluation. */
+export interface ChatEvaluationSnapshot {
+  workId: string
+  title: string
+  coverUrl: string | null
+  scores: ChatEvaluationScore[]
+  summary: string | null
+  confidence: number | null
+  /** Link pra página de revisão/commit dos scores. */
+  reviewHref: string
+}
+
 export interface ChatMessage {
   role: "user" | "assistant"
   /** Texto exibido e re-enviado ao modelo nos turnos seguintes. */
   content: string
   /** Presente quando o turno do assistente gerou recomendações. */
   recommendation?: ChatRecommendationSnapshot
+  /** Presente quando o turno gerou uma avaliação completa de 1 obra. */
+  evaluation?: ChatEvaluationSnapshot
+  /** Respostas rápidas sugeridas pelo modelo quando ele faz uma pergunta. */
+  suggestions?: string[]
   created_at?: string
 }
 

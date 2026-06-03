@@ -290,18 +290,24 @@ export function AlignmentScoreCell({
 }
 
 /**
- * Cell pra a Nota Final (0–10) — número de PRIORIDADE que combina Prevista,
- * Alinhamento e (quando há) IA Rk. Distinta visualmente das outras notas (tom
- * primary) porque é o critério default de ordenação. O tooltip abre a composição
- * pra deixar claro que NÃO é uma previsão de nota, e sim "o que ler primeiro".
+ * Cell pra a Prioridade (0–10, exibida ×10 como 0–100) — número que ancora na
+ * Prevista e ajusta pela IA Rk quando há. Distinta visualmente das outras notas
+ * (tom primary) porque é o critério default de ordenação. O tooltip abre a
+ * composição pra deixar claro que NÃO é uma previsão de nota, e sim "o que ler primeiro".
  */
 export function DecisionCell({
   score,
+  affinity,
   expected,
   fitPercentile,
   alignment,
 }: {
   score: number | null
+  /**
+   * Afinidade 0–100 = Decisão × 10 (absoluta): "chance de você gostar". Quando
+   * null, cai pro `score` 0–10. Ver decisionToAffinity em ranking-table.tsx.
+   */
+  affinity: number | null
   expected: number | null
   fitPercentile: number | null
   alignment: number | null
@@ -314,7 +320,7 @@ export function DecisionCell({
             <span className="font-mono text-sm text-muted-foreground cursor-help">—</span>
           </TooltipTrigger>
           <TooltipContent side="top" className="max-w-[260px]">
-            Sem Nota Final — depende da Nota Prevista, que ainda não foi calculada pra esta obra.
+            Sem Prioridade — depende da Nota Prevista, que ainda não foi calculada pra esta obra.
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -327,6 +333,9 @@ export function DecisionCell({
     : score >= 4 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
     : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
 
+  // Headline = afinidade relativa 0–100 (resolução visual); fallback pro 0–10.
+  const display = affinity != null ? String(affinity) : score.toFixed(1)
+
   return (
     <TooltipProvider>
       <Tooltip>
@@ -337,13 +346,17 @@ export function DecisionCell({
               colorClass,
             )}
           >
-            {score.toFixed(1)}
+            {display}
           </span>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[300px] space-y-1.5">
-          <p className="text-xs font-semibold">Nota Final: {score.toFixed(1)}/10</p>
+          <p className="text-xs font-semibold">
+            Prioridade{affinity != null ? `: ${affinity}/100` : `: ${score.toFixed(1)}/10`}
+          </p>
           <p className="text-[11px] text-muted-foreground">
-            Prioridade pra escolher o que ler primeiro — combina as notas abaixo.
+            Chance estimada de você gostar — prioridade pra escolher o que ler primeiro
+            (Prevista ajustada pela IA Rk, ×10). Obras numa mesma faixa estão dentro do
+            erro do modelo, então dividem o número e ficam ordenadas por afinidade.
             <span className="font-semibold"> Não é uma previsão de nota</span> (essa é a Prevista).
           </p>
           <div className="border-t border-border/40 pt-1.5 space-y-0.5 text-xs">
@@ -352,12 +365,12 @@ export function DecisionCell({
               <span className="font-mono font-semibold">{expected != null ? expected.toFixed(1) : "—"}</span>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Alinhamento (±10%)</span>
-              <span className="font-mono font-semibold">{fitPercentile != null ? `${Math.round(fitPercentile)}%` : "—"}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
               <span className="text-muted-foreground">IA Rk. (quando há)</span>
               <span className="font-mono font-semibold">{alignment != null ? Math.round(alignment) : "não rankeada"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Alinhamento (desempate)</span>
+              <span className="font-mono font-semibold">{fitPercentile != null ? `${Math.round(fitPercentile)}%` : "—"}</span>
             </div>
           </div>
         </TooltipContent>

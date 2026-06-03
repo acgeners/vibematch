@@ -26,6 +26,7 @@ import {
 } from "@/server/queries/recommendations"
 import { MAX_CANDIDATES_HARD_LIMIT } from "@/lib/ai-recommendation/limits"
 import type {
+  ChatRecommendationItem,
   RankedCandidate,
   RankedWork,
   RecommendationMode,
@@ -655,6 +656,112 @@ export async function rerankClusterAction(
       .sort((a, b) => b.alignmentScore - a.alignmentScore)
 
     return { data: { ranked: upsertRows.length, requested: candidates.length, rankings } }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}
+
+export interface RankSpecificWorksResult {
+  items: ChatRecommendationItem[]
+  modeSummary: string
+}
+
+/**
+ * Rankeia um conjunto ESPECÍFICO de obras (por work_id) — usado pelo chat pra
+ * "avaliar 1 obra (fit)" e "recomendar entre estas obras". Espelha o
+ * `rerankClusterAction`: roda `rankFavorites` (mode "ranking") numa única
+ * chamada e PERSISTE o alignment_score em `calculated_scores` (IA Rk fica
+ * visível em /ranking, /favorites, /titles). Não cria `recommendation_runs` —
+ * é ação pontual, como os botões de re-rank. Devolve itens prontos pro card do
+ * chat (título, capa, score, justificativa), ordenados por IA Rk desc.
+ */
+export async function rankSpecificWorksForChat(args: {
+  workIds: string[]
+  userContext?: string | null
+}): Promise<{ data?: RankSpecificWorksResult; error?: string }> {
+  try {
+    const gate = await ensureCapability("smart_shortlist")
+    if (!gate.ok) return { error: gate.error }
+
+    const ids = Array.from(new Set(args.workIds)).filter(Boolean)
+    if (ids.length === 0) return { error: "Nenhuma obra indicada." }
+    const limited = ids.slice(0, MAX_CANDIDATES_HARD_LIMIT)
+
+    const runsToday = await getRunsToday()
+    if (runsToday >= MAX_RUNS_PER_DAY) {
+      return {
+        error: `Limite diário de ${MAX_RUNS_PER_DAY} execuções atingido. Tente novamente amanhã.`,
+      }
+    }
+
+    const profileResult = await loadOrEnsureProfile()
+    if ("error" in profileResult) return { error: profileResult.error }
+    const profile = profileResult.profile
+    if (profile.is_stub) {
+      return {
+        error: "Perfil ainda em modo stub — avalie mais obras com user_score pra desbloquear o ranking IA.",
+      }
+    }
+
+    const candidates = (await Promise.all(limited.map((id) => getCandidateById(id)))).filter(
+      (c): c is NonNullable<typeof c> => c != null,
+    )
+    if (candidates.length === 0) {
+      return { error: "Obras não encontradas (ou arquivadas)." }
+    }
+
+    const result = await rankFavorites({
+      profile: profile.profile,
+      candidates,
+      mode: "ranking",
+      userContext: args.userContext ?? null,
+    })
+
+    const byId = new Map<string, FavoriteCandidate>(candidates.map((c) => [c.id, c]))
+    const supabase = createAdminClient()
+    const now = new Date().toISOString()
+    const candidateIds = new Set(candidates.map((c) => c.id))
+
+    const upsertRows = result.rankings
+      .filter((r) => candidateIds.has(r.work_id))
+      .map((r) => ({
+        work_id: r.work_id,
+        alignment_score: r.alignment_score,
+        alignment_run_id: null,
+        alignment_justification: r.justification,
+        alignment_payload: buildAlignmentPayload(r),
+        alignment_at: now,
+        alignment_stale: false,
+      }))
+
+    if (upsertRows.length > 0) {
+      const { error: upErr } = await supabase
+        .from("calculated_scores")
+        .upsert(upsertRows, { onConflict: "work_id" })
+      if (upErr) {
+        return { error: `Falha persistindo alignment_score: ${upErr.message}` }
+      }
+      revalidatePath("/ranking")
+      revalidatePath("/favorites")
+      revalidatePath("/titles")
+    }
+
+    const items: ChatRecommendationItem[] = result.rankings
+      .filter((r) => candidateIds.has(r.work_id))
+      .sort((a, b) => b.alignment_score - a.alignment_score)
+      .map((r) => {
+        const work = byId.get(r.work_id)
+        return {
+          work_id: r.work_id,
+          title: work?.title ?? "(sem título)",
+          coverUrl: work?.coverUrl ?? null,
+          alignment_score: r.alignment_score,
+          justification: r.justification,
+          top_match_factors: r.top_match_factors,
+        }
+      })
+
+    return { data: { items, modeSummary: result.modeSummary } }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Erro desconhecido" }
   }

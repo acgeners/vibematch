@@ -34,10 +34,79 @@ const RECOMMEND_WORKS_TOOL: Anthropic.Messages.Tool = {
   },
 }
 
-export interface ChatToolCall {
+const EVALUATE_WORK_TOOL: Anthropic.Messages.Tool = {
+  name: "evaluate_work",
+  description:
+    "Avalia UMA obra específica que o usuário nomeou. ANTES de chamar, pergunte como ele quer a avaliação: 'fit' (o quanto combina com o gosto dele — rápido/barato) ou 'full' (avaliação completa de 9 critérios — mais lenta e custosa). Só chame depois que o usuário escolher.",
+  input_schema: {
+    type: "object",
+    properties: {
+      title: {
+        type: "string",
+        description: "Título da obra exatamente como o usuário escreveu (ou a forma que ele confirmou na desambiguação).",
+      },
+      kind: {
+        type: "string",
+        enum: ["fit", "full"],
+        description: "'fit' = alinhamento com o gosto do usuário (ranker). 'full' = avaliação completa de 9 critérios (pipeline Nota.IA).",
+      },
+      evenWithoutReviews: {
+        type: "boolean",
+        description: "Só para kind='full': passe true quando, num turno anterior, você avisou que não há reviews externas e o usuário confirmou que quer avaliar mesmo assim.",
+      },
+    },
+    required: ["title", "kind"],
+  },
+}
+
+const RECOMMEND_AMONG_TOOL: Anthropic.Messages.Tool = {
+  name: "recommend_among",
+  description:
+    "Ranqueia/recomenda APENAS entre as obras que o usuário indicou explicitamente (uma lista de títulos). Use quando ele der 2+ títulos e quiser saber qual combina mais com ele.",
+  input_schema: {
+    type: "object",
+    properties: {
+      titles: {
+        type: "array",
+        items: { type: "string" },
+        description: "Os títulos indicados pelo usuário, como ele os escreveu (mín. 2).",
+      },
+      userContext: {
+        type: "string",
+        description: "Mood/critério opcional pra orientar a comparação (ex.: 'pra hoje, algo leve'). Pode omitir.",
+      },
+    },
+    required: ["titles"],
+  },
+}
+
+export interface RecommendWorksCall {
+  tool: "recommend_works"
   userContext: string
   n: number
 }
+export interface EvaluateWorkCall {
+  tool: "evaluate_work"
+  title: string
+  kind: "fit" | "full"
+  evenWithoutReviews: boolean
+}
+export interface RecommendAmongCall {
+  tool: "recommend_among"
+  titles: string[]
+  userContext: string | null
+}
+export type ChatToolCall = RecommendWorksCall | EvaluateWorkCall | RecommendAmongCall
+
+/**
+ * Como o motor de recomendação pode ser acionado neste turno:
+ * - "auto": o modelo decide (perguntar vs. recomendar) — comportamento padrão.
+ * - "block": tools desligadas; o modelo é obrigado a só conversar/perguntar.
+ *   Usado como trava de interatividade nos primeiros turnos.
+ * - "force": força a chamada de `recommend_works` — usado pelo botão
+ *   "Pode recomendar agora", que pula o briefing a pedido do usuário.
+ */
+export type ChatToolMode = "auto" | "block" | "force"
 
 export interface ChatTurnResult {
   assistantText: string
@@ -60,6 +129,10 @@ function toApiMessages(messages: ChatMessage[]): Anthropic.Messages.MessageParam
       const marker = `[recomendou ${rec.items.length} obra(s)${rec.userContext ? ` (contexto: "${rec.userContext}")` : ""}${titles ? `: ${titles}` : ""}]`
       content = content ? `${content}\n\n${marker}` : marker
     }
+    if (m.role === "assistant" && m.evaluation) {
+      const marker = `[avaliou "${m.evaluation.title}" nos 9 critérios]`
+      content = content ? `${content}\n\n${marker}` : marker
+    }
     if (!content) continue
     out.push({ role: m.role, content })
   }
@@ -70,11 +143,43 @@ function toApiMessages(messages: ChatMessage[]): Anthropic.Messages.MessageParam
   return out
 }
 
-function findToolUse(message: Anthropic.Messages.Message, toolName: string) {
+function firstToolUse(message: Anthropic.Messages.Message) {
   return message.content.find(
-    (block): block is Extract<typeof block, { type: "tool_use" }> =>
-      block.type === "tool_use" && block.name === toolName,
+    (block): block is Extract<typeof block, { type: "tool_use" }> => block.type === "tool_use",
   )
+}
+
+function parseToolCall(message: Anthropic.Messages.Message): ChatToolCall | null {
+  const block = firstToolUse(message)
+  if (!block) return null
+  const input = (block.input ?? {}) as Record<string, unknown>
+
+  if (block.name === "recommend_works") {
+    const userContext = typeof input.userContext === "string" ? input.userContext.trim() : ""
+    if (!userContext) return null
+    return { tool: "recommend_works", userContext, n: normalizeN(input.n) }
+  }
+  if (block.name === "evaluate_work") {
+    const title = typeof input.title === "string" ? input.title.trim() : ""
+    if (!title) return null
+    const kind: "fit" | "full" = input.kind === "full" ? "full" : "fit"
+    return { tool: "evaluate_work", title, kind, evenWithoutReviews: input.evenWithoutReviews === true }
+  }
+  if (block.name === "recommend_among") {
+    const titles = Array.isArray(input.titles)
+      ? input.titles
+          .filter((t): t is string => typeof t === "string")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : []
+    if (titles.length === 0) return null
+    const userContext =
+      typeof input.userContext === "string" && input.userContext.trim()
+        ? input.userContext.trim()
+        : null
+    return { tool: "recommend_among", titles, userContext }
+  }
+  return null
 }
 
 function extractText(message: Anthropic.Messages.Message): string {
@@ -98,11 +203,28 @@ function normalizeN(raw: unknown): number {
 export async function runChatTurn(args: {
   profile: TasteProfilePayload
   messages: ChatMessage[]
+  /** Controla se/como o motor pode ser acionado neste turno. Default "auto". */
+  toolMode?: ChatToolMode
 }): Promise<ChatTurnResult> {
   const apiMessages = toApiMessages(args.messages)
   if (apiMessages.length === 0) {
     throw new Error("Conversa vazia — nada pra enviar ao modelo.")
   }
+
+  const toolMode: ChatToolMode = args.toolMode ?? "auto"
+  // Tools de alvo explícito (avaliar 1 obra / comparar uma lista) são pedidos
+  // diretos do usuário e ficam SEMPRE disponíveis — inclusive no "block", que só
+  // segura o `recommend_works` (a recomendação ampla, que precisa de briefing).
+  // "force" obriga o `recommend_works` (botão "Pode recomendar agora").
+  const TARGETED_TOOLS = [EVALUATE_WORK_TOOL, RECOMMEND_AMONG_TOOL]
+  const tools =
+    toolMode === "force"
+      ? [RECOMMEND_WORKS_TOOL]
+      : toolMode === "block"
+        ? TARGETED_TOOLS
+        : [RECOMMEND_WORKS_TOOL, ...TARGETED_TOOLS]
+  const tool_choice: Anthropic.Messages.ToolChoice =
+    toolMode === "force" ? { type: "tool", name: RECOMMEND_WORKS_TOOL.name } : { type: "auto" }
 
   const client = getAnthropicClient({ maxRetries: 6 })
   const { message, apiCallId, usage } = await createLoggedMessage(
@@ -115,8 +237,8 @@ export async function runChatTurn(args: {
         { type: "text", text: CHAT_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
         { type: "text", text: buildChatProfileBlock(args.profile), cache_control: { type: "ephemeral" } },
       ],
-      tools: [RECOMMEND_WORKS_TOOL],
-      tool_choice: { type: "auto" },
+      ...(tools ? { tools } : {}),
+      ...(tool_choice ? { tool_choice } : {}),
       messages: apiMessages,
     },
     {
@@ -127,16 +249,7 @@ export async function runChatTurn(args: {
   )
 
   const assistantText = extractText(message)
-  const toolUse = findToolUse(message, RECOMMEND_WORKS_TOOL.name)
-  let toolCall: ChatToolCall | null = null
-  if (toolUse) {
-    const input = (toolUse.input ?? {}) as { userContext?: unknown; n?: unknown }
-    const userContext =
-      typeof input.userContext === "string" ? input.userContext.trim() : ""
-    if (userContext) {
-      toolCall = { userContext, n: normalizeN(input.n) }
-    }
-  }
+  const toolCall = parseToolCall(message)
 
   return { assistantText, toolCall, usage, apiCallId }
 }

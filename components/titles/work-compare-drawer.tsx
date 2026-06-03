@@ -48,6 +48,8 @@ import {
 } from "@/components/ui/tooltip"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
+import type { CriterionSlug } from "@/types/domain"
+import { computeMoodAdjusted, isMoodActive, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
 import { cn } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
 import { fetchCompareWorks, type CompareWork } from "@/server/actions/compare"
@@ -59,7 +61,7 @@ import {
 } from "@/components/ui/column-picker"
 
 const HIDDEN_ROWS_STORAGE_KEY = "compare_hidden_rows_v1"
-// v3 → v4: adiciona as linhas "Nota Final" (decision) e "Alinhamento"
+// v3 → v4: adiciona as linhas "Prioridade" (decision) e "Alinhamento"
 // (personal_fit) ao grupo Notas, posicionadas na ordem canônica.
 const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v4"
 
@@ -88,7 +90,7 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
     id: "notas",
     label: "Notas",
     rows: [
-      { key: "score:decision", label: "Nota Final" },
+      { key: "score:decision", label: "Prioridade" },
       { key: "score:expectedScore", label: "Nota Prevista" },
       { key: "score:personalFit", label: "Alinhamento" },
       { key: "score:alignmentScore", label: "IA Rk." },
@@ -200,6 +202,9 @@ interface WorkCompareDrawerProps {
   scoreThresholds: ColumnThresholds | null
   /** Quando false, o "Desempatar com IA" mostra upsell em vez de rodar (feature Pago). */
   isPaid?: boolean
+  /** Refino por mood (desempate dentro do tier). Quando ativo, mostra a linha
+   *  "Prioridade ajustada" + resumo; os `ids` já chegam ordenados pelo mood. */
+  moodRefine?: MoodRefine | null
 }
 
 export function WorkCompareDrawer({
@@ -210,6 +215,7 @@ export function WorkCompareDrawer({
   onRemoveId,
   scoreThresholds,
   isPaid = true,
+  moodRefine = null,
 }: WorkCompareDrawerProps) {
   const [works, setWorks] = useState<CompareWork[]>([])
   const [loading, setLoading] = useState(false)
@@ -363,7 +369,7 @@ export function WorkCompareDrawer({
           }
         })
         setVerdict(items)
-        // Re-fetch em paralelo pra atualizar as linhas IA Rk. / Nota Final no fundo.
+        // Re-fetch em paralelo pra atualizar as linhas IA Rk. / Prioridade no fundo.
         setReloadKey((k) => k + 1)
       })
       .catch((err: unknown) =>
@@ -463,6 +469,8 @@ export function WorkCompareDrawer({
           </div>
         </SheetHeader>
 
+        {moodRefine && isMoodActive(moodRefine) && <MoodSummaryBanner mood={moodRefine} />}
+
         <div className="flex-1 overflow-auto">
           {loading ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -487,6 +495,7 @@ export function WorkCompareDrawer({
               highlightBestWorst={showBestWorst}
               hiddenRows={hiddenRows}
               rowOrder={rowsConfig.order}
+              moodRefine={moodRefine}
             />
           )}
         </div>
@@ -525,7 +534,7 @@ function VerdictDialog({
           </DialogTitle>
           <DialogDescription>
             Comparação cabeça-a-cabeça destas {total} obras. A IA Rk. (0–100)
-            ordena o desempate e já entrou na Nota Final de cada uma.
+            ordena o desempate e já entrou na Prioridade de cada uma.
           </DialogDescription>
         </DialogHeader>
 
@@ -720,6 +729,8 @@ interface CompareGridProps {
   /** Ordem das linhas escolhida pelo usuário (lista achatada de keys).
    *  Aplicada às seções iteradas (Notas, Critérios). */
   rowOrder: string[]
+  /** Refino por mood ativo → mostra a linha "Prioridade ajustada" no topo. */
+  moodRefine?: MoodRefine | null
 }
 
 type SectionKey = "notas" | "criterios" | "tags-generos"
@@ -746,8 +757,27 @@ function CompareGrid({
   highlightBestWorst,
   hiddenRows,
   rowOrder,
+  moodRefine = null,
 }: CompareGridProps) {
   const n = works.length
+
+  const moodActive = moodRefine != null && isMoodActive(moodRefine)
+  // Prioridade ajustada ao mood (0–10) por obra — correção limitada ao MAE.
+  const moodAdjustedById = useMemo(() => {
+    if (!moodActive || moodRefine == null) return new Map<string, number | null>()
+    const moodWorks: MoodWork[] = works.map((w) => ({
+      id: w.id,
+      decisionScore: w.decisionScore,
+      scores: Object.fromEntries(
+        w.criteria.map((c) => [c.slug, c.score]),
+      ) as Partial<Record<CriterionSlug, number | null>>,
+      totalChapters: w.totalChapters,
+      personalFit: w.personalFit,
+      totalVotes: w.totalVotes,
+      synopsisQuality: w.synopsisQuality,
+    }))
+    return computeMoodAdjusted(moodWorks, moodRefine)
+  }, [works, moodActive, moodRefine])
   const [collapsed, setCollapsed] = useState<Set<SectionKey>>(new Set())
   const [draggedOverIndex, setDraggedOverIndex] = useState<number | null>(null)
 
@@ -811,10 +841,10 @@ function CompareGrid({
     asAttributeBox?: boolean
   }> = [
     {
-      // Nota Final (0–10) — número de prioridade que combina Prevista + Alinhamento
-      // + IA Rk. Mesmo box colorido dos atributos (escala 0–10).
+      // Prioridade (0–10) — âncora na Prevista + IA Rk quando há. Mesmo box
+      // colorido dos atributos (escala 0–10).
       key: "score:decision",
-      label: "Nota Final",
+      label: "Prioridade",
       get: (w) => w.decisionScore,
       thresholds: scoreThresholds?.final ?? null,
       asAttributeBox: true,
@@ -900,9 +930,21 @@ function CompareGrid({
   ]
 
   const orderedNotasRows = sortByOrder(notasRowDefs, (r) => r.key, rowOrder)
-  const visibleNotasRows = orderedNotasRows.filter((r) =>
-    isRowVisible(r.key, () => allEqualScore(r.get))
-  )
+  // A linha "Prioridade ajustada" é efêmera (refino por mood) e fica fixa no topo
+  // do grupo Notas — fora do config de ordem/visibilidade do usuário.
+  const moodRow: (typeof notasRowDefs)[number] | null = moodActive
+    ? {
+        key: "score:moodAdjusted",
+        label: "Prioridade ajustada",
+        get: (w) => moodAdjustedById.get(w.id) ?? null,
+        thresholds: scoreThresholds?.final ?? null,
+        asAttributeBox: true,
+      }
+    : null
+  const visibleNotasRows = [
+    ...(moodRow ? [moodRow] : []),
+    ...orderedNotasRows.filter((r) => isRowVisible(r.key, () => allEqualScore(r.get))),
+  ]
   const orderedCritSlugs = sortByOrder([...CRITERION_SLUGS], (slug) => `crit:${slug}`, rowOrder)
   const visibleCritSlugs = orderedCritSlugs.filter((slug) =>
     isRowVisible(`crit:${slug}`, () =>
@@ -1530,7 +1572,7 @@ interface ScoreRowProps {
    *  pra anexar tooltip/popover (ex.: justificativa do IA Rk no hover). */
   wrapScore?: (node: React.ReactNode, w: CompareWork) => React.ReactNode
   /** Renderiza o número no mesmo box dos atributos (CriterionRow) em vez do
-   *  ScoreBadge pequeno — usado por Nota Final / Nota Prevista. */
+   *  ScoreBadge pequeno — usado por Prioridade / Nota Prevista. */
   asAttributeBox?: boolean
 }
 
@@ -1668,4 +1710,44 @@ function formatVotes(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`
   return String(count)
+}
+
+/** Resumo do refino por mood ativo, acima do grid. */
+function MoodSummaryBanner({ mood }: { mood: MoodRefine }) {
+  const prioritize: string[] = []
+  const avoid: string[] = []
+  for (const [slug, w] of Object.entries(mood.attributes) as Array<[CriterionSlug, number]>) {
+    const info = CRITERIA_INFO[slug]
+    const strong = Math.abs(w) >= 2 ? "++" : ""
+    const chip = `${info.emoji} ${info.name}${strong}`
+    if (w > 0) prioritize.push(chip)
+    else avoid.push(chip)
+  }
+  if (mood.chapters === "curto") prioritize.push("📖 Mais curto")
+  if (mood.chapters === "longo") prioritize.push("📖 Mais longo")
+  if (mood.alignment) prioritize.push("❤️ Mais alinhado")
+  if (mood.synopsis) prioritize.push("📜 Sinopse interessante")
+  if (mood.popularity) prioritize.push("📈 Mais popular")
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-primary/5 px-4 py-2 text-xs">
+      <span className="font-semibold text-primary">Refinado por mood:</span>
+      {prioritize.length > 0 && (
+        <span className="flex flex-wrap items-center gap-1.5">
+          <span className="text-muted-foreground">Priorizando</span>
+          {prioritize.map((c) => (
+            <span key={c} className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">{c}</span>
+          ))}
+        </span>
+      )}
+      {avoid.length > 0 && (
+        <span className="flex flex-wrap items-center gap-1.5">
+          <span className="text-muted-foreground">Evitando</span>
+          {avoid.map((c) => (
+            <span key={c} className="rounded bg-rose-500/10 px-1.5 py-0.5 text-rose-600 dark:text-rose-300">{c}</span>
+          ))}
+        </span>
+      )}
+    </div>
+  )
 }
