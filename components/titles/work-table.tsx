@@ -692,7 +692,7 @@ function WorkListView({
     chapters_read: { field: "chapters_read", label: "Capítulos lidos" },
     year: { field: "year", label: "Ano" },
     synopsis_q: { field: "synopsis_q", label: "Sinopse" },
-    decision: { field: "decision", label: "Nota Final" },
+    decision: { field: "decision", label: "Prioridade" },
     expected_score: { field: "expected_score", label: "Nota Prevista" },
     expected_baseline: { field: "expected_baseline", label: "Perfil (Stage 1)" },
     expected_quality_adj: { field: "expected_quality_adj", label: "Δ Qualidade" },
@@ -825,13 +825,13 @@ function WorkListView({
       const cs = work.calculated_scores
       const score = computeDecisionScore({
         expected: cs?.expected_score ?? null,
-        fit: cs?.personal_fit ?? null,
         alignment: cs?.alignment_score ?? null,
         confidence: (cs?.alignment_payload as { confidence?: number } | null)?.confidence ?? null,
       })
       return (
         <DecisionCell
           score={score}
+          affinity={null}
           expected={cs?.expected_score ?? null}
           fitPercentile={
             cs?.personal_fit_percentile ?? (cs?.personal_fit != null ? cs.personal_fit * 100 : null)

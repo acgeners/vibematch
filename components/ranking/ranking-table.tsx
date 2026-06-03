@@ -2,12 +2,15 @@
 
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Fragment, useEffect, useState, useSyncExternalStore } from "react"
+import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { AlertTriangle, ChevronDown, ChevronUp, ImageOff, LayoutGrid, List, X } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
+import { MoodRefineDialog } from "@/components/ranking/mood-refine-dialog"
+import { isMoodActive, sortByMoodAdjusted, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
+import type { CriterionSlug } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { getCoverImageSrc } from "@/lib/image-proxy"
@@ -19,7 +22,7 @@ import { PublicationStatusBadge, PersonalStatusBadge, AiStatusBadge } from "@/co
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
 import { AlignmentCell, AlignmentScoreCell, DecisionCell } from "@/components/ranking/ranking-cells"
-import { TieBreakBand } from "@/components/ranking/tie-break-band"
+import { TierDividerRow } from "@/components/ranking/tie-break-band"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
 import type { WorkPreview } from "@/server/actions/works"
@@ -62,42 +65,73 @@ function getSortFieldForColumn(key: string): string | null {
 // ordem entre elas é ruído sem um critério extra.
 const TIE_DELTA = 0.3
 
-interface TieCluster {
+interface Tier {
+  /** Índice da primeira obra do tier em `entries` (ordenado por decisão desc). */
+  startIndex: number
   workIds: string[]
   count: number
+  /** 1-based, na ordem de leitura. */
+  tierNumber: number
 }
 
 /**
- * Agrupa entradas CONSECUTIVAS cuja Nota de Decisão cai dentro de `TIE_DELTA`
- * do topo do cluster (ancoragem no primeiro). Retorna um mapa indexado pela
- * posição de início do cluster → info do cluster, só pra clusters de 2+ obras.
- * Pressupõe `entries` já ordenado por decisão desc (ordem de leitura).
+ * Particiona TODAS as entries (ordenadas desc pelo campo `scoreOf`) em tiers:
+ * faixas equivalentes, agrupando consecutivas dentro de `TIE_DELTA` do topo do
+ * tier (= dentro do erro do modelo). `scoreOf` é o campo ordenado (decisão OU
+ * Nota Prevista — mesmo eixo da prioridade), pra os tiers ficarem contíguos.
+ * Inclui tiers de 1 obra; entries com score null viram um tier no fim.
+ *
+ * Substitui o antigo número por linha: a tabela comunica prioridade por SEPARAÇÃO
+ * em tiers, não por um decimal falso dentro da incerteza.
  */
-function computeTieClusters(entries: RankingEntry[]): Map<number, TieCluster> {
-  const clusters = new Map<number, TieCluster>()
+function computeTiers(entries: RankingEntry[], scoreOf: (e: RankingEntry) => number | null): Tier[] {
+  const tiers: Tier[] = []
   let i = 0
+  let tierNumber = 0
   while (i < entries.length) {
-    const anchor = entries[i].decisionScore
-    if (anchor == null) {
-      i++
-      continue
-    }
+    const anchor = scoreOf(entries[i])
     let j = i
-    while (j + 1 < entries.length) {
-      const next = entries[j + 1].decisionScore
-      if (next == null || Math.abs(anchor - next) > TIE_DELTA) break
-      j++
+    if (anchor == null) {
+      while (j + 1 < entries.length && scoreOf(entries[j + 1]) == null) j++
+    } else {
+      while (j + 1 < entries.length) {
+        const next = scoreOf(entries[j + 1])
+        if (next == null || Math.abs(anchor - next) > TIE_DELTA) break
+        j++
+      }
     }
-    const size = j - i + 1
-    if (size >= 2) {
-      clusters.set(i, {
-        workIds: entries.slice(i, j + 1).map((e) => e.workId),
-        count: size,
-      })
-    }
+    tierNumber++
+    tiers.push({
+      startIndex: i,
+      workIds: entries.slice(i, j + 1).map((e) => e.workId),
+      count: j - i + 1,
+      tierNumber,
+    })
     i = j + 1
   }
-  return clusters
+  return tiers
+}
+
+/**
+ * Desempate dentro de cada tier: reordena por `personalFit` desc (entre obras
+ * estatisticamente empatadas, mostra a que mais combina com o perfil primeiro).
+ * O fit NÃO vira número — só ordena a ordem default das linhas (o mood reordena
+ * depois no drawer). Reatribui os `rank` do tier na ordem exibida pra coluna "#"
+ * continuar monotônica. Sort estável.
+ */
+function reorderTiersByFit(entries: RankingEntry[], tiers: Tier[]): RankingEntry[] {
+  const out = [...entries]
+  for (const tier of tiers) {
+    if (tier.count < 2) continue
+    const { startIndex, count } = tier
+    const slice = out.slice(startIndex, startIndex + count)
+    const ranks = slice.map((e) => e.rank) // ranks do tier, em ordem ascendente
+    slice.sort((a, b) => (b.personalFit ?? -Infinity) - (a.personalFit ?? -Infinity))
+    for (let k = 0; k < slice.length; k++) {
+      out[startIndex + k] = { ...slice[k], rank: ranks[k] }
+    }
+  }
+  return out
 }
 
 type ViewMode = "list" | "cards"
@@ -282,7 +316,8 @@ function renderCell(
   entry: RankingEntry,
   col: RankingColumnDef,
   scoreThresholds: ColumnThresholds | null | undefined,
-  isPaid: boolean = true
+  isPaid: boolean = true,
+  affinity: number | null = null
 ) {
   if (col.key === "rank") return <span className="font-mono text-sm text-muted-foreground">{entry.rank}</span>
   if (col.key === "percentile") {
@@ -348,6 +383,7 @@ function renderCell(
     return (
       <DecisionCell
         score={entry.decisionScore}
+        affinity={affinity}
         expected={entry.expectedScore}
         fitPercentile={entry.personalFitPercentile ?? (entry.personalFit != null ? entry.personalFit * 100 : null)}
         alignment={entry.alignmentScore}
@@ -404,6 +440,11 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   // a seleção sobrevive a mudanças de filtro mesmo se a obra sair do pool visível.
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // Refino por mood: o "Comparar / Refinar" do divisor abre primeiro o popup;
+  // a escolha (ou pular) define o moodRefine passado ao drawer.
+  const [moodDialogOpen, setMoodDialogOpen] = useState(false)
+  const [moodClusterIds, setMoodClusterIds] = useState<string[]>([])
+  const [moodRefine, setMoodRefine] = useState<MoodRefine | null>(null)
   const selectedSet = new Set(selectedIds)
   const toggleSelect = (id: string) => {
     const scrollY = window.scrollY
@@ -431,11 +472,19 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
       window.scrollTo({ top: scrollY })
     })
   }
-  // Atalho da banda de empate: seleciona o cluster e abre o drawer de comparação
-  // (onde mora o "Desempatar com IA"). Respeita o teto de obras comparáveis.
+  // Ação do divisor de tier: abre o popup de refino por mood. Guarda o tier
+  // INTEIRO (sem cortar): o mood rankeia todas e o drawer mostra as melhores até
+  // o teto (`fetchCompareWorks` corta em MAX_COMPARE_WORKS).
   const compareCluster = (workIds: string[]) => {
+    setMoodClusterIds(workIds)
+    setMoodDialogOpen(true)
+  }
+  // Abre o drawer de comparação com (ou sem) o refino por mood escolhido.
+  const openCompareWithMood = (mood: MoodRefine | null) => {
     const scrollY = window.scrollY
-    setSelectedIds(workIds.slice(0, MAX_COMPARE_WORKS))
+    setMoodRefine(mood)
+    setSelectedIds(moodClusterIds)
+    setMoodDialogOpen(false)
     setDrawerOpen(true)
     requestAnimationFrame(() => {
       window.scrollTo({ top: scrollY })
@@ -461,12 +510,63 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   const [activeSortField, activeSortDirRaw = "desc"] = sortRaw.split(",")[0].split(":")
   const activeSortDir: "asc" | "desc" = activeSortDirRaw === "asc" ? "asc" : "desc"
 
-  // Bandas de empate só fazem sentido na ordem de leitura por Nota de Decisão
-  // (o default). Em qualquer outro sort, não há cluster a sinalizar.
-  const tieClusters =
-    activeSortField === "decision" && activeSortDir === "desc"
-      ? computeTieClusters(entries)
+  // Tiers (faixas de prioridade equivalente) fazem sentido em qualquer ordenação
+  // descendente pelo MESMO eixo da prioridade: por Prioridade (decisão) OU por
+  // Nota Prevista (a âncora da prioridade — praticamente o mesmo eixo). Em outros
+  // sorts não há tier contíguo a sinalizar. O agrupamento usa o campo ordenado
+  // (pra ficar contíguo); a base do mood-refine continua sendo a decisionScore.
+  const tierField: "decision" | "expected_score" | null =
+    activeSortDir === "desc" && (activeSortField === "decision" || activeSortField === "expected_score")
+      ? activeSortField
       : null
+  const tiersEnabled = tierField != null
+  const tiers = useMemo(
+    () =>
+      tierField
+        ? computeTiers(
+            entries,
+            tierField === "expected_score" ? (e) => e.expectedScore : (e) => e.decisionScore,
+          )
+        : null,
+    [entries, tierField],
+  )
+
+  // Dentro de cada tier, ordem default por fit. O mood reordena depois no drawer.
+  const displayEntries = useMemo(
+    () => (tiers ? reorderTiersByFit(entries, tiers) : entries),
+    [entries, tiers],
+  )
+
+  // Divisor de tier indexado pelo índice de início. Rotula TODOS os tiers
+  // (inclusive o 1º) — leitura section-like, cada faixa de prioridade nomeada.
+  const tierByStart = useMemo(() => {
+    const map = new Map<number, Tier>()
+    if (tiers) for (const t of tiers) map.set(t.startIndex, t)
+    return map
+  }, [tiers])
+
+  // IDs passados ao drawer: na ordem visível, mas reordenados pela Prioridade
+  // ajustada ao mood quando há refino ativo (o drawer mostra a linha ajustada).
+  const drawerIds = useMemo(() => {
+    const base = sortIdsByVisibleOrder(selectedIds, displayEntries)
+    if (!moodRefine || !isMoodActive(moodRefine)) return base
+    const byId = new Map(entries.map((e) => [e.workId, e]))
+    const moodWorks: MoodWork[] = []
+    for (const id of base) {
+      const e = byId.get(id)
+      if (!e) continue
+      moodWorks.push({
+        id,
+        decisionScore: e.decisionScore,
+        scores: e.scores as Partial<Record<CriterionSlug, number | null>>,
+        totalChapters: e.totalChapters,
+        personalFit: e.personalFit,
+        totalVotes: e.totalVotes,
+        synopsisQuality: e.synopsisQuality,
+      })
+    }
+    return sortByMoodAdjusted(moodWorks, moodRefine).map((w) => w.id)
+  }, [selectedIds, displayEntries, moodRefine, entries])
 
   const updateSort = (field: string) => {
     const params = new URLSearchParams(window.location.search)
@@ -595,16 +695,17 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
             </tr>
           </thead>
           <tbody>
-            {entries.map((entry, index) => {
-              const cluster = tieClusters?.get(index)
+            {displayEntries.map((entry, index) => {
+              const tierDivider = tierByStart.get(index)
               return (
               <Fragment key={entry.workId}>
-                {cluster && (
-                  <TieBreakBand
-                    workIds={cluster.workIds}
-                    count={cluster.count}
+                {tierDivider && (
+                  <TierDividerRow
+                    tierNumber={tierDivider.tierNumber}
+                    workIds={tierDivider.workIds}
+                    count={tierDivider.count}
                     colSpan={columns.length}
-                    onCompare={compareCluster}
+                    onCompare={tierDivider.count >= 2 ? compareCluster : undefined}
                   />
                 )}
                 <tr className="transition-colors hover:bg-primary/5 [&>td]:border-b [&>td]:border-border/55 last:[&>td]:border-0">
@@ -626,7 +727,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                             aria-label={`Selecionar ${entry.title} para comparar`}
                           />
                         ) : (
-                          renderCell(entry, col, scoreThresholds, isPaid)
+                          renderCell(entry, col, scoreThresholds, isPaid, null)
                         )}
                       </div>
                     </td>
@@ -642,7 +743,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
 
       {/* Mobile cards */}
       <div className="lg:hidden space-y-2">
-        {entries.map((entry) => (
+        {displayEntries.map((entry) => (
           <Link
             key={entry.workId}
             href={`/titles/${titleToSlug(entry.title)}`}
@@ -692,14 +793,26 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
 
       <CompareFloatingBar
         count={selectedIds.length}
-        onOpen={() => setDrawerOpen(true)}
+        onOpen={() => {
+          setMoodRefine(null) // comparação manual: sem refino por mood
+          setDrawerOpen(true)
+        }}
         onClear={clearSelection}
+      />
+
+      <MoodRefineDialog
+        open={moodDialogOpen}
+        onOpenChange={setMoodDialogOpen}
+        workCount={moodClusterIds.length}
+        onApply={(mood) => openCompareWithMood(mood)}
+        onSkip={() => openCompareWithMood(null)}
       />
 
       <WorkCompareDrawer
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
-        ids={sortIdsByVisibleOrder(selectedIds, entries)}
+        ids={drawerIds}
+        moodRefine={moodRefine}
         onClear={clearSelection}
         onRemoveId={removeSelection}
         scoreThresholds={scoreThresholds}

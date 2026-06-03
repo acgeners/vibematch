@@ -30,7 +30,7 @@ export interface CompareWork {
   totalChapters: number | null
   isFavorite: boolean
   expectedScore: number | null
-  /** Nota Final (0–10) — combina Prevista, Alinhamento e IA Rk. (ver lib/calculations/decision.ts). */
+  /** Prioridade (0–10) — âncora na Prevista + IA Rk quando há (ver lib/calculations/decision.ts). */
   decisionScore: number | null
   /** Alinhamento com o perfil: cru (0–1) e percentil na biblioteca (0–100). */
   personalFit: number | null
@@ -149,7 +149,6 @@ function mapWorkToCompare(
     expectedScore: work.calculated_scores?.expected_score ?? null,
     decisionScore: computeDecisionScore({
       expected: work.calculated_scores?.expected_score ?? null,
-      fit: work.calculated_scores?.personal_fit ?? null,
       alignment: work.calculated_scores?.alignment_score ?? null,
       confidence:
         (work.calculated_scores?.alignment_payload as { confidence?: number } | null)?.confidence ??

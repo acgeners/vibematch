@@ -38,9 +38,11 @@ export interface RankingEntry {
   expectedQualityAdj: number | null
   expectedIsStub: boolean
   /**
-   * Nota de Decisão (0–10) — combina Prevista (âncora), fit (modulação limitada)
-   * e IA Rk. (quando há, ponderada pela confiança) num único número de
-   * PRIORIDADE. Ver lib/calculations/decision.ts. NULL quando não há Prevista.
+   * Nota de Decisão (0–10) — número único de PRIORIDADE ("quão provável que goste").
+   * Âncora = Prevista (que já embute o fit calibrado); só a IA Rk. ajusta quando
+   * existe (ponderada pela confiança). O fit NÃO entra aqui (evita double-counting)
+   * — serve de desempate na exibição. Ver lib/calculations/decision.ts. NULL quando
+   * não há Prevista.
    */
   decisionScore: number | null
   platformAvg: number | null
@@ -433,7 +435,6 @@ export async function getRanking(
       expectedIsStub: w.calculated_scores?.expected_is_stub ?? true,
       decisionScore: computeDecisionScore({
         expected: w.calculated_scores?.expected_score ?? null,
-        fit: w.calculated_scores?.personal_fit ?? null,
         alignment: w.calculated_scores?.alignment_score ?? null,
         confidence:
           (w.calculated_scores?.alignment_payload as { confidence?: number } | null)?.confidence ??
