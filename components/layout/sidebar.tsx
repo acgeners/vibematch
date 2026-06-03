@@ -13,6 +13,7 @@ import {
   Settings,
   UserCircle,
   Wand2,
+  Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -47,6 +48,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: "/conta", icon: UserCircle, label: "Minha conta" },
       { href: "/settings", icon: Settings, label: "Configurações" },
       { href: "/ai-evaluation", icon: Sparkles, label: "Avaliação IA" },
+      { href: "/ai-usage", icon: Activity, label: "Uso da API IA" },
       { href: "/import", icon: Upload, label: "Importar" },
     ],
   },

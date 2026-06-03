@@ -5,13 +5,15 @@ import { RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { LastRunHint } from "@/components/settings/last-run-hint"
+import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import { syncConstantsNow } from "@/server/actions/settings"
 
 interface SyncConstantsPanelProps {
+  accent: SettingsAccent
   initialLastRun: string | null
 }
 
-export function SyncConstantsPanel({ initialLastRun }: SyncConstantsPanelProps) {
+export function SyncConstantsPanel({ accent, initialLastRun }: SyncConstantsPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [output, setOutput] = useState<string | null>(null)
   const [lastRun, setLastRun] = useState<string | null>(initialLastRun)
@@ -39,7 +41,7 @@ export function SyncConstantsPanel({ initialLastRun }: SyncConstantsPanelProps) 
           <p className="font-mono text-xs">npm run sync-constants</p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <Button type="button" onClick={handleSync} disabled={isPending}>
+          <Button type="button" onClick={handleSync} disabled={isPending} className={ACCENT_BUTTON[accent]}>
             <RefreshCw className={isPending ? "animate-spin" : ""} />
             {isPending ? "Sincronizando..." : "Sincronizar constantes"}
           </Button>

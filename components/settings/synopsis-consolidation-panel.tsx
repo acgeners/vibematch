@@ -4,17 +4,21 @@ import { useState, useTransition } from "react"
 import { toast } from "sonner"
 import { FileText } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { StatCard } from "@/components/settings/stat-card"
+import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import {
   consolidatePendingSynopses,
   type ConsolidateSynopsesProgress,
 } from "@/server/actions/settings"
 
 interface SynopsisConsolidationPanelProps {
+  accent: SettingsAccent
   pendingCount: number
   totalCount: number
 }
 
 export function SynopsisConsolidationPanel({
+  accent,
   pendingCount,
   totalCount,
 }: SynopsisConsolidationPanelProps) {
@@ -66,30 +70,30 @@ export function SynopsisConsolidationPanel({
             Se a Anthropic estiver congestionada, aborta após 3 falhas seguidas.
           </p>
         </div>
-        <Button type="button" onClick={handleRun} disabled={isPending || pendingCount === 0}>
+        <Button
+          type="button"
+          onClick={handleRun}
+          disabled={isPending || pendingCount === 0}
+          className={ACCENT_BUTTON[accent]}
+        >
           <FileText className={isPending ? "animate-pulse" : ""} />
           {isPending ? "Consolidando…" : "Consolidar sinopses pendentes"}
         </Button>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="rounded-md border border-border p-3">
-          <p className="text-xs text-muted-foreground">Pendentes</p>
-          <p className="mt-1 font-mono text-base">{pendingCount}</p>
-          <p className="text-[10px] text-muted-foreground">sem canonical_synopsis</p>
-        </div>
-        <div className="rounded-md border border-border p-3">
-          <p className="text-xs text-muted-foreground">Consolidadas</p>
-          <p className="mt-1 font-mono text-base">
-            {totalCount - pendingCount} / {totalCount}
-          </p>
-          <p className="text-[10px] text-muted-foreground">{completionPct}% da base</p>
-        </div>
-        <div className="rounded-md border border-border p-3">
-          <p className="text-xs text-muted-foreground">Modelo</p>
-          <p className="mt-1 font-mono text-xs">claude-haiku-4-5</p>
-          <p className="text-[10px] text-muted-foreground">~$0.002/obra</p>
-        </div>
+        <StatCard label="Pendentes" value={pendingCount} hint="sem canonical_synopsis" />
+        <StatCard
+          label="Consolidadas"
+          value={`${totalCount - pendingCount} / ${totalCount}`}
+          hint={`${completionPct}% da base`}
+        />
+        <StatCard
+          label="Modelo"
+          value="claude-haiku-4-5"
+          valueClassName="text-xs"
+          hint="~$0.002/obra"
+        />
       </div>
 
       {lastResult && (

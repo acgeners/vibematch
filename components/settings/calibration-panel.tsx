@@ -6,6 +6,7 @@ import { ChevronDown, Info, Layers } from "lucide-react"
 import { MaeHistoryChart } from "@/components/settings/calibration/mae-history-chart"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import { recalculateNow, setStackerEnabled, setScoreWeightsAuto } from "@/server/actions/settings"
 import type { CalibrationHistoryEntry } from "@/server/actions/settings"
 import { cn } from "@/lib/utils"
@@ -16,6 +17,7 @@ import { POST_READING_WEIGHT_LABELS } from "@/lib/constants/post-reading-criteri
 import type { BucketBreakdown, CalibrationDiff } from "@/lib/calculations/calibration"
 
 interface CalibrationPanelProps {
+  accent: SettingsAccent
   config: FormulaConfig
   snapshot: {
     totalWorks: number
@@ -74,7 +76,7 @@ function maeColor(value: number | null | undefined): string {
   return "text-rose-500"
 }
 
-export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
+export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [isTogglingStacker, startStackerToggle] = useTransition()
   const [isTogglingAutoWeights, startAutoWeightsToggle] = useTransition()
@@ -97,12 +99,17 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
         const result = await recalculateNow()
         const cal = result.calibration
         if (cal) {
+          // Reporta a MESMA métrica do headline (MAE CV da Nota Prevista / L1),
+          // não o cvMAE do preditor Nota.Pr (L2) — que é outro modelo e confunde.
           setLastRun(
-            `${result.recalculated} obras recalculadas. ` +
-              `Treino: ${cal.trainSize} títulos, alpha=${cal.alpha}, ` +
-              `cvMAE=${fmt(cal.cvMAE, 3)}.`
+            cal.expectedIsStub
+              ? `${result.recalculated} obras recalculadas. ` +
+                  `Treino: ${cal.expectedTrainSize ?? cal.trainSize} títulos — Nota Prevista em fallback (precisa de ≥ 20 títulos com nota pessoal).`
+              : `${result.recalculated} obras recalculadas. ` +
+                  `Treino: ${cal.expectedTrainSize ?? cal.trainSize} títulos · ` +
+                  `MAE CV (Nota Prevista) = ${fmt(cal.expectedCvMAE, 2)}.`
           )
-          toast.success(`Recalibrado. MAE LOOCV: ${fmt(cal.stacker?.cvMAE ?? cal.maeFinal, 3)}`)
+          toast.success(`Recalibrado. MAE CV da Nota Prevista: ${fmt(cal.expectedCvMAE, 2)}`)
         } else {
           toast.success(`${result.recalculated} obras recalculadas.`)
         }
@@ -191,7 +198,7 @@ export function CalibrationPanel({ config, snapshot }: CalibrationPanelProps) {
 
             {/* Ação */}
             <div className="flex flex-col items-stretch gap-1 sm:items-end">
-              <Button onClick={handleRecalibrate} disabled={isPending}>
+              <Button onClick={handleRecalibrate} disabled={isPending} className={ACCENT_BUTTON[accent]}>
                 {isPending ? "Recalibrando..." : "Recalibrar agora"}
               </Button>
               <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>

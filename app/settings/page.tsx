@@ -2,12 +2,12 @@ import type { ReactNode } from "react"
 import { promises as fs } from "node:fs"
 import path from "node:path"
 import {
-  Activity,
   ArrowRight,
   Brain,
   Compass,
   Database,
   Gauge,
+  Info,
   Settings,
   Sparkles,
   Tags,
@@ -23,6 +23,7 @@ import { ReviewSummaryPanel } from "@/components/settings/review-summary-panel"
 import { countStaleEmbeddings } from "@/server/actions/embeddings"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
 import type { FormulaConfig } from "@/types/domain"
+import { ACCENT_LINK, type SettingsAccent } from "@/lib/settings-accent"
 import { cn } from "@/lib/utils"
 
 async function getSyncConstantsMtime(): Promise<string | null> {
@@ -96,21 +97,20 @@ async function getSettingsData() {
 
 const SECTION_GROUPS = [
   {
-    label: "Operação contínua",
+    label: "Pipeline de dados",
     sections: [
-      { id: "calibration", title: "Calibração", icon: <Gauge />, accent: "cyan" as const },
       { id: "embeddings", title: "Embeddings", icon: <Brain />, accent: "emerald" as const },
+      { id: "calibration", title: "Calibração", icon: <Gauge />, accent: "cyan" as const },
       { id: "synopsis-canonical", title: "Sinopse canônica", icon: <Brain />, accent: "violet" as const },
       { id: "review-summary", title: "Resumo de reviews", icon: <Sparkles />, accent: "amber" as const },
-      { id: "ai-usage", title: "Uso da API IA", icon: <Activity />, accent: "cyan" as const },
-      { id: "sync", title: "Sincronização", icon: <Database />, accent: "emerald" as const },
     ],
   },
   {
-    label: "Manutenção periódica",
+    label: "Casos especiais",
     sections: [
-      { id: "ai-calibration", title: "Calibração IA", icon: <Sparkles />, accent: "amber" as const },
-      { id: "tags", title: "Consolidação de tags", icon: <Tags />, accent: "violet" as const },
+      { id: "sync", title: "Sincronização", icon: <Database />, accent: "indigo" as const },
+      { id: "ai-calibration", title: "Calibração IA", icon: <Sparkles />, accent: "rose" as const },
+      { id: "tags", title: "Consolidação de tags", icon: <Tags />, accent: "fuchsia" as const },
     ],
   },
 ]
@@ -166,15 +166,9 @@ export default async function SettingsPage() {
 
       <IndexSpacer />
 
-      <SettingsSection
-        id="calibration"
-        title="Calibração automática"
-        description="MAEs e pseudo-votos são recalculados a partir dos dados reais sempre que um título é incluído ou alterado."
-        icon={<Gauge />}
-        accent="cyan"
-      >
-        <CalibrationPanel config={config} snapshot={snapshot} />
-      </SettingsSection>
+      {/* ── Pipeline de dados ─────────────────────────────────────── */}
+      <GroupHeading label="Pipeline de dados" />
+      <RecommendedOrderBanner />
 
       <SettingsSection
         id="embeddings"
@@ -182,8 +176,10 @@ export default async function SettingsPage() {
         description="Representação vetorial via OpenAI para 'obras parecidas' e kNN predictor. Cacheado por obra — só re-embeda quando sinopse/tags/critérios mudam."
         icon={<Brain />}
         accent="emerald"
+        badge={{ label: "Passo 1", variant: "step" }}
       >
         <EmbeddingsPanel
+          accent="emerald"
           initialCachedCount={embeddingsCount}
           initialPendingCount={embeddingsPending}
           totalWorks={worksCount}
@@ -192,13 +188,26 @@ export default async function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection
+        id="calibration"
+        title="Calibração automática"
+        description="MAEs e pseudo-votos são recalculados a partir dos dados reais sempre que um título é incluído ou alterado."
+        icon={<Gauge />}
+        accent="cyan"
+        badge={{ label: "Passo 2", variant: "step" }}
+      >
+        <CalibrationPanel config={config} snapshot={snapshot} accent="cyan" />
+      </SettingsSection>
+
+      <SettingsSection
         id="synopsis-canonical"
         title="Sinopse canônica"
         description="Consolida múltiplas sinopses por obra em uma única canônica via Haiku — usada nos prompts de recomendação."
         icon={<Brain />}
         accent="violet"
+        badge={{ label: "Independente", variant: "independent" }}
       >
         <SynopsisConsolidationPanel
+          accent="violet"
           pendingCount={canonicalSynopsisPending}
           totalCount={worksCount}
         />
@@ -210,37 +219,26 @@ export default async function SettingsPage() {
         description="Resume as reviews externas de cada obra em um parágrafo de consenso via Haiku — mostrado na aba Notas & Avaliações."
         icon={<Sparkles />}
         accent="amber"
+        badge={{ label: "Independente", variant: "independent" }}
       >
         <ReviewSummaryPanel
+          accent="amber"
           pendingCount={reviewSummaryPending}
           totalCount={worksCount}
         />
       </SettingsSection>
 
-      <SettingsSection
-        id="ai-usage"
-        title="Uso da API IA"
-        description="Custo estimado em USD, tokens consumidos e latência por operação/modelo. Consolidado de todas as chamadas Anthropic do app."
-        icon={<Activity />}
-        accent="cyan"
-      >
-        <a
-          href="/settings/ai-usage"
-          className="inline-flex items-center gap-1.5 rounded-md border border-cyan-500/55 bg-cyan-500/10 px-3 py-1.5 text-sm font-medium text-cyan-700 transition-colors hover:bg-cyan-500/20 dark:text-cyan-300"
-        >
-          Abrir página de uso
-          <ArrowRight className="h-3.5 w-3.5" />
-        </a>
-      </SettingsSection>
+      {/* ── Casos especiais ───────────────────────────────────────── */}
+      <GroupHeading label="Casos especiais" />
 
       <SettingsSection
         id="sync"
         title="Sincronização de constantes"
-        description="Regenera os arquivos locais de constantes a partir do Supabase."
+        description="Regenera os arquivos locais de constantes a partir do Supabase. Só precisa quando o schema/tabelas de constantes do DB mudam."
         icon={<Database />}
-        accent="emerald"
+        accent="indigo"
       >
-        <SyncConstantsPanel initialLastRun={syncConstantsLastRun} />
+        <SyncConstantsPanel initialLastRun={syncConstantsLastRun} accent="indigo" />
       </SettingsSection>
 
       <SettingsSection
@@ -248,15 +246,9 @@ export default async function SettingsPage() {
         title="Calibração de critérios IA"
         description="Auditoria por obra com auto-apply de sugestões e detecção de viés sistemático nos category_scores."
         icon={<Sparkles />}
-        accent="amber"
+        accent="rose"
       >
-        <a
-          href="/settings/calibration"
-          className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/55 bg-amber-500/10 px-3 py-1.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-300"
-        >
-          Abrir página de calibração
-          <ArrowRight className="h-3.5 w-3.5" />
-        </a>
+        <NavLink href="/settings/calibration" accent="rose" label="Abrir página de calibração" />
       </SettingsSection>
 
       <SettingsSection
@@ -264,15 +256,9 @@ export default async function SettingsPage() {
         title="Consolidação de tags"
         description="Revise clusters semânticos propostos pela IA e mescle tags duplicadas."
         icon={<Tags />}
-        accent="violet"
+        accent="fuchsia"
       >
-        <a
-          href="/settings/tag-consolidation"
-          className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/55 bg-violet-500/10 px-3 py-1.5 text-sm font-medium text-violet-600 transition-colors hover:bg-violet-500/20 dark:text-violet-300"
-        >
-          Abrir página de consolidação
-          <ArrowRight className="h-3.5 w-3.5" />
-        </a>
+        <NavLink href="/settings/tag-consolidation" accent="fuchsia" label="Abrir página de consolidação" />
       </SettingsSection>
 
       <ScrollToTop />
@@ -351,7 +337,7 @@ function IndexSpacer() {
   )
 }
 
-type Accent = "cyan" | "violet" | "emerald" | "slate" | "amber"
+type Accent = SettingsAccent
 
 const ACCENT_STYLES: Record<
   Accent,
@@ -416,7 +402,39 @@ const ACCENT_STYLES: Record<
     cardHoverBorder: "hover:border-amber-500/70",
     cardHoverShadow: "hover:shadow-amber-500/25",
   },
+  indigo: {
+    rail: "bg-gradient-to-b from-indigo-500/80 to-indigo-500/30",
+    iconBg: "bg-indigo-500/20",
+    iconText: "text-indigo-600 dark:text-indigo-300",
+    ring: "ring-indigo-500/30",
+    cardBg: "bg-indigo-500/15",
+    cardBorder: "border-indigo-500/40",
+    cardHoverBorder: "hover:border-indigo-500/70",
+    cardHoverShadow: "hover:shadow-indigo-500/25",
+  },
+  rose: {
+    rail: "bg-gradient-to-b from-rose-500/80 to-rose-500/30",
+    iconBg: "bg-rose-500/20",
+    iconText: "text-rose-600 dark:text-rose-300",
+    ring: "ring-rose-500/30",
+    cardBg: "bg-rose-500/15",
+    cardBorder: "border-rose-500/40",
+    cardHoverBorder: "hover:border-rose-500/70",
+    cardHoverShadow: "hover:shadow-rose-500/25",
+  },
+  fuchsia: {
+    rail: "bg-gradient-to-b from-fuchsia-500/80 to-fuchsia-500/30",
+    iconBg: "bg-fuchsia-500/20",
+    iconText: "text-fuchsia-600 dark:text-fuchsia-300",
+    ring: "ring-fuchsia-500/30",
+    cardBg: "bg-fuchsia-500/15",
+    cardBorder: "border-fuchsia-500/40",
+    cardHoverBorder: "hover:border-fuchsia-500/70",
+    cardHoverShadow: "hover:shadow-fuchsia-500/25",
+  },
 }
+
+type SectionBadge = { label: string; variant: "step" | "independent" }
 
 function SettingsSection({
   id,
@@ -424,6 +442,7 @@ function SettingsSection({
   description,
   icon,
   accent,
+  badge,
   children,
 }: {
   id?: string
@@ -431,6 +450,7 @@ function SettingsSection({
   description: string
   icon: ReactNode
   accent: Accent
+  badge?: SectionBadge
   children: ReactNode
 }) {
   const styles = ACCENT_STYLES[accent]
@@ -453,12 +473,80 @@ function SettingsSection({
             {icon}
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-base font-semibold leading-tight text-foreground">{title}</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold leading-tight text-foreground">{title}</h2>
+              {badge && <SectionBadge badge={badge} accent={accent} />}
+            </div>
             <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
           </div>
         </div>
         <div>{children}</div>
       </div>
     </section>
+  )
+}
+
+function SectionBadge({ badge, accent }: { badge: SectionBadge; accent: Accent }) {
+  const styles = ACCENT_STYLES[accent]
+  if (badge.variant === "step") {
+    return (
+      <span
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1",
+          styles.iconBg,
+          styles.iconText,
+          styles.ring
+        )}
+      >
+        {badge.label}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+      {badge.label}
+    </span>
+  )
+}
+
+function GroupHeading({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 px-1 pt-2">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </p>
+      <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
+    </div>
+  )
+}
+
+function RecommendedOrderBanner() {
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs text-muted-foreground">
+      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-600 dark:text-cyan-400" />
+      <p>
+        <span className="font-medium text-foreground">Ordem recomendada:</span> atualize os{" "}
+        <span className="font-medium">Embeddings</span> (Passo 1) antes de{" "}
+        <span className="font-medium">Recalibrar</span> (Passo 2) — a calibração usa o kNN derivado
+        dos embeddings. <span className="font-medium">Sinopse canônica</span> e{" "}
+        <span className="font-medium">Resumo de reviews</span> são independentes e podem rodar a
+        qualquer momento.
+      </p>
+    </div>
+  )
+}
+
+function NavLink({ href, accent, label }: { href: string; accent: Accent; label: string }) {
+  return (
+    <a
+      href={href}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+        ACCENT_LINK[accent]
+      )}
+    >
+      {label}
+      <ArrowRight className="h-3.5 w-3.5" />
+    </a>
   )
 }
