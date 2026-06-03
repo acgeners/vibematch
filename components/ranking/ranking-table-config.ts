@@ -29,7 +29,9 @@ export const RANKING_COLUMN_GROUP_LABELS: Record<RankingColumnGroup, string> = {
 
 // Bump v3 → v4 to hide chapters_read by default and add missing columns.
 // Bump v4 → v5 to add the "Decisão" column (default sort) next to "Prevista".
-export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v5"
+// Bump v5 → v6 to HIDE "decision" by default: a Prioridade agora é comunicada
+// por TIERS (divisores), não por um número dentro da incerteza do modelo.
+export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v6"
 export const RANKING_TABLE_COLUMN_CONFIG_EVENT = "ranking-column-config-change"
 
 export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
@@ -46,22 +48,24 @@ export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
   { key: "ai_status", label: "IA", configLabel: "Status da avaliação IA", description: "Estágio da avaliação por IA: pendente de atributos, pendente de IA Rk, avaliado ou pulado.", defaultWidth: 80, align: "center", group: "basico" },
   { key: "updated_at", label: "Atual.", configLabel: "Atualizado em", description: "Quando o registro da obra foi atualizado pela última vez.", defaultWidth: 110, align: "center", group: "basico" },
   { key: "last_read_at", label: "Últ. leitura", configLabel: "Última leitura", description: "Data da última vez que você leu algum capítulo desta obra.", defaultWidth: 110, align: "center", group: "basico" },
-  { key: "platform_avg", label: "N.M", configLabel: "Nota.M", description: "Nota.M — média ponderada das notas das plataformas externas (AniList, MAL, etc.), na escala 0–10. Pondera mais as fontes com mais votos.", defaultWidth: 88, align: "center", group: "notas" },
-  { key: "total_votes", label: "Votos", configLabel: "Votos", description: "Total de votos/avaliações somados nas plataformas externas. Quanto maior, mais confiável é a Nota.M.", defaultWidth: 88, align: "center", group: "notas" },
-  // Nota Final — combina Prevista + Alinhamento + IA Rk. num único número de
-  // prioridade. É o sort default; ajuda a escolher entre obras com Prevista parecida.
-  { key: "decision", label: "Nota Final", configLabel: "Nota Final", description: "Combina Nota Prevista, Alinhamento e IA Rk num único número de prioridade (0–10). Serve pra decidir o que ler primeiro entre obras com Prevista parecida — é um score de PRIORIDADE, não uma previsão de nota. Ordenação padrão do ranking.", defaultWidth: 100, align: "center", group: "notas" },
+  { key: "platform_avg", label: "N.M", configLabel: "Nota.M", description: "A nota que o público das plataformas externas (AniList, MAL, etc.) dá à obra, na escala 0–10. É a opinião geral dos leitores, não a sua.", defaultWidth: 88, align: "center", group: "notas" },
+  { key: "total_votes", label: "Votos", configLabel: "Votos", description: "Quantas pessoas avaliaram a obra nas plataformas externas — uma medida de popularidade e de quanta gente sustenta a Nota.M.", defaultWidth: 88, align: "center", group: "notas" },
+  // Prioridade — "quão provável que você goste". Âncora na Prevista (que já
+  // embute o Alinhamento calibrado) + IA Rk quando há. Exibida 0–100 = Decisão×10
+  // (absoluta). Obras quase-empatadas se separam pela ORDEM (fit + bandas), não
+  // por inflar o número. (Sort default agora é Prevista → IA Rk → Alinhamento.)
+  { key: "decision", label: "Prioridade", configLabel: "Prioridade", description: "Quão provável que você goste da obra — um número único (0–100) pra decidir o que ler primeiro. Quanto maior, mais a obra deveria estar no topo da sua fila. Não é uma previsão de nota: é o lugar dela na sua ordem de leitura.", defaultWidth: 100, align: "center", group: "notas" },
   // Novo (Fase 1.5): expected_score é o L1 que substitui o trio Nota.IA/Pr/Final
-  { key: "expected", label: "Prevista", configLabel: "Nota Prevista", description: "Nota que o modelo prevê que você daria à obra (0–10). É a âncora calibrada do ranking — um Ridge L1 que substituiu o antigo trio Nota.IA / Nota.Pr / Nota.Final.", defaultWidth: 100, align: "center", group: "notas" },
-  { key: "expected_baseline", label: "Perfil", configLabel: "Prevista — Perfil", description: "Decomposição da Nota Prevista (etapa 1): a parte vinda só do seu perfil de gosto, antes de considerar a qualidade da obra.", defaultWidth: 90, align: "center", group: "legado" },
-  { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Prevista — Δ Qualidade", description: "Decomposição da Nota Prevista (etapa 2): o ajuste aplicado pelas 8 dimensões de qualidade sobre a parte do perfil.", defaultWidth: 90, align: "center", group: "legado" },
-  { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento", description: "O quanto a obra combina com o seu perfil de gosto (fit_score). Quanto maior, mais alinhada às suas preferências de atributos e tags.", defaultWidth: 110, align: "center", group: "notas" },
+  { key: "expected", label: "Prevista", configLabel: "Nota Prevista", description: "A nota que estimamos que você daria à obra (0–10), juntando o seu gosto com a qualidade dela. É a referência principal do ranking. Calculada a partir das notas dos atributos da IA, do seu perfil de gosto e da nota do público.", defaultWidth: 100, align: "center", group: "notas" },
+  { key: "expected_baseline", label: "Perfil", configLabel: "Prevista — Perfil", description: "A parte da Nota Prevista que vem só do seu gosto: o quanto a obra combina com o seu perfil, antes de considerar se ela é boa ou não.", defaultWidth: 90, align: "center", group: "legado" },
+  { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Prevista — Δ Qualidade", description: "O quanto a qualidade da obra puxa a Nota Prevista pra cima ou pra baixo, além do que o seu gosto já explica.", defaultWidth: 90, align: "center", group: "legado" },
+  { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento", description: "O quanto a obra combina com o seu perfil de gosto. Quanto maior, mais alinhada às suas preferências — independente de a obra ser boa ou popular. Calculado comparando as tags e os atributos da obra com as suas preferências.", defaultWidth: 110, align: "center", group: "notas" },
   // Legado — escondidos por padrão a partir do v2. Disponíveis via column picker
   // ou via preset "Legado". Vão ser removidos quando Fase 2 (consultor) ativar.
   { key: "final", label: "N.Final", configLabel: "Nota.Final (legado)", description: "[Legado] Mistura ponderada de Nota.IA e Nota.Pr. Substituída pela Nota Prevista no cutover da Fase 1.5; mantida só por compatibilidade.", defaultWidth: 100, align: "center", group: "legado" },
   { key: "calc", label: "N.IA", configLabel: "Nota.IA (legado)", description: "[Legado] Nota calculada a partir da avaliação da IA (soma ponderada dos atributos). Substituída pela Nota Prevista.", defaultWidth: 100, align: "center", group: "legado" },
   { key: "pred", label: "N.Pr", configLabel: "Nota.Pr (legado)", description: "[Legado] Predição por regressão sobre notas manuais. Substituída pela Nota Prevista.", defaultWidth: 100, align: "center", group: "legado" },
-  { key: "alignment_score", label: "IA Rk.", configLabel: "IA Rk", description: "Re-rank do consultor IA (0–100), gerado sob demanda. Reordena as recomendações ('Recomendar com IA', 'Próxima leitura', 'Recomendar do ranking') e alimenta a Nota Final. A maioria das obras fica sem valor até passar pelo Rankear.", defaultWidth: 80, align: "center", group: "notas" },
+  { key: "alignment_score", label: "IA Rk.", configLabel: "IA Rk", description: "A opinião de um consultor de IA sobre o quanto esta obra é uma boa recomendação pra você (0–100), pensada caso a caso. É um segundo olhar mais fino que a Nota Prevista. Gerada por um LLM que analisa o seu perfil, a sinopse e os atributos da obra. A maioria das obras fica sem valor até você pedir o Rankear.", defaultWidth: 80, align: "center", group: "notas" },
   ...CRITERION_SLUGS.map((slug) => ({
     key: `crit_${slug}`,
     label: CRITERIA_INFO[slug]?.emoji ?? slug,
@@ -88,6 +92,9 @@ const LEGACY_HIDDEN_KEYS = ["calc", "pred", "final"] as const
 const DEFAULT_COLUMN_CONFIG: RankingColumnConfig = {
   order: DEFAULT_COLUMN_KEYS,
   hidden: [
+    // Prioridade: número escondido por padrão — a tabela separa por TIERS
+    // (divisores), em vez de mostrar um decimal dentro da incerteza do modelo.
+    "decision",
     "pub",
     "per_status",
     "chapters_read",
@@ -211,10 +218,9 @@ const PADRAO_VISIBLE = DEFAULT_COLUMN_KEYS.filter(
 
 const PRESET_VISIBLE_KEYS: Record<RankingColumnPreset, string[]> = {
   padrao: PADRAO_VISIBLE,
-  compacto: ["rank", "title", "pub", "per_status", "decision", "expected", "personal_fit"],
+  compacto: ["rank", "title", "pub", "per_status", "expected", "personal_fit"],
   notas: [
     "rank", "title",
-    "decision",
     "expected", "expected_baseline", "expected_quality_adj",
     "personal_fit", "alignment_score", "platform_avg", "total_votes",
   ],
