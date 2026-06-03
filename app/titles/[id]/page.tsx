@@ -4,6 +4,7 @@ import { BarChart3, ChevronDown, LayoutDashboard, Plus, Sparkles, Tags as TagsIc
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
+import { SynopsisQualitySuggestion } from "@/components/titles/synopsis-quality-suggestion"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug } from "@/server/queries/works"
 import { getAllTags } from "@/server/queries/tags"
@@ -17,6 +18,7 @@ import { planAllows } from "@/lib/plans/capabilities"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
+import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
 import { ScoreBadge, getCriterionColorClass } from "@/components/ui/score-badge"
 import {
@@ -48,7 +50,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CRITERIA_INFO, PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { getPublicationStatusNameById, getPersonalStatusNameById } from "@/lib/constants/status-lookups"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
-import type { PersonalStatus } from "@/types/domain"
+import type { PersonalStatus, SynopsisQuality } from "@/types/domain"
 import { pickPrimarySynopsis, pickPrimaryCover } from "@/lib/work-derived"
 import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 import { CRITERION_SLUGS } from "@/types/domain"
@@ -181,7 +183,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -190,6 +192,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getBiasMap(await getCurrentUserId(configClient), configClient),
     getCurrentPlan(configClient),
     getAllTags(),
+    getSynopsisPredictionForWork(work.id as string),
   ])
   const subGroupBySlug = new Map<string, string>()
   for (const t of allTagsCatalog) {
@@ -661,6 +664,22 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     canonical={work.canonical_synopsis as string | null | undefined}
                     maxLines={20}
                     className="text-sm leading-6 text-foreground/85"
+                  />
+                  <SynopsisQualitySuggestion
+                    workId={work.id as string}
+                    manualValue={(work.synopsis_quality as SynopsisQuality | null) ?? null}
+                    hasCanonicalSynopsis={Boolean(work.canonical_synopsis)}
+                    isPaid={isPaidPlan}
+                    prediction={
+                      synopsisPrediction
+                        ? {
+                            predictedQuality: synopsisPrediction.predictedQuality,
+                            justification: synopsisPrediction.justification,
+                            confidence: synopsisPrediction.confidence,
+                            stale: synopsisPrediction.stale,
+                          }
+                        : null
+                    }
                   />
                 </CardContent>
               </Card>

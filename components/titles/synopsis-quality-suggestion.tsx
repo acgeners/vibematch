@@ -1,0 +1,146 @@
+"use client"
+
+import { useTransition } from "react"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
+import { Sparkles, Loader2, Check } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import {
+  predictSynopsisQualityForWorkAction,
+  applySynopsisPredictionAction,
+} from "@/server/actions/synopsis-quality"
+import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
+import type { SynopsisQuality } from "@/types/domain"
+
+export interface SynopsisQualitySuggestionProps {
+  workId: string
+  /** Valor MANUAL atual (works.synopsis_quality) — pra saber se já foi aplicado. */
+  manualValue: SynopsisQuality | null
+  prediction: {
+    predictedQuality: SynopsisQuality
+    justification: string | null
+    confidence: number | null
+    stale: boolean
+  } | null
+  /** A obra tem sinopse canônica? Sem ela não há o que avaliar. */
+  hasCanonicalSynopsis: boolean
+  /** Previsão IA é feature do plano Pago. Controla só a aparência. */
+  isPaid?: boolean
+}
+
+/**
+ * Sugestão IA do "Interesse Sinopse" abaixo da sinopse. É uma SUGESTÃO separada:
+ * "Aplicar" copia o valor pro campo manual (única via que entra no pipeline de
+ * notas) por ação explícita do usuário. "Prever/Reprever" dispara a estimativa.
+ */
+export function SynopsisQualitySuggestion({
+  workId,
+  manualValue,
+  prediction,
+  hasCanonicalSynopsis,
+  isPaid = true,
+}: SynopsisQualitySuggestionProps) {
+  const router = useRouter()
+  const [predicting, startPredict] = useTransition()
+  const [applying, startApply] = useTransition()
+
+  const runPredict = () => {
+    startPredict(async () => {
+      const res = await predictSynopsisQualityForWorkAction(workId)
+      if (res.error) {
+        toast.error(res.error)
+        return
+      }
+      const q = res.data?.predictedQuality
+      toast.success(q ? `Interesse estimado: ${q} (${SYNOPSIS_QUALITY_LABELS[q]})` : "Interesse estimado.")
+      router.refresh()
+    })
+  }
+
+  const runApply = () => {
+    startApply(async () => {
+      const res = await applySynopsisPredictionAction(workId)
+      if (res.error) {
+        toast.error(res.error)
+        return
+      }
+      toast.success("Aplicado ao Interesse sinopse.")
+      router.refresh()
+    })
+  }
+
+  if (!isPaid) {
+    return (
+      <div className="mt-3 flex items-center gap-2 border-t border-border/40 pt-3 text-xs text-muted-foreground">
+        <Sparkles className="h-3.5 w-3.5" />
+        Estimar Interesse Sinopse por IA é uma feature do plano Pago.
+      </div>
+    )
+  }
+
+  const alreadyApplied = prediction != null && manualValue === prediction.predictedQuality
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-border/40 pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <Sparkles className="h-3.5 w-3.5" /> Interesse sinopse (sugestão IA)
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5 text-xs"
+          onClick={runPredict}
+          disabled={predicting || !hasCanonicalSynopsis}
+          title={hasCanonicalSynopsis ? undefined : "Sem sinopse canônica para avaliar."}
+        >
+          {predicting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          {predicting ? "Estimando…" : prediction ? "Reprever" : "Prever"}
+        </Button>
+      </div>
+
+      {prediction ? (
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center rounded-full border border-rose-400/30 bg-rose-500/10 px-2.5 py-0.5 text-xs font-semibold text-rose-600 dark:text-rose-300">
+              {prediction.predictedQuality} — {SYNOPSIS_QUALITY_LABELS[prediction.predictedQuality]}
+            </span>
+            {prediction.confidence != null && (
+              <span className="text-[11px] text-muted-foreground">
+                confiança {Math.round(prediction.confidence * 100)}%
+              </span>
+            )}
+            {prediction.stale && (
+              <span className="inline-flex items-center rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-300">
+                desatualizado
+              </span>
+            )}
+            <Button
+              variant={alreadyApplied ? "ghost" : "secondary"}
+              size="sm"
+              className="ml-auto h-7 gap-1.5 text-xs"
+              onClick={runApply}
+              disabled={applying || alreadyApplied}
+            >
+              {applying ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : alreadyApplied ? (
+                <Check className="h-3.5 w-3.5" />
+              ) : null}
+              {alreadyApplied ? "Aplicado" : "Aplicar"}
+            </Button>
+          </div>
+          {prediction.justification && (
+            <p className="text-xs leading-5 text-muted-foreground">{prediction.justification}</p>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {hasCanonicalSynopsis
+            ? "Estime o quanto esta sinopse combina com seu perfil de gosto."
+            : "Gere a sinopse consolidada para habilitar a estimativa."}
+        </p>
+      )}
+    </div>
+  )
+}

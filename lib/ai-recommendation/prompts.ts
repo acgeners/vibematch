@@ -54,14 +54,14 @@ CAMPOS ENRIQUECIDOS (opcionais — preencha quando há evidência real):
 13. \`review_quotes\` (1–2 quotes): trechos curtos (≤ 150 chars, entre aspas) de reviews FORNECIDAS no bloco \`reviews:\` da candidata. NÃO INVENTE quotes. Cite a fonte ou contexto quando útil. Omita se reviews não foram fornecidas.
 14. \`mood_fit\` (0–1): SOMENTE quando o user enviou CONTEXTO ADICIONAL. Mede quão alinhada essa obra está com o mood específico, independente do alignment_score geral. Ex.: alignment=70 mas mood "quero algo curto" + obra tem 500 caps → mood_fit baixo (0.3). Omita o campo quando não houver mood.`
 
-function truncate(text: string | null | undefined, maxChars: number): string {
+export function truncate(text: string | null | undefined, maxChars: number): string {
   if (!text) return ""
   const trimmed = text.trim()
   if (trimmed.length <= maxChars) return trimmed
   return `${trimmed.slice(0, maxChars - 1).trimEnd()}…`
 }
 
-function formatTagsByGroup(tags: Array<{ name: string; group: string | null }>): string {
+export function formatTagsByGroup(tags: Array<{ name: string; group: string | null }>): string {
   if (!tags.length) return "(sem tags)"
   const grouped = new Map<string, string[]>()
   const ungrouped: string[] = []

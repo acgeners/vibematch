@@ -42,7 +42,7 @@ import { toast } from "sonner"
 import type { CategoryScore, WorkWithRelations, WorkCover } from "@/types/domain"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
-import { getCoverImageSrc } from "@/lib/image-proxy"
+import { CoverImage } from "@/components/ui/cover-image"
 import { ScoreBadge, getCriterionColorClass, type ColumnThresholds, type ScoreColorThresholds } from "@/components/ui/score-badge"
 import {
   AiStatusBadge,
@@ -596,11 +596,8 @@ function WorkCardsView({
                 )}
               >
                 {coverUrl ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={getCoverImageSrc(coverUrl)}
-                    alt=""
-                    loading="lazy"
+                  <CoverImage
+                    url={coverUrl}
                     className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                   />
                 ) : (

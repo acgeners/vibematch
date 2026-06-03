@@ -14,8 +14,14 @@ import Link from "next/link"
 import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 import { StaleRerankPanel } from "@/components/ranking/stale-rerank-panel"
-import { getAlignmentQueueWorks } from "@/server/queries/recommendations"
-import type { AlignmentQueueWork } from "@/server/queries/recommendations"
+import { SynopsisPredictPanel } from "@/components/titles/synopsis-predict-panel"
+import { SynopsisAccuracyBar } from "@/components/titles/synopsis-accuracy-bar"
+import { getAlignmentQueueWorks, getSynopsisQueueWorks } from "@/server/queries/recommendations"
+import type { AlignmentQueueWork, SynopsisQueueWork } from "@/server/queries/recommendations"
+import { getSynopsisPredictionAccuracy, getSynopsisVersionComparison } from "@/server/queries/synopsis-quality"
+import type { SynopsisPredictionAccuracy, SynopsisVersionComparison } from "@/server/queries/synopsis-quality"
+import { getCurrentPlan } from "@/server/queries/current-user"
+import { planAllows } from "@/lib/plans/capabilities"
 
 const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
@@ -447,6 +453,18 @@ function parseIaRkStates(raw: string | string[] | undefined): IaRkState[] {
   return IA_RK_STATES.filter((s) => parts.includes(s))
 }
 
+const SYNOPSIS_STATES = ["stale", "unpredicted", "predicted"] as const
+type SynopsisState = (typeof SYNOPSIS_STATES)[number]
+
+function parseSynopsisStates(raw: string | string[] | undefined): SynopsisState[] {
+  const value = Array.isArray(raw) ? raw[0] : raw
+  // Default da fila de ação: desatualizado + não previsto (sem "predicted").
+  if (value == null) return ["stale", "unpredicted"]
+  if (value === "none") return []
+  const parts = value.split(",").map((p) => p.trim())
+  return SYNOPSIS_STATES.filter((s) => parts.includes(s))
+}
+
 /**
  * Aba "IA Rk" — fila de re-rank: obras com IA Rk desatualizado E/OU não avaliado
  * (sem IA Rk ainda). Recebe a fila já buscada pelo pai (mesma query do badge, pra
@@ -487,6 +505,53 @@ function IaRkTab({
   )
 }
 
+/**
+ * Aba "Interesse Sinopse" — fila de obras com sinopse canônica que precisam de
+ * estimativa IA (desatualizada ou não prevista). Mesmo formato de cards da aba
+ * IA Rk. Compartilha os filtros de Status; só os de estado da avaliação não se
+ * aplicam.
+ */
+function SynopsisTab({
+  works,
+  accuracy,
+  comparison,
+  pubStatusNames,
+  personalStatusNames,
+  synopsisQualities,
+  states,
+  isPaid,
+}: {
+  works: SynopsisQueueWork[]
+  accuracy: SynopsisPredictionAccuracy
+  comparison: SynopsisVersionComparison | null
+  pubStatusNames: string[]
+  personalStatusNames: string[]
+  synopsisQualities: string[]
+  states: SynopsisState[]
+  isPaid: boolean
+}) {
+  return (
+    <div className="space-y-4">
+      <SynopsisAccuracyBar accuracy={accuracy} comparison={comparison} />
+      <AiEvaluationFilters
+        activeFilters={[]}
+        currentModel={MODEL}
+        currentPromptVersion={PROMPT_VERSION}
+        currentPromptVersionNum={CURRENT_PROMPT_VERSION_NUM}
+        promptVersionTolerance={0}
+        lowConfidenceThreshold={DEFAULT_LOW_CONFIDENCE_THRESHOLD}
+        activePubStatuses={pubStatusNames}
+        activePersonalStatuses={personalStatusNames}
+        activeSynopsisQualities={synopsisQualities}
+        showEvalState={false}
+        showSynopsisState
+        activeSynopsisStates={states}
+      />
+      <SynopsisPredictPanel works={works} isPaid={isPaid} />
+    </div>
+  )
+}
+
 function toParam(v: string | string[] | undefined): string | undefined {
   if (v == null) return undefined
   return Array.isArray(v) ? v.join(",") : v
@@ -503,11 +568,13 @@ export default async function AiEvaluationPage({
     tolerance?: string | string[]
     tab?: string | string[]
     rk?: string | string[]
+    sq?: string | string[]
   }>
 }) {
   const params = await searchParams
   const tabRaw = Array.isArray(params.tab) ? params.tab[0] : params.tab
-  const activeTab: "atributos" | "ia-rk" = tabRaw === "ia-rk" ? "ia-rk" : "atributos"
+  const activeTab: "atributos" | "ia-rk" | "sinopse" =
+    tabRaw === "ia-rk" ? "ia-rk" : tabRaw === "sinopse" ? "sinopse" : "atributos"
 
   // Filtros de Status + interesse compartilhados pelas 2 abas.
   const { names: pubStatusNames, ids: pubStatusIds } = parseStatusList(params.pub, PUB_STATUS_NAME_TO_ID)
@@ -517,6 +584,7 @@ export default async function AiEvaluationPage({
   )
   const synopsisQualities = parseSynopsisQualities(params.synopsis_q)
   const iaRkStates = parseIaRkStates(params.rk)
+  const synopsisStates = parseSynopsisStates(params.sq)
 
   // Filtros específicos da aba de atributos.
   const activeFilters = parseFilters(params.filter)
@@ -525,10 +593,10 @@ export default async function AiEvaluationPage({
     ? parseInt(toleranceRaw, 10)
     : null
 
-  // Roda as duas filas em paralelo. Ambas alimentam o contador do título da aba
+  // Roda as três filas em paralelo. Todas alimentam o contador do título da aba
   // (precisa estar certo mesmo na aba inativa) e o conteúdo. Queries leves
   // (~tamanho da biblioteca).
-  const [attrResult, iaRkQueue] = await Promise.all([
+  const [attrResult, iaRkQueue, synopsisQueue, synopsisAccuracy, synopsisComparison, plan] = await Promise.all([
     getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, synopsisQualities, toleranceOverride),
     getAlignmentQueueWorks({
       states: iaRkStates,
@@ -536,9 +604,20 @@ export default async function AiEvaluationPage({
       personalStatusIds,
       synopsisQualities,
     }),
+    getSynopsisQueueWorks({
+      states: synopsisStates,
+      pubStatusIds,
+      personalStatusIds,
+      synopsisQualities,
+    }),
+    getSynopsisPredictionAccuracy(),
+    getSynopsisVersionComparison(),
+    getCurrentPlan(),
   ])
   const attrCount = attrResult.works.length
   const iaRkCount = iaRkQueue.length
+  const synopsisCount = synopsisQueue.length
+  const isPaidPlan = planAllows(plan, "smart_shortlist")
 
   // Preserva os filtros ao trocar de aba.
   const filter = toParam(params.filter)
@@ -547,6 +626,7 @@ export default async function AiEvaluationPage({
   const tolerance = toParam(params.tolerance)
   const synq = toParam(params.synopsis_q)
   const rk = toParam(params.rk)
+  const sq = toParam(params.sq)
 
   const attrParams = new URLSearchParams()
   if (filter) attrParams.set("filter", filter)
@@ -562,6 +642,13 @@ export default async function AiEvaluationPage({
   if (synq) rkParams.set("synopsis_q", synq)
   if (rk) rkParams.set("rk", rk)
   const rkHref = `/ai-evaluation?${rkParams}`
+
+  const synParams = new URLSearchParams({ tab: "sinopse" })
+  if (pub) synParams.set("pub", pub)
+  if (personal) synParams.set("personal", personal)
+  if (synq) synParams.set("synopsis_q", synq)
+  if (sq) synParams.set("sq", sq)
+  const synHref = `/ai-evaluation?${synParams}`
 
   return (
     <div className="space-y-4">
@@ -579,9 +666,23 @@ export default async function AiEvaluationPage({
         <EvalTabLink href={rkHref} active={activeTab === "ia-rk"}>
           IA Rk ({iaRkCount})
         </EvalTabLink>
+        <EvalTabLink href={synHref} active={activeTab === "sinopse"}>
+          Interesse Sinopse ({synopsisCount})
+        </EvalTabLink>
       </div>
 
-      {activeTab === "ia-rk" ? (
+      {activeTab === "sinopse" ? (
+        <SynopsisTab
+          works={synopsisQueue}
+          accuracy={synopsisAccuracy}
+          comparison={synopsisComparison}
+          pubStatusNames={pubStatusNames}
+          personalStatusNames={personalStatusNames}
+          synopsisQualities={synopsisQualities}
+          states={synopsisStates}
+          isPaid={isPaidPlan}
+        />
+      ) : activeTab === "ia-rk" ? (
         <IaRkTab
           works={iaRkQueue}
           pubStatusNames={pubStatusNames}

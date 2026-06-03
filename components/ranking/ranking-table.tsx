@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
-import { getCoverImageSrc } from "@/lib/image-proxy"
+import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { formatPercentile } from "@/lib/calculations/percentile"
 import { ScoreBadge } from "@/components/ui/score-badge"
@@ -653,12 +653,9 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                 {entry.rank}
               </span>
               {entry.coverUrl && (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  src={getCoverImageSrc(entry.coverUrl)}
-                  alt=""
+                <CoverImage
+                  url={entry.coverUrl}
                   className="h-16 w-12 shrink-0 rounded object-cover"
-                  loading="lazy"
                 />
               )}
               <div className="flex-1 min-w-0">
@@ -871,11 +868,8 @@ function RankingCard({
         )}
       >
         {entry.coverUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={getCoverImageSrc(entry.coverUrl)}
-            alt=""
-            loading="lazy"
+          <CoverImage
+            url={entry.coverUrl}
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
           />
         ) : (

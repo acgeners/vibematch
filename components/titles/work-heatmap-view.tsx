@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { ChevronDown, ChevronUp, ImageOff } from "lucide-react"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
-import { getCoverImageSrc } from "@/lib/image-proxy"
+import { CoverImage } from "@/components/ui/cover-image"
 import { ScoreBadge, type ColumnThresholds, type ScoreColorThresholds } from "@/components/ui/score-badge"
 import {
   Tooltip,
@@ -431,11 +431,8 @@ export function WorkHeatmapView({
                       >
                         <div className="relative h-10 w-7 shrink-0 overflow-hidden rounded border bg-muted/40">
                           {cover ? (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img
-                              src={getCoverImageSrc(cover)}
-                              alt=""
-                              loading="lazy"
+                            <CoverImage
+                              url={cover}
                               className="h-full w-full object-cover"
                             />
                           ) : (

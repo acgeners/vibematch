@@ -4,7 +4,7 @@ import Link from "next/link"
 import { ExternalLink, ImageOff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { getCoverImageSrc } from "@/lib/image-proxy"
+import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug } from "@/lib/utils"
 import type { RankedCandidate } from "@/lib/ai-recommendation/types"
 
@@ -30,12 +30,10 @@ export function RankedWorkCard({ rank, ranked }: RankedWorkCardProps) {
         <span className="text-xs font-semibold text-muted-foreground tabular-nums">#{rank}</span>
         <div className="relative h-24 w-16 overflow-hidden rounded border bg-muted">
           {coverUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={getCoverImageSrc(coverUrl)}
+            <CoverImage
+              url={coverUrl}
               alt={work.title}
               className="h-full w-full object-cover"
-              loading="lazy"
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-muted-foreground">

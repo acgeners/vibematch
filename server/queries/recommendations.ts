@@ -12,6 +12,7 @@ import {
 import type { CriterionSlug } from "@/types/domain"
 import type { CandidateReview, CandidateWorkInput, RatedWorkInput, RecommendationMode } from "@/lib/ai-recommendation/types"
 import { getRanking, type RankingFilters } from "@/server/queries/ranking"
+import { PROMPT_VERSION as SYNOPSIS_PROMPT_VERSION } from "@/lib/ai-evaluation/synopsis-quality-predictor"
 
 const POST_SCORE_FIELDS = [
   "post_story_score",
@@ -587,6 +588,234 @@ export async function countStaleAlignmentWorks(): Promise<number> {
     return 0
   }
   return count ?? 0
+}
+
+export interface SynopsisQueueWork {
+  id: string
+  title: string
+  coverUrl: string | null
+  /** Todas as capas (primária primeiro) — pro fallback quando uma falha. */
+  coverUrls: string[]
+  publicationStatusId: number | null
+  personalStatusId: number | null
+  /** Valor MANUAL (works.synopsis_quality). */
+  manualSynopsisQuality: string | null
+  expectedScore: number | null
+  /** Data da última leitura (works.last_read_at) — pra ordenação. */
+  lastReadAt: string | null
+  /** Previsão IA ATIVA (versão atual se houver, senão a mais recente). */
+  predictedQuality: string | null
+  predictedPromptVersion: string | null
+  predictionStale: boolean
+  predictedConfidence: number | null
+  justification: string | null
+  /** Previsão de uma versão de prompt ANTERIOR (pra comparar v1 × v2 no card). */
+  previousPredictedQuality: string | null
+  previousPromptVersion: string | null
+}
+
+/**
+ * Fila da aba /ai-evaluation?tab=sinopse: obras com `canonical_synopsis` que
+ * precisam de estimativa de Interesse Sinopse. Três estados (espelha a fila de
+ * IA Rk):
+ *   - "stale": já têm previsão mas marcada desatualizada (perfil/sinopse mudou)
+ *   - "unpredicted": ainda não têm previsão
+ *   - "predicted": têm previsão fresca — pra comparar manual × IA em massa
+ * Filtra por status em SQL; estado em JS. Sort é no client.
+ */
+interface SynopsisPredRow {
+  predicted_quality?: string | null
+  stale?: boolean | null
+  confidence?: number | null
+  justification?: string | null
+  prompt_version?: string | null
+}
+
+const SYNOPSIS_QUEUE_SELECT =
+  "id, title, publication_status_id, personal_status_id, synopsis_quality, last_read_at, work_covers(url, is_primary, position), calculated_scores(expected_score)"
+
+/** Todas as URLs de capa de uma obra, primária primeiro depois por posição, sem duplicatas. */
+function orderedCoverUrls(covers: RawCoverRow[] | undefined): string[] {
+  const list = (covers ?? [])
+    .filter((c): c is RawCoverRow & { url: string } => Boolean(c?.url))
+    .slice()
+    .sort((a, b) => {
+      const ap = a.is_primary ? 0 : 1
+      const bp = b.is_primary ? 0 : 1
+      if (ap !== bp) return ap - bp
+      return (a.position ?? 9999) - (b.position ?? 9999)
+    })
+    .map((c) => c.url)
+  return [...new Set(list)]
+}
+
+export async function getSynopsisQueueWorks(opts: {
+  states?: Array<"stale" | "unpredicted" | "predicted">
+  pubStatusIds?: number[]
+  personalStatusIds?: number[]
+  synopsisQualities?: string[]
+  limit?: number
+}): Promise<SynopsisQueueWork[]> {
+  const states: Array<"stale" | "unpredicted" | "predicted"> =
+    opts.states ?? ["stale", "unpredicted"]
+  const wantStale = states.includes("stale")
+  const wantUnpredicted = states.includes("unpredicted")
+  const wantPredicted = states.includes("predicted")
+  if (!wantStale && !wantUnpredicted && !wantPredicted) return []
+  const supabase = createAdminClient()
+
+  // Carrega TODAS as previsões (tabela pequena) — fonte da verdade do estado de
+  // cada obra. Evita depender de embed + limite na query de works (que, sem
+  // order, descartava previsões silenciosamente além da janela).
+  const { data: predRows, error: predErr } = await supabase
+    .from("synopsis_quality_predictions")
+    .select("work_id, predicted_quality, stale, confidence, justification, prompt_version")
+  if (predErr) throw new Error(`Falha lendo previsões de sinopse: ${predErr.message}`)
+  // Pode haver VÁRIAS previsões por obra (uma por versão de prompt). Agrupa e
+  // escolhe a "ativa" (versão atual, senão a de maior versão) pra exibição.
+  const verNum = (v: string | null | undefined) => {
+    const m = (v ?? "").match(/(\d+)/)
+    return m ? parseInt(m[1], 10) : -1
+  }
+  const rowsByWork = new Map<string, Array<{ work_id: string } & SynopsisPredRow>>()
+  for (const p of predRows ?? []) {
+    const row = p as { work_id: string } & SynopsisPredRow
+    const list = rowsByWork.get(row.work_id)
+    if (list) list.push(row)
+    else rowsByWork.set(row.work_id, [row])
+  }
+  const predByWork = new Map<string, SynopsisPredRow>()
+  const prevByWork = new Map<string, SynopsisPredRow>()
+  const outdatedWorks = new Set<string>()
+  const freshIds: string[] = []
+  const staleIds: string[] = []
+  for (const [workId, rows] of rowsByWork) {
+    const current = rows.find((r) => (r.prompt_version ?? null) === SYNOPSIS_PROMPT_VERSION)
+    const sorted = rows.slice().sort((a, b) => verNum(b.prompt_version) - verNum(a.prompt_version))
+    const active = current ?? sorted[0]
+    predByWork.set(workId, active)
+    // Previsão de versão anterior (maior versão != ativa) — pra mostrar v1 × v2.
+    const previous = sorted.find((r) => r !== active)
+    if (previous) prevByWork.set(workId, previous)
+    // "Desatualizada" = sem previsão da versão atual, OU a da versão atual ficou
+    // stale (perfil/sinopse mudou). Volta pra fila pra re-previsão em lote.
+    const outdated = !current || Boolean(current.stale)
+    if (outdated) {
+      outdatedWorks.add(workId)
+      staleIds.push(workId)
+    } else {
+      freshIds.push(workId)
+    }
+  }
+
+  const pubIds = opts.pubStatusIds ?? []
+  const personalIds = opts.personalStatusIds ?? []
+  const synQ = opts.synopsisQualities ?? []
+
+  const mapWork = (w: Record<string, unknown>): SynopsisQueueWork => {
+    const calc = (w.calculated_scores as { expected_score?: number | null } | null) ?? null
+    const pred = predByWork.get(w.id as string) ?? null
+    const prev = prevByWork.get(w.id as string) ?? null
+    const coverUrls = orderedCoverUrls(w.work_covers as RawCoverRow[] | undefined)
+    return {
+      id: w.id as string,
+      title: w.title as string,
+      coverUrl: coverUrls[0] ?? null,
+      coverUrls,
+      publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
+      personalStatusId: w.personal_status_id != null ? Number(w.personal_status_id) : null,
+      manualSynopsisQuality: (w.synopsis_quality as string | null) ?? null,
+      expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
+      lastReadAt: (w.last_read_at as string | null) ?? null,
+      predictedQuality: (pred?.predicted_quality as string | null) ?? null,
+      predictedPromptVersion: (pred?.prompt_version as string | null) ?? null,
+      predictionStale: outdatedWorks.has(w.id as string),
+      predictedConfidence: pred?.confidence != null ? Number(pred.confidence) : null,
+      justification: (pred?.justification as string | null) ?? null,
+      previousPredictedQuality: (prev?.predicted_quality as string | null) ?? null,
+      previousPromptVersion: (prev?.prompt_version as string | null) ?? null,
+    }
+  }
+
+  const out = new Map<string, SynopsisQueueWork>()
+
+  // 1) Previstas / desatualizadas — hidratadas POR ID (completas, sem limite de
+  // janela). Chunk de 100 IDs pra não estourar o limite de URL do PostgREST.
+  const predSideIds = [...(wantStale ? staleIds : []), ...(wantPredicted ? freshIds : [])]
+  for (let i = 0; i < predSideIds.length; i += 100) {
+    const chunk = predSideIds.slice(i, i + 100)
+    let q = supabase
+      .from("works")
+      .select(SYNOPSIS_QUEUE_SELECT)
+      .in("id", chunk)
+      .eq("is_archived", false)
+      .not("canonical_synopsis", "is", null)
+    if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
+    if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
+    if (synQ.length > 0) q = q.in("synopsis_quality", synQ)
+    const { data, error } = await q
+    if (error) throw new Error(`Falha hidratando previstas/desatualizadas: ${error.message}`)
+    for (const w of data ?? []) {
+      const row = w as Record<string, unknown>
+      out.set(row.id as string, mapWork(row))
+    }
+  }
+
+  // 2) Não-previstas — obras com sinopse canônica e SEM previsão.
+  if (wantUnpredicted) {
+    const predIdSet = new Set(predByWork.keys())
+    let q = supabase
+      .from("works")
+      .select(SYNOPSIS_QUEUE_SELECT)
+      .eq("is_archived", false)
+      .not("canonical_synopsis", "is", null)
+      .order("updated_at", { ascending: false })
+    if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
+    if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
+    if (synQ.length > 0) q = q.in("synopsis_quality", synQ)
+    const { data, error } = await q.limit(opts.limit ?? 1000)
+    if (error) throw new Error(`Falha listando não-previstas: ${error.message}`)
+    for (const w of data ?? []) {
+      const row = w as Record<string, unknown>
+      const id = row.id as string
+      if (predIdSet.has(id) || out.has(id)) continue
+      out.set(id, mapWork(row))
+    }
+  }
+
+  return [...out.values()]
+}
+
+/**
+ * Hidrata obras específicas (por ID) como `FavoriteCandidate`, preservando a
+ * ordem dos IDs e filtrando arquivadas. Usado pelo lote da aba Interesse Sinopse,
+ * que prevê exatamente as obras visíveis na fila (na ordem que o usuário vê).
+ */
+export async function getSynopsisCandidatesByIds(ids: string[]): Promise<FavoriteCandidate[]> {
+  if (ids.length === 0) return []
+  const supabase = createAdminClient()
+  // Chunk de 100 ids por request: `.in("id", [...])` codifica cada UUID na URL
+  // (~37 chars); 100 ≈ 3.7KB, abaixo do limite de proxy/PostgREST (~16KB).
+  const rows: unknown[] = []
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100)
+    const { data, error } = await supabase
+      .from("works")
+      .select(CANDIDATE_WORK_SELECT)
+      .in("id", chunk)
+      .eq("is_archived", false)
+    if (error) throw new Error(`Falha hidratando candidatos por ID: ${error.message}`)
+    if (data) rows.push(...data)
+  }
+
+  const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  const biasMap = await loadBiasMapForRecs(supabase)
+  const byId = new Map<string, FavoriteCandidate>()
+  for (const row of rows) {
+    const id = (row as { id: string }).id
+    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap))
+  }
+  return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
 }
 
 export async function getRunsToday(): Promise<number> {
