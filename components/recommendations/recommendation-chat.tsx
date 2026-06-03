@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 import { cn, titleToSlug } from "@/lib/utils"
-import { getCoverImageSrc } from "@/lib/image-proxy"
+import { CoverImage } from "@/components/ui/cover-image"
 import { sendChatMessageAction } from "@/server/actions/recommendation-chat"
 import type { ChatMessage, ChatRecommendationSnapshot } from "@/lib/ai-recommendation/types"
 
@@ -19,6 +19,11 @@ const STARTERS = [
   "Algo curto pra terminar rápido",
   "Me surpreende com algo fora do meu padrão",
 ]
+
+interface ChatOpener {
+  greeting: string
+  chips: string[]
+}
 
 function alignmentColor(score: number): string {
   if (score >= 90) return "bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-300"
@@ -31,11 +36,14 @@ function alignmentColor(score: number): string {
 interface RecommendationChatProps {
   initialSlug?: string | null
   initialMessages?: ChatMessage[]
+  /** Abertura proativa montada do perfil (estado vazio). Ausente → fallback estático. */
+  opener?: ChatOpener
 }
 
 export function RecommendationChat({
   initialSlug = null,
   initialMessages = [],
+  opener,
 }: RecommendationChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [slug, setSlug] = useState<string | null>(initialSlug)
@@ -88,36 +96,58 @@ export function RecommendationChat({
   }
 
   const isEmpty = messages.length === 0
+  const chips = opener?.chips ?? STARTERS
 
   return (
     <div className="flex h-[calc(100vh-220px)] min-h-[420px] flex-col rounded-lg border bg-card/30">
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4">
         {isEmpty ? (
-          <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-            <div className="rounded-full bg-primary/10 p-3">
-              <Sparkles className="h-6 w-6 text-primary" />
+          opener ? (
+            // Abertura proativa: a IA "fala primeiro" com uma saudação ancorada no
+            // perfil, seguida de chips personalizados pra destravar a conversa.
+            <div className="space-y-4">
+              <MessageBubble message={{ role: "assistant", content: opener.greeting }} />
+              <div className="flex flex-wrap gap-1.5 pl-1">
+                {chips.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => send(s)}
+                    disabled={isPending}
+                    className="rounded-full border border-border/60 bg-muted/30 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Bate um papo pra eu te recomendar</p>
-              <p className="max-w-sm text-xs text-muted-foreground">
-                Me conta o mood de hoje (tom, gênero, tamanho, o que evitar). Eu pergunto o que
-                faltar e garimpo obras do seu catálogo de descoberta.
-              </p>
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+              <div className="rounded-full bg-primary/10 p-3">
+                <Sparkles className="h-6 w-6 text-primary" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Bate um papo pra eu te recomendar</p>
+                <p className="max-w-sm text-xs text-muted-foreground">
+                  Me conta o mood de hoje (tom, gênero, tamanho, o que evitar). Eu pergunto o que
+                  faltar e garimpo obras do seu catálogo de descoberta.
+                </p>
+              </div>
+              <div className="flex max-w-md flex-wrap justify-center gap-1.5">
+                {chips.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => send(s)}
+                    disabled={isPending}
+                    className="rounded-full border border-border/60 bg-muted/30 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="flex max-w-md flex-wrap justify-center gap-1.5">
-              {STARTERS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => send(s)}
-                  disabled={isPending}
-                  className="rounded-full border border-border/60 bg-muted/30 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
+          )
         ) : (
           messages.map((m, i) => <MessageBubble key={i} message={m} />)
         )}
@@ -193,12 +223,10 @@ function RecommendationCards({ snapshot }: { snapshot: ChatRecommendationSnapsho
               </span>
               <div className="relative h-20 w-14 overflow-hidden rounded border bg-muted">
                 {item.coverUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={getCoverImageSrc(item.coverUrl)}
+                  <CoverImage
+                    url={item.coverUrl}
                     alt={item.title}
                     className="h-full w-full object-cover"
-                    loading="lazy"
                   />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-muted-foreground">

@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureCapability } from "@/server/queries/current-user"
 import { loadOrEnsureProfile } from "@/lib/ai-recommendation/ensure-profile"
 import { runChatTurn, CHAT_MODEL, CHAT_PROMPT_VERSION } from "@/lib/ai-recommendation/chat-service"
+import { buildChatOpener } from "@/lib/ai-recommendation/chat-prompt"
 import { runRecommendationAction, type RunRecommendationResult } from "@/server/actions/recommendations"
 import { parseFiltersFromSearchParams } from "@/lib/ranking-filters-from-params"
 import type {
@@ -187,7 +188,19 @@ export async function sendChatMessageAction(
       created_at: new Date().toISOString(),
     }
 
-    const newMessages: ChatMessage[] = [...history, assistantMessage]
+    // Conversa nova: persiste a abertura proativa da IA como messages[0] (só pra
+    // exibição/coerência no reload). Não entrou no `history` enviado ao modelo, e
+    // `toApiMessages` descarta esse assistant inicial nos turnos seguintes.
+    const opener: ChatMessage | null = existing
+      ? null
+      : {
+          role: "assistant",
+          content: buildChatOpener(profile.profile).greeting,
+          created_at: now,
+        }
+    const newMessages: ChatMessage[] = opener
+      ? [opener, ...history, assistantMessage]
+      : [...history, assistantMessage]
 
     let slug = existing?.slug ?? null
     if (existing) {

@@ -7,12 +7,24 @@ import { listChatsAction } from "@/server/actions/recommendation-chat"
 import { getCurrentPlan } from "@/server/queries/current-user"
 import { planAllows, paidOnlyMessage } from "@/lib/plans/capabilities"
 import { formatRelativeDateTime } from "@/lib/date-utils"
+import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
+import { buildChatOpener } from "@/lib/ai-recommendation/chat-prompt"
 
 export const dynamic = "force-dynamic"
 
 export default async function RecommendationChatPage() {
   const plan = await getCurrentPlan()
   const isPaid = planAllows(plan, "chat_recommend")
+
+  // Abertura proativa montada do perfil atual (read-only, sem gerar via LLM).
+  // Stub/ausente → sem opener; o componente cai no estado vazio estático.
+  let opener: ReturnType<typeof buildChatOpener> | undefined
+  if (isPaid) {
+    const profile = await loadCurrentTasteProfile()
+    if (profile && !profile.is_stub) {
+      opener = buildChatOpener(profile.profile)
+    }
+  }
 
   return (
     <div className="w-full space-y-4">
@@ -50,7 +62,7 @@ export default async function RecommendationChatPage() {
         </Card>
       ) : (
         <>
-          <RecommendationChat />
+          <RecommendationChat opener={opener} />
           <RecentChats />
         </>
       )}
