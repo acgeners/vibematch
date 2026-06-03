@@ -632,6 +632,7 @@ export interface RecommendationRunSummary {
   nCandidates: number
   topTitles: string[]
   topAlignment: number | null
+  lowAlignment: number | null
   createdAt: string
   tasteProfileId: string | null
 }
@@ -652,18 +653,33 @@ export async function listRecommendationRuns(limit = 50): Promise<Recommendation
 
   const rows = (data ?? []) as Array<Pick<RawRunRow, "id" | "slug" | "mode" | "taste_profile_id" | "user_context" | "n_candidates" | "results" | "created_at">>
   const topWorkIds = new Set<string>()
-  const perRunTop: Array<{ runId: string; ids: string[]; alignment: number | null }> = []
+  const perRunTop: Array<{
+    runId: string
+    ids: string[]
+    alignment: number | null
+    lowAlignment: number | null
+  }> = []
   for (const row of rows) {
     const arr = Array.isArray(row.results)
       ? (row.results as Array<{ work_id?: string; alignment_score?: number }>)
       : []
-    const sorted = [...arr].sort((a, b) => (b.alignment_score ?? 0) - (a.alignment_score ?? 0))
-    const top = sorted.slice(0, 3)
+    const sorted = [...arr]
+      .filter((t) => typeof t.alignment_score === "number")
+      .sort((a, b) => (b.alignment_score ?? 0) - (a.alignment_score ?? 0))
+    // Dedupe defensivo: `results` pode repetir work_id (ranker/persistência).
+    const seen = new Set<string>()
+    const deduped = sorted.filter((t) => {
+      if (!t.work_id || seen.has(t.work_id)) return false
+      seen.add(t.work_id)
+      return true
+    })
+    const top = deduped.slice(0, 3)
     for (const t of top) if (t.work_id) topWorkIds.add(t.work_id)
     perRunTop.push({
       runId: row.id,
       ids: top.map((t) => t.work_id ?? "").filter(Boolean),
-      alignment: sorted[0]?.alignment_score ?? null,
+      alignment: deduped[0]?.alignment_score ?? null,
+      lowAlignment: deduped[deduped.length - 1]?.alignment_score ?? null,
     })
   }
 
@@ -687,6 +703,7 @@ export async function listRecommendationRuns(limit = 50): Promise<Recommendation
       nCandidates: row.n_candidates,
       topTitles,
       topAlignment: meta?.alignment ?? null,
+      lowAlignment: meta?.lowAlignment ?? null,
       createdAt: row.created_at,
       tasteProfileId: row.taste_profile_id,
     } satisfies RecommendationRunSummary
@@ -767,9 +784,19 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
     }
   }
 
+  // Defensivo: `results` persistido pode conter o mesmo work_id repetido (o
+  // ranker/persistência ocasionalmente duplica). Mantém só a 1ª ocorrência
+  // (maior alignment, pós-sort) — senão a UI quebra com keys duplicadas.
+  const seenWorkIds = new Set<string>()
   const ranked = rankings
     .filter((r) => typeof r.work_id === "string" && typeof r.alignment_score === "number")
     .sort((a, b) => (b.alignment_score ?? 0) - (a.alignment_score ?? 0))
+    .filter((r) => {
+      const id = r.work_id as string
+      if (seenWorkIds.has(id)) return false
+      seenWorkIds.add(id)
+      return true
+    })
     .map((r) => {
       const work = worksById.get(r.work_id as string) ?? null
       return {

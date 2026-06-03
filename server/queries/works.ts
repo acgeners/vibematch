@@ -90,6 +90,79 @@ async function getSearchMatchIds(supabase: any, searchTerm: string | undefined):
     .map((work: { id: string }) => work.id)
 }
 
+/**
+ * Resolve uma lista de títulos digitados (ex.: pelo chat) para obras do catálogo,
+ * de forma determinística (sem LLM). Para cada título retorna:
+ *  - `matched`   → 1 obra encontrada (melhor faixa de match)
+ *  - `ambiguous` → várias obras na melhor faixa (o caller pede pra desambiguar)
+ *  - `not_found` → nenhuma correspondência
+ *
+ * Ranqueia por faixa: igualdade exata > começa-com > contém (em qualquer um de
+ * title/original_title/alternative_titles, normalizados). Reusa a mesma
+ * normalização da busca por título da listagem.
+ */
+export type TitleResolution =
+  | { query: string; status: "matched"; work: { id: string; title: string } }
+  | { query: string; status: "ambiguous"; options: Array<{ id: string; title: string }> }
+  | { query: string; status: "not_found" }
+
+const MAX_AMBIGUOUS_OPTIONS = 6
+
+function titleMatchTier(
+  work: { title: string | null; original_title: string | null; alternative_titles: string[] | null },
+  normalizedQuery: string,
+): 0 | 1 | 2 | 3 {
+  const names = [work.title, work.original_title, ...(work.alternative_titles ?? [])]
+    .map(normalizeTitleSearchMatch)
+    .filter(Boolean)
+  let best: 0 | 1 | 2 | 3 = 0
+  for (const name of names) {
+    if (name === normalizedQuery) return 3
+    if (name.startsWith(normalizedQuery)) best = best < 2 ? 2 : best
+    else if (name.includes(normalizedQuery) || normalizedQuery.includes(name))
+      best = best < 1 ? 1 : best
+  }
+  return best
+}
+
+export async function resolveWorksByTitles(titles: string[]): Promise<TitleResolution[]> {
+  const queries = titles.map((t) => t.trim()).filter(Boolean)
+  if (queries.length === 0) return []
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("works")
+    .select("id, title, original_title, alternative_titles")
+    .eq("is_archived", false)
+    .limit(5000)
+  if (error) throw new Error(`Falha resolvendo títulos: ${error.message}`)
+  const works = (data ?? []) as Array<{
+    id: string
+    title: string | null
+    original_title: string | null
+    alternative_titles: string[] | null
+  }>
+
+  return queries.map((query) => {
+    const normalizedQuery = normalizeTitleSearchMatch(query)
+    let bestTier: 0 | 1 | 2 | 3 = 0
+    let bucket: Array<{ id: string; title: string }> = []
+    for (const w of works) {
+      const tier = titleMatchTier(w, normalizedQuery)
+      if (tier === 0) continue
+      if (tier > bestTier) {
+        bestTier = tier
+        bucket = [{ id: w.id, title: w.title ?? "(sem título)" }]
+      } else if (tier === bestTier) {
+        bucket.push({ id: w.id, title: w.title ?? "(sem título)" })
+      }
+    }
+    if (bestTier === 0 || bucket.length === 0) return { query, status: "not_found" as const }
+    if (bucket.length === 1) return { query, status: "matched" as const, work: bucket[0] }
+    return { query, status: "ambiguous" as const, options: bucket.slice(0, MAX_AMBIGUOUS_OPTIONS) }
+  })
+}
+
 function applyWorkFilters(
   query: SupabaseFilterableQuery,
   filters: WorkFilters,
