@@ -170,6 +170,22 @@ async function getEligibleWorks(
     filters.includes("low-confidence") || filters.includes("outdated-model")
   const latestEvalsPromise = needsLatestEvals ? loadLatestEvalsMap(supabase) : null
 
+  // Os filtros baseados na última avaliação (low-confidence / outdated-model)
+  // olham só o registro de avaliação, ignorando o ai_eval_status. Sem isto, uma
+  // obra "Pulada" (ai_eval_status="skipped") que tenha uma avaliação antiga de
+  // baixa confiança ou modelo desatualizado continuaria reaparecendo na fila.
+  // Carregamos o conjunto de obras puladas uma vez pra excluí-las desses filtros.
+  const skippedIdsPromise = needsLatestEvals
+    ? (async () => {
+        const { data, error } = await supabase
+          .from("works")
+          .select("id")
+          .eq("ai_eval_status", "skipped")
+        if (error) throw new Error(error.message)
+        return new Set((data ?? []).map((w) => w.id))
+      })()
+    : null
+
   // Pra cada filtro, descobrimos os work_ids elegíveis e depois unimos.
   // Mais eficiente que um único query com OR complexo (queries simples,
   // índices óbvios). Em paralelo.
@@ -206,9 +222,10 @@ async function getEligibleWorks(
   if (filters.includes("low-confidence")) {
     queries.push(
       (async () => {
-        const latest = await latestEvalsPromise!
+        const [latest, skipped] = await Promise.all([latestEvalsPromise!, skippedIdsPromise!])
         const ids = new Set<string>()
         for (const [workId, row] of latest) {
+          if (skipped.has(workId)) continue
           if (row.confidence != null && Number(row.confidence) < lowConfidenceThreshold) {
             ids.add(workId)
           }
@@ -221,9 +238,10 @@ async function getEligibleWorks(
   if (filters.includes("outdated-model")) {
     queries.push(
       (async () => {
-        const latest = await latestEvalsPromise!
+        const [latest, skipped] = await Promise.all([latestEvalsPromise!, skippedIdsPromise!])
         const ids = new Set<string>()
         for (const [workId, row] of latest) {
+          if (skipped.has(workId)) continue
           const versionNum = parsePromptVersion(row.prompt_version)
           const modelMismatch = row.model_name !== MODEL
           const promptMismatch =
