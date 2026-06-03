@@ -123,6 +123,11 @@ export async function insertNewTasteProfile(
   if (error || !data) {
     throw new Error(`Erro persistindo perfil de gosto: ${error?.message ?? "desconhecido"}`)
   }
+  // Um novo perfil virou o corrente ⇒ previsões de Interesse Sinopse feitas
+  // contra perfis anteriores ficam desatualizadas. Best-effort (não bloqueia a
+  // geração do perfil).
+  const { markSynopsisPredictionsStale } = await import("@/server/queries/synopsis-quality")
+  await markSynopsisPredictionsStale(args.inputHash)
   return rowToTasteProfile(data as Record<string, unknown>)
 }
 

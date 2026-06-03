@@ -51,7 +51,7 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug } from "@/types/domain"
 import { computeMoodAdjusted, isMoodActive, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
 import { cn } from "@/lib/utils"
-import { getCoverImageSrc } from "@/lib/image-proxy"
+import { CoverImage } from "@/components/ui/cover-image"
 import { fetchCompareWorks, type CompareWork } from "@/server/actions/compare"
 import { rerankClusterAction } from "@/server/actions/recommendations"
 import {
@@ -621,9 +621,8 @@ function VerdictCard({ item, position }: { item: VerdictItem; position: number }
     >
       <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded border bg-muted">
         {item.coverUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={getCoverImageSrc(item.coverUrl)}
+          <CoverImage
+            url={item.coverUrl}
             alt={item.title}
             className="h-full w-full object-cover"
           />
@@ -1249,11 +1248,8 @@ function CompareHeaderCell({
       <div className="flex gap-2.5">
         <div className="relative h-20 w-14 shrink-0 overflow-hidden rounded-md border bg-muted/40">
           {work.coverUrl ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={getCoverImageSrc(work.coverUrl)}
-              alt=""
-              loading="lazy"
+            <CoverImage
+              url={work.coverUrl}
               className="h-full w-full object-cover"
             />
           ) : (

@@ -7,7 +7,7 @@ import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/sta
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { cn, titleToSlug } from "@/lib/utils"
-import { getCoverImageSrc } from "@/lib/image-proxy"
+import { CoverImage } from "@/components/ui/cover-image"
 import type { SimilarWork } from "@/server/queries/similar-works"
 
 interface SimilarWorksCardProps {
@@ -127,12 +127,9 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
                   className="shrink-0 w-20 h-28 overflow-hidden rounded-lg border border-border bg-muted relative shadow-sm transition-transform group-hover:scale-[1.02]"
                 >
                   {w.coverUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={getCoverImageSrc(w.coverUrl) ?? w.coverUrl}
-                      alt=""
+                    <CoverImage
+                      url={w.coverUrl}
                       className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      loading="lazy"
                     />
                   ) : (
                     <div className="grid size-full place-items-center text-muted-foreground">

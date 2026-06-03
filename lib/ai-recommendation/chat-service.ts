@@ -136,6 +136,10 @@ function toApiMessages(messages: ChatMessage[]): Anthropic.Messages.MessageParam
     if (!content) continue
     out.push({ role: m.role, content })
   }
+  // A Anthropic Messages API exige que o array comece com role "user". O opener
+  // proativo é persistido como messages[0] (assistant), só pra exibição — descarta
+  // qualquer turno assistant inicial antes de enviar ao modelo.
+  while (out.length > 0 && out[0].role === "assistant") out.shift()
   return out
 }
 

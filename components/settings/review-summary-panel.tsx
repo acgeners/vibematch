@@ -4,17 +4,20 @@ import { useState, useTransition } from "react"
 import { toast } from "sonner"
 import { MessageSquareText } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { StatCard } from "@/components/settings/stat-card"
+import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import {
   consolidatePendingReviewSummaries,
   type ConsolidateReviewSummariesProgress,
 } from "@/server/actions/settings"
 
 interface ReviewSummaryPanelProps {
+  accent: SettingsAccent
   pendingCount: number
   totalCount: number
 }
 
-export function ReviewSummaryPanel({ pendingCount, totalCount }: ReviewSummaryPanelProps) {
+export function ReviewSummaryPanel({ accent, pendingCount, totalCount }: ReviewSummaryPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [lastResult, setLastResult] = useState<ConsolidateReviewSummariesProgress | null>(null)
 
@@ -46,6 +49,9 @@ export function ReviewSummaryPanel({ pendingCount, totalCount }: ReviewSummaryPa
     })
   }
 
+  const completionPct =
+    totalCount > 0 ? Math.round(((totalCount - pendingCount) / totalCount) * 100) : 0
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -60,28 +66,30 @@ export function ReviewSummaryPanel({ pendingCount, totalCount }: ReviewSummaryPa
             Se a Anthropic estiver congestionada, aborta após 3 falhas seguidas.
           </p>
         </div>
-        <Button type="button" onClick={handleRun} disabled={isPending || pendingCount === 0}>
+        <Button
+          type="button"
+          onClick={handleRun}
+          disabled={isPending || pendingCount === 0}
+          className={ACCENT_BUTTON[accent]}
+        >
           <MessageSquareText className={isPending ? "animate-pulse" : ""} />
           {isPending ? "Resumindo…" : "Resumir reviews pendentes"}
         </Button>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="rounded-md border border-border p-3">
-          <p className="text-xs text-muted-foreground">Pendentes</p>
-          <p className="mt-1 font-mono text-base">{pendingCount}</p>
-          <p className="text-[10px] text-muted-foreground">com reviews, sem resumo</p>
-        </div>
-        <div className="rounded-md border border-border p-3">
-          <p className="text-xs text-muted-foreground">Base</p>
-          <p className="mt-1 font-mono text-base">{totalCount}</p>
-          <p className="text-[10px] text-muted-foreground">obras (não arquivadas)</p>
-        </div>
-        <div className="rounded-md border border-border p-3">
-          <p className="text-xs text-muted-foreground">Modelo</p>
-          <p className="mt-1 font-mono text-xs">claude-haiku-4-5</p>
-          <p className="text-[10px] text-muted-foreground">~$0.002/obra</p>
-        </div>
+        <StatCard label="Pendentes" value={pendingCount} hint="com reviews, sem resumo" />
+        <StatCard
+          label="Resumidas"
+          value={`${totalCount - pendingCount} / ${totalCount}`}
+          hint={`${completionPct}% das obras`}
+        />
+        <StatCard
+          label="Modelo"
+          value="claude-haiku-4-5"
+          valueClassName="text-xs"
+          hint="~$0.002/obra"
+        />
       </div>
 
       {lastResult && (

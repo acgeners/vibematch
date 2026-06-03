@@ -2,13 +2,12 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { UserCircle, Sparkles, SlidersHorizontal } from "lucide-react"
+import { UserCircle, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const TABS = [
   { href: "/conta", icon: UserCircle, label: "Conta" },
   { href: "/conta/perfil", icon: Sparkles, label: "Perfil" },
-  { href: "/conta/preferencias", icon: SlidersHorizontal, label: "Preferências" },
 ]
 
 export function ContaTabs() {

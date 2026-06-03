@@ -31,6 +31,12 @@ const IA_RK_STATE_OPTIONS: Array<{ id: "stale" | "unranked"; label: string; tool
   { id: "unranked", label: "Não avaliado", tooltip: "Ainda não tem IA Rk (nunca passou pelo re-rank)." },
 ]
 
+const SYNOPSIS_STATE_OPTIONS: Array<{ id: "stale" | "unpredicted" | "predicted"; label: string; tooltip: string }> = [
+  { id: "stale", label: "Desatualizado", tooltip: "Tem previsão, mas ficou velha (perfil de gosto ou sinopse mudou)." },
+  { id: "unpredicted", label: "Não previsto", tooltip: "Ainda não tem estimativa de Interesse Sinopse." },
+  { id: "predicted", label: "Previsto", tooltip: "Já tem estimativa fresca — pra comparar o valor manual com o da IA." },
+]
+
 function isDefaultFilterSet(filters: Set<EvaluationFilter> | EvaluationFilter[]) {
   const set = Array.isArray(filters) ? new Set(filters) : filters
   return set.size === DEFAULT_FILTERS.length && DEFAULT_FILTERS.every((filter) => set.has(filter))
@@ -53,6 +59,10 @@ interface AiEvaluationFiltersProps {
   showIaRkState?: boolean
   /** Estados de IA Rk ativos ("stale"/"unranked"). */
   activeIaRkStates?: string[]
+  /** Mostra a seção "Estado da previsão" (aba Interesse Sinopse). */
+  showSynopsisState?: boolean
+  /** Estados de previsão ativos ("stale"/"unpredicted"/"predicted"). */
+  activeSynopsisStates?: string[]
 }
 
 const PUB_STATUSES = Object.values(PUBLICATION_STATUSES_BY_ID)
@@ -73,6 +83,8 @@ export function AiEvaluationFilters({
   showEvalState = true,
   showIaRkState = false,
   activeIaRkStates = [],
+  showSynopsisState = false,
+  activeSynopsisStates = [],
 }: AiEvaluationFiltersProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -136,6 +148,17 @@ export function AiEvaluationFilters({
     })
   }
 
+  const toggleSynopsisState = (value: string) => {
+    const next = new Set(activeSynopsisStates)
+    if (next.has(value)) next.delete(value)
+    else next.add(value)
+
+    updateParams((params) => {
+      if (next.size === 0) params.set("sq", "none")
+      else params.set("sq", [...next].join(","))
+    })
+  }
+
   const clearAll = () => {
     updateParams((params) => {
       params.delete("filter")
@@ -144,6 +167,7 @@ export function AiEvaluationFilters({
       params.delete("synopsis_q")
       params.delete("tolerance")
       params.delete("rk")
+      params.delete("sq")
     })
   }
 
@@ -191,9 +215,15 @@ export function AiEvaluationFilters({
     showEvalState && !isDefaultFilterSet(activeFilters) ? activeFilters.length : 0
   const iaRkFilterActive =
     showIaRkState && activeIaRkStates.length !== IA_RK_STATE_OPTIONS.length
+  // Default da aba Sinopse = {stale, unpredicted} (sem "predicted"). Qualquer
+  // desvio conta como filtro ativo.
+  const synopsisFilterActive =
+    showSynopsisState &&
+    [...activeSynopsisStates].sort().join(",") !== ["stale", "unpredicted"].sort().join(",")
   const activeCount =
     evalFilterCount +
     (iaRkFilterActive ? 1 : 0) +
+    (synopsisFilterActive ? 1 : 0) +
     activePubStatuses.length +
     activePersonalStatuses.length +
     activeSynopsisQualities.length
@@ -201,6 +231,7 @@ export function AiEvaluationFilters({
   const hasAnyActive =
     (showEvalState && !isDefaultFilterSet(activeFilters)) ||
     iaRkFilterActive ||
+    synopsisFilterActive ||
     activePubStatuses.length > 0 ||
     activePersonalStatuses.length > 0 ||
     activeSynopsisQualities.length > 0
@@ -300,6 +331,31 @@ export function AiEvaluationFilters({
                     <Tooltip key={opt.id}>
                       <TooltipTrigger asChild>
                         <button type="button" onClick={() => toggleIaRkState(opt.id)}>
+                          <Badge
+                            variant={active ? "default" : "outline"}
+                            className="cursor-pointer text-xs"
+                          >
+                            {opt.label}
+                          </Badge>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs text-xs">{opt.tooltip}</TooltipContent>
+                    </Tooltip>
+                  )
+                })}
+              </div>
+            </FilterSection>
+          )}
+
+          {showSynopsisState && (
+            <FilterSection title="Estado da previsão">
+              <div className="flex flex-wrap items-center gap-1">
+                {SYNOPSIS_STATE_OPTIONS.map((opt) => {
+                  const active = activeSynopsisStates.includes(opt.id)
+                  return (
+                    <Tooltip key={opt.id}>
+                      <TooltipTrigger asChild>
+                        <button type="button" onClick={() => toggleSynopsisState(opt.id)}>
                           <Badge
                             variant={active ? "default" : "outline"}
                             className="cursor-pointer text-xs"

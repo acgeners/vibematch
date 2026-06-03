@@ -5,12 +5,15 @@ import { toast } from "sonner"
 import { Brain, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LastRunHint } from "@/components/settings/last-run-hint"
+import { StatCard } from "@/components/settings/stat-card"
+import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import {
   refreshEmbeddings,
   type RefreshEmbeddingsResult,
 } from "@/server/actions/embeddings"
 
 interface EmbeddingsPanelProps {
+  accent: SettingsAccent
   /** Quantas obras já têm embedding cacheado (lido do DB no server). */
   initialCachedCount: number
   /** Quantas obras precisam re-embedar (sem linha OU com hash desatualizado). */
@@ -25,7 +28,7 @@ function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`
 }
 
-export function EmbeddingsPanel({ initialCachedCount, initialPendingCount, totalWorks, initialLastRun }: EmbeddingsPanelProps) {
+export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCount, totalWorks, initialLastRun }: EmbeddingsPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [lastResult, setLastResult] = useState<RefreshEmbeddingsResult | null>(null)
   const [lastRun, setLastRun] = useState<string | null>(initialLastRun)
@@ -70,8 +73,8 @@ export function EmbeddingsPanel({ initialCachedCount, initialPendingCount, total
         <div className="flex flex-col items-end gap-1 shrink-0">
           <Button
             onClick={handleRefresh}
-            disabled={isPending}
-            variant="secondary"
+            disabled={isPending || pendingCount === 0}
+            className={ACCENT_BUTTON[accent]}
           >
             <Brain className="mr-1 h-4 w-4" />
             {isPending ? "Embedando..." : "Atualizar embeddings"}
@@ -81,25 +84,22 @@ export function EmbeddingsPanel({ initialCachedCount, initialPendingCount, total
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="rounded-md border border-border p-3">
-          <p className="text-xs text-muted-foreground">Cacheados</p>
-          <p className="mt-1 font-mono text-base">
-            {initialCachedCount} / {totalWorks}
-          </p>
-          <p className="text-[10px] text-muted-foreground">{completionPct}% da base</p>
-        </div>
-        <div className="rounded-md border border-border p-3">
-          <p className="text-xs text-muted-foreground">Pendentes</p>
-          <p className="mt-1 font-mono text-base">{Math.max(0, pendingCount)}</p>
-          <p className="text-[10px] text-muted-foreground">
-            obras sem embedding ou com hash desatualizado
-          </p>
-        </div>
-        <div className="rounded-md border border-border p-3">
-          <p className="text-xs text-muted-foreground">Modelo</p>
-          <p className="mt-1 font-mono text-xs">text-embedding-3-small</p>
-          <p className="text-[10px] text-muted-foreground">1536 dimensões · $0.02/M tokens</p>
-        </div>
+        <StatCard
+          label="Pendentes"
+          value={Math.max(0, pendingCount)}
+          hint="obras sem embedding ou com hash desatualizado"
+        />
+        <StatCard
+          label="Cacheados"
+          value={`${initialCachedCount} / ${totalWorks}`}
+          hint={`${completionPct}% da base`}
+        />
+        <StatCard
+          label="Modelo"
+          value="text-embedding-3-small"
+          valueClassName="text-xs"
+          hint="1536 dimensões · $0.02/M tokens"
+        />
       </div>
 
       {lastResult && (

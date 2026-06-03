@@ -5,7 +5,7 @@ import { ImageOff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { CollapsibleCard } from "@/components/ui/collapsible-card"
 import { ScoreBadge } from "@/components/ui/score-badge"
-import { getCoverImageSrc } from "@/lib/image-proxy"
+import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug } from "@/lib/utils"
 import type { DeepDiveSimilarItem } from "@/lib/ai-recommendation/types"
 
@@ -56,12 +56,10 @@ export function DeepDiveSimilarSection({ items }: DeepDiveSimilarSectionProps) {
           >
             <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded border bg-muted">
               {cover ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={getCoverImageSrc(cover)}
+                <CoverImage
+                  url={cover}
                   alt={title}
                   className="h-full w-full object-cover"
-                  loading="lazy"
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-muted-foreground">

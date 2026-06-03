@@ -82,6 +82,18 @@ function scheduleSynopsisConsolidation(workId: string) {
           canonical_synopsis_inputs_hash: hash,
         })
         .eq("id", workId)
+
+      // A sinopse canônica mudou ⇒ qualquer previsão de Interesse Sinopse ficou
+      // desatualizada. Marca stale e tenta reprever (só roda se houver perfil
+      // corrente não-stub — caso contrário a flag stale permanece).
+      const { markWorkSynopsisPredictionStale } = await import(
+        "@/server/queries/synopsis-quality"
+      )
+      const { autoPredictSynopsisQuality } = await import(
+        "@/lib/ai-evaluation/synopsis-quality-runner"
+      )
+      await markWorkSynopsisPredictionStale(workId)
+      await autoPredictSynopsisQuality(workId)
     } catch (err) {
       console.error("[scheduleSynopsisConsolidation] falhou:", err)
     }

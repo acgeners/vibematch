@@ -9,7 +9,7 @@ export default function ContaLayout({ children }: { children: ReactNode }) {
       <Header
         kicker="Você"
         title="Minha conta"
-        description="Sua identidade, plano, perfil de gosto e preferências num só lugar."
+        description="Sua identidade, plano e perfil de gosto num só lugar."
         icon={<UserCircle />}
       />
       <ContaTabs />

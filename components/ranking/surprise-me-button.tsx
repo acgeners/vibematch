@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
-import { getCoverImageSrc } from "@/lib/image-proxy"
+import { CoverImage } from "@/components/ui/cover-image"
 import { titleToSlug } from "@/lib/utils"
 
 interface SurpriseMeButtonProps {
@@ -110,9 +110,8 @@ function SurprisePickCard({ entry, onNavigate }: { entry: RankingEntry; onNaviga
     >
       <div className="relative h-28 w-20 shrink-0 overflow-hidden rounded border bg-muted">
         {entry.coverUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={getCoverImageSrc(entry.coverUrl)}
+          <CoverImage
+            url={entry.coverUrl}
             alt={entry.title}
             className="h-full w-full object-cover"
           />

@@ -37,7 +37,7 @@ interface ScoreBadgeProps {
   /**
    * Quando passado, as cores são definidas por bucket de percentil (top
    * 20% / 60-80% / 40-60% / 20-40% / bottom 20%, configurável em
-   * /conta/preferencias). Quando omitido, cai pros thresholds fixos abaixo —
+   * /preferencias). Quando omitido, cai pros thresholds fixos abaixo —
    * mantém compat com badges de critério individual (escala absoluta).
    */
   thresholds?: ScoreColorThresholds | null
