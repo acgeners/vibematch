@@ -11,6 +11,7 @@ import {
   Trophy,
   Sparkles,
   Settings,
+  SlidersHorizontal,
   UserCircle,
   Wand2,
   Activity,
@@ -46,6 +47,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Gerenciar",
     items: [
       { href: "/conta", icon: UserCircle, label: "Minha conta" },
+      { href: "/preferencias", icon: SlidersHorizontal, label: "Preferências" },
       { href: "/settings", icon: Settings, label: "Configurações" },
       { href: "/ai-evaluation", icon: Sparkles, label: "Avaliação IA" },
       { href: "/ai-usage", icon: Activity, label: "Uso da API IA" },

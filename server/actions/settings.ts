@@ -64,7 +64,7 @@ export async function setScoreWeightsAuto(enabled: boolean) {
 
   const result = await recalculateAll()
   revalidatePath("/settings")
-  revalidatePath("/conta/preferencias")
+  revalidatePath("/preferencias")
   revalidatePath("/ranking")
   revalidatePath("/titles")
   return result
@@ -197,7 +197,7 @@ export async function updateScoreColorPercentiles(update: ScoreColorPercentilesU
   if (error) return { error: error.message }
 
   revalidateTag("score-color-thresholds", "max")
-  revalidatePath("/conta/preferencias")
+  revalidatePath("/preferencias")
   revalidatePath("/ranking")
   revalidatePath("/titles")
   revalidatePath("/")
@@ -266,7 +266,7 @@ export async function updateCriterionColorPcts(
   if (error) return { error: error.message }
 
   revalidateTag("score-color-thresholds", "max")
-  revalidatePath("/conta/preferencias")
+  revalidatePath("/preferencias")
   revalidatePath("/ranking")
   revalidatePath("/titles")
   revalidatePath("/")

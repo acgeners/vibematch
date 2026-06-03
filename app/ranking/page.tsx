@@ -29,8 +29,8 @@ interface RankingPageProps {
 
 const getPreferences = unstable_cache(async (): Promise<{
   topN: number | null
-  minCalc: number | null
-  minPredicted: number | null
+  minFit: number | null
+  minAlign: number | null
   minFinal: number | null
 }> => {
   const supabase = createAdminClient()
@@ -42,8 +42,10 @@ const getPreferences = unstable_cache(async (): Promise<{
   const cfg = data as Pick<FormulaConfig, "top_n" | "min_calc_score" | "min_predicted_score" | "min_final_score"> | null
   return {
     topN: cfg?.top_n ?? null,
-    minCalc: cfg?.min_calc_score ?? null,
-    minPredicted: cfg?.min_predicted_score ?? null,
+    // Colunas legadas repurposadas como filtros padrão (ver ranking-preferences-form):
+    // min_calc_score → Alinhamento, min_predicted_score → IA Rk, min_final_score → Nota Prevista.
+    minFit: cfg?.min_calc_score ?? null,
+    minAlign: cfg?.min_predicted_score ?? null,
     minFinal: cfg?.min_final_score ?? null,
   }
 }, ["ranking-preferences"], { revalidate: 300 })
@@ -183,9 +185,9 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     maxTotalChapters: num("max_chapters"),
     minExpectedScore: overrideMinExpected ?? prefs.minFinal ?? undefined,
     maxExpectedScore: num("max_expected"),
-    minPersonalFitPct: num("min_fit"),
+    minPersonalFitPct: num("min_fit") ?? prefs.minFit ?? undefined,
     maxPersonalFitPct: num("max_fit"),
-    minAlignment: num("min_align"),
+    minAlignment: num("min_align") ?? prefs.minAlign ?? undefined,
     maxAlignment: num("max_align"),
     minPlatformAvg: num("min_platform_avg"),
     maxPlatformAvg: num("max_platform_avg"),
@@ -260,6 +262,8 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         personalStatuses={statusOptions.personalStatuses}
         defaultTopN={prefs.topN}
         defaultMinExpected={prefs.minFinal}
+        defaultMinFit={prefs.minFit}
+        defaultMinAlign={prefs.minAlign}
         defaultSort={defaultSort}
         savedPresets={savedPresets}
       />

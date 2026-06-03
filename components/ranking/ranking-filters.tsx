@@ -200,6 +200,10 @@ interface RankingFiltersProps {
   defaultTopN: number | null
   /** Preferência "Nota Prevista mínima" (persistida na coluna min_final_score, repurposada). */
   defaultMinExpected: number | null
+  /** Preferência "Alinhamento mínimo" (persistida na coluna min_calc_score, repurposada). */
+  defaultMinFit?: number | null
+  /** Preferência "IA Rk mínimo" (persistida na coluna min_predicted_score, repurposada). */
+  defaultMinAlign?: number | null
   basePath?: string
   hidePreferencesControls?: boolean
   /** Sort default efetivo (depende do plano: Free="recommended:desc", Pago="expected_score:desc"). */
@@ -1423,6 +1427,8 @@ export function RankingFilters({
   personalStatuses = [],
   defaultTopN,
   defaultMinExpected,
+  defaultMinFit = null,
+  defaultMinAlign = null,
   basePath = "/ranking",
   hidePreferencesControls = false,
   defaultSort,
@@ -1462,19 +1468,28 @@ export function RankingFilters({
   // persistida na coluna min_final_score (repurposada no cutover Fase 1.5).
   const urlTopN = num(searchParams.get("top_n"))
   const urlMinExpected = num(searchParams.get("min_expected"))
+  const urlMinFit = num(searchParams.get("min_fit"))
+  const urlMinAlign = num(searchParams.get("min_align"))
 
   const currentTopN = urlTopN ?? defaultTopN ?? undefined
   const currentMinExpected = urlMinExpected ?? defaultMinExpected ?? undefined
+  // Alinhamento/IA Rk também são preferências (colunas min_calc/min_predicted
+  // repurposadas) — preservamos o default ao salvar pra não zerar o que foi
+  // definido em /preferencias.
+  const currentMinFit = urlMinFit ?? defaultMinFit ?? undefined
+  const currentMinAlign = urlMinAlign ?? defaultMinAlign ?? undefined
 
   const prefsDirty =
     (urlTopN !== undefined && urlTopN !== (defaultTopN ?? undefined)) ||
-    (urlMinExpected !== undefined && urlMinExpected !== (defaultMinExpected ?? undefined))
+    (urlMinExpected !== undefined && urlMinExpected !== (defaultMinExpected ?? undefined)) ||
+    (urlMinFit !== undefined && urlMinFit !== (defaultMinFit ?? undefined)) ||
+    (urlMinAlign !== undefined && urlMinAlign !== (defaultMinAlign ?? undefined))
 
   const savePrefs = async () => {
     const result = await updateRankingPreferences({
       top_n: currentTopN ?? null,
-      min_calc_score: null,
-      min_predicted_score: null,
+      min_calc_score: currentMinFit ?? null,
+      min_predicted_score: currentMinAlign ?? null,
       min_final_score: currentMinExpected ?? null,
     })
     if (result.error) {

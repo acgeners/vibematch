@@ -67,7 +67,7 @@ export function CriterionColorPercentilesForm({ config }: CriterionColorPercenti
       toast.error(result.error)
       return
     }
-    // O server action revalida /conta/preferencias, então `config` (e o `overrides`
+    // O server action revalida /preferencias, então `config` (e o `overrides`
     // derivado) é refrescado pelo Next — não mutar o objeto vindo das props.
     toast.success(`Percentis de "${CRITERIA_INFO[slug]?.name ?? slug}" salvos.`)
   }
