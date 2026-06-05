@@ -65,7 +65,7 @@ export function StatCard({
   const content = (
     <Card
       className={cn(
-        "group relative gap-3 overflow-hidden py-5 transition-all",
+        "group relative h-full justify-center gap-3 overflow-hidden py-5 transition-all",
         href && "cursor-pointer hover:-translate-y-0.5 hover:bg-card hover:shadow-md",
         href && accentStyle.ring,
         href && accentStyle.glow,
@@ -105,7 +105,11 @@ export function StatCard({
   )
 
   if (href) {
-    return <Link href={href}>{content}</Link>
+    return (
+      <Link href={href} className="block h-full">
+        {content}
+      </Link>
+    )
   }
 
   return content

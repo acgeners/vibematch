@@ -2,7 +2,12 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import {
   getPublicationStatusNameById,
   getPersonalStatusNameById,
+  getPersonalStatusIdByName,
 } from "@/lib/constants/status-lookups"
+import { pickPrimaryCover } from "@/lib/covers"
+import { getAlignmentQueueWorks, getSynopsisQueueWorks } from "@/server/queries/recommendations"
+
+type CoverRow = { url: string; is_primary: boolean; position: number }
 
 export interface DashboardStats {
   totalWorks: number
@@ -15,6 +20,7 @@ export interface DashboardStats {
   topWorks: Array<{
     id: string
     title: string
+    coverUrl: string | null
     expectedScore: number | null
     publicationStatus: string
     publicationStatusId: number | null
@@ -22,6 +28,33 @@ export interface DashboardStats {
     personalStatusId: number | null
     aiEvalStatus: string
   }>
+}
+
+export interface ContinueReadingItem {
+  id: string
+  title: string
+  coverUrl: string | null
+  personalStatusId: number | null
+  chaptersRead: number | null
+  totalChapters: number | null
+  lastReadAt: string | null
+  expectedScore: number | null
+  lastChapterReleasedAt: string | null
+  nextChapterPredictedAt: string | null
+}
+
+export interface RecentActivityItem {
+  id: string
+  title: string
+  coverUrl: string | null
+  createdAt: string
+  updatedAt: string
+  kind: "added" | "updated"
+}
+
+export interface AiQueueCounts {
+  iaRk: number
+  synopsis: number
 }
 
 export async function getDashboardStats(): Promise<DashboardStats> {
@@ -38,7 +71,8 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       .from("works")
       .select(`
         id, title, publication_status_id, personal_status_id, ai_eval_status, is_archived,
-        calculated_scores(expected_score)
+        calculated_scores(expected_score),
+        work_covers(url, is_primary, position)
       `)
       .eq("is_archived", false)
       .order("title")
@@ -89,10 +123,12 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     personal_status_id: number | null
     ai_eval_status: string
     calculated_scores?: { expected_score?: number | null } | null
+    work_covers?: CoverRow[] | null
   }>)
     .map((w) => ({
       id: w.id,
       title: w.title,
+      coverUrl: pickPrimaryCover(w.work_covers),
       expectedScore: w.calculated_scores?.expected_score ?? null,
       publicationStatus: getPublicationStatusNameById(w.publication_status_id) ?? "Unknown",
       publicationStatusId: w.publication_status_id ?? null,
@@ -114,4 +150,110 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     byPersonalStatus,
     topWorks,
   }
+}
+
+/**
+ * Obras em leitura ativa (status pessoal Reading/Started), ordenadas pela
+ * leitura mais recente. Alimenta o widget "Continuar lendo" do dashboard.
+ */
+export async function getContinueReading(limit = 6): Promise<ContinueReadingItem[]> {
+  const readingId = getPersonalStatusIdByName("Reading")
+  const startedId = getPersonalStatusIdByName("Started")
+  const statusIds = [readingId, startedId].filter((id): id is number => id != null)
+  if (statusIds.length === 0) return []
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("works")
+    .select(`
+      id, title, personal_status_id, total_chapters, chapters_read, last_read_at,
+      last_chapter_released_at, next_chapter_predicted_at,
+      calculated_scores(expected_score),
+      work_covers(url, is_primary, position)
+    `)
+    .eq("is_archived", false)
+    .in("personal_status_id", statusIds)
+    .order("last_read_at", { ascending: false, nullsFirst: false })
+    .limit(limit)
+
+  if (error) throw new Error(error.message)
+
+  return ((data ?? []) as Array<{
+    id: string
+    title: string
+    personal_status_id: number | null
+    total_chapters: number | null
+    chapters_read: number | null
+    last_read_at: string | null
+    last_chapter_released_at: string | null
+    next_chapter_predicted_at: string | null
+    calculated_scores?: { expected_score?: number | null } | null
+    work_covers?: CoverRow[] | null
+  }>).map((w) => ({
+    id: w.id,
+    title: w.title,
+    coverUrl: pickPrimaryCover(w.work_covers),
+    personalStatusId: w.personal_status_id ?? null,
+    chaptersRead: w.chapters_read ?? null,
+    totalChapters: w.total_chapters ?? null,
+    lastReadAt: w.last_read_at ?? null,
+    expectedScore: w.calculated_scores?.expected_score ?? null,
+    lastChapterReleasedAt: w.last_chapter_released_at ?? null,
+    nextChapterPredictedAt: w.next_chapter_predicted_at ?? null,
+  }))
+}
+
+/**
+ * Obras tocadas mais recentemente (criadas ou atualizadas). `kind` distingue
+ * inclusões recentes de edições, comparando created_at e updated_at.
+ */
+export async function getRecentActivity(limit = 6): Promise<RecentActivityItem[]> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("works")
+    .select("id, title, created_at, updated_at, work_covers(url, is_primary, position)")
+    .eq("is_archived", false)
+    .order("updated_at", { ascending: false })
+    .limit(limit)
+
+  if (error) throw new Error(error.message)
+
+  return ((data ?? []) as Array<{
+    id: string
+    title: string
+    created_at: string
+    updated_at: string
+    work_covers?: CoverRow[] | null
+  }>).map((w) => {
+    const created = new Date(w.created_at).getTime()
+    const updated = new Date(w.updated_at).getTime()
+    // Margem de 60s absorve o tempo de processamento do import/criação inicial.
+    const kind: "added" | "updated" = updated - created < 60_000 ? "added" : "updated"
+    return {
+      id: w.id,
+      title: w.title,
+      coverUrl: pickPrimaryCover(w.work_covers),
+      createdAt: w.created_at,
+      updatedAt: w.updated_at,
+      kind,
+    }
+  })
+}
+
+/**
+ * Contadores das filas de IA secundárias (re-rank e interesse por sinopse).
+ * Reusa as mesmas queries das abas de /ai-evaluation com seus estados-padrão,
+ * pra os números baterem com os badges de lá. A fila de atributos vem do
+ * `pendingAi` de getDashboardStats (já calculado). Falhas degradam pra 0.
+ */
+export async function getAiQueueCounts(): Promise<AiQueueCounts> {
+  const [iaRk, synopsis] = await Promise.all([
+    getAlignmentQueueWorks({})
+      .then((r) => r.length)
+      .catch(() => 0),
+    getSynopsisQueueWorks({})
+      .then((r) => r.length)
+      .catch(() => 0),
+  ])
+  return { iaRk, synopsis }
 }
