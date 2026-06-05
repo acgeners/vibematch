@@ -943,18 +943,11 @@ function GroupedTagRuleGrid({
     return [...byGroup.entries()]
       .map(([groupName, groupItems]) => ({
         groupName,
-        items: groupItems.sort((a, b) => {
-          const aRule = getRule(a.value)
-          const bRule = getRule(b.value)
-          const weight = (rule: FacetRule) => rule === "all" ? 0 : rule === "any" ? 1 : rule === "exclude" ? 2 : 3
-          const diff = weight(aRule) - weight(bRule)
-          return diff !== 0 ? diff : a.label.localeCompare(b.label)
-        }),
+        // Fixed alphabetical order so selecting a tag doesn't move it.
+        items: groupItems.sort((a, b) => a.label.localeCompare(b.label)),
       }))
       .sort((a, b) => a.groupName.localeCompare(b.groupName))
-    // getRule depends on the selected sets above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, selectedAll, selectedAny, selectedExclude])
+  }, [items])
 
   // Lookup: slug -> { label, groupName } for the selection strip.
   // Uses the unfiltered list so selected chips keep their labels under active search.

@@ -462,6 +462,8 @@ export interface AlignmentQueueWork {
   id: string
   title: string
   coverUrl: string | null
+  /** Todas as capas (primária primeiro) — pro fallback quando uma falha. */
+  coverUrls: string[]
   publicationStatusId: number | null
   personalStatusId: number | null
   synopsisQuality: string | null
@@ -525,16 +527,12 @@ export async function getAlignmentQueueWorks(opts: {
     const isStale = alignmentScore != null && alignmentStale
     const isUnranked = alignmentScore == null
     if (!((wantStale && isStale) || (wantUnranked && isUnranked))) continue
+    const coverUrls = orderedCoverUrls(w.work_covers as RawCoverRow[] | undefined)
     rows.push({
       id: w.id as string,
       title: w.title as string,
-      coverUrl: pickPrimaryCover(
-        (w.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
-          url: c.url ?? null,
-          is_primary: c.is_primary ?? null,
-          position: c.position ?? null,
-        })),
-      ),
+      coverUrl: coverUrls[0] ?? null,
+      coverUrls,
       publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
       personalStatusId: w.personal_status_id != null ? Number(w.personal_status_id) : null,
       synopsisQuality: (w.synopsis_quality as string | null) ?? null,
@@ -865,10 +863,11 @@ export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
 
 /**
  * Hidrata obras específicas (por ID) como `FavoriteCandidate`, preservando a
- * ordem dos IDs e filtrando arquivadas. Usado pelo lote da aba Interesse Sinopse,
- * que prevê exatamente as obras visíveis na fila (na ordem que o usuário vê).
+ * ordem dos IDs e filtrando arquivadas. Usado pelos lotes que agem exatamente
+ * sobre as obras visíveis na fila (na ordem que o usuário vê): Interesse Sinopse
+ * e re-rank de IA Rk.
  */
-export async function getSynopsisCandidatesByIds(ids: string[]): Promise<FavoriteCandidate[]> {
+export async function getCandidatesByIds(ids: string[]): Promise<FavoriteCandidate[]> {
   if (ids.length === 0) return []
   const supabase = createAdminClient()
   // Chunk de 100 ids por request: `.in("id", [...])` codifica cada UUID na URL

@@ -22,6 +22,8 @@ interface CalibrationPanelProps {
   snapshot: {
     totalWorks: number
     trainSize: number
+    /** MAE de "chutar a média" das notas pessoais — piso que o modelo precisa bater. */
+    baselineMae: number | null
     maeCalc: number | null
     maePredicted: number | null
     maeFinal: number | null
@@ -169,6 +171,15 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
       ? Number(config.cv_mae_expected_stage1)
       : null
 
+  // Quanto o modelo ganha do baseline trivial (chutar a média). Se o ganho for
+  // pequeno/negativo, a Nota Prevista não está agregando valor real — sinal de
+  // que a alavanca é mais dado rotulado, não mexer no modelo.
+  const baselineMae = snapshot.baselineMae
+  const skillGainPct =
+    expectedCvMae != null && baselineMae != null && baselineMae > 0
+      ? ((baselineMae - expectedCvMae) / baselineMae) * 100
+      : null
+
   return (
     <TooltipProvider delayDuration={150}>
       <div className="space-y-6">
@@ -194,6 +205,32 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
               <p className="text-xs text-muted-foreground">
                 MAE CV da Nota Prevista · Treino: {stacker?.trainSize ?? snapshot.trainSize} / {snapshot.totalWorks} obras
               </p>
+              {baselineMae != null && (
+                <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span>
+                    vs. baseline (chutar a média):{" "}
+                    <span className="font-mono">{fmt(baselineMae, 2)}</span>
+                  </span>
+                  {skillGainPct != null && (
+                    <span
+                      className={cn(
+                        "rounded px-1.5 py-0.5 font-medium",
+                        skillGainPct >= 15
+                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                          : skillGainPct >= 5
+                            ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                            : "bg-rose-500/15 text-rose-600 dark:text-rose-400",
+                      )}
+                    >
+                      {skillGainPct >= 0 ? "ganha" : "perde"} {Math.abs(skillGainPct).toFixed(0)}% do trivial
+                    </span>
+                  )}
+                  <InfoTooltip
+                    label="Baseline trivial"
+                    text="MAE de simplesmente prever a média das suas notas pra toda obra. É o piso: se a Nota Prevista não ganha disso com folga, ela quase não agrega — e a alavanca passa a ser mais obras com nota pessoal, não mexer no modelo."
+                  />
+                </p>
+              )}
             </div>
 
             {/* Ação */}
@@ -329,28 +366,7 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
         {/* ============================================================ */}
         {/* DIAGNÓSTICO — onde o sistema acerta mais e menos             */}
         {/* ============================================================ */}
-        <div className="rounded-lg border border-border bg-card/50 p-4 space-y-4">
-          <div>
-            <h3 className="text-sm font-semibold">Onde o sistema acerta mais e menos</h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              MAE in-sample da Nota Prevista por faixa, sobre as {snapshot.trainSize} obras com nota
-              pessoal. Mostra em que perfis o modelo erra mais. Faixas com menos de 10 obras aparecem
-              como &quot;sem amostra&quot; — não tire conclusão delas.
-            </p>
-          </div>
-
-          <BucketSection
-            title="Por distância ao centróide do treino"
-            tooltip="Distância ao centróide = quão diferente a obra é do conjunto de treino (proxy de 'exoticidade'). ⚠️ Usa a distância do preditor legado (Nota.Pr), não a do expected_score — leia como aproximação, não veredito. Distância alta ≠ necessariamente erro maior."
-            buckets={snapshot.buckets.byDistance}
-          />
-
-          <BucketSection
-            title="Por número de votos na plataforma"
-            tooltip="Obras com poucos votos têm Nota.M pouco confiável (média da plataforma instável). Se o MAE for muito pior em <100, o sistema está sofrendo com falta de dado externo."
-            buckets={snapshot.buckets.byVotes}
-          />
-        </div>
+        <BucketDiagnostic overallMae={snapshot.maeExpected} buckets={snapshot.buckets} />
 
         {/* ============================================================ */}
         {/* DETALHES TÉCNICOS (colapsável)                                */}
@@ -696,62 +712,136 @@ function RidgeFeatureImportance({
   )
 }
 
-function BucketSection({
+// Gate de effect-size pra sinalizar uma faixa como outlier:
+//   - amostra mínima pra não cair em ruído (buckets pequenos são instáveis);
+//   - erro >= overall + margem (effect-size absoluto, robusto à otimismo
+//     in-sample uniforme do MAE por bucket).
+const OUTLIER_MIN_N = 30
+const OUTLIER_DELTA = 0.15
+
+interface FlaggedBucket {
+  group: string
+  label: string
+  mae: number
+  count: number
+  delta: number
+}
+
+function findOutliers(overallMae: number | null, buckets: BucketBreakdown): FlaggedBucket[] {
+  if (overallMae == null) return []
+  const scan = (group: string, list: BucketBreakdown["byDistance"]) =>
+    list
+      .filter(
+        (b): b is { label: string; count: number; mae: number } =>
+          b.mae != null && b.count >= OUTLIER_MIN_N && b.mae >= overallMae + OUTLIER_DELTA,
+      )
+      .map((b) => ({ group, label: b.label, mae: b.mae, count: b.count, delta: b.mae - overallMae }))
+  return [
+    ...scan("distância ao centróide", buckets.byDistance),
+    ...scan("nº de votos", buckets.byVotes),
+  ]
+}
+
+function BucketDiagnostic({
+  overallMae,
+  buckets,
+}: {
+  overallMae: number | null
+  buckets: BucketBreakdown
+}) {
+  const outliers = findOutliers(overallMae, buckets)
+  const uniform = outliers.length === 0
+
+  return (
+    <div className="rounded-lg border border-border bg-card/50 p-4 space-y-3">
+      <div>
+        <h3 className="flex items-center gap-1 text-sm font-semibold">
+          <span>Faixas fora do padrão</span>
+          <InfoTooltip
+            label="Faixas fora do padrão"
+            text={`Procura faixas (por distância ao centróide ou nº de votos) onde o modelo erra notavelmente mais que a média — só sinaliza com ≥ ${OUTLIER_MIN_N} obras na faixa e MAE ≥ média + ${OUTLIER_DELTA.toFixed(2)}. Sem isso, a diferença é ruído amostral. MAE por faixa é in-sample (otimista) — serve só pra comparação relativa entre faixas, não como precisão absoluta.`}
+          />
+        </h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Detecta perfis de obra onde a Nota Prevista é especialmente fraca e justificaria
+          tratamento (ex.: peso menor por confiança). A precisão honesta global é a MAE CV da headline.
+        </p>
+      </div>
+
+      {uniform ? (
+        <p className="flex items-start gap-2 rounded-md bg-emerald-500/5 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400">
+          <span>✓</span>
+          <span>
+            Nenhuma faixa fora do padrão. O modelo erra de forma uniforme nas faixas com amostra
+            suficiente — não há região que justifique tratamento especial. Pra baixar o erro global, a
+            alavanca é mais obras com nota pessoal, não ajuste por faixa.
+          </span>
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {outliers.map((o) => (
+            <li
+              key={`${o.group}-${o.label}`}
+              className="flex items-center gap-2 rounded-md bg-amber-500/5 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400"
+            >
+              <span>⚠</span>
+              <span>
+                <span className="font-mono">{o.label}</span> ({o.group}) erra{" "}
+                <span className="font-mono">+{o.delta.toFixed(2)}</span> acima da média — MAE{" "}
+                <span className="font-mono">{o.mae.toFixed(2)}</span> em {o.count} obras.
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <details className="group">
+        <summary className="cursor-pointer list-none text-[11px] text-muted-foreground transition-colors hover:text-foreground">
+          <ChevronDown className="mr-1 inline h-3 w-3 transition-transform group-open:rotate-180" />
+          Ver MAE por faixa (in-sample, aproximado)
+        </summary>
+        <div className="mt-3 space-y-3">
+          <BucketBars title="Por distância ao centróide do treino" buckets={buckets.byDistance} />
+          <BucketBars title="Por número de votos na plataforma" buckets={buckets.byVotes} />
+        </div>
+      </details>
+    </div>
+  )
+}
+
+function BucketBars({
   title,
-  tooltip,
   buckets,
 }: {
   title: string
-  tooltip: string
   buckets: BucketBreakdown["byDistance"]
 }) {
-  // Escala visual relativa ao pior bucket pra realçar diferenças.
-  const maxMae = Math.max(
-    ...buckets.map((b) => b.mae ?? 0),
-    0.1,
-  )
+  // Escala visual relativa ao pior bucket — sem selos de veredito (o gate de
+  // outlier acima já cuida do "tem algo aqui?"); aqui são só os números crus.
+  const maxMae = Math.max(...buckets.map((b) => b.mae ?? 0), 0.1)
   return (
     <div>
-      <p className="mb-2 flex items-center gap-1 text-xs font-medium">
-        <span>{title}</span>
-        <InfoTooltip label={title} text={tooltip} />
-      </p>
+      <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">{title}</p>
       <div className="space-y-1">
         {buckets.map((bucket) => {
           const pct = bucket.mae != null ? (bucket.mae / maxMae) * 100 : 0
-          const status = maeStatus(bucket.mae)
           return (
-            <div
-              key={bucket.label}
-              className={cn(
-                "flex items-center gap-2 rounded-md border border-transparent px-2 py-1 text-xs",
-                status.rowBg,
-              )}
-            >
+            <div key={bucket.label} className="flex items-center gap-2 px-1 text-xs">
               <span className="w-20 font-mono text-muted-foreground">{bucket.label}</span>
-              <div className="flex-1 rounded-sm bg-muted/40 overflow-hidden">
+              <div className="flex-1 overflow-hidden rounded-sm bg-muted/40">
                 <div
-                  className={cn("h-4 transition-all", status.barColor)}
+                  className={cn("h-3 transition-all", bucket.mae != null ? "bg-muted-foreground/40" : "bg-muted")}
                   style={{ width: `${pct}%` }}
                 />
               </div>
               <span className="w-24 text-right font-mono text-[11px]">
                 MAE{" "}
                 {bucket.mae != null ? (
-                  <span className={maeColor(bucket.mae)}>{bucket.mae.toFixed(2)}</span>
+                  bucket.mae.toFixed(2)
                 ) : (
-                  <span className="text-muted-foreground">—</span>
+                  <span className="text-muted-foreground">sem amostra</span>
                 )}{" "}
                 <span className="text-muted-foreground">({bucket.count})</span>
-              </span>
-              <span
-                className={cn(
-                  "inline-flex w-20 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium",
-                  status.badgeClass,
-                )}
-              >
-                {status.icon}
-                {status.label}
               </span>
             </div>
           )
@@ -759,51 +849,6 @@ function BucketSection({
       </div>
     </div>
   )
-}
-
-interface MaeStatus {
-  label: string
-  icon: string
-  barColor: string
-  rowBg: string
-  badgeClass: string
-}
-
-function maeStatus(mae: number | null): MaeStatus {
-  if (mae == null) {
-    return {
-      label: "sem amostra",
-      icon: "—",
-      barColor: "bg-muted",
-      rowBg: "",
-      badgeClass: "bg-muted/40 text-muted-foreground",
-    }
-  }
-  if (mae <= 0.5) {
-    return {
-      label: "ótimo",
-      icon: "✓",
-      barColor: "bg-emerald-500/80",
-      rowBg: "bg-emerald-500/5",
-      badgeClass: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-    }
-  }
-  if (mae < 1.0) {
-    return {
-      label: "atenção",
-      icon: "⚠",
-      barColor: "bg-amber-500/80",
-      rowBg: "bg-amber-500/5",
-      badgeClass: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-    }
-  }
-  return {
-    label: "ruim",
-    icon: "✗",
-    barColor: "bg-rose-500/80",
-    rowBg: "bg-rose-500/5",
-    badgeClass: "bg-rose-500/15 text-rose-600 dark:text-rose-400",
-  }
 }
 
 interface MetricCardProps {

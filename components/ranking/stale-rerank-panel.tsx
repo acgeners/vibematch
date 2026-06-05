@@ -1,8 +1,8 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowDown, ArrowUp, Loader2, RotateCw } from "lucide-react"
+import { ArrowDown, ArrowUp, Loader2, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -19,24 +19,44 @@ import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/sta
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
-import { rerankStaleBatchAction } from "@/server/actions/recommendations"
+import { rerankWorksBatchAction } from "@/server/actions/recommendations"
 import type { AlignmentQueueWork } from "@/server/queries/recommendations"
 
 type SortField = "default" | "expected" | "alignment"
 
+/** Opções de tamanho de lote por run (total de obras). */
+const BATCH_OPTIONS = [10, 30, 50, 100] as const
+const DEFAULT_BATCH_SIZE = 30
+
+/**
+ * Obras por CHAMADA ao ranker. Mandar muitos candidatos enriquecidos numa só
+ * chamada estoura o orçamento de tokens da resposta (~280/candidato; 30 já
+ * trunca em max_tokens e o modelo passa a devolver work_ids inválidos → 0 notas).
+ * 10 por chamada fica bem dentro da faixa confiável (a run normal de
+ * recomendação usa 10–20) e isola falhas. Lotes maiores rodam em vários blocos.
+ */
+const PER_CALL_CHUNK = 10
+
 /**
  * Fila de IA Rk (aba /ai-evaluation?tab=ia-rk): obras desatualizadas (re-rank
  * velho) e/ou não avaliadas (sem IA Rk). Mesmo layout de cards da aba de
- * atributos. O re-rank em LOTE cobre só os desatualizados (rerankStaleBatchAction);
- * não avaliados são re-rankeados item a item pelo RerankAiRkButton.
+ * atributos. O botão de lote cobre TODA a fila visível (desatualizados + não
+ * avaliados) até `batchSize` por run, em blocos pra mostrar progresso; item a
+ * item usa o RerankAiRkButton.
  */
-export function StaleRerankPanel({ works }: { works: AlignmentQueueWork[] }) {
-  const [isPending, startTransition] = useTransition()
+export function StaleRerankPanel({
+  works,
+  isPaid = true,
+}: {
+  works: AlignmentQueueWork[]
+  isPaid?: boolean
+}) {
   const router = useRouter()
   const [sortField, setSortField] = useState<SortField>("default")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
-
-  const hasStale = works.some((w) => w.alignmentStale && w.alignmentScore != null)
+  const [batchSize, setBatchSize] = useState<number>(DEFAULT_BATCH_SIZE)
+  const [batchRunning, setBatchRunning] = useState(false)
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
 
   const sortedWorks = useMemo(() => {
     if (sortField === "default") {
@@ -62,21 +82,49 @@ export function StaleRerankPanel({ works }: { works: AlignmentQueueWork[] }) {
     })
   }, [works, sortField, sortDir])
 
-  const handleRerankAll = () => {
-    startTransition(async () => {
-      const result = await rerankStaleBatchAction()
-      if (result.error || !result.data) {
-        toast.error(result.error ?? "Erro ao re-rankear.")
-        return
+  // Alvos do lote = todas as obras VISÍVEIS na fila (todas precisam de re-rank:
+  // desatualizadas ou não avaliadas), na ordem exibida, cortadas em batchSize.
+  // Garante que "Calcular N" age sobre os cards que o usuário está vendo.
+  const batchIds = sortedWorks.slice(0, batchSize).map((w) => w.id)
+  const remainingAfterBatch = Math.max(sortedWorks.length - batchIds.length, 0)
+
+  // Cada bloco vira UMA chamada rankFavorites; processar em blocos pequenos
+  // mantém a resposta dentro do orçamento de tokens (sem truncar) e exibe
+  // progresso (X/total) entre eles.
+  const handleRerankAll = async () => {
+    const ids = batchIds
+    if (ids.length === 0 || batchRunning) return
+    const total = ids.length
+    setBatchRunning(true)
+    setProgress({ done: 0, total })
+    let ranked = 0
+    let failed = 0
+    let aborted = false
+    try {
+      for (let i = 0; i < ids.length; i += PER_CALL_CHUNK) {
+        const chunk = ids.slice(i, i + PER_CALL_CHUNK)
+        const result = await rerankWorksBatchAction(chunk)
+        if (result.error || !result.data) {
+          toast.error(result.error ?? "Erro ao re-rankear.")
+          aborted = true
+          break
+        }
+        ranked += result.data.ranked
+        failed += result.data.failed
+        setProgress({ done: Math.min(i + PER_CALL_CHUNK, total), total })
       }
-      const { ranked, truncated, available } = result.data
+    } finally {
+      setBatchRunning(false)
+      setProgress(null)
+    }
+    if (!aborted) {
       toast.success(
-        truncated
-          ? `${ranked} re-rankeadas (de ${available}). Rode de novo pro restante.`
-          : `${ranked} obra${ranked !== 1 ? "s" : ""} re-rankeada${ranked !== 1 ? "s" : ""}.`,
+        `${ranked} re-rankeada${ranked !== 1 ? "s" : ""}` +
+          (failed > 0 ? ` · ${failed} falhou` : "") +
+          (remainingAfterBatch > 0 ? ` · ${remainingAfterBatch} restantes` : "."),
       )
-      router.refresh()
-    })
+    }
+    router.refresh()
   }
 
   if (works.length === 0) {
@@ -113,15 +161,37 @@ export function StaleRerankPanel({ works }: { works: AlignmentQueueWork[] }) {
           </Button>
         </div>
 
-        {hasStale && (
-          <Button onClick={handleRerankAll} disabled={isPending}>
-            {isPending ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <RotateCw className="mr-1 h-4 w-4" />
-            )}
-            {isPending ? "Re-rankeando..." : "Re-rankear desatualizados"}
-          </Button>
+        {isPaid && sortedWorks.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Select
+              value={String(batchSize)}
+              onValueChange={(v) => setBatchSize(Number(v))}
+              disabled={batchRunning}
+            >
+              <SelectTrigger size="sm" className="h-9 w-[78px] text-xs" title="Quantas obras por run">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BATCH_OPTIONS.map((n) => (
+                  <SelectItem key={n} value={String(n)}>
+                    {n}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={handleRerankAll} disabled={batchRunning || batchIds.length === 0}>
+              {batchRunning ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="mr-1 h-4 w-4" />
+              )}
+              {batchRunning
+                ? progress
+                  ? `Re-rankeando… ${progress.done}/${progress.total}`
+                  : "Re-rankeando…"
+                : `Calcular ${batchIds.length} por IA`}
+            </Button>
+          </div>
         )}
       </div>
 
@@ -136,7 +206,7 @@ export function StaleRerankPanel({ works }: { works: AlignmentQueueWork[] }) {
               <CardContent className="py-2.5">
                 <div className="flex items-center gap-3">
                   {/* Capa (esquerda) — aspect 2:3 de manga */}
-                  <CoverThumb url={w.coverUrl} />
+                  <CoverThumb urls={w.coverUrls} />
 
                   {/* Conteúdo central */}
                   <div className="flex-1 min-w-0 space-y-1.5">

@@ -117,12 +117,14 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     // Critérios IA
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
-  // Default: ordena pela Nota Prevista; IA Rk. como 1º desempate (só Pago, NULL
-  // no Free) e Alinhamento como fallback que atua nos dois planos. Os empates só
-  // quebram no EXATO no SQL; o desempate band-aware fino é client-side.
+  // Default: ordena pela Nota Prevista e, como desempate, IA Rk no plano Pago
+  // (NULL no Free) ou Alinhamento no Free. Os empates só quebram no EXATO no
+  // SQL; o desempate band-aware fino é client-side.
   const plan = await getCurrentPlan()
   const isPaid = planAllows(plan, "smart_shortlist")
-  const defaultSort = "expected_score:desc,alignment_score:desc,personal_fit:desc"
+  const defaultSort = isPaid
+    ? "expected_score:desc,alignment_score:desc"
+    : "expected_score:desc,personal_fit:desc"
   const rawSort = str("sort") ?? defaultSort
   let sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")

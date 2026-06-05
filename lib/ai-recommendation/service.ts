@@ -312,7 +312,14 @@ export async function rankFavorites(args: RankFavoritesArgs): Promise<RankingRes
       continue
     }
 
-    const validRankings = parsed.data.rankings.filter((r) => candidateIdSet.has(r.work_id))
+    // Filtra work_ids fora dos candidatos enviados e deduplica: o modelo às
+    // vezes repete a mesma obra. Consumidores assumem 1 ranking por work_id
+    // (senão o upsert com onConflict="work_id" quebra com "ON CONFLICT DO
+    // UPDATE command cannot affect row a second time"). Mantém a 1ª ocorrência.
+    const seenIds = new Set<string>()
+    const validRankings = parsed.data.rankings.filter(
+      (r) => candidateIdSet.has(r.work_id) && !seenIds.has(r.work_id) && seenIds.add(r.work_id),
+    )
     if (validRankings.length === 0) {
       lastError = new Error("Ranking não trouxe nenhum work_id válido dos candidatos enviados.")
       continue

@@ -7,12 +7,13 @@ import { loadOrEnsureProfile } from "@/lib/ai-recommendation/ensure-profile"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import {
   getCandidateById,
-  getSynopsisCandidatesByIds,
+  getCandidatesByIds,
 } from "@/server/queries/recommendations"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { recalculateWork } from "@/server/actions/calculations"
 import { getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { predictAndPersistSynopsisQuality } from "@/lib/ai-evaluation/synopsis-quality-runner"
+import { predictSynopsisQuality } from "@/lib/ai-evaluation/synopsis-quality-predictor"
 import type { SynopsisQuality } from "@/types/domain"
 
 const STUB_PROFILE_ERROR =
@@ -56,6 +57,61 @@ export async function predictSynopsisQualityForWorkAction(
     revalidatePath(`/titles/${workId}`)
 
     return { data: result }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}
+
+export interface DraftSynopsisQualityInput {
+  title: string
+  /** A SINOPSE CANÔNICA (consolidada) — mesmo sinal que o caminho da obra salva. */
+  synopsis: string
+  /** Nomes de tags do form (sem grupo). */
+  tags: string[]
+}
+
+/**
+ * Estima o Interesse Sinopse de um RASCUNHO (form de /titles/new), antes da obra
+ * existir no banco. Roda a previsão em memória contra a sinopse canônica + tags
+ * do form — NÃO persiste nada (nem em synopsis_quality_predictions, nem em works).
+ * A sugestão só entra no pipeline se o usuário clicar "Aplicar" (seta o campo do
+ * form) e depois salvar a obra. Mesmo gate Pago e perfil não-stub do caminho da
+ * obra salva.
+ */
+export async function predictSynopsisQualityForDraftAction(
+  input: DraftSynopsisQualityInput,
+): Promise<{ data?: PredictSynopsisQualityResult; error?: string }> {
+  try {
+    const gate = await ensureCapability("smart_shortlist")
+    if (!gate.ok) return { error: gate.error }
+
+    const profileResult = await loadOrEnsureProfile()
+    if ("error" in profileResult) return { error: profileResult.error }
+    const profile = profileResult.profile
+    if (profile.is_stub) return { error: STUB_PROFILE_ERROR }
+
+    const synopsis = input.synopsis?.trim()
+    if (!synopsis) {
+      return { error: "Gere a sinopse canônica antes de estimar o Interesse Sinopse." }
+    }
+
+    const result = await predictSynopsisQuality({
+      profile: profile.profile,
+      work: {
+        id: "draft",
+        title: input.title?.trim() || "(sem título)",
+        synopsis,
+        tags: (input.tags ?? []).map((name) => ({ name, group: null })),
+      },
+    })
+
+    return {
+      data: {
+        predictedQuality: result.predictedQuality,
+        justification: result.justification,
+        confidence: result.confidence,
+      },
+    }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Erro desconhecido" }
   }
@@ -126,7 +182,7 @@ export async function predictSynopsisQualityBatchAction(
     if (ids.length === 0) {
       return { error: "Nenhuma obra para estimar." }
     }
-    const todo = await getSynopsisCandidatesByIds(ids)
+    const todo = await getCandidatesByIds(ids)
     if (todo.length === 0) {
       return { error: "Nenhuma obra elegível (sem sinopse canônica ou arquivada)." }
     }

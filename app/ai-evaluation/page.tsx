@@ -495,12 +495,14 @@ function IaRkTab({
   personalStatusNames,
   synopsisQualities,
   states,
+  isPaid,
 }: {
   works: AlignmentQueueWork[]
   pubStatusNames: string[]
   personalStatusNames: string[]
   synopsisQualities: string[]
   states: IaRkState[]
+  isPaid: boolean
 }) {
   return (
     <div className="space-y-4">
@@ -518,7 +520,7 @@ function IaRkTab({
         showIaRkState
         activeIaRkStates={states}
       />
-      <StaleRerankPanel works={works} />
+      <StaleRerankPanel works={works} isPaid={isPaid} />
     </div>
   )
 }
@@ -707,6 +709,7 @@ export default async function AiEvaluationPage({
           personalStatusNames={personalStatusNames}
           synopsisQualities={synopsisQualities}
           states={iaRkStates}
+          isPaid={isPaidPlan}
         />
       ) : (
         <IaAttributesTab

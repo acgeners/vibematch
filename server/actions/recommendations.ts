@@ -17,6 +17,7 @@ import {
 } from "@/lib/ai-recommendation/taste-profile"
 import {
   getCandidateById,
+  getCandidatesByIds,
   getFavoriteCandidates,
   getRankingCandidates,
   getRatedWorksForProfile,
@@ -552,6 +553,108 @@ export async function rerankStaleBatchAction(
         ranked: upsertRows.length,
         available: allCandidates.length,
         truncated,
+      },
+    }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}
+
+export interface RerankWorksBatchResult {
+  /** Quantas obras receberam alignment_score nesta chamada. */
+  ranked: number
+  /** Quantas obras enviadas o modelo não retornou ranking. */
+  failed: number
+}
+
+/**
+ * Re-rankeia em LOTE uma lista EXPLÍCITA de obras — os IDs que o painel de IA Rk
+ * está exibindo na fila (desatualizados E/OU não avaliados), na ordem visível.
+ * Espelha o `predictSynopsisQualityBatchAction`: o cliente chama em blocos pra
+ * mostrar progresso, então lê o perfil ATUAL (1 linha) em vez de
+ * `loadOrEnsureProfile` — recarregar o histórico a cada bloco seria desperdício.
+ * Manda o bloco numa única chamada `rankFavorites` (o alignment_score é absoluto
+ * por obra no mode "ranking", então fatiar não muda o resultado) e limpa a flag
+ * stale. Não cria recommendation_run (alignment_run_id=null, como o re-rank
+ * sob-demanda). Corta em `MAX_CANDIDATES_HARD_LIMIT` por chamada (trava de custo
+ * — é o mesmo teto da run de ranking). Respeita o gate Pago e o limite diário.
+ */
+export async function rerankWorksBatchAction(
+  workIds: string[],
+): Promise<{ data?: RerankWorksBatchResult; error?: string }> {
+  try {
+    const gate = await ensureCapability("smart_shortlist")
+    if (!gate.ok) return { error: gate.error }
+
+    const runsToday = await getRunsToday()
+    if (runsToday >= MAX_RUNS_PER_DAY) {
+      return {
+        error: `Limite diário de ${MAX_RUNS_PER_DAY} execuções atingido. Tente novamente amanhã.`,
+      }
+    }
+
+    const profile = await loadCurrentTasteProfile()
+    if (!profile) {
+      return { error: "Gere o perfil de gosto antes de re-rankear (em /recommendations)." }
+    }
+    if (profile.is_stub) {
+      return {
+        error: "Perfil ainda em modo stub — avalie mais obras com user_score pra desbloquear o ranking IA.",
+      }
+    }
+
+    const ids = Array.from(new Set(workIds ?? []))
+      .filter(Boolean)
+      .slice(0, MAX_CANDIDATES_HARD_LIMIT)
+    if (ids.length === 0) {
+      return { error: "Nenhuma obra para re-rankear." }
+    }
+
+    const candidates = await getCandidatesByIds(ids)
+    if (candidates.length === 0) {
+      return { error: "Nenhuma obra elegível (arquivada ou inexistente)." }
+    }
+
+    const result = await rankFavorites({
+      profile: profile.profile,
+      candidates,
+      mode: "ranking",
+      userContext: null,
+    })
+
+    const supabase = createAdminClient()
+    const now = new Date().toISOString()
+    const candidateIds = new Set(candidates.map((c) => c.id))
+    const upsertRows = result.rankings
+      .filter((r) => candidateIds.has(r.work_id))
+      .map((r) => ({
+        work_id: r.work_id,
+        alignment_score: r.alignment_score,
+        alignment_run_id: null,
+        alignment_justification: r.justification,
+        alignment_payload: buildAlignmentPayload(r),
+        alignment_at: now,
+        alignment_stale: false, // recém-computado com bias/perfil atuais
+      }))
+
+    if (upsertRows.length > 0) {
+      const { error: upErr } = await supabase
+        .from("calculated_scores")
+        .upsert(upsertRows, { onConflict: "work_id" })
+      if (upErr) {
+        return { error: `Falha persistindo alignment_score: ${upErr.message}` }
+      }
+    }
+
+    revalidatePath("/ranking")
+    revalidatePath("/ranking/desatualizados")
+    revalidatePath("/favorites")
+    revalidatePath("/ai-evaluation")
+
+    return {
+      data: {
+        ranked: upsertRows.length,
+        failed: candidates.length - upsertRows.length,
       },
     }
   } catch (err) {
