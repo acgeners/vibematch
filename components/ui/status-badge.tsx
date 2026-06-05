@@ -71,20 +71,23 @@ interface PublicationStatusBadgeProps {
   status?: string | null
   /** Quando true, mostra o código curto (`short` no DB) em vez do nome canônico. */
   compact?: boolean
+  /** Quando true, mostra só o símbolo (sem texto). */
+  iconOnly?: boolean
   className?: string
 }
 
-export function PublicationStatusBadge({ statusId, status, compact, className }: PublicationStatusBadgeProps) {
+export function PublicationStatusBadge({ statusId, status, compact, iconOnly, className }: PublicationStatusBadgeProps) {
   const info = resolvePublicationInfo(statusId, status)
   const name = info?.status ?? "Unknown"
   const display = compact ? (info?.short || name) : name
   return (
     <Badge
       variant="outline"
-      className={cn("gap-1", PUB_STATUS_CLASSES[name] ?? PUB_STATUS_CLASSES.Unknown, className)}
+      className={cn("gap-1", iconOnly && "px-1.5", PUB_STATUS_CLASSES[name] ?? PUB_STATUS_CLASSES.Unknown, className)}
+      title={iconOnly ? name : undefined}
     >
       <span aria-hidden>{info?.symbol || "?"}</span>
-      {display}
+      {!iconOnly && display}
     </Badge>
   )
 }

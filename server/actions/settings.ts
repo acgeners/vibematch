@@ -399,9 +399,25 @@ export async function getCalibrationSnapshot() {
   }
   if (expectedCovered > 0) maeExpected = expectedSumAbs / expectedCovered
 
+  // Baseline trivial: prever a média das notas pessoais pra TODAS as obras.
+  // É o piso que qualquer modelo precisa bater — se a Nota Prevista não ganha
+  // disso, ela não está agregando valor. Predizer a média não tem capacidade de
+  // overfit, então in-sample ≈ generalização → comparável direto com a MAE CV
+  // do headline (cv_mae_expected_stage1).
+  const baselineScores = items
+    .map((it) => it.userScore)
+    .filter((v): v is number => v != null)
+  let baselineMae: number | null = null
+  if (baselineScores.length > 0) {
+    const mean = baselineScores.reduce((a, b) => a + b, 0) / baselineScores.length
+    baselineMae =
+      baselineScores.reduce((a, b) => a + Math.abs(b - mean), 0) / baselineScores.length
+  }
+
   return {
     totalWorks: items.length,
     trainSize: calibration.trainSize,
+    baselineMae,
     maeCalc: calibration.maeCalc,
     maePredicted: calibration.maePredicted,
     maeFinal: calibration.maeFinal,

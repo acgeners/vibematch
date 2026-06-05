@@ -39,9 +39,10 @@ import {
 } from "@/components/ui/tooltip"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { toast } from "sonner"
-import type { CategoryScore, WorkWithRelations, WorkCover } from "@/types/domain"
+import type { CategoryScore, WorkWithRelations } from "@/types/domain"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
+import { pickPrimaryCover } from "@/lib/covers"
 import { CoverImage } from "@/components/ui/cover-image"
 import { ScoreBadge, getCriterionColorClass, type ColumnThresholds, type ScoreColorThresholds } from "@/components/ui/score-badge"
 import {
@@ -526,12 +527,6 @@ function EmptyState({ searchQuery }: { searchQuery?: string }) {
       )}
     </div>
   )
-}
-
-function pickPrimaryCover(covers: WorkCover[] | undefined): string | null {
-  if (!covers || covers.length === 0) return null
-  const primary = covers.find((c) => c.is_primary)
-  return (primary ?? covers[0])?.url ?? null
 }
 
 function WorkCardsView({

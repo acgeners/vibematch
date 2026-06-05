@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { ChevronDown, ChevronUp, ImageOff } from "lucide-react"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
+import { pickPrimaryCover } from "@/lib/covers"
 import { CoverImage } from "@/components/ui/cover-image"
 import { ScoreBadge, type ColumnThresholds, type ScoreColorThresholds } from "@/components/ui/score-badge"
 import {
@@ -26,7 +27,7 @@ import {
   type WorkColumnGroup,
   type WorkColumnNamespace,
 } from "@/components/titles/work-table-config"
-import type { WorkWithRelations, WorkCover, CategoryScore } from "@/types/domain"
+import type { WorkWithRelations, CategoryScore } from "@/types/domain"
 
 interface WorkHeatmapViewProps {
   works: WorkWithRelations[]
@@ -156,12 +157,6 @@ function formatVoteCount(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`
   return String(count)
-}
-
-function pickPrimaryCover(covers: WorkCover[] | undefined): string | null {
-  if (!covers || covers.length === 0) return null
-  const primary = covers.find((c) => c.is_primary)
-  return (primary ?? covers[0])?.url ?? null
 }
 
 function scoreFor(work: WorkWithRelations, slug: string): number | null {

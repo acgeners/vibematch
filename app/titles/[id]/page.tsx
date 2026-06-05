@@ -711,6 +711,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         workTitle={work.title}
         hasCriteriaScores={Object.keys(scoreMap).length > 0}
         coverUrl={primaryCover}
+        latestEvaluation={latestAiEval ?? null}
       />
       {/* Notas e Avaliações Externas side-by-side */}
       <div className={cn(platformRatings.length > 0 && "grid grid-cols-1 lg:grid-cols-2 gap-5")}>
