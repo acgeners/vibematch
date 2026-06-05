@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -17,6 +17,9 @@ import {
   Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { getSidebarBadgeCounts } from "@/server/actions/badges"
+
+type BadgeKey = "ai-eval" | "settings"
 
 interface NavItem {
   href: string
@@ -25,6 +28,8 @@ interface NavItem {
   // Marca o item como ativo apenas quando um query param específico está setado.
   // Quando ausente, o item-base do mesmo path fica inativo (evita dupla seleção).
   query?: { key: string; value: string }
+  // Exibe um badge de pendências (contagem buscada no client por chave).
+  badgeKey?: BadgeKey
 }
 
 interface NavSection {
@@ -48,8 +53,8 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: "/conta", icon: UserCircle, label: "Minha conta" },
       { href: "/preferencias", icon: SlidersHorizontal, label: "Preferências" },
-      { href: "/settings", icon: Settings, label: "Configurações" },
-      { href: "/ai-evaluation", icon: Sparkles, label: "Avaliação IA" },
+      { href: "/settings", icon: Settings, label: "Configurações", badgeKey: "settings" },
+      { href: "/ai-evaluation", icon: Sparkles, label: "Avaliação IA", badgeKey: "ai-eval" },
       { href: "/ai-usage", icon: Activity, label: "Uso da API IA" },
       { href: "/import", icon: Upload, label: "Importar" },
     ],
@@ -76,6 +81,29 @@ function useClientSearchParams(): URLSearchParams {
 export function Sidebar() {
   const pathname = usePathname()
   const searchParams = useClientSearchParams()
+
+  // Badges de pendências (contagens):
+  //   - "ai-eval":  obras nos filtros padrão de /ai-evaluation
+  //   - "settings": pendências do Pipeline de dados de /settings
+  // Re-busca a cada navegação pra refletir itens processados (ex.: ao sair da
+  // página depois de avaliar / rodar manutenção). Falha silenciosa em 0.
+  const [badgeCounts, setBadgeCounts] = useState<Record<BadgeKey, number>>({
+    "ai-eval": 0,
+    settings: 0,
+  })
+  useEffect(() => {
+    let cancelled = false
+    getSidebarBadgeCounts()
+      .then(({ aiEval, settings }) => {
+        if (!cancelled) setBadgeCounts({ "ai-eval": aiEval, settings })
+      })
+      .catch(() => {
+        /* mantém contagens atuais em caso de falha */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [pathname])
 
   const isItemActive = (item: NavItem, siblings: NavItem[]): boolean => {
     const basePath = item.href.split("?")[0]
@@ -118,6 +146,7 @@ export function Sidebar() {
             {section.items.map((item) => {
               const { href, icon: Icon, label } = item
               const active = isItemActive(item, section.items)
+              const badgeCount = item.badgeKey ? badgeCounts[item.badgeKey] : 0
               return (
                 <Link
                   key={href}
@@ -149,6 +178,14 @@ export function Sidebar() {
                     <Icon className="size-4" />
                   </span>
                   <span className="truncate">{label}</span>
+                  {badgeCount > 0 && (
+                    <span
+                      aria-label={`${badgeCount} ${badgeCount === 1 ? "item" : "itens"} na fila`}
+                      className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-bold leading-none text-primary-foreground shadow-sm shadow-primary/30 ring-1 ring-white/15"
+                    >
+                      {badgeCount > 99 ? "99+" : badgeCount}
+                    </span>
+                  )}
                 </Link>
               )
             })}

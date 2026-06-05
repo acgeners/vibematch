@@ -142,7 +142,8 @@ export function AiEvaluationFilters({
     else next.add(value)
 
     updateParams((params) => {
-      if (next.size === IA_RK_STATE_OPTIONS.length) params.delete("rk")
+      // Default da aba IA Rk = {stale} (só "Desatualizado") → URL limpa.
+      if (next.size === 1 && next.has("stale")) params.delete("rk")
       else if (next.size === 0) params.set("rk", "none")
       else params.set("rk", [...next].join(","))
     })
@@ -213,8 +214,9 @@ export function AiEvaluationFilters({
 
   const evalFilterCount =
     showEvalState && !isDefaultFilterSet(activeFilters) ? activeFilters.length : 0
+  // Default da aba IA Rk = {stale} (só "Desatualizado"). Qualquer desvio conta.
   const iaRkFilterActive =
-    showIaRkState && activeIaRkStates.length !== IA_RK_STATE_OPTIONS.length
+    showIaRkState && [...activeIaRkStates].sort().join(",") !== "stale"
   // Default da aba Sinopse = {stale, unpredicted} (sem "predicted"). Qualquer
   // desvio conta como filtro ativo.
   const synopsisFilterActive =

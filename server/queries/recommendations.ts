@@ -505,7 +505,10 @@ export async function getAlignmentQueueWorks(opts: {
   if (opts.synopsisQualities && opts.synopsisQualities.length > 0) {
     query = query.in("synopsis_quality", opts.synopsisQualities)
   }
-  const { data, error } = await query.limit(opts.limit ?? 500)
+  // Limite alto: com 500+ obras, um cap de 500 (sem order) descartava obras da
+  // cauda silenciosamente — uma obra stale ali sumia da aba mas aparecia no
+  // badge (que conta todas), gerando divergência aba×badge.
+  const { data, error } = await query.limit(opts.limit ?? 5000)
   if (error) throw new Error(`Falha listando fila de IA Rk: ${error.message}`)
 
   const rows: AlignmentQueueWork[] = []
@@ -784,6 +787,80 @@ export async function getSynopsisQueueWorks(opts: {
   }
 
   return [...out.values()]
+}
+
+/**
+ * Conta as obras que aparecem nos FILTROS PADRÃO da página /ai-evaluation,
+ * tratando as três filas como um CONJUNTO DISTINTO de obras (uma obra que cai em
+ * mais de uma fila conta uma vez). Usado pelo badge "Avaliação IA (N)" na
+ * sidebar. Seleciona só colunas mínimas — roda a cada navegação. Espelha os
+ * defaults de parseFilters / parseIaRkStates / parseSynopsisStates em
+ * app/ai-evaluation/page.tsx:
+ *   - Atributos:        ai_eval_status ∈ {pending, review_pending}
+ *   - IA Rk:            "stale" (tem alignment_score e alignment_stale)
+ *   - Interesse Sinopse: "stale" + "unpredicted" (sinopse canônica sem previsão fresca)
+ */
+export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
+  const supabase = createAdminClient()
+
+  const [attr, staleScores, synWorks, preds] = await Promise.all([
+    // 1) Atributos — default {pending, review-pending}.
+    supabase
+      .from("works")
+      .select("id")
+      .in("ai_eval_status", ["pending", "review_pending"])
+      .eq("is_archived", false),
+    // 2) IA Rk — default {stale}: filtra direto em calculated_scores (conjunto
+    //    pequeno) em vez de carregar o catálogo inteiro. Arquivadas são excluídas
+    //    abaixo intersectando com works não-arquivadas.
+    supabase
+      .from("calculated_scores")
+      .select("work_id")
+      .eq("alignment_stale", true)
+      .not("alignment_score", "is", null),
+    // 3) Interesse Sinopse — obras (não arquivadas) com sinopse canônica.
+    supabase
+      .from("works")
+      .select("id")
+      .eq("is_archived", false)
+      .not("canonical_synopsis", "is", null),
+    supabase.from("synopsis_quality_predictions").select("work_id, prompt_version, stale"),
+  ])
+
+  if (attr.error) throw new Error(`Falha contando fila de atributos: ${attr.error.message}`)
+  if (staleScores.error) throw new Error(`Falha contando fila de IA Rk: ${staleScores.error.message}`)
+  if (synWorks.error) throw new Error(`Falha contando fila de sinopse: ${synWorks.error.message}`)
+  if (preds.error) throw new Error(`Falha lendo previsões de sinopse: ${preds.error.message}`)
+
+  const ids = new Set<string>()
+
+  for (const w of attr.data ?? []) ids.add((w as { id: string }).id)
+
+  // IA Rk stale: exclui arquivadas validando os work_ids contra works não-arquivadas.
+  const staleIds = [...new Set((staleScores.data ?? []).map((r) => (r as { work_id: string }).work_id))]
+  for (let i = 0; i < staleIds.length; i += 200) {
+    const chunk = staleIds.slice(i, i + 200)
+    const { data, error } = await supabase
+      .from("works")
+      .select("id")
+      .in("id", chunk)
+      .eq("is_archived", false)
+    if (error) throw new Error(`Falha validando IA Rk não-arquivadas: ${error.message}`)
+    for (const w of data ?? []) ids.add((w as { id: string }).id)
+  }
+
+  // Obra sai da fila de sinopse só se tem previsão FRESCA (versão atual e não-stale).
+  const freshSynopsis = new Set<string>()
+  for (const p of preds.data ?? []) {
+    const row = p as { work_id: string; prompt_version: string | null; stale: boolean | null }
+    if (row.prompt_version === SYNOPSIS_PROMPT_VERSION && !row.stale) freshSynopsis.add(row.work_id)
+  }
+  for (const w of synWorks.data ?? []) {
+    const id = (w as { id: string }).id
+    if (!freshSynopsis.has(id)) ids.add(id)
+  }
+
+  return ids.size
 }
 
 /**

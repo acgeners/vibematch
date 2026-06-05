@@ -20,8 +20,8 @@ import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
 import { ReviewSummaryPanel } from "@/components/settings/review-summary-panel"
-import { countStaleEmbeddings } from "@/server/actions/embeddings"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
+import { getSettingsPendingCounts } from "@/server/queries/settings-pending"
 import type { FormulaConfig } from "@/types/domain"
 import { ACCENT_LINK, type SettingsAccent } from "@/lib/settings-accent"
 import { cn } from "@/lib/utils"
@@ -47,9 +47,7 @@ async function getSettingsData() {
     worksCount,
     embeddingsLastRunRes,
     syncConstantsLastRun,
-    canonicalSynopsisPending,
-    embeddingsPending,
-    reviewSummaryPending,
+    pending,
   ] = await Promise.all([
     supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
     getCalibrationSnapshot(),
@@ -69,14 +67,7 @@ async function getSettingsData() {
       .limit(1)
       .maybeSingle(),
     getSyncConstantsMtime(),
-    supabase
-      .from("works")
-      .select("id", { count: "exact", head: true })
-      .is("canonical_synopsis", null)
-      .eq("is_archived", false)
-      .then((r) => r.count ?? 0),
-    countStaleEmbeddings().then((r) => r.pending).catch(() => 0),
-    countPendingReviewSummaries(),
+    getSettingsPendingCounts(),
   ])
 
   if (configRes.error) throw new Error(configRes.error.message)
@@ -89,9 +80,9 @@ async function getSettingsData() {
     worksCount,
     embeddingsLastRun: (embeddingsLastRunRes.data?.updated_at as string | undefined) ?? null,
     syncConstantsLastRun,
-    canonicalSynopsisPending,
-    embeddingsPending,
-    reviewSummaryPending,
+    canonicalSynopsisPending: pending.canonicalSynopsis,
+    embeddingsPending: pending.embeddings,
+    reviewSummaryPending: pending.reviewSummary,
   }
 }
 
@@ -114,31 +105,6 @@ const SECTION_GROUPS = [
     ],
   },
 ]
-
-async function countPendingReviewSummaries(): Promise<number> {
-  const supabase = createAdminClient()
-  // work_reviews pode passar de 1000 linhas (cap do PostgREST) — pagina até esgotar
-  // pra não subcontar as obras pendentes.
-  const reviewedIds = new Set<string>()
-  const PAGE = 1000
-  for (let from = 0; ; from += PAGE) {
-    const { data } = await supabase
-      .from("work_reviews")
-      .select("work_id")
-      .range(from, from + PAGE - 1)
-    for (const r of data ?? []) reviewedIds.add(r.work_id as string)
-    if (!data || data.length < PAGE) break
-  }
-  if (reviewedIds.size === 0) return 0
-  const { data: summarized } = await supabase
-    .from("works")
-    .select("id")
-    .not("review_summary", "is", null)
-  const summarizedIds = new Set<string>((summarized ?? []).map((r) => r.id as string))
-  let pending = 0
-  for (const id of reviewedIds) if (!summarizedIds.has(id)) pending += 1
-  return pending
-}
 
 export default async function SettingsPage() {
   const {

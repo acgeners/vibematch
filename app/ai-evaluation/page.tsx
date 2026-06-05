@@ -465,7 +465,7 @@ type IaRkState = (typeof IA_RK_STATES)[number]
 
 function parseIaRkStates(raw: string | string[] | undefined): IaRkState[] {
   const value = Array.isArray(raw) ? raw[0] : raw
-  if (value == null) return [...IA_RK_STATES] // default: ambos
+  if (value == null) return ["stale"] // default: só "Desatualizado"
   if (value === "none") return []
   const parts = value.split(",").map((p) => p.trim())
   return IA_RK_STATES.filter((s) => parts.includes(s))
