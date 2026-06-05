@@ -20,6 +20,7 @@ import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getTasteProfileStatusAction } from "@/server/actions/recommendations"
 import { getPredictionHealth } from "@/server/queries/calibration-guards"
 import { getAiUsageTotals } from "@/server/queries/ai-usage"
+import { getCurrentUserProfile } from "@/server/queries/current-user"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { AiQueueCard } from "@/components/dashboard/ai-queue-card"
 import { StatusDistribution } from "@/components/dashboard/status-distribution"
@@ -43,6 +44,7 @@ export default async function DashboardPage() {
     profileStatus,
     health,
     usage,
+    profile,
   ] = await Promise.all([
     getDashboardStats(),
     getScoreColorThresholds(),
@@ -52,15 +54,25 @@ export default async function DashboardPage() {
     getTasteProfileStatusAction(),
     getPredictionHealth(),
     getAiUsageTotals(),
+    getCurrentUserProfile(),
   ])
+
+  const firstName = profile.displayName?.trim().split(/\s+/)[0]
 
   return (
     <div className="space-y-6">
       <Header
-        kicker="Biblioteca"
+        kicker={firstName ? `Olá, ${firstName}` : "Biblioteca"}
         title="Dashboard"
         description="Visão geral do seu catálogo"
-        icon={<LayoutDashboard />}
+        icon={
+          profile.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- avatar do usuário (URL própria/colada); next/image não cabe (sem images config).
+            <img src={profile.avatarUrl} alt="" className="size-full rounded-xl object-cover" />
+          ) : (
+            <LayoutDashboard />
+          )
+        }
         actions={
           <Button asChild size="sm">
             <Link href="/titles/new">

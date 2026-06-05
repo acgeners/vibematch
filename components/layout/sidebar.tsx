@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getSidebarBadgeCounts } from "@/server/actions/badges"
+import { AccountChip } from "@/components/layout/account-chip"
 
 type BadgeKey = "ai-eval" | "settings"
 
@@ -195,10 +196,8 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="border-t border-sidebar-border/60 px-4 py-3">
-        <p className="text-[10px] font-medium text-muted-foreground/70">
-          v1 · catálogo pessoal
-        </p>
+      <div className="border-t border-sidebar-border/60 p-3">
+        <AccountChip />
       </div>
     </aside>
   )

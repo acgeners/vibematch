@@ -49,6 +49,44 @@ export async function getCurrentPlan(admin?: AdminClient): Promise<UserPlan> {
   return (data?.user_plan as UserPlan | undefined) ?? "free"
 }
 
+export interface CurrentUserProfile {
+  userId: string
+  displayName: string | null
+  email: string | null
+  avatarUrl: string | null
+  plan: UserPlan
+}
+
+/**
+ * Perfil completo do usuário atual (singleton). NÃO cacheado — display_name,
+ * email, avatar_url e user_plan mudam em runtime via /conta. Tolerante a
+ * colunas ausentes (migration 090 não aplicada): cai pro id + plano e zera
+ * o resto, mantendo o /conta funcional. Mesmo espírito de getCurrentPlan.
+ */
+export async function getCurrentUserProfile(admin?: AdminClient): Promise<CurrentUserProfile> {
+  const supabase = admin ?? createAdminClient()
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("current_user_id, display_name, email, avatar_url, user_plan")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.warn(`[getCurrentUserProfile] fallback (colunas indisponíveis): ${error.message}`)
+    const [userId, plan] = await Promise.all([getCurrentUserId(supabase), getCurrentPlan(supabase)])
+    return { userId, displayName: null, email: null, avatarUrl: null, plan }
+  }
+
+  return {
+    userId: (data?.current_user_id as string | undefined) ?? (await getCurrentUserId(supabase)),
+    displayName: (data?.display_name as string | null | undefined) ?? null,
+    email: (data?.email as string | null | undefined) ?? null,
+    avatarUrl: (data?.avatar_url as string | null | undefined) ?? null,
+    plan: (data?.user_plan as UserPlan | undefined) ?? "free",
+  }
+}
+
 /**
  * Gate de capability pra server actions. Retorna erro estruturado quando o
  * plano atual não libera a feature — o caller propaga pro client.
