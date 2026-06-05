@@ -1,7 +1,9 @@
 import { Activity, AlertTriangle } from "lucide-react"
+import Link from "next/link"
 import { Header } from "@/components/layout/header"
 import { CostByOperationChart } from "@/components/settings/ai-usage/cost-by-operation-chart"
 import { DailyCostChart } from "@/components/settings/ai-usage/daily-cost-chart"
+import { OperationFilter } from "@/components/settings/ai-usage/operation-filter"
 import {
   getAiUsageByModel,
   getAiUsageByOperation,
@@ -65,15 +67,27 @@ function KpiCard({ label, agg }: { label: string; agg: UsageAggregate }) {
   )
 }
 
-export default async function AiUsagePage() {
+export default async function AiUsagePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ op?: string | string[] }>
+}) {
+  const params = await searchParams
+  const opRaw = Array.isArray(params.op) ? params.op[0] : params.op
+  const op = opRaw && opRaw.trim() ? opRaw.trim() : null
+
+  // byOperation é sempre completo: alimenta a tabela/gráfico de breakdown e o menu
+  // do filtro. As demais métricas são escopadas pela operação selecionada (se houver).
   const [totals, byOperation, byModel, recent, dailySeries] = await Promise.all([
-    getAiUsageTotals(),
+    getAiUsageTotals(op),
     getAiUsageByOperation(30),
-    getAiUsageByModel(30),
-    getRecentAiCalls(50),
-    getAiUsageDailySeries(30),
+    getAiUsageByModel(30, op),
+    getRecentAiCalls(50, op),
+    getAiUsageDailySeries(30, op),
   ])
 
+  const operationNames = byOperation.map((row) => row.operation)
+  const opSuffix = op ? ` · ${op}` : ""
   const hasUnknownPricing = recent.some((r) => r.totalCostUsd === 0 && r.totalTokens > 0)
 
   return (
@@ -83,6 +97,7 @@ export default async function AiUsagePage() {
         title="Uso da API IA"
         description="Custo estimado e tokens consumidos por todas as chamadas Anthropic do app."
         icon={<Activity />}
+        actions={<OperationFilter operations={operationNames} active={op} />}
       />
 
       {hasUnknownPricing && (
@@ -96,6 +111,13 @@ export default async function AiUsagePage() {
         </div>
       )}
 
+      {op && (
+        <p className="text-xs text-muted-foreground">
+          Métricas abaixo (exceto a distribuição por operação) filtradas por{" "}
+          <code className="font-mono text-foreground">{op}</code>.
+        </p>
+      )}
+
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiCard label="Últimas 24h" agg={totals.last24h} />
         <KpiCard label="Últimos 7 dias" agg={totals.last7d} />
@@ -106,7 +128,7 @@ export default async function AiUsagePage() {
       <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <div className="rounded-xl border border-border/70 bg-card/55 shadow-sm shadow-black/5">
           <header className="border-b border-border/60 px-4 py-3 sm:px-5">
-            <h2 className="text-sm font-semibold text-foreground">Custo diário (30d)</h2>
+            <h2 className="text-sm font-semibold text-foreground">Custo diário (30d){opSuffix}</h2>
           </header>
           <div className="px-3 py-3 sm:px-4">
             <DailyCostChart data={dailySeries} />
@@ -117,7 +139,7 @@ export default async function AiUsagePage() {
             <h2 className="text-sm font-semibold text-foreground">Distribuição por operação (30d)</h2>
           </header>
           <div className="px-3 py-3 sm:px-4">
-            <CostByOperationChart data={byOperation} />
+            <CostByOperationChart data={byOperation} active={op} />
           </div>
         </div>
       </section>
@@ -146,16 +168,34 @@ export default async function AiUsagePage() {
                   </td>
                 </tr>
               )}
-              {byOperation.map((row) => (
-                <tr key={row.operation} className="border-t border-border/40">
-                  <td className="px-4 py-2 font-mono text-[11px]">{row.operation}</td>
+              {byOperation.map((row) => {
+                const isActive = op === row.operation
+                return (
+                <tr
+                  key={row.operation}
+                  className={
+                    isActive
+                      ? "border-t border-border/40 bg-primary/10"
+                      : "border-t border-border/40 hover:bg-muted/30"
+                  }
+                >
+                  <td className="px-4 py-2 font-mono text-[11px]">
+                    <Link
+                      href={isActive ? "/ai-usage" : `/ai-usage?op=${encodeURIComponent(row.operation)}`}
+                      className="text-primary underline-offset-2 hover:underline"
+                      title={isActive ? "Remover filtro" : `Filtrar por ${row.operation}`}
+                    >
+                      {row.operation}
+                    </Link>
+                  </td>
                   <td className="px-4 py-2 text-right tabular-nums">{row.nCalls}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{formatTokens(row.totalTokens)}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{formatUsd(row.totalCostUsd)}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{formatLatency(row.avgLatencyMs)}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{formatPct(row.errorRate)}</td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -163,7 +203,7 @@ export default async function AiUsagePage() {
 
       <section className="rounded-xl border border-border/70 bg-card/55 shadow-sm shadow-black/5">
         <header className="border-b border-border/60 px-4 py-3 sm:px-5">
-          <h2 className="text-sm font-semibold text-foreground">Por modelo (30 dias)</h2>
+          <h2 className="text-sm font-semibold text-foreground">Por modelo (30 dias){opSuffix}</h2>
         </header>
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs">
@@ -204,7 +244,7 @@ export default async function AiUsagePage() {
 
       <section className="rounded-xl border border-border/70 bg-card/55 shadow-sm shadow-black/5">
         <header className="border-b border-border/60 px-4 py-3 sm:px-5">
-          <h2 className="text-sm font-semibold text-foreground">Últimas 50 chamadas</h2>
+          <h2 className="text-sm font-semibold text-foreground">Últimas 50 chamadas{opSuffix}</h2>
         </header>
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs">

@@ -136,16 +136,35 @@ const SELECT_COLS =
   "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, " +
   "cost_total_usd, latency_ms, status, error_message, stop_reason, metadata"
 
-async function fetchRows(sinceIso: string | null): Promise<RawRow[]> {
+// Supabase limita cada resposta a `db.maxRows` (default 1000). Sem paginação,
+// os agregados ficavam silenciosamente truncados nas 1000 chamadas mais recentes
+// — totais/custos apareciam muito abaixo do real e "encolhiam" conforme novas
+// linhas empurravam as antigas pra fora da janela. Paginamos até esgotar.
+const PAGE_SIZE = 1000
+
+async function fetchRows(sinceIso: string | null, operation?: string | null): Promise<RawRow[]> {
   const supabase = createAdminClient()
-  let query = supabase.from("ai_api_calls").select(SELECT_COLS).order("created_at", { ascending: false })
-  if (sinceIso) query = query.gte("created_at", sinceIso)
-  const { data, error } = await query
-  if (error) {
-    console.error("[ai-usage] fetchRows falhou:", error.message)
-    return []
+  const all: RawRow[] = []
+  let from = 0
+  for (;;) {
+    let query = supabase
+      .from("ai_api_calls")
+      .select(SELECT_COLS)
+      .order("created_at", { ascending: false })
+      .range(from, from + PAGE_SIZE - 1)
+    if (sinceIso) query = query.gte("created_at", sinceIso)
+    if (operation) query = query.eq("operation", operation)
+    const { data, error } = await query
+    if (error) {
+      console.error("[ai-usage] fetchRows falhou:", error.message)
+      break
+    }
+    const batch = (data ?? []) as unknown as RawRow[]
+    all.push(...batch)
+    if (batch.length < PAGE_SIZE) break
+    from += PAGE_SIZE
   }
-  return (data ?? []) as unknown as RawRow[]
+  return all
 }
 
 function rangeStartIso(days: number | null): string | null {
@@ -153,13 +172,13 @@ function rangeStartIso(days: number | null): string | null {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
 }
 
-export async function getAiUsageTotals(): Promise<{
+export async function getAiUsageTotals(operation?: string | null): Promise<{
   allTime: UsageAggregate
   last30d: UsageAggregate
   last7d: UsageAggregate
   last24h: UsageAggregate
 }> {
-  const allTime = await fetchRows(null)
+  const allTime = await fetchRows(null, operation)
   const cutoff30 = Date.now() - 30 * 24 * 60 * 60 * 1000
   const cutoff7 = Date.now() - 7 * 24 * 60 * 60 * 1000
   const cutoff24 = Date.now() - 24 * 60 * 60 * 1000
@@ -188,8 +207,11 @@ export async function getAiUsageByOperation(rangeDays: number): Promise<Operatio
   return result
 }
 
-export async function getAiUsageByModel(rangeDays: number): Promise<ModelAggregate[]> {
-  const rows = await fetchRows(rangeStartIso(rangeDays))
+export async function getAiUsageByModel(
+  rangeDays: number,
+  operation?: string | null,
+): Promise<ModelAggregate[]> {
+  const rows = await fetchRows(rangeStartIso(rangeDays), operation)
   const byModel = new Map<string, RawRow[]>()
   for (const r of rows) {
     const list = byModel.get(r.model_name) ?? []
@@ -210,8 +232,11 @@ export interface DailyUsagePoint {
   calls: number
 }
 
-export async function getAiUsageDailySeries(rangeDays = 30): Promise<DailyUsagePoint[]> {
-  const rows = await fetchRows(rangeStartIso(rangeDays))
+export async function getAiUsageDailySeries(
+  rangeDays = 30,
+  operation?: string | null,
+): Promise<DailyUsagePoint[]> {
+  const rows = await fetchRows(rangeStartIso(rangeDays), operation)
   const byDay = new Map<string, { cost: number; calls: number }>()
   for (const r of rows) {
     const day = r.created_at.slice(0, 10)
@@ -229,13 +254,18 @@ export async function getAiUsageDailySeries(rangeDays = 30): Promise<DailyUsageP
   return result
 }
 
-export async function getRecentAiCalls(limit: number): Promise<AiCallRow[]> {
+export async function getRecentAiCalls(
+  limit: number,
+  operation?: string | null,
+): Promise<AiCallRow[]> {
   const supabase = createAdminClient()
-  const { data, error } = await supabase
+  let query = supabase
     .from("ai_api_calls")
     .select(SELECT_COLS)
     .order("created_at", { ascending: false })
     .limit(limit)
+  if (operation) query = query.eq("operation", operation)
+  const { data, error } = await query
   if (error) {
     console.error("[ai-usage] getRecentAiCalls falhou:", error.message)
     return []

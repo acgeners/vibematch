@@ -1,5 +1,6 @@
 "use client"
 
+import { useRouter } from "next/navigation"
 import {
   Bar,
   BarChart,
@@ -13,6 +14,7 @@ import {
 
 interface Props {
   data: Array<{ operation: string; totalCostUsd: number; nCalls: number }>
+  active?: string | null
 }
 
 const COLORS = [
@@ -31,13 +33,20 @@ function formatUsd(value: number): string {
   return `$${value.toFixed(2)}`
 }
 
-export function CostByOperationChart({ data }: Props) {
+export function CostByOperationChart({ data, active }: Props) {
+  const router = useRouter()
   const filtered = data.filter((d) => d.totalCostUsd > 0).slice(0, 8)
   if (filtered.length === 0) {
     return (
       <div className="flex h-44 items-center justify-center text-xs text-muted-foreground">
         Sem chamadas com custo nos últimos 30 dias.
       </div>
+    )
+  }
+  function goToOperation(operation: string | undefined) {
+    if (!operation) return
+    router.push(
+      operation === active ? "/ai-usage" : `/ai-usage?op=${encodeURIComponent(operation)}`,
     )
   }
   return (
@@ -74,10 +83,25 @@ export function CostByOperationChart({ data }: Props) {
               return [`${formatUsd(num)} · ${calls} chamadas`, "Custo"]
             }}
           />
-          <Bar dataKey="totalCostUsd" radius={[0, 4, 4, 0]}>
-            {filtered.map((_, i) => (
-              <Cell key={i} fill={COLORS[i % COLORS.length]} />
-            ))}
+          <Bar
+            dataKey="totalCostUsd"
+            radius={[0, 4, 4, 0]}
+            cursor="pointer"
+            onClick={(entry) => {
+              const e = entry as { operation?: string; payload?: { operation?: string } }
+              goToOperation(e?.operation ?? e?.payload?.operation)
+            }}
+          >
+            {filtered.map((entry, i) => {
+              const dim = active != null && entry.operation !== active
+              return (
+                <Cell
+                  key={i}
+                  fill={COLORS[i % COLORS.length]}
+                  fillOpacity={dim ? 0.3 : 1}
+                />
+              )
+            })}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
