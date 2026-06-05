@@ -84,8 +84,15 @@ export interface ComixDetail {
   rating?: number
   votes?: number
   tags: string[]
+  /** Data (relativa, pré-formatada pela comix, ex.: "8mos ago") do último capítulo. */
+  lastChapterAt?: string
   /** Cross-source IDs exposed by comix.to (anilist, mangaupdates, myanimelist, mangadex). */
   links?: { anilist?: string; mu?: string; mal?: string; md?: string }
+}
+
+/** URL canônica da obra no comix.to. Só o hid já resolve (sem precisar do slug). */
+export function comixWorkUrl(hid: string): string {
+  return `https://comix.to/title/${hid}`
 }
 
 function mapStatus(status: unknown): PublicationStatus {
@@ -186,6 +193,8 @@ export async function searchComix(query: string): Promise<ExternalSearchResult[]
         votes: typeof item.ratedCount === "number" ? item.ratedCount : undefined,
         genres: tagsFromItem(item),
         crossIds: Object.keys(crossIds).length > 0 ? crossIds : undefined,
+        lastChapterAt:
+          typeof item.chapterUpdatedAtFormatted === "string" ? item.chapterUpdatedAtFormatted : undefined,
       }
     })
 }
@@ -217,6 +226,7 @@ export async function fetchComixById(hid: string): Promise<ComixDetail | null> {
     rating: typeof r.ratedAvg === "number" ? r.ratedAvg : undefined,
     votes: typeof r.ratedCount === "number" ? r.ratedCount : undefined,
     tags: tagsFromItem(r),
+    lastChapterAt: typeof r.chapterUpdatedAtFormatted === "string" ? r.chapterUpdatedAtFormatted : undefined,
     links: linksFromItem(r.links),
   }
 }

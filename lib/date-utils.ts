@@ -28,6 +28,19 @@ export function formatRelativeDate(input: DateInput): string {
   return format(d, "dd/MM/yy")
 }
 
+/**
+ * Formata uma data FUTURA prevista: "07/06 (em 3 dias)" / "(hoje)" / "(amanhã)" /
+ * "(atrasado)". `null` quando a entrada é inválida. Usado pra previsão de próximo cap.
+ */
+export function formatPredictedDate(input: DateInput): string | null {
+  const d = toDate(input)
+  if (!d) return null
+  const days = differenceInCalendarDays(d, new Date())
+  const rel =
+    days < 0 ? "atrasado" : days === 0 ? "hoje" : days === 1 ? "amanhã" : `em ${days} dias`
+  return `${format(d, "dd/MM")} (${rel})`
+}
+
 export function formatRelativeDateTime(input: DateInput): string {
   const d = toDate(input)
   if (!d) return "—"

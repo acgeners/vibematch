@@ -313,3 +313,44 @@ export async function fetchMangaDexById(id: string): Promise<MangaDexDetail | nu
     return null
   }
 }
+
+/**
+ * Datas de lançamento (ISO, `readableAt`) dos capítulos EN mais recentes, uma por
+ * número de capítulo (a mais antiga quando vários grupos sobem o mesmo cap),
+ * em ordem decrescente. Usado só pra estimar a CADÊNCIA (gap entre lançamentos):
+ * os intervalos são confiáveis mesmo quando as datas absolutas do MangaDex estão
+ * defasadas em relação a agregadores (ex.: comix mais adiantado).
+ */
+export async function fetchMangaDexChapterDates(id: string, limit = 16): Promise<string[]> {
+  try {
+    const url = new URL(`${MD_BASE}/manga/${id}/feed`)
+    url.searchParams.append("translatedLanguage[]", "en")
+    url.searchParams.append("order[readableAt]", "desc")
+    url.searchParams.append("limit", String(Math.min(100, Math.max(1, limit))))
+    url.searchParams.append("includeFutureUpdates", "0")
+    for (const cr of ["safe", "suggestive", "erotica", "pornographic"]) {
+      url.searchParams.append("contentRating[]", cr)
+    }
+
+    const res = await fetch(url, { cache: "no-store" })
+    if (!res.ok) return []
+    const json = await res.json()
+    const data = (json?.data ?? []) as Array<{
+      attributes?: { chapter?: string | null; readableAt?: string; publishAt?: string }
+    }>
+
+    // Uma data por número de capítulo (a mais antiga = primeira disponibilização).
+    const byChapter = new Map<string, string>()
+    for (const c of data) {
+      const at = c.attributes?.readableAt ?? c.attributes?.publishAt
+      if (typeof at !== "string" || !at) continue
+      const chap = c.attributes?.chapter
+      const key = typeof chap === "string" && chap.trim() ? chap.trim() : at
+      const prev = byChapter.get(key)
+      if (!prev || new Date(at).getTime() < new Date(prev).getTime()) byChapter.set(key, at)
+    }
+    return [...byChapter.values()].sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
+  } catch {
+    return []
+  }
+}

@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
   BookOpen,
+  BookMarked,
   Heart,
   Upload,
   Trophy,
@@ -43,6 +44,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: "/", icon: LayoutDashboard, label: "Dashboard" },
       { href: "/titles", icon: BookOpen, label: "Títulos" },
+      { href: "/leitura", icon: BookMarked, label: "Acompanhamento" },
       { href: "/ranking", icon: Trophy, label: "Ranking" },
       { href: "/favorites", icon: Heart, label: "Favoritos" },
       { href: "/recommendations", icon: Wand2, label: "Recomendações" },
