@@ -8,6 +8,7 @@ import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews, fetchJik
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
 import { searchMangaDex, fetchMangaDexById, fetchMangaDexForumComments } from "./mangadex"
 import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews, fetchMangaUpdatesAlternativeTitles } from "./mangaupdates"
+import { withTimeout } from "./with-timeout"
 import type {
   ConflictField,
   ConflictOption,
@@ -23,6 +24,15 @@ import type {
   SimilarWork,
   SourcedReview,
 } from "./types"
+
+// Timeouts por fonte externa (ms). `Promise.allSettled` espera a fonte mais
+// lenta; sem teto, um scraper travado somava dezenas de segundos. Valores
+// conservadores — afináveis pelos logs `[ai-eval timing]`. Reviews têm teto
+// maior porque MangaUpdates faz 2 requests (API + scrape de HTML).
+const TIMEOUT_SEARCH_MS = 8000
+const TIMEOUT_HYDRATE_MS = 8000
+const TIMEOUT_REVIEWS_MS = 12000
+const TIMEOUT_SIMILAR_MS = 8000
 
 // ============================================================================
 // Text utilities
@@ -671,7 +681,9 @@ export const SEARCH_CONNECTORS = [
 export async function searchAllSources(query: string): Promise<MergedCandidate[]> {
   if (DEBUG_SEARCH) debugLog(`query="${query}"`)
   const settled = await Promise.allSettled(
-    SEARCH_CONNECTORS.map((connector) => connector.search(query))
+    SEARCH_CONNECTORS.map((connector) =>
+      withTimeout(connector.search(query), TIMEOUT_SEARCH_MS, `search:${connector.source}`)
+    )
   )
   const results = settled.flatMap((entry, i) => {
     const connectorName = SEARCH_CONNECTORS[i].source
@@ -1119,22 +1131,22 @@ export function extractUserRating(text: string): { rating?: number; cleanText: s
 async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<SourcedReview[]> {
   const fetchers: Array<Promise<{ source: ExternalSourceId; reviews: string[] } | null>> = [
     candidate.muId
-      ? fetchMangaUpdatesReviews(candidate.muId).then((reviews) => ({ source: "mangaupdates" as const, reviews }))
+      ? withTimeout(fetchMangaUpdatesReviews(candidate.muId).then((reviews) => ({ source: "mangaupdates" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:mangaupdates")
       : Promise.resolve(null),
     candidate.anilistId
-      ? fetchAniListReviews(candidate.anilistId).then((reviews) => ({ source: "anilist" as const, reviews }))
+      ? withTimeout(fetchAniListReviews(candidate.anilistId).then((reviews) => ({ source: "anilist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:anilist")
       : Promise.resolve(null),
     candidate.malId
-      ? fetchJikanMangaReviews(candidate.malId).then((reviews) => ({ source: "myanimelist" as const, reviews }))
+      ? withTimeout(fetchJikanMangaReviews(candidate.malId).then((reviews) => ({ source: "myanimelist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:myanimelist")
       : Promise.resolve(null),
     candidate.kitsuId
-      ? fetchKitsuReactions(candidate.kitsuId).then((reviews) => ({ source: "kitsu" as const, reviews }))
+      ? withTimeout(fetchKitsuReactions(candidate.kitsuId).then((reviews) => ({ source: "kitsu" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:kitsu")
       : Promise.resolve(null),
     candidate.animePlanetSlug
-      ? fetchAnimePlanetReviews(candidate.animePlanetSlug).then((reviews) => ({ source: "animeplanet" as const, reviews }))
+      ? withTimeout(fetchAnimePlanetReviews(candidate.animePlanetSlug).then((reviews) => ({ source: "animeplanet" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:animeplanet")
       : Promise.resolve(null),
     candidate.mangadexId
-      ? fetchMangaDexForumComments(candidate.mangadexId).then((reviews) => ({ source: "mangadex" as const, reviews }))
+      ? withTimeout(fetchMangaDexForumComments(candidate.mangadexId).then((reviews) => ({ source: "mangadex" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:mangadex")
       : Promise.resolve(null),
   ]
 
@@ -1205,13 +1217,13 @@ function normalizeSimilarTitle(title: string): string {
 async function collectSimilarFromCandidate(candidate: MergedCandidate, limit = 6): Promise<SimilarWork[]> {
   const fetchers: Array<Promise<unknown>> = [
     candidate.anilistId
-      ? fetchAniListRecommendations(candidate.anilistId).then((recs) => ({ source: "anilist" as const, recs }))
+      ? withTimeout(fetchAniListRecommendations(candidate.anilistId).then((recs) => ({ source: "anilist" as const, recs })), TIMEOUT_SIMILAR_MS, "similar:anilist")
       : Promise.resolve(null),
     candidate.malId
-      ? fetchJikanMangaRecommendations(candidate.malId).then((recs) => ({ source: "myanimelist" as const, recs }))
+      ? withTimeout(fetchJikanMangaRecommendations(candidate.malId).then((recs) => ({ source: "myanimelist" as const, recs })), TIMEOUT_SIMILAR_MS, "similar:myanimelist")
       : Promise.resolve(null),
     candidate.animePlanetSlug
-      ? fetchAnimePlanetRecommendations(candidate.animePlanetSlug).then((titles) => ({ source: "animeplanet" as const, titles }))
+      ? withTimeout(fetchAnimePlanetRecommendations(candidate.animePlanetSlug).then((titles) => ({ source: "animeplanet" as const, titles })), TIMEOUT_SIMILAR_MS, "similar:animeplanet")
       : Promise.resolve(null),
   ]
 
@@ -1614,23 +1626,39 @@ async function fetchExternalEvaluationContextForWorkUncached(input: {
 
   const rejected = new Set((input.rejectedSources ?? []) as string[])
 
-  for (const query of queries) {
-    const candidates = await searchAllSources(query)
-    for (const candidate of candidates) {
-      if ((candidate.matchScore ?? 0) < 0.72) break // candidates are sorted desc; no point continuing
-      const result = await fetchExternalEvaluationContextForCandidate(candidate, {
-        rejectedSources: [...rejected],
-        perSource: 8,
-        total: 30,
-      })
-      if (
-        result.sourcedReviews.length ||
-        result.externalContext.length ||
-        result.platformRatings.length ||
-        result.similarWorks.length
-      ) {
-        return result
-      }
+  // Busca as variantes de título em PARALELO (antes era um loop sequencial de
+  // até 5 buscas — ~5× a latência da busca mais lenta). Depois mescla/dedupa os
+  // candidatos por título normalizado e ordena por matchScore desc; só então
+  // hidrata os candidatos sob demanda (parte cara), parando no primeiro que
+  // produzir contexto. A hidratação segue lazy pra não disparar reviews/similar
+  // de todos os candidatos de uma vez.
+  const candidateLists = await Promise.all(queries.map((query) => searchAllSources(query)))
+  const seen = new Set<string>()
+  const merged: MergedCandidate[] = []
+  for (const list of candidateLists) {
+    for (const candidate of list) {
+      if ((candidate.matchScore ?? 0) < 0.72) break // cada lista vem ordenada desc
+      const key = normalizeText(candidate.title)
+      if (key && seen.has(key)) continue
+      if (key) seen.add(key)
+      merged.push(candidate)
+    }
+  }
+  merged.sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0))
+
+  for (const candidate of merged) {
+    const result = await fetchExternalEvaluationContextForCandidate(candidate, {
+      rejectedSources: [...rejected],
+      perSource: 8,
+      total: 30,
+    })
+    if (
+      result.sourcedReviews.length ||
+      result.externalContext.length ||
+      result.platformRatings.length ||
+      result.similarWorks.length
+    ) {
+      return result
     }
   }
 
@@ -1644,14 +1672,14 @@ async function fetchExternalEvaluationContextForWorkUncached(input: {
 async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated: ExternalSearchResult[]; apDetail: AnimePlanetDetail | null; muStatusText: string | undefined }> {
   const base = candidate.sourceResults ?? []
   const settled = await Promise.allSettled([
-    candidate.anilistId ? fetchAniListById(candidate.anilistId) : null,
-    candidate.muId ? fetchMangaUpdatesById(candidate.muId) : null,
-    candidate.kitsuId ? fetchKitsuMangaById(candidate.kitsuId) : null,
-    candidate.malId ? fetchJikanMangaById(candidate.malId) : null,
-    candidate.mangadexId ? fetchMangaDexById(candidate.mangadexId) : null,
-    candidate.comickHid ? fetchComicKByHid(candidate.comickHid) : null,
-    candidate.comixHid ? fetchComixById(candidate.comixHid) : null,
-    candidate.animePlanetSlug ? fetchAnimePlanetByTitle(candidate.title, candidate.animePlanetSlug) : null,
+    candidate.anilistId ? withTimeout(fetchAniListById(candidate.anilistId), TIMEOUT_HYDRATE_MS, "hydrate:anilist") : null,
+    candidate.muId ? withTimeout(fetchMangaUpdatesById(candidate.muId), TIMEOUT_HYDRATE_MS, "hydrate:mangaupdates") : null,
+    candidate.kitsuId ? withTimeout(fetchKitsuMangaById(candidate.kitsuId), TIMEOUT_HYDRATE_MS, "hydrate:kitsu") : null,
+    candidate.malId ? withTimeout(fetchJikanMangaById(candidate.malId), TIMEOUT_HYDRATE_MS, "hydrate:myanimelist") : null,
+    candidate.mangadexId ? withTimeout(fetchMangaDexById(candidate.mangadexId), TIMEOUT_HYDRATE_MS, "hydrate:mangadex") : null,
+    candidate.comickHid ? withTimeout(fetchComicKByHid(candidate.comickHid), TIMEOUT_HYDRATE_MS, "hydrate:comick") : null,
+    candidate.comixHid ? withTimeout(fetchComixById(candidate.comixHid), TIMEOUT_HYDRATE_MS, "hydrate:comix") : null,
+    candidate.animePlanetSlug ? withTimeout(fetchAnimePlanetByTitle(candidate.title, candidate.animePlanetSlug), TIMEOUT_HYDRATE_MS, "hydrate:animeplanet") : null,
   ])
 
   const HYDRATE_SOURCES = ["anilist", "mangaupdates", "kitsu", "myanimelist", "mangadex", "comick", "comix", "animeplanet"] as const

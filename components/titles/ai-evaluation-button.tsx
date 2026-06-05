@@ -6,6 +6,8 @@ import { Loader2, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation } from "@/server/actions/ai"
 import { AiEvaluationReviewForm } from "@/components/ai-evaluation/ai-evaluation-review-form"
+import { AiEvaluationCompare } from "@/components/ai-evaluation/ai-evaluation-compare"
+import type { CompareEval } from "@/components/ai-evaluation/ai-evaluation-compare"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
@@ -16,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
+import { SHOW_HAIKU_AB } from "@/lib/ai-evaluation/ab-config"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import type { AiEvaluation } from "@/types/domain"
 
@@ -26,6 +29,12 @@ interface AiEvaluationButtonProps {
   coverUrl?: string | null
   /** Variante visual. "cta" (default) = botão grande dentro da aba; "compact" = botão pequeno. */
   variant?: "cta" | "compact"
+  /**
+   * Última avaliação completada da obra (tipicamente Sonnet). Quando presente,
+   * habilita o botão "Comparar com Haiku 4.5": roda o Haiku e mostra lado a lado
+   * contra esta, sem refazer o modelo atual.
+   */
+  latestEvaluation?: CompareEval | null
 }
 
 export function AiEvaluationButton({
@@ -34,6 +43,7 @@ export function AiEvaluationButton({
   hasCriteriaScores,
   coverUrl,
   variant = "cta",
+  latestEvaluation,
 }: AiEvaluationButtonProps) {
   const router = useRouter()
   const [evaluating, setEvaluating] = useState(false)
@@ -41,8 +51,10 @@ export function AiEvaluationButton({
   const [evaluation, setEvaluation] = useState<AiEvaluation | null>(null)
   const [currentScores, setCurrentScores] = useState<Record<string, number>>({})
   const [noReviewConfirm, setNoReviewConfirm] = useState<NoReviewsReason | null | "none">(null)
+  // Comparação Sonnet (existente) vs. Haiku (recém-rodado).
+  const [compareData, setCompareData] = useState<{ a: CompareEval; b: AiEvaluation } | null>(null)
 
-  const runEvaluation = async (opts?: { model?: "sonnet" | "opus"; proceedWithoutReviews?: boolean }) => {
+  const runEvaluation = async (opts?: { model?: "sonnet" | "opus" | "haiku"; proceedWithoutReviews?: boolean }) => {
     setEvaluating(true)
     const result = await triggerAiEvaluation(workId, opts)
     setEvaluating(false)
@@ -72,6 +84,21 @@ export function AiEvaluationButton({
 
   const handleAiEvaluation = () => void runEvaluation()
 
+  // Roda o Haiku e abre a comparação contra a avaliação existente (sem refazer
+  // o modelo atual). `proceedWithoutReviews` porque a obra já foi avaliada.
+  const runHaikuCompare = async () => {
+    if (!latestEvaluation) return
+    setEvaluating(true)
+    const result = await triggerAiEvaluation(workId, { model: "haiku", proceedWithoutReviews: true })
+    setEvaluating(false)
+    if (("error" in result && result.error) || !("data" in result) || !result.data?.evaluation) {
+      toast.error(`Erro na avaliação Haiku: ${("error" in result && result.error) || "resposta vazia"}`)
+      return
+    }
+    setCurrentScores(result.data.currentScores ?? {})
+    setCompareData({ a: latestEvaluation, b: result.data.evaluation })
+  }
+
   const label = evaluating
     ? "Avaliando..."
     : hasCriteriaScores
@@ -93,16 +120,43 @@ export function AiEvaluationButton({
                 : "Busca reviews externas e cria a avaliação inicial. Você revisa as notas antes de aplicar."}
             </p>
           </div>
-          <Button onClick={handleAiEvaluation} disabled={evaluating} className="shrink-0">
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button onClick={handleAiEvaluation} disabled={evaluating}>
+              <Sparkles className="h-4 w-4" />
+              {label}
+            </Button>
+            {SHOW_HAIKU_AB && latestEvaluation && (
+              <Button
+                variant="outline"
+                onClick={() => void runHaikuCompare()}
+                disabled={evaluating}
+                title="Roda o Haiku 4.5 e compara lado a lado com a avaliação atual, sem refazer o modelo atual."
+              >
+                <Sparkles className="h-4 w-4" />
+                Comparar com Haiku 4.5
+              </Button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleAiEvaluation} disabled={evaluating}>
             <Sparkles className="h-4 w-4" />
             {label}
           </Button>
+          {SHOW_HAIKU_AB && latestEvaluation && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void runHaikuCompare()}
+              disabled={evaluating}
+              title="Roda o Haiku 4.5 e compara lado a lado com a avaliação atual."
+            >
+              <Sparkles className="h-4 w-4" />
+              Comparar com Haiku 4.5
+            </Button>
+          )}
         </div>
-      ) : (
-        <Button variant="outline" size="sm" onClick={handleAiEvaluation} disabled={evaluating}>
-          <Sparkles className="h-4 w-4" />
-          {label}
-        </Button>
       )}
 
       <Dialog open={evaluating} onOpenChange={() => undefined}>
@@ -142,6 +196,34 @@ export function AiEvaluationButton({
                 router.refresh()
               }}
               onCancel={() => setReviewOpen(false)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Comparação Sonnet (atual) vs. Haiku (recém-rodado). */}
+      <Dialog open={compareData != null} onOpenChange={(open) => !open && setCompareData(null)}>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Comparar modelos</DialogTitle>
+            <DialogDescription>
+              {`"${workTitle}" — escolha qual avaliação usar.`}
+            </DialogDescription>
+          </DialogHeader>
+          {compareData && (
+            <AiEvaluationCompare
+              a={compareData.a}
+              b={compareData.b}
+              onPick={(which) => {
+                // "b" (Haiku) → carrega no form pra aceitar/editar.
+                // "a" (atual) → mantém o que já existe; só fecha.
+                if (which === "b") {
+                  setEvaluation(compareData.b)
+                  setReviewOpen(true)
+                }
+                setCompareData(null)
+              }}
+              onClose={() => setCompareData(null)}
             />
           )}
         </DialogContent>

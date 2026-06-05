@@ -19,16 +19,81 @@ import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-util
 
 const OPUS_MODEL_ID = "claude-opus-4-7"
 const SONNET_MODEL_ID = "claude-sonnet-4-6"
+const HAIKU_MODEL_ID = "claude-haiku-4-5-20251001"
 
-function resolveModelOverride(model: "sonnet" | "opus" | undefined): string | undefined {
+type ReevalModel = "sonnet" | "opus" | "haiku"
+
+function resolveModelOverride(model: ReevalModel | undefined): string | undefined {
   if (model === "opus") return OPUS_MODEL_ID
   if (model === "sonnet") return SONNET_MODEL_ID
+  if (model === "haiku") return HAIKU_MODEL_ID
   return undefined
+}
+
+/**
+ * Resolve o contexto externo (reviews/sinopses/similares/ratings) de uma obra,
+ * escolhendo entre o caminho por IDs confirmados (candidate) e o fallback por
+ * busca de título (work). Fontes rejeitadas pelo user via "Revalidar fontes"
+ * são filtradas. Compartilhado entre `triggerAiEvaluation` e
+ * `prewarmEvaluationContext` para garantir que ambos batam na MESMA chave do
+ * `reviewContextCache` (mesma leitura de `work_external_ids` → mesma key).
+ */
+async function resolveEvaluationContext(
+  supabase: ReturnType<typeof createAdminClient>,
+  identity: {
+    workId: string
+    title: string
+    originalTitle?: string | null
+    alternativeTitles?: string[] | null
+  },
+) {
+  const { data: extIds } = await supabase
+    .from("work_external_ids")
+    .select("source, external_id, is_rejected")
+    .eq("work_id", identity.workId)
+  const rejectedSources = (extIds ?? [])
+    .filter((row) => row.is_rejected === true)
+    .map((row) => row.source as string)
+  const acceptedExternalIds = Object.fromEntries(
+    (extIds ?? [])
+      .filter((row) => row.is_rejected !== true && row.external_id)
+      .map((row) => [row.source, String(row.external_id)]),
+  ) as Partial<Record<ExternalSourceId, string>>
+  const hasAnyExternalIds = (extIds ?? []).length > 0
+  const hasAcceptedExternalIds = Object.keys(acceptedExternalIds).length > 0
+
+  const context = hasAcceptedExternalIds
+    ? await fetchExternalEvaluationContextForCandidate(
+        buildCandidateFromExternalIds(
+          {
+            title: identity.title,
+            originalTitle: identity.originalTitle,
+            alternativeTitles: identity.alternativeTitles,
+          },
+          acceptedExternalIds,
+        ),
+        { rejectedSources, ...AI_EVAL_REVIEW_CAPS },
+      )
+    : await fetchExternalEvaluationContextForWork({
+        title: identity.title,
+        originalTitle: identity.originalTitle,
+        alternativeTitles: identity.alternativeTitles,
+        rejectedSources,
+      })
+
+  return {
+    context,
+    acceptedExternalIds,
+    rejectedSources,
+    hasAnyExternalIds,
+    hasAcceptedExternalIds,
+    extIdsCount: (extIds ?? []).length,
+  }
 }
 
 interface TriggerAiEvaluationOpts {
   /** Override do modelo Claude. Default usa o MODEL configurado no service. */
-  model?: "sonnet" | "opus"
+  model?: ReevalModel
   /**
    * Quando true, segue com a avaliação mesmo sem reviews externas. Sem isso, o
    * gate pré-análise retorna `needsReviewConfirmation` antes de chamar o LLM
@@ -82,38 +147,24 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
   let evaluationId: string | null = null
 
   try {
-    // Fontes que o user explicitamente rejeitou via "Revalidar fontes" não
-    // entram na busca por reviews (evita reviews de matches errados).
-    const { data: extIds } = await supabase
-      .from("work_external_ids")
-      .select("source, external_id, is_rejected")
-      .eq("work_id", workId)
-    const rejectedSources = (extIds ?? [])
-      .filter((row) => row.is_rejected === true)
-      .map((row) => row.source as string)
-    const acceptedExternalIds = Object.fromEntries(
-      (extIds ?? [])
-        .filter((row) => row.is_rejected !== true && row.external_id)
-        .map((row) => [row.source, String(row.external_id)])
-    ) as Partial<Record<ExternalSourceId, string>>
-
-    const hasAnyExternalIds = (extIds ?? []).length > 0
-    const hasAcceptedExternalIds = Object.keys(acceptedExternalIds).length > 0
-    const { sourcedReviews, allReviews, externalContext, platformRatings, similarWorks } = hasAcceptedExternalIds
-      ? await fetchExternalEvaluationContextForCandidate(
-          buildCandidateFromExternalIds({
-            title: work.title,
-            originalTitle: work.original_title,
-            alternativeTitles: work.alternative_titles,
-          }, acceptedExternalIds),
-          { rejectedSources, ...AI_EVAL_REVIEW_CAPS }
-        )
-      : await fetchExternalEvaluationContextForWork({
-          title: work.title,
-          originalTitle: work.original_title,
-          alternativeTitles: work.alternative_titles,
-          rejectedSources,
-        })
+    // Busca de contexto externo (reviews/sinopses/similares/ratings). O helper
+    // escolhe o caminho (candidate vs. work) e filtra fontes rejeitadas. Timing
+    // separado pra diagnosticar o gargalo (busca externa vs. chamada do LLM).
+    const externalStart = Date.now()
+    const {
+      context: { sourcedReviews, allReviews, externalContext, platformRatings, similarWorks },
+      acceptedExternalIds,
+      rejectedSources,
+      hasAnyExternalIds,
+      hasAcceptedExternalIds,
+      extIdsCount,
+    } = await resolveEvaluationContext(supabase, {
+      workId,
+      title: work.title,
+      originalTitle: work.original_title,
+      alternativeTitles: work.alternative_titles,
+    })
+    const externalMs = Date.now() - externalStart
 
     // Diagnóstico do motivo de "sem reviews externas". Renderizado na UI de
     // revisão para indicar a ação certa (atribuir fontes, revisar rejeições, etc.).
@@ -122,7 +173,7 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
         ? null
         : hasAcceptedExternalIds
           ? "sources_returned_empty"
-          : hasAnyExternalIds && rejectedSources.length === (extIds ?? []).length
+          : hasAnyExternalIds && rejectedSources.length === extIdsCount
             ? "all_rejected"
             : hasAnyExternalIds
               ? "search_miss"
@@ -176,6 +227,7 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     if (evalError) return { error: evalError.message }
     evaluationId = evaluation.id
 
+    const claudeStart = Date.now()
     const response = await requestAiEvaluation({
       workId,
       title: work.title,
@@ -190,6 +242,10 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
       coverUrl,
       model: resolveModelOverride(opts.model),
     })
+    const claudeMs = Date.now() - claudeStart
+    console.log(
+      `[ai-eval timing] work="${work.title}" path=${hasAcceptedExternalIds ? "candidate" : "work"} externalMs=${externalMs} claudeMs=${claudeMs} totalMs=${externalMs + claudeMs} fromCache=${response.fromCache ?? "no"}`
+    )
 
     // Injeta noReviewsReason no evaluationContext do raw_response. O service
     // monta o evaluationContext mas não tem visibilidade do estado de
@@ -252,6 +308,39 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
         .eq("id", evaluationId)
     }
     return { error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}
+
+/**
+ * Pré-aquece o cache de contexto externo (`reviewContextCache`, TTL ~5min) de
+ * uma obra, sem chamar o LLM nem gravar nada. Disparado pela UI quando a obra
+ * entra na fila do Avaliar (ou no hover do botão) pra que `triggerAiEvaluation`
+ * encontre o contexto já pronto e pule a busca externa (o gargalo de cauda).
+ * Best-effort: usa a MESMA `resolveEvaluationContext` do trigger pra bater na
+ * mesma chave de cache; erros são engolidos (é só otimização).
+ */
+export async function prewarmEvaluationContext(workId: string): Promise<{ ok: boolean }> {
+  try {
+    const supabase = createAdminClient()
+    const { data: work, error } = await supabase
+      .from("works")
+      .select("id, title, original_title, alternative_titles")
+      .eq("id", workId)
+      .single()
+    if (error || !work) return { ok: false }
+
+    const start = Date.now()
+    await resolveEvaluationContext(supabase, {
+      workId,
+      title: work.title,
+      originalTitle: work.original_title,
+      alternativeTitles: work.alternative_titles,
+    })
+    console.log(`[ai-eval prewarm] work="${work.title}" ms=${Date.now() - start}`)
+    return { ok: true }
+  } catch (err) {
+    console.warn("[ai-eval prewarm] falhou (ignorado):", err instanceof Error ? err.message : err)
+    return { ok: false }
   }
 }
 

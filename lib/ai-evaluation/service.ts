@@ -105,7 +105,16 @@ export interface AiEvaluationResponse {
 }
 
 export const MODEL = "claude-sonnet-4-6"
-export const PROMPT_VERSION = "v18"
+
+// ── Reversível (1 linha) ────────────────────────────────────────────────────
+// Output enxuto do Sonnet: justificativas curtas (≤2 frases) + remoção do campo
+// `review_usage.impact` (que a auditoria nem usa). Corta ~30% dos tokens de
+// SAÍDA (≈ -15~20s de latência) mantendo o MESMO modelo e as mesmas notas.
+// Se o output piorar (notas ou justificativas), volte para `false`: isso reverte
+// o prompt E a versão de volta pra v18, reaproveitando os caches antigos.
+export const CONCISE_OUTPUT: boolean = true
+export const PROMPT_VERSION = CONCISE_OUTPUT ? "v19" : "v18"
+// ────────────────────────────────────────────────────────────────────────────
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
 export function parsePromptVersion(s: string | null | undefined): number | null {
@@ -388,13 +397,21 @@ const EVALUATION_TOOL = {
               description:
                 "Lista de IDs (ex.: ['R1','R3']) das reviews que sustentaram a nota deste critério. Vazia se nenhuma review ajudou.",
             },
-            impact: {
-              type: "string",
-              description:
-                "Como as reviews citadas alteraram ou confirmaram a nota. Vazio se usedReviewIds for vazio.",
-            },
+            // `impact` é texto livre que a auditoria não consome — omitido no
+            // modo enxuto pra economizar tokens de saída.
+            ...(CONCISE_OUTPUT
+              ? {}
+              : {
+                  impact: {
+                    type: "string",
+                    description:
+                      "Como as reviews citadas alteraram ou confirmaram a nota. Vazio se usedReviewIds for vazio.",
+                  },
+                }),
           },
-          required: ["criterion", "usedReviewIds", "impact"],
+          required: CONCISE_OUTPUT
+            ? ["criterion", "usedReviewIds"]
+            : ["criterion", "usedReviewIds", "impact"],
         },
       },
       reviewsRejectedReason: {
@@ -421,7 +438,8 @@ const evaluationToolPayloadSchema = z.object({
     z.object({
       criterion: z.string(),
       usedReviewIds: z.array(z.string()),
-      impact: z.string(),
+      // Opcional: omitido quando CONCISE_OUTPUT está ligado.
+      impact: z.string().optional(),
     })
   ),
   reviewsRejectedReason: z.string().optional(),
@@ -742,6 +760,13 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
   lines.push(
     `\nAvalie a obra "${req.title}" com base nas rubricas do sistema. Use todos os gêneros e todas as tags fornecidas. Use reviews de usuários externas compatíveis como evidência auxiliar na avaliação e cite-as nas justificativas quando fizer sentido. Use apenas evidências presentes nos dados fornecidos; não invente eventos de plot. Retorne todos os 9 critérios pela tool "submit_evaluation". No "summary", refira-se à obra apenas como "${req.title}".`
   )
+
+  if (CONCISE_OUTPUT) {
+    lines.push(
+      `\nFORMATO DAS JUSTIFICATIVAS (conciso): no MÁXIMO 2 frases curtas por critério — vá direto à evidência decisiva, sem reexplicar a rubrica nem o que o critério mede. OBRIGATÓRIO manter a citação da faixa (ex.: "Faixa 7-8") e, quando usar uma review, o ID dela (ex.: "review R1"). O "summary" também deve ficar em no máximo 2 frases.`
+    )
+  }
+
   return lines.join("\n")
 }
 

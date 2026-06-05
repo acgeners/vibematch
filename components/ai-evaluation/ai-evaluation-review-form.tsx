@@ -18,6 +18,7 @@ import {
   isNoReviewsReason,
 } from "@/lib/ai-evaluation/no-reviews"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
+import { SHOW_HAIKU_AB } from "@/lib/ai-evaluation/ab-config"
 import type { AiEvaluation } from "@/types/domain"
 
 // Limiar fixo de fricção no "Aceitar todos" e no botão "Reavaliar com Opus".
@@ -26,7 +27,7 @@ import type { AiEvaluation } from "@/types/domain"
 // alinhado com a faixa amarela/vermelha dos badges (≥75% = verde, sem fricção).
 const CONFIRM_THRESHOLD = 0.7
 
-type ReevalModel = "sonnet" | "opus"
+type ReevalModel = "sonnet" | "opus" | "haiku"
 
 interface AiEvaluationReviewFormProps {
   evaluation: AiEvaluation
@@ -296,6 +297,11 @@ export function AiEvaluationReviewForm({
   const showOpusButton =
     !!onReevaluate && isLowConfidence && evaluation.model_name !== "claude-opus-4-7"
 
+  // A/B de modelo: oculto por padrão (Haiku se mostrou pior na rubrica).
+  // Reexibir via SHOW_HAIKU_AB em lib/ai-evaluation/ab-config.ts.
+  const showHaikuButton =
+    SHOW_HAIKU_AB && !!onReevaluate && evaluation.model_name !== "claude-haiku-4-5-20251001"
+
   return (
     <div className="space-y-4">
       <ConfirmDialog
@@ -367,20 +373,36 @@ export function AiEvaluationReviewForm({
                 )}
               </p>
             )}
-            {showOpusButton && (
-              <div className="mt-2">
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={!!reevaluatingModel || submitting}
-                  onClick={() => void handleReevaluate("opus")}
-                  title="Modelo alternativo. Nota.Final continua usando calibração do Sonnet."
-                >
-                  {reevaluatingModel === "opus" ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : null}
-                  Reavaliar com Opus 4.7
-                </Button>
+            {(showOpusButton || showHaikuButton) && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {showOpusButton && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={!!reevaluatingModel || submitting}
+                    onClick={() => void handleReevaluate("opus")}
+                    title="Modelo alternativo. Nota.Final continua usando calibração do Sonnet."
+                  >
+                    {reevaluatingModel === "opus" ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : null}
+                    Reavaliar com Opus 4.7
+                  </Button>
+                )}
+                {showHaikuButton && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={!!reevaluatingModel || submitting}
+                    onClick={() => void handleReevaluate("haiku")}
+                    title="A/B: modelo mais rápido e barato. Nota.Final continua usando calibração do Sonnet."
+                  >
+                    {reevaluatingModel === "haiku" ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : null}
+                    Reavaliar com Haiku 4.5
+                  </Button>
+                )}
               </div>
             )}
           </div>

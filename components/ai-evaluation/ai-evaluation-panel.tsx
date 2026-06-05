@@ -1,12 +1,13 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowDown, ArrowUp, CalendarDays, CheckSquare, Cpu, ExternalLink, Gauge, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
 import { toast } from "sonner"
-import { triggerAiEvaluation, skipAiEvaluation } from "@/server/actions/ai"
+import { triggerAiEvaluation, skipAiEvaluation, prewarmEvaluationContext } from "@/server/actions/ai"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
+import { AiEvaluationCompare } from "./ai-evaluation-compare"
 import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -79,11 +80,39 @@ type EvalOutcome =
   | { kind: "needs-confirm"; work: PendingWork; noReviewsReason: NoReviewsReason | null }
   | { kind: "none" }
 
+/**
+ * Progresso ESTIMADO de uma avaliação single (a chamada do LLM é ~91% do tempo
+ * e bloqueante — não há sinal real de progresso do servidor). A barra usa um
+ * ease-out assintótico: avança sempre, mas nunca crava 100% antes do resultado
+ * chegar (o diálogo desmonta quando chega). O rótulo de fase reflete o pipeline
+ * real: busca externa rápida, depois geração das notas. É estimativa honesta,
+ * não dado do modelo.
+ */
+function EvaluatingProgress({ estimateMs = 55000 }: { estimateMs?: number }) {
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    const start = Date.now()
+    const id = setInterval(() => setElapsed(Date.now() - start), 500)
+    return () => clearInterval(id)
+  }, [])
+  const percent = Math.min(95, 100 * (1 - Math.exp(-elapsed / (estimateMs * 0.6))))
+  const phase =
+    elapsed < 6000 ? "Buscando reviews externas…" : "Gerando as 9 notas com a IA…"
+  return (
+    <div className="space-y-2">
+      <Progress value={percent} />
+      <p className="text-center text-xs text-muted-foreground">{phase}</p>
+    </div>
+  )
+}
+
 export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   const router = useRouter()
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null)
   const [skippingId, setSkippingId] = useState<string | null>(null)
   const [reviewData, setReviewData] = useState<ReviewData | null>(null)
+  // Comparação lado a lado de dois modelos (ex.: Sonnet atual vs. Haiku reavaliado).
+  const [compareData, setCompareData] = useState<{ a: ReviewData; b: ReviewData } | null>(null)
   const [queue, setQueue] = useState<PendingWork[]>([])
   const [queueResults, setQueueResults] = useState<ReviewData[]>([])
   const [queueReviewIndex, setQueueReviewIndex] = useState(0)
@@ -105,6 +134,17 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   // cliente — usuário pode revisar depois pela página /ai-evaluation.
   const evaluationCancelledRef = useRef(false)
   const reviewScrollRef = useRef<HTMLDivElement | null>(null)
+  // Obras já pré-aquecidas nesta sessão de UI — evita disparar prewarm repetido.
+  const prewarmedRef = useRef(new Set<string>())
+
+  // Fire-and-forget: aquece o cache de contexto externo da obra (TTL ~5min no
+  // server) pra que triggerAiEvaluation pule a busca externa. Best-effort —
+  // erros são ignorados. Deduplica por id pra não martelar os scrapers.
+  const prewarm = (work: PendingWork | undefined) => {
+    if (!work || prewarmedRef.current.has(work.id)) return
+    prewarmedRef.current.add(work.id)
+    void prewarmEvaluationContext(work.id).catch(() => {})
+  }
 
   // Selection mode
   const [selectionMode, setSelectionMode] = useState(false)
@@ -211,7 +251,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   // Queue logic
   const runEvaluation = async (
     work: PendingWork,
-    opts?: { model?: "sonnet" | "opus"; proceedWithoutReviews?: boolean }
+    opts?: { model?: "sonnet" | "opus" | "haiku"; proceedWithoutReviews?: boolean }
   ): Promise<EvalOutcome> => {
     evaluationCancelledRef.current = false
     setEvaluatingId(work.id)
@@ -276,16 +316,26 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
     setQueueResults([])
     setQueueReviewIndex(0)
     setQueueProcessedCount(0)
+    prewarmedRef.current = new Set()
 
     const slots: (EvalOutcome | null)[] = new Array(works.length).fill(null)
     let nextIndex = 0
     let processed = 0
+    const workerCount = Math.min(QUEUE_CONCURRENCY, works.length)
+
+    // Pré-aquece a janela inicial à frente (os próximos workerCount itens),
+    // pra os primeiros slots que abrirem já acharem o contexto pronto.
+    for (let i = workerCount; i < works.length && i < workerCount * 2; i += 1) {
+      prewarm(works[i])
+    }
 
     const worker = async () => {
       while (!queueCancelledRef.current) {
         const index = nextIndex
         nextIndex += 1
         if (index >= works.length) return
+        // Aquece o próximo item que este worker vai pegar enquanto avalia o atual.
+        prewarm(works[index + workerCount])
         const outcome = await runQueuedEvaluation(works[index], opts)
         processed += 1
         setQueueProcessedCount(processed)
@@ -293,7 +343,6 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
       }
     }
 
-    const workerCount = Math.min(QUEUE_CONCURRENCY, works.length)
     await Promise.all(Array.from({ length: workerCount }, () => worker()))
 
     const reviews: ReviewData[] = []
@@ -484,10 +533,11 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
             <DialogTitle>Avaliando com IA</DialogTitle>
             <DialogDescription>
               {evaluatingWork
-                ? `Preparando reviews externas e notas para "${evaluatingWork.title}".`
-                : "Preparando reviews externas e notas."}
+                ? `Avaliando "${evaluatingWork.title}".`
+                : "Avaliando obra."}
             </DialogDescription>
           </DialogHeader>
+          <EvaluatingProgress />
           <Button variant="outline" onClick={handleCancelEvaluation}>
             <X className="h-4 w-4 mr-1.5" />
             Cancelar
@@ -693,6 +743,8 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                     <Button
                       size="sm"
                       onClick={() => handleEvaluate(work)}
+                      onMouseEnter={() => prewarm(work)}
+                      onFocus={() => prewarm(work)}
                       disabled={!!evaluatingId || !!skippingId || isInQueue}
                     >
                       <Sparkles className="h-3.5 w-3.5" />
@@ -721,7 +773,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
       </div>
 
       {/* Review Dialog */}
-      <Dialog open={reviewData != null} onOpenChange={(open) => !open && handleCancel()}>
+      <Dialog open={reviewData != null && compareData == null} onOpenChange={(open) => !open && handleCancel()}>
         <DialogContent ref={reviewScrollRef} className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Revisão da avaliação IA</DialogTitle>
@@ -754,6 +806,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
               coverUrl={reviewData.coverUrl}
               currentScores={reviewData.currentScores}
               onReevaluate={async (model) => {
+                const before = reviewData
                 const pseudoWork: PendingWork = {
                   id: reviewData.workId,
                   title: reviewData.workTitle,
@@ -766,21 +819,49 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                 // Reavaliar a partir do modal: a obra já está aberta, então
                 // segue mesmo sem reviews (sem novo aviso).
                 const outcome = await runEvaluation(pseudoWork, { model, proceedWithoutReviews: true })
-                if (outcome.kind === "review") {
-                  const next = outcome.data
-                  setReviewData(next)
-                  // Substitui no buffer da fila (se aplicável) pra manter coerência da navegação.
-                  if (queueResults.length > 0) {
-                    setQueueResults((prev) => {
-                      const copy = prev.slice()
-                      copy[queueReviewIndex] = next
-                      return copy
-                    })
-                  }
+                if (outcome.kind !== "review") return
+                // Em vez de substituir, abre a comparação lado a lado (atual vs.
+                // reavaliação). O usuário escolhe qual carregar no form editável.
+                if (before) {
+                  setCompareData({ a: before, b: outcome.data })
+                } else {
+                  setReviewData(outcome.data)
                 }
               }}
               onSaved={handleSaved}
               onCancel={handleCancel}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Comparação lado a lado de modelos (ex.: Sonnet vs. Haiku). */}
+      <Dialog open={compareData != null} onOpenChange={(open) => !open && setCompareData(null)}>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Comparar modelos</DialogTitle>
+            <DialogDescription>
+              {compareData ? `"${compareData.a.workTitle}" — escolha qual avaliação usar.` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          {compareData && (
+            <AiEvaluationCompare
+              a={compareData.a.evaluation}
+              b={compareData.b.evaluation}
+              onPick={(which) => {
+                const chosen = which === "a" ? compareData.a : compareData.b
+                setReviewData(chosen)
+                // Mantém coerência da navegação da fila com a escolha.
+                if (queueResults.length > 0) {
+                  setQueueResults((prev) => {
+                    const copy = prev.slice()
+                    copy[queueReviewIndex] = chosen
+                    return copy
+                  })
+                }
+                setCompareData(null)
+              }}
+              onClose={() => setCompareData(null)}
             />
           )}
         </DialogContent>
