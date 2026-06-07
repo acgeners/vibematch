@@ -658,7 +658,7 @@ export async function getSynopsisQueueWorks(opts: {
   limit?: number
 }): Promise<SynopsisQueueWork[]> {
   const states: Array<"stale" | "unpredicted" | "predicted"> =
-    opts.states ?? ["stale", "unpredicted"]
+    opts.states ?? ["unpredicted"]
   const wantStale = states.includes("stale")
   const wantUnpredicted = states.includes("unpredicted")
   const wantPredicted = states.includes("predicted")
@@ -796,7 +796,7 @@ export async function getSynopsisQueueWorks(opts: {
  * app/ai-evaluation/page.tsx:
  *   - Atributos:        ai_eval_status ∈ {pending, review_pending}
  *   - IA Rk:            "stale" (tem alignment_score e alignment_stale)
- *   - Interesse Sinopse: "stale" + "unpredicted" (sinopse canônica sem previsão fresca)
+ *   - Interesse Sinopse: "unpredicted" (sinopse canônica SEM nenhuma previsão)
  */
 export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
   const supabase = createAdminClient()
@@ -822,7 +822,7 @@ export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
       .select("id")
       .eq("is_archived", false)
       .not("canonical_synopsis", "is", null),
-    supabase.from("synopsis_quality_predictions").select("work_id, prompt_version, stale"),
+    supabase.from("synopsis_quality_predictions").select("work_id"),
   ])
 
   if (attr.error) throw new Error(`Falha contando fila de atributos: ${attr.error.message}`)
@@ -847,15 +847,15 @@ export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
     for (const w of data ?? []) ids.add((w as { id: string }).id)
   }
 
-  // Obra sai da fila de sinopse só se tem previsão FRESCA (versão atual e não-stale).
-  const freshSynopsis = new Set<string>()
+  // Badge = só "não previsto": obra com sinopse canônica e SEM nenhuma previsão
+  // (qualquer versão). Desatualizadas (têm previsão velha) NÃO entram no badge.
+  const predictedSynopsis = new Set<string>()
   for (const p of preds.data ?? []) {
-    const row = p as { work_id: string; prompt_version: string | null; stale: boolean | null }
-    if (row.prompt_version === SYNOPSIS_PROMPT_VERSION && !row.stale) freshSynopsis.add(row.work_id)
+    predictedSynopsis.add((p as { work_id: string }).work_id)
   }
   for (const w of synWorks.data ?? []) {
     const id = (w as { id: string }).id
-    if (!freshSynopsis.has(id)) ids.add(id)
+    if (!predictedSynopsis.has(id)) ids.add(id)
   }
 
   return ids.size
