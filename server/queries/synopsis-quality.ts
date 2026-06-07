@@ -147,7 +147,10 @@ export async function upsertSynopsisPrediction(
 
 /**
  * Marca como `stale` as previsões cujo `taste_profile_hash` difere do hash
- * atual — chamado quando um novo perfil de gosto vira o corrente. Best-effort
+ * atual — chamado quando um novo perfil de gosto vira o corrente. O `currentHash`
+ * é a ASSINATURA DE CONTEÚDO do perfil (`computeProfileSignature`), não o
+ * `input_hash` da biblioteca: assim regenerar o perfil sem mudar o gosto
+ * destilado (mesmas tags/temas/pesos) NÃO invalida as previsões. Best-effort
  * (não lança): falhar aqui não deve quebrar a geração do perfil.
  */
 export async function markSynopsisPredictionsStale(currentHash: string): Promise<void> {
