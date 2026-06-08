@@ -1,6 +1,7 @@
 import { Activity, AlertTriangle } from "lucide-react"
 import Link from "next/link"
 import { Header } from "@/components/layout/header"
+import { BalanceCard } from "@/components/settings/ai-usage/balance-card"
 import { CostByOperationChart } from "@/components/settings/ai-usage/cost-by-operation-chart"
 import { DailyCostChart } from "@/components/settings/ai-usage/daily-cost-chart"
 import { OperationFilter } from "@/components/settings/ai-usage/operation-filter"
@@ -9,6 +10,7 @@ import {
   getAiUsageByOperation,
   getAiUsageDailySeries,
   getAiUsageTotals,
+  getAnthropicBalanceStatus,
   getRecentAiCalls,
 } from "@/server/queries/ai-usage"
 import type { UsageAggregate } from "@/server/queries/ai-usage"
@@ -78,12 +80,13 @@ export default async function AiUsagePage({
 
   // byOperation é sempre completo: alimenta a tabela/gráfico de breakdown e o menu
   // do filtro. As demais métricas são escopadas pela operação selecionada (se houver).
-  const [totals, byOperation, byModel, recent, dailySeries] = await Promise.all([
+  const [totals, byOperation, byModel, recent, dailySeries, balance] = await Promise.all([
     getAiUsageTotals(op),
     getAiUsageByOperation(30),
     getAiUsageByModel(30, op),
     getRecentAiCalls(50, op),
     getAiUsageDailySeries(30, op),
+    getAnthropicBalanceStatus(),
   ])
 
   const operationNames = byOperation.map((row) => row.operation)
@@ -99,6 +102,8 @@ export default async function AiUsagePage({
         icon={<Activity />}
         actions={<OperationFilter operations={operationNames} active={op} />}
       />
+
+      <BalanceCard status={balance} />
 
       {hasUnknownPricing && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">

@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils"
 import { getSidebarBadgeCounts } from "@/server/actions/badges"
 import { AccountChip } from "@/components/layout/account-chip"
+import { BalanceChip } from "@/components/layout/balance-chip"
 
 type BadgeKey = "ai-eval" | "settings"
 
@@ -196,8 +197,11 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="border-t border-sidebar-border/60 p-3">
-        <AccountChip />
+      <div className="flex items-center gap-2 border-t border-sidebar-border/60 p-3">
+        <div className="min-w-0 flex-1">
+          <AccountChip />
+        </div>
+        <BalanceChip />
       </div>
     </aside>
   )
