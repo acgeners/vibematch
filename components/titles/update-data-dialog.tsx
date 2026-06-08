@@ -38,6 +38,10 @@ interface UpdateDataDialogProps {
   open?: boolean
   onOpenChange?: (open: boolean) => void
   hideTrigger?: boolean
+  // Chamado após salvar com sucesso. Quando fornecido, substitui a navegação
+  // padrão (router.push/refresh) — o caller decide o que fazer (ex.: abrir a
+  // obra em outra aba na revisão de importadas).
+  onSaved?: (workId: string) => void
 }
 
 interface FieldConflict {
@@ -98,6 +102,7 @@ export function UpdateDataDialog({
   open: controlledOpen,
   onOpenChange,
   hideTrigger = false,
+  onSaved,
 }: UpdateDataDialogProps) {
   const router = useRouter()
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
@@ -433,6 +438,12 @@ export function UpdateDataDialog({
     toast.success("Dados atualizados com sucesso.")
     setOpen(false)
     setPhase("refreshing")
+    // Quando o caller trata o pós-save (ex.: abrir a obra em outra aba), não
+    // navegamos a aba atual.
+    if (onSaved) {
+      onSaved(workId)
+      return
+    }
     // Se o título mudou, navegar pelo UUID evita depender do cache slug->id.
     // A rota /titles/{uuid} redireciona para o slug canônico lido do banco.
     const newTitle = typeof updates.title === "string" ? updates.title : null
