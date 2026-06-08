@@ -77,37 +77,34 @@ async function resolveExternalData(work: {
   | { ok: true; data: ExternalWorkData }
   | { ok: false; reason: string; suggestion?: { title: string; score: number } }
 > {
-  // 1. Fast-path: IDs externos confirmados.
-  const refreshed = await refreshWorkExternalData(work.id)
-  if (refreshed.ok) return { ok: true, data: refreshed.data }
-
-  // 2. Busca por título.
+  // 1. Descoberta AMPLA por título — pega TODAS as fontes. Crucial pras obras
+  //    importadas que têm só 1 ID (ex.: animeplanet): o refresh-por-ID limitaria
+  //    o enriquecimento a essa única fonte (e o id do animeplanet do export é
+  //    numérico, nem hidrata). A busca por título descobre AniList/MAL/MU/etc.
   const candidates = await searchAllSources(work.title)
-  if (candidates.length === 0) return { ok: false, reason: "Nenhum candidato encontrado" }
-
   const ranked = candidates
     .map((c) => ({ candidate: c, score: bestTitleMatch(work.title, c) }))
     .sort((a, b) => b.score - a.score)
   const best = ranked[0]
 
-  if (best.score < AUTO_ACCEPT_TITLE_SCORE) {
-    return {
-      ok: false,
-      reason: "Confiança baixa no título",
-      suggestion: { title: best.candidate.title, score: Math.round(best.score * 100) / 100 },
-    }
+  if (best && best.score >= AUTO_ACCEPT_TITLE_SCORE) {
+    const result = await fetchExternalData(best.candidate)
+    const accepted = result.data.externalIds ? Object.keys(result.data.externalIds).length : 0
+    if (accepted > 0 || result.data.coverUrl) return { ok: true, data: result.data }
   }
 
-  const result = await fetchExternalData(best.candidate)
-  const accepted = result.data.externalIds ? Object.keys(result.data.externalIds).length : 0
-  if (accepted === 0 && !result.data.coverUrl) {
-    return {
-      ok: false,
-      reason: "Fontes não confirmaram a obra",
-      suggestion: { title: best.candidate.title, score: Math.round(best.score * 100) / 100 },
-    }
+  // 2. Fallback: re-hidrata pelos IDs já vinculados (obra que a busca por título
+  //    não casou com confiança, mas tem ID externo confirmado).
+  const refreshed = await refreshWorkExternalData(work.id)
+  if (refreshed.ok) return { ok: true, data: refreshed.data }
+
+  // 3. Sem match confiável → revisar manualmente.
+  if (!best) return { ok: false, reason: "Nenhum candidato encontrado" }
+  return {
+    ok: false,
+    reason: "Confiança baixa no título",
+    suggestion: { title: best.candidate.title, score: Math.round(best.score * 100) / 100 },
   }
-  return { ok: true, data: result.data }
 }
 
 // Dados que a etapa de revisão da importação precisa por obra (capa primária,

@@ -300,10 +300,15 @@ export function UpdateDataDialog({
     })
   }
 
-  const runRefresh = async () => {
+  // `shouldApply` evita aplicar o resultado de um refresh obsoleto. Sem isso, o
+  // double-invoke do StrictMode (dev) dispara dois fetches; o mais lento resolve
+  // depois e chamava handleSelect de novo, jogando o usuário de "capas" de volta
+  // pra "sinopses". Só a última invocação aplica.
+  const runRefresh = async (shouldApply: () => boolean = () => true) => {
     setPhase("refreshing")
     try {
       const result = await refreshWorkExternalData(workId)
+      if (!shouldApply()) return
       if (result.ok) {
         handleSelect(result.data)
         return
@@ -313,6 +318,7 @@ export function UpdateDataDialog({
       }
       setPhase("search")
     } catch (err) {
+      if (!shouldApply()) return
       const message = err instanceof Error ? err.message : String(err)
       console.error("[UpdateDataDialog] refresh failed:", message)
       toast.error(`Erro ao atualizar: ${message}`)
@@ -325,11 +331,15 @@ export function UpdateDataDialog({
     await runRefresh()
   }
 
-  // Quando controlado externamente, dispara o refresh ao abrir.
+  // Quando controlado externamente, dispara o refresh ao abrir. O cleanup
+  // cancela a aplicação do resultado se o efeito re-rodar (StrictMode / deps).
   useEffect(() => {
-    if (isControlled && open) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      void runRefresh()
+    if (!(isControlled && open)) return
+    let active = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void runRefresh(() => active)
+    return () => {
+      active = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isControlled, open])

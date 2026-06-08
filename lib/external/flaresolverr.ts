@@ -9,9 +9,25 @@
 
 const ENDPOINT = process.env.FLARESOLVERR_URL?.trim() || ""
 
+// Timeout de conexão curto: a porta às vezes aceita a conexão mas não responde
+// (container fora), e o fetch ficaria pendurado até o teto externo (8s). Menor
+// que o withTimeout do orquestrador pra o catch disparar e abrir o circuito.
+const FLARESOLVERR_TIMEOUT_MS = 5000
+// Circuit breaker: ao falhar, marca indisponível por um tempo pra não pagar o
+// timeout em CADA chamada (enriquecimento em lote chama comix dezenas de vezes).
+// Reabre sozinho depois do TTL (se o container voltar, volta a usar).
+const CIRCUIT_TTL_MS = 60_000
+let circuitOpenUntil = 0
+
 /** True when FlareSolverr is configured (env var present). */
 export function isFlareSolverrEnabled(): boolean {
   return ENDPOINT.length > 0
+}
+
+/** Circuito aberto = FlareSolverr falhou recentemente; chamadas devem pular pra
+ *  não pagar o timeout repetidamente (reabre sozinho após o TTL). */
+export function isFlareSolverrCircuitOpen(): boolean {
+  return Date.now() < circuitOpenUntil
 }
 
 /** Heuristic: is this response HTML a Cloudflare challenge page? */
@@ -39,6 +55,8 @@ export async function flareSolverrFetch(
   timeoutMs = 60000
 ): Promise<{ html: string; finalUrl: string } | null> {
   if (!ENDPOINT) return null
+  // Circuito aberto (container falhou recentemente) → falha na hora, sem esperar.
+  if (Date.now() < circuitOpenUntil) return null
   try {
     const res = await fetch(ENDPOINT, {
       method: "POST",
@@ -49,9 +67,11 @@ export async function flareSolverrFetch(
         maxTimeout: timeoutMs,
       }),
       cache: "no-store",
+      signal: AbortSignal.timeout(FLARESOLVERR_TIMEOUT_MS),
     })
     if (!res.ok) {
       logFlareSolverrFailure(`HTTP ${res.status} — container caído ou misconfigurado?`)
+      circuitOpenUntil = Date.now() + CIRCUIT_TTL_MS
       return null
     }
     const json = await res.json()
@@ -61,9 +81,11 @@ export async function flareSolverrFetch(
       logFlareSolverrFailure(`resposta sem solution.response (status=${json?.status ?? "?"} message="${json?.message ?? ""}")`)
       return null
     }
+    circuitOpenUntil = 0 // sucesso → fecha o circuito
     return { html, finalUrl }
   } catch (err) {
     logFlareSolverrFailure(`falha de rede (${err instanceof Error ? err.message : err}) — container provavelmente não está rodando`)
+    circuitOpenUntil = Date.now() + CIRCUIT_TTL_MS
     return null
   }
 }

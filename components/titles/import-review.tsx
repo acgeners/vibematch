@@ -15,6 +15,19 @@ type RowState = EnrichResult | "running" | undefined
 
 const CONCURRENCY = 3
 
+// Abre em nova aba via <a target="_blank"> clicado. window.open(url, "_blank",
+// "...features...") abre POPUP (3º arg) — frequentemente bloqueado/falho,
+// inclusive no navegador embutido do VSCode. Âncora abre aba de verdade.
+function openInNewTab(url: string) {
+  const a = document.createElement("a")
+  a.href = url
+  a.target = "_blank"
+  a.rel = "noopener noreferrer"
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
 async function runPool<T>(items: T[], worker: (item: T) => Promise<void>, concurrency: number) {
   let cursor = 0
   const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
@@ -27,19 +40,27 @@ export function ImportReview({
   works,
   onReload,
   onBatchComplete,
+  onReviewed,
 }: {
   works: ReviewWork[]
   onReload?: () => void | Promise<void>
   // Disparado quando o lote "Buscar dados das sem capa" termina.
   onBatchComplete?: () => void
+  // Disparado quando uma obra é revisada (some da lista) — o pai usa pra
+  // decrementar o contador da aba.
+  onReviewed?: (workId: string) => void
 }) {
   const router = useRouter()
   const reload = onReload ?? (() => router.refresh())
   const [states, setStates] = useState<Record<string, RowState>>({})
   const [running, setRunning] = useState(false)
   const [active, setActive] = useState<ReviewWork | null>(null)
+  // Obras já revisadas nesta sessão — somem da lista mesmo após reload (ainda
+  // ficam 'pending' no banco até serem avaliadas em /ai-evaluation).
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
 
-  const coverless = useMemo(() => works.filter((w) => w.coverCount === 0), [works])
+  const visibleWorks = useMemo(() => works.filter((w) => !dismissed.has(w.id)), [works, dismissed])
+  const coverless = useMemo(() => visibleWorks.filter((w) => w.coverCount === 0), [visibleWorks])
 
   const runBatch = async () => {
     // Só busca dados das que ainda não têm capa e não foram processadas nesta sessão.
@@ -68,7 +89,7 @@ export function ImportReview({
     }
   }
 
-  if (works.length === 0) {
+  if (visibleWorks.length === 0) {
     return <p className="text-sm text-muted-foreground">Nenhuma obra pendente de revisão. 🎉</p>
   }
 
@@ -76,7 +97,7 @@ export function ImportReview({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
         <span className="text-muted-foreground">
-          {works.length} pendentes · {coverless.length} sem capa
+          {visibleWorks.length} pendentes · {coverless.length} sem capa
         </span>
         <div className="flex items-center gap-2">
           {coverless.length > 0 && (
@@ -99,7 +120,7 @@ export function ImportReview({
       </div>
 
       <div className="divide-y divide-border/60 rounded-lg border border-border/60">
-        {works.map((work) => {
+        {visibleWorks.map((work) => {
           const state = states[work.id]
           const enriched = state && state !== "running" && state.status === "enriched" ? state : null
           const coverUrl = enriched?.coverUrl ?? work.coverPrimaryUrl
@@ -163,8 +184,11 @@ export function ImportReview({
           hideTrigger
           open
           onSaved={(workId) => {
-            // Abre a obra em nova aba após escolher sinopse/capa.
-            window.open(`/titles/${workId}`, "_blank", "noopener,noreferrer")
+            // Abre a obra em nova aba após escolher sinopse/capa e remove da
+            // lista de pendentes (revisada).
+            openInNewTab(`/titles/${workId}`)
+            setDismissed((prev) => new Set(prev).add(workId))
+            onReviewed?.(workId)
           }}
           onOpenChange={(v) => {
             if (!v) {

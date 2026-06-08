@@ -1,6 +1,6 @@
 import type { PublicationStatus } from "@/types/domain"
 import type { ExternalSearchResult } from "./types"
-import { fetchHtmlWithCfFallback, isCloudflareChallenge, isFlareSolverrEnabled } from "./flaresolverr"
+import { fetchHtmlWithCfFallback, isCloudflareChallenge, isFlareSolverrEnabled, isFlareSolverrCircuitOpen } from "./flaresolverr"
 
 const COMIX_BASE = "https://comix.to/api/v1"
 
@@ -25,6 +25,11 @@ function logComixFailure(url: string, reason: ComixFailure, detail?: string) {
 // faz fallback via FlareSolverr (headless Chrome) extraindo JSON do <pre>.
 async function fetchComixJson(path: string): Promise<unknown | null> {
   const url = `${COMIX_BASE}${path}`
+
+  // comix.to é sempre CF-protegido; sem FlareSolverr não há como passar. Quando
+  // o circuito está aberto (container fora), pula tudo — inclusive o fetch direto
+  // inútil — pra não somar segundos em cada chamada (a busca chama comix N×).
+  if (isFlareSolverrEnabled() && isFlareSolverrCircuitOpen()) return null
 
   let directBodyLooksLikeChallenge = false
   try {

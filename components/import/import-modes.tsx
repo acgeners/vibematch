@@ -12,14 +12,17 @@ type Mode = "external" | "review"
 export function ImportModes({ pendingReviewWorks }: { pendingReviewWorks: ReviewWork[] }) {
   const router = useRouter()
   const [mode, setMode] = useState<Mode>("external")
-  const hasReview = pendingReviewWorks.length > 0
-  // Se o modo selecionado deixou de existir (revisou tudo), cai pra "external".
-  const activeMode: Mode = mode === "review" && !hasReview ? "external" : mode
+  // Obras revisadas nesta sessão — somem da contagem/aba de pendentes.
+  const [reviewed, setReviewed] = useState<Set<string>>(new Set())
+  const pendingCount = pendingReviewWorks.filter((w) => !reviewed.has(w.id)).length
+  // Mostra a aba de revisão se há pendentes OU se o usuário está nela (pra não
+  // sumir bruscamente ao revisar a última — exibe o estado vazio 🎉).
+  const showReview = pendingCount > 0 || mode === "review"
 
   const modes: { id: Mode; label: string }[] = [
     { id: "external", label: "Listas externas" },
-    ...(hasReview
-      ? [{ id: "review" as Mode, label: `Revisar pendentes (${pendingReviewWorks.length})` }]
+    ...(showReview
+      ? [{ id: "review" as Mode, label: `Revisar pendentes (${pendingCount})` }]
       : []),
   ]
 
@@ -34,7 +37,7 @@ export function ImportModes({ pendingReviewWorks }: { pendingReviewWorks: Review
               onClick={() => setMode(m.id)}
               className={cn(
                 "rounded-md px-3 py-1 text-sm font-medium transition",
-                activeMode === m.id
+                mode === m.id
                   ? "bg-background text-foreground shadow-sm"
                   : "text-foreground/60 hover:text-foreground"
               )}
@@ -45,7 +48,7 @@ export function ImportModes({ pendingReviewWorks }: { pendingReviewWorks: Review
         </div>
       )}
 
-      {activeMode === "external" && (
+      {mode === "external" && (
         <ExternalListImport
           onReviewBatchComplete={() => {
             // Lote de "Buscar dados das sem capa" terminou → atualiza as
@@ -55,12 +58,15 @@ export function ImportModes({ pendingReviewWorks }: { pendingReviewWorks: Review
           }}
         />
       )}
-      {activeMode === "review" && (
+      {mode === "review" && (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
             Obras importadas pendentes de avaliação. Busque capa/sinopses das que estão sem capa e confira o que veio das fontes. As notas dos atributos são geradas na Avaliação IA.
           </p>
-          <ImportReview works={pendingReviewWorks} />
+          <ImportReview
+            works={pendingReviewWorks}
+            onReviewed={(id) => setReviewed((prev) => new Set(prev).add(id))}
+          />
         </div>
       )}
     </div>
