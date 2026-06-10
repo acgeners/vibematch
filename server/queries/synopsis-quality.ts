@@ -108,6 +108,39 @@ export async function getSynopsisPredictionsByWorkIds(
   return out
 }
 
+/**
+ * Carrega a previsão ATIVA de Interesse Sinopse de TODAS as obras de uma vez
+ * (a tabela é pequena — uma linha por obra/versão de prompt). Usado pelo ranking
+ * pra enriquecer as entries sem precisar de um IN gigante de work_ids. Agrupa por
+ * obra e escolhe a versão ativa (atual se houver, senão a de maior versão).
+ */
+export async function getAllActiveSynopsisPredictions(): Promise<
+  Map<string, SynopsisQualityPredictionRow>
+> {
+  const out = new Map<string, SynopsisQualityPredictionRow>()
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("synopsis_quality_predictions")
+    .select("*")
+  if (error) {
+    console.warn("[synopsis-pred] getAllActiveSynopsisPredictions falhou:", error.message)
+    return out
+  }
+  const byWork = new Map<string, Array<Record<string, unknown>>>()
+  for (const row of data ?? []) {
+    const r = row as Record<string, unknown>
+    const id = r.work_id as string
+    const list = byWork.get(id)
+    if (list) list.push(r)
+    else byWork.set(id, [r])
+  }
+  for (const [id, rows] of byWork) {
+    const active = pickActiveRaw(rows)
+    if (active) out.set(id, mapRow(active))
+  }
+  return out
+}
+
 export interface UpsertSynopsisPredictionArgs {
   workId: string
   predictedQuality: SynopsisQuality
@@ -147,7 +180,10 @@ export async function upsertSynopsisPrediction(
 
 /**
  * Marca como `stale` as previsões cujo `taste_profile_hash` difere do hash
- * atual — chamado quando um novo perfil de gosto vira o corrente. Best-effort
+ * atual — chamado quando um novo perfil de gosto vira o corrente. O `currentHash`
+ * é a ASSINATURA DE CONTEÚDO do perfil (`computeProfileSignature`), não o
+ * `input_hash` da biblioteca: assim regenerar o perfil sem mudar o gosto
+ * destilado (mesmas tags/temas/pesos) NÃO invalida as previsões. Best-effort
  * (não lança): falhar aqui não deve quebrar a geração do perfil.
  */
 export async function markSynopsisPredictionsStale(currentHash: string): Promise<void> {

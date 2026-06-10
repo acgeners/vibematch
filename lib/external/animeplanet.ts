@@ -1,6 +1,6 @@
 import type { PublicationStatus } from "@/types/domain"
 import type { ExternalSearchResult } from "./types"
-import { fetchHtmlWithCfFallback } from "./flaresolverr"
+import { fetchHtmlWithCfFallback, isFlareSolverrCircuitOpen } from "./flaresolverr"
 
 const AP_BASE = "https://www.anime-planet.com"
 
@@ -168,6 +168,9 @@ async function findSlug(title: string): Promise<string | null> {
 }
 
 export async function searchAnimePlanet(search: string): Promise<ExternalSearchResult[]> {
+  // anime-planet.com é Cloudflare-gated; sem FlareSolverr (circuito aberto) os
+  // fetches só voltam o desafio CF (~5s à toa, 0 resultado). Pula rápido.
+  if (isFlareSolverrCircuitOpen()) return []
   try {
     const result = await fetchHtmlWithCfFallback(
       `${AP_BASE}/manga/all?name=${encodeURIComponent(search)}`,
@@ -402,6 +405,7 @@ export function parseAnimePlanetDetailHtml(html: string): AnimePlanetDetail | nu
  * CF protege — caímos no FlareSolverr quando o fetch direto for bloqueado.
  */
 export async function fetchAnimePlanetReviews(slug: string, limit = Infinity): Promise<string[]> {
+  if (isFlareSolverrCircuitOpen()) return []
   try {
     const url = `${AP_BASE}/manga/${slug}/reviews`
     const result = await fetchHtmlWithCfFallback(url, HEADERS)
@@ -458,6 +462,7 @@ export async function fetchAnimePlanetReviews(slug: string, limit = Infinity): P
  * with the source slug filtered out. Defensive — returns [] on any parse error.
  */
 export async function fetchAnimePlanetRecommendations(slug: string): Promise<string[]> {
+  if (isFlareSolverrCircuitOpen()) return []
   try {
     const result = await fetchHtmlWithCfFallback(
       `${AP_BASE}/manga/${slug}/recommendations`,
@@ -490,6 +495,7 @@ export async function fetchAnimePlanetRecommendations(slug: string): Promise<str
 }
 
 export async function fetchAnimePlanetByTitle(title: string, knownSlug?: string): Promise<AnimePlanetDetail | null> {
+  if (isFlareSolverrCircuitOpen()) return null
   try {
     const slug = knownSlug ?? await findSlug(title)
     if (!slug) return null

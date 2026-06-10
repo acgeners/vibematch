@@ -476,8 +476,8 @@ type SynopsisState = (typeof SYNOPSIS_STATES)[number]
 
 function parseSynopsisStates(raw: string | string[] | undefined): SynopsisState[] {
   const value = Array.isArray(raw) ? raw[0] : raw
-  // Default da fila de ação: desatualizado + não previsto (sem "predicted").
-  if (value == null) return ["stale", "unpredicted"]
+  // Default da fila de ação: só "não previsto" (sem "stale" nem "predicted").
+  if (value == null) return ["unpredicted"]
   if (value === "none") return []
   const parts = value.split(",").map((p) => p.trim())
   return SYNOPSIS_STATES.filter((s) => parts.includes(s))

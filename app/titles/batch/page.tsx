@@ -43,9 +43,14 @@ export default async function BatchReviewPage({ searchParams }: BatchReviewPageP
         title={`${works.length} obra${works.length === 1 ? "" : "s"} criada${works.length === 1 ? "" : "s"}`}
         description="Revise as notas e dados de cada obra. Clique no título pra abrir o detalhe."
         actions={
-          <Button asChild variant="outline" size="sm">
-            <Link href="/titles">Ver todas as obras</Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild size="sm">
+              <Link href="/titles/new">Criar mais</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/titles">Ver todas as obras</Link>
+            </Button>
+          </div>
         }
       />
 

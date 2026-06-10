@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -13,15 +13,21 @@ import {
   Sparkles,
   Settings,
   SlidersHorizontal,
-  UserCircle,
   Wand2,
   Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getSidebarBadgeCounts } from "@/server/actions/badges"
+import { SIDEBAR_BADGES_REFRESH_EVENT } from "@/lib/sidebar-badges"
 import { AccountChip } from "@/components/layout/account-chip"
+import { BalanceChip } from "@/components/layout/balance-chip"
 
 type BadgeKey = "ai-eval" | "settings"
+
+// Janela mínima entre re-fetches dos badges disparados por navegação. Mutações
+// que esvaziam filas forçam o re-fetch na hora (evento global), então a navegação
+// não precisa recontar a cada troca de rota (cada chamada ~450ms no DB remoto).
+const BADGES_TTL_MS = 30_000
 
 interface NavItem {
   href: string
@@ -54,7 +60,6 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "Gerenciar",
     items: [
-      { href: "/conta", icon: UserCircle, label: "Minha conta" },
       { href: "/preferencias", icon: SlidersHorizontal, label: "Preferências" },
       { href: "/settings", icon: Settings, label: "Configurações", badgeKey: "settings" },
       { href: "/ai-evaluation", icon: Sparkles, label: "Avaliação IA", badgeKey: "ai-eval" },
@@ -88,25 +93,40 @@ export function Sidebar() {
   // Badges de pendências (contagens):
   //   - "ai-eval":  obras nos filtros padrão de /ai-evaluation
   //   - "settings": pendências do Pipeline de dados de /settings
-  // Re-busca a cada navegação pra refletir itens processados (ex.: ao sair da
-  // página depois de avaliar / rodar manutenção). Falha silenciosa em 0.
+  // Falha silenciosa em 0.
   const [badgeCounts, setBadgeCounts] = useState<Record<BadgeKey, number>>({
     "ai-eval": 0,
     settings: 0,
   })
-  useEffect(() => {
-    let cancelled = false
+  const lastFetchRef = useRef(0)
+  const refreshBadges = useCallback((force = false) => {
+    const now = Date.now()
+    if (!force && now - lastFetchRef.current < BADGES_TTL_MS) return
+    lastFetchRef.current = now
     getSidebarBadgeCounts()
       .then(({ aiEval, settings }) => {
-        if (!cancelled) setBadgeCounts({ "ai-eval": aiEval, settings })
+        setBadgeCounts({ "ai-eval": aiEval, settings })
       })
       .catch(() => {
-        /* mantém contagens atuais em caso de falha */
+        // Libera o TTL pra permitir retry antes da janela em caso de falha.
+        lastFetchRef.current = 0
       })
-    return () => {
-      cancelled = true
-    }
-  }, [pathname])
+  }, [])
+
+  // Re-busca ao trocar de rota, mas no máximo 1x por BADGES_TTL_MS — antes era um
+  // round-trip de ~450ms em CADA navegação. Reflete itens processados ao navegar
+  // sem recontar a cada clique.
+  useEffect(() => {
+    refreshBadges()
+  }, [pathname, refreshBadges])
+
+  // Re-busca (forçado) quando uma mutação na MESMA rota pede (evento global) —
+  // ex.: zerar a fila de /ai-evaluation sem navegar. Ignora o TTL pra refletir na hora.
+  useEffect(() => {
+    const handler = () => refreshBadges(true)
+    window.addEventListener(SIDEBAR_BADGES_REFRESH_EVENT, handler)
+    return () => window.removeEventListener(SIDEBAR_BADGES_REFRESH_EVENT, handler)
+  }, [refreshBadges])
 
   const isItemActive = (item: NavItem, siblings: NavItem[]): boolean => {
     const basePath = item.href.split("?")[0]
@@ -127,15 +147,39 @@ export function Sidebar() {
   return (
     <aside className="relative z-20 hidden min-h-screen w-64 shrink-0 flex-col border-r border-sidebar-border/80 bg-sidebar/95 shadow-[10px_0_30px_hsl(220_30%_5%/0.14)] backdrop-blur md:flex">
       <div className="flex h-16 items-center gap-3 border-b border-sidebar-border/70 px-4">
-        <div className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-primary to-[hsl(200_98%_50%)] text-white shadow-md shadow-primary/30 ring-1 ring-white/15">
-          <BookOpen className="size-4" />
+        <div className="grid size-10 place-items-center rounded-xl bg-gradient-to-br from-primary to-[hsl(200_98%_50%)] text-white shadow-md shadow-primary/30 ring-1 ring-white/15">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.6}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="size-9"
+            aria-hidden="true"
+          >
+            {/* pétalas do lótus */}
+            <path d="M12 17 Q8.5 11 12 5 Q15.5 11 12 17 Z" />
+            <path d="M12 17 Q6.5 13.5 6 7 Q10.5 10.5 12 17 Z" />
+            <path d="M12 17 Q17.5 13.5 18 7 Q13.5 10.5 12 17 Z" />
+            <path d="M12 17 Q6 16 4 11 Q9 13 12 17 Z" />
+            <path d="M12 17 Q18 16 20 11 Q15 13 12 17 Z" />
+            {/* faísca de insight (IA) */}
+            <path
+              d="M12 1 C12.2 2.3 12.6 2.7 13.9 2.9 C12.6 3.1 12.2 3.5 12 4.8 C11.8 3.5 11.4 3.1 10.1 2.9 C11.4 2.7 11.8 2.3 12 1 Z"
+              fill="currentColor"
+              stroke="none"
+            />
+          </svg>
         </div>
         <div className="min-w-0">
           <span className="block text-base font-bold tracking-tight text-sidebar-foreground">
-            VibeMatch
+            Sator<span className="text-primary">IA</span>
           </span>
-          <span className="block truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            Manhwa Library
+          <span className="mt-0.5 block text-[10px] font-semibold uppercase leading-tight tracking-[0.18em] text-muted-foreground">
+            Recomendações
+            <br />
+            que te entendem
           </span>
         </div>
       </div>
@@ -196,8 +240,11 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="border-t border-sidebar-border/60 p-3">
-        <AccountChip />
+      <div className="flex items-center gap-2 border-t border-sidebar-border/60 p-3">
+        <div className="min-w-0 flex-1">
+          <AccountChip />
+        </div>
+        <BalanceChip />
       </div>
     </aside>
   )

@@ -158,10 +158,11 @@ function normalizePlatformName(name: string) {
     .replace(/^-|-$/g, "")
 }
 
-function normalizeTextList(values: string[] = []) {
+function normalizeTextList(values: Array<string | null | undefined> = []) {
   const seen = new Set<string>()
   const out: string[] = []
   for (const value of values) {
+    if (typeof value !== "string") continue
     const item = value.trim()
     const key = item.toLowerCase()
     if (!item || seen.has(key)) continue

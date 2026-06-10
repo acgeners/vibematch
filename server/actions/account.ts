@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getCurrentUserId, getCurrentUserProfile } from "@/server/queries/current-user"
+import { getAnthropicBalanceStatus } from "@/server/queries/ai-usage"
+import type { BalanceStatus } from "@/server/queries/ai-usage"
 import { accountProfileSchema } from "@/lib/validations/account.schema"
 import type { AccountProfileValues } from "@/lib/validations/account.schema"
 import type { UserPlan } from "@/lib/plans/capabilities"
@@ -166,5 +168,46 @@ export async function getAccountSummary(): Promise<AccountSummary> {
     return { displayName: p.displayName, avatarUrl: p.avatarUrl, plan: p.plan }
   } catch {
     return { displayName: null, avatarUrl: null, plan: "free" }
+  }
+}
+
+/**
+ * Grava o saldo Anthropic informado manualmente (snapshot: valor + agora).
+ * O restante é derivado depois subtraindo o custo das chamadas desde este
+ * instante (ver getAnthropicBalanceStatus). Reinformar zera o desvio.
+ */
+export async function setAnthropicBalance(amountUsd: number): Promise<{ error?: string }> {
+  if (!Number.isFinite(amountUsd) || amountUsd < 0) {
+    return { error: "Informe um valor válido (≥ 0)." }
+  }
+
+  const supabase = createAdminClient()
+  try {
+    const id = await getSingletonId(supabase)
+    const { error } = await supabase
+      .from("user_settings")
+      .update({
+        anthropic_balance_usd: amountUsd,
+        anthropic_balance_set_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+    if (error) return { error: error.message }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro ao salvar saldo." }
+  }
+
+  revalidatePath("/ai-usage")
+  return {}
+}
+
+/**
+ * Status do saldo pro chip da sidebar. Wrapper client-callable da query
+ * server-only getAnthropicBalanceStatus. Falha silenciosa: nunca derruba o layout.
+ */
+export async function getBalanceSummary(): Promise<BalanceStatus> {
+  try {
+    return await getAnthropicBalanceStatus()
+  } catch {
+    return { balanceUsd: null, setAt: null, spentSinceUsd: 0, remainingUsd: null, callsSince: 0 }
   }
 }

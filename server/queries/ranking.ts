@@ -7,8 +7,9 @@ import {
   getPublicationStatusNameById,
   getPersonalStatusNameById,
 } from "@/lib/constants/status-lookups"
-import { pickPrimarySynopsis, pickPrimaryCover } from "@/lib/work-derived"
+import { pickPrimaryCover } from "@/lib/work-derived"
 import { computeDecisionScore } from "@/lib/calculations/decision"
+import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quality"
 
 export interface RankingDifferentiator {
   slug: string
@@ -82,6 +83,12 @@ export interface RankingEntry {
   coverUrl: string | null
   synopsis: string | null
   synopsisQuality: string | null
+  /** Previsão IA de Interesse Sinopse (♥..♥♥♥♥) — synopsis_quality_predictions. NULL se nunca prevista. */
+  predictedSynopsisQuality: string | null
+  /** True quando a previsão de Interesse Sinopse ficou desatualizada (perfil/sinopse mudou). */
+  predictedSynopsisStale: boolean
+  /** Confiança 0–1 da previsão de Interesse Sinopse (pra tooltip). */
+  predictedSynopsisConfidence: number | null
   observations: string | null
   year: number | null
   updatedAt: string | null
@@ -107,6 +114,7 @@ export type RankingSortBy =
   | "title"
   | "year"
   | "synopsis_q"
+  | "synopsis_pred"
   | "updated_at"
   | "publication_status"
   | "personal_status"
@@ -139,6 +147,8 @@ export interface RankingFilters {
   tagSlugsExclude?: string[]
   tagSlugs?: string[]
   synopsisQualities?: string[]
+  /** Previsão IA de Interesse Sinopse (♥..♥♥♥♥) — filtra pelas obras cuja previsão casa. */
+  predictedSynopsisQualities?: string[]
   minTotalChapters?: number
   maxTotalChapters?: number
   minCalcScore?: number
@@ -197,6 +207,26 @@ export async function getRanking(
   filters: RankingFilters = {}
 ): Promise<RankingEntry[]> {
   const supabase = createAdminClient()
+  // Previsões de Interesse Sinopse (tabela pequena) — carregadas em paralelo com
+  // o resto. Consumidas ao montar as entries; a previsão é independente dos
+  // filtros de works, então não precisa esperar a query principal.
+  const synopsisPredictionsPromise = getAllActiveSynopsisPredictions()
+  // Sinopse primária (só pro hover preview). Buscar como query achatada separada
+  // — apenas (work_id, text) das linhas is_primary, apoiada no índice parcial
+  // work_synopses_one_primary — evita embutir TODAS as sinopses (várias por obra,
+  // texto completo) no JSON aninhado da query principal (~0.9MB → 0.4MB, dedup).
+  const primarySynopsisPromise = supabase
+    .from("work_synopses")
+    .select("work_id, text")
+    .eq("is_primary", true)
+    .then(({ data }) => {
+      const map = new Map<string, string>()
+      for (const r of (data ?? []) as Array<{ work_id: string; text: string | null }>) {
+        const t = r.text?.trim()
+        if (t) map.set(r.work_id, t)
+      }
+      return map
+    })
   const { personalStatusRows, publicationStatusRows } = await getRankingStatusRows()
   const personalStatusOptions = (personalStatusRows ?? []) as Array<{
     id: number
@@ -325,11 +355,12 @@ export async function getRanking(
       synopsis_quality, observations, year, updated_at, last_read_at,
       calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, platform_avg, total_votes, personal_fit, personal_fit_percentile, final_score_confidence, knn_score, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
       category_scores(criterion_slug, score),
-      work_tags(tags(id, name, slug, tag_group_id)),
-      work_genres(genres(name)),
-      work_covers(url, is_primary, position),
-      work_synopses(text, is_primary, position)
+      work_covers(url, is_primary, position)
     `)
+  // Nota: work_tags/work_genres NÃO são embutidos aqui. O filtro por gênero/tag
+  // já é resolvido em SQL (allowedIds, acima) e nenhum consumidor do RankingEntry
+  // lê entry.tags/entry.genres no client — embuti-los só inflava o payload (~3.9MB
+  // pra 660 obras). work_synopses idem: vem da query achatada primarySynopsisPromise.
 
   if (!filters.includeArchived) {
     worksQuery = worksQuery.eq("is_archived", false)
@@ -389,6 +420,9 @@ export async function getRanking(
 
   if (error) throw new Error(error.message)
 
+  const synopsisPredictions = await synopsisPredictionsPromise
+  const primarySynopses = await primarySynopsisPromise
+
   const personalStatusSymbolsById = new Map(
     personalStatusOptions.map((status) => [status.id, status.symbol])
   )
@@ -412,13 +446,7 @@ export async function getRanking(
     for (const cs of w.category_scores ?? []) {
       scores[cs.criterion_slug] = cs.score
     }
-    const displayTags = ((w.work_tags ?? [])
-      .map((wt: { tags: unknown }) => wt.tags)
-      .filter(Boolean) as Array<{ id: string; name: string; slug: string; tag_group_id?: string | null }>)
-      .map((tag) => ({ ...tag, tag_group_id: tag.tag_group_id ?? null }))
-    const genreNames = ((w.work_genres ?? []) as Array<{ genres?: { name?: string } | null }>)
-      .map((wg) => wg.genres?.name)
-      .filter((name): name is string => Boolean(name))
+    const synopsisPred = synopsisPredictions.get(w.id) ?? null
 
     return {
       rank: 0,
@@ -466,15 +494,20 @@ export async function getRanking(
       totalChapters: w.total_chapters,
       chaptersRead: w.chapters_read ?? null,
       coverUrl: pickPrimaryCover(w.work_covers),
-      synopsis: pickPrimarySynopsis(w.work_synopses),
+      synopsis: primarySynopses.get(w.id) ?? null,
       synopsisQuality: w.synopsis_quality ?? null,
+      predictedSynopsisQuality: synopsisPred?.predictedQuality ?? null,
+      predictedSynopsisStale: synopsisPred?.stale ?? false,
+      predictedSynopsisConfidence: synopsisPred?.confidence ?? null,
       observations: w.observations ?? null,
       year: w.year ?? null,
       updatedAt: w.updated_at ?? null,
       lastReadAt: w.last_read_at ?? null,
-      genres: genreNames,
+      // Não embutidos no payload (ver SELECT): o filtro por gênero/tag é feito em
+      // SQL e nenhum consumidor lê estes campos no client.
+      genres: [],
       scores,
-      tags: displayTags,
+      tags: [],
     }
   })
 
@@ -503,38 +536,18 @@ export async function getRanking(
   if (filters.aiEvalStatus?.length) {
     entries = entries.filter((e) => filters.aiEvalStatus!.includes(e.aiEvalStatus))
   }
-  if (filters.genreAll?.length) {
-    const wanted = filters.genreAll
-    entries = entries.filter((e) => wanted.every((g) => e.genres.includes(g)))
-  }
-  const genreAny = filters.genreAny ?? filters.genres
-  if (genreAny?.length) {
-    const wanted = genreAny
-    entries = entries.filter((e) => wanted.some((g) => e.genres.includes(g)))
-  }
-  if (filters.genreExclude?.length) {
-    const blocked = filters.genreExclude
-    entries = entries.filter((e) => blocked.every((g) => !e.genres.includes(g)))
-  }
-  if (filters.tagSlugsAll?.length) {
-    const wanted = new Set(filters.tagSlugsAll)
-    entries = entries.filter((e) => {
-      const entryTags = new Set(e.tags.map((t) => t.slug))
-      return [...wanted].every((slug) => entryTags.has(slug))
-    })
-  }
-  const tagSlugsAny = filters.tagSlugsAny ?? filters.tagSlugs
-  if (tagSlugsAny?.length) {
-    const wanted = new Set(tagSlugsAny)
-    entries = entries.filter((e) => e.tags.some((t) => wanted.has(t.slug)))
-  }
-  if (filters.tagSlugsExclude?.length) {
-    const blocked = new Set(filters.tagSlugsExclude)
-    entries = entries.filter((e) => e.tags.every((t) => !blocked.has(t.slug)))
-  }
+  // Filtros de gênero/tag (genreAll/Any/Exclude, tagSlugsAll/Any/Exclude) já são
+  // aplicados em SQL via allowedIds/excludeIds (pre-resolução por pivot, acima).
+  // O re-filtro em memória era redundante e exigia carregar tags/genres no payload.
   if (filters.synopsisQualities?.length) {
     const wanted = new Set(filters.synopsisQualities)
     entries = entries.filter((e) => e.synopsisQuality != null && wanted.has(e.synopsisQuality))
+  }
+  if (filters.predictedSynopsisQualities?.length) {
+    const wanted = new Set(filters.predictedSynopsisQualities)
+    entries = entries.filter(
+      (e) => e.predictedSynopsisQuality != null && wanted.has(e.predictedSynopsisQuality)
+    )
   }
   if (filters.minTotalChapters != null) {
     const min = filters.minTotalChapters
@@ -677,6 +690,8 @@ export async function getRanking(
     if (field === "chapters_read") return m * ((a.chaptersRead ?? -Infinity) - (b.chaptersRead ?? -Infinity))
     if (field === "year") return m * ((a.year ?? -Infinity) - (b.year ?? -Infinity))
     if (field === "synopsis_q") return m * ((a.synopsisQuality?.length ?? 0) - (b.synopsisQuality?.length ?? 0))
+    if (field === "synopsis_pred")
+      return m * ((a.predictedSynopsisQuality?.length ?? 0) - (b.predictedSynopsisQuality?.length ?? 0))
     if (field === "updated_at") {
       const av = a.updatedAt ? Date.parse(a.updatedAt) : -Infinity
       const bv = b.updatedAt ? Date.parse(b.updatedAt) : -Infinity

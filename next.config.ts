@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Indicador de dev do Next (botão flutuante "N") vai pro canto inferior
+  // direito — no canto esquerdo ele sobrepunha o avatar do chip de conta na
+  // sidebar. Só afeta `next dev`.
+  devIndicators: {
+    position: "bottom-right",
+  },
   experimental: {
     optimizePackageImports: [
       "recharts",

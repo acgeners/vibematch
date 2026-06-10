@@ -1,5 +1,6 @@
+import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
-import { getWorkWithAiEvaluations, getWorkBySlug } from "@/server/queries/works"
+import { getWorkWithAiEvaluations, getWorkBySlug, getWorkTitleByIdOrSlug } from "@/server/queries/works"
 import { titleToSlug } from "@/lib/utils"
 import { Header } from "@/components/layout/header"
 import { WorkForm, type WorkFormAiEvaluation } from "@/components/titles/work-form"
@@ -98,6 +99,12 @@ function workToFormValues(work: WorkWithRelations): Partial<WorkFormValues> {
     extra_platform_ratings: extraPlatformRatings,
     ...criterionValues,
   }
+}
+
+export async function generateMetadata({ params }: EditPageProps): Promise<Metadata> {
+  const { id } = await params
+  const title = await getWorkTitleByIdOrSlug(id)
+  return { title: title ? `Editar: ${title} · SatorIA` : "Editar · SatorIA" }
 }
 
 export default async function EditTitlePage({ params }: EditPageProps) {

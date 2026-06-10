@@ -826,6 +826,17 @@ export async function recalculateAll() {
   }
   const gptClampHitRate = gptClampHits / works.length
 
+  // Headline "Precisão da previsão". Pago: MAE CV honesto (held-out com
+  // qualidade estimada pela IA — não-circular). Free: cvMAE do modelo
+  // (sem qualidade, já honesto). Fallback pro cvMAE se o honesto não rodou.
+  // Persistido tanto no config (headline) quanto no calibration_history
+  // (trendline honesta).
+  const cvMaeExpected: number | null = expectedPredictor.isStub
+    ? null
+    : includeQuality
+      ? (honestCvMae ?? expectedPredictor.model.cvMAE)
+      : expectedPredictor.model.cvMAE
+
   // ---------- 7) Persistir novo formula_config ----------
   const { error: configUpdateErr } = await supabase
     .from("formula_config")
@@ -866,14 +877,7 @@ export async function recalculateAll() {
       mae_expected: maeExpected,
       rmse_expected: rmseExpected,
       mae_expected_baseline: maeExpectedBaseline,
-      // Headline "Precisão da previsão". Pago: MAE CV honesto (held-out com
-      // qualidade estimada pela IA — não-circular). Free: cvMAE do modelo
-      // (sem qualidade, já honesto). Fallback pro cvMAE se o honesto não rodou.
-      cv_mae_expected_stage1: expectedPredictor.isStub
-        ? null
-        : includeQuality
-          ? (honestCvMae ?? expectedPredictor.model.cvMAE)
-          : expectedPredictor.model.cvMAE,
+      cv_mae_expected_stage1: cvMaeExpected,
       // Sem treino sequencial: stage2 cvMAE não existe mais; valor de baseline
       // serve de proxy de "quanto o modelo erra sem qualidade" no painel.
       cv_mae_expected_stage2: null,
@@ -901,6 +905,7 @@ export async function recalculateAll() {
     mae_calc: newMaeCalc,
     mae_predicted: newMaePredicted,
     mae_expected: maeExpected,
+    cv_mae_expected: cvMaeExpected,
     train_size: predictor.trainSize,
     total_works: works.length,
     stacker_coefficients: stackerCoefs

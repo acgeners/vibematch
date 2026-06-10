@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState, type MouseEvent } from "react"
-import { useRouter } from "next/navigation"
 import { Heart } from "lucide-react"
 import { toast } from "sonner"
 import { toggleFavorite } from "@/server/actions/works"
@@ -16,11 +15,10 @@ export function FavoriteCell({
   workTitle: string
   isFavorite: boolean
 }) {
-  const router = useRouter()
   const [isFavorite, setIsFavorite] = useState(initialIsFavorite)
   const [pending, setPending] = useState(false)
 
-  // Re-sync optimistic state when the prop changes (e.g. after router.refresh).
+  // Re-sync optimistic state when the prop changes (após o revalidate da action).
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsFavorite(initialIsFavorite)
@@ -39,7 +37,12 @@ export function FavoriteCell({
       toast.error("Erro ao atualizar favorito")
       return
     }
-    router.refresh()
+    // Sem router.refresh() aqui: toggleFavorite já chama revalidatePath das rotas
+    // afetadas (/ranking, /titles, /favorites, /titles/:id) e o App Router aplica
+    // esse re-render à rota atual na resposta da action. O router.refresh() extra
+    // era um SEGUNDO re-render pesado por clique (re-roda getRanking/getWorks). O
+    // estado otimista acima mantém o coração instantâneo; em /favorites a linha
+    // sai pelo revalidate.
   }
 
   return (

@@ -658,7 +658,7 @@ export async function getSynopsisQueueWorks(opts: {
   limit?: number
 }): Promise<SynopsisQueueWork[]> {
   const states: Array<"stale" | "unpredicted" | "predicted"> =
-    opts.states ?? ["stale", "unpredicted"]
+    opts.states ?? ["unpredicted"]
   const wantStale = states.includes("stale")
   const wantUnpredicted = states.includes("unpredicted")
   const wantPredicted = states.includes("predicted")
@@ -796,7 +796,7 @@ export async function getSynopsisQueueWorks(opts: {
  * app/ai-evaluation/page.tsx:
  *   - Atributos:        ai_eval_status ∈ {pending, review_pending}
  *   - IA Rk:            "stale" (tem alignment_score e alignment_stale)
- *   - Interesse Sinopse: "stale" + "unpredicted" (sinopse canônica sem previsão fresca)
+ *   - Interesse Sinopse: "unpredicted" (sinopse canônica SEM nenhuma previsão)
  */
 export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
   const supabase = createAdminClient()
@@ -822,7 +822,7 @@ export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
       .select("id")
       .eq("is_archived", false)
       .not("canonical_synopsis", "is", null),
-    supabase.from("synopsis_quality_predictions").select("work_id, prompt_version, stale"),
+    supabase.from("synopsis_quality_predictions").select("work_id"),
   ])
 
   if (attr.error) throw new Error(`Falha contando fila de atributos: ${attr.error.message}`)
@@ -847,15 +847,15 @@ export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
     for (const w of data ?? []) ids.add((w as { id: string }).id)
   }
 
-  // Obra sai da fila de sinopse só se tem previsão FRESCA (versão atual e não-stale).
-  const freshSynopsis = new Set<string>()
+  // Badge = só "não previsto": obra com sinopse canônica e SEM nenhuma previsão
+  // (qualquer versão). Desatualizadas (têm previsão velha) NÃO entram no badge.
+  const predictedSynopsis = new Set<string>()
   for (const p of preds.data ?? []) {
-    const row = p as { work_id: string; prompt_version: string | null; stale: boolean | null }
-    if (row.prompt_version === SYNOPSIS_PROMPT_VERSION && !row.stale) freshSynopsis.add(row.work_id)
+    predictedSynopsis.add((p as { work_id: string }).work_id)
   }
   for (const w of synWorks.data ?? []) {
     const id = (w as { id: string }).id
-    if (!freshSynopsis.has(id)) ids.add(id)
+    if (!predictedSynopsis.has(id)) ids.add(id)
   }
 
   return ids.size
@@ -1134,4 +1134,62 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
     sourceMeta: run.source_meta,
     ranked,
   }
+}
+
+export interface AlignedWork {
+  id: string
+  title: string
+  coverUrl: string | null
+  /** personal_fit determinístico (0–1) — teto baixo (~0.55) por construção. */
+  personalFit: number
+  /** Percentil (0–100) dentro da biblioteca; comunica "Top X%" de forma mais honesta. */
+  personalFitPercentile: number | null
+}
+
+/**
+ * Top obras mais alinhadas com o TasteProfile atual.
+ *
+ * Lê o `personal_fit` DETERMINÍSTICO já persistido em `calculated_scores`
+ * (computado no último `recalculateAll` — zero LLM, zero recompute aqui). É a
+ * mesma métrica de alinhamento que o resto do app usa. Ordena por personal_fit
+ * desc em JS (PostgREST não ordena confiável por coluna embedada). Retorna
+ * vazio quando não há perfil não-stub — nesse caso o personal_fit fica null
+ * pra todas as obras.
+ */
+export async function getTopAlignedWorks(limit = 5): Promise<AlignedWork[]> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("works")
+    .select(
+      "id, title, work_covers(url, is_primary, position), calculated_scores!inner(personal_fit, personal_fit_percentile)",
+    )
+    .eq("is_archived", false)
+    .not("calculated_scores.personal_fit", "is", null)
+  if (error) throw new Error(`Falha listando obras alinhadas: ${error.message}`)
+
+  return (data ?? [])
+    .map((row) => {
+      const w = row as Record<string, unknown>
+      const calc =
+        (w.calculated_scores as {
+          personal_fit?: number | null
+          personal_fit_percentile?: number | null
+        } | null) ?? null
+      return {
+        id: w.id as string,
+        title: w.title as string,
+        coverUrl: pickPrimaryCover(
+          (w.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
+            url: c.url ?? null,
+            is_primary: c.is_primary ?? null,
+            position: c.position ?? null,
+          })),
+        ),
+        personalFit: calc?.personal_fit != null ? Number(calc.personal_fit) : 0,
+        personalFitPercentile:
+          calc?.personal_fit_percentile != null ? Number(calc.personal_fit_percentile) : null,
+      } satisfies AlignedWork
+    })
+    .sort((a, b) => b.personalFit - a.personalFit)
+    .slice(0, limit)
 }

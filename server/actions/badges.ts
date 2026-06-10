@@ -1,7 +1,6 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
-import { PROMPT_VERSION as SYNOPSIS_PROMPT_VERSION } from "@/lib/ai-evaluation/synopsis-quality-predictor"
 import { getAiEvaluationDefaultQueueCount } from "@/server/queries/recommendations"
 import { getSettingsBadgePendingTotal } from "@/server/queries/settings-pending"
 
@@ -22,9 +21,7 @@ export interface SidebarBadgeCounts {
 export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
   const supabase = createAdminClient()
   try {
-    const { data, error } = await supabase.rpc("get_sidebar_badge_counts", {
-      synopsis_prompt_version: SYNOPSIS_PROMPT_VERSION,
-    })
+    const { data, error } = await supabase.rpc("get_sidebar_badge_counts")
     if (error) throw error
     const row = Array.isArray(data) ? data[0] : data
     if (row && typeof row.ai_eval_total === "number" && typeof row.settings_total === "number") {

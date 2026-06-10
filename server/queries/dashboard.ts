@@ -5,7 +5,6 @@ import {
   getPersonalStatusIdByName,
 } from "@/lib/constants/status-lookups"
 import { pickPrimaryCover } from "@/lib/covers"
-import { getAlignmentQueueWorks, getSynopsisQueueWorks } from "@/server/queries/recommendations"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 
@@ -242,18 +241,65 @@ export async function getRecentActivity(limit = 6): Promise<RecentActivityItem[]
 
 /**
  * Contadores das filas de IA secundárias (re-rank e interesse por sinopse).
- * Reusa as mesmas queries das abas de /ai-evaluation com seus estados-padrão,
- * pra os números baterem com os badges de lá. A fila de atributos vem do
- * `pendingAi` de getDashboardStats (já calculado). Falhas degradam pra 0.
+ * Replica o predicado dos estados-padrão das abas de /ai-evaluation pra os
+ * números baterem com os badges de lá — mas com queries ACHATADAS (só as colunas
+ * do predicado, sem covers/título nem montar objetos). Antes chamava
+ * getAlignmentQueueWorks/getSynopsisQueueWorks, que carregavam o catálogo 2x (com
+ * join de covers) só pra `.length` — gargalo da home. A fila de atributos vem do
+ * `pendingAi` de getDashboardStats. Falhas degradam pra 0.
+ *
+ * Predicados (espelham getAlignmentQueueWorks({}) e getSynopsisQueueWorks({})):
+ *   - IA Rk {stale, unranked}: obra ativa com alignment_score NULL (não rankeada,
+ *     inclui sem linha em calculated_scores) OU alignment_score presente + stale.
+ *   - Interesse Sinopse {unpredicted}: obra ativa com sinopse canônica e SEM
+ *     nenhuma previsão (qualquer versão).
  */
 export async function getAiQueueCounts(): Promise<AiQueueCounts> {
-  const [iaRk, synopsis] = await Promise.all([
-    getAlignmentQueueWorks({})
-      .then((r) => r.length)
-      .catch(() => 0),
-    getSynopsisQueueWorks({})
-      .then((r) => r.length)
-      .catch(() => 0),
-  ])
-  return { iaRk, synopsis }
+  const supabase = createAdminClient()
+  try {
+    const [activeRes, calcRes, synRes, predRes] = await Promise.all([
+      supabase.from("works").select("id").eq("is_archived", false),
+      supabase.from("calculated_scores").select("work_id, alignment_score, alignment_stale"),
+      supabase
+        .from("works")
+        .select("id")
+        .eq("is_archived", false)
+        .not("canonical_synopsis", "is", null),
+      supabase.from("synopsis_quality_predictions").select("work_id"),
+    ])
+    if (activeRes.error || calcRes.error || synRes.error || predRes.error) {
+      throw activeRes.error ?? calcRes.error ?? synRes.error ?? predRes.error
+    }
+
+    const calcByWork = new Map(
+      (calcRes.data ?? []).map((r) => {
+        const row = r as {
+          work_id: string
+          alignment_score: number | null
+          alignment_stale: boolean | null
+        }
+        return [row.work_id, row] as const
+      })
+    )
+    let iaRk = 0
+    for (const w of activeRes.data ?? []) {
+      const calc = calcByWork.get((w as { id: string }).id)
+      const alignmentScore = calc?.alignment_score ?? null
+      const isUnranked = alignmentScore == null
+      const isStale = alignmentScore != null && Boolean(calc?.alignment_stale)
+      if (isUnranked || isStale) iaRk++
+    }
+
+    const predicted = new Set(
+      (predRes.data ?? []).map((p) => (p as { work_id: string }).work_id)
+    )
+    let synopsis = 0
+    for (const w of synRes.data ?? []) {
+      if (!predicted.has((w as { id: string }).id)) synopsis++
+    }
+
+    return { iaRk, synopsis }
+  } catch {
+    return { iaRk: 0, synopsis: 0 }
+  }
 }

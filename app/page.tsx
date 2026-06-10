@@ -29,6 +29,7 @@ import { RecentActivity } from "@/components/dashboard/recent-activity"
 import { ProfileSummary } from "@/components/dashboard/profile-summary"
 import { HealthStrip } from "@/components/dashboard/health-strip"
 import { TopWorkCard } from "@/components/dashboard/top-work-card"
+import { DashboardGreeting } from "@/components/dashboard/dashboard-greeting"
 import { Header } from "@/components/layout/header"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -62,8 +63,8 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-6">
       <Header
-        kicker={firstName ? `Olá, ${firstName}` : "Biblioteca"}
-        title="Dashboard"
+        kicker="Dashboard"
+        title={<DashboardGreeting firstName={firstName} />}
         description="Visão geral do seu catálogo"
         icon={
           profile.avatarUrl ? (

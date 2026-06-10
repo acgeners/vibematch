@@ -50,3 +50,9 @@ scripts/seed-from-xlsx*.js
 
 # backups locais de arquivos duplicados por sync (iCloud/Google Drive)
 *.bak
+
+# dumps de importação de teste no root (não versionar)
+/mal.xml
+/animeplanet.json
+/animeplanet.xml.gz
+/mangaupdates.json

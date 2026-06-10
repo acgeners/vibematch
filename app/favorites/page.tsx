@@ -77,11 +77,11 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
     // Critérios IA
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
-  const rawSort = str("sort") ?? "final_score:desc"
+  const rawSort = str("sort") ?? "expected_score:desc"
   const sortLevels: SortLevel[] = rawSort.split(",").map((seg) => {
     const [field, dir] = seg.trim().split(":")
     return {
-      field: (validSortFields.has(field) ? field : "final_score") as SortLevel["field"],
+      field: (validSortFields.has(field) ? field : "expected_score") as SortLevel["field"],
       dir: dir === "asc" ? "asc" : "desc",
     }
   })

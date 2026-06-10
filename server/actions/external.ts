@@ -354,6 +354,7 @@ export async function evaluateCandidateForCreate(input: {
     externalContext,
     platformRatings: contextResult.platformRatings,
     similarWorks: contextResult.similarWorks,
+    contentRatings: contextResult.contentRatings,
     coverUrl: input.coverUrl ?? null,
     model: modelOverride,
   })

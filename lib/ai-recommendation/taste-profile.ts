@@ -2,7 +2,7 @@ import "server-only"
 import { createHash } from "node:crypto"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { MODEL, PROMPT_VERSION } from "./service"
-import type { RatedWorkInput, TasteProfilePayload, TasteProfileRow } from "./types"
+import type { ProfileTag, RatedWorkInput, TasteProfilePayload, TasteProfileRow } from "./types"
 
 export const MIN_WORKS_FOR_FULL_PROFILE = 10
 export const MIN_WORKS_FOR_ANY_PROFILE = 5
@@ -34,6 +34,48 @@ export function computeInputHash(works: RatedWorkInput[]): string {
     works: canonical,
   })
   return createHash("sha256").update(payload).digest("hex")
+}
+
+/**
+ * Assinatura de CONTEÚDO do perfil — hash só dos campos que o preditor de
+ * Interesse Sinopse de fato consome pra decidir a faixa: tags/temas amados e
+ * evitados, narrative_patterns e os prefs numéricos de critério. É a chave de
+ * staleness das previsões de sinopse (NÃO o `input_hash`, que é da biblioteca).
+ *
+ * Por quê: o `input_hash` muda a CADA edição da biblioteca (1 nota manual, 1 tag),
+ * o que regenerava o perfil e marcava TODAS as previsões como desatualizadas —
+ * mesmo quando o gosto destilado não mudou em nada. Comparar a saída material do
+ * perfil faz uma regeneração "idêntica na prática" não invalidar nada.
+ *
+ * Exclui de propósito:
+ *  - `summary` e os `note` por critério: texto livre que o LLM reescreve a cada
+ *    geração; incluí-los manteria a invalidação fútil que estamos consertando.
+ *  - model/prompt do perfil: é COMO o perfil foi gerado, não O QUE ele diz.
+ * Números são arredondados a 2 casas (jitter < 0.01 é ruído) e arrays ordenados
+ * pra a assinatura ser estável à ordem de retorno do modelo.
+ */
+export function computeProfileSignature(profile: TasteProfilePayload): string {
+  const round = (n: number) => Math.round(n * 100) / 100
+  const sortTags = (ts: ProfileTag[]) =>
+    [...(ts ?? [])]
+      .map((t) => ({ n: t.name, g: t.group ?? "", s: round(t.strength) }))
+      .sort((a, b) => `${a.g}::${a.n}`.localeCompare(`${b.g}::${b.n}`))
+  const sortStrs = (ss: string[]) =>
+    [...(ss ?? [])].map((s) => s.trim()).sort((a, b) => a.localeCompare(b))
+  const prefs = Object.entries(profile.criterion_preferences ?? {})
+    .filter(([, v]) => v != null)
+    .map(([k, v]) => [k, { min: round(v!.ideal_min), max: round(v!.ideal_max), w: round(v!.weight) }] as const)
+    .sort(([a], [b]) => a.localeCompare(b))
+
+  const canonical = JSON.stringify({
+    lovedTags: sortTags(profile.loved_tags),
+    avoidedTags: sortTags(profile.avoided_tags),
+    lovedThemes: sortStrs(profile.loved_themes),
+    avoidedThemes: sortStrs(profile.avoided_themes),
+    criterionPreferences: prefs,
+    narrativePatterns: sortStrs(profile.narrative_patterns),
+  })
+  return createHash("sha256").update(canonical).digest("hex")
 }
 
 function rowToTasteProfile(row: Record<string, unknown>): TasteProfileRow {
@@ -123,11 +165,11 @@ export async function insertNewTasteProfile(
   if (error || !data) {
     throw new Error(`Erro persistindo perfil de gosto: ${error?.message ?? "desconhecido"}`)
   }
-  // Um novo perfil virou o corrente ⇒ previsões de Interesse Sinopse feitas
-  // contra perfis anteriores ficam desatualizadas. Best-effort (não bloqueia a
-  // geração do perfil).
+  // Um novo perfil virou o corrente ⇒ previsões de Interesse Sinopse só ficam
+  // desatualizadas se o CONTEÚDO material do perfil mudou (assinatura), não a cada
+  // mexida na biblioteca. Best-effort (não bloqueia a geração do perfil).
   const { markSynopsisPredictionsStale } = await import("@/server/queries/synopsis-quality")
-  await markSynopsisPredictionsStale(args.inputHash)
+  await markSynopsisPredictionsStale(computeProfileSignature(args.profile))
   return rowToTasteProfile(data as Record<string, unknown>)
 }
 

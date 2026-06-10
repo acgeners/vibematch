@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useMemo, useState, useTransition } from "react"
 import type { ReactNode } from "react"
-import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, ChevronUp, Filter, Minus, Pencil, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, ChevronUp, Filter, Loader2, Minus, Pencil, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -52,6 +52,7 @@ const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
   { value: "chapters_read", label: "Capítulos lidos" },
   { value: "year", label: "Ano" },
   { value: "synopsis_q", label: "Sinopse" },
+  { value: "synopsis_pred", label: "Prev. sinopse (IA)" },
   { value: "publication_status", label: "Publicação" },
   { value: "personal_status", label: "Status pessoal" },
   { value: "updated_at", label: "Atualizado" },
@@ -1432,7 +1433,10 @@ export function RankingFilters({
   const appliedSearchString = appliedSearchParams.toString()
   const [draftSearch, setDraftSearch] = useState(appliedSearchString)
   const searchParams = useMemo(() => new URLSearchParams(draftSearch), [draftSearch])
-  const [, startTransition] = useTransition()
+  // isApplying: a navegação por filtro (router.replace) roda numa transition que
+  // fica pendente enquanto o servidor re-renderiza o ranking (~1s). Sem expor isso,
+  // o clique em "Aplicar filtros" ficava sem feedback nenhum nesse intervalo.
+  const [isApplying, startTransition] = useTransition()
   const [collapsed, setCollapsed] = useCollapsedFilters(`ranking:${basePath}`)
   const [presets, setPresets] = useState<SavedFilterPreset[]>(savedPresets)
 
@@ -1562,6 +1566,7 @@ export function RankingFilters({
   }
 
   const selectedSynopsisQ = csvSet("synopsis_q")
+  const selectedSynopsisPred = csvSet("synopsis_pred")
 
   const DEFAULT_PUB_STATUS = "Completed"
   const DEFAULT_PER_STATUS = "To read"
@@ -1728,6 +1733,13 @@ export function RankingFilters({
       onRemove: () => toggleCsv("synopsis_q", quality),
     })
   })
+  selectedSynopsisPred.forEach((quality) => {
+    activeFilterChips.push({
+      key: `synopsis-pred-${quality}`,
+      label: `Prev. sinopse: ${quality}`,
+      onRemove: () => toggleCsv("synopsis_pred", quality),
+    })
+  })
   selectedGenreAll.forEach((genre) => {
     activeFilterChips.push({
       key: `genre-all-${genre}`,
@@ -1807,8 +1819,15 @@ export function RankingFilters({
             />
           )}
           {!collapsed && (
-            <Button size="sm" onClick={applyAllFilters} disabled={!filtersDirty}>
-              Aplicar filtros
+            <Button size="sm" onClick={applyAllFilters} disabled={isApplying || !filtersDirty}>
+              {isApplying ? (
+                <>
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                  Aplicando…
+                </>
+              ) : (
+                "Aplicar filtros"
+              )}
             </Button>
           )}
           {!collapsed && hasFilters && (
@@ -1974,6 +1993,38 @@ export function RankingFilters({
                       <button key={q} type="button" onClick={() => toggleCsv("synopsis_q", q)}>
                         <Badge
                           variant={selectedSynopsisQ.has(q) ? "default" : "outline"}
+                          className="inline-flex h-8 cursor-pointer items-center justify-center rounded-full px-3 text-xs font-semibold transition-all hover:scale-105 active:scale-95 duration-200"
+                        >
+                          {q}
+                        </Badge>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Divisor vertical */}
+                <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
+
+                {/* Previsão de Interesse na Sinopse (IA) */}
+                <div className="flex items-center gap-2">
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Label className="cursor-help text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+                          Prev. IA
+                        </Label>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs text-xs">
+                        Previsão da IA de quanto a sinopse vai te interessar (♥ a ♥♥♥♥), com base no
+                        seu perfil de gosto. Diferente do interesse que você informou.
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <div className="flex items-center gap-1.5">
+                    {SYNOPSIS_QUALITIES.map((q) => (
+                      <button key={q} type="button" onClick={() => toggleCsv("synopsis_pred", q)}>
+                        <Badge
+                          variant={selectedSynopsisPred.has(q) ? "default" : "outline"}
                           className="inline-flex h-8 cursor-pointer items-center justify-center rounded-full px-3 text-xs font-semibold transition-all hover:scale-105 active:scale-95 duration-200"
                         >
                           {q}

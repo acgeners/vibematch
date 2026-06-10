@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 
 /**
@@ -286,6 +287,63 @@ export function AlignmentScoreCell({
     </TooltipProvider>
       {canRerankStale && <RerankStaleButton workId={workId!} />}
     </span>
+  )
+}
+
+/**
+ * Cell pra a PREVISÃO de Interesse Sinopse (♥..♥♥♥♥) gerada pela IA — distinta
+ * da coluna "Sinopse" (valor manual). Badge rosa com ✨ pra deixar claro que é
+ * uma estimativa. NULL vira "—" (obra ainda não prevista). Stale = a obra/perfil
+ * mudaram desde a previsão; fica esmaecida com aviso na tooltip.
+ */
+export function SynopsisPredictionCell({
+  quality,
+  stale = false,
+  confidence = null,
+}: {
+  quality: string | null
+  stale?: boolean
+  confidence?: number | null
+}) {
+  if (!quality) {
+    return <span className="font-mono text-sm text-muted-foreground">—</span>
+  }
+  const label = SYNOPSIS_QUALITY_LABELS[quality] ?? ""
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border border-rose-400/30 bg-rose-500/10 px-2 py-0.5 text-xs font-semibold text-rose-600 cursor-help dark:text-rose-300",
+              stale && "opacity-60",
+            )}
+          >
+            <Sparkles className="h-3 w-3" />
+            <span>{quality}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[260px] space-y-1">
+          <p className="text-xs font-semibold">
+            Previsão de interesse: {quality}{label ? ` — ${label}` : ""}
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            Estimativa da IA de quanto a sinopse combina com o seu perfil de gosto. Não é o
+            valor que você informou (coluna &ldquo;Sinopse&rdquo;).
+          </p>
+          {confidence != null && (
+            <p className="text-[11px] text-muted-foreground">
+              Confiança: <span className="font-semibold text-foreground">{Math.round(confidence * 100)}%</span>
+            </p>
+          )}
+          {stale && (
+            <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+              Desatualizada — a obra ou o perfil mudaram desde a previsão.
+            </p>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 

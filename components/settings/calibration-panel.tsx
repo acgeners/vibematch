@@ -355,9 +355,9 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
           <div>
             <h3 className="text-sm font-semibold">Histórico de precisão</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              MAE in-sample da Nota Prevista por dia (último snapshot de cada dia). É a tendência do
-              mesmo modelo da headline — só que medida no treino (otimista); o número honesto
-              ponto-a-ponto é a MAE CV lá em cima.
+              MAE CV da Nota Prevista por dia (último snapshot de cada dia) — o mesmo número honesto
+              da headline ao longo do tempo. A linha começa quando há CV gravado; snapshots
+              anteriores a essa mudança não aparecem.
             </p>
           </div>
           <MaeHistoryChart history={snapshot.history} />

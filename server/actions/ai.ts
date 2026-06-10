@@ -152,7 +152,7 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     // separado pra diagnosticar o gargalo (busca externa vs. chamada do LLM).
     const externalStart = Date.now()
     const {
-      context: { sourcedReviews, allReviews, externalContext, platformRatings, similarWorks },
+      context: { sourcedReviews, allReviews, externalContext, platformRatings, similarWorks, contentRatings },
       acceptedExternalIds,
       rejectedSources,
       hasAnyExternalIds,
@@ -239,6 +239,7 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
       externalContext,
       platformRatings,
       similarWorks,
+      contentRatings,
       coverUrl,
       model: resolveModelOverride(opts.model),
     })

@@ -110,7 +110,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     // Plataforma
     "platform_avg", "total_votes",
     // Metadata
-    "title", "year", "synopsis_q",
+    "title", "year", "synopsis_q", "synopsis_pred",
     "chapters", "chapters_total", "chapters_read",
     "publication_status", "personal_status", "ai_eval_status",
     "updated_at", "last_read_at",
@@ -120,7 +120,16 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // Default: ordena pela Nota Prevista e, como desempate, IA Rk no plano Pago
   // (NULL no Free) ou Alinhamento no Free. Os empates só quebram no EXATO no
   // SQL; o desempate band-aware fino é client-side.
-  const plan = await getCurrentPlan()
+  // `plan` é buscado junto do bloco de metadados abaixo (Promise.all) pra não
+  // pagar um round-trip serial só dele.
+  const [plan, prefs, allGenres, allTags, statusOptions, savedPresets] = await Promise.all([
+    getCurrentPlan(),
+    getPreferences(),
+    getAllGenres(),
+    getAllTags(),
+    getStatusOptions(),
+    getFilterPresets("/ranking"),
+  ])
   const isPaid = planAllows(plan, "smart_shortlist")
   const defaultSort = isPaid
     ? "expected_score:desc,alignment_score:desc"
@@ -157,14 +166,6 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         ? pubStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
         : ["Completed"]
 
-  const [prefs, allGenres, allTags, statusOptions, savedPresets] = await Promise.all([
-    getPreferences(),
-    getAllGenres(),
-    getAllTags(),
-    getStatusOptions(),
-    getFilterPresets("/ranking"),
-  ])
-
   // URL pode sobrescrever as preferências (ex: usuário ajusta direto na barra).
   // A preferência "Nota Prevista mínima" é persistida em min_final_score (repurposada).
   const overrideTopN = num("top_n")
@@ -183,6 +184,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     tagSlugsAny: multi("tags_any") ?? multi("tags"),
     tagSlugsExclude: multi("tags_exclude"),
     synopsisQualities: multi("synopsis_q"),
+    predictedSynopsisQualities: multi("synopsis_pred"),
     minTotalChapters: num("min_chapters"),
     maxTotalChapters: num("max_chapters"),
     minExpectedScore: overrideMinExpected ?? prefs.minFinal ?? undefined,

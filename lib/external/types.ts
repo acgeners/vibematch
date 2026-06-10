@@ -31,6 +31,8 @@ export interface ExternalSearchResult {
   score?: number
   votes?: number
   genres?: string[]
+  /** Classificação de conteúdo da fonte (MangaDex `contentRating`, ComicK `content_rating`): "safe" | "suggestive" | "erotica" | "pornographic". Sinal de conteúdo adulto — eleva o piso de adult_content na avaliação. */
+  contentRating?: string
   /** Data relativa pré-formatada do último capítulo (ex.: comix "8mos ago"). */
   lastChapterAt?: string
   /** Cross-platform IDs the source itself surfaces (e.g. MangaDex `attributes.links`, AniList `idMal`). Used by the search pipeline to populate sibling-source IDs on the merged candidate so we can hydrate sources whose title search failed. */

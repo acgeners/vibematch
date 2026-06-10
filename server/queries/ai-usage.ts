@@ -254,6 +254,60 @@ export async function getAiUsageDailySeries(
   return result
 }
 
+export interface BalanceStatus {
+  balanceUsd: number | null // valor informado (snapshot)
+  setAt: string | null // ISO de quando foi informado
+  spentSinceUsd: number // Σ cost_total_usd desde setAt
+  remainingUsd: number | null // balanceUsd − spentSinceUsd (null se nunca informado)
+  callsSince: number // nº de chamadas desde setAt
+}
+
+const EMPTY_BALANCE: BalanceStatus = {
+  balanceUsd: null,
+  setAt: null,
+  spentSinceUsd: 0,
+  remainingUsd: null,
+  callsSince: 0,
+}
+
+/**
+ * Saldo Anthropic informado manualmente + quanto restou. Modelo snapshot
+ * (migration 092): lê valor + instante do singleton user_settings e subtrai
+ * o custo das chamadas desde aquele instante. Tolerante a colunas ausentes
+ * (mesma estratégia de getCurrentUserProfile) → cai pro estado "nunca informado".
+ */
+export async function getAnthropicBalanceStatus(): Promise<BalanceStatus> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("anthropic_balance_usd, anthropic_balance_set_at")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.warn(`[ai-usage] saldo indisponível (colunas ausentes?): ${error.message}`)
+    return EMPTY_BALANCE
+  }
+
+  const rawBalance = data?.anthropic_balance_usd
+  const setAt = (data?.anthropic_balance_set_at as string | null | undefined) ?? null
+  if (rawBalance == null || setAt == null) return EMPTY_BALANCE
+
+  const balanceUsd = Number(rawBalance)
+  // Janela pequena: só as chamadas desde o último rebaseamento. Reaproveita o
+  // fetch paginado + agregação do resto do módulo.
+  const since = aggregate(await fetchRows(setAt))
+  const spentSinceUsd = since.totalCostUsd
+  return {
+    balanceUsd,
+    setAt,
+    spentSinceUsd,
+    remainingUsd: balanceUsd - spentSinceUsd,
+    callsSince: since.nCalls,
+  }
+}
+
 export async function getRecentAiCalls(
   limit: number,
   operation?: string | null,

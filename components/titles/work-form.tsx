@@ -1090,14 +1090,14 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
     }
 
     toast.success(workId ? "Obra atualizada!" : "Obra criada!")
-    // Quando título muda em update, o slug derivado também muda — usar o novo
-    // slug evita 404 (page.tsx resolve por slug computado a partir do título).
+    // Navegar SEMPRE pelo slug canônico novo (devolvido pela action). Antes, no
+    // update, navegava pelo UUID e deixava /titles/{uuid} fazer um redirect()
+    // server-side pro slug — mas esse redirect falha numa navegação soft (RSC),
+    // mostrando "This page couldn't load"; só funcionava após refresh (hard nav).
+    // Ir direto no slug elimina o redirect. getWorkBySlug tem fallback direto no
+    // banco, então o cache slug->id desatualizado não causa 404.
     const newSlug = result.data?.slug ?? (values.title ? titleToSlug(values.title) : "")
-    const destination = workId
-      // Depois de renomear, navegar pelo UUID evita depender do cache slug->id.
-      // A página /titles/{uuid} busca direto e redireciona para o slug canônico novo.
-      ? workId
-      : (newSlug || result.data?.id || workSlug || workId)
+    const destination = newSlug || result.data?.id || workSlug || workId
     router.push(`/titles/${destination}`)
   }
 

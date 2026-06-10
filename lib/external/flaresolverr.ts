@@ -9,9 +9,25 @@
 
 const ENDPOINT = process.env.FLARESOLVERR_URL?.trim() || ""
 
+// Timeout de conexão curto: a porta às vezes aceita a conexão mas não responde
+// (container fora), e o fetch ficaria pendurado até o teto externo (8s). Menor
+// que o withTimeout do orquestrador pra o catch disparar e abrir o circuito.
+const FLARESOLVERR_TIMEOUT_MS = 5000
+// Circuit breaker: ao falhar, marca indisponível por um tempo pra não pagar o
+// timeout em CADA chamada (enriquecimento em lote chama comix dezenas de vezes).
+// Reabre sozinho depois do TTL (se o container voltar, volta a usar).
+const CIRCUIT_TTL_MS = 60_000
+let circuitOpenUntil = 0
+
 /** True when FlareSolverr is configured (env var present). */
 export function isFlareSolverrEnabled(): boolean {
   return ENDPOINT.length > 0
+}
+
+/** Circuito aberto = FlareSolverr falhou recentemente; chamadas devem pular pra
+ *  não pagar o timeout repetidamente (reabre sozinho após o TTL). */
+export function isFlareSolverrCircuitOpen(): boolean {
+  return Date.now() < circuitOpenUntil
 }
 
 /** Heuristic: is this response HTML a Cloudflare challenge page? */
@@ -36,9 +52,17 @@ function logFlareSolverrFailure(reason: string) {
 
 export async function flareSolverrFetch(
   url: string,
-  timeoutMs = 60000
+  timeoutMs = 60000,
+  // Teto de espera da NOSSA conexão com o FlareSolverr. Default curto (5s) detecta
+  // container caído rápido; chamadas que sabem que vão pagar um solve frio de
+  // Cloudflare (ex.: scrape de página) passam um valor maior pra não cortar antes
+  // do desafio terminar. Não confundir com `timeoutMs` (orçamento do Chrome
+  // headless DENTRO do FlareSolverr).
+  abortMs = FLARESOLVERR_TIMEOUT_MS
 ): Promise<{ html: string; finalUrl: string } | null> {
   if (!ENDPOINT) return null
+  // Circuito aberto (container falhou recentemente) → falha na hora, sem esperar.
+  if (Date.now() < circuitOpenUntil) return null
   try {
     const res = await fetch(ENDPOINT, {
       method: "POST",
@@ -49,9 +73,11 @@ export async function flareSolverrFetch(
         maxTimeout: timeoutMs,
       }),
       cache: "no-store",
+      signal: AbortSignal.timeout(abortMs),
     })
     if (!res.ok) {
       logFlareSolverrFailure(`HTTP ${res.status} — container caído ou misconfigurado?`)
+      circuitOpenUntil = Date.now() + CIRCUIT_TTL_MS
       return null
     }
     const json = await res.json()
@@ -61,9 +87,11 @@ export async function flareSolverrFetch(
       logFlareSolverrFailure(`resposta sem solution.response (status=${json?.status ?? "?"} message="${json?.message ?? ""}")`)
       return null
     }
+    circuitOpenUntil = 0 // sucesso → fecha o circuito
     return { html, finalUrl }
   } catch (err) {
     logFlareSolverrFailure(`falha de rede (${err instanceof Error ? err.message : err}) — container provavelmente não está rodando`)
+    circuitOpenUntil = Date.now() + CIRCUIT_TTL_MS
     return null
   }
 }
@@ -79,7 +107,10 @@ export async function flareSolverrFetch(
  */
 export async function fetchHtmlWithCfFallback(
   url: string,
-  headers: Record<string, string> = {}
+  headers: Record<string, string> = {},
+  // Repassado ao FlareSolverr como teto de espera da conexão. Default 5s; suba pra
+  // páginas que pagam solve frio de Cloudflare (ver flareSolverrFetch).
+  abortMs?: number
 ): Promise<{ html: string; finalUrl: string } | null> {
   try {
     const res = await fetch(url, { headers, cache: "no-store" })
@@ -93,5 +124,5 @@ export async function fetchHtmlWithCfFallback(
     // fall through to FlareSolverr
   }
   if (!ENDPOINT) return null
-  return flareSolverrFetch(url)
+  return flareSolverrFetch(url, 60000, abortMs)
 }
