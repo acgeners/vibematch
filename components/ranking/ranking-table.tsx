@@ -21,7 +21,7 @@ import type { ColumnThresholds } from "@/components/ui/score-badge"
 import { PublicationStatusBadge, PersonalStatusBadge, AiStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
-import { AlignmentCell, AlignmentScoreCell, DecisionCell } from "@/components/ranking/ranking-cells"
+import { AlignmentCell, AlignmentScoreCell, DecisionCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { TierDividerRow } from "@/components/ranking/tie-break-band"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
@@ -44,6 +44,7 @@ const COLUMN_TO_SORT_FIELD: Record<string, string> = {
   chapters: "chapters",
   chapters_read: "chapters_read",
   synopsis_q: "synopsis_q",
+  synopsis_pred: "synopsis_pred",
   platform_avg: "platform_avg",
   total_votes: "total_votes",
   decision: "decision",
@@ -344,6 +345,14 @@ function renderCell(
     return <span className="font-mono text-sm">{pct != null ? `${pct}%` : "—"}</span>
   }
   if (col.key === "synopsis_q") return <span className="text-xs text-muted-foreground">{entry.synopsisQuality ?? "—"}</span>
+  if (col.key === "synopsis_pred")
+    return (
+      <SynopsisPredictionCell
+        quality={entry.predictedSynopsisQuality}
+        stale={entry.predictedSynopsisStale}
+        confidence={entry.predictedSynopsisConfidence}
+      />
+    )
   if (col.key === "ai_status") return <AiStatusBadge status={entry.aiEvalStatus} />
   if (col.key === "updated_at") {
     return entry.updatedAt ? (

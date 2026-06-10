@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "VibeMatch",
-  description: "Catálogo pessoal de mangás, manhwas e manhuas",
+  title: "SatorIA",
+  description: "Seu catálogo de manhwas com uma IA que aprende o seu gosto e prevê o que você vai amar ler.",
 }
 
 export default function RootLayout({

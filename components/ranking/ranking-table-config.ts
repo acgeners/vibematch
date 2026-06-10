@@ -31,7 +31,9 @@ export const RANKING_COLUMN_GROUP_LABELS: Record<RankingColumnGroup, string> = {
 // Bump v4 → v5 to add the "Decisão" column (default sort) next to "Prevista".
 // Bump v5 → v6 to HIDE "decision" by default: a Prioridade agora é comunicada
 // por TIERS (divisores), não por um número dentro da incerteza do modelo.
-export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v6"
+// Bump v6 → v7 to add "synopsis_pred" (Previsão de interesse na sinopse) HIDDEN
+// by default — disponível no column picker, mas opt-in.
+export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v7"
 export const RANKING_TABLE_COLUMN_CONFIG_EVENT = "ranking-column-config-change"
 
 export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
@@ -45,6 +47,7 @@ export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
   { key: "chapters_read", label: "Lidos", configLabel: "Capítulos lidos", description: "Quantos capítulos você já marcou como lidos.", defaultWidth: 70, align: "center", group: "basico" },
   { key: "chapters_progress", label: "% Lido", configLabel: "% lido", description: "Progresso de leitura: capítulos lidos ÷ total de capítulos.", defaultWidth: 80, align: "center", group: "basico" },
   { key: "synopsis_q", label: "Sinopse", configLabel: "Interesse na sinopse", description: "O quanto a sinopse te interessou (♥ a ♥♥♥♥), informado na triagem/avaliação.", defaultWidth: 80, align: "center", group: "basico" },
+  { key: "synopsis_pred", label: "Prev. Sinopse", configLabel: "Previsão de interesse na sinopse", description: "A previsão da IA de quanto a sinopse vai te interessar (♥ a ♥♥♥♥), com base no seu perfil de gosto. Diferente da coluna \"Sinopse\", que é o valor que VOCÊ informou. Só preenchida em obras que passaram pela estimativa (feature Paga).", defaultWidth: 110, align: "center", group: "basico" },
   { key: "ai_status", label: "IA", configLabel: "Status da avaliação IA", description: "Estágio da avaliação por IA: pendente de atributos, pendente de IA Rk, avaliado ou pulado.", defaultWidth: 80, align: "center", group: "basico" },
   { key: "updated_at", label: "Atual.", configLabel: "Atualizado em", description: "Quando o registro da obra foi atualizado pela última vez.", defaultWidth: 110, align: "center", group: "basico" },
   { key: "last_read_at", label: "Últ. leitura", configLabel: "Última leitura", description: "Data da última vez que você leu algum capítulo desta obra.", defaultWidth: 110, align: "center", group: "basico" },
@@ -99,6 +102,8 @@ const DEFAULT_COLUMN_CONFIG: RankingColumnConfig = {
     "per_status",
     "chapters_read",
     "chapters_progress",
+    // Previsão de interesse na sinopse: opt-in (disponível no column picker).
+    "synopsis_pred",
     "expected_baseline",
     "expected_quality_adj",
     ...LEGACY_HIDDEN_KEYS,

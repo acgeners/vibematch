@@ -15,7 +15,7 @@ import type { CalibrationHistoryEntry } from "@/server/actions/settings"
 interface HistoryChartDatum {
   ts: string
   date: string
-  expected: number | null
+  cvExpected: number | null
   trainSize: number | null
 }
 
@@ -52,7 +52,7 @@ export function MaeHistoryChart({ history }: { history: CalibrationHistoryEntry[
     data.push({
       ts: h?.recorded_at ?? d.toISOString(),
       date: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`,
-      expected: h?.mae_expected ?? null,
+      cvExpected: h?.cv_mae_expected ?? null,
       trainSize: h?.train_size ?? null,
     })
   }
@@ -96,8 +96,8 @@ export function MaeHistoryChart({ history }: { history: CalibrationHistoryEntry[
           />
           <Line
             type="monotone"
-            dataKey="expected"
-            name="MAE Nota Prevista (in-sample)"
+            dataKey="cvExpected"
+            name="MAE Nota Prevista (CV honesto)"
             stroke="hsl(var(--primary))"
             strokeWidth={2}
             dot={{ r: 2 }}

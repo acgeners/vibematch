@@ -329,6 +329,8 @@ export interface CalibrationHistoryEntry {
   mae_predicted: number | null
   /** Fase 1 shadow mode: MAE do expected_score (L1 Ridge cleaned). NULL em snapshots anteriores à migration 066. */
   mae_expected: number | null
+  /** MAE CV honesto da Nota Prevista — mesmo valor da headline. NULL em snapshots anteriores à migration 093. */
+  cv_mae_expected: number | null
   train_size: number | null
   total_works: number | null
 }
@@ -348,7 +350,7 @@ export async function getCalibrationSnapshot() {
     supabase
       .from("calibration_history")
       .select(
-        "recorded_at, formula_version, stacker_enabled, mae_loocv_stacker, mae_final, mae_calc, mae_predicted, mae_expected, train_size, total_works",
+        "recorded_at, formula_version, stacker_enabled, mae_loocv_stacker, mae_final, mae_calc, mae_predicted, mae_expected, cv_mae_expected, train_size, total_works",
       )
       .order("recorded_at", { ascending: false })
       .limit(1000),

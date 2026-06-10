@@ -1,3 +1,4 @@
+import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
 import { BarChart3, ChevronDown, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
@@ -6,7 +7,7 @@ import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { SynopsisQualitySuggestion } from "@/components/titles/synopsis-quality-suggestion"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
-import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug } from "@/server/queries/works"
+import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug } from "@/server/queries/works"
 import { getAllTags } from "@/server/queries/tags"
 import {
   getLatestAiEvaluationAttributes,
@@ -161,6 +162,12 @@ const getSourceRows = unstable_cache(
 const POST_READING_SCORE_FIELDS = Object.keys(DEFAULT_POST_READING_WEIGHTS) as PostReadingScoreField[]
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export async function generateMetadata({ params }: TitleDetailPageProps): Promise<Metadata> {
+  const { id } = await params
+  const title = await getWorkTitleByIdOrSlug(id)
+  return { title: title ? `${title} · SatorIA` : "SatorIA" }
+}
 
 export default async function TitleDetailPage({ params }: TitleDetailPageProps) {
   const { id } = await params

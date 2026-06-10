@@ -36,6 +36,8 @@ export interface AiEvaluationRequest {
   platformRatings?: PlatformRating[]
   /** Obras recomendadas pelas fontes a quem gostou desta. Sinal estrutural de cluster temático. */
   similarWorks?: SimilarWork[]
+  /** Classificações de conteúdo das fontes externas aceitas (MangaDex/ComicK): "suggestive" | "erotica" | "pornographic". Elevam o piso mínimo de adult_content. */
+  contentRatings?: string[]
   promptVersion?: string
   /** Override do modelo Claude (ex.: "claude-sonnet-4-6"). Default: claude-haiku-4-5. */
   model?: string
@@ -576,6 +578,7 @@ function prepareReviews(req: AiEvaluationRequest): PreparedReviews {
 // ============================================================================
 
 const R19_REGEX = /(?:^|[^a-z0-9])R\s*-?\s*19(?:[^a-z0-9]|$)/i
+const R15_REGEX = /(?:^|[^a-z0-9])R\s*-?\s*15(?:[^a-z0-9]|$)/i
 
 const ADULT_GENRE_KEYWORDS = ["adult", "smut", "mature", "hentai", "ecchi"]
 const ADULT_SYNOPSIS_KEYWORDS = [
@@ -589,23 +592,50 @@ const ADULT_SYNOPSIS_KEYWORDS = [
 ]
 const ADULT_TAG_GROUP = "content_indicator"
 
-/**
- * Detecção R19 em duas camadas:
- *  - "weak" → regex match em qualquer evidência (sugestiva). Aciona piso 6.0.
- *  - "strong" → regex match + corroboração: tag do grupo content_indicator,
- *    gênero adulto explícito ou keyword adulta na sinopse. Aciona piso 7.0.
- */
-function detectR19(req: AiEvaluationRequest): "none" | "weak" | "strong" {
-  const synopsis = req.synopsis ?? ""
+/** Strings de evidência onde um marcador R-rating pode aparecer (sinopse, gêneros,
+ *  tags, contexto externo e reviews). */
+function collectRatingEvidence(req: AiEvaluationRequest): string[] {
   const tags = normalizeTags(req.tags)
-  const haystack = [
-    synopsis,
+  return [
+    req.synopsis ?? "",
     ...(req.genres ?? []),
     ...tags.map((t) => t.name),
     ...(req.externalContext ?? []),
     ...(req.sourcedReviews?.map((review) => review.text) ?? []),
     ...(req.reviews ?? []),
-  ].join("\n")
+  ]
+}
+
+/**
+ * Evidência tipo "R15 but Based on a R19 Novel": menciona R15 E R19 na mesma
+ * string. Aqui o R19 se refere ao NOVEL original, não à obra avaliada (que é
+ * R15). NÃO deve acionar o piso do R19 — trata-se com um piso menor
+ * ([R15_FROM_R19_FLOOR]).
+ */
+function isR15FromR19(text: string): boolean {
+  return R15_REGEX.test(text) && R19_REGEX.test(text)
+}
+
+function detectR15FromR19(req: AiEvaluationRequest): boolean {
+  return collectRatingEvidence(req).some(isR15FromR19)
+}
+
+/**
+ * Detecção R19 em duas camadas:
+ *  - "weak" → regex match em qualquer evidência (sugestiva). Aciona piso 6.0.
+ *  - "strong" → regex match + corroboração: tag do grupo content_indicator,
+ *    gênero adulto explícito ou keyword adulta na sinopse. Aciona piso 7.0.
+ *
+ * Evidências "R15 ... R19 ... novel" são EXCLUÍDAS do haystack: o R19 ali é do
+ * novel original, não da obra. Sem isso, a tag "R15 but Based on a R19 Novel"
+ * disparava o piso 7 indevidamente.
+ */
+function detectR19(req: AiEvaluationRequest): "none" | "weak" | "strong" {
+  const synopsis = req.synopsis ?? ""
+  const tags = normalizeTags(req.tags)
+  const haystack = collectRatingEvidence(req)
+    .filter((text) => !isR15FromR19(text))
+    .join("\n")
 
   if (!R19_REGEX.test(haystack)) return "none"
 
@@ -628,12 +658,46 @@ function hasR19Marker(req: AiEvaluationRequest): boolean {
   return detectR19(req) === "strong"
 }
 
+// Piso de adult_content para obras R15 derivadas de novel R19 (a obra em si é
+// R15 — conteúdo maduro mas não explícito). Menor que os pisos do R19 (6/7).
+const R15_FROM_R19_FLOOR = 4
+
+// Piso mínimo de adult_content por classificação de conteúdo das fontes externas
+// (MangaDex/ComicK). "safe" não tem piso. "pornographic" (só MangaDex) fica acima
+// de "erotica". Análogo à regra do R19 — garante que conteúdo marcado como adulto
+// na fonte não receba nota baixa por falta de menção em sinopse/reviews.
+const CONTENT_RATING_FLOORS: Record<string, number> = {
+  suggestive: 5,
+  erotica: 7,
+  pornographic: 8,
+}
+
+/**
+ * Maior piso de adult_content implicado pelos content ratings das fontes aceitas.
+ * Quando várias fontes divergem (ex.: MangaDex "suggestive" + ComicK "erotica"),
+ * vence o mais restritivo. Retorna null quando nenhuma classificação aciona piso.
+ */
+function detectContentRatingFloor(
+  req: AiEvaluationRequest
+): { floor: number; rating: string } | null {
+  let best: { floor: number; rating: string } | null = null
+  for (const raw of req.contentRatings ?? []) {
+    const rating = raw.toLowerCase().trim()
+    const floor = CONTENT_RATING_FLOORS[rating]
+    if (floor != null && (best === null || floor > best.floor)) {
+      best = { floor, rating }
+    }
+  }
+  return best
+}
+
 // ============================================================================
 // User prompt
 // ============================================================================
 
 function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): string {
   const r19Level = detectR19(req)
+  const r15FromR19 = detectR15FromR19(req)
   const lines: string[] = [
     `Título oficial da obra a avaliar: "${req.title}"`,
     "(use SOMENTE este título nas suas respostas)",
@@ -724,6 +788,10 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
   } else if (r19Level === "weak") {
     lines.push(
       `\nMarcador R19 encontrado em alguma evidência, sem corroboração explícita de tag/gênero/termo adulto. A presença do marcador é, ainda assim, evidência POSITIVA de conteúdo adulto — reviews/tags podem simplesmente não ter mencionado. Aplique o princípio "ausência de evidência ≠ ausência": adult_content tem nota mínima 6.0. Pode subir mais conforme outras evidências.`
+    )
+  } else if (r15FromR19) {
+    lines.push(
+      `\nAtenção: há a marcação "R15 but Based on a R19 Novel". O "R19" aqui se refere ao NOVEL original — a OBRA avaliada é R15 (conteúdo maduro, mas não explícito). NÃO trate isso como conteúdo adulto explícito: adult_content tem nota mínima 4.0 (não o piso do R19), podendo subir só se outras evidências (tags/reviews/sinopse) indicarem conteúdo sexual de fato.`
     )
   }
 
@@ -867,6 +935,78 @@ function enforceR19AdultContentRule(
       ...rawObject(response.rawResponse),
       r19AdultContentRuleApplied: true,
       r19AdultContentLevel: level,
+    },
+  }
+}
+
+/**
+ * Obras "R15 but Based on a R19 Novel": a obra avaliada é R15 (o R19 é do novel
+ * original). Aplica piso 4 a adult_content — em vez do piso 7 que a menção de R19
+ * acionaria. Monotônica, então compõe com as demais regras pelo MAIOR piso (se
+ * houver R19 real ou content rating adulto por outra evidência, esses prevalecem).
+ */
+function enforceR15FromR19AdultContentRule(
+  response: AiEvaluationResponse,
+  req: AiEvaluationRequest
+): AiEvaluationResponse {
+  if (!detectR15FromR19(req)) return response
+  const floor = R15_FROM_R19_FLOOR
+
+  return {
+    ...response,
+    scores: response.scores.map((score) => {
+      if (score.criterionSlug !== "adult_content" || score.suggestedScore >= floor) {
+        return score
+      }
+      const reason = `Tag "R15 but Based on a R19 Novel": a obra é R15 (o R19 é do novel original); adult_content tem piso ${floor.toFixed(1)}, não o piso do R19.`
+      return {
+        ...score,
+        suggestedScore: floor,
+        justification: score.justification.includes("R15") ? score.justification : `${score.justification} ${reason}`,
+      }
+    }),
+    rawResponse: {
+      ...rawObject(response.rawResponse),
+      r15FromR19RuleApplied: true,
+      r15FromR19Floor: floor,
+    },
+  }
+}
+
+/**
+ * Eleva o piso de adult_content conforme a classificação de conteúdo das fontes
+ * externas aceitas (MangaDex/ComicK): suggestive→5, erotica→7, pornographic→8.
+ * Monotônica (só sobe), então compõe com a regra do R19: encadeadas, o resultado
+ * final é o MAIOR piso acionado entre as duas.
+ */
+function enforceExternalContentRatingRule(
+  response: AiEvaluationResponse,
+  req: AiEvaluationRequest
+): AiEvaluationResponse {
+  const detected = detectContentRatingFloor(req)
+  if (!detected) return response
+  const { floor, rating } = detected
+
+  return {
+    ...response,
+    scores: response.scores.map((score) => {
+      if (score.criterionSlug !== "adult_content" || score.suggestedScore >= floor) {
+        return score
+      }
+      const reason = `Fonte externa classifica o conteúdo como "${rating}"; pela regra obrigatória, adult_content não pode ficar abaixo de ${floor.toFixed(1)}.`
+      return {
+        ...score,
+        suggestedScore: floor,
+        justification: score.justification.includes("classifica o conteúdo")
+          ? score.justification
+          : `${score.justification} ${reason}`,
+      }
+    }),
+    rawResponse: {
+      ...rawObject(response.rawResponse),
+      externalContentRatingRuleApplied: true,
+      externalContentRatingFloor: floor,
+      externalContentRating: rating,
     },
   }
 }
@@ -1062,6 +1202,8 @@ function attachEvaluationContext(
           })) ?? [],
         r19Detected: hasR19Marker(req),
         r19Level: detectR19(req),
+        r15FromR19Detected: detectR15FromR19(req),
+        contentRatingFloor: detectContentRatingFloor(req),
         coverUrlSentToModel: req.coverUrl ?? null,
       },
     },
@@ -1076,7 +1218,12 @@ function postProcessEvaluation(
   return attachEvaluationContext(
     enforceAuditableReviewUsage(
       enforceConfidenceCapWhenSynopsisAbsent(
-        enforceNeutralCoupleDynamicsWhenNoRomance(enforceR19AdultContentRule(response, req)),
+        enforceNeutralCoupleDynamicsWhenNoRomance(
+          enforceExternalContentRatingRule(
+            enforceR15FromR19AdultContentRule(enforceR19AdultContentRule(response, req), req),
+            req
+          )
+        ),
         req
       ),
       prepared
@@ -1123,6 +1270,7 @@ function canonicalInputHash(req: AiEvaluationRequest): string {
       })) ?? [],
     reviews: req.reviews ?? [],
     coverUrl: req.coverUrl ?? null,
+    contentRatings: [...(req.contentRatings ?? [])].map((r) => r.toLowerCase().trim()).sort(),
   }
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex")
 }

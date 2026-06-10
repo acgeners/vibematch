@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Sparkles, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
+import { refreshSidebarBadges } from "@/lib/sidebar-badges"
 
 interface RerankAiRkButtonProps {
   workId: string
@@ -56,6 +57,7 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true }: RerankAiRk
         score != null ? `IA Rk calculado: ${Math.round(score)}` : "IA Rk calculado.",
       )
       router.refresh()
+      refreshSidebarBadges() // tirou a obra da fila "IA Rk stale" → recontar badge
     })
   }
 

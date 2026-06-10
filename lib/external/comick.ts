@@ -45,6 +45,8 @@ export interface ComicKDetail {
   rating?: number
   votes?: number
   tags: string[]
+  /** "safe" | "suggestive" | "erotica". */
+  contentRating?: string
 }
 
 function cleanText(value: unknown): string | undefined {
@@ -207,12 +209,137 @@ export async function searchComicK(search: string): Promise<ExternalSearchResult
             : item?.bayesian_rating != null ? parseFloat(String(item.bayesian_rating)) : undefined,
           votes: typeof item?.rating_count === "number" ? item.rating_count : item?.follow_count,
           genres: tagsFromComic(item),
+          contentRating: typeof item?.content_rating === "string" ? item.content_rating : undefined,
         }
       })
       .filter((item): item is ExternalSearchResult => item !== null)
   } catch {
     return []
   }
+}
+
+// ============================================================================
+// Reviews + comentários
+// ============================================================================
+// ComicK expõe duas seções de opinião na página da obra: "Reviews" (curadas, com
+// nota /10) e "Comments" (discussão livre onde os usuários também compartilham
+// opinião). As reviews vêm estruturadas no JSON de `/comic/{hid}` (campo
+// `comic.reviews[]`); os comentários NÃO têm endpoint de API filtrável por obra
+// (o `/comment/` devolve só o feed global), então são raspados do HTML SSR da
+// página web da obra. Ambos entram como "review" no pipeline de avaliação.
+
+// Domínios do frontend (não da API) usados só pra raspar comentários. comick.io
+// redireciona pra comick.dev; mantemos os dois como fallback.
+const COMICK_WEB_BASES = ["https://comick.io", "https://comick.dev"]
+
+const WEB_HEADERS = {
+  "User-Agent": HEADERS["User-Agent"],
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&nbsp;/gi, " ")
+}
+
+function stripHtmlToText(value: string): string {
+  return decodeHtmlEntities(
+    value
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+  )
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+/** Reviews curadas (com nota /10) do JSON de detalhe. Prefixa a nota no formato
+ *  que `extractUserRating` reconhece pra o sampler de reviews aproveitar. */
+async function fetchComicKReviewsFromDetail(hid: string): Promise<string[]> {
+  const data = await fetchJson(`/comic/${hid}`)
+  if (!data) return []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const comic: any = (data as any)?.comic ?? data
+  const reviews: unknown[] = Array.isArray(comic?.reviews) ? comic.reviews : []
+  const out: string[] = []
+  for (const entry of reviews) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const review: any = entry
+    const content = cleanText(review?.content)
+    if (!content) continue
+    const ratingNum = review?.rating != null ? parseFloat(String(review.rating)) : NaN
+    out.push(
+      Number.isFinite(ratingNum) && ratingNum >= 0 && ratingNum <= 10
+        ? `Nota do usuário: ${ratingNum}/10\n${content}`
+        : content
+    )
+  }
+  return out
+}
+
+// Comentários moram no HTML SSR da página, em <div class="comment-content ...">.
+const COMMENT_CONTENT_RE = /class="comment-content[^"]*">([\s\S]*?)<\/div>/g
+
+// O scrape bate no domínio do FRONTEND (comick.dev), que — diferente do
+// api.comick.dev tocado na hidratação — costuma estar "frio" no Cloudflare. Um
+// solve frio leva ~8-15s e o abort default de 5s do FlareSolverr cortava antes,
+// derrubando os comentários. Damos um teto maior SÓ aqui. O clearance do
+// Cloudflare persiste por IP+UA, então só a 1ª obra paga o frio; as seguintes
+// entram quentes (~3s) dentro desse mesmo teto.
+const COMICK_COMMENTS_CF_ABORT_MS = 16000
+
+/** Comentários da obra raspados da página web. Filtra por tamanho mínimo (corta
+ *  reação curta/emoji) e dedupa por prefixo. Best-effort: sem FlareSolverr ou com
+ *  Cloudflare ativo, devolve []. */
+async function fetchComicKComments(
+  hid: string,
+  opts: { minLength?: number; cap?: number } = {}
+): Promise<string[]> {
+  const minLength = opts.minLength ?? 40
+  const cap = opts.cap ?? 20
+  for (const base of COMICK_WEB_BASES) {
+    const fallback = await fetchHtmlWithCfFallback(`${base}/comic/${hid}`, WEB_HEADERS, COMICK_COMMENTS_CF_ABORT_MS)
+    if (!fallback) continue
+    const comments: string[] = []
+    const seen = new Set<string>()
+    let match: RegExpExecArray | null
+    COMMENT_CONTENT_RE.lastIndex = 0
+    while ((match = COMMENT_CONTENT_RE.exec(fallback.html)) !== null) {
+      const text = stripHtmlToText(match[1])
+      if (text.length < minLength) continue
+      const key = text.slice(0, 80).toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      comments.push(text.slice(0, 900))
+      if (comments.length >= cap) break
+    }
+    // Página carregou (mesmo sem comentários) → não tenta o próximo domínio.
+    return comments
+  }
+  return []
+}
+
+/**
+ * Reviews + comentários da obra no ComicK, unificados como "reviews" pro pipeline
+ * de avaliação. Fail-soft cada fonte — uma falha (ex.: scrape de comentários
+ * bloqueado) não derruba a outra.
+ *
+ * As duas buscas rodam EM SÉRIE de propósito. Ambas passam pelo FlareSolverr, que
+ * serializa os solves de Cloudflare; em paralelo, o JSON (abort curto) perdia a
+ * disputa pelo solver, dava timeout e abria o circuit breaker — derrubando junto
+ * os comentários. Em série não há contenção: o JSON bate em api.comick.dev (já
+ * quente da hidratação → ~2s) e só os comentários, no frontend, pagam o solve frio.
+ */
+export async function fetchComicKReviews(hid: string): Promise<string[]> {
+  const reviews = await fetchComicKReviewsFromDetail(hid).catch(() => [])
+  const comments = await fetchComicKComments(hid).catch(() => [])
+  return [...reviews, ...comments]
 }
 
 export async function fetchComicKByHid(hid: string): Promise<ComicKDetail | null> {
@@ -239,6 +366,7 @@ export async function fetchComicKByHid(hid: string): Promise<ComicKDetail | null
       rating: rating != null && !isNaN(rating) ? rating : undefined,
       votes: comic.rating_count ?? comic.follow_count ?? undefined,
       tags: tagsFromComic(comic),
+      contentRating: typeof comic.content_rating === "string" ? comic.content_rating : undefined,
     }
   } catch {
     return null

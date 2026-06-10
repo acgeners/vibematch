@@ -111,6 +111,7 @@ Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evalu
 
 Post-processing applied to every evaluation (in `service.ts`):
 - `enforceR19AdultContentRule`: raises `adult_content` to ≥ 7.0 if R19 marker detected anywhere in input
+- `enforceExternalContentRatingRule`: raises `adult_content` to a floor from the accepted external sources' content rating (MangaDex `contentRating` / ComicK `content_rating`) — `suggestive`→5, `erotica`→7, `pornographic`→8. Chained with the R19 rule; both are monotonic so the effective floor is the max of whichever triggered.
 - `enforceNeutralCoupleDynamicsWhenNoRomance`: raises `couple_dynamics` to 5.0 when romance ≤ 3 and couple_dynamics < 5
 - `enforceAuditableReviewUsage`: **throws and retries** if reviews were passed but the model didn't cite review IDs (`R1`, `R2`…) both in `review_usage` and in justifications
 

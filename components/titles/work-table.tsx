@@ -547,7 +547,7 @@ function WorkCardsView({
       {works.map((work) => {
         const slug = titleToSlug(work.title)
         const coverUrl = pickPrimaryCover(work.work_covers)
-        const finalScore = work.calculated_scores?.final_score ?? null
+        const expectedScore = work.calculated_scores?.expected_score ?? null
         const isSelected = selectedIds.has(work.id)
 
         return (
@@ -600,9 +600,14 @@ function WorkCardsView({
                     <ImageOff className="size-7 opacity-40" />
                   </div>
                 )}
-                {finalScore != null && (
+                {expectedScore != null && (
                   <div className="absolute right-1.5 top-1.5">
-                    <ScoreBadge score={finalScore} size="sm" thresholds={scoreThresholds?.final} />
+                    <ScoreBadge
+                      score={expectedScore}
+                      size="sm"
+                      showStub={work.calculated_scores?.expected_is_stub ?? false}
+                      thresholds={scoreThresholds?.final}
+                    />
                   </div>
                 )}
                 <div className="absolute inset-x-0 bottom-0 flex items-end gap-1 bg-gradient-to-t from-black/75 via-black/30 to-transparent p-1.5">
@@ -673,7 +678,7 @@ function WorkListView({
   )
 
   const [activeSortField, activeSortDirection = "desc"] = (
-    searchParams.get("sort") ?? "final_score:desc"
+    searchParams.get("sort") ?? "expected_score:desc"
   ).split(":")
 
   const sortableColumns: Record<string, { field: string; label: string }> = {
@@ -1293,8 +1298,9 @@ function WorkListView({
                   </span>
                 </div>
                 <ScoreBadge
-                  score={work.calculated_scores?.final_score ?? null}
+                  score={work.calculated_scores?.expected_score ?? null}
                   size="sm"
+                  showStub={work.calculated_scores?.expected_is_stub ?? false}
                   thresholds={scoreThresholds?.final}
                 />
               </div>

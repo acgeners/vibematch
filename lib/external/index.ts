@@ -1,7 +1,7 @@
 import { searchAniList, fetchAniListById, fetchAniListReviews, fetchAniListRecommendations } from "./anilist"
 import { searchAnimePlanet, fetchAnimePlanetByTitle, fetchAnimePlanetReviews, fetchAnimePlanetRecommendations } from "./animeplanet"
 import type { AnimePlanetDetail } from "./animeplanet"
-import { searchComicK, fetchComicKByHid } from "./comick"
+import { searchComicK, fetchComicKByHid, fetchComicKReviews } from "./comick"
 import { searchComix, fetchComixById } from "./comix"
 import { isBlockedCoverUrl } from "./blocked-covers"
 import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews, fetchJikanMangaRecommendations } from "./jikan"
@@ -32,6 +32,11 @@ import type {
 const TIMEOUT_SEARCH_MS = 8000
 const TIMEOUT_HYDRATE_MS = 8000
 const TIMEOUT_REVIEWS_MS = 12000
+// ComicK raspa a página do frontend (resolve Cloudflare via FlareSolverr no
+// caminho); um solve frio leva ~8-15s, mais que as APIs JSON das outras fontes.
+// Teto maior só pra ele — análogo à observação de que reviews do MangaUpdates
+// (2 requests) já justificam um teto acima do padrão.
+const TIMEOUT_REVIEWS_COMICK_MS = 18000
 const TIMEOUT_SIMILAR_MS = 8000
 
 // ============================================================================
@@ -669,6 +674,7 @@ export const SEARCH_CONNECTORS = [
           coverUrl: item.coverUrl,
           year: item.year,
           chapters: item.chapters,
+          contentRating: item.contentRating,
           crossIds: Object.keys(crossIds).length > 0 ? crossIds : undefined,
         }
       })
@@ -1126,7 +1132,8 @@ export function extractUserRating(text: string): { rating?: number; cleanText: s
 /**
  * Fetches user reviews from every source that has an id on the merged candidate.
  * Não aplica cap — devolve tudo. A seleção/limites são feitos por
- * `selectReviewsForEvaluation()`. ComicK reviews ainda não implementadas.
+ * `selectReviewsForEvaluation()`. ComicK contribui reviews curadas (com nota /10)
+ * + comentários da obra (opinião livre dos usuários), unificados como "review".
  */
 async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<SourcedReview[]> {
   const fetchers: Array<Promise<{ source: ExternalSourceId; reviews: string[] } | null>> = [
@@ -1148,20 +1155,23 @@ async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<
     candidate.mangadexId
       ? withTimeout(fetchMangaDexForumComments(candidate.mangadexId).then((reviews) => ({ source: "mangadex" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:mangadex")
       : Promise.resolve(null),
+    candidate.comickHid
+      ? withTimeout(fetchComicKReviews(candidate.comickHid).then((reviews) => ({ source: "comick" as const, reviews })), TIMEOUT_REVIEWS_COMICK_MS, "reviews:comick")
+      : Promise.resolve(null),
   ]
 
   const settled = await Promise.allSettled(fetchers)
 
   // DEBUG: contar reviews raw por fonte antes de filtrar
   const rawCounts = settled.map((entry, i) => {
-    const src = ["mangaupdates", "anilist", "myanimelist", "kitsu", "animeplanet", "mangadex"][i]
+    const src = ["mangaupdates", "anilist", "myanimelist", "kitsu", "animeplanet", "mangadex", "comick"][i]
     if (entry.status === "rejected") return `${src}=REJECTED(${entry.reason})`
     if (!entry.value) return `${src}=skipped(no_id)`
     const reviews = entry.value.reviews
     const lens = reviews.map((r) => r.length).sort((a, b) => b - a).slice(0, 3)
     return `${src}=${reviews.length}(top3lens=${lens.join(",")})`
   })
-  console.log(`[collectReviews] candidate="${candidate.title}" ids={mu:${candidate.muId},ani:${candidate.anilistId},mal:${candidate.malId},kitsu:${candidate.kitsuId},ap:${candidate.animePlanetSlug},md:${candidate.mangadexId}} raw=${rawCounts.join(" ")}`)
+  console.log(`[collectReviews] candidate="${candidate.title}" ids={mu:${candidate.muId},ani:${candidate.anilistId},mal:${candidate.malId},kitsu:${candidate.kitsuId},ap:${candidate.animePlanetSlug},md:${candidate.mangadexId},cmk:${candidate.comickHid}} raw=${rawCounts.join(" ")}`)
 
   // Kitsu expõe "reactions" (não reviews completos), tipicamente 40-90 chars.
   // Pra outras fontes mantemos o threshold em 100 (reviews curtos demais
@@ -1172,6 +1182,10 @@ async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<
     // mangadex já vem com filtro + dedup no fetcher (XenForo tem muito ruído);
     // o threshold daqui é redundante mas explícito.
     mangadex: 150,
+    // comick mistura reviews curadas (longas, com nota) e comentários (curtos);
+    // os comentários já vêm filtrados (>=40) no fetcher. 40 aqui evita re-cortar
+    // review/comentário legítimo curto que o default 100 derrubaria.
+    comick: 40,
   }
   return settled
     .flatMap((entry) => (entry.status === "fulfilled" && entry.value ? [entry.value] : []))
@@ -1407,6 +1421,8 @@ interface ReviewContextResult {
   externalContext: string[]
   platformRatings: PlatformRating[]
   similarWorks: SimilarWork[]
+  /** Classificações de conteúdo das fontes ACEITAS que expõem o campo (MangaDex/ComicK), normalizadas em minúsculas e deduplicadas. Eleva o piso de adult_content na avaliação. */
+  contentRatings: string[]
 }
 
 interface ReviewContextCacheEntry {
@@ -1558,6 +1574,13 @@ async function fetchExternalEvaluationContextForCandidateUncached(
       votes: typeof result.votes === "number" ? result.votes : undefined,
     }))
 
+  // Só fontes ACEITAS contam — evita herdar o rating de uma obra que não casou.
+  const contentRatings = Array.from(new Set(
+    filteredAccepted
+      .map((result) => result.contentRating?.toLowerCase().trim())
+      .filter((rating): rating is string => Boolean(rating))
+  ))
+
   return {
     sourcedReviews: selectReviewsForEvaluation(allReviews, {
       perSource: opts.perSource ?? 8,
@@ -1569,6 +1592,7 @@ async function fetchExternalEvaluationContextForCandidateUncached(
     ).slice(0, 6),
     platformRatings,
     similarWorks,
+    contentRatings,
   }
 }
 
@@ -1662,7 +1686,7 @@ async function fetchExternalEvaluationContextForWorkUncached(input: {
     }
   }
 
-  return { sourcedReviews: [], allReviews: [], externalContext: [], platformRatings: [], similarWorks: [] }
+  return { sourcedReviews: [], allReviews: [], externalContext: [], platformRatings: [], similarWorks: [], contentRatings: [] }
 }
 
 // ============================================================================
@@ -1698,8 +1722,8 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
   if (mu) hydrated.push({ id: `mu:${candidate.muId}`, source: "mangaupdates", title: mu.title, alternativeTitles: mu.alternativeTitles, synopsis: mu.synopsis, coverUrl: mu.coverUrl, year: mu.year, publicationStatus: mu.publicationStatus, chapters: mu.chapters, score: mu.rating, votes: mu.votes, genres: uniqueStrings([...(mu.genres ?? []), ...(mu.categories ?? [])]) })
   if (kitsu) hydrated.push({ id: `kitsu:${candidate.kitsuId}`, source: "kitsu", title: kitsu.title, synopsis: kitsu.synopsis, coverUrl: kitsu.coverUrl, year: kitsu.year, publicationStatus: kitsu.publicationStatus, chapters: kitsu.chapters, score: kitsu.rating, votes: kitsu.votes, genres: kitsu.genres })
   if (mal) hydrated.push({ id: `mal:${candidate.malId}`, source: "myanimelist", title: mal.title, originalTitle: mal.originalTitle, alternativeTitles: mal.alternativeTitles, synopsis: mal.synopsis, coverUrl: mal.coverUrl, year: mal.year, publicationStatus: mal.publicationStatus, chapters: mal.chapters, score: mal.rating, votes: mal.votes, genres: mal.genres })
-  if (md) hydrated.push({ id: `mangadex:${candidate.mangadexId}`, source: "mangadex", title: md.title, alternativeTitles: md.alternativeTitles, synopsis: md.synopsis, coverUrl: md.coverUrl, year: md.year, publicationStatus: md.publicationStatus, chapters: md.chapters, score: md.rating, votes: md.votes, genres: md.genres })
-  if (cmx) hydrated.push({ id: `comick:${candidate.comickHid}`, source: "comick", title: cmx.title, alternativeTitles: cmx.alternativeTitles, synopsis: cmx.synopsis, coverUrl: cmx.coverUrl, publicationStatus: cmx.publicationStatus, chapters: cmx.lastChapter, score: cmx.rating, votes: cmx.votes, genres: cmx.tags })
+  if (md) hydrated.push({ id: `mangadex:${candidate.mangadexId}`, source: "mangadex", title: md.title, alternativeTitles: md.alternativeTitles, synopsis: md.synopsis, coverUrl: md.coverUrl, year: md.year, publicationStatus: md.publicationStatus, chapters: md.chapters, score: md.rating, votes: md.votes, genres: md.genres, contentRating: md.contentRating })
+  if (cmx) hydrated.push({ id: `comick:${candidate.comickHid}`, source: "comick", title: cmx.title, alternativeTitles: cmx.alternativeTitles, synopsis: cmx.synopsis, coverUrl: cmx.coverUrl, publicationStatus: cmx.publicationStatus, chapters: cmx.lastChapter, score: cmx.rating, votes: cmx.votes, genres: cmx.tags, contentRating: cmx.contentRating })
   if (cmix) hydrated.push({ id: `comix:${candidate.comixHid}`, source: "comix", title: cmix.title, alternativeTitles: cmix.alternativeTitles, synopsis: cmix.synopsis, coverUrl: cmix.coverUrl, year: cmix.year, publicationStatus: cmix.publicationStatus, chapters: cmix.chapters, score: cmix.rating, votes: cmix.votes, genres: cmix.tags })
   const muStatusText = typeof mu?.statusText === "string" ? mu.statusText : undefined
   return { hydrated, apDetail: ap as AnimePlanetDetail | null, muStatusText }

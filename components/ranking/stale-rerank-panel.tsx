@@ -21,6 +21,7 @@ import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
 import { rerankWorksBatchAction } from "@/server/actions/recommendations"
 import type { AlignmentQueueWork } from "@/server/queries/recommendations"
+import { refreshSidebarBadges } from "@/lib/sidebar-badges"
 
 type SortField = "default" | "expected" | "alignment"
 
@@ -125,6 +126,7 @@ export function StaleRerankPanel({
       )
     }
     router.refresh()
+    refreshSidebarBadges() // re-rank mudou a fila "IA Rk stale" → recontar badge
   }
 
   if (works.length === 0) {

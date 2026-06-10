@@ -6,6 +6,7 @@ import Link from "next/link"
 import { ArrowDown, ArrowUp, CalendarDays, CheckSquare, Cpu, ExternalLink, Gauge, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation, skipAiEvaluation, prewarmEvaluationContext } from "@/server/actions/ai"
+import { refreshSidebarBadges } from "@/lib/sidebar-badges"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
 import { AiEvaluationCompare } from "./ai-evaluation-compare"
 import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/status-badge"
@@ -108,6 +109,12 @@ function EvaluatingProgress({ estimateMs = 55000 }: { estimateMs?: number }) {
 
 export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   const router = useRouter()
+  // router.refresh() atualiza os contadores das abas (server component); o badge
+  // da sidebar fica na mesma rota, então precisa do evento pra recontar.
+  const refreshQueue = () => {
+    router.refresh()
+    refreshSidebarBadges()
+  }
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null)
   const [skippingId, setSkippingId] = useState<string | null>(null)
   const [reviewData, setReviewData] = useState<ReviewData | null>(null)
@@ -359,7 +366,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
     if (reviews.length === 0) {
       setQueue([])
       setQueueProcessedCount(0)
-      router.refresh()
+      refreshQueue()
       return
     }
     setQueueResults(reviews)
@@ -420,7 +427,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
       setQueueResults([])
       setQueueReviewIndex(0)
       setQueueProcessedCount(0)
-      router.refresh()
+      refreshQueue()
     }
   }
 
@@ -432,7 +439,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
     setQueueReviewIndex(0)
     setQueueProcessedCount(0)
     setBatchNoReview(null)
-    router.refresh()
+    refreshQueue()
   }
 
   const handleSkip = async (workId: string) => {
@@ -440,7 +447,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
     await skipAiEvaluation(workId)
     setSkippingId(null)
     toast.success("Obra marcada para pular avaliação IA")
-    router.refresh()
+    refreshQueue()
   }
 
   const handleEvaluateSelected = async () => {
@@ -458,7 +465,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
       await skipAiEvaluation(id)
     }
     toast.success(`${ids.length} obra${ids.length !== 1 ? "s" : ""} pulada${ids.length !== 1 ? "s" : ""}`)
-    router.refresh()
+    refreshQueue()
   }
 
   const isInQueue = queue.length > 0

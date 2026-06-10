@@ -216,7 +216,7 @@ function applyWorkFilters(
 
 export async function getWorks(
   filters: WorkFilters = {},
-  sort: WorkSort = { field: "final_score", direction: "desc" },
+  sort: WorkSort = { field: "expected_score", direction: "desc" },
   page = 1,
   pageSize = 50
 ): Promise<PaginatedResult<WorkWithRelations>> {
@@ -462,6 +462,29 @@ export async function getWorkBySlug(slug: string) {
   }
   if (!id) return null
   return getWorkWithAiEvaluations(id)
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Busca só o título de uma obra por id (UUID) ou slug. Usado pelo
+ * `generateMetadata` da página de detalhe pra nomear a aba do navegador sem
+ * carregar todas as relações da obra.
+ */
+export async function getWorkTitleByIdOrSlug(idOrSlug: string): Promise<string | null> {
+  const supabase = createAdminClient()
+  if (UUID_RE.test(idOrSlug)) {
+    const { data } = await supabase
+      .from("works")
+      .select("title")
+      .eq("id", idOrSlug)
+      .maybeSingle()
+    return (data?.title as string | null) ?? null
+  }
+  const { data } = await supabase.from("works").select("title")
+  return (
+    (data ?? []).find((row) => titleToSlug(row.title ?? "") === idOrSlug)?.title ?? null
+  )
 }
 
 export async function getWorkIdsBySlug(slug: string): Promise<string[]> {

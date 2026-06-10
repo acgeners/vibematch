@@ -11,6 +11,8 @@ export interface MangaDexResult {
   coverUrl?: string
   year?: number
   chapters?: number
+  /** "safe" | "suggestive" | "erotica" | "pornographic". */
+  contentRating?: string
   /** Cross-platform IDs from MangaDex `attributes.links`: al=AniList, mu=MangaUpdates, mal=MyAnimeList, kt=Kitsu, ap=AnimePlanet. */
   links?: { al?: string; mu?: string; mal?: string; kt?: string; ap?: string }
 }
@@ -29,6 +31,8 @@ export interface MangaDexDetail {
   /** follows count from /statistics — closest signal MangaDex offers */
   votes?: number
   genres: string[]
+  /** "safe" | "suggestive" | "erotica" | "pornographic". */
+  contentRating?: string
 }
 
 interface MdRelationship {
@@ -158,6 +162,7 @@ export async function searchMangaDex(title: string): Promise<MangaDexResult[]> {
           coverUrl: coverFromRelationships(record.id, record.relationships),
           year: typeof attr.year === "number" ? attr.year : undefined,
           chapters: chapterCountFromLastChapter(attr.lastChapter),
+          contentRating: typeof attr.contentRating === "string" ? attr.contentRating : undefined,
           links: extractLinks(attr.links),
         }
       })
@@ -308,6 +313,7 @@ export async function fetchMangaDexById(id: string): Promise<MangaDexDetail | nu
       rating,
       votes,
       genres: tagsFromAttributes(attr),
+      contentRating: typeof attr.contentRating === "string" ? attr.contentRating : undefined,
     }
   } catch {
     return null

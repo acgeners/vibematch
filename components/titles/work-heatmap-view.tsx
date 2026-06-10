@@ -272,13 +272,13 @@ export function WorkHeatmapView({
   const widthPercent = (px: number): string =>
     `${((px / naturalTotal) * 100).toFixed(4)}%`
 
-  const [sortKey, setSortKey] = useState<string>("final_score")
+  const [sortKey, setSortKey] = useState<string>("expected_score")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
 
   // If the user hides the currently-sorted column, fall back to the first visible score column.
   const effectiveSortKey = useMemo(() => {
     if (visibleScoreColumns.find((c) => c.key === sortKey)) return sortKey
-    return visibleScoreColumns[0]?.key ?? "final_score"
+    return visibleScoreColumns[0]?.key ?? "expected_score"
   }, [sortKey, visibleScoreColumns])
 
   const sortedWorks = useMemo(() => {

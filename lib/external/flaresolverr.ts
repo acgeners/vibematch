@@ -52,7 +52,13 @@ function logFlareSolverrFailure(reason: string) {
 
 export async function flareSolverrFetch(
   url: string,
-  timeoutMs = 60000
+  timeoutMs = 60000,
+  // Teto de espera da NOSSA conexão com o FlareSolverr. Default curto (5s) detecta
+  // container caído rápido; chamadas que sabem que vão pagar um solve frio de
+  // Cloudflare (ex.: scrape de página) passam um valor maior pra não cortar antes
+  // do desafio terminar. Não confundir com `timeoutMs` (orçamento do Chrome
+  // headless DENTRO do FlareSolverr).
+  abortMs = FLARESOLVERR_TIMEOUT_MS
 ): Promise<{ html: string; finalUrl: string } | null> {
   if (!ENDPOINT) return null
   // Circuito aberto (container falhou recentemente) → falha na hora, sem esperar.
@@ -67,7 +73,7 @@ export async function flareSolverrFetch(
         maxTimeout: timeoutMs,
       }),
       cache: "no-store",
-      signal: AbortSignal.timeout(FLARESOLVERR_TIMEOUT_MS),
+      signal: AbortSignal.timeout(abortMs),
     })
     if (!res.ok) {
       logFlareSolverrFailure(`HTTP ${res.status} — container caído ou misconfigurado?`)
@@ -101,7 +107,10 @@ export async function flareSolverrFetch(
  */
 export async function fetchHtmlWithCfFallback(
   url: string,
-  headers: Record<string, string> = {}
+  headers: Record<string, string> = {},
+  // Repassado ao FlareSolverr como teto de espera da conexão. Default 5s; suba pra
+  // páginas que pagam solve frio de Cloudflare (ver flareSolverrFetch).
+  abortMs?: number
 ): Promise<{ html: string; finalUrl: string } | null> {
   try {
     const res = await fetch(url, { headers, cache: "no-store" })
@@ -115,5 +124,5 @@ export async function fetchHtmlWithCfFallback(
     // fall through to FlareSolverr
   }
   if (!ENDPOINT) return null
-  return flareSolverrFetch(url)
+  return flareSolverrFetch(url, 60000, abortMs)
 }

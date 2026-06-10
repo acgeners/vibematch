@@ -10,6 +10,7 @@ import {
   applySynopsisPredictionAction,
 } from "@/server/actions/synopsis-quality"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
+import { refreshSidebarBadges } from "@/lib/sidebar-badges"
 
 export interface PredictSynopsisRowActionsProps {
   workId: string
@@ -57,6 +58,7 @@ export function PredictSynopsisRowActions({
       const q = res.data?.predictedQuality
       toast.success(q ? `Interesse estimado: ${q} (${SYNOPSIS_QUALITY_LABELS[q]})` : "Interesse estimado.")
       router.refresh()
+      refreshSidebarBadges() // saiu de "não previsto" → recontar badge
     })
   }
 

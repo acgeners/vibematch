@@ -20,6 +20,7 @@ import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
 import { PredictSynopsisRowActions } from "@/components/titles/predict-synopsis-row-actions"
 import { predictSynopsisQualityBatchAction } from "@/server/actions/synopsis-quality"
+import { refreshSidebarBadges } from "@/lib/sidebar-badges"
 import { cn } from "@/lib/utils"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
@@ -130,6 +131,7 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
       )
     }
     router.refresh()
+    refreshSidebarBadges() // estimou sinopses → saíram de "não previsto" no badge
   }
 
   if (works.length === 0) {
