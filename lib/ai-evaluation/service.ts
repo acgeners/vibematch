@@ -134,7 +134,7 @@ const MAX_REVIEW_WORDS = 200
  * garantir que a mesma obra avaliada nos dois fluxos receba o mesmo input
  * (e portanto bata no mesmo `inputHash` do cache).
  */
-export const AI_EVAL_REVIEW_CAPS = { perSource: 8, total: 30 } as const
+export const AI_EVAL_REVIEW_CAPS = { total: 30, maxPerSource: 12 } as const
 
 const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
   mangaupdates: "MangaUpdates",

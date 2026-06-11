@@ -94,7 +94,8 @@ Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evalu
 **Path A — "✨ Avaliar" page (`/ai-evaluation`)**
 `triggerAiEvaluation(workId)` → `fetchExternalEvaluationContextForWork()` → `requestAiEvaluation()`
 - Uses saved work data (primary synopsis, genres, grouped tags, cover). If the work has accepted `work_external_ids`, reviews/context are fetched from those confirmed source IDs; otherwise it falls back to title search.
-- Review sources: MangaUpdates + AniList + MyAnimeList + AnimePlanet + Kitsu (where IDs are available)
+- Review sources (each only when the candidate has that source's ID): MangaUpdates + AniList + MyAnimeList + Kitsu (reactions) + AnimePlanet + MangaDex (forum comments) + ComicK (curated reviews + comments) + Comix (per-work comment thread, mini-reviews). Comix has no formal reviews API; `fetchComixReviews(hid)` walks detail `id` → `threads/lookup?page_identifier=manga{id}&page_url=/title/{hid}` → `threads/{threadId}/comments` (cursor-paginated, via `fetchComixJson`/FlareSolverr).
+- Reviews go through `selectReviewsForEvaluation()` before the prompt — stratified per-source sampling with an **adaptive** quota: `perSource = min(maxPerSource, ceil(total / sourcesWithReviews))`, capped by `AI_EVAL_REVIEW_CAPS = { total: 30, maxPerSource: 12 }` (service.ts), then global round-robin in `REVIEW_SOURCE_PRIORITY` order (MangaUpdates first). So few-source works fill the budget (2 sources → up to 24, not 16) instead of being stuck at a fixed 8/source. All sources are always fetched in parallel; the cap is applied at selection time only (no fetch short-circuit). The full pool persists to `work_reviews`.
 - Passes `sourcedReviews: SourcedReview[]` (rich format with source, matchScore, sourceTitle)
 - Also passes `externalContext` (synopsis strings from external sources)
 - Saves results to `ai_evaluations` + `ai_evaluation_scores` tables

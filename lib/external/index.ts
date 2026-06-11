@@ -2,7 +2,7 @@ import { searchAniList, fetchAniListById, fetchAniListReviews, fetchAniListRecom
 import { searchAnimePlanet, fetchAnimePlanetByTitle, fetchAnimePlanetReviews, fetchAnimePlanetRecommendations } from "./animeplanet"
 import type { AnimePlanetDetail } from "./animeplanet"
 import { searchComicK, fetchComicKByHid, fetchComicKReviews } from "./comick"
-import { searchComix, fetchComixById } from "./comix"
+import { searchComix, fetchComixById, fetchComixReviews } from "./comix"
 import { isBlockedCoverUrl } from "./blocked-covers"
 import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews, fetchJikanMangaRecommendations } from "./jikan"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
@@ -37,6 +37,10 @@ const TIMEOUT_REVIEWS_MS = 12000
 // Teto maior só pra ele — análogo à observação de que reviews do MangaUpdates
 // (2 requests) já justificam um teto acima do padrão.
 const TIMEOUT_REVIEWS_COMICK_MS = 18000
+// Comix também passa por FlareSolverr (3 calls: detalhe → lookup → comments),
+// mas roda em paralelo sob o teto do ComicK; teto próprio < 18s pra ele nunca
+// estender o caminho crítico além do que o ComicK já custa.
+const TIMEOUT_REVIEWS_COMIX_MS = 15000
 const TIMEOUT_SIMILAR_MS = 8000
 
 // ============================================================================
@@ -1158,13 +1162,16 @@ async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<
     candidate.comickHid
       ? withTimeout(fetchComicKReviews(candidate.comickHid).then((reviews) => ({ source: "comick" as const, reviews })), TIMEOUT_REVIEWS_COMICK_MS, "reviews:comick")
       : Promise.resolve(null),
+    candidate.comixHid
+      ? withTimeout(fetchComixReviews(candidate.comixHid).then((reviews) => ({ source: "comix" as const, reviews })), TIMEOUT_REVIEWS_COMIX_MS, "reviews:comix")
+      : Promise.resolve(null),
   ]
 
   const settled = await Promise.allSettled(fetchers)
 
   // DEBUG: contar reviews raw por fonte antes de filtrar
   const rawCounts = settled.map((entry, i) => {
-    const src = ["mangaupdates", "anilist", "myanimelist", "kitsu", "animeplanet", "mangadex", "comick"][i]
+    const src = ["mangaupdates", "anilist", "myanimelist", "kitsu", "animeplanet", "mangadex", "comick", "comix"][i]
     if (entry.status === "rejected") return `${src}=REJECTED(${entry.reason})`
     if (!entry.value) return `${src}=skipped(no_id)`
     const reviews = entry.value.reviews
@@ -1186,6 +1193,9 @@ async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<
     // os comentários já vêm filtrados (>=40) no fetcher. 40 aqui evita re-cortar
     // review/comentário legítimo curto que o default 100 derrubaria.
     comick: 40,
+    // comix são comentários de nível-obra (mini-reviews); 80 corta one-liners
+    // de baixo sinal ("totally recomended") mas mantém opiniões concisas.
+    comix: 80,
   }
   return settled
     .flatMap((entry) => (entry.status === "fulfilled" && entry.value ? [entry.value] : []))
@@ -1303,7 +1313,9 @@ async function collectSimilarFromCandidate(candidate: MergedCandidate, limit = 6
 /**
  * Seleciona reviews para enviar à IA com amostragem estratificada por fonte
  * e por sentimento. Algoritmo:
- *  1. Agrupa por `source`.
+ *  1. Agrupa por `source`. Cota por fonte = ceil(`total` / nº de fontes com
+ *     review), limitada por `maxPerSource` — com poucas fontes cada uma enche
+ *     mais o orçamento; com muitas, o round-robin global (passo 3) apara.
  *  2. Em cada grupo, se há ratings, bucketiza alto (>=7) / baixo (<=4) / médio
  *     e pega round-robin entre buckets (ordenado por textLength desc).
  *     Sem ratings, ordena por textLength desc.
@@ -1313,7 +1325,7 @@ async function collectSimilarFromCandidate(candidate: MergedCandidate, limit = 6
  */
 export function selectReviewsForEvaluation(
   reviews: SourcedReview[],
-  opts: { perSource: number; total: number }
+  opts: { total: number; maxPerSource?: number }
 ): SourcedReview[] {
   const grouped = new Map<ExternalSourceId, SourcedReview[]>()
   for (const review of reviews) {
@@ -1321,6 +1333,15 @@ export function selectReviewsForEvaluation(
     if (list) list.push(review)
     else grouped.set(review.source, [review])
   }
+
+  // Reparte o orçamento (`total`) entre as fontes que de fato têm review. Sem
+  // o `maxPerSource`, uma fonte única poderia contribuir até `total`; com ele,
+  // fica capada mesmo quando é a única com reviews.
+  const sourceCount = Math.max(1, grouped.size)
+  const perSource = Math.min(
+    opts.maxPerSource ?? opts.total,
+    Math.ceil(opts.total / sourceCount),
+  )
 
   const byLength = (a: SourcedReview, b: SourcedReview) =>
     (b.textLength ?? b.text.length) - (a.textLength ?? a.text.length)
@@ -1356,7 +1377,7 @@ export function selectReviewsForEvaluation(
 
   const perSourcePicked = new Map<ExternalSourceId, SourcedReview[]>()
   for (const [source, list] of grouped.entries()) {
-    perSourcePicked.set(source, pickFromSource(list, opts.perSource))
+    perSourcePicked.set(source, pickFromSource(list, perSource))
   }
 
   const sortedSources = [...perSourcePicked.keys()].sort((a, b) => {
@@ -1505,8 +1526,8 @@ export async function fetchExternalEvaluationContextForCandidate(
   candidate: MergedCandidate,
   opts: {
     rejectedSources?: ReadonlyArray<string>
-    perSource?: number
     total?: number
+    maxPerSource?: number
   } = {}
 ): Promise<ReviewContextResult> {
   const cacheKey = reviewContextCacheKey({
@@ -1519,9 +1540,10 @@ export async function fetchExternalEvaluationContextForCandidate(
     mangadexId: candidate.mangadexId ?? null,
     animePlanetSlug: candidate.animePlanetSlug ?? null,
     comickHid: candidate.comickHid ?? null,
+    comixHid: candidate.comixHid ?? null,
     rejectedSources: [...(opts.rejectedSources ?? [])].sort(),
-    perSource: opts.perSource ?? 8,
     total: opts.total ?? 30,
+    maxPerSource: opts.maxPerSource ?? 12,
   })
   const cached = readReviewContextCache(cacheKey)
   if (cached) {
@@ -1540,8 +1562,8 @@ async function fetchExternalEvaluationContextForCandidateUncached(
   candidate: MergedCandidate,
   opts: {
     rejectedSources?: ReadonlyArray<string>
-    perSource?: number
     total?: number
+    maxPerSource?: number
   } = {}
 ): Promise<ReviewContextResult> {
   const { uniqueAccepted } = await hydrateAndFilterCandidate(candidate)
@@ -1583,8 +1605,8 @@ async function fetchExternalEvaluationContextForCandidateUncached(
 
   return {
     sourcedReviews: selectReviewsForEvaluation(allReviews, {
-      perSource: opts.perSource ?? 8,
       total: opts.total ?? 30,
+      maxPerSource: opts.maxPerSource ?? 12,
     }),
     allReviews,
     externalContext: uniqueSynopsisBlocks(
@@ -1673,7 +1695,6 @@ async function fetchExternalEvaluationContextForWorkUncached(input: {
   for (const candidate of merged) {
     const result = await fetchExternalEvaluationContextForCandidate(candidate, {
       rejectedSources: [...rejected],
-      perSource: 8,
       total: 30,
     })
     if (

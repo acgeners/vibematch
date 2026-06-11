@@ -235,3 +235,78 @@ export async function fetchComixById(hid: string): Promise<ComixDetail | null> {
     links: linksFromItem(r.links),
   }
 }
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&nbsp;/gi, " ")
+}
+
+function stripHtmlToText(value: string): string {
+  return decodeHtmlEntities(
+    value
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+  )
+    .replace(/[ \t]+/g, " ")
+    .replace(/\s*\n\s*/g, "\n")
+    .trim()
+}
+
+/**
+ * Comentários do thread de NÍVEL-OBRA (a aba de comentários da página inicial da
+ * obra no comix.to, não atrelada a capítulo). A comix não tem "reviews" formais;
+ * esses comentários funcionam como mini-reviews ("10/10 peak", "dropped at ch20…").
+ *
+ * Cadeia (descoberta por reverse-engineering do bundle do front — acessores
+ * `Ve.threadLookup`/`Ve.thread`):
+ *  1. detalhe → id interno numérico (page_identifier = "manga{id}")
+ *  2. GET /threads/lookup?page_identifier=…&page_url=/title/{hid} → threadId
+ *     (ambos os params são obrigatórios; o feed global /comments NÃO filtra por obra)
+ *  3. GET /threads/{threadId}/comments (paginado por cursor) → items[].contentHtml
+ * Tudo via `fetchComixJson` pra herdar o fallback FlareSolverr do Cloudflare.
+ */
+export async function fetchComixReviews(hid: string): Promise<string[]> {
+  const detail = await fetchComixJson(`/manga/${encodeURIComponent(hid)}`)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const internalId = (detail as any)?.result?.id
+  if (typeof internalId !== "number") return []
+
+  const lookupPath = `/threads/lookup?page_identifier=manga${internalId}&page_url=${encodeURIComponent(`/title/${hid}`)}`
+  const lookup = await fetchComixJson(lookupPath)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const threadId = (lookup as any)?.result?.thread?.id
+  if (typeof threadId !== "number" || threadId <= 0) return []
+
+  const texts: string[] = []
+  let cursor: string | undefined
+  // 2 páginas (~44 comentários de topo) bastam: o seletor a jusante
+  // (`selectReviewsForEvaluation`) corta por fonte de qualquer forma.
+  for (let page = 0; page < 2; page++) {
+    const path = `/threads/${threadId}/comments${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+    const data = await fetchComixJson(path)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = (data as any)?.result
+    const items: unknown[] = Array.isArray(result?.items) ? result.items : []
+    for (const item of items) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const it = item as any
+      if (it?.isBanned || it?.isShadowBanned) continue
+      if (typeof it?.status === "string" && it.status !== "visible") continue
+      if (typeof it?.contentHtml === "string") {
+        // Trunca em 900 chars como as outras fontes (mangaupdates/comick/…) pra
+        // não inflar tokens nem enviesar o ranking por textLength a jusante.
+        const text = stripHtmlToText(it.contentHtml).slice(0, 900)
+        if (text) texts.push(text)
+      }
+    }
+    cursor = typeof result?.cursor === "string" && result.cursor ? result.cursor : undefined
+    if (!cursor || items.length === 0) break
+  }
+  return texts
+}
