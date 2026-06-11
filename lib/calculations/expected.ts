@@ -14,18 +14,20 @@
  * EXISTEM tanto em treino quanto inferência → predições passam a variar
  * informativamente entre obras leves e dramáticas.
  *
- * Features após revisão (13 numéricas + 1 categórica):
- *   Baseline / perfil (13):
+ * Features (19 numéricas + 2 categóricas):
+ *   Baseline / perfil (19):
  *     - 9 category_scores (preference axis)
  *     - IA(n) — engineered non-linear summary
  *     - Nota.M, LogVotos, Cps.N
  *     - SinopseScore
  *     - LovedTagOverlap, AvoidedTagOverlap, CriterionFitScore
+ *     - ReleaseAge, RunLength (recência/era + duração)
  *   (ObsAdjustment removido — agora soma determinística pós-predição.)
  *   Quality (0):
  *     - (removidas — ver acima)
- *   Categórica:
+ *   Categóricas:
  *     - Status (one-hot)
+ *     - Origin (ko/ja/zh/other — país de origem do título original)
  *
  * Decomposição pós-hoc continua válida — `qualityAdj` agora é sempre 0
  * (esperado), `baseline` é o único componente. Mantida a estrutura pra não
@@ -67,6 +69,10 @@ const BASELINE_NUMERIC_FEATURES = [
   "LovedTagOverlap",
   "AvoidedTagOverlap",
   "CriterionFitScore",
+  // Recência/era e duração da obra. Sinal ortogonal (não está nas 9 notas):
+  // idade = ano atual − ano de início; duração = ano_fim − ano_início.
+  "ReleaseAge",
+  "RunLength",
 ] as const
 
 // Mantido exportado pra backwards-compat: outros módulos consomem o nome.
@@ -95,7 +101,9 @@ const NUMERIC_FEATURE_NAMES = [
   ...QUALITY_NUMERIC_FEATURES,
 ] as const
 
-const CATEGORICAL_FEATURE_NAMES = ["Status"] as const
+// Origin = país de origem inferido do título original (ko/ja/zh/other). Sinal de
+// preferência de mídia (manhwa coreano vs mangá japonês vs manhua chinês).
+const CATEGORICAL_FEATURE_NAMES = ["Status", "Origin"] as const
 
 const MIN_TRAIN = 20
 
@@ -117,6 +125,12 @@ export interface ExpectedScoreInput {
   lovedTagOverlap: number | null
   avoidedTagOverlap: number | null
   criterionFitScore: number | null
+  /** Idade da obra (ano atual − ano de início). null quando sem ano. */
+  releaseAge: number | null
+  /** Duração (ano_fim − ano_início). null quando sem anos. */
+  runLength: number | null
+  /** Origem inferida do título original: "ko" | "ja" | "zh" | "other" | "unknown". */
+  origin: string
   // Quality (8 granulares; null pra obras não lidas → imputado pela mediana)
   postScores: Partial<Record<PostScoreField, number | null>>
 }
@@ -174,6 +188,8 @@ function buildNumericRow(input: ExpectedScoreInput, includeQuality = false): Num
   row.push(input.lovedTagOverlap ?? null)
   row.push(input.avoidedTagOverlap ?? null)
   row.push(input.criterionFitScore ?? null)
+  row.push(input.releaseAge ?? null)
+  row.push(input.runLength ?? null)
   // post_*_score (8 quality) — só entram no Ridge no plano Pago (L0+), quando
   // existem pra TODA obra (user pós-leitura OU estimativa IA pras não-lidas).
   // No Free ficam de fora (imputação→colapso nas não-lidas). Ver doc-comment.
@@ -187,7 +203,7 @@ function buildNumericRow(input: ExpectedScoreInput, includeQuality = false): Num
 }
 
 function buildCategoricalRow(input: ExpectedScoreInput): string[] {
-  return [input.publicationStatus || "Unknown"]
+  return [input.publicationStatus || "Unknown", input.origin || "unknown"]
 }
 
 function hasAnyPostScore(input: ExpectedScoreInput): boolean {
@@ -377,6 +393,70 @@ export function verifyDecompositionCovers(predictor: TrainedExpectedPredictor): 
     if (!covered.has(i)) return false
   }
   return true
+}
+
+/**
+ * Out-of-fold predictions do expected_score: pra cada item, qual seria o
+ * `.expected` se a obra NÃO estivesse no treino. Usado pra fitar o peso do blend
+ * expected⊕calc sem leakage — sem OOF, o Ridge memoriza as obras de treino e o
+ * peso do blend sairia enviesado pro Ridge (que parece perfeito in-sample).
+ *
+ * Mesma mecânica do `ridgeOutOfFoldPredictions` (prediction.ts): shuffle
+ * determinístico (seed 42), LOOCV abaixo de 50. Retorna null com n < 20.
+ */
+export function expectedOutOfFoldPredictions(
+  inputs: ExpectedScoreInput[],
+  targets: number[],
+  includeQuality = false,
+  kFolds = 5,
+): number[] | null {
+  if (inputs.length !== targets.length) {
+    throw new Error("expectedOutOfFoldPredictions: inputs/targets length mismatch")
+  }
+  const n = inputs.length
+  if (n < 20) return null
+  const useFolds = n < 50 ? n : Math.max(2, Math.min(kFolds, n))
+
+  const order = Array.from({ length: n }, (_, i) => i)
+  let state = 42
+  const rand = () => {
+    state = (state * 1664525 + 1013904223) >>> 0
+    return state / 0x100000000
+  }
+  for (let i = n - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1))
+    ;[order[i], order[j]] = [order[j], order[i]]
+  }
+  const folds: number[][] = Array.from({ length: useFolds }, () => [])
+  for (let i = 0; i < n; i++) folds[i % useFolds].push(order[i])
+
+  const preds = new Array<number>(n).fill(NaN)
+  for (const fold of folds) {
+    const testIdx = new Set(fold)
+    const trIn: ExpectedScoreInput[] = []
+    const trTg: number[] = []
+    const teIn: ExpectedScoreInput[] = []
+    const teOrder: number[] = []
+    for (let i = 0; i < n; i++) {
+      if (testIdx.has(i)) {
+        teIn.push(inputs[i])
+        teOrder.push(i)
+      } else {
+        trIn.push(inputs[i])
+        trTg.push(targets[i])
+      }
+    }
+    if (trIn.length === 0 || teIn.length === 0) continue
+    const predictor = trainExpectedPredictor(trIn, trTg, includeQuality)
+    if (predictor.isStub) {
+      const fallback = trTg.length > 0 ? trTg.reduce((a, b) => a + b, 0) / trTg.length : 7.0
+      for (const idx of teOrder) preds[idx] = fallback
+      continue
+    }
+    const out = predictor.predict(teIn)
+    for (let i = 0; i < teOrder.length; i++) preds[teOrder[i]] = out[i].expected
+  }
+  return preds
 }
 
 export {

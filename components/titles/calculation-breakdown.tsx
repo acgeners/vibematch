@@ -119,7 +119,7 @@ function ExpectedWaterfall({ calculatedScore }: { calculatedScore: CalculatedSco
                 <Info className="h-3.5 w-3.5 text-muted-foreground" />
               </TooltipTrigger>
               <TooltipContent className="max-w-sm text-xs">
-                A nota prevista é UM Ridge único treinado contra seu user_score em 22 features. A decomposição em <strong>Perfil</strong> (Stage 1: 14 features de encaixe com seu tipo) + <strong>Qualidade</strong> (Stage 2: 8 dimensões pós-leitura) é calculada pós-hoc via atribuição linear (intercept + Σ coef × x agrupado). As 9 notas por critério que alimentam o Perfil vêm da avaliação da IA, que pontua cada critério pelas rubricas (não é o cálculo abaixo).
+                A nota prevista é UM Ridge único treinado contra seu user_score em 22 features. A decomposição em <strong>Perfil</strong> (Stage 1: 14 features de encaixe com seu tipo) + <strong>Qualidade</strong> (Stage 2: 8 dimensões pós-leitura) é calculada pós-hoc via atribuição linear (intercept + Σ coef × x agrupado). As 9 notas por critério que alimentam o Perfil vêm da avaliação da IA, que pontua cada critério pelas rubricas (não é o cálculo abaixo). O Perfil já embute uma âncora na Nota.Calc determinística (blend de variância — estabiliza a previsão e dá robustez fora-da-distribuição).
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

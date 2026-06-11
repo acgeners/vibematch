@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   trainExpectedPredictor,
+  expectedOutOfFoldPredictions,
   verifyDecompositionCovers,
   EXPECTED_BASELINE_FEATURES,
   EXPECTED_QUALITY_FEATURES,
@@ -32,6 +33,9 @@ const baseInput = (overrides: Partial<ExpectedScoreInput> = {}): ExpectedScoreIn
   lovedTagOverlap: null,
   avoidedTagOverlap: null,
   criterionFitScore: null,
+  releaseAge: 3,
+  runLength: 2,
+  origin: "ko",
   postScores: {},
   ...overrides,
 })
@@ -250,11 +254,49 @@ describe("trainExpectedPredictor (single Ridge + decomposition)", () => {
       "LovedTagOverlap",
       "AvoidedTagOverlap",
       "CriterionFitScore",
+      "ReleaseAge",
+      "RunLength",
     ])
     // QUALITY removida do Ridge — array vazio. POST_SCORE_FIELDS preservado
     // pra back-compat de outros módulos que ainda consomem o nome.
     expect(EXPECTED_QUALITY_FEATURES).toEqual([])
     expect(POST_SCORE_FIELDS).toHaveLength(8)
     expect(EXPECTED_NUMERIC_FEATURES).toEqual(EXPECTED_BASELINE_FEATURES)
+  })
+})
+
+describe("expectedOutOfFoldPredictions", () => {
+  // Inputs sintéticos com sinal: user_score correlaciona com romance.
+  const makeData = (n: number) => {
+    const inputs: ExpectedScoreInput[] = []
+    const targets: number[] = []
+    for (let i = 0; i < n; i++) {
+      const romance = 1 + (i % 10)
+      inputs.push(baseInput({ categoryScores: { ...baseInput().categoryScores, romance } }))
+      targets.push(5 + romance * 0.3) // alvo ~determinístico no romance
+    }
+    return { inputs, targets }
+  }
+
+  it("retorna null abaixo de 20 amostras (CV instável)", () => {
+    const { inputs, targets } = makeData(15)
+    expect(expectedOutOfFoldPredictions(inputs, targets)).toBeNull()
+  })
+
+  it("retorna predições OOF finitas pra todos os itens (n ≥ 20)", () => {
+    const { inputs, targets } = makeData(60)
+    const oof = expectedOutOfFoldPredictions(inputs, targets)
+    expect(oof).not.toBeNull()
+    expect(oof).toHaveLength(60)
+    for (const v of oof as number[]) {
+      expect(Number.isFinite(v)).toBe(true)
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThanOrEqual(10)
+    }
+  })
+
+  it("lança quando inputs e targets têm tamanhos diferentes", () => {
+    const { inputs } = makeData(30)
+    expect(() => expectedOutOfFoldPredictions(inputs, [1, 2, 3])).toThrow()
   })
 })

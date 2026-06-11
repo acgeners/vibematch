@@ -162,4 +162,12 @@ describe("normalizeGPT", () => {
   it("GPT=10 → GPT.N=10 (clamp superior, sem clamp seria 11.25)", () => {
     expect(normalizeGPT(10)).toBe(10)
   })
+
+  it("center customizado: amplifica em torno do centro passado", () => {
+    // Com center=7 (média do catálogo), o ponto fixo passa pra 7 e nada é
+    // empurrado pra cima/baixo só por estar acima/abaixo de 5.
+    expect(normalizeGPT(7, 7)).toBeCloseTo(7)
+    expect(normalizeGPT(8, 7)).toBeCloseTo(7 + (8 - 7) * 1.25)
+    expect(normalizeGPT(6, 7)).toBeCloseTo(7 + (6 - 7) * 1.25)
+  })
 })

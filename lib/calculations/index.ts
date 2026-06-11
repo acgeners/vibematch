@@ -39,7 +39,8 @@ export function calculateAll(inputs: CalculationInputs): CalculationResult {
   } = inputs
 
   const iaEvalRaw = calculateGPT(categoryScores, weights)
-  const iaEvalNormalized = normalizeGPT(iaEvalRaw)
+  // Centro vindo do último recalc do catálogo (fallback 5 antes do 1º recalc).
+  const iaEvalNormalized = normalizeGPT(iaEvalRaw, config.gpt_mean ?? 5)
 
   const totalVotes = sumVotes(platformRatings)
   const platformAvg = calculatePlatformAvg(

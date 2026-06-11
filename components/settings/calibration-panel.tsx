@@ -515,10 +515,10 @@ const RIDGE_FEATURE_GROUPS: Array<{
   },
   {
     key: "personal",
-    label: "Pessoal (qualidade pós-leitura + tag overlap)",
+    label: "Pessoal (afinidade de tags + critérios)",
     tone: "personal",
     description:
-      "Seu gosto: notas pós-leitura, sobreposição de tags com obras que você amou/evitou (LovedTagOverlap, AvoidedTagOverlap) e alinhamento de critérios (CriterionFitScore). Quanto a previsão é personalizada pra você.",
+      "Seu gosto: sobreposição de tags com obras que você amou/evitou (LovedTagOverlap, AvoidedTagOverlap) e alinhamento de critérios (CriterionFitScore). Quanto a previsão é personalizada pra você. (As notas pós-leitura granulares só entram no modelo no plano Pago; em Free elas não contam aqui.)",
     belongs: (n) =>
       n === "MeanPostScore" ||
       n === "LovedTagOverlap" ||
@@ -530,10 +530,10 @@ const RIDGE_FEATURE_GROUPS: Array<{
   },
   {
     key: "other",
-    label: "Outros (capítulos, sinopse, status)",
+    label: "Outros (capítulos, sinopse, status, ano, origem)",
     tone: "muted",
     description:
-      "Metadados estruturais: número de capítulos (Cps.N), qualidade da sinopse (SinopseScore) e status de publicação. Sinal de contexto que não cai nos grupos acima.",
+      "Metadados estruturais: capítulos (Cps.N), qualidade da sinopse (SinopseScore), status de publicação, idade/duração da obra (ReleaseAge, RunLength) e origem (manhwa/mangá/manhua). Sinal de contexto que não cai nos grupos acima.",
     belongs: () => true, // catch-all (último — não-IA, não-plataforma, não-pessoal)
   },
 ]
@@ -563,6 +563,8 @@ const FEATURE_LABELS: Record<string, string> = {
   LovedTagOverlap: "Afinidade c/ tags que você amou",
   AvoidedTagOverlap: "Sobreposição c/ tags que você evita",
   CriterionFitScore: "Alinhamento de critérios",
+  ReleaseAge: "Idade da obra (anos)",
+  RunLength: "Duração (anos)",
   ObsAdjustment: "Ajuste de observação",
   MeanPostScore: "Nota pós-leitura (média)",
 }
@@ -575,6 +577,14 @@ const STATUS_FEATURE_LABELS: Record<string, string> = {
   Unknown: "Desconhecido",
 }
 
+const ORIGIN_FEATURE_LABELS: Record<string, string> = {
+  ko: "Coreano (manhwa)",
+  ja: "Japonês (mangá)",
+  zh: "Chinês (manhua)",
+  other: "Outro",
+  unknown: "Desconhecido",
+}
+
 /** Resolve o nome cru de uma feature do Ridge pra um rótulo legível. */
 function featureLabel(name: string): string {
   const criterion = CRITERIA_INFO[name as keyof typeof CRITERIA_INFO]
@@ -585,6 +595,10 @@ function featureLabel(name: string): string {
   if (name.startsWith("Status_")) {
     const raw = name.slice("Status_".length)
     return `Status: ${STATUS_FEATURE_LABELS[raw] ?? raw}`
+  }
+  if (name.startsWith("Origin_")) {
+    const raw = name.slice("Origin_".length)
+    return `Origem: ${ORIGIN_FEATURE_LABELS[raw] ?? raw}`
   }
   return name
 }

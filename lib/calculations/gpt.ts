@@ -87,14 +87,20 @@ export function calculateGPT(
 }
 
 /**
- * GPT.N = clamp(5 + (gpt - 5) * 1.25, 0, 10)
+ * GPT.N = clamp(center + (gpt - center) * 1.25, 0, 10)
  *
- * Amplificação simples em torno do ponto neutro 5. O slope 1.25 foi calibrado
- * empiricamente. Tentamos z-score adaptativo (mean/std da distribuição real)
- * mas afundava IA(n) porque recentrava o output em 5 — a média dos user_score
- * fica em ~7–8, então recentrar GPT em 5 quebra a calibração contra o target.
- * As colunas formula_config.gpt_mean/gpt_std permanecem no DB como legacy.
+ * Amplificação em torno de `center`. `recalculateAll` passa a média do GPT cru
+ * do catálogo (persistida em formula_config.gpt_mean) como centro; o default 5
+ * é só fallback retrocompatível pra caminhos single-work sem o contexto do
+ * catálogo. Centrar em 5 quando a distribuição real centra em ~7 empurrava tudo
+ * acima de 5 pra cima — viés sistemático de +0.20 no calc_score. Centrar na
+ * média mata esse viés. (O z-score adaptativo que tentamos antes afundava IA(n)
+ * porque dividia pelo std E recentrava em 5/0; centrar na média SEM dividir pelo
+ * std evita esse modo de falha.) Slope 1.25 fixo — super-amplificar piora a MAE.
+ *
+ * Só afeta calc_score: a feature IA(n) do Ridge passa por StandardScaler, que é
+ * invariante a qualquer centro/escala constante.
  */
-export function normalizeGPT(gpt: number): number {
-  return Math.max(0, Math.min(10, 5 + (gpt - 5) * 1.25))
+export function normalizeGPT(gpt: number, center = 5): number {
+  return Math.max(0, Math.min(10, center + (gpt - center) * 1.25))
 }

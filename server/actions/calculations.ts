@@ -29,6 +29,7 @@ import {
 } from "@/lib/calculations/prediction"
 import {
   trainExpectedPredictor,
+  expectedOutOfFoldPredictions,
   type ExpectedScoreInput,
 } from "@/lib/calculations/expected"
 import {
@@ -49,6 +50,7 @@ import {
   weightedTagOverlap,
 } from "@/lib/ai-recommendation/personal-fit"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
+import { buildTasteProfileHeuristic } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import {
   CRITERION_SLUGS,
@@ -90,6 +92,9 @@ interface RawWork {
   observation_adjustment: number
   user_score: number | null
   is_archived: boolean
+  year: number | null
+  year_end: number | null
+  original_title: string | null
   post_story_score: number | null
   post_fl_score: number | null
   post_ml_score: number | null
@@ -113,6 +118,10 @@ interface WorkComputed {
   totalChapters: number | null
   synopsisQuality: SynopsisQuality | null
   observationAdjustment: number
+  /** Idade (ano atual − ano de início), duração e origem — features do expected. */
+  releaseAge: number | null
+  runLength: number | null
+  origin: string
   categoryScores: CategoryScoreMap
   /**
    * categoryScores com offset de atributos aplicado (Fase 1.5). Usado nos
@@ -140,6 +149,8 @@ interface WorkComputed {
   chaptersNormalized: number
   platformAvg: number | null
   calcScore: number
+  /** Nota.Calc sem o nudge de observação — parceiro do blend expected⊕calc. */
+  calcScoreNoObs: number
   predictedScore: number | null
   predictionDistance: number | null
   finalScore: number | null
@@ -158,6 +169,21 @@ interface WorkComputed {
   knnScore: number | null
   knnNeighbors: Array<KnnNeighbor & { weight: number }> | null
   knnDistanceTo5thNeighbor: number | null
+}
+
+const CURRENT_YEAR = new Date().getFullYear()
+
+/**
+ * Origem inferida pelo script do título original — feature do expected_score
+ * (preferência de mídia): Hangul → "ko" (manhwa) | Kana → "ja" (mangá) | Han
+ * sem kana/hangul → "zh" (manhua) | latino/outro → "other" | vazio → "unknown".
+ */
+function detectOrigin(originalTitle: string | null): string {
+  if (!originalTitle) return "unknown"
+  if (/[가-힯ᄀ-ᇿ]/.test(originalTitle)) return "ko"
+  if (/[぀-ヿ]/.test(originalTitle)) return "ja"
+  if (/[一-鿿]/.test(originalTitle)) return "zh"
+  return "other"
 }
 
 function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed {
@@ -222,6 +248,9 @@ function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed {
     totalChapters: raw.total_chapters,
     synopsisQuality: raw.synopsis_quality as SynopsisQuality | null,
     observationAdjustment: Number(raw.observation_adjustment ?? 0),
+    releaseAge: raw.year != null ? CURRENT_YEAR - raw.year : null,
+    runLength: raw.year != null && raw.year_end != null ? raw.year_end - raw.year : null,
+    origin: detectOrigin(raw.original_title),
     categoryScores,
     categoryScoresCalibrated,
     platformRatings,
@@ -238,6 +267,7 @@ function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed {
     chaptersNormalized: 0,
     platformAvg: null,
     calcScore: 0,
+    calcScoreNoObs: 0,
     predictedScore: null,
     predictionDistance: null,
     finalScore: null,
@@ -290,8 +320,139 @@ function buildExpectedInput(w: WorkComputed): ExpectedScoreInput {
     lovedTagOverlap: w.lovedTagOverlap,
     avoidedTagOverlap: w.avoidedTagOverlap,
     criterionFitScore: w.criterionFitScore,
+    releaseAge: w.releaseAge,
+    runLength: w.runLength,
+    origin: w.origin,
     postScores: w.postScores,
   }
+}
+
+/**
+ * MAE CV TRULY honesta da Nota Prevista (expected_score).
+ *
+ * Diferente do `model.cvMAE` interno do RidgeCV — que é otimista porque (a) o
+ * StandardScaler/imputer são fitados em TODAS as rotuladas antes do split do CV
+ * e (b) as features de perfil (criterionFit, tag-overlaps, IA(n) calibrado) são
+ * computadas uma vez com o perfil+pesos fitados em todas as rotuladas, então a
+ * fold held-out já "viu" o próprio rótulo via feature — aqui o perfil de gosto e
+ * os pesos auto-inferidos são RECOMPUTADOS dentro de cada fold só com o treino
+ * do fold, e o predictor (com seu próprio pré-processamento) é re-treinado por
+ * fold. Tipicamente fica ~0.03-0.05 acima do cvMAE vazado.
+ *
+ * Resíduo conhecido: o offset de bias (categoryScoresCalibrated) é mantido fixo
+ * (é offset de atributo da Fase 1.5, não derivado de user_score por obra).
+ *
+ * Retorna null quando treino < 30 (CV instável) ou tudo vira stub.
+ */
+function computeHonestExpectedCvMae(
+  trainSet: WorkComputed[],
+  baseWeights: ScoreWeight[],
+  scoreWeightsAuto: boolean,
+  includeQuality: boolean,
+  /** Peso do blend expected⊕calc — mede o score ENTREGUE, não o Ridge puro. */
+  blendWeight = 1,
+  k = 5,
+  seed = 42,
+): number | null {
+  const n = trainSet.length
+  if (n < 30) return null
+
+  const idx = Array.from({ length: n }, (_, i) => i)
+  let state = seed
+  const rand = () => {
+    state = (state * 1664525 + 1013904223) >>> 0
+    return state / 0x100000000
+  }
+  for (let i = n - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1))
+    ;[idx[i], idx[j]] = [idx[j], idx[i]]
+  }
+  // Mesmo critério de folds do trainExpectedPredictor: LOOCV abaixo de 50.
+  const effK = n < 50 ? n : k
+  const folds: number[][] = Array.from({ length: effK }, () => [])
+  idx.forEach((v, i) => folds[i % effK].push(v))
+
+  const knownSlugs = new Set<string>(CRITERION_SLUGS as readonly string[])
+  const currentWeights: CurrentWeight[] = baseWeights
+    .filter((w): w is ScoreWeight & { slug: CriterionSlug } => knownSlugs.has(w.slug))
+    .map((w) => ({ slug: w.slug as CriterionSlug, weight: w.weight }))
+
+  let absSum = 0
+  let count = 0
+  for (const fold of folds) {
+    const testSet = new Set(fold)
+    const trainWorks = trainSet.filter((_, i) => !testSet.has(i))
+    const testWorks = fold.map((i) => trainSet[i])
+    if (trainWorks.length < 20) continue
+
+    // Pesos do fold: re-inferidos só do treino (se auto); senão usa os manuais.
+    let foldWeights = baseWeights
+    if (scoreWeightsAuto) {
+      const inf = inferScoreWeights(
+        trainWorks.map((w) => ({
+          workId: w.id,
+          categoryScores: w.categoryScores,
+          userScore: w.userScore as number,
+        })),
+        currentWeights,
+      )
+      if (!inf.isStub) {
+        const bySlug = new Map<string, number>(
+          inf.suggestions.map((s) => [s.slug, s.suggestedWeight]),
+        )
+        foldWeights = baseWeights.map((w) => ({ ...w, weight: bySlug.get(w.slug) ?? w.weight }))
+      }
+    }
+
+    // Perfil de gosto do fold: construído só do treino → sem leak na held-out.
+    const profile = buildTasteProfileHeuristic(
+      trainWorks.map((w) => ({
+        id: w.id,
+        title: "",
+        userScore: w.userScore,
+        postScores: {},
+        personalStatus: null,
+        synopsis: null,
+        categoryScores: w.categoryScores,
+        tags: w.tags,
+      })),
+    )
+
+    const buildInput = (w: WorkComputed): ExpectedScoreInput => ({
+      categoryScores: w.categoryScoresCalibrated,
+      iaEvalNormalized: normalizeGPT(calculateGPT(w.categoryScoresCalibrated, foldWeights)),
+      platformAvg: w.platformAvg,
+      totalVotes: w.totalVotes,
+      totalChapters: w.totalChapters,
+      synopsisQuality: w.synopsisQuality,
+      observationAdjustment: w.observationAdjustment,
+      publicationStatus: w.publicationStatus,
+      lovedTagOverlap: weightedTagOverlap(w.tags, profile.loved_tags),
+      avoidedTagOverlap: weightedTagOverlap(w.tags, profile.avoided_tags),
+      criterionFitScore: criterionAlignment(w.categoryScoresCalibrated, profile.criterion_preferences),
+      releaseAge: w.releaseAge,
+      runLength: w.runLength,
+      origin: w.origin,
+      postScores: w.postScores,
+    })
+
+    const predictor = trainExpectedPredictor(
+      trainWorks.map(buildInput),
+      trainWorks.map((w) => w.userScore as number),
+      includeQuality,
+    )
+    if (predictor.isStub) continue
+    const preds = predictor.predict(testWorks.map(buildInput))
+    for (let i = 0; i < testWorks.length; i++) {
+      // Mesmo blend que o score entregue: w·ridge + (1-w)·calcNoObs. Mede a
+      // precisão do que o usuário vê, não só do Ridge. (Usar o blendWeight global
+      // dentro do fold tem otimismo desprezível — é 1 escalar numa curva chata.)
+      const blended = blendWeight * preds[i].expected + (1 - blendWeight) * testWorks[i].calcScoreNoObs
+      absSum += Math.abs(blended - (testWorks[i].userScore as number))
+      count++
+    }
+  }
+  return count > 0 ? absSum / count : null
 }
 
 /**
@@ -328,6 +489,7 @@ export async function recalculateAll() {
       .select(
         `id, publication_status_id, total_chapters, synopsis_quality,
          observation_adjustment, user_score, is_archived,
+         year, year_end, original_title,
          post_story_score, post_fl_score, post_ml_score,
          post_character_development_score, post_pacing_score,
          post_art_visual_score, post_impact_immersion_score,
@@ -447,21 +609,31 @@ export async function recalculateAll() {
   // ---------- 2) GPT, GPT.N, Cps.N, Nota.M, Nota.Calc ----------
   let gptClampHits = 0
   const gptNegativeActivations: Record<string, number> = {}
+  // Pass 1: GPT cru de todas — precisamos da média do catálogo antes de normalizar.
+  let gptRawSum = 0
   for (const w of works) {
     const { value, diagnostics } = calculateGPTWithDiagnostics(w.categoryScores, effectiveWeights)
     w.iaEvalRaw = value
-    w.iaEvalNormalized = normalizeGPT(value)
-    // Versão calibrada do mesmo agregado, só pra feature do Ridge. calc_score
-    // (Nota.IA) continua usando o valor cru acima.
-    w.iaEvalNormalizedCalibrated = normalizeGPT(
-      calculateGPT(w.categoryScoresCalibrated, effectiveWeights),
-    )
+    gptRawSum += value
     w.chaptersNormalized = normalizeChapters(w.totalChapters)
     if (diagnostics.clampHit) gptClampHits += 1
     for (const [slug, activated] of Object.entries(diagnostics.negativeActivations)) {
       if (!activated) continue
       gptNegativeActivations[slug] = (gptNegativeActivations[slug] ?? 0) + 1
     }
+  }
+  // Centro da amplificação = média do GPT cru do catálogo (não o fixo 5). Remove
+  // o viés sistemático que centrar em 5 introduzia (ver normalizeGPT). Persistido
+  // em formula_config.gpt_mean e reusado nos caminhos single-work.
+  const gptMean = works.length > 0 ? gptRawSum / works.length : 5
+  // Pass 2: normaliza GPT.N com o centro do catálogo.
+  for (const w of works) {
+    w.iaEvalNormalized = normalizeGPT(w.iaEvalRaw, gptMean)
+    // Versão calibrada do mesmo agregado, só pra feature do Ridge. Mantida em
+    // center=5 — é indiferente, pois o StandardScaler do Ridge remove centro/escala.
+    w.iaEvalNormalizedCalibrated = normalizeGPT(
+      calculateGPT(w.categoryScoresCalibrated, effectiveWeights),
+    )
   }
 
   // Global mean precisa dos platform_avg de todos. Calcular em 2 passes:
@@ -486,6 +658,17 @@ export async function recalculateAll() {
       totalVotes: w.totalVotes,
       synopsisQuality: w.synopsisQuality,
       observationAdjustment: w.observationAdjustment,
+      pseudoVotesBlend,
+    })
+    // Mesma Nota.Calc sem o nudge manual de observação — parceiro do blend
+    // expected⊕calc, pra o obs ser aplicado UMA vez no fim (não duplicado: o
+    // calc embute obs internamente e o expected_score reaplica via applyObsAdjustment).
+    w.calcScoreNoObs = calculateNotaCalc({
+      iaEvalNormalized: w.iaEvalNormalized,
+      platformAvg: w.platformAvg,
+      totalVotes: w.totalVotes,
+      synopsisQuality: w.synopsisQuality,
+      observationAdjustment: 0,
       pseudoVotesBlend,
     })
   }
@@ -542,17 +725,50 @@ export async function recalculateAll() {
   const expectedAllInputs = works.map(buildExpectedInput)
   const expectedPredictor = trainExpectedPredictor(expectedTrainInputs, trainTargets, includeQuality)
   const expectedPredictions = expectedPredictor.predict(expectedAllInputs)
+
+  // ---------- Blend expected⊕calc ----------
+  // O calc_score determinístico é parceiro de ensemble do Ridge: ancora as obras
+  // (reduz variância e dá robustez fora-da-distribuição). Mediu-se ~0.596→0.584
+  // de MAE honesta com o ótimo em ~0.7-0.75. O peso é fitado em OOF do expected
+  // (sem leak: sem OOF o Ridge memoriza o treino e o peso sairia enviesado pro
+  // Ridge) por busca 1-D minimizando MAE de w·ridgeOOF + (1-w)·calcNoObs. w=1
+  // (sem blend) quando OOF indisponível (treino < 30 ou stub).
+  let calcBlendWeight = 1
+  if (!expectedPredictor.isStub && trainSet.length >= 30) {
+    const expectedOof = expectedOutOfFoldPredictions(expectedTrainInputs, trainTargets, includeQuality)
+    if (expectedOof) {
+      let bestW = 1
+      let bestMae = Infinity
+      for (let wgrid = 0; wgrid <= 1.0001; wgrid += 0.05) {
+        let sum = 0
+        for (let i = 0; i < trainSet.length; i++) {
+          const blended = wgrid * expectedOof[i] + (1 - wgrid) * trainSet[i].calcScoreNoObs
+          sum += Math.abs(blended - (trainSet[i].userScore as number))
+        }
+        const mae = sum / trainSet.length
+        if (mae < bestMae) {
+          bestMae = mae
+          bestW = wgrid
+        }
+      }
+      calcBlendWeight = bestW
+    }
+  }
+
   for (let i = 0; i < works.length; i++) {
     const p = expectedPredictions[i]
-    // observation_adjustment volta a ser um ajuste manual DETERMINÍSTICO (±0.30)
-    // somado sobre a Nota Esperada — não é mais feature do Ridge (ver
-    // lib/calculations/expected.ts). Embute só no expected_score entregue;
-    // baseline/qualityAdj permanecem a decomposição crua do modelo, e o MAE/CV
-    // continuam medindo só o poder preditivo do modelo (sem o nudge manual).
-    works[i].expectedScore = applyObsAdjustment(p.expected, works[i].observationAdjustment)
-    works[i].expectedBaseline = p.baseline
-    works[i].expectedQualityAdj = p.qualityAdj
-    works[i].expectedIsStub = expectedPredictor.isStub
+    const w = works[i]
+    // Blend com o calc determinístico (sem obs), depois aplica obs UMA vez.
+    const blendedNoObs = calcBlendWeight * p.expected + (1 - calcBlendWeight) * w.calcScoreNoObs
+    // observation_adjustment é um nudge manual DETERMINÍSTICO (±0.30) somado sobre
+    // a Nota Esperada — não é feature do Ridge (ver lib/calculations/expected.ts).
+    w.expectedScore = applyObsAdjustment(blendedNoObs, w.observationAdjustment)
+    // Dobra o blend no baseline pra manter o invariante baseline + qualityAdj ==
+    // expected (pré-obs) no waterfall. Em Free qualityAdj=0 → baseline = blendedNoObs.
+    // O coef cru do Ridge fica preservado em formula_config.expected_ridge_coefficients.
+    w.expectedBaseline = blendedNoObs - p.qualityAdj
+    w.expectedQualityAdj = p.qualityAdj
+    w.expectedIsStub = expectedPredictor.isStub
   }
 
   // MAE in-sample decomposto: baseline-only, combined (baseline+qualityAdj).
@@ -826,16 +1042,35 @@ export async function recalculateAll() {
   }
   const gptClampHitRate = gptClampHits / works.length
 
-  // Headline "Precisão da previsão". Pago: MAE CV honesto (held-out com
-  // qualidade estimada pela IA — não-circular). Free: cvMAE do modelo
-  // (sem qualidade, já honesto). Fallback pro cvMAE se o honesto não rodou.
-  // Persistido tanto no config (headline) quanto no calibration_history
-  // (trendline honesta).
+  // Headline "Precisão da previsão". Free: nested-CV TRULY honesta (perfil+pesos
+  // recomputados por fold — sem o leak do model.cvMAE interno). Pago: MAE CV
+  // held-out com qualidade estimada pela IA (não-circular). Ambos caem pro
+  // model.cvMAE se o honesto não rodar (treino pequeno/erro). Persistido no
+  // config (headline) e no calibration_history (trendline).
+  // NOTA: a trendline vai mostrar um degrau pra cima vs. entradas antigas — não
+  // é regressão, é o número virando honesto (saiu de ~0.55 vazado pra ~0.59 real).
+  let honestExpectedCvMae: number | null = null
+  if (!expectedPredictor.isStub && !includeQuality) {
+    try {
+      honestExpectedCvMae = computeHonestExpectedCvMae(
+        trainSet,
+        weights,
+        config.score_weights_auto ?? false,
+        includeQuality,
+        calcBlendWeight,
+      )
+    } catch (err) {
+      console.warn(
+        "[recalculateAll] computeHonestExpectedCvMae falhou — usando model.cvMAE:",
+        err instanceof Error ? err.message : err,
+      )
+    }
+  }
   const cvMaeExpected: number | null = expectedPredictor.isStub
     ? null
     : includeQuality
       ? (honestCvMae ?? expectedPredictor.model.cvMAE)
-      : expectedPredictor.model.cvMAE
+      : (honestExpectedCvMae ?? expectedPredictor.model.cvMAE)
 
   // ---------- 7) Persistir novo formula_config ----------
   const { error: configUpdateErr } = await supabase
@@ -847,6 +1082,9 @@ export async function recalculateAll() {
       rmse_predicted: newRmsePredicted,
       pseudo_votes_nota_m: pseudoVotesNotaM,
       pseudo_votes_blend: pseudoVotesBlend,
+      // Centro da amplificação GPT.N (média do GPT cru deste recalc). Reusado
+      // como `center` em normalizeGPT nos caminhos single-work.
+      gpt_mean: gptMean,
       gpt_clamp_hit_rate: gptClampHitRate,
       negative_activation_rate: negativeActivationRate,
       distance_p95: distanceP95,
@@ -889,6 +1127,8 @@ export async function recalculateAll() {
         : {
             featureNames: expectedPredictor.featureNames,
             coefficients: expectedPredictor.model.coefficients,
+            // Peso do blend expected⊕calc aplicado ao score entregue (1 = sem blend).
+            calcBlendWeight,
           },
       last_recalculated_at: new Date().toISOString(),
     })
