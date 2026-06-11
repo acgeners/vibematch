@@ -12,7 +12,6 @@ import {
   normalizeChapters,
   calculateNotaCalc,
 } from "@/lib/calculations"
-import { calculateNotaFinalChoosing } from "@/lib/calculations/final"
 import { calculateGPTWithDiagnostics, calculateGPT } from "@/lib/calculations/gpt"
 import { getCurrentUserId, getCurrentPlan } from "@/server/queries/current-user"
 import { planAllows } from "@/lib/plans/capabilities"
@@ -22,11 +21,6 @@ import {
   type AttributeBiasMap,
   type CategoryScoreWithSource,
 } from "@/lib/ai-recommendation/calibrated-scores"
-import {
-  ridgeOutOfFoldPredictions,
-  trainPredictor,
-  type PredictionInput,
-} from "@/lib/calculations/prediction"
 import {
   trainExpectedPredictor,
   expectedOutOfFoldPredictions,
@@ -39,11 +33,6 @@ import {
   type WeightInferenceResult,
 } from "@/lib/ml/weight-inference"
 import { computeCalibration } from "@/lib/calculations/calibration"
-import { calculateFinalScoreConfidence } from "@/lib/calculations/confidence"
-import { fitStacker, type StackerCoefficients } from "@/lib/calculations/stacker"
-import { predictKnn, DEFAULT_K, type KnnNeighbor } from "@/lib/ml/knn-predictor"
-import { getKnnNeighborsBatch } from "@/server/queries/knn-neighbors"
-import { percentile } from "@/lib/ml/preprocessing"
 import {
   computePersonalFit,
   criterionAlignment,
@@ -151,10 +140,7 @@ interface WorkComputed {
   calcScore: number
   /** Nota.Calc sem o nudge de observação — parceiro do blend expected⊕calc. */
   calcScoreNoObs: number
-  predictedScore: number | null
-  predictionDistance: number | null
-  finalScore: number | null
-  /** Shadow mode: L1 expected_score (2-stage: baseline + quality adj). */
+  /** Nota Prevista (single Ridge + blend com Nota.Calc). */
   expectedScore: number | null
   /** Stage 1 puro (baseline a partir do perfil). */
   expectedBaseline: number | null
@@ -164,11 +150,6 @@ interface WorkComputed {
   personalFit: number | null
   /** Percentil (0–100) do personalFit dentro da biblioteca (migration 071). */
   personalFitPercentile: number | null
-  finalScoreConfidence: number | null
-  // kNN sobre embeddings (Passo 5) — null quando obra não tem embedding ou < 3 vizinhos rotulados
-  knnScore: number | null
-  knnNeighbors: Array<KnnNeighbor & { weight: number }> | null
-  knnDistanceTo5thNeighbor: number | null
 }
 
 const CURRENT_YEAR = new Date().getFullYear()
@@ -268,36 +249,12 @@ function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed {
     platformAvg: null,
     calcScore: 0,
     calcScoreNoObs: 0,
-    predictedScore: null,
-    predictionDistance: null,
-    finalScore: null,
     expectedScore: null,
     expectedBaseline: null,
     expectedQualityAdj: null,
     expectedIsStub: true,
     personalFit: null,
     personalFitPercentile: null,
-    finalScoreConfidence: null,
-    knnScore: null,
-    knnNeighbors: null,
-    knnDistanceTo5thNeighbor: null,
-  }
-}
-
-function buildPredictionInput(w: WorkComputed): PredictionInput {
-  return {
-    categoryScores: w.categoryScoresCalibrated,
-    iaEvalNormalized: w.iaEvalNormalizedCalibrated,
-    platformAvg: w.platformAvg,
-    totalVotes: w.totalVotes,
-    totalChapters: w.totalChapters,
-    synopsisQuality: w.synopsisQuality,
-    observationAdjustment: w.observationAdjustment,
-    publicationStatus: w.publicationStatus,
-    meanPostScore: w.meanPostScore,
-    lovedTagOverlap: w.lovedTagOverlap,
-    avoidedTagOverlap: w.avoidedTagOverlap,
-    criterionFitScore: w.criterionFitScore,
   }
 }
 
@@ -686,36 +643,14 @@ export async function recalculateAll() {
     }
   }
 
-  // ---------- 3) Treinar Ridge e prever Nota.Pr ----------
+  // ---------- 3) Conjunto de treino (obras com user_score) ----------
+  // O ramo legado (Nota.Pr/Nota.Final/stacker/kNN) foi removido — a Nota Prevista
+  // é o expected_score (single Ridge + blend com Nota.Calc). Mantemos só trainSet
+  // e trainTargets, que alimentam o expected.
   const trainSet = works.filter((w) => w.userScore != null)
-  const trainInputs = trainSet.map(buildPredictionInput)
   const trainTargets = trainSet.map((w) => w.userScore as number)
 
-  const predictor = trainPredictor(trainInputs, trainTargets)
-  const allInputs = works.map(buildPredictionInput)
-  const { predictions, distances } = predictor.predictWithDistance(allInputs)
-  for (let i = 0; i < works.length; i++) {
-    works[i].predictedScore = predictions[i]
-    works[i].predictionDistance = distances[i]
-  }
-
-  // Threshold de outlier por percentil: P95 das distâncias do treino ao
-  // próprio centróide. Robusto a dimensionalidade — não depende de "distância
-  // absoluta" que escala com √k. Obras com d ≤ P95 mantêm factor = 1 (sem
-  // penalidade); acima cai suavemente via exp(-(d - p95)/p95).
-  const trainDistances = predictor.isStub
-    ? []
-    : predictor.predictWithDistance(trainInputs).distances
-  const distanceP95: number | null =
-    trainDistances.length > 0 ? Number(percentile(trainDistances, 0.95).toFixed(4)) : null
-
-  function distanceFactor(distance: number | null): number {
-    if (distance == null || distanceP95 == null || predictor.isStub) return 1
-    if (distance <= distanceP95) return 1
-    return Math.exp(-(distance - distanceP95) / distanceP95)
-  }
-
-  // ---------- 3c) L1 novo: expected_score (single Ridge + decomposição) ----------
+  // ---------- 3c) Nota Prevista: expected_score (single Ridge + decomposição) ----------
   // UM Ridge com 22 features (14 baseline + 8 quality granulares + Status one-hot)
   // treinado conjuntamente contra user_score. Decomposição "baseline + quality"
   // é computada pós-hoc via atribuição linear (intercept + Σ coef × x por grupo).
@@ -841,96 +776,22 @@ export async function recalculateAll() {
     if (count > 0) honestCvMae = sumAbs / count
   }
 
-  // ---------- 3b) kNN sobre embeddings ----------
-  // Pra cada obra, busca os k vizinhos rotulados mais próximos no espaço
-  // de embeddings e prediz via kernel Gaussiano. Quando a obra-alvo também
-  // é rotulada, a RPC exclui ela mesma do conjunto candidato — efetivamente
-  // leave-one-out por construção (sem leakage no stacker).
-  //
-  // Tolerante a falhas: obras sem embedding (ou se a RPC falhar) ficam com
-  // knnScore = null e são tratadas pelo stacker como ausência de feature.
-  const allWorkIds = works.map((w) => w.id)
-  let knnBatch: Map<string, KnnNeighbor[]>
-  try {
-    knnBatch = await getKnnNeighborsBatch(allWorkIds, DEFAULT_K)
-  } catch (err) {
-    console.warn(
-      "[recalculateAll] kNN batch falhou — seguindo sem essa feature:",
-      err instanceof Error ? err.message : err,
-    )
-    knnBatch = new Map()
-  }
-  for (const w of works) {
-    const neighbors = knnBatch.get(w.id) ?? []
-    const knnResult = predictKnn(neighbors)
-    w.knnScore = knnResult.prediction
-    w.knnNeighbors = knnResult.neighbors.length > 0 ? knnResult.neighbors : null
-    w.knnDistanceTo5thNeighbor = knnResult.distanceTo5thNeighbor
-  }
-
-  // ---------- 4) Calibrar MAEs com Nota.Calc + Nota.Pr ----------
+  // ---------- 4) Calibrar MAE da Nota.Calc ----------
   const calibrationAfterPr = computeCalibration(
     works.map((w) => ({
       workId: w.id,
       userScore: w.userScore,
       calcScore: w.calcScore,
-      predictedScore: w.predictedScore,
+      predictedScore: null,
       finalScore: null,
       totalVotes: w.totalVotes,
     }))
   )
   const newMaeCalc = calibrationAfterPr.maeCalc
-  const newMaePredicted = calibrationAfterPr.maePredicted
   const newRmseCalc = calibrationAfterPr.rmseCalc
-  const newRmsePredicted = calibrationAfterPr.rmsePredicted
 
-  // ---------- 4b) Fit do stacker (Ridge segundo-nível) ----------
-  // Usa out-of-fold predictions do Ridge pra evitar leakage. Trainset == obras
-  // com user_score. Stacker fica como NULL quando treino < 30 ou Ridge é stub.
-  //
-  // kNN entra como 3ª feature SE estiver disponível pra TODAS as obras de
-  // treino (knnScore não-null em todas). Caso contrário, treina com 2 features
-  // (Calc + Ridge) — fail-safe pra obras de treino sem embedding ou com poucos
-  // vizinhos rotulados.
-  let stackerCoefs: StackerCoefficients | null = null
-  if (!predictor.isStub && trainSet.length >= 30) {
-    const oofRidge = ridgeOutOfFoldPredictions(trainInputs, trainTargets)
-    if (oofRidge) {
-      const trainKnnComplete = trainSet.every((w) => w.knnScore != null)
-      stackerCoefs = fitStacker(
-        trainSet.map((w, i) => ({
-          calc: w.calcScore,
-          ridge: oofRidge[i],
-          knn: trainKnnComplete ? (w.knnScore as number) : null,
-          manual: w.userScore as number,
-        })),
-      )
-    }
-  }
-
-  // ---------- 5) NotaFinal — stacker (se habilitado e disponível) ou inverse-variance ----------
-  const useStacker = (config.stacker_enabled ?? false) && stackerCoefs != null
-  for (const w of works) {
-    if (w.predictedScore == null || predictor.isStub) {
-      // Calibração insuficiente em qualquer caminho — cai pra Calc puro.
-      w.finalScore = w.calcScore
-    } else {
-      w.finalScore = calculateNotaFinalChoosing(
-        w.calcScore,
-        w.predictedScore,
-        newRmseCalc,
-        newRmsePredicted,
-        distanceFactor(w.predictionDistance),
-        useStacker,
-        stackerCoefs,
-        w.knnScore,
-      )
-    }
-  }
-
-  // ---------- 5b) Personal fit (determinístico, a partir do TasteProfile) ----------
-  // Quando o perfil é stub ou inexistente, personalFit fica null pra todas
-  // as obras — o ranking pode cair pra final_score como fallback.
+  // ---------- 5) Personal fit (determinístico, a partir do TasteProfile) ----------
+  // Independente da Nota Prevista — alinhamento de gosto via tags + critérios.
   const profilePayload = tasteProfile && !tasteProfile.is_stub ? tasteProfile.profile : null
   if (profilePayload) {
     for (const w of works) {
@@ -967,31 +828,6 @@ export async function recalculateAll() {
     }
   }
 
-  // Recalibração final só pra reportar mae_final (não vai pro config)
-  const finalCalibration = computeCalibration(
-    works.map((w) => ({
-      workId: w.id,
-      userScore: w.userScore,
-      calcScore: w.calcScore,
-      predictedScore: w.predictedScore,
-      finalScore: w.finalScore,
-      totalVotes: w.totalVotes,
-    }))
-  )
-
-  // ---------- 5c) Confiança individual na Nota.Final ----------
-  // Computada agora porque depende de rmse_final (vindo do calibration acima),
-  // distance_p95 e do flag de stub. Persistida pra evitar recomputar a cada
-  // render e permitir sort/filter "alta confiança".
-  for (const w of works) {
-    w.finalScoreConfidence = calculateFinalScoreConfidence({
-      rmseFinal: finalCalibration.rmseFinal,
-      predictedIsStub: predictor.isStub,
-      predictionDistance: w.predictionDistance,
-      distanceP95,
-    })
-  }
-
   // ---------- 6) Bulk upsert calculated_scores ----------
   const rows = works.map((w) => ({
     work_id: w.id,
@@ -1001,23 +837,25 @@ export async function recalculateAll() {
     ia_eval_normalized: w.iaEvalNormalized,
     chapters_normalized: w.chaptersNormalized,
     calc_score: w.calcScore,
-    predicted_score: w.predictedScore,
-    predicted_is_stub: predictor.isStub,
-    final_score: w.finalScore,
+    // Colunas do ramo legado (Nota.Pr/Nota.Final/stacker/kNN) — removido. Zeradas
+    // (degradam pra "—"/fallback na UI); serão dropadas numa migration de follow-up.
+    predicted_score: null,
+    predicted_is_stub: true,
+    final_score: null,
     expected_score: w.expectedScore,
     expected_baseline: w.expectedBaseline,
     expected_quality_adj: w.expectedQualityAdj,
     expected_is_stub: w.expectedIsStub,
     mae_calc: newMaeCalc,
-    mae_predicted: newMaePredicted,
+    mae_predicted: null,
     rmse_calc: newRmseCalc,
-    rmse_predicted: newRmsePredicted,
-    prediction_distance: w.predictionDistance,
+    rmse_predicted: null,
+    prediction_distance: null,
     personal_fit: w.personalFit,
     personal_fit_percentile: w.personalFitPercentile,
-    final_score_confidence: w.finalScoreConfidence,
-    knn_score: w.knnScore,
-    knn_neighbors: w.knnNeighbors,
+    final_score_confidence: null,
+    knn_score: null,
+    knn_neighbors: null,
     formula_version: config.formula_version,
     calculated_at: new Date().toISOString(),
   }))
@@ -1077,9 +915,11 @@ export async function recalculateAll() {
     .from("formula_config")
     .update({
       mae_calc: newMaeCalc,
-      mae_predicted: newMaePredicted,
+      // Ramo legado removido — mae/rmse_predicted, distance_p95, stacker e
+      // ridge_coefficients zerados (serão dropados em migration de follow-up).
+      mae_predicted: null,
       rmse_calc: newRmseCalc,
-      rmse_predicted: newRmsePredicted,
+      rmse_predicted: null,
       pseudo_votes_nota_m: pseudoVotesNotaM,
       pseudo_votes_blend: pseudoVotesBlend,
       // Centro da amplificação GPT.N (média do GPT cru deste recalc). Reusado
@@ -1087,23 +927,9 @@ export async function recalculateAll() {
       gpt_mean: gptMean,
       gpt_clamp_hit_rate: gptClampHitRate,
       negative_activation_rate: negativeActivationRate,
-      distance_p95: distanceP95,
-      stacker_coefficients: stackerCoefs
-        ? {
-            intercept: stackerCoefs.intercept,
-            calcWeight: stackerCoefs.calcWeight,
-            ridgeWeight: stackerCoefs.ridgeWeight,
-            knnWeight: stackerCoefs.knnWeight,
-            trainSize: stackerCoefs.trainSize,
-            cvMAE: stackerCoefs.cvMAE,
-          }
-        : null,
-      ridge_coefficients: predictor.isStub
-        ? null
-        : {
-            featureNames: predictor.featureNames,
-            coefficients: predictor.model.coefficients,
-          },
+      distance_p95: null,
+      stacker_coefficients: null,
+      ridge_coefficients: null,
       score_weights_inferred: inferenceSnapshot && !inferenceSnapshot.isStub
         ? {
             suggestions: inferenceSnapshot.suggestions,
@@ -1139,25 +965,16 @@ export async function recalculateAll() {
   // só perde uma entrada do gráfico de tendência.
   const { error: historyErr } = await supabase.from("calibration_history").insert({
     formula_version: config.formula_version,
-    stacker_enabled: useStacker,
-    mae_loocv_stacker: stackerCoefs?.cvMAE ?? null,
-    mae_final: finalCalibration.maeFinal,
+    stacker_enabled: false,
+    mae_loocv_stacker: null,
+    mae_final: null,
     mae_calc: newMaeCalc,
-    mae_predicted: newMaePredicted,
+    mae_predicted: null,
     mae_expected: maeExpected,
     cv_mae_expected: cvMaeExpected,
-    train_size: predictor.trainSize,
+    train_size: expectedPredictor.trainSize,
     total_works: works.length,
-    stacker_coefficients: stackerCoefs
-      ? {
-          intercept: stackerCoefs.intercept,
-          calcWeight: stackerCoefs.calcWeight,
-          ridgeWeight: stackerCoefs.ridgeWeight,
-          knnWeight: stackerCoefs.knnWeight,
-          trainSize: stackerCoefs.trainSize,
-          cvMAE: stackerCoefs.cvMAE,
-        }
-      : null,
+    stacker_coefficients: null,
   })
   if (historyErr) {
     console.warn("[recalculateAll] calibration_history insert falhou:", historyErr.message)
@@ -1179,19 +996,21 @@ export async function recalculateAll() {
       negativeActivationRate,
     },
     calibration: {
-      trainSize: predictor.trainSize,
-      isStub: predictor.isStub,
-      alpha: predictor.model.alpha,
-      cvMAE: predictor.model.cvMAE,
-      cvRMSE: predictor.model.cvRMSE,
+      // Campos do ramo legado (Nota.Pr/Final/stacker) zerados — a Nota Prevista
+      // agora é o expected_score. Mantidos na shape pra não quebrar consumidores.
+      trainSize: expectedPredictor.trainSize,
+      isStub: expectedPredictor.isStub,
+      alpha: expectedPredictor.model.alpha,
+      cvMAE: expectedPredictor.model.cvMAE,
+      cvRMSE: expectedPredictor.model.cvRMSE,
       maeCalc: newMaeCalc,
-      maePredicted: newMaePredicted,
-      maeFinal: finalCalibration.maeFinal,
+      maePredicted: null,
+      maeFinal: null,
       maeExpected,
       maeExpectedBaseline,
       rmseCalc: newRmseCalc,
-      rmsePredicted: newRmsePredicted,
-      rmseFinal: finalCalibration.rmseFinal,
+      rmsePredicted: null,
+      rmseFinal: null,
       rmseExpected,
       expectedIsStub: expectedPredictor.isStub,
       expectedTrainSize: expectedPredictor.trainSize,
@@ -1203,19 +1022,9 @@ export async function recalculateAll() {
       expectedQualityIndices: expectedPredictor.qualityIndices,
       pseudoVotesNotaM,
       pseudoVotesBlend,
-      featureNames: predictor.featureNames,
-      coefficients: predictor.model.coefficients,
-      stacker: stackerCoefs
-        ? {
-            enabled: useStacker,
-            intercept: stackerCoefs.intercept,
-            calcWeight: stackerCoefs.calcWeight,
-            ridgeWeight: stackerCoefs.ridgeWeight,
-            knnWeight: stackerCoefs.knnWeight,
-            trainSize: stackerCoefs.trainSize,
-            cvMAE: stackerCoefs.cvMAE,
-          }
-        : null,
+      featureNames: expectedPredictor.featureNames,
+      coefficients: expectedPredictor.model.coefficients,
+      stacker: null,
     },
   }
 }
