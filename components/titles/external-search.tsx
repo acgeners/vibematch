@@ -5,6 +5,7 @@ import Image from "next/image"
 import { toast } from "sonner"
 import { Search, Loader2, Sparkles, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -17,6 +18,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
 import { searchExternalTitles, fetchExternalData, upsertExternalTags, checkExistingWorkInDb, evaluateCandidateForCreate, type ExistingWorkMatch } from "@/server/actions/external"
+import { validateComixHid } from "@/server/actions/comix-resolver"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
@@ -293,6 +295,8 @@ export function ExternalSearch({
   const [pendingCandidate, setPendingCandidate] = useState<MergedCandidate | null>(null)
   const [duplicateUpdateTarget, setDuplicateUpdateTarget] = useState<ExistingWorkMatch | null>(null)
   const [sourceSelection, setSourceSelection] = useState<Partial<Record<ExternalSourceId, SourceSelectionValue>>>({})
+  const [manualComixHid, setManualComixHid] = useState("")
+  const [validatingComix, setValidatingComix] = useState(false)
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
   const [activeRefineUrl, setActiveRefineUrl] = useState<string | null>(null)
@@ -682,12 +686,58 @@ export function ExternalSearch({
   }
 
   const sourceMatchGroups = pendingCandidate ? getSourceMatchGroups(pendingCandidate) : []
+  // Comix sempre presente na confirmação: a busca dela é gateada (token), então
+  // nunca vem em sourceCandidates — mas queremos o bloco de preenchimento manual.
+  const displayGroups = sourceMatchGroups.some((g) => g.source === "comix")
+    ? sourceMatchGroups
+    : [...sourceMatchGroups, { source: "comix" as ExternalSourceId, options: [] as ExternalSourceCandidateOption[] }]
   const hasSelectedSource = sourceMatchGroups.some((group) => {
     const value = sourceSelection[group.source]
     return Boolean(value && value !== "rejected" && value !== "none")
   })
   const setSourceMatchSelection = (source: ExternalSourceId, value: SourceSelectionValue) => {
     setSourceSelection((prev) => ({ ...prev, [source]: value }))
+  }
+
+  // Valida um hid/URL da Comix (SSR token-free) e injeta como candidato sintético
+  // selecionado em pendingCandidate.sourceCandidates — assim ele flui por
+  // buildCandidateFromSourceSelection → applySelectedId → comixHid na criação.
+  const handleAddComixManual = async () => {
+    const hidOrUrl = manualComixHid.trim()
+    if (!hidOrUrl) return
+    setValidatingComix(true)
+    try {
+      const res = await validateComixHid(hidOrUrl)
+      if (!res.ok || !res.hid) {
+        toast.error(res.error ?? "Falha ao validar o hid da Comix.")
+        return
+      }
+      const hid = res.hid
+      const option: ExternalSourceCandidateOption = {
+        source: "comix",
+        externalId: hid,
+        title: res.title ?? hid,
+        coverUrl: res.coverUrl ?? null,
+        matchScore: 1,
+        synopsis: res.synopsis ?? null,
+        year: res.year ?? null,
+        chapters: res.chapters ?? null,
+        trusted: true,
+      }
+      setPendingCandidate((prev) => {
+        if (!prev) return prev
+        const others = (prev.sourceCandidates ?? []).filter(
+          (o) => !(o.source === "comix" && o.externalId === hid),
+        )
+        const sources = prev.sources.includes("comix") ? prev.sources : [...prev.sources, "comix" as ExternalSourceId]
+        return { ...prev, sources, sourceCandidates: [...others, option] }
+      })
+      setSourceMatchSelection("comix" as ExternalSourceId, hid)
+      setManualComixHid("")
+      toast.success(`Comix vinculada: "${res.title}"`)
+    } finally {
+      setValidatingComix(false)
+    }
   }
 
   return (
@@ -758,7 +808,7 @@ export function ExternalSearch({
                 Confirme ou troque os matches por fonte antes de buscar e mesclar os dados.
               </p>
 
-              {sourceMatchGroups.map((group) => {
+              {displayGroups.map((group) => {
                 const value = sourceSelection[group.source] ?? "none"
                 return (
                   <div key={group.source} className="rounded-md border p-3 space-y-2">
@@ -833,6 +883,39 @@ export function ExternalSearch({
                       />
                       <span className="text-xs">Não decidir agora (refazer busca depois)</span>
                     </label>
+
+                    {group.source === "comix" && (
+                      <div className="mt-1 space-y-1.5 rounded-md border border-dashed border-border p-2">
+                        <p className="text-[11px] text-muted-foreground">
+                          A busca da Comix é bloqueada — cole o hid (ex.: <span className="font-mono">003kd</span>) ou a
+                          URL da comix.to. O título é validado antes de vincular.
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={manualComixHid}
+                            onChange={(e) => setManualComixHid(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault()
+                                void handleAddComixManual()
+                              }
+                            }}
+                            placeholder="hid ou URL da comix.to"
+                            disabled={validatingComix}
+                            className="h-8 text-xs"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleAddComixManual()}
+                            disabled={validatingComix || !manualComixHid.trim()}
+                          >
+                            {validatingComix ? <Loader2 className="size-3.5 animate-spin" /> : "Validar e adicionar"}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}

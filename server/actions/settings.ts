@@ -156,6 +156,33 @@ export async function updateAiEvalPreferences(update: AiEvalPreferencesUpdate) {
   return { error: null }
 }
 
+/**
+ * Liga/desliga a avaliação IA automática na criação de obras (migration 097).
+ * Persiste em user_settings (singleton). Default false (ver getAiEvalOnCreate).
+ */
+export async function setAiEvalOnCreate(enabled: boolean) {
+  const supabase = createAdminClient()
+  const { data: row } = await supabase
+    .from("user_settings")
+    .select("id")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (!row?.id) return { error: "user_settings sem linha singleton (rode a migration 074)" }
+
+  const { error } = await supabase
+    .from("user_settings")
+    .update({ ai_eval_on_create: enabled })
+    .eq("id", row.id as string)
+
+  if (error) return { error: error.message }
+
+  revalidatePath("/settings")
+  revalidatePath("/titles/new")
+  return { error: null }
+}
+
 export interface ScoreColorPercentilesUpdate {
   score_color_pct_top: number
   score_color_pct_high: number

@@ -7,6 +7,7 @@ import { TAG_GROUPS_CATALOG, GENRE_NAMES } from "@/lib/constants/tags"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { searchAllSources, fetchMultiSourceDetails, fetchExternalEvaluationContextForWork, fetchExternalEvaluationContextForCandidate, buildCandidateFromExternalIds, SEARCH_CONNECTORS, bestTitleMatch } from "@/lib/external/index"
 import { fetchMangaUpdatesAlternativeTitles } from "@/lib/external/mangaupdates"
+import { fetchComixById } from "@/lib/external/comix"
 import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import type { ExternalSourceId, MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField, SourcedReview, ExternalSearchResult } from "@/lib/external/types"
@@ -749,6 +750,34 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
     externalId: row.external_id as string | null,
     isRejected: Boolean(row.is_rejected),
   }))
+
+  // Comix: a busca é gateada (token), então nunca aparece em candidatesPerSource.
+  // Se há um hid salvo (não rejeitado) e ele não está entre os candidatos, hidrata
+  // um candidato via SSR token-free pra UI conseguir mostrar a fonte vinculada
+  // (senão a seleção salva fica invisível no dialog).
+  const comixHid = currentSelections.find((s) => s.source === "comix" && !s.isRejected && s.externalId)?.externalId
+  if (comixHid && !(candidatesPerSource.comix ?? []).some((c) => c.externalId === comixHid)) {
+    try {
+      const detail = await fetchComixById(comixHid)
+      if (detail?.title) {
+        const coverUrl = detail.coverUrl && !isBlockedCoverUrl(detail.coverUrl) ? detail.coverUrl : null
+        candidatesPerSource.comix = [
+          {
+            externalId: detail.hid,
+            title: detail.title,
+            coverUrl,
+            matchScore: 1,
+            synopsis: detail.synopsis ?? null,
+            year: detail.year ?? null,
+            chapters: detail.chapters ?? null,
+          },
+          ...(candidatesPerSource.comix ?? []),
+        ]
+      }
+    } catch (err) {
+      console.warn(`[revalidateWorkSources] hidratação comix falhou (${comixHid}):`, err)
+    }
+  }
 
   return {
     data: {

@@ -11,7 +11,9 @@ import {
   type SourceCandidateOption,
   type SourceSelectionInput,
 } from "@/server/actions/external"
+import { setComixHidManually } from "@/server/actions/comix-resolver"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Dialog,
   DialogContent,
@@ -67,6 +69,8 @@ export function RevalidateSourcesDialog({
   >({})
   const [selection, setSelection] = useState<Partial<Record<ExternalSourceId, SelectionValue>>>({})
   const [brokenCovers, setBrokenCovers] = useState<Set<string>>(new Set())
+  const [manualHid, setManualHid] = useState("")
+  const [savingManual, setSavingManual] = useState(false)
 
   const runLoad = async () => {
     setLoading(true)
@@ -135,6 +139,45 @@ export function RevalidateSourcesDialog({
     setSelection((prev) => ({ ...prev, [source]: value }))
   }
 
+  // Preenchimento manual da Comix: valida (SSR token-free) + salva direto, e
+  // reflete na seleção. Útil quando a revalidação não achou a Comix.
+  const handleManualComix = async () => {
+    const hidOrUrl = manualHid.trim()
+    if (!hidOrUrl) return
+    setSavingManual(true)
+    try {
+      const res = await setComixHidManually({ workId, hidOrUrl })
+      if (!res.ok) {
+        toast.error(res.error ?? "Falha ao validar o hid da Comix.")
+        return
+      }
+      toast.success(`Comix vinculada: "${res.title}"`)
+      if (res.hid) {
+        const hid = res.hid
+        // Injeta o candidato resolvido pra aparecer JÁ selecionado na seção Comix
+        // (a busca da Comix é gateada, então ele não viria de candidatesPerSource).
+        setCandidatesPerSource((prev) => {
+          const others = (prev.comix ?? []).filter((c) => c.externalId !== hid)
+          const candidate: SourceCandidateOption = {
+            externalId: hid,
+            title: res.title ?? hid,
+            coverUrl: res.coverUrl ?? null,
+            matchScore: 1,
+            synopsis: res.synopsis ?? null,
+            year: res.year ?? null,
+            chapters: res.chapters ?? null,
+          }
+          return { ...prev, comix: [candidate, ...others] }
+        })
+        setSourceSelection("comix" as ExternalSourceId, hid)
+      }
+      setManualHid("")
+      router.refresh()
+    } finally {
+      setSavingManual(false)
+    }
+  }
+
   const handleOpen = async () => {
     setOpen(true)
     await runLoad()
@@ -153,6 +196,9 @@ export function RevalidateSourcesDialog({
     new Set([
       ...(Object.keys(candidatesPerSource) as ExternalSourceId[]),
       ...(Object.keys(selection) as ExternalSourceId[]),
+      // Comix sempre presente: garante o bloco de preenchimento manual mesmo
+      // quando a busca não a encontrou (fonte principal de reviews).
+      "comix" as ExternalSourceId,
     ])
   ).sort()
 
@@ -287,6 +333,36 @@ export function RevalidateSourcesDialog({
                       Não decidir agora (refazer busca depois)
                     </span>
                   </label>
+
+                  {source === "comix" && (
+                    <div className="mt-1 space-y-1.5 rounded-md border border-dashed border-border p-2">
+                      <p className="text-[11px] text-muted-foreground">
+                        Não achou? Cole o hid (ex.: <span className="font-mono">003kd</span>) ou a URL da
+                        comix.to — o título é validado antes de salvar.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={manualHid}
+                          onChange={(e) => setManualHid(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") void handleManualComix()
+                          }}
+                          placeholder="hid ou URL da comix.to"
+                          disabled={savingManual}
+                          className="h-8 text-xs"
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void handleManualComix()}
+                          disabled={savingManual || !manualHid.trim()}
+                        >
+                          {savingManual ? <Loader2 className="size-3.5 animate-spin" /> : "Validar e salvar"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )
             })}
