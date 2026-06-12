@@ -14,10 +14,62 @@ const HEADERS: Record<string, string> = {
   Referer: "https://comix.to/",
 }
 
-type ComixFailure = "cloudflare_challenge" | "http_error" | "json_parse_error" | "flaresolverr_unavailable" | "network_error"
+// Navegação de página (HTML SSR), não-XHR. A página /title/{hid} responde ao
+// plain fetch com um <script> de hidratação que já contém o objeto completo da obra.
+const HTML_HEADERS: Record<string, string> = {
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "User-Agent": HEADERS["User-Agent"],
+  Referer: "https://comix.to/",
+}
+
+type ComixFailure = "cloudflare_challenge" | "http_error" | "json_parse_error" | "flaresolverr_unavailable" | "network_error" | "api_auth_required"
 
 function logComixFailure(url: string, reason: ComixFailure, detail?: string) {
   console.error(`[comix] ${reason} url=${url}${detail ? ` detail=${detail}` : ""}`)
+}
+
+// Circuit breaker de auth: desde ~2026-06 a API /api/v1/manga* do comix.to exige um
+// token de assinatura `_=` gerado no client (anti-bot, chunk VM-ofuscado) e responde
+// {"message":"Missing token."} sem ele. Isso afeta SÓ a busca (`/manga?keyword=`) e o
+// detalhe-via-API (`/manga/{hid}`). O detalhe e as reviews foram migrados pro caminho
+// TOKEN-FREE (SSR de /title/{hid} → objeto da obra + id interno; endpoints /threads/*
+// não exigem token), então o circuito hoje cobre APENAS a busca: ao detectar
+// "Missing token." abre o circuito e devolve [] na busca até o TTL reabrir (caso a API
+// volte a ser pública), sem pagar solves de CF à toa.
+const COMIX_AUTH_CIRCUIT_TTL_MS = 30 * 60_000
+let comixAuthCircuitOpenUntil = 0
+let comixAuthLogged = false
+
+/** Resposta do origin indicando que a API exige token de auth (gateada). */
+function isComixAuthError(data: unknown): boolean {
+  if (typeof data !== "object" || data === null) return false
+  const msg = (data as { message?: unknown }).message
+  return typeof msg === "string" && /missing token/i.test(msg)
+}
+
+/**
+ * Mesmo check, mas a partir do corpo bruto (string) de uma resposta não-ok.
+ * O 403 atual do comix já entrega `{"message":"Missing token."}` em JSON no
+ * fetch direto — detectar aqui evita pagar um solve de Cloudflare (~8-15s) só
+ * pra receber o mesmo erro. Exige que o corpo realmente parseie como JSON com
+ * `message` contendo "missing token" (não confia só no regex pra não dar falso
+ * positivo com conteúdo legítimo).
+ */
+function bodyHasComixAuthError(body: string): boolean {
+  if (!/missing token/i.test(body)) return false
+  try {
+    return isComixAuthError(JSON.parse(body))
+  } catch {
+    return false
+  }
+}
+
+/** Abre o circuito de auth do Comix e loga uma única vez por processo. */
+function tripComixAuthCircuit(url: string): void {
+  comixAuthCircuitOpenUntil = Date.now() + COMIX_AUTH_CIRCUIT_TTL_MS
+  if (comixAuthLogged) return
+  logComixFailure(url, "api_auth_required", "API exige token (login) — pulando Comix até o TTL reabrir")
+  comixAuthLogged = true
 }
 
 // comix.to fica atrás do Cloudflare Challenge — fetch direto retorna 403/HTML.
@@ -25,6 +77,11 @@ function logComixFailure(url: string, reason: ComixFailure, detail?: string) {
 // faz fallback via FlareSolverr (headless Chrome) extraindo JSON do <pre>.
 async function fetchComixJson(path: string): Promise<unknown | null> {
   const url = `${COMIX_BASE}${path}`
+
+  // Circuito de auth aberto: a API exigiu token recentemente — pula tudo, inclusive
+  // o solve de Cloudflare (que voltaria só "Missing token."). Comix fica indisponível
+  // até o TTL reabrir.
+  if (Date.now() < comixAuthCircuitOpenUntil) return null
 
   // comix.to é sempre CF-protegido; sem FlareSolverr não há como passar. Quando
   // o circuito está aberto (container fora), pula tudo — inclusive o fetch direto
@@ -38,7 +95,13 @@ async function fetchComixJson(path: string): Promise<unknown | null> {
       const contentType = res.headers.get("content-type") ?? ""
       if (contentType.includes("json")) {
         try {
-          return await res.json()
+          const data = await res.json()
+          // API gateada (login) → abre o circuito e desiste do Comix.
+          if (isComixAuthError(data)) {
+            tripComixAuthCircuit(url)
+            return null
+          }
+          return data
         } catch (err) {
           logComixFailure(url, "json_parse_error", err instanceof Error ? err.message : String(err))
         }
@@ -48,6 +111,13 @@ async function fetchComixJson(path: string): Promise<unknown | null> {
       }
     } else {
       const body = await res.text().catch(() => "")
+      // API gateada (login): o 403 já traz "Missing token." em JSON no corpo
+      // direto → abre o circuito aqui e desiste, SEM cair no fallback de
+      // Cloudflare (que só devolveria o mesmo erro pagando o solve).
+      if (bodyHasComixAuthError(body)) {
+        tripComixAuthCircuit(url)
+        return null
+      }
       directBodyLooksLikeChallenge = isCloudflareChallenge(body)
       if (!directBodyLooksLikeChallenge) {
         logComixFailure(url, "http_error", `status=${res.status}`)
@@ -70,11 +140,123 @@ async function fetchComixJson(path: string): Promise<unknown | null> {
   const preMatch = fallback.html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i)
   const raw = (preMatch?.[1] ?? fallback.html).trim()
   try {
+    const data = JSON.parse(raw)
+    // API gateada (login): atravessou o CF mas o origin pediu token → abre o
+    // circuito pra não pagar mais solves só pra receber "Missing token.".
+    if (isComixAuthError(data)) {
+      tripComixAuthCircuit(url)
+      return null
+    }
+    return data
+  } catch (err) {
+    logComixFailure(url, "json_parse_error", `after-flaresolverr: ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
+}
+
+/**
+ * Busca o HTML SSR de uma página do comix (TOKEN-FREE). `/title/{hid}` responde ao
+ * plain fetch com um <script> de hidratação contendo o objeto completo da obra (incl.
+ * o `id` interno usado pelos threads). Cai pro FlareSolverr só se o Cloudflare desafiar.
+ */
+async function fetchComixHtml(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, { headers: HTML_HEADERS, cache: "no-store" })
+    const body = await res.text()
+    if (res.ok) {
+      if (!isCloudflareChallenge(body)) return body
+    } else if (!isCloudflareChallenge(body)) {
+      // Erro real (404 etc.) que não é challenge — FlareSolverr não ajudaria.
+      logComixFailure(url, "http_error", `status=${res.status}`)
+      return null
+    }
+  } catch (err) {
+    logComixFailure(url, "network_error", err instanceof Error ? err.message : String(err))
+  }
+
+  if (!isFlareSolverrEnabled() || isFlareSolverrCircuitOpen()) return null
+  const fallback = await fetchHtmlWithCfFallback(url, HTML_HEADERS)
+  if (!fallback) {
+    logComixFailure(url, "cloudflare_challenge", "flaresolverr returned no response")
+    return null
+  }
+  return fallback.html
+}
+
+/**
+ * GET de um endpoint /api/v1 TOKEN-FREE (threads de comentário de nível-obra). Esses
+ * endpoints não exigem o token de assinatura `_=` (só /manga* exige), então resolvem
+ * por plain fetch; FlareSolverr só como fallback de CF. NÃO consulta o circuito de
+ * auth (que cobre apenas a busca gateada).
+ */
+async function fetchComixThreadJson(path: string): Promise<unknown | null> {
+  const url = `${COMIX_BASE}${path}`
+  try {
+    const res = await fetch(url, { headers: HEADERS, cache: "no-store" })
+    if (res.ok && (res.headers.get("content-type") ?? "").includes("json")) {
+      try {
+        return await res.json()
+      } catch (err) {
+        logComixFailure(url, "json_parse_error", err instanceof Error ? err.message : String(err))
+      }
+    }
+  } catch (err) {
+    logComixFailure(url, "network_error", err instanceof Error ? err.message : String(err))
+  }
+
+  if (!isFlareSolverrEnabled() || isFlareSolverrCircuitOpen()) return null
+  const fallback = await fetchHtmlWithCfFallback(url, HEADERS)
+  if (!fallback) return null
+  const preMatch = fallback.html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i)
+  const raw = (preMatch?.[1] ?? fallback.html).trim()
+  try {
     return JSON.parse(raw)
   } catch (err) {
     logComixFailure(url, "json_parse_error", `after-flaresolverr: ${err instanceof Error ? err.message : String(err)}`)
     return null
   }
+}
+
+/**
+ * Extrai o objeto completo da obra do <script> de hidratação SSR da página
+ * /title/{hid} (React Query cache key ["manga","detail",hid]). Substitui o endpoint
+ * /manga/{hid}, que passou a exigir token de assinatura. Mesmo shape do antigo
+ * `result` (id/hid/title/synopsis/ratedAvg/links/genres/…).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractComixDetailFromHtml(html: string): any | null {
+  const scripts = html.match(/<script\b[^>]*>([\s\S]*?)<\/script>/gi) ?? []
+  for (const block of scripts) {
+    const inner = block.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>$/i, "").trim()
+    if (!inner.startsWith("{") || !inner.includes('"queries"')) continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(inner)
+    } catch {
+      continue
+    }
+    const queries = (parsed as { queries?: unknown }).queries
+    if (!queries || typeof queries !== "object") continue
+    for (const [key, value] of Object.entries(queries as Record<string, unknown>)) {
+      let arr: unknown
+      try {
+        arr = JSON.parse(key)
+      } catch {
+        continue
+      }
+      if (
+        Array.isArray(arr) &&
+        arr[0] === "manga" &&
+        arr[1] === "detail" &&
+        value &&
+        typeof value === "object" &&
+        (value as { hid?: unknown }).hid
+      ) {
+        return value
+      }
+    }
+  }
+  return null
 }
 
 export interface ComixDetail {
@@ -205,10 +387,11 @@ export async function searchComix(query: string): Promise<ExternalSearchResult[]
 }
 
 export async function fetchComixById(hid: string): Promise<ComixDetail | null> {
-  const data = await fetchComixJson(`/manga/${encodeURIComponent(hid)}`)
-  if (!data) return null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const r = (data as any)?.result
+  // Token-free: o objeto completo da obra vem no <script> de hidratação SSR da página
+  // /title/{hid}. O antigo endpoint /manga/{hid} passou a exigir token de assinatura.
+  const html = await fetchComixHtml(comixWorkUrl(hid))
+  if (!html) return null
+  const r = extractComixDetailFromHtml(html)
   if (!r || typeof r !== "object") return null
 
   return {
@@ -263,22 +446,26 @@ function stripHtmlToText(value: string): string {
  * obra no comix.to, não atrelada a capítulo). A comix não tem "reviews" formais;
  * esses comentários funcionam como mini-reviews ("10/10 peak", "dropped at ch20…").
  *
- * Cadeia (descoberta por reverse-engineering do bundle do front — acessores
- * `Ve.threadLookup`/`Ve.thread`):
- *  1. detalhe → id interno numérico (page_identifier = "manga{id}")
+ * Cadeia (TOKEN-FREE — desde que /manga* foi gateado atrás do token `_=`):
+ *  1. SSR de /title/{hid} → id interno numérico (page_identifier = "manga{id}").
+ *     O id numérico é obrigatório: usar o hid literal ("manga{hid}") resolve thread
+ *     errada. Vem do <script> de hidratação via `extractComixDetailFromHtml`.
  *  2. GET /threads/lookup?page_identifier=…&page_url=/title/{hid} → threadId
  *     (ambos os params são obrigatórios; o feed global /comments NÃO filtra por obra)
  *  3. GET /threads/{threadId}/comments (paginado por cursor) → items[].contentHtml
- * Tudo via `fetchComixJson` pra herdar o fallback FlareSolverr do Cloudflare.
+ * Threads via `fetchComixThreadJson` (plain fetch token-free, FlareSolverr só fallback CF).
  */
 export async function fetchComixReviews(hid: string): Promise<string[]> {
-  const detail = await fetchComixJson(`/manga/${encodeURIComponent(hid)}`)
+  // Token-free: o id interno vem do SSR da página; os endpoints /threads/* não exigem
+  // o token de assinatura `_=` (só /manga* exige).
+  const html = await fetchComixHtml(comixWorkUrl(hid))
+  if (!html) return []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const internalId = (detail as any)?.result?.id
+  const internalId = (extractComixDetailFromHtml(html) as any)?.id
   if (typeof internalId !== "number") return []
 
   const lookupPath = `/threads/lookup?page_identifier=manga${internalId}&page_url=${encodeURIComponent(`/title/${hid}`)}`
-  const lookup = await fetchComixJson(lookupPath)
+  const lookup = await fetchComixThreadJson(lookupPath)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const threadId = (lookup as any)?.result?.thread?.id
   if (typeof threadId !== "number" || threadId <= 0) return []
@@ -289,7 +476,7 @@ export async function fetchComixReviews(hid: string): Promise<string[]> {
   // (`selectReviewsForEvaluation`) corta por fonte de qualquer forma.
   for (let page = 0; page < 2; page++) {
     const path = `/threads/${threadId}/comments${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
-    const data = await fetchComixJson(path)
+    const data = await fetchComixThreadJson(path)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = (data as any)?.result
     const items: unknown[] = Array.isArray(result?.items) ? result.items : []
