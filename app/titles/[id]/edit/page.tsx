@@ -4,6 +4,8 @@ import { getWorkWithAiEvaluations, getWorkBySlug, getWorkTitleByIdOrSlug } from 
 import { titleToSlug } from "@/lib/utils"
 import { Header } from "@/components/layout/header"
 import { WorkForm, type WorkFormAiEvaluation } from "@/components/titles/work-form"
+import { ManualReviewsCard } from "@/components/titles/manual-reviews-card"
+import { getManualReviews } from "@/server/queries/manual-reviews"
 import type { WorkFormValues } from "@/lib/validations/work.schema"
 import type { WorkWithRelations } from "@/types/domain"
 import { CRITERION_SLUGS } from "@/types/domain"
@@ -127,6 +129,7 @@ export default async function EditTitlePage({ params }: EditPageProps) {
 
   const slug = titleToSlug(work.title) || work.id
   const initialValues = workToFormValues(work)
+  const manualReviews = await getManualReviews(work.id)
 
   const aiEvaluations = (work as WorkWithRelations & {
     ai_evaluations?: Array<{
@@ -169,6 +172,7 @@ export default async function EditTitlePage({ params }: EditPageProps) {
         initialValues={initialValues}
         aiEvaluation={aiEvaluationForForm}
       />
+      <ManualReviewsCard workId={work.id} initialReviews={manualReviews} />
     </div>
   )
 }

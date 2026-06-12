@@ -8,7 +8,9 @@ import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
 import { getFilterPresets } from "@/server/queries/filter-presets"
 import { countStaleAlignmentWorks } from "@/server/queries/recommendations"
+import { getRecalcPendingState } from "@/server/actions/recalc-queue"
 import { Header } from "@/components/layout/header"
+import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
 import { RankingTable } from "@/components/ranking/ranking-table"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
 import { SurpriseMeButton } from "@/components/ranking/surprise-me-button"
@@ -203,11 +205,12 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     sortLevels,
   }
 
-  const [rawEntries, scoreThresholds, lowCoverageIds, staleAlignmentCount] = await Promise.all([
+  const [rawEntries, scoreThresholds, lowCoverageIds, staleAlignmentCount, recalcState] = await Promise.all([
     getRanking(filters),
     getScoreColorThresholds(),
     getLowCoverageWorkIds(),
     countStaleAlignmentWorks(),
+    getRecalcPendingState(),
   ])
   // Marca obras não-lidas com baixa cobertura de gênero (badge ⚠ na Nota esperada).
   const entries = rawEntries.map((e) => ({ ...e, lowCoverage: lowCoverageIds.has(e.workId) }))
@@ -227,6 +230,8 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
 
   return (
     <div className="space-y-4">
+      <RecalcPendingControl pending={recalcState.pending} variant="banner" />
+
       <Header
         kicker="Ranking"
         title="Ranking"

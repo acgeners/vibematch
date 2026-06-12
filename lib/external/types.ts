@@ -164,6 +164,12 @@ export interface SourcedReview {
   userRating?: number
   /** Comprimento do texto antes de qualquer truncamento — usado pelo sampler. */
   textLength?: number
+  /**
+   * Review escrita manualmente pelo usuário (vinda de `work_manual_reviews`).
+   * Quando true, é tratada como evidência DIRETA sobre a obra no prompt (sem o
+   * aviso de "verifique se descreve a mesma obra") e nunca é descartada pelo cap.
+   */
+  isManual?: boolean
 }
 
 /** Avaliação numérica de uma plataforma externa para a obra (rating 0-10 + nº de votos). Usada como sinal de recepção/popularidade no prompt da IA. */

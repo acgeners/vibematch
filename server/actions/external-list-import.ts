@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { recalculateAllInBackground } from "@/server/actions/calculations"
+import { markRecalcPending } from "@/server/actions/recalc-queue"
 import {
   getPersonalStatusIdByName,
   getPublicationStatusIdByName,
@@ -328,7 +328,7 @@ export async function commitExternalListImport(
       .eq("id", importId)
 
     if (result.createdCount > 0 || result.updatedCount > 0) {
-      await recalculateAllInBackground("external-list-import")
+      await markRecalcPending("external-list-import")
     }
 
     revalidatePath("/titles")

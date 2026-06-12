@@ -6,7 +6,7 @@ import { predictNextFromAnchor, parseRelativeAgeToDate } from "@/lib/external/ch
 import { comixWorkUrl } from "@/lib/external/comix"
 import { fetchMangaDexChapterDates } from "@/lib/external/mangadex"
 import { withTimeout } from "@/lib/external/with-timeout"
-import { recalculateWork } from "@/server/actions/calculations"
+import { markRecalcPending } from "@/server/actions/recalc-queue"
 
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean }
 
@@ -143,7 +143,9 @@ export async function checkReadingUpdates(
         // pra cima OU pra baixo — corrige totais antigos inflados (ex.: 130 do round(129.7)).
         if (latest != null && Math.ceil(latest) !== total) {
           await supabase.from("works").update({ total_chapters: Math.ceil(latest) }).eq("id", w.id)
-          await recalculateWork(w.id).catch(() => {})
+          // total_chapters é feature do Ridge → marca pendente em vez de N
+          // recalc-all dentro deste loop de sync de capítulos.
+          await markRecalcPending("reading-chapter-sync").catch(() => {})
         }
 
         return {

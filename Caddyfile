@@ -1,0 +1,16 @@
+# O domínio vem do .env (DOMAIN=seu-sub.duckdns.org). O Caddy resolve
+# Let's Encrypt sozinho assim que o DNS apontar pro IP da VM e as portas
+# 80/443 estiverem abertas.
+{$DOMAIN} {
+	encode zstd gzip
+
+	reverse_proxy app:3000 {
+		# A avaliação IA leva ~78s; afrouxa os timeouts do proxy pra não cortar.
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 180s
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+}

@@ -10,7 +10,7 @@ import {
   getCandidatesByIds,
 } from "@/server/queries/recommendations"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
-import { recalculateAllInBackground } from "@/server/actions/calculations"
+import { markRecalcPending } from "@/server/actions/recalc-queue"
 import { getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { predictAndPersistSynopsisQuality } from "@/lib/ai-evaluation/synopsis-quality-runner"
 import { predictSynopsisQuality } from "@/lib/ai-evaluation/synopsis-quality-predictor"
@@ -137,12 +137,11 @@ export async function applySynopsisPredictionAction(
       .eq("id", workId)
     if (error) return { error: `Falha aplicando previsão: ${error.message}` }
 
-    // O recálculo completo (Ridge/kNN/stacker dependem de toda a base) roda em
-    // background via after() — a resposta volta assim que synopsis_quality está
-    // gravado, que é tudo que a UI precisa pro estado "Aplicado". As notas
-    // derivadas atualizam logo depois, igual aos demais saves (updateWork,
-    // pós-leitura, etc.). Antes isto bloqueava o clique por um recalc-all inteiro.
-    await recalculateAllInBackground("applySynopsisPrediction")
+    // synopsis_quality é feature do Ridge global → marca recálculo pendente em
+    // vez de recalcular na hora. A resposta volta assim que synopsis_quality está
+    // gravado (estado "Aplicado"); a Nota Prevista atualiza no "Recalcular agora"
+    // ou no auto-recalc (≥1h sem novas edições). Antes era um recalc-all inteiro.
+    await markRecalcPending("applySynopsisPrediction")
 
     revalidatePath("/titles")
     revalidatePath(`/titles/${workId}`)

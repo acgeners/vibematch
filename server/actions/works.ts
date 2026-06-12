@@ -18,10 +18,8 @@ import {
   pickPrimaryCover,
   splitSynopsesFromText,
 } from "@/lib/work-derived"
-import {
-  recalculateAll,
-  recalculateAllInBackground as recalcAllInBackgroundShared,
-} from "./calculations"
+import { recalculateAll } from "./calculations"
+import { markRecalcPending } from "./recalc-queue"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
@@ -30,13 +28,6 @@ import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import { titleToSlug } from "@/lib/utils"
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>
-
-// Wrapper sync (mantém os call sites existentes sem floating-promise) que delega
-// pro helper compartilhado em calculations.ts — assim o coalescing guard é único
-// entre updateWorkStatus, submitPostReadingAttributes, etc.
-function recalculateAllInBackground(context: string) {
-  void recalcAllInBackgroundShared(context)
-}
 
 /**
  * Dispara consolidação de sinopses via Haiku em background. Só roda quando o
@@ -1378,9 +1369,10 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
   // re-rank é manual). No-op se a obra nunca foi rankeada.
   await markWorkAlignmentStale(id)
 
-  // Recalcular todos sem bloquear a edição: a média global muda quando qualquer título é alterado,
-  // mas esperar a base inteira aqui deixa o formulário preso quando o recálculo demora.
-  recalculateAllInBackground("updateWork")
+  // Editar a obra muda as features do Ridge global → marca a base como recálculo
+  // pendente em vez de recalcular na hora. A Nota Prevista atualiza quando o
+  // usuário clica "Recalcular agora" ou no auto-recalc (≥1h sem novas edições).
+  await markRecalcPending("updateWork")
 
   revalidatePath(`/titles/${id}`)
   revalidatePath(`/titles/${id}/edit`)
@@ -1530,7 +1522,7 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
 
   if (error) return { error: { _root: [error.message] } }
 
-  recalculateAllInBackground("updateWorkStatus")
+  await markRecalcPending("updateWorkStatus")
 
   revalidatePath("/titles/[id]", "page")
   revalidatePath("/titles")
@@ -1685,7 +1677,7 @@ export async function updateWorkExternalData(id: string, updates: ExternalWorkUp
     // (não recomputa; re-rank é manual). No-op se a obra nunca foi rankeada.
     await markWorkAlignmentStale(id)
 
-    recalculateAllInBackground("updateWorkExternalData")
+    await markRecalcPending("updateWorkExternalData")
     const nextSlug = titleToSlug(
       typeof updates.title === "string" && updates.title.trim()
         ? updates.title

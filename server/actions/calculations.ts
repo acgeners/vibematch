@@ -961,6 +961,24 @@ export async function recalculateAll() {
     .eq("id", config.id)
   if (configUpdateErr) throw new Error(configUpdateErr.message)
 
+  // Limpa o flag de "recálculo pendente" (migration 096): qualquer recalculateAll
+  // completo — manual, auto após 1h, ou eager (settings/calibração) — satisfaz a
+  // fila. Best-effort: se as colunas ainda não existem, ignora (o recálculo em si
+  // não pode falhar por isso). Race conhecido e benigno: uma edição que cair entre
+  // o load das obras e este UPDATE perde o flag até o próximo trigger — num app
+  // single-user, a janela é de poucos segundos e o dado editado entra no recalc
+  // seguinte (qualquer edição futura re-arma o flag).
+  const { error: clearPendingErr } = await supabase
+    .from("formula_config")
+    .update({ recalc_pending: false, recalc_last_edit_at: null })
+    .eq("id", config.id)
+  if (clearPendingErr) {
+    console.warn(
+      "[recalculateAll] limpeza do flag recalc_pending falhou (migration 096 aplicada?):",
+      clearPendingErr.message,
+    )
+  }
+
   // Snapshot histórico — append-only. Falha aqui não invalida o recálculo;
   // só perde uma entrada do gráfico de tendência.
   const { error: historyErr } = await supabase.from("calibration_history").insert({

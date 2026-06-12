@@ -204,6 +204,7 @@ services:
 
   caddy:
     image: caddy:2
+    env_file: .env           # lê o DOMAIN pro Caddyfile
     ports:
       - "80:80"
       - "443:443"
@@ -223,6 +224,7 @@ volumes:
 ### 4.6 `.env` na VM (não commitar)
 
 ```
+DOMAIN=seu-sub.duckdns.org
 NEXT_PUBLIC_SUPABASE_URL=https://djbreiyzwoevbmoscqiq.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
@@ -237,20 +239,21 @@ quanto pra injetar as secretas em runtime via `env_file`.)
 
 ## Fase 5 — HTTPS (reverse proxy)
 
-**Com domínio (recomendado):** crie um `Caddyfile` — o Caddy resolve Let's Encrypt
-sozinho:
+O `Caddyfile` (já no repo) lê o host de `{$DOMAIN}` (vindo do `.env`), então o
+Caddy resolve o Let's Encrypt sozinho assim que o DNS apontar pro IP da VM.
 
-```
-seu-dominio.com {
-    reverse_proxy app:3000
-}
-```
+**DuckDNS (recomendado, grátis):** sem domínio próprio, é o caminho pra ter HTTPS
+de verdade. Em [duckdns.org](https://www.duckdns.org) (login social), crie um
+subdomínio e aponte o IP público da VM nele. Depois, no `.env`:
+`DOMAIN=seu-sub.duckdns.org`. Não precisa de token/módulo no Caddy — o desafio
+HTTP-01 funciona só com o A record + portas 80/443 abertas.
 
-Aponte o DNS (registro A) do domínio pro IP público da VM antes de subir.
+> HTTPS importa aqui: o app caminha pra multi-user com auth, e cookie de sessão
+> seguro exige HTTPS. Trocar por um domínio próprio depois é só mudar `DOMAIN` no
+> `.env` e o DNS — nada no código.
 
-**Sem domínio:** remova o serviço `caddy`, exponha `app` na porta 80
-(`ports: ["80:3000"]`) e acesse via `http://SEU_IP` (sem HTTPS — ok pra uso pessoal).
-Ou use DuckDNS (domínio grátis) + Caddy.
+**Sem nenhum domínio (só pra teste rápido):** remova o serviço `caddy`, exponha
+`app` na porta 80 (`ports: ["80:3000"]`) e acesse via `http://SEU_IP` (sem HTTPS).
 
 ---
 

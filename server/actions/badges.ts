@@ -3,12 +3,15 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getAiEvaluationDefaultQueueCount } from "@/server/queries/recommendations"
 import { getSettingsBadgePendingTotal } from "@/server/queries/settings-pending"
+import { maybeTriggerStaleRecalc } from "@/server/actions/recalc-queue"
 
 export interface SidebarBadgeCounts {
   /** Obras distintas nos filtros padrão de /ai-evaluation. */
   aiEval: number
   /** Pendências do Pipeline de dados de /settings (soma). */
   settings: number
+  /** Há edições de nota aguardando recálculo (fila de recálculo, migration 096). */
+  recalcPending: boolean
 }
 
 /**
@@ -20,12 +23,20 @@ export interface SidebarBadgeCounts {
  */
 export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
   const supabase = createAdminClient()
+  // Estado da fila de recálculo + disparo lazy do auto-recalc (≥1h sem edições).
+  // Roda em paralelo com a contagem; falha vira "não pendente". A carga de página
+  // (que dispara este action na sidebar) é o gatilho do recálculo automático.
+  const recalcStatePromise = maybeTriggerStaleRecalc().catch(() => ({
+    pending: false,
+    lastEditAt: null,
+  }))
   try {
     const { data, error } = await supabase.rpc("get_sidebar_badge_counts")
     if (error) throw error
     const row = Array.isArray(data) ? data[0] : data
     if (row && typeof row.ai_eval_total === "number" && typeof row.settings_total === "number") {
-      return { aiEval: row.ai_eval_total, settings: row.settings_total }
+      const recalc = await recalcStatePromise
+      return { aiEval: row.ai_eval_total, settings: row.settings_total, recalcPending: recalc.pending }
     }
     throw new Error("RPC get_sidebar_badge_counts retornou formato inesperado")
   } catch (rpcErr) {
@@ -34,14 +45,15 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
       rpcErr instanceof Error ? rpcErr.message : rpcErr,
     )
     try {
-      const [aiEval, settings] = await Promise.all([
+      const [aiEval, settings, recalc] = await Promise.all([
         getAiEvaluationDefaultQueueCount(),
         getSettingsBadgePendingTotal(),
+        recalcStatePromise,
       ])
-      return { aiEval, settings }
+      return { aiEval, settings, recalcPending: recalc.pending }
     } catch (fallbackErr) {
       console.error("[getSidebarBadgeCounts] fallback falhou:", fallbackErr)
-      return { aiEval: 0, settings: 0 }
+      return { aiEval: 0, settings: 0, recalcPending: false }
     }
   }
 }

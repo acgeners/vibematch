@@ -7,7 +7,7 @@ import type { CriterionSlug } from "@/types/domain"
 import { getCurrentUserId } from "@/server/queries/current-user"
 import { getLatestAiEvaluationAttributes } from "@/server/queries/post-attribute-assessment"
 import { recomputeAttributeBias } from "@/lib/calculations/attribute-bias"
-import { recalculateAllInBackground } from "@/server/actions/calculations"
+import { markRecalcPending } from "@/server/actions/recalc-queue"
 
 export type PostReadingResult = { ok: true } | { ok: false; error: string }
 
@@ -75,10 +75,10 @@ export async function submitPostReadingAttributes(
   }
 
   await recomputeAttributeBias(userId, supabase)
-  // Recalc roda em background (coalescido): o save retorna na hora; os scores
-  // atualizam quando o recalc termina (igual ao updateWorkStatus). Antes isso
-  // era um `await recalculateAll()` bloqueante de dezenas de segundos.
-  await recalculateAllInBackground("submitPostReadingAttributes")
+  // A pós-leitura alimenta o Ridge global → marca recálculo pendente em vez de
+  // recalcular na hora. A Nota Prevista atualiza no "Recalcular agora" ou no
+  // auto-recalc (≥1h sem novas edições). Antes era um recalc-all em background.
+  await markRecalcPending("submitPostReadingAttributes")
   revalidatePath(`/titles/${workId}`)
 
   return { ok: true }

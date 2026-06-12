@@ -1,7 +1,6 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation } from "@/lib/ai-evaluation/service"
 import {
@@ -10,8 +9,9 @@ import {
   fetchExternalEvaluationContextForWork,
 } from "@/lib/external/index"
 import { saveWorkReviews } from "@/lib/external/persist-reviews"
-import type { ExternalSourceId } from "@/lib/external/types"
-import { recalculateWork } from "./calculations"
+import type { ExternalSourceId, SourcedReview } from "@/lib/external/types"
+import { getManualReviews } from "@/server/queries/manual-reviews"
+import { markRecalcPending } from "./recalc-queue"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import type { AiEvaluation } from "@/types/domain"
 import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
@@ -166,10 +166,28 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     })
     const externalMs = Date.now() - externalStart
 
+    // Reviews manuais (work_manual_reviews) — curadas pelo usuário. São tratadas
+    // como evidência DIRETA: sempre entram no prompt (prepend → recebem R1…),
+    // nunca passam pelo cap/sampler das externas e sobrevivem ao snapshot de
+    // work_reviews. "manual" não está no enum ExternalSourceId; o render usa
+    // `isManual`, não a fonte — cast localizado evita widening do tipo.
+    const manualReviews = await getManualReviews(workId)
+    const manualSourced: SourcedReview[] = manualReviews.map((m) => ({
+      source: "manual" as unknown as ExternalSourceId,
+      sourceTitle: work.title,
+      matchScore: 1,
+      text: m.text,
+      userRating: m.user_rating ?? undefined,
+      textLength: m.text.length,
+      isManual: true,
+    }))
+    const effectiveSourcedReviews: SourcedReview[] = [...manualSourced, ...(sourcedReviews ?? [])]
+
     // Diagnóstico do motivo de "sem reviews externas". Renderizado na UI de
     // revisão para indicar a ação certa (atribuir fontes, revisar rejeições, etc.).
+    // Reviews manuais contam como reviews: se houver alguma, o motivo é null.
     const noReviewsReason: "no_external_ids" | "all_rejected" | "search_miss" | "sources_returned_empty" | null =
-      (sourcedReviews?.length ?? 0) > 0
+      (effectiveSourcedReviews.length) > 0
         ? null
         : hasAcceptedExternalIds
           ? "sources_returned_empty"
@@ -195,7 +213,7 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
       sentCounts[r.source] = (sentCounts[r.source] ?? 0) + 1
     }
     console.log(
-      `[ai-eval reviews] work="${work.title}" hasAcceptedExternalIds=${hasAcceptedExternalIds} accepted=${JSON.stringify(acceptedExternalIds)} rejected=${JSON.stringify(rejectedSources)} pool=${allReviews?.length ?? 0} (${JSON.stringify(sourceCounts)}) sent=${sourcedReviews?.length ?? 0} (${JSON.stringify(sentCounts)})`
+      `[ai-eval reviews] work="${work.title}" hasAcceptedExternalIds=${hasAcceptedExternalIds} accepted=${JSON.stringify(acceptedExternalIds)} rejected=${JSON.stringify(rejectedSources)} pool=${allReviews?.length ?? 0} (${JSON.stringify(sourceCounts)}) manual=${manualSourced.length} sent=${effectiveSourcedReviews.length} (${JSON.stringify(sentCounts)})`
     )
 
     const synopses = (work as { work_synopses?: Array<{ source?: string | null; text?: string | null; is_primary?: boolean | null; position?: number | null }> }).work_synopses ?? []
@@ -205,10 +223,11 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     const covers = (work as { work_covers?: Array<{ url?: string | null; is_primary?: boolean | null; position?: number | null }> }).work_covers ?? []
     const coverUrl = pickPrimaryCover(covers)
 
-    // Gate pré-análise: sem reviews externas, deixa o cliente decidir se segue
-    // mesmo assim antes de gastar a chamada do LLM. Ainda não inserimos a linha
-    // de ai_evaluations aqui, então não fica avaliação órfã "processing".
-    if ((sourcedReviews?.length ?? 0) === 0 && !opts.proceedWithoutReviews) {
+    // Gate pré-análise: sem NENHUMA review (externa ou manual), deixa o cliente
+    // decidir se segue mesmo assim antes de gastar a chamada do LLM. Ainda não
+    // inserimos a linha de ai_evaluations aqui, então não fica avaliação órfã
+    // "processing". Reviews manuais saltam o gate (o usuário já optou por seguir).
+    if (effectiveSourcedReviews.length === 0 && !opts.proceedWithoutReviews) {
       return {
         needsReviewConfirmation: true as const,
         noReviewsReason,
@@ -235,7 +254,7 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
       synopsisIsManual,
       genres: genreNames,
       tags,
-      sourcedReviews,
+      sourcedReviews: effectiveSourcedReviews,
       externalContext,
       platformRatings,
       similarWorks,
@@ -401,13 +420,11 @@ export async function submitAiReview(submission: AiReviewSubmission) {
   // (alignment_score) persistido. Marca como desatualizado (re-rank é manual).
   await markWorkAlignmentStale(submission.workId)
 
-  after(async () => {
-    try {
-      await recalculateWork(submission.workId)
-    } catch (error) {
-      console.error("[submitAiReview] Failed to recalculate scores", error)
-    }
-  })
+  // Aceitar a avaliação muda as notas por critério (features do Ridge global) →
+  // marca recálculo pendente em vez de recalcular na hora. Coerente com avaliar
+  // vários títulos em sequência: a Nota Prevista entra no batch e atualiza no
+  // "Recalcular agora" ou no auto-recalc (≥1h sem novas edições).
+  await markRecalcPending("submitAiReview")
 
   revalidatePath(`/titles/${submission.workId}`)
   revalidatePath("/ai-evaluation")
