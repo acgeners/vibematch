@@ -796,21 +796,38 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
   }
 
   if (prepared.sourcedReviews?.length) {
-    lines.push(
-      `\nReviews de usuários externas (buscadas por similaridade de título — VERIFIQUE se descrevem a mesma obra antes de usar):`
-    )
-    prepared.sourcedReviews.forEach((r, i) => {
-      const matchPct = Math.round(r.matchScore * 100)
-      const ratingLabel = r.userRating != null ? `, nota do usuário: ${r.userRating}/10` : ""
+    const withIds = prepared.sourcedReviews.map((r, i) => ({ r, id: prepared.ids[i] }))
+    const manual = withIds.filter((x) => x.r.isManual)
+    const external = withIds.filter((x) => !x.r.isManual)
+
+    if (manual.length) {
       lines.push(
-        `[${prepared.ids[i]}] (fonte: ${r.source}, match com o título: ${matchPct}%${ratingLabel}, título-fonte: "${r.sourceTitle}")\n${truncateReviewByWords(r.text)}`
+        `\nReviews fornecidas por você sobre esta obra (evidência DIRETA e confiável — descrevem a obra avaliada; NÃO precisa verificar se é a mesma obra):`
       )
-    })
+      manual.forEach(({ r, id }) => {
+        const ratingLabel = r.userRating != null ? ` (nota do usuário: ${r.userRating}/10)` : ""
+        lines.push(`[${id}]${ratingLabel}\n${truncateReviewByWords(r.text)}`)
+      })
+    }
+
+    if (external.length) {
+      lines.push(
+        `\nReviews de usuários externas (buscadas por similaridade de título — VERIFIQUE se descrevem a mesma obra antes de usar):`
+      )
+      external.forEach(({ r, id }) => {
+        const matchPct = Math.round(r.matchScore * 100)
+        const ratingLabel = r.userRating != null ? `, nota do usuário: ${r.userRating}/10` : ""
+        lines.push(
+          `[${id}] (fonte: ${r.source}, match com o título: ${matchPct}%${ratingLabel}, título-fonte: "${r.sourceTitle}")\n${truncateReviewByWords(r.text)}`
+        )
+      })
+      lines.push(
+        `\nLembrete: se uma review externa acima descrever uma obra DIFERENTE da sinopse fornecida, IGNORE-a completamente. Se não houver conflito claro, use a review como evidência auxiliar.`
+      )
+    }
+
     lines.push(
-      `\nLembrete: se uma review acima descrever uma obra DIFERENTE da sinopse fornecida, IGNORE-a completamente. Se não houver conflito claro, use a review como evidência auxiliar.`
-    )
-    lines.push(
-      `Instrução obrigatória: para cada nota, considere essas reviews de usuários compatíveis junto com sinopse/tags/gêneros. Quando uma review influenciar a nota ou confirmar a evidência, mencione "review de usuário", "review externa" ou a fonte na justificativa, incluindo o ID da review, como "review R1". Preencha "review_usage" com os IDs usados.`
+      `Instrução obrigatória: para cada nota, considere essas reviews junto com sinopse/tags/gêneros. Quando uma review influenciar a nota ou confirmar a evidência, mencione "review de usuário", "review externa" ou a fonte na justificativa, incluindo o ID da review, como "review R1". Preencha "review_usage" com os IDs usados.`
     )
   } else if (prepared.legacyReviews?.length) {
     lines.push(

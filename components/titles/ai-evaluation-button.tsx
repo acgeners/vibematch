@@ -2,18 +2,32 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Loader2, Sparkles } from "lucide-react"
+import { Loader2, Pencil, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation } from "@/server/actions/ai"
+import {
+  getEvaluationInputs,
+  saveManualReviews,
+  updatePrimarySynopsis,
+} from "@/server/actions/manual-reviews"
 import { AiEvaluationReviewForm } from "@/components/ai-evaluation/ai-evaluation-review-form"
 import { AiEvaluationCompare } from "@/components/ai-evaluation/ai-evaluation-compare"
 import type { CompareEval } from "@/components/ai-evaluation/ai-evaluation-compare"
+import {
+  ReviewDraftsField,
+  draftsToManualReviewInput,
+  manualReviewsToDrafts,
+} from "@/components/titles/review-drafts-field"
+import type { ReviewDraft } from "@/components/titles/review-drafts-field"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -53,6 +67,58 @@ export function AiEvaluationButton({
   const [noReviewConfirm, setNoReviewConfirm] = useState<NoReviewsReason | null | "none">(null)
   // Comparação Sonnet (existente) vs. Haiku (recém-rodado).
   const [compareData, setCompareData] = useState<{ a: CompareEval; b: AiEvaluation } | null>(null)
+  // Editor de entradas (sinopse + reviews manuais) antes de rodar a IA.
+  const [inputsOpen, setInputsOpen] = useState(false)
+  const [inputsLoading, setInputsLoading] = useState(false)
+  const [savingInputs, setSavingInputs] = useState(false)
+  const [synopsisDraft, setSynopsisDraft] = useState("")
+  const [reviewDrafts, setReviewDrafts] = useState<ReviewDraft[]>([])
+
+  const openInputsEditor = async () => {
+    setInputsOpen(true)
+    setInputsLoading(true)
+    const inputs = await getEvaluationInputs(workId)
+    setSynopsisDraft(inputs.synopsis)
+    setReviewDrafts(manualReviewsToDrafts(inputs.reviews))
+    setInputsLoading(false)
+  }
+
+  // Persiste sinopse primária + reviews manuais. Retorna false em erro.
+  const persistInputs = async (): Promise<boolean> => {
+    const [synRes, revRes] = await Promise.all([
+      updatePrimarySynopsis(workId, synopsisDraft),
+      saveManualReviews(workId, draftsToManualReviewInput(reviewDrafts)),
+    ])
+    if (synRes.error) {
+      toast.error(`Falha ao salvar sinopse: ${synRes.error}`)
+      return false
+    }
+    if (revRes.error) {
+      toast.error(`Falha ao salvar reviews: ${revRes.error}`)
+      return false
+    }
+    return true
+  }
+
+  const handleSaveInputs = async () => {
+    setSavingInputs(true)
+    const ok = await persistInputs()
+    setSavingInputs(false)
+    if (ok) {
+      toast.success("Entradas salvas")
+      setInputsOpen(false)
+      router.refresh()
+    }
+  }
+
+  const handleSaveInputsAndEvaluate = async () => {
+    setSavingInputs(true)
+    const ok = await persistInputs()
+    setSavingInputs(false)
+    if (!ok) return
+    setInputsOpen(false)
+    await runEvaluation()
+  }
 
   const runEvaluation = async (opts?: { model?: "sonnet" | "opus" | "haiku"; proceedWithoutReviews?: boolean }) => {
     setEvaluating(true)
@@ -125,6 +191,15 @@ export function AiEvaluationButton({
               <Sparkles className="h-4 w-4" />
               {label}
             </Button>
+            <Button
+              variant="outline"
+              onClick={() => void openInputsEditor()}
+              disabled={evaluating}
+              title="Edite a sinopse usada pela IA e adicione reviews suas antes de avaliar."
+            >
+              <Pencil className="h-4 w-4" />
+              Editar entradas
+            </Button>
             {SHOW_HAIKU_AB && latestEvaluation && (
               <Button
                 variant="outline"
@@ -143,6 +218,16 @@ export function AiEvaluationButton({
           <Button variant="outline" size="sm" onClick={handleAiEvaluation} disabled={evaluating}>
             <Sparkles className="h-4 w-4" />
             {label}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void openInputsEditor()}
+            disabled={evaluating}
+            title="Edite a sinopse usada pela IA e adicione reviews suas antes de avaliar."
+          >
+            <Pencil className="h-4 w-4" />
+            Editar entradas
           </Button>
           {SHOW_HAIKU_AB && latestEvaluation && (
             <Button
@@ -198,6 +283,59 @@ export function AiEvaluationButton({
               onCancel={() => setReviewOpen(false)}
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Editor de entradas: sinopse usada pela IA + reviews manuais. */}
+      <Dialog open={inputsOpen} onOpenChange={(open) => !open && !savingInputs && setInputsOpen(false)}>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar entradas da avaliação IA</DialogTitle>
+            <DialogDescription>
+              {`Ajuste a sinopse e adicione reviews suas sobre "${workTitle}". São salvas na obra e reusadas em toda reavaliação.`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {inputsLoading ? (
+            <div className="flex items-center justify-center py-10 text-muted-foreground">
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Carregando entradas…
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div className="space-y-1.5">
+                <Label htmlFor="ai-synopsis">Sinopse usada pela IA</Label>
+                <Textarea
+                  id="ai-synopsis"
+                  value={synopsisDraft}
+                  disabled={savingInputs}
+                  onChange={(e) => setSynopsisDraft(e.target.value)}
+                  placeholder="Sinopse da obra. Editar aqui define a sinopse primária (manual) — autoridade máxima no prompt."
+                  className="min-h-[140px]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Vira a sinopse primária da obra (mesma que aparece na página). Vazia = sem sinopse (a IA baixa a confidence).
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Reviews manuais</Label>
+                <ReviewDraftsField value={reviewDrafts} onChange={setReviewDrafts} disabled={savingInputs} />
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="ghost" onClick={() => setInputsOpen(false)} disabled={savingInputs}>
+              Cancelar
+            </Button>
+            <Button variant="outline" onClick={() => void handleSaveInputs()} disabled={savingInputs || inputsLoading}>
+              {savingInputs ? "Salvando…" : "Salvar"}
+            </Button>
+            <Button onClick={() => void handleSaveInputsAndEvaluate()} disabled={savingInputs || inputsLoading}>
+              <Sparkles className="h-4 w-4" />
+              Salvar e avaliar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

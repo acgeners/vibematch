@@ -21,6 +21,7 @@ import { getSidebarBadgeCounts } from "@/server/actions/badges"
 import { SIDEBAR_BADGES_REFRESH_EVENT } from "@/lib/sidebar-badges"
 import { AccountChip } from "@/components/layout/account-chip"
 import { BalanceChip } from "@/components/layout/balance-chip"
+import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
 
 type BadgeKey = "ai-eval" | "settings"
 
@@ -98,14 +99,18 @@ export function Sidebar() {
     "ai-eval": 0,
     settings: 0,
   })
+  // Há edições de nota aguardando recálculo (fila de recálculo). Vem do mesmo
+  // fetch dos badges; mostra o botão "Recalcular notas" no rodapé da sidebar.
+  const [recalcPending, setRecalcPending] = useState(false)
   const lastFetchRef = useRef(0)
   const refreshBadges = useCallback((force = false) => {
     const now = Date.now()
     if (!force && now - lastFetchRef.current < BADGES_TTL_MS) return
     lastFetchRef.current = now
     getSidebarBadgeCounts()
-      .then(({ aiEval, settings }) => {
+      .then(({ aiEval, settings, recalcPending }) => {
         setBadgeCounts({ "ai-eval": aiEval, settings })
+        setRecalcPending(recalcPending)
       })
       .catch(() => {
         // Libera o TTL pra permitir retry antes da janela em caso de falha.
@@ -239,6 +244,16 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+
+      {recalcPending && (
+        <div className="border-t border-sidebar-border/60 px-3 py-2.5">
+          <RecalcPendingControl
+            pending={recalcPending}
+            variant="compact"
+            onDone={() => setRecalcPending(false)}
+          />
+        </div>
+      )}
 
       <div className="flex items-center gap-2 border-t border-sidebar-border/60 p-3">
         <div className="min-w-0 flex-1">

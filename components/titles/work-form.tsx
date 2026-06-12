@@ -87,6 +87,8 @@ interface WorkFormProps {
   workSlug?: string
   initialValues?: Partial<WorkFormValues>
   aiEvaluation?: WorkFormAiEvaluation | null
+  /** Se a avaliação IA roda automaticamente ao criar via "Buscar dados" (setting, default false). */
+  aiEvalOnCreate?: boolean
 }
 
 const PLATFORM_FIELDS = [
@@ -529,7 +531,7 @@ const scrollToTop = () => {
   window.scrollTo({ top: 0, behavior: "smooth" })
 }
 
-export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: WorkFormProps) {
+export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEvalOnCreate = false }: WorkFormProps) {
   const router = useRouter()
   const isCreating = !workId
 
@@ -1614,6 +1616,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation }: Work
                 titleQuery={titleValue ?? ""}
                 onSelect={handleExternalSelect}
                 onDuplicateUpdate={handleExternalDuplicateUpdate}
+                evaluateAi={aiEvalOnCreate}
               />
             </div>
             {errors.title && (

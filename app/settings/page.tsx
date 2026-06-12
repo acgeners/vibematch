@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs"
 import path from "node:path"
 import {
   ArrowRight,
+  BookOpen,
   Brain,
   Compass,
   Database,
@@ -20,7 +21,12 @@ import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
 import { ReviewSummaryPanel } from "@/components/settings/review-summary-panel"
+import { ResolveComixPanel } from "@/components/settings/resolve-comix-panel"
+import { AiEvalOnCreateToggle } from "@/components/settings/ai-eval-on-create-toggle"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
+import { getComixResolverStatus } from "@/server/actions/comix-resolver"
+import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
+import { getAiEvalOnCreate } from "@/server/queries/current-user"
 import { getSettingsPendingCounts } from "@/server/queries/settings-pending"
 import type { FormulaConfig } from "@/types/domain"
 import { ACCENT_LINK, type SettingsAccent } from "@/lib/settings-accent"
@@ -70,6 +76,12 @@ async function getSettingsData() {
     getSettingsPendingCounts(),
   ])
 
+  const [comixStatus, comixMissing, aiEvalOnCreate] = await Promise.all([
+    getComixResolverStatus(),
+    getWorksMissingComixHid(),
+    getAiEvalOnCreate(),
+  ])
+
   if (configRes.error) throw new Error(configRes.error.message)
   if (!configRes.data?.[0]) throw new Error("formula_config não encontrado")
 
@@ -83,6 +95,9 @@ async function getSettingsData() {
     canonicalSynopsisPending: pending.canonicalSynopsis,
     embeddingsPending: pending.embeddings,
     reviewSummaryPending: pending.reviewSummary,
+    comixStatus,
+    comixMissing,
+    aiEvalOnCreate,
   }
 }
 
@@ -104,6 +119,13 @@ const SECTION_GROUPS = [
       { id: "tags", title: "Consolidação de tags", icon: <Tags />, accent: "fuchsia" as const },
     ],
   },
+  {
+    label: "Comix & criação",
+    sections: [
+      { id: "comix", title: "Comix", icon: <BookOpen />, accent: "slate" as const },
+      { id: "ai-on-create", title: "Avaliação na criação", icon: <Sparkles />, accent: "amber" as const },
+    ],
+  },
 ]
 
 export default async function SettingsPage() {
@@ -117,6 +139,9 @@ export default async function SettingsPage() {
     canonicalSynopsisPending,
     embeddingsPending,
     reviewSummaryPending,
+    comixStatus,
+    comixMissing,
+    aiEvalOnCreate,
   } = await getSettingsData()
 
   return (
@@ -225,6 +250,29 @@ export default async function SettingsPage() {
         accent="fuchsia"
       >
         <NavLink href="/settings/tag-consolidation" accent="fuchsia" label="Abrir página de consolidação" />
+      </SettingsSection>
+
+      {/* ── Comix & criação ───────────────────────────────────────── */}
+      <GroupHeading label="Comix & criação" />
+
+      <SettingsSection
+        id="comix"
+        title="Cobertura da Comix"
+        description="Resolve o hid da Comix das obras (pra habilitar reviews) e permite preencher manualmente as não encontradas. A Comix é a fonte principal de reviews."
+        icon={<BookOpen />}
+        accent="slate"
+      >
+        <ResolveComixPanel accent="slate" initialStatus={comixStatus} initialMissing={comixMissing} />
+      </SettingsSection>
+
+      <SettingsSection
+        id="ai-on-create"
+        title="Avaliação IA na criação"
+        description="Controla se a avaliação IA roda automaticamente ao criar uma obra via Buscar dados. Desabilitada por padrão pra evitar custo de tokens não intencional."
+        icon={<Sparkles />}
+        accent="amber"
+      >
+        <AiEvalOnCreateToggle initialEnabled={aiEvalOnCreate} />
       </SettingsSection>
 
       <ScrollToTop />

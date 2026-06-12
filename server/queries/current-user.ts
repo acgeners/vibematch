@@ -49,6 +49,25 @@ export async function getCurrentPlan(admin?: AdminClient): Promise<UserPlan> {
   return (data?.user_plan as UserPlan | undefined) ?? "free"
 }
 
+// Toggle "avaliação IA na criação de obras" (migration 097). NÃO cacheado
+// (muda em runtime via /settings). Tolerante: se a coluna ainda não existe,
+// cai pro default seguro `false` (não dispara IA na criação sem querer).
+export async function getAiEvalOnCreate(admin?: AdminClient): Promise<boolean> {
+  const supabase = admin ?? createAdminClient()
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("ai_eval_on_create")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.warn(`[getAiEvalOnCreate] fallback false (coluna indisponível): ${error.message}`)
+    return false
+  }
+  return (data?.ai_eval_on_create as boolean | undefined) ?? false
+}
+
 export interface CurrentUserProfile {
   userId: string
   displayName: string | null

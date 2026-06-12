@@ -56,3 +56,6 @@ scripts/seed-from-xlsx*.js
 /animeplanet.json
 /animeplanet.xml.gz
 /mangaupdates.json
+
+# Perfil do Chrome do resolve-comix-hids (puppeteer)
+.cache/

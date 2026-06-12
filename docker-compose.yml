@@ -1,0 +1,45 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    env_file: .env
+    environment:
+      - FLARESOLVERR_URL=http://flaresolverr:8191/v1
+    expose:
+      - "3000"
+    depends_on:
+      - flaresolverr
+    restart: unless-stopped
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    environment:
+      - LOG_LEVEL=info
+      - TZ=America/Sao_Paulo
+      - HEADLESS=true
+      - DISABLE_MEDIA=true   # não baixa imagens/CSS → menos RAM no Chromium
+    shm_size: "1gb"          # evita crash do Chromium por /dev/shm pequeno
+    expose:
+      - "8191"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    env_file: .env           # lê o DOMAIN pro Caddyfile
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

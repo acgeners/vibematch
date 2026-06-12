@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, MessageSquareText, Sparkles } from "lucide-react"
+import { ChevronDown, MessageSquareText, PenLine, Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ExpandableText } from "@/components/ui/expandable-text"
@@ -25,22 +25,23 @@ function ratingColor(rating: number | null): string {
 export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
   const [expanded, setExpanded] = useState(false)
 
-  if (snapshot.total === 0) {
+  if (snapshot.total === 0 && snapshot.manual.length === 0) {
     return (
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <MessageSquareText className="h-4 w-4 text-muted-foreground" />
-              <CardTitle className="text-base">Reviews externas</CardTitle>
+              <CardTitle className="text-base">Reviews</CardTitle>
             </div>
             <Badge variant="outline" className="text-[10px]">0 reviews</Badge>
           </div>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            Nenhuma review salva ainda. Reviews são extraídas e salvas quando a
-            Avaliação IA é executada nesta obra.
+            Nenhuma review salva ainda. Reviews externas são extraídas quando a
+            Avaliação IA é executada; reviews suas podem ser adicionadas na edição
+            da obra.
           </p>
         </CardContent>
       </Card>
@@ -55,12 +56,20 @@ export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
           onClick={() => setExpanded((v) => !v)}
           className="flex w-full items-center justify-between gap-3 text-left"
         >
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <MessageSquareText className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-base">Reviews externas</CardTitle>
-            <Badge variant="outline" className="text-[10px]">
-              {snapshot.total} de {snapshot.bySource.length} fonte(s)
-            </Badge>
+            <CardTitle className="text-base">Reviews</CardTitle>
+            {snapshot.total > 0 && (
+              <Badge variant="outline" className="text-[10px]">
+                {snapshot.total} de {snapshot.bySource.length} fonte(s)
+              </Badge>
+            )}
+            {snapshot.manual.length > 0 && (
+              <Badge variant="secondary" className="gap-1 text-[10px]">
+                <PenLine className="h-3 w-3" />
+                {snapshot.manual.length} sua{snapshot.manual.length === 1 ? "" : "s"}
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-3">
             {snapshot.fetchedAt && (
@@ -97,6 +106,51 @@ export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
       )}
       {expanded && (
         <CardContent className="space-y-5">
+          {snapshot.manual.length > 0 && (
+            <section>
+              <div className="mb-2 flex items-baseline justify-between gap-2">
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+                  <PenLine className="h-3.5 w-3.5 text-primary" />
+                  Suas reviews
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  {snapshot.manual.length} review(s)
+                </span>
+              </div>
+              <ul className="space-y-2">
+                {snapshot.manual.map((review) => (
+                  <li
+                    key={review.id}
+                    className="rounded-md border border-primary/30 bg-primary/5 p-3"
+                  >
+                    <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
+                      <span className="text-muted-foreground">Review manual</span>
+                      {review.userRating != null && (
+                        <span
+                          className={cn(
+                            "font-mono font-semibold tabular-nums",
+                            ratingColor(review.userRating),
+                          )}
+                        >
+                          {review.userRating.toFixed(1)}/10
+                        </span>
+                      )}
+                    </div>
+                    <ExpandableText
+                      text={review.text}
+                      maxLines={4}
+                      className="mt-2 text-sm leading-relaxed text-foreground/90 whitespace-pre-line"
+                    />
+                    {review.note && (
+                      <p className="mt-2 text-xs italic text-muted-foreground">
+                        {review.note}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {snapshot.bySource.map(({ source, reviews }) => (
             <section key={source}>
               <div className="mb-2 flex items-baseline justify-between gap-2">

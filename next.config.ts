@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Gera um servidor mínimo (.next/standalone) pra imagem Docker enxuta no deploy.
+  // Só afeta `next build`; não muda o `next dev`.
+  output: "standalone",
   // Indicador de dev do Next (botão flutuante "N") vai pro canto inferior
   // direito — no canto esquerdo ele sobrepunha o avatar do chip de conta na
   // sidebar. Só afeta `next dev`.

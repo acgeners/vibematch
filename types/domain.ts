@@ -200,6 +200,17 @@ export interface WorkSynopsis {
   position: number
 }
 
+/** Review escrita manualmente pelo usuário para alimentar a avaliação IA (tabela `work_manual_reviews`). */
+export interface ManualReview {
+  id: string
+  text: string
+  /** Nota 0-10 opcional atribuída pelo usuário. */
+  user_rating: number | null
+  /** Contexto opcional do usuário — NÃO vai pro prompt. */
+  note: string | null
+  position: number
+}
+
 export interface WorkWithRelations extends Work {
   category_scores: CategoryScore[]
   platform_ratings: PlatformRating[]
@@ -269,6 +280,13 @@ export interface FormulaConfig {
   gpt_clamp_hit_rate: number | null
   negative_activation_rate: Record<string, number> | null
   last_recalculated_at: string | null
+  /**
+   * Fila de recálculo (migration 096). `recalc_pending` = há edições de nota não
+   * recalculadas desde o último recalculateAll; `recalc_last_edit_at` = última
+   * edição (o debounce de 1h do auto-recalc conta daqui). Opcionais p/ compat com
+   * leituras antes da migration. */
+  recalc_pending?: boolean | null
+  recalc_last_edit_at?: string | null
   /** P95 das distâncias do treino — threshold de outlier em distanceFactor. */
   distance_p95: number | null
   /** Quantas versões pra trás do prompt são aceitas sem marcar como outdated. */
