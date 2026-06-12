@@ -1,7 +1,7 @@
 "use client"
 
 import { useTransition } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
 import { Sparkles, Loader2, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -40,7 +40,7 @@ export function SynopsisQualitySuggestion({
   hasCanonicalSynopsis,
   isPaid = true,
 }: SynopsisQualitySuggestionProps) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [predicting, startPredict] = useTransition()
   const [applying, startApply] = useTransition()
 
@@ -53,7 +53,7 @@ export function SynopsisQualitySuggestion({
       }
       const q = res.data?.predictedQuality
       toast.success(q ? `Interesse estimado: ${q} (${SYNOPSIS_QUALITY_LABELS[q]})` : "Interesse estimado.")
-      router.refresh()
+      refresh()
     })
   }
 
@@ -65,7 +65,7 @@ export function SynopsisQualitySuggestion({
         return
       }
       toast.success("Aplicado ao Interesse sinopse.")
-      router.refresh()
+      refresh()
     })
   }
 

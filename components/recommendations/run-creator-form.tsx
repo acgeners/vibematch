@@ -1,6 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { useState } from "react"
 import { BookOpen, ChartNoAxesCombined, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -15,6 +16,7 @@ interface RunCreatorFormProps {
 
 export function RunCreatorForm({ disabled, disabledReason }: RunCreatorFormProps) {
   const router = useRouter()
+  const refresh = useRefresh()
   const [userContext, setUserContext] = useState("")
   const [running, setRunning] = useState<"next_read" | "full_analysis" | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -30,7 +32,7 @@ export function RunCreatorForm({ disabled, disabledReason }: RunCreatorFormProps
       if (res.error) setError(res.error)
       else if (res.data) {
         router.push(`/recommendations/${res.data.runSlug}`)
-        router.refresh()
+        refresh()
       }
     } finally {
       setRunning(null)

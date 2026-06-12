@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { Loader2, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -105,6 +106,7 @@ export function UpdateDataDialog({
   onSaved,
 }: UpdateDataDialogProps) {
   const router = useRouter()
+  const refresh = useRefresh()
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : uncontrolledOpen
@@ -460,7 +462,7 @@ export function UpdateDataDialog({
     if (newTitle && newTitle !== currentWork.title) {
       router.push(`/titles/${workId}`)
     } else {
-      router.refresh()
+      refresh()
     }
   }
 

@@ -1,12 +1,11 @@
 "use client"
 
 import { useTransition } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
 import { Sparkles, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
-import { refreshSidebarBadges } from "@/lib/sidebar-badges"
 
 interface RerankAiRkButtonProps {
   workId: string
@@ -24,7 +23,7 @@ interface RerankAiRkButtonProps {
  * controla a aparência do botão.
  */
 export function RerankAiRkButton({ workId, hasScore, isPaid = true }: RerankAiRkButtonProps) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
 
   if (!isPaid) {
@@ -56,8 +55,7 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true }: RerankAiRk
       toast.success(
         score != null ? `IA Rk calculado: ${Math.round(score)}` : "IA Rk calculado.",
       )
-      router.refresh()
-      refreshSidebarBadges() // tirou a obra da fila "IA Rk stale" → recontar badge
+      refresh()
     })
   }
 

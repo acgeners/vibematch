@@ -1,13 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { Loader2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { triggerRecalcNow } from "@/server/actions/recalc-queue"
-import { refreshSidebarBadges } from "@/lib/sidebar-badges"
 
 interface RecalcPendingControlProps {
   /** Estado vindo do server (banner) ou do fetch de badges (sidebar). */
@@ -29,7 +28,7 @@ export function RecalcPendingControl({
   variant = "banner",
   onDone,
 }: RecalcPendingControlProps) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [running, setRunning] = useState(false)
   const [done, setDone] = useState(false)
 
@@ -44,8 +43,7 @@ export function RecalcPendingControl({
       )
       setDone(true)
       onDone?.()
-      router.refresh()
-      refreshSidebarBadges()
+      refresh()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Erro ao recalcular")
     } finally {

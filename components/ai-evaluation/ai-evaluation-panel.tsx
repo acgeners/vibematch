@@ -1,12 +1,11 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowDown, ArrowUp, CalendarDays, CheckSquare, Cpu, ExternalLink, Gauge, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation, skipAiEvaluation, prewarmEvaluationContext } from "@/server/actions/ai"
-import { refreshSidebarBadges } from "@/lib/sidebar-badges"
+import { useRefresh } from "@/lib/use-refresh"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
 import { AiEvaluationCompare } from "./ai-evaluation-compare"
 import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/status-badge"
@@ -108,13 +107,9 @@ function EvaluatingProgress({ estimateMs = 55000 }: { estimateMs?: number }) {
 }
 
 export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
-  const router = useRouter()
-  // router.refresh() atualiza os contadores das abas (server component); o badge
-  // da sidebar fica na mesma rota, então precisa do evento pra recontar.
-  const refreshQueue = () => {
-    router.refresh()
-    refreshSidebarBadges()
-  }
+  // refresh() atualiza os contadores das abas (server component) E o chrome da
+  // sidebar (badge/saldo) na mesma rota, via o evento de refresh do chrome.
+  const refreshQueue = useRefresh()
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null)
   const [skippingId, setSkippingId] = useState<string | null>(null)
   const [reviewData, setReviewData] = useState<ReviewData | null>(null)

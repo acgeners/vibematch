@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { useForm, useWatch, type FieldErrors } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
@@ -200,7 +200,7 @@ export function WorkStatusForm({
   formId,
   onStateChange,
 }: WorkStatusFormProps) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [saving, setSaving] = useState(false)
   const [notesOpen, setNotesOpen] = useState(true)
   const [criteriaOpen, setCriteriaOpen] = useState(true)
@@ -321,7 +321,7 @@ export function WorkStatusForm({
 
     if (extraOk) toast.success(extraSave ? "Tudo salvo." : "Status atualizado.")
     onSaved?.()
-    router.refresh()
+    refresh()
   }
 
   const onInvalid = (formErrors: FieldErrors<WorkStatusInput>) => {

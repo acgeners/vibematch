@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import {
   Archive,
   BookOpen,
@@ -49,7 +50,7 @@ export function FavoriteToggleButton({
   isFavorite: boolean
   iconOnly?: boolean
 }) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
   const handleClick = () => {
     const next = !isFavorite
@@ -60,7 +61,7 @@ export function FavoriteToggleButton({
         return
       }
       toast.success(next ? "Adicionado aos favoritos." : "Removido dos favoritos.")
-      router.refresh()
+      refresh()
     })
   }
   return (
@@ -189,6 +190,7 @@ export function MoreActionsMenu({
   iconOnly?: boolean
 }) {
   const router = useRouter()
+  const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
   const [deleteOpen, setDeleteOpen] = useState(false)
 
@@ -200,7 +202,7 @@ export function MoreActionsMenu({
         return
       }
       toast.success(isArchived ? "Obra desarquivada." : "Obra arquivada.")
-      router.refresh()
+      refresh()
     })
   }
 

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { Loader2, Pencil, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation } from "@/server/actions/ai"
@@ -59,7 +59,7 @@ export function AiEvaluationButton({
   variant = "cta",
   latestEvaluation,
 }: AiEvaluationButtonProps) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [evaluating, setEvaluating] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [evaluation, setEvaluation] = useState<AiEvaluation | null>(null)
@@ -107,7 +107,7 @@ export function AiEvaluationButton({
     if (ok) {
       toast.success("Entradas salvas")
       setInputsOpen(false)
-      router.refresh()
+      refresh()
     }
   }
 
@@ -278,7 +278,7 @@ export function AiEvaluationButton({
               }}
               onSaved={() => {
                 setReviewOpen(false)
-                router.refresh()
+                refresh()
               }}
               onCancel={() => setReviewOpen(false)}
             />

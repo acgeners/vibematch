@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Wallet } from "lucide-react"
 import { getBalanceSummary } from "@/server/actions/account"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
+import { useChromeData } from "@/lib/use-refresh"
 import { cn } from "@/lib/utils"
 
 // Limiar de "saldo baixo" pra colorir o restante em alerta (espelha BalanceCard).
@@ -25,19 +26,9 @@ export function BalanceChip() {
   const pathname = usePathname()
   const [status, setStatus] = useState<BalanceStatus | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    getBalanceSummary()
-      .then((s) => {
-        if (!cancelled) setStatus(s)
-      })
-      .catch(() => {
-        /* mantém o estado atual em caso de falha */
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [pathname])
+  // Re-busca o saldo a cada navegação e quando uma mutação atualiza o chrome
+  // (ex.: avaliação IA gastou tokens). Coalescing/lifecycle em useChromeData.
+  useChromeData(getBalanceSummary, setStatus)
 
   const active = pathname === "/ai-usage" || pathname.startsWith("/ai-usage/")
   const hasBalance = status != null && status.remainingUsd != null

@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import {
   useReactTable,
   getCoreRowModel,
@@ -195,6 +196,7 @@ export function WorkTable({
   isPaid = true,
 }: WorkTableProps) {
   const router = useRouter()
+  const refresh = useRefresh()
   const searchParams = useSearchParams()
 
   const storedViewMode = useSyncExternalStore(
@@ -270,8 +272,8 @@ export function WorkTable({
     const n = favoriteSelectedIds.length
     toast.success(`${n} obra${n !== 1 ? "s" : ""} desfavoritada${n !== 1 ? "s" : ""}`)
     updateCompareIds([])
-    router.refresh()
-  }, [favoriteSelectedIds, updateCompareIds, router])
+    refresh()
+  }, [favoriteSelectedIds, updateCompareIds, refresh])
 
   const totalPages = Math.ceil(total / pageSize)
 
@@ -668,6 +670,7 @@ function WorkListView({
   onSelectAll?: () => void
   onClearAll?: () => void
 }) {
+  const refresh = useRefresh()
   const columnConfig = useSyncExternalStore(
     (onChange) => subscribeWorkColumnConfig(onChange, namespace),
     () => readWorkColumnConfig(namespace),
@@ -966,7 +969,7 @@ function WorkListView({
                   toast.error("Erro ao alterar favorito")
                 } else {
                   toast.success(next ? "Obra favoritada" : "Obra desfavoritada")
-                  router.refresh()
+                  refresh()
                 }
               }}
             >
@@ -985,7 +988,7 @@ function WorkListView({
                   toast.error("Erro ao alterar status da obra")
                 } else {
                   toast.success(work.is_archived ? "Obra desarquivada" : "Obra arquivada")
-                  router.refresh()
+                  refresh()
                 }
               }}
             >
@@ -1003,7 +1006,7 @@ function WorkListView({
                   toast.error(result.error ?? "Erro ao avaliar IA Rk")
                 } else {
                   toast.success(`IA Rk: ${Math.round(result.data.alignmentScore)}`)
-                  router.refresh()
+                  refresh()
                 }
               }}
             >

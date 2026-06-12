@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { ArrowRightLeft, Check, ChevronDown, ChevronUp, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -67,7 +68,8 @@ export function TagSubgroupsPanel({
   subgroupsWithTags,
   unassignedTags,
 }: Props) {
-  const router = useRouter()
+  const router = useRouter() // mantido pro router.replace em updateQuery
+  const doRefresh = useRefresh()
   const [isPending, startTransition] = useTransition()
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -75,7 +77,7 @@ export function TagSubgroupsPanel({
   const [isApplying, setIsApplying] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
 
-  const refresh = () => startTransition(() => router.refresh())
+  const refresh = () => startTransition(() => doRefresh())
   const clearSelection = () => setSelectedIds(new Set())
   const exitSelectionMode = () => {
     setSelectionMode(false)

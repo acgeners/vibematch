@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
 import { Crown, Check, Lock, Loader2 } from "lucide-react"
 import {
@@ -25,7 +25,7 @@ interface PlanCardProps {
 }
 
 export function PlanCard({ plan }: PlanCardProps) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pending, setPending] = useState(false)
   const isPaid = plan === "paid"
@@ -41,7 +41,7 @@ export function PlanCard({ plan }: PlanCardProps) {
       return
     }
     toast.success("Plano cancelado. Você está no Free.")
-    router.refresh()
+    refresh()
   }
 
   const handleReactivate = async () => {
@@ -53,7 +53,7 @@ export function PlanCard({ plan }: PlanCardProps) {
       return
     }
     toast.success("Plano Pago reativado.")
-    router.refresh()
+    refresh()
   }
 
   return (

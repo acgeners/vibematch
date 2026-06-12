@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Image from "next/image"
 import { ImageOff, Loader2, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import {
   revalidateWorkSources,
   saveWorkSourceSelections,
@@ -53,7 +53,7 @@ export function RevalidateSourcesDialog({
   onOpenChange,
   hideTrigger = false,
 }: RevalidateSourcesDialogProps) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : uncontrolledOpen
@@ -129,7 +129,7 @@ export function RevalidateSourcesDialog({
       }
       toast.success("Seleção de fontes salva. Atualize os dados pra rehidratar com as novas fontes.")
       setOpen(false)
-      router.refresh()
+      refresh()
     } finally {
       setSaving(false)
     }
@@ -172,7 +172,7 @@ export function RevalidateSourcesDialog({
         setSourceSelection("comix" as ExternalSourceId, hid)
       }
       setManualHid("")
-      router.refresh()
+      refresh()
     } finally {
       setSavingManual(false)
     }

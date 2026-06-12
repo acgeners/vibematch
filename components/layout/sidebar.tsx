@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -18,7 +18,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getSidebarBadgeCounts } from "@/server/actions/badges"
-import { SIDEBAR_BADGES_REFRESH_EVENT } from "@/lib/sidebar-badges"
+import { useChromeData } from "@/lib/use-refresh"
 import { AccountChip } from "@/components/layout/account-chip"
 import { BalanceChip } from "@/components/layout/balance-chip"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
@@ -102,36 +102,19 @@ export function Sidebar() {
   // Há edições de nota aguardando recálculo (fila de recálculo). Vem do mesmo
   // fetch dos badges; mostra o botão "Recalcular notas" no rodapé da sidebar.
   const [recalcPending, setRecalcPending] = useState(false)
-  const lastFetchRef = useRef(0)
-  const refreshBadges = useCallback((force = false) => {
-    const now = Date.now()
-    if (!force && now - lastFetchRef.current < BADGES_TTL_MS) return
-    lastFetchRef.current = now
-    getSidebarBadgeCounts()
-      .then(({ aiEval, settings, recalcPending }) => {
-        setBadgeCounts({ "ai-eval": aiEval, settings })
-        setRecalcPending(recalcPending)
-      })
-      .catch(() => {
-        // Libera o TTL pra permitir retry antes da janela em caso de falha.
-        lastFetchRef.current = 0
-      })
-  }, [])
 
-  // Re-busca ao trocar de rota, mas no máximo 1x por BADGES_TTL_MS — antes era um
-  // round-trip de ~450ms em CADA navegação. Reflete itens processados ao navegar
-  // sem recontar a cada clique.
-  useEffect(() => {
-    refreshBadges()
-  }, [pathname, refreshBadges])
-
-  // Re-busca (forçado) quando uma mutação na MESMA rota pede (evento global) —
-  // ex.: zerar a fila de /ai-evaluation sem navegar. Ignora o TTL pra refletir na hora.
-  useEffect(() => {
-    const handler = () => refreshBadges(true)
-    window.addEventListener(SIDEBAR_BADGES_REFRESH_EVENT, handler)
-    return () => window.removeEventListener(SIDEBAR_BADGES_REFRESH_EVENT, handler)
-  }, [refreshBadges])
+  // Re-busca os contadores a cada navegação (no máx. 1×/BADGES_TTL_MS — cada RPC
+  // ~450ms no DB remoto) e, FORÇADO, quando uma mutação dispara o refresh do
+  // chrome (ex.: zerar a fila de /ai-evaluation sem navegar). O coalescing e o
+  // re-run pós-mutação vivem em useChromeData.
+  useChromeData(
+    getSidebarBadgeCounts,
+    ({ aiEval, settings, recalcPending }) => {
+      setBadgeCounts({ "ai-eval": aiEval, settings })
+      setRecalcPending(recalcPending)
+    },
+    BADGES_TTL_MS,
+  )
 
   const isItemActive = (item: NavItem, siblings: NavItem[]): boolean => {
     const basePath = item.href.split("?")[0]
