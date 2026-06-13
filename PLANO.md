@@ -84,7 +84,7 @@ pela metade, e os módulos antigos grandes. **Não é qualidade irregular — é
 | # | Item | Onde | Ação recomendada | Sev | Esforço |
 |---|---|---|---|---|---|
 | U1 | Nomenclatura de notas dividida: "Nota Prevista"/`expected_score` (novo) × "Nota.IA/Pr/Calc/Final" (legado) em ~10 componentes | work-table, calculation-breakdown, ranking-table-config, work-heatmap, calibration-panel, ai-evaluation-review-form… | finalizar a migração fase-C: **um** termo voltado ao usuário | 🔴 (maior atrito de UX) | médio |
-| U2 | God components | [work-form.tsx](components/titles/work-form.tsx) 2473, [ranking-filters.tsx](components/ranking/ranking-filters.tsx) 2222, [external/index.ts](lib/external/index.ts) 1942 | modularizar (filtros→hooks/reducer; index→connectors-merge vs context-building) | 🟡 | alto |
+| U2 | God components (manutenção + bundle client) | UI: [work-form.tsx](components/titles/work-form.tsx) 2473, [ranking-filters.tsx](components/ranking/ranking-filters.tsx) 2222, [work-compare-drawer.tsx](components/titles/work-compare-drawer.tsx) 1753, [tag-consolidation-client.tsx](components/settings/tag-consolidation-client.tsx) 1618, [work-table.tsx](components/titles/work-table.tsx) 1412, [external-search.tsx](components/titles/external-search.tsx) 1353. Server/lib: [external/index.ts](lib/external/index.ts) 1942, [works.ts](server/actions/works.ts) 1762 | modularizar incrementalmente (filtros→hooks/reducer; index→connectors-merge vs context-building) | 🟡 | alto |
 
 > **Forte (não mexer):** páginas todas server-components; 11 `loading.tsx`; `optimizePackageImports`;
 > sidebar com badges via barramento+TTL+coalescing; deep-dive decomposto em ~9 componentes pequenos.
@@ -230,7 +230,7 @@ silêncio). Mitigação robusta se cortar: migrar a avaliação para **disparo +
 ### Onda 3 — Render & UX de catálogo · maior esforço, contínuo
 - U1 (nomenclatura de notas — maior atrito de UX) · E3 (virtualização) · E4 (imagens)
 - E1 (sources como prop) · E2 (chunked → RPC)
-- U2 (quebrar work-form, ranking-filters, external/index)
+- U2 (quebrar os god components — lista completa na Parte I.C)
 
 ### Onda 4 — Deploy · por último; plataforma decidida no início, executada agora
 - Cenário **A (Fly)** ou **C (Híbrido)** — se **C**, incluir o auth do FlareSolverr (idealmente já na Onda 2)
@@ -250,3 +250,4 @@ silêncio). Mitigação robusta se cortar: migrar a avaliação para **disparo +
 - **Drift do saldo otimista** (Onda 2): mitigado pela reconciliação por TTL.
 - **IA >60s** (Onda 1): se o proxy cortar, polling é a saída robusta — replanejar a UI da avaliação.
 - **Não regredir o forte:** cache de avaliação, prompt caching, circuit-breakers, server-components — manter intactos ao mexer no entorno.
+- **Fora de escopo desta análise (não auditado):** a *qualidade* das predições (MAE real) e das recomendações/chat — só avaliei arquitetura, fluxo e custo. Elogios (cache L1+L2, prompt caching, orquestração externa, `expected.ts`, deep-dive componentizado) não viraram tarefas — entram em "não regredir o forte". Sinais que classifiquei como não-problemas (ex.: 152/177 `use client` — folhas interativas; páginas são server) também ficaram de fora de propósito.
