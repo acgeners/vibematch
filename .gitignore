@@ -48,8 +48,9 @@ scripts/seed-from-xlsx 6.js
 # scripts locais de seed/import com chaves
 scripts/seed-from-xlsx*.js
 
-# backups locais de arquivos duplicados por sync (iCloud/Google Drive)
-*.bak
+# backups e cópias acidentais (Finder/sync: "arquivo.bak2", "arquivo 2" sem extensão)
+*.bak*
+* [0-9]
 
 # dumps de importação de teste no root (não versionar)
 /mal.xml

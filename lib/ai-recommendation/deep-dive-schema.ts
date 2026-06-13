@@ -2,7 +2,7 @@ import { z } from "zod"
 
 // ============================================================
 // Schema do payload do tool `submit_deep_analysis`.
-// Espelha llm-reranker.ts em estilo: nested arrays + campos
+// Estilo dos demais tools estruturados: nested arrays + campos
 // opcionais quando há lacuna informacional, IDs validados contra
 // Set conhecido depois do parse (não no Zod) pra permitir filtro
 // silencioso em vez de hard fail.
