@@ -1,6 +1,7 @@
 import "server-only"
 import Anthropic from "@anthropic-ai/sdk"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { deepStripLoneSurrogates } from "@/lib/ai/sanitize"
 import { computeCostUsd } from "./pricing"
 import type { UsageTokens } from "./pricing"
 
@@ -109,13 +110,19 @@ export async function createLoggedMessage(
   const start = Date.now()
   const modelStr = typeof params.model === "string" ? params.model : String(params.model)
 
+  // Defesa central: remove surrogates UTF-16 soltos de TODO o payload antes de
+  // serializar. Sem isso, qualquer texto raspado truncado no meio de um emoji
+  // (vários `.slice(0, N)` em lib/external/*) faz a Anthropic responder 400
+  // "no low surrogate in string". Vale pra todas as chamadas que passam por aqui.
+  const safeParams = deepStripLoneSurrogates(params)
+
   try {
     // Usa streaming internamente (.stream().finalMessage()) em vez de
     // create(): a geração das respostas estruturadas longas (avaliação IA ~3-4k
     // tokens) ultrapassa o limite recomendado de requests não-stream do SDK.
     // O streaming evita esse risco e a interface segue idêntica — só o Message
     // final importa pros callers. Latência é medida do start ao finalMessage.
-    const message = await client.messages.stream(params).finalMessage()
+    const message = await client.messages.stream(safeParams).finalMessage()
     const usage = extractUsage(message)
     const apiCallId = await persistLog({
       meta,
