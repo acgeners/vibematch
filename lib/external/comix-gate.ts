@@ -98,6 +98,12 @@ function maybePersist(): void {
 export function recordComixOk(): void {
   lastOkAt = Date.now()
   consecutiveFails = 0
+  // Um sucesso PROVA que o muro de token / a falha anterior caiu. Limpa o sinal
+  // de falha pra `authGated` (e o fallback "degraded" por lastFailAt) não manter
+  // o estado preso em "down"/"degraded" por todo o TTL apesar do tráfego voltar.
+  // É o que torna o canário ("Testar agora") uma recuperação imediata.
+  lastFailReason = null
+  lastFailAt = null
   maybePersist()
 }
 

@@ -91,11 +91,14 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
               </p>
             </div>
             <div className="flex items-start gap-2">
-              <div className="flex gap-1 shrink-0 mt-0.5">
-                <ScoreBadge score={8.0} size="sm" variant="solid" className="h-6 min-w-[2rem] text-[10px] font-bold pointer-events-none" />
+              <div className="flex flex-col items-center gap-1 shrink-0 mt-0.5">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-bold leading-none">
+                  prevista
+                </span>
+                <ScoreBadge score={null} variant="solid" className="h-8 min-w-[3rem] text-sm font-bold shadow-xs px-2 pointer-events-none" />
               </div>
               <p className="text-[11px] leading-relaxed">
-                <strong className="text-foreground">Nota pessoal/prevista:</strong> Sua nota pessoal se você já avaliou esta obra, ou a Nota Final prevista pelo sistema se você ainda não avaliou.
+                <strong className="text-foreground">Nota:</strong> sua nota pessoal se você já avaliou (rótulo <em>pessoal</em>), ou a Nota Prevista pelo sistema se ainda não (rótulo <em>prevista</em>).
               </p>
             </div>
           </div>
@@ -115,7 +118,7 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
               w.publicationStatusId != null ||
               w.personalStatusId != null
 
-            const displayScore = w.userScore ?? w.finalScore
+            const displayScore = w.userScore ?? w.expectedScore
             const isManual = w.userScore != null
             return (
               <div

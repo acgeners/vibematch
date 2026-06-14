@@ -48,7 +48,6 @@ export interface RankingEntry {
   personalFit: number | null
   /** Percentil 0–100 dentro da biblioteca. NULL quando personalFit é NULL ou pré-migration 071. */
   personalFitPercentile: number | null
-  knnScore: number | null
   alignmentScore: number | null
   alignmentJustification: string | null
   alignmentAt: string | null
@@ -112,7 +111,6 @@ export type RankingSortBy =
   | "ai_eval_status"
   | "last_read_at"
   | "personal_fit"
-  | "knn_score"
   | "alignment_score"
   | `crit_${string}`
 
@@ -338,7 +336,7 @@ export async function getRanking(
       id, title, publication_status_id, personal_status_id, ai_eval_status,
       total_chapters, chapters_read, user_score, is_archived, is_favorite,
       synopsis_quality, observations, year, updated_at, last_read_at,
-      calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, platform_avg, total_votes, personal_fit, personal_fit_percentile, knn_score, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
+      calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, platform_avg, total_votes, personal_fit, personal_fit_percentile, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
       category_scores(criterion_slug, score),
       work_covers(url, is_primary, position)
     `)
@@ -454,7 +452,6 @@ export async function getRanking(
       totalVotes: w.calculated_scores?.total_votes ?? 0,
       personalFit: w.calculated_scores?.personal_fit ?? null,
       personalFitPercentile: w.calculated_scores?.personal_fit_percentile ?? null,
-      knnScore: w.calculated_scores?.knn_score ?? null,
       alignmentScore: w.calculated_scores?.alignment_score ?? null,
       alignmentJustification: w.calculated_scores?.alignment_justification ?? null,
       alignmentAt: w.calculated_scores?.alignment_at ?? null,
@@ -623,7 +620,6 @@ export async function getRanking(
       const bv = b.personalFit ?? -Infinity
       return m * (av - bv)
     }
-    if (field === "knn_score") return m * (rawScore(a.knnScore) - rawScore(b.knnScore))
     if (field === "alignment_score") {
       const av = a.alignmentScore ?? -Infinity
       const bv = b.alignmentScore ?? -Infinity

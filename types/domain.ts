@@ -89,9 +89,6 @@ export interface CalculatedScore {
   ia_eval_normalized: number | null
   chapters_normalized: number | null
   calc_score: number | null
-  predicted_score: number | null
-  predicted_is_stub: boolean
-  final_score: number | null
   /** L1 novo (single Ridge + decomposição). Migration 066. */
   expected_score: number | null
   expected_is_stub: boolean | null
@@ -100,10 +97,7 @@ export interface CalculatedScore {
   /** Stage 2 da decomposição (qualidade granular). Migration 068. */
   expected_quality_adj: number | null
   mae_calc: number | null
-  mae_predicted: number | null
   rmse_calc: number | null
-  rmse_predicted: number | null
-  prediction_distance: number | null
   /** Alinhamento determinístico (0–1) com o TasteProfile atual. NULL quando perfil é stub. */
   personal_fit: number | null
   /**
@@ -112,17 +106,6 @@ export interface CalculatedScore {
    * o personal_fit cru tem teto matemático baixo (~0.55). Migration 071.
    */
   personal_fit_percentile: number | null
-  /** Confiança (0–1) na Nota.Final. NULL quando calibração é insuficiente. */
-  final_score_confidence: number | null
-  /** Predição via kNN sobre embeddings (Passo 5). NULL quando sem embedding/vizinhos. */
-  knn_score: number | null
-  /** Top-k vizinhos usados na predição kNN (debug/explicabilidade). */
-  knn_neighbors: Array<{
-    workId: string
-    similarity: number
-    userScore: number
-    weight: number
-  }> | null
   /** Score 0–100 do LLM re-ranker (Passo 8). Atualizado sob demanda. */
   alignment_score: number | null
   alignment_run_id: string | null

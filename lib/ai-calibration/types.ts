@@ -48,7 +48,6 @@ export interface BiasResidualExample {
   title: string
   userScore: number
   calcScore: number | null
-  finalScore: number | null
   scoresBySlug: Partial<Record<CriterionSlug, number>>
 }
 

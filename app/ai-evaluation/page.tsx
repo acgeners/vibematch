@@ -129,6 +129,11 @@ interface LatestEvalRow {
  *
  * Usa o índice `idx_ai_evaluations_status` (status='completed'), retorna todas
  * as linhas ordenadas e mantém só a primeira por work_id.
+ *
+ * ⚠️ Varre a tabela inteira (cresce sem teto — ~1.6k linhas e subindo, várias
+ * avals por obra). Só é necessário para os filtros `low-confidence`/
+ * `outdated-model`, que precisam olhar TODAS as obras. Para apenas hidratar a
+ * metadata de avaliação dos cards exibidos, use `loadLatestEvalsForIds`.
  */
 async function loadLatestEvalsMap(
   supabase: ReturnType<typeof createAdminClient>,
@@ -142,6 +147,39 @@ async function loadLatestEvalsMap(
 
   const latest = new Map<string, LatestEvalRow>()
   for (const row of (data ?? []) as LatestEvalRow[]) {
+    if (!latest.has(row.work_id)) latest.set(row.work_id, row)
+  }
+  return latest
+}
+
+/**
+ * Versão direcionada de `loadLatestEvalsMap`: carrega a última aval completed só
+ * para os `ids` informados (os cards que serão exibidos, ≤500). Evita varrer a
+ * tabela inteira no caminho padrão (filtros pending/review-pending), onde a fila
+ * tem poucas obras mas a tabela de avaliações é grande.
+ *
+ * A dedup "primeira por work_id" continua correta mesmo em chunks: cada work_id
+ * só aparece dentro do seu próprio chunk (chunks particionam por work_id), então
+ * o `order(created_at desc)` por chunk basta.
+ */
+async function loadLatestEvalsForIds(
+  supabase: ReturnType<typeof createAdminClient>,
+  ids: string[],
+  chunkSize: number,
+): Promise<Map<string, LatestEvalRow>> {
+  const { data, error } = await chunkedInQuery<LatestEvalRow>(ids, chunkSize, (chunk) =>
+    supabase
+      .from("ai_evaluations")
+      .select("work_id, confidence, model_name, prompt_version, created_at, updated_at")
+      .eq("status", "completed")
+      .in("work_id", chunk)
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => ({ data: (data ?? []) as LatestEvalRow[], error })),
+  )
+  if (error) throw new Error(String((error as { message?: string }).message ?? error))
+
+  const latest = new Map<string, LatestEvalRow>()
+  for (const row of data) {
     if (!latest.has(row.work_id)) latest.set(row.work_id, row)
   }
   return latest
@@ -284,10 +322,6 @@ async function getEligibleWorks(
 
   const eligibleIds = [...matchedByWork.keys()]
 
-  // Carrega o mapa de últimas evals (uma chamada compartilhada com os filtros
-  // outdated/low-confidence acima).
-  const latestEvals = await (latestEvalsPromise ?? loadLatestEvalsMap(supabase))
-
   // Chunk size de 100 IDs por request. PostgREST `?id=in.(...)` codifica cada
   // UUID em ~37 chars; 100 IDs ≈ 3.7KB de URL, confortavelmente abaixo de
   // qualquer limite de proxy/cdn (~16KB). Sem chunk, 500+ IDs ultrapassam o
@@ -322,10 +356,13 @@ async function getEligibleWorks(
     .slice(0, 500)
   const displayedIds = displayedWorks.map((w) => w.id)
 
-  // Hidrata covers + calculated_scores em chunks também.
+  // Hidrata covers + calculated_scores + última aval em chunks, tudo em paralelo
+  // sobre os IDs exibidos. No caminho padrão (pending/review-pending) a aval é
+  // carregada direcionada (≤500 IDs) em vez de varrer a tabela inteira; quando os
+  // filtros low-confidence/outdated já dispararam o full-load, reusamos o promise.
   type CoverRow = { work_id: string; url: string | null; is_primary: boolean | null; position: number | null }
   type ScoreRow = { work_id: string; expected_score: number | null }
-  const [coversResult, scoresResult] = await Promise.all([
+  const [coversResult, scoresResult, latestEvals] = await Promise.all([
     chunkedInQuery<CoverRow>(displayedIds, CHUNK_SIZE, (chunk) =>
       supabase
         .from("work_covers")
@@ -340,6 +377,7 @@ async function getEligibleWorks(
         .in("work_id", chunk)
         .then(({ data, error }) => ({ data: (data ?? []) as ScoreRow[], error })),
     ),
+    latestEvalsPromise ?? loadLatestEvalsForIds(supabase, displayedIds, CHUNK_SIZE),
   ])
 
   const coversByWork = new Map<string, CoverRow[]>()

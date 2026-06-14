@@ -26,7 +26,7 @@ export async function suggestPostReadingWeights(
   const selectColumns = [
     "id",
     ...POST_READING_FIELDS,
-    "calculated_scores(final_score)",
+    "calculated_scores(expected_score)",
   ].join(", ")
 
   const { data, error } = await supabase
@@ -44,7 +44,7 @@ export async function suggestPostReadingWeights(
       const cs = Array.isArray(r.calculated_scores)
         ? r.calculated_scores[0]
         : r.calculated_scores
-      const target = cs?.final_score == null ? null : Number(cs.final_score)
+      const target = cs?.expected_score == null ? null : Number(cs.expected_score)
       if (target == null || !Number.isFinite(target)) return null
 
       const postScores: PostReadingScoreMap = {}

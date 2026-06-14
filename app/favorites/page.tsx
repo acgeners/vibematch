@@ -64,9 +64,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
     // Notas (novo pipeline)
     "decision",
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
-    // Notas (legado)
-    "final_score", "calc_score", "predicted_score", "pred_score", "alignment_score",
-    "knn_score",
+    "alignment_score",
     // Plataforma
     "platform_avg", "total_votes",
     // Metadata

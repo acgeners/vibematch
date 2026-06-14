@@ -9,6 +9,7 @@ import { ACCENT_BUTTON } from "@/lib/settings-accent"
 import type { SettingsAccent } from "@/lib/settings-accent"
 import { cn } from "@/lib/utils"
 import { checkComixHealth } from "@/server/actions/comix-resolver"
+import { refreshChrome } from "@/lib/chrome-refresh"
 
 // Deriva o shape do retorno da action (arquivo "use server" não exporta tipos).
 type ComixHealthResult = Awaited<ReturnType<typeof checkComixHealth>>
@@ -26,6 +27,9 @@ export function ComixHealthPanel({ accent }: { accent: SettingsAccent }) {
       try {
         const res = await checkComixHealth()
         setResult(res)
+        // O canário moveu o estado do gate (sucesso limpa "fora"/falha o re-arma).
+        // Re-busca o chrome pra o indicador "Comix fora" na sidebar refletir já.
+        refreshChrome()
         if (res.checks.every((c) => c.ok)) {
           toast.success("Comix OK — todas as chamadas funcionando.")
         } else {

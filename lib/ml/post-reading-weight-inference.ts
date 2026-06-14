@@ -2,17 +2,18 @@
  * Inferência dos pesos pós-leitura a partir do histórico.
  *
  * Treina uma Ridge restrita aos 8 critérios pós-leitura (`post_*_score`) contra
- * `calculated_scores.final_score`. Os coeficientes traduzem "quanto cada eixo
- * pós-leitura prediz a Nota.Final do sistema". Normalizamos pra escala dos
- * pesos atuais (preservando intensidade total) e estimamos confiança via
- * bootstrap.
+ * `calculated_scores.expected_score` (Nota Prevista). Os coeficientes traduzem
+ * "quanto cada eixo pós-leitura prediz a nota prevista do sistema". Normalizamos
+ * pra escala dos pesos atuais (preservando intensidade total) e estimamos
+ * confiança via bootstrap.
  *
  * IMPORTANTE — escolha de target:
  * `user_score` é função direta dos próprios `post_*_score` ponderados pelos
  * pesos atuais (calculado client-side). Usá-lo como target seria circular —
- * Ridge apenas recuperaria os pesos atuais. Usamos `final_score`, que mistura
+ * Ridge apenas recuperaria os pesos atuais. Usamos `expected_score`, que mistura
  * GPT + plataformas externas + penalidades + Ridge preditor; só uma fração dele
- * depende indiretamente dos `post_*_score` (via `meanPostScore` no nota_pr).
+ * depende indiretamente dos `post_*_score`. (Antes usava `final_score`, aposentado
+ * na faxina do pipeline legado — a feature ficava muda enquanto a coluna era null.)
  *
  * Mesma estrutura de `weight-inference.ts` (IA), só trocando features/target.
  */

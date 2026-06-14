@@ -7,7 +7,7 @@ import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchComixById, fetchComixReviews } from "@/lib/external/comix"
 import { extractComixHid } from "@/lib/external/comix-hid"
-import { isBlockedCoverUrl } from "@/lib/external/blocked-covers"
+import { isBlockedCoverUrl, recordCoverUrlResult } from "@/lib/external/blocked-covers"
 import { flareSolverrHealth } from "@/lib/external/flaresolverr"
 import { getComixStatus } from "@/lib/external/comix-gate"
 
@@ -155,26 +155,130 @@ export async function getComixHealthStatus() {
   return getComixStatus()
 }
 
+/**
+ * Status leve da resolução do Comix de uma obra (pro watcher da página atualizar
+ * sozinha quando o resolver de background termina). `resolved` = a obra já tem um
+ * hid do Comix aceito.
+ */
+export async function getComixResolutionStatus(workId: string): Promise<{ resolved: boolean }> {
+  if (!workId) return { resolved: false }
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from("work_external_ids")
+    .select("external_id")
+    .eq("work_id", workId)
+    .eq("source", "comix")
+    .eq("is_rejected", false)
+    .maybeSingle()
+  return { resolved: Boolean(data?.external_id) }
+}
+
+/**
+ * Roda o script resolver e RESOLVE quando o filho fecha (em vez de fire-and-forget).
+ * Awaitar mantém o `after()` vivo até o fim (~60s, Chrome+Cloudflare) sem o filho
+ * ser morto pelo ciclo do request — e ainda permite enriquecer/recalcular depois.
+ * Retorna o exit code (-1 = falha de spawn).
+ */
+async function runResolverScript(extraArgs: string[]): Promise<number> {
+  await fs.mkdir(CACHE_DIR, { recursive: true })
+  const logFd = openSync(ONCREATE_LOG_PATH, "a") // append — acumula entre criações
+  try {
+    return await new Promise<number>((resolve) => {
+      // --variants 12: vale gastar mais buscas pra tentar as alt-titles em inglês —
+      // webtoons coreanos têm o título do Comix (ex.: "The Sorcerers") só lá no meio
+      // das alternativas, fora do default 2. early-break em ≥0.95 corta cedo.
+      const child = spawn(
+        "npm",
+        ["run", "resolve-comix-hids", "--", ...extraArgs, "--variants", "12"],
+        {
+          cwd: process.cwd(),
+          env: { ...process.env, COMIX_HEADLESS: "1" },
+          stdio: ["ignore", logFd, logFd],
+        },
+      )
+      child.on("error", (err) => {
+        console.error("[runResolverScript] spawn error:", err.message)
+        resolve(-1)
+      })
+      child.on("close", (code) => resolve(code ?? 0))
+    })
+  } finally {
+    closeSync(logFd)
+  }
+}
+
+/**
+ * Após o hid estar resolvido, busca o detalhe do Comix (via FlareSolverr — vale em
+ * prod, é só o detalhe-por-hid) e grava o rating/votos em `platform_ratings`. A
+ * média bayesiana (`platform_avg`) é recalculada do `platform_ratings` em todo
+ * recalc e NÃO filtra por fonte, então o Comix passa a pesar na nota. Retorna true
+ * se gravou. No-op se não há hid ou se o rating está fora de 0–10.
+ */
+async function enrichComixRatingForWork(workId: string): Promise<boolean> {
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from("work_external_ids")
+    .select("external_id")
+    .eq("work_id", workId)
+    .eq("source", "comix")
+    .eq("is_rejected", false)
+    .maybeSingle()
+  const hid = data?.external_id
+  if (!hid) return false
+  const detail = await fetchComixById(hid)
+  const rating = detail?.rating
+  if (rating == null || rating < 0 || rating > 10) return false
+  const { error } = await supabase.from("platform_ratings").upsert(
+    { work_id: workId, platform: "comix", rating, vote_count: detail?.votes ?? 0 },
+    { onConflict: "work_id,platform" },
+  )
+  if (error) {
+    console.error("[enrichComixRatingForWork] upsert falhou:", error.message)
+    return false
+  }
+  return true
+}
+
 export async function resolveComixHidForWork(workId: string): Promise<void> {
   if (!workId) return
+  console.log(`[resolveComixHidForWork] disparado para work ${workId}`)
   try {
-    await fs.mkdir(CACHE_DIR, { recursive: true })
-    const logFd = openSync(ONCREATE_LOG_PATH, "a") // append — acumula entre criações
-    try {
-      const child = spawn("npm", ["run", "resolve-comix-hids", "--", "--work", workId], {
-        cwd: process.cwd(),
-        env: { ...process.env, COMIX_HEADLESS: "1" },
-        stdio: ["ignore", logFd, logFd],
-        detached: false,
-      })
-      // Não interessa o resultado aqui (fire-and-forget); o hid, se achado, é
-      // persistido pelo próprio script e as reviews fluem na próxima aquisição.
-      child.on("error", (err) => console.error("[resolveComixHidForWork] spawn error:", err.message))
-    } finally {
-      closeSync(logFd) // o filho herdou a própria cópia do fd
+    const code = await runResolverScript(["--work", workId])
+    if (code !== 0) return
+    // Achou o hid → grava o rating do Comix e recalcula esta obra pra a bayesiana
+    // (e a Nota Prevista) já refletirem a fonte.
+    const wrote = await enrichComixRatingForWork(workId)
+    if (wrote) {
+      const { recalculateWork } = await import("@/server/actions/calculations")
+      await recalculateWork(workId)
     }
   } catch (err) {
     console.error("[resolveComixHidForWork] falha:", err instanceof Error ? err.message : err)
+  }
+}
+
+/**
+ * Resolução "mop-up" pós-lote: dispara UM run do resolver SEM `--work`, que mira
+ * todas as obras ainda sem comix id (após um lote, são exatamente as recém-criadas
+ * — o resto do catálogo já está resolvido). Um único processo evita o conflito de
+ * `userDataDir` do Chrome que N spawns `--work` concorrentes causariam.
+ */
+export async function resolveComixHidsPending(workIds?: string[]): Promise<void> {
+  console.log("[resolveComixHidsPending] disparado (mop-up pós-lote)")
+  try {
+    const code = await runResolverScript([])
+    if (code !== 0) return
+    // Enriquece o rating do Comix das obras do lote (as recém-criadas são as que o
+    // mop-up acabou de resolver) e recalcula só as que ganharam rating.
+    for (const id of workIds ?? []) {
+      const wrote = await enrichComixRatingForWork(id)
+      if (wrote) {
+        const { recalculateWork } = await import("@/server/actions/calculations")
+        await recalculateWork(id)
+      }
+    }
+  } catch (err) {
+    console.error("[resolveComixHidsPending] falha:", err instanceof Error ? err.message : err)
   }
 }
 
@@ -316,6 +420,9 @@ export async function checkComixHealth(): Promise<ComixHealthResult> {
     } catch (err) {
       info = err instanceof Error ? err.message : String(err)
     }
+    // Alimenta o bloqueio dinâmico de covers: o canário é o re-probe manual que
+    // libera/re-bloqueia o host (ex.: static.comix.to) a partir do 200 real.
+    recordCoverUrlResult(coverUrl, ok)
     checks.push({ ok, label: "Imagem (CDN)", detail: info, ms: Date.now() - t3 })
   }
 

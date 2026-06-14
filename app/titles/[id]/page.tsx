@@ -3,6 +3,8 @@ import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
 import { BarChart3, ChevronDown, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
+import { CalculationBreakdown } from "@/components/titles/calculation-breakdown"
+import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-watcher"
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { SynopsisQualitySuggestion } from "@/components/titles/synopsis-quality-suggestion"
@@ -412,6 +414,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           {work.title}
         </h1>
       </header>
+
+      <ComixResolutionWatcher workId={work.id} createdAt={work.created_at} />
 
       <Tabs defaultValue="overview" className="w-full">
         {/* Tabs navbar (full width, 5 abas com wrap responsivo) */}
@@ -915,6 +919,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           </Card>
         )}
       </div>
+
+      {/* Detalhamento do cálculo (waterfall do expected_score) — colapsável */}
+      {work.calculated_scores != null && (
+        <CalculationBreakdown calculatedScore={work.calculated_scores} />
+      )}
 
       {/* Notas por critério */}
       <Card>

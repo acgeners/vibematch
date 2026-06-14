@@ -370,7 +370,7 @@ export async function getCalibrationSnapshot() {
       .from("works")
       .select(
         `id, title, user_score,
-         calculated_scores(calc_score, predicted_score, final_score, total_votes, predicted_is_stub, prediction_distance, expected_score, expected_is_stub)`
+         calculated_scores(calc_score, total_votes, expected_score, expected_is_stub)`
       )
       .eq("is_archived", false)
       .limit(2000),

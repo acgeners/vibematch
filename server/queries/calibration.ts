@@ -57,7 +57,7 @@ const BIAS_WORK_SELECT = `
   post_impact_immersion_score,
   post_originality_score,
   category_scores(criterion_slug, score),
-  calculated_scores(calc_score, final_score)
+  calculated_scores(calc_score)
 `
 
 interface RawTagRow {
@@ -186,7 +186,7 @@ export async function loadInputsForBias(): Promise<BiasInputs> {
     title: string
     user_score: number
     category_scores: RawCategoryScoreRow[] | null
-    calculated_scores: { calc_score: number | null; final_score: number | null } | null
+    calculated_scores: { calc_score: number | null } | null
     [key: string]: unknown
   }
 
@@ -217,7 +217,6 @@ export async function loadInputsForBias(): Promise<BiasInputs> {
     title: string
     userScore: number
     calcScore: number | null
-    finalScore: number | null
     scoresBySlug: Partial<Record<CriterionSlug, number>>
     residual: number
   }> = []
@@ -260,7 +259,6 @@ export async function loadInputsForBias(): Promise<BiasInputs> {
         title: w.title,
         userScore: manual,
         calcScore: calcNum,
-        finalScore: w.calculated_scores?.final_score != null ? Number(w.calculated_scores.final_score) : null,
         scoresBySlug: csBySlug,
         residual: Math.abs(manual - calcNum),
       })
@@ -324,7 +322,6 @@ export async function loadInputsForBias(): Promise<BiasInputs> {
       title: r.title,
       userScore: r.userScore,
       calcScore: r.calcScore,
-      finalScore: r.finalScore,
       scoresBySlug: r.scoresBySlug,
     }))
 

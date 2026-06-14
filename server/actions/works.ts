@@ -1109,6 +1109,7 @@ export async function createWorksBatch(
   }
 
   const created: Array<{ id: string; title: string }> = []
+  const needEdgeReviews: string[] = []
   let saveWorkReviewsFn: typeof import("@/lib/external/persist-reviews").saveWorkReviews | null = null
   for (const { values, aiMeta, externalReviews } of normalized) {
     const result = await persistNewWork(values, aiMeta)
@@ -1118,8 +1119,25 @@ export async function createWorksBatch(
         saveWorkReviewsFn = (await import("@/lib/external/persist-reviews")).saveWorkReviews
       }
       await saveWorkReviewsFn(result.workId, externalReviews)
+    } else {
+      needEdgeReviews.push(result.workId)
     }
     created.push({ id: result.workId, title: values.title })
+  }
+
+  // Paridade com createWork (que faz isso por obra): resolve o hid da Comix das
+  // recém-criadas e extrai reviews na borda das que não vieram com pool. Um único
+  // run "mop-up" do resolver (sem --work) evita N Chrome concorrentes no mesmo
+  // userDataDir. Tudo em background.
+  after(async () => {
+    const { resolveComixHidsPending } = await import("@/server/actions/comix-resolver")
+    await resolveComixHidsPending(created.map((c) => c.id))
+  })
+  if (needEdgeReviews.length > 0) {
+    after(async () => {
+      const { acquireAndPersistWorkReviews } = await import("@/lib/external/acquire-reviews")
+      for (const id of needEdgeReviews) await acquireAndPersistWorkReviews(id)
+    })
   }
 
   try {

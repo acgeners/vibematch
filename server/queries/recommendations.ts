@@ -52,7 +52,7 @@ const CANDIDATE_WORK_SELECT = `
   is_favorite,
   canonical_synopsis,
   category_scores(criterion_slug, score, source),
-  calculated_scores(platform_avg, total_votes, predicted_score, expected_score, personal_fit),
+  calculated_scores(platform_avg, total_votes, expected_score, personal_fit),
   work_tags(tag_id, tags(name, tag_group_id)),
   work_synopses(text, is_primary, position),
   work_covers(url, is_primary, position)
@@ -274,7 +274,7 @@ function mapRowToCandidate(
   biasMap: AttributeBiasMap,
 ): FavoriteCandidate {
   const work = row as Record<string, unknown>
-  const calc = (work.calculated_scores as { platform_avg?: number | null; total_votes?: number | null; predicted_score?: number | null; expected_score?: number | null; personal_fit?: number | null } | null) ?? null
+  const calc = (work.calculated_scores as { platform_avg?: number | null; total_votes?: number | null; expected_score?: number | null; personal_fit?: number | null } | null) ?? null
   const synopsis = pickRecommendationSynopsis(
     work.canonical_synopsis as string | null | undefined,
     (work.work_synopses as RawSynopsisRow[] | undefined)?.map((s) => ({
@@ -301,7 +301,6 @@ function mapRowToCandidate(
     fitScore: calc?.personal_fit != null ? Number(calc.personal_fit) : null,
     platformAvg: calc?.platform_avg != null ? Number(calc.platform_avg) : null,
     totalVotes: calc?.total_votes != null ? Number(calc.total_votes) : null,
-    predictedScore: calc?.predicted_score != null ? Number(calc.predicted_score) : null,
     reviews,
     coverUrl,
     isAlreadyRated: work.user_score != null,

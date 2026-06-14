@@ -40,7 +40,7 @@ const WORK_LIST_SELECT = `
   created_at,
   updated_at,
   last_read_at,
-  calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, personal_fit, personal_fit_percentile, alignment_score, alignment_justification, alignment_payload, platform_avg, total_votes),
+  calculated_scores(calc_score, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, personal_fit, personal_fit_percentile, alignment_score, alignment_justification, alignment_payload, platform_avg, total_votes),
   category_scores(criterion_slug, score),
   work_covers(url, is_primary, position),
   work_tags(tag_id, tags(*)),

@@ -35,10 +35,7 @@ export interface CompareWork {
   /** Alinhamento com o perfil: cru (0–1) e percentil na biblioteca (0–100). */
   personalFit: number | null
   personalFitPercentile: number | null
-  finalScore: number | null
   calcScore: number | null
-  predictedScore: number | null
-  predictedIsStub: boolean
   userScore: number | null
   platformAvg: number | null
   totalVotes: number
@@ -156,10 +153,7 @@ function mapWorkToCompare(
     }),
     personalFit: work.calculated_scores?.personal_fit ?? null,
     personalFitPercentile: work.calculated_scores?.personal_fit_percentile ?? null,
-    finalScore: work.calculated_scores?.final_score ?? null,
     calcScore: work.calculated_scores?.calc_score ?? null,
-    predictedScore: work.calculated_scores?.predicted_score ?? null,
-    predictedIsStub: work.calculated_scores?.predicted_is_stub ?? false,
     userScore: (work as { user_score?: number | null }).user_score ?? null,
     platformAvg: work.calculated_scores?.platform_avg ?? null,
     totalVotes: work.calculated_scores?.total_votes ?? 0,
