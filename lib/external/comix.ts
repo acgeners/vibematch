@@ -1,8 +1,28 @@
 import type { PublicationStatus } from "@/types/domain"
 import type { ExternalSearchResult } from "./types"
 import { fetchHtmlWithCfFallback, isCloudflareChallenge, isFlareSolverrEnabled, isFlareSolverrCircuitOpen } from "./flaresolverr"
+import { recordComixOk, recordComixFailure } from "./comix-gate"
+import type { ComixFailure } from "./comix-gate"
 
 const COMIX_BASE = "https://comix.to/api/v1"
+
+// Teto de espera da NOSSA conexão com o FlareSolverr nas chamadas do comix. O
+// default (5s) é curto pra um solve FRIO de Cloudflare: o comix passou a desafiar
+// até a navegação SSR (/title/{hid}), e o solve medido leva ~11s. Aborto em 5s
+// cortava antes do desafio terminar → null + circuit aberto, fazendo a atribuição
+// manual de hid e o fetch de detalhe/reviews falharem mesmo com o hid certo.
+// 25s dá folga sobre a variância do solve (maxTimeout interno do Chrome é 60s).
+const COMIX_CF_ABORT_MS = 25000
+
+// Sessão FlareSolverr compartilhada por TODAS as chamadas do comix. Desde ~2026-06-12
+// (fim do dia) a CF do comix ficou estrita: SSR (/title/{hid}) E os endpoints
+// /api/v1/* (incl. /threads/*) passaram a ser desafiados, e o cf_clearance NÃO é
+// replayável por fetch externo. Sem sessão, cada uma das ~4 calls de uma review pagaria
+// um solve frio (~11s → ~44s, estourando o teto). Com a sessão, só a 1ª paga o solve;
+// as seguintes reusam o browser quente (<1s). A sessão é lazy (criada no 1º uso) e
+// persistente (sobrevive entre requests até o container reiniciar — flareSolverrFetch
+// recria sob demanda).
+const COMIX_FS_SESSION = "comix"
 
 // The comix.to API only responds with full data when called as an XHR
 // (same origin pattern). Without X-Requested-With the detail endpoint returns 404.
@@ -22,10 +42,11 @@ const HTML_HEADERS: Record<string, string> = {
   Referer: "https://comix.to/",
 }
 
-type ComixFailure = "cloudflare_challenge" | "http_error" | "json_parse_error" | "flaresolverr_unavailable" | "network_error" | "api_auth_required"
-
+// Choke point ÚNICO de falhas do Comix: além de logar, reporta ao ComixGate
+// (fonte única de saúde observada). Toda superfície de falha passa por aqui.
 function logComixFailure(url: string, reason: ComixFailure, detail?: string) {
   console.error(`[comix] ${reason} url=${url}${detail ? ` detail=${detail}` : ""}`)
+  recordComixFailure(reason)
 }
 
 // Circuit breaker de auth: desde ~2026-06 a API /api/v1/manga* do comix.to exige um
@@ -101,6 +122,7 @@ async function fetchComixJson(path: string): Promise<unknown | null> {
             tripComixAuthCircuit(url)
             return null
           }
+          recordComixOk()
           return data
         } catch (err) {
           logComixFailure(url, "json_parse_error", err instanceof Error ? err.message : String(err))
@@ -132,7 +154,7 @@ async function fetchComixJson(path: string): Promise<unknown | null> {
     return null
   }
 
-  const fallback = await fetchHtmlWithCfFallback(url, HEADERS)
+  const fallback = await fetchHtmlWithCfFallback(url, HEADERS, COMIX_CF_ABORT_MS, COMIX_FS_SESSION)
   if (!fallback) {
     logComixFailure(url, "cloudflare_challenge", "flaresolverr returned no response")
     return null
@@ -147,6 +169,7 @@ async function fetchComixJson(path: string): Promise<unknown | null> {
       tripComixAuthCircuit(url)
       return null
     }
+    recordComixOk()
     return data
   } catch (err) {
     logComixFailure(url, "json_parse_error", `after-flaresolverr: ${err instanceof Error ? err.message : String(err)}`)
@@ -164,7 +187,10 @@ async function fetchComixHtml(url: string): Promise<string | null> {
     const res = await fetch(url, { headers: HTML_HEADERS, cache: "no-store" })
     const body = await res.text()
     if (res.ok) {
-      if (!isCloudflareChallenge(body)) return body
+      if (!isCloudflareChallenge(body)) {
+        recordComixOk()
+        return body
+      }
     } else if (!isCloudflareChallenge(body)) {
       // Erro real (404 etc.) que não é challenge — FlareSolverr não ajudaria.
       logComixFailure(url, "http_error", `status=${res.status}`)
@@ -175,11 +201,12 @@ async function fetchComixHtml(url: string): Promise<string | null> {
   }
 
   if (!isFlareSolverrEnabled() || isFlareSolverrCircuitOpen()) return null
-  const fallback = await fetchHtmlWithCfFallback(url, HTML_HEADERS)
+  const fallback = await fetchHtmlWithCfFallback(url, HTML_HEADERS, COMIX_CF_ABORT_MS, COMIX_FS_SESSION)
   if (!fallback) {
     logComixFailure(url, "cloudflare_challenge", "flaresolverr returned no response")
     return null
   }
+  recordComixOk()
   return fallback.html
 }
 
@@ -195,7 +222,9 @@ async function fetchComixThreadJson(path: string): Promise<unknown | null> {
     const res = await fetch(url, { headers: HEADERS, cache: "no-store" })
     if (res.ok && (res.headers.get("content-type") ?? "").includes("json")) {
       try {
-        return await res.json()
+        const json = await res.json()
+        recordComixOk()
+        return json
       } catch (err) {
         logComixFailure(url, "json_parse_error", err instanceof Error ? err.message : String(err))
       }
@@ -205,12 +234,14 @@ async function fetchComixThreadJson(path: string): Promise<unknown | null> {
   }
 
   if (!isFlareSolverrEnabled() || isFlareSolverrCircuitOpen()) return null
-  const fallback = await fetchHtmlWithCfFallback(url, HEADERS)
+  const fallback = await fetchHtmlWithCfFallback(url, HEADERS, COMIX_CF_ABORT_MS, COMIX_FS_SESSION)
   if (!fallback) return null
   const preMatch = fallback.html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i)
   const raw = (preMatch?.[1] ?? fallback.html).trim()
   try {
-    return JSON.parse(raw)
+    const json = JSON.parse(raw)
+    recordComixOk()
+    return json
   } catch (err) {
     logComixFailure(url, "json_parse_error", `after-flaresolverr: ${err instanceof Error ? err.message : String(err)}`)
     return null
@@ -222,9 +253,16 @@ async function fetchComixThreadJson(path: string): Promise<unknown | null> {
  * /title/{hid} (React Query cache key ["manga","detail",hid]). Substitui o endpoint
  * /manga/{hid}, que passou a exigir token de assinatura. Mesmo shape do antigo
  * `result` (id/hid/title/synopsis/ratedAvg/links/genres/…).
+ *
+ * IMPORTANTE: casa pelo `hid` PEDIDO. A página às vezes prefetcha o detalhe de OUTRAS
+ * obras (carrosséis de recomendação/trending) no mesmo cache de hidratação; pegar o
+ * "primeiro manga-detail" retornava a obra ERRADA (detalhe e reviews). Só faz fallback
+ * pro único candidato quando a página traz exatamente um (sem ambiguidade).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractComixDetailFromHtml(html: string): any | null {
+function extractComixDetailFromHtml(html: string, hid: string): any | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const candidates: { keyHid: unknown; value: any }[] = []
   const scripts = html.match(/<script\b[^>]*>([\s\S]*?)<\/script>/gi) ?? []
   for (const block of scripts) {
     const inner = block.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>$/i, "").trim()
@@ -252,10 +290,15 @@ function extractComixDetailFromHtml(html: string): any | null {
         typeof value === "object" &&
         (value as { hid?: unknown }).hid
       ) {
-        return value
+        candidates.push({ keyHid: arr[2], value })
       }
     }
   }
+  // Match exato pelo hid pedido (no payload ou na chave do cache).
+  const exact = candidates.find((c) => c.value.hid === hid || c.keyHid === hid)
+  if (exact) return exact.value
+  // Sem match exato mas a página traz só um detalhe → é o da obra pedida.
+  if (candidates.length === 1) return candidates[0].value
   return null
 }
 
@@ -391,7 +434,7 @@ export async function fetchComixById(hid: string): Promise<ComixDetail | null> {
   // /title/{hid}. O antigo endpoint /manga/{hid} passou a exigir token de assinatura.
   const html = await fetchComixHtml(comixWorkUrl(hid))
   if (!html) return null
-  const r = extractComixDetailFromHtml(html)
+  const r = extractComixDetailFromHtml(html, hid)
   if (!r || typeof r !== "object") return null
 
   return {
@@ -461,7 +504,7 @@ export async function fetchComixReviews(hid: string): Promise<string[]> {
   const html = await fetchComixHtml(comixWorkUrl(hid))
   if (!html) return []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const internalId = (extractComixDetailFromHtml(html) as any)?.id
+  const internalId = (extractComixDetailFromHtml(html, hid) as any)?.id
   if (typeof internalId !== "number") return []
 
   const lookupPath = `/threads/lookup?page_identifier=manga${internalId}&page_url=${encodeURIComponent(`/title/${hid}`)}`
