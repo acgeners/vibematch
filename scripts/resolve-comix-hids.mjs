@@ -47,8 +47,12 @@ const args = process.argv.slice(2)
 const DRY = args.includes("--dry")
 const FORCE = args.includes("--force")
 const numArg = (flag, def) => { const i = args.indexOf(flag); return i >= 0 ? Number(args[i + 1]) : def }
+const strArg = (flag, def) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : def }
 const LIMIT = numArg("--limit", Infinity)
 const VARIANTS = numArg("--variants", 2)
+// --work <id>: resolve UMA obra específica (usado pela resolução na criação da
+// obra). Sobrepõe o varrer-tudo; restringe os targets a esse id.
+const WORK = strArg("--work", null)
 // Threshold conservador: a busca casa a QUERY contra os títulos do candidato (title +
 // altTitles que a própria comix expõe). Sem checagem de synopse (que o app usa), exijo
 // score alto pra evitar falso-positivo (poluir o banco com hid errado). 0.78 aceita
@@ -194,6 +198,9 @@ async function main() {
   const have = new Set((existing ?? []).map((r) => r.work_id))
 
   let targets = (works ?? []).filter((w) => FORCE || !have.has(w.id))
+  // Escopo a uma obra (resolução na criação): só ela, ainda respeitando o skip
+  // de quem já tem hid (a menos de --force).
+  if (WORK) targets = targets.filter((w) => w.id === WORK)
   if (Number.isFinite(LIMIT)) targets = targets.slice(0, LIMIT)
 
   console.log(`Catálogo: ${works?.length ?? 0} obras | já com comix: ${have.size} | a resolver: ${targets.length}${DRY ? " (DRY-RUN)" : ""}`)

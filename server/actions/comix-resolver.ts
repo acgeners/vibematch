@@ -5,13 +5,17 @@ import { promises as fs, openSync, closeSync } from "node:fs"
 import path from "node:path"
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { fetchComixById } from "@/lib/external/comix"
+import { fetchComixById, fetchComixReviews } from "@/lib/external/comix"
 import { extractComixHid } from "@/lib/external/comix-hid"
 import { isBlockedCoverUrl } from "@/lib/external/blocked-covers"
+import { flareSolverrHealth } from "@/lib/external/flaresolverr"
 
 const CACHE_DIR = path.join(process.cwd(), ".cache")
 const LOG_PATH = path.join(CACHE_DIR, "resolve-comix.log")
 const STATUS_PATH = path.join(CACHE_DIR, "resolve-comix.status.json")
+// Log das resoluções por-obra disparadas na criação (append; não colide com o
+// log/status do batch, que alimentam o painel "Resolver").
+const ONCREATE_LOG_PATH = path.join(CACHE_DIR, "resolve-comix-oncreate.log")
 // Acima disso (e sem pid vivo) um "running" é considerado órfão — ex.: o
 // servidor Next reiniciou no meio do batch e perdeu o listener de exit.
 const STALE_MS = 20 * 60_000
@@ -133,6 +137,39 @@ export async function startComixResolver(): Promise<{ ok: boolean; error?: strin
 }
 
 /**
+ * Resolve o hid da Comix de UMA obra (recém-criada) em background, escopando o
+ * batch script com `--work <id>`. Spawn detached, não-await: a busca exige um
+ * browser real (Puppeteer) pra gerar o token `_=` da Comix, então roda fora do
+ * caminho da requisição. A obra que já tiver hid é pulada pelo próprio script.
+ *
+ * PRÉ-REQUISITO: Chrome/Chromium na máquina (CHROME_PATH) — ok em dev. O pé
+ * prod-safe (GitHub Action com Chrome) entra no deploy (II.A fase 5); por isso
+ * NÃO há fallback aqui, só o caminho dev. Best-effort: falha de spawn só loga.
+ */
+export async function resolveComixHidForWork(workId: string): Promise<void> {
+  if (!workId) return
+  try {
+    await fs.mkdir(CACHE_DIR, { recursive: true })
+    const logFd = openSync(ONCREATE_LOG_PATH, "a") // append — acumula entre criações
+    try {
+      const child = spawn("npm", ["run", "resolve-comix-hids", "--", "--work", workId], {
+        cwd: process.cwd(),
+        env: { ...process.env, COMIX_HEADLESS: "1" },
+        stdio: ["ignore", logFd, logFd],
+        detached: false,
+      })
+      // Não interessa o resultado aqui (fire-and-forget); o hid, se achado, é
+      // persistido pelo próprio script e as reviews fluem na próxima aquisição.
+      child.on("error", (err) => console.error("[resolveComixHidForWork] spawn error:", err.message))
+    } finally {
+      closeSync(logFd) // o filho herdou a própria cópia do fd
+    }
+  } catch (err) {
+    console.error("[resolveComixHidForWork] falha:", err instanceof Error ? err.message : err)
+  }
+}
+
+/**
  * Preenchimento manual do hid da Comix pra uma obra. Aceita hid cru ou URL,
  * VALIDA via fetchComixById (SSR token-free — não precisa de browser) e só
  * então persiste em work_external_ids. Retorna o título resolvido pra confirmar.
@@ -174,6 +211,106 @@ export async function validateComixHid(hidOrUrl: string): Promise<ComixManualRes
     chapters: detail.chapters ?? null,
     synopsis: detail.synopsis ?? null,
   }
+}
+
+// Hid canário pra o diagnóstico: obra antiga/estável e popular na Comix ("Jinx"),
+// que existe e tem comentários. Não depende de nenhuma obra do catálogo do usuário.
+const COMIX_CANARY_HID = "003kd"
+
+// Tipos NÃO exportados: arquivo "use server" só pode exportar funções async. O client
+// deriva o shape via `Awaited<ReturnType<typeof checkComixHealth>>` (mesmo padrão de
+// getComixResolverStatus em resolve-comix-panel).
+interface ComixHealthCheck {
+  ok: boolean
+  /** Nome curto da superfície testada (ex.: "FlareSolverr", "Detalhe (SSR)"). */
+  label: string
+  /** Detalhe legível do resultado (versão, título resolvido, status HTTP…). */
+  detail: string
+  /** Latência da chamada em ms (omitido p/ checks que não fazem rede pesada). */
+  ms?: number
+}
+
+interface ComixHealthResult {
+  checks: ComixHealthCheck[]
+  checkedAt: string
+}
+
+/**
+ * Diagnóstico da Comix SEM precisar testar numa obra: roda um canário (hid fixo) por
+ * todas as superfícies que a app usa — FlareSolverr (dependência), detalhe (SSR solve),
+ * reviews (cadeia de threads) e imagem (CDN static.comix.to). A 1ª chamada paga o solve
+ * frio do Cloudflare (~11s) e aquece a sessão `comix`; as seguintes ficam rápidas.
+ * Se o FlareSolverr estiver fora, pula detalhe/reviews (falhariam) e retorna rápido.
+ */
+export async function checkComixHealth(): Promise<ComixHealthResult> {
+  const checks: ComixHealthCheck[] = []
+  const checkedAt = new Date().toISOString()
+
+  // 1. FlareSolverr — dependência de tudo (toda call da Comix passa por ele agora).
+  const fs = await flareSolverrHealth()
+  checks.push({
+    ok: fs.ok,
+    label: "FlareSolverr",
+    detail: fs.ok
+      ? `v${fs.version ?? "?"} · sessões: ${fs.sessions?.length ? fs.sessions.join(", ") : "nenhuma"}`
+      : (fs.error ?? "indisponível"),
+  })
+
+  // FlareSolverr fora → detalhe/reviews falhariam (e demorariam ~25s cada no abort).
+  // Pula pra dar um diagnóstico rápido e claro.
+  if (!fs.ok) {
+    checks.push({ ok: false, label: "Detalhe (SSR)", detail: "pulado — FlareSolverr fora" })
+    checks.push({ ok: false, label: "Reviews (threads)", detail: "pulado — FlareSolverr fora" })
+    checks.push({ ok: false, label: "Imagem (CDN)", detail: "não testado — depende do detalhe" })
+    return { checks, checkedAt }
+  }
+
+  // 2. Detalhe (SSR solve) — porta de entrada de tudo (reviews também começam por aqui).
+  const t1 = Date.now()
+  const detail = await fetchComixById(COMIX_CANARY_HID)
+  checks.push({
+    ok: !!detail?.title,
+    label: "Detalhe (SSR)",
+    detail: detail?.title
+      ? `"${detail.title}"${detail.year ? ` (${detail.year})` : ""}`
+      : `canário ${COMIX_CANARY_HID} não resolveu`,
+    ms: Date.now() - t1,
+  })
+
+  // 3. Reviews (cadeia de threads) — endpoints /threads/* (CF-gated desde 2026-06-12).
+  const t2 = Date.now()
+  const reviews = await fetchComixReviews(COMIX_CANARY_HID)
+  checks.push({
+    ok: reviews.length > 0,
+    label: "Reviews (threads)",
+    detail: reviews.length > 0
+      ? `${reviews.length} comentários do canário`
+      : "0 — cadeia de threads falhou (ou canário sem comentários)",
+    ms: Date.now() - t2,
+  })
+
+  // 4. Imagem (CDN static.comix.to) — host próprio, fora do FlareSolverr. Testa o
+  // cover do detalhe direto; 403 = CF re-bloqueou (app usa fallback cross-source).
+  const coverUrl = detail?.coverUrl ?? null
+  if (!coverUrl) {
+    checks.push({ ok: false, label: "Imagem (CDN)", detail: "sem cover no detalhe pra testar" })
+  } else {
+    const t3 = Date.now()
+    let ok = false
+    let info = ""
+    try {
+      const res = await fetch(coverUrl, { cache: "no-store", signal: AbortSignal.timeout(8000) })
+      void res.body?.cancel() // não baixa a imagem; só os headers interessam
+      const ct = res.headers.get("content-type") ?? ""
+      ok = res.ok && ct.startsWith("image/")
+      info = ok ? `200 ${ct}` : `${res.status} (bloqueado — usa fallback cross-source)`
+    } catch (err) {
+      info = err instanceof Error ? err.message : String(err)
+    }
+    checks.push({ ok, label: "Imagem (CDN)", detail: info, ms: Date.now() - t3 })
+  }
+
+  return { checks, checkedAt }
 }
 
 export async function setComixHidManually(input: {

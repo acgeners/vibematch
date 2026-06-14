@@ -434,7 +434,9 @@ export function UpdateDataDialog({
 
     let result: { data?: { id: string; slug?: string }; error?: string }
     try {
-      result = await updateWorkExternalData(workId, updates)
+      // acquireReviews: colhe + persiste reviews das fontes confirmadas em
+      // background (borda) — aparecem na página da obra sem esperar avaliação.
+      result = await updateWorkExternalData(workId, updates, { acquireReviews: true })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       toast.error(`Erro ao atualizar: ${message}`)

@@ -1,6 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import type { SourcedReview } from "@/lib/external/types"
+import type { SourcedReview, ExternalSourceId } from "@/lib/external/types"
 import type { ReviewSummaryInput } from "@/lib/ai-recommendation/review-summarizer"
 
 /**
@@ -83,6 +83,45 @@ export async function saveWorkReviews(
     .map((r) => ({ text: String(r.text ?? ""), userRating: r.user_rating ?? null }))
     .filter((r) => r.text.trim().length > 0)
   await persistReviewSummary(supabase, workId, summaryInputs)
+}
+
+/**
+ * Lê o pool persistido em `work_reviews` e o devolve como `SourcedReview[]` —
+ * o formato que a avaliação consome. Usado como FALLBACK de robustez: quando a
+ * busca fresca de reviews volta vazia (ex.: queda transitória do Cloudflare no
+ * Comix), a avaliação usa o que já foi colhido antes em vez de avaliar sem
+ * nenhuma review. Não inclui reviews manuais (tratadas à parte no fluxo).
+ *
+ * Ordena por fonte → match_score desc → rating desc (determinístico) pra que o
+ * `selectReviewsForEvaluation`/`input_hash` resultante seja estável entre
+ * avaliações que caiam neste fallback.
+ */
+export async function loadWorkReviewsAsSourced(workId: string): Promise<SourcedReview[]> {
+  if (!workId) return []
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("work_reviews")
+    .select("source, source_title, text, text_length, user_rating, match_score")
+    .eq("work_id", workId)
+    .order("source", { ascending: true })
+    .order("match_score", { ascending: false })
+    .order("user_rating", { ascending: false, nullsFirst: false })
+  if (error) {
+    console.error("[work_reviews] erro lendo pool persistido:", error)
+    return []
+  }
+  return (data ?? []).map((row) => {
+    const r = row as Record<string, unknown>
+    const text = String(r.text ?? "")
+    return {
+      source: r.source as ExternalSourceId,
+      sourceTitle: (r.source_title as string | null) ?? "",
+      matchScore: Number(r.match_score ?? 0),
+      text,
+      userRating: r.user_rating != null ? Number(r.user_rating) : undefined,
+      textLength: r.text_length != null ? Number(r.text_length) : text.length,
+    }
+  })
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>
