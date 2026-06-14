@@ -63,10 +63,42 @@ let lastFailAt: number | null = null
 let lastFailReason: ComixFailure | null = null
 let consecutiveFails = 0
 
+// Heartbeat da persistência: mesmo sem mudança de estado, re-grava de tempos em
+// tempos pra manter os timestamps (last_ok_at) frescos no DB.
+const PERSIST_HEARTBEAT_MS = 5 * 60_000
+let lastPersistedState: ComixHealthState | null = null
+let lastPersistAt = 0
+
+/**
+ * Persiste o status no DB (migration 098) fire-and-forget, SÓ em mudança de
+ * estado ou no heartbeat — não a cada chamada (o enrich bate no Comix N×). O
+ * store é carregado por dynamic import (server-only) e engole erros; telemetria
+ * nunca quebra o scraping. No-op fora do servidor (sem store).
+ */
+function maybePersist(): void {
+  const status = getComixStatus()
+  const now = Date.now()
+  if (status.state === lastPersistedState && now - lastPersistAt < PERSIST_HEARTBEAT_MS) return
+  lastPersistedState = status.state
+  lastPersistAt = now
+  void import("./source-health-store")
+    .then((m) =>
+      m.upsertSourceHealth("comix", {
+        status: status.state,
+        lastOkAt: status.lastOkAt,
+        lastFailAt: status.lastFailAt,
+        failReason: status.failReason,
+        consecutiveFails: status.consecutiveFails,
+      }),
+    )
+    .catch(() => {})
+}
+
 /** Registra um desfecho de SUCESSO de uma chamada ao Comix. */
 export function recordComixOk(): void {
   lastOkAt = Date.now()
   consecutiveFails = 0
+  maybePersist()
 }
 
 /** Registra uma FALHA de uma chamada ao Comix (qualquer superfície). */
@@ -74,6 +106,7 @@ export function recordComixFailure(reason: ComixFailure): void {
   lastFailAt = Date.now()
   lastFailReason = reason
   consecutiveFails += 1
+  maybePersist()
 }
 
 /** Status atual do Comix, derivado do tráfego observado + circuito do FlareSolverr.
