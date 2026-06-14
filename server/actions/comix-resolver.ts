@@ -9,6 +9,7 @@ import { fetchComixById, fetchComixReviews } from "@/lib/external/comix"
 import { extractComixHid } from "@/lib/external/comix-hid"
 import { isBlockedCoverUrl } from "@/lib/external/blocked-covers"
 import { flareSolverrHealth } from "@/lib/external/flaresolverr"
+import { getComixStatus } from "@/lib/external/comix-gate"
 
 const CACHE_DIR = path.join(process.cwd(), ".cache")
 const LOG_PATH = path.join(CACHE_DIR, "resolve-comix.log")
@@ -146,6 +147,14 @@ export async function startComixResolver(): Promise<{ ok: boolean; error?: strin
  * prod-safe (GitHub Action com Chrome) entra no deploy (II.A fase 5); por isso
  * NÃO há fallback aqui, só o caminho dev. Best-effort: falha de spawn só loga.
  */
+/**
+ * Status observado do Comix (ComixGate, in-memory) — exposto como action pra o
+ * cliente (ex.: toast por lote na avaliação). Leitura passiva, sem rede.
+ */
+export async function getComixHealthStatus() {
+  return getComixStatus()
+}
+
 export async function resolveComixHidForWork(workId: string): Promise<void> {
   if (!workId) return
   try {

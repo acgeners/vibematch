@@ -15,6 +15,7 @@ import {
   SlidersHorizontal,
   Wand2,
   Activity,
+  AlertTriangle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getSidebarBadgeCounts } from "@/server/actions/badges"
@@ -24,6 +25,8 @@ import { BalanceChip } from "@/components/layout/balance-chip"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
 
 type BadgeKey = "ai-eval" | "settings"
+// Derivado do retorno da action (evita importar o módulo server-only comix-gate no client).
+type ComixHealth = Awaited<ReturnType<typeof getSidebarBadgeCounts>>["comixHealth"]
 
 // Janela mínima entre re-fetches dos badges disparados por navegação. Mutações
 // que esvaziam filas forçam o re-fetch na hora (evento global), então a navegação
@@ -102,6 +105,8 @@ export function Sidebar() {
   // Há edições de nota aguardando recálculo (fila de recálculo). Vem do mesmo
   // fetch dos badges; mostra o botão "Recalcular notas" no rodapé da sidebar.
   const [recalcPending, setRecalcPending] = useState(false)
+  // Saúde do Comix (ComixGate): alerta discreto no rodapé quando degradado/fora.
+  const [comixHealth, setComixHealth] = useState<ComixHealth>("unknown")
 
   // Re-busca os contadores a cada navegação (no máx. 1×/BADGES_TTL_MS — cada RPC
   // ~450ms no DB remoto) e, FORÇADO, quando uma mutação dispara o refresh do
@@ -109,9 +114,10 @@ export function Sidebar() {
   // re-run pós-mutação vivem em useChromeData.
   useChromeData(
     getSidebarBadgeCounts,
-    ({ aiEval, settings, recalcPending }) => {
+    ({ aiEval, settings, recalcPending, comixHealth }) => {
       setBadgeCounts({ "ai-eval": aiEval, settings })
       setRecalcPending(recalcPending)
+      setComixHealth(comixHealth)
     },
     BADGES_TTL_MS,
     (patch) => {
@@ -239,6 +245,28 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+
+      {(comixHealth === "down" || comixHealth === "degraded") && (
+        <Link
+          href="/settings"
+          title={
+            comixHealth === "down"
+              ? "Comix indisponível (API exigindo token) — avaliações podem rodar sem reviews da Comix."
+              : "Comix instável (FlareSolverr/Cloudflare) — algumas reviews da Comix podem faltar."
+          }
+          className={cn(
+            "flex items-center gap-2 border-t border-sidebar-border/60 px-3 py-2 text-xs font-medium transition-colors",
+            comixHealth === "down"
+              ? "text-rose-500 hover:bg-rose-500/10"
+              : "text-amber-500 hover:bg-amber-500/10",
+          )}
+        >
+          <AlertTriangle className="size-3.5 shrink-0" />
+          <span className="truncate">
+            Comix {comixHealth === "down" ? "fora" : "instável"}
+          </span>
+        </Link>
+      )}
 
       {recalcPending && (
         <div className="border-t border-sidebar-border/60 px-3 py-2.5">
