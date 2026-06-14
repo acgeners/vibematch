@@ -655,6 +655,11 @@ export async function getSynopsisQueueWorks(opts: {
   pubStatusIds?: number[]
   personalStatusIds?: number[]
   synopsisQualities?: string[]
+  /**
+   * Triagem manual: ignora o estado de previsão e lista só obras SEM Interesse
+   * manual (synopsis_quality IS NULL). Sobrepõe `states`/`synopsisQualities`.
+   */
+  missingManual?: boolean
   limit?: number
 }): Promise<SynopsisQueueWork[]> {
   const states: Array<"stale" | "unpredicted" | "predicted"> =
@@ -711,7 +716,9 @@ export async function getSynopsisQueueWorks(opts: {
 
   const pubIds = opts.pubStatusIds ?? []
   const personalIds = opts.personalStatusIds ?? []
-  const synQ = opts.synopsisQualities ?? []
+  // "none" é só um sentinela de UI (filtro "Não avaliada") — nunca casa numa
+  // linha real, então é removido antes de qualquer `.in("synopsis_quality", …)`.
+  const synQ = (opts.synopsisQualities ?? []).filter((q) => q !== "none")
 
   const mapWork = (w: Record<string, unknown>): SynopsisQueueWork => {
     const calc = (w.calculated_scores as { expected_score?: number | null } | null) ?? null
@@ -736,6 +743,24 @@ export async function getSynopsisQueueWorks(opts: {
       previousPredictedQuality: (prev?.predicted_quality as string | null) ?? null,
       previousPromptVersion: (prev?.prompt_version as string | null) ?? null,
     }
+  }
+
+  // Triagem manual: lista obras com sinopse canônica e SEM Interesse manual
+  // (synopsis_quality IS NULL), independente do estado de previsão. As previsões
+  // carregadas acima ainda alimentam a exibição (sugestão IA no card).
+  if (opts.missingManual) {
+    let q = supabase
+      .from("works")
+      .select(SYNOPSIS_QUEUE_SELECT)
+      .eq("is_archived", false)
+      .not("canonical_synopsis", "is", null)
+      .is("synopsis_quality", null)
+      .order("updated_at", { ascending: false })
+    if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
+    if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
+    const { data, error } = await q.limit(opts.limit ?? 1000)
+    if (error) throw new Error(`Falha listando obras sem Interesse manual: ${error.message}`)
+    return (data ?? []).map((w) => mapWork(w as Record<string, unknown>))
   }
 
   const out = new Map<string, SynopsisQueueWork>()

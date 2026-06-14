@@ -430,7 +430,7 @@ export function ExternalListImport({
                   />
                   <span className="flex-1">{c.entry.title}</span>
                   <span className="text-xs text-muted-foreground">
-                    {[c.entry.personalStatus ?? "To read", c.entry.userScore != null ? `nota ${c.entry.userScore}` : null, c.entry.chaptersRead != null ? `${c.entry.chaptersRead} caps` : null]
+                    {[c.entry.personalStatus ?? "Want to Read", c.entry.userScore != null ? `nota ${c.entry.userScore}` : null, c.entry.chaptersRead != null ? `${c.entry.chaptersRead} caps` : null]
                       .filter(Boolean)
                       .join(" · ")}
                   </span>

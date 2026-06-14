@@ -10,7 +10,7 @@ export const PERSONAL_STATUS_DESCRIPTIONS_PT: Record<string, string> = {
   Paused: "Comecei e pausei, pretendo terminar depois",
   Hiatus: "Aguardando nova temporada / retorno do título",
   "On-hold": "Comecei, planejo retomar, mas preciso reler antes",
-  "To read": "Não comecei — está na lista de leitura",
+  "Want to Read": "Não comecei — está na lista de leitura",
   Dropped: "Abandonado, não pretendo continuar",
 }
 

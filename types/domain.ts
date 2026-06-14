@@ -6,7 +6,8 @@ export const PUBLICATION_STATUSES = ["Completed", "Ongoing", "Hiatus", "Cancelle
 export type PublicationStatus = (typeof PUBLICATION_STATUSES)[number]
 
 export const PERSONAL_STATUSES = [
-  "To read",
+  "Want to Read",
+  "Untracked",
   "Reading",
   "Started",
   "Stalled",

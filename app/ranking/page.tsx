@@ -158,7 +158,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
       ? undefined
       : perStatusParam
         ? perStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
-        : ["To read"]
+        : ["Want to Read"]
 
   const pubStatusParam = str("pub_status")
   const publicationStatus =

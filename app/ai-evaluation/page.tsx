@@ -49,7 +49,9 @@ function parseFilters(raw: string | string[] | undefined): EvaluationFilter[] {
 function parseSynopsisQualities(raw: string | string[] | undefined): string[] {
   const value = Array.isArray(raw) ? raw.join(",") : raw
   if (!value) return []
-  const valid = new Set<string>(SYNOPSIS_QUALITIES)
+  // "none" = sentinela do filtro "Não avaliada" (synopsis_quality IS NULL),
+  // tratado só na fila tab=sinopse; inofensivo nas outras queries.
+  const valid = new Set<string>([...SYNOPSIS_QUALITIES, "none"])
   return value
     .split(",")
     .map((p) => p.trim())
@@ -629,6 +631,7 @@ export default async function AiEvaluationPage({
       pubStatusIds,
       personalStatusIds,
       synopsisQualities,
+      missingManual: synopsisQualities.includes("none"),
     }),
     getSynopsisPredictionAccuracy(),
     getSynopsisVersionComparison(),

@@ -67,6 +67,9 @@ export function CoverImage({
       src={src}
       alt={alt}
       loading={loading}
+      // Decode fora da main thread — ganho nas views com dezenas de capas (grid/ranking),
+      // sem risco de CLS: o espaço já é reservado pelo container/className do caller.
+      decoding="async"
       className={className}
       onError={() => setIdx((i) => i + 1)}
     />

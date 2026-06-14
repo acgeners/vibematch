@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { useFieldArray, useForm, useWatch, type FieldPath } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
@@ -34,6 +35,7 @@ import {
   PUBLICATION_STATUS_LABELS,
   PERSONAL_STATUS_LABELS,
   SYNOPSIS_QUALITY_LABELS,
+  PLATFORM_LABELS,
 } from "@/lib/constants/criteria"
 import {
   DEFAULT_POST_READING_WEIGHTS,
@@ -97,16 +99,13 @@ const PLATFORM_FIELDS = [
   { key: "ap",  label: "Anime Planet", ratingField: "ap_rating"  as const, votesField: "ap_votes"  as const },
 ]
 
-const FALLBACK_SOURCE_OPTIONS = [
-  { id: 3, name: "Manga Updates", order: 1 },
-  { id: 1, name: "ComicK", order: 2 },
-  { id: 4, name: "AniList", order: 3 },
-  { id: 2, name: "Anime Planet", order: 4 },
-  { id: 5, name: "Comix", order: 5 },
-  { id: 6, name: "MangaDex", order: 6 },
-  { id: 7, name: "Kitsu", order: 7 },
-  { id: 8, name: "MyAnimeList", order: 8 },
-]
+// Lista de fontes externas. Deriva de PLATFORM_LABELS (constante já no bundle) —
+// antes vinha de um fetch("/api/sources") que só reembrulhava esta mesma constante.
+const SOURCE_OPTIONS = Object.values(PLATFORM_LABELS).map((name, index) => ({
+  id: index + 1,
+  name,
+  order: index + 1,
+}))
 
 const READING_STATUSES_WITH_PROGRESS = new Set(["Reading", "Completed", "Paused", "Stalled", "Dropped", "Started", "Hiatus"])
 
@@ -234,7 +233,6 @@ const POST_READING_STAR_LEGEND = [
 ]
 
 type SectionKey = "new" | "basic" | "external" | "criteria" | "status" | "categorization"
-type ExternalSourceOption = { id: number; name: string; order?: number | string | null }
 type AiMetaSnapshot = {
   inputHash: string
   modelName: string
@@ -469,7 +467,7 @@ const getEmptyCreateValues = (): Partial<WorkFormValues> => ({
   year: null,
   year_end: null,
   publication_status: "Unknown",
-  personal_status: "To read",
+  personal_status: "Untracked",
   total_chapters: null,
   chapters_read: null,
   synopsis_quality: null,
@@ -533,7 +531,12 @@ const scrollToTop = () => {
 
 export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEvalOnCreate = false }: WorkFormProps) {
   const router = useRouter()
+  const refresh = useRefresh()
   const isCreating = !workId
+
+  // Em edição, sempre mostra as notas. Na criação, só mostra se a avaliação IA
+  // na criação estiver ligada (senão as notas nem são geradas nessa etapa).
+  const showCriteriaSection = !isCreating || aiEvalOnCreate
 
   const defaultValues: Partial<WorkFormValues> = {
     ...getEmptyCreateValues(),
@@ -663,7 +666,6 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
   const synopsisQualityValue = useWatch({ control, name: "synopsis_quality" })
   const [coverPreviewFailedUrl, setCoverPreviewFailedUrl] = useState<string | null>(null)
   const [openSections, setOpenSections] = useState(DEFAULT_OPEN_SECTIONS)
-  const [sourceOptions, setSourceOptions] = useState<ExternalSourceOption[]>([])
   const [genreSuggestions, setGenreSuggestions] = useState<string[]>(GENRE_NAMES)
   const [postReadingWeights] = useState<Record<PostReadingScoreField, number>>(readPostReadingWeights)
   const coverPreviewSrc = getCoverImageSrc(coverUrl)
@@ -694,7 +696,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
   const buildFixedExtraPlatformRatings = useCallback((
     baseValues: WorkFormValues["extra_platform_ratings"] = []
   ) => {
-    const availableSources = sourceOptions.length ? sourceOptions : FALLBACK_SOURCE_OPTIONS
+    const availableSources = SOURCE_OPTIONS
     const fixedExtraSources = availableSources.filter((source) => !getBuiltInSourceKey(source.name))
     const currentByName = new Map(
       (baseValues ?? [])
@@ -711,7 +713,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
         item?.platform && !fixedNames.has(normalizeSourceName(item.platform))
       ),
     ]
-  }, [sourceOptions])
+  }, [])
 
   const clearFormState = () => {
     setCriteriaJustifications({})
@@ -727,13 +729,6 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     })
     clearFormState()
   }
-
-  useEffect(() => {
-    fetch("/api/sources")
-      .then((res) => res.json())
-      .then((data: ExternalSourceOption[]) => setSourceOptions(data.length ? data : FALLBACK_SOURCE_OPTIONS))
-      .catch(() => setSourceOptions(FALLBACK_SOURCE_OPTIONS))
-  }, [])
 
   useEffect(() => {
     if (GENRE_NAMES.length > 0) return
@@ -757,7 +752,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     if (JSON.stringify(current) !== JSON.stringify(next)) {
       setValue("extra_platform_ratings", next, { shouldDirty: false, shouldValidate: false })
     }
-  }, [buildFixedExtraPlatformRatings, getValues, setValue, sourceOptions])
+  }, [buildFixedExtraPlatformRatings, getValues, setValue])
 
   // Auto-preencher chapters_read = total_chapters quando status muda para Completed.
   useEffect(() => {
@@ -1297,7 +1292,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
           setEditingDraftId(null)
           resetForNewEntry()
           toast.warning(firstError ?? "Obras criadas, mas houve um aviso ao finalizar.")
-          router.refresh()
+          refresh()
           const idsParam = result.data.created.map((c) => c.id).join(",")
           router.push(`/titles/batch?ids=${idsParam}`)
           return
@@ -1312,7 +1307,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
       setEditingDraftId(null)
       resetForNewEntry()
       toast.success(`${created.length} obra${created.length === 1 ? "" : "s"} criada${created.length === 1 ? "" : "s"} e recalculada${created.length === 1 ? "" : "s"}.`)
-      router.refresh()
+      refresh()
       if (created[0]) {
         const idsParam = created.map((c) => c.id).join(",")
         router.push(`/titles/batch?ids=${idsParam}`)
@@ -1331,7 +1326,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
   }
 
   const getNextSourceName = () => {
-    const availableSources = sourceOptions.length ? sourceOptions : FALLBACK_SOURCE_OPTIONS
+    const availableSources = SOURCE_OPTIONS
     const selected = new Set(
       (extraPlatformValues ?? [])
         .map((item) => item?.platform?.trim())
@@ -2108,7 +2103,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
         {openSections.external && (
           <CardContent className="space-y-4">
             {(() => {
-              const availableSources = sourceOptions.length ? sourceOptions : FALLBACK_SOURCE_OPTIONS
+              const availableSources = SOURCE_OPTIONS
               const builtInByKey = new Map(PLATFORM_FIELDS.map((plat) => [plat.key, plat]))
               const sourceNames = new Set(availableSources.map((source) => normalizeSourceName(source.name)))
 
@@ -2272,6 +2267,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
       </Card>
 
       {/* 4. Notas por atributo */}
+      {showCriteriaSection && (
       <Card>
         {renderSectionHeader("criteria", "Notas por atributo", {
           description: "Rating 0 - 10",
@@ -2421,6 +2417,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
           </CardContent>
         )}
       </Card>
+      )}
 
       {/* 5. Categorização */}
       <Card>

@@ -96,9 +96,6 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
       { key: "score:alignmentScore", label: "IA Rk." },
       { key: "score:platformAvg", label: "Média externa" },
       { key: "score:userScore", label: "Pessoal" },
-      { key: "score:finalScore", label: "Final (legado)" },
-      { key: "score:calcScore", label: "IA (legado)" },
-      { key: "score:predictedScore", label: "Pr (legado)" },
     ],
   },
   {
@@ -126,17 +123,13 @@ const COMPARE_ROW_COLUMN_DEFS: ColumnPickerColumnDef[] = COMPARE_ROW_GROUPS.flat
   g.rows.map((r) => ({ key: r.key, label: r.label, group: g.id }))
 )
 
-// Default enxuto (cutover Fase 1.5): visíveis = Capítulos, Ano, Nota Prevista,
-// IA Rk, Média externa, todos os atributos e Gêneros/Tags. Escondidos por padrão:
-// Status, Pessoal e as notas legadas (Final/IA/Pr).
+// Default enxuto: visíveis = Capítulos, Ano, Nota Prevista, IA Rk, Média externa,
+// todos os atributos e Gêneros/Tags. Escondidos por padrão: Status e Pessoal.
 const DEFAULT_ROWS_CONFIG: ColumnPickerConfig = {
   order: ALL_ROW_KEYS,
   hidden: [
     "status",
     "score:userScore",
-    "score:finalScore",
-    "score:calcScore",
-    "score:predictedScore",
   ],
 }
 
@@ -846,14 +839,14 @@ function CompareGrid({
       key: "score:decision",
       label: "Prioridade",
       get: (w) => w.decisionScore,
-      thresholds: scoreThresholds?.final ?? null,
+      thresholds: scoreThresholds?.expected ?? null,
       asAttributeBox: true,
     },
     {
       key: "score:expectedScore",
       label: "Nota Prevista",
       get: (w) => w.expectedScore,
-      thresholds: scoreThresholds?.final ?? null,
+      thresholds: scoreThresholds?.expected ?? null,
       asAttributeBox: true,
     },
     {
@@ -864,25 +857,6 @@ function CompareGrid({
       get: (w) => w.personalFitPercentile ?? (w.personalFit != null ? w.personalFit * 100 : null),
       thresholds: null,
       formatScore: (v) => `${Math.round(v)}%`,
-    },
-    {
-      key: "score:finalScore",
-      label: "Final (legado)",
-      get: (w) => w.finalScore,
-      thresholds: scoreThresholds?.final ?? null,
-    },
-    {
-      key: "score:calcScore",
-      label: "IA (legado)",
-      get: (w) => w.calcScore,
-      thresholds: scoreThresholds?.calc ?? null,
-    },
-    {
-      key: "score:predictedScore",
-      label: "Pr (legado)",
-      get: (w) => w.predictedScore,
-      stub: (w) => w.predictedIsStub,
-      thresholds: scoreThresholds?.predicted ?? null,
     },
     {
       // IA Rk usa escala 0–100 (diferente dos demais 0–10). thresholds=null
@@ -937,7 +911,7 @@ function CompareGrid({
         key: "score:moodAdjusted",
         label: "Prioridade ajustada",
         get: (w) => moodAdjustedById.get(w.id) ?? null,
-        thresholds: scoreThresholds?.final ?? null,
+        thresholds: scoreThresholds?.expected ?? null,
         asAttributeBox: true,
       }
     : null

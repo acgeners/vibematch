@@ -9,7 +9,6 @@ import { TasteProfileSummary } from "@/components/titles/recommendations/taste-p
 import { RunDetailActions } from "@/components/recommendations/run-detail-actions"
 import { getRecommendationRun } from "@/server/queries/recommendations"
 import { getWorksByIds } from "@/server/queries/works"
-import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { formatRelativeDateTime } from "@/lib/date-utils"
@@ -55,13 +54,12 @@ export default async function RunDetailPage({ params }: PageProps) {
   const removedRanked = run.ranked.filter((r) => r.work == null)
   const validRankedIds = validRanked.map((r) => r.work_id)
 
-  const [usedProfile, currentProfile, fullWorks, scoreThresholds] = await Promise.all([
+  const [usedProfile, currentProfile, fullWorks] = await Promise.all([
     loadProfileById(run.tasteProfileId),
     loadCurrentTasteProfile(),
     validRankedIds.length > 0
       ? getWorksByIds(validRankedIds)
       : Promise.resolve([] as WorkWithRelations[]),
-    getScoreColorThresholds(),
   ])
 
   const worksById: Record<string, WorkWithRelations> = {}
@@ -172,7 +170,6 @@ export default async function RunDetailPage({ params }: PageProps) {
               }),
             )}
             worksById={worksById}
-            scoreThresholds={scoreThresholds}
           />
         )}
         {removedRanked.length > 0 && (

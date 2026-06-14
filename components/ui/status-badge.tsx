@@ -41,10 +41,9 @@ function resolvePersonalInfo(
   return PERSONAL_STATUSES_BY_NAME[canonical] ?? null
 }
 
-// Tailwind class palettes keyed by canonical status. DB stores hex colors,
-// which don't map cleanly to Tailwind utility classes — so we keep the
-// aesthetic palette here and rely on the DB only for the canonical name
-// and symbol.
+// Publication badges still use a hand-tuned Tailwind palette (the DB hex
+// colors don't map cleanly to utility classes). Personal badges, in contrast,
+// derive their colors directly from the DB hex via `hexToRgba` below.
 const PUB_STATUS_CLASSES: Record<string, string> = {
   Completed: "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-400/12 dark:text-blue-200 dark:border-blue-400/25",
   Hiatus: "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-400/12 dark:text-amber-200 dark:border-amber-400/25",
@@ -53,16 +52,15 @@ const PUB_STATUS_CLASSES: Record<string, string> = {
   Unknown: "bg-gray-100 text-gray-600 border-gray-200 dark:bg-slate-400/10 dark:text-slate-300 dark:border-slate-400/20",
 }
 
-const PERSONAL_STATUS_CLASSES: Record<string, string> = {
-  Completed: "bg-blue-100 text-blue-800 dark:bg-blue-400/12 dark:text-blue-200",
-  Reading: "bg-green-100 text-green-800 dark:bg-emerald-400/12 dark:text-emerald-200",
-  "To read": "bg-gray-100 text-gray-700 dark:bg-slate-400/10 dark:text-slate-300",
-  Paused: "bg-yellow-100 text-yellow-800 dark:bg-yellow-400/12 dark:text-yellow-200",
-  Stalled: "bg-orange-100 text-orange-800 dark:bg-orange-400/12 dark:text-orange-200",
-  Dropped: "bg-red-100 text-red-800 dark:bg-red-400/12 dark:text-red-200",
-  Started: "bg-purple-100 text-purple-800 dark:bg-purple-400/12 dark:text-purple-200",
-  Hiatus: "bg-cyan-100 text-cyan-800 dark:bg-cyan-400/12 dark:text-cyan-200",
-  "On-hold": "bg-slate-100 text-slate-700 dark:bg-slate-400/10 dark:text-slate-300",
+// Converts a `#RRGGBB` hex (as stored in the DB `color` column) to an rgba
+// string so we can use the same status color for the text and a low-opacity
+// background tint.
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace("#", "")
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
 interface PublicationStatusBadgeProps {
@@ -102,11 +100,21 @@ interface PersonalStatusBadgeProps {
 
 export function PersonalStatusBadge({ statusId, status, className, iconOnly }: PersonalStatusBadgeProps) {
   const info = resolvePersonalInfo(statusId, status)
-  const name = info?.status ?? "To read"
+  const name = info?.status ?? "Want to Read"
+  // Text color comes straight from the DB `color` hex; the background reuses
+  // the same color at low opacity so it stays subtle. Inline styles override
+  // the secondary variant's bg/text utilities.
+  const style = info ? { color: info.color, backgroundColor: hexToRgba(info.color, 0.12) } : undefined
   return (
     <Badge
       variant="secondary"
-      className={cn("gap-1", iconOnly && "px-1.5", PERSONAL_STATUS_CLASSES[name] ?? "bg-gray-100 text-gray-700", className)}
+      className={cn(
+        "gap-1",
+        iconOnly && "px-1.5",
+        !info && "bg-gray-100 text-gray-700 dark:bg-slate-400/10 dark:text-slate-300",
+        className
+      )}
+      style={style}
       title={iconOnly ? name : undefined}
     >
       <span aria-hidden>{info?.symbol || "•"}</span>

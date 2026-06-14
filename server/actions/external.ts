@@ -4,7 +4,6 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG, normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { TAG_GROUPS_CATALOG, GENRE_NAMES } from "@/lib/constants/tags"
-import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { searchAllSources, fetchMultiSourceDetails, fetchExternalEvaluationContextForWork, fetchExternalEvaluationContextForCandidate, buildCandidateFromExternalIds, SEARCH_CONNECTORS, bestTitleMatch } from "@/lib/external/index"
 import { fetchMangaUpdatesAlternativeTitles } from "@/lib/external/mangaupdates"
 import { fetchComixById } from "@/lib/external/comix"
@@ -225,15 +224,6 @@ export async function upsertExternalTags(tagNames: string[]): Promise<void> {
   const supabase = createAdminClient()
   const { createdIds } = await resolveOrCreateTags(supabase, tagNames)
   scheduleTagEnrichment(createdIds)
-}
-
-export async function listExternalSources() {
-  return Object.entries(PLATFORM_LABELS).map(([slug, name], index) => ({
-    id: index + 1,
-    slug,
-    name,
-    order: index + 1,
-  }))
 }
 
 export async function searchTags(query: string): Promise<TagSuggestion[]> {

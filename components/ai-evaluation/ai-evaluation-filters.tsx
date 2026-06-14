@@ -412,6 +412,18 @@ export function AiEvaluationFilters({
                   </button>
                 )
               })}
+              {/* Triagem manual (só na aba Interesse Sinopse): obras ainda sem
+                  Interesse informado (synopsis_quality IS NULL). */}
+              {showSynopsisState && (
+                <button type="button" onClick={() => toggleSynopsisQuality("none")}>
+                  <Badge
+                    variant={activeSynopsisQualities.includes("none") ? "default" : "outline"}
+                    className="cursor-pointer text-sm"
+                  >
+                    Não avaliada
+                  </Badge>
+                </button>
+              )}
             </div>
           </FilterSection>
         </div>

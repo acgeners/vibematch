@@ -9,7 +9,7 @@ import type { ExternalListEntry, ExternalListSource } from "./types"
 const MAL_JSON_STATUS: Record<string, PersonalStatus> = {
   read: "Completed",
   reading: "Reading",
-  "want to read": "To read",
+  "want to read": "Want to Read",
   stalled: "Stalled",
   dropped: "Dropped",
   "on-hold": "On-hold",
@@ -21,7 +21,7 @@ const MAL_XML_STATUS: Record<string, PersonalStatus> = {
   reading: "Reading",
   "on-hold": "On-hold",
   dropped: "Dropped",
-  "plan to read": "To read",
+  "plan to read": "Want to Read",
 }
 
 function clampScore(value: number): number {

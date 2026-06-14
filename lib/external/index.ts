@@ -37,10 +37,13 @@ const TIMEOUT_REVIEWS_MS = 12000
 // Teto maior só pra ele — análogo à observação de que reviews do MangaUpdates
 // (2 requests) já justificam um teto acima do padrão.
 const TIMEOUT_REVIEWS_COMICK_MS = 18000
-// Comix também passa por FlareSolverr (3 calls: detalhe → lookup → comments),
-// mas roda em paralelo sob o teto do ComicK; teto próprio < 18s pra ele nunca
-// estender o caminho crítico além do que o ComicK já custa.
-const TIMEOUT_REVIEWS_COMIX_MS = 15000
+// Comix passa por FlareSolverr em TODAS as ~4 calls (SSR detalhe → lookup →
+// comments×2) desde que a CF ficou estrita (2026-06-12): nenhuma é mais token-free.
+// Com a sessão FlareSolverr compartilhada (COMIX_FS_SESSION), só a 1ª paga o solve
+// frio (~11s) e as demais reusam o browser quente (<1s) → ~12s no pior caso (sessão
+// fria), ~2-4s quando já quente de uma call anterior. 25s dá folga sobre o solve frio
+// (era 15s, que estourava porque cada call solava ~11s isolada).
+const TIMEOUT_REVIEWS_COMIX_MS = 25000
 const TIMEOUT_SIMILAR_MS = 8000
 
 // ============================================================================

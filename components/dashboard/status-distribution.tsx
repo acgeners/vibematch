@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 const PERSONAL_COLORS: Record<string, string> = {
   Reading: "bg-emerald-500",
   Started: "bg-violet-500",
-  "To read": "bg-slate-400",
+  "Want to Read": "bg-slate-400",
   Completed: "bg-blue-500",
   "On-hold": "bg-slate-500",
   Stalled: "bg-orange-500",

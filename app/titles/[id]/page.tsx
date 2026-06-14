@@ -101,12 +101,6 @@ function formatVotes(count: number): string {
   return String(count)
 }
 
-const DEFAULT_SYNOPSIS_INTEREST = "♥♥"
-
-function formatSynopsisInterest(value: string | null | undefined) {
-  return value?.trim() || DEFAULT_SYNOPSIS_INTEREST
-}
-
 function getTagGroupLabel(tagGroupId: string | null | undefined) {
   if (!tagGroupId) return "Sem grupo"
   const entry = Object.entries(TAG_GROUP_IDS).find(([, id]) => id === tagGroupId)
@@ -335,9 +329,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     return null
   })()
 
+  // Interesse na sinopse (♥ a ♥♥♥♥), preenchido manualmente. Quando vazio,
+  // mostramos "—" em vez de inventar uma nota — null sinaliza "sem dado ainda".
+  const synopsisInterest = work.synopsis_quality?.trim() || null
+
   const statusInitial: WorkStatusValues = {
     personal_status:
-      (getPersonalStatusNameById(work.personal_status_id) as PersonalStatus | undefined) ?? "To read",
+      (getPersonalStatusNameById(work.personal_status_id) as PersonalStatus | undefined) ?? "Want to Read",
     personal_status_id: work.personal_status_id ?? null,
     synopsis_quality: work.synopsis_quality ?? null,
     observation_adjustment: work.observation_adjustment ?? 0,
@@ -490,16 +488,23 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               </span>
               <PersonalStatusBadge statusId={work.personal_status_id} />
             </div>
-            {formatSynopsisInterest(work.synopsis_quality) && (
-              <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Interesse
-                </span>
+            <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Interesse
+              </span>
+              {synopsisInterest ? (
                 <span className="inline-flex items-center rounded-full border border-rose-400/30 bg-rose-500/10 px-2.5 py-0.5 text-xs font-semibold text-rose-600 dark:text-rose-300">
-                  {formatSynopsisInterest(work.synopsis_quality)}
+                  {synopsisInterest}
                 </span>
-              </div>
-            )}
+              ) : (
+                <span
+                  className="text-sm font-mono font-semibold text-muted-foreground"
+                  title="Interesse na sinopse ainda não informado"
+                >
+                  —
+                </span>
+              )}
+            </div>
             {work.calculated_scores?.expected_score != null && (
               <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -509,7 +514,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   score={work.calculated_scores.expected_score}
                   size="md"
                   showStub={work.calculated_scores?.expected_is_stub ?? false}
-                  thresholds={scoreThresholds?.final}
+                  thresholds={scoreThresholds?.expected}
                 />
               </div>
             )}

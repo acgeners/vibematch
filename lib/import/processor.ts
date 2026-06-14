@@ -153,7 +153,7 @@ async function createWork(
   row: MappedImportRow
 ): Promise<string> {
   const publicationStatus = row.publication_status ?? "Unknown"
-  const personalStatus = row.personal_status ?? "To read"
+  const personalStatus = row.personal_status ?? "Want to Read"
   const { data, error } = await supabase
     .from("works")
     .insert({

@@ -34,7 +34,7 @@ export function parseFiltersFromSearchParams(sp: URLSearchParams): RankingFilter
       ? undefined
       : perStatusParam
         ? perStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
-        : ["To read"]
+        : ["Want to Read"]
 
   const pubStatusParam = sp.get("pub_status")
   const publicationStatus =
@@ -58,12 +58,6 @@ export function parseFiltersFromSearchParams(sp: URLSearchParams): RankingFilter
     synopsisQualities: multi("synopsis_q"),
     minTotalChapters: num("min_chapters"),
     maxTotalChapters: num("max_chapters"),
-    minCalcScore: num("min_calc"),
-    maxCalcScore: num("max_calc"),
-    minPredictedScore: num("min_pr"),
-    maxPredictedScore: num("max_pr"),
-    minFinalScore: num("min_final"),
-    maxFinalScore: num("max_final"),
     minExpectedScore: num("min_expected"),
     maxExpectedScore: num("max_expected"),
     minPersonalFitPct: num("min_fit"),

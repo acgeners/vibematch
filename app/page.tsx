@@ -192,7 +192,7 @@ export default async function DashboardPage() {
                   key={work.id}
                   rank={index + 1}
                   work={work}
-                  scoreThresholds={scoreThresholds?.final ?? null}
+                  scoreThresholds={scoreThresholds?.expected ?? null}
                 />
               ))}
             </div>

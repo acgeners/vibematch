@@ -37,7 +37,7 @@ const MAX_CHAT_MESSAGES_PER_DAY = 60
 const MIN_USER_MESSAGES_BEFORE_RECOMMEND = 2
 
 // Universo de descoberta do chat = mesmo default do "Recomendar do ranking"
-// (status pessoal "To read" + publicação "Completed"). Mantém consistência com
+// (status pessoal "Want to Read" + publicação "Completed"). Mantém consistência com
 // o botão existente; a nuance de mood vai no userContext derivado da conversa.
 function defaultChatFilters() {
   return parseFiltersFromSearchParams(new URLSearchParams())
