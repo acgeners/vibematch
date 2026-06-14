@@ -114,6 +114,18 @@ export function Sidebar() {
       setRecalcPending(recalcPending)
     },
     BADGES_TTL_MS,
+    (patch) => {
+      // Delta otimista: ex.: avaliar uma obra tira 1 da fila de /ai-evaluation
+      // sem re-contar no DB. Clampa em 0 (a navegação reconcilia o exato).
+      if (patch.badgeDelta) {
+        const { aiEval = 0, settings = 0 } = patch.badgeDelta
+        setBadgeCounts((prev) => ({
+          "ai-eval": Math.max(0, prev["ai-eval"] + aiEval),
+          settings: Math.max(0, prev.settings + settings),
+        }))
+      }
+      if (patch.recalcPending != null) setRecalcPending(patch.recalcPending)
+    },
   )
 
   const isItemActive = (item: NavItem, siblings: NavItem[]): boolean => {

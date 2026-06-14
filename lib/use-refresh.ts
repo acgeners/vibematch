@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { CHROME_REFRESH_EVENT, refreshChrome } from "@/lib/chrome-refresh"
+import type { ChromePatch } from "@/lib/chrome-refresh"
 
 /**
  * `router.refresh()` + refresh do chrome (saldo/badges/conta) num só lugar.
@@ -11,24 +12,33 @@ import { CHROME_REFRESH_EVENT, refreshChrome } from "@/lib/chrome-refresh"
  * re-renderiza os Server Components da rota, mas NÃO re-roda os fetches client
  * dos chips persistentes do layout — `refreshChrome()` cuida desses. Centralizar
  * aqui garante que toda mutação mantenha o chrome em dia sem fiação caso-a-caso.
+ *
+ * Passe um `patch` quando souber o que mudou (ex.: avaliação IA gastou tokens e
+ * tirou 1 da fila) pra atualizar o chrome otimisticamente, sem re-buscar do DB.
+ * Sem patch = re-busca tudo (comportamento original).
  */
-export function useRefresh(): () => void {
+export function useRefresh(): (patch?: ChromePatch) => void {
   const router = useRouter()
-  return useCallback(() => {
-    router.refresh()
-    refreshChrome()
-  }, [router])
+  return useCallback(
+    (patch?: ChromePatch) => {
+      router.refresh()
+      refreshChrome(patch)
+    },
+    [router],
+  )
 }
 
 /**
- * Inscreve um callback no evento de refresh do chrome. Passe um callback estável
- * (useCallback) pra não re-inscrever a cada render. Primitivo de baixo nível —
- * prefira `useChromeData` quando o que você quer é buscar dados do chrome.
+ * Inscreve um callback no evento de refresh do chrome. Recebe o `ChromePatch`
+ * (delta otimista) ou `null` (re-fetch). Passe um callback estável (useCallback)
+ * pra não re-inscrever a cada render. Primitivo de baixo nível — prefira
+ * `useChromeData` quando o que você quer é buscar/atualizar dados do chrome.
  */
-export function useChromeRefresh(onRefresh: () => void): void {
+export function useChromeRefresh(onRefresh: (patch: ChromePatch | null) => void): void {
   useEffect(() => {
-    window.addEventListener(CHROME_REFRESH_EVENT, onRefresh)
-    return () => window.removeEventListener(CHROME_REFRESH_EVENT, onRefresh)
+    const handler = (e: Event) => onRefresh((e as CustomEvent<ChromePatch | null>).detail)
+    window.addEventListener(CHROME_REFRESH_EVENT, handler)
+    return () => window.removeEventListener(CHROME_REFRESH_EVENT, handler)
   }, [onRefresh])
 }
 
@@ -43,13 +53,17 @@ export function useChromeRefresh(onRefresh: () => void): void {
  *
  * @param fetcher  busca os dados (pode ser inline; é "refado" a cada render).
  * @param onData   recebe o resultado, ex.: setState (pode ser inline).
- * @param ttlMs    janela mínima entre re-fetches por NAVEGAÇÃO; o evento de chrome
- *                 sempre força (ignora o TTL). Default 0 = sem TTL.
+ * @param ttlMs    janela mínima entre re-fetches por NAVEGAÇÃO; um evento de
+ *                 RE-FETCH sempre força (ignora o TTL). Default 0 = sem TTL.
+ * @param onPatch  aplica um delta otimista LOCALMENTE (sem fetch) quando o evento
+ *                 traz um `ChromePatch`. Se omitido, patches direcionados são
+ *                 ignorados (o chip não re-busca por algo que não lhe diz respeito).
  */
 export function useChromeData<T>(
   fetcher: () => Promise<T>,
   onData: (data: T) => void,
   ttlMs = 0,
+  onPatch?: (patch: ChromePatch) => void,
 ): void {
   const pathname = usePathname()
   // "Refamos" fetcher/onData/run pra que callbacks inline não re-rodem os effects
@@ -58,6 +72,7 @@ export function useChromeData<T>(
   // .current durante o render).
   const fetcherRef = useRef(fetcher)
   const onDataRef = useRef(onData)
+  const onPatchRef = useRef(onPatch)
   const runRef = useRef<(force: boolean) => void>(() => {})
   const inFlight = useRef(false)
   const pendingForce = useRef(false)
@@ -93,6 +108,7 @@ export function useChromeData<T>(
   useEffect(() => {
     fetcherRef.current = fetcher
     onDataRef.current = onData
+    onPatchRef.current = onPatch
     runRef.current = run
   })
 
@@ -101,6 +117,18 @@ export function useChromeData<T>(
     run(false)
   }, [pathname, run])
 
-  // Re-busca (forçado) quando uma mutação dispara o refresh do chrome.
-  useChromeRefresh(useCallback(() => run(true), [run]))
+  // Reage a uma mutação: patch direcionado → aplica delta local (sem fetch);
+  // re-fetch (detail null) → re-busca forçado. Patch sem handler → ignora.
+  useChromeRefresh(
+    useCallback(
+      (patch) => {
+        if (patch) {
+          onPatchRef.current?.(patch)
+        } else {
+          run(true)
+        }
+      },
+      [run],
+    ),
+  )
 }
