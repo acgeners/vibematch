@@ -6,7 +6,6 @@ import { RankedWorkCard } from "@/components/titles/recommendations/ranked-work-
 import { WorkHeatmapView } from "@/components/titles/work-heatmap-view"
 import { WorkColumnPicker } from "@/components/titles/work-column-picker"
 import { cn } from "@/lib/utils"
-import type { ColumnThresholds } from "@/components/ui/score-badge"
 import type { RankedCandidate } from "@/lib/ai-recommendation/types"
 import type { WorkWithRelations } from "@/types/domain"
 
@@ -47,13 +46,11 @@ const PRESETS: Array<{ label: string; value: number }> = [
 interface RankedWorksViewProps {
   ranked: RankedCandidate[]
   worksById: Record<string, WorkWithRelations>
-  scoreThresholds: ColumnThresholds | null
 }
 
 export function RankedWorksView({
   ranked,
   worksById,
-  scoreThresholds,
 }: RankedWorksViewProps) {
   const viewMode = useSyncExternalStore(
     subscribeViewMode,
@@ -146,7 +143,6 @@ export function RankedWorksView({
         ) : (
           <WorkHeatmapView
             works={heatmapWorks}
-            scoreThresholds={scoreThresholds}
             selectedIds={noopSet}
             onToggleSelect={noopToggle}
             namespace="recommendations"

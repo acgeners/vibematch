@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -43,7 +43,7 @@ export function PostAttributeAssessmentForm({
   onChange,
   hideOwnSave = false,
 }: PostAttributeAssessmentFormProps) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
   const [open, setOpen] = useState(true)
   const isControlled = value !== undefined && onChange !== undefined
@@ -121,7 +121,7 @@ export function PostAttributeAssessmentForm({
       const result = await submitPostReadingAttributes(workId, payload)
       if (result.ok) {
         toast.success("Avaliação pós-leitura salva. Offset recalculado.")
-        router.refresh()
+        refresh()
       } else {
         toast.error(result.error)
       }

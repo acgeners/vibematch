@@ -1,12 +1,12 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowDown, ArrowUp, CalendarDays, CheckSquare, Cpu, ExternalLink, Gauge, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation, skipAiEvaluation, prewarmEvaluationContext } from "@/server/actions/ai"
-import { refreshSidebarBadges } from "@/lib/sidebar-badges"
+import { getComixHealthStatus } from "@/server/actions/comix-resolver"
+import { useRefresh } from "@/lib/use-refresh"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
 import { AiEvaluationCompare } from "./ai-evaluation-compare"
 import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/status-badge"
@@ -108,13 +108,9 @@ function EvaluatingProgress({ estimateMs = 55000 }: { estimateMs?: number }) {
 }
 
 export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
-  const router = useRouter()
-  // router.refresh() atualiza os contadores das abas (server component); o badge
-  // da sidebar fica na mesma rota, então precisa do evento pra recontar.
-  const refreshQueue = () => {
-    router.refresh()
-    refreshSidebarBadges()
-  }
+  // refresh() atualiza os contadores das abas (server component) E o chrome da
+  // sidebar (badge/saldo) na mesma rota, via o evento de refresh do chrome.
+  const refreshQueue = useRefresh()
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null)
   const [skippingId, setSkippingId] = useState<string | null>(null)
   const [reviewData, setReviewData] = useState<ReviewData | null>(null)
@@ -374,6 +370,26 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
     setReviewData(reviews[0])
   }
 
+  // "Não-silencioso": após um lote, se o Comix estava degradado/fora, avisa uma
+  // vez que reviews da Comix podem ter faltado (o estado é pegajoso — TTL de
+  // minutos —, então checar pós-lote ≈ durante o lote). Best-effort.
+  const notifyIfComixImpaired = async () => {
+    try {
+      const { state } = await getComixHealthStatus()
+      if (state === "down") {
+        toast.warning(
+          "Comix indisponível durante o lote — algumas obras podem ter sido avaliadas sem reviews da Comix.",
+        )
+      } else if (state === "degraded") {
+        toast.warning(
+          "Comix instável durante o lote — reviews da Comix podem ter faltado em algumas obras.",
+        )
+      }
+    } catch {
+      /* telemetria best-effort */
+    }
+  }
+
   const startQueue = async (works?: PendingWork[]) => {
     const source = works ?? sortedWorks.slice(0, Math.max(1, Math.min(queueSize, sortedWorks.length)))
     if (source.length === 0) return
@@ -384,6 +400,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
 
     const { reviews, needConfirm } = await runBatch(source)
     if (queueCancelledRef.current) return
+    void notifyIfComixImpaired()
 
     // Algumas obras sem reviews: pausa e mostra UM aviso agregado. As que têm
     // review já ficam prontas; o usuário decide se avalia as demais mesmo assim.

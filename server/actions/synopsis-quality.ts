@@ -14,6 +14,7 @@ import { markRecalcPending } from "@/server/actions/recalc-queue"
 import { getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { predictAndPersistSynopsisQuality } from "@/lib/ai-evaluation/synopsis-quality-runner"
 import { predictSynopsisQuality } from "@/lib/ai-evaluation/synopsis-quality-predictor"
+import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
 
 const STUB_PROFILE_ERROR =
@@ -148,6 +149,41 @@ export async function applySynopsisPredictionAction(
     revalidatePath("/ranking")
 
     return { data: { applied: prediction.predictedQuality } }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}
+
+/**
+ * Atribui (ou limpa) o Interesse Sinopse MANUAL (works.synopsis_quality)
+ * diretamente — sem passar pela previsão IA. É o caminho GRÁTIS de triagem
+ * manual da fila /ai-evaluation?tab=sinopse. `quality = null` limpa o campo
+ * ("Não avaliada"). Igual ao apply: marca recálculo pendente (synopsis_quality
+ * é feature do Ridge global) em vez de recalcular na hora.
+ */
+export async function setSynopsisQualityAction(
+  workId: string,
+  quality: SynopsisQuality | null,
+): Promise<{ data?: { synopsisQuality: SynopsisQuality | null }; error?: string }> {
+  try {
+    if (quality !== null && !(SYNOPSIS_QUALITIES as readonly string[]).includes(quality)) {
+      return { error: "Valor de Interesse inválido." }
+    }
+    const supabase = createAdminClient()
+    const { error } = await supabase
+      .from("works")
+      .update({ synopsis_quality: quality })
+      .eq("id", workId)
+    if (error) return { error: `Falha gravando Interesse: ${error.message}` }
+
+    await markRecalcPending("setSynopsisQuality")
+
+    revalidatePath("/titles")
+    revalidatePath(`/titles/${workId}`)
+    revalidatePath("/ranking")
+    revalidatePath("/ai-evaluation")
+
+    return { data: { synopsisQuality: quality } }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Erro desconhecido" }
   }

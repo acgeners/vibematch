@@ -6,7 +6,6 @@ import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
 import { pickPrimaryCover } from "@/lib/covers"
 import { CoverImage } from "@/components/ui/cover-image"
-import { ScoreBadge, type ColumnThresholds, type ScoreColorThresholds } from "@/components/ui/score-badge"
 import {
   Tooltip,
   TooltipContent,
@@ -31,7 +30,6 @@ import type { WorkWithRelations, CategoryScore } from "@/types/domain"
 
 interface WorkHeatmapViewProps {
   works: WorkWithRelations[]
-  scoreThresholds: ColumnThresholds | null
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
   namespace?: WorkColumnNamespace
@@ -128,9 +126,6 @@ function ResizeHandle({ columnKey, onResize, startWidth }: ResizeHandleProps) {
 }
 
 const NON_CRITERION_LABELS: Record<string, string> = {
-  final_score: "Final",
-  calc_score: "IA",
-  predicted_score: "Pr",
   expected_score: "Prevista",
   expected_baseline: "Perfil",
   expected_quality_adj: "Δ Qual.",
@@ -141,9 +136,6 @@ const NON_CRITERION_LABELS: Record<string, string> = {
 }
 
 const NON_CRITERION_TOOLTIPS: Record<string, string> = {
-  final_score: "Nota.Final",
-  calc_score: "Nota.IA",
-  predicted_score: "Nota.Pr",
   expected_score: "Nota Prevista (L1 single Ridge — substitui N.IA/N.Pr/N.Final)",
   expected_baseline: "Stage 1 da decomposição — contribuição do perfil (sem qualidade)",
   expected_quality_adj: "Stage 2 da decomposição — ajuste pelas 8 dimensões de qualidade",
@@ -178,9 +170,6 @@ function getCriterionColor(score: number, slug: string): string {
 }
 
 function getValueForKey(work: WorkWithRelations, key: string): number | null {
-  if (key === "final_score") return work.calculated_scores?.final_score ?? null
-  if (key === "calc_score") return work.calculated_scores?.calc_score ?? null
-  if (key === "predicted_score") return work.calculated_scores?.predicted_score ?? null
   if (key === "expected_score") {
     const v = work.calculated_scores?.expected_score
     return v == null ? null : Number(v)
@@ -235,7 +224,6 @@ function getTooltipLabel(col: WorkColumnDef): string {
 
 export function WorkHeatmapView({
   works,
-  scoreThresholds,
   selectedIds,
   onToggleSelect,
   namespace = "titles",
@@ -455,7 +443,6 @@ export function WorkHeatmapView({
                         <ScoreCell
                           col={col}
                           work={work}
-                          scoreThresholds={scoreThresholds}
                         />
                       </td>
                     )
@@ -473,11 +460,9 @@ export function WorkHeatmapView({
 function ScoreCell({
   col,
   work,
-  scoreThresholds,
 }: {
   col: WorkColumnDef
   work: WorkWithRelations
-  scoreThresholds: ColumnThresholds | null
 }) {
   const tooltipLabel = getTooltipLabel(col)
 
@@ -503,42 +488,6 @@ function ScoreCell({
   const score = getValueForKey(work, col.key)
 
   if (score == null) return <EmptyCell />
-
-  // Calculated/aggregated scores use ScoreBadge (with thresholds).
-  if (
-    col.key === "final_score" ||
-    col.key === "calc_score" ||
-    col.key === "predicted_score"
-  ) {
-    const colThresholds: ScoreColorThresholds | null = scoreThresholds
-      ? col.key === "final_score"
-        ? scoreThresholds.final
-        : col.key === "calc_score"
-          ? scoreThresholds.calc
-          : scoreThresholds.predicted
-      : null
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-block">
-            <ScoreBadge
-              score={score}
-              size="sm"
-              thresholds={colThresholds}
-              showStub={
-                col.key === "predicted_score"
-                  ? work.calculated_scores?.predicted_is_stub ?? false
-                  : false
-              }
-            />
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="text-xs">
-          {tooltipLabel}: {score.toFixed(1)}
-        </TooltipContent>
-      </Tooltip>
-    )
-  }
 
   if (col.key === "platform_avg") {
     return (

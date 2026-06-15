@@ -45,13 +45,10 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   }
 
   // Whitelist espelha `RankingSortBy` em server/queries/ranking.ts.
-  // Sem o expected_*, sort por "Esperada" caía silenciosamente em final_score.
   const validSortFields = new Set<string>([
     // Notas (novo pipeline)
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
-    // Notas (legado)
-    "final_score", "calc_score", "predicted_score", "pred_score", "alignment_score",
-    "knn_score",
+    "alignment_score",
     // Plataforma
     "platform_avg", "total_votes",
     // Metadata

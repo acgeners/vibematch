@@ -185,8 +185,6 @@ export interface CandidateWorkInput {
   expectedScore: number | null
   /** Alinhamento com o perfil (0–1). */
   fitScore: number | null
-  /** @deprecated legado — mantido pra compat; não enviado mais ao prompt. */
-  predictedScore: number | null
   reviews: CandidateReview[]
 }
 

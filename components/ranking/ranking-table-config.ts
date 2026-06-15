@@ -1,7 +1,7 @@
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 
-export type RankingColumnGroup = "basico" | "notas" | "criterios" | "legado"
+export type RankingColumnGroup = "basico" | "notas" | "criterios" | "avancado"
 
 export interface RankingColumnDef {
   key: string
@@ -24,7 +24,7 @@ export const RANKING_COLUMN_GROUP_LABELS: Record<RankingColumnGroup, string> = {
   basico: "Básico",
   notas: "Notas",
   criterios: "Atributos",
-  legado: "Legado",
+  avancado: "Avançado",
 }
 
 // Bump v3 → v4 to hide chapters_read by default and add missing columns.
@@ -33,7 +33,9 @@ export const RANKING_COLUMN_GROUP_LABELS: Record<RankingColumnGroup, string> = {
 // por TIERS (divisores), não por um número dentro da incerteza do modelo.
 // Bump v6 → v7 to add "synopsis_pred" (Previsão de interesse na sinopse) HIDDEN
 // by default — disponível no column picker, mas opt-in.
-export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v7"
+// Bump v7 → v8 to drop the legacy Nota.IA/Pr/Final columns (aposentados — os
+// dados Pr/Final já eram null; calc_score vira só feature interna do expected).
+export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v8"
 export const RANKING_TABLE_COLUMN_CONFIG_EVENT = "ranking-column-config-change"
 
 export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
@@ -60,14 +62,9 @@ export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
   { key: "decision", label: "Prioridade", configLabel: "Prioridade", description: "Quão provável que você goste da obra — um número único (0–100) pra decidir o que ler primeiro. Quanto maior, mais a obra deveria estar no topo da sua fila. Não é uma previsão de nota: é o lugar dela na sua ordem de leitura.", defaultWidth: 100, align: "center", group: "notas" },
   // Novo (Fase 1.5): expected_score é o L1 que substitui o trio Nota.IA/Pr/Final
   { key: "expected", label: "Prevista", configLabel: "Nota Prevista", description: "A nota que estimamos que você daria à obra (0–10), juntando o seu gosto com a qualidade dela. É a referência principal do ranking. Calculada a partir das notas dos atributos da IA, do seu perfil de gosto e da nota do público.", defaultWidth: 100, align: "center", group: "notas" },
-  { key: "expected_baseline", label: "Perfil", configLabel: "Prevista — Perfil", description: "A parte da Nota Prevista que vem só do seu gosto: o quanto a obra combina com o seu perfil, antes de considerar se ela é boa ou não.", defaultWidth: 90, align: "center", group: "legado" },
-  { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Prevista — Δ Qualidade", description: "O quanto a qualidade da obra puxa a Nota Prevista pra cima ou pra baixo, além do que o seu gosto já explica.", defaultWidth: 90, align: "center", group: "legado" },
+  { key: "expected_baseline", label: "Perfil", configLabel: "Prevista — Perfil", description: "A parte da Nota Prevista que vem só do seu gosto: o quanto a obra combina com o seu perfil, antes de considerar se ela é boa ou não.", defaultWidth: 90, align: "center", group: "avancado" },
+  { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Prevista — Δ Qualidade", description: "O quanto a qualidade da obra puxa a Nota Prevista pra cima ou pra baixo, além do que o seu gosto já explica.", defaultWidth: 90, align: "center", group: "avancado" },
   { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento", description: "O quanto a obra combina com o seu perfil de gosto. Quanto maior, mais alinhada às suas preferências — independente de a obra ser boa ou popular. Calculado comparando as tags e os atributos da obra com as suas preferências.", defaultWidth: 110, align: "center", group: "notas" },
-  // Legado — escondidos por padrão a partir do v2. Disponíveis via column picker
-  // ou via preset "Legado". Vão ser removidos quando Fase 2 (consultor) ativar.
-  { key: "final", label: "N.Final", configLabel: "Nota.Final (legado)", description: "[Legado] Mistura ponderada de Nota.IA e Nota.Pr. Substituída pela Nota Prevista no cutover da Fase 1.5; mantida só por compatibilidade.", defaultWidth: 100, align: "center", group: "legado" },
-  { key: "calc", label: "N.IA", configLabel: "Nota.IA (legado)", description: "[Legado] Nota calculada a partir da avaliação da IA (soma ponderada dos atributos). Substituída pela Nota Prevista.", defaultWidth: 100, align: "center", group: "legado" },
-  { key: "pred", label: "N.Pr", configLabel: "Nota.Pr (legado)", description: "[Legado] Predição por regressão sobre notas manuais. Substituída pela Nota Prevista.", defaultWidth: 100, align: "center", group: "legado" },
   { key: "alignment_score", label: "IA Rk.", configLabel: "IA Rk", description: "A opinião de um consultor de IA sobre o quanto esta obra é uma boa recomendação pra você (0–100), pensada caso a caso. É um segundo olhar mais fino que a Nota Prevista. Gerada por um LLM que analisa o seu perfil, a sinopse e os atributos da obra. A maioria das obras fica sem valor até você pedir o Rankear.", defaultWidth: 80, align: "center", group: "notas" },
   ...CRITERION_SLUGS.map((slug) => ({
     key: `crit_${slug}`,
@@ -87,11 +84,8 @@ const LOCKED_KEYS = new Set(RANKING_TABLE_COLUMNS.filter((c) => c.locked).map((c
 //   - synopsis_q: pouco útil no contexto de ranking; reduz ruído
 //   - expected_baseline / expected_quality_adj: detalhe da decomposição;
 //     interessante pra debug mas polui a view padrão
-//   - calc/pred/final: legado escondido após cutover da Fase 1.5
-//     (acessível via column picker / preset "legado")
 //   - alignment_score: NÃO está aqui — continua ativo no fluxo de
 //     recomendação, fica visível por padrão em /ranking
-const LEGACY_HIDDEN_KEYS = ["calc", "pred", "final"] as const
 const DEFAULT_COLUMN_CONFIG: RankingColumnConfig = {
   order: DEFAULT_COLUMN_KEYS,
   hidden: [
@@ -106,7 +100,6 @@ const DEFAULT_COLUMN_CONFIG: RankingColumnConfig = {
     "synopsis_pred",
     "expected_baseline",
     "expected_quality_adj",
-    ...LEGACY_HIDDEN_KEYS,
     "ai_status",
     "updated_at",
     "last_read_at",
@@ -203,14 +196,13 @@ export function writeRankingColumnConfig(config: RankingColumnConfig) {
   window.dispatchEvent(new CustomEvent(RANKING_TABLE_COLUMN_CONFIG_EVENT, { detail: normalized }))
 }
 
-export type RankingColumnPreset = "padrao" | "compacto" | "notas" | "criterios" | "legado"
+export type RankingColumnPreset = "padrao" | "compacto" | "notas" | "criterios"
 
 export const RANKING_COLUMN_PRESETS: Array<{ id: RankingColumnPreset; label: string }> = [
   { id: "padrao", label: "Padrão" },
   { id: "compacto", label: "Compacto" },
   { id: "notas", label: "Foco em notas" },
   { id: "criterios", label: "Foco em atributos" },
-  { id: "legado", label: "Legado (N.IA/Pr/Final)" },
 ]
 
 const CRITERION_KEYS = CRITERION_SLUGS.map((slug) => `crit_${slug}`)
@@ -230,8 +222,6 @@ const PRESET_VISIBLE_KEYS: Record<RankingColumnPreset, string[]> = {
     "personal_fit", "alignment_score", "platform_avg", "total_votes",
   ],
   criterios: ["rank", "title", "expected", ...CRITERION_KEYS],
-  // Pra debug/comparação: mostra TUDO incluindo legado + decomposição.
-  legado: DEFAULT_COLUMN_KEYS.filter((k) => k !== "chapters_progress"),
 }
 
 export function getPresetConfig(preset: RankingColumnPreset): RankingColumnConfig {

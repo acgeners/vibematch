@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import {
   useReactTable,
   getCoreRowModel,
@@ -195,6 +196,7 @@ export function WorkTable({
   isPaid = true,
 }: WorkTableProps) {
   const router = useRouter()
+  const refresh = useRefresh()
   const searchParams = useSearchParams()
 
   const storedViewMode = useSyncExternalStore(
@@ -270,8 +272,8 @@ export function WorkTable({
     const n = favoriteSelectedIds.length
     toast.success(`${n} obra${n !== 1 ? "s" : ""} desfavoritada${n !== 1 ? "s" : ""}`)
     updateCompareIds([])
-    router.refresh()
-  }, [favoriteSelectedIds, updateCompareIds, router])
+    refresh()
+  }, [favoriteSelectedIds, updateCompareIds, refresh])
 
   const totalPages = Math.ceil(total / pageSize)
 
@@ -305,7 +307,6 @@ export function WorkTable({
       ) : viewMode === "heatmap" ? (
         <WorkHeatmapView
           works={works}
-          scoreThresholds={scoreThresholds}
           selectedIds={selectedSet}
           onToggleSelect={toggleCompare}
           namespace={namespace}
@@ -606,7 +607,7 @@ function WorkCardsView({
                       score={expectedScore}
                       size="sm"
                       showStub={work.calculated_scores?.expected_is_stub ?? false}
-                      thresholds={scoreThresholds?.final}
+                      thresholds={scoreThresholds?.expected}
                     />
                   </div>
                 )}
@@ -668,6 +669,7 @@ function WorkListView({
   onSelectAll?: () => void
   onClearAll?: () => void
 }) {
+  const refresh = useRefresh()
   const columnConfig = useSyncExternalStore(
     (onChange) => subscribeWorkColumnConfig(onChange, namespace),
     () => readWorkColumnConfig(namespace),
@@ -694,9 +696,6 @@ function WorkListView({
     expected_baseline: { field: "expected_baseline", label: "Perfil (Stage 1)" },
     expected_quality_adj: { field: "expected_quality_adj", label: "Δ Qualidade" },
     personal_fit: { field: "personal_fit", label: "Alinhamento" },
-    calc_score: { field: "calc_score", label: "[Legado] Nota.IA" },
-    predicted_score: { field: "predicted_score", label: "[Legado] Nota.Pr" },
-    final_score: { field: "final_score", label: "[Legado] Nota.Final" },
     platform_avg: { field: "platform_avg", label: "Nota.M" },
     total_votes: { field: "total_votes", label: "Votos" },
     alignment_score: { field: "alignment_score", label: "[Legado] IA Re-rank" },
@@ -796,28 +795,6 @@ function WorkListView({
         <span className="text-muted-foreground">—</span>
       )
     },
-    calc_score: (work) => (
-      <ScoreBadge
-        score={work.calculated_scores?.calc_score ?? null}
-        size="sm"
-        thresholds={scoreThresholds?.calc}
-      />
-    ),
-    predicted_score: (work) => (
-      <ScoreBadge
-        score={work.calculated_scores?.predicted_score ?? null}
-        size="sm"
-        showStub={work.calculated_scores?.predicted_is_stub ?? false}
-        thresholds={scoreThresholds?.predicted}
-      />
-    ),
-    final_score: (work) => (
-      <ScoreBadge
-        score={work.calculated_scores?.final_score ?? null}
-        size="sm"
-        thresholds={scoreThresholds?.final}
-      />
-    ),
     decision: (work) => {
       const cs = work.calculated_scores
       const score = computeDecisionScore({
@@ -842,7 +819,7 @@ function WorkListView({
         score={work.calculated_scores?.expected_score ?? null}
         size="sm"
         showStub={work.calculated_scores?.expected_is_stub ?? false}
-        thresholds={scoreThresholds?.final}
+        thresholds={scoreThresholds?.expected}
       />
     ),
     expected_baseline: (work) => {
@@ -966,7 +943,7 @@ function WorkListView({
                   toast.error("Erro ao alterar favorito")
                 } else {
                   toast.success(next ? "Obra favoritada" : "Obra desfavoritada")
-                  router.refresh()
+                  refresh()
                 }
               }}
             >
@@ -985,7 +962,7 @@ function WorkListView({
                   toast.error("Erro ao alterar status da obra")
                 } else {
                   toast.success(work.is_archived ? "Obra desarquivada" : "Obra arquivada")
-                  router.refresh()
+                  refresh()
                 }
               }}
             >
@@ -1003,7 +980,7 @@ function WorkListView({
                   toast.error(result.error ?? "Erro ao avaliar IA Rk")
                 } else {
                   toast.success(`IA Rk: ${Math.round(result.data.alignmentScore)}`)
-                  router.refresh()
+                  refresh()
                 }
               }}
             >
@@ -1144,9 +1121,6 @@ function WorkListView({
     key === "chapters_progress" ||
     key === "year" ||
     key === "synopsis_q" ||
-    key === "calc_score" ||
-    key === "predicted_score" ||
-    key === "final_score" ||
     key === "platform_avg" ||
     key === "total_votes" ||
     key === "alignment_score" ||
@@ -1301,7 +1275,7 @@ function WorkListView({
                   score={work.calculated_scores?.expected_score ?? null}
                   size="sm"
                   showStub={work.calculated_scores?.expected_is_stub ?? false}
-                  thresholds={scoreThresholds?.final}
+                  thresholds={scoreThresholds?.expected}
                 />
               </div>
               <div className="flex flex-wrap gap-1">

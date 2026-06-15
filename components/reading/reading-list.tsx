@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo, useTransition } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
 import { RefreshCw, Loader2, BookOpen, Clock, CalendarClock, ExternalLink, AlertCircle, Filter, ArrowDownUp, Check, BookOpenCheck, Hourglass, RotateCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -169,7 +169,7 @@ export function ReadingList({
   works: ReadingWork[]
   variant?: Variant
 }) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const cfg = VARIANT[variant]
   const [results, setResults] = useState<Record<string, ReadingUpdateResult>>({})
   const [checking, startCheck] = useTransition()
@@ -222,7 +222,7 @@ export function ReadingList({
             : "Nenhuma novidade encontrada",
           failed > 0 ? { description: `${failed} fonte(s) não responderam` } : undefined,
         )
-        router.refresh() // traz hids recém-persistidos pra próxima carga
+        refresh() // traz hids recém-persistidos pra próxima carga
       } catch (err) {
         toast.error("Falha ao verificar atualizações", {
           description: err instanceof Error ? err.message : undefined,

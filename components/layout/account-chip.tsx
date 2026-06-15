@@ -2,12 +2,13 @@
 
 /* eslint-disable @next/next/no-img-element -- avatar pequeno com URL do usuário (própria ou colada) + fallback próprio; next/image não cabe (sem images config). */
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { UserCircle } from "lucide-react"
 import { getAccountSummary } from "@/server/actions/account"
 import type { AccountSummary } from "@/server/actions/account"
+import { useChromeData } from "@/lib/use-refresh"
 import { cn } from "@/lib/utils"
 
 /**
@@ -20,22 +21,12 @@ export function AccountChip() {
   const [summary, setSummary] = useState<AccountSummary | null>(null)
   const [imgError, setImgError] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
-    getAccountSummary()
-      .then((s) => {
-        if (!cancelled) {
-          setSummary(s)
-          setImgError(false)
-        }
-      })
-      .catch(() => {
-        /* mantém o estado atual em caso de falha */
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [pathname])
+  // Re-busca o resumo da conta a cada navegação e quando uma mutação atualiza o
+  // chrome (ex.: editar perfil/plano em /conta). Coalescing/lifecycle no hook.
+  useChromeData(getAccountSummary, (s) => {
+    setSummary(s)
+    setImgError(false)
+  })
 
   const active = pathname === "/conta" || pathname.startsWith("/conta/")
   const name = summary?.displayName?.trim() || "Minha conta"

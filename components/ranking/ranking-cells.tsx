@@ -1,7 +1,7 @@
 "use client"
 
 import { useTransition } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { Loader2, Sparkles, RotateCw } from "lucide-react"
 import { toast } from "sonner"
 
@@ -17,7 +17,7 @@ import { rerankSingleWorkAction } from "@/server/actions/recommendations"
  */
 function useRerankSingleWork(workId: string) {
   const [isPending, startTransition] = useTransition()
-  const router = useRouter()
+  const refresh = useRefresh()
   const run = () => {
     startTransition(async () => {
       const result = await rerankSingleWorkAction(workId)
@@ -26,7 +26,7 @@ function useRerankSingleWork(workId: string) {
         return
       }
       toast.success(`IA Rk: ${Math.round(result.data.alignmentScore)}`)
-      router.refresh()
+      refresh()
     })
   }
   return { isPending, run }

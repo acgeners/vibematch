@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { CheckCircle2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { finalizePendingBatch } from "@/server/actions/works"
@@ -12,7 +12,7 @@ interface PendingBatchBannerProps {
 }
 
 export function PendingBatchBanner({ initialCount }: PendingBatchBannerProps) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [count, setCount] = useState(initialCount)
   const [finalizing, setFinalizing] = useState(false)
 
@@ -28,7 +28,7 @@ export function PendingBatchBanner({ initialCount }: PendingBatchBannerProps) {
           ? `${result.finalized} obra${result.finalized === 1 ? "" : "s"} recalculada${result.finalized === 1 ? "" : "s"}.`
           : "Nenhuma obra pendente para recalcular."
       )
-      router.refresh()
+      refresh()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Erro ao finalizar lote")
     } finally {

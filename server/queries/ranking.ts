@@ -28,10 +28,7 @@ export interface RankingEntry {
    * quando não foi computado.
    */
   lowCoverage?: boolean
-  finalScore: number | null
-  calcScore: number | null
-  predictedScore: number | null
-  /** L1 novo (single Ridge + decomposição). Substitui finalScore na UI nova. */
+  /** L1 (single Ridge + decomposição) — a Nota Prevista, âncora do catálogo. */
   expectedScore: number | null
   /** Stage 1 da decomposição — contribuição das features de perfil/tipo. */
   expectedBaseline: number | null
@@ -48,12 +45,9 @@ export interface RankingEntry {
   decisionScore: number | null
   platformAvg: number | null
   totalVotes: number
-  predictedIsStub: boolean
   personalFit: number | null
   /** Percentil 0–100 dentro da biblioteca. NULL quando personalFit é NULL ou pré-migration 071. */
   personalFitPercentile: number | null
-  finalScoreConfidence: number | null
-  knnScore: number | null
   alignmentScore: number | null
   alignmentJustification: string | null
   alignmentAt: string | null
@@ -99,10 +93,6 @@ export interface RankingEntry {
 }
 
 export type RankingSortBy =
-  | "final_score"
-  | "calc_score"
-  | "pred_score"
-  | "predicted_score"
   | "expected_score"
   | "decision"
   | "recommended"
@@ -121,7 +111,6 @@ export type RankingSortBy =
   | "ai_eval_status"
   | "last_read_at"
   | "personal_fit"
-  | "knn_score"
   | "alignment_score"
   | `crit_${string}`
 
@@ -151,12 +140,6 @@ export interface RankingFilters {
   predictedSynopsisQualities?: string[]
   minTotalChapters?: number
   maxTotalChapters?: number
-  minCalcScore?: number
-  maxCalcScore?: number
-  minPredictedScore?: number
-  maxPredictedScore?: number
-  minFinalScore?: number
-  maxFinalScore?: number
   /** Nota Prevista (expected_score, escala 0–10) — filtro headline do novo pipeline. */
   minExpectedScore?: number
   maxExpectedScore?: number
@@ -171,8 +154,8 @@ export interface RankingFilters {
   minTotalVotes?: number
   maxTotalVotes?: number
   topN?: number
+  /** "Só obras com nota" — filtra por Nota Prevista presente (era finalScore). */
   onlyWithFinalScore?: boolean
-  onlyStubPrediction?: boolean
   onlyFavorites?: boolean
   /** Quando true, não aplica o hard filter que esconde obras Completed/Dropped.
    *  Default false (mantém semântica de "ranking de o que ler"). Páginas tipo
@@ -353,7 +336,7 @@ export async function getRanking(
       id, title, publication_status_id, personal_status_id, ai_eval_status,
       total_chapters, chapters_read, user_score, is_archived, is_favorite,
       synopsis_quality, observations, year, updated_at, last_read_at,
-      calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, platform_avg, total_votes, personal_fit, personal_fit_percentile, final_score_confidence, knn_score, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
+      calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, platform_avg, total_votes, personal_fit, personal_fit_percentile, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
       category_scores(criterion_slug, score),
       work_covers(url, is_primary, position)
     `)
@@ -454,9 +437,6 @@ export async function getRanking(
       differentiators: [],
       workId: w.id,
       title: w.title,
-      finalScore: w.calculated_scores?.final_score ?? null,
-      calcScore: w.calculated_scores?.calc_score ?? null,
-      predictedScore: w.calculated_scores?.predicted_score ?? null,
       expectedScore: w.calculated_scores?.expected_score ?? null,
       expectedBaseline: w.calculated_scores?.expected_baseline ?? null,
       expectedQualityAdj: w.calculated_scores?.expected_quality_adj ?? null,
@@ -470,11 +450,8 @@ export async function getRanking(
       }),
       platformAvg: w.calculated_scores?.platform_avg ?? null,
       totalVotes: w.calculated_scores?.total_votes ?? 0,
-      predictedIsStub: w.calculated_scores?.predicted_is_stub ?? true,
       personalFit: w.calculated_scores?.personal_fit ?? null,
       personalFitPercentile: w.calculated_scores?.personal_fit_percentile ?? null,
-      finalScoreConfidence: w.calculated_scores?.final_score_confidence ?? null,
-      knnScore: w.calculated_scores?.knn_score ?? null,
       alignmentScore: w.calculated_scores?.alignment_score ?? null,
       alignmentJustification: w.calculated_scores?.alignment_justification ?? null,
       alignmentAt: w.calculated_scores?.alignment_at ?? null,
@@ -486,7 +463,7 @@ export async function getRanking(
       publicationStatusId,
       publicationStatusShort: publicationStatusDisplay?.short ?? null,
       publicationStatusColor: publicationStatusDisplay?.color ?? null,
-      personalStatus: getPersonalStatusNameById(personalStatusId) ?? "To read",
+      personalStatus: getPersonalStatusNameById(personalStatusId) ?? "Want to Read",
       personalStatusId,
       personalStatusSymbol:
         personalStatusId != null ? personalStatusSymbolsById.get(personalStatusId) ?? null : null,
@@ -559,30 +536,6 @@ export async function getRanking(
   }
 
   // Filtros de notas mínimas (vindos das preferências de ranking)
-  if (filters.minCalcScore != null) {
-    const min = filters.minCalcScore
-    entries = entries.filter((e) => e.calcScore != null && e.calcScore >= min)
-  }
-  if (filters.maxCalcScore != null) {
-    const max = filters.maxCalcScore
-    entries = entries.filter((e) => e.calcScore != null && e.calcScore <= max)
-  }
-  if (filters.minPredictedScore != null) {
-    const min = filters.minPredictedScore
-    entries = entries.filter((e) => e.predictedScore != null && e.predictedScore >= min)
-  }
-  if (filters.maxPredictedScore != null) {
-    const max = filters.maxPredictedScore
-    entries = entries.filter((e) => e.predictedScore != null && e.predictedScore <= max)
-  }
-  if (filters.minFinalScore != null) {
-    const min = filters.minFinalScore
-    entries = entries.filter((e) => e.finalScore != null && e.finalScore >= min)
-  }
-  if (filters.maxFinalScore != null) {
-    const max = filters.maxFinalScore
-    entries = entries.filter((e) => e.finalScore != null && e.finalScore <= max)
-  }
   if (filters.minExpectedScore != null) {
     const min = filters.minExpectedScore
     entries = entries.filter((e) => e.expectedScore != null && e.expectedScore >= min)
@@ -637,10 +590,7 @@ export async function getRanking(
     entries = entries.filter((e) => e.totalVotes <= max)
   }
   if (filters.onlyWithFinalScore) {
-    entries = entries.filter((e) => e.finalScore != null)
-  }
-  if (filters.onlyStubPrediction) {
-    entries = entries.filter((e) => e.predictedIsStub)
+    entries = entries.filter((e) => e.expectedScore != null)
   }
 
   // Ordenação
@@ -653,14 +603,6 @@ export async function getRanking(
     const rawScore = (value: number | null | undefined) =>
       value == null ? -Infinity : value
     if (field === "title") return m * a.title.localeCompare(b.title)
-    if (field === "final_score") {
-      const av = rawScore(a.finalScore ?? a.calcScore)
-      const bv = rawScore(b.finalScore ?? b.calcScore)
-      return m * (av - bv)
-    }
-    if (field === "calc_score") return m * (rawScore(a.calcScore) - rawScore(b.calcScore))
-    if (field === "predicted_score" || field === "pred_score")
-      return m * (rawScore(a.predictedScore) - rawScore(b.predictedScore))
     if (field === "expected_score")
       return m * (rawScore(a.expectedScore) - rawScore(b.expectedScore))
     if (field === "decision")
@@ -678,7 +620,6 @@ export async function getRanking(
       const bv = b.personalFit ?? -Infinity
       return m * (av - bv)
     }
-    if (field === "knn_score") return m * (rawScore(a.knnScore) - rawScore(b.knnScore))
     if (field === "alignment_score") {
       const av = a.alignmentScore ?? -Infinity
       const bv = b.alignmentScore ?? -Infinity

@@ -1,7 +1,7 @@
 "use client"
 
 import { Wallet } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { useState, useTransition } from "react"
 import { setAnthropicBalance } from "@/server/actions/account"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
@@ -26,7 +26,7 @@ function formatDateTime(iso: string): string {
 const LOW_BALANCE_USD = 5
 
 export function BalanceCard({ status }: { status: BalanceStatus }) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [pending, startTransition] = useTransition()
   const [value, setValue] = useState(status.balanceUsd != null ? String(status.balanceUsd) : "")
   const [error, setError] = useState<string | null>(null)
@@ -50,7 +50,7 @@ export function BalanceCard({ status }: { status: BalanceStatus }) {
         setError(res.error)
         return
       }
-      router.refresh()
+      refresh()
     })
   }
 

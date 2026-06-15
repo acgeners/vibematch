@@ -64,9 +64,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
     // Notas (novo pipeline)
     "decision",
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
-    // Notas (legado)
-    "final_score", "calc_score", "predicted_score", "pred_score", "alignment_score",
-    "knn_score",
+    "alignment_score",
     // Plataforma
     "platform_avg", "total_votes",
     // Metadata
@@ -89,7 +87,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
   const aiStatuses = multi("ai_status")
   const perStatusParam = str("per_status")
   // Em /favorites o default é "todos" (não filtra por status pessoal),
-  // diferente do /ranking que filtra "To read" por padrão.
+  // diferente do /ranking que filtra "Want to Read" por padrão.
   const personalStatus =
     perStatusParam === "all" || !perStatusParam
       ? undefined
@@ -163,7 +161,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
 
       <FavoritesStatsHeader
         summary={summary}
-        scoreThresholds={scoreThresholds?.final ?? null}
+        scoreThresholds={scoreThresholds?.expected ?? null}
         actions={
           <>
             <RecommendWithAiButton source="favorites" isPaid={isPaid} />

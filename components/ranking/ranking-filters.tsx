@@ -1569,7 +1569,7 @@ export function RankingFilters({
   const selectedSynopsisPred = csvSet("synopsis_pred")
 
   const DEFAULT_PUB_STATUS = "Completed"
-  const DEFAULT_PER_STATUS = "To read"
+  const DEFAULT_PER_STATUS = "Want to Read"
 
   const pubStatusParam = searchParams.get("pub_status")
   const isAllPublication = pubStatusParam === "all"

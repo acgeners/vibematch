@@ -52,7 +52,7 @@ const CANDIDATE_WORK_SELECT = `
   is_favorite,
   canonical_synopsis,
   category_scores(criterion_slug, score, source),
-  calculated_scores(platform_avg, total_votes, predicted_score, expected_score, personal_fit),
+  calculated_scores(platform_avg, total_votes, expected_score, personal_fit),
   work_tags(tag_id, tags(name, tag_group_id)),
   work_synopses(text, is_primary, position),
   work_covers(url, is_primary, position)
@@ -274,7 +274,7 @@ function mapRowToCandidate(
   biasMap: AttributeBiasMap,
 ): FavoriteCandidate {
   const work = row as Record<string, unknown>
-  const calc = (work.calculated_scores as { platform_avg?: number | null; total_votes?: number | null; predicted_score?: number | null; expected_score?: number | null; personal_fit?: number | null } | null) ?? null
+  const calc = (work.calculated_scores as { platform_avg?: number | null; total_votes?: number | null; expected_score?: number | null; personal_fit?: number | null } | null) ?? null
   const synopsis = pickRecommendationSynopsis(
     work.canonical_synopsis as string | null | undefined,
     (work.work_synopses as RawSynopsisRow[] | undefined)?.map((s) => ({
@@ -301,7 +301,6 @@ function mapRowToCandidate(
     fitScore: calc?.personal_fit != null ? Number(calc.personal_fit) : null,
     platformAvg: calc?.platform_avg != null ? Number(calc.platform_avg) : null,
     totalVotes: calc?.total_votes != null ? Number(calc.total_votes) : null,
-    predictedScore: calc?.predicted_score != null ? Number(calc.predicted_score) : null,
     reviews,
     coverUrl,
     isAlreadyRated: work.user_score != null,
@@ -655,6 +654,11 @@ export async function getSynopsisQueueWorks(opts: {
   pubStatusIds?: number[]
   personalStatusIds?: number[]
   synopsisQualities?: string[]
+  /**
+   * Triagem manual: ignora o estado de previsão e lista só obras SEM Interesse
+   * manual (synopsis_quality IS NULL). Sobrepõe `states`/`synopsisQualities`.
+   */
+  missingManual?: boolean
   limit?: number
 }): Promise<SynopsisQueueWork[]> {
   const states: Array<"stale" | "unpredicted" | "predicted"> =
@@ -711,7 +715,9 @@ export async function getSynopsisQueueWorks(opts: {
 
   const pubIds = opts.pubStatusIds ?? []
   const personalIds = opts.personalStatusIds ?? []
-  const synQ = opts.synopsisQualities ?? []
+  // "none" é só um sentinela de UI (filtro "Não avaliada") — nunca casa numa
+  // linha real, então é removido antes de qualquer `.in("synopsis_quality", …)`.
+  const synQ = (opts.synopsisQualities ?? []).filter((q) => q !== "none")
 
   const mapWork = (w: Record<string, unknown>): SynopsisQueueWork => {
     const calc = (w.calculated_scores as { expected_score?: number | null } | null) ?? null
@@ -736,6 +742,24 @@ export async function getSynopsisQueueWorks(opts: {
       previousPredictedQuality: (prev?.predicted_quality as string | null) ?? null,
       previousPromptVersion: (prev?.prompt_version as string | null) ?? null,
     }
+  }
+
+  // Triagem manual: lista obras com sinopse canônica e SEM Interesse manual
+  // (synopsis_quality IS NULL), independente do estado de previsão. As previsões
+  // carregadas acima ainda alimentam a exibição (sugestão IA no card).
+  if (opts.missingManual) {
+    let q = supabase
+      .from("works")
+      .select(SYNOPSIS_QUEUE_SELECT)
+      .eq("is_archived", false)
+      .not("canonical_synopsis", "is", null)
+      .is("synopsis_quality", null)
+      .order("updated_at", { ascending: false })
+    if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
+    if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
+    const { data, error } = await q.limit(opts.limit ?? 1000)
+    if (error) throw new Error(`Falha listando obras sem Interesse manual: ${error.message}`)
+    return (data ?? []).map((w) => mapWork(w as Record<string, unknown>))
   }
 
   const out = new Map<string, SynopsisQueueWork>()

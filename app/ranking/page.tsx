@@ -106,9 +106,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     // Notas (novo pipeline)
     "decision", "recommended",
     "expected_score", "expected_baseline", "expected_quality_adj", "personal_fit",
-    // Notas (legado)
-    "final_score", "calc_score", "predicted_score", "pred_score", "alignment_score",
-    "knn_score",
+    "alignment_score",
     // Plataforma
     "platform_avg", "total_votes",
     // Metadata
@@ -158,7 +156,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
       ? undefined
       : perStatusParam
         ? perStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
-        : ["To read"]
+        : ["Want to Read"]
 
   const pubStatusParam = str("pub_status")
   const publicationStatus =

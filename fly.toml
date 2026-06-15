@@ -1,0 +1,26 @@
+app = "satoria"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+  [build.args]
+    NEXT_PUBLIC_SUPABASE_URL = "https://djbreiyzwoevbmoscqiq.supabase.co"
+    NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_hhw8ddfqYWYFH6StEnJj_g_e_Ox4yVw"  # publishable/anon, ok no toml
+
+[env]
+  NODE_ENV = "production"
+  TZ = "America/Sao_Paulo"
+  FLARESOLVERR_URL = "http://satoria-flaresolverr.flycast:8191/v1"
+  COMIX_FS_SESSION = "comix"
+  COMIX_CF_ABORT_MS = "25000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"    # economiza quando ocioso
+  auto_start_machines = true
+  min_machines_running = 0        # sobe sob demanda (cold start ~poucos s)
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

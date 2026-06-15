@@ -1,6 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { useState, useTransition } from "react"
 import { Loader2, RefreshCw, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -16,6 +17,7 @@ interface RunDetailActionsProps {
 
 export function RunDetailActions({ runId }: RunDetailActionsProps) {
   const router = useRouter()
+  const refresh = useRefresh()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [rerunning, startRerun] = useTransition()
   const [deleting, startDelete] = useTransition()
@@ -28,7 +30,7 @@ export function RunDetailActions({ runId }: RunDetailActionsProps) {
       if (res.error) setError(res.error)
       else if (res.data) {
         router.push(`/recommendations/${res.data.runSlug}`)
-        router.refresh()
+        refresh()
       }
     })
   }
@@ -42,7 +44,7 @@ export function RunDetailActions({ runId }: RunDetailActionsProps) {
         return
       }
       router.push("/recommendations")
-      router.refresh()
+      refresh()
     })
   }
 

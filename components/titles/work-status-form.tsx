@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { useForm, useWatch, type FieldErrors } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
@@ -170,7 +170,7 @@ export interface WorkStatusFormProps {
   /** Considera o form "sujo" mesmo sem mudança nos campos de status (ex.: atributos mudaram). */
   extraDirty?: boolean
   /** Gate de exibição da seção "Critérios de avaliação". Quando omitido, usa a regra
-   *  antiga (status != "To read"). O PostReadingFlow passa a MESMA regra dos atributos
+   *  antiga (status != "Want to Read"). O PostReadingFlow passa a MESMA regra dos atributos
    *  pós-leitura (status terminal OU > 20% lido) pra alinhar as duas seções. */
   showEvaluationCriteria?: boolean
   /** Rótulo do botão de submit (default "Salvar"). */
@@ -200,7 +200,7 @@ export function WorkStatusForm({
   formId,
   onStateChange,
 }: WorkStatusFormProps) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [saving, setSaving] = useState(false)
   const [notesOpen, setNotesOpen] = useState(true)
   const [criteriaOpen, setCriteriaOpen] = useState(true)
@@ -247,8 +247,8 @@ export function WorkStatusForm({
   }, [saving, canSubmit, onStateChange])
 
   // Gate da seção "Critérios de avaliação": usa a regra passada pelo parent
-  // (mesma dos atributos pós-leitura) ou cai na regra antiga (status != "To read").
-  const criteriaVisible = showEvaluationCriteria ?? personalStatus !== "To read"
+  // (mesma dos atributos pós-leitura) ou cai na regra antiga (status != "Want to Read").
+  const criteriaVisible = showEvaluationCriteria ?? personalStatus !== "Want to Read"
 
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
@@ -321,7 +321,7 @@ export function WorkStatusForm({
 
     if (extraOk) toast.success(extraSave ? "Tudo salvo." : "Status atualizado.")
     onSaved?.()
-    router.refresh()
+    refresh()
   }
 
   const onInvalid = (formErrors: FieldErrors<WorkStatusInput>) => {
@@ -522,7 +522,7 @@ export function WorkStatusForm({
             </div>
           </div>
 
-          {personalStatus !== "To read" && (
+          {personalStatus !== "Want to Read" && (
             <div className="space-y-1.5 w-full sm:w-[280px]">
               <Label htmlFor="status-last-read-at">Última leitura</Label>
               <div className="flex items-center gap-1 h-9">

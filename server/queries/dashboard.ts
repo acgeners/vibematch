@@ -110,7 +110,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   const byPersonalStatus: Record<string, number> = {}
   for (const w of active) {
     const pubName = getPublicationStatusNameById(w.publication_status_id) ?? "Unknown"
-    const persName = getPersonalStatusNameById(w.personal_status_id) ?? "To read"
+    const persName = getPersonalStatusNameById(w.personal_status_id) ?? "Want to Read"
     byPublicationStatus[pubName] = (byPublicationStatus[pubName] ?? 0) + 1
     byPersonalStatus[persName] = (byPersonalStatus[persName] ?? 0) + 1
   }
@@ -131,7 +131,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       expectedScore: w.calculated_scores?.expected_score ?? null,
       publicationStatus: getPublicationStatusNameById(w.publication_status_id) ?? "Unknown",
       publicationStatusId: w.publication_status_id ?? null,
-      personalStatus: getPersonalStatusNameById(w.personal_status_id) ?? "To read",
+      personalStatus: getPersonalStatusNameById(w.personal_status_id) ?? "Want to Read",
       personalStatusId: w.personal_status_id ?? null,
       aiEvalStatus: w.ai_eval_status,
     }))

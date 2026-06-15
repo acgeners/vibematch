@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { cn } from "@/lib/utils"
 import { ExternalListImport } from "@/components/import/external-list-import"
 import { ImportReview } from "@/components/titles/import-review"
@@ -10,7 +10,7 @@ import type { ReviewWork } from "@/server/actions/enrich"
 type Mode = "external" | "review"
 
 export function ImportModes({ pendingReviewWorks }: { pendingReviewWorks: ReviewWork[] }) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [mode, setMode] = useState<Mode>("external")
   // Obras revisadas nesta sessão — somem da contagem/aba de pendentes.
   const [reviewed, setReviewed] = useState<Set<string>>(new Set())
@@ -53,7 +53,7 @@ export function ImportModes({ pendingReviewWorks }: { pendingReviewWorks: Review
           onReviewBatchComplete={() => {
             // Lote de "Buscar dados das sem capa" terminou → atualiza as
             // pendentes (servidor) e vai pra aba "Revisar pendentes".
-            router.refresh()
+            refresh()
             setMode("review")
           }}
         />

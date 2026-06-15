@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { Loader2, Check, AlertTriangle, X, Sparkles, RefreshCw, ImageOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -50,8 +50,8 @@ export function ImportReview({
   // decrementar o contador da aba.
   onReviewed?: (workId: string) => void
 }) {
-  const router = useRouter()
-  const reload = onReload ?? (() => router.refresh())
+  const refresh = useRefresh()
+  const reload = onReload ?? (() => refresh())
   const [states, setStates] = useState<Record<string, RowState>>({})
   const [running, setRunning] = useState(false)
   const [active, setActive] = useState<ReviewWork | null>(null)

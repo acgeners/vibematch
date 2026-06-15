@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest"
 import { calculateNotaCalc } from "@/lib/calculations/score"
-import { calculateNotaFinal } from "@/lib/calculations/final"
 
 describe("calculateNotaCalc", () => {
   const base = {
@@ -64,28 +63,5 @@ describe("calculateNotaCalc", () => {
     const resMax = calculateNotaCalc({ ...base, observationAdjustment: 0.30 })
     const resAbove = calculateNotaCalc({ ...base, observationAdjustment: 0.50 })
     expect(resMax).toBeCloseTo(resAbove, 4)
-  })
-})
-
-describe("calculateNotaFinal", () => {
-  it("com RMSEs iguais, retorna média simples", () => {
-    const result = calculateNotaFinal(7.0, 9.0, 1.0, 1.0)
-    expect(result).toBeCloseTo(8.0, 4)
-  })
-
-  it("RMSE menor tem peso maior", () => {
-    // RMSE_pr menor → Nota.Pr tem mais peso
-    const result = calculateNotaFinal(7.0, 9.0, 1.27, 0.92)
-    expect(result).toBeGreaterThan(8.0)
-  })
-
-  it("resultado clamped a 0–10", () => {
-    expect(calculateNotaFinal(0, 0, 1, 1)).toBe(0)
-    expect(calculateNotaFinal(10, 10, 1, 1)).toBe(10)
-  })
-
-  it("quando RMSE é null, retorna calcScore puro (sem blend com Pr)", () => {
-    expect(calculateNotaFinal(7.0, 9.0, null, 0.92)).toBeCloseTo(7.0, 4)
-    expect(calculateNotaFinal(7.0, 9.0, 1.0, null)).toBeCloseTo(7.0, 4)
   })
 })

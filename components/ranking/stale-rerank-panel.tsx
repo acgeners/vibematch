@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { ArrowDown, ArrowUp, Loader2, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 
@@ -21,7 +21,6 @@ import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
 import { rerankWorksBatchAction } from "@/server/actions/recommendations"
 import type { AlignmentQueueWork } from "@/server/queries/recommendations"
-import { refreshSidebarBadges } from "@/lib/sidebar-badges"
 
 type SortField = "default" | "expected" | "alignment"
 
@@ -52,7 +51,7 @@ export function StaleRerankPanel({
   works: AlignmentQueueWork[]
   isPaid?: boolean
 }) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [sortField, setSortField] = useState<SortField>("default")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [batchSize, setBatchSize] = useState<number>(DEFAULT_BATCH_SIZE)
@@ -125,8 +124,7 @@ export function StaleRerankPanel({
           (remainingAfterBatch > 0 ? ` · ${remainingAfterBatch} restantes` : "."),
       )
     }
-    router.refresh()
-    refreshSidebarBadges() // re-rank mudou a fila "IA Rk stale" → recontar badge
+    refresh()
   }
 
   if (works.length === 0) {

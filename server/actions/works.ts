@@ -642,7 +642,7 @@ function dbWorkToFormValues(work: any): WorkFormValues {
     year: work.year ?? null,
     year_end: work.year_end ?? null,
     publication_status: getPublicationStatusNameById(work.publication_status_id) ?? "Unknown",
-    personal_status: getPersonalStatusNameById(work.personal_status_id) ?? "To read",
+    personal_status: getPersonalStatusNameById(work.personal_status_id) ?? "Want to Read",
     publication_status_id: work.publication_status_id ?? null,
     personal_status_id: work.personal_status_id ?? null,
     total_chapters: work.total_chapters ?? null,
@@ -1012,9 +1012,30 @@ export async function createWork(
   const result = await persistNewWork(values, aiMeta)
   if (!result.ok) return { error: result.error }
   if (externalReviews && externalReviews.length > 0) {
+    // A avaliação (Path B) já buscou as reviews pra montar o prompt — reusa o
+    // pool em vez de re-buscar na borda.
     const { saveWorkReviews } = await import("@/lib/external/persist-reviews")
     await saveWorkReviews(result.workId, externalReviews)
+  } else {
+    // Criada SEM avaliar: extrai + persiste reviews na borda, desacoplado da
+    // avaliação, em background (`after()`). A obra passa a exibir reviews na
+    // própria página sem esperar uma avaliação. No-op se não há IDs aceitos.
+    after(async () => {
+      const { acquireAndPersistWorkReviews } = await import("@/lib/external/acquire-reviews")
+      await acquireAndPersistWorkReviews(result.workId)
+    })
   }
+
+  // Resolve o hid da Comix na criação: a Comix não entra na busca multi-fonte
+  // (precisa de browser real pro token), então a obra nasce sem hid e o app
+  // nunca pegaria reviews de lá. Dispara a resolução escopada em background;
+  // achado o hid, as reviews da Comix passam a fluir na próxima aquisição. O
+  // script pula a obra se ela já tiver hid.
+  after(async () => {
+    const { resolveComixHidForWork } = await import("@/server/actions/comix-resolver")
+    await resolveComixHidForWork(result.workId)
+  })
+
   const slug = titleToSlug(values.title)
 
   // Recalcular todos: a média global muda quando um título é adicionado
@@ -1088,6 +1109,7 @@ export async function createWorksBatch(
   }
 
   const created: Array<{ id: string; title: string }> = []
+  const needEdgeReviews: string[] = []
   let saveWorkReviewsFn: typeof import("@/lib/external/persist-reviews").saveWorkReviews | null = null
   for (const { values, aiMeta, externalReviews } of normalized) {
     const result = await persistNewWork(values, aiMeta)
@@ -1097,8 +1119,25 @@ export async function createWorksBatch(
         saveWorkReviewsFn = (await import("@/lib/external/persist-reviews")).saveWorkReviews
       }
       await saveWorkReviewsFn(result.workId, externalReviews)
+    } else {
+      needEdgeReviews.push(result.workId)
     }
     created.push({ id: result.workId, title: values.title })
+  }
+
+  // Paridade com createWork (que faz isso por obra): resolve o hid da Comix das
+  // recém-criadas e extrai reviews na borda das que não vieram com pool. Um único
+  // run "mop-up" do resolver (sem --work) evita N Chrome concorrentes no mesmo
+  // userDataDir. Tudo em background.
+  after(async () => {
+    const { resolveComixHidsPending } = await import("@/server/actions/comix-resolver")
+    await resolveComixHidsPending(created.map((c) => c.id))
+  })
+  if (needEdgeReviews.length > 0) {
+    after(async () => {
+      const { acquireAndPersistWorkReviews } = await import("@/lib/external/acquire-reviews")
+      for (const id of needEdgeReviews) await acquireAndPersistWorkReviews(id)
+    })
   }
 
   try {
@@ -1488,11 +1527,11 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
     (current?.chapters_read == null || data.chapters_read > current.chapters_read)
 
   let nextLastReadAt: string | null
-  if (newStatus === "To read") {
+  if (newStatus === "Want to Read") {
     nextLastReadAt = null
   } else if (userTouchedDate) {
     nextLastReadAt = data.last_read_at ?? null
-  } else if (currentStatusName === "To read" || chaptersGrew) {
+  } else if (currentStatusName === "Want to Read" || chaptersGrew) {
     nextLastReadAt = today
   } else {
     nextLastReadAt = currentLastRead
@@ -1570,7 +1609,11 @@ export interface ExternalWorkUpdate {
   observations?: string | null
 }
 
-export async function updateWorkExternalData(id: string, updates: ExternalWorkUpdate) {
+export async function updateWorkExternalData(
+  id: string,
+  updates: ExternalWorkUpdate,
+  opts: { acquireReviews?: boolean } = {},
+) {
   try {
     const supabase = createAdminClient()
     const { data: existingWork } = await supabase
@@ -1671,6 +1714,18 @@ export async function updateWorkExternalData(id: string, updates: ExternalWorkUp
     }
 
     await upsertWorkExternalIds(supabase, id, updates.externalIds)
+
+    // Aquisição na BORDA: colhe + persiste reviews das fontes confirmadas agora
+    // (opt-in — só o fluxo de "atualizar dados" pede; o enrich em massa NÃO, pra
+    // não scrapar N obras). Roda em background (`after()`) com os IDs já gravados
+    // acima, sem bloquear a resposta. A obra passa a exibir reviews na própria
+    // página no próximo load, sem esperar uma avaliação. Best-effort.
+    if (opts.acquireReviews) {
+      after(async () => {
+        const { acquireAndPersistWorkReviews } = await import("@/lib/external/acquire-reviews")
+        await acquireAndPersistWorkReviews(id)
+      })
+    }
 
     // "Atualizar dados" mexe em ratings/sinopse/tags que alimentam o re-rank →
     // invalida o IA Rk (alignment_score) persistido. Marca como desatualizado

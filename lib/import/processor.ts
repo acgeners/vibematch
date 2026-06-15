@@ -153,7 +153,7 @@ async function createWork(
   row: MappedImportRow
 ): Promise<string> {
   const publicationStatus = row.publication_status ?? "Unknown"
-  const personalStatus = row.personal_status ?? "To read"
+  const personalStatus = row.personal_status ?? "Want to Read"
   const { data, error } = await supabase
     .from("works")
     .insert({
@@ -258,9 +258,6 @@ async function upsertCalculatedScores(
         ia_eval: row.ia_eval ?? null,
         ia_eval_normalized: row.ia_eval_normalized ?? null,
         calc_score: row.calc_score ?? null,
-        predicted_score: row.predicted_score ?? null,
-        predicted_is_stub: row.predicted_score == null,
-        final_score: row.final_score ?? null,
         formula_version: "v1_imported",
         calculated_at: new Date().toISOString(),
       },

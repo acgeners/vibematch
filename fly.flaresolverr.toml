@@ -1,0 +1,22 @@
+app = "satoria-flaresolverr"
+primary_region = "iad"
+
+[build]
+  image = "ghcr.io/flaresolverr/flaresolverr:latest"
+
+[env]
+  LOG_LEVEL = "info"
+  HEADLESS = "true"
+  DISABLE_MEDIA = "true"   # menos RAM no Chromium
+  TZ = "America/Sao_Paulo"
+
+# Sem [http_service] público. Exposto só internamente via flycast.
+[[services]]
+  internal_port = 8191
+  protocol = "tcp"
+  auto_stop_machines = false   # scraping precisa dele de pé
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"               # Chromium headless precisa de folga

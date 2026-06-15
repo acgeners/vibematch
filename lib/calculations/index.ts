@@ -2,7 +2,6 @@ import { calculateGPT, normalizeGPT } from "./gpt"
 import { calculatePlatformAvg, sumVotes, computeGlobalPlatformMean } from "./platform"
 import { normalizeChapters } from "./chapters"
 import { calculateNotaCalc } from "./score"
-import { calculateNotaFinal } from "./final"
 import type {
   CalculationInputs,
   CalculationResult,
@@ -16,7 +15,6 @@ export {
   computeGlobalPlatformMean,
   normalizeChapters,
   calculateNotaCalc,
-  calculateNotaFinal,
 }
 
 /**
@@ -70,36 +68,6 @@ export function calculateAll(inputs: CalculationInputs): CalculationResult {
     predictedScore: null,
     predictedIsStub: true,
     finalScore: null,
-  }
-}
-
-/**
- * Versão completa com Nota.Pr disponível.
- *
- * Quando `predictedIsStub === true` (poucos dados de treino), o modelo
- * de Nota.Pr é uma constante (média dos targets) e não agrega informação.
- * Nesse caso Nota.Final = Nota.Calc, evitando que um "blend" enganoso
- * arraste o resultado pra média global da base.
- */
-export function calculateAllWithPrediction(
-  inputs: CalculationInputs,
-  predictedScore: number,
-  predictedIsStub: boolean
-): CalculationResult {
-  const partial = calculateAll(inputs)
-  const finalScore = predictedIsStub
-    ? partial.calcScore
-    : calculateNotaFinal(
-        partial.calcScore,
-        predictedScore,
-        inputs.config.rmse_calc,
-        inputs.config.rmse_predicted
-      )
-  return {
-    ...partial,
-    predictedScore,
-    predictedIsStub,
-    finalScore,
   }
 }
 

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
 import { updateWorkStatus } from "@/server/actions/works"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
@@ -25,7 +25,7 @@ interface WorkPersonalFieldsProps {
 }
 
 export function WorkPersonalFields({ workId, initialValues }: WorkPersonalFieldsProps) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [synopsisQuality, setSynopsisQuality] = useState<WorkStatusValues["synopsis_quality"]>(
     initialValues.synopsis_quality ?? null
   )
@@ -67,7 +67,7 @@ export function WorkPersonalFields({ workId, initialValues }: WorkPersonalFields
       return
     }
     toast.success("Atualizado.")
-    router.refresh()
+    refresh()
   }
 
   return (

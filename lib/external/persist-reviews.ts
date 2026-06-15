@@ -1,25 +1,36 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import type { SourcedReview } from "@/lib/external/types"
+import type { SourcedReview, ExternalSourceId } from "@/lib/external/types"
+import type { ReviewSummaryInput } from "@/lib/ai-recommendation/review-summarizer"
 
 /**
- * Salva snapshot de reviews externas pra uma obra. Estratégia: snapshot
- * atômico — delete tudo de work_id e re-insere as novas. Mantém o DB
- * sincronizado com o último fetch sem reviews órfãs de buscas antigas.
+ * Salva snapshot de reviews externas de uma obra — estratégia NÃO-DESTRUTIVA
+ * (merge por fonte). Substitui apenas as reviews das fontes presentes em
+ * `reviews`; fontes AUSENTES nesta rodada são preservadas. Assim uma queda
+ * transitória de uma fonte (ex.: Comix/FlareSolverr retorna 0 reviews por causa
+ * do Cloudflare) NÃO apaga o que já foi colhido antes — o vazio fica restrito à
+ * primeira busca da obra. Conjunto totalmente vazio = no-op (preserva o snapshot).
  *
- * Falhas são silenciosas (apenas logam). Persistir reviews é otimização,
- * não fonte de verdade.
+ * Passe `replace: true` pra forçar a limpeza total (ex.: a obra foi reapontada
+ * pra outro título e as reviews antigas tornaram-se inválidas).
+ *
+ * Falhas são silenciosas (apenas logam). Persistir reviews é otimização, não
+ * fonte de verdade.
  */
 export async function saveWorkReviews(
   workId: string,
   reviews: SourcedReview[],
+  opts: { replace?: boolean } = {},
 ): Promise<void> {
   if (!workId) return
   const supabase = createAdminClient()
 
+  // Conjunto vazio. Sem `replace`: no-op — preserva o snapshot anterior (caso
+  // comum de "todas as fontes falharam nesta rodada"). Com `replace`: limpa tudo
+  // + o resumo (reapontamento real da obra).
   if (reviews.length === 0) {
+    if (!opts.replace) return
     await supabase.from("work_reviews").delete().eq("work_id", workId)
-    // Sem reviews → limpa também o resumo IA pra não ficar órfão.
     await supabase
       .from("works")
       .update({ review_summary: null, review_summary_at: null, review_summary_inputs_hash: null })
@@ -27,12 +38,15 @@ export async function saveWorkReviews(
     return
   }
 
-  const { error: delError } = await supabase
-    .from("work_reviews")
-    .delete()
-    .eq("work_id", workId)
+  // Merge por fonte: apaga só as fontes presentes neste batch (re-inseridas
+  // abaixo) e mantém as demais. `replace` zera o snapshot inteiro.
+  const sourcesInBatch = [...new Set(reviews.map((r) => r.source))]
+  const baseDelete = supabase.from("work_reviews").delete().eq("work_id", workId)
+  const { error: delError } = await (opts.replace
+    ? baseDelete
+    : baseDelete.in("source", sourcesInBatch))
   if (delError) {
-    console.error("[work_reviews] erro deletando snapshot anterior:", delError)
+    console.error("[work_reviews] erro limpando snapshot:", delError)
     return
   }
 
@@ -54,9 +68,60 @@ export async function saveWorkReviews(
     return
   }
 
-  // Resumo de consenso das reviews (best-effort, hash-guarded) — espelha a
-  // sinopse canônica. Falhas só logam: o resumo é otimização, não fonte de verdade.
-  await persistReviewSummary(supabase, workId, reviews)
+  // Resumo de consenso: precisa refletir o conjunto COMPLETO persistido (merge),
+  // não só este batch — senão o resumo ignoraria fontes preservadas. Re-lê todas
+  // as reviews da obra antes de consolidar.
+  const { data: persisted, error: readError } = await supabase
+    .from("work_reviews")
+    .select("text, user_rating")
+    .eq("work_id", workId)
+  if (readError) {
+    console.error("[work_reviews] erro relendo conjunto p/ resumo:", readError)
+    return
+  }
+  const summaryInputs: ReviewSummaryInput[] = (persisted ?? [])
+    .map((r) => ({ text: String(r.text ?? ""), userRating: r.user_rating ?? null }))
+    .filter((r) => r.text.trim().length > 0)
+  await persistReviewSummary(supabase, workId, summaryInputs)
+}
+
+/**
+ * Lê o pool persistido em `work_reviews` e o devolve como `SourcedReview[]` —
+ * o formato que a avaliação consome. Usado como FALLBACK de robustez: quando a
+ * busca fresca de reviews volta vazia (ex.: queda transitória do Cloudflare no
+ * Comix), a avaliação usa o que já foi colhido antes em vez de avaliar sem
+ * nenhuma review. Não inclui reviews manuais (tratadas à parte no fluxo).
+ *
+ * Ordena por fonte → match_score desc → rating desc (determinístico) pra que o
+ * `selectReviewsForEvaluation`/`input_hash` resultante seja estável entre
+ * avaliações que caiam neste fallback.
+ */
+export async function loadWorkReviewsAsSourced(workId: string): Promise<SourcedReview[]> {
+  if (!workId) return []
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("work_reviews")
+    .select("source, source_title, text, text_length, user_rating, match_score")
+    .eq("work_id", workId)
+    .order("source", { ascending: true })
+    .order("match_score", { ascending: false })
+    .order("user_rating", { ascending: false, nullsFirst: false })
+  if (error) {
+    console.error("[work_reviews] erro lendo pool persistido:", error)
+    return []
+  }
+  return (data ?? []).map((row) => {
+    const r = row as Record<string, unknown>
+    const text = String(r.text ?? "")
+    return {
+      source: r.source as ExternalSourceId,
+      sourceTitle: (r.source_title as string | null) ?? "",
+      matchScore: Number(r.match_score ?? 0),
+      text,
+      userRating: r.user_rating != null ? Number(r.user_rating) : undefined,
+      textLength: r.text_length != null ? Number(r.text_length) : text.length,
+    }
+  })
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>
@@ -64,18 +129,22 @@ type AdminClient = ReturnType<typeof createAdminClient>
 /**
  * Gera/atualiza o resumo IA das reviews da obra. Só roda quando o conjunto de
  * reviews mudou (compara sha256) ou ainda não há resumo. Best-effort.
+ *
+ * Os inputs são ordenados por texto antes do hash pra que a ordem não-determinística
+ * do SELECT não dispare re-gerações desnecessárias do resumo (que custam LLM).
  */
 async function persistReviewSummary(
   supabase: AdminClient,
   workId: string,
-  reviews: SourcedReview[],
+  inputs: ReviewSummaryInput[],
 ): Promise<void> {
+  if (inputs.length === 0) return
   try {
     const { consolidateReviews, hashReviewInputs } = await import(
       "@/lib/ai-recommendation/review-summarizer"
     )
-    const inputs = reviews.map((r) => ({ text: r.text, userRating: r.userRating ?? null }))
-    const hash = hashReviewInputs(inputs)
+    const ordered = [...inputs].sort((a, b) => a.text.localeCompare(b.text))
+    const hash = hashReviewInputs(ordered)
 
     const { data: existing } = await supabase
       .from("works")
@@ -84,7 +153,7 @@ async function persistReviewSummary(
       .maybeSingle()
     if (existing?.review_summary != null && existing?.review_summary_inputs_hash === hash) return
 
-    const result = await consolidateReviews(inputs, { workId })
+    const result = await consolidateReviews(ordered, { workId })
     if (!result) return
 
     await supabase

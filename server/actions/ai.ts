@@ -7,8 +7,9 @@ import {
   buildCandidateFromExternalIds,
   fetchExternalEvaluationContextForCandidate,
   fetchExternalEvaluationContextForWork,
+  selectReviewsForEvaluation,
 } from "@/lib/external/index"
-import { saveWorkReviews } from "@/lib/external/persist-reviews"
+import { saveWorkReviews, loadWorkReviewsAsSourced } from "@/lib/external/persist-reviews"
 import type { ExternalSourceId, SourcedReview } from "@/lib/external/types"
 import { getManualReviews } from "@/server/queries/manual-reviews"
 import { markRecalcPending } from "./recalc-queue"
@@ -152,7 +153,7 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     // separado pra diagnosticar o gargalo (busca externa vs. chamada do LLM).
     const externalStart = Date.now()
     const {
-      context: { sourcedReviews, allReviews, externalContext, platformRatings, similarWorks, contentRatings },
+      context,
       acceptedExternalIds,
       rejectedSources,
       hasAnyExternalIds,
@@ -164,6 +165,26 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
       originalTitle: work.original_title,
       alternativeTitles: work.alternative_titles,
     })
+    const { externalContext, platformRatings, similarWorks, contentRatings } = context
+    let { sourcedReviews, allReviews } = context
+
+    // Fallback de robustez (F0.3b): a busca fresca não trouxe nenhuma review
+    // (ex.: queda transitória do Cloudflare no Comix). Em vez de avaliar sem
+    // reviews, usa o pool já persistido em work_reviews (de uma aquisição na
+    // borda ou avaliação anterior). Só atua no caminho de FALHA — o caso normal
+    // (busca traz reviews) fica idêntico, preservando o input_hash do cache.
+    let usedPersistedFallback = false
+    if ((allReviews?.length ?? 0) === 0) {
+      const persisted = await loadWorkReviewsAsSourced(workId)
+      if (persisted.length > 0) {
+        allReviews = persisted
+        sourcedReviews = selectReviewsForEvaluation(persisted, AI_EVAL_REVIEW_CAPS)
+        usedPersistedFallback = true
+        console.log(
+          `[ai-eval reviews] busca fresca vazia → usando pool persistido (${persisted.length}) de work_reviews`,
+        )
+      }
+    }
     const externalMs = Date.now() - externalStart
 
     // Reviews manuais (work_manual_reviews) — curadas pelo usuário. São tratadas
@@ -200,7 +221,9 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     // Persiste o pool completo (pode passar de 100 reviews), não só o subset
     // capeado que vai pro prompt — recomendação usa essa base pra escolher
     // top reviews por candidato.
-    await saveWorkReviews(workId, allReviews ?? [])
+    // Não re-grava quando o pool veio do próprio work_reviews (fallback) — seria
+    // um delete+insert idêntico + recomputo de resumo à toa.
+    if (!usedPersistedFallback) await saveWorkReviews(workId, allReviews ?? [])
 
     // Debug: detalha o pipeline de reviews durante a avaliação. Útil pra
     // entender por que a IA recebeu N reviews quando esperava-se mais.

@@ -40,7 +40,7 @@ const WORK_LIST_SELECT = `
   created_at,
   updated_at,
   last_read_at,
-  calculated_scores(final_score, calc_score, predicted_score, predicted_is_stub, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, personal_fit, personal_fit_percentile, alignment_score, alignment_justification, alignment_payload, platform_avg, total_votes),
+  calculated_scores(calc_score, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, personal_fit, personal_fit_percentile, alignment_score, alignment_justification, alignment_payload, platform_avg, total_votes),
   category_scores(criterion_slug, score),
   work_covers(url, is_primary, position),
   work_tags(tag_id, tags(*)),
@@ -223,13 +223,8 @@ export async function getWorks(
   const supabase = createAdminClient()
   const searchTerm = filters.search?.trim() || undefined
   const needsClientScoreProcessing =
-    sort.field === "final_score" ||
-    sort.field === "calc_score" ||
-    sort.field === "predicted_score" ||
     sort.field === "expected_score" ||
     sort.field === "is_favorite" ||
-    filters.minFinalScore != null ||
-    filters.maxFinalScore != null ||
     filters.minExpectedScore != null ||
     filters.maxExpectedScore != null ||
     filters.minPersonalFitPct != null ||
@@ -272,7 +267,7 @@ export async function getWorks(
     // every matching work just to throw most of it away.
     let lightQuery = supabase
       .from("works")
-      .select("id, is_favorite, calculated_scores(final_score, calc_score, predicted_score, expected_score, personal_fit, personal_fit_percentile, total_votes)")
+      .select("id, is_favorite, calculated_scores(expected_score, personal_fit, personal_fit_percentile, total_votes)")
     lightQuery = applyWorkFilters(lightQuery, filters, searchMatchIds, genreMatchIds, tagMatchIds)
 
     const { data: lightData, error: lightError } = await lightQuery
@@ -282,9 +277,6 @@ export async function getWorks(
       id: string
       is_favorite: boolean
       calculated_scores: {
-        final_score: number | null
-        calc_score: number | null
-        predicted_score: number | null
         expected_score: number | null
         personal_fit: number | null
         personal_fit_percentile: number | null
@@ -302,12 +294,6 @@ export async function getWorks(
       }
     })
 
-    if (filters.minFinalScore != null) {
-      scored = scored.filter((w) => (w.calculated_scores?.final_score ?? -1) >= filters.minFinalScore!)
-    }
-    if (filters.maxFinalScore != null) {
-      scored = scored.filter((w) => (w.calculated_scores?.final_score ?? 11) <= filters.maxFinalScore!)
-    }
     if (filters.minExpectedScore != null) {
       scored = scored.filter((w) => (w.calculated_scores?.expected_score ?? -1) >= filters.minExpectedScore!)
     }
@@ -341,27 +327,19 @@ export async function getWorks(
     }
 
     if (sort.field === "is_favorite") {
-      // Favoritos primeiro (ou último, se asc); desempate por final_score desc.
+      // Favoritos primeiro (ou último, se asc); desempate por Nota Prevista desc.
       scored.sort((a, b) => {
         const favDelta = Number(b.is_favorite) - Number(a.is_favorite)
         if (favDelta !== 0) return sort.direction === "asc" ? -favDelta : favDelta
-        const aScore = a.calculated_scores?.final_score ?? -1
-        const bScore = b.calculated_scores?.final_score ?? -1
+        const aScore = a.calculated_scores?.expected_score ?? -1
+        const bScore = b.calculated_scores?.expected_score ?? -1
         return bScore - aScore
       })
     } else {
-      const sortKey =
-        sort.field === "calc_score"
-          ? "calc_score"
-          : sort.field === "predicted_score"
-            ? "predicted_score"
-            : sort.field === "expected_score"
-              ? "expected_score"
-              : "final_score"
-
+      // Único sort de nota restante: Nota Prevista (expected_score).
       scored.sort((a, b) => {
-        const aScore = a.calculated_scores?.[sortKey] ?? -1
-        const bScore = b.calculated_scores?.[sortKey] ?? -1
+        const aScore = a.calculated_scores?.expected_score ?? -1
+        const bScore = b.calculated_scores?.expected_score ?? -1
         return sort.direction === "desc" ? bScore - aScore : aScore - bScore
       })
     }

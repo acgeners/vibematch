@@ -7,7 +7,7 @@ export interface SimilarWork {
   similarity: number
   coverUrl: string | null
   synopsis: string | null
-  finalScore: number | null
+  expectedScore: number | null
   personalFit: number | null
   userScore: number | null
   genres: string[]
@@ -24,7 +24,7 @@ interface RpcRow {
   title: string
   similarity: number
   user_score: number | null
-  final_score: number | null
+  expected_score: number | null
   personal_fit: number | null
   cover_url: string | null
   synopsis: string | null
@@ -142,7 +142,7 @@ export async function getSimilarWorks(
       similarity: Number(r.similarity),
       coverUrl: r.cover_url,
       synopsis: r.synopsis,
-      finalScore: r.final_score == null ? null : Number(r.final_score),
+      expectedScore: r.expected_score == null ? null : Number(r.expected_score),
       personalFit: r.personal_fit == null ? null : Number(r.personal_fit),
       userScore: r.user_score == null ? null : Number(r.user_score),
       genres: genresByWorkId.get(r.id) ?? [],

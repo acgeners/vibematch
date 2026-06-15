@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { ArrowDown, ArrowUp, Loader2, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 
@@ -19,8 +19,8 @@ import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/sta
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
 import { PredictSynopsisRowActions } from "@/components/titles/predict-synopsis-row-actions"
+import { SynopsisQualityPicker } from "@/components/titles/synopsis-quality-picker"
 import { predictSynopsisQualityBatchAction } from "@/server/actions/synopsis-quality"
-import { refreshSidebarBadges } from "@/lib/sidebar-badges"
 import { cn } from "@/lib/utils"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
@@ -46,7 +46,7 @@ const DEFAULT_BATCH_SIZE = 30
  * (perfil cacheado); item a item usa o PredictSynopsisRowActions.
  */
 export function SynopsisPredictPanel({ works, isPaid = true }: { works: SynopsisQueueWork[]; isPaid?: boolean }) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const [sortField, setSortField] = useState<SortField>("default")
   const [batchSize, setBatchSize] = useState<number>(DEFAULT_BATCH_SIZE)
   const [batchRunning, setBatchRunning] = useState(false)
@@ -130,8 +130,7 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
           (remainingAfterBatch > 0 ? ` · ${remainingAfterBatch} restantes` : "."),
       )
     }
-    router.refresh()
-    refreshSidebarBadges() // estimou sinopses → saíram de "não previsto" no badge
+    refresh()
   }
 
   if (works.length === 0) {
@@ -311,7 +310,13 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
                     </div>
                   </div>
 
-                  <div className="flex shrink-0 flex-col items-stretch gap-2.5">
+                  <div className="flex shrink-0 flex-col items-end gap-2.5">
+                    <div className="flex flex-col items-end gap-0.5">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Interesse
+                      </span>
+                      <SynopsisQualityPicker workId={w.id} value={w.manualSynopsisQuality} />
+                    </div>
                     <PredictSynopsisRowActions
                       workId={w.id}
                       hasPrediction={w.predictedQuality != null}

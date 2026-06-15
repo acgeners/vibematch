@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
+import { useRefresh } from "@/lib/use-refresh"
 import { Loader2, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -105,6 +106,7 @@ export function UpdateDataDialog({
   onSaved,
 }: UpdateDataDialogProps) {
   const router = useRouter()
+  const refresh = useRefresh()
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : uncontrolledOpen
@@ -432,7 +434,9 @@ export function UpdateDataDialog({
 
     let result: { data?: { id: string; slug?: string }; error?: string }
     try {
-      result = await updateWorkExternalData(workId, updates)
+      // acquireReviews: colhe + persiste reviews das fontes confirmadas em
+      // background (borda) — aparecem na página da obra sem esperar avaliação.
+      result = await updateWorkExternalData(workId, updates, { acquireReviews: true })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       toast.error(`Erro ao atualizar: ${message}`)
@@ -460,7 +464,7 @@ export function UpdateDataDialog({
     if (newTitle && newTitle !== currentWork.title) {
       router.push(`/titles/${workId}`)
     } else {
-      router.refresh()
+      refresh()
     }
   }
 

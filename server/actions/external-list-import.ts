@@ -174,7 +174,7 @@ async function createWorkFromEntry(
     .insert({
       title: entry.title,
       publication_status_id: getPublicationStatusIdByName("Unknown"),
-      personal_status_id: getPersonalStatusIdByName(entry.personalStatus ?? "To read"),
+      personal_status_id: getPersonalStatusIdByName(entry.personalStatus ?? "Want to Read"),
       user_score: entry.userScore ?? null,
       chapters_read: entry.chaptersRead ?? null,
       ai_eval_status: "pending",

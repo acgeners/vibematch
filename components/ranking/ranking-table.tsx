@@ -49,9 +49,6 @@ const COLUMN_TO_SORT_FIELD: Record<string, string> = {
   total_votes: "total_votes",
   decision: "decision",
   expected: "expected_score",
-  final: "final_score",
-  calc: "calc_score",
-  pred: "pred_score",
   personal_fit: "personal_fit",
   alignment_score: "alignment_score",
 }
@@ -401,7 +398,7 @@ function renderCell(
   if (col.key === "expected")
     return (
       <span className="inline-flex items-center gap-1">
-        <ScoreBadge score={entry.expectedScore} size="sm" showStub={entry.expectedIsStub} thresholds={scoreThresholds?.final} />
+        <ScoreBadge score={entry.expectedScore} size="sm" showStub={entry.expectedIsStub} thresholds={scoreThresholds?.expected} />
         {entry.lowCoverage && (
           <AlertTriangle
             className="h-3 w-3 text-amber-500"
@@ -419,9 +416,6 @@ function renderCell(
     const cls = v >= 0 ? "text-emerald-500" : "text-rose-500"
     return <span className={`font-mono text-sm ${cls}`}>{sign}{v.toFixed(2)}</span>
   }
-  if (col.key === "final") return <ScoreBadge score={entry.finalScore} size="sm" thresholds={scoreThresholds?.final} />
-  if (col.key === "calc") return <ScoreBadge score={entry.calcScore} size="sm" thresholds={scoreThresholds?.calc} />
-  if (col.key === "pred") return <ScoreBadge score={entry.predictedScore} size="sm" showStub={entry.predictedIsStub} thresholds={scoreThresholds?.predicted} />
   if (col.key === "personal_fit")
     return <AlignmentCell value={entry.personalFit} percentile={entry.personalFitPercentile} showBar={false} />
   if (col.key === "alignment_score")
@@ -787,10 +781,8 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                 </div>
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">
-                <ScoreBadge score={entry.finalScore} size="md" thresholds={scoreThresholds?.final} />
-                <span className="text-xs text-muted-foreground">
-                  Calc: {entry.calcScore?.toFixed(1) ?? "—"}
-                </span>
+                <ScoreBadge score={entry.expectedScore} size="md" showStub={entry.expectedIsStub} thresholds={scoreThresholds?.expected} />
+                <span className="text-xs text-muted-foreground">Prevista</span>
               </div>
             </div>
           </Link>
@@ -1012,10 +1004,10 @@ function RankingCard({
           {entry.rank}
         </div>
 
-        {/* Score badge */}
-        {entry.finalScore != null && (
+        {/* Score badge — Nota Prevista */}
+        {entry.expectedScore != null && (
           <div className="absolute right-1.5 top-1.5">
-            <ScoreBadge score={entry.finalScore} size="sm" thresholds={scoreThresholds?.final} />
+            <ScoreBadge score={entry.expectedScore} size="sm" showStub={entry.expectedIsStub} thresholds={scoreThresholds?.expected} />
           </div>
         )}
 
@@ -1040,10 +1032,9 @@ function RankingCard({
             {entry.title}
           </p>
         </div>
-        {entry.calcScore != null && (
+        {entry.alignmentScore != null && (
           <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-            IA {entry.calcScore.toFixed(1)}
-            {entry.predictedScore != null && <> · Pr {entry.predictedScore.toFixed(1)}</>}
+            IA Rk {Math.round(entry.alignmentScore)}
           </p>
         )}
       </div>

@@ -68,7 +68,7 @@ function workToFormValues(work: WorkWithRelations): Partial<WorkFormValues> {
       "Unknown",
     personal_status:
       (getPersonalStatusNameById((work as { personal_status_id?: number | null }).personal_status_id) as WorkFormValues["personal_status"]) ??
-      "To read",
+      "Want to Read",
     publication_status_id: (work as { publication_status_id?: number | null }).publication_status_id ?? null,
     personal_status_id: (work as { personal_status_id?: number | null }).personal_status_id ?? null,
     total_chapters: work.total_chapters ?? undefined,

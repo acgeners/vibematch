@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { promises as fs } from "node:fs"
 import path from "node:path"
 import {
+  Activity,
   ArrowRight,
   BookOpen,
   Brain,
@@ -22,6 +23,7 @@ import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
 import { ReviewSummaryPanel } from "@/components/settings/review-summary-panel"
 import { ResolveComixPanel } from "@/components/settings/resolve-comix-panel"
+import { ComixHealthPanel } from "@/components/settings/comix-health-panel"
 import { AiEvalOnCreateToggle } from "@/components/settings/ai-eval-on-create-toggle"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
 import { getComixResolverStatus } from "@/server/actions/comix-resolver"
@@ -122,6 +124,7 @@ const SECTION_GROUPS = [
   {
     label: "Comix & criação",
     sections: [
+      { id: "comix-health", title: "Diagnóstico Comix", icon: <Activity />, accent: "slate" as const },
       { id: "comix", title: "Comix", icon: <BookOpen />, accent: "slate" as const },
       { id: "ai-on-create", title: "Avaliação na criação", icon: <Sparkles />, accent: "amber" as const },
     ],
@@ -254,6 +257,16 @@ export default async function SettingsPage() {
 
       {/* ── Comix & criação ───────────────────────────────────────── */}
       <GroupHeading label="Comix & criação" />
+
+      <SettingsSection
+        id="comix-health"
+        title="Diagnóstico da Comix"
+        description="Testa se as chamadas pra Comix estão funcionando (FlareSolverr, detalhe, reviews, imagem) sem precisar abrir uma obra."
+        icon={<Activity />}
+        accent="slate"
+      >
+        <ComixHealthPanel accent="slate" />
+      </SettingsSection>
 
       <SettingsSection
         id="comix"

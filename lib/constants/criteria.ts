@@ -119,8 +119,10 @@ export const PUBLICATION_STATUS_LABELS: Record<string, string> = {
 }
 
 export const PERSONAL_STATUS_LABELS: Record<string, string> = {
-  "to-read": "To read",
-  "To read": "To read",
+  "want-to-read": "Want to Read",
+  "Want to Read": "Want to Read",
+  "untracked": "Untracked",
+  "Untracked": "Untracked",
   "reading": "Reading",
   "Reading": "Reading",
   "started": "Started",
@@ -164,7 +166,8 @@ export interface PersonalStatusInfo {
 }
 
 export const PERSONAL_STATUSES_BY_ID: Record<number, PersonalStatusInfo> = {
-  8: { id: 8, status: "To read", slug: "to-read", color: "#8B5CF6", symbol: "⭐️", comment: "Not started, on my reading list" },
+  8: { id: 8, status: "Want to Read", slug: "want-to-read", color: "#8B5CF6", symbol: "⭐️", comment: "Not started yet, but intended for future reading" },
+  10: { id: 10, status: "Untracked", slug: "untracked", color: "#6B7280", symbol: "○", comment: "Stored in the database without an active reading status" },
   2: { id: 2, status: "Reading", slug: "reading", color: "#2563EB", symbol: "📖", comment: "Currently reading or actively following new chapters/releases" },
   3: { id: 3, status: "Started", slug: "started", color: "#06B6D4", symbol: "▶️", comment: "Started recently; still deciding whether to continue" },
   4: { id: 4, status: "Stalled", slug: "stalled", color: "#64748B", symbol: "⏸️", comment: "Lost momentum or interest. Not sure I liked it; likely needs rereading before continuing" },

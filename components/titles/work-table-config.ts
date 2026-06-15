@@ -1,7 +1,7 @@
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 
-export type WorkColumnGroup = "basico" | "notas" | "criterios" | "legado"
+export type WorkColumnGroup = "basico" | "notas" | "criterios" | "avancado"
 
 export interface WorkColumnDef {
   key: string
@@ -25,7 +25,7 @@ export const WORK_COLUMN_GROUP_LABELS: Record<WorkColumnGroup, string> = {
   basico: "Básico",
   notas: "Notas",
   criterios: "Atributos",
-  legado: "Legado",
+  avancado: "Avançado",
 }
 
 export type WorkColumnNamespace = "titles" | "favorites" | "ranking" | "recommendations"
@@ -40,11 +40,13 @@ export const DEFAULT_WORK_COLUMN_NAMESPACE: WorkColumnNamespace = "titles"
 //     já é favorito)
 //   - ranking, recommendations: sem mudança de default, mantêm v4
 // favorites v7 → v8: adiciona a coluna "Prioridade" (decision) visível por padrão.
+// Bump em todos os namespaces ao aposentar as colunas legado N.IA/Pr/Final
+// (limpa configs salvos que referenciavam as colunas removidas).
 const NAMESPACE_STORAGE_VERSION: Record<WorkColumnNamespace, string> = {
-  titles: "v6",
-  favorites: "v8",
-  ranking: "v5",
-  recommendations: "v4",
+  titles: "v7",
+  favorites: "v9",
+  ranking: "v6",
+  recommendations: "v5",
 }
 
 function storageKeyFor(namespace: WorkColumnNamespace): string {
@@ -75,14 +77,9 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   { key: "decision", label: "Prioridade", configLabel: "Prioridade", description: "Quão provável que você goste — número único pra decidir o que ler primeiro. Ancorado na Nota Prevista (que já embute o Alinhamento calibrado) e ajustado pela IA Rk quando existe. É um score de PRIORIDADE, não uma previsão de nota.", align: "center", group: "notas" },
   // Novo (Fase 1.5): expected_score é o L1 que substitui o trio N.IA/N.Pr/N.Final
   { key: "expected_score", label: "Prevista", configLabel: "Nota Prevista", description: "Nota que o modelo prevê que você daria à obra (0–10). É a âncora calibrada — um Ridge L1 que substituiu o antigo trio Nota.IA / Nota.Pr / Nota.Final.", align: "center", group: "notas" },
-  { key: "expected_baseline", label: "Perfil", configLabel: "Prevista — Perfil", description: "Decomposição da Nota Prevista (etapa 1): a parte vinda só do seu perfil de gosto, antes de considerar a qualidade da obra.", align: "center", defaultHidden: true, group: "legado" },
-  { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Prevista — Δ Qualidade", description: "Decomposição da Nota Prevista (etapa 2): o ajuste aplicado pelas 8 dimensões de qualidade sobre a parte do perfil.", align: "center", defaultHidden: true, group: "legado" },
+  { key: "expected_baseline", label: "Perfil", configLabel: "Prevista — Perfil", description: "Decomposição da Nota Prevista (etapa 1): a parte vinda só do seu perfil de gosto, antes de considerar a qualidade da obra.", align: "center", defaultHidden: true, group: "avancado" },
+  { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Prevista — Δ Qualidade", description: "Decomposição da Nota Prevista (etapa 2): o ajuste aplicado pelas 8 dimensões de qualidade sobre a parte do perfil.", align: "center", defaultHidden: true, group: "avancado" },
   { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento", description: "O quanto a obra combina com o seu perfil de gosto (fit_score). Quanto maior, mais alinhada às suas preferências de atributos e tags.", align: "center", group: "notas" },
-  // Legado — escondidos por padrão após cutover Fase 1.5. Disponíveis via column
-  // picker ou preset "Legado". Vão ser removidos quando Fase 2 (consultor) ativar.
-  { key: "calc_score", label: "N.IA", configLabel: "Nota.IA (legado)", description: "[Legado] Nota calculada a partir da avaliação da IA (soma ponderada dos atributos). Substituída pela Nota Prevista.", align: "center", defaultHidden: true, group: "legado" },
-  { key: "predicted_score", label: "N.Pr", configLabel: "Nota.Pr (legado)", description: "[Legado] Predição por regressão sobre notas manuais. Substituída pela Nota Prevista.", align: "center", defaultHidden: true, group: "legado" },
-  { key: "final_score", label: "N.Final", configLabel: "Nota.Final (legado)", description: "[Legado] Mistura ponderada de Nota.IA e Nota.Pr. Substituída pela Nota Prevista no cutover da Fase 1.5; mantida só por compatibilidade.", align: "center", defaultHidden: true, group: "legado" },
   { key: "platform_avg", label: "N.M", configLabel: "Nota.M", description: "Nota.M — média ponderada das notas das plataformas externas (AniList, MAL, etc.), na escala 0–10. Pondera mais as fontes com mais votos.", align: "center", defaultHidden: true, group: "notas" },
   { key: "total_votes", label: "Votos", configLabel: "Votos", description: "Total de votos/avaliações somados nas plataformas externas. Quanto maior, mais confiável é a Nota.M.", align: "center", defaultHidden: true, group: "notas" },
   { key: "alignment_score", label: "IA Rk.", configLabel: "IA Rk", description: "Re-rank do consultor IA (0–100), gerado sob demanda. Reordena as recomendações ('Recomendar com IA', 'Próxima leitura', 'Recomendar do ranking') e ajusta a Prioridade. A maioria das obras fica sem valor até passar pelo Rankear.", align: "center", defaultHidden: true, group: "notas" },
@@ -334,9 +331,6 @@ const SCORE_COLUMN_KEYS = new Set<string>([
   "expected_score",
   "expected_baseline",
   "expected_quality_adj",
-  "final_score",
-  "calc_score",
-  "predicted_score",
   "platform_avg",
   "total_votes",
   "alignment_score",
@@ -348,14 +342,13 @@ export function isScoreColumn(key: string): boolean {
   return SCORE_COLUMN_KEYS.has(key)
 }
 
-export type WorkColumnPreset = "tudo" | "geral" | "notas" | "criterios" | "legado"
+export type WorkColumnPreset = "tudo" | "geral" | "notas" | "criterios"
 
 export const WORK_COLUMN_PRESETS: Array<{ id: WorkColumnPreset; label: string }> = [
   { id: "tudo", label: "Tudo" },
   { id: "geral", label: "Geral" },
   { id: "notas", label: "Notas" },
   { id: "criterios", label: "Atributos" },
-  { id: "legado", label: "Legado" },
 ]
 
 const PRESET_VISIBLE_KEYS: Record<WorkColumnPreset, string[]> = {
@@ -363,7 +356,6 @@ const PRESET_VISIBLE_KEYS: Record<WorkColumnPreset, string[]> = {
   geral: WORK_TABLE_COLUMNS.filter((c) => !c.locked && c.group === "basico").map((c) => c.key),
   notas: WORK_TABLE_COLUMNS.filter((c) => !c.locked && c.group === "notas").map((c) => c.key),
   criterios: WORK_TABLE_COLUMNS.filter((c) => !c.locked && c.group === "criterios").map((c) => c.key),
-  legado: WORK_TABLE_COLUMNS.filter((c) => !c.locked && c.group === "legado").map((c) => c.key),
 }
 
 function hiddenForVisible(visibleKeys: Iterable<string>): string[] {
