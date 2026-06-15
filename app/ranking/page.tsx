@@ -50,7 +50,7 @@ const getPreferences = unstable_cache(async (): Promise<{
     minAlign: cfg?.min_predicted_score ?? null,
     minFinal: cfg?.min_final_score ?? null,
   }
-}, ["ranking-preferences"], { revalidate: 300 })
+}, ["ranking-preferences"], { revalidate: 300, tags: ["ranking-preferences"] })
 
 export default async function RankingPage({ searchParams }: RankingPageProps) {
   const params = await searchParams

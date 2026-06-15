@@ -326,6 +326,10 @@ export async function updateRankingPreferences(update: RankingPreferencesUpdate)
 
   revalidatePath("/settings")
   revalidatePath("/ranking")
+  // getPreferences (app/ranking/page.tsx) é um unstable_cache que revalidatePath
+  // NÃO derruba (entradas de unstable_cache só caem por TTL ou tag). Sem isto a
+  // preferência salva demoraria o TTL (5min) pra refletir no ranking.
+  revalidateTag("ranking-preferences", "max")
   return { error: null }
 }
 
