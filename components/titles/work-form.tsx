@@ -644,7 +644,6 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
   }), [canonicalPreview, getValues])
   const {
     fields: extraPlatformFields,
-    append: appendExtraPlatform,
   } = useFieldArray({
     control,
     name: "extra_platform_ratings",
@@ -666,6 +665,11 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
   const synopsisQualityValue = useWatch({ control, name: "synopsis_quality" })
   const [coverPreviewFailedUrl, setCoverPreviewFailedUrl] = useState<string | null>(null)
   const [openSections, setOpenSections] = useState(DEFAULT_OPEN_SECTIONS)
+  // Fontes externas reveladas manualmente via "+" mesmo estando vazias. Por
+  // padrão só mostramos as preenchidas, pra não poluir o form com ~10 linhas
+  // vazias (#8). Chaves = nome normalizado da fonte.
+  const [revealedSources, setRevealedSources] = useState<Set<string>>(new Set())
+  const [sourcePickerOpen, setSourcePickerOpen] = useState(false)
   const [genreSuggestions, setGenreSuggestions] = useState<string[]>(GENRE_NAMES)
   const [postReadingWeights] = useState<Record<PostReadingScoreField, number>>(readPostReadingWeights)
   const coverPreviewSrc = getCoverImageSrc(coverUrl)
@@ -679,6 +683,12 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     control,
     name: "extra_platform_ratings",
   }) ?? []
+  // Valores das 3 fontes built-in (mu/cmx/ap) — pra saber quais estão preenchidas
+  // e decidir a visibilidade da linha (#8). Ordem: rating/votes intercalados.
+  const builtInRatingValues = useWatch({
+    control,
+    name: ["mu_rating", "mu_votes", "cmx_rating", "cmx_votes", "ap_rating", "ap_votes"],
+  })
 
   const filterKnownGenres = useCallback((values: string[]) => {
     const byKey = new Map(genreSuggestions.map((genre) => [normalizeSourceName(genre), genre]))
@@ -715,11 +725,41 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     ]
   }, [])
 
+  // —— Visibilidade das fontes externas (#8) ——
+  // Uma linha de fonte aparece se está preenchida (rating ou votos) OU foi
+  // revelada manualmente pelo "+". As demais ficam ocultas e disponíveis no
+  // picker. As linhas vazias seguem semeadas no form (valor null não persiste);
+  // ocultá-las é puramente visual.
+  const builtInSourceFilled = (key: string): boolean => {
+    const [muR, muV, cmxR, cmxV, apR, apV] = builtInRatingValues
+    if (key === "mu") return muR != null || muV != null
+    if (key === "cmx") return cmxR != null || cmxV != null
+    if (key === "ap") return apR != null || apV != null
+    return false
+  }
+  const isExternalSourceVisible = (name: string): boolean => {
+    const norm = normalizeSourceName(name)
+    if (revealedSources.has(norm)) return true
+    const builtInKey = getBuiltInSourceKey(name)
+    if (builtInKey) return builtInSourceFilled(builtInKey)
+    const item = (extraPlatformValues ?? []).find(
+      (i) => normalizeSourceName(i?.platform ?? "") === norm
+    )
+    return Boolean(item && (item.rating != null || item.votes != null))
+  }
+  const hiddenExternalSources = SOURCE_OPTIONS.filter((s) => !isExternalSourceVisible(s.name))
+  const revealExternalSource = (name: string) => {
+    setRevealedSources((prev) => new Set(prev).add(normalizeSourceName(name)))
+    setSourcePickerOpen(false)
+  }
+
   const clearFormState = () => {
     setCriteriaJustifications({})
     setCoverPreviewFailedUrl(null)
     setAiMeta(null)
     setPendingExternalReviews(null)
+    // Form novo/resetado: volta a mostrar só as preenchidas.
+    setRevealedSources(new Set())
   }
 
   const resetForNewEntry = () => {
@@ -1323,20 +1363,6 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
       ...current,
       [section]: !current[section],
     }))
-  }
-
-  const getNextSourceName = () => {
-    const availableSources = SOURCE_OPTIONS
-    const selected = new Set(
-      (extraPlatformValues ?? [])
-        .map((item) => item?.platform?.trim())
-        .filter(Boolean)
-    )
-    return (
-      availableSources.find((source) => !getBuiltInSourceKey(source.name) && !selected.has(source.name))?.name ??
-      availableSources.find((source) => !selected.has(source.name))?.name ??
-      ""
-    )
   }
 
   const renderCriterionRubric = (slug: string) => {
@@ -2087,17 +2113,40 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
         {renderSectionHeader("external", "Avaliações externas", {
           description: "Rating 0 - 10",
           action: (
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              aria-label="Adicionar fonte externa"
-              title="Adicionar fonte externa"
-              onClick={() => appendExtraPlatform({ platform: getNextSourceName(), rating: null, votes: null })}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
+            <Popover open={sourcePickerOpen} onOpenChange={setSourcePickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label="Adicionar fonte externa"
+                  title="Adicionar fonte externa"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-56 p-1" side="bottom" align="end">
+                {hiddenExternalSources.length === 0 ? (
+                  <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                    Todas as fontes já estão visíveis.
+                  </p>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto">
+                    {hiddenExternalSources.map((source) => (
+                      <button
+                        key={source.id}
+                        type="button"
+                        className="flex w-full items-center rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
+                        onClick={() => revealExternalSource(source.name)}
+                      >
+                        {source.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
           ),
         })}
         {openSections.external && (
@@ -2242,6 +2291,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
               return (
                 <>
                   {availableSources.map((source) => {
+                    if (!isExternalSourceVisible(source.name)) return null
                     const builtInKey = getBuiltInSourceKey(source.name)
                     if (builtInKey) {
                       const builtIn = builtInByKey.get(builtInKey)

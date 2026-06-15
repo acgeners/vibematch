@@ -115,20 +115,39 @@ pela metade, e os módulos antigos grandes. **Não é qualidade irregular — é
 
 ---
 
+## Registro da sessão 2026-06-14 (cont. — QA #4 diagnóstico + #8 + verificações #3)
+
+**Branch:** `feat/realtime-chrome-refresh`. `tsc` 0 · lint 0 no arquivo tocado · 113 testes OK. **#8 verificado no browser (headless puppeteer-core + Chrome) e COMMITADO.** *(Nota: o entrelaçamento de WIP que a memória mencionava já tinha sido resolvido no commit `8164c6e` — a árvore estava limpa no início desta sessão, então #8 entrou como commit isolado.)*
+
+**#4 (badge "Avaliação IA" × aba) — NÃO É BUG. Superdimensionado (padrão da Onda 3).** Verificado contra o DB de prod via PostgREST:
+- A RPC `get_sidebar_badge_counts()` (091, no-arg) **está aplicada** (a assinatura `(TEXT)` de 089 retorna 404). Badge = **22**, **autoconsistente**: 21 atributos (`pending`+`review_pending`) + 1 IA Rk stale + **0** sinopse "não previsto" (= soma das 3 abas nos defaults; sem overlap).
+- Os números mudaram desde o QA (catálogo cresceu; atributos foi de 4→21). O **4×24** observado era o cenário stale-de-sinopse que a **migration 091 trata de propósito**: hoje há **544 obras "Desatualizado"** (têm previsão velha/stale) que aparecem na aba *Interesse Sinopse só com o filtro "Desatualizado" ligado*, mas são **excluídas do badge** (091 evita inflar o badge a cada regen de perfil, que marca centenas como stale de uma vez). Default da aba (`unpredicted`) e badge concordam.
+- **Decisão do user: MANTER como está** (sem mudança de código). O badge segue sinal, não ruído. (Alternativas oferecidas e recusadas: contar stale no badge → reinfla; aba sinopse default incluir stale.)
+
+**#8 (ocultar fontes vazias em "Avaliações externas") — FEITO.** Arquivo [components/titles/work-form.tsx](components/titles/work-form.tsx):
+- Linhas de fonte vazias agora **ocultas**; só aparecem as preenchidas (rating ou votos) OU reveladas manualmente. Predicado `isExternalSourceVisible` (built-in mu/cmx/ap via `useWatch` dos 6 campos; extras via `extra_platform_ratings`). A semeadura `buildFixedExtraPlatformRatings` e a persistência ficam **intocadas** — ocultar é só visual (valor null não persiste; o save já pula null).
+- O "+" virou **picker** (Popover) das fontes ocultas; selecionar revela a linha. `revealedSources` (Set) limpo no `clearFormState` (form novo volta a mostrar só preenchidas).
+- Removidos os órfãos `getNextSourceName` + destruct `append: appendExtraPlatform` (o "+" antigo só anexava a próxima fonte).
+- **Verificação browser (headless):** (1) form novo → **0 linhas**, picker com 8 fontes, revelar "Manga Updates" → 1 linha; (2) obra existente `c8b99ac6…` → mostra as **6 preenchidas** (MU/ComicK/anilist/AnimePlanet/comix/mangadex), oculta as 2 vazias (Kitsu/MyAnimeList), "+" pra adicioná-las.
+
+**#3 (verificações no app) — parcial.** #9 botões OK (read-only). Saldo-ao-vivo, #7 end-to-end e Recalcular pós-099 **deferidos à validação manual do user** (o dev :3001 aponta pro Supabase de prod → submeter/criar muta prod + custo de tokens; #7 é dev-only Comix/Chrome).
+
+---
+
 ## Pendências consolidadas (próximo chat)
 
 **Do QA do user:**
 - **#3 — resolver Comix durante o diálogo "Buscar dados"** — **ADIADO.** Dev-only (busca Comix CF-morta → exigiria Chrome headless inline, não roda em prod); alto custo no god-component `external-search.tsx`. Fazer junto do resolver prod-safe (Onda 4). Gap residual: sinopse/capa do Comix no caminho 100% automático (o **paste manual já as traz** ao merge).
-- **#8 — ocultar fontes vazias no form** de "Avaliações externas" (mostrar só preenchidas + "+" pra adicionar). **NÃO feito.**
-- **#4 — badge "Avaliação IA (N)" da sidebar diverge da aba** (ex.: 4 × 24 em Interesse Sinopse). **NÃO investigado** (provável diferença RPC do badge × query da página).
+- **#8 — ocultar fontes vazias no form** de "Avaliações externas" — **✅ FEITO (2026-06-14)** e verificado no browser. Ver registro abaixo.
+- **#4 — badge "Avaliação IA (N)" da sidebar diverge da aba** — **✅ DIAGNOSTICADO: não é bug (2026-06-14).** Verificado contra prod. Ver registro abaixo.
 
 **Onda 3 restante:** **U2** (god components, incremental/alto esforço) · ~~E3~~ virtualização (adiada, sem gargalo medido).
 
-**Verificar no app rodando (browser) — não validei visualmente:**
-- #9 botões "Criar obra"/"Salvar e incluir mais" (provável artefato do server zumbi de ~1d19h que reiniciei; **re-testar**).
-- Saldo ao vivo em ações além da avaliação IA (Onda 1 / Fase 3).
-- #7 end-to-end (criar → hid + bayesiana + auto-refresh).
-- **Pós-099: rodar "Recalcular agora" em /settings.**
+**Verificar no app rodando (browser):**
+- #9 botões "Criar obra"/"Salvar e incluir mais" — **✅ OK (read-only, 2026-06-14)**: renderizam enabled (`Criar obra` type=submit), zero JS errors na página. O estado "quebrado" era o server zumbi; resolvido no compile fresco. (Não submetido — dev :3001 escreve em prod.)
+- Saldo ao vivo em ações além da avaliação IA (Onda 1 / Fase 3) — **PENDENTE (validação manual do user)**: muta prod; deferido ao uso normal.
+- #7 end-to-end (criar → hid + bayesiana + auto-refresh) — **PENDENTE (validação manual do user)**: dev-only (Comix/Chrome) + muta prod; deferido.
+- **Pós-099: rodar "Recalcular agora" em /settings** — **PENDENTE (user, deixado pra depois).**
 
 **Cleanup cosmético (legado inerte):** campos em `CalculationResult`/`WorkSortField`/`WorkFilters.minFinalScore`/`MappedImportRow`; `formula_config` legado (mae_predicted/rmse_predicted/stacker_*/gpt_* — drop em migration futura); bloco predicted/final do painel de calibração; renomear `min_predicted_score`/`min_final_score` (repurposadas); remover o log de diagnóstico do resolver quando #7 estável.
 
