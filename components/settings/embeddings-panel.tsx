@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { LastRunHint } from "@/components/settings/last-run-hint"
 import { StatCard } from "@/components/settings/stat-card"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
+import { useRefresh } from "@/lib/use-refresh"
 import {
   refreshEmbeddings,
   type RefreshEmbeddingsResult,
@@ -33,6 +34,7 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
   const [lastResult, setLastResult] = useState<RefreshEmbeddingsResult | null>(null)
   const [lastRun, setLastRun] = useState<string | null>(initialLastRun)
   const [pendingCount, setPendingCount] = useState<number>(initialPendingCount)
+  const refresh = useRefresh()
 
   const handleRefresh = () => {
     startTransition(async () => {
@@ -41,6 +43,9 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
         setLastResult(result)
         setLastRun(new Date().toISOString())
         setPendingCount(result.failed)
+        // Atualiza o badge "Configurações" da sidebar em tempo real (re-fetch sem
+        // patch, que ignora o TTL) quando o pool de pendências de fato mudou.
+        if (result.refreshed > 0) refresh()
         if (result.refreshed === 0 && result.failed === 0) {
           toast.info("Tudo em dia — nenhum embedding precisava ser atualizado.")
         } else if (result.failed > 0) {
