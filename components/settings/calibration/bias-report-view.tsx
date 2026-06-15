@@ -49,10 +49,10 @@ export function BiasReportView({ report, createdAt }: BiasReportViewProps) {
                 <span className="font-medium">
                   {info?.emoji} {info?.name ?? entry.criterion_slug}
                 </span>
-                <Badge variant="outline" className={cn("text-[10px]", dispersionColor(entry.dispersion))}>
+                <Badge variant="outline" className={cn("text-[11px]", dispersionColor(entry.dispersion))}>
                   dispersão {entry.dispersion}
                 </Badge>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-[11px] text-muted-foreground">
                   conf {(entry.confidence * 100).toFixed(0)}%
                 </span>
                 <span className="ml-auto font-mono tabular-nums text-foreground/80">

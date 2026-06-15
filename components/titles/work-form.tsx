@@ -2426,7 +2426,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                         variant="outline"
                         disabled={reevaluatingOpus}
                         onClick={() => void handleReevaluateOpus()}
-                        title="Modelo alternativo. Nota.Final continua usando calibração do Sonnet."
+                        title="Modelo alternativo. A Nota Prevista continua usando calibração do Sonnet."
                       >
                         {reevaluatingOpus ? (
                           <Loader2 className="h-3 w-3 animate-spin" />

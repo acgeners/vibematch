@@ -368,7 +368,7 @@ function EvaluationCard({ snapshot }: { snapshot: ChatEvaluationSnapshot }) {
       <div className="flex items-start justify-between gap-2">
         <p className="text-xs font-semibold leading-tight">{snapshot.title}</p>
         {snapshot.confidence != null && (
-          <span className="shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+          <span className="shrink-0 rounded-full border px-1.5 py-0.5 text-[11px] text-muted-foreground">
             confiança {Math.round(snapshot.confidence * 100)}%
           </span>
         )}
@@ -418,7 +418,7 @@ function RecommendationCards({ snapshot }: { snapshot: ChatRecommendationSnapsho
             className="flex gap-2.5 rounded-lg border bg-card/60 p-2.5 transition hover:bg-card"
           >
             <div className="flex flex-col items-center gap-1 pt-0.5">
-              <span className="text-[10px] font-semibold tabular-nums text-muted-foreground">
+              <span className="text-[11px] font-semibold tabular-nums text-muted-foreground">
                 #{i + 1}
               </span>
               <div className="relative h-20 w-14 overflow-hidden rounded border bg-muted">

@@ -229,7 +229,7 @@ export function AlignmentScoreCell({
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[400px] space-y-1.5">
           {stale && (
-            <p className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+            <p className="flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
               <RotateCw className="h-3 w-3" />
               Desatualizado — a obra mudou desde este re-rank. Rode o IA re-rank de novo pra atualizar.
             </p>
@@ -237,13 +237,13 @@ export function AlignmentScoreCell({
           <div className="flex items-center justify-between gap-3">
             <p className="font-semibold text-xs">IA Re-rank: {Math.round(score)}/100</p>
             {payload?.confidence != null && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[11px] text-muted-foreground">
                 Confiança: <span className="font-semibold text-foreground">{(payload.confidence * 100).toFixed(0)}%</span>
               </span>
             )}
           </div>
           {payload?.mood_fit != null && (
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground">
               Fit com mood: <span className="font-mono font-semibold text-foreground">{(payload.mood_fit * 100).toFixed(0)}%</span>
             </p>
           )}
@@ -271,12 +271,12 @@ export function AlignmentScoreCell({
                 </div>
               )}
               {payload?.similar_loved && payload.similar_loved.length > 0 && (
-                <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
                   Lembra de obras que você ama ({payload.similar_loved.length} similar{payload.similar_loved.length > 1 ? "es" : ""})
                 </p>
               )}
               {payload?.similar_avoided && payload.similar_avoided.length > 0 && (
-                <p className="text-[10px] text-rose-600 dark:text-rose-400">
+                <p className="text-[11px] text-rose-600 dark:text-rose-400">
                   Lembra de obras que você não curtiu ({payload.similar_avoided.length})
                 </p>
               )}

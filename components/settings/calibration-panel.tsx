@@ -238,10 +238,10 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
               <Button onClick={handleRecalibrate} disabled={isPending} className={ACCENT_BUTTON[accent]}>
                 {isPending ? "Recalibrando..." : "Recalibrar agora"}
               </Button>
-              <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>
+              <span className="text-[11px] text-muted-foreground" suppressHydrationWarning>
                 Último: {relativeTime}
               </span>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[11px] text-muted-foreground">
                 Versão: <span className="font-mono">{config.formula_version}</span>
               </span>
             </div>
@@ -254,7 +254,7 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
                 ridge={config.expected_ridge_coefficients}
                 label="Origem do sinal na Nota Prevista"
               />
-              <p className="px-1 text-[10px] leading-relaxed text-muted-foreground/70">
+              <p className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
                 O <span className="font-medium">ajuste de observação</span> que você define por obra é
                 aplicado por fora deste modelo, como soma determinística (±0,30) sobre a Nota Prevista —
                 por isso não aparece entre os pesos aprendidos acima.
@@ -426,7 +426,7 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
                         ? `${(config.gpt_clamp_hit_rate * 100).toFixed(1)}%`
                         : "—"}
                     </p>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[11px] text-muted-foreground">
                       {config.gpt_clamp_hit_rate != null && config.gpt_clamp_hit_rate > 0.2
                         ? "Alto — bônus pode estar empurrando obras pra fora da escala"
                         : "Abaixo de 20% = saudável"}
@@ -605,7 +605,7 @@ function featureLabel(name: string): string {
 
 function RidgeFeatureImportance({
   ridge,
-  label = "Origem do sinal no Nota.Pr",
+  label = "Origem do sinal na Nota Prevista",
 }: {
   ridge: { featureNames: string[]; coefficients: number[] }
   label?: string
@@ -717,7 +717,7 @@ function RidgeFeatureImportance({
                   {coef.toFixed(3)}
                 </span>
                 <span className="text-muted-foreground">{featureLabel(name)}</span>
-                <span className="font-mono text-[10px] text-muted-foreground/50">{name}</span>
+                <span className="font-mono text-[11px] text-muted-foreground/50">{name}</span>
               </li>
             ))}
         </ul>
@@ -891,11 +891,11 @@ function MetricCard({ label, live, stored, mismatch, digits = 4, note, tooltip, 
       <p className="flex items-center gap-1 text-xs text-muted-foreground">
         <span>{label}</span>
         {tooltip && <InfoTooltip text={tooltip} label={label} />}
-        {note && <span className="ml-1 text-[10px] opacity-70">{note}</span>}
+        {note && <span className="ml-1 text-[11px] opacity-70">{note}</span>}
       </p>
       <p className="mt-1 font-mono text-base">{fmt(live, digits)}</p>
       {stored != null && (
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-[11px] text-muted-foreground">
           Salvo: <span className="font-mono">{fmt(stored, digits)}</span>
           {mismatch && (
             <span className="ml-1 text-amber-500">• desatualizado</span>
@@ -903,7 +903,7 @@ function MetricCard({ label, live, stored, mismatch, digits = 4, note, tooltip, 
         </p>
       )}
       {extra && (
-        <p className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+        <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
           <span>
             {extra.label}: <span className="font-mono">{fmt(extra.value ?? null, extra.digits ?? 4)}</span>
           </span>

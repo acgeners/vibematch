@@ -284,7 +284,7 @@ function TitleCell({ entry }: { entry: RankingEntry }) {
               return (
                 <Tooltip key={d.slug}>
                   <TooltipTrigger asChild>
-                    <span className="inline-flex items-center gap-0.5 rounded bg-muted/60 px-1 py-0.5 text-[10px] font-mono text-muted-foreground">
+                    <span className="inline-flex items-center gap-0.5 rounded bg-muted/60 px-1 py-0.5 text-[11px] font-mono text-muted-foreground">
                       <span>{info.emoji}</span>
                       <span>+{d.diff.toFixed(1)}</span>
                     </span>
@@ -1033,7 +1033,7 @@ function RankingCard({
           </p>
         </div>
         {entry.alignmentScore != null && (
-          <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+          <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
             IA Rk {Math.round(entry.alignmentScore)}
           </p>
         )}

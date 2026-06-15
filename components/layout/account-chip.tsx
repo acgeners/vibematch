@@ -58,7 +58,7 @@ export function AccountChip() {
         <span className="block truncate text-sm font-semibold text-sidebar-foreground">{name}</span>
         <span
           className={cn(
-            "block truncate text-[10px] font-medium",
+            "block truncate text-[11px] font-medium",
             summary ? (isPaid ? "text-primary/80" : "text-muted-foreground/70") : "text-muted-foreground/70",
           )}
         >

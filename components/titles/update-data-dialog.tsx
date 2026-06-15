@@ -540,7 +540,7 @@ export function UpdateDataDialog({
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <Badge variant="outline" className="text-[10px]">{s.source}</Badge>
+                      <Badge variant="outline" className="text-[11px]">{s.source}</Badge>
                       <div className="flex items-center gap-3 text-xs">
                         <label className="flex items-center gap-1.5 cursor-pointer">
                           <Checkbox
@@ -610,7 +610,7 @@ export function UpdateDataDialog({
                       />
                     </div>
                     <div className="flex items-center justify-between gap-3">
-                      <Badge variant="outline" className="text-[10px]">{activeCover.source}</Badge>
+                      <Badge variant="outline" className="text-[11px]">{activeCover.source}</Badge>
                       <div className="flex items-center gap-3 text-xs">
                         <label className="flex items-center gap-1.5 cursor-pointer">
                           <Checkbox
@@ -738,7 +738,7 @@ export function UpdateDataDialog({
                           className="mt-0.5 accent-primary shrink-0"
                         />
                         <span className="min-w-0 flex-1 text-sm">
-                          <Badge variant="outline" className="text-[10px] py-0 mr-1.5">{label}</Badge>
+                          <Badge variant="outline" className="text-[11px] py-0 mr-1.5">{label}</Badge>
                           <span className="break-all">{value ?? "—"}</span>
                         </span>
                       </label>

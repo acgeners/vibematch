@@ -36,7 +36,7 @@ export function LastRunHint({ iso, label = "Última execução", className }: La
 
   return (
     <span
-      className={className ?? "text-[10px] text-muted-foreground"}
+      className={className ?? "text-[11px] text-muted-foreground"}
       suppressHydrationWarning
       title={iso ? new Date(iso).toLocaleString("pt-BR") : undefined}
     >

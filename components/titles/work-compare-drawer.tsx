@@ -625,7 +625,7 @@ function VerdictCard({ item, position }: { item: VerdictItem; position: number }
           </div>
         )}
         <span className="absolute left-0.5 top-0.5 text-base leading-none drop-shadow">
-          {medal ?? <span className="rounded bg-background/80 px-1 text-[10px] font-bold tabular-nums">{position}º</span>}
+          {medal ?? <span className="rounded bg-background/80 px-1 text-[11px] font-bold tabular-nums">{position}º</span>}
         </span>
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -896,7 +896,7 @@ function CompareGrid({
       formatScore: (v) => v.toFixed(2),
       renderExtra: (w) =>
         w.totalVotes > 0 ? (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-[11px] text-muted-foreground">
             {formatVotes(w.totalVotes)} votos
           </span>
         ) : null,
@@ -1143,7 +1143,7 @@ function DifferentialsSummary({ works, compact = false }: { works: CompareWork[]
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Onde elas se diferenciam
         </span>
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-[11px] text-muted-foreground">
           critérios com pelo menos 1.5 ponto de diferença entre maior e menor nota
         </span>
       </div>
@@ -1159,7 +1159,7 @@ function DifferentialsSummary({ works, compact = false }: { works: CompareWork[]
               <div className="flex items-center gap-1.5">
                 <span>{info?.emoji}</span>
                 <span className="font-medium">{info?.name ?? d.slug}</span>
-                <span className="ml-1 rounded-sm bg-amber-200/60 px-1 font-mono text-[10px] font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
+                <span className="ml-1 rounded-sm bg-amber-200/60 px-1 font-mono text-[11px] font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
                   diferença {d.amplitude.toFixed(1)}
                 </span>
               </div>
@@ -1299,7 +1299,7 @@ function SynopsisButton({
         className="max-w-sm space-y-2 p-3 text-sm"
       >
         {synopsisQuality && (
-          <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-1.5 text-[10px] font-semibold text-rose-700">
+          <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-1.5 text-[11px] font-semibold text-rose-700">
             Interesse: {synopsisQuality}
           </span>
         )}
@@ -1349,7 +1349,7 @@ function GenresTagsCell({
         <Badge
           key={`g:${g}`}
           variant="secondary"
-          className="h-5 py-0 text-[10px] font-normal"
+          className="h-5 py-0 text-[11px] font-normal"
         >
           {g}
         </Badge>
@@ -1358,7 +1358,7 @@ function GenresTagsCell({
         <Badge
           key={`t:${t.slug}`}
           variant="outline"
-          className="h-5 py-0 text-[10px] font-normal"
+          className="h-5 py-0 text-[11px] font-normal"
         >
           {t.name}
         </Badge>
@@ -1368,7 +1368,7 @@ function GenresTagsCell({
           <PopoverTrigger asChild>
             <button
               type="button"
-              className="inline-flex h-5 items-center rounded-full border border-dashed border-border/70 bg-background/40 px-2 text-[10px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+              className="inline-flex h-5 items-center rounded-full border border-dashed border-border/70 bg-background/40 px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
             >
               +{remaining} ver
             </button>
@@ -1390,7 +1390,7 @@ function GenresTagsCell({
                     <Badge
                       key={`g:${g}`}
                       variant="secondary"
-                      className="h-5 py-0 text-[10px] font-normal"
+                      className="h-5 py-0 text-[11px] font-normal"
                     >
                       {g}
                     </Badge>
@@ -1428,14 +1428,14 @@ function GenresTagsCell({
                     <div className="space-y-1">
                       {subSections.map((sg) => (
                         <details key={sg.name} className="group">
-                          <summary className="flex cursor-pointer list-none items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                          <summary className="flex cursor-pointer list-none items-center gap-1 text-[11px] font-medium text-muted-foreground">
                             <ChevronDown className="h-2.5 w-2.5 transition-transform group-open:rotate-180" />
                             {sg.name}{" "}
                             <span className="text-muted-foreground/60">({sg.tags.length})</span>
                           </summary>
                           <div className="mt-1 flex flex-wrap gap-1 pl-3.5">
                             {sg.tags.map((t) => (
-                              <Badge key={`t:${t.slug}`} variant="outline" className="h-5 py-0 text-[10px] font-normal">
+                              <Badge key={`t:${t.slug}`} variant="outline" className="h-5 py-0 text-[11px] font-normal">
                                 {t.name}
                               </Badge>
                             ))}
@@ -1449,7 +1449,7 @@ function GenresTagsCell({
                         <Badge
                           key={`t:${t.slug}`}
                           variant="outline"
-                          className="h-5 py-0 text-[10px] font-normal"
+                          className="h-5 py-0 text-[11px] font-normal"
                         >
                           {t.name}
                         </Badge>

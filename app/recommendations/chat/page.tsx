@@ -75,7 +75,7 @@ async function RecentChats() {
             title={c.title ?? c.slug}
           >
             {c.title ?? c.slug}
-            <span className="ml-1.5 text-[10px] opacity-70">· {formatRelativeDateTime(c.updatedAt)}</span>
+            <span className="ml-1.5 text-[11px] opacity-70">· {formatRelativeDateTime(c.updatedAt)}</span>
           </Link>
         ))}
       </div>

@@ -746,7 +746,7 @@ function GenreRuleGrid({
                 >
                   <span className="truncate font-medium">{item}</span>
                   {rule && (
-                    <span className="shrink-0 rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] font-semibold">
+                    <span className="shrink-0 rounded-full bg-background/80 px-1.5 py-0.5 text-[11px] font-semibold">
                       {stateLabel[rule]}
                     </span>
                   )}
@@ -900,7 +900,7 @@ function ActiveGroupBody({ items, getRule, renderItem }: ActiveGroupBodyProps) {
               <span className="text-sm font-medium">{section.name}</span>
               <span className="text-xs tabular-nums text-muted-foreground">{section.items.length}</span>
               {selectedCount > 0 && (
-                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-400/25 px-1.5 text-[10px] font-bold tabular-nums text-emerald-100">
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-400/25 px-1.5 text-[11px] font-bold tabular-nums text-emerald-100">
                   {selectedCount}
                 </span>
               )}
@@ -1046,11 +1046,11 @@ function GroupedTagRuleGrid({
           <span className="flex min-w-0 flex-col leading-tight">
             <span className="truncate font-medium">{item.label}</span>
             {withGroupHint && (
-              <span className="truncate text-[10px] font-normal text-muted-foreground">{item.groupName}</span>
+              <span className="truncate text-[11px] font-normal text-muted-foreground">{item.groupName}</span>
             )}
           </span>
           {rule && (
-            <span className="shrink-0 rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] font-semibold">
+            <span className="shrink-0 rounded-full bg-background/80 px-1.5 py-0.5 text-[11px] font-semibold">
               {TAG_STATE_LABEL[rule]}
             </span>
           )}
@@ -1086,7 +1086,7 @@ function GroupedTagRuleGrid({
         <div className="rounded-lg border border-border/65 bg-background/45 px-3 py-2.5">
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <span>Selecionadas</span>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-foreground">
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-foreground">
               {selectedEntries.length}
             </span>
           </div>

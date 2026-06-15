@@ -52,7 +52,7 @@ export function RunHistoryTable({ runs }: RunHistoryTableProps) {
                 {formatRelativeDateTime(run.completed_at ?? run.created_at)}
               </TableCell>
               <TableCell>
-                <Badge variant="outline" className="text-[10px]">
+                <Badge variant="outline" className="text-[11px]">
                   {run.mode}
                 </Badge>
               </TableCell>
@@ -61,10 +61,10 @@ export function RunHistoryTable({ runs }: RunHistoryTableProps) {
                   variant="outline"
                   className={
                     run.status === "completed"
-                      ? "text-emerald-700 border-emerald-500/40 text-[10px]"
+                      ? "text-emerald-700 border-emerald-500/40 text-[11px]"
                       : run.status === "failed"
-                        ? "text-rose-700 border-rose-500/40 text-[10px]"
-                        : "text-amber-700 border-amber-500/40 text-[10px]"
+                        ? "text-rose-700 border-rose-500/40 text-[11px]"
+                        : "text-amber-700 border-amber-500/40 text-[11px]"
                   }
                 >
                   {run.status}

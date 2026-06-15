@@ -588,7 +588,7 @@ export function WorkStatusForm({
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground leading-tight">
                   Nota Pessoal
                 </span>
-                <span className="text-[10px] text-muted-foreground/80 leading-none">Calculada</span>
+                <span className="text-[11px] text-muted-foreground/80 leading-none">Calculada</span>
               </div>
               <ScoreBadge
                 score={computedManualScore}
@@ -693,7 +693,7 @@ export function WorkStatusForm({
                               )
                             })()}
                             {currentValue != null && (
-                              <span className="text-[10px] font-mono font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded leading-none">
+                              <span className="text-[11px] font-mono font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded leading-none">
                                 {currentValue.toFixed(1)}
                               </span>
                             )}

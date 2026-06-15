@@ -97,7 +97,7 @@ export default async function PreferenciasPage() {
       id: "score-colors",
       title: "Cores das notas",
       description:
-        "Percentis que definem as cores das notas agregadas (Nota Prevista / Nota.IA / Nota.Pr).",
+        "Percentis que definem as cores das notas agregadas (Nota Prevista / Nota.Calc).",
       icon: <Palette />,
       accent: "amber",
       content: <ScoreColorPercentilesForm config={config} />,

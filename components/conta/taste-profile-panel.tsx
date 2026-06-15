@@ -350,7 +350,7 @@ function Stat({
       >
         {value}
       </p>
-      {hint && <p className="mt-0.5 text-[10px] text-muted-foreground">{hint}</p>}
+      {hint && <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>}
     </div>
   )
 }
@@ -482,7 +482,7 @@ function AlignedCard({ work, rank }: { work: AlignedWork; rank: number }) {
           alt={work.title}
           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
         />
-        <span className="absolute left-1.5 top-1.5 grid size-5 place-items-center rounded-full bg-black/60 font-mono text-[10px] font-semibold text-white">
+        <span className="absolute left-1.5 top-1.5 grid size-5 place-items-center rounded-full bg-black/60 font-mono text-[11px] font-semibold text-white">
           {rank}
         </span>
       </div>

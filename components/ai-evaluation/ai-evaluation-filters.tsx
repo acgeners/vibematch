@@ -255,7 +255,7 @@ export function AiEvaluationFilters({
             </div>
             <h2 className="text-sm font-semibold">Filtros</h2>
             {activeCount > 0 && (
-              <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
                 {activeCount}
               </span>
             )}

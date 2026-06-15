@@ -114,7 +114,7 @@ function StatusButton({
         className="cursor-pointer gap-1 rounded-full px-2.5 py-1 text-xs"
         style={style}
       >
-        {option.symbol && <span className="text-[10px]">{option.symbol}</span>}
+        {option.symbol && <span className="text-[11px]">{option.symbol}</span>}
         {option.status}
       </Badge>
     </button>

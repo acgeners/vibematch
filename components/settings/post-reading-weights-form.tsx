@@ -145,7 +145,7 @@ function PostReadingWeightCard({
               onValueChange={(v) => ctrl.onChange(v[0])}
               className="px-1"
             />
-            <p className="mt-1.5 text-[10px] text-muted-foreground">
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
               {isDefault ? (
                 <>Padrão</>
               ) : (

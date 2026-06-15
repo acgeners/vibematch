@@ -846,7 +846,7 @@ export function ExternalSearch({
                           </div>
                           <div className="min-w-0 flex-1">
                             <p className="line-clamp-2 text-sm font-medium">{option.title}</p>
-                            <p className="mt-0.5 text-[10px] text-muted-foreground">
+                            <p className="mt-0.5 text-[11px] text-muted-foreground">
                               match {Math.round(option.matchScore * 100)}%
                               {option.year ? ` · ${option.year}` : ""}
                               {option.chapters ? ` · ${option.chapters} cap.` : ""}
@@ -988,7 +988,7 @@ export function ExternalSearch({
                       )}
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
-                      <Badge variant="outline" className="text-[10px]">
+                      <Badge variant="outline" className="text-[11px]">
                         {dup.matchType === "exact_title" && "título exato"}
                         {dup.matchType === "original_title" && "título original"}
                         {dup.matchType === "exact_alt" && "alt exato"}
@@ -1047,7 +1047,7 @@ export function ExternalSearch({
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <Badge variant="outline" className="text-[10px]">{getSourceLabel(s.source)}</Badge>
+                      <Badge variant="outline" className="text-[11px]">{getSourceLabel(s.source)}</Badge>
                       <div className="flex items-center gap-3 text-xs">
                         <label className="flex items-center gap-1.5 cursor-pointer">
                           <Checkbox
@@ -1117,7 +1117,7 @@ export function ExternalSearch({
                       />
                     </div>
                     <div className="flex items-center justify-between gap-3">
-                      <Badge variant="outline" className="text-[10px]">{getSourceLabel(activeCover.source)}</Badge>
+                      <Badge variant="outline" className="text-[11px]">{getSourceLabel(activeCover.source)}</Badge>
                       <div className="flex items-center gap-3 text-xs">
                         <label className="flex items-center gap-1.5 cursor-pointer">
                           <Checkbox

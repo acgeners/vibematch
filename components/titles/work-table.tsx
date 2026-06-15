@@ -621,7 +621,7 @@ function WorkCardsView({
                   {work.title}
                 </p>
                 {(work.chapters_read != null || work.total_chapters != null) && (
-                  <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                  <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
                     {(() => {
                       const pct = readingProgressPercent(work.chapters_read, work.total_chapters)
                       const base = `Caps ${work.chapters_read ?? "?"}/${work.total_chapters ?? "?"}`

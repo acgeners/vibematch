@@ -576,7 +576,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   </div>
                 )}
                 {work.is_archived && (
-                  <span className="inline-flex w-fit items-center rounded-full border border-gray-200 bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                  <span className="inline-flex w-fit items-center rounded-full border border-gray-200 bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
                     Arquivada
                   </span>
                 )}
@@ -774,7 +774,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       name="Alinhamento"
                       description="fit_score (0–100%): alinhamento determinístico entre a obra e o seu TasteProfile (gêneros/tags amados e evitados + preferências por critério). Não usa LLM."
                     />
-                    <span className="text-[10px] text-muted-foreground">Quão a obra combina com seu perfil</span>
+                    <span className="text-[11px] text-muted-foreground">Quão a obra combina com seu perfil</span>
                   </div>
                   {(() => {
                     const fit = work.calculated_scores.personal_fit as number
@@ -802,7 +802,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       name="Match (IA Rk)"
                       description="match_score / IA Re-rank (0–100): veredito do consultor LLM sob demanda ('Recomendar com IA' / Deep Dive). Preenchido ao rodar o re-rank."
                     />
-                    <span className="text-[10px] text-muted-foreground">Veredito do consultor IA (0–100)</span>
+                    <span className="text-[11px] text-muted-foreground">Veredito do consultor IA (0–100)</span>
                   </div>
                   {(() => {
                     const rk = work.calculated_scores.alignment_score
@@ -832,7 +832,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                           />
                           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
                         </div>
-                        <span className="text-[10px] text-muted-foreground">Sua nota pós-leitura</span>
+                        <span className="text-[11px] text-muted-foreground">Sua nota pós-leitura</span>
                       </div>
                       <ScoreBadge score={work.user_score ?? null} size="lg" className="h-10 w-14 text-lg font-bold shrink-0" />
                     </summary>
@@ -856,7 +856,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                         name="Pessoal"
                         description="Média ponderada das suas avaliações por estrelas pós-leitura (Ritmo, Arte, Impacto, Originalidade, etc). Calculada automaticamente conforme você preenche os critérios."
                       />
-                      <span className="text-[10px] text-muted-foreground">Sua nota pós-leitura</span>
+                      <span className="text-[11px] text-muted-foreground">Sua nota pós-leitura</span>
                     </div>
                     <ScoreBadge score={work.user_score ?? null} size="lg" className="h-10 w-14 text-lg font-bold shrink-0" />
                   </div>
@@ -899,7 +899,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       <span className="text-xs font-semibold text-foreground truncate">
                         {PLATFORM_LABELS[pr.platform] ?? pr.platform}
                       </span>
-                      <span className="text-[10px] text-muted-foreground mt-0.5">
+                      <span className="text-[11px] text-muted-foreground mt-0.5">
                         {formatVotes(pr.vote_count)} votos
                       </span>
                     </div>
@@ -1013,7 +1013,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       />
                     )}
                     {aiScore && aiScore.suggested_score != null && aiScore.suggested_score !== score && (
-                      <p className="text-[10px] text-muted-foreground/70">
+                      <p className="text-[11px] text-muted-foreground/70">
                         Sugestão IA:{" "}
                         <span className="font-mono font-semibold">
                           {Number(aiScore.suggested_score).toFixed(1)}
@@ -1024,7 +1024,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       BIAS_APPLICABLE.has(sourceMap[slug]) &&
                       (biasMap[slug] ?? 0) !== 0 && (
                         <p
-                          className="text-[10px] text-sky-600/80 dark:text-sky-400/80"
+                          className="text-[11px] text-sky-600/80 dark:text-sky-400/80"
                           title={`Offset do seu perfil: ${biasMap[slug] > 0 ? "+" : ""}${biasMap[slug]}. O cálculo usa o valor calibrado, não o bruto da IA.`}
                         >
                           → calibrado p/{" "}
@@ -1110,7 +1110,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                         <h3 className="text-xs font-bold uppercase tracking-wider text-foreground/70">
                           {group.groupName}
                         </h3>
-                        <span className="text-[10px] font-semibold text-muted-foreground">
+                        <span className="text-[11px] font-semibold text-muted-foreground">
                           {group.tags.length}
                         </span>
                       </div>
@@ -1121,7 +1121,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                               <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground/65">
                                 <ChevronDown className="h-3 w-3 text-muted-foreground transition-transform group-open:rotate-180" />
                                 <span>{sg.name}</span>
-                                <span className="text-[10px] font-normal normal-case text-muted-foreground">{sg.tags.length}</span>
+                                <span className="text-[11px] font-normal normal-case text-muted-foreground">{sg.tags.length}</span>
                               </summary>
                               <div className="flex flex-wrap gap-1.5 px-2 pb-2">
                                 {sg.tags.map((tag) => (

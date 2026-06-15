@@ -147,9 +147,9 @@ export function ImportReview({
                   {work.title}
                 </Link>
                 <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                  <Badge variant="outline" className="text-[10px]">{coverCount} capas</Badge>
-                  <Badge variant="outline" className="text-[10px]">{synopsisCount} sinopses</Badge>
-                  <Badge variant="secondary" className="text-[10px]">IA: {work.aiEvalStatus}</Badge>
+                  <Badge variant="outline" className="text-[11px]">{coverCount} capas</Badge>
+                  <Badge variant="outline" className="text-[11px]">{synopsisCount} sinopses</Badge>
+                  <Badge variant="secondary" className="text-[11px]">IA: {work.aiEvalStatus}</Badge>
                   <EnrichStatus state={state} />
                 </div>
               </div>

@@ -244,7 +244,7 @@ export function WeightSuggestionsPanel({ initialLastApplied }: WeightSuggestions
                             <TooltipTrigger asChild>
                               <span
                                 className={cn(
-                                  "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium cursor-help",
+                                  "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium cursor-help",
                                   badge.classes,
                                 )}
                               >
@@ -253,7 +253,7 @@ export function WeightSuggestionsPanel({ initialLastApplied }: WeightSuggestions
                             </TooltipTrigger>
                             <TooltipContent side="top" className="max-w-[240px]">
                               {badge.tooltip}
-                              <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                              <div className="mt-1 font-mono text-[11px] text-muted-foreground">
                                 coef={s.coefficient} ± {s.stderr}
                               </div>
                             </TooltipContent>

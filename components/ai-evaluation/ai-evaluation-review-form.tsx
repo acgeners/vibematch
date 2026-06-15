@@ -381,7 +381,7 @@ export function AiEvaluationReviewForm({
                     variant="outline"
                     disabled={!!reevaluatingModel || submitting}
                     onClick={() => void handleReevaluate("opus")}
-                    title="Modelo alternativo. Nota.Final continua usando calibração do Sonnet."
+                    title="Modelo alternativo. A Nota Prevista continua usando calibração do Sonnet."
                   >
                     {reevaluatingModel === "opus" ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -395,7 +395,7 @@ export function AiEvaluationReviewForm({
                     variant="outline"
                     disabled={!!reevaluatingModel || submitting}
                     onClick={() => void handleReevaluate("haiku")}
-                    title="A/B: modelo mais rápido e barato. Nota.Final continua usando calibração do Sonnet."
+                    title="A/B: modelo mais rápido e barato. A Nota Prevista continua usando calibração do Sonnet."
                   >
                     {reevaluatingModel === "haiku" ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -431,7 +431,7 @@ export function AiEvaluationReviewForm({
                   Sinopse{" "}
                   <span
                     className={
-                      "ml-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium " +
+                      "ml-1 rounded-full border px-1.5 py-0.5 text-[11px] font-medium " +
                       (debugContext.synopsisIsManual
                         ? "border-emerald-300 bg-emerald-50 text-emerald-700"
                         : "border-amber-300 bg-amber-50 text-amber-700")
@@ -440,7 +440,7 @@ export function AiEvaluationReviewForm({
                     {debugContext.synopsisIsManual ? "manual" : "auto/externa"}
                   </span>
                   {debugContext.synopsisOmittedFromPrompt && (
-                    <span className="ml-2 text-[10px] font-normal text-amber-700">
+                    <span className="ml-2 text-[11px] font-normal text-amber-700">
                       (omitida do prompt — usando [C1]…[Cn])
                     </span>
                   )}
@@ -495,7 +495,7 @@ export function AiEvaluationReviewForm({
                   {debugContext.sourcedReviews.map((r) => (
                     <li key={r.id} className="whitespace-pre-wrap">
                       <span className="font-medium text-foreground">[{r.id}]</span>{" "}
-                      <span className="text-[10px]">
+                      <span className="text-[11px]">
                         ({r.source}, match {Math.round(r.matchScore * 100)}%
                         {r.userRating != null ? `, nota: ${r.userRating}/10` : ""}
                         , &ldquo;{r.sourceTitle}&rdquo;)

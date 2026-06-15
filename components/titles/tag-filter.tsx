@@ -112,13 +112,13 @@ export function TagFilter({ selected, onChange, availableTags }: TagFilterProps)
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-[11px] text-muted-foreground">
           Separe por vírgula, ponto e vírgula ou quebra de linha
         </span>
         <button
           type="button"
           onClick={() => setDictOpen(true)}
-          className="inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:underline"
+          className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
         >
           <BookOpen className="h-3 w-3" />
           Ver dicionário de tags
@@ -158,7 +158,7 @@ export function TagFilter({ selected, onChange, availableTags }: TagFilterProps)
         </div>
       )}
       {invalidCount > 0 && (
-        <p className="text-[10px] text-destructive/80">
+        <p className="text-[11px] text-destructive/80">
           {invalidCount === 1
             ? "1 tag não existe no dicionário e será ignorada"
             : `${invalidCount} tags não existem no dicionário e serão ignoradas`}

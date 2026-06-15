@@ -34,7 +34,7 @@ export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
               <MessageSquareText className="h-4 w-4 text-muted-foreground" />
               <CardTitle className="text-base">Reviews</CardTitle>
             </div>
-            <Badge variant="outline" className="text-[10px]">0 reviews</Badge>
+            <Badge variant="outline" className="text-[11px]">0 reviews</Badge>
           </div>
         </CardHeader>
         <CardContent>
@@ -60,12 +60,12 @@ export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
             <MessageSquareText className="h-4 w-4 text-muted-foreground" />
             <CardTitle className="text-base">Reviews</CardTitle>
             {snapshot.total > 0 && (
-              <Badge variant="outline" className="text-[10px]">
+              <Badge variant="outline" className="text-[11px]">
                 {snapshot.total} de {snapshot.bySource.length} fonte(s)
               </Badge>
             )}
             {snapshot.manual.length > 0 && (
-              <Badge variant="secondary" className="gap-1 text-[10px]">
+              <Badge variant="secondary" className="gap-1 text-[11px]">
                 <PenLine className="h-3 w-3" />
                 {snapshot.manual.length} sua{snapshot.manual.length === 1 ? "" : "s"}
               </Badge>
@@ -93,7 +93,7 @@ export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
               <Sparkles className="h-3.5 w-3.5 text-primary" />
               <span className="text-xs font-semibold text-foreground">Resumo das reviews (IA)</span>
               {snapshot.summaryAt && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-[11px] text-muted-foreground">
                   · {formatRelativeDateTime(snapshot.summaryAt)}
                 </span>
               )}
@@ -177,7 +177,7 @@ export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
                             <span className="text-foreground/70">como </span>“{review.sourceTitle}”
                           </span>
                         )}
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-[11px]">
                           match {Math.round(review.matchScore * 100)}%
                         </Badge>
                       </div>

@@ -88,7 +88,7 @@ export function PostReadingWeightSuggestionsPanel() {
         )
         if (res.isStub) {
           toast.warning(
-            `Treino insuficiente (${res.trainSize} obras). Preencha mais avaliações pós-leitura com Nota.Final calculada.`,
+            `Treino insuficiente (${res.trainSize} obras). Preencha mais avaliações pós-leitura com Nota Prevista calculada.`,
           )
         } else {
           toast.success(
@@ -158,7 +158,7 @@ export function PostReadingWeightSuggestionsPanel() {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <p className="text-xs text-muted-foreground max-w-2xl">
-          Treina uma regressão Ridge nos 8 critérios pós-leitura contra a Nota.Final do sistema
+          Treina uma regressão Ridge nos 8 critérios pós-leitura contra a Nota Prevista do sistema
           e sugere pesos que minimizam o erro. Use isso pra descobrir se algum eixo está
           super/subestimado nos seus pesos atuais. Não aplica nada sozinho — você revisa e marca
           o que aceita.
@@ -174,7 +174,7 @@ export function PostReadingWeightSuggestionsPanel() {
       {result?.isStub && (
         <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
           Treino insuficiente — precisa de pelo menos 20 obras com todos os 8 eixos pós-leitura
-          preenchidos e Nota.Final calculada. Atualmente: {result.trainSize}.
+          preenchidos e Nota Prevista calculada. Atualmente: {result.trainSize}.
         </p>
       )}
 
@@ -250,7 +250,7 @@ export function PostReadingWeightSuggestionsPanel() {
                             <TooltipTrigger asChild>
                               <span
                                 className={cn(
-                                  "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium cursor-help",
+                                  "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium cursor-help",
                                   badge.classes,
                                 )}
                               >
@@ -259,7 +259,7 @@ export function PostReadingWeightSuggestionsPanel() {
                             </TooltipTrigger>
                             <TooltipContent side="top" className="max-w-[240px]">
                               {badge.tooltip}
-                              <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                              <div className="mt-1 font-mono text-[11px] text-muted-foreground">
                                 coef={s.coefficient} ± {s.stderr}
                               </div>
                             </TooltipContent>
@@ -276,7 +276,7 @@ export function PostReadingWeightSuggestionsPanel() {
           <div className="flex items-center justify-between gap-2 pt-1">
             <p className="text-[11px] text-muted-foreground max-w-md">
               ⚠️ Aplicar recalcula a nota pessoal de todas as obras com pós-leitura preenchido
-              e dispara recálculo completo (Nota.Calc, Pr, Final).
+              e dispara recálculo completo (Nota.Calc e Nota Prevista).
             </p>
             <Button
               onClick={handleApply}

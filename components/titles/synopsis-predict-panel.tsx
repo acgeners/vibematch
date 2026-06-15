@@ -237,30 +237,30 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
                       {w.manualSynopsisQuality && (
                         <span
                           title="Interesse na sinopse (manual)"
-                          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300"
+                          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-600 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300"
                         >
                           {w.manualSynopsisQuality}
                         </span>
                       )}
                       {isStale ? (
-                        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-200">
+                        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-200">
                           desatualizado
                         </span>
                       ) : w.predictedQuality == null ? (
-                        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:border-slate-400/20 dark:bg-slate-400/10 dark:text-slate-300">
+                        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-400/20 dark:bg-slate-400/10 dark:text-slate-300">
                           não previsto
                         </span>
                       ) : null}
                       {!isStale && diverges && (
                         <span
                           title={`Manual ${w.manualSynopsisQuality} ≠ IA ${w.predictedQuality}`}
-                          className="inline-flex items-center rounded-full border border-orange-300 bg-orange-50 px-2 py-0.5 text-[10px] font-medium text-orange-700 dark:border-orange-400/25 dark:bg-orange-400/12 dark:text-orange-200"
+                          className="inline-flex items-center rounded-full border border-orange-300 bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-700 dark:border-orange-400/25 dark:bg-orange-400/12 dark:text-orange-200"
                         >
                           diverge
                         </span>
                       )}
                       {!isStale && alreadyApplied && (
-                        <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/12 dark:text-emerald-200">
+                        <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/12 dark:text-emerald-200">
                           bate
                         </span>
                       )}
@@ -285,7 +285,7 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
                           <span
                             title={`IA ${w.predictedQuality} vs manual ${w.manualSynopsisQuality} (${delta > 0 ? "+" : ""}${delta} nível${Math.abs(delta) !== 1 ? "s" : ""})`}
                             className={cn(
-                              "ml-1.5 rounded px-1 py-0.5 text-[10px] font-semibold",
+                              "ml-1.5 rounded px-1 py-0.5 text-[11px] font-semibold",
                               delta === 0
                                 ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300"
                                 : "bg-orange-500/12 text-orange-700 dark:text-orange-300",

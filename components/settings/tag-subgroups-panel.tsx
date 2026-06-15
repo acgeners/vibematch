@@ -456,12 +456,12 @@ function SubgroupCard({
                 <span className="text-base font-semibold">{s.name}</span>
               )}
               <span className="text-xs text-muted-foreground">{s.group_slug}</span>
-              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sb.cls}`}>
+              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${sb.cls}`}>
                 {sb.label}
               </span>
               {confidencePct != null && (
                 <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ${
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${
                     confidencePct >= 90 ? "bg-emerald-400/15 text-emerald-200" : confidencePct >= 80 ? "bg-sky-400/15 text-sky-200" : "bg-amber-400/15 text-amber-200"
                   }`}
                 >
@@ -763,7 +763,7 @@ function BulkMoveButton({
                 className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/60 disabled:opacity-50"
               >
                 <span className="truncate">{g.label}</span>
-                <span className="text-[10px] text-muted-foreground">{g.slug}</span>
+                <span className="text-[11px] text-muted-foreground">{g.slug}</span>
               </button>
             ))}
         </div>
@@ -803,7 +803,7 @@ function SubgroupAssignmentCard({ subgroup: s, groupSlug, siblings, groups, isPe
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="text-base font-semibold">{s.name}</span>
-          <span className="rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{s.tags.length}</span>
+          <span className="rounded-full bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{s.tags.length}</span>
         </div>
         {pendingIds.length > 0 && (
           <Button size="sm" variant="outline" disabled={busy || isPending} onClick={approvePending}>
@@ -865,7 +865,7 @@ function UnassignedSection({ tags, groupSlug, siblings, groups, isPending, onRef
         <div className="flex items-center gap-2">
           {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           <span className="text-sm font-semibold">{label}</span>
-          <span className="rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{tags.length}</span>
+          <span className="rounded-full bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{tags.length}</span>
         </div>
         <span className="text-[11px] text-muted-foreground">{hint}</span>
       </button>
@@ -1029,7 +1029,7 @@ function AssignChip({ tagId, name, slug, status, groupSlug, siblings, groups, di
                 className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/60 disabled:opacity-50"
               >
                 <span className="truncate">{g.label}</span>
-                <span className="text-[10px] text-muted-foreground">{g.slug}</span>
+                <span className="text-[11px] text-muted-foreground">{g.slug}</span>
               </button>
             ))}
         </div>

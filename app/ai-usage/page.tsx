@@ -287,12 +287,12 @@ export default async function AiUsagePage({
                   <td className="px-4 py-2 text-right tabular-nums">{formatLatency(row.latencyMs)}</td>
                   <td className="px-4 py-2">
                     {row.status === "success" ? (
-                      <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                      <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
                         ok
                       </span>
                     ) : (
                       <span
-                        className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:text-rose-300"
+                        className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700 dark:text-rose-300"
                         title={row.errorMessage ?? undefined}
                       >
                         erro

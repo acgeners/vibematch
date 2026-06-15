@@ -164,7 +164,7 @@ export function WorkFilters({}: WorkFiltersProps) {
           </div>
           <h2 className="text-sm font-semibold">Filtros</h2>
           {activeChips.length > 0 && (
-            <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
               {activeChips.length}
             </span>
           )}
@@ -198,7 +198,7 @@ export function WorkFilters({}: WorkFiltersProps) {
               key={chip.key}
               type="button"
               onClick={chip.onRemove}
-              className="group inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+              className="group inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
             >
               <span>{chip.label}</span>
               <X className="h-2.5 w-2.5 opacity-60 transition-opacity group-hover:opacity-100" />
@@ -377,7 +377,7 @@ function DraftRangeSlider({
         <div className="flex shrink-0 items-center gap-1">
           <span
             className={cn(
-              "rounded-full px-1.5 py-0 text-[10px] font-semibold tabular-nums",
+              "rounded-full px-1.5 py-0 text-[11px] font-semibold tabular-nums",
               isActive ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground"
             )}
           >

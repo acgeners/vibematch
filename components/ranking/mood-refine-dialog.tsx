@@ -134,7 +134,7 @@ export function MoodRefineDialog({
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Atributos
               </p>
-              <span className="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <Minus className="h-2.5 w-2.5 text-red-500" />
                 evitar
                 <span className="inline-flex items-end gap-px" aria-hidden>

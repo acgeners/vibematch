@@ -314,7 +314,7 @@ export function WorkHeatmapView({
   return (
     <TooltipProvider delayDuration={200}>
       <div className="rounded-lg border border-border/70 bg-card/80 shadow-sm">
-        <p className="border-b bg-muted/40 px-3 py-1.5 text-[10px] text-muted-foreground">
+        <p className="border-b bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
           Heatmap ordena apenas as obras visíveis nesta página · use <span className="font-medium text-foreground">Colunas</span> para escolher as notas.
         </p>
         <table

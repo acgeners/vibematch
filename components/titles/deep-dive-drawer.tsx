@@ -165,7 +165,7 @@ export function DeepDiveDrawer({
 
         {state === "result" && current && (
           <div className="flex items-center justify-between gap-2 border-t bg-card/30 px-4 py-3">
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground">
               {current.input_tokens != null && current.output_tokens != null ? (
                 <>
                   in {current.input_tokens.toLocaleString()} · out{" "}

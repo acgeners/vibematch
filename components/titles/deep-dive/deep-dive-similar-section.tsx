@@ -89,7 +89,7 @@ export function DeepDiveSimilarSection({ items }: DeepDiveSimilarSectionProps) {
 
               <Badge
                 variant="outline"
-                className={cn("w-fit text-[10px] font-normal", signalBadgeClasses(item.alignment_signal))}
+                className={cn("w-fit text-[11px] font-normal", signalBadgeClasses(item.alignment_signal))}
               >
                 {SIGNAL_LABEL[item.alignment_signal]}
               </Badge>
