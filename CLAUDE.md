@@ -116,7 +116,7 @@ Post-processing applied to every evaluation (in `service.ts`):
 - `enforceNeutralCoupleDynamicsWhenNoRomance`: raises `couple_dynamics` to 5.0 when romance ≤ 3 and couple_dynamics < 5
 - `enforceAuditableReviewUsage`: **throws and retries** if reviews were passed but the model didn't cite review IDs (`R1`, `R2`…) both in `review_usage` and in justifications
 
-The model is `claude-sonnet-4-6`, prompt version `v16`, up to 2 attempts (second attempt uses temperature 0 and 4500 max tokens). Opus 4.7 is supported as override but doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
+The model is `claude-sonnet-4-6`, prompt version `v19` (toggled by `CONCISE_OUTPUT` in `service.ts`: `v19` concise output / `v18` verbose — flipping it falls back to the old caches), up to 2 attempts (4500 max tokens on **both** attempts; temperature 0.2 then 0). Opus 4.7 and Haiku 4.5 are supported as per-evaluation overrides (the A/B "Reavaliar com…" buttons); Opus 4.7 doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
 
 ## External data sources
 

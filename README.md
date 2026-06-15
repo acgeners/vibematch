@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SatorIA
 
-## Getting Started
+> Seu catálogo de manhwas/mangás com uma IA que aprende o seu gosto e prevê o que você vai amar ler.
 
-First, run the development server:
+Aplicação Next.js que cataloga obras, busca metadados em múltiplas fontes externas,
+avalia cada obra por critérios via Claude e prevê a nota que **você** daria (a "Nota Prevista"),
+alimentando ranking e recomendações personalizadas.
+
+## Stack
+
+- **Next.js 16** (App Router + Turbopack), React 19, TypeScript, Tailwind 4, Radix UI
+- **Supabase** (Postgres) — todo acesso é server-only via service role (`createAdminClient()`); RLS ligado sem políticas permissivas. Não há camada de auth ainda (multi-user em preparação).
+- **Claude** (`@anthropic-ai/sdk`) — avaliação por critérios + perfil de gosto + chat de recomendação, com cache L1/L2 e prompt caching.
+- **Fontes externas** — AniList, MangaUpdates, ComicK, Kitsu, MyAnimeList, MangaDex, AnimePlanet e Comix (este via FlareSolverr, por causa do Cloudflare).
+- **Vitest** — testes unitários do pipeline de notas (`tests/unit/calculations/`).
+
+## Rodando localmente
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # preencha as chaves (Supabase + Anthropic)
+npm run dev                  # http://localhost:3001  (porta 3001, não 3000)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+As variáveis necessárias estão em [`.env.example`](.env.example) — destaque para
+`SUPABASE_SERVICE_ROLE_KEY` e `ANTHROPIC_API_KEY`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Comandos
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run dev             # dev server em http://localhost:3001
+npm run build           # build de produção
+npm run test            # vitest run (todos os testes)
+npm run test:watch      # vitest em watch
+npm run lint            # eslint
+npm run sync-constants  # regenera os arquivos de constantes a partir do Supabase (requer SUPABASE_SERVICE_ROLE_KEY)
+npm run resolve-comix-hids  # resolve os hids do Comix (usa Chrome/puppeteer-core)
+```
 
-## Learn More
+> `sync-constants` **sobrescreve** 7 arquivos gerados — nunca edite à mão os listados em CLAUDE.md.
 
-To learn more about Next.js, take a look at the following resources:
+## Estrutura & arquitetura
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+A referência viva de arquitetura, pipeline de notas, fluxos de avaliação IA e fontes
+externas está em [CLAUDE.md](CLAUDE.md). O roadmap e o estado de implementação estão
+em [PLANO.md](PLANO.md). O guia de deploy (Fly.io) está em [DEPLOY-FLY.md](DEPLOY-FLY.md).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+app/          rotas (server components por padrão)
+components/   componentes React ("use client" nas folhas interativas)
+server/       actions ("use server") + queries (leitura server-only)
+lib/          ai-evaluation, ai-recommendation, calculations, external, ml, supabase…
+supabase/     histórico de migrations SQL
+```

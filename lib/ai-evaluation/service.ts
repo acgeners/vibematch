@@ -39,7 +39,7 @@ export interface AiEvaluationRequest {
   /** Classificações de conteúdo das fontes externas aceitas (MangaDex/ComicK): "suggestive" | "erotica" | "pornographic". Elevam o piso mínimo de adult_content. */
   contentRatings?: string[]
   promptVersion?: string
-  /** Override do modelo Claude (ex.: "claude-sonnet-4-6"). Default: claude-haiku-4-5. */
+  /** Override do modelo Claude (ex.: "claude-opus-4-7"). Default: a constante `MODEL` (claude-sonnet-4-6). */
   model?: string
   /**
    * URL pública da capa primary. Quando presente, enviada como image content
