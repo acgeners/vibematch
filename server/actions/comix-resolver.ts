@@ -209,12 +209,20 @@ async function runResolverScript(extraArgs: string[]): Promise<number> {
 
 /**
  * Após o hid estar resolvido, busca o detalhe do Comix (via FlareSolverr — vale em
- * prod, é só o detalhe-por-hid) e grava o rating/votos em `platform_ratings`. A
- * média bayesiana (`platform_avg`) é recalculada do `platform_ratings` em todo
- * recalc e NÃO filtra por fonte, então o Comix passa a pesar na nota. Retorna true
- * se gravou. No-op se não há hid ou se o rating está fora de 0–10.
+ * prod, é só o detalhe-por-hid) e grava:
+ *  - **rating/votos** em `platform_ratings` (a média bayesiana `platform_avg` é
+ *    recalculada do `platform_ratings` em todo recalc e NÃO filtra por fonte, então o
+ *    Comix passa a pesar na nota);
+ *  - **sinopse** em `work_synopses` (fonte `comix`) e **capa** em `work_covers` (fonte
+ *    `comix`) — espelhando o que a colagem manual traz, mas de forma NÃO-DESTRUTIVA:
+ *    só adiciona se ainda não houver linha da fonte `comix`, sempre como secundária
+ *    (`is_primary=false`) no fim da lista; nunca sobrescreve o que o usuário escolheu.
+ *    A capa só entra se o host do Comix não estiver bloqueado no momento (mesma regra
+ *    do `validateComixHid`).
+ * Retorna `true` quando o **rating** mudou (→ o caller recalcula a nota). Sinopse/capa
+ * são efeitos colaterais de display e não exigem recalc. No-op se não há hid/detalhe.
  */
-async function enrichComixRatingForWork(workId: string): Promise<boolean> {
+async function enrichComixDataForWork(workId: string): Promise<boolean> {
   const supabase = createAdminClient()
   const { data } = await supabase
     .from("work_external_ids")
@@ -226,17 +234,56 @@ async function enrichComixRatingForWork(workId: string): Promise<boolean> {
   const hid = data?.external_id
   if (!hid) return false
   const detail = await fetchComixById(hid)
-  const rating = detail?.rating
-  if (rating == null || rating < 0 || rating > 10) return false
-  const { error } = await supabase.from("platform_ratings").upsert(
-    { work_id: workId, platform: "comix", rating, vote_count: detail?.votes ?? 0 },
-    { onConflict: "work_id,platform" },
-  )
-  if (error) {
-    console.error("[enrichComixRatingForWork] upsert falhou:", error.message)
-    return false
+  if (!detail) return false
+
+  let ratingChanged = false
+
+  // 1. Rating/votos → platform_ratings (alimenta a bayesiana).
+  const rating = detail.rating
+  if (rating != null && rating >= 0 && rating <= 10) {
+    const { error } = await supabase.from("platform_ratings").upsert(
+      { work_id: workId, platform: "comix", rating, vote_count: detail.votes ?? 0 },
+      { onConflict: "work_id,platform" },
+    )
+    if (error) console.error("[enrichComixDataForWork] rating upsert falhou:", error.message)
+    else ratingChanged = true
   }
-  return true
+
+  // 2. Sinopse do Comix → work_synopses (não-destrutivo: só se ainda não houver fonte comix).
+  const synopsis = detail.synopsis?.trim()
+  if (synopsis) {
+    const { data: synRows } = await supabase
+      .from("work_synopses")
+      .select("source, position")
+      .eq("work_id", workId)
+    const hasComix = (synRows ?? []).some((r) => r.source === "comix")
+    if (!hasComix) {
+      const nextPos = Math.max(-1, ...(synRows ?? []).map((r) => r.position ?? 0)) + 1
+      const { error } = await supabase
+        .from("work_synopses")
+        .insert({ work_id: workId, source: "comix", text: synopsis, is_primary: false, position: nextPos })
+      if (error) console.error("[enrichComixDataForWork] synopsis insert falhou:", error.message)
+    }
+  }
+
+  // 3. Capa do Comix → work_covers (mesma regra; só se a capa não estiver bloqueada).
+  const coverUrl = detail.coverUrl && !isBlockedCoverUrl(detail.coverUrl) ? detail.coverUrl : null
+  if (coverUrl) {
+    const { data: coverRows } = await supabase
+      .from("work_covers")
+      .select("source, position")
+      .eq("work_id", workId)
+    const hasComix = (coverRows ?? []).some((r) => r.source === "comix")
+    if (!hasComix) {
+      const nextPos = Math.max(-1, ...(coverRows ?? []).map((r) => r.position ?? 0)) + 1
+      const { error } = await supabase
+        .from("work_covers")
+        .insert({ work_id: workId, source: "comix", url: coverUrl, is_primary: false, position: nextPos })
+      if (error) console.error("[enrichComixDataForWork] cover insert falhou:", error.message)
+    }
+  }
+
+  return ratingChanged
 }
 
 export async function resolveComixHidForWork(workId: string): Promise<void> {
@@ -245,9 +292,10 @@ export async function resolveComixHidForWork(workId: string): Promise<void> {
   try {
     const code = await runResolverScript(["--work", workId])
     if (code !== 0) return
-    // Achou o hid → grava o rating do Comix e recalcula esta obra pra a bayesiana
-    // (e a Nota Prevista) já refletirem a fonte.
-    const wrote = await enrichComixRatingForWork(workId)
+    // Achou o hid → grava rating/sinopse/capa do Comix; recalcula só se o rating mudou
+    // (pra a bayesiana e a Nota Prevista refletirem a fonte). A sinopse/capa entram como
+    // fonte secundária e aparecem no próximo refresh da página (watcher).
+    const wrote = await enrichComixDataForWork(workId)
     if (wrote) {
       const { recalculateWork } = await import("@/server/actions/calculations")
       await recalculateWork(workId)
@@ -268,10 +316,10 @@ export async function resolveComixHidsPending(workIds?: string[]): Promise<void>
   try {
     const code = await runResolverScript([])
     if (code !== 0) return
-    // Enriquece o rating do Comix das obras do lote (as recém-criadas são as que o
-    // mop-up acabou de resolver) e recalcula só as que ganharam rating.
+    // Enriquece rating/sinopse/capa do Comix das obras do lote (as recém-criadas são as
+    // que o mop-up acabou de resolver) e recalcula só as que ganharam rating.
     for (const id of workIds ?? []) {
-      const wrote = await enrichComixRatingForWork(id)
+      const wrote = await enrichComixDataForWork(id)
       if (wrote) {
         const { recalculateWork } = await import("@/server/actions/calculations")
         await recalculateWork(id)
