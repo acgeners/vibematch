@@ -2,9 +2,11 @@ import { unstable_cache } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 export interface TagOption {
+  id: string
   slug: string
   name: string
   tag_group_id: string | null
+  tag_subgroup_id: string | null
   groupName: string
   subGroupName?: string
   subGroupSlug?: string
@@ -15,6 +17,7 @@ export const getAllTags = unstable_cache(
     const supabase = createAdminClient()
     const PAGE = 1000
     const allTags: Array<{
+      id: string
       slug: string
       name: string
       tag_group_id: string | null
@@ -23,13 +26,14 @@ export const getAllTags = unstable_cache(
     for (let offset = 0; ; offset += PAGE) {
       const { data, error } = await supabase
         .from("tags")
-        .select("slug, name, tag_group_id, tag_subgroup_id")
+        .select("id, slug, name, tag_group_id, tag_subgroup_id")
         .order("name")
         .range(offset, offset + PAGE - 1)
       if (error) break
       if (!data || data.length === 0) break
       for (const row of data) {
         allTags.push({
+          id: row.id,
           slug: row.slug,
           name: row.name,
           tag_group_id: row.tag_group_id ?? null,
@@ -55,15 +59,17 @@ export const getAllTags = unstable_cache(
     return allTags.map((tag) => {
       const sub = tag.tag_subgroup_id ? subById.get(tag.tag_subgroup_id) : undefined
       return {
+        id: tag.id,
         slug: tag.slug,
         name: tag.name,
         tag_group_id: tag.tag_group_id,
+        tag_subgroup_id: tag.tag_subgroup_id,
         groupName: tag.tag_group_id ? groupById.get(tag.tag_group_id) ?? "Sem grupo" : "Sem grupo",
         subGroupName: sub?.name,
         subGroupSlug: sub?.slug,
       }
     })
   },
-  ["all-tags-v2"],
+  ["all-tags-v3"],
   { revalidate: 300, tags: ["tags-catalog"] }
 )

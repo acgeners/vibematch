@@ -1,6 +1,7 @@
 import {
   Brain,
   Droplets,
+  Heart,
   Palette,
   Scale,
   SlidersHorizontal,
@@ -9,6 +10,9 @@ import {
 } from "lucide-react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getFilterPresets } from "@/server/queries/filter-presets"
+import { getAllTags } from "@/server/queries/tags"
+import { getTagPreferenceRows } from "@/server/queries/tag-preferences"
+import { TagPreferencesForm } from "@/components/settings/tag-preferences-form"
 import { Header } from "@/components/layout/header"
 import { ScrollToTop } from "@/components/layout/scroll-to-top"
 import { ScoreWeightsForm } from "@/components/settings/score-weights-form"
@@ -53,9 +57,11 @@ async function getPreferencesData() {
 }
 
 export default async function PreferenciasPage() {
-  const [{ weights, config, weightsLastApplied }, savedPresets] = await Promise.all([
+  const [{ weights, config, weightsLastApplied }, savedPresets, allTags, tagPrefRows] = await Promise.all([
     getPreferencesData(),
     getFilterPresets("/ranking"),
+    getAllTags(),
+    getTagPreferenceRows(),
   ])
 
   // Quando "pesos auto" está ativo E houve inferência válida, sobrescrevemos
@@ -92,6 +98,15 @@ export default async function PreferenciasPage() {
           <SavedRankingFilters presets={savedPresets} />
         </div>
       ),
+    },
+    {
+      id: "tag-preferences",
+      title: "Tags que amo / evito",
+      description:
+        "Declare gostos por grupo, subgrupo ou tag. Vira prior do seu perfil (ajusta o ranking) e habilita o filtro de evitadas.",
+      icon: <Heart />,
+      accent: "rose",
+      content: <TagPreferencesForm tags={allTags} initialRows={tagPrefRows} />,
     },
     {
       id: "score-colors",

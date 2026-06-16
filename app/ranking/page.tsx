@@ -5,6 +5,7 @@ import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getLowCoverageWorkIds } from "@/server/queries/calibration-guards"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
+import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { getStatusOptions } from "@/server/queries/status-options"
 import { getFilterPresets } from "@/server/queries/filter-presets"
 import { countStaleAlignmentWorks } from "@/server/queries/recommendations"
@@ -23,7 +24,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import type { FormulaConfig } from "@/types/domain"
 import { unstable_cache } from "next/cache"
 import Link from "next/link"
-import { Heart, RotateCw } from "lucide-react"
+import { Ban, Heart, RotateCw } from "lucide-react"
 
 interface RankingPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -122,14 +123,28 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // SQL; o desempate band-aware fino é client-side.
   // `plan` é buscado junto do bloco de metadados abaixo (Promise.all) pra não
   // pagar um round-trip serial só dele.
-  const [plan, prefs, allGenres, allTags, statusOptions, savedPresets] = await Promise.all([
+  // Filtro opt-in "esconder minhas tags evitadas", em 3 estados:
+  //   off | "strong" (só as evitadas com ênfase 2×) | "all" (todas as evitadas).
+  // Só busca as declarações quando ligado (custo zero quando off). O efeito SUAVE
+  // do evito (deprioriza via personal_fit) vale sempre, sem este toggle.
+  const hideMode = str("hide_avoided") // "strong" | "all" | undefined
+  const hideActive = hideMode === "strong" || hideMode === "all"
+  const [plan, prefs, allGenres, allTags, statusOptions, savedPresets, declaredPrefs] = await Promise.all([
     getCurrentPlan(),
     getPreferences(),
     getAllGenres(),
     getAllTags(),
     getStatusOptions(),
     getFilterPresets("/ranking"),
+    hideActive ? getDeclaredTagPreferences() : Promise.resolve([]),
   ])
+  const avoided = declaredPrefs.filter((p) => p.stance === "avoid")
+  const avoidedSlugs =
+    hideMode === "all"
+      ? avoided.map((p) => p.slug)
+      : hideMode === "strong"
+        ? avoided.filter((p) => p.weight >= 2).map((p) => p.slug)
+        : []
   const isPaid = planAllows(plan, "smart_shortlist")
   const defaultSort = isPaid
     ? "expected_score:desc,alignment_score:desc"
@@ -182,7 +197,11 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     genreExclude: multi("genres_exclude"),
     tagSlugsAll: multi("tags_all"),
     tagSlugsAny: multi("tags_any") ?? multi("tags"),
-    tagSlugsExclude: multi("tags_exclude"),
+    tagSlugsExclude: (() => {
+      const fromUrl = multi("tags_exclude") ?? []
+      const merged = [...new Set([...fromUrl, ...avoidedSlugs])]
+      return merged.length ? merged : undefined
+    })(),
     synopsisQualities: multi("synopsis_q"),
     predictedSynopsisQualities: multi("synopsis_pred"),
     minTotalChapters: num("min_chapters"),
@@ -226,6 +245,19 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   const queryString = queryParams.toString()
   const favoritesUrl = `/favorites${queryString ? `?${queryString}` : ""}`
 
+  // Ciclo do filtro "esconder evitadas": off → 2× → todas → off (preserva params).
+  const nextHideMode = hideMode === "strong" ? "all" : hideMode === "all" ? null : "strong"
+  const hideAvoidedParams = new URLSearchParams(queryString)
+  if (nextHideMode) hideAvoidedParams.set("hide_avoided", nextHideMode)
+  else hideAvoidedParams.delete("hide_avoided")
+  const hideAvoidedToggleUrl = `/ranking${hideAvoidedParams.toString() ? `?${hideAvoidedParams}` : ""}`
+  const hideAvoidedLabel =
+    hideMode === "strong"
+      ? "Escondendo evitadas 2×"
+      : hideMode === "all"
+        ? "Escondendo todas evitadas"
+        : "Esconder evitadas"
+
   return (
     <div className="space-y-4">
       <RecalcPendingControl pending={recalcState.pending} variant="banner" />
@@ -255,6 +287,24 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
                 </Link>
               </Button>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              asChild
+              className={
+                hideActive
+                  ? "h-9 gap-1.5 border-rose-500/50 text-rose-600 dark:text-rose-400"
+                  : "h-9 gap-1.5"
+              }
+            >
+              <Link
+                href={hideAvoidedToggleUrl}
+                title="Esconde obras com tags que você declarou evitar (em /preferencias). Clique pra alternar: só 2× → todas → desligado."
+              >
+                <Ban className="h-4 w-4" />
+                <span>{hideAvoidedLabel}</span>
+              </Link>
+            </Button>
             <SurpriseMeButton entries={entries} />
             <ChatRecommendButton isPaid={isPaid} />
             <RecommendWithAiButton source="ranking" isPaid={isPaid} />

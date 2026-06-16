@@ -39,7 +39,14 @@ import {
   weightedTagOverlap,
 } from "@/lib/ai-recommendation/personal-fit"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
-import { buildTasteProfileHeuristic } from "@/lib/ai-recommendation/taste-profile-heuristic"
+import {
+  buildTasteProfileHeuristic,
+  buildRatedTagCounts,
+  mergeDeclaredTagPreferences,
+} from "@/lib/ai-recommendation/taste-profile-heuristic"
+import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
+import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
+import type { TasteProfilePayload } from "@/lib/ai-recommendation/types"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import {
   CRITERION_SLUGS,
@@ -310,6 +317,8 @@ function computeHonestExpectedCvMae(
   blendWeight = 1,
   k = 5,
   seed = 42,
+  /** Tags declaradas (exógenas) — mescladas no perfil de cada fold sem leak. */
+  declared: DeclaredTagPref[] = [],
 ): number | null {
   const n = trainSet.length
   if (n < 30) return null
@@ -362,6 +371,9 @@ function computeHonestExpectedCvMae(
     }
 
     // Perfil de gosto do fold: construído só do treino → sem leak na held-out.
+    // As tags declaradas são EXÓGENAS (ditas pelo usuário, constantes entre folds,
+    // não derivam de rótulo held-out) → incluí-las não vaza e torna o MAE honesto
+    // refletir a feature que existe em produção.
     const profile = buildTasteProfileHeuristic(
       trainWorks.map((w) => ({
         id: w.id,
@@ -373,6 +385,7 @@ function computeHonestExpectedCvMae(
         categoryScores: w.categoryScores,
         tags: w.tags,
       })),
+      declared,
     )
 
     const buildInput = (w: WorkComputed): ExpectedScoreInput => ({
@@ -440,7 +453,7 @@ export async function recalculateAll() {
   const plan = await getCurrentPlan(supabase)
   const includeQuality = L0_QUALITY_ENABLED && planAllows(plan, "l0_quality_eval")
 
-  const [worksRes, weightsRes, configRes, tasteProfile] = await Promise.all([
+  const [worksRes, weightsRes, configRes, tasteProfile, declaredTagPrefs] = await Promise.all([
     supabase
       .from("works")
       .select(
@@ -460,6 +473,7 @@ export async function recalculateAll() {
     supabase.from("score_weights").select("*").eq("is_active", true),
     supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
     loadCurrentTasteProfile(),
+    getDeclaredTagPreferences(supabase),
   ])
 
   if (worksRes.error) throw new Error(worksRes.error.message)
@@ -630,16 +644,39 @@ export async function recalculateAll() {
     })
   }
 
-  // ---------- 2b) Features derivadas do TasteProfile pro Ridge ----------
-  // Pré-computa loved/avoided tag overlap e criterion_fit a partir do perfil
-  // atual. Quando o perfil é stub ou inexistente, todas ficam null e o
-  // MedianImputer lida no pipeline. Mesmo profile usado em personal_fit (5b).
-  const profileForFeatures = tasteProfile && !tasteProfile.is_stub ? tasteProfile.profile : null
-  if (profileForFeatures) {
+  // ---------- 2b) Perfil efetivo: persistido ⊕ tags declaradas ----------
+  // O perfil persistido (heurístico/LLM) é mesclado com as preferências de tag
+  // DECLARADAS (amo/evito) via prior com encolhimento (λ=n/(n+k)). Aplicado
+  // AQUI (não na geração do perfil) pra as declarações valerem já no próximo
+  // recalc, mesmo com o perfil persistido defasado. Idempotente. Item A.
+  const ratedTagCounts = buildRatedTagCounts(works.filter((w) => w.userScore != null))
+  const baseProfile: TasteProfilePayload = tasteProfile && !tasteProfile.is_stub
+    ? tasteProfile.profile
+    : {
+        loved_tags: [],
+        avoided_tags: [],
+        loved_themes: [],
+        avoided_themes: [],
+        criterion_preferences: {},
+        narrative_patterns: [],
+        summary: "",
+      }
+  const mergedProfile = mergeDeclaredTagPreferences(baseProfile, declaredTagPrefs, ratedTagCounts)
+  // Sem sinal (loved/avoided/prefs vazios) → trata como null (comportamento legado).
+  const effectiveProfile: TasteProfilePayload | null =
+    mergedProfile.loved_tags.length ||
+    mergedProfile.avoided_tags.length ||
+    Object.keys(mergedProfile.criterion_preferences).length
+      ? mergedProfile
+      : null
+
+  // Features derivadas do perfil efetivo pro Ridge. Perfil sem sinal → ficam null
+  // e o MedianImputer lida no pipeline. Mesmo perfil usado em personal_fit (5b).
+  if (effectiveProfile) {
     for (const w of works) {
-      w.lovedTagOverlap = weightedTagOverlap(w.tags, profileForFeatures.loved_tags)
-      w.avoidedTagOverlap = weightedTagOverlap(w.tags, profileForFeatures.avoided_tags)
-      w.criterionFitScore = criterionAlignment(w.categoryScoresCalibrated, profileForFeatures.criterion_preferences)
+      w.lovedTagOverlap = weightedTagOverlap(w.tags, effectiveProfile.loved_tags)
+      w.avoidedTagOverlap = weightedTagOverlap(w.tags, effectiveProfile.avoided_tags)
+      w.criterionFitScore = criterionAlignment(w.categoryScoresCalibrated, effectiveProfile.criterion_preferences)
     }
   }
 
@@ -792,10 +829,10 @@ export async function recalculateAll() {
 
   // ---------- 5) Personal fit (determinístico, a partir do TasteProfile) ----------
   // Independente da Nota Prevista — alinhamento de gosto via tags + critérios.
-  const profilePayload = tasteProfile && !tasteProfile.is_stub ? tasteProfile.profile : null
-  if (profilePayload) {
+  // Usa o MESMO perfil efetivo das features (persistido ⊕ tags declaradas).
+  if (effectiveProfile) {
     for (const w of works) {
-      w.personalFit = computePersonalFit(profilePayload, {
+      w.personalFit = computePersonalFit(effectiveProfile, {
         tags: w.tags,
         categoryScores: w.categoryScoresCalibrated,
       })
@@ -885,6 +922,9 @@ export async function recalculateAll() {
         config.score_weights_auto ?? false,
         includeQuality,
         calcBlendWeight,
+        5,
+        42,
+        declaredTagPrefs,
       )
     } catch (err) {
       console.warn(

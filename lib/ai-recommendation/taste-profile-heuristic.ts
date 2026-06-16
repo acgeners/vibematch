@@ -7,6 +7,7 @@ import type {
   ProfileTag,
   ProfileCriterionPreference,
 } from "@/lib/ai-recommendation/types"
+import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
 
 // ============================================================
 // TasteProfile heurístico (plano Free, zero LLM)
@@ -22,6 +23,20 @@ const MAX_LOVED = 30
 const MAX_AVOIDED = 15
 const TOP_SCORE = 8
 const BOTTOM_SCORE = 5
+
+// ---------- Prior declarado com encolhimento (shrinkage) ----------
+// As tags declaradas (amo/evito) entram como PRIOR e são misturadas com o
+// sinal APRENDIDO (point-biserial) pesando pela evidência:
+//   λ(n) = n / (n + k)   força_final = λ·aprendido + (1−λ)·declarado
+// n = nº de obras avaliadas com a tag. k = "pseudo-contagem" (quanto a
+// declaração vale em obras). n=0 → λ=0 → prior puro (cold-start); muito
+// dado → λ→1 → o dado domina ("amo é sobreponível pelo dado").
+/** Força de uma declaração na escala 0–1 (multiplicada por weight 1–2). */
+const DECLARED_BASE = 0.5
+/** k do "amo": declaração ~= 5 obras de evidência. */
+const K_LOVE = 5
+/** k do "evito": MAIOR → mais teimoso, resiste mais ao dado contrário (evito é mais confiável). */
+const K_AVOID = 8
 
 function quantile(sorted: number[], q: number): number {
   if (sorted.length === 0) return 0
@@ -54,7 +69,88 @@ function pointBiserial(present: boolean[], scores: number[]): number {
   return ((m1 - m0) / sd) * Math.sqrt(p * (1 - p))
 }
 
-export function buildTasteProfileHeuristic(works: RatedWorkInput[]): TasteProfilePayload {
+/** Chave de identidade da tag pro merge — nome normalizado (robusto à
+ *  representação do grupo, que varia entre id e nome conforme o caller). */
+function tagNameKey(name: string): string {
+  return name.toLowerCase().trim()
+}
+
+/**
+ * Conta, entre as obras AVALIADAS, em quantas cada tag aparece (1× por obra).
+ * É o `n` (evidência) do shrinkage. Exportado pra o recalc reusar quando aplica
+ * o merge sobre o perfil persistido (onde não chama buildTasteProfileHeuristic).
+ */
+export function buildRatedTagCounts(
+  ratedWorks: Array<{ tags: Array<{ name: string }> }>,
+): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const w of ratedWorks) {
+    const seen = new Set<string>()
+    for (const t of w.tags) {
+      const k = tagNameKey(t.name)
+      if (seen.has(k)) continue
+      seen.add(k)
+      counts.set(k, (counts.get(k) ?? 0) + 1)
+    }
+  }
+  return counts
+}
+
+/**
+ * Mistura as preferências DECLARADAS no perfil já construído, via shrinkage.
+ * Opera sobre qualquer TasteProfilePayload finalizado (heurístico ou LLM), então
+ * roda tanto na geração do perfil quanto, defensivamente, no recalc (idempotente:
+ * re-mergear o mesmo declarado dá o mesmo resultado).
+ *
+ * Tags declaradas NÃO são truncadas pelos caps (a escolha explícita do usuário
+ * nunca some). Onde declarado e aprendido discordam, λ(n) decide quem manda.
+ */
+export function mergeDeclaredTagPreferences(
+  profile: TasteProfilePayload,
+  declared: DeclaredTagPref[],
+  ratedTagCounts: Map<string, number>,
+): TasteProfilePayload {
+  if (declared.length === 0) return profile
+
+  // Sinal aprendido atual, com sinal: amada = +strength, evitada = −strength.
+  const learnedSigned = new Map<string, number>()
+  for (const t of profile.loved_tags) learnedSigned.set(tagNameKey(t.name), clamp01(t.strength))
+  for (const t of profile.avoided_tags) learnedSigned.set(tagNameKey(t.name), -clamp01(t.strength))
+
+  // Blend declarado⊕aprendido por tag.
+  const declaredKeys = new Set<string>()
+  const blendedLoved: ProfileTag[] = []
+  const blendedAvoided: ProfileTag[] = []
+  for (const d of declared) {
+    const key = tagNameKey(d.name)
+    if (declaredKeys.has(key)) continue
+    declaredKeys.add(key)
+    const n = ratedTagCounts.get(key) ?? 0
+    const k = d.stance === "avoid" ? K_AVOID : K_LOVE
+    const lambda = n / (n + k)
+    const learned = learnedSigned.get(key) ?? 0
+    const declaredSigned = (d.stance === "love" ? 1 : -1) * clamp01(DECLARED_BASE * d.weight)
+    const blended = lambda * learned + (1 - lambda) * declaredSigned
+    if (blended > 1e-6) blendedLoved.push({ name: d.name, group: d.group, strength: clamp01(blended) })
+    else if (blended < -1e-6) blendedAvoided.push({ name: d.name, group: d.group, strength: clamp01(-blended) })
+    // blended ≈ 0 → dado e declaração se cancelam → tag fica neutra (dropada).
+  }
+
+  // Mantém o aprendido que NÃO foi declarado; declaradas entram pinadas na frente.
+  const keepLoved = profile.loved_tags.filter((t) => !declaredKeys.has(tagNameKey(t.name)))
+  const keepAvoided = profile.avoided_tags.filter((t) => !declaredKeys.has(tagNameKey(t.name)))
+
+  return {
+    ...profile,
+    loved_tags: [...blendedLoved, ...keepLoved].sort((a, b) => b.strength - a.strength),
+    avoided_tags: [...blendedAvoided, ...keepAvoided].sort((a, b) => b.strength - a.strength),
+  }
+}
+
+export function buildTasteProfileHeuristic(
+  works: RatedWorkInput[],
+  declared: DeclaredTagPref[] = [],
+): TasteProfilePayload {
   const rated = works.filter((w) => w.userScore != null) as Array<RatedWorkInput & { userScore: number }>
   const scores = rated.map((w) => w.userScore)
 
@@ -117,9 +213,26 @@ export function buildTasteProfileHeuristic(works: RatedWorkInput[]): TasteProfil
     criterion_preferences[slug as CriterionSlug] = { ideal_min, ideal_max, weight }
   }
 
+  // ---------- prior declarado com encolhimento ----------
+  // Mistura as tags amo/evito declaradas (se houver) ANTES do summary, pra ele
+  // já refletir o gosto efetivo. Sem declaração, retorna o perfil intacto.
+  const merged = mergeDeclaredTagPreferences(
+    {
+      loved_tags,
+      avoided_tags,
+      loved_themes: [],
+      avoided_themes: [],
+      criterion_preferences,
+      narrative_patterns: [],
+      summary: "",
+    },
+    declared,
+    buildRatedTagCounts(rated),
+  )
+
   // ---------- summary template (sem prosa LLM) ----------
-  const topLoved = loved_tags.slice(0, 3).map((t) => t.name)
-  const topAvoided = avoided_tags.slice(0, 2).map((t) => t.name)
+  const topLoved = merged.loved_tags.slice(0, 3).map((t) => t.name)
+  const topAvoided = merged.avoided_tags.slice(0, 2).map((t) => t.name)
   const strongCrit = Object.entries(criterion_preferences)
     .sort((a, b) => (b[1]?.weight ?? 0) - (a[1]?.weight ?? 0))
     .slice(0, 3)
@@ -131,13 +244,5 @@ export function buildTasteProfileHeuristic(works: RatedWorkInput[]): TasteProfil
   if (strongCrit.length) parts.push(`Atributos que mais separam suas notas: ${strongCrit.join(", ")}.`)
   parts.push("Análise narrativa rica disponível no plano Pago.")
 
-  return {
-    loved_tags,
-    avoided_tags,
-    loved_themes: [],
-    avoided_themes: [],
-    criterion_preferences,
-    narrative_patterns: [],
-    summary: parts.join(" "),
-  }
+  return { ...merged, summary: parts.join(" ") }
 }

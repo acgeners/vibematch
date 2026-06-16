@@ -9,8 +9,10 @@ import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { SynopsisQualitySuggestion } from "@/components/titles/synopsis-quality-suggestion"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
+import { TagsExpandAll } from "@/components/titles/tags-expand-all"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug } from "@/server/queries/works"
 import { getAllTags } from "@/server/queries/tags"
+import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import {
   getLatestAiEvaluationAttributes,
   getExistingPostReadingAssessment,
@@ -74,6 +76,7 @@ type DetailTag = {
   key: string
   label: string
   subGroupName?: string
+  stance?: "love" | "avoid"
 }
 
 type WorkTagForDisplay = {
@@ -108,6 +111,15 @@ function getTagGroupLabel(tagGroupId: string | null | undefined) {
   const entry = Object.entries(TAG_GROUP_IDS).find(([, id]) => id === tagGroupId)
   if (!entry) return "Sem grupo"
   return TAG_GROUP_LABELS[entry[0] as TagGroupSlug] ?? entry[0]
+}
+
+/** Cor do badge conforme a stance declarada (amo=verde, evito=vermelho). */
+function tagStanceClass(stance?: "love" | "avoid"): string {
+  if (stance === "love")
+    return "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
+  if (stance === "avoid")
+    return "border-rose-500/50 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 hover:text-rose-800 dark:text-rose-300 dark:hover:text-rose-200"
+  return ""
 }
 
 /**
@@ -186,7 +198,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction, declaredTagPrefs] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -196,11 +208,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getCurrentPlan(configClient),
     getAllTags(),
     getSynopsisPredictionForWork(work.id as string),
+    getDeclaredTagPreferences(configClient),
   ])
   const subGroupBySlug = new Map<string, string>()
   for (const t of allTagsCatalog) {
     if (t.subGroupName) subGroupBySlug.set(t.slug, t.subGroupName)
   }
+  // Stance declarada (amo/evito) por slug de tag — pra colorir os badges.
+  const stanceBySlug = new Map<string, "love" | "avoid">()
+  for (const p of declaredTagPrefs) stanceBySlug.set(p.slug, p.stance)
   const isPaidPlan = planAllows(plan, "deep_dive")
 
   const scoreMap: Record<string, number> = {}
@@ -253,6 +269,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       key: typeof tag === "string" ? tag : tag.id ?? tag.slug ?? label,
       label,
       subGroupName: slug ? subGroupBySlug.get(slug) : undefined,
+      stance: slug ? stanceBySlug.get(slug) : undefined,
     })
     tagGroupMap.set(groupLabel, groupTags)
   }
@@ -1091,44 +1108,52 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           {tags.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
-                <div className="flex items-baseline justify-between gap-3">
+                <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Hash className="h-4.5 w-4.5 text-muted-foreground" />
                     <CardTitle className="text-base font-bold text-foreground">Tags</CardTitle>
                   </div>
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {tags.length} {tags.length === 1 ? "tag" : "tags"} em {tagGroups.length}{" "}
-                    {tagGroups.length === 1 ? "grupo" : "grupos"}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {tags.length} {tags.length === 1 ? "tag" : "tags"} em {tagGroups.length}{" "}
+                      {tagGroups.length === 1 ? "grupo" : "grupos"}
+                    </span>
+                    {tagGroups.some((g) => g.subGroups) && <TagsExpandAll targetId="work-tags-masonry" />}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="pt-0">
-                <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
+                <div id="work-tags-masonry" className="gap-x-6 sm:columns-2 [&>section]:mb-5 [&>section]:break-inside-avoid">
                   {tagGroups.map((group) => (
                     <section key={group.groupName} className="space-y-2">
-                      <div className="flex items-baseline gap-2 border-b border-border/60 pb-1.5">
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-foreground/70">
+                      <div className="flex items-baseline gap-2 border-b-2 border-border/50 pb-1">
+                        <h3 className="text-xs font-bold uppercase tracking-[0.14em] text-foreground">
                           {group.groupName}
                         </h3>
-                        <span className="text-[11px] font-semibold text-muted-foreground">
+                        <span className="text-[11px] font-semibold text-muted-foreground/70">
                           {group.tags.length}
                         </span>
                       </div>
                       {group.subGroups ? (
-                        <div className="space-y-1.5">
+                        <div className="ml-1 space-y-1 border-l border-border/30 pl-2">
                           {group.subGroups.map((sg) => (
-                            <details key={sg.name} className="group rounded-md border border-border/45 bg-background/30">
-                              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground/65">
-                                <ChevronDown className="h-3 w-3 text-muted-foreground transition-transform group-open:rotate-180" />
-                                <span>{sg.name}</span>
-                                <span className="text-[11px] font-normal normal-case text-muted-foreground">{sg.tags.length}</span>
+                            <details key={sg.name} className="group rounded-md bg-muted/20 transition-colors hover:bg-muted/30">
+                              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[13px] font-medium text-muted-foreground">
+                                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform group-open:rotate-180" />
+                                <span className="text-foreground/80">{sg.name}</span>
+                                <span className="text-[11px] text-muted-foreground/60">{sg.tags.length}</span>
                               </summary>
-                              <div className="flex flex-wrap gap-1.5 px-2 pb-2">
+                              <div className="flex flex-wrap gap-1.5 px-2 pb-2 pl-6">
                                 {sg.tags.map((tag) => (
                                   <Badge
                                     key={tag.key}
                                     variant="outline"
-                                    className="rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors hover:bg-accent hover:text-accent-foreground"
+                                    className={cn(
+                                      "rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors",
+                                      tag.stance
+                                        ? tagStanceClass(tag.stance)
+                                        : "hover:bg-accent hover:text-accent-foreground",
+                                    )}
                                   >
                                     {tag.label}
                                   </Badge>
@@ -1143,7 +1168,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                             <Badge
                               key={tag.key}
                               variant="outline"
-                              className="rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors hover:bg-accent hover:text-accent-foreground"
+                              className={cn(
+                                "rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors",
+                                tag.stance
+                                  ? tagStanceClass(tag.stance)
+                                  : "hover:bg-accent hover:text-accent-foreground",
+                              )}
                             >
                               {tag.label}
                             </Badge>

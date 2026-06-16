@@ -20,6 +20,7 @@ import {
 } from "@/lib/work-derived"
 import { recalculateAll } from "./calculations"
 import { markRecalcPending } from "./recalc-queue"
+import { capturePredictionForFirstRating } from "./prediction-ledger"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
@@ -1215,10 +1216,11 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
   const supabase = createAdminClient()
   const { data: existingWork } = await supabase
     .from("works")
-    .select("title")
+    .select("title, user_score")
     .eq("id", id)
     .maybeSingle()
   const previousSlug = existingWork?.title ? titleToSlug(existingWork.title) : null
+  const prevUserScore = (existingWork?.user_score as number | null | undefined) ?? null
   const nextSlug = titleToSlug(data.title)
   let knownGenres: Awaited<ReturnType<typeof filterKnownGenres>>
   try {
@@ -1408,6 +1410,12 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
   // re-rank é manual). No-op se a obra nunca foi rankeada.
   await markWorkAlignmentStale(id)
 
+  // Validação prospectiva: se a obra ganhou a PRIMEIRA nota agora (null → valor),
+  // congela a previsão de-registro (ainda pré-rótulo, pois o recalc é deferido).
+  if (prevUserScore == null && data.user_score != null) {
+    await capturePredictionForFirstRating(id, data.user_score)
+  }
+
   // Editar a obra muda as features do Ridge global → marca a base como recálculo
   // pendente em vez de recalcular na hora. A Nota Prevista atualiza quando o
   // usuário clica "Recalcular agora" ou no auto-recalc (≥1h sem novas edições).
@@ -1509,9 +1517,10 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
 
   const { data: current } = await supabase
     .from("works")
-    .select("personal_status_id, chapters_read, last_read_at")
+    .select("personal_status_id, chapters_read, last_read_at, user_score")
     .eq("id", id)
     .single()
+  const prevUserScore = (current?.user_score as number | null | undefined) ?? null
 
   const currentStatusName = current
     ? getPersonalStatusNameById(current.personal_status_id)
@@ -1560,6 +1569,12 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
     .eq("id", id)
 
   if (error) return { error: { _root: [error.message] } }
+
+  // Validação prospectiva: primeira nota (null → valor) → congela a previsão
+  // de-registro antes do recalc deferido incluir o rótulo.
+  if (prevUserScore == null && data.user_score != null) {
+    await capturePredictionForFirstRating(id, data.user_score)
+  }
 
   await markRecalcPending("updateWorkStatus")
 
