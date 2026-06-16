@@ -26,7 +26,11 @@ import type {
 } from "@/lib/ai-calibration/types"
 import type { ScoreSource } from "@/types/domain"
 
-const AUDIT_CHUNK_SIZE = 40
+// 10 obras/chunk: o modelo emite um objeto audits[] por inconsistência (com
+// justification em PT), e 40 obras estouravam o teto de max_tokens da saída —
+// truncando o tool_use e devolvendo 0 sugestões silenciosamente. Ver guard de
+// stop_reason="max_tokens" em lib/ai-calibration/service.ts.
+const AUDIT_CHUNK_SIZE = 10
 const AUDIT_PARALLEL = 3
 const DEFAULT_AUTO_APPLY_MIN_CONFIDENCE = 0.8
 const DEFAULT_AUTO_APPLY_MAX_DELTA = 1.5

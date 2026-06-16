@@ -7,7 +7,7 @@ import { MaeHistoryChart } from "@/components/settings/calibration/mae-history-c
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
-import { recalculateNow, setStackerEnabled, setScoreWeightsAuto } from "@/server/actions/settings"
+import { recalculateNow, setScoreWeightsAuto } from "@/server/actions/settings"
 import type { CalibrationHistoryEntry } from "@/server/actions/settings"
 import { cn } from "@/lib/utils"
 import type { FormulaConfig } from "@/types/domain"
@@ -24,18 +24,11 @@ interface CalibrationPanelProps {
     trainSize: number
     /** MAE de "chutar a média" das notas pessoais — piso que o modelo precisa bater. */
     baselineMae: number | null
-    maeCalc: number | null
-    maePredicted: number | null
-    maeFinal: number | null
     /** Fase 1 shadow mode: MAE in-sample do expected_score (L1 Ridge cleaned). */
     maeExpected: number | null
-    rmseCalc: number | null
-    rmsePredicted: number | null
-    rmseFinal: number | null
     pseudoVotesNotaM: number | null
     pseudoVotesBlend: number | null
     worstDiffs: CalibrationDiff[]
-    predictorIsStub: boolean
     /** True quando todos os expected_score são null/stub — predictor L1 ainda não rodou ou treino < 20. */
     expectedPredictorIsStub: boolean
     /** Quantas obras têm expected_score preenchido (denominador do MAE expected). */
@@ -80,7 +73,6 @@ function maeColor(value: number | null | undefined): string {
 
 export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelProps) {
   const [isPending, startTransition] = useTransition()
-  const [isTogglingStacker, startStackerToggle] = useTransition()
   const [isTogglingAutoWeights, startAutoWeightsToggle] = useTransition()
   const [lastRun, setLastRun] = useState<string | null>(null)
   const [showDetails, setShowDetails] = useState(false)
@@ -101,8 +93,7 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
         const result = await recalculateNow()
         const cal = result.calibration
         if (cal) {
-          // Reporta a MESMA métrica do headline (MAE CV da Nota Prevista / L1),
-          // não o cvMAE do preditor Nota.Pr (L2) — que é outro modelo e confunde.
+          // Reporta a MESMA métrica do headline: MAE CV da Nota Prevista (L1).
           setLastRun(
             cal.expectedIsStub
               ? `${result.recalculated} obras recalculadas. ` +
@@ -117,22 +108,6 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Erro ao recalibrar")
-      }
-    })
-  }
-
-  const handleToggleStacker = (next: boolean) => {
-    startStackerToggle(async () => {
-      try {
-        const result = await setStackerEnabled(next)
-        toast.success(
-          `Stacker ${next ? "ativado" : "desativado"}. MAE Final: ${fmt(
-            result.calibration?.maeFinal ?? null,
-            3,
-          )}`,
-        )
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao alternar stacker")
       }
     })
   }
@@ -160,8 +135,6 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
     if (live == null || stored == null) return false
     return Math.abs(live - stored) / Math.max(stored, 0.001) > threshold
   }
-
-  const stacker = config.stacker_coefficients
 
   // Precisão honesta da PREVISÃO (Nota Prevista / L1) — CV interno do RidgeCV.
   // É o número que importa pros 2 objetivos: prediz obras NÃO-LIDAS sem usar
@@ -203,7 +176,7 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
                 </p>
               </div>
               <p className="text-xs text-muted-foreground">
-                MAE CV da Nota Prevista · Treino: {stacker?.trainSize ?? snapshot.trainSize} / {snapshot.totalWorks} obras
+                MAE CV da Nota Prevista · Treino: {snapshot.trainSize} / {snapshot.totalWorks} obras
               </p>
               {baselineMae != null && (
                 <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -275,7 +248,7 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
                   text="Quantos votos uma obra precisa pra a opinião da plataforma valer realmente. Ex.: 1600 → uma obra precisa de ~1600 votos pra a média global ter peso 50% contra sua nota."
                 />
               </span>
-              {snapshot.predictorIsStub && (
+              {snapshot.expectedPredictorIsStub && (
                 <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-500">
                   Modelo em fallback (precisa de ≥ 20 títulos com nota pessoal)
                 </span>
@@ -309,31 +282,6 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
                     className={cn(
                       "inline-block size-4 transform rounded-full bg-white transition-transform",
                       config.score_weights_auto ? "translate-x-4" : "translate-x-0.5",
-                    )}
-                  />
-                </button>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <span className="text-muted-foreground">
-                  Stacker: <span className="font-medium text-foreground">{config.stacker_enabled ? "ativo" : "desativado"}</span>
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={config.stacker_enabled}
-                  disabled={isTogglingStacker || config.stacker_coefficients == null}
-                  onClick={() => handleToggleStacker(!config.stacker_enabled)}
-                  className={cn(
-                    "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
-                    config.stacker_enabled ? "bg-emerald-500" : "bg-muted",
-                    (isTogglingStacker || config.stacker_coefficients == null) && "opacity-50 cursor-not-allowed",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "inline-block size-4 transform rounded-full bg-white transition-transform",
-                      config.stacker_enabled ? "translate-x-4" : "translate-x-0.5",
                     )}
                   />
                 </button>
@@ -489,7 +437,7 @@ function InfoTooltip({ text, label }: { text: string; label?: string }) {
 // Grupos semânticos pra agregar a importância das features da Nota Prevista.
 // Como as features são padronizadas antes do fit, |coef| mede importância
 // relativa direta. A "fatia" de cada grupo é a soma dos |coef| dividida pelo
-// total — uma estimativa de onde o sinal do Nota.Pr vem.
+// total — uma estimativa de onde o sinal da Nota Prevista vem.
 const RIDGE_FEATURE_GROUPS: Array<{
   key: string
   label: string

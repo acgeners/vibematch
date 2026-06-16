@@ -127,8 +127,12 @@ export async function loadWorkReviewsAsSourced(workId: string): Promise<SourcedR
 type AdminClient = ReturnType<typeof createAdminClient>
 
 /**
- * Gera/atualiza o resumo IA das reviews da obra. Só roda quando o conjunto de
- * reviews mudou (compara sha256) ou ainda não há resumo. Best-effort.
+ * Gera/atualiza o resumo IA das reviews da obra. Best-effort. Gate de
+ * MATERIALIDADE (Item C, Passe 1): re-resumir custa Haiku, então só roda quando
+ *   - não há resumo (cold), OU
+ *   - o conjunto mudou (sha256) E o crescimento é material (ver
+ *     `isMaterialReviewChange`) — +1 review numa obra com dezenas é desperdício.
+ * Edição pura (mesmo count, texto diferente) NÃO dispara — fica pro botão manual.
  *
  * Os inputs são ordenados por texto antes do hash pra que a ordem não-determinística
  * do SELECT não dispare re-gerações desnecessárias do resumo (que custam LLM).
@@ -140,18 +144,31 @@ async function persistReviewSummary(
 ): Promise<void> {
   if (inputs.length === 0) return
   try {
-    const { consolidateReviews, hashReviewInputs } = await import(
-      "@/lib/ai-recommendation/review-summarizer"
-    )
+    const {
+      consolidateReviews,
+      hashReviewInputs,
+      packReviewSummaryMeta,
+      parseReviewSummaryMeta,
+      isMaterialReviewChange,
+    } = await import("@/lib/ai-recommendation/review-summarizer")
     const ordered = [...inputs].sort((a, b) => a.text.localeCompare(b.text))
     const hash = hashReviewInputs(ordered)
+    const nowN = ordered.length
 
     const { data: existing } = await supabase
       .from("works")
       .select("review_summary, review_summary_inputs_hash")
       .eq("id", workId)
       .maybeSingle()
-    if (existing?.review_summary != null && existing?.review_summary_inputs_hash === hash) return
+
+    if (existing?.review_summary != null) {
+      const { hash: prevHash, n: prevN } = parseReviewSummaryMeta(
+        existing.review_summary_inputs_hash as string | null,
+      )
+      // Conjunto idêntico → nunca roda. Mudou mas imaterial → também não.
+      if (prevHash === hash) return
+      if (!isMaterialReviewChange(prevN, nowN)) return
+    }
 
     const result = await consolidateReviews(ordered, { workId })
     if (!result) return
@@ -161,7 +178,7 @@ async function persistReviewSummary(
       .update({
         review_summary: result.summary,
         review_summary_at: new Date().toISOString(),
-        review_summary_inputs_hash: hash,
+        review_summary_inputs_hash: packReviewSummaryMeta(hash, nowN),
       })
       .eq("id", workId)
   } catch (err) {

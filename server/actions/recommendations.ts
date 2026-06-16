@@ -26,6 +26,7 @@ import {
   type FavoriteCandidate,
 } from "@/server/queries/recommendations"
 import { MAX_CANDIDATES_HARD_LIMIT } from "@/lib/ai-recommendation/limits"
+import { getPreferenceRules } from "@/server/queries/preference-rules"
 import type {
   ChatRecommendationItem,
   RankedCandidate,
@@ -197,6 +198,10 @@ export async function runRecommendationAction(
       }
     }
 
+    // Item B — regras/preferências livres (lidas ao vivo). Disparada aqui pra
+    // sobrepor a latência ao fetch de candidatos; awaited antes do rankFavorites.
+    const preferenceRulesPromise = getPreferenceRules()
+
     // Busca o universo completo primeiro (sem aplicar `n`) pra reportar
     // truncagem na UI; depois slice. Para ranking, getRanking sem topN
     // retorna a base inteira filtrada.
@@ -229,6 +234,7 @@ export async function runRecommendationAction(
       candidates,
       mode: args.mode,
       userContext: args.userContext ?? null,
+      preferenceRules: await preferenceRulesPromise,
     })
 
     const byId = new Map<string, FavoriteCandidate>(candidates.map((c) => [c.id, c]))
@@ -415,7 +421,10 @@ export async function rerankSingleWorkAction(
       }
     }
 
-    const candidate = await getCandidateById(workId)
+    const [candidate, preferenceRules] = await Promise.all([
+      getCandidateById(workId),
+      getPreferenceRules(),
+    ])
     if (!candidate) {
       return { error: "Obra não encontrada (ou arquivada)." }
     }
@@ -425,6 +434,7 @@ export async function rerankSingleWorkAction(
       candidates: [candidate],
       mode: "ranking",
       userContext: null,
+      preferenceRules,
     })
 
     const ranking = result.rankings.find((r) => r.work_id === workId) ?? result.rankings[0]
@@ -506,7 +516,10 @@ export async function rerankStaleBatchAction(
     }
 
     const limit = Math.min(Math.max(n ?? MAX_CANDIDATES_HARD_LIMIT, 1), MAX_CANDIDATES_HARD_LIMIT)
-    const allCandidates = await getStaleAlignmentCandidates(MAX_CANDIDATES_HARD_LIMIT)
+    const [allCandidates, preferenceRules] = await Promise.all([
+      getStaleAlignmentCandidates(MAX_CANDIDATES_HARD_LIMIT),
+      getPreferenceRules(),
+    ])
     if (allCandidates.length === 0) {
       return { error: "Nenhuma obra com IA Rk desatualizado." }
     }
@@ -518,6 +531,7 @@ export async function rerankStaleBatchAction(
       candidates,
       mode: "ranking",
       userContext: null,
+      preferenceRules,
     })
 
     const supabase = createAdminClient()
@@ -610,7 +624,10 @@ export async function rerankWorksBatchAction(
       return { error: "Nenhuma obra para re-rankear." }
     }
 
-    const candidates = await getCandidatesByIds(ids)
+    const [candidates, preferenceRules] = await Promise.all([
+      getCandidatesByIds(ids),
+      getPreferenceRules(),
+    ])
     if (candidates.length === 0) {
       return { error: "Nenhuma obra elegível (arquivada ou inexistente)." }
     }
@@ -620,6 +637,7 @@ export async function rerankWorksBatchAction(
       candidates,
       mode: "ranking",
       userContext: null,
+      preferenceRules,
     })
 
     const supabase = createAdminClient()
@@ -708,9 +726,11 @@ export async function rerankClusterAction(
       }
     }
 
-    const candidates = (await Promise.all(limited.map((id) => getCandidateById(id)))).filter(
-      (c): c is NonNullable<typeof c> => c != null,
-    )
+    const [candidatesRaw, preferenceRules] = await Promise.all([
+      Promise.all(limited.map((id) => getCandidateById(id))),
+      getPreferenceRules(),
+    ])
+    const candidates = candidatesRaw.filter((c): c is NonNullable<typeof c> => c != null)
     if (candidates.length < 2) {
       return { error: "Obras do cluster não encontradas (ou arquivadas)." }
     }
@@ -720,6 +740,7 @@ export async function rerankClusterAction(
       candidates,
       mode: "ranking",
       userContext: null,
+      preferenceRules,
     })
 
     const supabase = createAdminClient()
@@ -806,9 +827,11 @@ export async function rankSpecificWorksForChat(args: {
       }
     }
 
-    const candidates = (await Promise.all(limited.map((id) => getCandidateById(id)))).filter(
-      (c): c is NonNullable<typeof c> => c != null,
-    )
+    const [candidatesRaw, preferenceRules] = await Promise.all([
+      Promise.all(limited.map((id) => getCandidateById(id))),
+      getPreferenceRules(),
+    ])
+    const candidates = candidatesRaw.filter((c): c is NonNullable<typeof c> => c != null)
     if (candidates.length === 0) {
       return { error: "Obras não encontradas (ou arquivadas)." }
     }
@@ -818,6 +841,7 @@ export async function rankSpecificWorksForChat(args: {
       candidates,
       mode: "ranking",
       userContext: args.userContext ?? null,
+      preferenceRules,
     })
 
     const byId = new Map<string, FavoriteCandidate>(candidates.map((c) => [c.id, c]))

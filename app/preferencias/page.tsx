@@ -7,12 +7,16 @@ import {
   SlidersHorizontal,
   Sparkles,
   Trophy,
+  Wand2,
 } from "lucide-react"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getCurrentPlan } from "@/server/queries/current-user"
 import { getFilterPresets } from "@/server/queries/filter-presets"
 import { getAllTags } from "@/server/queries/tags"
 import { getTagPreferenceRows } from "@/server/queries/tag-preferences"
+import { getPreferenceRuleRows } from "@/server/queries/preference-rules"
 import { TagPreferencesForm } from "@/components/settings/tag-preferences-form"
+import { PreferenceRulesForm } from "@/components/settings/preference-rules-form"
 import { Header } from "@/components/layout/header"
 import { ScrollToTop } from "@/components/layout/scroll-to-top"
 import { ScoreWeightsForm } from "@/components/settings/score-weights-form"
@@ -57,12 +61,15 @@ async function getPreferencesData() {
 }
 
 export default async function PreferenciasPage() {
-  const [{ weights, config, weightsLastApplied }, savedPresets, allTags, tagPrefRows] = await Promise.all([
-    getPreferencesData(),
-    getFilterPresets("/ranking"),
-    getAllTags(),
-    getTagPreferenceRows(),
-  ])
+  const [{ weights, config, weightsLastApplied }, savedPresets, allTags, tagPrefRows, ruleRows, plan] =
+    await Promise.all([
+      getPreferencesData(),
+      getFilterPresets("/ranking"),
+      getAllTags(),
+      getTagPreferenceRows(),
+      getPreferenceRuleRows(),
+      getCurrentPlan(),
+    ])
 
   // Quando "pesos auto" está ativo E houve inferência válida, sobrescrevemos
   // os pesos exibidos com os inferidos — refletindo o que de fato vai ser usado
@@ -108,6 +115,20 @@ export default async function PreferenciasPage() {
       accent: "rose",
       content: <TagPreferencesForm tags={allTags} initialRows={tagPrefRows} />,
     },
+    // Item B — só no plano Pago (alimenta exclusivamente a IA sob demanda).
+    ...(plan === "paid"
+      ? [
+          {
+            id: "preference-rules",
+            title: "Regras e preferências livres (IA)",
+            description:
+              "Orientações em texto livre pro consultor IA (Recomendar / Deep Dive / Desempatar / Chat). Não altera o ranking padrão.",
+            icon: <Wand2 />,
+            accent: "violet",
+            content: <PreferenceRulesForm initialRules={ruleRows} />,
+          } satisfies PreferencesSection,
+        ]
+      : []),
     {
       id: "score-colors",
       title: "Cores das notas",

@@ -1,6 +1,7 @@
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { POST_READING_WEIGHT_LABELS, type PostReadingScoreField } from "@/lib/constants/post-reading-criteria"
+import { formatPreferenceRulesBlock, formatReviewDigestBlock } from "./prompts"
 import type {
   CandidateReview,
   DeepDiveAlternativeCandidate,
@@ -43,6 +44,11 @@ PRINCÍPIOS:
    - Quando presente, a **Nota Esperada (L1)** é a predição offline do sistema (qual nota o user provavelmente daria). Use-a como âncora: seu \`match_score\` deve ser coerente com ela ou explicar o porquê da divergência. Se vier marcada como stub/baixa confiança, pese-a menos.
 
 2. **Cite evidência o tempo todo.** Reviews vêm rotuladas R1..R10. Quando uma decisão depende de review, cite o ID na justificativa (ex.: "pacing irregular [R3, R7]"). NÃO INVENTE reviews. Se a obra não tem reviews fornecidas, declare isso em \`review_synthesis.consensus\` ("Sem reviews externas") e mantenha o resto da análise via tags/scores/perfil.
+   - Para obras com POUCAS tags ou \`category_scores\` escassos/rasos, apoie-se MAIS nas reviews (R1..R10) e nas PREFERÊNCIAS/REGRAS do usuário do que nos atributos finos — eles são pouco confiáveis nesses casos. Abaixe o \`confidence\` quando a evidência for magra.
+
+2b. **PREFERÊNCIAS E REGRAS DO USUÁRIO** (quando o bloco estiver presente): são declarações do próprio usuário, em texto livre — CONDICIONAIS ("evito X exceto se Y") e/ou GERAIS ("valorizo arte detalhada mesmo com história simples"). Aplique as condicionais como LÓGICA, não filtro absoluto: só pesam quando a condição E a exceção casarem com tags/category_scores da obra — não rebaixe a obra só porque o antecedente apareceu. As gerais entram como contexto permanente do gosto. Quando uma regra mover o \`match_score\` ou a \`read_recommendation\`, cite-a no \`reasoning\` (ou em \`flags\`).
+   - **INVERSÃO DE SENTIMENTO**: uma review que CONFIRMA um traço que o usuário declarou EVITAR é evidência NEGATIVA pra ele, MESMO que o autor da review AME esse traço. Ex.: "amo que ela é uma vilã cruel" CONFIRMA a crueldade que ele evita → conta CONTRA. NÃO use o consenso positivo nem a nota alta dos reviewers pra descontar a regra — o entusiasmo deles não anula a preferência dele.
+   - **FORÇA POR EVIDÊNCIA**: quando o antecedente de uma regra "evito" é CONFIRMADO por consenso (vários reviews / sinal forte e convergente), limite \`read_recommendation.when\` a no MÁXIMO "guardar" (nunca "agora") e reduza o \`match_score\` proporcionalmente. Quando a evidência é fraca, única ou incerta (1 review, autor admite dúvida), mantenha como \`tags_cons\`/\`flags\` SEM rebaixar o veredito.
 
 3. **\`match_score\` (0–100) é um VEREDITO ABSOLUTO**, não um percentil. Escala:
    - 90+ : match excepcional, várias evidências convergentes
@@ -196,6 +202,12 @@ function formatWorkBundle(work: DeepDiveWorkBundle): string {
     const votes = work.totalVotes ? ` (${work.totalVotes} votos)` : ""
     lines.push(`platform_avg: ${work.platformAvg.toFixed(2)}${votes}`)
   }
+  // Digest estruturado (Passe 2) tem precedência; cai no resumo-texto (Passe 1).
+  if (work.reviewDigest) {
+    lines.push(formatReviewDigestBlock(work.reviewDigest))
+  } else if (work.reviewSummary) {
+    lines.push(`consenso das reviews (resumo IA, preference-agnostic): ${truncate(work.reviewSummary, 700)}`)
+  }
   lines.push(formatReviewsWithIds(work.reviews))
   return lines.join("\n")
 }
@@ -270,10 +282,13 @@ export interface DeepDivePromptBlocks {
 export function buildDeepDiveUserPrompt(
   context: DeepDiveContext,
   userContext: string | null | undefined,
+  preferenceRules?: string[] | null,
 ): DeepDivePromptBlocks {
+  const rulesBlock = formatPreferenceRulesBlock(preferenceRules)
   const profileBlock = [
     `PERFIL DE GOSTO (cacheado, base da avaliação):`,
     JSON.stringify(profileForPrompt(context.profile), null, 2),
+    ...(rulesBlock ? ["", rulesBlock] : []),
     "",
     formatRecentActivity(context.recentActivity),
   ].join("\n")

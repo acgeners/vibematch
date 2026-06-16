@@ -10,7 +10,7 @@ import {
   type CategoryScoreWithSource,
 } from "@/lib/ai-recommendation/calibrated-scores"
 import type { CriterionSlug } from "@/types/domain"
-import type { CandidateReview, CandidateWorkInput, RatedWorkInput, RecommendationMode } from "@/lib/ai-recommendation/types"
+import type { CandidateReview, CandidateWorkInput, RatedWorkInput, RecommendationMode, ReviewDigest } from "@/lib/ai-recommendation/types"
 import { getRanking, type RankingFilters } from "@/server/queries/ranking"
 import { PROMPT_VERSION as SYNOPSIS_PROMPT_VERSION } from "@/lib/ai-evaluation/synopsis-quality-predictor"
 
@@ -51,6 +51,7 @@ const CANDIDATE_WORK_SELECT = `
   user_score,
   is_favorite,
   canonical_synopsis,
+  review_summary,
   category_scores(criterion_slug, score, source),
   calculated_scores(platform_avg, total_votes, expected_score, personal_fit),
   work_tags(tag_id, tags(name, tag_group_id)),
@@ -138,9 +139,13 @@ function pickRecommendationSynopsis(
   return [...blocks].sort((a, b) => b.length - a.length)[0] ?? raw
 }
 
-// Review "crítica" = bucket negativo. Espelha a convenção do merge externo
-// (lib/external/index.ts: low = userRating <= 4) pra ficar consistente.
-const CRITICAL_RATING_MAX = 4
+// Piso de qualidade pra uma review CRUA citável chegar ao consultor. Abaixo
+// disto a review é fraca/obscura demais: texto curto = "amei 10/10" (sem
+// conteúdo), match baixo = risco de ser de outra obra (espelha o espírito dos
+// thresholds de aceitação do merge externo em lib/external/index.ts). Não some
+// do pool — só perde prioridade (ver top-up em pickBalancedReviews).
+const MIN_REVIEW_CHARS = 120
+const MIN_REVIEW_MATCH = 0.5
 
 interface ScoredReview {
   source: string
@@ -153,11 +158,20 @@ interface ScoredReview {
 }
 
 /**
- * Escolhe `perWork` reviews por obra. A partir de 3 vagas, reserva 1 pra uma
- * review CRÍTICA bem-casada (rating ≤ 4, match > 0) — assim o modelo recebe um
- * contraponto pro campo `risks`, em vez de só as mais bem-avaliadas. As demais
- * vagas vão pras de maior relevância. Sem review crítica relevante, cai no
- * comportamento antigo (top-N por relevância).
+ * Escolhe `perWork` reviews por obra priorizando QUALIDADE > DIVERSIDADE DE
+ * FONTE > relevância. A seleção por `match × nota` antiga super-amostrava as
+ * fontes que enchem de reviews com nota (MyAnimeList/AniList — 100%/97% têm
+ * nota; o resto, ~7%), enterrando o ângulo das demais. Como 93% das reviews não
+ * têm nota, a nota não pode ser o eixo de seleção.
+ *
+ * Três passos:
+ *  1. Piso de qualidade (MIN_REVIEW_CHARS/MIN_REVIEW_MATCH) separa reviews
+ *     substanciais e bem-casadas das fracas/obscuras.
+ *  2. Round-robin entre fontes sobre o pool que passou no piso (cada fonte
+ *     ordenada por match desc) → cobre ângulos distintos sem deixar a nota
+ *     decidir.
+ *  3. Top-up por relevância (mesmo abaixo do piso) se o piso esvaziar demais —
+ *     nunca retorna menos reviews do que retornaria antes.
  */
 function pickBalancedReviews(list: ScoredReview[], perWork: number): CandidateReview[] {
   const toReview = (r: ScoredReview): CandidateReview => ({
@@ -166,22 +180,57 @@ function pickBalancedReviews(list: ScoredReview[], perWork: number): CandidateRe
     rating: r.rating,
   })
   const byRelevance = [...list].sort((a, b) => b.relevance - a.relevance)
-  if (perWork < 3 || list.length <= perWork) {
-    return byRelevance.slice(0, perWork).map(toReview)
+  if (list.length <= perWork) return byRelevance.map(toReview)
+
+  // 1) Piso de qualidade.
+  const qualifying = [...list]
+    .filter((r) => r.text.length >= MIN_REVIEW_CHARS && r.match >= MIN_REVIEW_MATCH)
+    .sort((a, b) => b.match - a.match)
+
+  // 2) Round-robin entre fontes (fontes ordenadas pelo melhor match de cada).
+  const bySource = new Map<string, ScoredReview[]>()
+  for (const r of qualifying) {
+    const bucket = bySource.get(r.source)
+    if (bucket) bucket.push(r)
+    else bySource.set(r.source, [r])
   }
-  const top = byRelevance.slice(0, perWork - 1)
-  const topSet = new Set(top)
-  const critical = list
-    .filter((r) => !topSet.has(r) && r.match > 0 && r.rating != null && r.rating <= CRITICAL_RATING_MAX)
-    .sort((a, b) => a.rating! - b.rating! || b.match - a.match)[0]
-  const chosen = critical ? [...top, critical] : byRelevance.slice(0, perWork)
+  const sources = [...bySource.keys()].sort(
+    (a, b) => (bySource.get(b)![0]?.match ?? 0) - (bySource.get(a)![0]?.match ?? 0),
+  )
+  const chosen: ScoredReview[] = []
+  const chosenSet = new Set<ScoredReview>()
+  let progressed = true
+  while (chosen.length < perWork && progressed) {
+    progressed = false
+    for (const s of sources) {
+      if (chosen.length >= perWork) break
+      const next = bySource.get(s)!.find((r) => !chosenSet.has(r))
+      if (next) {
+        chosen.push(next)
+        chosenSet.add(next)
+        progressed = true
+      }
+    }
+  }
+
+  // 3) Top-up por relevância se o piso esvaziou demais.
+  if (chosen.length < perWork) {
+    for (const r of byRelevance) {
+      if (chosen.length >= perWork) break
+      if (!chosenSet.has(r)) {
+        chosen.push(r)
+        chosenSet.add(r)
+      }
+    }
+  }
+
   return chosen.map(toReview)
 }
 
 /**
- * Top-N reviews por obra, batch. Combina relevância (`match_score *
- * COALESCE(user_rating, 5)`) com 1 vaga reservada pra uma review crítica (ver
- * `pickBalancedReviews`). Texto truncado pelo caller via prompts.formatReviews.
+ * Top-N reviews por obra, batch. A seleção (piso de qualidade + diversidade de
+ * fonte + top-up) fica em `pickBalancedReviews`. Texto truncado pelo caller via
+ * prompts.formatReviews.
  */
 async function fetchTopReviewsBatch(
   workIds: string[],
@@ -211,6 +260,29 @@ async function fetchTopReviewsBatch(
   }
   for (const [workId, list] of grouped) {
     out.set(workId, pickBalancedReviews(list, perWork))
+  }
+  return out
+}
+
+/**
+ * Digest estruturado das reviews (Item C, Passe 2), em lote. Fetch SEPARADO e
+ * TOLERANTE (não vai no CANDIDATE_WORK_SELECT): se a migration 103 ainda não foi
+ * aplicada, a coluna não existe e o select erraria — aqui a falha cai em mapa
+ * vazio (consultor usa o review_summary do Passe 1 como fallback). Roda em
+ * paralelo com fetchTopReviewsBatch.
+ */
+export async function fetchReviewDigestsBatch(workIds: string[]): Promise<Map<string, ReviewDigest>> {
+  const out = new Map<string, ReviewDigest>()
+  if (workIds.length === 0) return out
+  const supabase = createAdminClient()
+  const { data, error } = await supabase.from("works").select("id, review_digest").in("id", workIds)
+  if (error) {
+    console.warn("[recommendations] review_digest indisponível (migration 103?):", error.message)
+    return out
+  }
+  for (const row of data ?? []) {
+    const r = row as { id: string; review_digest: ReviewDigest | null }
+    if (r.review_digest) out.set(r.id, r.review_digest)
   }
   return out
 }
@@ -272,6 +344,7 @@ function mapRowToCandidate(
   row: unknown,
   reviews: CandidateReview[],
   biasMap: AttributeBiasMap,
+  reviewDigest: ReviewDigest | null = null,
 ): FavoriteCandidate {
   const work = row as Record<string, unknown>
   const calc = (work.calculated_scores as { platform_avg?: number | null; total_votes?: number | null; expected_score?: number | null; personal_fit?: number | null } | null) ?? null
@@ -302,6 +375,8 @@ function mapRowToCandidate(
     platformAvg: calc?.platform_avg != null ? Number(calc.platform_avg) : null,
     totalVotes: calc?.total_votes != null ? Number(calc.total_votes) : null,
     reviews,
+    reviewSummary: (work.review_summary as string | null) ?? null,
+    reviewDigest,
     coverUrl,
     isAlreadyRated: work.user_score != null,
   } satisfies FavoriteCandidate
@@ -330,9 +405,15 @@ export async function getFavoriteCandidates(
 
   const rows = data ?? []
   const ids = rows.map((r) => (r as { id: string }).id)
-  const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  const [reviewsById, digestById] = await Promise.all([
+    fetchTopReviewsBatch(ids, 3),
+    fetchReviewDigestsBatch(ids),
+  ])
   const biasMap = await loadBiasMapForRecs(supabase)
-  return rows.map((row) => mapRowToCandidate(row, reviewsById.get((row as { id: string }).id) ?? [], biasMap))
+  return rows.map((row) => {
+    const id = (row as { id: string }).id
+    return mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap, digestById.get(id) ?? null)
+  })
 }
 
 /**
@@ -358,12 +439,15 @@ export async function getRankingCandidates(
     .in("id", ids)
   if (error) throw new Error(`Falha hidratando candidatos do ranking: ${error.message}`)
 
-  const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  const [reviewsById, digestById] = await Promise.all([
+    fetchTopReviewsBatch(ids, 3),
+    fetchReviewDigestsBatch(ids),
+  ])
   const biasMap = await loadBiasMapForRecs(supabase)
   const byId = new Map<string, FavoriteCandidate>()
   for (const row of data ?? []) {
     const id = (row as { id: string }).id
-    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap))
+    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap, digestById.get(id) ?? null))
   }
   // Preserva a ordem do ranking original.
   return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
@@ -384,9 +468,12 @@ export async function getCandidateById(workId: string): Promise<FavoriteCandidat
     .maybeSingle()
   if (error) throw new Error(`Falha hidratando obra ${workId}: ${error.message}`)
   if (!data) return null
-  const reviewsById = await fetchTopReviewsBatch([workId], 3)
+  const [reviewsById, digestById] = await Promise.all([
+    fetchTopReviewsBatch([workId], 3),
+    fetchReviewDigestsBatch([workId]),
+  ])
   const biasMap = await loadBiasMapForRecs(supabase)
-  return mapRowToCandidate(data, reviewsById.get(workId) ?? [], biasMap)
+  return mapRowToCandidate(data, reviewsById.get(workId) ?? [], biasMap, digestById.get(workId) ?? null)
 }
 
 export interface StaleAlignmentWork {
@@ -561,12 +648,15 @@ export async function getStaleAlignmentCandidates(limit = 200): Promise<Favorite
     .eq("is_archived", false)
   if (error) throw new Error(`Falha hidratando candidatos stale: ${error.message}`)
 
-  const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  const [reviewsById, digestById] = await Promise.all([
+    fetchTopReviewsBatch(ids, 3),
+    fetchReviewDigestsBatch(ids),
+  ])
   const biasMap = await loadBiasMapForRecs(supabase)
   const byId = new Map<string, FavoriteCandidate>()
   for (const row of data ?? []) {
     const id = (row as { id: string }).id
-    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap))
+    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap, digestById.get(id) ?? null))
   }
   // Preserva a ordem da fila (re-rank mais antigo primeiro).
   return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
@@ -908,12 +998,15 @@ export async function getCandidatesByIds(ids: string[]): Promise<FavoriteCandida
     if (data) rows.push(...data)
   }
 
-  const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  const [reviewsById, digestById] = await Promise.all([
+    fetchTopReviewsBatch(ids, 3),
+    fetchReviewDigestsBatch(ids),
+  ])
   const biasMap = await loadBiasMapForRecs(supabase)
   const byId = new Map<string, FavoriteCandidate>()
   for (const row of rows) {
     const id = (row as { id: string }).id
-    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap))
+    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap, digestById.get(id) ?? null))
   }
   return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
 }

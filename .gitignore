@@ -60,3 +60,6 @@ scripts/seed-from-xlsx*.js
 
 # Perfil do Chrome do resolve-comix-hids (puppeteer)
 .cache/
+
+# guia pessoal de onboarding (não versionar)
+/GUIA.md

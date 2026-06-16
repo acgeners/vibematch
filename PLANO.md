@@ -1,5 +1,11 @@
 # SatorIA — Plano de Trabalho Consolidado
 
+> ## 🗄️ ARQUIVADO (2026-06-15) — não é mais o plano vivo
+> O plano ativo agora é **[PLANO-ATUAL.md](PLANO-ATUAL.md)** (sistema de diferenciação por
+> tiers + Onda 4 de deploy carregada pra lá). Este arquivo permanece **só como histórico**:
+> diagnósticos originais + logs das sessões das Ondas 0–3 (Comix, saldo/badges, faxina de notas),
+> que estão essencialmente concluídas. **Ao retomar, leia o PLANO-ATUAL.md.**
+
 > Consolida os dois diagnósticos (geral + aprofundado) e os três tópicos prioritários
 > (Comix, Saldo/badges, Deploy). Substitui os `plan-*.md` antigos como fonte de verdade.
 > **Princípio orientador:** varrer resíduo (risco ~0) antes de tocar lógica viva; subir
@@ -165,9 +171,13 @@ pela metade, e os módulos antigos grandes. **Não é qualidade irregular — é
 
 **Microcópia de notas legada na UI — ✅ FECHADA (2026-06-15):** textos visíveis que ainda diziam "Nota.Final / Nota.IA / Nota.Pr" repontados p/ "Nota Prevista" / "Nota.Calc" em 6 superfícies (percentis de cor, `/preferencias`, sugestão de pesos pós-leitura, botões de override de modelo em work-form + review-form, label do Ridge no painel de calibração). Os 2 piores **descreviam colunas dropadas na 099** (o slider de cor dizia afetar 3 colunas inexistentes). Era UX enganosa, não "tipo TS inerte". *(tsc 0 · lint 0 · 113 testes OK.)* Resíduo intencional mantido: [work-table-config.ts](components/titles/work-table-config.ts) explica didaticamente que o Ridge "substituiu o antigo trio Nota.IA / Nota.Pr / Nota.Final".
 
-**Cleanup cosmético (legado inerte):** campos em `CalculationResult`/`WorkSortField`/`WorkFilters.minFinalScore`/`MappedImportRow`; `formula_config` legado (mae_predicted/rmse_predicted/stacker_*/gpt_* — drop em migration futura); bloco predicted/final do painel de calibração; renomear `min_predicted_score`/`min_final_score` (repurposadas); remover o log de diagnóstico do resolver quando #7 estável.
+**Cleanup cosmético — atualizado 2026-06-15:**
+- ✅ **FEITO (2026-06-15):** tipos órfãos `CalculationResult`/`CalculationInputs` + `WorkFilters.minFinalScore`/`maxFinalScore` removidos de types/domain.ts; código morto deletado (`lib/calculations/prediction.ts`, `confidence.ts`, função `calculateAll` do index.ts — todos zero callers); **bloco predicted/final + toggle Stacker morto removidos do painel de calibração** (+ **bug-fix**: o badge "Modelo em fallback" usava `predictorIsStub` legado, sempre-`true` pós-099 → repontado p/ `expectedPredictorIsStub`).
+- 🔵 **DECIDIDO NÃO FAZER:** renomear `min_predicted_score`/`min_final_score` — são colunas **repurposadas e ATIVAS** ("IA Rk mínimo" 0–100 / "Nota Prevista mínima" 0–10), lidas/escritas em 4 arquivos; renomear = migration à mão contra prod + risco de drift por ganho ~0 (já bem comentadas).
+- ⏭️ **MOVIDO P/ ONDA 4:** drop das colunas `formula_config` legadas (ver Onda 4).
+- 🟡 **Resíduo inerte que fica:** campos legados em `WorkSortField`/`MappedImportRow` (estes consumidos em lib/import/processor.ts — NÃO remover sem tocar o import); plumbing inerte de predicted/final em settings.ts→`computeCalibration` (sempre null, não mais exibido); remover o log de diagnóstico do resolver quando #7 estável.
 
-**Onda 4 — Deploy** (Fly iad) + resolver-hid **prod-safe** (GitHub Action com Chrome).
+**Onda 4 — Deploy** (Fly iad) + resolver-hid **prod-safe** (GitHub Action com Chrome) + **drop das colunas `formula_config` legadas** (mae_predicted / rmse_predicted / stacker_* / stacker_coefficients). ⚠️ **NÃO dropar `gpt_mean`** — está vivo (centro da amplificação da IA(n)/calc_score). Coordenar o drop com a remoção dos null-writes em [calculations.ts](server/actions/calculations.ts) (senão o `upsert` quebra ao escrever em coluna inexistente).
 
 ---
 

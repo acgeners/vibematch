@@ -10,6 +10,7 @@ import {
   Database,
   Gauge,
   Info,
+  Layers,
   Settings,
   Sparkles,
   Tags,
@@ -22,6 +23,7 @@ import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
 import { ReviewSummaryPanel } from "@/components/settings/review-summary-panel"
+import { ReviewDigestPanel } from "@/components/settings/review-digest-panel"
 import { ResolveComixPanel } from "@/components/settings/resolve-comix-panel"
 import { ComixHealthPanel } from "@/components/settings/comix-health-panel"
 import { AiEvalOnCreateToggle } from "@/components/settings/ai-eval-on-create-toggle"
@@ -111,6 +113,7 @@ const SECTION_GROUPS = [
       { id: "calibration", title: "Calibração", icon: <Gauge />, accent: "cyan" as const },
       { id: "synopsis-canonical", title: "Sinopse canônica", icon: <Brain />, accent: "violet" as const },
       { id: "review-summary", title: "Resumo de reviews", icon: <Sparkles />, accent: "amber" as const },
+      { id: "review-digest", title: "Digest de reviews", icon: <Layers />, accent: "amber" as const },
     ],
   },
   {
@@ -220,6 +223,17 @@ export default async function SettingsPage() {
           pendingCount={reviewSummaryPending}
           totalCount={worksCount}
         />
+      </SettingsSection>
+
+      <SettingsSection
+        id="review-digest"
+        title="Digest estruturado de reviews"
+        description="Destila as reviews num digest estruturado (Sonnet) que o consultor IA consome — consenso, traços salientes, alertas. Opt-in (custo Sonnet)."
+        icon={<Layers />}
+        accent="amber"
+        badge={{ label: "Independente", variant: "independent" }}
+      >
+        <ReviewDigestPanel accent="amber" />
       </SettingsSection>
 
       {/* ── Casos especiais ───────────────────────────────────────── */}

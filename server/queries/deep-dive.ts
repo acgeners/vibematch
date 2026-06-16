@@ -5,6 +5,7 @@ import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-util
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getCurrentUserId } from "@/server/queries/current-user"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
+import { fetchReviewDigestsBatch } from "@/server/queries/recommendations"
 import {
   applyBiasToCategoryScores,
   type AttributeBiasMap,
@@ -151,6 +152,7 @@ async function fetchWorkBundle(workId: string): Promise<{
       id,
       title,
       canonical_synopsis,
+      review_summary,
       post_story_score,
       post_fl_score,
       post_ml_score,
@@ -180,7 +182,10 @@ async function fetchWorkBundle(workId: string): Promise<{
     (row.work_synopses as RawSynopsisRow[] | undefined),
   )
   const coverUrl = pickPrimaryCover(row.work_covers as RawCoverRow[] | undefined)
-  const reviews = await fetchReviewsForWork(workId)
+  const [reviews, digestMap] = await Promise.all([
+    fetchReviewsForWork(workId),
+    fetchReviewDigestsBatch([workId]),
+  ])
   const biasMap = await getBiasMap(await getCurrentUserId(supabase), supabase)
 
   const postScores: Partial<Record<string, number>> = {}
@@ -214,6 +219,8 @@ async function fetchWorkBundle(workId: string): Promise<{
     platformAvg,
     totalVotes: totalVotes > 0 ? totalVotes : null,
     reviews,
+    reviewSummary: (row.review_summary as string | null) ?? null,
+    reviewDigest: digestMap.get(workId) ?? null,
     expectedScore: calc?.expected_score ?? null,
     expectedIsStub: calc?.expected_is_stub ?? false,
     fit: calc?.personal_fit ?? null,

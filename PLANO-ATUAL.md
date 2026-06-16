@@ -14,9 +14,14 @@
 
 **✅ Feito nesta sessão:**
 - **Item A — tags declaradas (amo/evito)** — completo. Migration **100** (`user_tag_preferences`, polimórfica tag/subgrupo/grupo) **aplicada**. UI em `/preferencias`: árvore Grupo→Subgrupo→Tag (grupo só navega, não é declarável), 2 colunas, **Salvar batch** (não por-clique), ênfase 2×. Lógica: `mergeDeclaredTagPreferences` (shrinkage `λ=n/(n+k)`, `K_LOVE=5`/`K_AVOID=8`/`BASE=0.5`) em [taste-profile-heuristic.ts](lib/ai-recommendation/taste-profile-heuristic.ts), re-mesclado no recalc ([calculations.ts](server/actions/calculations.ts): features Ridge + `personal_fit` + folds CV, sem leak) → vale após **Recalcular**. Ranking: filtro "evito" **opt-in 3-estados** (`hide_avoided=strong|all`, strong = weight ≥ 2). Página da obra: tags coloridas verde/vermelho por stance + masonry + "expandir todos".
-- **Métrica de ranking (§5) — instrumento ligado.** `prediction_ledger` (migration **101**, *aplicar à mão*) captura a previsão **de-registro** (expected + decision, pré-rótulo) na **primeira nota** de cada obra (hook em `updateWork`/`updateWorkStatus`). Sem backfill → ligado cedo. **Painel da métrica ainda pendente** (esperar acumular notas).
+- **Métrica de ranking (§5) — instrumento ligado.** `prediction_ledger` (migration **101**, **aplicada**) captura a previsão **de-registro** (expected + decision, pré-rótulo) na **primeira nota** de cada obra (hook em `updateWork`/`updateWorkStatus`). Sem backfill → ligado cedo. **Painel da métrica ainda pendente** (esperar acumular notas).
+- **Item B — efeitos cruzados via LLM** — **COMPLETO, migration 102 APLICADA, verificado live.** Campo **"Regras e preferências livres (IA)"** (condicional + geral). Coluna `user_settings.preference_rules jsonb` (query tolerante). Action `savePreferenceRules` (batch, **sem recalc**). Bloco no **profileBlock cacheado** + instruções nos system prompts. Threadado nos **7** call sites (rankFavorites ×6 + runDeepDive). UI **gateada no Pago**. **Verificado:** run `recommendation_rank v3` com `nPreferenceRules=4`; Deep Dive da Aria citou as regras (crueldade/tom) como `tags_cons`. **Endurecido p/ `v4` / `deep-dive-v4`:** (1) **inversão de sentimento** (review que confirma traço evitado conta CONTRA, mesmo se o autor ama); (2) **força por evidência** (regra "evito" confirmada por consenso → Deep Dive capa `read_when` em "guardar" + baixa score; ranking baixa alignment + risks; evidência fraca = só risco). **B6 (chat briefing) NÃO feito** (opcional).
 
-**⬜ Pendente:** Item B (cross-effects LLM), Item C (sinal de reviews), painel do ledger (concordância par-a-par + MAE prospectivo), **§6 Consolidação de UX** (maior bloco intocado). **⏸️ Diferido:** §7 Deploy.
+- **Item C — Passe 1 (sinal de reviews ao consultor)** — **FEITO + VERIFICADO LIVE na Aria.** review_summary no tailBlock do ranking + Deep Dive; seleção das cruas por qualidade/diversidade de fonte (não mais por nota); gate de materialidade sem migration (count empacotado no hash). **IA Rk da Aria caiu 91→72 citando o consenso; offline idêntico.** Detalhe em §4. tsc/lint/testes limpos.
+
+- **Item C — Passe 2 (digest estruturado)** — **COMPLETO + VERIFICADO LIVE (migration 103 APLICADA).** `consolidateReviewsDigestDetailed` (Sonnet 4.6, tool `submit_review_digest`, amostragem estratificada por fonte) → `review_digest jsonb` (migration **103 aplicada**; leitura tolerante via `fetchReviewDigestsBatch`). Geração **batch opt-in** (`consolidatePendingReviewDigests` + painel em /settings, ~$0.02–0.04/obra), NÃO automática. Consultor **prefere o digest** sobre o resumo-texto (ranking tailBlock + Deep Dive bundle). Bumps `PROMPT_VERSION v5→v6` + Deep Dive `v5→v6`. **Verificado na Aria:** digest no prompt (não o texto Passe 1); re-rank cita "o consenso… crueldade a uma antagonista criança — evidência convergente e forte"; Deep Dive surfou risco novo (`Suicide/s`) dos content_warnings; offline idêntico (8.53 / 0.558). tsc/lint/117 testes limpos. **→ Item C inteiro CONCLUÍDO.**
+
+**⬜ Pendente:** painel do ledger (esperar acumular notas), **§6 Consolidação de UX** (maior bloco intocado). **⏸️ Diferido:** §7 Deploy · B6 (chat briefing ciente das regras).
 
 > Detalhe de cada um nas seções abaixo (Item A marcado ✅).
 
@@ -102,7 +107,12 @@ tiers honestos**, diferenciando **dentro do tier** pelo contexto do usuário.
 - **Custo:** **M** — UI nova + 1 migration + integração. Sem LLM.
 - **Ressalva:** declarado ≠ revelado → "amo" é prior sobreponível pelo dado; "evito" é mais confiável (filtro).
 
-### Item B — Efeitos cruzados via LLM
+### Item B — Efeitos cruzados via LLM · ✅ **FEITO (2026-06-15, código; migration 102 a aplicar)** · ver §0
+
+> **Escopo ampliado na execução:** o campo não ficou só "condicional" — virou **"Regras e
+> preferências livres (IA)"**, aceitando também preferências GERAIS e a orientação "em obra com
+> poucas tags/scores rasos, apoie-se nas reviews" (o consultor já recebe top-3 reviews por obra).
+> Continua **só no consultor LLM (pago)**; nunca alimenta o modelo offline.
 
 - **Objetivo:** capturar lógica condicional ("evito tragédia *salvo* quando casal forte"; "odeio
   'horny female lead' *exceto* quando comédia é alta") que **nenhum modelo aditivo** (Ridge ou
@@ -131,6 +141,32 @@ tiers honestos**, diferenciando **dentro do tier** pelo contexto do usuário.
 - **Custo:** **M** — tokens marginais; mas **backfill das ~600 obras = re-pagar a avaliação**
   (custo único, fazer **incremental** conforme re-avalia).
 - **Ressalva CRÍTICA:** **NÃO** virar feature numérica do Ridge (esparsidade → colapso, igual L0+).
+
+#### Item C — plano REFINADO (2026-06-16) — descobertas + decisões desta sessão
+
+> **Disparador:** no Item B, a Aria ("The Villainess Turns the Hourglass") foi #1 com align 91 apesar de violar a regra "não gosto de protagonista cruel com inocentes". **Diagnóstico com dado:** o ranking manda só **3 reviews/obra** selecionadas por `relevance = match × nota`; mas **93% das 7248 reviews NÃO têm nota** (só MyAnimeList 100% + AniList 97% têm) → a seleção **super-amostra MAL/AniList** e a review-chave da crueldade (nota nula) **nunca chegou ao modelo**. O Deep Dive (10 reviews + thinking) **mordeu** (citou a crueldade), confirmando que a falha é do **ranking raso**, não do Item B.
+
+- **JÁ EXISTE (reusar, não rebuildar):** `works.review_summary` (migration **081**: resumo de consenso via **Haiku**, `hashReviewInputs` p/ cache, badge "resumo faltando"; **69% de cobertura** — 494/721). Amostra as **40 mais longas** (não por nota). **MAS não chega ao consultor** (confirmado: ausente em recommendations.ts/lib/ai-recommendation). Summarizer em [review-summarizer.ts](lib/ai-recommendation/review-summarizer.ts) (`consolidateReviews`).
+- **Trava:** digest é **sinal qualitativo pro consultor LLM** (Recomendar/IA Rk/Deep Dive/Chat) — **nunca** feature do offline (`expected_score`/`personal_fit`). O casamento digest × preferências fica **a jusante no consultor** (Item B v4), **não** no digest (digest é **preference-agnostic** — injetar prefs do user quebraria cache/multi-user/neutralidade).
+- **Fase 1 (Passe 1 — barata, sem migration, sem LLM novo, vale com 69% já):**
+  1. Fiação: `review_summary` → candidato ([mapRowToCandidate](server/queries/recommendations.ts)) + bloco "consenso das reviews" no **tailBlock** do ranking e do Deep Dive.
+  2. Seleção das 3 reviews cruas: trocar `match × nota` (+ vaga crítica por nota) por **match + diversidade de fonte** (rodízio) em [pickBalancedReviews](server/queries/recommendations.ts) — mata o viés das 93% sem nota.
+  3. Bump de versão dos prompts.
+  4. **Regra anti-repetição (pedido do user):** trocar o gate por hash em [persist-reviews.ts](lib/external/persist-reviews.ts) por **materialidade**: re-roda só se `reviewsAgora − n_no_último ≥ max(2, ⌈n × 0,20⌉)` (ou cold, ou versão mudou). Biblioteca pequena re-roda com poucas adições; grande ignora +1. Edições puras → botão manual.
+- **Fase 2 (Passe 2 — após verificar a Fase 1):** migration **103** com **`review_digest jsonb`** + `review_digest_at` + `review_digest_n` + `review_digest_version` (**NÃO** sobrescrever `review_summary` — UI/badge usam o texto). Summarizer estruturado em **Sonnet 4.6** (~1500 out), **amostragem estratificada por fonte** (não "40 mais longas" — isso re-introduz o viés MAL/AniList, que escrevem ensaios). Saída preference-agnostic: `consensus` · `divergence` · `salient_traits` (moralidade/tom/ritmo) · `content_warnings` · `execution`. Consultor consome o digest. **Sonnet justificado** = custo **único por obra, amortizado**; catálogo ≈ **$49 one-time** (re-roda só com mudança material). Opus = overkill.
+- **Recomendação travada:** fazer **Passe 1 (Fase 1 + gate de materialidade) PRIMEIRO**, verificar na Aria (IA Rk cai? ganha risco? offline NÃO mudou?), só então Passe 2. (Rework: 1 bump de versão extra — compensado pelo gate de verificação/gasto.)
+
+#### Item C — Passe 1 · ✅ **FEITO + VERIFICADO LIVE na Aria (2026-06-16)**
+
+> **Verificação live (Aria, run real de IA Rk + Deep Dive):** (a) o bloco "consenso das reviews" entrou no prompt com o texto do consenso ("Aria genuinamente má e calculista, sem arco redentor"); (b) **IA Rk caiu 91 → 72** — a justificativa cita *"o consenso das reviews"* + a tag Cruel Female Lead conflitando com a regra declarada; Deep Dive deu `match_score=66`, `read_when="guardar"`, flag "cruelty a inocentes confirmada [R10]". (c) **offline idêntico** (`expected_score 8.52→8.52`, `personal_fit 0.558→0.558`). Seleção das 3 cruas veio de 3 fontes distintas (comick/mangadex/mangaupdates), todas sem nota — confirmando que o viés MAL/AniList morreu (live: 114 reviews, só MAL 8/8 + AniList 2/2 + 1 comick têm nota). **→ liberado pro Passe 2.**
+
+
+- **(1) Fiação:** `reviewSummary` em `CandidateWorkInput`/`DeepDiveWorkBundle`; `review_summary` adicionado ao `CANDIDATE_WORK_SELECT` ([recommendations.ts](server/queries/recommendations.ts)) e ao select do Deep Dive ([deep-dive.ts](server/queries/deep-dive.ts)); bloco "consenso das reviews (resumo IA)" no tailBlock do ranking ([prompts.ts](lib/ai-recommendation/prompts.ts)) e no work bundle do Deep Dive ([deep-dive-prompts.ts](lib/ai-recommendation/deep-dive-prompts.ts)), acima das cruas. 31% sem resumo → degrada pras cruas.
+- **(2) Seleção das 3 cruas** reescrita em `pickBalancedReviews`: **piso de qualidade** (`MIN_REVIEW_CHARS=120`, `MIN_REVIEW_MATCH=0.5`, ajustáveis) → **round-robin de fonte** → **top-up** por relevância (nunca retorna menos que antes). Mata o viés MAL/AniList e o piso evita review fraca/obscura (pedido do user). Removida a "vaga crítica por nota" (dependia do `rating` ausente em 93%). Escopo: só o ranking; Deep Dive (cap 10) só ganhou o resumo.
+- **(3) Bumps:** `PROMPT_VERSION v4→v5`, `DEEP_DIVE_PROMPT_VERSION deep-dive-v4→v5`.
+- **(4) Gate de materialidade** ([persist-reviews.ts](lib/external/persist-reviews.ts)): re-resume só se cold OU (conjunto mudou E `nowN − prevN ≥ max(2, ⌈nowN×0,20⌉)`). **Sem migration (Opção A):** count empacotado em `review_summary_inputs_hash` como `"<hash>:<n>"` (helpers `packReviewSummaryMeta`/`parseReviewSummaryMeta`/`isMaterialReviewChange` em [review-summarizer.ts](lib/ai-recommendation/review-summarizer.ts)); linha legada (só hash) = material → 1 recompute. 3 escritores atualizados (persist ×1 + backfill [settings.ts](server/actions/settings.ts)). Edição pura (mesmo count) → botão manual.
+- **Verificação:** tsc limpo, 117 testes verdes, lint sem erro nos arquivos tocados. **PENDENTE:** rodar IA Rk + Deep Dive na Aria (resumo aparece? crueldade vira risco no ranking raso? offline idêntico?) antes do Passe 2.
+- **Custo:** sem novas chamadas LLM (consome o `review_summary` já gerado); ~200 tok/candidato de input extra (~US$0,012/run de 20 a Sonnet); gate de materialidade = economia líquida de Haiku.
 
 ---
 

@@ -21,7 +21,16 @@ export const MODEL = "claude-sonnet-4-6"
 // v2: Smart Shortlist enriquecido (sub-fase 2.3.A) — adicionados campos
 // opcionais ao tool submit_ranking: confidence, risks, similar_loved/avoided,
 // review_quotes, mood_fit. Sistema prompt instrui sobre cada um.
-export const PROMPT_VERSION = "v2"
+// v3 (Item B): bloco PREFERÊNCIAS E REGRAS DO USUÁRIO (texto livre condicional/
+// geral) injetado no profileBlock cacheado + instruções no system prompt.
+// v4 (Item B): endurecimento — inversão de sentimento (review que confirma traço
+// evitado conta CONTRA, mesmo se o autor ama) + força por evidência (consenso
+// rebaixa alignment_score; evidência fraca fica só em risks).
+// v5 (Item C, Passe 1): consenso das reviews (review_summary) no tailBlock +
+// seleção das cruas por qualidade/diversidade de fonte (não mais por nota).
+// v6 (Item C, Passe 2): digest estruturado (review_digest, Sonnet) tem
+// precedência sobre o review_summary-texto no tailBlock.
+export const PROMPT_VERSION = "v6"
 
 const CRITERION_SLUG_ENUM = [...CRITERION_SLUGS]
 
@@ -236,6 +245,8 @@ export interface RankFavoritesArgs {
   candidates: CandidateWorkInput[]
   mode: RecommendationMode
   userContext?: string | null
+  /** Item B — preferências/regras livres (texto) injetadas no profileBlock cacheado. */
+  preferenceRules?: string[] | null
 }
 
 export async function rankFavorites(args: RankFavoritesArgs): Promise<RankingResult> {
@@ -249,6 +260,7 @@ export async function rankFavorites(args: RankFavoritesArgs): Promise<RankingRes
     args.candidates,
     args.mode,
     args.userContext,
+    args.preferenceRules,
   )
 
   const candidateIdSet = new Set(args.candidates.map((c) => c.id))
@@ -288,6 +300,7 @@ export async function rankFavorites(args: RankFavoritesArgs): Promise<RankingRes
           mode: args.mode,
           nCandidates: args.candidates.length,
           hasUserContext: !!args.userContext,
+          nPreferenceRules: args.preferenceRules?.length ?? 0,
         },
       },
     )

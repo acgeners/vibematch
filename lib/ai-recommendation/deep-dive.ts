@@ -10,7 +10,14 @@ import type { UsageTokens } from "@/lib/ai/pricing"
 // Versão do prompt — incremente quando mudar DEEP_DIVE_SYSTEM_PROMPT ou
 // o schema do tool. Importante porque o ai_api_calls.prompt_version é
 // usado pra A/B e auditoria de regressão.
-export const DEEP_DIVE_PROMPT_VERSION = "deep-dive-v2"
+// v3 (Item B): bloco PREFERÊNCIAS E REGRAS DO USUÁRIO no profileBlock cacheado
+// + instruções (condicional/geral + fallback de reviews em obras magras).
+// v4 (Item B): endurecimento — inversão de sentimento + força por evidência
+// (regra "evito" confirmada por consenso limita read_when a "guardar" e baixa
+// match_score; evidência fraca/única fica só em tags_cons/flags).
+// v5 (Item C, Passe 1): consenso das reviews (review_summary) no work bundle.
+// v6 (Item C, Passe 2): digest estruturado (review_digest) tem precedência.
+export const DEEP_DIVE_PROMPT_VERSION = "deep-dive-v6"
 
 // Extended thinking budget tokens — escolhido em discussão com o user.
 // Reduz pra metade na segunda tentativa pra liberar headroom de output
@@ -212,11 +219,17 @@ export interface DeepDiveResult {
 export interface RunDeepDiveArgs {
   context: DeepDiveContext
   userContext?: string | null
+  /** Item B — preferências/regras livres (texto) injetadas no profileBlock cacheado. */
+  preferenceRules?: string[] | null
 }
 
 export async function runDeepDive(args: RunDeepDiveArgs): Promise<DeepDiveResult> {
   const client = getAnthropicClient({ maxRetries: 6 })
-  const { profileBlock, tailBlock } = buildDeepDiveUserPrompt(args.context, args.userContext)
+  const { profileBlock, tailBlock } = buildDeepDiveUserPrompt(
+    args.context,
+    args.userContext,
+    args.preferenceRules,
+  )
 
   // IDs que o modelo pode legitimamente referenciar. Inclui similares e
   // alternativas. work_id da obra alvo NÃO entra (ela é o objeto da análise,
@@ -269,6 +282,7 @@ export async function runDeepDive(args: RunDeepDiveArgs): Promise<DeepDiveResult
         metadata: {
           thinkingBudget,
           hasUserContext: !!args.userContext?.trim(),
+          nPreferenceRules: args.preferenceRules?.length ?? 0,
           nSimilarsLoved: args.context.similars.loved.length,
           nSimilarsAvoided: args.context.similars.avoided.length,
           nAlternatives: args.context.alternatives.length,

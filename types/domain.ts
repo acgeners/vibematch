@@ -374,30 +374,6 @@ export interface CategoryScoreMap {
   [slug: string]: number
 }
 
-export interface CalculationInputs {
-  categoryScores: CategoryScoreMap
-  weights: ScoreWeight[]
-  platformRatings: PlatformRating[]
-  totalChapters: number | null
-  publicationStatus: PublicationStatus
-  synopsisQuality: SynopsisQuality | null
-  observationAdjustment: number
-  config: FormulaConfig
-  globalPlatformMean: number
-}
-
-export interface CalculationResult {
-  iaEvalRaw: number
-  iaEvalNormalized: number
-  totalVotes: number
-  platformAvg: number | null
-  chaptersNormalized: number
-  calcScore: number
-  predictedScore: number | null
-  predictedIsStub: boolean
-  finalScore: number | null
-}
-
 // ============================================================
 // Tipos de importação
 // ============================================================
@@ -467,8 +443,6 @@ export interface WorkFilters {
   publicationStatus?: PublicationStatus[]
   personalStatus?: PersonalStatus[]
   aiEvalStatus?: AiEvalStatus[]
-  minFinalScore?: number
-  maxFinalScore?: number
   /** Nota prevista (expected_score, 0–10) — filtro headline do novo pipeline. */
   minExpectedScore?: number
   maxExpectedScore?: number
