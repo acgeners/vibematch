@@ -21,7 +21,7 @@
 
 - **Item C — Passe 2 (digest estruturado)** — **COMPLETO + VERIFICADO LIVE (migration 103 APLICADA).** `consolidateReviewsDigestDetailed` (Sonnet 4.6, tool `submit_review_digest`, amostragem estratificada por fonte) → `review_digest jsonb` (migration **103 aplicada**; leitura tolerante via `fetchReviewDigestsBatch`). Geração **batch opt-in** (`consolidatePendingReviewDigests` + painel em /settings, ~$0.02–0.04/obra), NÃO automática. Consultor **prefere o digest** sobre o resumo-texto (ranking tailBlock + Deep Dive bundle). Bumps `PROMPT_VERSION v5→v6` + Deep Dive `v5→v6`. **Verificado na Aria:** digest no prompt (não o texto Passe 1); re-rank cita "o consenso… crueldade a uma antagonista criança — evidência convergente e forte"; Deep Dive surfou risco novo (`Suicide/s`) dos content_warnings; offline idêntico (8.53 / 0.558). tsc/lint/117 testes limpos. **→ Item C inteiro CONCLUÍDO.**
 
-**⬜ Pendente:** painel do ledger (esperar acumular notas), **§6 Consolidação de UX** (maior bloco intocado). **⏸️ Diferido:** §7 Deploy · B6 (chat briefing ciente das regras).
+**⬜ Pendente:** **Item C — geração do digest no eval-time** (obra nova ganhar digest automático, não só via batch) — desenho decidido + 1 decisão custo×latência em aberto; detalhe em §4 "PENDÊNCIA ABERTA". Painel do ledger (esperar acumular notas), **§6 Consolidação de UX** (maior bloco intocado). **⏸️ Diferido:** §7 Deploy · B6 (chat briefing ciente das regras) · dispersão de notas como sinal de tier (§4 Q2, go/no-go barato antes).
 
 > Detalhe de cada um nas seções abaixo (Item A marcado ✅).
 
@@ -167,6 +167,29 @@ tiers honestos**, diferenciando **dentro do tier** pelo contexto do usuário.
 - **(4) Gate de materialidade** ([persist-reviews.ts](lib/external/persist-reviews.ts)): re-resume só se cold OU (conjunto mudou E `nowN − prevN ≥ max(2, ⌈nowN×0,20⌉)`). **Sem migration (Opção A):** count empacotado em `review_summary_inputs_hash` como `"<hash>:<n>"` (helpers `packReviewSummaryMeta`/`parseReviewSummaryMeta`/`isMaterialReviewChange` em [review-summarizer.ts](lib/ai-recommendation/review-summarizer.ts)); linha legada (só hash) = material → 1 recompute. 3 escritores atualizados (persist ×1 + backfill [settings.ts](server/actions/settings.ts)). Edição pura (mesmo count) → botão manual.
 - **Verificação:** tsc limpo, 117 testes verdes, lint sem erro nos arquivos tocados. **PENDENTE:** rodar IA Rk + Deep Dive na Aria (resumo aparece? crueldade vira risco no ranking raso? offline idêntico?) antes do Passe 2.
 - **Custo:** sem novas chamadas LLM (consome o `review_summary` já gerado); ~200 tok/candidato de input extra (~US$0,012/run de 20 a Sonnet); gate de materialidade = economia líquida de Haiku.
+
+#### Item C — PENDÊNCIA ABERTA (decidir + implementar em sessão nova): geração do digest no eval-time
+
+> **Contexto:** Passe 2 entregou o digest, mas a geração é **batch opt-in** (botão em /settings). Obra **nova** NÃO ganha digest na avaliação — só o resumo Haiku do Passe 1 (auto); o consultor cai no fallback até o batch rodar. Discussão (2026-06-16) concluiu que **isso devia ser automático no eval-time**.
+
+- **Dois erros meus já corrigidos na discussão (não repetir):**
+  - ❌ "escopar o auto a favoritos/ranking" — obra recém-criada **não é** favorita nem está no ranking; tem que cobrir **toda obra recém-avaliada**.
+  - ❌ "staleness mata o eval-time" — staleness **só vale pra on-going**. Pra status "Completo" (maioria do catálogo curado) as reviews são estáveis → gerar **uma vez** no eval é a cadência **certa**.
+- **Desenho decidido:** gerar o digest **no eval-time**, no mesmo lugar do resumo Haiku ([persist-reviews.ts](lib/external/persist-reviews.ts) `saveWorkReviews` → após `persistReviewSummary`), sob o **mesmo gate de materialidade** (auto-limitado: Completo digere 1×, on-going renova com crescimento material). O **batch** continua só pro backfill do catálogo existente (~$24 one-time).
+- **ÚNICA decisão em aberto (custo × latência) — escolher antes de codar:**
+
+  | Opção | Custo | Latência |
+  |---|---|---|
+  | **Same-call** (digest sai no output da própria avaliação Sonnet v19) | só ~$0,012 output extra (reviews já no contexto) | **+20–30s na avaliação** (já ~60s, tela Avaliar) + acopla schema/cache/retry v19 |
+  | **Separado fire-and-forget** em `saveWorkReviews` (RECOMENDADO) | ~$0,037/obra (re-manda reviews) | **zero** na avaliação — background, desacoplado |
+
+- **Minha recomendação: separado/background/gated, SEM `await`.** O digest **não é preciso síncrono** (é pro consultor que roda depois); a economia do same-call (~$0,025/obra) é centavos no fluxo de obras novas (conta-gotas) e não vale taxar a latência da avaliação (ponto de dor conhecido — [[project_ai_eval_latency]]). **Cuidado de implementação:** fire-and-forget precisa sobreviver ao fim do request — ok no host long-running (Fly), arriscado em serverless; o `saveWorkReviews` já é best-effort/silencioso.
+- **Próximos passos (sessão nova):** (1) confirmar a opção acima; (2) `persistReviewDigest` em persist-reviews sob o gate (reusa `isMaterialReviewChange` + `review_digest_n`/`_version`), disparado sem `await` no fim de `saveWorkReviews`; (3) testar numa obra nova (digest nasce junto) e numa Completo já digerida (gate bloqueia re-run); (4) manter o batch pro catálogo antigo.
+
+#### Item C — Q1/Q2 da sessão (respostas registradas)
+
+- **Q1 (digest em obra nova):** hoje **não** é gerado no eval — só o resumo Haiku é auto; digest é batch. → vira a pendência aberta acima.
+- **Q2 (dispersão/polarização das notas como sinal OFFLINE):** **candidato deferido** (registrado na memória `project_tiers_differentiation`). Veredito: **NÃO** como feature do `expected_score`/Ridge (prediz incerteza, não nível; cobertura parcial; MAE não mede o ganho). Se um dia, é **sinal de incerteza do TIER via 1 fonte canônica (AniList `scoreDistribution`, histograma da comunidade)** — nunca Ridge. **Go/no-go barato antes de modelar:** persistir o `scoreDistribution` da AniList do catálogo e medir se a **dispersão sequer varia entre obras** (catálogo curado pode achatar isso — range restriction). O digest (texto/struct do LLM) **NÃO** vira feature offline (qualitativo/condicional → fica no consultor).
 
 ---
 
