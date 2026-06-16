@@ -21,7 +21,9 @@
 
 - **Item C — Passe 2 (digest estruturado)** — **COMPLETO + VERIFICADO LIVE (migration 103 APLICADA).** `consolidateReviewsDigestDetailed` (Sonnet 4.6, tool `submit_review_digest`, amostragem estratificada por fonte) → `review_digest jsonb` (migration **103 aplicada**; leitura tolerante via `fetchReviewDigestsBatch`). Geração **batch opt-in** (`consolidatePendingReviewDigests` + painel em /settings, ~$0.02–0.04/obra), NÃO automática. Consultor **prefere o digest** sobre o resumo-texto (ranking tailBlock + Deep Dive bundle). Bumps `PROMPT_VERSION v5→v6` + Deep Dive `v5→v6`. **Verificado na Aria:** digest no prompt (não o texto Passe 1); re-rank cita "o consenso… crueldade a uma antagonista criança — evidência convergente e forte"; Deep Dive surfou risco novo (`Suicide/s`) dos content_warnings; offline idêntico (8.53 / 0.558). tsc/lint/117 testes limpos. **→ Item C inteiro CONCLUÍDO.**
 
-**⬜ Pendente:** **Item C — geração do digest no eval-time** (obra nova ganhar digest automático, não só via batch) — desenho decidido + 1 decisão custo×latência em aberto; detalhe em §4 "PENDÊNCIA ABERTA". Painel do ledger (esperar acumular notas), **§6 Consolidação de UX** (maior bloco intocado). **⏸️ Diferido:** §7 Deploy · B6 (chat briefing ciente das regras) · dispersão de notas como sinal de tier (§4 Q2, go/no-go barato antes).
+- **Item C — digest no eval-time** — **COMPLETO + VERIFICADO LIVE (2026-06-16).** Decisão custo×latência fechada: **separado / fire-and-forget / gated** (não same-call). `persistReviewDigest` em [persist-reviews.ts](lib/external/persist-reviews.ts) disparado **SEM `await`** no fim de `saveWorkReviews` (logo após o resumo Haiku) — latência **zero** na avaliação. Gate reusa `isMaterialReviewChange` + `review_digest_n`/`_version`: cold gera, version bump regenera, crescimento material renova, senão no-op. Os **3 call sites** (avaliação ai.ts, acquire-reviews, criação works.ts) afunilam em `saveWorkReviews` → eval-time cobre obra nova **e** re-colheita; **batch fica só pro backfill legado** (~493 obras cold hoje). Tolerante à ausência da migration 103 (catch silencioso). **Verificado live** (rota temp): cold→gera (digest rico persistido em background ~depois~ de resposta de ~1,7s, prova do fire-and-forget sobreviver ao request), gate pula em obra já digerida (`digest_at` inalterado, sem Sonnet novo), offline (expected/calc) intacto. tsc/lint/117 testes verdes. Commit `7be13e0`. **→ Item C 100% fechado.**
+
+**⬜ Pendente:** Painel do ledger (esperar acumular notas), **§6 Consolidação de UX** (maior bloco intocado). **⏸️ Diferido:** §7 Deploy · B6 (chat briefing ciente das regras) · dispersão de notas como sinal de tier (§4 Q2, go/no-go barato antes).
 
 > Detalhe de cada um nas seções abaixo (Item A marcado ✅).
 
@@ -168,7 +170,9 @@ tiers honestos**, diferenciando **dentro do tier** pelo contexto do usuário.
 - **Verificação:** tsc limpo, 117 testes verdes, lint sem erro nos arquivos tocados. **PENDENTE:** rodar IA Rk + Deep Dive na Aria (resumo aparece? crueldade vira risco no ranking raso? offline idêntico?) antes do Passe 2.
 - **Custo:** sem novas chamadas LLM (consome o `review_summary` já gerado); ~200 tok/candidato de input extra (~US$0,012/run de 20 a Sonnet); gate de materialidade = economia líquida de Haiku.
 
-#### Item C — PENDÊNCIA ABERTA (decidir + implementar em sessão nova): geração do digest no eval-time
+#### Item C — geração do digest no eval-time · ✅ **RESOLVIDA + VERIFICADA LIVE (2026-06-16)** · ver §0
+
+> **Fechamento:** implementado como **separado / fire-and-forget / gated** (opção recomendada abaixo). `persistReviewDigest` disparado sem `await` no fim de `saveWorkReviews`, gate via `isMaterialReviewChange`+`review_digest_n`/`_version`. Verificado live (cold→gera em background, gate pula em obra digerida, latência/offline intactos). Commit `7be13e0`. Detalhe da decisão preservado abaixo como histórico.
 
 > **Contexto:** Passe 2 entregou o digest, mas a geração é **batch opt-in** (botão em /settings). Obra **nova** NÃO ganha digest na avaliação — só o resumo Haiku do Passe 1 (auto); o consultor cai no fallback até o batch rodar. Discussão (2026-06-16) concluiu que **isso devia ser automático no eval-time**.
 
