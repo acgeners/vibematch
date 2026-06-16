@@ -1,7 +1,7 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { SourcedReview, ExternalSourceId } from "@/lib/external/types"
-import type { ReviewSummaryInput } from "@/lib/ai-recommendation/review-summarizer"
+import type { ReviewSummaryInput, ReviewDigestInput } from "@/lib/ai-recommendation/review-summarizer"
 
 /**
  * Salva snapshot de reviews externas de uma obra — estratégia NÃO-DESTRUTIVA
@@ -68,12 +68,12 @@ export async function saveWorkReviews(
     return
   }
 
-  // Resumo de consenso: precisa refletir o conjunto COMPLETO persistido (merge),
-  // não só este batch — senão o resumo ignoraria fontes preservadas. Re-lê todas
-  // as reviews da obra antes de consolidar.
+  // Resumo + digest: ambos precisam refletir o conjunto COMPLETO persistido
+  // (merge), não só este batch — senão ignorariam fontes preservadas. Re-lê todas
+  // as reviews da obra (com `source`, que o digest estratifica) antes de consolidar.
   const { data: persisted, error: readError } = await supabase
     .from("work_reviews")
-    .select("text, user_rating")
+    .select("text, user_rating, source")
     .eq("work_id", workId)
   if (readError) {
     console.error("[work_reviews] erro relendo conjunto p/ resumo:", readError)
@@ -83,6 +83,23 @@ export async function saveWorkReviews(
     .map((r) => ({ text: String(r.text ?? ""), userRating: r.user_rating ?? null }))
     .filter((r) => r.text.trim().length > 0)
   await persistReviewSummary(supabase, workId, summaryInputs)
+
+  // Digest estruturado (Sonnet, Item C Passe 2) no eval-time: fire-and-forget,
+  // SEM await — não taxa a latência da avaliação (~60s, ponto de dor conhecido).
+  // Gate próprio (cold/versão/materialidade) dentro de `persistReviewDigest`. A
+  // promise solta sobrevive no host long-running (dev/Fly); o .catch é só rede de
+  // segurança (a função já é best-effort/silenciosa). Se um dia for serverless,
+  // migrar p/ after()/fila.
+  const digestInputs: ReviewDigestInput[] = (persisted ?? [])
+    .map((r) => ({
+      text: String(r.text ?? ""),
+      source: String(r.source ?? "desconhecida"),
+      userRating: r.user_rating ?? null,
+    }))
+    .filter((r) => r.text.trim().length > 0)
+  void persistReviewDigest(supabase, workId, digestInputs).catch((err) =>
+    console.error("[work_reviews] digest fire-and-forget rejeitou:", err),
+  )
 }
 
 /**
@@ -183,5 +200,63 @@ async function persistReviewSummary(
       .eq("id", workId)
   } catch (err) {
     console.error("[work_reviews] erro gerando resumo:", err instanceof Error ? err.message : err)
+  }
+}
+
+/**
+ * Gera/atualiza o DIGEST estruturado (Sonnet 4.6, Item C Passe 2) das reviews da
+ * obra no eval-time. Best-effort, disparado SEM await por `saveWorkReviews`
+ * (background). Gate — mesma disciplina do batch (`consolidatePendingReviewDigests`)
+ * somada à materialidade do Passe 1:
+ *   - cold (obra sem digest), OU
+ *   - versão antiga (`review_digest_version` != atual — regenera no bump), OU
+ *   - crescimento material do conjunto (`isMaterialReviewChange` sobre `review_digest_n`).
+ * Senão (digest fresco + sem crescimento material) → no-op, zero custo Sonnet. Assim
+ * "Completo" digere 1×; on-going renova ao crescer; edição pura (mesmo count) NÃO
+ * dispara — fica pro batch/botão manual.
+ *
+ * Tolerante: sem a migration 103 (colunas ausentes) o select/update falha → catch
+ * silencioso, sem quebrar o save de reviews.
+ */
+async function persistReviewDigest(
+  supabase: AdminClient,
+  workId: string,
+  inputs: ReviewDigestInput[],
+): Promise<void> {
+  const nowN = inputs.filter((i) => i.text.trim().length > 0).length
+  if (nowN === 0) return
+  try {
+    const { consolidateReviewsDigestDetailed, REVIEW_DIGEST_VERSION, isMaterialReviewChange } =
+      await import("@/lib/ai-recommendation/review-summarizer")
+
+    const { data: existing } = await supabase
+      .from("works")
+      .select("review_digest, review_digest_n, review_digest_version")
+      .eq("id", workId)
+      .maybeSingle()
+    const row = existing as {
+      review_digest: unknown
+      review_digest_n: number | null
+      review_digest_version: string | null
+    } | null
+
+    // Digest fresco (presente E versão atual): só renova se cresceu o bastante.
+    const fresh = row?.review_digest != null && row.review_digest_version === REVIEW_DIGEST_VERSION
+    if (fresh && !isMaterialReviewChange(row?.review_digest_n ?? null, nowN)) return
+
+    const status = await consolidateReviewsDigestDetailed(inputs, { workId })
+    if (status.kind !== "ok") return
+
+    await supabase
+      .from("works")
+      .update({
+        review_digest: status.result.digest,
+        review_digest_at: new Date().toISOString(),
+        review_digest_n: nowN,
+        review_digest_version: REVIEW_DIGEST_VERSION,
+      })
+      .eq("id", workId)
+  } catch (err) {
+    console.error("[work_reviews] erro gerando digest:", err instanceof Error ? err.message : err)
   }
 }
