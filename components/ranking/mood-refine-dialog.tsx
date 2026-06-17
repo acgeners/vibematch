@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { BookOpen, Heart, Minus, Plus, ScrollText, Sparkles, TrendingUp } from "lucide-react"
+import { BookOpen, Heart, Minus, Plus, ScrollText, SlidersHorizontal, TrendingUp } from "lucide-react"
 
 import {
   Dialog,
@@ -84,13 +84,16 @@ export function MoodRefineDialog({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
+            <SlidersHorizontal className="h-4 w-4 text-primary" />
             Refinar comparação
           </DialogTitle>
           <DialogDescription>
             Estas {workCount} obras estão tecnicamente empatadas em Prioridade (dentro do erro do
             modelo). Diga o que você quer priorizar agora — a comparação abre reordenada por isso
-            {overflow ? `, mostrando as ${MAX_COMPARE_WORKS} melhores pro seu mood` : ""}.
+            {overflow ? `, mostrando as ${MAX_COMPARE_WORKS} melhores pro seu mood` : ""}.{" "}
+            <span className="text-muted-foreground">
+              Grátis e instantâneo, sem IA — o desempate por IA é opcional, dentro da comparação.
+            </span>
           </DialogDescription>
         </DialogHeader>
 
