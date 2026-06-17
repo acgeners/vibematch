@@ -23,7 +23,16 @@
 
 - **Item C — digest no eval-time** — **COMPLETO + VERIFICADO LIVE (2026-06-16).** Decisão custo×latência fechada: **separado / fire-and-forget / gated** (não same-call). `persistReviewDigest` em [persist-reviews.ts](lib/external/persist-reviews.ts) disparado **SEM `await`** no fim de `saveWorkReviews` (logo após o resumo Haiku) — latência **zero** na avaliação. Gate reusa `isMaterialReviewChange` + `review_digest_n`/`_version`: cold gera, version bump regenera, crescimento material renova, senão no-op. Os **3 call sites** (avaliação ai.ts, acquire-reviews, criação works.ts) afunilam em `saveWorkReviews` → eval-time cobre obra nova **e** re-colheita; **batch fica só pro backfill legado** (~493 obras cold hoje). Tolerante à ausência da migration 103 (catch silencioso). **Verificado live** (rota temp): cold→gera (digest rico persistido em background ~depois~ de resposta de ~1,7s, prova do fire-and-forget sobreviver ao request), gate pula em obra já digerida (`digest_at` inalterado, sem Sonnet novo), offline (expected/calc) intacto. tsc/lint/117 testes verdes. Commit `7be13e0`. **→ Item C 100% fechado.**
 
-**⬜ Pendente:** Painel do ledger (esperar acumular notas), **§6 Consolidação de UX** (maior bloco intocado). **⏸️ Diferido:** §7 Deploy · B6 (chat briefing ciente das regras) · dispersão de notas como sinal de tier (§4 Q2, go/no-go barato antes).
+- **§6 Consolidação de UX — Blocos 1–3** — **FEITOS + verificados live (2026-06-16).**
+  Bloco 1 (`75a77c9`): tira as notas decompostas mortas (Perfil/Δ Qualidade) do ranking
+  + renomeia "Análise do gosto" → "Re-ranquear favoritos". Bloco 2 (`07a5ac4`): mesma
+  limpeza em /titles + heatmap + re-enquadra o waterfall "Por que esta nota?" (tira o
+  2-stage aposentado). Bloco 3 (`bda7bc4`): `alignment_score` "IA Rk" → **"Veredito IA"**
+  em ~23 arquivos (resolve a colisão com "Alinhamento"=personal_fit). Detalhe no §6.3.
+
+**⬜ Pendente:** Painel do ledger (esperar acumular notas), **§6 Bloco 4** (fusão das ~4
+portas de recomendação numa entrada com modos — único bloco grande restante). **⏸️ Diferido:**
+§7 Deploy · B6 (chat briefing ciente das regras) · dispersão de notas como sinal de tier (§4 Q2, go/no-go barato antes).
 
 > Detalhe de cada um nas seções abaixo (Item A marcado ✅).
 
@@ -255,18 +264,41 @@ ela chama o `rankFavorites`, que é o **re-ranker LLM** (gera `alignment_score`,
 
 ### 6.3 — Curadoria: tirar / mudar / implementar
 
+> **STATUS (2026-06-16) — Blocos 1–3 FEITOS + verificados live** (commits `75a77c9`,
+> `07a5ac4`, `bda7bc4`). **Descoberta-chave do inventário vivo:** o §6 foi auditado
+> lendo código (2026-06-15) assumindo notas mortas **na cara do usuário**; na prática
+> ~80% da faxina de notas **já estava feita** nos defaults (Prioridade/Perfil/Δ
+> Qualidade já vinham `hidden`). Sobrou: remover de vez + naming + a fusão das portas
+> (Bloco 4, único bloco grande restante).
+
 **🗑️ TIRAR**
-- Nota **Prevista - Qualidade** → some da UI (é **sempre 0** no Free — coluna morta).
-- Nota **Prevista - Perfil** → some da UI (≈ Nota Prevista quando Qualidade=0 — redundante). *(Manter as 2 só em debug.)*
-- **Nota Prevista vs Prioridade** → mostrar **UMA** (mesmo eixo). Manter `expected_score` interno; exibir só "Prioridade".
-- **4 portas de recomendação** ("Recomendar com IA" = "Recomendar do Ranking"; "Próxima Leitura"/"Análise do gosto" são MODOS) → fundir em **uma** entrada com modos dentro.
+- ✅ **Bloco 1+2** — Nota **Prevista - Qualidade** (`expected_quality_adj`) e **Prevista
+  - Perfil** (`expected_baseline`) **removidas de todas as superfícies** (ranking, tabela
+  de /titles, heatmap, waterfall da obra). Correção factual: Δ Qualidade era **sempre 0
+  pra TODOS** (não só Free) — `L0_QUALITY_ENABLED=false` aposentou o estágio 2; Perfil ≈
+  expected menos o nudge de observação. Coeficiente cru do Ridge segue em
+  `formula_config.expected_ridge_coefficients` p/ debug real.
+- ✅ **Resolvido (já era o estado vivo)** — **Nota Prevista vs Prioridade**: o código já
+  lidera com **Prevista + tiers** e esconde Prioridade por padrão (v6). Decisão travada:
+  **manter Prevista como escalar líder** (alinha com §2; ≠ do texto original que pedia
+  "só Prioridade"). `decision` fica opt-in no column picker.
+- ⬜ **Bloco 4** — **4 portas de recomendação** (`RunCreatorForm` + `RecommendWithAiButton`
+  ×2 + Chat, todas chamando `runRecommendationAction`) → fundir em **uma** entrada com
+  modos. **Único bloco grande restante.**
 
 **✏️ MUDAR**
-- Colisão **Alinhamento × IA Rk**: renomear o do LLM (ex.: "Veredito IA", 0–100, sob demanda); "Alinhamento" fica só pro `personal_fit` offline.
-- **Dois desempates** (Comparar/Refinar grátis/mood + Desempatar com IA pago/LLM) → uma ação "**Refinar / desempatar**" com profundidades ("rápido grátis" vs "com IA pago").
-- **Chat** = porta conversacional única do consultor — não exibir junto das 3 ações que ele já cobre como se fossem pares.
-- **Análise do gosto** confunde com o perfil de gosto, mas é um **run LLM de todos os favoritos** (full_analysis). O **perfil de gosto** em si é outra coisa (auto — ver 6.4). Renomear/reposicionar pra não confundir.
-- **Surpreenda-me** → reposicionar como "não sei o que ler — escolhe por mim" (sabor do desempate), não engine à parte.
+- ✅ **Bloco 3** — Colisão **Alinhamento × IA Rk** resolvida: `alignment_score` →
+  **"Veredito IA"** (abrev. "Veredito" em colunas/badges estreitos) em ~23 arquivos;
+  "Alinhamento" fica exclusivo do `personal_fit`. Verbo "Rankear" e identificadores
+  (`ia-rk`/`iaRk*`) NÃO tocados.
+- ⬜ **Bloco 4 (avaliar)** — **Dois desempates**: **já estruturalmente aninhados** (tier →
+  "Comparar / Refinar" grátis/mood → `WorkCompareDrawer` → "Desempatar com IA" pago).
+  Falta só polir o rótulo/clareza de profundidade.
+- ⬜ **Bloco 4** — **Chat** = porta conversacional única; reposicionar p/ não parear com as
+  ações que ele já cobre.
+- ✅ **Bloco 1** — **Análise do gosto** → renomeada **"Re-ranquear favoritos"** (full_analysis),
+  tira a confusão com *perfil de gosto*.
+- ⬜ **Bloco 4** — **Surpreenda-me** → reposicionar como "escolhe por mim", não engine à parte.
 
 **🔨 IMPLEMENTAR**
 - Itens A/B/C (seção 4) entram **pelos fluxos existentes** — tags declaradas e sinal de reviews viram lentes/badges **dentro do Refinar**; efeitos cruzados entram no **consultor**. Não criar botão novo.
