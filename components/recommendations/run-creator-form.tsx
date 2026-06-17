@@ -105,7 +105,7 @@ export function RunCreatorForm({ disabled, disabledReason }: RunCreatorFormProps
             <ChartNoAxesCombined className="h-4 w-4" />
           )}
           <span className="flex flex-col items-start">
-            <span className="text-sm font-semibold">Análise do gosto</span>
+            <span className="text-sm font-semibold">Re-ranquear favoritos</span>
             <span className="text-[11px] font-normal opacity-80">
               Re-ranqueia a biblioteca inteira de favoritos
             </span>

@@ -24,7 +24,7 @@ interface RunHistoryListProps {
 function modeLabel(mode: RecommendationMode): string {
   if (mode === "next_read") return "Próxima leitura"
   if (mode === "ranking") return "Conversa com IA"
-  return "Análise do gosto"
+  return "Re-ranquear favoritos"
 }
 
 function ModeIcon({ mode }: { mode: RecommendationMode }) {

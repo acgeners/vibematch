@@ -49,7 +49,7 @@ interface RecommendWithAiButtonProps {
 
 const MODE_LABELS: Record<Exclude<RecommendationMode, "ranking">, string> = {
   next_read: "Próxima leitura — só favoritos não-lidos",
-  full_analysis: "Análise completa — todos os favoritos",
+  full_analysis: "Re-ranquear favoritos — todos, inclusive lidos",
 }
 
 const CONTEXT_EXAMPLES = [

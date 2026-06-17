@@ -407,15 +407,6 @@ function renderCell(
         )}
       </span>
     )
-  if (col.key === "expected_baseline")
-    return <span className="font-mono text-sm text-muted-foreground">{entry.expectedBaseline != null ? entry.expectedBaseline.toFixed(2) : "—"}</span>
-  if (col.key === "expected_quality_adj") {
-    const v = entry.expectedQualityAdj
-    if (v == null) return <span className="font-mono text-sm text-muted-foreground">—</span>
-    const sign = v >= 0 ? "+" : ""
-    const cls = v >= 0 ? "text-emerald-500" : "text-rose-500"
-    return <span className={`font-mono text-sm ${cls}`}>{sign}{v.toFixed(2)}</span>
-  }
   if (col.key === "personal_fit")
     return <AlignmentCell value={entry.personalFit} percentile={entry.personalFitPercentile} showBar={false} />
   if (col.key === "alignment_score")

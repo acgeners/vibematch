@@ -1,7 +1,7 @@
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 
-export type RankingColumnGroup = "basico" | "notas" | "criterios" | "avancado"
+export type RankingColumnGroup = "basico" | "notas" | "criterios"
 
 export interface RankingColumnDef {
   key: string
@@ -24,7 +24,6 @@ export const RANKING_COLUMN_GROUP_LABELS: Record<RankingColumnGroup, string> = {
   basico: "Básico",
   notas: "Notas",
   criterios: "Atributos",
-  avancado: "Avançado",
 }
 
 // Bump v3 → v4 to hide chapters_read by default and add missing columns.
@@ -35,6 +34,11 @@ export const RANKING_COLUMN_GROUP_LABELS: Record<RankingColumnGroup, string> = {
 // by default — disponível no column picker, mas opt-in.
 // Bump v7 → v8 to drop the legacy Nota.IA/Pr/Final columns (aposentados — os
 // dados Pr/Final já eram null; calc_score vira só feature interna do expected).
+// (§6 Bloco 1, 2026-06-16) Removidas as colunas decompostas "Perfil"
+// (expected_baseline) e "Δ Qualidade" (expected_quality_adj): a arquitetura
+// 2-stage foi aposentada (L0_QUALITY_ENABLED=false → qualityAdj sempre 0, e
+// baseline ≈ expected). Eram colunas mortas/enganosas. Sem bump da key:
+// normalizeRankingColumnConfig descarta as chaves removidas (preserva as prefs).
 export const RANKING_TABLE_COLUMN_CONFIG_STORAGE_KEY = "ranking_col_config_v8"
 export const RANKING_TABLE_COLUMN_CONFIG_EVENT = "ranking-column-config-change"
 
@@ -62,8 +66,6 @@ export const RANKING_TABLE_COLUMNS: RankingColumnDef[] = [
   { key: "decision", label: "Prioridade", configLabel: "Prioridade", description: "Quão provável que você goste da obra — um número único (0–100) pra decidir o que ler primeiro. Quanto maior, mais a obra deveria estar no topo da sua fila. Não é uma previsão de nota: é o lugar dela na sua ordem de leitura.", defaultWidth: 100, align: "center", group: "notas" },
   // Novo (Fase 1.5): expected_score é o L1 que substitui o trio Nota.IA/Pr/Final
   { key: "expected", label: "Prevista", configLabel: "Nota Prevista", description: "A nota que estimamos que você daria à obra (0–10), juntando o seu gosto com a qualidade dela. É a referência principal do ranking. Calculada a partir das notas dos atributos da IA, do seu perfil de gosto e da nota do público.", defaultWidth: 100, align: "center", group: "notas" },
-  { key: "expected_baseline", label: "Perfil", configLabel: "Prevista — Perfil", description: "A parte da Nota Prevista que vem só do seu gosto: o quanto a obra combina com o seu perfil, antes de considerar se ela é boa ou não.", defaultWidth: 90, align: "center", group: "avancado" },
-  { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Prevista — Δ Qualidade", description: "O quanto a qualidade da obra puxa a Nota Prevista pra cima ou pra baixo, além do que o seu gosto já explica.", defaultWidth: 90, align: "center", group: "avancado" },
   { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento", description: "O quanto a obra combina com o seu perfil de gosto. Quanto maior, mais alinhada às suas preferências — independente de a obra ser boa ou popular. Calculado comparando as tags e os atributos da obra com as suas preferências.", defaultWidth: 110, align: "center", group: "notas" },
   { key: "alignment_score", label: "IA Rk.", configLabel: "IA Rk", description: "A opinião de um consultor de IA sobre o quanto esta obra é uma boa recomendação pra você (0–100), pensada caso a caso. É um segundo olhar mais fino que a Nota Prevista. Gerada por um LLM que analisa o seu perfil, a sinopse e os atributos da obra. A maioria das obras fica sem valor até você pedir o Rankear.", defaultWidth: 80, align: "center", group: "notas" },
   ...CRITERION_SLUGS.map((slug) => ({
@@ -82,8 +84,6 @@ const LOCKED_KEYS = new Set(RANKING_TABLE_COLUMNS.filter((c) => c.locked).map((c
 // Hidden por padrão a partir de v3:
 //   - chapters_progress: tradição (igual v1)
 //   - synopsis_q: pouco útil no contexto de ranking; reduz ruído
-//   - expected_baseline / expected_quality_adj: detalhe da decomposição;
-//     interessante pra debug mas polui a view padrão
 //   - alignment_score: NÃO está aqui — continua ativo no fluxo de
 //     recomendação, fica visível por padrão em /ranking
 const DEFAULT_COLUMN_CONFIG: RankingColumnConfig = {
@@ -98,8 +98,6 @@ const DEFAULT_COLUMN_CONFIG: RankingColumnConfig = {
     "chapters_progress",
     // Previsão de interesse na sinopse: opt-in (disponível no column picker).
     "synopsis_pred",
-    "expected_baseline",
-    "expected_quality_adj",
     "ai_status",
     "updated_at",
     "last_read_at",
@@ -218,8 +216,7 @@ const PRESET_VISIBLE_KEYS: Record<RankingColumnPreset, string[]> = {
   compacto: ["rank", "title", "pub", "per_status", "expected", "personal_fit"],
   notas: [
     "rank", "title",
-    "expected", "expected_baseline", "expected_quality_adj",
-    "personal_fit", "alignment_score", "platform_avg", "total_votes",
+    "expected", "personal_fit", "alignment_score", "platform_avg", "total_votes",
   ],
   criterios: ["rank", "title", "expected", ...CRITERION_KEYS],
 }
