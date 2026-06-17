@@ -324,6 +324,52 @@ Persona: Pago, cadastra **100 obras** (25 com nota, 75 sem).
 
 **Loop comum:** abrir ranking → olhar Tier 1 → talvez Refinar → escolher (tudo grátis). O LLM é acabamento sob demanda. **O que melhora o sistema é ler e dar nota** (alimenta a engine determinística) — não gastar no LLM.
 
+### 6.5 — Bloco 4: fusão das portas de recomendação (ÚNICO bloco grande restante)
+
+> **Status:** ⬜ não começado. Blocos 1–3 fechados (ver §6.3). Inventário abaixo é
+> **vivo** (verificado no app rodando 2026-06-16), não só leitura de código.
+
+**O problema:** a MESMA engine (`rankFavorites` via `runRecommendationAction`) é acionada
+por 3 UIs com 3 enquadramentos diferentes + Chat em 3 lugares.
+
+**Inventário vivo das portas:**
+
+| Porta | Onde (componente) | Modo(s) | Forma |
+|---|---|---|---|
+| Modo rápido | `/recommendations` → `RunCreatorForm` | next_read · full_analysis | 2 botões + textarea de mood, dentro de colapsável "Modo rápido" |
+| Recomendar do ranking | `/ranking` header → `RecommendWithAiButton(source=ranking)` | `ranking` (usa filtros da tela) | dialog (n + contexto) |
+| Recomendar com IA | `/favorites` → `RecommendWithAiButton(source=favorites)` | next_read · full_analysis | dialog c/ seletor de modo + n + contexto |
+| Chat | `/recommendations` (primário) · `/ranking` header (`ChatRecommendButton`) · global (`ActiveChatFab`) | — | porta conversacional (reusa a engine) |
+| Ver recomendações | `/favorites` → `ViewRecommendationsButton` | — | só navega pro histórico |
+
+**Alvo (§6.3):** UMA entrada com modos dentro (Próxima leitura · Re-ranquear favoritos ·
+Do ranking-filtrado), Chat como porta conversacional única, Surpreenda-me reposicionado.
+
+**Já resolvido (não rebuildar):** os **2 desempates** já estão aninhados —
+tier → "Comparar / Refinar" (grátis/mood, `tie-break-band` → `MoodRefineDialog`) →
+`WorkCompareDrawer` → "Desempatar com IA" (pago). Só falta polir rótulo de profundidade.
+
+**Constraints / armadilhas:**
+- O modo `ranking` **depende do contexto de filtros** da /ranking → não dá pra mover a
+  porta pra qualquer lugar; ou a entrada unificada lê os filtros quando aberta da /ranking,
+  ou esse modo só aparece lá.
+- `RunCreatorForm` e `RecommendWithAiButton` **duplicam** a mesma lógica com UIs diferentes
+  (botões vs dropdown) → candidatos a 1 componente só.
+- Chat já é gated por plano (`planAllows(plan, "chat_recommend")`).
+
+**Decisões de UX a tomar (antes de código):**
+1. **Componente único vs variantes por tela** — fundir `RunCreatorForm` + `RecommendWithAiButton`
+   num só (usado em /recommendations, /ranking, /favorites), ou manter gatilhos por tela que
+   abrem o MESMO modal com modos?
+2. **Onde vive a entrada** — /recommendations como casa; /ranking e /favorites deep-link com
+   contexto pré-setado, ou modal inline em cada uma?
+3. **Modos** — manter os 3 (next_read · full_analysis · ranking) ou consolidar? (next_read e
+   full_analysis diferem só no escopo de candidatos; ranking é o único que precisa de filtros.)
+4. **Surpreenda-me** — reposicionar como sabor do desempate ("escolhe por mim") ou manter botão.
+
+**Custo estimado:** médio — multi-tela, sem LLM/migration; risco = regressão de fluxo (testar
+live cada porta). Naming/notas (Blocos 1–3) já fora do caminho.
+
 ---
 
 ## 7. Onda 4 — Deploy (carregada do PLANO.md antigo, DIFERIDA)
