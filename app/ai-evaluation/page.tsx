@@ -524,10 +524,10 @@ function parseSynopsisStates(raw: string | string[] | undefined): SynopsisState[
 }
 
 /**
- * Aba "IA Rk" — fila de re-rank: obras com IA Rk desatualizado E/OU não avaliado
- * (sem IA Rk ainda). Recebe a fila já buscada pelo pai (mesma query do badge, pra
+ * Aba "Veredito IA" — fila de re-rank: obras com Veredito IA desatualizado E/OU não avaliado
+ * (sem Veredito IA ainda). Recebe a fila já buscada pelo pai (mesma query do badge, pra
  * o contador da aba bater com a lista). Compartilha os filtros de Status com a aba
- * de atributos; troca "Estado da avaliação" por "Estado do IA Rk". Sort é no painel.
+ * de atributos; troca "Estado da avaliação" por "Estado do Veredito IA". Sort é no painel.
  */
 function IaRkTab({
   works,
@@ -568,7 +568,7 @@ function IaRkTab({
 /**
  * Aba "Interesse Sinopse" — fila de obras com sinopse canônica que precisam de
  * estimativa IA (desatualizada ou não prevista). Mesmo formato de cards da aba
- * IA Rk. Compartilha os filtros de Status; só os de estado da avaliação não se
+ * Veredito IA. Compartilha os filtros de Status; só os de estado da avaliação não se
  * aplicam.
  */
 function SynopsisTab({
@@ -716,7 +716,7 @@ export default async function AiEvaluationPage({
       <Header
         kicker="Avaliação"
         title="Avaliação IA"
-        description="Fila de avaliação/revisão das notas por IA (atributos) e de re-rank (IA Rk) desatualizado ou não avaliado."
+        description="Fila de avaliação/revisão das notas por IA (atributos) e de re-rank (Veredito IA) desatualizado ou não avaliado."
         icon={<Sparkles />}
       />
 
@@ -725,7 +725,7 @@ export default async function AiEvaluationPage({
           IA atributos ({attrCount})
         </EvalTabLink>
         <EvalTabLink href={rkHref} active={activeTab === "ia-rk"}>
-          IA Rk ({iaRkCount})
+          Veredito IA ({iaRkCount})
         </EvalTabLink>
         <EvalTabLink href={synHref} active={activeTab === "sinopse"}>
           Interesse Sinopse ({synopsisCount})

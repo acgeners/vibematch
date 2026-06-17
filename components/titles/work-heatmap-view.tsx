@@ -129,7 +129,7 @@ const NON_CRITERION_LABELS: Record<string, string> = {
   expected_score: "Prevista",
   platform_avg: "Externa",
   total_votes: "Votos",
-  alignment_score: "IA Rk.",
+  alignment_score: "Veredito",
   synopsis_q: "Sinopse",
 }
 
@@ -137,7 +137,7 @@ const NON_CRITERION_TOOLTIPS: Record<string, string> = {
   expected_score: "Nota Prevista (L1 single Ridge — substitui N.IA/N.Pr/N.Final)",
   platform_avg: "Média externa",
   total_votes: "Total de votos nas plataformas",
-  alignment_score: "IA Re-rank — score 0-100 que ordena os resultados das ações 'Recomendar com IA'. Preenchido em batch pela run ou sob demanda pelo botão Rankear.",
+  alignment_score: "Veredito IA — score 0-100 que ordena os resultados das ações 'Recomendar com IA'. Preenchido em batch pela run ou sob demanda pelo botão Rankear.",
   synopsis_q: "Interesse na sinopse (♥ a ♥♥♥♥) — preenchido manualmente",
 }
 

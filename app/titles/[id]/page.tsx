@@ -307,7 +307,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   })).filter((item) => item.score != null && Number.isFinite(item.score))
   const hasPostReadingScores = postReadingScores.length > 0
 
-  // Quantos cards aparecem em "Notas calculadas" (Alinhamento, Match/IA Rk,
+  // Quantos cards aparecem em "Notas calculadas" (Alinhamento, Match/Veredito IA,
   // Pessoal). Com ≤2 cada um ocupa a linha toda; com 3 volta a 2 colunas.
   const calcCardCount =
     (work.calculated_scores?.personal_fit != null ? 1 : 0) +
@@ -783,7 +783,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               {work.calculated_scores?.personal_fit != null && (
                 <div className={cn(
                   "flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
-                  // Sem o par (IA Rk) ao lado, ocupa a linha toda pra não deixar célula vazia.
+                  // Sem o par (Veredito IA) ao lado, ocupa a linha toda pra não deixar célula vazia.
                   work.calculated_scores?.alignment_score == null && "sm:col-span-2",
                 )}>
                   <div className="flex flex-col items-start gap-1">
@@ -816,8 +816,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 )}>
                   <div className="flex flex-col items-start gap-1">
                     <ScoreLabelTooltip
-                      name="Match (IA Rk)"
-                      description="match_score / IA Re-rank (0–100): veredito do consultor LLM sob demanda ('Recomendar com IA' / Deep Dive). Preenchido ao rodar o re-rank."
+                      name="Veredito IA"
+                      description="match_score / Veredito IA (0–100): veredito do consultor LLM sob demanda ('Recomendar com IA' / Deep Dive). Preenchido ao rodar o re-rank."
                     />
                     <span className="text-[11px] text-muted-foreground">Veredito do consultor IA (0–100)</span>
                   </div>

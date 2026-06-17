@@ -300,7 +300,7 @@ export async function runRecommendationAction(
       console.error("[recommendations] falha persistindo run:", insertError)
     }
 
-    // Persiste alignment_score em calculated_scores pra a coluna "IA Rk." ficar
+    // Persiste alignment_score em calculated_scores pra a coluna "Veredito IA." ficar
     // disponível em qualquer tabela (ranking, favoritos, títulos) — independente
     // do modo da run, já que sempre representa o re-rank mais recente da obra.
     // alignment_payload guarda os campos enriquecidos (sub-fase 2.3.A) — pode
@@ -390,7 +390,7 @@ export interface RerankSingleWorkResult {
 
 /**
  * Re-rank sob demanda de UMA obra específica. Disparado pelo botão "Rankear"
- * que substitui o "—" na cell IA Rk quando `alignment_score` é NULL.
+ * que substitui o "—" na cell Veredito IA quando `alignment_score` é NULL.
  *
  * Compartilha o limite diário com `runRecommendationAction` (cada chamada é 1
  * LLM call). Não cria registro em `recommendation_runs` — só faz o upsert em
@@ -486,7 +486,7 @@ export interface RerankStaleBatchResult {
 }
 
 /**
- * Re-rankeia em LOTE as obras com IA Rk desatualizado (alignment_stale=true).
+ * Re-rankeia em LOTE as obras com Veredito IA desatualizado (alignment_stale=true).
  * Espelha o fluxo do re-rank por-obra, mas manda todos os candidatos numa única
  * chamada `rankFavorites` (como a run de ranking) e limpa a flag stale de cada
  * um. Não cria recommendation_run (alignment_run_id=null, como o re-rank
@@ -521,7 +521,7 @@ export async function rerankStaleBatchAction(
       getPreferenceRules(),
     ])
     if (allCandidates.length === 0) {
-      return { error: "Nenhuma obra com IA Rk desatualizado." }
+      return { error: "Nenhuma obra com Veredito IA desatualizado." }
     }
     const truncated = allCandidates.length > limit
     const candidates = truncated ? allCandidates.slice(0, limit) : allCandidates
@@ -582,7 +582,7 @@ export interface RerankWorksBatchResult {
 }
 
 /**
- * Re-rankeia em LOTE uma lista EXPLÍCITA de obras — os IDs que o painel de IA Rk
+ * Re-rankeia em LOTE uma lista EXPLÍCITA de obras — os IDs que o painel de Veredito IA
  * está exibindo na fila (desatualizados E/OU não avaliados), na ordem visível.
  * Espelha o `predictSynopsisQualityBatchAction`: o cliente chama em blocos pra
  * mostrar progresso, então lê o perfil ATUAL (1 linha) em vez de
@@ -794,10 +794,10 @@ export interface RankSpecificWorksResult {
  * Rankeia um conjunto ESPECÍFICO de obras (por work_id) — usado pelo chat pra
  * "avaliar 1 obra (fit)" e "recomendar entre estas obras". Espelha o
  * `rerankClusterAction`: roda `rankFavorites` (mode "ranking") numa única
- * chamada e PERSISTE o alignment_score em `calculated_scores` (IA Rk fica
+ * chamada e PERSISTE o alignment_score em `calculated_scores` (Veredito IA fica
  * visível em /ranking, /favorites, /titles). Não cria `recommendation_runs` —
  * é ação pontual, como os botões de re-rank. Devolve itens prontos pro card do
- * chat (título, capa, score, justificativa), ordenados por IA Rk desc.
+ * chat (título, capa, score, justificativa), ordenados por Veredito IA desc.
  */
 export async function rankSpecificWorksForChat(args: {
   workIds: string[]

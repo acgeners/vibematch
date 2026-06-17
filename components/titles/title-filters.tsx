@@ -47,7 +47,7 @@ const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
 
 const AI_STATUS_LABELS: Record<string, string> = {
   pending: "Pendente atributos",
-  review_pending: "Pendente IA Rk",
+  review_pending: "Pendente Veredito IA",
   done: "Avaliado",
   skipped: "Pulado",
 }

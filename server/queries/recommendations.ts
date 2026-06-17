@@ -455,7 +455,7 @@ export async function getRankingCandidates(
 
 /**
  * Hidrata uma obra única como `FavoriteCandidate`. Usado pelo re-rank
- * sob demanda (1 obra) disparado do botão "Rankear" da cell IA Rk.
+ * sob demanda (1 obra) disparado do botão "Rankear" da cell Veredito IA.
  * Filtra obras arquivadas pra evitar consumir LLM call à toa.
  */
 export async function getCandidateById(workId: string): Promise<FavoriteCandidate | null> {
@@ -487,7 +487,7 @@ export interface StaleAlignmentWork {
 }
 
 /**
- * Lista obras cujo IA Rk (alignment_score) ficou desatualizado — têm
+ * Lista obras cujo Veredito IA (alignment_score) ficou desatualizado — têm
  * alignment_score persistido mas alignment_stale=true (a obra foi editada ou
  * re-avaliada depois do último re-rank). Filtra arquivadas e ordena pelo
  * re-rank mais antigo primeiro. Alimenta a fila de re-rank em lote.
@@ -512,7 +512,7 @@ export async function getStaleAlignmentWorks(
     query = query.in("personal_status_id", opts.personalStatusIds)
   }
   const { data, error } = await query.limit(limit)
-  if (error) throw new Error(`Falha listando IA Rk desatualizados: ${error.message}`)
+  if (error) throw new Error(`Falha listando Veredito IA desatualizados: ${error.message}`)
 
   const rows = (data ?? []).map((row) => {
     const w = row as Record<string, unknown>
@@ -559,7 +559,7 @@ export interface AlignmentQueueWork {
 }
 
 /**
- * Fila de IA Rk pra aba /ai-evaluation?tab=ia-rk. Dois estados:
+ * Fila de Veredito IA pra aba /ai-evaluation?tab=ia-rk. Dois estados:
  *   - "stale": tem alignment_score mas alignment_stale=true (re-rank velho)
  *   - "unranked": ainda não tem alignment_score (nunca passou pelo re-rank)
  * Filtra por status (publicação/leitura) em SQL e por estado em JS. Sort é no
@@ -597,7 +597,7 @@ export async function getAlignmentQueueWorks(opts: {
   // cauda silenciosamente — uma obra stale ali sumia da aba mas aparecia no
   // badge (que conta todas), gerando divergência aba×badge.
   const { data, error } = await query.limit(opts.limit ?? 5000)
-  if (error) throw new Error(`Falha listando fila de IA Rk: ${error.message}`)
+  if (error) throw new Error(`Falha listando fila de Veredito IA: ${error.message}`)
 
   const rows: AlignmentQueueWork[] = []
   for (const row of data ?? []) {
@@ -631,7 +631,7 @@ export async function getAlignmentQueueWorks(opts: {
 }
 
 /**
- * Hidrata as obras com IA Rk desatualizado como `FavoriteCandidate` pra o
+ * Hidrata as obras com Veredito IA desatualizado como `FavoriteCandidate` pra o
  * re-rank em lote. Mesmo shape que `getRankingCandidates`, mas o pool vem da
  * fila de stale em vez dos top-N do ranking.
  */
@@ -663,7 +663,7 @@ export async function getStaleAlignmentCandidates(limit = 200): Promise<Favorite
 }
 
 /**
- * Conta (head-count) quantas obras têm IA Rk desatualizado. Usado pra exibir o
+ * Conta (head-count) quantas obras têm Veredito IA desatualizado. Usado pra exibir o
  * link/badge da fila no header do ranking só quando há o que processar.
  */
 export async function countStaleAlignmentWorks(): Promise<number> {
@@ -707,7 +707,7 @@ export interface SynopsisQueueWork {
 /**
  * Fila da aba /ai-evaluation?tab=sinopse: obras com `canonical_synopsis` que
  * precisam de estimativa de Interesse Sinopse. Três estados (espelha a fila de
- * IA Rk):
+ * Veredito IA):
  *   - "stale": já têm previsão mas marcada desatualizada (perfil/sinopse mudou)
  *   - "unpredicted": ainda não têm previsão
  *   - "predicted": têm previsão fresca — pra comparar manual × IA em massa
@@ -909,7 +909,7 @@ export async function getSynopsisQueueWorks(opts: {
  * defaults de parseFilters / parseIaRkStates / parseSynopsisStates em
  * app/ai-evaluation/page.tsx:
  *   - Atributos:        ai_eval_status ∈ {pending, review_pending}
- *   - IA Rk:            "stale" (tem alignment_score e alignment_stale)
+ *   - Veredito IA:            "stale" (tem alignment_score e alignment_stale)
  *   - Interesse Sinopse: "unpredicted" (sinopse canônica SEM nenhuma previsão)
  */
 export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
@@ -922,7 +922,7 @@ export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
       .select("id")
       .in("ai_eval_status", ["pending", "review_pending"])
       .eq("is_archived", false),
-    // 2) IA Rk — default {stale}: filtra direto em calculated_scores (conjunto
+    // 2) Veredito IA — default {stale}: filtra direto em calculated_scores (conjunto
     //    pequeno) em vez de carregar o catálogo inteiro. Arquivadas são excluídas
     //    abaixo intersectando com works não-arquivadas.
     supabase
@@ -940,7 +940,7 @@ export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
   ])
 
   if (attr.error) throw new Error(`Falha contando fila de atributos: ${attr.error.message}`)
-  if (staleScores.error) throw new Error(`Falha contando fila de IA Rk: ${staleScores.error.message}`)
+  if (staleScores.error) throw new Error(`Falha contando fila de Veredito IA: ${staleScores.error.message}`)
   if (synWorks.error) throw new Error(`Falha contando fila de sinopse: ${synWorks.error.message}`)
   if (preds.error) throw new Error(`Falha lendo previsões de sinopse: ${preds.error.message}`)
 
@@ -948,7 +948,7 @@ export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
 
   for (const w of attr.data ?? []) ids.add((w as { id: string }).id)
 
-  // IA Rk stale: exclui arquivadas validando os work_ids contra works não-arquivadas.
+  // Veredito IA stale: exclui arquivadas validando os work_ids contra works não-arquivadas.
   const staleIds = [...new Set((staleScores.data ?? []).map((r) => (r as { work_id: string }).work_id))]
   for (let i = 0; i < staleIds.length; i += 200) {
     const chunk = staleIds.slice(i, i + 200)
@@ -957,7 +957,7 @@ export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
       .select("id")
       .in("id", chunk)
       .eq("is_archived", false)
-    if (error) throw new Error(`Falha validando IA Rk não-arquivadas: ${error.message}`)
+    if (error) throw new Error(`Falha validando Veredito IA não-arquivadas: ${error.message}`)
     for (const w of data ?? []) ids.add((w as { id: string }).id)
   }
 
@@ -979,7 +979,7 @@ export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
  * Hidrata obras específicas (por ID) como `FavoriteCandidate`, preservando a
  * ordem dos IDs e filtrando arquivadas. Usado pelos lotes que agem exatamente
  * sobre as obras visíveis na fila (na ordem que o usuário vê): Interesse Sinopse
- * e re-rank de IA Rk.
+ * e re-rank de Veredito IA.
  */
 export async function getCandidatesByIds(ids: string[]): Promise<FavoriteCandidate[]> {
   if (ids.length === 0) return []

@@ -109,10 +109,10 @@ export function RunHistoryList({ runs }: RunHistoryListProps) {
                     "inline-flex shrink-0 items-baseline gap-1 rounded-md border px-1.5 py-0.5",
                     alignmentColor(run.topAlignment),
                   )}
-                  title="Faixa de IA Rk (match) das obras desta execução — do maior ao menor"
+                  title="Faixa de Veredito IA (match) das obras desta execução — do maior ao menor"
                 >
                   <span className="text-[9px] font-semibold uppercase tracking-wide opacity-80">
-                    IA Rk
+                    Veredito IA
                   </span>
                   <span className="text-xs font-bold tabular-nums">
                     {Math.round(run.topAlignment)}

@@ -16,7 +16,7 @@ interface RerankAiRkButtonProps {
 }
 
 /**
- * Dispara o re-rank por IA (match_score / "IA Rk") de UMA obra sob demanda.
+ * Dispara o re-rank por IA (match_score / "Veredito IA") de UMA obra sob demanda.
  * Chama `rerankSingleWorkAction`, que faz 1 chamada LLM (ranker), respeita o gate
  * Pago (`smart_shortlist`) + o limite diário, e persiste `alignment_score` em
  * `calculated_scores`. O servidor é a fonte da verdade do gate — este `isPaid` só
@@ -36,7 +36,7 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true }: RerankAiRk
         title="Re-rank por IA é uma feature do plano Pago."
       >
         <Sparkles className="h-3.5 w-3.5" />
-        Calcular IA Rk
+        Calcular Veredito IA
         <span className="ml-1 rounded bg-muted px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Pago
         </span>
@@ -53,7 +53,7 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true }: RerankAiRk
       }
       const score = result.data?.alignmentScore
       toast.success(
-        score != null ? `IA Rk calculado: ${Math.round(score)}` : "IA Rk calculado.",
+        score != null ? `Veredito IA calculado: ${Math.round(score)}` : "Veredito IA calculado.",
       )
       refresh()
     })
@@ -66,7 +66,7 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true }: RerankAiRk
       ) : (
         <Sparkles className="h-3.5 w-3.5" />
       )}
-      {isPending ? "Calculando…" : hasScore ? "Recalcular IA Rk" : "Calcular IA Rk"}
+      {isPending ? "Calculando…" : hasScore ? "Recalcular Veredito IA" : "Calcular Veredito IA"}
     </Button>
   )
 }

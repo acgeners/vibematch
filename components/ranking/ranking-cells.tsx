@@ -25,7 +25,7 @@ function useRerankSingleWork(workId: string) {
         toast.error(result.error ?? "Erro ao rankear obra.")
         return
       }
-      toast.success(`IA Rk: ${Math.round(result.data.alignmentScore)}`)
+      toast.success(`Veredito IA: ${Math.round(result.data.alignmentScore)}`)
       refresh()
     })
   }
@@ -66,7 +66,7 @@ function RerankSingleWorkButton({ workId }: { workId: string }) {
 }
 
 /**
- * Ícone ⟳ clicável ao lado da nota quando o IA Rk está DESATUALIZADO. Roda o
+ * Ícone ⟳ clicável ao lado da nota quando o Veredito IA está DESATUALIZADO. Roda o
  * re-rank só desta obra (mesma action do "Rankear"), limpando o stale.
  */
 function RerankStaleButton({ workId }: { workId: string }) {
@@ -83,7 +83,7 @@ function RerankStaleButton({ workId }: { workId: string }) {
               run()
             }}
             disabled={isPending}
-            aria-label="Atualizar IA Rk (desatualizado)"
+            aria-label="Atualizar Veredito IA (desatualizado)"
             className="inline-flex items-center justify-center rounded p-0.5 text-amber-500 hover:bg-amber-500/10 hover:text-amber-600 disabled:cursor-wait disabled:opacity-50 dark:hover:text-amber-400"
           >
             {isPending ? (
@@ -131,7 +131,7 @@ export function AlignmentScoreCell({
   workId?: string
   payload?: AlignmentPayload | null
   isPaid?: boolean
-  /** True quando o IA Rk ficou desatualizado (obra editada/re-avaliada). */
+  /** True quando o Veredito IA ficou desatualizado (obra editada/re-avaliada). */
   stale?: boolean
 }) {
   if (score == null) {
@@ -149,7 +149,7 @@ export function AlignmentScoreCell({
               </span>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-[260px]">
-              O re-rank por IA (IA Rk) é uma feature do plano Pago. No Free o ranking usa
+              O re-rank por IA (Veredito IA) é uma feature do plano Pago. No Free o ranking usa
               Nota Prevista × alinhamento.
             </TooltipContent>
           </Tooltip>
@@ -235,7 +235,7 @@ export function AlignmentScoreCell({
             </p>
           )}
           <div className="flex items-center justify-between gap-3">
-            <p className="font-semibold text-xs">IA Re-rank: {Math.round(score)}/100</p>
+            <p className="font-semibold text-xs">Veredito IA: {Math.round(score)}/100</p>
             {payload?.confidence != null && (
               <span className="text-[11px] text-muted-foreground">
                 Confiança: <span className="font-semibold text-foreground">{(payload.confidence * 100).toFixed(0)}%</span>
@@ -349,7 +349,7 @@ export function SynopsisPredictionCell({
 
 /**
  * Cell pra a Prioridade (0–10, exibida ×10 como 0–100) — número que ancora na
- * Prevista e ajusta pela IA Rk quando há. Distinta visualmente das outras notas
+ * Prevista e ajusta pelo Veredito IA quando há. Distinta visualmente das outras notas
  * (tom primary) porque é o critério default de ordenação. O tooltip abre a
  * composição pra deixar claro que NÃO é uma previsão de nota, e sim "o que ler primeiro".
  */
@@ -413,7 +413,7 @@ export function DecisionCell({
           </p>
           <p className="text-[11px] text-muted-foreground">
             Chance estimada de você gostar — prioridade pra escolher o que ler primeiro
-            (Prevista ajustada pela IA Rk, ×10). Obras numa mesma faixa estão dentro do
+            (Prevista ajustada pelo Veredito IA, ×10). Obras numa mesma faixa estão dentro do
             erro do modelo, então dividem o número e ficam ordenadas por afinidade.
             <span className="font-semibold"> Não é uma previsão de nota</span> (essa é a Prevista).
           </p>
@@ -423,7 +423,7 @@ export function DecisionCell({
               <span className="font-mono font-semibold">{expected != null ? expected.toFixed(1) : "—"}</span>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">IA Rk. (quando há)</span>
+              <span className="text-muted-foreground">Veredito IA (quando há)</span>
               <span className="font-mono font-semibold">{alignment != null ? Math.round(alignment) : "não rankeada"}</span>
             </div>
             <div className="flex items-center justify-between gap-3">

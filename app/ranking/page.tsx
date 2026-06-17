@@ -46,7 +46,7 @@ const getPreferences = unstable_cache(async (): Promise<{
   return {
     topN: cfg?.top_n ?? null,
     // Colunas legadas repurposadas como filtros padrão (ver ranking-preferences-form):
-    // min_calc_score → Alinhamento, min_predicted_score → IA Rk, min_final_score → Nota Prevista.
+    // min_calc_score → Alinhamento, min_predicted_score → Veredito IA, min_final_score → Nota Prevista.
     minFit: cfg?.min_calc_score ?? null,
     minAlign: cfg?.min_predicted_score ?? null,
     minFinal: cfg?.min_final_score ?? null,
@@ -118,7 +118,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     // Critérios IA
     ...CRITERION_SLUGS.map((s) => `crit_${s}`),
   ])
-  // Default: ordena pela Nota Prevista e, como desempate, IA Rk no plano Pago
+  // Default: ordena pela Nota Prevista e, como desempate, Veredito IA no plano Pago
   // (NULL no Free) ou Alinhamento no Free. Os empates só quebram no EXATO no
   // SQL; o desempate band-aware fino é client-side.
   // `plan` é buscado junto do bloco de metadados abaixo (Promise.all) pra não
@@ -283,7 +283,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
               >
                 <Link href="/ai-evaluation?tab=ia-rk">
                   <RotateCw className="h-4 w-4" />
-                  <span>IA Rk desatualizados ({staleAlignmentCount})</span>
+                  <span>Veredito IA desatualizados ({staleAlignmentCount})</span>
                 </Link>
               </Button>
             )}

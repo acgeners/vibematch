@@ -38,8 +38,8 @@ const DEFAULT_BATCH_SIZE = 30
 const PER_CALL_CHUNK = 10
 
 /**
- * Fila de IA Rk (aba /ai-evaluation?tab=ia-rk): obras desatualizadas (re-rank
- * velho) e/ou não avaliadas (sem IA Rk). Mesmo layout de cards da aba de
+ * Fila de Veredito IA (aba /ai-evaluation?tab=ia-rk): obras desatualizadas (re-rank
+ * velho) e/ou não avaliadas (sem Veredito IA). Mesmo layout de cards da aba de
  * atributos. O botão de lote cobre TODA a fila visível (desatualizados + não
  * avaliados) até `batchSize` por run, em blocos pra mostrar progresso; item a
  * item usa o RerankAiRkButton.
@@ -147,7 +147,7 @@ export function StaleRerankPanel({
             <SelectContent>
               <SelectItem value="default">Padrão</SelectItem>
               <SelectItem value="expected">Nota prevista</SelectItem>
-              <SelectItem value="alignment">IA Rk</SelectItem>
+              <SelectItem value="alignment">Veredito IA</SelectItem>
             </SelectContent>
           </Select>
           <Button
@@ -246,7 +246,7 @@ export function StaleRerankPanel({
                     </div>
 
                     <p className="font-mono text-xs text-muted-foreground tabular-nums">
-                      IA Rk: {w.alignmentScore != null ? Math.round(w.alignmentScore) : "—"}
+                      Veredito IA: {w.alignmentScore != null ? Math.round(w.alignmentScore) : "—"}
                     </p>
                   </div>
 

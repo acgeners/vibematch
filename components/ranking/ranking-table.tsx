@@ -1025,7 +1025,7 @@ function RankingCard({
         </div>
         {entry.alignmentScore != null && (
           <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-            IA Rk {Math.round(entry.alignmentScore)}
+            Veredito IA {Math.round(entry.alignmentScore)}
           </p>
         )}
       </div>

@@ -65,7 +65,7 @@ export function ReviewDigestPanel({ accent }: ReviewDigestPanelProps) {
             (consenso, divergência, traços salientes, alertas, execução) via Sonnet 4.6
             (~$0.02–0.04 por obra, varia com o volume de reviews), com amostragem
             estratificada por fonte. É o sinal qualitativo
-            que o <strong>consultor IA</strong> consome (Recomendar / IA Rk / Deep Dive / Chat).
+            que o <strong>consultor IA</strong> consome (Recomendar / Veredito IA / Deep Dive / Chat).
           </p>
           <p className="text-xs">
             Custo único por obra, amortizado — só re-roda quando a versão do digest muda.

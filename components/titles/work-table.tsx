@@ -696,7 +696,7 @@ function WorkListView({
     personal_fit: { field: "personal_fit", label: "Alinhamento" },
     platform_avg: { field: "platform_avg", label: "Nota.M" },
     total_votes: { field: "total_votes", label: "Votos" },
-    alignment_score: { field: "alignment_score", label: "[Legado] IA Re-rank" },
+    alignment_score: { field: "alignment_score", label: "Veredito IA" },
     ai_status: { field: "ai_eval_status", label: "Status IA" },
     updated_at: { field: "updated_at", label: "Atualizado" },
     last_read_at: { field: "last_read_at", label: "Última leitura" },
@@ -959,15 +959,15 @@ function WorkListView({
                 e.stopPropagation()
                 const result = await rerankSingleWorkAction(work.id)
                 if (result.error || !result.data) {
-                  toast.error(result.error ?? "Erro ao avaliar IA Rk")
+                  toast.error(result.error ?? "Erro ao avaliar Veredito IA")
                 } else {
-                  toast.success(`IA Rk: ${Math.round(result.data.alignmentScore)}`)
+                  toast.success(`Veredito IA: ${Math.round(result.data.alignmentScore)}`)
                   refresh()
                 }
               }}
             >
               <Sparkles className="h-4 w-4 mr-2" />
-              Avaliar IA Rk
+              Avaliar Veredito IA
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

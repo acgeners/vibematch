@@ -44,7 +44,7 @@ const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
   { value: "decision", label: "Prioridade" },
   { value: "expected_score", label: "Nota Prevista" },
   { value: "personal_fit", label: "Alinhamento" },
-  { value: "alignment_score", label: "IA Rk" },
+  { value: "alignment_score", label: "Veredito IA" },
   { value: "platform_avg", label: "Nota.M" },
   { value: "total_votes", label: "Votos" },
   { value: "title", label: "Título" },
@@ -203,7 +203,7 @@ interface RankingFiltersProps {
   defaultMinExpected: number | null
   /** Preferência "Alinhamento mínimo" (persistida na coluna min_calc_score, repurposada). */
   defaultMinFit?: number | null
-  /** Preferência "IA Rk mínimo" (persistida na coluna min_predicted_score, repurposada). */
+  /** Preferência "Veredito IA mínimo" (persistida na coluna min_predicted_score, repurposada). */
   defaultMinAlign?: number | null
   basePath?: string
   hidePreferencesControls?: boolean
@@ -1470,7 +1470,7 @@ export function RankingFilters({
 
   const currentTopN = urlTopN ?? defaultTopN ?? undefined
   const currentMinExpected = urlMinExpected ?? defaultMinExpected ?? undefined
-  // Alinhamento/IA Rk também são preferências (colunas min_calc/min_predicted
+  // Alinhamento/Veredito IA também são preferências (colunas min_calc/min_predicted
   // repurposadas) — preservamos o default ao salvar pra não zerar o que foi
   // definido em /preferencias.
   const currentMinFit = urlMinFit ?? defaultMinFit ?? undefined
@@ -1690,7 +1690,7 @@ export function RankingFilters({
   pushRangeChip("chapters", "Capítulos", "min_chapters", "max_chapters")
   pushRangeChip("expected", "Nota Prevista", "min_expected", "max_expected")
   pushRangeChip("fit", "Alinhamento", "min_fit", "max_fit")
-  pushRangeChip("align", "IA Rk", "min_align", "max_align")
+  pushRangeChip("align", "Veredito IA", "min_align", "max_align")
   pushRangeChip("platform", "Nota.M", "min_platform_avg", "max_platform_avg")
   pushRangeChip("votes", "Votos", "min_votes", "max_votes")
   for (const slug of CRITERION_SLUGS) {
@@ -2101,7 +2101,7 @@ export function RankingFilters({
                 />
                 <ScoreRangeCard
                   emoji="🤖"
-                  label="IA Rk"
+                  label="Veredito IA"
                   tooltip="Re-rank do consultor IA (0–100), sob demanda. Só obras já rankeadas têm valor."
                   minKey="min_align"
                   maxKey="max_align"
