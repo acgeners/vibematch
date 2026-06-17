@@ -693,8 +693,6 @@ function WorkListView({
     synopsis_q: { field: "synopsis_q", label: "Sinopse" },
     decision: { field: "decision", label: "Prioridade" },
     expected_score: { field: "expected_score", label: "Nota Prevista" },
-    expected_baseline: { field: "expected_baseline", label: "Perfil (Stage 1)" },
-    expected_quality_adj: { field: "expected_quality_adj", label: "Δ Qualidade" },
     personal_fit: { field: "personal_fit", label: "Alinhamento" },
     platform_avg: { field: "platform_avg", label: "Nota.M" },
     total_votes: { field: "total_votes", label: "Votos" },
@@ -822,22 +820,6 @@ function WorkListView({
         thresholds={scoreThresholds?.expected}
       />
     ),
-    expected_baseline: (work) => {
-      const v = work.calculated_scores?.expected_baseline
-      return v != null ? (
-        <span className="font-mono text-sm text-muted-foreground">{Number(v).toFixed(2)}</span>
-      ) : (
-        <span className="text-muted-foreground">—</span>
-      )
-    },
-    expected_quality_adj: (work) => {
-      const v = work.calculated_scores?.expected_quality_adj
-      if (v == null) return <span className="text-muted-foreground">—</span>
-      const num = Number(v)
-      const sign = num >= 0 ? "+" : ""
-      const cls = num >= 0 ? "text-emerald-500" : "text-rose-500"
-      return <span className={`font-mono text-sm ${cls}`}>{sign}{num.toFixed(2)}</span>
-    },
     personal_fit: (work) => (
       <AlignmentCell
         value={work.calculated_scores?.personal_fit ?? null}
