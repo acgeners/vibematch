@@ -32,6 +32,7 @@ import { getComixResolverStatus } from "@/server/actions/comix-resolver"
 import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
 import { getAiEvalOnCreate } from "@/server/queries/current-user"
 import { getSettingsPendingCounts } from "@/server/queries/settings-pending"
+import { parseModelEvaluationMetrics } from "@/lib/metrics/model-evaluation"
 import type { FormulaConfig } from "@/types/domain"
 import { ACCENT_LINK, type SettingsAccent } from "@/lib/settings-accent"
 import { cn } from "@/lib/utils"
@@ -150,6 +151,21 @@ export default async function SettingsPage() {
     aiEvalOnCreate,
   } = await getSettingsData()
 
+  // F4: métricas de erro honestas, validadas por Zod no boundary do servidor.
+  // crossValidationMae é gated por stub (mesma regra antiga da headline). A
+  // prospectiva ainda não entra aqui — vive na página técnica /admin/model-metrics.
+  const modelMetrics = parseModelEvaluationMetrics({
+    trainMae: config.mae_expected,
+    crossValidationMae: snapshot.expectedPredictorIsStub ? null : config.cv_mae_expected_stage1,
+    prospectiveMae: null,
+    baselineMae: snapshot.baselineMae,
+    sampleSize: snapshot.trainSize,
+    foldCount: null,
+    evaluatedAt: config.last_recalculated_at,
+    prospectiveSampleSize: null,
+    prospectiveEvaluatedAt: null,
+  })
+
   return (
     <div className="w-full max-w-6xl space-y-4">
       <Header
@@ -192,7 +208,7 @@ export default async function SettingsPage() {
         accent="cyan"
         badge={{ label: "Passo 2", variant: "step" }}
       >
-        <CalibrationPanel config={config} snapshot={snapshot} accent="cyan" />
+        <CalibrationPanel config={config} metrics={modelMetrics} snapshot={snapshot} accent="cyan" />
       </SettingsSection>
 
       <SettingsSection

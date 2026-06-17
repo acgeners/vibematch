@@ -6,6 +6,7 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
+import { fetchCoverForModel, isImageRelatedModelError } from "@/lib/server/covers/fetch-cover-for-model"
 import type { SourcedReview, PlatformRating, SimilarWork } from "@/lib/external/types"
 
 export interface AiEvaluationTag {
@@ -1409,9 +1410,14 @@ export async function requestAiEvaluation(
   // Opus 4.7 não aceita o parâmetro temperature.
   const supportsTemperature = !/opus-4-7/i.test(modelToUse)
 
-  // Tenta primeiro com cover (se fornecida); se Anthropic falhar com erro
-  // específico de imagem, retentamos sem ela (a segunda tentativa textual já
-  // é o flow padrão).
+  // Pré-busca a capa NO NOSSO servidor e envia em base64 (a Anthropic NÃO baixa a
+  // URL). Elimina os 400 "Unable to download image" de hosts com Cloudflare/hotlink:
+  // quando o fetch local falha, `coverImage` é null e avaliamos direto sem imagem,
+  // sem desperdiçar uma primeira chamada com URL inacessível.
+  const coverImage = req.coverUrl ? await fetchCoverForModel(req.coverUrl) : null
+
+  // Rede de segurança: se o MODELO recusar a imagem (400 image/media_type/base64),
+  // retentamos sem ela na mesma attempt.
   let imageFetchFailed = false
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -1420,12 +1426,12 @@ export async function requestAiEvaluation(
         ? userPrompt
         : `${userPrompt}\n\nA tentativa anterior não passou na auditoria de uso de reviews ou retornou payload inválido. Se reviews foram fornecidas, use pelo menos uma review compatível, cite o ID dela nas justificativas como "review R1" e preencha "review_usage" com IDs válidos. Use SEMPRE a tool "submit_evaluation".`
 
-    const includeImage = !!req.coverUrl && !imageFetchFailed
+    const includeImage = !!coverImage && !imageFetchFailed
     const messageContent: Anthropic.Messages.ContentBlockParam[] = includeImage
       ? [
           {
             type: "image",
-            source: { type: "url", url: req.coverUrl! },
+            source: { type: "base64", media_type: coverImage!.mediaType, data: coverImage!.data },
           },
           { type: "text", text: promptText },
         ]
@@ -1469,14 +1475,11 @@ export async function requestAiEvaluation(
       )
       message = logged.message
     } catch (err) {
-      // Erro relacionado à imagem (fetch falhou, formato inválido, URL privada).
-      // Retentar imediatamente sem a imagem em vez de rodar pra próxima attempt.
-      const errMessage = err instanceof Error ? err.message : String(err)
-      const looksLikeImageError =
-        includeImage &&
-        /image|url|fetch|media|content type/i.test(errMessage)
-      if (looksLikeImageError) {
-        console.warn(`[AI] Cover falhou (${errMessage}). Retentando sem imagem.`)
+      // Só retenta sem imagem quando o erro é COMPROVADAMENTE da imagem (400 +
+      // image/media_type/base64). NÃO retenta para rate limit, auth, timeout geral,
+      // indisponibilidade ou validação de resposta — esses propagam normalmente.
+      if (includeImage && isImageRelatedModelError(err)) {
+        console.warn(`[AI] Imagem recusada pelo modelo (400 image/media_type/base64). Retentando sem imagem.`)
         imageFetchFailed = true
         attempt -= 1
         continue

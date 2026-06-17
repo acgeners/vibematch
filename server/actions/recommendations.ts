@@ -27,6 +27,7 @@ import {
 } from "@/server/queries/recommendations"
 import { MAX_CANDIDATES_HARD_LIMIT } from "@/lib/ai-recommendation/limits"
 import { getPreferenceRules } from "@/server/queries/preference-rules"
+import { recordRecommendationSnapshots } from "@/lib/server/predictions/record-prediction"
 import type {
   ChatRecommendationItem,
   RankedCandidate,
@@ -330,6 +331,16 @@ export async function runRecommendationAction(
       revalidatePath("/ranking")
       revalidatePath("/favorites")
       revalidatePath("/titles")
+
+      // P1: registra snapshots prospectivos (prediction_snapshots) das obras
+      // recomendadas ainda SEM nota — agrupadas sob esta run (ranking_snapshot_id).
+      // Best-effort: o recorder filtra só as prospectivas e nunca lança.
+      await recordRecommendationSnapshots({
+        rankingSnapshotId: runRow.id,
+        workIds: ranked.map((r) => r.work_id),
+        modelVersion: result.modelName,
+        promptVersion: result.promptVersion,
+      })
     }
 
     revalidatePath("/recommendations")

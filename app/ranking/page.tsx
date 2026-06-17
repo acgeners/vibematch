@@ -2,6 +2,7 @@ import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } f
 import { getCurrentPlan } from "@/server/queries/current-user"
 import { planAllows } from "@/lib/plans/capabilities"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
+import { getTierBandWidth } from "@/server/queries/tier-band-width"
 import { getLowCoverageWorkIds } from "@/server/queries/calibration-guards"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
@@ -14,6 +15,8 @@ import { Header } from "@/components/layout/header"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
 import { RankingTable } from "@/components/ranking/ranking-table"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
+import { TierBandControl } from "@/components/ranking/tier-band-control"
+import { tierBandWidthSchema } from "@/lib/ranking/tier-config"
 import { SurpriseMeButton } from "@/components/ranking/surprise-me-button"
 import { MOOD_PRESETS_BY_ID } from "@/lib/constants/mood-presets"
 import { RecommendDialog } from "@/components/recommendations/recommend-dialog"
@@ -222,15 +225,22 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     sortLevels,
   }
 
-  const [rawEntries, scoreThresholds, lowCoverageIds, staleAlignmentCount, recalcState] = await Promise.all([
+  const [rawEntries, scoreThresholds, tierBandWidth, lowCoverageIds, staleAlignmentCount, recalcState] = await Promise.all([
     getRanking(filters),
     getScoreColorThresholds(),
+    getTierBandWidth(),
     getLowCoverageWorkIds(),
     countStaleAlignmentWorks(),
     getRecalcPendingState(),
   ])
   // Marca obras não-lidas com baixa cobertura de gênero (badge ⚠ na Nota esperada).
   const entries = rawEntries.map((e) => ({ ...e, lowCoverage: lowCoverageIds.has(e.workId) }))
+
+  // Override de TESTE da largura das bandas via ?band= (não persiste). Inválido →
+  // cai no valor salvo em formula_config.tier_band_width.
+  const bandParam = num("band")
+  const bandParse = bandParam != null ? tierBandWidthSchema.safeParse(bandParam) : null
+  const effectiveTierBandWidth = bandParse?.success ? bandParse.data : tierBandWidth
 
   const queryParams = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -326,7 +336,9 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         savedPresets={savedPresets}
       />
 
-      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} />
+      <TierBandControl defaultBand={tierBandWidth} />
+
+      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} />
     </div>
   )
 }

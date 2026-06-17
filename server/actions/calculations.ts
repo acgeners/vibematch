@@ -1064,7 +1064,13 @@ export async function recalculateAll() {
       expectedTrainWithPostScores: expectedPredictor.trainWithPostScores,
       expectedFeatureNames: expectedPredictor.featureNames,
       expectedCoefficients: expectedPredictor.model.coefficients,
+      // cvMAE INTERNO do RidgeCV (só seleção de α por fold) — otimista/vazado.
+      // Mantido pra diagnóstico; NÃO usar como vitrine.
       expectedCvMAE: expectedPredictor.model.cvMAE,
+      // MAE CV HONESTA (mesmo número da headline cv_mae_expected_stage1):
+      // nested-CV (Free) ou held-out com qualidade estimada (Pago). É a que o
+      // toast/UI deve reportar. NULL em fallback/stub.
+      expectedHonestCvMAE: cvMaeExpected,
       expectedBaselineIndices: expectedPredictor.baselineIndices,
       expectedQualityIndices: expectedPredictor.qualityIndices,
       pseudoVotesNotaM,

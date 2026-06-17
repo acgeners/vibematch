@@ -15,10 +15,18 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { POST_READING_WEIGHT_LABELS } from "@/lib/constants/post-reading-criteria"
 import type { BucketBreakdown, CalibrationDiff } from "@/lib/calculations/calibration"
+import {
+  selectPrimaryModelMetric,
+  describeMetricSource,
+  calculateRelativeErrorReduction,
+} from "@/lib/metrics/model-evaluation"
+import type { ModelEvaluationMetrics } from "@/lib/metrics/model-evaluation"
 
 interface CalibrationPanelProps {
   accent: SettingsAccent
   config: FormulaConfig
+  /** Métricas de erro do modelo já normalizadas/validadas (F4). */
+  metrics: ModelEvaluationMetrics
   snapshot: {
     totalWorks: number
     trainSize: number
@@ -71,7 +79,7 @@ function maeColor(value: number | null | undefined): string {
   return "text-rose-500"
 }
 
-export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelProps) {
+export function CalibrationPanel({ accent, config, metrics, snapshot }: CalibrationPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [isTogglingAutoWeights, startAutoWeightsToggle] = useTransition()
   const [lastRun, setLastRun] = useState<string | null>(null)
@@ -93,16 +101,17 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
         const result = await recalculateNow()
         const cal = result.calibration
         if (cal) {
-          // Reporta a MESMA métrica do headline: MAE CV da Nota Prevista (L1).
+          // Reporta a MESMA métrica HONESTA da headline: MAE CV da Nota Prevista
+          // (nested-CV / held-out), NÃO o cvMAE interno otimista do RidgeCV.
           setLastRun(
             cal.expectedIsStub
               ? `${result.recalculated} obras recalculadas. ` +
                   `Treino: ${cal.expectedTrainSize ?? cal.trainSize} títulos — Nota Prevista em fallback (precisa de ≥ 20 títulos com nota pessoal).`
               : `${result.recalculated} obras recalculadas. ` +
                   `Treino: ${cal.expectedTrainSize ?? cal.trainSize} títulos · ` +
-                  `MAE CV (Nota Prevista) = ${fmt(cal.expectedCvMAE, 2)}.`
+                  `MAE CV honesta (Nota Prevista) = ${fmt(cal.expectedHonestCvMAE, 2)}.`
           )
-          toast.success(`Recalibrado. MAE CV da Nota Prevista: ${fmt(cal.expectedCvMAE, 2)}`)
+          toast.success(`Recalibrado. MAE CV honesta da Nota Prevista: ${fmt(cal.expectedHonestCvMAE, 2)}`)
         } else {
           toast.success(`${result.recalculated} obras recalculadas.`)
         }
@@ -136,22 +145,22 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
     return Math.abs(live - stored) / Math.max(stored, 0.001) > threshold
   }
 
-  // Precisão honesta da PREVISÃO (Nota Prevista / L1) — CV interno do RidgeCV.
-  // É o número que importa pros 2 objetivos: prediz obras NÃO-LIDAS sem usar
-  // sinal pós-leitura.
-  const expectedCvMae =
-    config.cv_mae_expected_stage1 != null && !snapshot.expectedPredictorIsStub
-      ? Number(config.cv_mae_expected_stage1)
-      : null
+  // Métrica PRINCIPAL honesta (F4): prospectiva > CV/OOF > indisponível. Nunca
+  // a in-sample. A prospectiva (prediction_ledger) ainda não é alimentada aqui
+  // — vive na página técnica /admin/model-metrics; aqui a principal é a CV/OOF.
+  const primaryMetric = selectPrimaryModelMetric(metrics)
+  const metricCopy = describeMetricSource(primaryMetric.source)
+  const primaryMae = primaryMetric.mae
 
-  // Quanto o modelo ganha do baseline trivial (chutar a média). Se o ganho for
-  // pequeno/negativo, a Nota Prevista não está agregando valor real — sinal de
+  // Quanto o modelo reduz de erro vs o baseline trivial (chutar a média). Se a
+  // redução for pequena/negativa, a Nota Prevista quase não agrega — sinal de
   // que a alavanca é mais dado rotulado, não mexer no modelo.
-  const baselineMae = snapshot.baselineMae
-  const skillGainPct =
-    expectedCvMae != null && baselineMae != null && baselineMae > 0
-      ? ((baselineMae - expectedCvMae) / baselineMae) * 100
+  const baselineMae = metrics.baselineMae
+  const reduction =
+    primaryMae != null && baselineMae != null
+      ? calculateRelativeErrorReduction(primaryMae, baselineMae)
       : null
+  const skillGainPct = reduction != null ? reduction * 100 : null
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -165,18 +174,18 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
             <div className="flex-1 space-y-1">
               <p className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 <span>Precisão da previsão</span>
-                <InfoTooltip
-                  label="MAE CV da Nota Prevista"
-                  text="Erro médio (cross-validation) da Nota Prevista (L1) — a previsão usada pra obras NÃO-LIDAS, sem usar sinal pós-leitura. É a precisão honesta pro objetivo de recomendar. ↓ Menor = mais preciso."
-                />
+                <InfoTooltip label={metricCopy.title} text={metricCopy.tooltip} />
               </p>
               <div className="flex items-baseline gap-3">
-                <p className={cn("font-mono text-3xl font-semibold tabular-nums", maeColor(expectedCvMae))}>
-                  {fmt(expectedCvMae, 2)}
+                <p className={cn("font-mono text-3xl font-semibold tabular-nums", maeColor(primaryMae))}>
+                  {fmt(primaryMae, 2)}
                 </p>
               </div>
               <p className="text-xs text-muted-foreground">
-                MAE CV da Nota Prevista · Treino: {snapshot.trainSize} / {snapshot.totalWorks} obras
+                {metricCopy.title}
+                {primaryMetric.source === "prospective"
+                  ? ` · ${primaryMetric.sampleSize ?? 0} previsões resolvidas`
+                  : ` · Treino: ${snapshot.trainSize} / ${snapshot.totalWorks} obras`}
               </p>
               {baselineMae != null && (
                 <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -195,12 +204,14 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
                             : "bg-rose-500/15 text-rose-600 dark:text-rose-400",
                       )}
                     >
-                      {skillGainPct >= 0 ? "ganha" : "perde"} {Math.abs(skillGainPct).toFixed(0)}% do trivial
+                      {skillGainPct >= 0
+                        ? `${skillGainPct.toFixed(0)}% menos erro que o baseline`
+                        : `${Math.abs(skillGainPct).toFixed(0)}% mais erro que o baseline`}
                     </span>
                   )}
                   <InfoTooltip
                     label="Baseline trivial"
-                    text="MAE de simplesmente prever a média das suas notas pra toda obra. É o piso: se a Nota Prevista não ganha disso com folga, ela quase não agrega — e a alavanca passa a ser mais obras com nota pessoal, não mexer no modelo."
+                    text="MAE de simplesmente prever a média das suas notas pra toda obra. É o piso: se a Nota Prevista não reduz o erro disso com folga, ela quase não agrega — e a alavanca passa a ser mais obras com nota pessoal, não mexer no modelo. (Redução de erro vs baseline — não é acurácia.)"
                   />
                 </p>
               )}

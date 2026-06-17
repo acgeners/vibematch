@@ -21,6 +21,10 @@ import {
 import { recalculateAll } from "./calculations"
 import { markRecalcPending } from "./recalc-queue"
 import { capturePredictionForFirstRating } from "./prediction-ledger"
+import {
+  resolvePredictionsForWork,
+  markPredictionLabelChanged,
+} from "@/lib/server/predictions/resolve-prediction"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
@@ -1416,6 +1420,15 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
     await capturePredictionForFirstRating(id, data.user_score)
   }
 
+  // P1: resolve snapshots prospectivos (prediction_snapshots) com a nota real.
+  // 1ª nota → resolve (imutável); edição → relabel (preserva a 1ª medição);
+  // remoção → só carimba label_changed_at. Idempotente. Best-effort.
+  if (data.user_score != null) {
+    await resolvePredictionsForWork(id, data.user_score)
+  } else if (prevUserScore != null) {
+    await markPredictionLabelChanged(id)
+  }
+
   // Editar a obra muda as features do Ridge global → marca a base como recálculo
   // pendente em vez de recalcular na hora. A Nota Prevista atualiza quando o
   // usuário clica "Recalcular agora" ou no auto-recalc (≥1h sem novas edições).
@@ -1574,6 +1587,15 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   // de-registro antes do recalc deferido incluir o rótulo.
   if (prevUserScore == null && data.user_score != null) {
     await capturePredictionForFirstRating(id, data.user_score)
+  }
+
+  // P1: resolve snapshots prospectivos (prediction_snapshots) com a nota real.
+  // 1ª nota → resolve (imutável); edição → relabel (preserva a 1ª medição);
+  // remoção → só carimba label_changed_at. Idempotente. Best-effort.
+  if (data.user_score != null) {
+    await resolvePredictionsForWork(id, data.user_score)
+  } else if (prevUserScore != null) {
+    await markPredictionLabelChanged(id)
   }
 
   await markRecalcPending("updateWorkStatus")

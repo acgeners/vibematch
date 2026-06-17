@@ -391,8 +391,9 @@ export function DecisionCell({
     : score >= 4 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
     : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
 
-  // Headline = afinidade relativa 0–100 (resolução visual); fallback pro 0–10.
-  const display = affinity != null ? String(affinity) : score.toFixed(1)
+  // Estimativa SECUNDÁRIA (o tier é o sinal primário): prefixo "~" + visual
+  // discreto pra não prometer uma ordem fina que o modelo não sustenta.
+  const display = affinity != null ? `~${affinity}` : `~${score.toFixed(1)}`
 
   return (
     <TooltipProvider>
@@ -400,7 +401,7 @@ export function DecisionCell({
         <TooltipTrigger asChild>
           <span
             className={cn(
-              "inline-flex items-center rounded-md border px-1.5 py-0.5 text-sm font-bold cursor-help tabular-nums",
+              "inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-medium cursor-help tabular-nums",
               colorClass,
             )}
           >
@@ -412,9 +413,10 @@ export function DecisionCell({
             Prioridade{affinity != null ? `: ${affinity}/100` : `: ${score.toFixed(1)}/10`}
           </p>
           <p className="text-[11px] text-muted-foreground">
-            Chance estimada de você gostar — prioridade pra escolher o que ler primeiro
-            (Prevista ajustada pelo Veredito IA, ×10). Obras numa mesma faixa estão dentro do
-            erro do modelo, então dividem o número e ficam ordenadas por afinidade.
+            Estimativa de satisfação pra priorizar o que ler primeiro (Prevista ajustada pelo
+            Veredito IA, ×10). <span className="font-semibold">Diferenças pequenas entre obras da
+            mesma faixa não indicam uma ordem confiável</span> — dentro de cada faixa a ordem usa
+            compatibilidade e desempates, não o decimal.
             <span className="font-semibold"> Não é uma previsão de nota</span> (essa é a Prevista).
           </p>
           <div className="border-t border-border/40 pt-1.5 space-y-0.5 text-xs">

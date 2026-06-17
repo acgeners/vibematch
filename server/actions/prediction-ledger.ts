@@ -1,5 +1,13 @@
 "use server"
 
+// ⚠️ Legacy prediction capture. Do not use for new prospective ranking metrics.
+// Mecanismo legado (migration 101): grava 1 linha por obra no instante da
+// PRIMEIRA nota (resolve no mesmo evento, unique(user_id, work_id)). Para a
+// validação prospectiva nova (múltiplos snapshots imutáveis por obra/fórmula/
+// contexto/ranking + métricas de ordenação) use `prediction_snapshots`
+// (migration 105) via lib/server/predictions/*. Ver lib/server/predictions/README.md.
+// Esta tabela NÃO é apagada nem migrada nesta etapa.
+
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getCurrentUserId } from "@/server/queries/current-user"
 import { computeDecisionScore } from "@/lib/calculations/decision"
