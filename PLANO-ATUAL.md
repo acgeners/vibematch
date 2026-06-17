@@ -23,8 +23,10 @@
 
 - **Item C — digest no eval-time** — **COMPLETO + VERIFICADO LIVE (2026-06-16).** Decisão custo×latência fechada: **separado / fire-and-forget / gated** (não same-call). `persistReviewDigest` em [persist-reviews.ts](lib/external/persist-reviews.ts) disparado **SEM `await`** no fim de `saveWorkReviews` (logo após o resumo Haiku) — latência **zero** na avaliação. Gate reusa `isMaterialReviewChange` + `review_digest_n`/`_version`: cold gera, version bump regenera, crescimento material renova, senão no-op. Os **3 call sites** (avaliação ai.ts, acquire-reviews, criação works.ts) afunilam em `saveWorkReviews` → eval-time cobre obra nova **e** re-colheita; **batch fica só pro backfill legado** (~493 obras cold hoje). Tolerante à ausência da migration 103 (catch silencioso). **Verificado live** (rota temp): cold→gera (digest rico persistido em background ~depois~ de resposta de ~1,7s, prova do fire-and-forget sobreviver ao request), gate pula em obra já digerida (`digest_at` inalterado, sem Sonnet novo), offline (expected/calc) intacto. tsc/lint/117 testes verdes. Commit `7be13e0`. **→ Item C 100% fechado.**
 
-- **§6 Consolidação de UX — Blocos 1–4** — **FEITOS + verificados live (2026-06-16).** Os 4
-  blocos grandes fechados; resta só um micro-polish de rótulo nos desempates (não bloqueia, ver §6.3).
+- **§6 Consolidação de UX — Blocos 1–4 + micro-polish** — **FEITOS + verificados live (2026-06-16).
+  §6 100% COMPLETO.** Os 4 blocos grandes fechados; o micro-polish de rótulo dos desempates
+  (`c51e3b0`) zerou o resíduo: ícone Sparkles deixou de ser sobrecarregado (mood-refine grátis
+  usava o mesmo signo do IA pago) → `SlidersHorizontal`; convenção Sparkles=LLM pago / não-Sparkles=grátis.
   Bloco 1 (`75a77c9`): tira as notas decompostas mortas (Perfil/Δ Qualidade) do ranking
   + renomeia "Análise do gosto" → "Re-ranquear favoritos". Bloco 2 (`07a5ac4`): mesma
   limpeza em /titles + heatmap + re-enquadra o waterfall "Por que esta nota?" (tira o
@@ -298,9 +300,12 @@ ela chama o `rankFavorites`, que é o **re-ranker LLM** (gera `alignment_score`,
   **"Veredito IA"** (abrev. "Veredito" em colunas/badges estreitos) em ~23 arquivos;
   "Alinhamento" fica exclusivo do `personal_fit`. Verbo "Rankear" e identificadores
   (`ia-rk`/`iaRk*`) NÃO tocados.
-- ⬜ **(micro-polish residual, não bloqueia o §6)** — **Dois desempates**: **já estruturalmente
-  aninhados** (tier → "Comparar / Refinar" grátis/mood → `WorkCompareDrawer` → "Desempatar com IA"
-  pago). Funcionam; falta só polir o rótulo/clareza de profundidade — NÃO tocado no Bloco 4.
+- ✅ **(micro-polish, `c51e3b0`)** — **Dois desempates**: a escada (tier → "Comparar / Refinar"
+  grátis/mood → `WorkCompareDrawer` → "Desempatar com IA" pago) ganhou clareza de profundidade.
+  Bug resolvido: o ícone **Sparkles estava sobrecarregado** — marcava tanto o "Refinar comparação"
+  (mood, offline/MAE = GRÁTIS) quanto o "Desempatar com IA" (LLM = PAGO) → trocado por
+  `SlidersHorizontal` no passo grátis. Convenção do app agora: **Sparkles = LLM pago**;
+  não-Sparkles = grátis/determinístico. + frase/tooltip sinalizando "grátis, IA é opcional mais fundo".
 - ✅ **Bloco 4** — **Chat** já era porta conversacional única (store `active-chat` une
   `ChatRecommendButton` + `ActiveChatFab` na mesma conversa); rótulos **Conversar** vs
   **Recomendar** já distintos → confirmado, sem mudança de código.
