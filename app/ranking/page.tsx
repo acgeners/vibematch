@@ -306,6 +306,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
               </Link>
             </Button>
             <SurpriseMeButton entries={entries} />
+            <div className="mx-1 h-5 w-px self-center bg-border" aria-hidden />
             <ChatRecommendButton isPaid={isPaid} />
             <RecommendDialog context="ranking" isPaid={isPaid} />
           </div>
