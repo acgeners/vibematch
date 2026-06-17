@@ -23,15 +23,18 @@
 
 - **Item C — digest no eval-time** — **COMPLETO + VERIFICADO LIVE (2026-06-16).** Decisão custo×latência fechada: **separado / fire-and-forget / gated** (não same-call). `persistReviewDigest` em [persist-reviews.ts](lib/external/persist-reviews.ts) disparado **SEM `await`** no fim de `saveWorkReviews` (logo após o resumo Haiku) — latência **zero** na avaliação. Gate reusa `isMaterialReviewChange` + `review_digest_n`/`_version`: cold gera, version bump regenera, crescimento material renova, senão no-op. Os **3 call sites** (avaliação ai.ts, acquire-reviews, criação works.ts) afunilam em `saveWorkReviews` → eval-time cobre obra nova **e** re-colheita; **batch fica só pro backfill legado** (~493 obras cold hoje). Tolerante à ausência da migration 103 (catch silencioso). **Verificado live** (rota temp): cold→gera (digest rico persistido em background ~depois~ de resposta de ~1,7s, prova do fire-and-forget sobreviver ao request), gate pula em obra já digerida (`digest_at` inalterado, sem Sonnet novo), offline (expected/calc) intacto. tsc/lint/117 testes verdes. Commit `7be13e0`. **→ Item C 100% fechado.**
 
-- **§6 Consolidação de UX — Blocos 1–3** — **FEITOS + verificados live (2026-06-16).**
+- **§6 Consolidação de UX — Blocos 1–4** — **FEITOS + verificados live (2026-06-16).** Os 4
+  blocos grandes fechados; resta só um micro-polish de rótulo nos desempates (não bloqueia, ver §6.3).
   Bloco 1 (`75a77c9`): tira as notas decompostas mortas (Perfil/Δ Qualidade) do ranking
   + renomeia "Análise do gosto" → "Re-ranquear favoritos". Bloco 2 (`07a5ac4`): mesma
   limpeza em /titles + heatmap + re-enquadra o waterfall "Por que esta nota?" (tira o
   2-stage aposentado). Bloco 3 (`bda7bc4`): `alignment_score` "IA Rk" → **"Veredito IA"**
-  em ~23 arquivos (resolve a colisão com "Alinhamento"=personal_fit). Detalhe no §6.3.
+  em ~23 arquivos (resolve a colisão com "Alinhamento"=personal_fit). **Bloco 4** (`77e4d67`
+  +`ea5ceec`): funde as 3 portas (`RunCreatorForm`+`RecommendWithAiButton`×2) num único
+  `RecommendDialog` (modos→**escopo de candidatos**, gate único `smart_shortlist`); Surpreenda-me
+  → **"Escolhe por mim"** (Shuffle, fora do cluster LLM); Chat já era porta única. Detalhe no §6.3/§6.5.
 
-**⬜ Pendente:** Painel do ledger (esperar acumular notas), **§6 Bloco 4** (fusão das ~4
-portas de recomendação numa entrada com modos — único bloco grande restante). **⏸️ Diferido:**
+**⬜ Pendente:** Painel do ledger (esperar acumular notas). **⏸️ Diferido:**
 §7 Deploy · B6 (chat briefing ciente das regras) · dispersão de notas como sinal de tier (§4 Q2, go/no-go barato antes).
 
 > Detalhe de cada um nas seções abaixo (Item A marcado ✅).
@@ -282,23 +285,30 @@ ela chama o `rankFavorites`, que é o **re-ranker LLM** (gera `alignment_score`,
   lidera com **Prevista + tiers** e esconde Prioridade por padrão (v6). Decisão travada:
   **manter Prevista como escalar líder** (alinha com §2; ≠ do texto original que pedia
   "só Prioridade"). `decision` fica opt-in no column picker.
-- ⬜ **Bloco 4** — **4 portas de recomendação** (`RunCreatorForm` + `RecommendWithAiButton`
-  ×2 + Chat, todas chamando `runRecommendationAction`) → fundir em **uma** entrada com
-  modos. **Único bloco grande restante.**
+- ✅ **Bloco 4** (`77e4d67`) — as 3 portas one-shot (`RunCreatorForm` + `RecommendWithAiButton`
+  ×2) fundidas num único **`RecommendDialog`** (`components/recommendations/recommend-dialog.tsx`).
+  Os "modos" viraram **escopo de candidatos** (não-lidos→`next_read` · todos→`full_analysis` ·
+  filtro do ranking→`ranking`); prop `context` controla quais escopos aparecem por tela (filtro
+  só na /ranking, lê `useSearchParams`). Gate único `smart_shortlist` apresentado igual; gate de
+  perfil (insuficiente/stub) separado do de plano na /recommendations. Cópia stale do Free
+  corrigida. `runRecommendationAction` inalterado. Componentes antigos apagados.
 
 **✏️ MUDAR**
 - ✅ **Bloco 3** — Colisão **Alinhamento × IA Rk** resolvida: `alignment_score` →
   **"Veredito IA"** (abrev. "Veredito" em colunas/badges estreitos) em ~23 arquivos;
   "Alinhamento" fica exclusivo do `personal_fit`. Verbo "Rankear" e identificadores
   (`ia-rk`/`iaRk*`) NÃO tocados.
-- ⬜ **Bloco 4 (avaliar)** — **Dois desempates**: **já estruturalmente aninhados** (tier →
-  "Comparar / Refinar" grátis/mood → `WorkCompareDrawer` → "Desempatar com IA" pago).
-  Falta só polir o rótulo/clareza de profundidade.
-- ⬜ **Bloco 4** — **Chat** = porta conversacional única; reposicionar p/ não parear com as
-  ações que ele já cobre.
+- ⬜ **(micro-polish residual, não bloqueia o §6)** — **Dois desempates**: **já estruturalmente
+  aninhados** (tier → "Comparar / Refinar" grátis/mood → `WorkCompareDrawer` → "Desempatar com IA"
+  pago). Funcionam; falta só polir o rótulo/clareza de profundidade — NÃO tocado no Bloco 4.
+- ✅ **Bloco 4** — **Chat** já era porta conversacional única (store `active-chat` une
+  `ChatRecommendButton` + `ActiveChatFab` na mesma conversa); rótulos **Conversar** vs
+  **Recomendar** já distintos → confirmado, sem mudança de código.
 - ✅ **Bloco 1** — **Análise do gosto** → renomeada **"Re-ranquear favoritos"** (full_analysis),
   tira a confusão com *perfil de gosto*.
-- ⬜ **Bloco 4** — **Surpreenda-me** → reposicionar como "escolhe por mim", não engine à parte.
+- ✅ **Bloco 4** (`ea5ceec`) — **Surpreenda-me** → **"Escolhe por mim"** (ícone Shuffle, não
+  Sparkles; tooltip "sem IA"), separado das portas LLM pagas por um divisor no header da /ranking.
+  Mecânica intacta (sorteio determinístico de 3 do top-20, estável no dia).
 
 **🔨 IMPLEMENTAR**
 - Itens A/B/C (seção 4) entram **pelos fluxos existentes** — tags declaradas e sinal de reviews viram lentes/badges **dentro do Refinar**; efeitos cruzados entram no **consultor**. Não criar botão novo.
@@ -324,10 +334,17 @@ Persona: Pago, cadastra **100 obras** (25 com nota, 75 sem).
 
 **Loop comum:** abrir ranking → olhar Tier 1 → talvez Refinar → escolher (tudo grátis). O LLM é acabamento sob demanda. **O que melhora o sistema é ler e dar nota** (alimenta a engine determinística) — não gastar no LLM.
 
-### 6.5 — Bloco 4: fusão das portas de recomendação (ÚNICO bloco grande restante)
+### 6.5 — Bloco 4: fusão das portas de recomendação (✅ FEITO)
 
-> **Status:** ⬜ não começado. Blocos 1–3 fechados (ver §6.3). Inventário abaixo é
-> **vivo** (verificado no app rodando 2026-06-16), não só leitura de código.
+> **Status:** ✅ **FEITO + verificado live (2026-06-16)** — commits `77e4d67` (fusão) +
+> `ea5ceec` (Escolhe por mim). Decisões de UX travadas com o user: **(1)** 1 componente
+> compartilhado (`RecommendDialog`); **(2)** modal inline onde o user está (mais eficiente —
+> escopo "filtro do ranking" lê `useSearchParams` local; /recommendations segue hub de
+> histórico+chat); **(3)** modos re-enquadrados como **escopo de candidatos**; **(4)**
+> Surpreenda-me mantém mecânica global, só relabel/reposiciona. Verificação live (Chrome
+> headless): os 3 dialogs abrem e os escopos batem por tela (favorites=2, ranking=3 c/ default
+> "filtro do ranking", standalone=2); "Escolhe por mim" abre e sorteia 3. tsc+117 testes limpos.
+> Inventário abaixo mantido como registro do estado pré-fusão.
 
 **O problema:** a MESMA engine (`rankFavorites` via `runRecommendationAction`) é acionada
 por 3 UIs com 3 enquadramentos diferentes + Chat em 3 lugares.
