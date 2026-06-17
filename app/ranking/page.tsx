@@ -16,7 +16,7 @@ import { RankingTable } from "@/components/ranking/ranking-table"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
 import { SurpriseMeButton } from "@/components/ranking/surprise-me-button"
 import { MOOD_PRESETS_BY_ID } from "@/lib/constants/mood-presets"
-import { RecommendWithAiButton } from "@/components/recommendations/recommend-with-ai-button"
+import { RecommendDialog } from "@/components/recommendations/recommend-dialog"
 import { ChatRecommendButton } from "@/components/recommendations/chat-recommend-button"
 import { Button } from "@/components/ui/button"
 import { CRITERION_SLUGS } from "@/types/domain"
@@ -307,7 +307,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
             </Button>
             <SurpriseMeButton entries={entries} />
             <ChatRecommendButton isPaid={isPaid} />
-            <RecommendWithAiButton source="ranking" isPaid={isPaid} />
+            <RecommendDialog context="ranking" isPaid={isPaid} />
           </div>
         }
       />
