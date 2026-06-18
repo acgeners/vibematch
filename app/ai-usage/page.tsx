@@ -6,14 +6,17 @@ import { CostByOperationChart } from "@/components/settings/ai-usage/cost-by-ope
 import { DailyCostChart } from "@/components/settings/ai-usage/daily-cost-chart"
 import { OperationFilter } from "@/components/settings/ai-usage/operation-filter"
 import {
+  getAiOperationDiagnostics,
   getAiUsageByModel,
   getAiUsageByOperation,
   getAiUsageDailySeries,
   getAiUsageTotals,
   getAnthropicBalanceStatus,
+  getCoverFixReport,
   getRecentAiCalls,
 } from "@/server/queries/ai-usage"
-import type { UsageAggregate } from "@/server/queries/ai-usage"
+import type { CoverFixReport, UsageAggregate } from "@/server/queries/ai-usage"
+import type { OperationMetrics } from "@/lib/ai-observability"
 
 export const revalidate = 60
 
@@ -52,6 +55,30 @@ function formatRelative(iso: string): string {
   return `${d}d atrás`
 }
 
+function formatRatio(v: number | null): string {
+  return v != null && Number.isFinite(v) ? v.toFixed(2) : "—"
+}
+
+/** Solicitações lógicas: exato se disponível, senão ~aproximado (attempt 0/null). */
+function formatLogical(o: OperationMetrics): string {
+  return o.logicalRequests != null ? String(o.logicalRequests) : `~${o.logicalRequestsApprox}`
+}
+
+/** Maior entrada de um mapa de contagens, no formato "chave (n)". */
+function topEntry(counts: Record<string, number>): string {
+  const entries = Object.entries(counts)
+  if (entries.length === 0) return "—"
+  const [key, n] = entries.sort((a, b) => b[1] - a[1])[0]!
+  return `${key} (${n})`
+}
+
+/** byWorkload compacto: "recurring 12 · admin 3". */
+function formatWorkload(counts: Record<string, number>): string {
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1])
+  if (entries.length === 0) return "—"
+  return entries.map(([k, n]) => `${k} ${n}`).join(" · ")
+}
+
 function KpiCard({ label, agg }: { label: string; agg: UsageAggregate }) {
   return (
     <div className="rounded-xl border border-border/70 bg-card/55 p-4 shadow-sm shadow-black/5">
@@ -80,14 +107,21 @@ export default async function AiUsagePage({
 
   // byOperation é sempre completo: alimenta a tabela/gráfico de breakdown e o menu
   // do filtro. As demais métricas são escopadas pela operação selecionada (se houver).
-  const [totals, byOperation, byModel, recent, dailySeries, balance] = await Promise.all([
-    getAiUsageTotals(op),
-    getAiUsageByOperation(30),
-    getAiUsageByModel(30, op),
-    getRecentAiCalls(50, op),
-    getAiUsageDailySeries(30, op),
-    getAnthropicBalanceStatus(),
-  ])
+  const [totals, byOperation, byModel, recent, dailySeries, balance, diagnostics, coverFix] =
+    await Promise.all([
+      getAiUsageTotals(op),
+      getAiUsageByOperation(30),
+      getAiUsageByModel(30, op),
+      getRecentAiCalls(50, op),
+      getAiUsageDailySeries(30, op),
+      getAnthropicBalanceStatus(),
+      getAiOperationDiagnostics(30),
+      getCoverFixReport(),
+    ])
+
+  const diagOps = op
+    ? diagnostics.operations.filter((o) => o.operation === op)
+    : diagnostics.operations
 
   const operationNames = byOperation.map((row) => row.operation)
   const opSuffix = op ? ` · ${op}` : ""
@@ -206,6 +240,72 @@ export default async function AiUsagePage({
         </div>
       </section>
 
+      {/* ── Diagnóstico por operação (Plano 1 — Fase B) ─────────────── */}
+      <section className="rounded-xl border border-border/70 bg-card/55 shadow-sm shadow-black/5">
+        <header className="border-b border-border/60 px-4 py-3 sm:px-5">
+          <h2 className="text-sm font-semibold text-foreground">
+            Diagnóstico por operação (30 dias){opSuffix}
+          </h2>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Distingue solicitação lógica × tentativa física. Cache de resultado:{" "}
+            {diagnostics.cache.hits > 0 && diagnostics.cache.hitRate != null
+              ? `${formatPct(diagnostics.cache.hitRate)} de hit (${diagnostics.cache.hits} hits / ${diagnostics.cache.misses} misses)`
+              : `${diagnostics.cache.misses} miss(es) registrados — hits de cache não são logados (taxa de hit fica pro Plano 2)`}
+            .
+          </p>
+        </header>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-xs">
+            <thead className="bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2">Operação</th>
+                <th className="px-4 py-2 text-right">Solic. lóg.</th>
+                <th className="px-4 py-2 text-right">Tentativas</th>
+                <th className="px-4 py-2 text-right">Tent./solic.</th>
+                <th className="px-4 py-2 text-right">Custo/sucesso</th>
+                <th className="px-4 py-2 text-right">Lat. p50</th>
+                <th className="px-4 py-2 text-right">Lat. p95</th>
+                <th className="px-4 py-2">Erro principal</th>
+                <th className="px-4 py-2">Workload</th>
+              </tr>
+            </thead>
+            <tbody>
+              {diagOps.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">
+                    Nenhuma chamada registrada nos últimos 30 dias.
+                  </td>
+                </tr>
+              )}
+              {diagOps.map((o) => (
+                <tr key={o.operation} className="border-t border-border/40">
+                  <td className="px-4 py-2 font-mono text-[11px]">{o.operation}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{formatLogical(o)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{o.attempts}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {formatRatio(o.attemptsPerLogicalRequest)}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {o.costPerSuccess != null ? formatUsd(o.costPerSuccess) : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">{formatLatency(o.latencyP50Ms)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{formatLatency(o.latencyP95Ms)}</td>
+                  <td className="px-4 py-2 text-[11px] text-muted-foreground">
+                    {o.failures > 0 ? topEntry(o.errorsByCategory) : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-[11px] text-muted-foreground">
+                    {formatWorkload(o.byWorkload)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* ── Efeito do fix das capas (antes/depois) ───────────────────── */}
+      <CoverFixSection report={coverFix} />
+
       <section className="rounded-xl border border-border/70 bg-card/55 shadow-sm shadow-black/5">
         <header className="border-b border-border/60 px-4 py-3 sm:px-5">
           <h2 className="text-sm font-semibold text-foreground">Por modelo (30 dias){opSuffix}</h2>
@@ -306,5 +406,66 @@ export default async function AiUsagePage({
         </div>
       </section>
     </div>
+  )
+}
+
+const IMG_CAT = "provider_image_invalid_request"
+
+function imageErrorRate(o: OperationMetrics | null): string {
+  if (!o || o.attempts === 0) return "—"
+  const imgErr = o.errorsByCategory[IMG_CAT] ?? 0
+  return `${((imgErr / o.attempts) * 100).toFixed(1)}% (${imgErr}/${o.attempts})`
+}
+
+function CoverFixSection({ report }: { report: CoverFixReport }) {
+  const { before, after } = report.comparison
+  const cutoff = new Date(report.cutoffIso).toLocaleString("pt-BR")
+
+  return (
+    <section className="rounded-xl border border-border/70 bg-card/55 shadow-sm shadow-black/5">
+      <header className="border-b border-border/60 px-4 py-3 sm:px-5">
+        <h2 className="text-sm font-semibold text-foreground">Efeito do fix das capas (antes/depois)</h2>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          Corte = merge do prefetch base64 ({cutoff}). Erro de imagem ={" "}
+          <code className="font-mono">{IMG_CAT}</code>.
+        </p>
+      </header>
+      <div className="px-4 py-3 sm:px-5">
+        {report.afterCount === 0 ? (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              Ainda <span className="font-semibold">não mensurável</span>: 0 avaliações registradas
+              após o fix. O fix é mais recente que toda a base atual de chamadas. Acumule avaliações
+              em uso real (ou rode o teste manual da capa) para comparar.
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Antes — tentativas</p>
+              <p className="mt-0.5 font-mono text-lg tabular-nums">{before?.attempts ?? 0}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Antes — erro imagem</p>
+              <p className="mt-0.5 font-mono text-lg tabular-nums">{imageErrorRate(before)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Depois — tentativas</p>
+              <p className="mt-0.5 font-mono text-lg tabular-nums">{after?.attempts ?? 0}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Depois — erro imagem</p>
+              <p className="mt-0.5 font-mono text-lg tabular-nums">{imageErrorRate(after)}</p>
+            </div>
+          </div>
+        )}
+        {!report.comparison.hasSufficientSample && report.afterCount > 0 && (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Amostra insuficiente em pelo menos um dos lados — diferença ainda inconclusiva.
+          </p>
+        )}
+      </div>
+    </section>
   )
 }
