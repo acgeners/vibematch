@@ -16,6 +16,7 @@
 
 const { createClient } = require("@supabase/supabase-js")
 const Anthropic = require("@anthropic-ai/sdk").default
+const { loggedCreate } = require("./lib/ai-log.js")
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://djbreiyzwoevbmoscqiq.supabase.co"
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -143,7 +144,7 @@ async function callChunk(client, systemPrompt, validGroupSlugs, tagsChunk) {
       ? userMessage
       : userMessage + `\n\nBe thorough — review each tag against the group definitions. If a batch truly has no mis-classifications, return moves: []. Do not satisfice at 0 or 1 if more are clearly available.`
     try {
-      const message = await client.messages.create({
+      const message = await loggedCreate(client, supabase, {
         model: MODEL,
         max_tokens: 12000,
         temperature: attempt === 0 ? 0.2 : 0,
@@ -153,7 +154,7 @@ async function callChunk(client, systemPrompt, validGroupSlugs, tagsChunk) {
         tools: [TOOL],
         tool_choice: { type: "tool", name: TOOL.name },
         messages: [{ role: "user", content: finalMessage }],
-      })
+      }, { operation: "tag_audit", workloadType: "admin", metadata: { attempt } })
       console.log(`    stop_reason=${message.stop_reason} tokens=${message.usage.input_tokens}/${message.usage.output_tokens}`)
       const toolUse = message.content.find((b) => b.type === "tool_use")
       if (!toolUse) throw new Error("no tool_use")
