@@ -21,6 +21,7 @@ function rec(partial: Partial<AiCacheEventRecord>): AiCacheEventRecord {
     cacheLayer: "resolution",
     cacheStatus: "miss_not_found",
     isResolution: true,
+    cacheMissReason: null,
     lookupLatencyMs: null,
     ...partial,
   }
@@ -92,6 +93,7 @@ describe("buildCacheEventRecord (§25.2 — valor corrompido)", () => {
       cache_layer: "garbage",
       cache_status: "garbage",
       is_resolution: null,
+      cache_miss_reason: null,
       lookup_latency_ms: null,
     }
     const r = buildCacheEventRecord(raw)
@@ -135,6 +137,21 @@ describe("aggregateCacheEvents (§25.2 / §9)", () => {
     const m = aggregateCacheEventGroup("x", [rec({ cacheStatus: "bypass_experiment" })])
     expect(m.hitRate).toBeNull()
     expect(m.bypasses).toBe(1)
+  })
+
+  it("dedup (single_flight) NÃO conta como hit, mas evita chamada ao provider", () => {
+    const m = aggregateCacheEventGroup("ai_evaluation", [
+      rec({ cacheStatus: "hit_memory" }), // hit real
+      rec({ cacheStatus: "miss_not_found" }),
+      rec({ cacheStatus: "hit_memory", cacheMissReason: "single_flight_dedup" }), // dedup
+      rec({ cacheStatus: "hit_memory", cacheMissReason: "single_flight_dedup" }), // dedup
+    ])
+    expect(m.hits).toBe(1) // só o hit real
+    expect(m.misses).toBe(1)
+    expect(m.dedupWaits).toBe(2)
+    expect(m.hitRate).toBeCloseTo(0.5) // 1/(1+1), dedup fora
+    expect(m.providerCallsAvoided).toBe(3) // 1 hit + 2 dedup
+    expect(m.statusCounts.dedup_wait).toBe(2)
   })
 
   it("período vazio → lista vazia", () => {

@@ -80,6 +80,9 @@ export function toCacheEventRow(event: AiCacheEvent): Record<string, unknown> {
 
 // ── Agregação (plano §9) ─────────────────────────────────────────────────────
 
+/** Marcador de evento de DEDUP (single-flight), não um hit de cache real. */
+export const SINGLE_FLIGHT_DEDUP_REASON = "single_flight_dedup"
+
 /** Registro normalizado vindo de ai_cache_events (snake→camel). */
 export interface AiCacheEventRecord {
   createdAt: string
@@ -87,6 +90,7 @@ export interface AiCacheEventRecord {
   cacheLayer: AiCacheEventLayer
   cacheStatus: AiCacheEventStatus
   isResolution: boolean
+  cacheMissReason: string | null
   lookupLatencyMs: number | null
 }
 
@@ -96,6 +100,7 @@ export interface RawCacheEventInput {
   cache_layer: string
   cache_status: string
   is_resolution: boolean | null
+  cache_miss_reason: string | null
   lookup_latency_ms: number | null
 }
 
@@ -109,28 +114,35 @@ export function buildCacheEventRecord(raw: RawCacheEventInput): AiCacheEventReco
     cacheLayer: (EVENT_LAYER_SET.has(raw.cache_layer) ? raw.cache_layer : "resolution") as AiCacheEventLayer,
     cacheStatus: (EVENT_STATUS_SET.has(raw.cache_status) ? raw.cache_status : "unknown") as AiCacheEventStatus,
     isResolution: raw.is_resolution ?? true,
+    cacheMissReason: raw.cache_miss_reason ?? null,
     lookupLatencyMs: raw.lookup_latency_ms == null ? null : Number(raw.lookup_latency_ms),
   }
 }
 
 export interface CacheEventMetrics {
   operation: string
-  /** Consultas RESOLVIDAS (is_resolution=true) — base honesta da taxa. */
+  /** Consultas RESOLVIDAS de CACHE (exclui dedup) — base honesta da taxa. */
   lookups: number
   hits: number
   misses: number
   bypasses: number
   errors: number
+  /** Waiters de single-flight (dedup) — NÃO são hit de cache; contados à parte. */
+  dedupWaits: number
   /** hits / (hits + misses); null quando não há resoluções hit/miss. */
   hitRate: number | null
-  /** Chamadas ao provider EVITADAS = hits resolvidos. */
+  /** Chamadas ao provider EVITADAS = hits de cache + dedup waits. */
   providerCallsAvoided: number
   layerHits: Record<AiCacheLayer, number>
   statusCounts: Record<string, number>
   lookupLatencyAvgMs: number | null
 }
 
-/** Agrega eventos de UMA operação. Só `is_resolution` entra na taxa. */
+/**
+ * Agrega eventos de UMA operação. Só `is_resolution` entra na taxa. Eventos de
+ * DEDUP (single_flight) são separados de hits de cache reais para não inflar o
+ * hit rate — embora ambos evitem uma chamada ao provider.
+ */
 export function aggregateCacheEventGroup(
   operation: string,
   records: AiCacheEventRecord[],
@@ -140,12 +152,21 @@ export function aggregateCacheEventGroup(
   let bypasses = 0
   let errors = 0
   let lookups = 0
+  let dedupWaits = 0
   const layerHits: Record<AiCacheLayer, number> = { memory: 0, persistent: 0 }
   const statusCounts: Record<string, number> = {}
   const latencies: number[] = []
 
   for (const r of records) {
-    statusCounts[r.cacheStatus] = (statusCounts[r.cacheStatus] ?? 0) + 1
+    const isDedup = r.cacheMissReason === SINGLE_FLIGHT_DEDUP_REASON
+    statusCounts[isDedup ? "dedup_wait" : r.cacheStatus] =
+      (statusCounts[isDedup ? "dedup_wait" : r.cacheStatus] ?? 0) + 1
+
+    if (isDedup) {
+      if (r.isResolution) dedupWaits += 1
+      continue
+    }
+
     // Hits por camada física contam mesmo em eventos intermediários (informativo).
     if (r.cacheStatus === "hit_memory") layerHits.memory += 1
     if (r.cacheStatus === "hit_persistent") layerHits.persistent += 1
@@ -167,8 +188,9 @@ export function aggregateCacheEventGroup(
     misses,
     bypasses,
     errors,
+    dedupWaits,
     hitRate: denom > 0 ? hits / denom : null,
-    providerCallsAvoided: hits,
+    providerCallsAvoided: hits + dedupWaits,
     layerHits,
     statusCounts,
     lookupLatencyAvgMs: latencies.length > 0 ? latencies.reduce((a, b) => a + b, 0) / latencies.length : null,

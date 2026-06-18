@@ -43,7 +43,7 @@ export function recordCacheEventAsync(event: AiCacheEvent): void {
 }
 
 const SELECT_COLS =
-  "created_at, operation, cache_layer, cache_status, is_resolution, lookup_latency_ms"
+  "created_at, operation, cache_layer, cache_status, is_resolution, cache_miss_reason, lookup_latency_ms"
 const PAGE_SIZE = 1000
 
 async function fetchCacheEventRows(
@@ -76,11 +76,41 @@ async function fetchCacheEventRows(
   return all
 }
 
+export interface CacheEventTotals {
+  lookups: number
+  hits: number
+  misses: number
+  bypasses: number
+  errors: number
+  dedupWaits: number
+  providerCallsAvoided: number
+  hitRate: number | null
+}
+
 export interface CacheEventsResult {
   /** true quando a leitura falhou (tabela ausente/erro) — painel mostra "não mensurável". */
   unavailable: boolean
   totalEvents: number
+  totals: CacheEventTotals
   byOperation: CacheEventMetrics[]
+}
+
+function sumTotals(byOperation: CacheEventMetrics[]): CacheEventTotals {
+  const t: CacheEventTotals = {
+    lookups: 0, hits: 0, misses: 0, bypasses: 0, errors: 0, dedupWaits: 0, providerCallsAvoided: 0, hitRate: null,
+  }
+  for (const o of byOperation) {
+    t.lookups += o.lookups
+    t.hits += o.hits
+    t.misses += o.misses
+    t.bypasses += o.bypasses
+    t.errors += o.errors
+    t.dedupWaits += o.dedupWaits
+    t.providerCallsAvoided += o.providerCallsAvoided
+  }
+  const denom = t.hits + t.misses
+  t.hitRate = denom > 0 ? t.hits / denom : null
+  return t
 }
 
 /** Lê + agrega os eventos de cache do período (dias; null = tudo). */
@@ -91,9 +121,11 @@ export async function getCacheEventMetrics(
   const sinceIso = days == null ? null : new Date(Date.now() - days * 86_400_000).toISOString()
   const rows = await fetchCacheEventRows(sinceIso, operation)
   const records = rows.map(buildCacheEventRecord)
+  const byOperation = aggregateCacheEvents(records)
   return {
     unavailable: rows.length === 0,
     totalEvents: records.length,
-    byOperation: aggregateCacheEvents(records),
+    totals: sumTotals(byOperation),
+    byOperation,
   }
 }
