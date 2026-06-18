@@ -63,3 +63,4 @@ scripts/seed-from-xlsx*.js
 
 # guia pessoal de onboarding (não versionar)
 /GUIA.md
+lib/synopsis-interest/labeling-sheet.*
