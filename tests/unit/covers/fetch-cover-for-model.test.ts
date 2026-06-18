@@ -91,6 +91,14 @@ describe("isImageRelatedModelError", () => {
     expect(isImageRelatedModelError("image")).toBe(false)
     expect(isImageRelatedModelError(null)).toBe(false)
   })
+  // Alinhamento com o classificador central (plano §16): a mensagem REAL da
+  // Anthropic p/ capa inacessível é "Unable to download the file" (sem a palavra
+  // "image") — agora também aciona o fallback sem imagem (1×).
+  it("true para 'Unable to download the file' (mensagem real)", () => {
+    expect(
+      isImageRelatedModelError(Object.assign(new Error("Unable to download the file"), { status: 400 })),
+    ).toBe(true)
+  })
 })
 
 describe("fetchCoverForModel", () => {

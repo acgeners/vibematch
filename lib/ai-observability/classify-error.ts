@@ -97,3 +97,16 @@ export function classifyAiError(input: ClassifyAiErrorInput): AiErrorCategory {
   if (message.trim() === "") return "unknown"
   return "internal_error"
 }
+
+/**
+ * Predicado ÚNICO de "erro de imagem do provider" (plano §7/§16). Fonte da
+ * verdade compartilhada: o fluxo funcional (fallback sem imagem em
+ * `isImageRelatedModelError`) e a telemetria usam ESTA mesma regra, sem divergir.
+ *
+ * Evidência aceita (§16): image / media_type / base64 / download / file / format,
+ * exigindo status 400 (ou ausente, só com prova FORTE de download). NÃO amplia
+ * qualquer 400 genérico para erro de imagem.
+ */
+export function isImageProviderError(input: ClassifyAiErrorInput): boolean {
+  return classifyAiError(input) === "provider_image_invalid_request"
+}

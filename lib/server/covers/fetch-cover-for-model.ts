@@ -2,6 +2,7 @@ import "server-only"
 
 import { isBlockedCoverUrl, recordCoverHostResult } from "@/lib/external/blocked-covers"
 import { isAllowedCoverHost, refererFor, userAgentFor } from "./cover-host-policy"
+import { isImageProviderError } from "@/lib/ai-observability/classify-error"
 import type { AiImageStatus } from "@/lib/ai-observability/types"
 
 // Pré-busca da capa NO NOSSO servidor para enviar à Anthropic em base64, em vez
@@ -242,16 +243,18 @@ export async function fetchCoverForModel(rawUrl: string): Promise<ModelCoverImag
 }
 
 /**
- * Erro do MODELO relacionado à imagem (status 400 + menção a image/media_type/base64).
- * Focado de propósito: NÃO dispara para rate limit, auth, timeout geral, validação
- * de resposta estruturada ou indisponibilidade — só para problemas da própria imagem.
+ * Erro do MODELO relacionado à imagem. Delega no classificador central
+ * (`isImageProviderError`) — fonte ÚNICA da verdade (plano §7/§16): cobre a
+ * mensagem real "Unable to download the file" e não amplia 400 genérico.
+ * NÃO dispara para rate limit, auth, timeout geral, validação estruturada ou
+ * indisponibilidade — só para problemas da própria imagem. O fallback sem imagem
+ * segue limitado a UMA tentativa (controlado no loop de requestAiEvaluation).
  */
 export function isImageRelatedModelError(err: unknown): boolean {
   const status =
-    typeof err === "object" && err !== null && "status" in err
-      ? (err as { status?: unknown }).status
-      : undefined
-  if (status !== 400) return false
+    typeof err === "object" && err !== null && "status" in err && typeof (err as { status?: unknown }).status === "number"
+      ? (err as { status: number }).status
+      : null
   const message =
     err instanceof Error
       ? err.message
@@ -260,5 +263,5 @@ export function isImageRelatedModelError(err: unknown): boolean {
         : typeof err === "object" && err !== null && typeof (err as { message?: unknown }).message === "string"
           ? (err as { message: string }).message
           : ""
-  return /\b(?:image|media_type|base64)\b/i.test(message)
+  return isImageProviderError({ status, message, stage: "provider" })
 }
