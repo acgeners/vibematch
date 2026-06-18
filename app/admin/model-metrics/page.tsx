@@ -1,6 +1,7 @@
 import { Activity } from "lucide-react"
 import { Header } from "@/components/layout/header"
 import { getModelMetricsDashboard, MIN_RANKING_GROUP_SIZE } from "@/server/queries/prediction-metrics"
+import { getStrategyComparisonDashboard } from "@/server/queries/strategy-metrics"
 import type { CollectionStatus } from "@/lib/server/predictions/collection-status"
 import {
   MIN_PROSPECTIVE_SAMPLE_SIZE,
@@ -10,6 +11,12 @@ import {
   calculateRelativeErrorReduction,
 } from "@/lib/metrics/model-evaluation"
 import type { BucketErrorEntry, BaselineRow } from "@/lib/metrics/prediction-metrics"
+import {
+  STRATEGY_COMPARISON_CONFIG,
+  type StrategyAggregate,
+  type PairwiseComparison,
+  type ComparisonVerdict,
+} from "@/lib/metrics/strategy-comparison"
 
 export const dynamic = "force-dynamic"
 
@@ -45,7 +52,7 @@ const STATUS_BANNER: Record<CollectionStatus, { tone: "ok" | "warn" | "err"; tex
 }
 
 export default async function ModelMetricsPage() {
-  const d = await getModelMetricsDashboard()
+  const [d, strat] = await Promise.all([getModelMetricsDashboard(), getStrategyComparisonDashboard()])
 
   // F4: métrica principal = prospectiva por OBRA (sem pseudorreplicação) > CV > indisponível.
   const metrics = parseModelEvaluationMetrics({
@@ -212,6 +219,207 @@ export default async function ModelMetricsPage() {
           </div>
         )}
       </Panel>
+
+      {/* ── Comparação de estratégias (shadow mode) ─────────────── */}
+      <StrategyComparisonSection
+        status={strat.status}
+        strategies={strat.report.strategies}
+        pairwise={strat.report.pairwise}
+        totalRuns={strat.report.totalRuns}
+        totalResolved={strat.report.totalResolvedSnapshots}
+      />
+    </div>
+  )
+}
+
+const VERDICT_COPY: Record<ComparisonVerdict, { label: string; tone: "ok" | "warn" | "err" | "muted" }> = {
+  insufficient: { label: "Insuficiente", tone: "muted" },
+  equivalent: { label: "Equivalente", tone: "warn" },
+  possible_improvement: { label: "Possível melhora", tone: "ok" },
+  possible_worse: { label: "Possível piora", tone: "err" },
+}
+
+function fmtCi(ci: [number, number] | null): string {
+  return ci ? `[${ci[0] >= 0 ? "+" : ""}${ci[0].toFixed(3)}; ${ci[1] >= 0 ? "+" : ""}${ci[1].toFixed(3)}]` : "—"
+}
+
+function fmtSigned(v: number | null, digits = 3): string {
+  if (v == null || !Number.isFinite(v)) return "—"
+  return `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`
+}
+
+function StrategyComparisonSection({
+  status,
+  strategies,
+  pairwise,
+  totalRuns,
+  totalResolved,
+}: {
+  status: CollectionStatus
+  strategies: StrategyAggregate[]
+  pairwise: PairwiseComparison[]
+  totalRuns: number
+  totalResolved: number
+}) {
+  return (
+    <section className="space-y-6">
+      <div className="border-t border-border pt-6">
+        <h2 className="text-lg font-semibold">Comparação de estratégias</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Shadow mode: a cada recomendação várias estratégias são calculadas sobre o MESMO conjunto de
+          obras; só a exibida (LLM) aparece pro usuário. As demais são comparadas quando as obras
+          recebem nota real. Métricas só dentro do mesmo run; mínimo de {STRATEGY_COMPARISON_CONFIG.minResolvedPerRun}{" "}
+          obras resolvidas por run e {STRATEGY_COMPARISON_CONFIG.minRunsForSummary} runs pra resumir.
+        </p>
+      </div>
+
+      {status === "migration_missing" && (
+        <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
+          Coleta de estratégias indisponível: a migration{" "}
+          <span className="font-mono">106_ranking_strategy_snapshots.sql</span> ainda não foi aplicada.
+        </p>
+      )}
+      {(status === "connection_error" || status === "unexpected_error") && (
+        <p className="rounded-md border border-rose-500/40 bg-rose-500/5 px-3 py-2 text-sm text-rose-600 dark:text-rose-400">
+          Coleta de estratégias indisponível: erro ao ler ranking_strategy_snapshots.
+        </p>
+      )}
+
+      <Panel
+        title="Estratégias"
+        hint="Runs usáveis = com ≥ mínimo de obras resolvidas. Cobertura = fração de obras que a estratégia conseguiu ordenar (alignment tende a ser parcial). Métricas = média entre runs usáveis."
+      >
+        {strategies.length === 0 ? (
+          <Empty />
+        ) : (
+          <StrategyTable strategies={strategies} />
+        )}
+      </Panel>
+
+      <Panel
+        title="Comparações pareadas (subconjunto comum)"
+        hint="A × B nas obras elegíveis e resolvidas em AMBAS, por run. Diferença A − B com IC95% bootstrap (reamostrando runs). Nenhum vencedor antes dos mínimos."
+      >
+        {totalResolved === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Sem obras resolvidas ainda ({totalRuns} run(s) registrado(s)). As comparações aparecem quando
+            obras recomendadas receberem nota real.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {pairwise.map((c) => (
+              <PairwiseCard key={`${c.aKey}:${c.bKey}`} c={c} />
+            ))}
+          </div>
+        )}
+      </Panel>
+    </section>
+  )
+}
+
+function StrategyTable({ strategies }: { strategies: StrategyAggregate[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+            <th className="py-1 font-medium">Estratégia</th>
+            <th className="py-1 font-medium">Versão</th>
+            <th className="py-1 text-right font-medium">Runs</th>
+            <th className="py-1 text-right font-medium">Cobertura</th>
+            <th className="py-1 text-right font-medium">P@5</th>
+            <th className="py-1 text-right font-medium">NDCG@10</th>
+            <th className="py-1 text-right font-medium">Pairwise</th>
+            <th className="py-1 text-right font-medium">Regret@5</th>
+            <th className="py-1 font-medium">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {strategies.map((s) => (
+            <tr key={`${s.key}:${s.version}`} className="border-t border-border/40">
+              <td className="py-1">
+                {s.label}
+                {s.isDisplayed && <span className="ml-1 text-[10px] text-emerald-600 dark:text-emerald-400">(exibida)</span>}
+              </td>
+              <td className="py-1 font-mono text-xs">{s.version}</td>
+              <td className="py-1 text-right font-mono">
+                {s.runsUsable}/{s.runsRecorded}
+              </td>
+              <td className="py-1 text-right font-mono">{pct(s.coverage)}</td>
+              <td className="py-1 text-right font-mono">{fmt(s.metrics?.precisionAt5)}</td>
+              <td className="py-1 text-right font-mono">{fmt(s.metrics?.ndcgAt10)}</td>
+              <td className="py-1 text-right font-mono">{fmt(s.metrics?.pairwiseAccuracy)}</td>
+              <td className="py-1 text-right font-mono">{fmt(s.metrics?.regretAt5)}</td>
+              <td className="py-1 text-xs">
+                <StrategyStatusCell s={s} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function StrategyStatusCell({ s }: { s: StrategyAggregate }) {
+  // Estratégia do registry ainda sem nenhuma captura. O mood é o caso esperado:
+  // nenhum fluxo grava recomendação COM mood (não é uma estratégia "ruim").
+  if (!s.captured) {
+    const text =
+      s.key === "mood_within_tier"
+        ? "Indisponível — nenhum fluxo com mood está sendo capturado"
+        : "Sem captura ainda"
+    return <span className="text-muted-foreground">{text}</span>
+  }
+  if (s.enoughData) {
+    return <span className="text-emerald-600 dark:text-emerald-400">OK ({s.resolvedWorks} obras)</span>
+  }
+  return <span className="text-amber-600 dark:text-amber-400">Amostra inicial</span>
+}
+
+function PairwiseCard({ c }: { c: PairwiseComparison }) {
+  const v = VERDICT_COPY[c.verdict]
+  const toneClass =
+    v.tone === "ok"
+      ? "border-emerald-500/40 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+      : v.tone === "err"
+        ? "border-rose-500/40 bg-rose-500/5 text-rose-600 dark:text-rose-400"
+        : v.tone === "warn"
+          ? "border-amber-500/40 bg-amber-500/5 text-amber-600 dark:text-amber-400"
+          : "border-border bg-muted/20 text-muted-foreground"
+  return (
+    <div className="rounded-lg border border-border bg-card/50 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium">
+          {c.aLabel} <span className="text-muted-foreground">vs</span> {c.bLabel}
+        </p>
+        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${toneClass}`}>{v.label}</span>
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        {c.runsCompared} run(s) comparáveis · {c.worksCompared} obras no subconjunto comum
+      </p>
+      <table className="mt-2 w-full text-xs">
+        <thead>
+          <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+            <th className="py-0.5 font-medium">Métrica</th>
+            <th className="py-0.5 text-right font-medium">{c.aLabel}</th>
+            <th className="py-0.5 text-right font-medium">{c.bLabel}</th>
+            <th className="py-0.5 text-right font-medium">Δ (A−B)</th>
+            <th className="py-0.5 text-right font-medium">IC95%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {c.diffs.map((diff) => (
+            <tr key={diff.metric} className="border-t border-border/40">
+              <td className="py-0.5 font-mono">{diff.metric === "pairwiseAccuracy" ? "Pairwise" : "NDCG@10"}</td>
+              <td className="py-0.5 text-right font-mono">{fmt(diff.meanA)}</td>
+              <td className="py-0.5 text-right font-mono">{fmt(diff.meanB)}</td>
+              <td className="py-0.5 text-right font-mono">{fmtSigned(diff.diff)}</td>
+              <td className="py-0.5 text-right font-mono">{fmtCi(diff.ci)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

@@ -8,6 +8,8 @@ import { getTierBandWidth } from "@/server/queries/tier-band-width"
 import { predictionSnapshotSchema, buildDedupKey } from "./prediction-context"
 import type { PredictionContext, PredictionSnapshotInput } from "./prediction-context"
 import { classifyCollectionError, warnPredictionCollectionOnce } from "./collection-status"
+import { persistShadowRankings } from "./record-shadow-rankings"
+import type { RankingCandidate } from "@/lib/ranking/strategies/types"
 
 /**
  * Camada de REGISTRO de snapshots prospectivos (prediction_snapshots / P1).
@@ -219,12 +221,123 @@ export async function recordRecommendationSnapshots(args: {
       }
     })
 
-    return await recordPredictionSnapshots(inputs)
+    const inserted = await recordPredictionSnapshots(inputs)
+
+    // SHADOW RANKING (migration 106): calcula estratégias alternativas sobre o
+    // MESMO conjunto prospectivo desta run e persiste em silêncio. Best-effort —
+    // falha aqui NÃO afeta a recomendação nem os prediction_snapshots acima.
+    await recordShadowRankingsForRecommendation(supabase, {
+      rankingSnapshotId: args.rankingSnapshotId,
+      prospective,
+      tierByWork,
+      displayedOrder: args.workIds,
+    })
+
+    return inserted
   } catch (err) {
     console.warn(
       "[recordRecommendationSnapshots] falhou (best-effort, não bloqueia a recomendação):",
       err instanceof Error ? err.message : err,
     )
     return 0
+  }
+}
+
+type ProspectiveWork = {
+  id: string
+  user_score: number | null
+  calculated_scores: {
+    expected_score: number | null
+    calc_score: number | null
+    personal_fit: number | null
+    alignment_score: number | null
+    alignment_payload: { confidence?: number } | null
+    expected_is_stub: boolean | null
+  } | null
+}
+
+/**
+ * Re-lê os prediction_snapshots persistidos desta run (pra obter os IDs), monta
+ * os RankingCandidate com a ORDEM exibida (displayedOrder) e os sinais já
+ * calculados, e delega o cálculo+persistência das estratégias-sombra.
+ *
+ * Recomendações NÃO carregam mood (o mood é coisa do /ranking), então
+ * moodAdjustedScore = null e moodActive = false → mood_within_tier não é gerada
+ * aqui (não inventamos mood padrão). Best-effort.
+ */
+async function recordShadowRankingsForRecommendation(
+  supabase: ReturnType<typeof createAdminClient>,
+  args: {
+    rankingSnapshotId: string
+    prospective: ProspectiveWork[]
+    tierByWork: Map<string, number>
+    displayedOrder: string[]
+  },
+): Promise<void> {
+  try {
+    if (args.prospective.length === 0) return
+
+    // IDs reais dos snapshots desta run (dedup_key = ranking::{run}::work::{work}).
+    const { data: snapRows, error } = await supabase
+      .from("prediction_snapshots")
+      .select("id, work_id")
+      .eq("ranking_snapshot_id", args.rankingSnapshotId)
+    if (error) {
+      warnPredictionCollectionOnce(classifyCollectionError(error), error.message)
+      return
+    }
+    const snapIdByWork = new Map<string, string>()
+    for (const r of (snapRows ?? []) as Array<{ id: string; work_id: string }>) {
+      snapIdByWork.set(r.work_id, r.id)
+    }
+    if (snapIdByWork.size === 0) return
+
+    // Rank exibido = posição (1-based) entre as obras prospectivas na ORDEM
+    // realmente entregue à interface (displayedOrder = ordem do ranker).
+    const prospectiveIds = new Set(args.prospective.map((w) => w.id))
+    const displayedRankByWork = new Map<string, number>()
+    let pos = 0
+    for (const wid of args.displayedOrder) {
+      if (prospectiveIds.has(wid) && !displayedRankByWork.has(wid)) {
+        pos += 1
+        displayedRankByWork.set(wid, pos)
+      }
+    }
+
+    const candidates: RankingCandidate[] = []
+    for (const w of args.prospective) {
+      const psid = snapIdByWork.get(w.id)
+      if (!psid) continue // snapshot não persistido (validação/conflito) → fora do shadow
+      const cs = w.calculated_scores
+      const expected = cs?.expected_score ?? null
+      candidates.push({
+        predictionSnapshotId: psid,
+        workId: w.id,
+        // Sem rank exibido conhecido (não veio no displayedOrder) → fim da lista.
+        displayedRank: displayedRankByWork.get(w.id) ?? args.prospective.length + 1,
+        displayedTier: args.tierByWork.get(w.id) ?? null,
+        predictedScore: expected,
+        calcScore: cs?.calc_score ?? null,
+        personalFit: cs?.personal_fit ?? null,
+        alignmentScore: cs?.alignment_score ?? null,
+        decisionScore: computeDecisionScore({
+          expected,
+          alignment: cs?.alignment_score ?? null,
+          confidence: cs?.alignment_payload?.confidence ?? null,
+        }),
+        moodAdjustedScore: null,
+      })
+    }
+
+    await persistShadowRankings({
+      rankingSnapshotId: args.rankingSnapshotId,
+      candidates,
+      moodActive: false,
+    })
+  } catch (err) {
+    console.warn(
+      "[recordShadowRankingsForRecommendation] falhou (best-effort):",
+      err instanceof Error ? err.message : err,
+    )
   }
 }
