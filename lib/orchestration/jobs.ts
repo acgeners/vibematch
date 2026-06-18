@@ -4,16 +4,18 @@
  *
  * Dois back-ends por trás da mesma interface `JobStore`:
  *  - SupabaseJobStore: durável (tabela `work_processing_jobs`, migration 110).
- *    Dedup cross-processo via índice único parcial em `dedup_key`; suporta
- *    retomada (jobs `failed` são re-claimáveis) e telemetria de custo/erro.
+ *    Dedup cross-processo via índice único parcial em `dedup_key`; ciclo
+ *    queued→running→succeeded/failed; RETOMADA de jobs `failed` reusando a mesma
+ *    linha e incrementando `attempts`; telemetria de custo/erro/timestamps.
  *  - InMemoryJobStore: FALLBACK quando a tabela ainda não existe + usado nos
- *    testes. Dedup só no processo atual.
+ *    testes. Mesma semântica, dedup só no processo atual.
  *
  * `getJobStore()` sonda a tabela uma vez por processo e escolhe o back-end —
  * degradação graciosa idêntica ao padrão tolerante de `recalc_pending`.
  *
  * `runOrchestratedJob()` combina dedup durável (claim) com single-flight
- * em-processo (await compartilhado) — o executor chama só esta função.
+ * em-processo (await compartilhado) e dirige o ciclo de vida — o executor chama
+ * só esta função.
  */
 
 import "server-only"
@@ -37,6 +39,9 @@ export interface JobRecord {
   costActualUsd: number | null
   errorCategory: string | null
   lastError: string | null
+  createdAt: string | null
+  startedAt: string | null
+  finishedAt: string | null
 }
 
 export interface ClaimInput {
@@ -47,43 +52,87 @@ export interface ClaimInput {
 }
 
 export type ClaimResult =
-  | { kind: "claimed"; job: JobRecord }
+  | { kind: "claimed"; job: JobRecord; resumed: boolean }
   | { kind: "active"; job: JobRecord }
 
 export interface JobStore {
   /** Reivindica a execução. `active` = já há um job em voo com o mesmo dedup_key. */
   claim(input: ClaimInput): Promise<ClaimResult>
+  /** queued → running. */
+  markRunning(id: string): Promise<void>
   markSucceeded(id: string, patch?: { costActualUsd?: number | null }): Promise<void>
   markFailed(id: string, patch?: { errorCategory?: string | null; lastError?: string | null }): Promise<void>
+}
+
+// ---- Sanitização de erro ---------------------------------------------------
+
+/**
+ * Mensagem de erro segura p/ persistir em `last_error`: só a message (sem stack),
+ * em uma linha, truncada, com redação de padrões óbvios de segredo (api keys,
+ * JWT, bearer). NÃO é detecção exaustiva — é uma rede de segurança contra vazar
+ * credencial num campo logado.
+ */
+export function sanitizeErrorMessage(err: unknown, maxLen = 500): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  let s = raw.replace(/\s+/g, " ").trim()
+  s = s.replace(/\b(sk-[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9._-]{10,}|[Bb]earer\s+[A-Za-z0-9._-]{8,})/g, "[REDACTED]")
+  if (s.length > maxLen) s = `${s.slice(0, maxLen - 1)}…`
+  return s
 }
 
 // ---- In-memory (fallback + testes) ----------------------------------------
 
 export class InMemoryJobStore implements JobStore {
-  /** Jobs em voo por dedup_key (running). */
-  private active = new Map<string, JobRecord>()
   /** Histórico completo — telemetria/asserções de teste. */
   readonly records: JobRecord[] = []
 
-  async claim(input: ClaimInput): Promise<ClaimResult> {
-    const running = this.active.get(input.dedupKey)
-    if (running) return { kind: "active", job: running }
+  private latest(dedupKey: string): JobRecord | null {
+    for (let i = this.records.length - 1; i >= 0; i--) {
+      if (this.records[i].dedupKey === dedupKey) return this.records[i]
+    }
+    return null
+  }
 
+  async claim(input: ClaimInput): Promise<ClaimResult> {
+    const existing = this.latest(input.dedupKey)
+    if (existing && (existing.status === "queued" || existing.status === "running")) {
+      return { kind: "active", job: existing }
+    }
+    if (existing && existing.status === "failed") {
+      // Retomada: reusa a MESMA linha e incrementa attempts.
+      existing.status = "queued"
+      existing.attempts += 1
+      existing.lastError = null
+      existing.errorCategory = null
+      existing.startedAt = null
+      existing.finishedAt = null
+      existing.costEstimateUsd = input.estimateUsd ?? existing.costEstimateUsd
+      return { kind: "claimed", job: existing, resumed: true }
+    }
     const job: JobRecord = {
       id: randomUUID(),
       action: input.action,
       workId: input.workId,
       dedupKey: input.dedupKey,
-      status: "running",
+      status: "queued",
       attempts: 1,
       costEstimateUsd: input.estimateUsd ?? null,
       costActualUsd: null,
       errorCategory: null,
       lastError: null,
+      createdAt: new Date().toISOString(),
+      startedAt: null,
+      finishedAt: null,
     }
-    this.active.set(input.dedupKey, job)
     this.records.push(job)
-    return { kind: "claimed", job }
+    return { kind: "claimed", job, resumed: false }
+  }
+
+  async markRunning(id: string): Promise<void> {
+    const job = this.records.find((r) => r.id === id)
+    if (!job || job.status !== "queued") return
+    job.status = "running"
+    job.startedAt = new Date().toISOString()
   }
 
   async markSucceeded(id: string, patch?: { costActualUsd?: number | null }): Promise<void> {
@@ -91,7 +140,7 @@ export class InMemoryJobStore implements JobStore {
     if (!job) return
     job.status = "succeeded"
     job.costActualUsd = patch?.costActualUsd ?? job.costActualUsd
-    this.active.delete(job.dedupKey)
+    job.finishedAt = new Date().toISOString()
   }
 
   async markFailed(
@@ -103,8 +152,7 @@ export class InMemoryJobStore implements JobStore {
     job.status = "failed"
     job.errorCategory = patch?.errorCategory ?? null
     job.lastError = patch?.lastError ?? null
-    // Remove do "em voo" ⇒ uma reexecução futura (retry/resume) pode re-claimar.
-    this.active.delete(job.dedupKey)
+    job.finishedAt = new Date().toISOString()
   }
 }
 
@@ -125,43 +173,99 @@ function mapRow(row: Record<string, unknown>): JobRecord {
     costActualUsd: row.cost_actual_usd != null ? Number(row.cost_actual_usd) : null,
     errorCategory: (row.error_category as string | null) ?? null,
     lastError: (row.last_error as string | null) ?? null,
+    createdAt: (row.created_at as string | null) ?? null,
+    startedAt: (row.started_at as string | null) ?? null,
+    finishedAt: (row.finished_at as string | null) ?? null,
   }
 }
 
 export class SupabaseJobStore implements JobStore {
   constructor(private readonly supabase: AdminClient) {}
 
+  private async latest(dedupKey: string): Promise<JobRecord | null> {
+    const { data } = await this.supabase
+      .from(TABLE)
+      .select("*")
+      .eq("dedup_key", dedupKey)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    return data ? mapRow(data as Record<string, unknown>) : null
+  }
+
+  private async activeFor(dedupKey: string): Promise<JobRecord | null> {
+    const { data } = await this.supabase
+      .from(TABLE)
+      .select("*")
+      .eq("dedup_key", dedupKey)
+      .in("status", ACTIVE_STATUSES)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    return data ? mapRow(data as Record<string, unknown>) : null
+  }
+
   async claim(input: ClaimInput): Promise<ClaimResult> {
-    const now = new Date().toISOString()
+    const existing = await this.latest(input.dedupKey)
+
+    if (existing && (existing.status === "queued" || existing.status === "running")) {
+      return { kind: "active", job: existing }
+    }
+
+    // Retomada de um job FALHO: reusa a linha, incrementa attempts, requeue.
+    // O índice único parcial garante que só uma transição failed→queued vence.
+    if (existing && existing.status === "failed") {
+      const { data: reclaimed } = await this.supabase
+        .from(TABLE)
+        .update({
+          status: "queued",
+          attempts: existing.attempts + 1,
+          last_error: null,
+          error_category: null,
+          started_at: null,
+          finished_at: null,
+          cost_estimate_usd: input.estimateUsd ?? existing.costEstimateUsd,
+        })
+        .eq("id", existing.id)
+        .eq("status", "failed")
+        .select("*")
+        .maybeSingle()
+      if (reclaimed) return { kind: "claimed", job: mapRow(reclaimed as Record<string, unknown>), resumed: true }
+      // Corrida: outro processo retomou primeiro.
+      const active = await this.activeFor(input.dedupKey)
+      if (active) return { kind: "active", job: active }
+      // Senão cai pro insert de uma nova linha abaixo.
+    }
+
+    // Nova linha (status default 'queued').
     const { data, error } = await this.supabase
       .from(TABLE)
       .insert({
         action: input.action,
         work_id: input.workId,
         dedup_key: input.dedupKey,
-        status: "running",
+        status: "queued",
         attempts: 1,
         cost_estimate_usd: input.estimateUsd ?? null,
-        started_at: now,
       })
       .select("*")
       .single()
 
     if (error) {
-      // Provável violação do índice único parcial (já há job ativo): retorna o ativo.
-      const { data: activeRow } = await this.supabase
-        .from(TABLE)
-        .select("*")
-        .eq("dedup_key", input.dedupKey)
-        .in("status", ACTIVE_STATUSES)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (activeRow) return { kind: "active", job: mapRow(activeRow as Record<string, unknown>) }
+      // Provável violação do índice único parcial (já há job ativo).
+      const active = await this.activeFor(input.dedupKey)
+      if (active) return { kind: "active", job: active }
       throw error
     }
+    return { kind: "claimed", job: mapRow(data as Record<string, unknown>), resumed: false }
+  }
 
-    return { kind: "claimed", job: mapRow(data as Record<string, unknown>) }
+  async markRunning(id: string): Promise<void> {
+    await this.supabase
+      .from(TABLE)
+      .update({ status: "running", started_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("status", "queued")
   }
 
   async markSucceeded(id: string, patch?: { costActualUsd?: number | null }): Promise<void> {
@@ -209,10 +313,7 @@ async function tableExists(supabase: AdminClient): Promise<boolean> {
  * Decidido uma vez por processo (a migration não troca em runtime). Passe um
  * client e/ou um override pra testar sem rede.
  */
-export function getJobStore(
-  supabase?: AdminClient,
-  override?: JobStore,
-): Promise<JobStore> {
+export function getJobStore(supabase?: AdminClient, override?: JobStore): Promise<JobStore> {
   if (override) return Promise.resolve(override)
   if (cachedStorePromise) return cachedStorePromise
   cachedStorePromise = (async () => {
@@ -222,7 +323,7 @@ export function getJobStore(
   return cachedStorePromise
 }
 
-/** APENAS para testes — limpa o back-end memoizado. */
+/** APENAS para testes/smoke — limpa o back-end memoizado. */
 export function __resetJobStoreCache(): void {
   cachedStorePromise = null
 }
@@ -242,9 +343,10 @@ export interface RunJobParams {
 }
 
 /**
- * Roda `fn` sob dedup durável (claim) + single-flight em-processo. Duas chamadas
- * concorrentes com o MESMO dedup_key compartilham uma execução; `fn` roda 1×.
- * Falha marca o job `failed` (resumível) e devolve o erro sem lançar.
+ * Roda `fn` sob dedup durável (claim) + single-flight em-processo, dirigindo o
+ * ciclo queued→running→succeeded/failed. Duas chamadas concorrentes com o MESMO
+ * dedup_key compartilham uma execução; `fn` roda 1×. Falha marca o job `failed`
+ * (resumível, com erro sanitizado) e devolve o erro sem lançar.
  */
 export async function runOrchestratedJob(
   store: JobStore,
@@ -255,6 +357,7 @@ export async function runOrchestratedJob(
     const claim = await store.claim(params)
     if (claim.kind === "active") return { status: "processing" as const, job: claim.job }
 
+    await store.markRunning(claim.job.id)
     try {
       const out = await fn()
       const costActualUsd =
@@ -262,9 +365,7 @@ export async function runOrchestratedJob(
       await store.markSucceeded(claim.job.id, { costActualUsd })
       return { status: "succeeded" as const, job: claim.job }
     } catch (err) {
-      await store.markFailed(claim.job.id, {
-        lastError: err instanceof Error ? err.message : String(err),
-      })
+      await store.markFailed(claim.job.id, { lastError: sanitizeErrorMessage(err) })
       return { status: "failed" as const, job: claim.job, error: err }
     }
   })

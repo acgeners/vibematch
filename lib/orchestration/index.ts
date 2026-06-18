@@ -46,6 +46,7 @@ export {
   SupabaseJobStore,
   getJobStore,
   runOrchestratedJob,
+  sanitizeErrorMessage,
   __resetJobStoreCache,
 } from "./jobs"
 export type {
