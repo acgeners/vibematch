@@ -39,6 +39,8 @@ export interface JobRecord {
   costActualUsd: number | null
   errorCategory: string | null
   lastError: string | null
+  /** Mínimo p/ retomada (IDs/hashes/versões). NUNCA conteúdo sensível/grande. */
+  payload: Record<string, unknown> | null
   createdAt: string | null
   startedAt: string | null
   finishedAt: string | null
@@ -49,6 +51,8 @@ export interface ClaimInput {
   workId: string | null
   dedupKey: string
   estimateUsd?: number
+  /** Mínimo p/ retomada (IDs/hashes/versões). NUNCA reviews/prompts/outputs/secrets. */
+  payload?: Record<string, unknown> | null
 }
 
 export type ClaimResult =
@@ -107,6 +111,7 @@ export class InMemoryJobStore implements JobStore {
       existing.startedAt = null
       existing.finishedAt = null
       existing.costEstimateUsd = input.estimateUsd ?? existing.costEstimateUsd
+      existing.payload = input.payload ?? existing.payload
       return { kind: "claimed", job: existing, resumed: true }
     }
     const job: JobRecord = {
@@ -120,6 +125,7 @@ export class InMemoryJobStore implements JobStore {
       costActualUsd: null,
       errorCategory: null,
       lastError: null,
+      payload: input.payload ?? null,
       createdAt: new Date().toISOString(),
       startedAt: null,
       finishedAt: null,
@@ -173,6 +179,7 @@ function mapRow(row: Record<string, unknown>): JobRecord {
     costActualUsd: row.cost_actual_usd != null ? Number(row.cost_actual_usd) : null,
     errorCategory: (row.error_category as string | null) ?? null,
     lastError: (row.last_error as string | null) ?? null,
+    payload: (row.payload as Record<string, unknown> | null) ?? null,
     createdAt: (row.created_at as string | null) ?? null,
     startedAt: (row.started_at as string | null) ?? null,
     finishedAt: (row.finished_at as string | null) ?? null,
@@ -225,6 +232,7 @@ export class SupabaseJobStore implements JobStore {
           started_at: null,
           finished_at: null,
           cost_estimate_usd: input.estimateUsd ?? existing.costEstimateUsd,
+          payload: input.payload ?? existing.payload ?? null,
         })
         .eq("id", existing.id)
         .eq("status", "failed")
@@ -247,6 +255,7 @@ export class SupabaseJobStore implements JobStore {
         status: "queued",
         attempts: 1,
         cost_estimate_usd: input.estimateUsd ?? null,
+        payload: input.payload ?? null,
       })
       .select("*")
       .single()
@@ -340,6 +349,7 @@ export interface RunJobParams {
   workId: string | null
   dedupKey: string
   estimateUsd?: number
+  payload?: Record<string, unknown> | null
 }
 
 /**

@@ -2,6 +2,7 @@ import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { SourcedReview, ExternalSourceId } from "@/lib/external/types"
 import type { ReviewSummaryInput, ReviewDigestInput } from "@/lib/ai-recommendation/review-summarizer"
+import { ensureReviewSummary, ensureReviewDigest } from "@/lib/orchestration/integrations/reviews"
 
 /**
  * Salva snapshot de reviews externas de uma obra — estratégia NÃO-DESTRUTIVA
@@ -82,14 +83,19 @@ export async function saveWorkReviews(
   const summaryInputs: ReviewSummaryInput[] = (persisted ?? [])
     .map((r) => ({ text: String(r.text ?? ""), userRating: r.user_rating ?? null }))
     .filter((r) => r.text.trim().length > 0)
-  await persistReviewSummary(supabase, workId, summaryInputs)
+  // Resumo (Haiku): AGUARDADO, igual ao comportamento anterior. Agora via job
+  // durável (dedup por hash, status, falha persistida, retomada). Single-op do
+  // save = pré-autorizado (allowPaid) → preserva o auto-run sem confirmação. Não
+  // lança: outcome failed não quebra o save (best-effort, como antes).
+  await ensureReviewSummary(workId, { supabase, reviews: summaryInputs, allowPaid: true }).catch(
+    (err) => console.error("[work_reviews] ensureReviewSummary rejeitou:", err),
+  )
 
-  // Digest estruturado (Sonnet, Item C Passe 2) no eval-time: fire-and-forget,
-  // SEM await — não taxa a latência da avaliação (~60s, ponto de dor conhecido).
-  // Gate próprio (cold/versão/materialidade) dentro de `persistReviewDigest`. A
-  // promise solta sobrevive no host long-running (dev/Fly); o .catch é só rede de
-  // segurança (a função já é best-effort/silenciosa). Se um dia for serverless,
-  // migrar p/ after()/fila.
+  // Digest estruturado (Sonnet, Item C Passe 2): ASSÍNCRONO em relação ao save —
+  // SEM await, não bloqueia o retorno (preserva a semântica de hoje). A diferença:
+  // deixa de ser fire-and-forget invisível e vira job durável (dedup por conteúdo,
+  // status, falha registrada, retomada). Gate próprio (versão/materialidade) dentro
+  // de `ensureReviewDigest`. Single-op do save = pré-autorizado (allowPaid).
   const digestInputs: ReviewDigestInput[] = (persisted ?? [])
     .map((r) => ({
       text: String(r.text ?? ""),
@@ -97,8 +103,8 @@ export async function saveWorkReviews(
       userRating: r.user_rating ?? null,
     }))
     .filter((r) => r.text.trim().length > 0)
-  void persistReviewDigest(supabase, workId, digestInputs).catch((err) =>
-    console.error("[work_reviews] digest fire-and-forget rejeitou:", err),
+  void ensureReviewDigest(workId, { supabase, reviews: digestInputs, allowPaid: true }).catch((err) =>
+    console.error("[work_reviews] ensureReviewDigest rejeitou:", err),
   )
 }
 
@@ -139,124 +145,4 @@ export async function loadWorkReviewsAsSourced(workId: string): Promise<SourcedR
       textLength: r.text_length != null ? Number(r.text_length) : text.length,
     }
   })
-}
-
-type AdminClient = ReturnType<typeof createAdminClient>
-
-/**
- * Gera/atualiza o resumo IA das reviews da obra. Best-effort. Gate de
- * MATERIALIDADE (Item C, Passe 1): re-resumir custa Haiku, então só roda quando
- *   - não há resumo (cold), OU
- *   - o conjunto mudou (sha256) E o crescimento é material (ver
- *     `isMaterialReviewChange`) — +1 review numa obra com dezenas é desperdício.
- * Edição pura (mesmo count, texto diferente) NÃO dispara — fica pro botão manual.
- *
- * Os inputs são ordenados por texto antes do hash pra que a ordem não-determinística
- * do SELECT não dispare re-gerações desnecessárias do resumo (que custam LLM).
- */
-async function persistReviewSummary(
-  supabase: AdminClient,
-  workId: string,
-  inputs: ReviewSummaryInput[],
-): Promise<void> {
-  if (inputs.length === 0) return
-  try {
-    const {
-      consolidateReviews,
-      hashReviewInputs,
-      packReviewSummaryMeta,
-      parseReviewSummaryMeta,
-      isMaterialReviewChange,
-    } = await import("@/lib/ai-recommendation/review-summarizer")
-    const ordered = [...inputs].sort((a, b) => a.text.localeCompare(b.text))
-    const hash = hashReviewInputs(ordered)
-    const nowN = ordered.length
-
-    const { data: existing } = await supabase
-      .from("works")
-      .select("review_summary, review_summary_inputs_hash")
-      .eq("id", workId)
-      .maybeSingle()
-
-    if (existing?.review_summary != null) {
-      const { hash: prevHash, n: prevN } = parseReviewSummaryMeta(
-        existing.review_summary_inputs_hash as string | null,
-      )
-      // Conjunto idêntico → nunca roda. Mudou mas imaterial → também não.
-      if (prevHash === hash) return
-      if (!isMaterialReviewChange(prevN, nowN)) return
-    }
-
-    const result = await consolidateReviews(ordered, { workId })
-    if (!result) return
-
-    await supabase
-      .from("works")
-      .update({
-        review_summary: result.summary,
-        review_summary_at: new Date().toISOString(),
-        review_summary_inputs_hash: packReviewSummaryMeta(hash, nowN),
-      })
-      .eq("id", workId)
-  } catch (err) {
-    console.error("[work_reviews] erro gerando resumo:", err instanceof Error ? err.message : err)
-  }
-}
-
-/**
- * Gera/atualiza o DIGEST estruturado (Sonnet 4.6, Item C Passe 2) das reviews da
- * obra no eval-time. Best-effort, disparado SEM await por `saveWorkReviews`
- * (background). Gate — mesma disciplina do batch (`consolidatePendingReviewDigests`)
- * somada à materialidade do Passe 1:
- *   - cold (obra sem digest), OU
- *   - versão antiga (`review_digest_version` != atual — regenera no bump), OU
- *   - crescimento material do conjunto (`isMaterialReviewChange` sobre `review_digest_n`).
- * Senão (digest fresco + sem crescimento material) → no-op, zero custo Sonnet. Assim
- * "Completo" digere 1×; on-going renova ao crescer; edição pura (mesmo count) NÃO
- * dispara — fica pro batch/botão manual.
- *
- * Tolerante: sem a migration 103 (colunas ausentes) o select/update falha → catch
- * silencioso, sem quebrar o save de reviews.
- */
-async function persistReviewDigest(
-  supabase: AdminClient,
-  workId: string,
-  inputs: ReviewDigestInput[],
-): Promise<void> {
-  const nowN = inputs.filter((i) => i.text.trim().length > 0).length
-  if (nowN === 0) return
-  try {
-    const { consolidateReviewsDigestDetailed, REVIEW_DIGEST_VERSION, isMaterialReviewChange } =
-      await import("@/lib/ai-recommendation/review-summarizer")
-
-    const { data: existing } = await supabase
-      .from("works")
-      .select("review_digest, review_digest_n, review_digest_version")
-      .eq("id", workId)
-      .maybeSingle()
-    const row = existing as {
-      review_digest: unknown
-      review_digest_n: number | null
-      review_digest_version: string | null
-    } | null
-
-    // Digest fresco (presente E versão atual): só renova se cresceu o bastante.
-    const fresh = row?.review_digest != null && row.review_digest_version === REVIEW_DIGEST_VERSION
-    if (fresh && !isMaterialReviewChange(row?.review_digest_n ?? null, nowN)) return
-
-    const status = await consolidateReviewsDigestDetailed(inputs, { workId })
-    if (status.kind !== "ok") return
-
-    await supabase
-      .from("works")
-      .update({
-        review_digest: status.result.digest,
-        review_digest_at: new Date().toISOString(),
-        review_digest_n: nowN,
-        review_digest_version: REVIEW_DIGEST_VERSION,
-      })
-      .eq("id", workId)
-  } catch (err) {
-    console.error("[work_reviews] erro gerando digest:", err instanceof Error ? err.message : err)
-  }
 }
