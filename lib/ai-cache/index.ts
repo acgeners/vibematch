@@ -5,3 +5,4 @@
 export * from "./types"
 export * from "./canonicalize"
 export * from "./build-cache-key"
+export * from "./cache-events"

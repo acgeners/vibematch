@@ -7,7 +7,8 @@ import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { fetchCoverForModelWithStatus, isImageRelatedModelError } from "@/lib/server/covers/fetch-cover-for-model"
-import type { AiImageStatus } from "@/lib/ai-observability/types"
+import { recordCacheEventAsync } from "@/server/queries/ai-cache"
+import type { AiImageStatus, AiWorkloadType } from "@/lib/ai-observability/types"
 import type { SourcedReview, PlatformRating, SimilarWork } from "@/lib/external/types"
 
 export interface AiEvaluationTag {
@@ -128,6 +129,12 @@ export function parsePromptVersion(s: string | null | undefined): number | null 
 }
 
 export const CURRENT_PROMPT_VERSION_NUM = parsePromptVersion(PROMPT_VERSION) ?? 0
+
+// Versão do SCHEMA de saída (payload da tool `submit_evaluation`). Entra na chave
+// de cache canônica V2 (dual-read) — se a forma do payload mudar, o cache antigo
+// não é reaproveitado por engano. Bump manual quando EVALUATION_TOOL muda.
+export const EVAL_OUTPUT_SCHEMA_VERSION = "eval-1"
+
 const MAX_REVIEW_WORDS = 200
 
 /**
@@ -1392,12 +1399,28 @@ export async function requestAiEvaluation(
   // como item do Plano 2 (contador dedicado); aqui só marcamos as linhas que
   // foram ao provider como cache_status="miss".
   const logicalRequestId = randomUUID()
-  const workloadType = req.model ? "experiment" : "recurring"
+  const workloadType: AiWorkloadType = req.model ? "experiment" : "recurring"
 
   const cacheKey = canonicalInputHash(req)
+  // Telemetria de cache (Plano 2 §8): mede a CONSULTA (vai pra ai_cache_events),
+  // não a chamada ao provider. Best-effort (fire-and-forget) — não soma latência
+  // ao hit nem altera o retorno funcional. Hits aparecem SÓ aqui, nunca em
+  // ai_api_calls (que segue representando tentativas do provider).
+  const cacheEventBase = {
+    operation: "ai_evaluation" as const,
+    workloadType,
+    inputHash: cacheKey,
+    modelName: req.model ?? MODEL,
+    promptVersion: PROMPT_VERSION,
+    outputSchemaVersion: EVAL_OUTPUT_SCHEMA_VERSION,
+    workId: req.workId ?? null,
+    logicalRequestId,
+  }
+
   const cached = readCache(cacheKey)
   if (cached) {
     console.info(`[AI] Cache hit (memory) para "${req.title}" (hash=${cacheKey.slice(0, 8)})`)
+    recordCacheEventAsync({ ...cacheEventBase, cacheLayer: "resolution", cacheStatus: "hit_memory" })
     return { ...cached, fromCache: "memory" }
   }
 
@@ -1405,8 +1428,12 @@ export async function requestAiEvaluation(
   if (dbCached) {
     console.info(`[AI] Cache hit (db) para "${req.title}" (hash=${cacheKey.slice(0, 8)})`)
     writeCache(cacheKey, dbCached)
+    recordCacheEventAsync({ ...cacheEventBase, cacheLayer: "resolution", cacheStatus: "hit_persistent" })
     return { ...dbCached, fromCache: "db" }
   }
+
+  // Miss completo: nenhuma camada resolveu → vamos ao provider.
+  recordCacheEventAsync({ ...cacheEventBase, cacheLayer: "resolution", cacheStatus: "miss_not_found" })
 
   const prepared = prepareReviews(req)
   // maxRetries: 8 absorve janelas longas de 529 "Overloaded" da Anthropic com
