@@ -48,6 +48,18 @@ async function main() {
   }
   console.log(`Perfil v${profileRow.version} | obras da amostra resolvidas: ${byId.size}/${uniqueIds.length}`)
 
+  // Distribuição das 4 classes + variância dos níveis previstos (passo 2).
+  function distVar(name: string, byWork: Map<string, number>) {
+    const levels = uniqueIds.map((id) => byWork.get(id)).filter((l): l is number => l != null && l >= 1)
+    const dist = [1, 2, 3, 4].map((lv) => levels.filter((l) => l === lv).length)
+    const mean = levels.reduce((a, b) => a + b, 0) / (levels.length || 1)
+    const variance = levels.reduce((a, b) => a + (b - mean) ** 2, 0) / (levels.length || 1)
+    console.log(`  ${name}: ♥${dist[0]} ♥♥${dist[1]} ♥♥♥${dist[2]} ♥♥♥♥${dist[3]} | média=${mean.toFixed(2)} var=${variance.toFixed(2)}`)
+  }
+  console.log("\n=== Distribuição das classes + variância (amostra, n=80) ===")
+  distVar("D1     ", d1ByWork)
+  distVar("D2     ", d2ByWork)
+
   // Golden humano (se já carregado + rotulado).
   let golden = new Map<string, number>()
   let goldenAvailable = false
@@ -84,6 +96,7 @@ async function main() {
     // Comparação EXPLORATÓRIA (contaminada pelo "Aplicar") só p/ termômetro.
     const { data: wq } = await sb.from("works").select("id, synopsis_quality").in("id", uniqueIds)
     const manual = new Map((wq ?? []).map((w) => [(w as { id: string }).id, levelOf((w as { synopsis_quality: string | null }).synopsis_quality)]))
+    distVar("manual ", manual)
     console.log("=== D1/D2 × manual EXPLORATÓRIO (works.synopsis_quality — contaminado, NÃO é o golden) ===")
     report("D1", d1ByWork, manual)
     report("D2", d2ByWork, manual)
