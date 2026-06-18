@@ -74,34 +74,67 @@ const PLACEHOLDER_RE = /\b(?:sinopse|descri[cç][aã]o)\s+(?:indispon[ií]vel|em
 const PROMO_RE = /\b(?:dispon[ií]vel (?:agora|em)|buy now|pre-?order|read (?:now|it) on|leia (?:agora|j[aá]))\b|https?:\/\//i
 const NEGATION_RE = /\b(?:no|not|without|sem|n[aã]o|nenhum[ao]?)\b/i
 
+// Stopwords PT+EN — descartadas das frases de tema (não carregam sinal temático).
+const STOPWORDS = new Set([
+  "the", "of", "and", "with", "for", "to", "in", "by", "an", "a", "on", "her", "his", "its",
+  "de", "da", "do", "das", "dos", "e", "em", "um", "uma", "que", "se", "na", "no", "com", "ao", "por",
+])
+
+function normalizeWords(text: string): string[] {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean)
+}
+
 function tokenize(text: string): { tokens: Set<string>; lower: string } {
   const lower = text.toLowerCase()
-  const tokens = new Set(lower.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean))
+  const tokens = new Set(normalizeWords(lower))
   return { tokens, lower }
 }
 
-/** Um tema/tag "aparece" se TODAS as suas palavras significativas estão nos tokens. */
-function phraseHits(phrase: string, tokens: Set<string>): boolean {
-  const words = phrase.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 2)
-  if (words.length === 0) return false
-  return words.every((w) => tokens.has(w))
+/** Palavras significativas de uma frase (sem stopwords, len>2). */
+function significantWords(phrase: string): string[] {
+  return normalizeWords(phrase).filter((w) => w.length > 2 && !STOPWORDS.has(w))
 }
 
-/** Conta hits de uma lista de frases nos tokens, com checagem de negação no texto. */
-function countThemeHits(phrases: string[], tokens: Set<string>, lower: string, checkNegation: boolean): number {
+/** Uma palavra "casa" por token exato OU stem leve (prefixo de 5) p/ pegar flexões. */
+function wordMatches(word: string, tokens: Set<string>): boolean {
+  if (tokens.has(word)) return true
+  if (word.length >= 5) {
+    const stem = word.slice(0, 5)
+    for (const t of tokens) if (t.length >= 5 && t.startsWith(stem)) return true
+  }
+  return false
+}
+
+/** Fração [0,1] das palavras significativas da frase presentes (parcial, não exata). */
+function phraseMatchFraction(phrase: string, tokens: Set<string>): number {
+  const words = significantWords(phrase)
+  if (words.length === 0) return 0
+  let m = 0
+  for (const w of words) if (wordMatches(w, tokens)) m += 1
+  return m / words.length
+}
+
+/** Há negação na janela curta antes da 1ª palavra significativa da frase? */
+function isNegated(phrase: string, lower: string): boolean {
+  const w0 = significantWords(phrase)[0]
+  if (!w0) return false
+  const idx = lower.indexOf(w0.slice(0, Math.min(5, w0.length)))
+  if (idx <= 0) return false
+  return NEGATION_RE.test(lower.slice(Math.max(0, idx - 28), idx))
+}
+
+/** Cobertura amada: SOMA das frações das frases (parcial conta). */
+function lovedCoverageRaw(phrases: string[], tokens: Set<string>): number {
+  let sum = 0
+  for (const p of phrases) sum += phraseMatchFraction(p, tokens)
+  return sum
+}
+
+/** Conta frases EVITADAS fortemente presentes (fração ≥ 0.5) e não-negadas. */
+function avoidedStrongHits(phrases: string[], tokens: Set<string>, lower: string): number {
   let hits = 0
   for (const p of phrases) {
-    if (!phraseHits(p, tokens)) continue
-    if (checkNegation) {
-      // janela curta antes da 1ª palavra do tema: se houver negação, descarta o hit.
-      const w0 = p.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean)[0]
-      if (w0) {
-        const idx = lower.indexOf(w0)
-        const window = idx > 0 ? lower.slice(Math.max(0, idx - 24), idx) : ""
-        if (NEGATION_RE.test(window)) continue
-      }
-    }
-    hits += 1
+    if (phraseMatchFraction(p, tokens) >= 0.5 && !isNegated(p, lower)) hits += 1
   }
   return hits
 }
@@ -124,10 +157,12 @@ export function baselineD2(work: BaselineWork, profile: TasteProfilePayload): Ba
   const lovedTagNames = profile.loved_tags.map((t) => t.name)
   const avoidedTagNames = profile.avoided_tags.map((t) => t.name)
 
-  const lovedHits = countThemeHits([...lovedThemes, ...lovedTagNames], tokens, lower, false)
-  const avoidedHits = countThemeHits([...avoidedThemes, ...avoidedTagNames], tokens, lower, true)
-  const lovedDen = Math.max(1, lovedThemes.length + lovedTagNames.length)
-  const coverage = Math.min(1, lovedHits / Math.max(3, Math.min(8, lovedDen))) // saturação suave
+  // Matching PARCIAL (palavra-a-palavra + stem leve): cobre frases multi-palavra
+  // que não aparecem literais na sinopse (era o motivo de D2≡D1 antes).
+  const lovedHits = lovedCoverageRaw([...lovedThemes, ...lovedTagNames], tokens)
+  const avoidedHits = avoidedStrongHits([...avoidedThemes, ...avoidedTagNames], tokens, lower)
+  // Saturação suave: ~3 frações somadas já dá cobertura plena.
+  const coverage = Math.min(1, lovedHits / 3)
 
   // Penalidades textuais (pouco-informativo brando / promo / truncamento).
   let penalty = 0
