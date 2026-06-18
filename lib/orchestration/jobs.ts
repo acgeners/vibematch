@@ -350,6 +350,8 @@ export interface RunJobParams {
   dedupKey: string
   estimateUsd?: number
   payload?: Record<string, unknown> | null
+  /** Telemetria de dedup in-process (preserva recordCacheEventAsync ao integrar). */
+  onWaiter?: () => void
 }
 
 /**
@@ -363,20 +365,24 @@ export async function runOrchestratedJob(
   params: RunJobParams,
   fn: () => Promise<{ costActualUsd?: number } | void>,
 ): Promise<RunJobResult> {
-  return runSingleFlight(params.dedupKey, async () => {
-    const claim = await store.claim(params)
-    if (claim.kind === "active") return { status: "processing" as const, job: claim.job }
+  return runSingleFlight(
+    params.dedupKey,
+    async (): Promise<RunJobResult> => {
+      const claim = await store.claim(params)
+      if (claim.kind === "active") return { status: "processing", job: claim.job }
 
-    await store.markRunning(claim.job.id)
-    try {
-      const out = await fn()
-      const costActualUsd =
-        out && typeof out === "object" && "costActualUsd" in out ? out.costActualUsd : undefined
-      await store.markSucceeded(claim.job.id, { costActualUsd })
-      return { status: "succeeded" as const, job: claim.job }
-    } catch (err) {
-      await store.markFailed(claim.job.id, { lastError: sanitizeErrorMessage(err) })
-      return { status: "failed" as const, job: claim.job, error: err }
-    }
-  })
+      await store.markRunning(claim.job.id)
+      try {
+        const out = await fn()
+        const costActualUsd =
+          out && typeof out === "object" && "costActualUsd" in out ? out.costActualUsd : undefined
+        await store.markSucceeded(claim.job.id, { costActualUsd })
+        return { status: "succeeded", job: claim.job }
+      } catch (err) {
+        await store.markFailed(claim.job.id, { lastError: sanitizeErrorMessage(err) })
+        return { status: "failed", job: claim.job, error: err }
+      }
+    },
+    { onWaiter: params.onWaiter },
+  )
 }

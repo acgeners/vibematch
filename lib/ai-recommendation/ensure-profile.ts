@@ -1,8 +1,8 @@
 import "server-only"
 import { getRatedWorksForProfile } from "@/server/queries/recommendations"
-import { runSingleFlight } from "@/lib/ai-cache/single-flight"
 import { recordCacheEventAsync } from "@/server/queries/ai-cache"
-import { generateTasteProfile, MODEL, PROMPT_VERSION } from "./service"
+import { MODEL, PROMPT_VERSION } from "./service"
+import { ensureTasteProfile } from "@/lib/orchestration/integrations/taste-profile"
 import {
   buildStubProfile,
   computeInputHash,
@@ -31,21 +31,17 @@ async function regenerateFullProfile(
   ratedWorks: Awaited<ReturnType<typeof getRatedWorksForProfile>>,
   inputHash: string,
 ): Promise<TasteProfileRow> {
-  // Single-flight (plano §10): duas recomendações concorrentes com a MESMA
-  // biblioteca (mesmo input_hash) geravam DOIS perfis pagos + dois inserts. Agora
-  // a primeira gera e as demais aguardam — uma chamada paga, um insert.
-  return runSingleFlight(`taste_profile:${inputHash}`, async () => {
-    const result = await generateTasteProfile(ratedWorks)
-    return insertNewTasteProfile({
-      profile: result.profile,
-      nWorks: ratedWorks.length,
-      inputHash,
-      isStub: false,
-      modelName: result.modelName,
-      promptVersion: result.promptVersion,
-      rawResponse: result.rawResponse,
-    })
-  }, {
+  // Geração roteada pela orquestração durável (Fase B passo 3): job durável,
+  // dedup cross-processo + single-flight, status, falha persistida e retomada.
+  // É uma AÇÃO PAGA já iniciada pelo usuário (recomendação/chat passaram pelo gate
+  // de capability) ⇒ allowPaid:true (uma confirmação), preservando o auto-run de
+  // hoje. Efeitos da criação (nova versão, anterior deixa de ser atual, previsões
+  // de Interesse marcadas stale) ficam intactos dentro de insertNewTasteProfile.
+  // onWaiter preserva a telemetria de dedup in-process (recordCacheEventAsync).
+  const outcome = await ensureTasteProfile({
+    allowPaid: true,
+    refreshIfStale: true,
+    ratedWorks,
     onWaiter: () =>
       recordCacheEventAsync({
         operation: "recommendation_taste_profile",
@@ -58,6 +54,14 @@ async function regenerateFullProfile(
         promptVersion: PROMPT_VERSION,
       }),
   })
+  if (outcome.status === "succeeded" || outcome.status === "fresh" || outcome.status === "stale") {
+    return outcome.profile
+  }
+  if (outcome.status === "failed") throw new Error(outcome.error)
+  // blocked_manual/blocked_cost_confirmation/processing não devem ocorrer aqui:
+  // o caller garante ≥10 obras e allowPaid:true; single-flight cobre concorrência
+  // in-process. Erro coerente caso a invariante quebre.
+  throw new Error(`Geração de perfil indisponível (status: ${outcome.status}).`)
 }
 
 /**
