@@ -1,0 +1,10 @@
+{
+  "//": "tsconfig SÓ para rodar scripts/*.ts via tsx que importam módulos server-only (ex.: smoke-plan2). 'server-only' é alias do Next (não é pacote real) — aqui mapeamos pro mesmo stub que o vitest usa. NÃO afeta o build (next usa tsconfig.json).",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./*"],
+      "server-only": ["./tests/mocks/server-only.js"]
+    }
+  }
+}
