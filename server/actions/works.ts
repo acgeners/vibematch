@@ -875,6 +875,8 @@ async function persistNewWork(
       total_chapters: data.total_chapters ?? null,
       chapters_read: data.chapters_read ?? null,
       synopsis_quality: data.synopsis_quality ?? null,
+      // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
+      synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
       observation_adjustment: data.observation_adjustment,
       user_score: data.user_score ?? null,
       post_story_score: data.post_story_score ?? null,
@@ -1249,6 +1251,8 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
       total_chapters: data.total_chapters ?? null,
       chapters_read: data.chapters_read ?? null,
       synopsis_quality: data.synopsis_quality ?? null,
+      // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
+      synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
       observation_adjustment: data.observation_adjustment,
       user_score: data.user_score ?? null,
       post_story_score: data.post_story_score ?? null,
@@ -1565,6 +1569,8 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
       personal_status_id:
         getPersonalStatusIdByName(data.personal_status) ?? data.personal_status_id ?? null,
       synopsis_quality: data.synopsis_quality ?? null,
+      // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
+      synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
       observation_adjustment: data.observation_adjustment,
       observations: data.observations ?? null,
       chapters_read: data.chapters_read ?? null,

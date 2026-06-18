@@ -134,7 +134,12 @@ export async function applySynopsisPredictionAction(
     const supabase = createAdminClient()
     const { error } = await supabase
       .from("works")
-      .update({ synopsis_quality: prediction.predictedQuality })
+      .update({
+        synopsis_quality: prediction.predictedQuality,
+        // Proveniência (Plano 3): cópia da previsão IA. NÃO muda o valor copiado.
+        synopsis_quality_source: "prediction_applied",
+        synopsis_quality_prediction_id: prediction.id,
+      })
       .eq("id", workId)
     if (error) return { error: `Falha aplicando previsão: ${error.message}` }
 
@@ -172,7 +177,12 @@ export async function setSynopsisQualityAction(
     const supabase = createAdminClient()
     const { error } = await supabase
       .from("works")
-      .update({ synopsis_quality: quality })
+      .update({
+        synopsis_quality: quality,
+        // Proveniência (Plano 3): triagem manual direta. Limpar (null) zera a origem.
+        synopsis_quality_source: quality === null ? "legacy_unknown" : "human_manual",
+        synopsis_quality_prediction_id: null,
+      })
       .eq("id", workId)
     if (error) return { error: `Falha gravando Interesse: ${error.message}` }
 
