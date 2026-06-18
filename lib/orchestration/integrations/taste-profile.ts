@@ -105,7 +105,7 @@ export type EnsureTasteProfileOutcome =
   | { status: "succeeded"; profile: TasteProfileRow; ranLlm: boolean; costUsd: number }
   | { status: "processing" }
   | { status: "blocked_manual"; ratedWorksCount: number; required: number; message: string }
-  | { status: "blocked_cost_confirmation"; reason: "threshold" | "over_cap" | "pricing_unknown"; estimatedUsd: number; ratedWorksCount: number }
+  | { status: "blocked_cost_confirmation"; reason: "threshold" | "over_cap" | "pricing_unknown"; estimatedUsd: number; likelyUsd: number; ratedWorksCount: number }
   | { status: "failed"; error: string }
 
 export interface EnsureTasteProfileDeps {
@@ -164,7 +164,7 @@ export async function ensureTasteProfile(
   // escalado pela quantidade real de obras; upper bound conservador).
   const gate = gateActionCost("ensure_taste_profile", count, { allowPaid, maxCostUsd: deps.maxCostUsd, microThresholdUsd: micro })
   if ("blocked" in gate) {
-    return { status: "blocked_cost_confirmation", reason: gate.blocked, estimatedUsd: gate.estimatedUsd, ratedWorksCount: count }
+    return { status: "blocked_cost_confirmation", reason: gate.blocked, estimatedUsd: gate.estimatedUsd, likelyUsd: gate.likelyUsd, ratedWorksCount: count }
   }
   const estimatedUsd = gate.estimatedUsd
 

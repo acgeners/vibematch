@@ -5,10 +5,8 @@ import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
 import { Sparkles, Loader2, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  predictSynopsisQualityForWorkAction,
-  applySynopsisPredictionAction,
-} from "@/server/actions/synopsis-quality"
+import { applySynopsisPredictionAction } from "@/server/actions/synopsis-quality"
+import { predictInterestWithToast } from "@/components/titles/predict-interest-toast"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import type { SynopsisQuality } from "@/types/domain"
 
@@ -46,14 +44,7 @@ export function SynopsisQualitySuggestion({
 
   const runPredict = () => {
     startPredict(async () => {
-      const res = await predictSynopsisQualityForWorkAction(workId)
-      if (res.error) {
-        toast.error(res.error)
-        return
-      }
-      const q = res.data?.predictedQuality
-      toast.success(q ? `Interesse estimado: ${q} (${SYNOPSIS_QUALITY_LABELS[q]})` : "Interesse estimado.")
-      refresh()
+      await predictInterestWithToast(workId, refresh)
     })
   }
 

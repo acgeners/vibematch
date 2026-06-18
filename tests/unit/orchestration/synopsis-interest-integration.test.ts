@@ -175,7 +175,7 @@ describe("ensurePredictInterest (sem provider real)", () => {
   it("4) perfil ausente, suficiente, sem autorização ⇒ blocked_cost_confirmation (cascata)", async () => {
     const gw = new FakeGateway({ work: canonWork })
     const st = { calls: 0 }
-    const out = await ensurePredictInterest(W, base(gw, { status: "blocked_cost_confirmation", reason: "threshold", estimatedUsd: 0.58, ratedWorksCount: 192 }, st, { allowPaid: false }))
+    const out = await ensurePredictInterest(W, base(gw, { status: "blocked_cost_confirmation", reason: "threshold", estimatedUsd: 0.58, likelyUsd: 0.39, ratedWorksCount: 192 }, st, { allowPaid: false }))
     expect(out.status).toBe("blocked_cost_confirmation")
     if (out.status === "blocked_cost_confirmation") {
       expect(out.reason).toBe("profile_cascade")

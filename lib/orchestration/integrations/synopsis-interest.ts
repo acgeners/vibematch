@@ -143,7 +143,7 @@ export type PredictInterestOutcome =
   | { status: "stale"; reason: "input_changed" }
   | { status: "not_ready"; reason: "no_synopsis" | "no_profile" | "insufficient_works"; message: string }
   | { status: "blocked_manual"; reason: "no_synopsis" | "insufficient_works"; message: string }
-  | { status: "blocked_cost_confirmation"; reason: "threshold" | "over_cap" | "pricing_unknown" | "profile_cascade"; estimatedUsd: number }
+  | { status: "blocked_cost_confirmation"; reason: "threshold" | "over_cap" | "pricing_unknown" | "profile_cascade"; estimatedUsd: number; likelyUsd: number }
   | { status: "failed"; error: string }
 
 export type DefaultPredictFn = (
@@ -175,6 +175,9 @@ export interface EnsurePredictInterestDeps {
 
 function predictUpperBoundUsd(): number {
   return estimateStep("predict_interest_potential", 1).upperBoundUsd
+}
+function predictLikelyUsd(): number {
+  return estimateStep("predict_interest_potential", 1).likelyUsd
 }
 
 /**
@@ -217,7 +220,7 @@ export async function ensurePredictInterest(
         break
       case "stale":
         if (!deps.acceptStaleProfile) {
-          return { status: "blocked_cost_confirmation", reason: "profile_cascade", estimatedUsd: predictUpperBoundUsd() }
+          return { status: "blocked_cost_confirmation", reason: "profile_cascade", estimatedUsd: predictUpperBoundUsd(), likelyUsd: predictLikelyUsd() }
         }
         profile = p.profile
         usedFallbacks.push("stale_profile")
@@ -226,7 +229,7 @@ export async function ensurePredictInterest(
         return { status: "blocked_manual", reason: "insufficient_works", message: p.message }
       case "blocked_cost_confirmation":
         // Cascata: soma o custo da previsão ao do perfil pra mostrar o TOTAL.
-        return { status: "blocked_cost_confirmation", reason: "profile_cascade", estimatedUsd: p.estimatedUsd + predictUpperBoundUsd() }
+        return { status: "blocked_cost_confirmation", reason: "profile_cascade", estimatedUsd: p.estimatedUsd + predictUpperBoundUsd(), likelyUsd: p.likelyUsd + predictLikelyUsd() }
       case "processing":
         return { status: "processing", reason: "in_flight" }
       case "failed":
@@ -280,7 +283,7 @@ export async function ensurePredictInterest(
   // 4) Gate de custo da previsão individual (single-work). Perfil fresh + custo
   // abaixo do micro-threshold ⇒ auto (inclui background).
   const gate = gateActionCost("predict_interest_potential", 1, { allowPaid: deps.allowPaid ?? false, maxCostUsd: deps.maxCostUsd, microThresholdUsd: micro })
-  if ("blocked" in gate) return { status: "blocked_cost_confirmation", reason: gate.blocked, estimatedUsd: gate.estimatedUsd }
+  if ("blocked" in gate) return { status: "blocked_cost_confirmation", reason: gate.blocked, estimatedUsd: gate.estimatedUsd, likelyUsd: gate.likelyUsd }
 
   // 5) Job durável + predict + persist (com re-check anti-cobrança-dupla).
   const jobStore = deps.jobStore ?? (await getJobStore())
@@ -571,4 +574,92 @@ export async function planInterestBatch(
     upperBoundUsd: profile.upperBoundUsd + predict.upperBoundUsd * needs,
     likelyUsd: profile.likelyUsd + predict.likelyUsd * needs,
   }
+}
+
+// ---- Execução de LOTE (concorrência limitada, dedup, resume, skip fresh) ----
+
+export interface InterestBatchReport {
+  total: number
+  succeeded: number
+  /** já fresh ⇒ pulado, custo zero. */
+  fresh: number
+  failed: number
+  processing: number
+  /** blocked_manual / not_ready / blocked_cost / stale (input mudou). */
+  blocked: number
+  /** custo REAL acumulado (só dos que chamaram o provider). */
+  costUsd: number
+  errors: string[]
+}
+
+export interface RunInterestBatchDeps {
+  gateway: InterestGateway
+  ensureProfile?: (deps: EnsureTasteProfileDeps) => Promise<EnsureTasteProfileOutcome>
+  predict?: DefaultPredictFn
+  jobStore?: JobStore
+  /** Concorrência máxima (default 3). */
+  concurrency?: number
+  /** Teto TOTAL da cascata (USD). Ao acumular ≥ teto, para de gastar. */
+  maxCostUsd?: number
+}
+
+/**
+ * Executa o lote APÓS confirmação: `ensurePredictInterest` por obra com
+ * allowPaid=true (uma autorização da cascata). Concorrência limitada; o perfil é
+ * gerado UMA vez (dedup por input_hash); itens fresh são pulados sem custo; jobs
+ * duráveis dão dedup/resume. Respeita o teto total (para de gastar ao atingi-lo).
+ * NÃO herda a pré-autorização single-work — o caller só chama isto após o dry-run
+ * confirmado.
+ */
+export async function runInterestBatch(
+  workIds: string[],
+  deps: RunInterestBatchDeps,
+): Promise<InterestBatchReport> {
+  const report: InterestBatchReport = { total: workIds.length, succeeded: 0, fresh: 0, failed: 0, processing: 0, blocked: 0, costUsd: 0, errors: [] }
+  const concurrency = Math.max(1, deps.concurrency ?? 3)
+  let acc = 0
+  let idx = 0
+
+  const worker = async (): Promise<void> => {
+    while (idx < workIds.length) {
+      const id = workIds[idx++]
+      if (deps.maxCostUsd != null && acc >= deps.maxCostUsd) {
+        report.blocked += 1
+        continue
+      }
+      const out = await ensurePredictInterest(id, {
+        gateway: deps.gateway,
+        ensureProfile: deps.ensureProfile,
+        predict: deps.predict,
+        jobStore: deps.jobStore,
+        allowPaid: true,
+        maxCostUsd: deps.maxCostUsd != null ? deps.maxCostUsd - acc : undefined,
+      })
+      switch (out.status) {
+        case "fresh":
+          report.fresh += 1
+          break
+        case "succeeded":
+          report.succeeded += 1
+          if (out.ranLlm) {
+            acc += out.costUsd
+            report.costUsd += out.costUsd
+          }
+          break
+        case "processing":
+          report.processing += 1
+          break
+        case "failed":
+          report.failed += 1
+          report.errors.push(out.error)
+          break
+        default:
+          report.blocked += 1
+          break
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()))
+  return report
 }

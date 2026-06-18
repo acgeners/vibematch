@@ -58,7 +58,7 @@ class MemGateway implements InterestGateway {
   }
 }
 const profileFresh = async (): Promise<EnsureTasteProfileOutcome> => ({ status: "fresh", profile: ROW })
-const profileBlocked = async (): Promise<EnsureTasteProfileOutcome> => ({ status: "blocked_cost_confirmation", reason: "threshold", estimatedUsd: 0.58, ratedWorksCount: 192 })
+const profileBlocked = async (): Promise<EnsureTasteProfileOutcome> => ({ status: "blocked_cost_confirmation", reason: "threshold", estimatedUsd: 0.58, likelyUsd: 0.39, ratedWorksCount: 192 })
 const noopPredict = (gw: MemGateway) => async () => {
   gw.predictCalls++
   return { predictedQuality: "♥♥♥" as const, justification: "j", confidence: 0.6, modelName: MODEL, promptVersion: PROMPT_VERSION, apiCallId: null, usageUsd: 0.012 }
@@ -123,5 +123,37 @@ describe.skipIf(!ENABLED)("SMOKE — Potencial de Interesse × fila durável", (
     expect(gw.predictCalls).toBe(1)
     expect(a.status).toBe("succeeded")
     expect(b.status).toBe("succeeded")
+  })
+
+  it("compatibilidade legada: SupabaseInterestGateway lê linha legada com input_signature=null (READ-ONLY)", async () => {
+    const { SupabaseInterestGateway, __resetInputSignatureProbe } = await import("@/lib/orchestration/integrations/synopsis-interest")
+    __resetInputSignatureProbe()
+    // pega uma previsão real existente (das 1.026 legadas)
+    const { data } = await sb.from("synopsis_quality_predictions").select("work_id, prompt_version, input_signature").limit(1).maybeSingle()
+    if (!data) {
+      console.log("[SMOKE-PI] legado: nenhuma previsão existente — pulado")
+      return
+    }
+    const row = data as { work_id: string; prompt_version: string; input_signature: string | null }
+    const gw = new SupabaseInterestGateway(sb)
+    const stored = await gw.loadCurrentPrediction(row.work_id, row.prompt_version)
+    console.log(`[SMOKE-PI] legado: input_signature(db)=${row.input_signature === null ? "null" : "set"} → gateway.inputSignature=${stored?.inputSignature === null ? "null" : "set"} (coluna 111 lida sem erro)`)
+    expect(stored).not.toBeNull()
+    // a coluna existe (migration 111 aplicada) e a linha legada vem com null ⇒ dual-read legado.
+    expect(stored?.inputSignature).toBe(row.input_signature ?? null)
+  })
+
+  it("dry-run do lote sobre previsões reais (READ-ONLY, sem job, sem provider)", async () => {
+    const { SupabaseInterestGateway, planInterestBatch } = await import("@/lib/orchestration/integrations/synopsis-interest")
+    const { data } = await sb.from("synopsis_quality_predictions").select("work_id").limit(5)
+    const ids = (data ?? []).map((r) => (r as { work_id: string }).work_id)
+    if (ids.length === 0) {
+      console.log("[SMOKE-PI] dry-run: sem previsões — pulado")
+      return
+    }
+    const plan = await planInterestBatch(ids, { gateway: new SupabaseInterestGateway(sb), profileSignature: "qualquer", profileNeedsGeneration: false, profileScale: 192 })
+    console.log(`[SMOKE-PI] dry-run lote: total=${plan.total} fresh=${plan.fresh} stale=${plan.stale} absent=${plan.absent} upper=$${plan.upperBoundUsd.toFixed(4)}`)
+    expect(plan.total).toBe(ids.length)
+    expect(plan.fresh + plan.stale + plan.absent).toBe(ids.length)
   })
 })

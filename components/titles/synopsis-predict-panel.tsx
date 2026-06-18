@@ -20,7 +20,10 @@ import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
 import { PredictSynopsisRowActions } from "@/components/titles/predict-synopsis-row-actions"
 import { SynopsisQualityPicker } from "@/components/titles/synopsis-quality-picker"
-import { predictSynopsisQualityBatchAction } from "@/server/actions/synopsis-quality"
+import {
+  planSynopsisInterestBatchAction,
+  runSynopsisInterestBatchAction,
+} from "@/server/actions/synopsis-quality"
 import { cn } from "@/lib/utils"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
@@ -50,7 +53,6 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
   const [sortField, setSortField] = useState<SortField>("default")
   const [batchSize, setBatchSize] = useState<number>(DEFAULT_BATCH_SIZE)
   const [batchRunning, setBatchRunning] = useState(false)
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
 
   const sortedWorks = useMemo(() => {
@@ -95,42 +97,66 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
   const batchIds = pendingTargets.slice(0, batchSize).map((w) => w.id)
   const remainingAfterBatch = Math.max(pendingTargets.length - batchIds.length, 0)
 
-  // Processa em blocos pequenos pra exibir progresso (X/total) entre eles.
-  const PROGRESS_CHUNK = 5
-  const handlePredictAll = async () => {
-    const ids = batchIds
-    if (ids.length === 0 || batchRunning) return
-    const total = ids.length
+  // Executa o lote já confirmado (uma autorização da cascata). Custo total
+  // governado pelo teto = upper bound do dry-run.
+  const executeBatch = async (ids: string[], maxCostUsd: number) => {
     setBatchRunning(true)
-    setProgress({ done: 0, total })
-    let predicted = 0
-    let failed = 0
-    let aborted = false
     try {
-      for (let i = 0; i < ids.length; i += PROGRESS_CHUNK) {
-        const chunk = ids.slice(i, i + PROGRESS_CHUNK)
-        const result = await predictSynopsisQualityBatchAction(chunk)
-        if (result.error || !result.data) {
-          toast.error(result.error ?? "Erro ao estimar em lote.")
-          aborted = true
-          break
-        }
-        predicted += result.data.predicted
-        failed += result.data.failed
-        setProgress({ done: Math.min(i + PROGRESS_CHUNK, total), total })
+      const res = await runSynopsisInterestBatchAction(ids, { maxCostUsd })
+      if (res.status === "ok") {
+        const r = res.report
+        toast.success(
+          `${r.succeeded} estimada${r.succeeded !== 1 ? "s" : ""} · ${r.fresh} já ok` +
+            (r.failed > 0 ? ` · ${r.failed} falhou` : "") +
+            (r.blocked > 0 ? ` · ${r.blocked} bloqueada(s)` : "") +
+            ` · custo $${r.costUsd.toFixed(3)}`,
+        )
+      } else if (res.status === "blocked_cost_confirmation") {
+        toast.error(res.message)
+      } else {
+        toast.error("message" in res ? res.message : res.error)
       }
     } finally {
       setBatchRunning(false)
-      setProgress(null)
+      refresh()
     }
-    if (!aborted) {
-      toast.success(
-        `${predicted} estimada${predicted !== 1 ? "s" : ""}` +
-          (failed > 0 ? ` · ${failed} falhou` : "") +
-          (remainingAfterBatch > 0 ? ` · ${remainingAfterBatch} restantes` : "."),
+  }
+
+  // Fluxo: DRY-RUN obrigatório → mostra contagens + custo (provável/upper bound)
+  // → confirmação única → execução. Itens fresh não entram no custo.
+  const handlePredictAll = async () => {
+    const ids = batchIds
+    if (ids.length === 0 || batchRunning) return
+    setBatchRunning(true)
+    try {
+      const planned = await planSynopsisInterestBatchAction(ids)
+      if (planned.status !== "ok") {
+        toast.error("message" in planned ? planned.message : planned.error)
+        return
+      }
+      const p = planned.plan
+      const needCalls = p.stale + p.absent
+      if (needCalls === 0) {
+        toast.success("Tudo já está atualizado — nada a estimar.")
+        return
+      }
+      const profileNote = p.needsProfile ? " · inclui gerar/atualizar o perfil" : ""
+      const maxCostUsd = Math.max(p.upperBoundUsd, 0.01)
+      toast(
+        `Lote: ${needCalls} previsão(ões)${profileNote}. Custo ~$${p.likelyUsd.toFixed(3)} (provável) / até $${p.upperBoundUsd.toFixed(3)}${remainingAfterBatch > 0 ? ` · ${remainingAfterBatch} restantes` : ""}.`,
+        {
+          duration: 15000,
+          action: {
+            label: "Executar",
+            onClick: () => {
+              void executeBatch(ids, maxCostUsd)
+            },
+          },
+        },
       )
+    } finally {
+      setBatchRunning(false)
     }
-    refresh()
   }
 
   if (works.length === 0) {
@@ -191,11 +217,7 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
               ) : (
                 <Sparkles className="mr-1 h-4 w-4" />
               )}
-              {batchRunning
-                ? progress
-                  ? `Estimando… ${progress.done}/${progress.total}`
-                  : "Estimando…"
-                : `Estimar ${batchIds.length} por IA`}
+              {batchRunning ? "Processando…" : `Estimar ${batchIds.length} por IA`}
             </Button>
           </div>
         )}
