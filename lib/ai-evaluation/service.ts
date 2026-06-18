@@ -8,6 +8,8 @@ import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { fetchCoverForModelWithStatus, isImageRelatedModelError } from "@/lib/server/covers/fetch-cover-for-model"
 import { recordCacheEventAsync } from "@/server/queries/ai-cache"
+import { buildCacheKey } from "@/lib/ai-cache"
+import { runSingleFlight } from "@/lib/ai-cache/single-flight"
 import type { AiImageStatus, AiWorkloadType } from "@/lib/ai-observability/types"
 import type { SourcedReview, PlatformRating, SimilarWork } from "@/lib/external/types"
 
@@ -1301,6 +1303,44 @@ function canonicalInputHash(req: AiEvaluationRequest): string {
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex")
 }
 
+/**
+ * Chave canônica V2 (dual-read): mesma semântica do legado, porém pela chave
+ * central de lib/ai-cache (chaves de objeto ordenadas, null/ausente/"" distintos)
+ * e incluindo `output_schema_version` no hash. Escritas novas usam ESTA chave;
+ * a leitura tenta V2 e cai pra `canonicalInputHash` (legado) — o L2 persistente
+ * migra pra V2 conforme as obras são reacessadas, sem invalidação em massa.
+ */
+function canonicalInputHashV2(req: AiEvaluationRequest): string {
+  const normalizedTags = normalizeTags(req.tags)
+    .map((t) => `${t.group ?? ""}::${t.name}`)
+    .sort()
+  return buildCacheKey({
+    operation: "ai_evaluation",
+    model: req.model ?? MODEL,
+    promptVersion: PROMPT_VERSION,
+    outputSchemaVersion: EVAL_OUTPUT_SCHEMA_VERSION,
+    input: {
+      title: req.title,
+      synopsis: req.synopsis ?? "",
+      synopsisIsManual: req.synopsisIsManual ?? false,
+      genres: [...(req.genres ?? [])].sort(),
+      tags: normalizedTags,
+      externalContext: req.externalContext ?? [],
+      sourcedReviews:
+        req.sourcedReviews?.map((r) => ({
+          source: r.source,
+          sourceTitle: r.sourceTitle,
+          matchScore: Math.round(r.matchScore * 1000) / 1000,
+          userRating: r.userRating ?? null,
+          text: r.text,
+        })) ?? [],
+      reviews: req.reviews ?? [],
+      coverUrl: req.coverUrl ?? null,
+      contentRatings: [...(req.contentRatings ?? [])].map((r) => r.toLowerCase().trim()).sort(),
+    },
+  })
+}
+
 function readCache(hash: string): AiEvaluationResponse | null {
   const entry = evaluationCache.get(hash)
   if (!entry) return null
@@ -1385,56 +1425,17 @@ async function readDbCache(
 }
 
 // ============================================================================
-// Public entry point
+// Provider call (chamada real + tentativas estruturadas). Extraída de
+// requestAiEvaluation para rodar sob single-flight (dedup em processo). Persiste
+// o resultado em `cacheKey` (V2). NÃO faz lookup de cache — quem chama já fez.
 // ============================================================================
 
-export async function requestAiEvaluation(
-  req: AiEvaluationRequest
+async function runEvaluationProvider(
+  req: AiEvaluationRequest,
+  cacheKey: string,
+  logicalRequestId: string,
+  workloadType: AiWorkloadType,
 ): Promise<AiEvaluationResponse> {
-  // Observabilidade (Plano 1): 1 id por SOLICITAÇÃO lógica, compartilhado por
-  // todas as tentativas físicas. workload = experiment quando há override de
-  // modelo (botão "Reavaliar com…"/compare-models).
-  // Nota: HITS de cache NÃO são logados (curto-circuitam antes do logger) — isso
-  // evita distorcer custo/latência das linhas de provider. A taxa de hit fica
-  // como item do Plano 2 (contador dedicado); aqui só marcamos as linhas que
-  // foram ao provider como cache_status="miss".
-  const logicalRequestId = randomUUID()
-  const workloadType: AiWorkloadType = req.model ? "experiment" : "recurring"
-
-  const cacheKey = canonicalInputHash(req)
-  // Telemetria de cache (Plano 2 §8): mede a CONSULTA (vai pra ai_cache_events),
-  // não a chamada ao provider. Best-effort (fire-and-forget) — não soma latência
-  // ao hit nem altera o retorno funcional. Hits aparecem SÓ aqui, nunca em
-  // ai_api_calls (que segue representando tentativas do provider).
-  const cacheEventBase = {
-    operation: "ai_evaluation" as const,
-    workloadType,
-    inputHash: cacheKey,
-    modelName: req.model ?? MODEL,
-    promptVersion: PROMPT_VERSION,
-    outputSchemaVersion: EVAL_OUTPUT_SCHEMA_VERSION,
-    workId: req.workId ?? null,
-    logicalRequestId,
-  }
-
-  const cached = readCache(cacheKey)
-  if (cached) {
-    console.info(`[AI] Cache hit (memory) para "${req.title}" (hash=${cacheKey.slice(0, 8)})`)
-    recordCacheEventAsync({ ...cacheEventBase, cacheLayer: "resolution", cacheStatus: "hit_memory" })
-    return { ...cached, fromCache: "memory" }
-  }
-
-  const dbCached = await readDbCache(cacheKey, req.model ?? MODEL)
-  if (dbCached) {
-    console.info(`[AI] Cache hit (db) para "${req.title}" (hash=${cacheKey.slice(0, 8)})`)
-    writeCache(cacheKey, dbCached)
-    recordCacheEventAsync({ ...cacheEventBase, cacheLayer: "resolution", cacheStatus: "hit_persistent" })
-    return { ...dbCached, fromCache: "db" }
-  }
-
-  // Miss completo: nenhuma camada resolveu → vamos ao provider.
-  recordCacheEventAsync({ ...cacheEventBase, cacheLayer: "resolution", cacheStatus: "miss_not_found" })
-
   const prepared = prepareReviews(req)
   // maxRetries: 8 absorve janelas longas de 529 "Overloaded" da Anthropic com
   // backoff exponencial automático (~90s no worst-case). Mais alto que os
@@ -1574,4 +1575,85 @@ export async function requestAiEvaluation(
 
   console.error("[AI] Erro ao interpretar resposta:", lastError)
   throw new Error("Erro ao interpretar resposta da IA. Nenhuma avaliação foi salva.")
+}
+
+// ============================================================================
+// Public entry point
+// ============================================================================
+
+export async function requestAiEvaluation(
+  req: AiEvaluationRequest
+): Promise<AiEvaluationResponse> {
+  // Observabilidade (Plano 1): 1 id por SOLICITAÇÃO lógica, compartilhado por
+  // todas as tentativas físicas. workload = experiment quando há override de
+  // modelo (botão "Reavaliar com…"/compare-models).
+  // Nota: HITS de cache NÃO são logados (curto-circuitam antes do logger) — isso
+  // evita distorcer custo/latência das linhas de provider. A taxa de hit fica
+  // como item do Plano 2 (contador dedicado); aqui só marcamos as linhas que
+  // foram ao provider como cache_status="miss".
+  const logicalRequestId = randomUUID()
+  const workloadType: AiWorkloadType = req.model ? "experiment" : "recurring"
+
+  const cacheKey = canonicalInputHashV2(req)
+  const legacyCacheKey = canonicalInputHash(req)
+  // Telemetria de cache (Plano 2 §8): mede a CONSULTA (vai pra ai_cache_events),
+  // não a chamada ao provider. Best-effort (fire-and-forget) — não soma latência
+  // ao hit nem altera o retorno funcional. Hits aparecem SÓ aqui, nunca em
+  // ai_api_calls (que segue representando tentativas do provider).
+  const cacheEventBase = {
+    operation: "ai_evaluation" as const,
+    workloadType,
+    inputHash: cacheKey,
+    modelName: req.model ?? MODEL,
+    promptVersion: PROMPT_VERSION,
+    outputSchemaVersion: EVAL_OUTPUT_SCHEMA_VERSION,
+    workId: req.workId ?? null,
+    logicalRequestId,
+  }
+
+  // L1 (memória) — dual-read: chave V2, cai pro legado (migração suave do cache).
+  const cached = readCache(cacheKey) ?? readCache(legacyCacheKey)
+  if (cached) {
+    console.info(`[AI] Cache hit (memory) para "${req.title}" (hash=${cacheKey.slice(0, 8)})`)
+    recordCacheEventAsync({ ...cacheEventBase, cacheLayer: "resolution", cacheStatus: "hit_memory" })
+    return { ...cached, fromCache: "memory" }
+  }
+
+  // L2 (banco) — dual-read: V2 → legado; promove o hit pra V2 na memória.
+  const dbCached =
+    (await readDbCache(cacheKey, req.model ?? MODEL)) ??
+    (await readDbCache(legacyCacheKey, req.model ?? MODEL))
+  if (dbCached) {
+    console.info(`[AI] Cache hit (db) para "${req.title}" (hash=${cacheKey.slice(0, 8)})`)
+    writeCache(cacheKey, dbCached)
+    recordCacheEventAsync({ ...cacheEventBase, cacheLayer: "resolution", cacheStatus: "hit_persistent" })
+    return { ...dbCached, fromCache: "db" }
+  }
+
+  // Miss → single-flight (plano §10): solicitações IDÊNTICAS concorrentes (mesma
+  // cacheKey V2) compartilham UMA chamada ao provider em vez de pagar N vezes. O
+  // double-check em memória fecha a corrida entre o lookup acima e a aquisição.
+  return runSingleFlight(
+    `ai_evaluation:${cacheKey}`,
+    async () => {
+      const recheck = readCache(cacheKey)
+      if (recheck) {
+        recordCacheEventAsync({ ...cacheEventBase, cacheLayer: "memory", cacheStatus: "hit_memory" })
+        return { ...recheck, fromCache: "memory" as const }
+      }
+      recordCacheEventAsync({ ...cacheEventBase, cacheLayer: "resolution", cacheStatus: "miss_not_found" })
+      return runEvaluationProvider(req, cacheKey, logicalRequestId, workloadType)
+    },
+    {
+      // Waiter dedupado: evitou uma chamada paga ao aguardar a líder. Marcado com
+      // cache_miss_reason p/ o painel separar dedup de hit de cache real.
+      onWaiter: () =>
+        recordCacheEventAsync({
+          ...cacheEventBase,
+          cacheLayer: "memory",
+          cacheStatus: "hit_memory",
+          cacheMissReason: "single_flight_dedup",
+        }),
+    },
+  )
 }

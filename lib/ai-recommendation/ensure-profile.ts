@@ -1,5 +1,7 @@
 import "server-only"
 import { getRatedWorksForProfile } from "@/server/queries/recommendations"
+import { runSingleFlight } from "@/lib/ai-cache/single-flight"
+import { recordCacheEventAsync } from "@/server/queries/ai-cache"
 import { generateTasteProfile, MODEL, PROMPT_VERSION } from "./service"
 import {
   buildStubProfile,
@@ -29,15 +31,32 @@ async function regenerateFullProfile(
   ratedWorks: Awaited<ReturnType<typeof getRatedWorksForProfile>>,
   inputHash: string,
 ): Promise<TasteProfileRow> {
-  const result = await generateTasteProfile(ratedWorks)
-  return insertNewTasteProfile({
-    profile: result.profile,
-    nWorks: ratedWorks.length,
-    inputHash,
-    isStub: false,
-    modelName: result.modelName,
-    promptVersion: result.promptVersion,
-    rawResponse: result.rawResponse,
+  // Single-flight (plano §10): duas recomendações concorrentes com a MESMA
+  // biblioteca (mesmo input_hash) geravam DOIS perfis pagos + dois inserts. Agora
+  // a primeira gera e as demais aguardam — uma chamada paga, um insert.
+  return runSingleFlight(`taste_profile:${inputHash}`, async () => {
+    const result = await generateTasteProfile(ratedWorks)
+    return insertNewTasteProfile({
+      profile: result.profile,
+      nWorks: ratedWorks.length,
+      inputHash,
+      isStub: false,
+      modelName: result.modelName,
+      promptVersion: result.promptVersion,
+      rawResponse: result.rawResponse,
+    })
+  }, {
+    onWaiter: () =>
+      recordCacheEventAsync({
+        operation: "recommendation_taste_profile",
+        workloadType: "recurring",
+        cacheLayer: "memory",
+        cacheStatus: "hit_memory",
+        cacheMissReason: "single_flight_dedup",
+        inputHash,
+        modelName: MODEL,
+        promptVersion: PROMPT_VERSION,
+      }),
   })
 }
 
