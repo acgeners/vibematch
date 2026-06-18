@@ -1,12 +1,13 @@
 import "server-only"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import type Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
-import { fetchCoverForModel, isImageRelatedModelError } from "@/lib/server/covers/fetch-cover-for-model"
+import { fetchCoverForModelWithStatus, isImageRelatedModelError } from "@/lib/server/covers/fetch-cover-for-model"
+import type { AiImageStatus } from "@/lib/ai-observability/types"
 import type { SourcedReview, PlatformRating, SimilarWork } from "@/lib/external/types"
 
 export interface AiEvaluationTag {
@@ -1383,6 +1384,16 @@ async function readDbCache(
 export async function requestAiEvaluation(
   req: AiEvaluationRequest
 ): Promise<AiEvaluationResponse> {
+  // Observabilidade (Plano 1): 1 id por SOLICITAÇÃO lógica, compartilhado por
+  // todas as tentativas físicas. workload = experiment quando há override de
+  // modelo (botão "Reavaliar com…"/compare-models).
+  // Nota: HITS de cache NÃO são logados (curto-circuitam antes do logger) — isso
+  // evita distorcer custo/latência das linhas de provider. A taxa de hit fica
+  // como item do Plano 2 (contador dedicado); aqui só marcamos as linhas que
+  // foram ao provider como cache_status="miss".
+  const logicalRequestId = randomUUID()
+  const workloadType = req.model ? "experiment" : "recurring"
+
   const cacheKey = canonicalInputHash(req)
   const cached = readCache(cacheKey)
   if (cached) {
@@ -1414,7 +1425,10 @@ export async function requestAiEvaluation(
   // URL). Elimina os 400 "Unable to download image" de hosts com Cloudflare/hotlink:
   // quando o fetch local falha, `coverImage` é null e avaliamos direto sem imagem,
   // sem desperdiçar uma primeira chamada com URL inacessível.
-  const coverImage = req.coverUrl ? await fetchCoverForModel(req.coverUrl) : null
+  const coverOutcome = req.coverUrl
+    ? await fetchCoverForModelWithStatus(req.coverUrl)
+    : { image: null, status: "not_requested" as AiImageStatus }
+  const coverImage = coverOutcome.image
 
   // Rede de segurança: se o MODELO recusar a imagem (400 image/media_type/base64),
   // retentamos sem ela na mesma attempt.
@@ -1427,6 +1441,13 @@ export async function requestAiEvaluation(
         : `${userPrompt}\n\nA tentativa anterior não passou na auditoria de uso de reviews ou retornou payload inválido. Se reviews foram fornecidas, use pelo menos uma review compatível, cite o ID dela nas justificativas como "review R1" e preencha "review_usage" com IDs válidos. Use SEMPRE a tool "submit_evaluation".`
 
     const includeImage = !!coverImage && !imageFetchFailed
+    // Status da capa NESTA tentativa: enviada (fetch_success) / fallback após
+    // recusa do modelo / motivo da falha de prefetch (ou not_requested).
+    const imageStatusForAttempt: AiImageStatus = includeImage
+      ? coverOutcome.status
+      : imageFetchFailed
+        ? "fallback_without_image"
+        : coverOutcome.status
     const messageContent: Anthropic.Messages.ContentBlockParam[] = includeImage
       ? [
           {
@@ -1466,6 +1487,10 @@ export async function requestAiEvaluation(
           promptVersion: PROMPT_VERSION,
           workId: req.workId,
           attempt,
+          logicalRequestId,
+          workloadType,
+          cacheStatus: "miss",
+          imageStatus: imageStatusForAttempt,
           metadata: {
             hasImage: includeImage,
             hasReviews: prepared.ids.length > 0,

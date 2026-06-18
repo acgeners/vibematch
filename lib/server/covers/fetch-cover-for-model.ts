@@ -2,6 +2,7 @@ import "server-only"
 
 import { isBlockedCoverUrl, recordCoverHostResult } from "@/lib/external/blocked-covers"
 import { isAllowedCoverHost, refererFor, userAgentFor } from "./cover-host-policy"
+import type { AiImageStatus } from "@/lib/ai-observability/types"
 
 // Pré-busca da capa NO NOSSO servidor para enviar à Anthropic em base64, em vez
 // de mandar a URL (que a Anthropic baixa e falha em hosts com Cloudflare/hotlink
@@ -134,23 +135,35 @@ function logCoverResult(fields: Record<string, string | number | boolean>): void
   console.log("[cover-fetch]", JSON.stringify(fields))
 }
 
+export interface CoverFetchOutcome {
+  /** base64 + media_type quando a imagem é válida; null = avaliar sem imagem. */
+  image: ModelCoverImage | null
+  /** Status estável do ciclo de vida da capa (telemetria — Plano 1). */
+  status: AiImageStatus
+}
+
 /**
  * Busca e valida a capa no servidor; retorna base64 + media_type, ou null quando
  * deve-se avaliar SEM imagem (URL inválida, host fora da allowlist, host bloqueado,
  * timeout, tamanho/formato inválido). Nunca lança — falha vira null.
+ *
+ * Esta versão também devolve o STATUS do ciclo de vida (para observabilidade).
+ * O comportamento de fetch/validação é idêntico ao anterior — só expõe o motivo.
  */
-export async function fetchCoverForModel(rawUrl: string): Promise<ModelCoverImage | null> {
+export async function fetchCoverForModelWithStatus(rawUrl: string): Promise<CoverFetchOutcome> {
   let url: URL
   try {
     url = new URL(rawUrl)
   } catch {
-    return null
+    return { image: null, status: "source_invalid_url" }
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return null
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return { image: null, status: "source_invalid_url" }
+  }
   const host = url.hostname.toLowerCase()
-  if (!isAllowedCoverHost(host)) return null
+  if (!isAllowedCoverHost(host)) return { image: null, status: "host_not_allowed" }
   // Host com bloqueio temporário recente (TTL) → nem tenta.
-  if (isBlockedCoverUrl(rawUrl)) return null
+  if (isBlockedCoverUrl(rawUrl)) return { image: null, status: "host_blocked" }
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
@@ -161,12 +174,12 @@ export async function fetchCoverForModel(rawUrl: string): Promise<ModelCoverImag
       if (reason === "host_not_allowed" || reason === "bad_redirect") {
         logCoverResult({ cover_fetch_result: "blocked_redirect", cover_host: finalHost })
       }
-      return null
+      return { image: null, status: "blocked_redirect" }
     }
     if (!res.ok) {
       recordCoverHostResult(finalHost, false)
       logCoverResult({ cover_fetch_result: "http_error", cover_host: finalHost, status: res.status })
-      return null
+      return { image: null, status: "http_error" }
     }
 
     // Nível 1 de proteção de tamanho: Content-Length quando disponível.
@@ -174,7 +187,7 @@ export async function fetchCoverForModel(rawUrl: string): Promise<ModelCoverImag
     if (Number.isFinite(contentLength) && contentLength > MAX_IMAGE_BYTES) {
       recordCoverHostResult(finalHost, false)
       logCoverResult({ cover_fetch_result: "too_large_header", cover_host: finalHost, cover_original_bytes: contentLength })
-      return null
+      return { image: null, status: "too_large" }
     }
 
     // Nível 2: streaming com corte ao ultrapassar o limite.
@@ -182,7 +195,7 @@ export async function fetchCoverForModel(rawUrl: string): Promise<ModelCoverImag
     if (!bytes) {
       recordCoverHostResult(finalHost, false)
       logCoverResult({ cover_fetch_result: "too_large_stream", cover_host: finalHost })
-      return null
+      return { image: null, status: "too_large" }
     }
 
     const mediaType = detectImageMediaType(bytes)
@@ -190,7 +203,7 @@ export async function fetchCoverForModel(rawUrl: string): Promise<ModelCoverImag
       // Tipo não suportado (svg/avif/html/octet-stream sem assinatura de imagem).
       recordCoverHostResult(finalHost, false)
       logCoverResult({ cover_fetch_result: "unsupported_type", cover_host: finalHost, cover_original_bytes: bytes.length })
-      return null
+      return { image: null, status: "unsupported_format" }
     }
 
     recordCoverHostResult(finalHost, true)
@@ -203,18 +216,29 @@ export async function fetchCoverForModel(rawUrl: string): Promise<ModelCoverImag
       cover_media_type: mediaType,
     })
     return {
-      data: Buffer.from(bytes).toString("base64"),
-      mediaType,
-      originalBytes: bytes.length,
-      finalBytes: bytes.length,
+      image: {
+        data: Buffer.from(bytes).toString("base64"),
+        mediaType,
+        originalBytes: bytes.length,
+        finalBytes: bytes.length,
+      },
+      status: "fetch_success",
     }
   } catch (err) {
     const aborted = err instanceof Error && err.name === "AbortError"
     logCoverResult({ cover_fetch_result: aborted ? "timeout" : "fetch_error", cover_host: host })
-    return null
+    return { image: null, status: aborted ? "fetch_timeout" : "fetch_error" }
   } finally {
     clearTimeout(timeout)
   }
+}
+
+/**
+ * Versão compacta: só a imagem (ou null). Mantida para callers/testes que não
+ * precisam do status. Delega na versão com status — comportamento idêntico.
+ */
+export async function fetchCoverForModel(rawUrl: string): Promise<ModelCoverImage | null> {
+  return (await fetchCoverForModelWithStatus(rawUrl)).image
 }
 
 /**
