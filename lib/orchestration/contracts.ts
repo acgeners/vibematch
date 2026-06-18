@@ -170,19 +170,21 @@ export const ACTION_CONTRACTS: Record<ActionName, ActionContract> = {
   generate_review_summary: {
     action: "generate_review_summary",
     costTier: "micro",
+    // Haiku, max_tokens=700; amostra até 40 reviews (~400 tok/review). Conservador.
     manual: false,
     produces: "review_summary",
     inputs: [{ dataKey: "reviews", requirement: "required_automatic_free" }],
-    estimate: { model: HAIKU, base: tokens(3000, 400) },
+    estimate: { model: HAIKU, base: tokens(1000, 700), perItem: tokens(400, 0) },
   },
   generate_review_digest: {
     action: "generate_review_digest",
     // micro por obra; vira metered quando rodado em lote (scale alto no cost.ts).
+    // Sonnet, max_tokens=2000; amostra até 40 reviews (~350 tok/review). Conservador.
     costTier: "micro",
     manual: false,
     produces: "review_digest",
     inputs: [{ dataKey: "reviews", requirement: "required_automatic_free" }],
-    estimate: { model: SONNET, base: tokens(4000, 600) },
+    estimate: { model: SONNET, base: tokens(1500, 2000), perItem: tokens(350, 0) },
   },
   ensure_taste_profile: {
     action: "ensure_taste_profile",
@@ -190,7 +192,9 @@ export const ACTION_CONTRACTS: Record<ActionName, ActionContract> = {
     manual: false,
     produces: "taste_profile",
     inputs: [],
-    estimate: { model: SONNET, base: tokens(2000, 1500), perItem: tokens(300, 0) },
+    // Sonnet, max_tokens=6000 (cap real do call); ~500 tok/obra (prompt envia
+    // título/tags/notas/sinopse; ~90K tok p/ ~192 obras). Conservador.
+    estimate: { model: SONNET, base: tokens(3000, 6000), perItem: tokens(500, 0) },
     precondition: (s) =>
       s.ratedWorksCount >= MIN_RATED_WORKS_FOR_PROFILE
         ? { ok: true }
@@ -215,7 +219,8 @@ export const ACTION_CONTRACTS: Record<ActionName, ActionContract> = {
       },
       { dataKey: "tags", requirement: "optional_with_fallback", fallback: "previsão sem contexto de tags" },
     ],
-    estimate: { model: SONNET, base: tokens(1500, 200) },
+    // Sonnet, max_tokens=400; perfil cacheado + 1 sinopse. Output máximo plausível.
+    estimate: { model: SONNET, base: tokens(1500, 400) },
     precondition: (s) =>
       s.canonicalPresent || s.rawSynopsisCount > 0
         ? { ok: true }

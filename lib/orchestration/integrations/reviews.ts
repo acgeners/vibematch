@@ -34,8 +34,11 @@ import {
   type ReviewSummaryInput,
 } from "@/lib/ai-recommendation/review-summarizer"
 import type { ReviewDigest } from "@/lib/ai-recommendation/types"
-import { DEFAULT_MICRO_THRESHOLD_USD, decideCost, estimateStepUsd } from "../cost"
+import { DEFAULT_MICRO_THRESHOLD_USD, gateActionCost } from "../cost"
 import { getJobStore, runOrchestratedJob, type JobStore } from "../jobs"
+
+/** Teto de amostragem das reviews (MAX_REVIEWS / DIGEST_TOTAL_CAP no summarizer). */
+const REVIEW_SAMPLE_CAP = 40
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -172,7 +175,7 @@ export type EnsureReviewOutcome =
   | { status: "succeeded"; ranLlm: boolean; costUsd: number }
   | { status: "processing" }
   | { status: "failed"; error: string }
-  | { status: "blocked_cost_confirmation"; reason: "threshold" | "over_cap"; estimatedUsd: number }
+  | { status: "blocked_cost_confirmation"; reason: "threshold" | "over_cap" | "pricing_unknown"; estimatedUsd: number }
 
 interface CommonDeps {
   supabase?: AdminClient
@@ -198,19 +201,6 @@ export interface EnsureDigestDeps extends CommonDeps {
 }
 
 const NO_REVIEWS_MSG = "Obra sem reviews úteis — busque/adicione reviews (Atualizar dados / Revalidar fontes) antes."
-
-function gateCost(
-  action: "generate_review_summary" | "generate_review_digest",
-  allowPaid: boolean,
-  micro: number,
-  maxCostUsd: number | undefined,
-): { ok: true; estimatedUsd: number } | { blocked: "threshold" | "over_cap"; estimatedUsd: number } {
-  const estimatedUsd = estimateStepUsd(action)
-  const decision = decideCost({ estimatedUsd, microThresholdUsd: micro, allowPaid, maxCostUsd })
-  if (decision === "needs_confirmation") return { blocked: "threshold", estimatedUsd }
-  if (decision === "blocked_over_cap") return { blocked: "over_cap", estimatedUsd }
-  return { ok: true, estimatedUsd }
-}
 
 // ---- generate_review_summary ----------------------------------------------
 
@@ -249,7 +239,8 @@ export async function ensureReviewSummary(
   if (readiness.state === "fresh") return { status: "skipped", reason: "fresh" }
   if (readiness.state === "immaterial") return { status: "skipped", reason: "immaterial" }
 
-  const gate = gateCost("generate_review_summary", allowPaid, micro, deps.maxCostUsd)
+  const scale = Math.min(nowN, REVIEW_SAMPLE_CAP)
+  const gate = gateActionCost("generate_review_summary", scale, { allowPaid, maxCostUsd: deps.maxCostUsd, microThresholdUsd: micro })
   if ("blocked" in gate) return { status: "blocked_cost_confirmation", reason: gate.blocked, estimatedUsd: gate.estimatedUsd }
 
   const jobStore = deps.jobStore ?? (await getJobStore(sb()))
@@ -261,7 +252,7 @@ export async function ensureReviewSummary(
       action: "generate_review_summary",
       workId,
       dedupKey: summaryDedupKey(workId, hash),
-      estimateUsd: gate.estimatedUsd ?? estimateStepUsd("generate_review_summary"),
+      estimateUsd: gate.estimatedUsd,
       payload: { hash, n: nowN, promptVersion: REVIEW_SUMMARIZER_PROMPT_VERSION },
     },
     async () => {
@@ -320,7 +311,8 @@ export async function ensureReviewDigest(
   if (readiness.state === "fresh") return { status: "skipped", reason: "fresh" }
   if (readiness.state === "immaterial") return { status: "skipped", reason: "immaterial" }
 
-  const gate = gateCost("generate_review_digest", allowPaid, micro, deps.maxCostUsd)
+  const scale = Math.min(nowN, REVIEW_SAMPLE_CAP)
+  const gate = gateActionCost("generate_review_digest", scale, { allowPaid, maxCostUsd: deps.maxCostUsd, microThresholdUsd: micro })
   if ("blocked" in gate) return { status: "blocked_cost_confirmation", reason: gate.blocked, estimatedUsd: gate.estimatedUsd }
 
   const jobStore = deps.jobStore ?? (await getJobStore(sb()))

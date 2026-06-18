@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { existsSync, readFileSync } from "node:fs"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { computeCostUsd } from "@/lib/ai/pricing"
 import { SupabaseJobStore } from "@/lib/orchestration/jobs"
 import { ensureTasteProfile, type TasteProfileGateway } from "@/lib/orchestration/integrations/taste-profile"
 import type { RatedWorkInput, TasteProfilePayload, TasteProfileRow } from "@/lib/ai-recommendation/types"
@@ -45,11 +46,14 @@ class MemGateway implements TasteProfileGateway {
   async loadRatedWorks() {
     return this.ratedWorks
   }
-  async generateAndPersist(_rw: RatedWorkInput[], hash: string) {
+  async generateAndPersist(rw: RatedWorkInput[], hash: string) {
     this.genCalls++
     const p = prof({ input_hash: hash })
     this.current = p
-    return { profile: p, costUsd: 0.21 }
+    // Custo sintético COERENTE com a contagem de obras (não hardcoded): ~470
+    // tok/obra de input + ~2500 de output, abaixo do upper bound do estimador.
+    const real = computeCostUsd("claude-sonnet-4-6", { inputTokens: 3000 + 470 * rw.length, outputTokens: 2500, cacheReadTokens: 0, cacheCreationTokens: 0 })
+    return { profile: p, costUsd: real.costInputUsd + real.costOutputUsd }
   }
 }
 
@@ -110,12 +114,16 @@ describe.skipIf(!ENABLED)("SMOKE — ensure_taste_profile × fila durável", () 
       .limit(1)
       .maybeSingle()
     const row = data as Record<string, unknown> | null
-    console.log(`[SMOKE-TP] durável: work_id=${row?.work_id} status=${row?.status} est=${row?.cost_estimate_usd} actual=${row?.cost_actual_usd} payload=${JSON.stringify(row?.payload)}`)
+    const est = Number(row?.cost_estimate_usd)
+    const actual = Number(row?.cost_actual_usd)
+    console.log(`[SMOKE-TP] durável: work_id=${row?.work_id} status=${row?.status} est(upper)=${est.toFixed(4)} actual=${actual.toFixed(4)} payload=${JSON.stringify(row?.payload)}`)
     expect(row?.work_id).toBeNull()
     expect(row?.status).toBe("succeeded")
     expect(Object.keys((row?.payload as object) ?? {}).sort()).toEqual(["inputHash", "model", "n", "promptVersion"])
     expect(String(row?.dedup_key)).not.toContain("-w0") // sem ids de obra
-    expect(Number(row?.cost_actual_usd)).toBeGreaterThan(0)
+    expect(actual).toBeGreaterThan(0)
+    // O custo real fica ABAIXO do upper bound conservador usado pelo gate.
+    expect(actual).toBeLessThan(est)
   })
 
   it("duas concorrentes (mesmo hash) ⇒ 1 geração, 1 job", async () => {

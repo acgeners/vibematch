@@ -29,7 +29,7 @@ import {
 } from "@/lib/ai-recommendation/taste-profile"
 import { generateTasteProfile, MODEL, PROMPT_VERSION } from "@/lib/ai-recommendation/service"
 import type { RatedWorkInput, TasteProfileRow } from "@/lib/ai-recommendation/types"
-import { DEFAULT_MICRO_THRESHOLD_USD, decideCost, estimateStepUsd } from "../cost"
+import { DEFAULT_MICRO_THRESHOLD_USD, gateActionCost } from "../cost"
 import { getJobStore, runOrchestratedJob, type JobStore } from "../jobs"
 
 // ---- Readiness (puro) ------------------------------------------------------
@@ -105,7 +105,7 @@ export type EnsureTasteProfileOutcome =
   | { status: "succeeded"; profile: TasteProfileRow; ranLlm: boolean; costUsd: number }
   | { status: "processing" }
   | { status: "blocked_manual"; ratedWorksCount: number; required: number; message: string }
-  | { status: "blocked_cost_confirmation"; reason: "threshold" | "over_cap"; estimatedUsd: number; ratedWorksCount: number }
+  | { status: "blocked_cost_confirmation"; reason: "threshold" | "over_cap" | "pricing_unknown"; estimatedUsd: number; ratedWorksCount: number }
   | { status: "failed"; error: string }
 
 export interface EnsureTasteProfileDeps {
@@ -161,15 +161,12 @@ export async function ensureTasteProfile(
   }
 
   // absent | stub | (stale + refreshIfStale): gerar, com gate de custo (metered,
-  // escalado pela quantidade real de obras).
-  const estimatedUsd = estimateStepUsd("ensure_taste_profile", count)
-  const decision = decideCost({ estimatedUsd, microThresholdUsd: micro, allowPaid, maxCostUsd: deps.maxCostUsd })
-  if (decision === "needs_confirmation") {
-    return { status: "blocked_cost_confirmation", reason: "threshold", estimatedUsd, ratedWorksCount: count }
+  // escalado pela quantidade real de obras; upper bound conservador).
+  const gate = gateActionCost("ensure_taste_profile", count, { allowPaid, maxCostUsd: deps.maxCostUsd, microThresholdUsd: micro })
+  if ("blocked" in gate) {
+    return { status: "blocked_cost_confirmation", reason: gate.blocked, estimatedUsd: gate.estimatedUsd, ratedWorksCount: count }
   }
-  if (decision === "blocked_over_cap") {
-    return { status: "blocked_cost_confirmation", reason: "over_cap", estimatedUsd, ratedWorksCount: count }
-  }
+  const estimatedUsd = gate.estimatedUsd
 
   const jobStore = deps.jobStore ?? (await getJobStore())
   let produced: TasteProfileRow | null = null
