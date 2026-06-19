@@ -1,4 +1,4 @@
-STATUS: GATE AVALIADO — ROTULAGEM SUSPENSA ATÉ DECISÃO (read-only, nenhuma atualização executada)
+STATUS: GOLDEN DATA READINESS: APROVADO PARA SNAPSHOT-BASE — decisões fechadas (Fase B2.1B); S078 resolvido sem bloqueio; NÃO pronto p/ rotulagem (depende de materializar o snapshot + validar o pacote cego); nenhuma atualização paga executada
 
 # Plano 3 — Golden Data Readiness Gate (Fase B2.1A)
 
@@ -37,7 +37,7 @@ Fontes: [synopsis-quality-predictor.ts](lib/ai-evaluation/synopsis-quality-predi
 | title | required | required | not_used | not_used |
 | canonical synopsis | required (fallback raw) | required (fallback raw) | not_used | required (fallback raw) |
 | raw synopsis fallback | fallback | fallback | not_used | fallback |
-| tags | optional | optional | **required** | required |
+| tags | optional | optional | **required\*\*** | required\*\* |
 | taste profile | required | required | required | required |
 | reviews brutas | not_used | not_used | not_used | not_used |
 | review summary | not_used | **fallback** (do digest) | not_used | not_used |
@@ -52,6 +52,8 @@ Fontes: [synopsis-quality-predictor.ts](lib/ai-evaluation/synopsis-quality-predi
 | Veredito IA / decision score | not_used | not_used | not_used | not_used |
 
 \* `e1`: o contexto de review é **required como conceito**, mas com fallback explícito `digest fresco → summary fresco → no_reviews` ([resolveReviewContext](lib/synopsis-interest/experiment.ts)). `no_reviews` é entrada válida (não bloqueia).
+
+\*\* **tags em D1/D2 = `required` como CAMPO ESTRUTURAL, não "≥1 tag obrigatória".** `tags=[]` é entrada válida e determinística (🟦 `weightedTagOverlap` retorna `0` com `workTags=[]`; D1 → score 0 → ♥; D2 ainda extrai sinal da sinopse). Sem divisão por zero, sem fallback necessário, sem resultado neutro inválido. Correção de ambiguidade da Fase B2.1A (ver Fechamento do Gate, S078).
 
 > D1 usa **só tags + perfil** (`baselineD1`: `weightedTagOverlap`). D2 acrescenta a **sinopse** (`baselineD2`). Nenhum candidato lê reviews brutas, notas IA, scores calculados, alignment ou ratings.
 
@@ -310,4 +312,73 @@ alignment 47 fresh / 33 absent · golden labels 0/90 (inalterado)
 zero reviews atualizadas · zero summaries · zero digests · zero avaliações IA · zero alignments
 zero recálculos · zero predictions · zero labels · zero jobs · zero chamadas pagas · zero migrations
 Acesso: somente SELECT (1 script temporário, removido).
+```
+
+---
+
+# Fechamento do Readiness Gate — Fase B2.1B (2026-06-19)
+
+## A. Decisões aprovadas (registradas formalmente 🟧→✅)
+
+| Tema | Decisão | Justificativa |
+|---|---|---|
+| **Reviews — freshness** | janela experimental **≤ 30 dias** | as 51 estão ≤26d (idade máx reportada 26d) |
+| **Reviews — refresh** | **NÃO** atualizar/buscar; **congelar o corpus atual** | dentro da janela; experimento mede o predictor, não a completude |
+| **Summaries stale (9)** | **NÃO** regenerar antes do experimento | as 51 receberão digest; summary é só fallback; não pagar summary+digest p/ a mesma obra. Se um digest falhar ⇒ estado **explícito** de falha/indisponibilidade (`stale_digest`/`missing`), **nunca** regenerar summary silenciosamente em execução |
+| **Digests (51)** | etapa **paga separada**, **não autorizada aqui**; teto após dry-run exato (upper ~US$ 5,90) | único trabalho de dados do `e1` |
+| **D1 / D2** | **mantidos** como candidatos determinísticos de custo zero | piso/baseline; respondem "alternativa simples basta?" (AUDIT F10) |
+| **Alignment / Veredito IA** | **fora** desta rodada (não candidato) | nenhum candidato congelado usa; AUDIT F6 sem ganho; não vira requisito administrativo |
+| **Avaliação IA** | **nenhuma** adicional | 80/80 já têm 9 category_scores; não usados por b1/e1/D1/D2 |
+| **Calculated scores / ratings** | **não** recalcular/atualizar | não são entrada dos candidatos congelados |
+
+## B. Resolução de S078
+
+🟩 **Obra:** `S078` · workId `1a8ec6b3-ad81-49f6-adb2-11e5ea9cb57f` · *"Tada no Keiyaku Kon no Hazu na no ni…"* · split **holdout** · stratum **♥♥♥♥** · **1 slot** (não-repetida; nenhum outro slot aponta para ela).
+
+**Estado real de tags (🟩):** `work_tags = 0` · `work_genres = 4` · IDs externos aceitos = **4** (comix, comick, animeplanet, mangaupdates) · canonical fresh · 15 reviews úteis · `ai_eval_status=done`.
+
+**Causa:** a obra tem **gêneros (4) e 4 fontes externas aceitas** (MangaUpdates/AnimePlanet costumam carregar tags), mas os **work_tags granulares não foram persistidos** (`syncWorkTags` não trouxe tags nesta obra). Não é dado intrínsecamente ausente.
+
+**Classificação (exatamente um estado):** **`missing_tags_recoverable`** — as tags são, em princípio, recuperáveis via re-sync das fontes externas.
+
+**Recuperação (informada; NÃO executada):**
+- Fonte: as 4 externas aceitas (tags viriam de MangaUpdates/AnimePlanet via o ingest).
+- Mecanismo: `syncWorkTags` dentro de `refresh_external_data` ("Atualizar dados"/"Revalidar fontes") — **gratuito** (sem LLM), **manual/opt-in**.
+- Comando futuro: refresh externo da obra (manual) — **não** rodado.
+- Impacto na assinatura: recuperar tags mudaria `tagsSig` ⇒ mudaria as assinaturas de snapshot/b1/e1 ⇒ exigiria **nova versão de snapshot**.
+
+**Decisão (consistente com o congelamento aprovado):** **NÃO recuperar nesta rodada** — recuperar tags = **refresh externo**, exatamente o que a decisão "congelar o corpus, sem buscar" exclui; e o golden está **FROZEN** (não modificar obras). S078 é **congelada como `no_tags`** (estado explícito), entrada válida e determinística. Recuperação fica como **opção futura deferida** (se a usuária quiser, antes de materializar o snapshot, via refresh gratuito → exigiria nova versão de snapshot).
+
+**Por que NÃO bloqueia:** `tags=[]` é entrada determinística (§D1/D2). A obra **permanece** nas 80 únicas, no slot S078/holdout/♥♥♥♥, **recebe resultado em todos os candidatos** (não é excluída de D1/D2), e **não altera** o split. **Não foi removida nem substituída.**
+
+**Impacto por candidato:** b1/e1 → tags **opcional** (segue com título+sinopse+perfil). D1 → score 0 ⇒ ♥ (provável **sub-previsão** de uma obra ♥♥♥♥: limitação legítima do baseline de tags, não bug; 1/80). D2 → ainda extrai sinal da **sinopse**. Nenhum quebra.
+
+## C. Correção de contrato D1/D2 (ambiguidade da B2.1A)
+
+`tags required` para D1/D2 significa **campo estrutural obrigatório que aceita `[]`**, não "≥1 tag obrigatória". 🟦 `weightedTagOverlap(workTags, profileTags)` com `workTags=[]` retorna `0` (perfil não-vazio) ⇒ D1 determinístico (♥), D2 usa a sinopse. **Sem divisão por zero, sem fallback necessário.** Coberto por testes ([baselines.test.ts](tests/unit/synopsis-interest/baselines.test.ts): "tags=[] … determinístico, sem divisão por zero").
+
+## D. Correção mínima de assinatura (no_tags × erro de carregamento)
+
+🟦 Adicionados (puros) em [experiment.ts](lib/synopsis-interest/experiment.ts): `resolveTagContext` + `computeTagsSignature` + tipo `TagContextType`. Garantem três estados **distintos** (antes colidiam):
+- `tags=[]` → **`no_tags`** com assinatura estável `sha256("no_tags")`;
+- lista não-vazia → `sha256("tags:a|b|c")` (order-independent);
+- `tags=null`/`undefined` (não carregado/erro) → **THROW** (nunca assina); "obra não encontrada" → loader lança antes.
+
+Coberto por testes ([experiment.test.ts](tests/unit/synopsis-interest/experiment.test.ts): "tag context — caso S078"). **Nenhuma migration.** O loader do snapshot **deve** usar `computeTagsSignature` para o `tagsSig`.
+
+## E. Pseudorreplicação / elegibilidade (confirmado)
+
+S078 permanece nas 80 únicas · no slot original (holdout/♥♥♥♥) · não excluída de D1/D2 · recebe resultado/falha **igual** em todos os candidatos · não altera o split. O `planGoldenDigest` continua elegendo-a (tem reviews, sem digest → entra nos 51). O golden **não** foi modificado.
+
+## F. Veredito do gate
+
+**GOLDEN DATA READINESS: APROVADO PARA SNAPSHOT-BASE.** S078 resolvida **sem bloqueio**; decisões fechadas; rotulagem **ainda não liberada** (só após materializar o snapshot-base + validar o pacote cego). Custo de desbloqueio de rotulagem/b1/D1/D2 permanece **$0**; o `e1` segue dependente dos 51 digests (etapa paga separada, ~$1.0/$5.9, não autorizada aqui).
+
+### Banco (Fase B2.1B — somente SELECT)
+```
+S078: work_tags 0 · work_genres 4 · ext aceitos 4 · canonical fresh · reviews úteis 15 (inalterados)
+golden labels 0/90 · taste_profile 7 · digests 14 · predictions 1026 · jobs 114 (todos inalterados)
+zero tags alteradas · zero reviews · zero summaries · zero digests · zero avaliações IA · zero alignments
+zero recálculos · zero predictions · zero labels · zero jobs · zero chamadas pagas · zero migrations
+Acesso: somente SELECT (2 scripts temporários, removidos).
 ```

@@ -580,9 +580,21 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 
 ---
 
+## 24c. Addendum — Fase B2.1B: fechamento do Readiness Gate + S078 (2026-06-19)
+
+> **Golden Data Readiness: APROVADO PARA SNAPSHOT-BASE.** Detalhes em
+> [PLANO3-GOLDEN-DATA-READINESS.md](PLANO3-GOLDEN-DATA-READINESS.md) (Fechamento B2.1B).
+
+- **Decisões fechadas (✅):** reviews ≤30d **congeladas sem refresh** · **9 summaries não regenerados** (digest os supera; falha de digest ⇒ estado explícito, nunca regen silencioso de summary) · **51 digests = etapa paga separada** (não autorizada; teto após dry-run, upper ~$5,90) · **D1/D2 mantidos** · **alignment fora** desta rodada · **sem nova avaliação IA** · **sem recalc/ratings**.
+- **S078 (0 work_tags):** 🟩 tem 4 gêneros + 4 fontes externas aceitas ⇒ classificada **`missing_tags_recoverable`**; **congelada como `no_tags`** (recuperar = refresh externo, excluído pelo congelamento; golden FROZEN). `tags=[]` é entrada **determinística** (D1→♥; D2 usa sinopse) ⇒ **não bloqueia**; permanece nas 80, no slot holdout/♥♥♥♥, sem alterar split.
+- **Correções (código puro + testes):** `tags required` de D1/D2 = **campo estrutural que aceita `[]`** (não "≥1 tag"); assinatura de tags distingue `no_tags` × erro/`null` × não-encontrada (`resolveTagContext`/`computeTagsSignature` em [experiment.ts](lib/synopsis-interest/experiment.ts)). `tsc` limpo · **633 testes verdes** (+8) · lint 0. **Sem migration, sem escrita no banco.**
+- **Rotulagem:** **ainda não liberada** — só após materializar o snapshot-base + validar o pacote cego (próxima etapa, custo $0).
+
+---
+
 ## 24b. Addendum — Fase B2.1A: Golden Data Readiness Gate (2026-06-19)
 
-> **⛔ Rotulagem humana SUSPENSA até a conclusão deste gate.** Detalhes em
+> Rotulagem humana **gated** por este readiness gate (fechado em B2.1B, acima). Detalhes em
 > [PLANO3-GOLDEN-DATA-READINESS.md](PLANO3-GOLDEN-DATA-READINESS.md).
 
 Gate read-only que comprovou a freshness dos dados das 80 obras únicas do golden por candidato (freshness medida com as funções reais de produção):

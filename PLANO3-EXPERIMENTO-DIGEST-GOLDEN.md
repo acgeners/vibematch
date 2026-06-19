@@ -11,11 +11,15 @@ STATUS: PREPARADO — NENHUMA CHAMADA PAGA EXECUTADA
 > (candidatos, fallback, assinaturas, planner do digest do golden) + testes. Nenhum
 > caminho de execução paga foi construído ou disparado.
 >
-> **⛔ Rotulagem SUSPENSA até a conclusão do Golden Data Readiness Gate (Fase B2.1A)** —
-> ver [PLANO3-GOLDEN-DATA-READINESS.md](PLANO3-GOLDEN-DATA-READINESS.md). O gate confirmou
-> que a sinopse canônica das 80 obras está **100% fresh** (rotulagem desbloqueável após
-> congelar o snapshot), mas a liberação depende das decisões D1–D7 do gate (política de
-> reviews, digest do `e1`). Não iniciar a rotulagem nem materializar o snapshot antes disso.
+> **Golden Data Readiness Gate: APROVADO PARA SNAPSHOT-BASE (Fase B2.1B, 2026-06-19)** —
+> ver [PLANO3-GOLDEN-DATA-READINESS.md](PLANO3-GOLDEN-DATA-READINESS.md). Decisões fechadas
+> (reviews congeladas ≤30d sem refresh · 9 summaries não regenerados · 51 digests = etapa paga
+> separada · D1/D2 mantidos · alignment fora · sem nova avaliação IA). **S078 (0 work_tags)**
+> classificada `missing_tags_recoverable`, **congelada como `no_tags`** (não recuperada — seria
+> refresh externo): `tags=[]` é entrada determinística (correção: `tags required` de D1/D2 =
+> campo estrutural que aceita `[]`; assinatura `no_tags` ≠ erro de carregamento, ver
+> [experiment.ts](lib/synopsis-interest/experiment.ts) `resolveTagContext`/`computeTagsSignature`).
+> **Rotulagem ainda NÃO liberada** — só após materializar o snapshot-base + validar o pacote cego.
 
 ---
 

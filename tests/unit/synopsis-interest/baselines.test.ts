@@ -38,6 +38,27 @@ describe("baselineD1 (tags only)", () => {
   })
 })
 
+describe("tags=[] (caso S078: no_tags) — determinístico, sem divisão por zero", () => {
+  it("D1 com tags=[] retorna nível válido 1..4 e score finito (sem NaN)", () => {
+    const r = baselineD1({ tags: [], synopsis: longSyn }, profile)
+    expect(r.level).toBeGreaterThanOrEqual(1)
+    expect(r.level).toBeLessThanOrEqual(4)
+    expect(Number.isFinite(r.score)).toBe(true)
+    expect(baselineD1({ tags: [], synopsis: longSyn }, profile)).toEqual(r) // determinístico
+  })
+  it("D2 com tags=[] ainda extrai sinal da sinopse e é finito", () => {
+    const r = baselineD2({ tags: [], synopsis: longSyn }, profile)
+    expect(r.level).toBeGreaterThanOrEqual(1)
+    expect(r.level).toBeLessThanOrEqual(4)
+    expect(Number.isFinite(r.score)).toBe(true)
+    expect(baselineD2({ tags: [], synopsis: longSyn }, profile)).toEqual(r)
+  })
+  it("D1/D2 com tags=[] E sinopse=null não quebram (piso determinístico)", () => {
+    expect(Number.isFinite(baselineD1({ tags: [], synopsis: null }, profile).score)).toBe(true)
+    expect(Number.isFinite(baselineD2({ tags: [], synopsis: null }, profile).score)).toBe(true)
+  })
+})
+
 describe("baselineD2 (tags + keywords)", () => {
   it("é determinístico", () => {
     const w: BaselineWork = { tags: [{ name: "romance", group: null }], synopsis: longSyn }

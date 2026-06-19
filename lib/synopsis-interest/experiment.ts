@@ -113,6 +113,47 @@ export function resolveReviewContext(s: ReviewArtifactState): ResolvedReviewCont
   return { type: "missing", signaturePart: "missing" }
 }
 
+// ── Contexto de tags (no_tags explícito × erro de carregamento) ──────────────
+
+export type TagContextType = "tags" | "no_tags"
+
+export interface ResolvedTagContext {
+  type: TagContextType
+  /** Parte canônica da assinatura — order-independent. */
+  signaturePart: string
+  tags: string[]
+}
+
+/**
+ * Resolve o contexto de tags de uma obra para o snapshot/assinatura (Fase B2.1B,
+ * caso S078). Distingue três estados que ANTES colidiam:
+ *   - `null`/`undefined` = NÃO CARREGADO/erro ⇒ **THROW** (um erro de carregamento
+ *     nunca pode ser assinado silenciosamente como "sem tags");
+ *   - `[]` = **no_tags EXPLÍCITO** — estado legítimo e determinístico (D1/D2 ainda
+ *     produzem nível válido; b1/e1 tratam tags como opcional);
+ *   - lista não-vazia = `tags`.
+ * A ordem das tags não afeta a assinatura (normaliza + ordena). NÃO inventa tags.
+ */
+export function resolveTagContext(tags: string[] | null | undefined): ResolvedTagContext {
+  if (tags == null) {
+    throw new Error("tags não carregadas (null/undefined) — não assinar; corrija o carregamento da obra")
+  }
+  const norm = [...tags].map((t) => t.trim().toLowerCase()).filter(Boolean).sort()
+  if (norm.length === 0) return { type: "no_tags", signaturePart: "no_tags", tags: [] }
+  return { type: "tags", signaturePart: `tags:${norm.join("|")}`, tags: norm }
+}
+
+/**
+ * Assinatura canônica de tags. O loader DEVE usar isto para produzir o `tagsSig`
+ * de `WorkSnapshotInput` — garante que `no_tags` (`[]`) tenha hash estável e
+ * DISTINTO tanto de qualquer lista de tags quanto de um erro de carregamento
+ * (`null` ⇒ throw, nunca gera assinatura). "Obra não encontrada" é tratada antes
+ * (o loader lança) e também nunca chega aqui.
+ */
+export function computeTagsSignature(tags: string[] | null | undefined): string {
+  return sha256(resolveTagContext(tags).signaturePart)
+}
+
 // ── Snapshot + assinaturas ───────────────────────────────────────────────────
 
 /**

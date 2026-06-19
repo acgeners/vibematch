@@ -5,6 +5,8 @@ import {
   classifyGoldenDigest,
   computeCandidateInputSignature,
   computeSnapshotSignature,
+  computeTagsSignature,
+  resolveTagContext,
   planGoldenDigest,
   planCandidateDryRun,
   resolveReviewContext,
@@ -101,6 +103,28 @@ describe("experiment — resolveReviewContext (fallback explícito)", () => {
   })
   it("reviews sem artefato → missing", () => {
     expect(resolveReviewContext({ usefulReviewCount: 5, digestPresent: false, digestFresh: false, summaryPresent: false, summaryFresh: false }).type).toBe("missing")
+  })
+})
+
+describe("experiment — tag context (caso S078: no_tags × erro)", () => {
+  it("tags=[] é no_tags legítimo, com assinatura estável", () => {
+    expect(resolveTagContext([]).type).toBe("no_tags")
+    expect(computeTagsSignature([])).toBe(computeTagsSignature([]))
+  })
+  it("tags=[] (no_tags) ≠ lista de tags", () => {
+    expect(computeTagsSignature([])).not.toBe(computeTagsSignature(["romance"]))
+  })
+  it("tags=null/undefined (erro de carregamento) LANÇA — nunca assina", () => {
+    expect(() => computeTagsSignature(null)).toThrow(/não carregadas/)
+    expect(() => computeTagsSignature(undefined)).toThrow(/não carregadas/)
+    expect(() => resolveTagContext(null)).toThrow()
+  })
+  it("ordem das tags NÃO afeta a assinatura", () => {
+    expect(computeTagsSignature(["a", "b", "c"])).toBe(computeTagsSignature(["c", "a", "b"]))
+  })
+  it("normaliza (trim/lowercase/dedup-vazio) sem inventar tags", () => {
+    expect(computeTagsSignature([" Romance ", "romance"])).toBe(computeTagsSignature(["romance", "romance"]))
+    expect(resolveTagContext(["  ", "x"]).tags).toEqual(["x"]) // vazios filtrados, nada inventado
   })
 })
 
