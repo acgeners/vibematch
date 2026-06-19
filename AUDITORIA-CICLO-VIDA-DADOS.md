@@ -2,6 +2,10 @@
 
 > Sessão read-only — 2026-06-18. Tudo confirmado **no código** (com `file:line`) e validado por
 > **consulta read-only ao banco** (734 obras não-arquivadas). Nenhuma edição/migration/escrita foi feita.
+>
+> **Nota (2026-06-19):** estado reconciliado em
+> [PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md](PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md)
+> (review_digest é candidato do Plano 3, não entrada do predictor atual). Conteúdo abaixo preservado como histórico.
 
 ---
 

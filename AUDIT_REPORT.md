@@ -4,6 +4,8 @@
 > **Método:** leitura de código + **validação empírica read-only no banco de produção** (724 obras, 191 rotuladas, 3.304 chamadas de IA) + execução de build/typecheck/lint/testes. Nenhum dado alterado.
 > **Nota de honestidade (ponto 11 da revisão):** `SUPABASE_SERVICE_ROLE_KEY` **não é tecnicamente read-only** (pode escrever/DDL). Emiti apenas `SELECT` (zero escrita). Scripts inline (`node -e`), não persistidos, sem credenciais embutidas/impressas/versionadas.
 > **Limite de potência estatística:** com **n=190–191 rótulos** (e n=103 no subconjunto re-rankeado), os ICs95% são largos (~±0,06 em MAE, ~±0,10 em Spearman). Diferenças pequenas entre modelos são **inconclusivas** — isto é tratado explicitamente abaixo.
+>
+> **Nota (2026-06-19):** as ações derivadas (orquestração, backfill, Plano 3 / Interesse na Sinopse) estão reconciliadas em [PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md](PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md). Conteúdo abaixo preservado como histórico.
 
 ## Conclusão objetiva (classificação)
 

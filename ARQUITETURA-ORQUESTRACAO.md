@@ -3,6 +3,11 @@
 > Desenho da **Fase A**, aprovado em 2026-06-18. Deriva da auditoria em
 > [AUDITORIA-CICLO-VIDA-DADOS.md](AUDITORIA-CICLO-VIDA-DADOS.md). Implementação faseada;
 > a Fase B passo 1 entrega **apenas a infraestrutura central** (sem integrar aos fluxos reais).
+>
+> **Nota (2026-06-19):** estado reconciliado com o backfill e o Plano 3 em
+> [PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md](PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md).
+> O `review_digest` segue **entrada futura/opcional** (não está no contrato de
+> `predict_interest_potential`); as 112 previsões atuais foram geradas **sem digest**.
 
 ## Objetivo
 
