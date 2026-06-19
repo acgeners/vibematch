@@ -64,3 +64,6 @@ scripts/seed-from-xlsx*.js
 # guia pessoal de onboarding (não versionar)
 /GUIA.md
 lib/synopsis-interest/labeling-sheet.*
+
+# Backups locais de segurança (pilotos/execuções) — NÃO versionar
+.local-backups/

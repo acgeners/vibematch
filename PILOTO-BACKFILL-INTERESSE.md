@@ -1,7 +1,8 @@
 # Piloto do backfill orquestrado — Potencial de Interesse (12 obras)
 
 ```
-STATUS: NÃO EXECUTADO — AGUARDANDO APROVAÇÃO DE CUSTO E IMPACTO
+STATUS: EXECUTADO — Etapa 2B.1 concluída em 2026-06-19 (12/12 sucesso, custo real $0.62 ≤ $0.80)
+        Pendência ÚNICA: recalc global não roda headless → recalc_pending=true, resumível no app.
 ```
 
 > Etapa 2B.0 — preparação **read-only** do piloto pago. **Nenhuma** execução, `--execute`,
@@ -257,3 +258,83 @@ previsões criadas/alteradas: 0   ·   jobs criados: 0
 recalc_pending: inalterado (false)   ·   migrations: nenhuma
 work_processing_jobs 0 / taste_profile 6 / synopsis_quality_predictions 1026  (idênticos antes/depois)
 ```
+
+---
+
+# RESULTADO DA EXECUÇÃO — Etapa 2B.1
+
+> Execução pago **autorizada e concluída** em **2026-06-19 ~02:44 UTC**. Comando único
+> com `--execute`, 12 IDs, assinatura aprovada, `--max-cost-usd=0.80 --concurrency=2`,
+> sem `--retry-failed`. Snapshot de segurança feito antes (read-only, gitignored).
+
+## Pré-execução (confirmado)
+- Branch `feat/data-orchestration`; working tree limpo; **0** jobs queued/running; 12 IDs explícitos; 0 arquivada/bloqueada; código inalterado desde `d483128`.
+- **Snapshot de segurança:** `.local-backups/interest-pilot-before-2026-06-19T02-42-07-573Z.json` · 2.357.334 bytes · **sha256 `c1a5bf2379ea64e80c998d10d86bb55dde81a5a2012188464ca11d56abf2d45e`** · linhas: taste_profile 6, synopsis_quality_predictions 1026, calculated_scores 737, formula_config 1, work_processing_jobs 0. (NÃO versionado.)
+- **Dry-run final:** assinatura `199586267183f591363a9e821c2f4b766054aabfe0eabe67ad363bc1548d9abc` (**idêntica à aprovada**), upper $0.769 ≤ $0.80, 12 elegíveis / 0 blocked / 0 missing.
+
+## Execução
+| | resultado |
+|---|---|
+| status | **COMPLETED** |
+| planned / started / succeeded | 12 / 12 / **12** |
+| freshSkipped / failed / blocked / changedDuringRun | 0 / 0 / 0 / 0 |
+| stoppedByCost / PlanChange / Cancel | false / false / false |
+| profileUpdated | **true** (v6 → **v7**) |
+| recalcExecuted | **false** (ver pendência) |
+| duração | **118.4 s** |
+
+## Custos (🟩 jobs)
+| Operação | Qtd | Likely | Upper | **Real** |
+|---|--:|--:|--:|--:|
+| ensure_taste_profile | 1 | $0.387 | $0.581 | **$0.5003** |
+| predict_interest_potential | 12 | $0.126 | $0.189 | **$0.1193** |
+| recalculate_scores | 1 (failed) | 0 | 0 | **$0.0000** |
+| **Total** | | $0.513 | $0.769 | **$0.6196** |
+
+Real **$0.6196 ≤ teto $0.80** ✅ (entre likely $0.513 e upper $0.769).
+
+## Estado posterior (🟩, read-only)
+**Taste profile:** 7 versões; **v7 current**, `is_stub=false`, **exatamente 1 current**; v6 preservada (`is_current=false`). Novo `input_hash=210021707a97…`; nova assinatura funcional `23eb13f0067132c5…`.
+
+**As 12 obras (v2):** todas `stale=false` · **`input_signature` preenchida** · `taste_profile_hash` = nova assinatura v7 (12/12) · `taste_profile_version=7` · model `claude-sonnet-4-6` · `predicted_at=2026-06-19`. **Transição legada→moderna validada.**
+
+**Fora do escopo:** **apenas 12** linhas no catálogo têm `input_signature` (v2_with_sig_GLOBAL=12, all_with_sig_GLOBAL=12) ⇒ **nenhuma obra fora das 12 recebeu previsão**. `total=1026` (upsert in-place, sem linhas novas, sem duplicação).
+
+**Cobertura antes → depois (1026 linhas):** fresh `200 → 12` · stale `826 → 1014` · input_signature preenchida `0 → 12`. **Obras restantes para o backfill:** ~722 (stale, aguardando lote).
+
+**Scores / recalc:** ⚠️ `recalc_pending=**true**` (recalc_last_edit_at=2026-06-19T02:44:16). **personal_fit NÃO recalculado** — o job `recalculate_scores` falhou com `Invariant: incrementalCache missing in unstable_cache` (🟦 `recalculateAll` usa `unstable_cache`/`revalidatePath`, que exigem um **request scope do Next**; não rodam via CLI/tsx). **NÃO é falha de cálculo nem chamada paga** — é limitação do recalc headless. Job preservado `failed` (attempts=1), **resumível** com o mesmo `dedup_key`: o próximo page-load do app (auto-recalc) ou "Recalcular agora" o conclui (grátis) e zera `recalc_pending`. Fórmulas **inalteradas**.
+
+**Jobs (14):** `ensure_taste_profile/succeeded` 1 · `predict_interest_potential/succeeded` 12 · `recalculate_scores/failed` 1. Nenhum queued/running abandonado. Custo estimado total $0.7695 / real $0.6195.
+
+## Escopo (confirmação explícita)
+- **Nenhuma obra fora das 12** foi prevista (✅ só 12 com `input_signature`).
+- **Nenhum retry** executado (sem `--retry-failed`; nenhum re-run).
+- **Lote restante (~722) NÃO iniciado.**
+
+## Diferença planejado × executado
+Idêntico ao plano **exceto o recalc**: planejado "≤1 recalculate_scores"; executado **0 recálculo efetivo** + **1 job failed resumível** (limitação headless, não prevista no dry-run). As 12 previsões + perfil saíram exatamente como planejado; custo real abaixo do upper.
+
+## Critérios de sucesso — avaliação
+| Critério | Status |
+|---|:--:|
+| novo perfil válido criado (v7, não-stub, 1 current) | ✅ |
+| exatamente 12 obras processadas | ✅ |
+| nenhuma obra externa recebeu previsão | ✅ |
+| 12 previsões com `input_signature` | ✅ |
+| sem duplicação | ✅ |
+| custo real ≤ $0.80 | ✅ ($0.62) |
+| recálculo global ≤ 1 vez | ✅ (1 job; 0 efetivo) |
+| `recalc_pending` terminou false | ⚠️ **NÃO** (true; recalc headless falhou — resumível no app) |
+| sem job queued/running abandonado | ✅ |
+| erros persistidos e retomáveis | ✅ (recalc job failed, resumível) |
+
+**Veredito:** piloto **bem-sucedido na parte paga e na validação da transição/escopo**; **uma pendência operacional** (recalc não roda headless) — recuperável de graça no runtime do app, sem novo custo.
+
+## Recomendação GO/NO-GO para o backfill restante (~722)
+🟧 **GO condicional** — a transição legada→moderna, o isolamento de escopo e o custo foram validados empiricamente. **Antes** do lote restante, exigir:
+1. **Concluir o recalc pendente no app** (page-load/"Recalcular agora") e confirmar `recalc_pending=false` + `personal_fit` atualizado vs v7. (Grátis.)
+2. **Tratar o recalc headless** para o lote: ou rodar o lote e concluir o recalc no app depois, ou ajustar a etapa de recalc do executor para um caminho headless-safe (Etapa 2B.2) — **decisão de produto**.
+3. **Novo dry-run + nova assinatura** imediatamente antes (o perfil agora é v7; provavelmente **fresh** ⇒ o lote restante **não** regenera perfil, só prevê ~722 — custo estimado ~$7 likely / ~$11 upper, **a reconfirmar no dry-run**).
+4. Manter lotes controlados + teto explícito (não autorizar catálogo inteiro de uma vez sem reavaliar).
+
+**NO-GO** se: recalc pendente não for concluído; o dry-run do lote mudar de forma inesperada (ex.: perfil voltar a stale); custo upper exceder o teto aprovado; ou surgir job abandonado.
