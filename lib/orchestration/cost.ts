@@ -28,6 +28,32 @@ export const DEFAULT_MICRO_THRESHOLD_USD = 0.02
  */
 export const COST_SAFETY_MULTIPLIER = 1.5
 
+/**
+ * Arredonda um valor em USD para CIMA até o próximo centavo. Uso EXCLUSIVO:
+ * SUGERIR um teto de autorização (`--max-cost-usd`) que **nunca** fique abaixo do
+ * `upperBoundUsd` real — caso contrário o gate (`estimatedUsd > maxCostUsd`)
+ * rejeitaria a própria sugestão (bug: `1.575.toFixed(2)` → "1.57" < 1.575).
+ *
+ * NÃO é usado no gate nem na assinatura do plano (esses usam o upper REAL). Não
+ * altera estimadores/pricing/COST_SAFETY_MULTIPLIER.
+ *
+ * Tolera ruído de ponto flutuante de até ~1e-6 centavo (1e-8 USD), consistente com
+ * a grade de `round6` (1e-6 USD) usada no plano: um valor já "exatamente" em
+ * centavos (incluindo a representação binária de 0.01/1.57/etc.) NÃO sobe um
+ * centavo; um valor genuinamente acima do centavo (≥ a grade) sobe.
+ * Rejeita NaN/Infinity/negativo.
+ */
+export function ceilUsdToCents(value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new RangeError(`ceilUsdToCents: valor inválido (${value})`)
+  }
+  const cents = value * 100
+  // EPS em CENTAVOS: absorve só o ruído de representação (≪ 1 centavo real e ≪ a
+  // grade de round6), preservando valores já em centavos.
+  const result = Math.ceil(cents - 1e-6) / 100
+  return result === 0 ? 0 : result // normaliza -0
+}
+
 const ZERO_USAGE: UsageTokens = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }
 
 /**

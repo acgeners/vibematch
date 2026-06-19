@@ -20,6 +20,7 @@ import {
   runInterestBackfill,
 } from "@/lib/orchestration/backfill/interest-backfill"
 import { parseBackfillCliArgs } from "@/lib/orchestration/backfill/cli-args"
+import { ceilUsdToCents } from "@/lib/orchestration/cost"
 
 // ---- Saída (sanitizada — nunca secrets/sinopse/perfil/prompt íntegros) ------
 
@@ -33,15 +34,16 @@ function printPlan(plan: Awaited<ReturnType<typeof planInterestBackfill>>) {
   console.log(`obras: total=${plan.totalWorks} elegíveis=${plan.eligible} | fresh=${plan.fresh} stale=${plan.stale} ausente=${plan.absent} bloqueadas=${plan.blocked}`)
   console.log(`jobs: processing=${plan.processing} failed=${plan.failed}`)
   console.log(`previsões planejadas: ${plan.itemsToPredict.length}  (recalc final: ${plan.recalcPlanned ? "sim" : "não"})`)
-  console.log(`custo: likely=$${plan.estimatedLikelyUsd.toFixed(3)}  upperBound=$${plan.estimatedUpperBoundUsd.toFixed(3)}`)
-  console.log(`maxCostUsd MÍNIMO necessário: $${plan.minMaxCostUsd.toFixed(3)}`)
+  const minCeil = ceilUsdToCents(plan.minMaxCostUsd)
+  console.log(`custo: likely=$${plan.estimatedLikelyUsd.toFixed(3)}  upperBound (real)=$${plan.estimatedUpperBoundUsd.toFixed(4)}`)
+  console.log(`teto mínimo para execução (≥ upper, arredondado p/ cima ao centavo): $${minCeil.toFixed(2)}`)
   console.log(`versões: model=${plan.actionVersions.model} prompt=${plan.actionVersions.promptVersion} schema=${plan.actionVersions.schemaVersion} pricing=${plan.actionVersions.costVersion}`)
   for (const w of plan.warnings) console.log(`  ⚠ ${w}`)
   if (plan.abandonedJobs.length > 0) {
     console.log(`  ⚠ ${plan.abandonedJobs.length} job(s) possivelmente abandonados (queued/running antigos) — NÃO recuperados automaticamente.`)
   }
   console.log(`\nplanSignature: ${plan.planSignature}`)
-  console.log(`\nPara executar:\n  npm run backfill:interest -- --execute --plan-signature=${plan.planSignature} --max-cost-usd=${plan.minMaxCostUsd.toFixed(2)}`)
+  console.log(`\nPara executar (teto = mínimo arredondado p/ cima; pode aumentar a margem):\n  npm run backfill:interest -- --execute --plan-signature=${plan.planSignature} --max-cost-usd=${minCeil.toFixed(2)}`)
 }
 
 function printReport(report: Awaited<ReturnType<typeof runInterestBackfill>>) {

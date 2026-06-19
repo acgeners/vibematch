@@ -78,9 +78,9 @@ Razão de inclusão (todas): **previsão legada stale (input_signature=null, has
 - **Custo histórico aprox. (diagnóstico):** ~$0.97–$0.99 (100 × $0.0097/call histórico; pilot real $0.00994/previsão). **Não** substitui o upper.
 - **Comparação piloto × histórico:** piloto 2B.1 = $0.1193/12 = **$0.00994/previsão**; histórico (n=1089) = $0.0097/call → consistentes.
 - **Upper contratual (autorização):** **$1.575** (= likely × 1.5).
-- **Teto MÍNIMO aceito pela CLI:** estritamente **≥ $1.575** (o gate bloqueia se `upper > teto`).
-- ⚠️ **Caveat:** o texto "Para executar" da CLI sugere `--max-cost-usd=1.57` (arredondamento de `1.575.toFixed(2)` p/ baixo) — **seria REJEITADO** (`1.575 > 1.57`). Bug menor de **exibição** da sugestão (não bloqueia o pipeline; sem perda financeira). Usar **$1.60**.
-- **Teto arredondado proposto (🟧): $1.60** (≥ upper $1.575, folga mínima).
+- **Teto MÍNIMO técnico:** **$1.58** (o gate bloqueia se `upper > teto`; `1.575 > 1.57` ⇒ 1.57 rejeitado; `1.575 > 1.58` é falso ⇒ aceito).
+- **Teto proposto p/ aprovação (🟧): $1.60** (margem humana acima do mínimo $1.58).
+- ✅ **Bug corrigido (Etapa 2C.1):** a CLI sugeria `--max-cost-usd=1.57` (`1.575.toFixed(2)` arredondava p/ baixo) — seria **rejeitada** pelo gate. Agora a CLI usa `ceilUsdToCents` (arredonda p/ CIMA ao centavo) e sugere **`--max-cost-usd=1.58`**; o upper real é exibido com 4 casas (`$1.5750`) para não esconder a diferença. O **gate e a assinatura seguem usando o upper REAL** (sem arredondamento destrutivo); a `planSignature` permanece `0711bed4…`.
 
 ## 6. Comando futuro (NÃO executado — proposta para aprovação)
 ```bash
@@ -156,3 +156,13 @@ taste_profile 7 · current v7 · synopsis_quality_predictions 1026 · input_sign
 stale=true 1014 · stale=false 12 · recalc_pending false · jobs 14 (0 queued/running)
 zero chamadas pagas · zero LLM · zero previsões/perfis alterados · zero jobs criados · nenhuma migration
 ```
+
+---
+
+## Nota — Etapa 2C.1 (correção do arredondamento financeiro, 2026-06-19)
+- **Upper bound real:** US$ **1,575** (inalterado; usado pelo gate e pela assinatura).
+- **Bug anterior:** a CLI sugeria `--max-cost-usd=1.57` (`toFixed(2)` arredondava p/ baixo) — abaixo do upper ⇒ o gate rejeitaria.
+- **Correção aplicada:** helper `ceilUsdToCents` (lib/orchestration/cost.ts) arredonda o teto **sugerido** para cima ao centavo; a CLI passou a sugerir **$1,58** e a exibir o upper real com 4 casas.
+- **Teto mínimo técnico:** US$ **1,58**. **Teto proposto p/ aprovação:** US$ **1,60**.
+- **Plano inalterado:** `planSignature` segue `0711bed4729335d70cc56e704c5ef6d0a0393875211fd0e3efa5fba276f2802a`; os 100 IDs e o upper real não mudaram.
+- **Lote AINDA NÃO EXECUTADO** — aguardando aprovação de custo.
