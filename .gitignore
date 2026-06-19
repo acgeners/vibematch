@@ -67,3 +67,6 @@ lib/synopsis-interest/labeling-sheet.*
 
 # Backups locais de segurança (pilotos/execuções) — NÃO versionar
 .local-backups/
+
+# Snapshots/pacotes experimentais locais (Plano 3) — conteúdo integral (sinopses), NÃO versionar
+.local-experiments/

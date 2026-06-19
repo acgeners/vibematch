@@ -1,5 +1,27 @@
 import { describe, it, expect } from "vitest"
-import { parseLabelCsv, validateLabelRows } from "@/lib/synopsis-interest/labels"
+import { parseLabelCsv, validateLabelRows, summarizeLabeling } from "@/lib/synopsis-interest/labels"
+
+describe("labels — progresso × conclusão (B2.1C)", () => {
+  const EXPECTED = ["S001", "S002", "S003"]
+  it("progresso parcial: 0–N válidos, sem erro estrutural", () => {
+    const v = validateLabelRows(parseLabelCsv("slot_key,label\nS001,♥♥\nS002,\nS003,"), EXPECTED)
+    const p = summarizeLabeling(v, EXPECTED)
+    expect(p.labeled).toBe(1)
+    expect(p.total).toBe(3)
+    expect(p.progressOk).toBe(true)
+    expect(p.complete).toBe(false)
+  })
+  it("conclusão exige N/N válidos, 0 erro, 0 ausente", () => {
+    const v = validateLabelRows(parseLabelCsv("slot_key,label\nS001,♥\nS002,♥♥♥\nS003,♥♥♥♥"), EXPECTED)
+    expect(summarizeLabeling(v, EXPECTED).complete).toBe(true)
+  })
+  it("duplicado/inválido derruba progressOk", () => {
+    const dup = validateLabelRows(parseLabelCsv("slot_key,label\nS001,♥\nS001,♥♥"), EXPECTED)
+    expect(summarizeLabeling(dup, EXPECTED).progressOk).toBe(false)
+    const inv = validateLabelRows(parseLabelCsv("slot_key,label\nS001,X"), EXPECTED)
+    expect(summarizeLabeling(inv, EXPECTED).progressOk).toBe(false)
+  })
+})
 
 describe("parseLabelCsv", () => {
   it("parseia slot_key,label (tolerante a CRLF e espaços)", () => {

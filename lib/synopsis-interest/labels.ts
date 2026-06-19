@@ -59,3 +59,31 @@ export function validateLabelRows(rows: LabelRow[], expectedSlotKeys: string[]):
   const missing = expectedSlotKeys.filter((k) => !seen.has(k))
   return { valid, errors, unlabeled, missing }
 }
+
+export interface LabelingProgress {
+  labeled: number
+  total: number
+  /** 0–90 rótulos válidos com 0 erros = progresso aceitável. */
+  progressOk: boolean
+  /** 90/90 válidos, 0 erros, 0 ausentes = conclusão. */
+  complete: boolean
+  errors: number
+  missing: number
+}
+
+/**
+ * Resume a validação para os dois modos: PROGRESSO (0–N válidos, sem erros
+ * estruturais) e CONCLUSÃO (N/N válidos, 0 erros, 0 ausentes). NÃO lê outputs de
+ * candidato, NÃO calcula previsões, NÃO revela work_id.
+ */
+export function summarizeLabeling(v: LabelValidation, expectedSlotKeys: string[]): LabelingProgress {
+  const total = expectedSlotKeys.length
+  return {
+    labeled: v.valid.length,
+    total,
+    progressOk: v.errors.length === 0,
+    complete: v.errors.length === 0 && v.missing.length === 0 && v.valid.length === total,
+    errors: v.errors.length,
+    missing: v.missing.length,
+  }
+}

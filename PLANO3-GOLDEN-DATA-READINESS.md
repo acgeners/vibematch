@@ -1,4 +1,4 @@
-STATUS: GOLDEN DATA READINESS: APROVADO PARA SNAPSHOT-BASE — decisões fechadas (Fase B2.1B); S078 resolvido sem bloqueio; NÃO pronto p/ rotulagem (depende de materializar o snapshot + validar o pacote cego); nenhuma atualização paga executada
+STATUS: GOLDEN DATA READINESS: APROVADO PARA SNAPSHOT-BASE → MATERIALIZADO (Fase B2.1C). Snapshot-base (base-1) e pacote cego congelados/validados; PRONTO PARA ROTULAGEM HUMANA. Manifesto: PLANO3-GOLDEN-SNAPSHOT-BASE-MANIFEST.md. Nenhuma chamada paga executada.
 
 # Plano 3 — Golden Data Readiness Gate (Fase B2.1A)
 

@@ -113,45 +113,69 @@ export function resolveReviewContext(s: ReviewArtifactState): ResolvedReviewCont
   return { type: "missing", signaturePart: "missing" }
 }
 
-// ── Contexto de tags (no_tags explícito × erro de carregamento) ──────────────
+// ── Contexto de tags (4 estados; proveniência S078) ──────────────────────────
 
-export type TagContextType = "tags" | "no_tags"
+/**
+ * Quatro estados de proveniência de tags (Fase B2.1C). `loading_error` NUNCA
+ * produz assinatura (é lançado), por isso não aparece num `ResolvedTagContext`.
+ */
+export type TagContextType =
+  | "tags_present"
+  | "no_tags_legitimate"
+  | "missing_recoverable_frozen_empty"
+  | "loading_error"
 
 export interface ResolvedTagContext {
-  type: TagContextType
+  type: Exclude<TagContextType, "loading_error">
   /** Parte canônica da assinatura — order-independent. */
   signaturePart: string
   tags: string[]
 }
 
+export interface TagContextOptions {
+  /**
+   * true ⇒ a obra tem FONTES de onde tags são recuperáveis (IDs externos aceitos
+   * que carregam tags e/ou gêneros), mas as tags não foram persistidas. `[]` então
+   * é `missing_recoverable_frozen_empty` (S078) — DISTINTO de ausência legítima.
+   */
+  recoverable?: boolean
+}
+
 /**
- * Resolve o contexto de tags de uma obra para o snapshot/assinatura (Fase B2.1B,
- * caso S078). Distingue três estados que ANTES colidiam:
- *   - `null`/`undefined` = NÃO CARREGADO/erro ⇒ **THROW** (um erro de carregamento
- *     nunca pode ser assinado silenciosamente como "sem tags");
- *   - `[]` = **no_tags EXPLÍCITO** — estado legítimo e determinístico (D1/D2 ainda
- *     produzem nível válido; b1/e1 tratam tags como opcional);
- *   - lista não-vazia = `tags`.
- * A ordem das tags não afeta a assinatura (normaliza + ordena). NÃO inventa tags.
+ * Resolve o contexto de tags para o snapshot/assinatura. Distingue 4 estados que
+ * antes colidiam:
+ *   - `null`/`undefined` = **loading_error** ⇒ **THROW** (erro de carregamento
+ *     nunca é assinado silenciosamente);
+ *   - lista não-vazia ⇒ `tags_present`;
+ *   - `[]` + `recoverable` ⇒ `missing_recoverable_frozen_empty` (tags existem na
+ *     fonte, congeladas vazias de propósito — S078);
+ *   - `[]` sem `recoverable` ⇒ `no_tags_legitimate` (sem tags em lugar nenhum).
+ * Cada estado tem `signaturePart` própria. A ordem das tags não afeta a assinatura
+ * (normaliza + ordena). NÃO inventa nem busca tags.
  */
-export function resolveTagContext(tags: string[] | null | undefined): ResolvedTagContext {
+export function resolveTagContext(
+  tags: string[] | null | undefined,
+  opts: TagContextOptions = {},
+): ResolvedTagContext {
   if (tags == null) {
-    throw new Error("tags não carregadas (null/undefined) — não assinar; corrija o carregamento da obra")
+    throw new Error("tags não carregadas (loading_error) — não assinar; corrija o carregamento da obra")
   }
   const norm = [...tags].map((t) => t.trim().toLowerCase()).filter(Boolean).sort()
-  if (norm.length === 0) return { type: "no_tags", signaturePart: "no_tags", tags: [] }
-  return { type: "tags", signaturePart: `tags:${norm.join("|")}`, tags: norm }
+  if (norm.length > 0) return { type: "tags_present", signaturePart: `tags:${norm.join("|")}`, tags: norm }
+  if (opts.recoverable) {
+    return { type: "missing_recoverable_frozen_empty", signaturePart: "no_tags:recoverable_frozen", tags: [] }
+  }
+  return { type: "no_tags_legitimate", signaturePart: "no_tags:legitimate", tags: [] }
 }
 
 /**
  * Assinatura canônica de tags. O loader DEVE usar isto para produzir o `tagsSig`
- * de `WorkSnapshotInput` — garante que `no_tags` (`[]`) tenha hash estável e
- * DISTINTO tanto de qualquer lista de tags quanto de um erro de carregamento
- * (`null` ⇒ throw, nunca gera assinatura). "Obra não encontrada" é tratada antes
- * (o loader lança) e também nunca chega aqui.
+ * do snapshot — garante que `[]` recuperável (S078) tenha hash **distinto** de `[]`
+ * legítimo, de qualquer lista de tags, e de erro de carregamento (`null` ⇒ throw,
+ * nunca gera assinatura). "Obra não encontrada" é tratada antes (loader lança).
  */
-export function computeTagsSignature(tags: string[] | null | undefined): string {
-  return sha256(resolveTagContext(tags).signaturePart)
+export function computeTagsSignature(tags: string[] | null | undefined, opts: TagContextOptions = {}): string {
+  return sha256(resolveTagContext(tags, opts).signaturePart)
 }
 
 // ── Snapshot + assinaturas ───────────────────────────────────────────────────

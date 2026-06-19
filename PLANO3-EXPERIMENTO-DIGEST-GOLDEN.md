@@ -11,15 +11,15 @@ STATUS: PREPARADO — NENHUMA CHAMADA PAGA EXECUTADA
 > (candidatos, fallback, assinaturas, planner do digest do golden) + testes. Nenhum
 > caminho de execução paga foi construído ou disparado.
 >
-> **Golden Data Readiness Gate: APROVADO PARA SNAPSHOT-BASE (Fase B2.1B, 2026-06-19)** —
-> ver [PLANO3-GOLDEN-DATA-READINESS.md](PLANO3-GOLDEN-DATA-READINESS.md). Decisões fechadas
-> (reviews congeladas ≤30d sem refresh · 9 summaries não regenerados · 51 digests = etapa paga
-> separada · D1/D2 mantidos · alignment fora · sem nova avaliação IA). **S078 (0 work_tags)**
-> classificada `missing_tags_recoverable`, **congelada como `no_tags`** (não recuperada — seria
-> refresh externo): `tags=[]` é entrada determinística (correção: `tags required` de D1/D2 =
-> campo estrutural que aceita `[]`; assinatura `no_tags` ≠ erro de carregamento, ver
-> [experiment.ts](lib/synopsis-interest/experiment.ts) `resolveTagContext`/`computeTagsSignature`).
-> **Rotulagem ainda NÃO liberada** — só após materializar o snapshot-base + validar o pacote cego.
+> **✅ PRONTO PARA ROTULAGEM HUMANA — SNAPSHOT-BASE E PACOTE CEGO CONGELADOS (Fase B2.1C, 2026-06-19).**
+> Nenhuma chamada paga executada. Manifesto: [PLANO3-GOLDEN-SNAPSHOT-BASE-MANIFEST.md](PLANO3-GOLDEN-SNAPSHOT-BASE-MANIFEST.md).
+> `snapshot_version=base-1` · `snapshotBaseSignature=634571c2…` · pacote cego offline validado
+> (`labelingPackageSignature=73eb0f5d…`). Artefatos completos (sinopses) em `.local-experiments/`
+> (gitignored); regeneráveis por [scripts/synopsis-interest-snapshot.ts](scripts/synopsis-interest-snapshot.ts)
+> (read-only). Antecedentes: Readiness Gate aprovado (B2.1A/B2.1B) — reviews ≤30d congeladas sem
+> refresh · 9 summaries não regenerados · 51 digests = etapa paga separada · D1/D2 mantidos ·
+> alignment fora · sem nova avaliação IA. **S078** congelada `missing_recoverable_frozen_empty`
+> (proveniência distinta de `no_tags_legitimate`; `tags=[]` determinístico).
 
 ---
 

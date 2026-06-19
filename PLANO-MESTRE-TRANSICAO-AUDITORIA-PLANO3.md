@@ -580,6 +580,20 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 
 ---
 
+## 24d. Addendum — Fase B2.1C: snapshot-base + pacote cego (2026-06-19)
+
+> **✅ PRONTO PARA ROTULAGEM HUMANA.** Snapshot-base e pacote cego congelados/validados.
+> Manifesto: [PLANO3-GOLDEN-SNAPSHOT-BASE-MANIFEST.md](PLANO3-GOLDEN-SNAPSHOT-BASE-MANIFEST.md).
+
+- **Snapshot-base (`base-1`)** materializado read-only: 80 obras únicas, 90 slots (10 repetições intra-avaliador), 50 dev/30 holdout, strata 20×4. `snapshotBaseSignature=634571c2…`, `reviewCorpusSignature=8776419e…` (determinístico — 2 runs idênticas). Conteúdo em `.local-experiments/` (gitignored); manifesto versionado sem texto integral.
+- **Reviews congeladas:** 51 `frozen_current` + 29 `no_reviews`. Regra de invalidação: o digest futuro (`enriched-1`) só roda se `reviewCorpusSignature` atual == congelada; senão `plan_changed` + nova snapshot version.
+- **Pacote cego:** HTML offline (só `slot_key`+sinopse; **0** work_id/script/url/output — validado estrutural + grep), CSV template vazio, `labelingPackageSignature=73eb0f5d…`. Slots repetidos mostram conteúdo idêntico sem marca.
+- **S078:** congelada `missing_recoverable_frozen_empty` (4 estados de tag agora: `tags_present`/`no_tags_legitimate`/`missing_recoverable_frozen_empty`/`loading_error`→throw); assinatura distinta de ausência legítima.
+- **Código (puro, testado):** `lib/synopsis-interest/{snapshot,blind-package}.ts` + tag-context 4-estados + validador de labels (progresso/conclusão). **688 testes verdes** (+24) · `tsc` limpo · lint 0 · **build exit 0** (não auto-gera o pacote; mtime inalterado). **Sem migration, sem escrita no banco, sem chamada paga.**
+- **Unidade estatística:** slot = rotulagem; **work_id único = observação** (repetições NÃO contam); split por work_id. **Planners (digest/b1/e1/D1/D2) operam com 0 labels** — labels só na etapa de métricas; nunca em prompt/assinatura/dedup.
+
+---
+
 ## 24c. Addendum — Fase B2.1B: fechamento do Readiness Gate + S078 (2026-06-19)
 
 > **Golden Data Readiness: APROVADO PARA SNAPSHOT-BASE.** Detalhes em
