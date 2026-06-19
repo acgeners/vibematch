@@ -434,7 +434,19 @@ function computeHonestExpectedCvMae(
  *   6. Bulk upsert em calculated_scores
  *   7. Persiste novo formula_config
  */
-export async function recalculateAll() {
+/**
+ * Contexto de execução do recálculo. EXPLÍCITO (sem heurística de ambiente):
+ *  - "next-runtime": Server Actions/páginas/gatilhos — usa leituras cacheadas
+ *    (`unstable_cache`) e invalida o cache (`revalidatePath`/`revalidateTag`);
+ *  - "headless": CLI/workers/scripts — usa leituras UNCACHED e PULA a invalidação
+ *    de cache (não há request scope; `unstable_cache`/`revalidate*` lançariam
+ *    "incrementalCache/static store missing"). Mesmo núcleo matemático e mesmas
+ *    escritas funcionais nos dois caminhos.
+ */
+export type RecalculateExecutionContext = "next-runtime" | "headless"
+
+export async function recalculateAll(ctx: RecalculateExecutionContext = "next-runtime") {
+  const headless = ctx === "headless"
   const supabase = createAdminClient()
 
   // Offset de atributos (Fase 1.5) — carregado uma vez e aplicado on-read.
@@ -472,7 +484,7 @@ export async function recalculateAll() {
     supabase.from("score_weights").select("*").eq("is_active", true),
     supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
     loadCurrentTasteProfile(),
-    getDeclaredTagPreferences(supabase),
+    getDeclaredTagPreferences(supabase, { headless }),
   ])
 
   if (worksRes.error) throw new Error(worksRes.error.message)
@@ -1026,12 +1038,18 @@ export async function recalculateAll() {
     console.warn("[recalculateAll] calibration_history insert falhou:", historyErr.message)
   }
 
-  revalidatePath("/titles")
-  revalidatePath("/ranking")
-  revalidatePath("/settings")
-  revalidatePath("/")
-  revalidateTag("score-color-thresholds", "max")
-  revalidateTag("low-coverage", "max")
+  // Invalidação de cache só faz sentido (e só funciona) no runtime do Next.
+  // Headless (CLI) não tem request scope ⇒ pular (senão lança "static store
+  // missing"). O recálculo em si — escritas + limpeza de recalc_pending — já
+  // ocorreu acima; o cache do app revalida no próximo page-load/gatilho normal.
+  if (!headless) {
+    revalidatePath("/titles")
+    revalidatePath("/ranking")
+    revalidatePath("/settings")
+    revalidatePath("/")
+    revalidateTag("score-color-thresholds", "max")
+    revalidateTag("low-coverage", "max")
+  }
 
   return {
     recalculated: works.length,

@@ -157,6 +157,8 @@ export interface InterestBackfillReport {
   lastSanitizedError: string | null
   profileUpdated: boolean
   recalcExecuted: boolean
+  /** Recalc obrigatório (pós regeneração do perfil) que NÃO concluiu ⇒ pós-processamento falho, resume gratuito. */
+  recalcFailed: boolean
   errors: string[]
 }
 
@@ -548,7 +550,7 @@ export interface RunInterestBackfillDeps {
 }
 
 export type RunInterestBackfillResult =
-  | { status: "completed" | "partial"; report: InterestBackfillReport }
+  | { status: "completed" | "partial" | "completed_with_failures"; report: InterestBackfillReport }
   | { status: "plan_changed"; message: string; expected: string; actual: string }
   | { status: "blocked_cost_confirmation"; upperBoundUsd: number; maxCostUsd: number; message: string }
   | { status: "blocked_manual"; message: string }
@@ -614,6 +616,7 @@ export async function runInterestBackfill(deps: RunInterestBackfillDeps): Promis
     lastSanitizedError: null,
     profileUpdated: false,
     recalcExecuted: false,
+    recalcFailed: false,
     errors: [],
   }
 
@@ -722,19 +725,31 @@ export async function runInterestBackfill(deps: RunInterestBackfillDeps): Promis
   //    (force=false) roda por causa dessa pendência e a zera no sucesso. NÃO usa
   //    `force` (que mascararia a ausência de pendência para os demais consumidores).
   if (report.profileUpdated) {
+    // Default HEADLESS-SAFE: a CLI roda fora do request scope do Next, então o
+    // recalc usa o caminho uncached (recalculateScoresHeadless). Mesmo contrato
+    // global/free/coalescido; zera recalc_pending no sucesso.
     const recalcFn: RecalcRunner =
       deps.recalc ??
       (async () => {
-        const { recalculateScoresIfPending } = await import("@/server/actions/recalc-queue")
-        return recalculateScoresIfPending()
+        const { recalculateScoresHeadless } = await import("@/server/actions/recalc-queue")
+        return recalculateScoresHeadless()
       })
     const r = await recalcFn(false)
     report.recalcExecuted = r.status === "succeeded"
+    // Recalc OBRIGATÓRIO (após regeneração do perfil) que NÃO concluiu ⇒ falha de
+    // pós-processamento. "fresh" (pendência já zerada por outro caminho) não é falha.
+    report.recalcFailed = r.status !== "succeeded" && r.status !== "fresh"
   }
 
   report.durationMs = (deps.now ?? Date.now)() - started
-  const finished = report.succeeded + report.freshSkipped === report.planned && !report.stoppedByCost && !report.stoppedByPlanChange && !report.stoppedByCancel && report.failed === 0 && report.processing === 0
-  return { status: finished ? "completed" : "partial", report }
+  const predicted = report.succeeded + report.freshSkipped === report.planned
+  const noInterruptions = !report.stoppedByCost && !report.stoppedByPlanChange && !report.stoppedByCancel && report.failed === 0 && report.processing === 0
+  // Etapas pagas (perfil + previsões) OK mas o recalc obrigatório falhou ⇒
+  // sucesso PARCIAL com pós-processamento falho (resume gratuito disponível).
+  if (predicted && noInterruptions && report.recalcFailed) {
+    return { status: "completed_with_failures", report }
+  }
+  return { status: predicted && noInterruptions ? "completed" : "partial", report }
 }
 
 // ============================================================================

@@ -1,7 +1,7 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getCurrentUserId } from "@/server/queries/current-user"
-import { getAllTags } from "@/server/queries/tags"
+import { getAllTags, getAllTagsUncached } from "@/server/queries/tags"
 
 export type TagStance = "love" | "avoid"
 export type TagPrefLevel = "tag" | "subgroup" | "group"
@@ -82,9 +82,13 @@ export async function getTagPreferenceRows(
  */
 export async function getDeclaredTagPreferences(
   admin?: ReturnType<typeof createAdminClient>,
+  opts?: { headless?: boolean },
 ): Promise<DeclaredTagPref[]> {
   const supabase = admin ?? createAdminClient()
-  const [rows, tags] = await Promise.all([getTagPreferenceRows(supabase), getAllTags()])
+  // Headless (CLI/worker): catálogo de tags via leitura UNCACHED (sem request
+  // scope). Runtime Next: wrapper cacheado. Mesma lógica/resultado.
+  const loadTags = opts?.headless ? getAllTagsUncached : getAllTags
+  const [rows, tags] = await Promise.all([getTagPreferenceRows(supabase), loadTags()])
   if (rows.length === 0) return []
 
   // Índices do catálogo

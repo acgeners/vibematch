@@ -635,3 +635,52 @@ function catalog6Fresh() {
   gw.works = Array.from({ length: 6 }, (_, i) => work(`w${String(i).padStart(2, "0")}`))
   return gw
 }
+
+// ============================================================================
+// Correção 2B.2 — semântica de resultado do recalc obrigatório
+// ============================================================================
+
+describe("2B.2 — semântica de resultado (recalc obrigatório pós-perfil)", () => {
+  function staleGw(ids: string[]) {
+    const gw = new PlanGateway()
+    gw.works = ids.map((id) => work(id))
+    gw.profile = { current: profileRow("OLD"), libraryInputHash: "NEW", ratedWorksCount: 50 }
+    return gw
+  }
+  const run = (ids: string[], recalc: (f: boolean) => Promise<{ status: string }>, st = { calls: 0, max: 0, cur: 0 }) => {
+    const gw = staleGw(ids)
+    const exec = new ExecGateway(); for (const id of ids) exec.works.set(id, work(id))
+    return planInterestBackfill({ gateway: gw, scope: { kind: "ids", workIds: ids } }).then((plan) =>
+      runInterestBackfill({ planSignature: plan.planSignature, maxCostUsd: 10, scope: { kind: "ids", workIds: ids }, planGateway: gw, interestGateway: exec, ensureProfile: profileRegen(profileRow("NEW", NEWP), { calls: 0 }), predict: fakePredict(st), recalc, jobStore: new InMemoryJobStore(), concurrency: 1 }).then((res) => ({ res, st })),
+    )
+  }
+
+  it("8/12) recalc obrigatório FALHA ⇒ completed_with_failures (pagas preservadas, SEM retry pago)", async () => {
+    const { res, st } = await run(["w1", "w2"], async () => ({ status: "failed" }))
+    expect(res.status).toBe("completed_with_failures")
+    if (res.status === "completed_with_failures") {
+      expect(res.report.recalcFailed).toBe(true)
+      expect(res.report.recalcExecuted).toBe(false)
+      expect(res.report.succeeded).toBe(2) // previsões pagas preservadas
+    }
+    expect(st.calls).toBe(2) // cada obra 1×; nenhum retry pago
+  })
+
+  it("9) recalc SUCEDE ⇒ completed (exit 0)", async () => {
+    const { res } = await run(["w1"], async () => ({ status: "succeeded" }))
+    expect(res.status).toBe("completed")
+    if (res.status === "completed") expect(res.report.recalcExecuted).toBe(true)
+  })
+
+  it("recalc 'fresh' (pendência já zerada por outro caminho) NÃO é falha ⇒ completed", async () => {
+    const { res } = await run(["w1"], async () => ({ status: "fresh" }))
+    expect(res.status).toBe("completed")
+    if (res.status === "completed") expect(res.report.recalcFailed).toBe(false)
+  })
+
+  it("11) recalc falha NÃO dispara retry pago e preserva previsões anteriores", async () => {
+    const { res, st } = await run(["w1", "w2", "w3"], async () => ({ status: "failed" }))
+    if (res.status === "completed_with_failures") expect(res.report.succeeded).toBe(3)
+    expect(st.calls).toBe(3) // sem reprocessar previsões pagas
+  })
+})

@@ -45,7 +45,7 @@ function printPlan(plan: Awaited<ReturnType<typeof planInterestBackfill>>) {
 }
 
 function printReport(report: Awaited<ReturnType<typeof runInterestBackfill>>) {
-  if (report.status !== "completed" && report.status !== "partial") {
+  if (report.status !== "completed" && report.status !== "partial" && report.status !== "completed_with_failures") {
     console.log(`\n✗ ${report.status}: ${"message" in report ? report.message : ""}`)
     return
   }
@@ -53,10 +53,15 @@ function printReport(report: Awaited<ReturnType<typeof runInterestBackfill>>) {
   console.log(`\n=== ${report.status.toUpperCase()} ===`)
   console.log(`planned=${r.planned} started=${r.started} freshSkipped=${r.freshSkipped} succeeded=${r.succeeded} failed=${r.failed} processing=${r.processing} blocked=${r.blocked} changedDuringRun=${r.changedDuringRun}`)
   console.log(`stoppedByCost=${r.stoppedByCost} stoppedByPlanChange=${r.stoppedByPlanChange} stoppedByCancel=${r.stoppedByCancel}`)
-  console.log(`profileUpdated=${r.profileUpdated} recalcExecuted=${r.recalcExecuted}`)
+  console.log(`profileUpdated=${r.profileUpdated} recalcExecuted=${r.recalcExecuted} recalcFailed=${r.recalcFailed}`)
   console.log(`custo: estimadoLikely=$${r.estimatedLikelyUsd.toFixed(3)} estimadoUpper=$${r.estimatedUpperBoundUsd.toFixed(3)} real=$${r.actualUsd.toFixed(4)}`)
   console.log(`duração: ${(r.durationMs / 1000).toFixed(1)}s`)
   if (r.lastSanitizedError) console.log(`último erro (sanitizado): ${r.lastSanitizedError}`)
+  if (report.status === "completed_with_failures") {
+    console.log(`\n⚠ Etapas PAGAS concluídas (perfil + previsões, sem custo extra), mas o recálculo`)
+    console.log(`  global (GRATUITO) falhou. Estado parcial preservado. Retome SÓ o recálculo com:`)
+    console.log(`    npm run recalc:scores`)
+  }
 }
 
 // ---- Main ------------------------------------------------------------------
@@ -96,7 +101,9 @@ async function main() {
     shouldStop: () => cancel,
   })
   printReport(result)
-  if (result.status === "plan_changed" || result.status === "blocked_cost_confirmation" || result.status === "blocked_manual" || result.status === "profile_failed") {
+  // Exit 0 SOMENTE no sucesso completo. Qualquer falha/parcial (inclusive recalc
+  // de pós-processamento) ⇒ exit != 0.
+  if (result.status !== "completed") {
     process.exit(1)
   }
 }

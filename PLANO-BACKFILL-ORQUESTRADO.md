@@ -925,3 +925,62 @@ npm run backfill:interest -- --execute --work-id=<…> --plan-signature=<hash> -
 2 IDs explícitos (upper $0.61); ordem dos IDs **não** altera a `planSignature`. Snapshot
 do banco **idêntico** antes/depois: `work_processing_jobs` 0→0, `taste_profile` 6→6 (v6
 mesmo hash), `synopsis_quality_predictions` 1026→1026, `recalc_pending` false→false.
+
+---
+
+# 31. Etapa 2B.2 — recálculo headless-safe + recuperação do piloto
+
+> Implementada e validada (2026-06-19). **Custo US$ 0** — nenhuma chamada paga/LLM, nenhum
+> perfil/previsão alterado. Resolve a pendência do piloto 2B.1 (recalc global falhava na CLI).
+
+### Causa-raiz (🟦)
+O piloto 2B.1 deixou `recalc_pending=true` + job `recalculate_scores` **failed** porque
+`recalculateAll` não roda fora do **request scope do Next**:
+`recalculateAll` → `getDeclaredTagPreferences` → **`getAllTags`** (`unstable_cache`,
+[tags.ts](server/queries/tags.ts)). Headless (CLI/tsx) ⇒ `Invariant: incrementalCache missing
+in unstable_cache`. Além disso, o fim do `recalculateAll` chama `revalidatePath`/`revalidateTag`
+([calculations.ts](server/actions/calculations.ts)), que também exigem request scope (`static
+generation store missing`, confirmado por probe). Era o **único** read cacheado na cadeia do
+recalc; o resto é TS puro + queries diretas (Ridge, calibração, escrita de `calculated_scores`).
+
+### Solução (🟦) — separar leitura real do wrapper cacheado + contexto explícito
+- **[tags.ts](server/queries/tags.ts):** `getAllTagsUncached()` (lógica única de consulta) +
+  `getAllTags = unstable_cache(getAllTagsUncached, …)`. Sem duplicação; mesmo resultado.
+- **[tag-preferences.ts](server/queries/tag-preferences.ts):** `getDeclaredTagPreferences(_, { headless })`
+  escolhe `getAllTagsUncached` (headless) vs `getAllTags` (Next).
+- **[calculations.ts](server/actions/calculations.ts):** `recalculateAll(ctx: RecalculateExecutionContext = "next-runtime")`;
+  `headless` ⇒ tags uncached + **pula `revalidate*`** (o cache do app revalida no próximo
+  page-load). Mesmo núcleo matemático e mesmas escritas funcionais.
+- **[recalc-queue.ts](server/actions/recalc-queue.ts):** `recalcDeps(force, ctx)`; novo
+  `recalculateScoresHeadless()` (ctx="headless"). `recalculateScoresNow`/`IfPending` seguem next-runtime.
+- **Escolha EXPLÍCITA** (sem `try unstable_cache → catch → uncached`): a CLI seleciona o
+  caminho headless; Server Actions/páginas/gatilhos preservam o cacheado.
+
+### Semântica de resultado do executor (🟦)
+`runInterestBackfill` antes retornava `completed` mesmo com recalc obrigatório falho. Agora:
+recalc pós-regeneração que **não** conclui ⇒ status **`completed_with_failures`** (etapas pagas
+preservadas, sem retry pago, resume gratuito disponível); `report.recalcFailed`. A CLI imprime
+o resumo parcial (não "COMPLETED") e **sai com código ≠ 0**; exit 0 só no sucesso completo.
+
+### Ferramenta de recuperação (🟦)
+`npm run recalc:scores` ([scripts/recalculate-scores.ts](scripts/recalculate-scores.ts)):
+casca fina sobre `recalculateScoresHeadless` (reusa `ensureRecalculateScores`); fresh ⇒ sai
+sem job; pending/failed ⇒ retoma (mesma dedup key, reusa o job failed), custo 0, sem LLM.
+
+### Recuperação real (🟩)
+`recalculated=734` · `recalc_pending` **true→false** · recalc job **failed→succeeded**
+(attempts 1→2, reusado) · `calculated_scores` 737 linhas atualizadas (`calculated_at`
+2026-06-19T03:07:51, `personal_fit` vs v7) · **dados pagos inalterados** (taste_profile 7,
+predictions 1026, 12 com input_signature; zero IA).
+
+### Novo dry-run do lote restante (🟩, NÃO executado)
+perfil **fresh v7** · 12 fresh / **722 stale** · 722 previsões · **sem** ensure_taste_profile,
+**sem** recalc pré-previsões · likely $7.581 / **upper $11.371** ·
+planSignature `ef97f2bb853117f7782e13384adc0ba53c1522d47d00e01f93862b80835ae47b` (não aprovada).
+
+### Testes (🟦)
++6: semântica `completed_with_failures` / recalc obrigatório falho sem retry pago
+([interest-backfill.test.ts](tests/unit/orchestration/interest-backfill.test.ts)); loader por
+contexto headless vs cacheado ([recalc-headless.test.ts](tests/unit/orchestration/recalc-headless.test.ts)).
+Resume/dedup do recalc já cobertos em [taste-profile-recalc.test.ts](tests/unit/orchestration/taste-profile-recalc.test.ts).
+Suite: 582 passou / 24 skip · tsc limpo · lint exit 0 · build verde.

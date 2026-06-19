@@ -1,8 +1,8 @@
 # Piloto do backfill orquestrado — Potencial de Interesse (12 obras)
 
 ```
-STATUS: EXECUTADO — Etapa 2B.1 concluída em 2026-06-19 (12/12 sucesso, custo real $0.62 ≤ $0.80)
-        Pendência ÚNICA: recalc global não roda headless → recalc_pending=true, resumível no app.
+STATUS: EXECUTADO + RECUPERADO — 2B.1 (12/12, $0.62) + 2B.2 (recalc headless-safe; recalc_pending=false).
+        Backfill restante (~722) NÃO executado — aguarda aprovação (ver §RECUPERAÇÃO / novo dry-run).
 ```
 
 > Etapa 2B.0 — preparação **read-only** do piloto pago. **Nenhuma** execução, `--execute`,
@@ -273,9 +273,14 @@ work_processing_jobs 0 / taste_profile 6 / synopsis_quality_predictions 1026  (i
 - **Dry-run final:** assinatura `199586267183f591363a9e821c2f4b766054aabfe0eabe67ad363bc1548d9abc` (**idêntica à aprovada**), upper $0.769 ≤ $0.80, 12 elegíveis / 0 blocked / 0 missing.
 
 ## Execução
+> ⚠️ **Correção de semântica (2B.2):** a CLI **originalmente exibiu `COMPLETED`**, mas a
+> execução funcional ficou **PARCIAL** — o recálculo obrigatório (pós-regeneração do
+> perfil) falhou. O executor foi corrigido para retornar **`completed_with_failures`**
+> (exit ≠ 0) nesse caso; ver §RECUPERAÇÃO. O texto `COMPLETED` abaixo é o histórico real.
+
 | | resultado |
 |---|---|
-| status | **COMPLETED** |
+| status (CLI, histórico) | **COMPLETED** ⚠️ (na verdade parcial — recalc falhou; hoje seria `completed_with_failures`) |
 | planned / started / succeeded | 12 / 12 / **12** |
 | freshSkipped / failed / blocked / changedDuringRun | 0 / 0 / 0 / 0 |
 | stoppedByCost / PlanChange / Cancel | false / false / false |
@@ -338,3 +343,45 @@ Idêntico ao plano **exceto o recalc**: planejado "≤1 recalculate_scores"; exe
 4. Manter lotes controlados + teto explícito (não autorizar catálogo inteiro de uma vez sem reavaliar).
 
 **NO-GO** se: recalc pendente não for concluído; o dry-run do lote mudar de forma inesperada (ex.: perfil voltar a stale); custo upper exceder o teto aprovado; ou surgir job abandonado.
+
+---
+
+# RECUPERAÇÃO — Etapa 2B.2 (recalc headless-safe, GRATUITO)
+
+> Executado em **2026-06-19 ~03:07 UTC**. **Custo US$ 0** — nenhuma chamada paga/LLM,
+> nenhum perfil/previsão alterado. Detalhes técnicos em
+> [PLANO-BACKFILL-ORQUESTRADO.md](PLANO-BACKFILL-ORQUESTRADO.md) §31.
+
+**Causa-raiz (🟦):** `recalculateAll` → `getDeclaredTagPreferences` → **`getAllTags`** (`unstable_cache`).
+Fora do request scope do Next (CLI/tsx), `unstable_cache` lança `Invariant: incrementalCache
+missing`; o `revalidatePath`/`revalidateTag` no fim do recalc também lançariam (`static store
+missing`). Por isso o job recalc do piloto ficou `failed` e `recalc_pending=true`.
+
+**Solução (🟦):** caminho **headless-safe explícito** (sem heurística): `tags.ts` separa
+`getAllTagsUncached` (lógica única) do wrapper cacheado `getAllTags`; `getDeclaredTagPreferences(_, {headless})`
+escolhe o loader; `recalculateAll(ctx: "next-runtime" | "headless")` usa uncached e **pula
+`revalidate*`** quando headless; `recalc-queue` ganha `recalculateScoresHeadless`; o executor
+do backfill usa esse caminho. Mesmo núcleo matemático e mesmas escritas; runtime Next segue
+cacheado/invalidando.
+
+**Recuperação real (🟩):** `npm run recalc:scores` (retoma SÓ o recalc, gratuito):
+- estado antes: `recalc_pending=true`, recalc job `failed` (attempts=1), v7 current, 12 previsões fresh.
+- ação: **reutilizou o job failed** (mesma dedup key) → `recalculated=734`.
+- estado depois: **`recalc_pending=false`**, `recalc_last_edit_at=null`; recalc job **`succeeded`** (attempts=**2**, custo 0/0, last_error limpo, finished 03:07:53); `calculated_scores` 737 linhas com `calculated_at=2026-06-19T03:07:51` e `personal_fit` recalculado (perfil current=v7); **dados pagos inalterados** (taste_profile 7, predictions 1026, 12 com input_signature; zero novas chamadas IA).
+
+**Novo dry-run do lote restante (🟩, read-only, NÃO executado):**
+```
+perfil: fresh  (ação: none; versão funcional: 7)
+obras: total=734 | fresh=12 stale=722 ausente=0 bloqueadas=0
+previsões planejadas: 722  (recalc final: NÃO)   ← sem ensure_taste_profile, sem recalc pré-previsões
+custo: likely=$7.581  upperBound=$11.371
+planSignature: ef97f2bb853117f7782e13384adc0ba53c1522d47d00e01f93862b80835ae47b
+```
+(Assinatura **não** aprovada automaticamente — exige nova autorização.)
+
+**Recomendação GO/NO-GO do lote restante (~722):** 🟧 **GO condicional** — a pendência do
+piloto foi resolvida (recalc_pending=false), o caminho headless está corrigido e testado, e o
+lote restante agora é **só previsões** (perfil v7 fresh, sem regen, sem recalc pré). Antes de
+executar: nova autorização explícita do **upper $11.371** (teto sugerido ~$12), novo dry-run +
+nova assinatura imediatamente antes, e lotes controlados (não o catálogo inteiro sem reavaliar).
+**NO-GO** se o perfil voltar a stale, o dry-run divergir, ou o teto não cobrir o upper.

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { recalculateAll } from "@/server/actions/calculations"
+import { recalculateAll, type RecalculateExecutionContext } from "@/server/actions/calculations"
 import { ensureRecalculateScores } from "@/lib/orchestration/integrations/recalculate-scores"
 
 // Janela de debounce do recálculo automático: só dispara sozinho depois de 1h
@@ -43,8 +43,16 @@ export async function markRecalcPending(context: string): Promise<void> {
   }
 }
 
-/** Deps reais p/ a orquestração do recálculo (TS puro determinístico + pendente). */
-const recalcDeps = (force: boolean) => ({ force, recalc: recalculateAll, readPending: getRecalcPendingState })
+/**
+ * Deps reais p/ a orquestração do recálculo (TS puro determinístico + pendente).
+ * `ctx` seleciona o caminho de execução do `recalculateAll` (next-runtime cacheado
+ * vs headless uncached) — escolha EXPLÍCITA, sem heurística de ambiente.
+ */
+const recalcDeps = (force: boolean, ctx: RecalculateExecutionContext = "next-runtime") => ({
+  force,
+  recalc: () => recalculateAll(ctx),
+  readPending: getRecalcPendingState,
+})
 
 /**
  * Recálculo orquestrado AGUARDADO (force=true): create / "Recalcular agora". Job
@@ -63,6 +71,16 @@ export async function recalculateScoresNow() {
  */
 export async function recalculateScoresIfPending() {
   return ensureRecalculateScores(recalcDeps(false))
+}
+
+/**
+ * Recálculo orquestrado HEADLESS-SAFE (CLI/workers): mesmo contrato global/free/
+ * coalescido, mas com `recalculateAll("headless")` (leituras uncached, sem
+ * `revalidate*`). Só roda se houver pendência (force=false) — usado pelo backfill
+ * e pela CLI de recuperação `npm run recalc:scores`. NÃO chama LLM, custo zero.
+ */
+export async function recalculateScoresHeadless() {
+  return ensureRecalculateScores(recalcDeps(false, "headless"))
 }
 
 /**
