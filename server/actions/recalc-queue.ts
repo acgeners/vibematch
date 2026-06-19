@@ -5,7 +5,6 @@ import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { recalculateAll } from "@/server/actions/calculations"
 import { ensureRecalculateScores } from "@/lib/orchestration/integrations/recalculate-scores"
-import type { RecalcOutcome } from "@/lib/orchestration/integrations/recalculate-scores"
 
 // Janela de debounce do recálculo automático: só dispara sozinho depois de 1h
 // SEM novas edições de nota. Uma avaliação IA de atributos já leva >60s, então
@@ -51,8 +50,24 @@ const recalcDeps = (force: boolean) => ({ force, recalc: recalculateAll, readPen
  * Recálculo orquestrado AGUARDADO (force=true): create / "Recalcular agora". Job
  * global durável, free, deduplicado/coalescido. Devolve estado tipado.
  */
-export async function recalculateScoresNow(): Promise<RecalcOutcome> {
+export async function recalculateScoresNow() {
   return ensureRecalculateScores(recalcDeps(true))
+}
+
+/**
+ * Recálculo AGUARDADO que devolve o RESULTADO COMPLETO do recalc (recalculated +
+ * calibration etc.) — para callers que precisam dele (settings/calibração/pós-leitura).
+ * Roteia pela orquestração (NUNCA chama recalculateAll direto). Lança em falha ou
+ * no caso raro de waiter sem resultado (concorrência cross-processo, ~impossível em
+ * single-user) — preservando a semântica "ou recalcula e devolve, ou erra".
+ */
+export async function recalculateScoresNowResult() {
+  const out = await recalculateScoresNow()
+  if (out.status === "failed") throw new Error(out.error)
+  if (out.status !== "succeeded" || out.result == null) {
+    throw new Error("Recálculo em andamento — tente novamente em instantes.")
+  }
+  return out.result
 }
 
 /**
@@ -114,7 +129,7 @@ export async function maybeTriggerStaleRecalc(): Promise<RecalcPendingState> {
  * flag pendente (recalculateAll zera ao persistir o formula_config). recalculateAll
  * já revalida /ranking, /titles, /settings e / por dentro. Devolve estado tipado.
  */
-export async function triggerRecalcNow(): Promise<RecalcOutcome> {
+export async function triggerRecalcNow() {
   const result = await recalculateScoresNow()
   revalidatePath("/ranking")
   return result

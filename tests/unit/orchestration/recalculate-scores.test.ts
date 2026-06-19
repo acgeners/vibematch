@@ -4,6 +4,7 @@ import {
   recalcDedupKey,
   type RecalcPendingSnapshot,
 } from "@/lib/orchestration/integrations/recalculate-scores"
+import { isProductionBuildPhase } from "@/lib/orchestration/integrations/build-phase"
 import { InMemoryJobStore } from "@/lib/orchestration/jobs"
 import { estimateStepUsd } from "@/lib/orchestration/cost"
 import { __resetSingleFlight } from "@/lib/ai-cache/single-flight"
@@ -111,8 +112,62 @@ describe("ensureRecalculateScores", () => {
     expect(js.records.length).toBe(2)
   })
 
-  it("9) regressão: a contagem do recalc é repassada SEM modificação", async () => {
-    const out = await ensureRecalculateScores({ recalc: async () => ({ recalculated: 123 }), readPending: () => Promise.resolve(pending()), jobStore: new InMemoryJobStore() })
+  it("9) regressão: a contagem do recalc é repassada SEM modificação + result completo", async () => {
+    const fullResult = { recalculated: 123, calibration: { foo: 1 } }
+    const out = await ensureRecalculateScores({ recalc: async () => fullResult, readPending: () => Promise.resolve(pending()), jobStore: new InMemoryJobStore() })
     expect(out.status === "succeeded" && out.recalculated).toBe(123)
+    if (out.status === "succeeded") expect(out.result).toBe(fullResult) // result completo repassado
+  })
+})
+
+describe("guard de build (next build)", () => {
+  const ORIG = process.env.NEXT_PHASE
+  afterEach(() => {
+    if (ORIG === undefined) delete process.env.NEXT_PHASE
+    else process.env.NEXT_PHASE = ORIG
+    __resetSingleFlight()
+  })
+
+  it("isProductionBuildPhase reflete NEXT_PHASE", () => {
+    process.env.NEXT_PHASE = "phase-production-build"
+    expect(isProductionBuildPhase()).toBe(true)
+    delete process.env.NEXT_PHASE
+    expect(isProductionBuildPhase()).toBe(false)
+  })
+
+  it("6/7/8) durante o build, pendente NÃO executa recálculo nem cria job (recalc_pending intacto)", async () => {
+    process.env.NEXT_PHASE = "phase-production-build"
+    const st = { calls: 0 }
+    const js = new InMemoryJobStore()
+    let readCalls = 0
+    const out = await ensureRecalculateScores({
+      recalc: recalcFn(st),
+      readPending: async () => {
+        readCalls++
+        return pending()
+      },
+      jobStore: js,
+    })
+    expect(out.status).toBe("fresh")
+    expect(st.calls).toBe(0) // não recalcula
+    expect(js.records.length).toBe(0) // não cria job
+    expect(readCalls).toBe(0) // nem lê o estado (curto-circuita antes)
+  })
+
+  it("9-runtime) sem NEXT_PHASE + pendente ⇒ executa normalmente", async () => {
+    delete process.env.NEXT_PHASE
+    const st = { calls: 0 }
+    const out = await ensureRecalculateScores({ recalc: recalcFn(st), readPending: () => Promise.resolve(pending()), jobStore: new InMemoryJobStore() })
+    expect(out.status).toBe("succeeded")
+    expect(st.calls).toBe(1)
+  })
+
+  it("10) runtime + fresh ⇒ sem job", async () => {
+    delete process.env.NEXT_PHASE
+    const st = { calls: 0 }
+    const js = new InMemoryJobStore()
+    const out = await ensureRecalculateScores({ recalc: recalcFn(st), readPending: notPending, jobStore: js })
+    expect(out.status).toBe("fresh")
+    expect(js.records.length).toBe(0)
   })
 })

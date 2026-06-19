@@ -84,6 +84,23 @@ describe.skipIf(!ENABLED)("SMOKE — recalculate_scores × fila durável", () =>
     expect(String(row?.dedup_key)).toBe(`recalculate_scores:${GEN}`)
   })
 
+  it("guard de build: NEXT_PHASE=phase-production-build ⇒ fresh, nenhum job (mesmo pendente)", async () => {
+    __resetSingleFlight()
+    const orig = process.env.NEXT_PHASE
+    process.env.NEXT_PHASE = "phase-production-build"
+    try {
+      const before = (await sb.from("work_processing_jobs").select("*", { count: "exact", head: true }).eq("action", "recalculate_scores").gte("created_at", startedAt)).count ?? 0
+      const out = await ensureRecalculateScores({ recalc: noopRecalc, readPending: pendingMock, jobStore: store })
+      const after = (await sb.from("work_processing_jobs").select("*", { count: "exact", head: true }).eq("action", "recalculate_scores").gte("created_at", startedAt)).count ?? 0
+      console.log(`[SMOKE-RC] build-guard: status=${out.status} jobs_antes=${before} jobs_depois=${after}`)
+      expect(out.status).toBe("fresh")
+      expect(after).toBe(before) // nenhum job novo durante o "build"
+    } finally {
+      if (orig === undefined) delete process.env.NEXT_PHASE
+      else process.env.NEXT_PHASE = orig
+    }
+  })
+
   it("duas concorrentes (mesma geração) ⇒ uma execução", async () => {
     __resetSingleFlight()
     recalcCalls = 0

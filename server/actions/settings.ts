@@ -4,7 +4,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { recalculateAll } from "./calculations"
+import { recalculateScoresNowResult } from "./recalc-queue"
 import {
   computeCalibration,
   computeBucketBreakdown,
@@ -34,7 +34,7 @@ export async function setStackerEnabled(enabled: boolean) {
     .eq("id", config.id)
   if (error) throw new Error(error.message)
 
-  const result = await recalculateAll()
+  const result = await recalculateScoresNowResult()
   revalidatePath("/settings")
   revalidatePath("/ranking")
   revalidatePath("/titles")
@@ -62,7 +62,7 @@ export async function setScoreWeightsAuto(enabled: boolean) {
     .eq("id", config.id)
   if (error) throw new Error(error.message)
 
-  const result = await recalculateAll()
+  const result = await recalculateScoresNowResult()
   revalidatePath("/settings")
   revalidatePath("/preferencias")
   revalidatePath("/ranking")
@@ -107,7 +107,7 @@ export async function updateScoreWeights(updates: ScoreWeightUpdate[]) {
       .eq("formula_version", currentVersion)
   }
 
-  const result = await recalculateAll()
+  const result = await recalculateScoresNowResult()
 
   revalidatePath("/settings")
   revalidatePath("/ranking")
@@ -475,7 +475,7 @@ export async function getCalibrationSnapshot() {
  * Força recalcular tudo (e re-calibrar formula_config automaticamente).
  */
 export async function recalculateNow() {
-  const result = await recalculateAll()
+  const result = await recalculateScoresNowResult()
   revalidatePath("/settings")
   revalidatePath("/titles")
   revalidatePath("/ranking")

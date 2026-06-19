@@ -1081,12 +1081,3 @@ export async function recalculateAll() {
   }
 }
 
-/**
- * Recalcula de forma incremental — wrapper compatível com a API antiga.
- * Como Nota.Pr depende de Ridge treinado em todos, recalcular um único
- * título sem retreinar não faz sentido. Reaproveitamos recalculateAll().
- */
-export async function recalculateWork(workId: string) {
-  void workId
-  return recalculateAll()
-}

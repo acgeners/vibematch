@@ -15,7 +15,7 @@ import {
   loadLastRun,
   loadWorksForAudit,
 } from "@/server/queries/calibration"
-import { recalculateAll, recalculateWork } from "@/server/actions/calculations"
+import { recalculateScoresNow, recalculateScoresNowResult } from "@/server/actions/recalc-queue"
 import { generateTasteProfileAction } from "@/server/actions/recommendations"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import type {
@@ -230,7 +230,7 @@ export async function runCalibrationAuditAction(): Promise<{
     if (nAutoApplied > 0) {
       after(async () => {
         try {
-          await recalculateAll()
+          await recalculateScoresNow()
         } catch (err) {
           console.error("[calibration] recalculateAll falhou:", err)
         }
@@ -410,7 +410,7 @@ export async function acceptSuggestionAction(id: string): Promise<{ ok: boolean;
   if (!res.ok) return { ok: false, error: res.error }
   after(async () => {
     try {
-      await recalculateWork(res.workId)
+      await recalculateScoresNow()
     } catch (err) {
       console.error("[calibration] recalculateWork falhou:", err)
     }
@@ -430,7 +430,7 @@ export async function editSuggestionAction(
   if (!res.ok) return { ok: false, error: res.error }
   after(async () => {
     try {
-      await recalculateWork(res.workId)
+      await recalculateScoresNow()
     } catch (err) {
       console.error("[calibration] recalculateWork falhou:", err)
     }
@@ -486,7 +486,7 @@ export async function revertSuggestionAction(id: string): Promise<{ ok: boolean;
 
   after(async () => {
     try {
-      await recalculateWork(sug.work_id)
+      await recalculateScoresNow()
     } catch (err) {
       console.error("[calibration] recalculateWork falhou:", err)
     }
@@ -532,13 +532,13 @@ export async function bulkAcceptAction(args: {
   }
 
   if (workIds.size > 0) {
+    // Recálculo é GLOBAL e idempotente ⇒ uma única chamada cobre todas as obras do
+    // bulk (antes rodava N recalcs idênticos). Background, deduplicado.
     after(async () => {
-      for (const id of workIds) {
-        try {
-          await recalculateWork(id)
-        } catch (err) {
-          console.error("[calibration] recalculateWork em bulk falhou:", err)
-        }
+      try {
+        await recalculateScoresNow()
+      } catch (err) {
+        console.error("[calibration] recálculo em bulk falhou:", err)
       }
     })
   }
@@ -591,7 +591,7 @@ export async function regenerateCalibratedArtifacts(): Promise<
   }
 
   // 3. Recalcula tudo com o bias atual.
-  const recalc = await recalculateAll()
+  const recalc = await recalculateScoresNowResult()
 
   revalidatePath("/settings/calibration")
   revalidatePath("/ranking")

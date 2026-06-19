@@ -9,7 +9,7 @@ import {
   type PostReadingWeightInferenceInput,
   type PostReadingWeightInferenceResult,
 } from "@/lib/ml/post-reading-weight-inference"
-import { recalculateAll } from "@/server/actions/calculations"
+import { recalculateScoresNowResult } from "@/server/actions/recalc-queue"
 
 /**
  * Calcula sugestões de pesos pós-leitura a partir do histórico.
@@ -124,6 +124,6 @@ export async function applyPostReadingWeights(
     if (firstError?.error) throw new Error(firstError.error.message)
   }
 
-  const recalc = await recalculateAll()
+  const recalc = await recalculateScoresNowResult()
   return { recalculated: recalc.recalculated, updatedManualScores: updates.length }
 }

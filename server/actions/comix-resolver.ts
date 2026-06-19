@@ -297,8 +297,8 @@ export async function resolveComixHidForWork(workId: string): Promise<void> {
     // fonte secundária e aparecem no próximo refresh da página (watcher).
     const wrote = await enrichComixDataForWork(workId)
     if (wrote) {
-      const { recalculateWork } = await import("@/server/actions/calculations")
-      await recalculateWork(workId)
+      const { recalculateScoresNow } = await import("@/server/actions/recalc-queue")
+      await recalculateScoresNow()
     }
   } catch (err) {
     console.error("[resolveComixHidForWork] falha:", err instanceof Error ? err.message : err)
@@ -321,8 +321,8 @@ export async function resolveComixHidsPending(workIds?: string[]): Promise<void>
     for (const id of workIds ?? []) {
       const wrote = await enrichComixDataForWork(id)
       if (wrote) {
-        const { recalculateWork } = await import("@/server/actions/calculations")
-        await recalculateWork(id)
+        const { recalculateScoresNow } = await import("@/server/actions/recalc-queue")
+        await recalculateScoresNow()
       }
     }
   } catch (err) {
