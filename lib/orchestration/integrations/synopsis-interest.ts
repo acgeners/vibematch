@@ -424,7 +424,7 @@ export function __resetInputSignatureProbe(): void {
   inputSigColumn = null
 }
 
-function bestRawSynopsis(rows: Array<{ text?: string | null; is_primary?: boolean | null; position?: number | null }> | null | undefined): string | null {
+export function bestRawSynopsis(rows: Array<{ text?: string | null; is_primary?: boolean | null; position?: number | null }> | null | undefined): string | null {
   const primary = pickPrimarySynopsis(rows)
   if (!primary) return null
   const blocks = splitSynopsesFromText(primary)

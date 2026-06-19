@@ -746,3 +746,95 @@ itens bloqueados (manual)
 jobs restantes (queued/running/failed)
 decisões pendentes da usuária
 ```
+
+---
+
+# 29. Etapa 2A — IMPLEMENTADA (executor seguro: perfil + Potencial de Interesse)
+
+> Status: **implementada e validada** (2026-06-18). **Nenhum backfill real foi
+> executado** — sem chamada paga, sem LLM, sem previsão real, sem regeneração de
+> perfil. Validada com mocks/no-op + `InMemoryJobStore` + dry-run read-only no banco.
+> NÃO altera os fatos históricos do inventário (§1–§28). Escopo: `ensure_taste_profile`
+> + `predict_interest_potential` + `recalculate_scores` final (quando aplicável).
+> **Fora**: digest/summary/acquire_reviews/canonical/tags/ai_eval/alignment/deep_dive/
+> ranking/Plano 3 (não iniciados).
+
+### Arquivos
+- [lib/orchestration/backfill/interest-backfill.ts](lib/orchestration/backfill/interest-backfill.ts) — domínio (planner + assinatura + executor + gateway bulk read-only). Reusa `ensureTasteProfile`/`ensurePredictInterest`/`ensureRecalculateScores`/`estimateStep`/jobs — sem duplicar readiness/custo.
+- [lib/orchestration/backfill/cli-args.ts](lib/orchestration/backfill/cli-args.ts) — parsing + validação Zod (puro).
+- [scripts/backfill-work-data.ts](scripts/backfill-work-data.ts) — CLI híbrida (casca fina).
+- [tests/unit/orchestration/interest-backfill.test.ts](tests/unit/orchestration/interest-backfill.test.ts) — 32 testes (planejamento/confirmação/execução/build).
+- `package.json` — script `backfill:interest`.
+
+### Comando de dry-run (PADRÃO; read-only)
+```
+npm run backfill:interest
+```
+Saída validada no banco real (2026-06-18): perfil **stale** → ação `regenerate`, 734
+elegíveis (fresh 186 / stale 548 / ausente 0 / bloqueadas 0), 734 previsões planejadas,
+recalc final **sim**, upper **$12.141**, `planSignature` + comando de execução impressos.
+**Confirma empiricamente** a inferência da §2.6/§16 (perfil v6 estava de fato stale).
+
+### Política de perfil (§decisão de produto, objetiva — não pela data)
+`classifyTasteProfileReadiness` compara `currentLibraryInputHash` vs `currentProfile.input_hash`:
+- **fresh** (hashes iguais + current + não-stub) → plano só com stale/ausentes.
+- **stale** (hash diverge) → `regenerate` + prever **todas** as elegíveis + recalc final.
+  **Não** prevê parcialmente contra perfil stale (sem bypass silencioso).
+- **blocked_manual** (<10 rotuladas) → nenhuma previsão; sem stub artificial.
+
+### Assinatura do plano (`computeInterestPlanSignature`, sha256)
+Determinística sobre forma canônica (listas ordenadas; **sem timestamp**, sem ordem de
+query): `scope (workIds ordenados)` · `profilePolicy` · `profileState` ·
+`libraryInputHash` · `profileSignature` (ou `PENDING_PROFILE_REGEN`) · versão funcional
+do perfil · `model/promptVersion/schemaVersion` · `costVersion` (pricing tag) · `items`
+(workId + assinatura de entrada esperada + reason, ordenados) · `plannedActions` ·
+`likelyUsd`/`upperBoundUsd` (arredondados). Mudança em obra/perfil/modelo/prompt/schema
+**muda** a assinatura; ordem do banco **não**; ordem-só-de-tags **não** (a assinatura de
+entrada ordena tags). NUNCA contém sinopse/perfil/reviews/prompt íntegros.
+
+### Confirmação e gate de custo agregado
+`runInterestBackfill` exige `planSignature` + `maxCostUsd`; (1) **re-planeja** integralmente;
+(2) **aborta** se a assinatura divergir ("O catálogo ou o perfil mudou desde o dry-run.
+Gere um novo plano e confirme novamente."); (3) **aborta** se `upperBound > maxCostUsd`.
+A pré-autorização vale só p/ a assinatura/itens/versões/teto aprovados. O lote é metered:
+o micro-threshold individual ($0.02) **não** o autoriza (teste 20).
+
+### Executor / resume / cancelamento
+- Perfil 1× (dedup por `input_hash`); previsões com **concorrência limitada** (default 3,
+  máx 5); skip-fresh sem custo; dedup durável + single-flight (2 processos ⇒ 1 chamada);
+  **soft-cap** (`acc + upperPróximo > maxCostUsd` ⇒ não inicia) — custo desconhecido nunca
+  é zero; recalc global free/coalescido/`work_id=null` **1×** só quando o perfil foi
+  regenerado (personal_fit derivado fica stale; ver abaixo).
+- **Resume** derivado do estado (readiness + jobs + assinaturas): re-dry-run remove fresh,
+  reusa `failed` via claim durável (só com `--retry-failed`), reporta `processing`.
+- **Cancelamento cooperativo** (SIGINT/SIGTERM): para de iniciar novos itens; em-voo
+  terminam; estado parcial; resume posterior. **Sem** cancelamento de chamadas já iniciadas.
+- **Perfil muda durante a execução** → para de iniciar novos itens (validação opcional de
+  assinatura entre itens); a proteção dura contra escrita inválida é o re-check por item
+  já existente em `ensurePredictInterest` (output de assinatura antiga é descartado).
+
+### Recalculate scores (verificado no código)
+`insertNewTasteProfile` ([taste-profile.ts:144](lib/ai-recommendation/taste-profile.ts#L144))
+faz `markAllProfilesAsStale` + `markSynopsisPredictionsStale` mas **NÃO** marca
+`recalc_pending` / `touch_recalc_pending`. Logo uma nova versão de perfil deixa
+`personal_fit` (derivado por `recalculateAll`) **stale** sem agendar recálculo. Integração
+mínima da Etapa 2A: o executor roda **exatamente um** `recalculate_scores` (global, free,
+coalescido, `work_id=null`, via `ensureRecalculateScores`/injetável) ao final **quando o
+perfil foi regenerado** — nunca por obra, sem tocar fórmulas. Coberto por testes 31/32.
+(O caminho pago standalone de perfil em [ensure-profile.ts](lib/ai-recommendation/ensure-profile.ts)
+segue sem marcar `recalc_pending` — observação pré-existente, fora do escopo 2A.)
+
+### Build / render
+`runInterestBackfill` curto-circuita sob `isProductionBuildPhase()` (teste 34/35); o módulo
+não tem efeito colateral por import (teste 33); o dry-run lê o banco mas não é importado por
+rota/componente. Só a CLI explícita inicia trabalho.
+
+### Limites conhecidos
+- **Jobs `running`/`queued` órfãos**: detectados e **avisados** no dry-run (idade ≥30min);
+  **sem reaper automático** (não muda status). Recuperação futura: inspecionar
+  `work_processing_jobs` e, comprovado o abandono, requeue manual do `dedup_key`.
+- **Validação de mudança de perfil mid-run** é opcional (dep injetável) p/ não custar N
+  leituras; a garantia primária é o re-check por item.
+- **Migration**: nenhuma criada/necessária — usa `work_processing_jobs` + `input_signature`
+  + hashes/versões existentes.
+- **Execução real do digest/summary/aquisição**: não iniciada (fora do escopo 2A).
