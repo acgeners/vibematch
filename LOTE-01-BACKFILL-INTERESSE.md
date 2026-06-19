@@ -1,7 +1,8 @@
 # Lote 01 — backfill de Potencial de Interesse (100 obras)
 
 ```
-STATUS: NÃO EXECUTADO — AGUARDANDO APROVAÇÃO DE CUSTO
+STATUS: EXECUTADO — Etapa 2C.2 concluída em 2026-06-19 (100/100 sucesso, custo real $0.7528 ≤ $1.60).
+        Cobertura: 112 modernas fresh / ~622 pendentes. Próximo lote NÃO iniciado (aguarda aprovação).
 ```
 
 > Etapa 2C.0 — preparação **read-only** do primeiro lote controlado (100 obras) após o
@@ -165,4 +166,64 @@ zero chamadas pagas · zero LLM · zero previsões/perfis alterados · zero jobs
 - **Correção aplicada:** helper `ceilUsdToCents` (lib/orchestration/cost.ts) arredonda o teto **sugerido** para cima ao centavo; a CLI passou a sugerir **$1,58** e a exibir o upper real com 4 casas.
 - **Teto mínimo técnico:** US$ **1,58**. **Teto proposto p/ aprovação:** US$ **1,60**.
 - **Plano inalterado:** `planSignature` segue `0711bed4729335d70cc56e704c5ef6d0a0393875211fd0e3efa5fba276f2802a`; os 100 IDs e o upper real não mudaram.
-- **Lote AINDA NÃO EXECUTADO** — aguardando aprovação de custo.
+
+---
+
+# RESULTADO DA EXECUÇÃO — Etapa 2C.2
+
+> Execução pago **autorizada e concluída** em **2026-06-19 ~03:5x UTC** (teto $1,60).
+> Comando único com `--execute`, 100 IDs, assinatura aprovada, `--concurrency=2`, sem `--retry-failed`.
+
+## Pré-execução (confirmado, 🟩)
+- Branch `feat/data-orchestration`; working tree limpo; código inalterado desde `57f4817`.
+- Perfil **v7** current (1 único), fresh, não-stub; `recalc_pending=false`; **0** jobs queued/running nas 3 ações.
+- 100 IDs (sha256 `aa37ac8dc4dce67f2c427328941d5c38dd17524a1ab1e599ebeaf1d8f52a4482`): 0 arquivadas, 0 missing, **0 viraram fresh**, **0 ∩ piloto**.
+- **Snapshot de segurança:** `.local-backups/interest-batch-01-before-2026-06-19T03-46-33-020Z.json` · 180.161 bytes · **sha256 `d7992f2f8508705957c65466bd6a18e36651eec49dec78990077620f7c5c1707`** · 139 linhas (100 v2 + 39 v1) p/ os 100 work_ids. (NÃO versionado.)
+- **Dry-run final:** assinatura `0711bed4…` (idêntica à aprovada), upper $1.5750 ≤ $1.60, 100 elegíveis / 0 blocked / 0 missing.
+
+## Execução
+| | resultado |
+|---|---|
+| comando | `npm run backfill:interest -- --execute --work-id=<100> --plan-signature=0711bed4… --max-cost-usd=1.60 --concurrency=2` |
+| status | **COMPLETED** (exit 0) |
+| planned / started / **succeeded** | 100 / 100 / **100** |
+| failed / blocked / processing / changedDuringRun | 0 / 0 / 0 / 0 |
+| stoppedByCost / PlanChange / Cancel | false / false / false |
+| profileUpdated / recalcExecuted / recalcFailed | **false / false / false** |
+| duração | **513.3 s** (~8,5 min) |
+
+## Custos (🟩)
+| Operação | Qtd | Custo real |
+|---|--:|--:|
+| predict_interest_potential | 100 | **$0.7528** |
+| ensure_taste_profile | 0 | $0 |
+| recalculate_scores | 0 | $0 |
+| **Total** | 100 | **$0.7528** |
+
+Real **$0.7528 ≤ teto $1.60** ✅ (abaixo de likely $1.050 e de upper $1.575). Por previsão: **$0.0075** (piloto $0.00994; histórico $0.0097 — este lote saiu mais barato). **Nenhuma** geração de perfil, **nenhum** recálculo, nenhuma outra operação paga.
+
+## Estado posterior (🟩, read-only)
+- **As 100 (v2):** todas `stale=false` · **`input_signature` preenchida** · `taste_profile_hash` = assinatura v7 (`23eb13f0…`, 100/100) · `taste_profile_version=7` · model `claude-sonnet-4-6`. Sem duplicação (`total=1026`, upsert in-place).
+- **Escopo:** **apenas 112** obras no catálogo têm `input_signature` (12 piloto + 100 lote) ⇒ **nenhuma obra fora das 100** recebeu previsão; **nenhuma das 12 anteriores reprocessada**.
+- **Cobertura:** modernas fresh `12 → 112` · `input_signature` `12 → 112` · `stale=true` `1014 → 914` · `stale=false` `12 → 112` · obras pendentes `~722 → ~622` · total de linhas **1026** (inalterado).
+- **Perfil/recalc:** taste_profile **7** versões, current **v7** (sem novo perfil) · **`recalc_pending=false`** · **nenhum** novo job `recalculate_scores`.
+- **Jobs (114):** `predict_interest_potential/succeeded` **112** (12+100) · `ensure_taste_profile/succeeded` 1 · `recalculate_scores/succeeded` 1. Nenhum queued/running/failed.
+
+## Verificação amostral funcional (🟩)
+Amostra (níveis ♥♥/♥♥♥/♥♥♥♥, com/sem reviews, tags variadas): todos **nível válido**, **justificativa presente** (467–728 chars, sem truncamento), confiança 0.72–0.93, **assinatura moderna + v7**, model sonnet, sem erro. (Níveis podem diferir do estado pré-lote — previsão re-rodada vs o perfil v7 atual; esperado.)
+
+## Diferença planejado × executado
+**Idêntico ao plano.** 100 planejadas = 100 succeeded; 0 ensure_taste_profile; 0 recalculate_scores (perfil fresh ⇒ `profileUpdated=false` ⇒ etapa de recalc pulada — previsões não são entrada do `recalculateAll`); custo real **abaixo** do likely. Nenhum retry, nenhum bloqueio.
+
+## Banco — escritas realizadas
+- **100 upserts** em `synopsis_quality_predictions` (linhas v2 das 100 obras, in-place; total permanece 1026; `input_signature`/`taste_profile_hash`/`stale=false` atualizados vs v7).
+- **+100 jobs** `predict_interest_potential/succeeded` em `work_processing_jobs`.
+- **Nenhuma** escrita em `taste_profile`, `calculated_scores`, `formula_config` (recalc_pending inalterado). Nenhuma migration.
+
+## Próximo lote (recomendação — NÃO iniciado)
+🟧 O lote correu **limpo** (100/100, 0 falhas, $0.0075/previsão, ~5s/previsão a conc.2, 513s, dedup/escopo/assinatura OK). Restam **~622** pendentes.
+- **Tamanho recomendado: 200 obras** (2× este lote) — bounded, est. real ~$1.5 / upper ~$3.15 (200 × $0.01575), ~17 min a conc.2. Conservador e ainda auditável.
+- Alternativa: 622-em-um lote único é tecnicamente viável (upper ~$9.8) **mas** menos auditável — preferir steps de 200.
+- **Antes do próximo:** novo manifesto (IDs explícitos via `--limit`/seleção), novo dry-run + nova assinatura, teto = `ceilUsdToCents(upper)` (mínimo) ou margem, conc.2, sem `--retry-failed`. **Aguardar nova aprovação** — não preparar comando pago automaticamente.
+
+**GO/NO-GO próximo lote:** 🟧 **GO técnico** para PREPARAR o Lote 02 (200 obras) read-only; execução paga só com nova autorização explícita.
