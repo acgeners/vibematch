@@ -503,3 +503,89 @@ zero chamadas pagas · zero LLM · zero perfis criados · zero previsões criada
 zero digests criados/alterados · zero jobs criados · zero recálculos · zero migrations · zero escrita
 Acesso: somente SELECT (2 scripts temporários, já removidos).
 ```
+
+---
+
+## 23. Matriz completa de rastreabilidade das auditorias (addendum 2026-06-19, Fase B2.0)
+
+> Garante que **nenhum** achado das duas auditorias se perca na transição entre planos.
+> Estados: `completed · partial · planned · blocked · deferred · not_applicable · superseded`.
+> "Bloqueia agora?" = bloqueia o **experimento do Plano 3** (≠ "não é importante"). F1 **não**
+> bloqueia o experimento mas **bloqueia o deploy**.
+
+### 23.1 Achados do [AUDIT_REPORT.md](AUDIT_REPORT.md)
+
+| ID | Achado | Estado | Evidência | Fase responsável | Bloqueia agora? | Critério de conclusão | Próxima ação |
+|---|---|---|---|---|:--:|---|---|
+| F1 | auth + rate limit (service-role exposto) | planned | ~30 server actions sem auth (AUDIT §12) | pré-deploy | não · **SIM p/ deploy** | gate auth global + rate limit nos endpoints IA | implementar antes de expor (não nesta fase) |
+| F2 | falha de capa na avaliação IA | completed | base64 prefetch (AUDIT §1B/F2) | pré-Plano 3 | não | — | — (feito) |
+| F3 | falsa precisão / tiers | partial | `tier_band_width` mig 104; largura definitiva a validar | decisão de produto | não | validar largura (fixa×percentil×cluster) sobre dado prospectivo | validar após F9 |
+| F4 | métrica in-sample × OOF | completed | `selectPrimaryModelMetric` (AUDIT §1B/F4) | pré-Plano 3 | não | — | — (feito) |
+| F5 | Ridge × calc sem ganho | deferred | IC inclui 0 (§7.2); shadow-ranking (branch `feat/shadow-ranking`, mig 106) | hardening pós-Plano 3 | não | head-to-head OOF limpo; senão simplificar p/ calc | rodar shadow ranking / decidir |
+| F6 | alignment (Veredito IA) sem ganho | deferred | sem lift no subset (§7.3); shadow-ranking cobre | decisão de produto | não | medir lift ou aposentar | decidir após shadow ranking |
+| F7 | personal_fit redundante | deferred | ΔSpearman IC inclui 0; sd 0,058 | hardening pós-Plano 3 | não | percentil/robusto OU sinal ortogonal | repensar pós-contrato |
+| F8 | dois sistemas de mood | deferred | preset × drawer (§10) | decisão de produto | não | unificar semântica | decidir |
+| F9 | validação prospectiva | partial | `prediction_snapshots` mig 105 aplicada; falta dado | operação recorrente | não | acumular recomendações+notas; painel sai do vazio | ligar hooks de evento + acumular |
+| F10 | `synopsis_quality_predict` em Sonnet (custo/modelo) | **partial (no Plano 3)** | $10,3 / 14%; o experimento testa Sonnet × Haiku × D1/D2 | **Plano 3** | não (é o experimento) | experimento responde modelo/custo (§10 do experimento) | B2.0 → Fase 3 |
+| F11 | staleness / recalc manual | partial | headless-safe (2B.2); recalc ainda 1h/manual | operação recorrente | não | auto-recalc OU flag visível | decidir auto-refresh |
+| F12 | refresh de dados externos estagna | deferred | refetch só manual | operação recorrente | não | **política de atualização** (job de refresh) | definir política |
+| F13 | multicolinearidade / waterfall | partial | drama~tragedy 0,80; "não exibir waterfall" | hardening | não | confirmar waterfall não exibido por feature | verificar UI |
+| F14 | lint / `noUncheckedIndexedAccess` | deferred | 444 lint (29 err); flag off | hardening técnico | não | reduzir erros; ligar flag | hardening |
+| F15 | código morto / nomes legados | partial | `prediction.ts` removido (2026-06-15); `min_*_score` repurposados | hardening técnico | não | varredura final de legado | hardening |
+
+### 23.2 Achados do ciclo de vida ([AUDITORIA-CICLO-VIDA-DADOS.md](AUDITORIA-CICLO-VIDA-DADOS.md))
+
+| ID | Achado | Estado | Evidência (🟩) | Fase responsável | Bloqueia agora? | Critério de conclusão | Próxima ação |
+|---|---|---|---|---|:--:|---|---|
+| L1 | canonical_synopsis | completed | 734/734 (100%) | — | não | — | — (saudável) |
+| L2 | tags enriquecidas (group=null) | partial | fallback group=null | operação recorrente | não | enriquecimento durável cobre novas | monitorar |
+| L3 | reviews ausentes (231 obras) | not_applicable | opt-in manual (classe D) | decisão de produto | não | ausência legítima (não automatizar) | — |
+| L4 | review_summary 68% | partial | 503/734 | operação recorrente | não | backfill opcional OU sob demanda | decidir |
+| L5 | review_digest 2% | **partial (no Plano 3)** | 14/734; experimento + backfill condicional | Plano 3 → backfill final | não | experimento decide; backfill só se vencer | B2.0 → Fase 3 |
+| L6 | taste_profile regen só pago | partial | v7 fresh; auto-refresh deferido | operação recorrente | não | política de refresh fora do pago OU aviso de velho | decidir pós-contrato |
+| L7 | previsões stale (catálogo) | partial | 112 modernas / ~622 pendentes | backfill final | não (suspenso de propósito) | Lote 02 sob contrato final | após winner |
+| L8 | recalc após update (stale) | partial | `markRecalcPending`; headless-safe ok | operação recorrente | não | = F11 | = F11 |
+| L9 | provenance `synopsis_quality_source` | partial | 100% `legacy_unknown` | operação recorrente | não | sinal útil só após re-saves humanos | aguardar uso |
+| L10 | alignment stale | not_applicable | re-rank manual de propósito | decisão de produto | não | ausência legítima | — |
+| L11 | dados externos estagnados | deferred | = F12 | operação recorrente | não | = F12 | = F12 |
+| L12 | readiness parcial/completa (materializar) | partial | resolver derivado; materialização parcial | hardening pós-Plano 3 | não | expor readiness na UI/ranking (AUDITORIA §10) | hardening |
+| L13 | mudança de tags → staleness da previsão | **completed (superseded)** | `input_signature` (mig 111) **inclui tags** ⇒ tags mudam → stale | — | não | resolvido (supera AUDITORIA §11 caso 15) | — |
+| L14 | lote legado de digest bypassa o gate | partial / legacy | `consolidatePendingReviewDigests` sem gate | backfill final / pós-Plano 3 | não | migrar p/ `runDigestBatch` OU aposentar | após winner |
+
+### 23.3 Resumo
+
+| Estado | IDs | n |
+|---|---|--:|
+| completed | F2, F4, L1, L13 | **4** |
+| partial | F3, F9, F10, F11, F13, F15, L2, L4, L5, L6, L7, L8, L9, L12, L14 | **15** |
+| planned | F1 | **1** |
+| deferred | F5, F6, F7, F8, F12, L11 | **6** |
+| not_applicable | L3, L10 | **2** |
+| blocked | — | **0** |
+
+**Principais bloqueadores:**
+- do **experimento (agora):** golden 0/90 rotulado · candidato com digest (preparado em B2.0, execução não construída) · digest dos 51 do golden.
+- do **deploy (não agora):** **F1** (auth + rate limit).
+
+**Fase responsável por grupo:**
+- **Plano 3 (agora):** F10, L5 (o experimento decide modelo/custo/digest).
+- **pré-Plano 3 (feito):** F2, F4.
+- **backfill final:** L7, L14.
+- **pré-deploy:** F1.
+- **hardening pós-Plano 3:** F3, F5, F7, F13, F14, F15, L12.
+- **operação recorrente:** F9, F11, F12, L2, L4, L6, L8, L9, L11.
+- **decisão de produto:** F6, F8, L3, L10.
+
+> Regra mantida: item adiado **não desaparece** (fica nesta matriz); F5/F6/F7/F8/F9 têm destino explícito; F12 tem "política de atualização" como critério; F14/F15 ficam no hardening técnico; F1 segue bloqueando o deploy.
+
+---
+
+## 24. Addendum — Fase B2.0 executada (2026-06-19)
+
+Congelamento do protocolo experimental do Plano 3 — ver [PLANO3-EXPERIMENTO-DIGEST-GOLDEN.md](PLANO3-EXPERIMENTO-DIGEST-GOLDEN.md).
+
+- **Golden auditado (🟩):** 80 únicas — **0 digest**, **51 missing_with_reviews** (todas summary-only), **29 no_reviews**, 0 stale/blocked ⇒ **51 digests** a gerar (não as 489). Previsão v2 do golden: 12 modernas / 68 legadas.
+- **Código (puro, testado):** [lib/synopsis-interest/experiment.ts](lib/synopsis-interest/experiment.ts) — candidatos `b1`/`e1`, fallback explícito `resolveReviewContext`, `computeSnapshotSignature`/`computeCandidateInputSignature`, `planGoldenDigest`/`planCandidateDryRun`. 26 testes ([experiment.test.ts](tests/unit/synopsis-interest/experiment.test.ts)). **Nenhum caminho de execução paga construído.**
+- **Cegamento:** auditado, forte por construção (export só `slot_key`+sinopse; labels em tabela separada). Risco residual: export lê sinopse live → fechar pelo snapshot congelado.
+- **Custos (futuros, não gastos):** experimento total **~$2.6 likely / ~$8.6 upper** (digest 51 + b1 80 + e1 80 + D1/D2 grátis).
+- **Banco:** somente SELECT; zero escrita; 1 script temporário (removido).
