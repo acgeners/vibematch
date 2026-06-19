@@ -1,7 +1,6 @@
 "use server"
 
 import { revalidatePath, revalidateTag } from "next/cache"
-import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import {
@@ -1090,37 +1089,4 @@ export async function recalculateAll() {
 export async function recalculateWork(workId: string) {
   void workId
   return recalculateAll()
-}
-
-// Coalescing guard compartilhado: vários saves em sequência (ex.: o fluxo
-// "Terminei de ler" dispara updateWorkStatus + submitPostReadingAttributes, e o
-// usuário pode salvar várias vezes) não devem rodar N recalc-all completos em
-// paralelo. Se já há um em voo, marca um rerun e roda UMA vez ao final.
-let recalcInFlight = false
-let recalcRerunQueued = false
-
-/**
- * Dispara `recalculateAll()` em background via `after()` (não bloqueia a resposta
- * do server action) e coalesce chamadas concorrentes. Use isto em vez de
- * `await recalculateAll()` em qualquer save que só precise que os scores
- * atualizem "logo depois".
- */
-export async function recalculateAllInBackground(context: string): Promise<void> {
-  after(async () => {
-    if (recalcInFlight) {
-      recalcRerunQueued = true
-      return
-    }
-    recalcInFlight = true
-    try {
-      do {
-        recalcRerunQueued = false
-        await recalculateAll()
-      } while (recalcRerunQueued)
-    } catch (error) {
-      console.error(`[${context}] Failed to recalculate scores`, error)
-    } finally {
-      recalcInFlight = false
-    }
-  })
 }

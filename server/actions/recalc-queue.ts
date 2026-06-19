@@ -1,11 +1,11 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
+import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import {
-  recalculateAll,
-  recalculateAllInBackground as recalcAllInBackgroundShared,
-} from "@/server/actions/calculations"
+import { recalculateAll } from "@/server/actions/calculations"
+import { ensureRecalculateScores } from "@/lib/orchestration/integrations/recalculate-scores"
+import type { RecalcOutcome } from "@/lib/orchestration/integrations/recalculate-scores"
 
 // Janela de debounce do recálculo automático: só dispara sozinho depois de 1h
 // SEM novas edições de nota. Uma avaliação IA de atributos já leva >60s, então
@@ -40,8 +40,35 @@ export async function markRecalcPending(context: string): Promise<void> {
       `[markRecalcPending:${context}] não foi possível marcar pendente, recalculando em background:`,
       err instanceof Error ? err.message : err,
     )
-    void recalcAllInBackgroundShared(context)
+    recalculateScoresInBackground(context)
   }
+}
+
+/** Deps reais p/ a orquestração do recálculo (TS puro determinístico + pendente). */
+const recalcDeps = (force: boolean) => ({ force, recalc: recalculateAll, readPending: getRecalcPendingState })
+
+/**
+ * Recálculo orquestrado AGUARDADO (force=true): create / "Recalcular agora". Job
+ * global durável, free, deduplicado/coalescido. Devolve estado tipado.
+ */
+export async function recalculateScoresNow(): Promise<RecalcOutcome> {
+  return ensureRecalculateScores(recalcDeps(true))
+}
+
+/**
+ * Recálculo orquestrado em BACKGROUND (force=false): só roda se houver pendência.
+ * Substitui a coalescência in-process antiga — a dedup/coalescência agora é da
+ * orquestração (single-flight + job durável). Usado pelo auto-recalc e pelo
+ * fallback do markRecalcPending. Best-effort (engole erro).
+ */
+function recalculateScoresInBackground(context: string): void {
+  after(async () => {
+    try {
+      await ensureRecalculateScores(recalcDeps(false))
+    } catch (err) {
+      console.error(`[${context}] recálculo orquestrado (bg) falhou:`, err instanceof Error ? err.message : err)
+    }
+  })
 }
 
 /** Lê o estado de recálculo pendente (sem efeito colateral). */
@@ -75,20 +102,20 @@ export async function maybeTriggerStaleRecalc(): Promise<RecalcPendingState> {
   if (state.pending && state.lastEditAt) {
     const age = Date.now() - new Date(state.lastEditAt).getTime()
     if (age >= RECALC_DEBOUNCE_MS) {
-      void recalcAllInBackgroundShared("stale-auto")
+      recalculateScoresInBackground("stale-auto")
     }
   }
   return state
 }
 
 /**
- * "Recalcular agora" — roda o recálculo completo na hora (bloqueante) e limpa o
- * flag pendente (recalculateAll zera ao persistir o formula_config). Usado pelo
- * banner do /ranking e pelo botão da sidebar. recalculateAll já revalida
- * /ranking, /titles, /settings e / por dentro.
+ * "Recalcular agora" — recálculo completo AGUARDADO via orquestração (job global
+ * free, deduplicado: duplo-clique/callers concorrentes ⇒ uma execução). Limpa o
+ * flag pendente (recalculateAll zera ao persistir o formula_config). recalculateAll
+ * já revalida /ranking, /titles, /settings e / por dentro. Devolve estado tipado.
  */
-export async function triggerRecalcNow(): Promise<{ recalculated: number }> {
-  const result = await recalculateAll()
+export async function triggerRecalcNow(): Promise<RecalcOutcome> {
+  const result = await recalculateScoresNow()
   revalidatePath("/ranking")
-  return { recalculated: result.recalculated }
+  return result
 }

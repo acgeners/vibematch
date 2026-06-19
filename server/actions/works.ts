@@ -18,8 +18,7 @@ import {
   pickPrimaryCover,
   splitSynopsesFromText,
 } from "@/lib/work-derived"
-import { recalculateAll } from "./calculations"
-import { markRecalcPending } from "./recalc-queue"
+import { markRecalcPending, recalculateScoresNow } from "./recalc-queue"
 import { capturePredictionForFirstRating } from "./prediction-ledger"
 import {
   resolvePredictionsForWork,
@@ -1045,11 +1044,12 @@ export async function createWork(
 
   const slug = titleToSlug(values.title)
 
-  // Recalcular todos: a média global muda quando um título é adicionado
-  try {
-    await recalculateAll()
-  } catch (error) {
-    console.error("[createWork] Failed to recalculate scores", error)
+  // Recalcular todos (orquestrado, AGUARDADO): a média global muda quando um título
+  // é adicionado. Preserva a semântica síncrona do create — só troca o motor (job
+  // global free, deduplicado) por baixo.
+  const recalc = await recalculateScoresNow()
+  if (recalc.status === "failed") {
+    console.error("[createWork] Falha ao recalcular scores:", recalc.error)
     return {
       error: {
         _root: [
@@ -1147,10 +1147,9 @@ export async function createWorksBatch(
     })
   }
 
-  try {
-    await recalculateAll()
-  } catch (error) {
-    console.error("[createWorksBatch] Failed to recalculate scores", error)
+  const batchRecalc = await recalculateScoresNow()
+  if (batchRecalc.status === "failed") {
+    console.error("[createWorksBatch] Falha ao recalcular scores:", batchRecalc.error)
     return {
       error: {
         _root: [
@@ -1188,7 +1187,7 @@ export async function getPendingBatchCount(): Promise<number> {
 }
 
 /**
- * Finaliza o batch: dispara recalculateAll uma única vez.
+ * Finaliza o batch: dispara o recálculo orquestrado uma única vez (deduplicado).
  */
 export async function finalizePendingBatch() {
   const supabase = createAdminClient()
@@ -1201,7 +1200,8 @@ export async function finalizePendingBatch() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pending = (data ?? []).filter((w: any) => !w.calculated_scores).length
 
-  await recalculateAll()
+  const finalizeRecalc = await recalculateScoresNow()
+  if (finalizeRecalc.status === "failed") throw new Error(finalizeRecalc.error)
 
   revalidatePath("/titles")
   revalidateTag("works-slug-index", "max")
