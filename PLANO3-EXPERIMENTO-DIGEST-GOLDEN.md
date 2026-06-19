@@ -10,6 +10,12 @@ STATUS: PREPARADO — NENHUMA CHAMADA PAGA EXECUTADA
 > Implementação funcional desta etapa: **somente o módulo PURO** [lib/synopsis-interest/experiment.ts](lib/synopsis-interest/experiment.ts)
 > (candidatos, fallback, assinaturas, planner do digest do golden) + testes. Nenhum
 > caminho de execução paga foi construído ou disparado.
+>
+> **⛔ Rotulagem SUSPENSA até a conclusão do Golden Data Readiness Gate (Fase B2.1A)** —
+> ver [PLANO3-GOLDEN-DATA-READINESS.md](PLANO3-GOLDEN-DATA-READINESS.md). O gate confirmou
+> que a sinopse canônica das 80 obras está **100% fresh** (rotulagem desbloqueável após
+> congelar o snapshot), mas a liberação depende das decisões D1–D7 do gate (política de
+> reviews, digest do `e1`). Não iniciar a rotulagem nem materializar o snapshot antes disso.
 
 ---
 

@@ -580,6 +580,20 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 
 ---
 
+## 24b. Addendum — Fase B2.1A: Golden Data Readiness Gate (2026-06-19)
+
+> **⛔ Rotulagem humana SUSPENSA até a conclusão deste gate.** Detalhes em
+> [PLANO3-GOLDEN-DATA-READINESS.md](PLANO3-GOLDEN-DATA-READINESS.md).
+
+Gate read-only que comprovou a freshness dos dados das 80 obras únicas do golden por candidato (freshness medida com as funções reais de produção):
+
+- **Rotulagem + b1 + D1 + D2 = prontos** (🟩 canonical **80/80 fresh**, perfil v7 fresh, tags 79/80 enriquecidas). Custo de desbloqueio: **$0** (só congelar snapshot + pacote cego).
+- **e1 = não pronto** — exige **51 digests** (29 `no_reviews` legítimo; 9 summaries stale, regen opcional). Custo: **~$1.0 likely / ~$5.9 upper**.
+- **Não-bloqueadores confirmados:** AI eval/category_scores (80/80 cat9), calc/expected/personal_fit (80/80, recalc_pending=false), **alignment** (= Veredito IA; decision_score derivado) e platform ratings **não são usados por nenhum candidato** ⇒ não viram pré-requisito (AUDIT F6/F10-rigor).
+- **Decisões pendentes (D1–D7):** política de freshness de reviews · refrescar ou não as 51 · D1/D2 no experimento · alignment como candidato separado · gerar avaliações faltantes · regenerar 9 summaries · teto financeiro do digest. Recomendação geral: **congelar reviews como estão** (todas ≤26d) e gerar só os 51 digests.
+
+---
+
 ## 24. Addendum — Fase B2.0 executada (2026-06-19)
 
 Congelamento do protocolo experimental do Plano 3 — ver [PLANO3-EXPERIMENTO-DIGEST-GOLDEN.md](PLANO3-EXPERIMENTO-DIGEST-GOLDEN.md).
