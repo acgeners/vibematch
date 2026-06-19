@@ -121,7 +121,7 @@ describe("planner — assinatura e estados", () => {
 
   it("4) model/prompt/schema mudam a assinatura (função pura)", () => {
     const base: PlanSignatureInput = {
-      scopeWorkIds: ["w1"], profilePolicy: "default", profileState: "fresh", libraryInputHash: "h",
+      scope: { kind: "full", limit: null, selected: ["w1"], missing: [] }, profilePolicy: "default", profileState: "fresh", libraryInputHash: "h",
       profileSignatureOrRegen: "ps", profileFunctionalVersion: 6, model: "m1", promptVersion: "v2", schemaVersion: "v1",
       costVersion: "c", items: [{ workId: "w1", expectedInputSignature: "s", reason: "absent" }],
       plannedActions: { profile: false, predictCount: 1, recalc: false }, likelyUsd: 0.01, upperBoundUsd: 0.02,
@@ -404,7 +404,7 @@ describe("execução (mocks/no-op)", () => {
     const exec = new ExecGateway(); exec.works.set("w1", work("w1"))
     const recalcCalls: boolean[] = []
     await runInterestBackfill({ planSignature: plan.planSignature, maxCostUsd: 10, planGateway: gw, interestGateway: exec, ensureProfile: profileRegen(profileRow("NEW", NEWP), { calls: 0 }), predict: fakePredict({ calls: 0, max: 0, cur: 0 }), recalc: async (force) => { recalcCalls.push(force); return { status: "succeeded" } }, jobStore: new InMemoryJobStore(), concurrency: 1 })
-    expect(recalcCalls).toEqual([true]) // exatamente uma vez, force=true
+    expect(recalcCalls).toEqual([false]) // exatamente uma vez, force=FALSE (confia no recalc_pending marcado pela regeneração)
 
     // fresh ⇒ sem regen ⇒ recalc NÃO chamado
     const gw2 = freshProfilePlan()
@@ -447,3 +447,191 @@ describe("build/render — sem efeitos colaterais", () => {
     }
   })
 })
+
+// ============================================================================
+// Correção 1 — ESCOPO de piloto
+// ============================================================================
+
+describe("escopo de piloto", () => {
+  function catalog(n: number) {
+    const gw = new PlanGateway()
+    gw.works = Array.from({ length: n }, (_, i) => work(`w${String(i).padStart(2, "0")}`))
+    return gw
+  }
+
+  it("S1) full vs ids ⇒ assinaturas diferentes", async () => {
+    const gw = catalog(6)
+    const full = await planInterestBackfill({ gateway: gw })
+    const pilot = await planInterestBackfill({ gateway: gw, scope: { kind: "ids", workIds: ["w01", "w03"] } })
+    expect(full.planSignature).not.toBe(pilot.planSignature)
+    expect(pilot.scopeKind).toBe("ids")
+    expect(pilot.scopeWorkIds).toEqual(["w01", "w03"])
+    expect(pilot.totalWorks).toBe(2)
+  })
+
+  it("S2) mesmos IDs em ordem diferente ⇒ MESMA assinatura; IDs diferentes ⇒ diferente", async () => {
+    const gw = catalog(6)
+    const a = await planInterestBackfill({ gateway: gw, scope: { kind: "ids", workIds: ["w01", "w03", "w05"] } })
+    const b = await planInterestBackfill({ gateway: gw, scope: { kind: "ids", workIds: ["w05", "w01", "w03"] } })
+    const c = await planInterestBackfill({ gateway: gw, scope: { kind: "ids", workIds: ["w01", "w02", "w03"] } })
+    expect(a.planSignature).toBe(b.planSignature)
+    expect(a.planSignature).not.toBe(c.planSignature)
+  })
+
+  it("S3) --limit é determinístico (work_id ASC, estável)", async () => {
+    const gw = catalog(6)
+    const a = await planInterestBackfill({ gateway: gw, scope: { kind: "limit", limit: 3 } })
+    // mesma fonte embaralhada ⇒ mesma seleção
+    gw.works = [...gw.works].reverse()
+    const b = await planInterestBackfill({ gateway: gw, scope: { kind: "limit", limit: 3 } })
+    expect(a.scopeWorkIds).toEqual(["w00", "w01", "w02"])
+    expect(a.planSignature).toBe(b.planSignature)
+  })
+
+  it("S4) IDs inexistentes ⇒ requestedButMissing + executor bloqueia", async () => {
+    const gw = catalog(3)
+    const plan = await planInterestBackfill({ gateway: gw, scope: { kind: "ids", workIds: ["w00", "naoexiste-0000-0000-0000-000000000000"] } })
+    expect(plan.requestedButMissing).toEqual(["naoexiste-0000-0000-0000-000000000000"])
+    const res = await runInterestBackfill({
+      planSignature: plan.planSignature, maxCostUsd: 10, scope: { kind: "ids", workIds: ["w00", "naoexiste-0000-0000-0000-000000000000"] },
+      planGateway: gw, interestGateway: new ExecGateway(), ensureProfile: profileFresh(profileRow("LIB")), jobStore: new InMemoryJobStore(),
+    })
+    expect(res.status).toBe("blocked_manual")
+  })
+
+  it("S5) obra arquivada não entra (gateway só lista ativas ⇒ vira missing)", async () => {
+    const gw = catalog(2) // só w00, w01 ativas
+    const plan = await planInterestBackfill({ gateway: gw, scope: { kind: "ids", workIds: ["w00", "w99"] } }) // w99 arquivada/ausente
+    expect(plan.scopeWorkIds).toEqual(["w00"])
+    expect(plan.requestedButMissing).toEqual(["w99"])
+  })
+
+  it("S6) ambiguidade --work-id + --limit falha na CLI", () => {
+    const r = parseBackfillCliArgs(["--work-id=11111111-1111-1111-1111-111111111111", "--limit=5"])
+    expect(r.ok).toBe(false)
+  })
+
+  it("S7) CLI mapeia escopo (ids / limit / full); UUID inválido falha", () => {
+    const ids = parseBackfillCliArgs(["--work-id=11111111-1111-1111-1111-111111111111,22222222-2222-2222-2222-222222222222"])
+    expect(ids.ok && ids.scope.kind).toBe("ids")
+    const lim = parseBackfillCliArgs(["--limit=20"])
+    expect(lim.ok && lim.scope.kind).toBe("limit")
+    const full = parseBackfillCliArgs([])
+    expect(full.ok && full.scope.kind).toBe("full")
+    expect(parseBackfillCliArgs(["--work-id=not-a-uuid"]).ok).toBe(false)
+  })
+
+  it("S8) piloto com perfil stale ⇒ 1 perfil + SÓ as N previsões + custo do escopo + aviso", async () => {
+    const gw = catalog(6)
+    gw.profile = { current: profileRow("OLD"), libraryInputHash: "NEW", ratedWorksCount: 50 } // stale
+    const plan = await planInterestBackfill({ gateway: gw, scope: { kind: "ids", workIds: ["w01", "w02"] } })
+    expect(plan.profileAction).toBe("regenerate")
+    expect(plan.itemsToPredict.length).toBe(2) // SÓ o escopo, não as 6
+    expect(plan.recalcPlanned).toBe(true)
+    // custo = 1 perfil (escala biblioteca completa) + 2 previsões
+    const oneProfile = await planInterestBackfill({ gateway: gw, scope: { kind: "ids", workIds: [] } }) // 0 previsões
+    expect(plan.estimatedUpperBoundUsd).toBeGreaterThan(oneProfile.estimatedUpperBoundUsd)
+    expect(plan.warnings.some((w) => w.includes("permanecerão para um lote posterior"))).toBe(true)
+  })
+})
+
+// ============================================================================
+// Correção 3 — transição esperada do perfil dentro do plano
+// ============================================================================
+
+describe("transição de perfil (PENDING_PROFILE_REGEN)", () => {
+  function staleCatalog(ids: string[]) {
+    const gw = new PlanGateway()
+    gw.works = ids.map((id) => work(id))
+    gw.profile = { current: profileRow("OLD"), libraryInputHash: "NEW", ratedWorksCount: 50 }
+    return gw
+  }
+
+  it("T1/T2) plano stale regenera e prossegue; regeneração INTERNA não causa plan_changed", async () => {
+    const gw = staleCatalog(["w1", "w2"])
+    const plan = await planInterestBackfill({ gateway: gw, scope: { kind: "ids", workIds: ["w1", "w2"] } })
+    expect(plan.itemsToPredict.every((i) => i.expectedProfileSignature === PENDING_PROFILE_REGEN)).toBe(true)
+    const exec = new ExecGateway(); for (const id of ["w1", "w2"]) exec.works.set(id, work(id))
+    const res = await runInterestBackfill({
+      planSignature: plan.planSignature, maxCostUsd: 10, scope: { kind: "ids", workIds: ["w1", "w2"] },
+      planGateway: gw, interestGateway: exec, ensureProfile: profileRegen(profileRow("NEW", NEWP), { calls: 0 }),
+      predict: fakePredict({ calls: 0, max: 0, cur: 0 }), recalc: async () => ({ status: "succeeded" }), jobStore: new InMemoryJobStore(), concurrency: 1,
+    })
+    expect(res.status === "completed" || res.status === "partial").toBe(true) // NÃO plan_changed
+  })
+
+  it("T3) alteração EXTERNA antes da execução ⇒ plan_changed (zero chamada paga)", async () => {
+    const gw = staleCatalog(["w1"])
+    const plan = await planInterestBackfill({ gateway: gw, scope: { kind: "ids", workIds: ["w1"] } })
+    // alguém mexeu na biblioteca/perfil antes de confirmar
+    gw.profile = { current: profileRow("OLD"), libraryInputHash: "OUTRA", ratedWorksCount: 50 }
+    const st = { calls: 0, max: 0, cur: 0 }
+    const res = await runInterestBackfill({
+      planSignature: plan.planSignature, maxCostUsd: 10, scope: { kind: "ids", workIds: ["w1"] },
+      planGateway: gw, interestGateway: new ExecGateway(), ensureProfile: profileRegen(profileRow("NEW", NEWP), { calls: 0 }), predict: fakePredict(st), jobStore: new InMemoryJobStore(),
+    })
+    expect(res.status).toBe("plan_changed")
+    expect(st.calls).toBe(0)
+  })
+
+  it("T4) alteração externa APÓS congelar a assinatura ⇒ interrompe novos itens", async () => {
+    const gw = catalog6Fresh()
+    const plan = await planInterestBackfill({ gateway: gw })
+    const exec = new ExecGateway(); for (const w of gw.works) exec.works.set(w.workId, w)
+    let n = 0
+    const res = await runInterestBackfill({
+      planSignature: plan.planSignature, maxCostUsd: 10, planGateway: gw, interestGateway: exec,
+      ensureProfile: profileFresh(profileRow("LIB")), predict: fakePredict({ calls: 0, max: 0, cur: 0 }),
+      jobStore: new InMemoryJobStore(), concurrency: 1,
+      loadCurrentProfileSignature: async () => (n++ === 0 ? CUR_SIG : "assinatura-externa-nova"),
+    })
+    if (res.status === "completed" || res.status === "partial") expect(res.report.stoppedByPlanChange).toBe(true)
+  })
+
+  it("T5/T6/T8) escopo NÃO aumenta após regen; só obras do piloto previstas", async () => {
+    const gw = staleCatalog(["w1", "w2", "w3"]) // catálogo com 3
+    const plan = await planInterestBackfill({ gateway: gw, scope: { kind: "ids", workIds: ["w1"] } }) // piloto = 1
+    expect(plan.itemsToPredict.map((i) => i.workId)).toEqual(["w1"])
+    const exec = new ExecGateway(); for (const id of ["w1", "w2", "w3"]) exec.works.set(id, work(id))
+    const predicted: string[] = []
+    const predict: DefaultPredictFn = async (_p, w) => { predicted.push(w.id); return { predictedQuality: "♥♥", justification: "j", confidence: 0.5, modelName: MODEL, promptVersion: PROMPT_VERSION, apiCallId: null, usageUsd: 0.01 } }
+    await runInterestBackfill({
+      planSignature: plan.planSignature, maxCostUsd: 10, scope: { kind: "ids", workIds: ["w1"] },
+      planGateway: gw, interestGateway: exec, ensureProfile: profileRegen(profileRow("NEW", NEWP), { calls: 0 }), predict, recalc: async () => ({ status: "succeeded" }), jobStore: new InMemoryJobStore(), concurrency: 1,
+    })
+    expect(predicted).toEqual(["w1"]) // só o piloto, mesmo com perfil novo (conteúdo diferente)
+  })
+
+  it("T7) custo real não passa do upper aprovado (soft-cap)", async () => {
+    const gw = catalog6Fresh()
+    const plan = await planInterestBackfill({ gateway: gw })
+    const exec = new ExecGateway(); for (const w of gw.works) exec.works.set(w.workId, w)
+    const res = await runInterestBackfill({
+      planSignature: plan.planSignature, maxCostUsd: plan.estimatedUpperBoundUsd, planGateway: gw, interestGateway: exec,
+      ensureProfile: profileFresh(profileRow("LIB")), predict: fakePredict({ calls: 0, max: 0, cur: 0 }), jobStore: new InMemoryJobStore(), concurrency: 2,
+    })
+    if (res.status === "completed" || res.status === "partial") expect(res.report.actualUsd).toBeLessThanOrEqual(plan.estimatedUpperBoundUsd)
+  })
+
+  it("T9) obra alterada após o dry-run ⇒ plan_changed (não processa com assinatura antiga)", async () => {
+    const gw = new PlanGateway(); gw.works = [work("w1")] // fresh profile
+    const plan = await planInterestBackfill({ gateway: gw })
+    // a obra mudou DEPOIS do dry-run (re-plano detecta antes de qualquer chamada)
+    gw.works = [work("w1", { canonicalSynopsis: "sinopse mudou completamente e é bem mais longa agora" })]
+    const st = { calls: 0, max: 0, cur: 0 }
+    const res = await runInterestBackfill({
+      planSignature: plan.planSignature, maxCostUsd: 10, planGateway: gw, interestGateway: new ExecGateway(),
+      ensureProfile: profileFresh(profileRow("LIB")), predict: fakePredict(st), jobStore: new InMemoryJobStore(), concurrency: 1,
+    })
+    expect(res.status).toBe("plan_changed")
+    expect(st.calls).toBe(0)
+    // (a proteção in-flight — output de assinatura antiga descartado durante a
+    //  execução — é coberta pelos testes de synopsis-interest, re-check no runner.)
+  })
+})
+
+function catalog6Fresh() {
+  const gw = new PlanGateway()
+  gw.works = Array.from({ length: 6 }, (_, i) => work(`w${String(i).padStart(2, "0")}`))
+  return gw
+}

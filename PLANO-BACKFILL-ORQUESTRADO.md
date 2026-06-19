@@ -838,3 +838,90 @@ rota/componente. Só a CLI explícita inicia trabalho.
 - **Migration**: nenhuma criada/necessária — usa `work_processing_jobs` + `input_signature`
   + hashes/versões existentes.
 - **Execução real do digest/summary/aquisição**: não iniciada (fora do escopo 2A).
+
+---
+
+# 30. Etapa 2A.1 — ENDURECIMENTO pré-piloto
+
+> Status: **implementada e validada** (2026-06-18). **Nenhum piloto pago, LLM, perfil
+> ou previsão real.** Validada com mocks/no-op + InMemoryJobStore + 3 dry-runs read-only.
+> Sem migration.
+
+### Correção 1 — escopo explícito de piloto (`maxCostUsd` NÃO é seletor)
+CLI ganhou `--work-id=<uuid[,uuid…]>` e `--limit=<n>` (mutuamente exclusivos → falha na
+validação Zod; UUID inválido falha antes de qualquer execução). Mapeamento:
+- **sem filtro** → catálogo completo (comportamento anterior);
+- **`--work-id`** → só as obras pedidas; IDs inexistentes/arquivados **não entram
+  silenciosamente** → `requestedButMissing`, **executor bloqueia** (`blocked_manual`);
+- **`--limit=N`** → as N primeiras por **`work_id` ASC** (ordenação **estável e
+  documentada**; nenhuma seleção aleatória). Prefira `--work-id` para o piloto real;
+  `--limit` é conveniência/teste.
+
+A seleção aparece no dry-run. **Perfil stale em piloto** ⇒ plano = **1 regeneração global
+do perfil + somente as previsões do escopo + ≤1 recalc**; custo = perfil (escala a
+biblioteca **completa**) + previsões do escopo + recalc grátis. Aviso explícito:
+*"A regeneração do perfil tornará stale as previsões restantes do catálogo. Este plano
+atualizará somente as obras selecionadas. As demais permanecerão para um lote posterior."*
+
+Assinatura do plano inclui agora `scope { kind, limit, selected (ordenado), missing }`.
+Comportamento verificado: full(734) vs piloto(20) → assinaturas **diferentes**; mesmos IDs
+em ordem diferente → **mesma**; IDs diferentes → **diferente**.
+
+### Correção 2 — `recalc_pending` após nova versão de perfil
+`insertNewTasteProfile` (🟦 [taste-profile.ts:144](lib/ai-recommendation/taste-profile.ts#L144)) — **sink único** de
+persistência (4 call sites: gateway orquestrado, ensure-profile, 3× em recommendations)
+— agora chama `markRecalcPending("taste_profile_new_version")` **após o insert
+bem-sucedido** (depois de `markSynopsisPredictionsStale`). Geração/persistência que
+falham nunca chegam lá (caem no `throw`). **Não recalcula** ali — só marca (reusa o
+mecanismo existente; sem nova fonte de readiness; sem mexer em fórmula). Cobre TODOS os
+caminhos de regeneração (inclusive o pago).
+
+O executor então roda **um** `recalculateScoresIfPending()` (🟦 [recalc-queue.ts](server/actions/recalc-queue.ts), `ensureRecalculateScores` com **`force=false`**)
+quando o perfil foi regenerado: roda **porque** a pendência foi marcada (não usa `force`,
+que mascararia a ausência de pendência para os demais consumidores do recalc — page-load
+auto-recalc, "Recalcular agora"); global, free, coalescido, `work_id=null`, zera a
+pendência no sucesso. Testes: fresh→não marca/não recalc; novo→marca; geração/persistência
+falham→não marca; pendência true→1 recalc→pendência false; recalc falha→pendência true +
+job resumível; 2 callers→1 recalc.
+
+### Correção 3 — transição esperada do perfil (`PENDING_PROFILE_REGEN`)
+A assinatura do plano **não finge** conhecer a `profileSignature` futura. Itens em modo
+regen usam uma **assinatura de ESCOPO** = `computeInterestInputSignature` com
+`profileSignature = "regen:<libraryInputHash>"` (dados próprios da obra + libraryInputHash
++ política de regeneração + model/prompt/schema). Distinção:
+- **mudança esperada** (regen feito pelo próprio plano): o executor re-planeja **antes** da
+  regeneração (assinatura confere → prossegue), gera 1 perfil, **congela** a nova
+  `profileSignature` (`runningProfileSignature`) e deriva a assinatura funcional real por
+  obra dentro de `ensurePredictInterest`. **Não** causa `plan_changed`.
+- **mudança externa antes da execução**: o re-plano diverge → **`plan_changed`**, zero
+  chamada paga.
+- **mudança externa após o congelamento**: validação opcional entre itens → para de
+  iniciar novos (`stoppedByPlanChange`); em-voo terminam; parcial; novo plano para seguir.
+
+**O escopo aprovado não aumenta após a regeneração**: o executor só itera
+`plan.itemsToPredict` (conjunto fixo). Perfil de conteúdo diferente, mesmo escopo, **não**
+autoriza obras extras. Custo permanece limitado (≤ upper aprovado + soft-cap). Obra alterada
+após o dry-run → re-plano `plan_changed` (e, in-flight, o re-check de `ensurePredictInterest`
+descarta output de assinatura antiga).
+
+### Correção 4 — lint completo verde
+`.cache/**` (browser do FlareSolverr/Comix; **gitignored**, gerado, não-fonte) foi
+adicionado ao `globalIgnores` do ESLint ([eslint.config.mjs](eslint.config.mjs)). Não se
+ignorou diretório de código-fonte, não se usou disable global, não se afrouxou regra.
+Resultado: **`npm run lint` → exit 0**, 0 erros (restam só warnings pré-existentes em
+componentes não tocados).
+
+### CLI (dry-run é o padrão)
+```
+npm run backfill:interest                          # catálogo completo (dry-run)
+npm run backfill:interest -- --limit=20            # piloto determinístico (dry-run)
+npm run backfill:interest -- --work-id=<uuid1>,<uuid2>   # piloto explícito (dry-run)
+# execução real (NÃO rodada nesta etapa):
+npm run backfill:interest -- --execute --work-id=<…> --plan-signature=<hash> --max-cost-usd=<v>
+```
+
+### Smoke (read-only) — sem chamadas pagas
+3 dry-runs reais validados: catálogo (734, upper $12.14), `--limit=20` (upper $0.90),
+2 IDs explícitos (upper $0.61); ordem dos IDs **não** altera a `planSignature`. Snapshot
+do banco **idêntico** antes/depois: `work_processing_jobs` 0→0, `taste_profile` 6→6 (v6
+mesmo hash), `synopsis_quality_predictions` 1026→1026, `recalc_pending` false→false.

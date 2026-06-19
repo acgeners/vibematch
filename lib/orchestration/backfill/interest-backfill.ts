@@ -61,6 +61,13 @@ export type WorkPredictState =
   | "blocked"
 export type ItemReason = "stale_modern" | "stale_legacy" | "absent" | "profile_regen"
 
+/** Escopo de planejamento (Correção 2A.1 — piloto explícito). `maxCostUsd` é
+ *  proteção financeira, NÃO seletor de escopo. */
+export type BackfillScope =
+  | { kind: "full" }
+  | { kind: "ids"; workIds: string[] }
+  | { kind: "limit"; limit: number }
+
 /** Token usado como `profileSignature` esperada quando o perfil será regenerado
  *  (a assinatura do perfil novo é desconhecida no dry-run). Constante ⇒ a
  *  assinatura do PLANO segue determinística e sensível a mudanças de obra. */
@@ -99,6 +106,12 @@ export interface InterestBackfillPlan {
   profileFunctionalVersion: number | null
   libraryInputHash: string
   profileAction: ProfileAction
+  /** Escopo aplicado. `scopeWorkIds` = obras efetivamente selecionadas (ordenadas). */
+  scopeKind: "full" | "ids" | "limit"
+  scopeWorkIds: string[]
+  scopeLimit: number | null
+  /** IDs pedidos em `--work-id` que NÃO existem entre as obras ativas (erro/bloqueio). */
+  requestedButMissing: string[]
   totalWorks: number
   eligible: number
   fresh: number
@@ -218,7 +231,7 @@ function resolveSynopsis(w: InterestWorkData): { synopsis: string; source: Synop
 const round6 = (n: number) => (Number.isFinite(n) ? Math.round(n * 1e6) / 1e6 : n)
 
 export interface PlanSignatureInput {
-  scopeWorkIds: string[]
+  scope: { kind: "full" | "ids" | "limit"; limit: number | null; selected: string[]; missing: string[] }
   profilePolicy: ProfilePolicy
   profileState: BackfillProfileState
   libraryInputHash: string
@@ -237,7 +250,12 @@ export interface PlanSignatureInput {
 /** Assinatura canônica (sha256). Listas ordenadas; sem timestamp/ordem de query. */
 export function computeInterestPlanSignature(input: PlanSignatureInput): string {
   const canonical = JSON.stringify({
-    scope: [...input.scopeWorkIds].sort(),
+    scope: {
+      kind: input.scope.kind,
+      limit: input.scope.limit,
+      selected: [...input.scope.selected].sort(),
+      missing: [...input.scope.missing].sort(),
+    },
     profilePolicy: input.profilePolicy,
     profileState: input.profileState,
     libraryInputHash: input.libraryInputHash,
@@ -264,14 +282,45 @@ export function computeInterestPlanSignature(input: PlanSignatureInput): string 
 export interface PlanInterestBackfillDeps {
   gateway?: InterestBackfillGateway
   profilePolicy?: ProfilePolicy
+  /** Escopo do planejamento (default: catálogo completo). */
+  scope?: BackfillScope
   now?: () => number
 }
 
 const PREDICT_STEP = () => estimateStep("predict_interest_potential", 1)
 
+/**
+ * Aplica o escopo às obras ativas. Determinístico:
+ *  - full  → todas;
+ *  - ids   → só as pedidas (ordem da seleção é por id ASC); IDs ausentes/arquivados
+ *            NÃO entram silenciosamente — vão p/ `missing`;
+ *  - limit → as N primeiras por `work_id` ASC (ordenação estável e documentada).
+ */
+function applyScope(works: BackfillWork[], scope: BackfillScope): { selected: BackfillWork[]; missing: string[] } {
+  if (scope.kind === "ids") {
+    const requested = [...new Set(scope.workIds)]
+    const byId = new Map(works.map((w) => [w.workId, w]))
+    const selected: BackfillWork[] = []
+    const missing: string[] = []
+    for (const id of requested) {
+      const w = byId.get(id)
+      if (w) selected.push(w)
+      else missing.push(id)
+    }
+    selected.sort((a, b) => a.workId.localeCompare(b.workId))
+    return { selected, missing }
+  }
+  if (scope.kind === "limit") {
+    const sorted = [...works].sort((a, b) => a.workId.localeCompare(b.workId))
+    return { selected: sorted.slice(0, Math.max(0, scope.limit)), missing: [] }
+  }
+  return { selected: works, missing: [] }
+}
+
 export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}): Promise<InterestBackfillPlan> {
   const gateway = deps.gateway ?? new SupabaseInterestBackfillGateway()
   const profilePolicy = deps.profilePolicy ?? "default"
+  const scope: BackfillScope = deps.scope ?? { kind: "full" }
   const now = deps.now ?? Date.now
 
   const [works, predictions, profileSnap, jobs] = await Promise.all([
@@ -280,6 +329,9 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
     gateway.loadProfileSnapshot(),
     gateway.listBackfillJobs(),
   ])
+
+  // ---- Escopo (piloto explícito; maxCostUsd NÃO é seletor) ----
+  const { selected: scopedWorks, missing: requestedButMissing } = applyScope(works, scope)
 
   // ---- Estado do perfil (objetivo: hash da biblioteca vs hash do perfil) ----
   const readiness = classifyTasteProfileReadiness({
@@ -302,7 +354,16 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
   } else {
     profileState = "stale"
     profileAction = "regenerate"
-    warnings.push("Perfil stale: o plano regenera o perfil 1× e prevê TODAS as obras elegíveis (não prevê parcialmente contra perfil stale).")
+    if (scope.kind === "full") {
+      warnings.push("Perfil stale: o plano regenera o perfil 1× e prevê TODAS as obras elegíveis (não prevê parcialmente contra perfil stale).")
+    } else {
+      warnings.push(
+        "A regeneração do perfil tornará stale as previsões restantes do catálogo. Este plano atualizará somente as obras selecionadas. As demais permanecerão para um lote posterior.",
+      )
+    }
+  }
+  if (requestedButMissing.length > 0) {
+    warnings.push(`${requestedButMissing.length} ID(s) pedido(s) NÃO existe(m) entre as obras ativas (inexistente/arquivada) — execução bloqueada até corrigir: ${requestedButMissing.slice(0, 5).join(", ")}${requestedButMissing.length > 5 ? "…" : ""}.`)
   }
 
   // ---- Jobs: processing / failed / abandono ----
@@ -326,23 +387,24 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
     warnings.push(`${abandonedJobs.length} job(s) queued/running há ≥${Math.round(ABANDONED_JOB_THRESHOLD_MS / 60000)}min — possivelmente abandonados (NÃO recuperados automaticamente; ver procedimento no PLANO).`)
   }
 
-  // ---- Classificação por obra + itens a prever ----
+  // ---- Classificação por obra + itens a prever (somente no escopo) ----
   let fresh = 0, stale = 0, absent = 0, blocked = 0
   const items: InterestBackfillPlanItem[] = []
   const eligibleWorkIds: string[] = []
-  const scopeWorkIds = works.map((w) => w.workId)
+  const scopeWorkIds = scopedWorks.map((w) => w.workId).sort()
   const predictStep = PREDICT_STEP()
 
-  for (const w of works) {
+  for (const w of scopedWorks) {
     const resolved = resolveSynopsis(w)
     if (!resolved) {
       blocked++
       continue
     }
     eligibleWorkIds.push(w.workId)
-    const expectedSig = computeInterestInputSignature({
+    // Assinatura de CLASSIFICAÇÃO (detecta fresh_modern): contra o perfil CORRENTE.
+    const classifySig = computeInterestInputSignature({
       workId: w.workId,
-      profileSignature: profileState === "stale" ? PENDING_PROFILE_REGEN : currentProfileSignature ?? PENDING_PROFILE_REGEN,
+      profileSignature: currentProfileSignature ?? PENDING_PROFILE_REGEN,
       title: w.title,
       synopsis: resolved.synopsis,
       synopsisSource: resolved.source,
@@ -352,14 +414,14 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
       schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
     })
     const stored = predictions.get(w.workId) ?? null
-    const state = classifyWorkPredictState({ stored, expectedSignature: expectedSig, currentProfileSignature })
+    const state = classifyWorkPredictState({ stored, expectedSignature: classifySig, currentProfileSignature })
     if (state === "fresh_modern" || state === "fresh_legacy") fresh++
     else if (state === "absent") absent++
     else stale++
 
     // Itens a prever:
     //  - perfil fresh  ⇒ só stale/absent;
-    //  - perfil stale  ⇒ TODAS as elegíveis (reason=profile_regen);
+    //  - perfil stale  ⇒ TODAS as elegíveis no escopo (reason=profile_regen);
     //  - perfil blocked ⇒ nenhuma.
     if (profileState === "blocked_manual") continue
     const needsPredict =
@@ -367,10 +429,28 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
     if (!needsPredict) continue
     const reason: ItemReason =
       profileState === "stale" ? "profile_regen" : state === "absent" ? "absent" : (state as "stale_modern" | "stale_legacy")
+    // Assinatura do ITEM no plano confirmado:
+    //  - fresh ⇒ assinatura funcional completa (contra o perfil corrente);
+    //  - regen ⇒ assinatura de ESCOPO (dados próprios da obra + libraryInputHash +
+    //    política de regeneração) — NÃO finge conhecer a profileSignature futura.
+    const planItemSig =
+      profileState === "stale"
+        ? computeInterestInputSignature({
+            workId: w.workId,
+            profileSignature: `regen:${profileSnap.libraryInputHash}`,
+            title: w.title,
+            synopsis: resolved.synopsis,
+            synopsisSource: resolved.source,
+            tags: w.tags,
+            model: PREDICT_MODEL,
+            promptVersion: PREDICT_PROMPT_VERSION,
+            schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
+          })
+        : classifySig
     items.push({
       workId: w.workId,
       currentState: state,
-      expectedInputSignature: expectedSig,
+      expectedInputSignature: planItemSig,
       expectedProfileSignature: profileState === "stale" ? PENDING_PROFILE_REGEN : currentProfileSignature ?? PENDING_PROFILE_REGEN,
       synopsisSource: resolved.source,
       likelyUsd: round6(predictStep.likelyUsd),
@@ -379,7 +459,8 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
     })
   }
 
-  // ---- Custo agregado da cascata (reusa estimateStep) ----
+  // ---- Custo agregado da cascata (reusa estimateStep). Perfil escala com a
+  //      biblioteca COMPLETA (global), não com o escopo do piloto. ----
   const profileStep = profileState === "stale" ? estimateStep("ensure_taste_profile", profileSnap.ratedWorksCount) : null
   const predictCount = items.length
   const likelyUsd = round6((profileStep?.likelyUsd ?? 0) + predictStep.likelyUsd * predictCount)
@@ -387,7 +468,7 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
   const recalcPlanned = profileState === "stale"
 
   const planSignature = computeInterestPlanSignature({
-    scopeWorkIds,
+    scope: { kind: scope.kind, limit: scope.kind === "limit" ? scope.limit : null, selected: scopeWorkIds, missing: requestedButMissing },
     profilePolicy,
     profileState,
     libraryInputHash: profileSnap.libraryInputHash,
@@ -411,7 +492,11 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
     profileFunctionalVersion: profileSnap.current?.version ?? null,
     libraryInputHash: profileSnap.libraryInputHash,
     profileAction,
-    totalWorks: works.length,
+    scopeKind: scope.kind,
+    scopeWorkIds,
+    scopeLimit: scope.kind === "limit" ? scope.limit : null,
+    requestedButMissing,
+    totalWorks: scopedWorks.length,
     eligible: eligibleWorkIds.length,
     fresh,
     stale,
@@ -442,6 +527,8 @@ export type RecalcRunner = (force: boolean) => Promise<{ status: string }>
 export interface RunInterestBackfillDeps {
   planSignature: string
   maxCostUsd: number
+  /** MESMO escopo do dry-run confirmado (a assinatura embute o escopo). */
+  scope?: BackfillScope
   concurrency?: number
   retryFailed?: boolean
   // Injeção (testes/no-op):
@@ -483,10 +570,16 @@ export async function runInterestBackfill(deps: RunInterestBackfillDeps): Promis
   const jobStore = deps.jobStore ?? (await getJobStore())
   const shouldStop = deps.shouldStop ?? (() => false)
 
-  // 1) Re-plano íntegro + comparação de assinatura.
-  const plan = await planInterestBackfill({ gateway: planGateway, now: deps.now })
+  // 1) Re-plano íntegro (MESMO escopo) + comparação de assinatura. Mudança
+  //    EXTERNA (perfil/biblioteca/obra) antes da execução ⇒ assinatura diverge ⇒
+  //    plan_changed, sem nenhuma chamada paga.
+  const plan = await planInterestBackfill({ gateway: planGateway, scope: deps.scope, now: deps.now })
   if (plan.planSignature !== deps.planSignature) {
     return { status: "plan_changed", message: PLAN_CHANGED_MSG, expected: deps.planSignature, actual: plan.planSignature }
+  }
+  // 1b) IDs pedidos inexistentes/arquivados ⇒ bloqueia antes de qualquer execução.
+  if (plan.requestedButMissing.length > 0) {
+    return { status: "blocked_manual", message: `IDs inexistentes/arquivados no escopo: ${plan.requestedButMissing.join(", ")}. Corrija e gere novo plano.` }
   }
   // 2) Teto (hard cap insuficiente) — sempre sobre o UPPER BOUND.
   if (plan.estimatedUpperBoundUsd > deps.maxCostUsd) {
@@ -625,17 +718,18 @@ export async function runInterestBackfill(deps: RunInterestBackfillDeps): Promis
   await Promise.all(Array.from({ length: concurrency }, () => worker()))
 
   // 5) Recalc global FINAL (free, coalescido, work_id=null) — 1× quando o perfil
-  //    foi regenerado (personal_fit derivado fica stale; recalc o atualiza).
+  //    foi REGENERADO. insertNewTasteProfile marca recalc_pending; este recalc
+  //    (force=false) roda por causa dessa pendência e a zera no sucesso. NÃO usa
+  //    `force` (que mascararia a ausência de pendência para os demais consumidores).
   if (report.profileUpdated) {
-    const recalcFn = deps.recalc
-    if (recalcFn) {
-      const r = await recalcFn(true)
-      report.recalcExecuted = r.status === "succeeded" || r.status === "fresh"
-    } else {
-      const { recalculateScoresNow } = await import("@/server/actions/recalc-queue")
-      const r = await recalculateScoresNow()
-      report.recalcExecuted = r.status === "succeeded"
-    }
+    const recalcFn: RecalcRunner =
+      deps.recalc ??
+      (async () => {
+        const { recalculateScoresIfPending } = await import("@/server/actions/recalc-queue")
+        return recalculateScoresIfPending()
+      })
+    const r = await recalcFn(false)
+    report.recalcExecuted = r.status === "succeeded"
   }
 
   report.durationMs = (deps.now ?? Date.now)() - started

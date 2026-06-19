@@ -25,6 +25,10 @@ import { parseBackfillCliArgs } from "@/lib/orchestration/backfill/cli-args"
 
 function printPlan(plan: Awaited<ReturnType<typeof planInterestBackfill>>) {
   console.log("\n=== DRY-RUN — Backfill de Potencial de Interesse ===")
+  const scopeDesc = plan.scopeKind === "full" ? "catálogo completo" : plan.scopeKind === "limit" ? `limit=${plan.scopeLimit} (work_id ASC)` : `${plan.scopeWorkIds.length} ID(s) explícito(s)`
+  console.log(`escopo: ${scopeDesc}`)
+  if (plan.scopeKind !== "full") console.log(`  selecionadas: ${plan.scopeWorkIds.join(", ")}`)
+  if (plan.requestedButMissing.length > 0) console.log(`  ✗ IDs inexistentes/arquivados: ${plan.requestedButMissing.join(", ")}`)
   console.log(`perfil: ${plan.profileState}  (ação: ${plan.profileAction}; versão funcional: ${plan.profileFunctionalVersion ?? "—"})`)
   console.log(`obras: total=${plan.totalWorks} elegíveis=${plan.eligible} | fresh=${plan.fresh} stale=${plan.stale} ausente=${plan.absent} bloqueadas=${plan.blocked}`)
   console.log(`jobs: processing=${plan.processing} failed=${plan.failed}`)
@@ -64,10 +68,11 @@ async function main() {
     process.exit(2)
   }
   const args = parsed.args
+  const scope = parsed.scope
 
   if (!args.execute) {
     // DRY-RUN — read-only, sem jobs, sem LLM, sem alterar nada.
-    const plan = await planInterestBackfill()
+    const plan = await planInterestBackfill({ scope })
     printPlan(plan)
     return
   }
@@ -85,6 +90,7 @@ async function main() {
   const result = await runInterestBackfill({
     planSignature: args["plan-signature"]!,
     maxCostUsd: args["max-cost-usd"]!,
+    scope,
     concurrency: args.concurrency,
     retryFailed: args["retry-failed"],
     shouldStop: () => cancel,
