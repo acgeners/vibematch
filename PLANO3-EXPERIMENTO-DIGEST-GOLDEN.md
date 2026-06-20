@@ -1,4 +1,4 @@
-STATUS: LOTE DE DIGESTS PREPARADO (B2.2A) — 51 elegíveis, planSignature e44e5996…, upper $3.41; AGUARDANDO AUTORIZAÇÃO DE CUSTO (ver PLANO3-LOTE-DIGEST-GOLDEN.md). Golden CONTEXTUAL (B2.1D); synopsis-only SUPERSEDED; base-1 preservado. NENHUMA CHAMADA PAGA EXECUTADA.
+STATUS: 51 DIGESTS DO GOLDEN GERADOS ✅ (B2.2B, 2026-06-20) — 51/51 succeeded, custo real $0.8578 ≤ teto $3.50, status completed; corpus/escopo íntegros (ver PLANO3-LOTE-DIGEST-GOLDEN.md §RESULTADO). Golden CONTEXTUAL (B2.1D); synopsis-only SUPERSEDED; base-1 preservado. Próximo: sanitizar → enriched-1 → pacote contextual (etapa separada).
 
 > **⚠️ Correção de constructo (Fase B2.1D, 2026-06-19):** o alvo do Plano 3 é **Potencial
 > de Interesse na Obra (Contextual Work Interest)** — sinopse + tags + contexto de reviews —

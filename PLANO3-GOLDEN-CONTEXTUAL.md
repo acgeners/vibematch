@@ -119,4 +119,6 @@ nova snapshot version (base-2)  ·  novo reviewCorpusSignature  ·  novo plano d
 
 Ver **[PLANO3-LOTE-DIGEST-GOLDEN.md](PLANO3-LOTE-DIGEST-GOLDEN.md)** (`STATUS: NÃO EXECUTADO — AGUARDANDO AUTORIZAÇÃO DE CUSTO`). Planner/runner agregado seguro em [golden-digest.ts](lib/synopsis-interest/golden-digest.ts) + CLI `npm run digest:golden`.
 
-Resultado real (read-only): compatível (`corpus_changed=0`); **51 elegíveis** / 0 reutilizáveis / 29 no_reviews; **likely $2.27 / upper $3.41** (teto mín. $3.41, recomendado $3.50); `planSignature=e44e5996…`. Os valores antigos (~$1.0/~$5.9) eram projeções. Se qualquer review mudar (ex.: via a aba "Sem reviews"), o `reviewCorpusSignature` diverge ⇒ exige **base-2** antes de gerar digest. Geração permanece etapa paga separada, **não autorizada aqui**.
+Dry-run (B2.2A): compatível (`corpus_changed=0`); 51 elegíveis / 0 reutilizáveis / 29 no_reviews; `planSignature=e44e5996…`.
+
+**EXECUTADO (B2.2B, 2026-06-20):** ✅ **51/51 digests `digest-v1` gerados**, custo real **$0.8578** ≤ teto $3.50, status `completed`, 0 falhas; escopo rígido (só os 51; 29 no_reviews intactas; 0 fora do golden; 0 summary; corpus inalterado); predictions/labels/perfil inalterados. Validação: 51/51 estruturalmente válidos (1 digest com nota-token bruto será removido pela sanitização). Detalhes em [PLANO3-LOTE-DIGEST-GOLDEN.md](PLANO3-LOTE-DIGEST-GOLDEN.md) §RESULTADO. **Próximo (separado):** sanitizar → `enriched-1` → pacote contextual cego → liberar rotulagem.

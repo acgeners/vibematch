@@ -583,6 +583,20 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 
 ---
 
+## 24g. Addendum — Fase B2.2B: 51 digests do golden EXECUTADOS (2026-06-20)
+
+> **Execução paga autorizada e concluída.** Detalhes em [PLANO3-LOTE-DIGEST-GOLDEN.md](PLANO3-LOTE-DIGEST-GOLDEN.md) §RESULTADO.
+
+- **Gates pré-execução (🟩):** dry-run final idêntico ao aprovado (`planSignature=e44e5996…`, 51 elegíveis, upper $3.41 ≤ $3.50); `snapshotBaseSignature=634571c2…`/`reviewCorpusSignature=8776419e…` batem; SHA dos 51 IDs `7b264c55…`; labels 0/90; 0 jobs ativos; 0 corpus drift; backup gitignored (sha `b0141e0d…`, 51 obras).
+- **Resultado:** **51/51 succeeded**, 0 failed, status `completed`, exit 0, ~12 min. **Custo real $0.8578** (avg $0.0168, min $0.0082, max $0.0385) ≪ likely $2.27 ≪ upper $3.41 ≤ teto $3.50. **Só `review_digest`** — nenhuma outra operação paga.
+- **Escritas:** `review_digest`/version/n/at nas **51** obras + **51 jobs** `generate_review_digest/succeeded` (attempts=1). **Zero** reviews/summary/predictions/candidatos/labels/perfil/recalc/migration.
+- **Integridade (🟩):** só os 51 IDs (0 fora do golden); 29 `no_reviews_available` sem digest; corpus inalterado (51/51); predictions 1026 / taste_profile 7 / labels 0 inalterados.
+- **Validação:** 51/51 estruturalmente válidos (`digest-v1`, campos completos, não-vazios); **0 leak de recomendação**; **1/51** com nota-token no digest bruto (a sanitização `RATING_RE` remove antes da rotulagem — não bloqueante).
+- **Desvio:** runner roda **sequencial** (o `--concurrency=2` é aceito e ignorado) — mais seguro, só mais lento.
+- **GO para `enriched-1`** (etapa separada: sanitizar → materializar enriched-1 → pacote contextual cego → liberar rotulagem).
+
+---
+
 ## 24f. Addendum — Fase B2.2A: lote de digests do golden (dry-run) (2026-06-20)
 
 > **Lote preparado, NÃO executado** — ver [PLANO3-LOTE-DIGEST-GOLDEN.md](PLANO3-LOTE-DIGEST-GOLDEN.md)
