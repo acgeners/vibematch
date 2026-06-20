@@ -13,7 +13,8 @@
     "sync-constants": "node scripts/sync-constants.js",
     "resolve-comix-hids": "node scripts/resolve-comix-hids.mjs",
     "backfill:interest": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-work-data.ts",
-    "recalc:scores": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/recalculate-scores.ts"
+    "recalc:scores": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/recalculate-scores.ts",
+    "digest:golden": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/golden-digest-batch.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

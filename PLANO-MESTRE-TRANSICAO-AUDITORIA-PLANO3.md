@@ -583,6 +583,20 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 
 ---
 
+## 24f. Addendum — Fase B2.2A: lote de digests do golden (dry-run) (2026-06-20)
+
+> **Lote preparado, NÃO executado** — ver [PLANO3-LOTE-DIGEST-GOLDEN.md](PLANO3-LOTE-DIGEST-GOLDEN.md)
+> (`STATUS: NÃO EXECUTADO — AGUARDANDO AUTORIZAÇÃO DE CUSTO`).
+
+- **Compatibilidade (read-only):** o catálogo cresceu (works 734→737, digests 14→17, jobs 114→123) por atividade do app, **mas nenhuma mudança atingiu o golden** — `corpus_changed=0/80`, `reviewCorpusSignature` global bate (`8776419e…`), `base-1` íntegro (`634571c2…`). **Regra bloqueante não disparou** ⇒ não exige `base-2`.
+- **Escopo:** **51 elegíveis** (corpus_unchanged_digest_missing) · 0 reutilizáveis (os 3 digests novos são fora do golden) · 29 `no_reviews_available` excluídas · 0 stale/changed. SHA-256 dos 51 IDs ordenados = `7b264c55…`.
+- **Plano:** `planSignature=e44e5996…` · model sonnet-4-6 / digest-v1 / schema v1 · **likely $2.27 / upper $3.41** (real do `estimateStep`, não a projeção antiga ~$1/~$5.9); teto mín. $3.41, recomendado **$3.50**. Comando `npm run digest:golden -- --execute …` (gated; sem `--retry-failed`).
+- **Código (puro + IO-injetável, testado):** [golden-digest.ts](lib/synopsis-interest/golden-digest.ts) (`planGoldenDigestBatch`/`runGoldenDigestBatch`: escopo só golden, exclui no_reviews, exclui reusable, **bloqueia corpus_changed**, soft-cap, re-check de plano, cancel, sem retry/summary, partial≠completed) + CLI [golden-digest-batch.ts](scripts/golden-digest-batch.ts). **Não** usa o lote legado de `settings`. **729 testes** (+24); `tsc`/lint/build verdes; build não dispara geração.
+- **Correção (§ candidatos):** `b1`/`e1` **compartilham a mesma base de inputs de trabalho** (título/sinopse/tags/perfil), mas as **assinaturas FINAIS são distintas** (candidate id + review context). A frase anterior "b1/e1 com assinatura idêntica" significava "cada um manteve seu próprio hash anterior" (⇒ base-1 estável), **não** `b1==e1`.
+- **Pós-sucesso (não agora):** verificar 51/51 → sanitizar digests → materializar `enriched-1` → pacote contextual → validar leakage → liberar rotulagem. Falha persistente em qualquer digest ⇒ parar para decisão.
+
+---
+
 ## 24e. Addendum — Fase B2.1D: golden CONTEXTUAL + aba "Sem reviews" (2026-06-19)
 
 > **Constructo corrigido** + melhoria operacional. Detalhes em
@@ -591,7 +605,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 **Parte A — protocolo:**
 - **Constructo único:** **Potencial de Interesse na Obra** (sinopse + tags + contexto de reviews), **não** "apelo da sinopse". Um golden contextual só.
 - **Pacote synopsis-only SUPERSEDED** (não rotular); **snapshot-base `base-1` preservado** como base técnica (`snapshotBaseSignature=634571c2…` reverificado inalterado após estender candidatos).
-- **Candidatos S0/S1/D1/D2/b1/e1** (b1/e1 com assinatura idêntica ⇒ base-1 intacto); 8 perguntas experimentais; métrica principal = **MAE ordinal pareada por obra única no holdout** (80 work_ids; repetições só intra-avaliador).
+- **Candidatos S0/S1/D1/D2/b1/e1** (b1/e1 **mantêm cada um o próprio hash anterior** ⇒ base-1 intacto; assinaturas FINAIS de b1 e e1 são **distintas** — ver B2.2A); 8 perguntas experimentais; métrica principal = **MAE ordinal pareada por obra única no holdout** (80 work_ids; repetições só intra-avaliador).
 - **Tags contextuais** (`selectContextualTags`): exclui `format`/`other`, dedupe determinístico, ordem canônica, máx 30; **S078** → mensagem neutra (não finge ausência legítima — `missing_recoverable_frozen_empty`).
 - **Digest sanitizado** (`sanitizeDigestForLabeling` + `DIGEST_FIELD_POLICY`): remove notas/estrelas/recomendação; mantém traços (±)/polaridade/eixo/avisos.
 - **29 obras = `no_reviews_available`** (não equivalência de qualidade): análises separadas (todas/com-digest/sem-reviews/S078); ausência não escondida na métrica.

@@ -103,7 +103,7 @@ nova snapshot version (base-2)  ·  novo reviewCorpusSignature  ·  novo plano d
 | **b1** | perfil + título + sinopse + tags | LLM |
 | **e1** | b1 + digest/summary/no_reviews | LLM |
 
-`b1`/`e1` preservam **exatamente** a assinatura anterior ⇒ **snapshot base-1 inalterado** (verificado: `snapshotBaseSignature=634571c2…`). Candidatos com menos dados tentam aproximar o julgamento completo.
+`b1`/`e1` preservam **exatamente** a assinatura anterior **de cada um** (vs. antes de estender os candidatos) ⇒ **snapshot base-1 inalterado** (`snapshotBaseSignature=634571c2…`). **Esclarecimento (B2.2A):** `b1` e `e1` derivam da **mesma base de inputs de trabalho** (mesmo título/sinopse/tags/perfil), mas as **assinaturas FINAIS são distintas** — `candidate id`, `prompt version`, `review context`, `review context signature` e a assinatura final separam `b1` de `e1`. "Assinatura idêntica" referia-se ao fato de cada um manter seu próprio hash anterior, **não** a `b1 == e1`. Candidatos com menos dados tentam aproximar o julgamento completo.
 
 **Perguntas experimentais:** (1) sinopse sozinha basta? (2) perfil melhora? (3) tags somam sinal? (4) título soma ou só reconhecimento? (5) digest melhora vs baseline? (6) o ganho do digest é só no subconjunto com reviews? (7) compensa custo/complexidade? (8) determinísticos (D1/D2) são competitivos?
 
@@ -115,6 +115,8 @@ nova snapshot version (base-2)  ·  novo reviewCorpusSignature  ·  novo plano d
 - **Comparações obrigatórias:** `e1 vs b1` (mesmas obras) · `b1 vs D2` · `S1 vs S0` · `D1/D2 vs candidatos LLM`.
 - **Subgrupos separados:** com digest · sem reviews · S078/missing tag context.
 
-## 11. Próximo dry-run (NÃO executado) — 51 digests do golden
+## 11. Lote de digests do golden — dry-run CONCLUÍDO (B2.2A; NÃO executado pago)
 
-Verificará: `snapshotBaseSignature` (634571c2…) · `reviewCorpusSignature` (8776419e…) · **51 IDs** elegíveis · digest version (digest-v1) · model (sonnet-4-6) · prompt · schema · likely (~$1.0) · upper (~$5.9) · `planSignature`. Se qualquer review mudar (ex.: via a aba "Sem reviews"), o corpus signature diverge ⇒ exige **base-2** antes de gerar digest. Geração permanece etapa paga separada, **não autorizada aqui**.
+Ver **[PLANO3-LOTE-DIGEST-GOLDEN.md](PLANO3-LOTE-DIGEST-GOLDEN.md)** (`STATUS: NÃO EXECUTADO — AGUARDANDO AUTORIZAÇÃO DE CUSTO`). Planner/runner agregado seguro em [golden-digest.ts](lib/synopsis-interest/golden-digest.ts) + CLI `npm run digest:golden`.
+
+Resultado real (read-only): compatível (`corpus_changed=0`); **51 elegíveis** / 0 reutilizáveis / 29 no_reviews; **likely $2.27 / upper $3.41** (teto mín. $3.41, recomendado $3.50); `planSignature=e44e5996…`. Os valores antigos (~$1.0/~$5.9) eram projeções. Se qualquer review mudar (ex.: via a aba "Sem reviews"), o `reviewCorpusSignature` diverge ⇒ exige **base-2** antes de gerar digest. Geração permanece etapa paga separada, **não autorizada aqui**.

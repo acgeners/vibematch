@@ -1,4 +1,4 @@
-STATUS: CONSTRUCTO CORRIGIDO (B2.1D) — golden CONTEXTUAL único; pacote synopsis-only SUPERSEDED; snapshot-base base-1 preservado. NENHUMA CHAMADA PAGA EXECUTADA.
+STATUS: LOTE DE DIGESTS PREPARADO (B2.2A) — 51 elegíveis, planSignature e44e5996…, upper $3.41; AGUARDANDO AUTORIZAÇÃO DE CUSTO (ver PLANO3-LOTE-DIGEST-GOLDEN.md). Golden CONTEXTUAL (B2.1D); synopsis-only SUPERSEDED; base-1 preservado. NENHUMA CHAMADA PAGA EXECUTADA.
 
 > **⚠️ Correção de constructo (Fase B2.1D, 2026-06-19):** o alvo do Plano 3 é **Potencial
 > de Interesse na Obra (Contextual Work Interest)** — sinopse + tags + contexto de reviews —
