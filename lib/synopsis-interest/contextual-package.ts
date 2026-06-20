@@ -93,10 +93,12 @@ export const DIGEST_FIELD_POLICY: Record<string, DigestFieldPolicy> = {
 }
 
 // Linguagem de recomendação / previsão de gosto (proibida) — removida do texto.
+// Unicode-aware (`u`): `\p{L}*` cobre continuações ACENTUADAS (recomendável,
+// recomendação…) que `\w` (ASCII) deixava passar. Sem `\b` (incompatível com acento).
 const RECOMMENDATION_RE =
-  /\b(voc[êe] vai (gostar|amar|adorar)|recomend\w+|vale a pena|imperd[ií]vel|leitura obrigat\w+|must[- ]read|you('| wi)ll (love|enjoy)|highly recommend\w*)\b/gi
+  /(voc[êe] vai (gostar|amar|adorar)|recomend\p{L}*|vale a pena|imperd[ií]ve\p{L}*|leitura obrigat\p{L}*|must[- ]read|you(?:'| wi)ll (?:love|enjoy)|highly recommend\p{L}*)/giu
 // Notas/estrelas/rankings (proibidos).
-const RATING_RE = /\b\d{1,2}(?:[.,]\d)?\s*\/\s*(?:10|5)\b|★+|⭐+|\b\d(?:[.,]\d)?\s*(?:stars?|estrelas?)\b/gi
+const RATING_RE = /\d{1,2}(?:[.,]\d)?\s*\/\s*(?:10|5)|★+|⭐+|\d(?:[.,]\d)?\s*(?:stars?|estrelas?)/giu
 
 function scrub(text: string | null | undefined): string {
   return (text ?? "")

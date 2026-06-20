@@ -1,4 +1,4 @@
-STATUS: EXECUTADO ✅ — 51/51 digests gerados (Fase B2.2B, 2026-06-20); custo real US$ 0,8578 ≤ teto US$ 3,50; status `completed`, exit 0. Ver "RESULTADO DA EXECUÇÃO" no fim.
+STATUS: EXECUTADO ✅ — 51/51 digests gerados (Fase B2.2B, 2026-06-20); custo real US$ 0,8578 ≤ teto US$ 3,50; status `completed`, exit 0. Ver "RESULTADO DA EXECUÇÃO" no fim. B2.2C: enriched-1 + pacote contextual materializados (ver PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md).
 
 # Lote de digests do golden contextual (Plano 3 Fase B2.2A)
 

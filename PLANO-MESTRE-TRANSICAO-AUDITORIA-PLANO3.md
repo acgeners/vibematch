@@ -583,6 +583,21 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 
 ---
 
+## 24h. Addendum — Fase B2.2C: enriched-1 + pacote contextual cego (2026-06-20)
+
+> **PRONTO PARA ROTULAGEM HUMANA CONTEXTUAL.** Read-only; zero chamada paga.
+> Manifesto [PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md](PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md).
+
+- **Pré-verificação (🟩):** base-1 íntegro (`634571c2…`/`8776419e…`), 80 obras, labels 0/90; **51/51 digests** `digest-v1` parseáveis/completos, **corpus inalterado 80/80**; **blocks=0** (sem corpus_changed/stale/inválido/failed). Nenhum summary fallback.
+- **enriched-1** (deriva ESTRITAMENTE de base-1 + digests sanitizados): 51 `digest_available` + 29 `no_reviews_available`; `enrichedSnapshotSignature=8b61084d…`, `sanitizedDigestCorpusSignature=7958c236…` (determinístico — runs idênticas). Carrega congelados de base-1 (título/sinopse/tags/perfil/baseInputSignature); só acrescenta contexto.
+- **Sanitização** (`sanitizeDigestForLabeling`): removeu nota-token (1) e recomendação (1). **Fix B2.2C:** o regex de recomendação não pegava acento (`recomendável`) — `\w`→`\p{L}` com flag `u`; regenerado deterministicamente → **0 nota / 0 recomendação / 0 URL / 0 contexto vazio** nos 51. Digest **bruto** persistido inalterado.
+- **Pacote contextual cego** (`contextualPackageSignature=9e4d1b9f…`): HTML offline com SINOPSE + ELEMENTOS (tags `selectContextualTags`) + CONTEXTO DE LEITORES (digest sanitizado / no_reviews) + **rúbrica contextual** ([RUBRIC-CONTEXTUAL.md](lib/synopsis-interest/RUBRIC-CONTEXTUAL.md)). **Sem título** (b1 testa o título), sem work_id/scores/versões; **0 leakage** (validação estrutural); 90 cards; repetições idênticas sem marca; S078 com mensagem de elementos indisponíveis. CSV template vazio.
+- **synopsis-only SUPERSEDED** (preservado; aviso local em `base-1/SUPERSEDED-NAO-USAR.txt`). Rotulagem ativa = `enriched-1/golden-contextual-labeling.html`.
+- **Código (puro + testado):** `lib/synopsis-interest/{enriched,contextual-html}.ts` + gerador `scripts/synopsis-interest-enriched.ts`. **748 testes** (+24); tsc/lint/build verdes; build não gera o pacote. **Zero escrita no banco, zero LLM, zero migration.**
+- **Desvio do runner B2.2B** (concorrência sequencial) registrado como observação não-bloqueante: verificar eficácia da concorrência antes de backfills maiores.
+
+---
+
 ## 24g. Addendum — Fase B2.2B: 51 digests do golden EXECUTADOS (2026-06-20)
 
 > **Execução paga autorizada e concluída.** Detalhes em [PLANO3-LOTE-DIGEST-GOLDEN.md](PLANO3-LOTE-DIGEST-GOLDEN.md) §RESULTADO.

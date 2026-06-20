@@ -4,8 +4,9 @@
 > obras/90 slots/split/assinaturas). O **pacote cego synopsis-only** (`golden-labeling.html`)
 > está **SUPERSEDED — NÃO UTILIZAR PARA ROTULAGEM** (o constructo virou contextual: sinopse +
 > tags + reviews). Ver [PLANO3-GOLDEN-CONTEXTUAL.md](PLANO3-GOLDEN-CONTEXTUAL.md). Os hashes
-> abaixo seguem válidos para o snapshot-base; o futuro pacote contextual (`enriched-1`) deriva
-> deste base-1 + os 51 digests (etapa paga separada).
+> abaixo seguem válidos para o snapshot-base; o pacote contextual **ATIVO** é o `enriched-1`
+> (B2.2C, materializado — [PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md](PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md)),
+> que deriva deste base-1 + os 51 digests sanitizados.
 
 > Manifesto **versionado** (sem conteúdo integral: sem sinopse/tags/reviews/labels).
 > Gerado por [scripts/synopsis-interest-snapshot.ts](scripts/synopsis-interest-snapshot.ts)

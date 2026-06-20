@@ -68,6 +68,21 @@ describe("contextual-package — sanitizeDigestForLabeling", () => {
     expect(s.execution).not.toMatch(/★/)
     expect(s.traits[0]!.trait).not.toMatch(/must-read/i)
   })
+  it("remove recomendação ACENTUADA (recomendável/recomendação) — fix B2.2C", () => {
+    const d: ReviewDigest = {
+      consensus: "Obra genuinamente boa e recomendável.",
+      divergence: "Há recomendação ampla; alguns divergem.",
+      execution: "Bem executada.",
+      salient_traits: [{ trait: "Final recomendadíssimo", polarity: "positive", axis: "geral" }],
+      content_warnings: [],
+    }
+    const s = sanitizeDigestForLabeling(d)
+    expect(s.consensus).not.toMatch(/recomend/i)
+    expect(s.divergence).not.toMatch(/recomend/i)
+    expect(s.traits[0]!.trait).not.toMatch(/recomend/i)
+    // mantém o conteúdo descritivo restante
+    expect(s.consensus).toMatch(/genuinamente boa/)
+  })
   it("preserva traços (positivos e negativos), polaridade, eixo e content_warnings", () => {
     const s = sanitizeDigestForLabeling(digest)
     expect(s.traits.map((t) => t.polarity)).toEqual(["positive", "negative"])

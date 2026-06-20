@@ -121,4 +121,6 @@ Ver **[PLANO3-LOTE-DIGEST-GOLDEN.md](PLANO3-LOTE-DIGEST-GOLDEN.md)** (`STATUS: N
 
 Dry-run (B2.2A): compatível (`corpus_changed=0`); 51 elegíveis / 0 reutilizáveis / 29 no_reviews; `planSignature=e44e5996…`.
 
-**EXECUTADO (B2.2B, 2026-06-20):** ✅ **51/51 digests `digest-v1` gerados**, custo real **$0.8578** ≤ teto $3.50, status `completed`, 0 falhas; escopo rígido (só os 51; 29 no_reviews intactas; 0 fora do golden; 0 summary; corpus inalterado); predictions/labels/perfil inalterados. Validação: 51/51 estruturalmente válidos (1 digest com nota-token bruto será removido pela sanitização). Detalhes em [PLANO3-LOTE-DIGEST-GOLDEN.md](PLANO3-LOTE-DIGEST-GOLDEN.md) §RESULTADO. **Próximo (separado):** sanitizar → `enriched-1` → pacote contextual cego → liberar rotulagem.
+**EXECUTADO (B2.2B):** ✅ **51/51 digests `digest-v1` gerados**, custo real **$0.8578**, 0 falhas; escopo rígido. Detalhes em [PLANO3-LOTE-DIGEST-GOLDEN.md](PLANO3-LOTE-DIGEST-GOLDEN.md) §RESULTADO.
+
+**MATERIALIZADO (B2.2C, 2026-06-20):** ✅ **`enriched-1` + pacote contextual cego congelados** (read-only; zero chamada paga). 51 `digest_available` + 29 `no_reviews_available`; sanitização determinística (nota-token e recomendação acentuada removidos → 0 restante); pacote offline validado (0 leakage; sem título/work_id; 90 cards). `enrichedSnapshotSignature=8b61084d…`, `contextualPackageSignature=9e4d1b9f…`. Ver [PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md](PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md). **PRONTO PARA ROTULAGEM HUMANA CONTEXTUAL.**

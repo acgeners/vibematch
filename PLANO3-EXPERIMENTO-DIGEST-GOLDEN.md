@@ -1,4 +1,4 @@
-STATUS: 51 DIGESTS DO GOLDEN GERADOS ✅ (B2.2B, 2026-06-20) — 51/51 succeeded, custo real $0.8578 ≤ teto $3.50, status completed; corpus/escopo íntegros (ver PLANO3-LOTE-DIGEST-GOLDEN.md §RESULTADO). Golden CONTEXTUAL (B2.1D); synopsis-only SUPERSEDED; base-1 preservado. Próximo: sanitizar → enriched-1 → pacote contextual (etapa separada).
+STATUS: PRONTO PARA ROTULAGEM HUMANA CONTEXTUAL ✅ (B2.2C, 2026-06-20) — ENRICHED-1 E PACOTE CONTEXTUAL CONGELADOS; ZERO CHAMADAS PAGAS NESTA FASE. enrichedSnapshotSignature=8b61084d…, contextualPackageSignature=9e4d1b9f…; 51 digest_available + 29 no_reviews_available; pacote offline validado (0 leakage). Ver PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md. (B2.2B: 51 digests gerados, $0.8578. base-1 preservado; synopsis-only SUPERSEDED.)
 
 > **⚠️ Correção de constructo (Fase B2.1D, 2026-06-19):** o alvo do Plano 3 é **Potencial
 > de Interesse na Obra (Contextual Work Interest)** — sinopse + tags + contexto de reviews —
