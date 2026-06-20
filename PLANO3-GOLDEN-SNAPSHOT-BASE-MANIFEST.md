@@ -1,5 +1,12 @@
 # Manifesto — Snapshot-base + Pacote cego (Plano 3 Fase B2.1C)
 
+> **Nota (B2.1D):** o **snapshot-base `base-1` permanece a base técnica VÁLIDA** (mesmas 80
+> obras/90 slots/split/assinaturas). O **pacote cego synopsis-only** (`golden-labeling.html`)
+> está **SUPERSEDED — NÃO UTILIZAR PARA ROTULAGEM** (o constructo virou contextual: sinopse +
+> tags + reviews). Ver [PLANO3-GOLDEN-CONTEXTUAL.md](PLANO3-GOLDEN-CONTEXTUAL.md). Os hashes
+> abaixo seguem válidos para o snapshot-base; o futuro pacote contextual (`enriched-1`) deriva
+> deste base-1 + os 51 digests (etapa paga separada).
+
 > Manifesto **versionado** (sem conteúdo integral: sem sinopse/tags/reviews/labels).
 > Gerado por [scripts/synopsis-interest-snapshot.ts](scripts/synopsis-interest-snapshot.ts)
 > (read-only no banco). Os artefatos completos vivem em `.local-experiments/` (gitignored):

@@ -40,35 +40,83 @@ export function isMaterialReviewGrowth(prevN: number | null, nowN: number): bool
 
 // ── Candidatos ───────────────────────────────────────────────────────────────
 
+/** Quais entradas um candidato injeta. A assinatura inclui SÓ as marcadas. */
+export interface CandidateInputs {
+  title: boolean
+  synopsis: boolean
+  tags: boolean
+  profile: boolean
+  reviewContext: boolean
+}
+
 export interface ExperimentCandidate {
   id: string
   label: string
-  /** true ⇒ injeta contexto de review (digest/summary) no prompt. */
-  usesReviewContext: boolean
+  inputs: CandidateInputs
+  /** true ⇒ sem LLM (D1/D2 determinísticos). */
+  deterministic: boolean
   promptVersion: string
   model: string
   schemaVersion: string
 }
 
 /**
- * Registro CONGELADO. `b1` replica o contrato de produção (perfil+título+sinopse+
- * tags, SEM digest/summary) e é re-executado no experimento (nunca reusa as 112
- * de produção sem equivalência exata provada). `e1` adiciona o contexto de review
- * com fallback digest→summary→no_reviews.
+ * Registro CONGELADO do golden CONTEXTUAL (Fase B2.1D). Todos comparados contra o
+ * MESMO rótulo humano contextual (sinopse + tags + contexto de reviews). Candidatos
+ * com menos dados tentam aproximar o julgamento completo. `b1`/`e1` preservam
+ * EXATAMENTE a identidade de assinatura anterior (snapshot base-1 inalterado).
  */
-export const CANDIDATES: Record<"b1" | "e1", ExperimentCandidate> = {
+export const CANDIDATES: Record<"s0" | "s1" | "d1" | "d2" | "b1" | "e1", ExperimentCandidate> = {
+  s0: {
+    id: "s0",
+    label: "S0 — só sinopse (sem perfil)",
+    inputs: { title: false, synopsis: true, tags: false, profile: false, reviewContext: false },
+    deterministic: false,
+    promptVersion: "s0",
+    model: "claude-sonnet-4-6",
+    schemaVersion: "v1",
+  },
+  s1: {
+    id: "s1",
+    label: "S1 — perfil + sinopse",
+    inputs: { title: false, synopsis: true, tags: false, profile: true, reviewContext: false },
+    deterministic: false,
+    promptVersion: "s1",
+    model: "claude-sonnet-4-6",
+    schemaVersion: "v1",
+  },
+  d1: {
+    id: "d1",
+    label: "D1 — perfil + tags (determinístico)",
+    inputs: { title: false, synopsis: false, tags: true, profile: true, reviewContext: false },
+    deterministic: true,
+    promptVersion: "d1",
+    model: "deterministic",
+    schemaVersion: "v1",
+  },
+  d2: {
+    id: "d2",
+    label: "D2 — perfil + sinopse + tags (determinístico)",
+    inputs: { title: false, synopsis: true, tags: true, profile: true, reviewContext: false },
+    deterministic: true,
+    promptVersion: "d2",
+    model: "deterministic",
+    schemaVersion: "v1",
+  },
   b1: {
     id: "b1",
-    label: "baseline — perfil+título+sinopse+tags (sem digest/summary)",
-    usesReviewContext: false,
+    label: "b1 — perfil+título+sinopse+tags (sem digest/summary)",
+    inputs: { title: true, synopsis: true, tags: true, profile: true, reviewContext: false },
+    deterministic: false,
     promptVersion: "v2",
     model: "claude-sonnet-4-6",
     schemaVersion: "v1",
   },
   e1: {
     id: "e1",
-    label: "enriquecido — baseline + contexto de review (digest→summary→no_reviews)",
-    usesReviewContext: true,
+    label: "e1 — b1 + contexto de review (digest→summary→no_reviews)",
+    inputs: { title: true, synopsis: true, tags: true, profile: true, reviewContext: true },
+    deterministic: false,
     promptVersion: "v2+digest",
     model: "claude-sonnet-4-6",
     schemaVersion: "v1",
@@ -234,24 +282,24 @@ export function computeSnapshotSignature(parts: SnapshotSignatureParts): string 
 }
 
 /**
- * Assinatura de entrada de UM candidato para UMA obra. O baseline EXCLUI o
- * contexto de review (não depende de digest/summary); o enriquecido inclui.
+ * Assinatura de entrada de UM candidato para UMA obra. Inclui SÓ as entradas que o
+ * candidato usa (`inputs`): S0 = só sinopse; D1 = tags+perfil; b1 = título+sinopse+
+ * tags+perfil; e1 = b1 + contexto de review. A ORDEM dos campos é preservada para
+ * que `b1`/`e1` mantenham EXATAMENTE a assinatura anterior (snapshot base-1 estável).
  * Nenhum candidato inclui rótulo humano, score, ranking, alignment ou mood.
  */
 export function computeCandidateInputSignature(c: ExperimentCandidate, w: WorkSnapshotInput): string {
-  const base = {
-    workId: w.workId,
-    title: w.titleSig,
-    synopsis: w.synopsisSig,
-    tags: w.tagsSig,
-    profile: w.profileSig,
-    candidate: c.id,
-    prompt: c.promptVersion,
-    model: c.model,
-    schema: c.schemaVersion,
-  }
-  if (!c.usesReviewContext) return sha256(base)
-  return sha256({ ...base, reviewContextType: w.reviewContextType, reviewContextSig: w.reviewContextSig })
+  const sig: Record<string, string> = { workId: w.workId }
+  if (c.inputs.title) sig.title = w.titleSig
+  if (c.inputs.synopsis) sig.synopsis = w.synopsisSig
+  if (c.inputs.tags) sig.tags = w.tagsSig
+  if (c.inputs.profile) sig.profile = w.profileSig
+  sig.candidate = c.id
+  sig.prompt = c.promptVersion
+  sig.model = c.model
+  sig.schema = c.schemaVersion
+  if (!c.inputs.reviewContext) return sha256(sig)
+  return sha256({ ...sig, reviewContextType: w.reviewContextType, reviewContextSig: w.reviewContextSig })
 }
 
 // ── Planner PURO do digest restrito ao golden ────────────────────────────────

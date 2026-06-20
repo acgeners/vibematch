@@ -551,6 +551,9 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 | L12 | readiness parcial/completa (materializar) | partial | resolver derivado; materialização parcial | hardening pós-Plano 3 | não | expor readiness na UI/ranking (AUDITORIA §10) | hardening |
 | L13 | mudança de tags → staleness da previsão | **completed (superseded)** | `input_signature` (mig 111) **inclui tags** ⇒ tags mudam → stale | — | não | resolvido (supera AUDITORIA §11 caso 15) | — |
 | L14 | lote legado de digest bypassa o gate | partial / legacy | `consolidatePendingReviewDigests` sem gate | backfill final / pós-Plano 3 | não | migrar p/ `runDigestBatch` OU aposentar | após winner |
+| C1 | **mismatch de constructo** (sinopse-only × contextual) | **completed** | B2.1D: golden contextual único; synopsis-only superseded | Plano 3 | não | constructo = Potencial de Interesse na Obra; candidatos S0..e1 | rotular contextual (após 51 digests) |
+| C2 | **visibilidade de obras sem reviews** | **completed** | aba "Sem reviews" em `/ai-evaluation` (diagnóstico read-only) | operação recorrente | não | obras com 0 review útil visíveis + ação manual | usar p/ priorizar inclusão manual |
+| C3 | **ausência de reviews como risco de qualidade** | **partial** | `no_reviews_available` explícito; análise separada; aviso de custo×qualidade | Plano 3 / operação recorrente | não | grupo sem reviews analisado à parte; não escondido na métrica | medir no experimento |
 
 ### 23.3 Resumo
 
@@ -577,6 +580,28 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 - **decisão de produto:** F6, F8, L3, L10.
 
 > Regra mantida: item adiado **não desaparece** (fica nesta matriz); F5/F6/F7/F8/F9 têm destino explícito; F12 tem "política de atualização" como critério; F14/F15 ficam no hardening técnico; F1 segue bloqueando o deploy.
+
+---
+
+## 24e. Addendum — Fase B2.1D: golden CONTEXTUAL + aba "Sem reviews" (2026-06-19)
+
+> **Constructo corrigido** + melhoria operacional. Detalhes em
+> [PLANO3-GOLDEN-CONTEXTUAL.md](PLANO3-GOLDEN-CONTEXTUAL.md).
+
+**Parte A — protocolo:**
+- **Constructo único:** **Potencial de Interesse na Obra** (sinopse + tags + contexto de reviews), **não** "apelo da sinopse". Um golden contextual só.
+- **Pacote synopsis-only SUPERSEDED** (não rotular); **snapshot-base `base-1` preservado** como base técnica (`snapshotBaseSignature=634571c2…` reverificado inalterado após estender candidatos).
+- **Candidatos S0/S1/D1/D2/b1/e1** (b1/e1 com assinatura idêntica ⇒ base-1 intacto); 8 perguntas experimentais; métrica principal = **MAE ordinal pareada por obra única no holdout** (80 work_ids; repetições só intra-avaliador).
+- **Tags contextuais** (`selectContextualTags`): exclui `format`/`other`, dedupe determinístico, ordem canônica, máx 30; **S078** → mensagem neutra (não finge ausência legítima — `missing_recoverable_frozen_empty`).
+- **Digest sanitizado** (`sanitizeDigestForLabeling` + `DIGEST_FIELD_POLICY`): remove notas/estrelas/recomendação; mantém traços (±)/polaridade/eixo/avisos.
+- **29 obras = `no_reviews_available`** (não equivalência de qualidade): análises separadas (todas/com-digest/sem-reviews/S078); ausência não escondida na métrica.
+- **Reviews pós-snapshot ⇒ nova versão** (`base-2` + novo corpus signature + novo plano/pacote); nada silencioso.
+- **Fallback:** digest fresh → digest; `digest_failed` explícito; sem reviews → `no_reviews_available`; **sem** summary silencioso.
+
+**Parte B — aba "Sem reviews" (`/ai-evaluation`):**
+- Aba diagnóstica read-only listando obras ativas com **0 review útil** (regra centralizada `isUsefulReviewText` = trim≥40, reusada pelos gates de summary/digest). Filtros: busca/status/fonte-externa/golden (URL params, Server Component). Badges (Golden pilot-1 + aviso de imutabilidade de base-1), aviso de custo/qualidade, links p/ "Abrir obra"/"Adicionar review manualmente". **Não** gera reviews/summary/digest/avaliação/previsão.
+
+**Validação:** base-1 reverificado inalterado; `tsc` limpo; testes verdes; lint 0 nos novos; build exit 0. Zero escrita no banco, zero LLM, zero migration.
 
 ---
 

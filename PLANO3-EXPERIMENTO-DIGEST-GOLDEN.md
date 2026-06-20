@@ -1,4 +1,12 @@
-STATUS: PREPARADO — NENHUMA CHAMADA PAGA EXECUTADA
+STATUS: CONSTRUCTO CORRIGIDO (B2.1D) — golden CONTEXTUAL único; pacote synopsis-only SUPERSEDED; snapshot-base base-1 preservado. NENHUMA CHAMADA PAGA EXECUTADA.
+
+> **⚠️ Correção de constructo (Fase B2.1D, 2026-06-19):** o alvo do Plano 3 é **Potencial
+> de Interesse na Obra (Contextual Work Interest)** — sinopse + tags + contexto de reviews —
+> **não** "apelo da sinopse". O pacote **synopsis-only** (`golden-labeling.html`) está
+> **SUPERSEDED — NÃO UTILIZAR PARA ROTULAGEM**. O **snapshot-base `base-1` permanece válido**
+> (base técnica). Protocolo contextual, candidatos (S0/S1/D1/D2/b1/e1), política de tags e
+> sanitização de digest em **[PLANO3-GOLDEN-CONTEXTUAL.md](PLANO3-GOLDEN-CONTEXTUAL.md)**.
+> O conteúdo abaixo (synopsis-only) é preservado como histórico da Fase B2.0/B2.1C.
 
 # Plano 3 — Experimento digest × golden (Fase B2.0)
 

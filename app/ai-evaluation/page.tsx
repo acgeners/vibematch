@@ -22,6 +22,8 @@ import { getSynopsisPredictionAccuracy, getSynopsisVersionComparison } from "@/s
 import type { SynopsisPredictionAccuracy, SynopsisVersionComparison } from "@/server/queries/synopsis-quality"
 import { getCurrentPlan } from "@/server/queries/current-user"
 import { planAllows } from "@/lib/plans/capabilities"
+import { SemReviewsTab } from "@/components/ai-evaluation/sem-reviews-tab"
+import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
 
 const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
@@ -629,12 +631,21 @@ export default async function AiEvaluationPage({
     tab?: string | string[]
     rk?: string | string[]
     sq?: string | string[]
+    q?: string | string[]
+    src?: string | string[]
+    golden?: string | string[]
   }>
 }) {
   const params = await searchParams
   const tabRaw = Array.isArray(params.tab) ? params.tab[0] : params.tab
-  const activeTab: "atributos" | "ia-rk" | "sinopse" =
-    tabRaw === "ia-rk" ? "ia-rk" : tabRaw === "sinopse" ? "sinopse" : "atributos"
+  const activeTab: "atributos" | "ia-rk" | "sinopse" | "sem-reviews" =
+    tabRaw === "ia-rk" ? "ia-rk" : tabRaw === "sinopse" ? "sinopse" : tabRaw === "sem-reviews" ? "sem-reviews" : "atributos"
+
+  // Filtros da aba "Sem reviews".
+  const noReviewQ = (Array.isArray(params.q) ? params.q[0] : params.q ?? "").trim()
+  const srcRaw = Array.isArray(params.src) ? params.src[0] : params.src
+  const hasExternal: "yes" | "no" | null = srcRaw === "yes" ? "yes" : srcRaw === "no" ? "no" : null
+  const goldenOnly = (Array.isArray(params.golden) ? params.golden[0] : params.golden) === "1"
 
   // Filtros de Status + interesse compartilhados pelas 2 abas.
   const { names: pubStatusNames, ids: pubStatusIds } = parseStatusList(params.pub, PUB_STATUS_NAME_TO_ID)
@@ -656,7 +667,7 @@ export default async function AiEvaluationPage({
   // Roda as três filas em paralelo. Todas alimentam o contador do título da aba
   // (precisa estar certo mesmo na aba inativa) e o conteúdo. Queries leves
   // (~tamanho da biblioteca).
-  const [attrResult, iaRkQueue, synopsisQueue, synopsisAccuracy, synopsisComparison, plan] = await Promise.all([
+  const [attrResult, iaRkQueue, synopsisQueue, synopsisAccuracy, synopsisComparison, plan, noReviewResult] = await Promise.all([
     getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, synopsisQualities, toleranceOverride),
     getAlignmentQueueWorks({
       states: iaRkStates,
@@ -674,10 +685,12 @@ export default async function AiEvaluationPage({
     getSynopsisPredictionAccuracy(),
     getSynopsisVersionComparison(),
     getCurrentPlan(),
+    getWorksWithoutReviews({ q: noReviewQ, pubStatusIds, hasExternal, goldenOnly }),
   ])
   const attrCount = attrResult.works.length
   const iaRkCount = iaRkQueue.length
   const synopsisCount = synopsisQueue.length
+  const noReviewCount = noReviewResult.totalWithoutReviews
   const isPaidPlan = planAllows(plan, "smart_shortlist")
 
   // Preserva os filtros ao trocar de aba.
@@ -711,6 +724,13 @@ export default async function AiEvaluationPage({
   if (sq) synParams.set("sq", sq)
   const synHref = `/ai-evaluation?${synParams}`
 
+  const noRevParams = new URLSearchParams({ tab: "sem-reviews" })
+  if (pub) noRevParams.set("pub", pub)
+  if (noReviewQ) noRevParams.set("q", noReviewQ)
+  if (hasExternal) noRevParams.set("src", hasExternal)
+  if (goldenOnly) noRevParams.set("golden", "1")
+  const noRevHref = `/ai-evaluation?${noRevParams}`
+
   return (
     <div className="space-y-4">
       <Header
@@ -730,9 +750,21 @@ export default async function AiEvaluationPage({
         <EvalTabLink href={synHref} active={activeTab === "sinopse"}>
           Interesse Sinopse ({synopsisCount})
         </EvalTabLink>
+        <EvalTabLink href={noRevHref} active={activeTab === "sem-reviews"}>
+          Sem reviews ({noReviewCount})
+        </EvalTabLink>
       </div>
 
-      {activeTab === "sinopse" ? (
+      {activeTab === "sem-reviews" ? (
+        <SemReviewsTab
+          works={noReviewResult.works}
+          totalWithoutReviews={noReviewResult.totalWithoutReviews}
+          q={noReviewQ}
+          activePubStatuses={pubStatusNames}
+          hasExternal={hasExternal}
+          goldenOnly={goldenOnly}
+        />
+      ) : activeTab === "sinopse" ? (
         <SynopsisTab
           works={synopsisQueue}
           accuracy={synopsisAccuracy}

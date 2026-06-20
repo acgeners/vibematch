@@ -36,6 +36,7 @@ import {
 import type { ReviewDigest } from "@/lib/ai-recommendation/types"
 import { DEFAULT_MICRO_THRESHOLD_USD, gateActionCost } from "../cost"
 import { getJobStore, runOrchestratedJob, type JobStore } from "../jobs"
+import { isUsefulReviewText } from "@/lib/reviews/useful-review"
 
 /** Teto de amostragem das reviews (MAX_REVIEWS / DIGEST_TOTAL_CAP no summarizer). */
 const REVIEW_SAMPLE_CAP = 40
@@ -220,7 +221,7 @@ export async function ensureReviewSummary(
   const raw = deps.reviews ?? (await gateway.readReviews(workId))
   const cleaned = raw
     .map((r) => ({ text: (r.text ?? "").trim(), userRating: r.userRating ?? null }))
-    .filter((r) => r.text.length >= 40)
+    .filter((r) => isUsefulReviewText(r.text))
   // Ordem determinística — idêntica a persistReviewSummary (estabiliza o hash).
   const ordered = [...cleaned].sort((a, b) => a.text.localeCompare(b.text))
   const hash = hashReviewInputs(ordered)
@@ -292,7 +293,7 @@ export async function ensureReviewDigest(
   const raw = deps.reviews ?? (await gateway.readReviews(workId))
   const cleaned = raw
     .map((r) => ({ text: (r.text ?? "").trim(), source: r.source || "desconhecida", userRating: r.userRating ?? null }))
-    .filter((r) => r.text.length >= 40)
+    .filter((r) => isUsefulReviewText(r.text))
   const nowN = cleaned.length
   // Hash de conteúdo SÓ p/ a dedup_key (o gate do digest é versão+materialidade,
   // sem hash) — garante que "reviews mudaram" gere nova chave/execução.
