@@ -1,40 +1,36 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { pickPrimaryCover } from "@/lib/work-derived"
-import { isUsefulReviewLength } from "@/lib/reviews/useful-review"
 import { PUBLICATION_STATUSES_BY_ID, PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
-import { classifyWorksWithoutReviews, type NoReviewWork, type NoReviewFilters, type WorkMetaRow } from "@/lib/reviews/no-review-classify"
+import { classifyWorksWithoutTags, type NoTagsWork, type NoTagsFilters, type TagWorkMetaRow } from "@/lib/tags/no-tags-classify"
 
-export type { NoReviewWork, NoReviewFilters } from "@/lib/reviews/no-review-classify"
+export type { NoTagsWork, NoTagsFilters } from "@/lib/tags/no-tags-classify"
 
-export interface NoReviewResult {
-  works: NoReviewWork[]
-  /** total sem filtro de busca/golden/external (universo "≤ maxReviews reviews úteis"). */
-  totalWithoutReviews: number
+export interface NoTagsResult {
+  works: NoTagsWork[]
+  /** total sem filtro de busca/golden/external (universo "≤ maxTags tags"). */
+  totalWithoutTags: number
 }
 
 /**
- * Loader server-only. Read-only. Poucas queries (sem N+1): works ativas, reviews
- * (text_length+fetched_at), external ids aceitos, golden ids. NÃO carrega texto de
- * review/sinopse/digest. NÃO dispara LLM/summary/digest/avaliação.
+ * Loader server-only. Read-only. Espelha `getWorksWithoutReviews`. Poucas queries
+ * (sem N+1): work_tags (só work_id), works ativas, external ids aceitos, golden ids.
+ * NÃO carrega texto de review/sinopse. NÃO dispara LLM/summary/digest/avaliação.
  */
-export async function getWorksWithoutReviews(filters: NoReviewFilters = {}): Promise<NoReviewResult> {
+export async function getWorksWithoutTags(filters: NoTagsFilters = {}): Promise<NoTagsResult> {
   const sb = createAdminClient()
   const PAGE = 1000
 
-  // 1) reviews: agrega useful-count + last fetched por obra (colunas leves).
-  const usefulCount = new Map<string, number>()
-  const lastFetched = new Map<string, string | null>()
+  // 1) tags: agrega contagem por obra (coluna leve work_id).
+  const tagCount = new Map<string, number>()
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await sb
-      .from("work_reviews")
-      .select("work_id, text_length, fetched_at")
+      .from("work_tags")
+      .select("work_id")
       .range(from, from + PAGE - 1)
-    if (error) throw new Error(`work_reviews: ${error.message}`)
-    for (const r of (data ?? []) as Array<{ work_id: string; text_length: number | null; fetched_at: string | null }>) {
-      if (isUsefulReviewLength(r.text_length)) usefulCount.set(r.work_id, (usefulCount.get(r.work_id) ?? 0) + 1)
-      const prev = lastFetched.get(r.work_id) ?? null
-      if (r.fetched_at && (!prev || r.fetched_at > prev)) lastFetched.set(r.work_id, r.fetched_at)
+    if (error) throw new Error(`work_tags: ${error.message}`)
+    for (const r of (data ?? []) as Array<{ work_id: string }>) {
+      tagCount.set(r.work_id, (tagCount.get(r.work_id) ?? 0) + 1)
     }
     if (!data || data.length < PAGE) break
   }
@@ -57,10 +53,10 @@ export async function getWorksWithoutReviews(filters: NoReviewFilters = {}): Pro
     personal_status_id: number | null
     work_covers?: Array<{ url: string; is_primary: boolean | null; position: number | null }> | null
   }
-  const maxReviews = Math.max(0, Math.floor(filters.maxReviews ?? 0))
-  const activeNoReview = ((worksData ?? []) as Row[]).filter((w) => (usefulCount.get(w.id) ?? 0) <= maxReviews)
-  const totalWithoutReviews = activeNoReview.length
-  const ids = activeNoReview.map((w) => w.id)
+  const maxTags = Math.max(0, Math.floor(filters.maxTags ?? 0))
+  const activeFewTags = ((worksData ?? []) as Row[]).filter((w) => (tagCount.get(w.id) ?? 0) <= maxTags)
+  const totalWithoutTags = activeFewTags.length
+  const ids = activeFewTags.map((w) => w.id)
 
   // 3) external ids aceitos + golden (chunked, leves).
   const acceptedSources = new Map<string, string[]>()
@@ -83,7 +79,7 @@ export async function getWorksWithoutReviews(filters: NoReviewFilters = {}): Pro
     for (const r of (data ?? []) as Array<{ work_id: string }>) goldenIds.add(r.work_id)
   }
 
-  const works: WorkMetaRow[] = activeNoReview.map((w) => ({
+  const works: TagWorkMetaRow[] = activeFewTags.map((w) => ({
     id: w.id,
     title: w.title,
     coverUrl: pickPrimaryCover(w.work_covers),
@@ -91,15 +87,14 @@ export async function getWorksWithoutReviews(filters: NoReviewFilters = {}): Pro
     personalStatus: w.personal_status_id != null ? (PERSONAL_STATUSES_BY_ID[w.personal_status_id]?.status ?? "—") : "—",
     aiEvalStatus: w.ai_eval_status,
     canonicalPresent: !!(w.canonical_synopsis && String(w.canonical_synopsis).trim()),
-    usefulReviewCount: usefulCount.get(w.id) ?? 0,
+    tagCount: tagCount.get(w.id) ?? 0,
   }))
 
-  const result = classifyWorksWithoutReviews({
+  const result = classifyWorksWithoutTags({
     works,
-    lastFetchedByWork: lastFetched,
     acceptedSourcesByWork: acceptedSources,
     goldenWorkIds: goldenIds,
     filters,
   })
-  return { works: result, totalWithoutReviews }
+  return { works: result, totalWithoutTags }
 }

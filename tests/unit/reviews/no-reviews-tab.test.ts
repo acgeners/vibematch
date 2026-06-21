@@ -3,7 +3,7 @@ import { isUsefulReviewText, isUsefulReviewLength, MIN_USEFUL_REVIEW_LENGTH } fr
 import { classifyWorksWithoutReviews, type WorkMetaRow } from "@/lib/reviews/no-review-classify"
 
 function work(id: string, title: string, over: Partial<WorkMetaRow> = {}): WorkMetaRow {
-  return { id, title, coverUrl: null, publicationStatus: "Ongoing", personalStatus: "—", aiEvalStatus: "done", canonicalPresent: true, ...over }
+  return { id, title, coverUrl: null, publicationStatus: "Ongoing", personalStatus: "—", aiEvalStatus: "done", canonicalPresent: true, usefulReviewCount: 0, ...over }
 }
 
 describe("useful-review rule (centralizada)", () => {
@@ -61,5 +61,14 @@ describe("classifyWorksWithoutReviews", () => {
       filters: {},
     })
     expect(r.find((w) => w.id === "a")!.acceptedExternalSources).toEqual(["anilist", "mangaupdates"])
+  })
+  it("usefulReviewCount reflete a contagem da meta row (não mais fixo em 0)", () => {
+    const r = classifyWorksWithoutReviews({
+      ...base,
+      works: [work("a", "Alpha", { usefulReviewCount: 2 }), work("b", "Beta", { usefulReviewCount: 0 })],
+      filters: {},
+    })
+    expect(r.find((w) => w.id === "a")!.usefulReviewCount).toBe(2)
+    expect(r.find((w) => w.id === "b")!.usefulReviewCount).toBe(0)
   })
 })

@@ -1,52 +1,52 @@
 import Link from "next/link"
-import { AlertTriangle, BookOpen, ExternalLink, ImageOff, MessageSquarePlus } from "lucide-react"
+import { AlertTriangle, BookOpen, ExternalLink, ImageOff, Tags } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { titleToSlug } from "@/lib/utils"
-import { SemReviewsFilters } from "@/components/ai-evaluation/sem-reviews-filters"
-import type { NoReviewWork } from "@/lib/reviews/no-review-classify"
+import { SemTagsFilters } from "@/components/ai-evaluation/sem-tags-filters"
+import type { NoTagsWork } from "@/lib/tags/no-tags-classify"
 
 /**
- * Aba "Sem reviews" — diagnóstico read-only: obras ativas sem nenhuma review útil.
- * Tela de AÇÃO MANUAL: NÃO gera reviews/summary/digest/avaliação/previsão.
+ * Aba "Sem tags" — diagnóstico read-only: obras ativas com poucas (ou nenhuma) tags.
+ * Tela de AÇÃO MANUAL: NÃO gera tags/avaliação/previsão. Espelha a aba "Sem reviews".
  */
-export function SemReviewsTab({
+export function SemTagsTab({
   works,
-  totalWithoutReviews,
+  totalWithoutTags,
   q,
   activePubStatuses,
   hasExternal,
   goldenOnly,
-  maxReviews,
+  maxTags,
 }: {
-  works: NoReviewWork[]
-  totalWithoutReviews: number
+  works: NoTagsWork[]
+  totalWithoutTags: number
   q: string
   activePubStatuses: string[]
   hasExternal: "yes" | "no" | null
   goldenOnly: boolean
-  maxReviews: number
+  maxTags: number
 }) {
-  const universeLabel = maxReviews > 0 ? `até ${maxReviews} review(s) útil(eis)` : "sem review útil"
+  const universeLabel = maxTags > 0 ? `até ${maxTags} tag(s)` : "sem tags"
   return (
     <div className="space-y-4">
       <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
         <p className="text-muted-foreground">
-          Obras sem reviews podem ser avaliadas ou previstas com <strong>menos contexto</strong>. Isso pode manter
-          o custo semelhante, mas reduzir a qualidade do resultado. Adicione reviews manualmente quando houver uma
-          fonte confiável. Esta tela é apenas diagnóstico — <strong>não</strong> gera reviews, avaliação nem previsão.
+          Obras com poucas tags têm <strong>menos sinal</strong> para recomendação e previsão (overlap de tags
+          amadas/evitadas, fit por critério). Adicione tags manualmente ou importe de uma fonte externa. Esta tela é
+          apenas diagnóstico — <strong>não</strong> gera tags, avaliação nem previsão.
         </p>
       </div>
 
-      <SemReviewsFilters q={q} activePubStatuses={activePubStatuses} hasExternal={hasExternal} goldenOnly={goldenOnly} maxReviews={maxReviews} />
+      <SemTagsFilters q={q} activePubStatuses={activePubStatuses} hasExternal={hasExternal} goldenOnly={goldenOnly} maxTags={maxTags} />
 
       <p className="text-xs text-muted-foreground">
-        {works.length} de {totalWithoutReviews} obra(s) {universeLabel} (universo total ativo sem filtro de busca).
+        {works.length} de {totalWithoutTags} obra(s) {universeLabel} (universo total ativo sem filtro de busca).
       </p>
 
       {works.length === 0 ? (
         <p className="rounded-lg border border-border/60 p-6 text-center text-sm text-muted-foreground">
-          Nenhuma obra deste filtro está dentro do limite de reviews úteis.
+          Nenhuma obra deste filtro está dentro do limite de tags.
         </p>
       ) : (
         <ul className="space-y-2">
@@ -75,7 +75,7 @@ export function SemReviewsTab({
 
                   <div className="flex flex-wrap items-center gap-1.5 text-xs">
                     <Badge variant="outline">{w.publicationStatus}</Badge>
-                    <Badge variant="outline">{w.usefulReviewCount} review(s) útil(eis)</Badge>
+                    <Badge variant={w.tagCount === 0 ? "destructive" : "outline"}>{w.tagCount} tag(s)</Badge>
                     <Badge variant="outline">{w.aiEvalStatus ?? "—"}</Badge>
                     {!w.canonicalPresent ? <Badge variant="destructive">sem sinopse canônica</Badge> : null}
                     {w.acceptedExternalSources.length > 0 ? (
@@ -83,26 +83,14 @@ export function SemReviewsTab({
                     ) : (
                       <Badge variant="outline">Sem fontes externas aceitas</Badge>
                     )}
-                    {w.lastFetchedAt ? (
-                      <Badge variant="outline">reviews coletadas em {w.lastFetchedAt.slice(0, 10)}</Badge>
-                    ) : (
-                      <Badge variant="outline">sem reviews coletadas</Badge>
-                    )}
                   </div>
-
-                  {w.inGolden ? (
-                    <p className="rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1 text-xs text-muted-foreground">
-                      O snapshot experimental <strong>base-1</strong> já foi congelado sem reviews. Adicionar reviews
-                      agora não altera esse snapshot — usar os novos dados no experimento exigirá uma nova versão.
-                    </p>
-                  ) : null}
 
                   <div className="flex flex-wrap items-center gap-3 pt-0.5 text-xs">
                     <Link href={`/titles/${slug}`} className="inline-flex items-center gap-1 text-primary hover:underline">
                       <BookOpen className="h-3.5 w-3.5" /> Abrir obra
                     </Link>
                     <Link href={`/titles/${slug}/edit`} className="inline-flex items-center gap-1 text-primary hover:underline">
-                      <MessageSquarePlus className="h-3.5 w-3.5" /> Adicionar review manualmente
+                      <Tags className="h-3.5 w-3.5" /> Adicionar tags
                     </Link>
                     {w.acceptedExternalSources.length > 0 ? (
                       <Link href={`/titles/${slug}/edit`} className="inline-flex items-center gap-1 text-muted-foreground hover:underline">

@@ -11,18 +11,18 @@ import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 
 const PUB_OPTIONS = Object.values(PUBLICATION_STATUSES_BY_ID).map((i) => i.status)
 
-export function SemReviewsFilters({
+export function SemTagsFilters({
   q,
   activePubStatuses,
   hasExternal,
   goldenOnly,
-  maxReviews,
+  maxTags,
 }: {
   q: string
   activePubStatuses: string[]
   hasExternal: "yes" | "no" | null
   goldenOnly: boolean
-  maxReviews: number
+  maxTags: number
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -30,7 +30,7 @@ export function SemReviewsFilters({
   const [isPending, startTransition] = useTransition()
 
   function commit(next: URLSearchParams) {
-    next.set("tab", "sem-reviews")
+    next.set("tab", "sem-tags")
     startTransition(() => router.replace(`${pathname}?${next.toString()}`, { scroll: false }))
   }
   function setParam(key: string, value: string | null) {
@@ -45,12 +45,12 @@ export function SemReviewsFilters({
     else set.add(status)
     setParam("pub", set.size > 0 ? [...set].join(",") : null)
   }
-  function setMaxReviews(raw: string) {
+  function setMaxTags(raw: string) {
     const n = Math.max(0, Math.floor(Number(raw)))
-    setParam("maxrev", Number.isFinite(n) && n > 0 ? String(n) : null)
+    setParam("maxtags", Number.isFinite(n) && n > 0 ? String(n) : null)
   }
 
-  const hasAny = q || activePubStatuses.length > 0 || hasExternal != null || goldenOnly || maxReviews > 0
+  const hasAny = q || activePubStatuses.length > 0 || hasExternal != null || goldenOnly || maxTags > 0
 
   return (
     <div className="space-y-3 rounded-lg border border-border/60 p-3">
@@ -97,18 +97,18 @@ export function SemReviewsFilters({
         <button type="button" onClick={() => setParam("golden", goldenOnly ? null : "1")} disabled={isPending}>
           <Badge variant={goldenOnly ? "default" : "outline"} className="cursor-pointer">Só golden pilot-1</Badge>
         </button>
-        <span className="ml-3 text-xs text-muted-foreground">Máx. reviews úteis:</span>
+        <span className="ml-3 text-xs text-muted-foreground">Máx. tags:</span>
         <Input
-          key={maxReviews}
+          key={maxTags}
           type="number"
           min={0}
           step={1}
-          defaultValue={maxReviews}
-          onKeyDown={(e) => { if (e.key === "Enter") setMaxReviews((e.target as HTMLInputElement).value) }}
-          onBlur={(e) => { if (Math.max(0, Math.floor(Number(e.target.value))) !== maxReviews) setMaxReviews(e.target.value) }}
+          defaultValue={maxTags}
+          onKeyDown={(e) => { if (e.key === "Enter") setMaxTags((e.target as HTMLInputElement).value) }}
+          onBlur={(e) => { if (Math.max(0, Math.floor(Number(e.target.value))) !== maxTags) setMaxTags(e.target.value) }}
           disabled={isPending}
           className="h-7 w-16"
-          aria-label="Máximo de reviews úteis"
+          aria-label="Máximo de tags"
         />
       </div>
     </div>
