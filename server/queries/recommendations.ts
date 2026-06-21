@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
@@ -759,13 +760,17 @@ export async function getSynopsisQueueWorks(opts: {
   if (!wantStale && !wantUnpredicted && !wantPredicted) return []
   const supabase = createAdminClient()
 
-  // Carrega TODAS as previsões (tabela pequena) — fonte da verdade do estado de
-  // cada obra. Evita depender de embed + limite na query de works (que, sem
-  // order, descartava previsões silenciosamente além da janela).
-  const { data: predRows, error: predErr } = await supabase
-    .from("synopsis_quality_predictions")
-    .select("work_id, predicted_quality, stale, confidence, justification, prompt_version")
-  if (predErr) throw new Error(`Falha lendo previsões de sinopse: ${predErr.message}`)
+  // Carrega TODAS as previsões — fonte da verdade do estado de cada obra. A tabela
+  // já passou de 1000 linhas, então pagina (sem isso o PostgREST corta em 1000 e
+  // obras previstas reapareceriam como "não previsto").
+  const predRows = await fetchAllRows<{ work_id: string } & SynopsisPredRow>(
+    (from, to) =>
+      supabase
+        .from("synopsis_quality_predictions")
+        .select("work_id, predicted_quality, stale, confidence, justification, prompt_version")
+        .range(from, to),
+    "Falha lendo previsões de sinopse",
+  )
   // Pode haver VÁRIAS previsões por obra (uma por versão de prompt). Agrupa e
   // escolhe a "ativa" (versão atual, senão a de maior versão) pra exibição.
   const verNum = (v: string | null | undefined) => {
@@ -838,18 +843,28 @@ export async function getSynopsisQueueWorks(opts: {
   // (synopsis_quality IS NULL), independente do estado de previsão. As previsões
   // carregadas acima ainda alimentam a exibição (sugestão IA no card).
   if (opts.missingManual) {
-    let q = supabase
-      .from("works")
-      .select(SYNOPSIS_QUEUE_SELECT)
-      .eq("is_archived", false)
-      .not("canonical_synopsis", "is", null)
-      .is("synopsis_quality", null)
-      .order("updated_at", { ascending: false })
-    if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
-    if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
-    const { data, error } = await q.limit(opts.limit ?? 1000)
-    if (error) throw new Error(`Falha listando obras sem Interesse manual: ${error.message}`)
-    return (data ?? []).map((w) => mapWork(w as Record<string, unknown>))
+    const baseQ = () => {
+      let q = supabase
+        .from("works")
+        .select(SYNOPSIS_QUEUE_SELECT)
+        .eq("is_archived", false)
+        .not("canonical_synopsis", "is", null)
+        .is("synopsis_quality", null)
+        .order("updated_at", { ascending: false })
+      if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
+      if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
+      return q
+    }
+    // Sem limite explícito → pagina (a contagem da aba não pode parar em 1000).
+    let data: Record<string, unknown>[]
+    if (opts.limit != null) {
+      const res = await baseQ().limit(opts.limit)
+      if (res.error) throw new Error(`Falha listando obras sem Interesse manual: ${res.error.message}`)
+      data = (res.data ?? []) as Record<string, unknown>[]
+    } else {
+      data = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando obras sem Interesse manual")
+    }
+    return data.map((w) => mapWork(w))
   }
 
   const out = new Map<string, SynopsisQueueWork>()
@@ -879,19 +894,28 @@ export async function getSynopsisQueueWorks(opts: {
   // 2) Não-previstas — obras com sinopse canônica e SEM previsão.
   if (wantUnpredicted) {
     const predIdSet = new Set(predByWork.keys())
-    let q = supabase
-      .from("works")
-      .select(SYNOPSIS_QUEUE_SELECT)
-      .eq("is_archived", false)
-      .not("canonical_synopsis", "is", null)
-      .order("updated_at", { ascending: false })
-    if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
-    if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
-    if (synQ.length > 0) q = q.in("synopsis_quality", synQ)
-    const { data, error } = await q.limit(opts.limit ?? 1000)
-    if (error) throw new Error(`Falha listando não-previstas: ${error.message}`)
-    for (const w of data ?? []) {
-      const row = w as Record<string, unknown>
+    const baseQ = () => {
+      let q = supabase
+        .from("works")
+        .select(SYNOPSIS_QUEUE_SELECT)
+        .eq("is_archived", false)
+        .not("canonical_synopsis", "is", null)
+        .order("updated_at", { ascending: false })
+      if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
+      if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
+      if (synQ.length > 0) q = q.in("synopsis_quality", synQ)
+      return q
+    }
+    // Sem limite explícito → pagina (a contagem da aba não pode parar em 1000).
+    let data: Record<string, unknown>[]
+    if (opts.limit != null) {
+      const res = await baseQ().limit(opts.limit)
+      if (res.error) throw new Error(`Falha listando não-previstas: ${res.error.message}`)
+      data = (res.data ?? []) as Record<string, unknown>[]
+    } else {
+      data = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando não-previstas")
+    }
+    for (const row of data) {
       const id = row.id as string
       if (predIdSet.has(id) || out.has(id)) continue
       out.set(id, mapWork(row))
@@ -915,41 +939,56 @@ export async function getSynopsisQueueWorks(opts: {
 export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
   const supabase = createAdminClient()
 
+  // Todas as leituras paginam: works e synopsis_quality_predictions são de escala
+  // catálogo (predictions já passou de 1000) — sem isso o PostgREST corta em 1000
+  // e o badge desce abaixo do real (foi o bug "badge × aba não bate").
   const [attr, staleScores, synWorks, preds] = await Promise.all([
     // 1) Atributos — default {pending, review-pending}.
-    supabase
-      .from("works")
-      .select("id")
-      .in("ai_eval_status", ["pending", "review_pending"])
-      .eq("is_archived", false),
-    // 2) Veredito IA — default {stale}: filtra direto em calculated_scores (conjunto
-    //    pequeno) em vez de carregar o catálogo inteiro. Arquivadas são excluídas
-    //    abaixo intersectando com works não-arquivadas.
-    supabase
-      .from("calculated_scores")
-      .select("work_id")
-      .eq("alignment_stale", true)
-      .not("alignment_score", "is", null),
+    fetchAllRows<{ id: string }>(
+      (from, to) =>
+        supabase
+          .from("works")
+          .select("id")
+          .in("ai_eval_status", ["pending", "review_pending"])
+          .eq("is_archived", false)
+          .range(from, to),
+      "Falha contando fila de atributos",
+    ),
+    // 2) Veredito IA — default {stale}: filtra direto em calculated_scores. Arquivadas
+    //    são excluídas abaixo intersectando com works não-arquivadas.
+    fetchAllRows<{ work_id: string }>(
+      (from, to) =>
+        supabase
+          .from("calculated_scores")
+          .select("work_id")
+          .eq("alignment_stale", true)
+          .not("alignment_score", "is", null)
+          .range(from, to),
+      "Falha contando fila de Veredito IA",
+    ),
     // 3) Interesse Sinopse — obras (não arquivadas) com sinopse canônica.
-    supabase
-      .from("works")
-      .select("id")
-      .eq("is_archived", false)
-      .not("canonical_synopsis", "is", null),
-    supabase.from("synopsis_quality_predictions").select("work_id"),
+    fetchAllRows<{ id: string }>(
+      (from, to) =>
+        supabase
+          .from("works")
+          .select("id")
+          .eq("is_archived", false)
+          .not("canonical_synopsis", "is", null)
+          .range(from, to),
+      "Falha contando fila de sinopse",
+    ),
+    fetchAllRows<{ work_id: string }>(
+      (from, to) => supabase.from("synopsis_quality_predictions").select("work_id").range(from, to),
+      "Falha lendo previsões de sinopse",
+    ),
   ])
-
-  if (attr.error) throw new Error(`Falha contando fila de atributos: ${attr.error.message}`)
-  if (staleScores.error) throw new Error(`Falha contando fila de Veredito IA: ${staleScores.error.message}`)
-  if (synWorks.error) throw new Error(`Falha contando fila de sinopse: ${synWorks.error.message}`)
-  if (preds.error) throw new Error(`Falha lendo previsões de sinopse: ${preds.error.message}`)
 
   const ids = new Set<string>()
 
-  for (const w of attr.data ?? []) ids.add((w as { id: string }).id)
+  for (const w of attr) ids.add(w.id)
 
   // Veredito IA stale: exclui arquivadas validando os work_ids contra works não-arquivadas.
-  const staleIds = [...new Set((staleScores.data ?? []).map((r) => (r as { work_id: string }).work_id))]
+  const staleIds = [...new Set(staleScores.map((r) => r.work_id))]
   for (let i = 0; i < staleIds.length; i += 200) {
     const chunk = staleIds.slice(i, i + 200)
     const { data, error } = await supabase
@@ -964,12 +1003,11 @@ export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
   // Badge = só "não previsto": obra com sinopse canônica e SEM nenhuma previsão
   // (qualquer versão). Desatualizadas (têm previsão velha) NÃO entram no badge.
   const predictedSynopsis = new Set<string>()
-  for (const p of preds.data ?? []) {
-    predictedSynopsis.add((p as { work_id: string }).work_id)
+  for (const p of preds) {
+    predictedSynopsis.add(p.work_id)
   }
-  for (const w of synWorks.data ?? []) {
-    const id = (w as { id: string }).id
-    if (!predictedSynopsis.has(id)) ids.add(id)
+  for (const w of synWorks) {
+    if (!predictedSynopsis.has(w.id)) ids.add(w.id)
   }
 
   return ids.size

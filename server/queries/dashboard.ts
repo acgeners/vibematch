@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import {
   getPublicationStatusNameById,
   getPersonalStatusNameById,
@@ -257,45 +258,43 @@ export async function getRecentActivity(limit = 6): Promise<RecentActivityItem[]
 export async function getAiQueueCounts(): Promise<AiQueueCounts> {
   const supabase = createAdminClient()
   try {
-    const [activeRes, calcRes, synRes, predRes] = await Promise.all([
-      supabase.from("works").select("id").eq("is_archived", false),
-      supabase.from("calculated_scores").select("work_id, alignment_score, alignment_stale"),
-      supabase
-        .from("works")
-        .select("id")
-        .eq("is_archived", false)
-        .not("canonical_synopsis", "is", null),
-      supabase.from("synopsis_quality_predictions").select("work_id"),
+    // Tudo pagina: works/calculated_scores/predictions são de escala catálogo
+    // (predictions já passou de 1000). Sem isso o PostgREST corta em 1000 linhas e
+    // as contagens da home não batem com as abas de /ai-evaluation.
+    const [activeRows, calcRows, synRows, predRows] = await Promise.all([
+      fetchAllRows<{ id: string }>(
+        (from, to) => supabase.from("works").select("id").eq("is_archived", false).range(from, to),
+        "getAiQueueCounts.works",
+      ),
+      fetchAllRows<{ work_id: string; alignment_score: number | null; alignment_stale: boolean | null }>(
+        (from, to) => supabase.from("calculated_scores").select("work_id, alignment_score, alignment_stale").range(from, to),
+        "getAiQueueCounts.calculated_scores",
+      ),
+      fetchAllRows<{ id: string }>(
+        (from, to) =>
+          supabase.from("works").select("id").eq("is_archived", false).not("canonical_synopsis", "is", null).range(from, to),
+        "getAiQueueCounts.synopsis_works",
+      ),
+      fetchAllRows<{ work_id: string }>(
+        (from, to) => supabase.from("synopsis_quality_predictions").select("work_id").range(from, to),
+        "getAiQueueCounts.predictions",
+      ),
     ])
-    if (activeRes.error || calcRes.error || synRes.error || predRes.error) {
-      throw activeRes.error ?? calcRes.error ?? synRes.error ?? predRes.error
-    }
 
-    const calcByWork = new Map(
-      (calcRes.data ?? []).map((r) => {
-        const row = r as {
-          work_id: string
-          alignment_score: number | null
-          alignment_stale: boolean | null
-        }
-        return [row.work_id, row] as const
-      })
-    )
+    const calcByWork = new Map(calcRows.map((row) => [row.work_id, row] as const))
     let iaRk = 0
-    for (const w of activeRes.data ?? []) {
-      const calc = calcByWork.get((w as { id: string }).id)
+    for (const w of activeRows) {
+      const calc = calcByWork.get(w.id)
       const alignmentScore = calc?.alignment_score ?? null
       const isUnranked = alignmentScore == null
       const isStale = alignmentScore != null && Boolean(calc?.alignment_stale)
       if (isUnranked || isStale) iaRk++
     }
 
-    const predicted = new Set(
-      (predRes.data ?? []).map((p) => (p as { work_id: string }).work_id)
-    )
+    const predicted = new Set(predRows.map((p) => p.work_id))
     let synopsis = 0
-    for (const w of synRes.data ?? []) {
-      if (!predicted.has((w as { id: string }).id)) synopsis++
+    for (const w of synRows) {
+      if (!predicted.has(w.id)) synopsis++
     }
 
     return { iaRk, synopsis }
