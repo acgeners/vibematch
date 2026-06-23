@@ -70,3 +70,6 @@ lib/synopsis-interest/labeling-sheet.*
 
 # Snapshots/pacotes experimentais locais (Plano 3) — conteúdo integral (sinopses), NÃO versionar
 .local-experiments/
+
+# Estado temporário do Supabase CLI — não versionar
+supabase/.temp/
