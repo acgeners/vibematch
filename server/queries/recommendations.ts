@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
@@ -10,7 +11,7 @@ import {
   type CategoryScoreWithSource,
 } from "@/lib/ai-recommendation/calibrated-scores"
 import type { CriterionSlug } from "@/types/domain"
-import type { CandidateReview, CandidateWorkInput, RatedWorkInput, RecommendationMode } from "@/lib/ai-recommendation/types"
+import type { CandidateReview, CandidateWorkInput, RatedWorkInput, RecommendationMode, ReviewDigest } from "@/lib/ai-recommendation/types"
 import { getRanking, type RankingFilters } from "@/server/queries/ranking"
 import { PROMPT_VERSION as SYNOPSIS_PROMPT_VERSION } from "@/lib/ai-evaluation/synopsis-quality-predictor"
 
@@ -51,6 +52,7 @@ const CANDIDATE_WORK_SELECT = `
   user_score,
   is_favorite,
   canonical_synopsis,
+  review_summary,
   category_scores(criterion_slug, score, source),
   calculated_scores(platform_avg, total_votes, expected_score, personal_fit),
   work_tags(tag_id, tags(name, tag_group_id)),
@@ -138,9 +140,13 @@ function pickRecommendationSynopsis(
   return [...blocks].sort((a, b) => b.length - a.length)[0] ?? raw
 }
 
-// Review "crítica" = bucket negativo. Espelha a convenção do merge externo
-// (lib/external/index.ts: low = userRating <= 4) pra ficar consistente.
-const CRITICAL_RATING_MAX = 4
+// Piso de qualidade pra uma review CRUA citável chegar ao consultor. Abaixo
+// disto a review é fraca/obscura demais: texto curto = "amei 10/10" (sem
+// conteúdo), match baixo = risco de ser de outra obra (espelha o espírito dos
+// thresholds de aceitação do merge externo em lib/external/index.ts). Não some
+// do pool — só perde prioridade (ver top-up em pickBalancedReviews).
+const MIN_REVIEW_CHARS = 120
+const MIN_REVIEW_MATCH = 0.5
 
 interface ScoredReview {
   source: string
@@ -153,11 +159,20 @@ interface ScoredReview {
 }
 
 /**
- * Escolhe `perWork` reviews por obra. A partir de 3 vagas, reserva 1 pra uma
- * review CRÍTICA bem-casada (rating ≤ 4, match > 0) — assim o modelo recebe um
- * contraponto pro campo `risks`, em vez de só as mais bem-avaliadas. As demais
- * vagas vão pras de maior relevância. Sem review crítica relevante, cai no
- * comportamento antigo (top-N por relevância).
+ * Escolhe `perWork` reviews por obra priorizando QUALIDADE > DIVERSIDADE DE
+ * FONTE > relevância. A seleção por `match × nota` antiga super-amostrava as
+ * fontes que enchem de reviews com nota (MyAnimeList/AniList — 100%/97% têm
+ * nota; o resto, ~7%), enterrando o ângulo das demais. Como 93% das reviews não
+ * têm nota, a nota não pode ser o eixo de seleção.
+ *
+ * Três passos:
+ *  1. Piso de qualidade (MIN_REVIEW_CHARS/MIN_REVIEW_MATCH) separa reviews
+ *     substanciais e bem-casadas das fracas/obscuras.
+ *  2. Round-robin entre fontes sobre o pool que passou no piso (cada fonte
+ *     ordenada por match desc) → cobre ângulos distintos sem deixar a nota
+ *     decidir.
+ *  3. Top-up por relevância (mesmo abaixo do piso) se o piso esvaziar demais —
+ *     nunca retorna menos reviews do que retornaria antes.
  */
 function pickBalancedReviews(list: ScoredReview[], perWork: number): CandidateReview[] {
   const toReview = (r: ScoredReview): CandidateReview => ({
@@ -166,22 +181,57 @@ function pickBalancedReviews(list: ScoredReview[], perWork: number): CandidateRe
     rating: r.rating,
   })
   const byRelevance = [...list].sort((a, b) => b.relevance - a.relevance)
-  if (perWork < 3 || list.length <= perWork) {
-    return byRelevance.slice(0, perWork).map(toReview)
+  if (list.length <= perWork) return byRelevance.map(toReview)
+
+  // 1) Piso de qualidade.
+  const qualifying = [...list]
+    .filter((r) => r.text.length >= MIN_REVIEW_CHARS && r.match >= MIN_REVIEW_MATCH)
+    .sort((a, b) => b.match - a.match)
+
+  // 2) Round-robin entre fontes (fontes ordenadas pelo melhor match de cada).
+  const bySource = new Map<string, ScoredReview[]>()
+  for (const r of qualifying) {
+    const bucket = bySource.get(r.source)
+    if (bucket) bucket.push(r)
+    else bySource.set(r.source, [r])
   }
-  const top = byRelevance.slice(0, perWork - 1)
-  const topSet = new Set(top)
-  const critical = list
-    .filter((r) => !topSet.has(r) && r.match > 0 && r.rating != null && r.rating <= CRITICAL_RATING_MAX)
-    .sort((a, b) => a.rating! - b.rating! || b.match - a.match)[0]
-  const chosen = critical ? [...top, critical] : byRelevance.slice(0, perWork)
+  const sources = [...bySource.keys()].sort(
+    (a, b) => (bySource.get(b)![0]?.match ?? 0) - (bySource.get(a)![0]?.match ?? 0),
+  )
+  const chosen: ScoredReview[] = []
+  const chosenSet = new Set<ScoredReview>()
+  let progressed = true
+  while (chosen.length < perWork && progressed) {
+    progressed = false
+    for (const s of sources) {
+      if (chosen.length >= perWork) break
+      const next = bySource.get(s)!.find((r) => !chosenSet.has(r))
+      if (next) {
+        chosen.push(next)
+        chosenSet.add(next)
+        progressed = true
+      }
+    }
+  }
+
+  // 3) Top-up por relevância se o piso esvaziou demais.
+  if (chosen.length < perWork) {
+    for (const r of byRelevance) {
+      if (chosen.length >= perWork) break
+      if (!chosenSet.has(r)) {
+        chosen.push(r)
+        chosenSet.add(r)
+      }
+    }
+  }
+
   return chosen.map(toReview)
 }
 
 /**
- * Top-N reviews por obra, batch. Combina relevância (`match_score *
- * COALESCE(user_rating, 5)`) com 1 vaga reservada pra uma review crítica (ver
- * `pickBalancedReviews`). Texto truncado pelo caller via prompts.formatReviews.
+ * Top-N reviews por obra, batch. A seleção (piso de qualidade + diversidade de
+ * fonte + top-up) fica em `pickBalancedReviews`. Texto truncado pelo caller via
+ * prompts.formatReviews.
  */
 async function fetchTopReviewsBatch(
   workIds: string[],
@@ -211,6 +261,29 @@ async function fetchTopReviewsBatch(
   }
   for (const [workId, list] of grouped) {
     out.set(workId, pickBalancedReviews(list, perWork))
+  }
+  return out
+}
+
+/**
+ * Digest estruturado das reviews (Item C, Passe 2), em lote. Fetch SEPARADO e
+ * TOLERANTE (não vai no CANDIDATE_WORK_SELECT): se a migration 103 ainda não foi
+ * aplicada, a coluna não existe e o select erraria — aqui a falha cai em mapa
+ * vazio (consultor usa o review_summary do Passe 1 como fallback). Roda em
+ * paralelo com fetchTopReviewsBatch.
+ */
+export async function fetchReviewDigestsBatch(workIds: string[]): Promise<Map<string, ReviewDigest>> {
+  const out = new Map<string, ReviewDigest>()
+  if (workIds.length === 0) return out
+  const supabase = createAdminClient()
+  const { data, error } = await supabase.from("works").select("id, review_digest").in("id", workIds)
+  if (error) {
+    console.warn("[recommendations] review_digest indisponível (migration 103?):", error.message)
+    return out
+  }
+  for (const row of data ?? []) {
+    const r = row as { id: string; review_digest: ReviewDigest | null }
+    if (r.review_digest) out.set(r.id, r.review_digest)
   }
   return out
 }
@@ -272,6 +345,7 @@ function mapRowToCandidate(
   row: unknown,
   reviews: CandidateReview[],
   biasMap: AttributeBiasMap,
+  reviewDigest: ReviewDigest | null = null,
 ): FavoriteCandidate {
   const work = row as Record<string, unknown>
   const calc = (work.calculated_scores as { platform_avg?: number | null; total_votes?: number | null; expected_score?: number | null; personal_fit?: number | null } | null) ?? null
@@ -302,6 +376,8 @@ function mapRowToCandidate(
     platformAvg: calc?.platform_avg != null ? Number(calc.platform_avg) : null,
     totalVotes: calc?.total_votes != null ? Number(calc.total_votes) : null,
     reviews,
+    reviewSummary: (work.review_summary as string | null) ?? null,
+    reviewDigest,
     coverUrl,
     isAlreadyRated: work.user_score != null,
   } satisfies FavoriteCandidate
@@ -330,9 +406,15 @@ export async function getFavoriteCandidates(
 
   const rows = data ?? []
   const ids = rows.map((r) => (r as { id: string }).id)
-  const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  const [reviewsById, digestById] = await Promise.all([
+    fetchTopReviewsBatch(ids, 3),
+    fetchReviewDigestsBatch(ids),
+  ])
   const biasMap = await loadBiasMapForRecs(supabase)
-  return rows.map((row) => mapRowToCandidate(row, reviewsById.get((row as { id: string }).id) ?? [], biasMap))
+  return rows.map((row) => {
+    const id = (row as { id: string }).id
+    return mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap, digestById.get(id) ?? null)
+  })
 }
 
 /**
@@ -358,12 +440,15 @@ export async function getRankingCandidates(
     .in("id", ids)
   if (error) throw new Error(`Falha hidratando candidatos do ranking: ${error.message}`)
 
-  const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  const [reviewsById, digestById] = await Promise.all([
+    fetchTopReviewsBatch(ids, 3),
+    fetchReviewDigestsBatch(ids),
+  ])
   const biasMap = await loadBiasMapForRecs(supabase)
   const byId = new Map<string, FavoriteCandidate>()
   for (const row of data ?? []) {
     const id = (row as { id: string }).id
-    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap))
+    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap, digestById.get(id) ?? null))
   }
   // Preserva a ordem do ranking original.
   return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
@@ -371,7 +456,7 @@ export async function getRankingCandidates(
 
 /**
  * Hidrata uma obra única como `FavoriteCandidate`. Usado pelo re-rank
- * sob demanda (1 obra) disparado do botão "Rankear" da cell IA Rk.
+ * sob demanda (1 obra) disparado do botão "Rankear" da cell Veredito IA.
  * Filtra obras arquivadas pra evitar consumir LLM call à toa.
  */
 export async function getCandidateById(workId: string): Promise<FavoriteCandidate | null> {
@@ -384,9 +469,12 @@ export async function getCandidateById(workId: string): Promise<FavoriteCandidat
     .maybeSingle()
   if (error) throw new Error(`Falha hidratando obra ${workId}: ${error.message}`)
   if (!data) return null
-  const reviewsById = await fetchTopReviewsBatch([workId], 3)
+  const [reviewsById, digestById] = await Promise.all([
+    fetchTopReviewsBatch([workId], 3),
+    fetchReviewDigestsBatch([workId]),
+  ])
   const biasMap = await loadBiasMapForRecs(supabase)
-  return mapRowToCandidate(data, reviewsById.get(workId) ?? [], biasMap)
+  return mapRowToCandidate(data, reviewsById.get(workId) ?? [], biasMap, digestById.get(workId) ?? null)
 }
 
 export interface StaleAlignmentWork {
@@ -400,7 +488,7 @@ export interface StaleAlignmentWork {
 }
 
 /**
- * Lista obras cujo IA Rk (alignment_score) ficou desatualizado — têm
+ * Lista obras cujo Veredito IA (alignment_score) ficou desatualizado — têm
  * alignment_score persistido mas alignment_stale=true (a obra foi editada ou
  * re-avaliada depois do último re-rank). Filtra arquivadas e ordena pelo
  * re-rank mais antigo primeiro. Alimenta a fila de re-rank em lote.
@@ -425,7 +513,7 @@ export async function getStaleAlignmentWorks(
     query = query.in("personal_status_id", opts.personalStatusIds)
   }
   const { data, error } = await query.limit(limit)
-  if (error) throw new Error(`Falha listando IA Rk desatualizados: ${error.message}`)
+  if (error) throw new Error(`Falha listando Veredito IA desatualizados: ${error.message}`)
 
   const rows = (data ?? []).map((row) => {
     const w = row as Record<string, unknown>
@@ -472,7 +560,7 @@ export interface AlignmentQueueWork {
 }
 
 /**
- * Fila de IA Rk pra aba /ai-evaluation?tab=ia-rk. Dois estados:
+ * Fila de Veredito IA pra aba /ai-evaluation?tab=ia-rk. Dois estados:
  *   - "stale": tem alignment_score mas alignment_stale=true (re-rank velho)
  *   - "unranked": ainda não tem alignment_score (nunca passou pelo re-rank)
  * Filtra por status (publicação/leitura) em SQL e por estado em JS. Sort é no
@@ -510,7 +598,7 @@ export async function getAlignmentQueueWorks(opts: {
   // cauda silenciosamente — uma obra stale ali sumia da aba mas aparecia no
   // badge (que conta todas), gerando divergência aba×badge.
   const { data, error } = await query.limit(opts.limit ?? 5000)
-  if (error) throw new Error(`Falha listando fila de IA Rk: ${error.message}`)
+  if (error) throw new Error(`Falha listando fila de Veredito IA: ${error.message}`)
 
   const rows: AlignmentQueueWork[] = []
   for (const row of data ?? []) {
@@ -544,7 +632,7 @@ export async function getAlignmentQueueWorks(opts: {
 }
 
 /**
- * Hidrata as obras com IA Rk desatualizado como `FavoriteCandidate` pra o
+ * Hidrata as obras com Veredito IA desatualizado como `FavoriteCandidate` pra o
  * re-rank em lote. Mesmo shape que `getRankingCandidates`, mas o pool vem da
  * fila de stale em vez dos top-N do ranking.
  */
@@ -561,19 +649,22 @@ export async function getStaleAlignmentCandidates(limit = 200): Promise<Favorite
     .eq("is_archived", false)
   if (error) throw new Error(`Falha hidratando candidatos stale: ${error.message}`)
 
-  const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  const [reviewsById, digestById] = await Promise.all([
+    fetchTopReviewsBatch(ids, 3),
+    fetchReviewDigestsBatch(ids),
+  ])
   const biasMap = await loadBiasMapForRecs(supabase)
   const byId = new Map<string, FavoriteCandidate>()
   for (const row of data ?? []) {
     const id = (row as { id: string }).id
-    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap))
+    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap, digestById.get(id) ?? null))
   }
   // Preserva a ordem da fila (re-rank mais antigo primeiro).
   return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
 }
 
 /**
- * Conta (head-count) quantas obras têm IA Rk desatualizado. Usado pra exibir o
+ * Conta (head-count) quantas obras têm Veredito IA desatualizado. Usado pra exibir o
  * link/badge da fila no header do ranking só quando há o que processar.
  */
 export async function countStaleAlignmentWorks(): Promise<number> {
@@ -617,7 +708,7 @@ export interface SynopsisQueueWork {
 /**
  * Fila da aba /ai-evaluation?tab=sinopse: obras com `canonical_synopsis` que
  * precisam de estimativa de Interesse Sinopse. Três estados (espelha a fila de
- * IA Rk):
+ * Veredito IA):
  *   - "stale": já têm previsão mas marcada desatualizada (perfil/sinopse mudou)
  *   - "unpredicted": ainda não têm previsão
  *   - "predicted": têm previsão fresca — pra comparar manual × IA em massa
@@ -669,13 +760,17 @@ export async function getSynopsisQueueWorks(opts: {
   if (!wantStale && !wantUnpredicted && !wantPredicted) return []
   const supabase = createAdminClient()
 
-  // Carrega TODAS as previsões (tabela pequena) — fonte da verdade do estado de
-  // cada obra. Evita depender de embed + limite na query de works (que, sem
-  // order, descartava previsões silenciosamente além da janela).
-  const { data: predRows, error: predErr } = await supabase
-    .from("synopsis_quality_predictions")
-    .select("work_id, predicted_quality, stale, confidence, justification, prompt_version")
-  if (predErr) throw new Error(`Falha lendo previsões de sinopse: ${predErr.message}`)
+  // Carrega TODAS as previsões — fonte da verdade do estado de cada obra. A tabela
+  // já passou de 1000 linhas, então pagina (sem isso o PostgREST corta em 1000 e
+  // obras previstas reapareceriam como "não previsto").
+  const predRows = await fetchAllRows<{ work_id: string } & SynopsisPredRow>(
+    (from, to) =>
+      supabase
+        .from("synopsis_quality_predictions")
+        .select("work_id, predicted_quality, stale, confidence, justification, prompt_version")
+        .range(from, to),
+    "Falha lendo previsões de sinopse",
+  )
   // Pode haver VÁRIAS previsões por obra (uma por versão de prompt). Agrupa e
   // escolhe a "ativa" (versão atual, senão a de maior versão) pra exibição.
   const verNum = (v: string | null | undefined) => {
@@ -748,18 +843,28 @@ export async function getSynopsisQueueWorks(opts: {
   // (synopsis_quality IS NULL), independente do estado de previsão. As previsões
   // carregadas acima ainda alimentam a exibição (sugestão IA no card).
   if (opts.missingManual) {
-    let q = supabase
-      .from("works")
-      .select(SYNOPSIS_QUEUE_SELECT)
-      .eq("is_archived", false)
-      .not("canonical_synopsis", "is", null)
-      .is("synopsis_quality", null)
-      .order("updated_at", { ascending: false })
-    if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
-    if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
-    const { data, error } = await q.limit(opts.limit ?? 1000)
-    if (error) throw new Error(`Falha listando obras sem Interesse manual: ${error.message}`)
-    return (data ?? []).map((w) => mapWork(w as Record<string, unknown>))
+    const baseQ = () => {
+      let q = supabase
+        .from("works")
+        .select(SYNOPSIS_QUEUE_SELECT)
+        .eq("is_archived", false)
+        .not("canonical_synopsis", "is", null)
+        .is("synopsis_quality", null)
+        .order("updated_at", { ascending: false })
+      if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
+      if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
+      return q
+    }
+    // Sem limite explícito → pagina (a contagem da aba não pode parar em 1000).
+    let data: Record<string, unknown>[]
+    if (opts.limit != null) {
+      const res = await baseQ().limit(opts.limit)
+      if (res.error) throw new Error(`Falha listando obras sem Interesse manual: ${res.error.message}`)
+      data = (res.data ?? []) as Record<string, unknown>[]
+    } else {
+      data = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando obras sem Interesse manual")
+    }
+    return data.map((w) => mapWork(w))
   }
 
   const out = new Map<string, SynopsisQueueWork>()
@@ -789,19 +894,28 @@ export async function getSynopsisQueueWorks(opts: {
   // 2) Não-previstas — obras com sinopse canônica e SEM previsão.
   if (wantUnpredicted) {
     const predIdSet = new Set(predByWork.keys())
-    let q = supabase
-      .from("works")
-      .select(SYNOPSIS_QUEUE_SELECT)
-      .eq("is_archived", false)
-      .not("canonical_synopsis", "is", null)
-      .order("updated_at", { ascending: false })
-    if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
-    if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
-    if (synQ.length > 0) q = q.in("synopsis_quality", synQ)
-    const { data, error } = await q.limit(opts.limit ?? 1000)
-    if (error) throw new Error(`Falha listando não-previstas: ${error.message}`)
-    for (const w of data ?? []) {
-      const row = w as Record<string, unknown>
+    const baseQ = () => {
+      let q = supabase
+        .from("works")
+        .select(SYNOPSIS_QUEUE_SELECT)
+        .eq("is_archived", false)
+        .not("canonical_synopsis", "is", null)
+        .order("updated_at", { ascending: false })
+      if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
+      if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
+      if (synQ.length > 0) q = q.in("synopsis_quality", synQ)
+      return q
+    }
+    // Sem limite explícito → pagina (a contagem da aba não pode parar em 1000).
+    let data: Record<string, unknown>[]
+    if (opts.limit != null) {
+      const res = await baseQ().limit(opts.limit)
+      if (res.error) throw new Error(`Falha listando não-previstas: ${res.error.message}`)
+      data = (res.data ?? []) as Record<string, unknown>[]
+    } else {
+      data = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando não-previstas")
+    }
+    for (const row of data) {
       const id = row.id as string
       if (predIdSet.has(id) || out.has(id)) continue
       out.set(id, mapWork(row))
@@ -812,84 +926,36 @@ export async function getSynopsisQueueWorks(opts: {
 }
 
 /**
- * Conta as obras que aparecem nos FILTROS PADRÃO da página /ai-evaluation,
- * tratando as três filas como um CONJUNTO DISTINTO de obras (uma obra que cai em
- * mais de uma fila conta uma vez). Usado pelo badge "Avaliação IA (N)" na
- * sidebar. Seleciona só colunas mínimas — roda a cada navegação. Espelha os
- * defaults de parseFilters / parseIaRkStates / parseSynopsisStates em
- * app/ai-evaluation/page.tsx:
- *   - Atributos:        ai_eval_status ∈ {pending, review_pending}
- *   - IA Rk:            "stale" (tem alignment_score e alignment_stale)
- *   - Interesse Sinopse: "unpredicted" (sinopse canônica SEM nenhuma previsão)
+ * Conta as obras na fila de ATRIBUTOS de /ai-evaluation (aba "IA atributos"):
+ * ai_eval_status ∈ {pending, review_pending}, não arquivadas. É o número que
+ * alimenta o badge "Avaliação IA" da sidebar — espelha EXATAMENTE o contador
+ * dessa aba.
+ *
+ * Antes, o badge somava a UNIÃO distinta de três filas (atributos ∪ Veredito IA
+ * stale ∪ Interesse Sinopse não-previsto). As duas últimas inflavam o número —
+ * sobretudo após uma regeneração de perfil, que marca centenas de
+ * `alignment_stale` de uma vez — e faziam o badge divergir da aba que o usuário
+ * olha. Essas filas têm seus próprios contadores na página; ficam fora do badge.
+ *
+ * Head-count (`count: "exact", head: true`): agrega no Postgres, sem trafegar
+ * linhas nem paginar.
  */
-export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
+export async function getAttributesQueueCount(): Promise<number> {
   const supabase = createAdminClient()
-
-  const [attr, staleScores, synWorks, preds] = await Promise.all([
-    // 1) Atributos — default {pending, review-pending}.
-    supabase
-      .from("works")
-      .select("id")
-      .in("ai_eval_status", ["pending", "review_pending"])
-      .eq("is_archived", false),
-    // 2) IA Rk — default {stale}: filtra direto em calculated_scores (conjunto
-    //    pequeno) em vez de carregar o catálogo inteiro. Arquivadas são excluídas
-    //    abaixo intersectando com works não-arquivadas.
-    supabase
-      .from("calculated_scores")
-      .select("work_id")
-      .eq("alignment_stale", true)
-      .not("alignment_score", "is", null),
-    // 3) Interesse Sinopse — obras (não arquivadas) com sinopse canônica.
-    supabase
-      .from("works")
-      .select("id")
-      .eq("is_archived", false)
-      .not("canonical_synopsis", "is", null),
-    supabase.from("synopsis_quality_predictions").select("work_id"),
-  ])
-
-  if (attr.error) throw new Error(`Falha contando fila de atributos: ${attr.error.message}`)
-  if (staleScores.error) throw new Error(`Falha contando fila de IA Rk: ${staleScores.error.message}`)
-  if (synWorks.error) throw new Error(`Falha contando fila de sinopse: ${synWorks.error.message}`)
-  if (preds.error) throw new Error(`Falha lendo previsões de sinopse: ${preds.error.message}`)
-
-  const ids = new Set<string>()
-
-  for (const w of attr.data ?? []) ids.add((w as { id: string }).id)
-
-  // IA Rk stale: exclui arquivadas validando os work_ids contra works não-arquivadas.
-  const staleIds = [...new Set((staleScores.data ?? []).map((r) => (r as { work_id: string }).work_id))]
-  for (let i = 0; i < staleIds.length; i += 200) {
-    const chunk = staleIds.slice(i, i + 200)
-    const { data, error } = await supabase
-      .from("works")
-      .select("id")
-      .in("id", chunk)
-      .eq("is_archived", false)
-    if (error) throw new Error(`Falha validando IA Rk não-arquivadas: ${error.message}`)
-    for (const w of data ?? []) ids.add((w as { id: string }).id)
-  }
-
-  // Badge = só "não previsto": obra com sinopse canônica e SEM nenhuma previsão
-  // (qualquer versão). Desatualizadas (têm previsão velha) NÃO entram no badge.
-  const predictedSynopsis = new Set<string>()
-  for (const p of preds.data ?? []) {
-    predictedSynopsis.add((p as { work_id: string }).work_id)
-  }
-  for (const w of synWorks.data ?? []) {
-    const id = (w as { id: string }).id
-    if (!predictedSynopsis.has(id)) ids.add(id)
-  }
-
-  return ids.size
+  const { count, error } = await supabase
+    .from("works")
+    .select("id", { count: "exact", head: true })
+    .in("ai_eval_status", ["pending", "review_pending"])
+    .eq("is_archived", false)
+  if (error) throw new Error(`Falha contando fila de atributos: ${error.message}`)
+  return count ?? 0
 }
 
 /**
  * Hidrata obras específicas (por ID) como `FavoriteCandidate`, preservando a
  * ordem dos IDs e filtrando arquivadas. Usado pelos lotes que agem exatamente
  * sobre as obras visíveis na fila (na ordem que o usuário vê): Interesse Sinopse
- * e re-rank de IA Rk.
+ * e re-rank de Veredito IA.
  */
 export async function getCandidatesByIds(ids: string[]): Promise<FavoriteCandidate[]> {
   if (ids.length === 0) return []
@@ -908,12 +974,15 @@ export async function getCandidatesByIds(ids: string[]): Promise<FavoriteCandida
     if (data) rows.push(...data)
   }
 
-  const reviewsById = await fetchTopReviewsBatch(ids, 3)
+  const [reviewsById, digestById] = await Promise.all([
+    fetchTopReviewsBatch(ids, 3),
+    fetchReviewDigestsBatch(ids),
+  ])
   const biasMap = await loadBiasMapForRecs(supabase)
   const byId = new Map<string, FavoriteCandidate>()
   for (const row of rows) {
     const id = (row as { id: string }).id
-    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap))
+    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap, digestById.get(id) ?? null))
   }
   return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
 }

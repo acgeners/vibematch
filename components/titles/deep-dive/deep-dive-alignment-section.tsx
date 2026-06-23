@@ -61,7 +61,7 @@ function TagsCol({
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-[280px]">
                   <p className="text-xs leading-relaxed">{item.why}</p>
-                  <p className="mt-1 text-[10px] text-muted-foreground">
+                  <p className="mt-1 text-[11px] text-muted-foreground">
                     impacto: {(item.impact * 100).toFixed(0)}%
                   </p>
                 </TooltipContent>

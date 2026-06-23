@@ -157,3 +157,17 @@ body::after {
   background: hsl(var(--primary) / 0.28);
   color: hsl(var(--foreground));
 }
+
+/* Barra de progresso indeterminada — tarefas em segundo plano (sem % conhecido). */
+@keyframes task-indeterminate {
+  0%   { left: -45%; }
+  100% { left: 105%; }
+}
+.task-indeterminate-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 45%;
+  border-radius: inherit;
+  animation: task-indeterminate 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}

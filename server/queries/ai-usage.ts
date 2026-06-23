@@ -1,5 +1,17 @@
 import "server-only"
+import { z } from "zod"
 import { createAdminClient } from "@/lib/supabase/admin"
+import {
+  aggregateGroup,
+  aggregateOperationMetrics,
+  buildAiCallRecord,
+  compareImplementationPeriods,
+  summarizeCacheMetrics,
+  type AiCallRecord,
+  type CacheMetrics,
+  type ImplementationPeriodComparison,
+  type OperationMetrics,
+} from "@/lib/ai-observability"
 
 export interface UsageAggregate {
   nCalls: number
@@ -325,4 +337,71 @@ export async function getRecentAiCalls(
     return []
   }
   return ((data ?? []) as unknown as RawRow[]).map(rowToCall)
+}
+
+// ============================================================================
+// Diagnóstico de operações (Plano 1 — Fase B). Reusa o fetch paginado e delega
+// TODA a matemática às funções puras de lib/ai-observability. Distingue
+// solicitação lógica × tentativa, custo por sucesso, p50/p95, categoria de erro
+// e workload — métricas que os agregados legados (acima) não expõem.
+// ============================================================================
+
+/** Instante do merge do fix das capas (commit e9d0c70, base64 server-side). */
+export const COVER_FIX_CUTOFF_ISO = "2026-06-17T22:43:54.000Z"
+
+const rangeDaysSchema = z.number().int().positive().max(365).default(30)
+
+function recordsFromRows(rows: RawRow[]): AiCallRecord[] {
+  return rows.map((r) => buildAiCallRecord(r))
+}
+
+export interface AiOperationDiagnostics {
+  rangeDays: number
+  generatedAtIso: string
+  /** Métricas por operação (ordenadas por custo desc). */
+  operations: OperationMetrics[]
+  /** Tudo somado no período. */
+  overall: OperationMetrics
+  /** Cache de RESULTADO (hits só aparecem após a instrumentação do Commit 2). */
+  cache: CacheMetrics
+}
+
+export async function getAiOperationDiagnostics(
+  rangeDaysInput = 30,
+): Promise<AiOperationDiagnostics> {
+  const rangeDays = rangeDaysSchema.parse(rangeDaysInput)
+  const rows = await fetchRows(rangeStartIso(rangeDays))
+  const records = recordsFromRows(rows)
+  return {
+    rangeDays,
+    generatedAtIso: new Date().toISOString(),
+    operations: aggregateOperationMetrics(records),
+    overall: aggregateGroup("*", records),
+    cache: summarizeCacheMetrics(records),
+  }
+}
+
+export interface CoverFixReport {
+  cutoffIso: string
+  comparison: ImplementationPeriodComparison
+  /** Avaliações registradas APÓS o corte (0 = ainda não mensurável). */
+  afterCount: number
+}
+
+/**
+ * Comparação antes/depois do fix das capas (plano §18). Honesta: se não há
+ * amostra depois do corte (caso atual — o fix é mais novo que toda a base),
+ * `afterCount` = 0 e a UI mostra "ainda não mensurável".
+ */
+export async function getCoverFixReport(
+  cutoffIso: string = COVER_FIX_CUTOFF_ISO,
+): Promise<CoverFixReport> {
+  const rows = await fetchRows(null, "ai_evaluation")
+  const records = recordsFromRows(rows)
+  const comparison = compareImplementationPeriods("ai_evaluation", records, cutoffIso)
+  return {
+    cutoffIso,
+    comparison,
+    afterCount: comparison.after?.attempts ?? 0,
+  }
 }

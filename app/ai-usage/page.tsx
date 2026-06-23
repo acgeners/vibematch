@@ -6,14 +6,19 @@ import { CostByOperationChart } from "@/components/settings/ai-usage/cost-by-ope
 import { DailyCostChart } from "@/components/settings/ai-usage/daily-cost-chart"
 import { OperationFilter } from "@/components/settings/ai-usage/operation-filter"
 import {
+  getAiOperationDiagnostics,
   getAiUsageByModel,
   getAiUsageByOperation,
   getAiUsageDailySeries,
   getAiUsageTotals,
   getAnthropicBalanceStatus,
+  getCoverFixReport,
   getRecentAiCalls,
 } from "@/server/queries/ai-usage"
-import type { UsageAggregate } from "@/server/queries/ai-usage"
+import { getCacheEventMetrics } from "@/server/queries/ai-cache"
+import type { CacheEventsResult } from "@/server/queries/ai-cache"
+import type { CoverFixReport, UsageAggregate } from "@/server/queries/ai-usage"
+import type { OperationMetrics } from "@/lib/ai-observability"
 
 export const revalidate = 60
 
@@ -52,6 +57,30 @@ function formatRelative(iso: string): string {
   return `${d}d atrás`
 }
 
+function formatRatio(v: number | null): string {
+  return v != null && Number.isFinite(v) ? v.toFixed(2) : "—"
+}
+
+/** Solicitações lógicas: exato se disponível, senão ~aproximado (attempt 0/null). */
+function formatLogical(o: OperationMetrics): string {
+  return o.logicalRequests != null ? String(o.logicalRequests) : `~${o.logicalRequestsApprox}`
+}
+
+/** Maior entrada de um mapa de contagens, no formato "chave (n)". */
+function topEntry(counts: Record<string, number>): string {
+  const entries = Object.entries(counts)
+  if (entries.length === 0) return "—"
+  const [key, n] = entries.sort((a, b) => b[1] - a[1])[0]!
+  return `${key} (${n})`
+}
+
+/** byWorkload compacto: "recurring 12 · admin 3". */
+function formatWorkload(counts: Record<string, number>): string {
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1])
+  if (entries.length === 0) return "—"
+  return entries.map(([k, n]) => `${k} ${n}`).join(" · ")
+}
+
 function KpiCard({ label, agg }: { label: string; agg: UsageAggregate }) {
   return (
     <div className="rounded-xl border border-border/70 bg-card/55 p-4 shadow-sm shadow-black/5">
@@ -80,14 +109,22 @@ export default async function AiUsagePage({
 
   // byOperation é sempre completo: alimenta a tabela/gráfico de breakdown e o menu
   // do filtro. As demais métricas são escopadas pela operação selecionada (se houver).
-  const [totals, byOperation, byModel, recent, dailySeries, balance] = await Promise.all([
-    getAiUsageTotals(op),
-    getAiUsageByOperation(30),
-    getAiUsageByModel(30, op),
-    getRecentAiCalls(50, op),
-    getAiUsageDailySeries(30, op),
-    getAnthropicBalanceStatus(),
-  ])
+  const [totals, byOperation, byModel, recent, dailySeries, balance, diagnostics, coverFix, cacheEvents] =
+    await Promise.all([
+      getAiUsageTotals(op),
+      getAiUsageByOperation(30),
+      getAiUsageByModel(30, op),
+      getRecentAiCalls(50, op),
+      getAiUsageDailySeries(30, op),
+      getAnthropicBalanceStatus(),
+      getAiOperationDiagnostics(30),
+      getCoverFixReport(),
+      getCacheEventMetrics(30, op),
+    ])
+
+  const diagOps = op
+    ? diagnostics.operations.filter((o) => o.operation === op)
+    : diagnostics.operations
 
   const operationNames = byOperation.map((row) => row.operation)
   const opSuffix = op ? ` · ${op}` : ""
@@ -206,6 +243,75 @@ export default async function AiUsagePage({
         </div>
       </section>
 
+      {/* ── Diagnóstico por operação (Plano 1 — Fase B) ─────────────── */}
+      <section className="rounded-xl border border-border/70 bg-card/55 shadow-sm shadow-black/5">
+        <header className="border-b border-border/60 px-4 py-3 sm:px-5">
+          <h2 className="text-sm font-semibold text-foreground">
+            Diagnóstico por operação (30 dias){opSuffix}
+          </h2>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Distingue solicitação lógica × tentativa física. Cache de resultado:{" "}
+            {diagnostics.cache.hits > 0 && diagnostics.cache.hitRate != null
+              ? `${formatPct(diagnostics.cache.hitRate)} de hit (${diagnostics.cache.hits} hits / ${diagnostics.cache.misses} misses)`
+              : `${diagnostics.cache.misses} miss(es) registrados — hits de cache não são logados (taxa de hit fica pro Plano 2)`}
+            .
+          </p>
+        </header>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-xs">
+            <thead className="bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2">Operação</th>
+                <th className="px-4 py-2 text-right">Solic. lóg.</th>
+                <th className="px-4 py-2 text-right">Tentativas</th>
+                <th className="px-4 py-2 text-right">Tent./solic.</th>
+                <th className="px-4 py-2 text-right">Custo/sucesso</th>
+                <th className="px-4 py-2 text-right">Lat. p50</th>
+                <th className="px-4 py-2 text-right">Lat. p95</th>
+                <th className="px-4 py-2">Erro principal</th>
+                <th className="px-4 py-2">Workload</th>
+              </tr>
+            </thead>
+            <tbody>
+              {diagOps.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">
+                    Nenhuma chamada registrada nos últimos 30 dias.
+                  </td>
+                </tr>
+              )}
+              {diagOps.map((o) => (
+                <tr key={o.operation} className="border-t border-border/40">
+                  <td className="px-4 py-2 font-mono text-[11px]">{o.operation}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{formatLogical(o)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{o.attempts}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {formatRatio(o.attemptsPerLogicalRequest)}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {o.costPerSuccess != null ? formatUsd(o.costPerSuccess) : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">{formatLatency(o.latencyP50Ms)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{formatLatency(o.latencyP95Ms)}</td>
+                  <td className="px-4 py-2 text-[11px] text-muted-foreground">
+                    {o.failures > 0 ? topEntry(o.errorsByCategory) : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-[11px] text-muted-foreground">
+                    {formatWorkload(o.byWorkload)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* ── Confiabilidade: cache real, dedup, retries (Plano 2) ─────── */}
+      <ReliabilitySection cache={cacheEvents} diagnostics={diagOps} />
+
+      {/* ── Efeito do fix das capas (antes/depois) ───────────────────── */}
+      <CoverFixSection report={coverFix} />
+
       <section className="rounded-xl border border-border/70 bg-card/55 shadow-sm shadow-black/5">
         <header className="border-b border-border/60 px-4 py-3 sm:px-5">
           <h2 className="text-sm font-semibold text-foreground">Por modelo (30 dias){opSuffix}</h2>
@@ -287,12 +393,12 @@ export default async function AiUsagePage({
                   <td className="px-4 py-2 text-right tabular-nums">{formatLatency(row.latencyMs)}</td>
                   <td className="px-4 py-2">
                     {row.status === "success" ? (
-                      <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                      <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
                         ok
                       </span>
                     ) : (
                       <span
-                        className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:text-rose-300"
+                        className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700 dark:text-rose-300"
                         title={row.errorMessage ?? undefined}
                       >
                         erro
@@ -306,5 +412,215 @@ export default async function AiUsagePage({
         </div>
       </section>
     </div>
+  )
+}
+
+const IMG_CAT = "provider_image_invalid_request"
+
+function imageErrorRate(o: OperationMetrics | null): string {
+  if (!o || o.attempts === 0) return "—"
+  const imgErr = o.errorsByCategory[IMG_CAT] ?? 0
+  return `${((imgErr / o.attempts) * 100).toFixed(1)}% (${imgErr}/${o.attempts})`
+}
+
+function ReliabilityKpi({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="mt-0.5 font-mono text-lg tabular-nums text-foreground">{value}</p>
+      {hint && <p className="text-[10px] text-muted-foreground">{hint}</p>}
+    </div>
+  )
+}
+
+/**
+ * Confiabilidade (Plano 2): cache REAL (ai_cache_events), deduplicação
+ * (single-flight) e retries. Honesto: o que não é observável é declarado, não
+ * exibido como zero.
+ */
+function ReliabilitySection({
+  cache,
+  diagnostics,
+}: {
+  cache: CacheEventsResult
+  diagnostics: OperationMetrics[]
+}) {
+  const t = cache.totals
+  // Tentativas visíveis = tentativas físicas acima de 1 por solicitação lógica
+  // (loop estruturado + fallback de imagem). Retries de REDE do SDK não entram.
+  const visibleRetries = diagnostics.reduce((acc, o) => {
+    const logical = o.logicalRequests ?? o.logicalRequestsApprox
+    return acc + Math.max(0, o.attempts - logical)
+  }, 0)
+
+  return (
+    <section className="rounded-xl border border-border/70 bg-card/55 shadow-sm shadow-black/5">
+      <header className="border-b border-border/60 px-4 py-3 sm:px-5">
+        <h2 className="text-sm font-semibold text-foreground">
+          Confiabilidade — cache, dedup e retries (Plano 2)
+        </h2>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          Cache de RESULTADO medido em <code className="font-mono">ai_cache_events</code> (hits aparecem
+          aqui, nunca em <code className="font-mono">ai_api_calls</code>). Janela: 30 dias.
+        </p>
+      </header>
+
+      <div className="space-y-4 px-4 py-3 sm:px-5">
+        {/* Cache */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Cache</h3>
+          {cache.unavailable ? (
+            <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <span className="font-semibold">Não mensurável com a instrumentação atual.</span> Nenhum
+                evento em <code className="font-mono">ai_cache_events</code> — a migration 107 ainda não
+                foi aplicada, ou nenhuma consulta de cache ocorreu na janela.
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <ReliabilityKpi label="Lookups" value={String(t.lookups)} />
+                <ReliabilityKpi
+                  label="Hit rate"
+                  value={t.hitRate != null ? formatPct(t.hitRate) : "—"}
+                  hint={`${t.hits} hit · ${t.misses} miss`}
+                />
+                <ReliabilityKpi label="Bypass" value={String(t.bypasses)} />
+                <ReliabilityKpi
+                  label="Chamadas evitadas"
+                  value={String(t.providerCallsAvoided)}
+                  hint="hits + dedup"
+                />
+              </div>
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2">Operação</th>
+                      <th className="px-3 py-2 text-right">Lookups</th>
+                      <th className="px-3 py-2 text-right">Hit rate</th>
+                      <th className="px-3 py-2 text-right">L1 mem</th>
+                      <th className="px-3 py-2 text-right">L2 db</th>
+                      <th className="px-3 py-2 text-right">Miss</th>
+                      <th className="px-3 py-2 text-right">Dedup</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cache.byOperation.map((o) => (
+                      <tr key={o.operation} className="border-t border-border/40">
+                        <td className="px-3 py-2 font-mono text-[11px]">{o.operation}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{o.lookups}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {o.hitRate != null ? formatPct(o.hitRate) : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">{o.layerHits.memory}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{o.layerHits.persistent}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{o.misses}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{o.dedupWaits}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Deduplicação */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Deduplicação (single-flight)
+          </h3>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Solicitações idênticas concorrentes que aguardaram uma já em voo:{" "}
+            <span className="font-mono text-foreground">{cache.unavailable ? "—" : t.dedupWaits}</span>{" "}
+            (= chamadas pagas evitadas por dedup). Escopo: processo único — não cobre múltiplas
+            instâncias.
+          </p>
+        </div>
+
+        {/* Retries */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Retries</h3>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Tentativas físicas visíveis acima de 1 por solicitação lógica (loop estruturado + fallback
+            de imagem): <span className="font-mono text-foreground">{visibleRetries}</span>. Detalhe por
+            operação em “Diagnóstico por operação” (Tent./solic.).
+          </p>
+          <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+            Retries internos do SDK (429/529/5xx/timeout/rede):{" "}
+            <span className="font-semibold">não observáveis com a instrumentação atual</span> — cada
+            solicitação ao wrapper gera 1 linha; o SDK não expõe as tentativas de rede separadamente.
+          </p>
+        </div>
+
+        {/* Idempotência */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Idempotência
+          </h3>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Conflitos concorrentes evitados (single-flight):{" "}
+            <span className="font-mono text-foreground">{cache.unavailable ? "—" : t.dedupWaits}</span>.
+            Constraints de DB de idempotência: fora desta rodada (exigem auditoria de duplicatas antes).
+          </p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function CoverFixSection({ report }: { report: CoverFixReport }) {
+  const { before, after } = report.comparison
+  const cutoff = new Date(report.cutoffIso).toLocaleString("pt-BR")
+
+  return (
+    <section className="rounded-xl border border-border/70 bg-card/55 shadow-sm shadow-black/5">
+      <header className="border-b border-border/60 px-4 py-3 sm:px-5">
+        <h2 className="text-sm font-semibold text-foreground">Efeito do fix das capas (antes/depois)</h2>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          Corte = merge do prefetch base64 ({cutoff}). Erro de imagem ={" "}
+          <code className="font-mono">{IMG_CAT}</code>.
+        </p>
+      </header>
+      <div className="px-4 py-3 sm:px-5">
+        {report.afterCount === 0 ? (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              Ainda <span className="font-semibold">não mensurável</span>: 0 avaliações registradas
+              após o fix. O fix é mais recente que toda a base atual de chamadas. Acumule avaliações
+              em uso real (ou rode o teste manual da capa) para comparar.
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Antes — tentativas</p>
+              <p className="mt-0.5 font-mono text-lg tabular-nums">{before?.attempts ?? 0}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Antes — erro imagem</p>
+              <p className="mt-0.5 font-mono text-lg tabular-nums">{imageErrorRate(before)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Depois — tentativas</p>
+              <p className="mt-0.5 font-mono text-lg tabular-nums">{after?.attempts ?? 0}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Depois — erro imagem</p>
+              <p className="mt-0.5 font-mono text-lg tabular-nums">{imageErrorRate(after)}</p>
+            </div>
+          </div>
+        )}
+        {!report.comparison.hasSufficientSample && report.afterCount > 0 && (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Amostra insuficiente em pelo menos um dos lados — diferença ainda inconclusiva.
+          </p>
+        )}
+      </div>
+    </section>
   )
 }

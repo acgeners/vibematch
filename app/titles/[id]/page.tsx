@@ -9,8 +9,10 @@ import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { SynopsisQualitySuggestion } from "@/components/titles/synopsis-quality-suggestion"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
+import { TagsExpandAll } from "@/components/titles/tags-expand-all"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug } from "@/server/queries/works"
 import { getAllTags } from "@/server/queries/tags"
+import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import {
   getLatestAiEvaluationAttributes,
   getExistingPostReadingAssessment,
@@ -23,6 +25,8 @@ import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
+import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
+import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
 import { ScoreBadge, getCriterionColorClass } from "@/components/ui/score-badge"
 import {
   PublicationStatusBadge,
@@ -74,6 +78,7 @@ type DetailTag = {
   key: string
   label: string
   subGroupName?: string
+  stance?: "love" | "avoid"
 }
 
 type WorkTagForDisplay = {
@@ -108,6 +113,15 @@ function getTagGroupLabel(tagGroupId: string | null | undefined) {
   const entry = Object.entries(TAG_GROUP_IDS).find(([, id]) => id === tagGroupId)
   if (!entry) return "Sem grupo"
   return TAG_GROUP_LABELS[entry[0] as TagGroupSlug] ?? entry[0]
+}
+
+/** Cor do badge conforme a stance declarada (amo=verde, evito=vermelho). */
+function tagStanceClass(stance?: "love" | "avoid"): string {
+  if (stance === "love")
+    return "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
+  if (stance === "avoid")
+    return "border-rose-500/50 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 hover:text-rose-800 dark:text-rose-300 dark:hover:text-rose-200"
+  return ""
 }
 
 /**
@@ -186,7 +200,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction, declaredTagPrefs] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -196,12 +210,23 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getCurrentPlan(configClient),
     getAllTags(),
     getSynopsisPredictionForWork(work.id as string),
+    getDeclaredTagPreferences(configClient),
   ])
   const subGroupBySlug = new Map<string, string>()
   for (const t of allTagsCatalog) {
     if (t.subGroupName) subGroupBySlug.set(t.slug, t.subGroupName)
   }
+  // Stance declarada (amo/evito) por slug de tag — pra colorir os badges.
+  const stanceBySlug = new Map<string, "love" | "avoid">()
+  for (const p of declaredTagPrefs) stanceBySlug.set(p.slug, p.stance)
   const isPaidPlan = planAllows(plan, "deep_dive")
+
+  // Canal ÚNICO de review manual (externas) — para o diálogo "Avaliar" e o card de exibição.
+  // Só editável com o gate local aberto (as Server Actions reexecutam o gate).
+  const externalEditorEnabled = await isLocalExternalReviewEditorAllowed()
+  const externalManualReviews = externalEditorEnabled
+    ? await readManualExternalReviewsForDisplay(work.id as string)
+    : []
 
   const scoreMap: Record<string, number> = {}
   const sourceMap: Record<string, string> = {}
@@ -253,6 +278,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       key: typeof tag === "string" ? tag : tag.id ?? tag.slug ?? label,
       label,
       subGroupName: slug ? subGroupBySlug.get(slug) : undefined,
+      stance: slug ? stanceBySlug.get(slug) : undefined,
     })
     tagGroupMap.set(groupLabel, groupTags)
   }
@@ -290,7 +316,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   })).filter((item) => item.score != null && Number.isFinite(item.score))
   const hasPostReadingScores = postReadingScores.length > 0
 
-  // Quantos cards aparecem em "Notas calculadas" (Alinhamento, Match/IA Rk,
+  // Quantos cards aparecem em "Notas calculadas" (Alinhamento, Match/Veredito IA,
   // Pessoal). Com ≤2 cada um ocupa a linha toda; com 3 volta a 2 colunas.
   const calcCardCount =
     (work.calculated_scores?.personal_fit != null ? 1 : 0) +
@@ -576,7 +602,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   </div>
                 )}
                 {work.is_archived && (
-                  <span className="inline-flex w-fit items-center rounded-full border border-gray-200 bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                  <span className="inline-flex w-fit items-center rounded-full border border-gray-200 bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
                     Arquivada
                   </span>
                 )}
@@ -600,6 +626,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     totalChapters: work.total_chapters != null ? Number(work.total_chapters) : null,
                     observations: work.observations,
                   }}
+                  currentCovers={(work.work_covers ?? []).map(
+                    (c: { url: string; source?: string | null; is_primary?: boolean }) => ({
+                      url: c.url,
+                      source: c.source,
+                      isPrimary: c.is_primary,
+                    })
+                  )}
                 />
               </div>
               {(() => {
@@ -728,6 +761,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         hasCriteriaScores={Object.keys(scoreMap).length > 0}
         coverUrl={primaryCover}
         latestEvaluation={latestAiEval ?? null}
+        externalEditorEnabled={externalEditorEnabled}
+        externalReviews={externalManualReviews}
       />
       {/* Notas e Avaliações Externas side-by-side */}
       <div className={cn(platformRatings.length > 0 && "grid grid-cols-1 lg:grid-cols-2 gap-5")}>
@@ -766,7 +801,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               {work.calculated_scores?.personal_fit != null && (
                 <div className={cn(
                   "flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
-                  // Sem o par (IA Rk) ao lado, ocupa a linha toda pra não deixar célula vazia.
+                  // Sem o par (Veredito IA) ao lado, ocupa a linha toda pra não deixar célula vazia.
                   work.calculated_scores?.alignment_score == null && "sm:col-span-2",
                 )}>
                   <div className="flex flex-col items-start gap-1">
@@ -774,7 +809,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       name="Alinhamento"
                       description="fit_score (0–100%): alinhamento determinístico entre a obra e o seu TasteProfile (gêneros/tags amados e evitados + preferências por critério). Não usa LLM."
                     />
-                    <span className="text-[10px] text-muted-foreground">Quão a obra combina com seu perfil</span>
+                    <span className="text-[11px] text-muted-foreground">Quão a obra combina com seu perfil</span>
                   </div>
                   {(() => {
                     const fit = work.calculated_scores.personal_fit as number
@@ -799,10 +834,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 )}>
                   <div className="flex flex-col items-start gap-1">
                     <ScoreLabelTooltip
-                      name="Match (IA Rk)"
-                      description="match_score / IA Re-rank (0–100): veredito do consultor LLM sob demanda ('Recomendar com IA' / Deep Dive). Preenchido ao rodar o re-rank."
+                      name="Veredito IA"
+                      description="match_score / Veredito IA (0–100): veredito do consultor LLM sob demanda ('Recomendar com IA' / Deep Dive). Preenchido ao rodar o re-rank."
                     />
-                    <span className="text-[10px] text-muted-foreground">Veredito do consultor IA (0–100)</span>
+                    <span className="text-[11px] text-muted-foreground">Veredito do consultor IA (0–100)</span>
                   </div>
                   {(() => {
                     const rk = work.calculated_scores.alignment_score
@@ -832,7 +867,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                           />
                           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
                         </div>
-                        <span className="text-[10px] text-muted-foreground">Sua nota pós-leitura</span>
+                        <span className="text-[11px] text-muted-foreground">Sua nota pós-leitura</span>
                       </div>
                       <ScoreBadge score={work.user_score ?? null} size="lg" className="h-10 w-14 text-lg font-bold shrink-0" />
                     </summary>
@@ -856,7 +891,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                         name="Pessoal"
                         description="Média ponderada das suas avaliações por estrelas pós-leitura (Ritmo, Arte, Impacto, Originalidade, etc). Calculada automaticamente conforme você preenche os critérios."
                       />
-                      <span className="text-[10px] text-muted-foreground">Sua nota pós-leitura</span>
+                      <span className="text-[11px] text-muted-foreground">Sua nota pós-leitura</span>
                     </div>
                     <ScoreBadge score={work.user_score ?? null} size="lg" className="h-10 w-14 text-lg font-bold shrink-0" />
                   </div>
@@ -899,7 +934,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       <span className="text-xs font-semibold text-foreground truncate">
                         {PLATFORM_LABELS[pr.platform] ?? pr.platform}
                       </span>
-                      <span className="text-[10px] text-muted-foreground mt-0.5">
+                      <span className="text-[11px] text-muted-foreground mt-0.5">
                         {formatVotes(pr.vote_count)} votos
                       </span>
                     </div>
@@ -1013,7 +1048,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       />
                     )}
                     {aiScore && aiScore.suggested_score != null && aiScore.suggested_score !== score && (
-                      <p className="text-[10px] text-muted-foreground/70">
+                      <p className="text-[11px] text-muted-foreground/70">
                         Sugestão IA:{" "}
                         <span className="font-mono font-semibold">
                           {Number(aiScore.suggested_score).toFixed(1)}
@@ -1024,7 +1059,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       BIAS_APPLICABLE.has(sourceMap[slug]) &&
                       (biasMap[slug] ?? 0) !== 0 && (
                         <p
-                          className="text-[10px] text-sky-600/80 dark:text-sky-400/80"
+                          className="text-[11px] text-sky-600/80 dark:text-sky-400/80"
                           title={`Offset do seu perfil: ${biasMap[slug] > 0 ? "+" : ""}${biasMap[slug]}. O cálculo usa o valor calibrado, não o bruto da IA.`}
                         >
                           → calibrado p/{" "}
@@ -1091,44 +1126,52 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           {tags.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
-                <div className="flex items-baseline justify-between gap-3">
+                <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Hash className="h-4.5 w-4.5 text-muted-foreground" />
                     <CardTitle className="text-base font-bold text-foreground">Tags</CardTitle>
                   </div>
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {tags.length} {tags.length === 1 ? "tag" : "tags"} em {tagGroups.length}{" "}
-                    {tagGroups.length === 1 ? "grupo" : "grupos"}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {tags.length} {tags.length === 1 ? "tag" : "tags"} em {tagGroups.length}{" "}
+                      {tagGroups.length === 1 ? "grupo" : "grupos"}
+                    </span>
+                    {tagGroups.some((g) => g.subGroups) && <TagsExpandAll targetId="work-tags-masonry" />}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="pt-0">
-                <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
+                <div id="work-tags-masonry" className="gap-x-6 sm:columns-2 [&>section]:mb-5 [&>section]:break-inside-avoid">
                   {tagGroups.map((group) => (
                     <section key={group.groupName} className="space-y-2">
-                      <div className="flex items-baseline gap-2 border-b border-border/60 pb-1.5">
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-foreground/70">
+                      <div className="flex items-baseline gap-2 border-b-2 border-border/50 pb-1">
+                        <h3 className="text-xs font-bold uppercase tracking-[0.14em] text-foreground">
                           {group.groupName}
                         </h3>
-                        <span className="text-[10px] font-semibold text-muted-foreground">
+                        <span className="text-[11px] font-semibold text-muted-foreground/70">
                           {group.tags.length}
                         </span>
                       </div>
                       {group.subGroups ? (
-                        <div className="space-y-1.5">
+                        <div className="ml-1 space-y-1 border-l border-border/30 pl-2">
                           {group.subGroups.map((sg) => (
-                            <details key={sg.name} className="group rounded-md border border-border/45 bg-background/30">
-                              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground/65">
-                                <ChevronDown className="h-3 w-3 text-muted-foreground transition-transform group-open:rotate-180" />
-                                <span>{sg.name}</span>
-                                <span className="text-[10px] font-normal normal-case text-muted-foreground">{sg.tags.length}</span>
+                            <details key={sg.name} className="group rounded-md bg-muted/20 transition-colors hover:bg-muted/30">
+                              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[13px] font-medium text-muted-foreground">
+                                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform group-open:rotate-180" />
+                                <span className="text-foreground/80">{sg.name}</span>
+                                <span className="text-[11px] text-muted-foreground/60">{sg.tags.length}</span>
                               </summary>
-                              <div className="flex flex-wrap gap-1.5 px-2 pb-2">
+                              <div className="flex flex-wrap gap-1.5 px-2 pb-2 pl-6">
                                 {sg.tags.map((tag) => (
                                   <Badge
                                     key={tag.key}
                                     variant="outline"
-                                    className="rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors hover:bg-accent hover:text-accent-foreground"
+                                    className={cn(
+                                      "rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors",
+                                      tag.stance
+                                        ? tagStanceClass(tag.stance)
+                                        : "hover:bg-accent hover:text-accent-foreground",
+                                    )}
                                   >
                                     {tag.label}
                                   </Badge>
@@ -1143,7 +1186,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                             <Badge
                               key={tag.key}
                               variant="outline"
-                              className="rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors hover:bg-accent hover:text-accent-foreground"
+                              className={cn(
+                                "rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors",
+                                tag.stance
+                                  ? tagStanceClass(tag.stance)
+                                  : "hover:bg-accent hover:text-accent-foreground",
+                              )}
                             >
                               {tag.label}
                             </Badge>

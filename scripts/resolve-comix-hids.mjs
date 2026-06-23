@@ -21,8 +21,17 @@
  *   CHROME_PATH="/path/to/chrome" node scripts/resolve-comix-hids.mjs
  *
  * Requer no .env.local: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
- * Limitação conhecida: a busca usa o filtro padrão da SPA (content_rating=suggestive),
- * então obras estritamente adultas (erotica/pornographic) podem não aparecer.
+ *
+ * Limitação conhecida (content_rating) — VERIFICADA 2026-06-14: a busca anônima da SPA
+ * manda sempre `content_rating=suggestive`, e o token de assinatura `_=` é calculado
+ * SOBRE esse param. Alterar/remover/CSV/repetir o content_rating reusando o token →
+ * 403 "Invalid token." (o token NÃO é single-use; o control repetido segue 200). Não há
+ * setting de conteúdo no localStorage anônimo (`list.filters` não tem o campo). Logo NÃO
+ * dá pra alargar o filtro por código. Obras estritamente adultas (erotica/pornographic)
+ * só aparecem com uma SESSÃO LOGADA do comix.to com conteúdo adulto habilitado na conta:
+ * como o script reusa o userDataDir (.cache/comix-chrome), logar UMA vez nesse profile
+ * (headful) + habilitar adulto deve fazer as buscas seguintes herdarem o content_rating
+ * da conta (a SPA assina o param mais largo). Sem conta, segue só até `suggestive`.
  *
  * NOTA: `normalizeText`/`titleSimilarityDetailed` abaixo são REPLICADOS de
  * lib/external/index.ts (threshold de aceite 0.72). Mantenha em sincronia se a

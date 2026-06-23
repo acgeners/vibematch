@@ -1,7 +1,8 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { SourcedReview, ExternalSourceId } from "@/lib/external/types"
-import type { ReviewSummaryInput } from "@/lib/ai-recommendation/review-summarizer"
+import type { ReviewSummaryInput, ReviewDigestInput } from "@/lib/ai-recommendation/review-summarizer"
+import { ensureReviewSummary, ensureReviewDigest } from "@/lib/orchestration/integrations/reviews"
 
 /**
  * Salva snapshot de reviews externas de uma obra — estratégia NÃO-DESTRUTIVA
@@ -68,12 +69,12 @@ export async function saveWorkReviews(
     return
   }
 
-  // Resumo de consenso: precisa refletir o conjunto COMPLETO persistido (merge),
-  // não só este batch — senão o resumo ignoraria fontes preservadas. Re-lê todas
-  // as reviews da obra antes de consolidar.
+  // Resumo + digest: ambos precisam refletir o conjunto COMPLETO persistido
+  // (merge), não só este batch — senão ignorariam fontes preservadas. Re-lê todas
+  // as reviews da obra (com `source`, que o digest estratifica) antes de consolidar.
   const { data: persisted, error: readError } = await supabase
     .from("work_reviews")
-    .select("text, user_rating")
+    .select("text, user_rating, source")
     .eq("work_id", workId)
   if (readError) {
     console.error("[work_reviews] erro relendo conjunto p/ resumo:", readError)
@@ -82,7 +83,29 @@ export async function saveWorkReviews(
   const summaryInputs: ReviewSummaryInput[] = (persisted ?? [])
     .map((r) => ({ text: String(r.text ?? ""), userRating: r.user_rating ?? null }))
     .filter((r) => r.text.trim().length > 0)
-  await persistReviewSummary(supabase, workId, summaryInputs)
+  // Resumo (Haiku): AGUARDADO, igual ao comportamento anterior. Agora via job
+  // durável (dedup por hash, status, falha persistida, retomada). Single-op do
+  // save = pré-autorizado (allowPaid) → preserva o auto-run sem confirmação. Não
+  // lança: outcome failed não quebra o save (best-effort, como antes).
+  await ensureReviewSummary(workId, { supabase, reviews: summaryInputs, allowPaid: true }).catch(
+    (err) => console.error("[work_reviews] ensureReviewSummary rejeitou:", err),
+  )
+
+  // Digest estruturado (Sonnet, Item C Passe 2): ASSÍNCRONO em relação ao save —
+  // SEM await, não bloqueia o retorno (preserva a semântica de hoje). A diferença:
+  // deixa de ser fire-and-forget invisível e vira job durável (dedup por conteúdo,
+  // status, falha registrada, retomada). Gate próprio (versão/materialidade) dentro
+  // de `ensureReviewDigest`. Single-op do save = pré-autorizado (allowPaid).
+  const digestInputs: ReviewDigestInput[] = (persisted ?? [])
+    .map((r) => ({
+      text: String(r.text ?? ""),
+      source: String(r.source ?? "desconhecida"),
+      userRating: r.user_rating ?? null,
+    }))
+    .filter((r) => r.text.trim().length > 0)
+  void ensureReviewDigest(workId, { supabase, reviews: digestInputs, allowPaid: true }).catch((err) =>
+    console.error("[work_reviews] ensureReviewDigest rejeitou:", err),
+  )
 }
 
 /**
@@ -122,49 +145,4 @@ export async function loadWorkReviewsAsSourced(workId: string): Promise<SourcedR
       textLength: r.text_length != null ? Number(r.text_length) : text.length,
     }
   })
-}
-
-type AdminClient = ReturnType<typeof createAdminClient>
-
-/**
- * Gera/atualiza o resumo IA das reviews da obra. Só roda quando o conjunto de
- * reviews mudou (compara sha256) ou ainda não há resumo. Best-effort.
- *
- * Os inputs são ordenados por texto antes do hash pra que a ordem não-determinística
- * do SELECT não dispare re-gerações desnecessárias do resumo (que custam LLM).
- */
-async function persistReviewSummary(
-  supabase: AdminClient,
-  workId: string,
-  inputs: ReviewSummaryInput[],
-): Promise<void> {
-  if (inputs.length === 0) return
-  try {
-    const { consolidateReviews, hashReviewInputs } = await import(
-      "@/lib/ai-recommendation/review-summarizer"
-    )
-    const ordered = [...inputs].sort((a, b) => a.text.localeCompare(b.text))
-    const hash = hashReviewInputs(ordered)
-
-    const { data: existing } = await supabase
-      .from("works")
-      .select("review_summary, review_summary_inputs_hash")
-      .eq("id", workId)
-      .maybeSingle()
-    if (existing?.review_summary != null && existing?.review_summary_inputs_hash === hash) return
-
-    const result = await consolidateReviews(ordered, { workId })
-    if (!result) return
-
-    await supabase
-      .from("works")
-      .update({
-        review_summary: result.summary,
-        review_summary_at: new Date().toISOString(),
-        review_summary_inputs_hash: hash,
-      })
-      .eq("id", workId)
-  } catch (err) {
-    console.error("[work_reviews] erro gerando resumo:", err instanceof Error ? err.message : err)
-  }
 }

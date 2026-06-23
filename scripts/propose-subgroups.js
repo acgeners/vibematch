@@ -27,6 +27,7 @@ require("dotenv").config({ path: path.resolve(__dirname, "../.env.local") })
 
 const { createClient } = require("@supabase/supabase-js")
 const Anthropic = require("@anthropic-ai/sdk").default
+const { loggedCreate } = require("./lib/ai-log.js")
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://djbreiyzwoevbmoscqiq.supabase.co"
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -160,7 +161,7 @@ async function callClaude(group, tagNames) {
         : baseMessage +
           `\n\nReconsider: propose a clean, mutually-exclusive set of just 3–4 buckets with short, generic one-word names that covers this list. Avoid overlap and avoid singletons.`
     try {
-      const message = await client.messages.create({
+      const message = await loggedCreate(client, supabase, {
         model: MODEL,
         max_tokens: 4000,
         temperature: attempt === 0 ? 0.3 : 0,
@@ -168,7 +169,7 @@ async function callClaude(group, tagNames) {
         tools: [TOOL],
         tool_choice: { type: "tool", name: TOOL.name },
         messages: [{ role: "user", content: userMessage }],
-      })
+      }, { operation: "tag_subgroup_propose", workloadType: "admin", metadata: { attempt } })
       console.log(
         `  attempt ${attempt + 1}: stop_reason=${message.stop_reason} tokens=${message.usage.input_tokens}/${message.usage.output_tokens}`,
       )

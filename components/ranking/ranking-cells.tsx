@@ -25,7 +25,7 @@ function useRerankSingleWork(workId: string) {
         toast.error(result.error ?? "Erro ao rankear obra.")
         return
       }
-      toast.success(`IA Rk: ${Math.round(result.data.alignmentScore)}`)
+      toast.success(`Veredito IA: ${Math.round(result.data.alignmentScore)}`)
       refresh()
     })
   }
@@ -66,7 +66,7 @@ function RerankSingleWorkButton({ workId }: { workId: string }) {
 }
 
 /**
- * Ícone ⟳ clicável ao lado da nota quando o IA Rk está DESATUALIZADO. Roda o
+ * Ícone ⟳ clicável ao lado da nota quando o Veredito IA está DESATUALIZADO. Roda o
  * re-rank só desta obra (mesma action do "Rankear"), limpando o stale.
  */
 function RerankStaleButton({ workId }: { workId: string }) {
@@ -83,7 +83,7 @@ function RerankStaleButton({ workId }: { workId: string }) {
               run()
             }}
             disabled={isPending}
-            aria-label="Atualizar IA Rk (desatualizado)"
+            aria-label="Atualizar Veredito IA (desatualizado)"
             className="inline-flex items-center justify-center rounded p-0.5 text-amber-500 hover:bg-amber-500/10 hover:text-amber-600 disabled:cursor-wait disabled:opacity-50 dark:hover:text-amber-400"
           >
             {isPending ? (
@@ -131,7 +131,7 @@ export function AlignmentScoreCell({
   workId?: string
   payload?: AlignmentPayload | null
   isPaid?: boolean
-  /** True quando o IA Rk ficou desatualizado (obra editada/re-avaliada). */
+  /** True quando o Veredito IA ficou desatualizado (obra editada/re-avaliada). */
   stale?: boolean
 }) {
   if (score == null) {
@@ -149,7 +149,7 @@ export function AlignmentScoreCell({
               </span>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-[260px]">
-              O re-rank por IA (IA Rk) é uma feature do plano Pago. No Free o ranking usa
+              O re-rank por IA (Veredito IA) é uma feature do plano Pago. No Free o ranking usa
               Nota Prevista × alinhamento.
             </TooltipContent>
           </Tooltip>
@@ -229,21 +229,21 @@ export function AlignmentScoreCell({
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[400px] space-y-1.5">
           {stale && (
-            <p className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+            <p className="flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
               <RotateCw className="h-3 w-3" />
               Desatualizado — a obra mudou desde este re-rank. Rode o IA re-rank de novo pra atualizar.
             </p>
           )}
           <div className="flex items-center justify-between gap-3">
-            <p className="font-semibold text-xs">IA Re-rank: {Math.round(score)}/100</p>
+            <p className="font-semibold text-xs">Veredito IA: {Math.round(score)}/100</p>
             {payload?.confidence != null && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[11px] text-muted-foreground">
                 Confiança: <span className="font-semibold text-foreground">{(payload.confidence * 100).toFixed(0)}%</span>
               </span>
             )}
           </div>
           {payload?.mood_fit != null && (
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground">
               Fit com mood: <span className="font-mono font-semibold text-foreground">{(payload.mood_fit * 100).toFixed(0)}%</span>
             </p>
           )}
@@ -271,12 +271,12 @@ export function AlignmentScoreCell({
                 </div>
               )}
               {payload?.similar_loved && payload.similar_loved.length > 0 && (
-                <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
                   Lembra de obras que você ama ({payload.similar_loved.length} similar{payload.similar_loved.length > 1 ? "es" : ""})
                 </p>
               )}
               {payload?.similar_avoided && payload.similar_avoided.length > 0 && (
-                <p className="text-[10px] text-rose-600 dark:text-rose-400">
+                <p className="text-[11px] text-rose-600 dark:text-rose-400">
                   Lembra de obras que você não curtiu ({payload.similar_avoided.length})
                 </p>
               )}
@@ -349,7 +349,7 @@ export function SynopsisPredictionCell({
 
 /**
  * Cell pra a Prioridade (0–10, exibida ×10 como 0–100) — número que ancora na
- * Prevista e ajusta pela IA Rk quando há. Distinta visualmente das outras notas
+ * Prevista e ajusta pelo Veredito IA quando há. Distinta visualmente das outras notas
  * (tom primary) porque é o critério default de ordenação. O tooltip abre a
  * composição pra deixar claro que NÃO é uma previsão de nota, e sim "o que ler primeiro".
  */
@@ -391,8 +391,9 @@ export function DecisionCell({
     : score >= 4 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
     : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
 
-  // Headline = afinidade relativa 0–100 (resolução visual); fallback pro 0–10.
-  const display = affinity != null ? String(affinity) : score.toFixed(1)
+  // Estimativa SECUNDÁRIA (o tier é o sinal primário): prefixo "~" + visual
+  // discreto pra não prometer uma ordem fina que o modelo não sustenta.
+  const display = affinity != null ? `~${affinity}` : `~${score.toFixed(1)}`
 
   return (
     <TooltipProvider>
@@ -400,7 +401,7 @@ export function DecisionCell({
         <TooltipTrigger asChild>
           <span
             className={cn(
-              "inline-flex items-center rounded-md border px-1.5 py-0.5 text-sm font-bold cursor-help tabular-nums",
+              "inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-medium cursor-help tabular-nums",
               colorClass,
             )}
           >
@@ -412,9 +413,10 @@ export function DecisionCell({
             Prioridade{affinity != null ? `: ${affinity}/100` : `: ${score.toFixed(1)}/10`}
           </p>
           <p className="text-[11px] text-muted-foreground">
-            Chance estimada de você gostar — prioridade pra escolher o que ler primeiro
-            (Prevista ajustada pela IA Rk, ×10). Obras numa mesma faixa estão dentro do
-            erro do modelo, então dividem o número e ficam ordenadas por afinidade.
+            Estimativa de satisfação pra priorizar o que ler primeiro (Prevista ajustada pelo
+            Veredito IA, ×10). <span className="font-semibold">Diferenças pequenas entre obras da
+            mesma faixa não indicam uma ordem confiável</span> — dentro de cada faixa a ordem usa
+            compatibilidade e desempates, não o decimal.
             <span className="font-semibold"> Não é uma previsão de nota</span> (essa é a Prevista).
           </p>
           <div className="border-t border-border/40 pt-1.5 space-y-0.5 text-xs">
@@ -423,7 +425,7 @@ export function DecisionCell({
               <span className="font-mono font-semibold">{expected != null ? expected.toFixed(1) : "—"}</span>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">IA Rk. (quando há)</span>
+              <span className="text-muted-foreground">Veredito IA (quando há)</span>
               <span className="font-mono font-semibold">{alignment != null ? Math.round(alignment) : "não rankeada"}</span>
             </div>
             <div className="flex items-center justify-between gap-3">

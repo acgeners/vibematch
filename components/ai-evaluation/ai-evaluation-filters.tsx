@@ -27,8 +27,8 @@ type EvaluationFilter = "pending" | "review-pending" | "low-confidence" | "outda
 const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending"]
 
 const IA_RK_STATE_OPTIONS: Array<{ id: "stale" | "unranked"; label: string; tooltip: string }> = [
-  { id: "stale", label: "Desatualizado", tooltip: "Tem IA Rk, mas ficou velho (obra editada / re-avaliada / 'Atualizar dados')." },
-  { id: "unranked", label: "Não avaliado", tooltip: "Ainda não tem IA Rk (nunca passou pelo re-rank)." },
+  { id: "stale", label: "Desatualizado", tooltip: "Tem Veredito IA, mas ficou velho (obra editada / re-avaliada / 'Atualizar dados')." },
+  { id: "unranked", label: "Não avaliado", tooltip: "Ainda não tem Veredito IA (nunca passou pelo re-rank)." },
 ]
 
 const SYNOPSIS_STATE_OPTIONS: Array<{ id: "stale" | "unpredicted" | "predicted"; label: string; tooltip: string }> = [
@@ -53,11 +53,11 @@ interface AiEvaluationFiltersProps {
   activePersonalStatuses: string[]
   /** Interesse na sinopse (♥–♥♥♥♥) ativos. Compartilhado pelas 2 abas. */
   activeSynopsisQualities?: string[]
-  /** Quando false, esconde a seção "Estado da avaliação" (usado na aba IA Rk). */
+  /** Quando false, esconde a seção "Estado da avaliação" (usado na aba Veredito IA). */
   showEvalState?: boolean
-  /** Mostra a seção "Estado do IA Rk" (Desatualizado/Não avaliado) — aba IA Rk. */
+  /** Mostra a seção "Estado do Veredito IA" (Desatualizado/Não avaliado) — aba Veredito IA. */
   showIaRkState?: boolean
-  /** Estados de IA Rk ativos ("stale"/"unranked"). */
+  /** Estados de Veredito IA ativos ("stale"/"unranked"). */
   activeIaRkStates?: string[]
   /** Mostra a seção "Estado da previsão" (aba Interesse Sinopse). */
   showSynopsisState?: boolean
@@ -142,7 +142,7 @@ export function AiEvaluationFilters({
     else next.add(value)
 
     updateParams((params) => {
-      // Default da aba IA Rk = {stale} (só "Desatualizado") → URL limpa.
+      // Default da aba Veredito IA = {stale} (só "Desatualizado") → URL limpa.
       if (next.size === 1 && next.has("stale")) params.delete("rk")
       else if (next.size === 0) params.set("rk", "none")
       else params.set("rk", [...next].join(","))
@@ -216,7 +216,7 @@ export function AiEvaluationFilters({
 
   const evalFilterCount =
     showEvalState && !isDefaultFilterSet(activeFilters) ? activeFilters.length : 0
-  // Default da aba IA Rk = {stale} (só "Desatualizado"). Qualquer desvio conta.
+  // Default da aba Veredito IA = {stale} (só "Desatualizado"). Qualquer desvio conta.
   const iaRkFilterActive =
     showIaRkState && [...activeIaRkStates].sort().join(",") !== "stale"
   // Default da aba Sinopse = {unpredicted} (só "Não previsto"). Qualquer desvio
@@ -255,7 +255,7 @@ export function AiEvaluationFilters({
             </div>
             <h2 className="text-sm font-semibold">Filtros</h2>
             {activeCount > 0 && (
-              <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
                 {activeCount}
               </span>
             )}
@@ -326,7 +326,7 @@ export function AiEvaluationFilters({
           )}
 
           {showIaRkState && (
-            <FilterSection title="Estado do IA Rk">
+            <FilterSection title="Estado do Veredito IA">
               <div className="flex flex-wrap items-center gap-1">
                 {IA_RK_STATE_OPTIONS.map((opt) => {
                   const active = activeIaRkStates.includes(opt.id)

@@ -30,7 +30,7 @@ const schema = z.object({
   // do ranking — todas persistidas em formula_config, sem migration:
   //   min_final_score      → "Nota Prevista mínima"  (expected_score, 0–10)
   //   min_calc_score       → "Alinhamento mínimo"    (personal_fit, percentil 0–100)
-  //   min_predicted_score  → "IA Rk mínimo"          (alignment_score, 0–100)
+  //   min_predicted_score  → "Veredito IA mínimo"          (alignment_score, 0–100)
   min_final_score: optionalNumber(10),
   min_personal_fit: optionalNumber(100),
   min_alignment: optionalNumber(100),
@@ -70,7 +70,7 @@ export function RankingPreferencesForm({ config }: RankingPreferencesFormProps) 
     const result = await updateRankingPreferences({
       top_n: pending.top_n,
       // Colunas legadas repurposadas (ver schema): Alinhamento → min_calc_score,
-      // IA Rk → min_predicted_score, Nota Prevista → min_final_score.
+      // Veredito IA → min_predicted_score, Nota Prevista → min_final_score.
       min_calc_score: pending.min_personal_fit,
       min_predicted_score: pending.min_alignment,
       min_final_score: pending.min_final_score,
@@ -151,8 +151,8 @@ export function RankingPreferencesForm({ config }: RankingPreferencesFormProps) 
         <PercentMinSlider
           control={control}
           name="min_alignment"
-          label="IA Rk mínimo"
-          hint="Re-rank do consultor IA (0–100). Só obras já re-rankeadas têm IA Rk."
+          label="Veredito IA mínimo"
+          hint="Re-rank do consultor IA (0–100). Só obras já re-rankeadas têm Veredito IA."
         />
       </div>
 

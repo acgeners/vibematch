@@ -1,0 +1,839 @@
+{
+  "sample_version": "pilot-1",
+  "generated_note": "FROZEN — não regenerar após observar outputs candidatos (Plano 3 Fase B §2).",
+  "candidate_pool": 655,
+  "summary": {
+    "uniqueWorks": 80,
+    "repeats": 10,
+    "byStratum": {
+      "♥": {
+        "development": 13,
+        "holdout": 7
+      },
+      "♥♥": {
+        "development": 13,
+        "holdout": 7
+      },
+      "♥♥♥♥": {
+        "development": 12,
+        "holdout": 8
+      },
+      "♥♥♥": {
+        "development": 12,
+        "holdout": 8
+      }
+    }
+  },
+  "slots": [
+    {
+      "slotKey": "S018",
+      "workId": "673929ba-1827-436b-a7e3-4b7f35e7ce49",
+      "split": "holdout",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 1
+    },
+    {
+      "slotKey": "S015",
+      "workId": "ae687e42-a0dd-4051-98da-a6c74877ef14",
+      "split": "holdout",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 2
+    },
+    {
+      "slotKey": "R001",
+      "workId": "e7156496-0d3a-4087-bd9c-96157d12ab42",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": true,
+      "repeatOf": "S071",
+      "shuffleOrder": 3
+    },
+    {
+      "slotKey": "S011",
+      "workId": "2bb30182-691a-4cd7-90aa-98edc65b7134",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 4
+    },
+    {
+      "slotKey": "S037",
+      "workId": "90252bcf-92e6-4f93-8f03-65edf2e6e363",
+      "split": "holdout",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 5
+    },
+    {
+      "slotKey": "S068",
+      "workId": "6bce625f-1fbb-4c17-9eec-8c96ec1b0a70",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 6
+    },
+    {
+      "slotKey": "S067",
+      "workId": "f4064dde-4748-44e7-ae5d-100d1cac38eb",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 7
+    },
+    {
+      "slotKey": "S022",
+      "workId": "efc9c19c-20cc-42ee-9b39-fa7feeb08db4",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 8
+    },
+    {
+      "slotKey": "S047",
+      "workId": "f70d1b64-4c42-4bc4-b65f-dc0d2015a812",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 9
+    },
+    {
+      "slotKey": "S002",
+      "workId": "9c331c77-0e04-41aa-ad9d-bd2e3fa15463",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 10
+    },
+    {
+      "slotKey": "S042",
+      "workId": "b96d8f18-8ae5-4752-9c78-591581fe6c6b",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 11
+    },
+    {
+      "slotKey": "S079",
+      "workId": "a6ff6a17-19a3-4bf0-bd83-ba50a0770725",
+      "split": "holdout",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 12
+    },
+    {
+      "slotKey": "S072",
+      "workId": "e15d19df-8b10-40ea-abdb-f3c3b13c1212",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 13
+    },
+    {
+      "slotKey": "R009",
+      "workId": "54520edc-68bf-4b9c-92fd-41b23913b8bc",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": true,
+      "repeatOf": "S003",
+      "shuffleOrder": 14
+    },
+    {
+      "slotKey": "S065",
+      "workId": "fe0d787c-a8f4-4e32-beab-93fe6ac483d8",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 15
+    },
+    {
+      "slotKey": "S026",
+      "workId": "ac5aa12d-8c06-4ef8-a98b-1366bfacc156",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 16
+    },
+    {
+      "slotKey": "S046",
+      "workId": "09bf3743-456c-474b-96a6-ee68d61f7ecc",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 17
+    },
+    {
+      "slotKey": "S038",
+      "workId": "8947a67f-3429-48d2-aba5-199c04a057ad",
+      "split": "holdout",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 18
+    },
+    {
+      "slotKey": "S020",
+      "workId": "ced72849-bdf3-412c-841f-03daa0eaf353",
+      "split": "holdout",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 19
+    },
+    {
+      "slotKey": "S052",
+      "workId": "40d73e3e-7296-4dd9-a7e9-a3d1d3115b3f",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 20
+    },
+    {
+      "slotKey": "S075",
+      "workId": "1e4dc6ba-9d0c-474c-a96c-082546fe3445",
+      "split": "holdout",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 21
+    },
+    {
+      "slotKey": "S061",
+      "workId": "038a4e0b-4609-4f28-85c2-304d50475d38",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 22
+    },
+    {
+      "slotKey": "S029",
+      "workId": "60b9bde7-a13b-47ad-af2d-8503431c887b",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 23
+    },
+    {
+      "slotKey": "S078",
+      "workId": "1a8ec6b3-ad81-49f6-adb2-11e5ea9cb57f",
+      "split": "holdout",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 24
+    },
+    {
+      "slotKey": "S071",
+      "workId": "e7156496-0d3a-4087-bd9c-96157d12ab42",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 25
+    },
+    {
+      "slotKey": "S049",
+      "workId": "e01de45f-4a25-4732-9f23-3fdc5daa1703",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 26
+    },
+    {
+      "slotKey": "S008",
+      "workId": "51bd3a7c-b129-4955-a799-7f524a0089c0",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 27
+    },
+    {
+      "slotKey": "S055",
+      "workId": "988a5c83-5687-44f7-9865-fc0673459e46",
+      "split": "holdout",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 28
+    },
+    {
+      "slotKey": "S063",
+      "workId": "889a02ce-f50a-44c5-9c44-e4b2b70b44cd",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 29
+    },
+    {
+      "slotKey": "S056",
+      "workId": "89ccfdc3-c539-48f0-9244-310fe00b1e75",
+      "split": "holdout",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 30
+    },
+    {
+      "slotKey": "S073",
+      "workId": "101bc8ed-c158-43c7-ad54-97b6539f5efb",
+      "split": "holdout",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 31
+    },
+    {
+      "slotKey": "S050",
+      "workId": "3708a5b1-788f-47e0-ac4f-11088c512a6e",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 32
+    },
+    {
+      "slotKey": "R008",
+      "workId": "4fb5ad87-0c14-4586-9df1-2c710c670a04",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": true,
+      "repeatOf": "S030",
+      "shuffleOrder": 33
+    },
+    {
+      "slotKey": "S041",
+      "workId": "897b14aa-6bd9-49d6-8d27-09c086e3560c",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 34
+    },
+    {
+      "slotKey": "S036",
+      "workId": "e9c34238-1a85-4b9d-bc10-1e68f11f0a7e",
+      "split": "holdout",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 35
+    },
+    {
+      "slotKey": "S006",
+      "workId": "4e4b63d8-3db8-4e2f-8b6b-ae9c7dc91e44",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 36
+    },
+    {
+      "slotKey": "S017",
+      "workId": "9ff68660-e3ec-4794-bcaa-b7e24c8d6ee3",
+      "split": "holdout",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 37
+    },
+    {
+      "slotKey": "S043",
+      "workId": "42dc8afb-8b1d-4253-93d4-cdd256a36384",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 38
+    },
+    {
+      "slotKey": "S009",
+      "workId": "7d8aac45-41f1-4bf1-ae23-d8652f1f3391",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 39
+    },
+    {
+      "slotKey": "S027",
+      "workId": "9b539d1f-09a2-4fb9-96b2-c8b04b4c546e",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 40
+    },
+    {
+      "slotKey": "S019",
+      "workId": "d228b0f1-9a68-4be0-b184-f033354f2d9d",
+      "split": "holdout",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 41
+    },
+    {
+      "slotKey": "S039",
+      "workId": "9a5613e7-97b0-431e-bdf1-f8d8832c2e4a",
+      "split": "holdout",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 42
+    },
+    {
+      "slotKey": "S034",
+      "workId": "535934a9-59f6-4a55-9b78-d6c0facd5284",
+      "split": "holdout",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 43
+    },
+    {
+      "slotKey": "S064",
+      "workId": "b459e823-184e-4c4d-be46-c223186182ce",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 44
+    },
+    {
+      "slotKey": "R002",
+      "workId": "20714b59-9270-41c8-a972-de2c2b79bb2f",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": true,
+      "repeatOf": "S023",
+      "shuffleOrder": 45
+    },
+    {
+      "slotKey": "S033",
+      "workId": "bdf55765-9332-49db-bb1c-d81297c60d71",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 46
+    },
+    {
+      "slotKey": "S069",
+      "workId": "344aabeb-67c1-464a-8adc-5ad0e19bc70c",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 47
+    },
+    {
+      "slotKey": "S051",
+      "workId": "8039c21c-7ee4-4c54-85ab-fd65b2fa248d",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 48
+    },
+    {
+      "slotKey": "R005",
+      "workId": "65a903e1-710c-4218-ad08-32288ed73d52",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": true,
+      "repeatOf": "S044",
+      "shuffleOrder": 49
+    },
+    {
+      "slotKey": "S044",
+      "workId": "65a903e1-710c-4218-ad08-32288ed73d52",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 50
+    },
+    {
+      "slotKey": "S060",
+      "workId": "ca254b3a-5dae-4c56-89ca-7d564720e57e",
+      "split": "holdout",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 51
+    },
+    {
+      "slotKey": "S024",
+      "workId": "45a02fdc-503c-44f5-bcaf-54da3d652f18",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 52
+    },
+    {
+      "slotKey": "S048",
+      "workId": "652bfc21-e115-4966-9826-a91cd615d6b6",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 53
+    },
+    {
+      "slotKey": "S031",
+      "workId": "58533140-632a-4607-bbfb-930a927b38e7",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 54
+    },
+    {
+      "slotKey": "S005",
+      "workId": "3fb1bf39-8359-4586-9733-754defdbeac6",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 55
+    },
+    {
+      "slotKey": "S007",
+      "workId": "49fcd5fa-0656-4b54-a095-c9376b55c048",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 56
+    },
+    {
+      "slotKey": "S057",
+      "workId": "f81394f3-6aa9-464b-8891-6183a66733e2",
+      "split": "holdout",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 57
+    },
+    {
+      "slotKey": "R007",
+      "workId": "101bc8ed-c158-43c7-ad54-97b6539f5efb",
+      "split": "holdout",
+      "stratum": "♥♥♥♥",
+      "isRepeat": true,
+      "repeatOf": "S073",
+      "shuffleOrder": 58
+    },
+    {
+      "slotKey": "S004",
+      "workId": "84314635-3f8f-4ebd-83a3-41172527fcc4",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 59
+    },
+    {
+      "slotKey": "R006",
+      "workId": "d228b0f1-9a68-4be0-b184-f033354f2d9d",
+      "split": "holdout",
+      "stratum": "♥",
+      "isRepeat": true,
+      "repeatOf": "S019",
+      "shuffleOrder": 60
+    },
+    {
+      "slotKey": "S077",
+      "workId": "66d34ab5-6019-44bb-8bd5-24b48f9e4056",
+      "split": "holdout",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 61
+    },
+    {
+      "slotKey": "S054",
+      "workId": "e84c3bac-80c8-466a-bd78-930df89adcdd",
+      "split": "holdout",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 62
+    },
+    {
+      "slotKey": "S045",
+      "workId": "22a12e5b-0e2a-479a-bfc0-83f6a91c4efd",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 63
+    },
+    {
+      "slotKey": "S014",
+      "workId": "6af9df4e-185b-40c6-81ba-11daca61696b",
+      "split": "holdout",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 64
+    },
+    {
+      "slotKey": "S032",
+      "workId": "25007e9b-9105-429e-9557-eb35a1322bfa",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 65
+    },
+    {
+      "slotKey": "S025",
+      "workId": "f1dc73bd-2d38-42a9-bb7c-ea6c8cda45ca",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 66
+    },
+    {
+      "slotKey": "S023",
+      "workId": "20714b59-9270-41c8-a972-de2c2b79bb2f",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 67
+    },
+    {
+      "slotKey": "S010",
+      "workId": "cd3e3678-1db0-4c8e-90f7-bab8bf933c7c",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 68
+    },
+    {
+      "slotKey": "S076",
+      "workId": "c3dacd89-b671-4031-8f14-e163ea5f7d5a",
+      "split": "holdout",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 69
+    },
+    {
+      "slotKey": "S062",
+      "workId": "8ef70e2f-c0d6-437d-a327-cc73fdfc9e5e",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 70
+    },
+    {
+      "slotKey": "S021",
+      "workId": "16080ccb-6a68-418c-a027-98c304944b75",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 71
+    },
+    {
+      "slotKey": "S035",
+      "workId": "87265266-e217-46b2-9fa8-868d9a6e968f",
+      "split": "holdout",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 72
+    },
+    {
+      "slotKey": "S028",
+      "workId": "1cf09135-95a4-4248-a35f-0f3d5122abe2",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 73
+    },
+    {
+      "slotKey": "S012",
+      "workId": "b76764cb-08e3-45ef-b6af-97f00ac5f3a7",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 74
+    },
+    {
+      "slotKey": "S003",
+      "workId": "54520edc-68bf-4b9c-92fd-41b23913b8bc",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 75
+    },
+    {
+      "slotKey": "S040",
+      "workId": "4825fdc3-3dad-4e83-a5ca-6174310426b1",
+      "split": "holdout",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 76
+    },
+    {
+      "slotKey": "S016",
+      "workId": "1ed45f04-40f7-4d8a-8d74-60a387605969",
+      "split": "holdout",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 77
+    },
+    {
+      "slotKey": "R003",
+      "workId": "9713eca5-c6a8-4cbf-ac2e-a242e1aba199",
+      "split": "holdout",
+      "stratum": "♥♥♥♥",
+      "isRepeat": true,
+      "repeatOf": "S080",
+      "shuffleOrder": 78
+    },
+    {
+      "slotKey": "R010",
+      "workId": "40d73e3e-7296-4dd9-a7e9-a3d1d3115b3f",
+      "split": "development",
+      "stratum": "♥♥♥",
+      "isRepeat": true,
+      "repeatOf": "S052",
+      "shuffleOrder": 79
+    },
+    {
+      "slotKey": "S074",
+      "workId": "38c1c3d1-de8a-46c9-8c41-dc3de5eb0910",
+      "split": "holdout",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 80
+    },
+    {
+      "slotKey": "S030",
+      "workId": "4fb5ad87-0c14-4586-9df1-2c710c670a04",
+      "split": "development",
+      "stratum": "♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 81
+    },
+    {
+      "slotKey": "S013",
+      "workId": "3c18ad94-3319-46c7-ae27-38342165bee0",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 82
+    },
+    {
+      "slotKey": "S070",
+      "workId": "c00530b3-e464-42c0-ac39-a6f0371330e2",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 83
+    },
+    {
+      "slotKey": "S001",
+      "workId": "20024e21-bbe7-490c-9a6a-892db1d7f67d",
+      "split": "development",
+      "stratum": "♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 84
+    },
+    {
+      "slotKey": "S066",
+      "workId": "931e2fb4-3a2a-4320-969f-e736832462f2",
+      "split": "development",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 85
+    },
+    {
+      "slotKey": "S053",
+      "workId": "40269ebf-2a58-4236-9aff-bdbb0051e61f",
+      "split": "holdout",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 86
+    },
+    {
+      "slotKey": "R004",
+      "workId": "e9c34238-1a85-4b9d-bc10-1e68f11f0a7e",
+      "split": "holdout",
+      "stratum": "♥♥",
+      "isRepeat": true,
+      "repeatOf": "S036",
+      "shuffleOrder": 87
+    },
+    {
+      "slotKey": "S058",
+      "workId": "2293ff4f-a659-4147-8be8-1bc4e26d040c",
+      "split": "holdout",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 88
+    },
+    {
+      "slotKey": "S059",
+      "workId": "ec191e22-6726-4264-8951-550cd3400b23",
+      "split": "holdout",
+      "stratum": "♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 89
+    },
+    {
+      "slotKey": "S080",
+      "workId": "9713eca5-c6a8-4cbf-ac2e-a242e1aba199",
+      "split": "holdout",
+      "stratum": "♥♥♥♥",
+      "isRepeat": false,
+      "repeatOf": null,
+      "shuffleOrder": 90
+    }
+  ]
+}

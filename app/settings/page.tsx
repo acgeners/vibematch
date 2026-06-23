@@ -10,6 +10,7 @@ import {
   Database,
   Gauge,
   Info,
+  Layers,
   Settings,
   Sparkles,
   Tags,
@@ -22,6 +23,7 @@ import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
 import { ReviewSummaryPanel } from "@/components/settings/review-summary-panel"
+import { ReviewDigestPanel } from "@/components/settings/review-digest-panel"
 import { ResolveComixPanel } from "@/components/settings/resolve-comix-panel"
 import { ComixHealthPanel } from "@/components/settings/comix-health-panel"
 import { AiEvalOnCreateToggle } from "@/components/settings/ai-eval-on-create-toggle"
@@ -30,6 +32,7 @@ import { getComixResolverStatus } from "@/server/actions/comix-resolver"
 import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
 import { getAiEvalOnCreate } from "@/server/queries/current-user"
 import { getSettingsPendingCounts } from "@/server/queries/settings-pending"
+import { parseModelEvaluationMetrics } from "@/lib/metrics/model-evaluation"
 import type { FormulaConfig } from "@/types/domain"
 import { ACCENT_LINK, type SettingsAccent } from "@/lib/settings-accent"
 import { cn } from "@/lib/utils"
@@ -111,6 +114,7 @@ const SECTION_GROUPS = [
       { id: "calibration", title: "Calibração", icon: <Gauge />, accent: "cyan" as const },
       { id: "synopsis-canonical", title: "Sinopse canônica", icon: <Brain />, accent: "violet" as const },
       { id: "review-summary", title: "Resumo de reviews", icon: <Sparkles />, accent: "amber" as const },
+      { id: "review-digest", title: "Digest de reviews", icon: <Layers />, accent: "amber" as const },
     ],
   },
   {
@@ -146,6 +150,21 @@ export default async function SettingsPage() {
     comixMissing,
     aiEvalOnCreate,
   } = await getSettingsData()
+
+  // F4: métricas de erro honestas, validadas por Zod no boundary do servidor.
+  // crossValidationMae é gated por stub (mesma regra antiga da headline). A
+  // prospectiva ainda não entra aqui — vive na página técnica /admin/model-metrics.
+  const modelMetrics = parseModelEvaluationMetrics({
+    trainMae: config.mae_expected,
+    crossValidationMae: snapshot.expectedPredictorIsStub ? null : config.cv_mae_expected_stage1,
+    prospectiveMae: null,
+    baselineMae: snapshot.baselineMae,
+    sampleSize: snapshot.trainSize,
+    foldCount: null,
+    evaluatedAt: config.last_recalculated_at,
+    prospectiveSampleSize: null,
+    prospectiveEvaluatedAt: null,
+  })
 
   return (
     <div className="w-full max-w-6xl space-y-4">
@@ -189,7 +208,7 @@ export default async function SettingsPage() {
         accent="cyan"
         badge={{ label: "Passo 2", variant: "step" }}
       >
-        <CalibrationPanel config={config} snapshot={snapshot} accent="cyan" />
+        <CalibrationPanel config={config} metrics={modelMetrics} snapshot={snapshot} accent="cyan" />
       </SettingsSection>
 
       <SettingsSection
@@ -220,6 +239,17 @@ export default async function SettingsPage() {
           pendingCount={reviewSummaryPending}
           totalCount={worksCount}
         />
+      </SettingsSection>
+
+      <SettingsSection
+        id="review-digest"
+        title="Digest estruturado de reviews"
+        description="Destila as reviews num digest estruturado (Sonnet) que o consultor IA consome — consenso, traços salientes, alertas. Opt-in (custo Sonnet)."
+        icon={<Layers />}
+        accent="amber"
+        badge={{ label: "Independente", variant: "independent" }}
+      >
+        <ReviewDigestPanel accent="amber" />
       </SettingsSection>
 
       {/* ── Casos especiais ───────────────────────────────────────── */}

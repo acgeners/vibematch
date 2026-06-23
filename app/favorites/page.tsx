@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { WorkTable } from "@/components/titles/work-table"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
 import { FavoritesStatsHeader } from "@/components/favorites/favorites-stats-header"
-import { RecommendWithAiButton } from "@/components/recommendations/recommend-with-ai-button"
+import { RecommendDialog } from "@/components/recommendations/recommend-dialog"
 import { ViewRecommendationsButton } from "@/components/recommendations/view-recommendations-button"
 import { getCurrentPlan } from "@/server/queries/current-user"
 import { planAllows } from "@/lib/plans/capabilities"
@@ -113,6 +113,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
     tagSlugsAny: multi("tags_any") ?? multi("tags"),
     tagSlugsExclude: multi("tags_exclude"),
     synopsisQualities: multi("synopsis_q"),
+    predictedSynopsisQualities: multi("synopsis_pred"),
     minTotalChapters: num("min_chapters"),
     maxTotalChapters: num("max_chapters"),
     minExpectedScore: num("min_expected"),
@@ -164,7 +165,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
         scoreThresholds={scoreThresholds?.expected ?? null}
         actions={
           <>
-            <RecommendWithAiButton source="favorites" isPaid={isPaid} />
+            <RecommendDialog context="favorites" isPaid={isPaid} />
             <ViewRecommendationsButton />
           </>
         }

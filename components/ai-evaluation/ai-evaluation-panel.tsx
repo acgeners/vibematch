@@ -747,7 +747,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                     {work.synopsis_quality && (
                       <span
                         title="Interesse na sinopse"
-                        className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300"
+                        className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-600 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300"
                       >
                         {work.synopsis_quality}
                       </span>
@@ -1019,23 +1019,23 @@ function FilterBadges({
   return (
     <div className="flex flex-wrap gap-1 mt-1">
       {matchedFilters.includes("pending") && (
-        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:border-slate-400/20 dark:bg-slate-400/10 dark:text-slate-300">
+        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-400/20 dark:bg-slate-400/10 dark:text-slate-300">
           sem avaliação IA
         </span>
       )}
       {matchedFilters.includes("review-pending") && (
-        <span className="inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:border-sky-400/25 dark:bg-sky-400/12 dark:text-sky-200">
+        <span className="inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:border-sky-400/25 dark:bg-sky-400/12 dark:text-sky-200">
           aguardando revisão
         </span>
       )}
       {matchedFilters.includes("low-confidence") && evaluation?.confidence != null && (
-        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-200">
+        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-200">
           confiança {Math.round(evaluation.confidence * 100)}%
         </span>
       )}
       {matchedFilters.includes("outdated-model") && evaluation && (
         <span
-          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:border-rose-400/25 dark:bg-rose-400/12 dark:text-rose-200"
+          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700 dark:border-rose-400/25 dark:bg-rose-400/12 dark:text-rose-200"
           title={`Avaliado em ${evaluation.modelName ?? "?"} / ${evaluation.promptVersion ?? "?"}`}
         >
           modelo antigo: {evaluation.modelName ?? "?"}/{evaluation.promptVersion ?? "?"}

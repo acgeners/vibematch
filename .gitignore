@@ -60,3 +60,16 @@ scripts/seed-from-xlsx*.js
 
 # Perfil do Chrome do resolve-comix-hids (puppeteer)
 .cache/
+
+# guia pessoal de onboarding (não versionar)
+/GUIA.md
+lib/synopsis-interest/labeling-sheet.*
+
+# Backups locais de segurança (pilotos/execuções) — NÃO versionar
+.local-backups/
+
+# Snapshots/pacotes experimentais locais (Plano 3) — conteúdo integral (sinopses), NÃO versionar
+.local-experiments/
+
+# Estado temporário do Supabase CLI — não versionar
+supabase/.temp/

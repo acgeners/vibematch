@@ -20,7 +20,10 @@ import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
 import { PredictSynopsisRowActions } from "@/components/titles/predict-synopsis-row-actions"
 import { SynopsisQualityPicker } from "@/components/titles/synopsis-quality-picker"
-import { predictSynopsisQualityBatchAction } from "@/server/actions/synopsis-quality"
+import {
+  planSynopsisInterestBatchAction,
+  runSynopsisInterestBatchAction,
+} from "@/server/actions/synopsis-quality"
 import { cn } from "@/lib/utils"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
@@ -50,7 +53,6 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
   const [sortField, setSortField] = useState<SortField>("default")
   const [batchSize, setBatchSize] = useState<number>(DEFAULT_BATCH_SIZE)
   const [batchRunning, setBatchRunning] = useState(false)
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
 
   const sortedWorks = useMemo(() => {
@@ -95,42 +97,66 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
   const batchIds = pendingTargets.slice(0, batchSize).map((w) => w.id)
   const remainingAfterBatch = Math.max(pendingTargets.length - batchIds.length, 0)
 
-  // Processa em blocos pequenos pra exibir progresso (X/total) entre eles.
-  const PROGRESS_CHUNK = 5
-  const handlePredictAll = async () => {
-    const ids = batchIds
-    if (ids.length === 0 || batchRunning) return
-    const total = ids.length
+  // Executa o lote já confirmado (uma autorização da cascata). Custo total
+  // governado pelo teto = upper bound do dry-run.
+  const executeBatch = async (ids: string[], maxCostUsd: number) => {
     setBatchRunning(true)
-    setProgress({ done: 0, total })
-    let predicted = 0
-    let failed = 0
-    let aborted = false
     try {
-      for (let i = 0; i < ids.length; i += PROGRESS_CHUNK) {
-        const chunk = ids.slice(i, i + PROGRESS_CHUNK)
-        const result = await predictSynopsisQualityBatchAction(chunk)
-        if (result.error || !result.data) {
-          toast.error(result.error ?? "Erro ao estimar em lote.")
-          aborted = true
-          break
-        }
-        predicted += result.data.predicted
-        failed += result.data.failed
-        setProgress({ done: Math.min(i + PROGRESS_CHUNK, total), total })
+      const res = await runSynopsisInterestBatchAction(ids, { maxCostUsd })
+      if (res.status === "ok") {
+        const r = res.report
+        toast.success(
+          `${r.succeeded} estimada${r.succeeded !== 1 ? "s" : ""} · ${r.fresh} já ok` +
+            (r.failed > 0 ? ` · ${r.failed} falhou` : "") +
+            (r.blocked > 0 ? ` · ${r.blocked} bloqueada(s)` : "") +
+            ` · custo $${r.costUsd.toFixed(3)}`,
+        )
+      } else if (res.status === "blocked_cost_confirmation") {
+        toast.error(res.message)
+      } else {
+        toast.error("message" in res ? res.message : res.error)
       }
     } finally {
       setBatchRunning(false)
-      setProgress(null)
+      refresh()
     }
-    if (!aborted) {
-      toast.success(
-        `${predicted} estimada${predicted !== 1 ? "s" : ""}` +
-          (failed > 0 ? ` · ${failed} falhou` : "") +
-          (remainingAfterBatch > 0 ? ` · ${remainingAfterBatch} restantes` : "."),
+  }
+
+  // Fluxo: DRY-RUN obrigatório → mostra contagens + custo (provável/upper bound)
+  // → confirmação única → execução. Itens fresh não entram no custo.
+  const handlePredictAll = async () => {
+    const ids = batchIds
+    if (ids.length === 0 || batchRunning) return
+    setBatchRunning(true)
+    try {
+      const planned = await planSynopsisInterestBatchAction(ids)
+      if (planned.status !== "ok") {
+        toast.error("message" in planned ? planned.message : planned.error)
+        return
+      }
+      const p = planned.plan
+      const needCalls = p.stale + p.absent
+      if (needCalls === 0) {
+        toast.success("Tudo já está atualizado — nada a estimar.")
+        return
+      }
+      const profileNote = p.needsProfile ? " · inclui gerar/atualizar o perfil" : ""
+      const maxCostUsd = Math.max(p.upperBoundUsd, 0.01)
+      toast(
+        `Lote: ${needCalls} previsão(ões)${profileNote}. Custo ~$${p.likelyUsd.toFixed(3)} (provável) / até $${p.upperBoundUsd.toFixed(3)}${remainingAfterBatch > 0 ? ` · ${remainingAfterBatch} restantes` : ""}.`,
+        {
+          duration: 15000,
+          action: {
+            label: "Executar",
+            onClick: () => {
+              void executeBatch(ids, maxCostUsd)
+            },
+          },
+        },
       )
+    } finally {
+      setBatchRunning(false)
     }
-    refresh()
   }
 
   if (works.length === 0) {
@@ -191,11 +217,7 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
               ) : (
                 <Sparkles className="mr-1 h-4 w-4" />
               )}
-              {batchRunning
-                ? progress
-                  ? `Estimando… ${progress.done}/${progress.total}`
-                  : "Estimando…"
-                : `Estimar ${batchIds.length} por IA`}
+              {batchRunning ? "Processando…" : `Estimar ${batchIds.length} por IA`}
             </Button>
           </div>
         )}
@@ -237,30 +259,30 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
                       {w.manualSynopsisQuality && (
                         <span
                           title="Interesse na sinopse (manual)"
-                          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300"
+                          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-600 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300"
                         >
                           {w.manualSynopsisQuality}
                         </span>
                       )}
                       {isStale ? (
-                        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-200">
+                        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-200">
                           desatualizado
                         </span>
                       ) : w.predictedQuality == null ? (
-                        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:border-slate-400/20 dark:bg-slate-400/10 dark:text-slate-300">
+                        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-400/20 dark:bg-slate-400/10 dark:text-slate-300">
                           não previsto
                         </span>
                       ) : null}
                       {!isStale && diverges && (
                         <span
                           title={`Manual ${w.manualSynopsisQuality} ≠ IA ${w.predictedQuality}`}
-                          className="inline-flex items-center rounded-full border border-orange-300 bg-orange-50 px-2 py-0.5 text-[10px] font-medium text-orange-700 dark:border-orange-400/25 dark:bg-orange-400/12 dark:text-orange-200"
+                          className="inline-flex items-center rounded-full border border-orange-300 bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-700 dark:border-orange-400/25 dark:bg-orange-400/12 dark:text-orange-200"
                         >
                           diverge
                         </span>
                       )}
                       {!isStale && alreadyApplied && (
-                        <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/12 dark:text-emerald-200">
+                        <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/12 dark:text-emerald-200">
                           bate
                         </span>
                       )}
@@ -285,7 +307,7 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
                           <span
                             title={`IA ${w.predictedQuality} vs manual ${w.manualSynopsisQuality} (${delta > 0 ? "+" : ""}${delta} nível${Math.abs(delta) !== 1 ? "s" : ""})`}
                             className={cn(
-                              "ml-1.5 rounded px-1 py-0.5 text-[10px] font-semibold",
+                              "ml-1.5 rounded px-1 py-0.5 text-[11px] font-semibold",
                               delta === 0
                                 ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300"
                                 : "bg-orange-500/12 text-orange-700 dark:text-orange-300",

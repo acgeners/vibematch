@@ -170,6 +170,13 @@ export async function insertNewTasteProfile(
   // mexida na biblioteca. Best-effort (não bloqueia a geração do perfil).
   const { markSynopsisPredictionsStale } = await import("@/server/queries/synopsis-quality")
   await markSynopsisPredictionsStale(computeProfileSignature(args.profile))
+  // Uma nova versão de perfil torna `personal_fit` (derivado por recalculateAll a
+  // partir do perfil efetivo) STALE. Sinaliza recálculo pendente — NÃO recalcula
+  // aqui (apenas marca; reusa o mecanismo existente). Marcado SÓ após o insert
+  // bem-sucedido: geração/persistência que falham nunca chegam aqui (caem no throw
+  // acima). Cobre TODOS os caminhos de persistência (este é o único sink).
+  const { markRecalcPending } = await import("@/server/actions/recalc-queue")
+  await markRecalcPending("taste_profile_new_version")
   return rowToTasteProfile(data as Record<string, unknown>)
 }
 

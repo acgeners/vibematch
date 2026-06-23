@@ -1,0 +1,57 @@
+{
+  "package": "migration-112-manual-application",
+  "packageVersion": "v2 (B2.2L, canônica estrita)",
+  "generatedAt": "2026-06-21",
+  "superseded": {
+    "note": "SUPERSEDED — NÃO APLICAR",
+    "previousMigrationSha256": "591a6cfe36ead2749be1cf8062cf3dd9f914c88aeb8f2a88aa6b401e8b2c70b0",
+    "previousMigrationApplicationPackageSignature": "60b60c20ffd618ed6c3c6bbb1964d7195d7fe6ca061f004b2b1ed8a02744ad43",
+    "reason": "removido IF NOT EXISTS / DROP TRIGGER; qualificado public.; opcionais endurecidos (sem string vazia)"
+  },
+  "migrationPath": "supabase/migrations/112_work_external_reviews_manual.sql",
+  "migrationSha256": "9c47a2cd7d1889ee879bda05d44bed19e977f56a90bfa8277840a49b87dffe12",
+  "migrationBytes": 6673,
+  "migrationLines": 105,
+  "applicationScriptPath": "docs/sql/112_work_external_reviews_manual_apply.sql",
+  "applicationScriptSha256": "ebd8ec7bce96fcbca1b4a3a04c5163f1b7a70e689f160841e587146e628e5667",
+  "applicationScriptRelation": "corpo LITERAL da migration + BEGIN/COMMIT + comentários externos (estruturalmente idêntico)",
+  "precheckPath": "docs/sql/112_work_external_reviews_manual_precheck.sql",
+  "precheckSha256": "077436fc37ec0e0adb8b731c68a9e9d6349d32d4116b4a6e2d37f2c2bb18ca7d",
+  "postcheckPath": "docs/sql/112_work_external_reviews_manual_postcheck.sql",
+  "postcheckSha256": "243c16d7f274c2bf1f708ce8ffacef282729462dd5e05f228bdd14af661af74b",
+  "expectedTable": "public.work_external_reviews_manual",
+  "expectedConstraintNames": [
+    "work_external_reviews_manual_pkey",
+    "work_external_reviews_manual_work_id_fkey",
+    "work_external_reviews_manual_source_format",
+    "work_external_reviews_manual_text_nonempty",
+    "work_external_reviews_manual_hash_format",
+    "work_external_reviews_manual_provenance",
+    "work_external_reviews_manual_source_url_nonblank",
+    "work_external_reviews_manual_external_review_id_nonblank",
+    "work_external_reviews_manual_reviewer_name_nonblank",
+    "work_external_reviews_manual_language_format"
+  ],
+  "expectedIndexNames": [
+    "work_external_reviews_manual_pkey",
+    "work_external_reviews_manual_uniq_extid",
+    "work_external_reviews_manual_uniq_hash",
+    "work_external_reviews_manual_work_idx",
+    "work_external_reviews_manual_created_idx"
+  ],
+  "expectedTriggerName": "trg_work_external_reviews_manual_updated_at",
+  "rlsExpected": true,
+  "expectedPolicyCount": 0,
+  "expectedRowCount": 0,
+  "applyTransactional": true,
+  "applied": false,
+  "semanticIdentityVerified": true,
+  "remoteHistory": {
+    "tool": "supabase-cli",
+    "registeredCount": 6,
+    "localCount": 114,
+    "migration112Registered": false,
+    "note": "drift pré-existente: 108/114 locais sem registro remoto; aplicar via SQL Editor (NÃO db push)"
+  },
+  "migrationApplicationPackageSignature": "5cc6b32a137cfc693640c7a5ace7e9bb1c60478cded1b2c283b2e8b192ff5822"
+}

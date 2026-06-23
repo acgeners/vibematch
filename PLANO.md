@@ -1,5 +1,11 @@
 # SatorIA — Plano de Trabalho Consolidado
 
+> ## 🗄️ ARQUIVADO (2026-06-15) — não é mais o plano vivo
+> O plano ativo agora é **[PLANO-ATUAL.md](PLANO-ATUAL.md)** (sistema de diferenciação por
+> tiers + Onda 4 de deploy carregada pra lá). Este arquivo permanece **só como histórico**:
+> diagnósticos originais + logs das sessões das Ondas 0–3 (Comix, saldo/badges, faxina de notas),
+> que estão essencialmente concluídas. **Ao retomar, leia o PLANO-ATUAL.md.**
+
 > Consolida os dois diagnósticos (geral + aprofundado) e os três tópicos prioritários
 > (Comix, Saldo/badges, Deploy). Substitui os `plan-*.md` antigos como fonte de verdade.
 > **Princípio orientador:** varrer resíduo (risco ~0) antes de tocar lógica viva; subir
@@ -43,9 +49,9 @@ pela metade, e os módulos antigos grandes. **Não é qualidade irregular — é
 - [~] **Onda 1** — Saldo/badges tempo real (II.B) · **core concluído (1+2+4); fase 3 deferida**
   - [x] **Fase 1** — barramento tipado: `refreshChrome(patch?: ChromePatch)` + `CustomEvent<ChromePatch|null>`; acumulador no debounce (re-fetch supera patches da janela); `useRefresh`/`useChromeRefresh`/`useChromeData` propagam o patch. Aditivo/backward-compat (sem patch = re-fetch). *(typecheck + lint OK)*
   - [x] **Fase 2** — chips aplicam delta local via `onPatch`: saldo soma `balanceDeltaUsd`; sidebar soma `badgeDelta` (clamp 0) + override `recalcPending`. Patch direcionado sem `onPatch` é ignorado (chip não re-busca o que não lhe diz respeito — AccountChip).
-  - [x] **Fase 4** — TTL 60s no saldo (era 0); re-fetch forçado (evento sem patch) ignora o TTL, então mutações mantêm saldo/badge frescos; o TTL só limita re-fetch por navegação pura.
+  - [x] **Fase 4** — TTL 120s no saldo (era 0; subiu 60→120 em 06-14, ver log da sessão); re-fetch forçado (evento sem patch) ignora o TTL, então mutações mantêm saldo/badge frescos; o TTL só limita re-fetch por navegação pura.
   - [ ] **Fase 3** — *(deferida)* push de delta na avaliação IA. ROI fraco: a fase 4 já força re-fetch após mutações; o delta de saldo exigiria threadear custo `service.ts`→`triggerAiEvaluation` (hoje não retorna usage) → client, por ganho de ~300ms ao fim de uma op de ~60s; deltas de badge são exatos só em pular single/selecionadas. A infra já suporta — qualquer mutação rápida futura faz `refresh({...})` e ganha o update otimista.
-- [~] **Onda 2** — Comix (II.A) · **Fase 0 substancialmente completa** (0.1/0.2/0.3b/0.4/0.5 ✅; 0.3a otimização adiada). **Fase 5 (resolver-hid na criação) — metade dev FEITA**: `createWork` dispara `resolveComixHidForWork(workId)` ([comix-resolver.ts](server/actions/comix-resolver.ts)) via `after()` → spawn de `resolve-comix-hids --work <id>` (flag novo no script). Falta o pé **prod-safe** (GitHub Action com Chrome) — entra no deploy (Onda 4). **II.A fase 1 (ComixGate) FEITA**: `lib/external/comix-gate.ts` — estado único observado (`getComixStatus()` deriva `ok/degraded/down/unknown` de `recordComixOk`/`recordComixFailure` fiados no choke point `logComixFailure` do comix.ts + circuito do FlareSolverr). Passivo (sem rede); dono do tipo `ComixFailure`. **II.A fase 2 (telemetria) FEITA**: migration `098_external_source_health.sql` (1 linha/fonte, RLS sem policies — **aplicar via `supabase db push`**); `lib/external/source-health-store.ts` (`upsertSourceHealth`, best-effort/engole-erro/tolera migration não-aplicada); o gate persiste fire-and-forget só em mudança de estado ou heartbeat 5min, via dynamic import (mantém server-only fora do bundle client). **II.A fase 3 (notificação ativa) FEITA**: (1) indicador no chrome — `getSidebarBadgeCounts` agrega `comixHealth` (in-memory `getComixStatus().state`, sem mexer no RPC/migration), sidebar mostra alerta discreto (down=fora/rose, degraded=instável/amber) linkando /settings; (2) toast por lote — `getComixHealthStatus()` action + `notifyIfComixImpaired` no painel após `runBatch`. **II.A fase 4 (cache do internalId) ADIADA — baixo ROI**: a sessão do FlareSolverr já amortiza o solve quente (<1s) e a F0.2/F0.3 cortaram a frequência de fetch; o gate já é preciso (fase 1 instrumentou os fetches de baixo nível, então o `{status}` é redundante); cachear o internalId exigiria migration + mudar o shape do candidato + persist-back + backfill de 683 obras por ganho marginal. **Onda 2 dada por concluída no essencial.**
+- [~] **Onda 2** — Comix (II.A) · **Fase 0 substancialmente completa** (0.1/0.2/0.3b/0.4/0.5 ✅; 0.3a otimização adiada). **Fase 5 (resolver-hid na criação) — metade dev FEITA**: `createWork` dispara `resolveComixHidForWork(workId)` ([comix-resolver.ts](server/actions/comix-resolver.ts)) via `after()` → spawn de `resolve-comix-hids --work <id>` (flag novo no script). Falta o pé **prod-safe** (GitHub Action com Chrome) — entra no deploy (Onda 4). **II.A fase 1 (ComixGate) FEITA**: `lib/external/comix-gate.ts` — estado único observado (`getComixStatus()` deriva `ok/degraded/down/unknown` de `recordComixOk`/`recordComixFailure` fiados no choke point `logComixFailure` do comix.ts + circuito do FlareSolverr). Passivo (sem rede); dono do tipo `ComixFailure`. **II.A fase 2 (telemetria) FEITA**: migration `098_external_source_health.sql` (1 linha/fonte, RLS sem policies — **aplicada 2026-06-15**); `lib/external/source-health-store.ts` (`upsertSourceHealth`, best-effort/engole-erro/tolera migration não-aplicada); o gate persiste fire-and-forget só em mudança de estado ou heartbeat 5min, via dynamic import (mantém server-only fora do bundle client). **II.A fase 3 (notificação ativa) FEITA**: (1) indicador no chrome — `getSidebarBadgeCounts` agrega `comixHealth` (in-memory `getComixStatus().state`, sem mexer no RPC/migration), sidebar mostra alerta discreto (down=fora/rose, degraded=instável/amber) linkando /settings; (2) toast por lote — `getComixHealthStatus()` action + `notifyIfComixImpaired` no painel após `runBatch`. **II.A fase 4 (cache do internalId) ADIADA — baixo ROI**: a sessão do FlareSolverr já amortiza o solve quente (<1s) e a F0.2/F0.3 cortaram a frequência de fetch; o gate já é preciso (fase 1 instrumentou os fetches de baixo nível, então o `{status}` é redundante); cachear o internalId exigiria migration + mudar o shape do candidato + persist-back + backfill de 683 obras por ganho marginal. **Onda 2 dada por concluída no essencial.**
   - [x] **F0.1** — `saveWorkReviews` não-destrutivo: merge por fonte, conjunto vazio = no-op, `replace` opcional; resumo recomputado sobre o conjunto completo. *(typecheck + lint OK)*
   - [x] **F0.2** — Aquisição na borda (extração desacoplada da avaliação). Novo helper `acquireAndPersistWorkReviews` ([lib/external/acquire-reviews.ts](lib/external/acquire-reviews.ts), só caminho por IDs aceitos, sem title-search na borda). **Atualizar dados:** `updateWorkExternalData(id, updates, { acquireReviews:true })` via `after()` (opt-in; **enrich em massa NÃO dispara**). **Criar:** `createWork` extrai na borda via `after()` quando criada SEM avaliar (com avaliação, reusa o pool que o Path B já buscou — sem double-fetch). *(typecheck + lint OK)*
   - [~] **F0.3** — Consumo com fallback. **(b) robustez FEITA**: a avaliação usa o pool persistido (`loadWorkReviewsAsSourced` em [persist-reviews.ts](lib/external/persist-reviews.ts)) quando a busca fresca volta vazia ([ai.ts](server/actions/ai.ts), guarda `usedPersistedFallback` → não re-grava nem avalia sem reviews). Só atua no caminho de FALHA → caso de sucesso intocado, `input_hash` do cache preservado. *(typecheck + lint OK)* **(a) otimização ADIADA** (skip-scrape quando DB fresco): ganho marginal (o cache L1 do contexto, ~5min, já mata o double-scrape "atualizar dados→avaliar" porque a F0.2 popula a MESMA chave); risco real ao **`input_hash`** (L2 inclui `sourcedReviews` com `matchScore` a **3 casas** e ordem do array — mas `work_reviews` grava a **2 casas** e reordena; reconstruir do DB muda o hash → cache miss). Fazer (a) exige casar casas/ordem/seleção.
@@ -76,7 +82,7 @@ pela metade, e os módulos antigos grandes. **Não é qualidade irregular — é
 - **Comix Fase 4** (cache internalId) — baixo ROI (sessão amortiza solve; gate já preciso).
 
 **PENDÊNCIAS DE AÇÃO (humano):**
-- ⚠️ **Aplicar a migration `098_external_source_health.sql`** (`supabase db push`/dashboard). Até lá o upsert de telemetria é no-op silencioso (não quebra nada).
+- ✅ **Migration `098_external_source_health.sql` APLICADA (2026-06-15)** — a telemetria de saúde das fontes (`upsertSourceHealth`) deixou de ser no-op e passa a persistir de fato.
 - **Resolver-hid prod-safe** (GitHub Action com Chrome) — fica para a Onda 4 (deploy); hoje só o caminho dev.
 - **WIP pré-existente NÃO-commitado** (~35 arquivos de sessões anteriores: `app/*`, `ranking-filters`, **gerados** `criteria.ts`/`types/domain.ts`, deploy `fly.toml`/`DEPLOY-FLY.md`, `comix-health-panel.tsx`) — deixado intocado; tratar à parte (inclui arquivos gerados — não commitar sem revisar).
 - **H3** (remover kNN morto) — migration; fazer em **chat dedicado**.
@@ -134,6 +140,20 @@ pela metade, e os módulos antigos grandes. **Não é qualidade irregular — é
 
 ---
 
+## Registro da sessão 2026-06-15 (consultoria geral + faxina risco ~0)
+
+**Branch:** `feat/realtime-chrome-refresh`. `tsc` 0 · lint 0 novo · **113 testes OK**. Diagnóstico dos 5 eixos (coerência / eficiência / UI / layout / render) + execução dos itens risco ~0:
+
+- **Microcópia de notas legada FECHADA** (detalhe em Pendências consolidadas): "Nota.Final/IA/Pr" → "Nota Prevista" / "Nota.Calc" em 6 superfícies; as 2 piores (percentis de cor + `/preferencias`) descreviam **colunas dropadas na 099**.
+- **Docs realinhados:** [CLAUDE.md](CLAUDE.md) (prompt `v16`→`v19` + toggle `CONCISE_OUTPUT`; 4500 tokens nas **2** tentativas; Opus/Haiku como overrides A/B); JSDoc do `model` default em [service.ts](lib/ai-evaluation/service.ts#L42) (dizia "haiku" → é a constante `MODEL`/sonnet); [README.md](README.md) reescrito (era boilerplate `create-next-app`, apontava `:3000`).
+- **`revalidateTag` direcionado — o "shotgun" amplo era SUPERDIMENSIONADO** (o cache já gerencia tags: `favorites-summary`/`works-slug-index`/`score-color-thresholds`/`tags-catalog`/`genres-catalog`/`low-coverage`; `revalidatePath` em rota dinâmica do Next 16 é largamente inócuo). **1 bug real:** `getPreferences` ([ranking/page.tsx](app/ranking/page.tsx#L53)) era `unstable_cache` TTL 300s **sem tag** → `updateRankingPreferences` não o derrubava → preferência de ranking demorava o TTL (5min) pra refletir. Add tag `ranking-preferences` + `revalidateTag` no save ([settings.ts](server/actions/settings.ts#L327)). `favorites-summary` checado: **estava correto** (`revalidateFavorites()` invalida a tag).
+- **Densidade tipográfica (decisão do user: conservador):** 148 `text-[10px]`→`text-[11px]` em conteúdo; **65 overlines uppercase preservados em 10px** (convenção tipográfica). Heurística por-linha `unless /uppercase/`.
+- **Migration 098 aplicada (2026-06-15)** — telemetria de saúde das fontes deixou de ser no-op.
+
+**Não executados (seguem nas pendências):** Onda 4 (Deploy) · U2 (god components). Tipografia mais agressiva (12px) descartada nesta passada (risco de reflow). **Novo achado registrado:** `revalidatePath` "shotgun" não é problema de eficiência real no Next 16 — só o gap de tag pontual importava.
+
+---
+
 ## Pendências consolidadas (próximo chat)
 
 **Do QA do user:**
@@ -149,9 +169,15 @@ pela metade, e os módulos antigos grandes. **Não é qualidade irregular — é
 - #7 end-to-end (criar → hid + bayesiana + auto-refresh) — **PENDENTE (validação manual do user)**: dev-only (Comix/Chrome) + muta prod; deferido.
 - **Pós-099: rodar "Recalcular agora" em /settings** — **PENDENTE (user, deixado pra depois).**
 
-**Cleanup cosmético (legado inerte):** campos em `CalculationResult`/`WorkSortField`/`WorkFilters.minFinalScore`/`MappedImportRow`; `formula_config` legado (mae_predicted/rmse_predicted/stacker_*/gpt_* — drop em migration futura); bloco predicted/final do painel de calibração; renomear `min_predicted_score`/`min_final_score` (repurposadas); remover o log de diagnóstico do resolver quando #7 estável.
+**Microcópia de notas legada na UI — ✅ FECHADA (2026-06-15):** textos visíveis que ainda diziam "Nota.Final / Nota.IA / Nota.Pr" repontados p/ "Nota Prevista" / "Nota.Calc" em 6 superfícies (percentis de cor, `/preferencias`, sugestão de pesos pós-leitura, botões de override de modelo em work-form + review-form, label do Ridge no painel de calibração). Os 2 piores **descreviam colunas dropadas na 099** (o slider de cor dizia afetar 3 colunas inexistentes). Era UX enganosa, não "tipo TS inerte". *(tsc 0 · lint 0 · 113 testes OK.)* Resíduo intencional mantido: [work-table-config.ts](components/titles/work-table-config.ts) explica didaticamente que o Ridge "substituiu o antigo trio Nota.IA / Nota.Pr / Nota.Final".
 
-**Onda 4 — Deploy** (Fly iad) + resolver-hid **prod-safe** (GitHub Action com Chrome).
+**Cleanup cosmético — atualizado 2026-06-15:**
+- ✅ **FEITO (2026-06-15):** tipos órfãos `CalculationResult`/`CalculationInputs` + `WorkFilters.minFinalScore`/`maxFinalScore` removidos de types/domain.ts; código morto deletado (`lib/calculations/prediction.ts`, `confidence.ts`, função `calculateAll` do index.ts — todos zero callers); **bloco predicted/final + toggle Stacker morto removidos do painel de calibração** (+ **bug-fix**: o badge "Modelo em fallback" usava `predictorIsStub` legado, sempre-`true` pós-099 → repontado p/ `expectedPredictorIsStub`).
+- 🔵 **DECIDIDO NÃO FAZER:** renomear `min_predicted_score`/`min_final_score` — são colunas **repurposadas e ATIVAS** ("IA Rk mínimo" 0–100 / "Nota Prevista mínima" 0–10), lidas/escritas em 4 arquivos; renomear = migration à mão contra prod + risco de drift por ganho ~0 (já bem comentadas).
+- ⏭️ **MOVIDO P/ ONDA 4:** drop das colunas `formula_config` legadas (ver Onda 4).
+- 🟡 **Resíduo inerte que fica:** campos legados em `WorkSortField`/`MappedImportRow` (estes consumidos em lib/import/processor.ts — NÃO remover sem tocar o import); plumbing inerte de predicted/final em settings.ts→`computeCalibration` (sempre null, não mais exibido); remover o log de diagnóstico do resolver quando #7 estável.
+
+**Onda 4 — Deploy** (Fly iad) + resolver-hid **prod-safe** (GitHub Action com Chrome) + **drop das colunas `formula_config` legadas** (mae_predicted / rmse_predicted / stacker_* / stacker_coefficients). ⚠️ **NÃO dropar `gpt_mean`** — está vivo (centro da amplificação da IA(n)/calc_score). Coordenar o drop com a remoção dos null-writes em [calculations.ts](server/actions/calculations.ts) (senão o `upsert` quebra ao escrever em coluna inexistente).
 
 ---
 
@@ -183,6 +209,11 @@ pela metade, e os módulos antigos grandes. **Não é qualidade irregular — é
 ---
 
 ## Parte I — Inventário consolidado dos diagnósticos
+
+> ⚠️ **Fonte de verdade:** as Partes I/II/III são o **diagnóstico/plano original** e podem estar
+> defasadas onde a seção **Status de implementação** (topo) e os **logs de sessão** divergem —
+> esses são a verdade viva. Ex.: itens listados aqui como a fazer já podem estar **adiados** no
+> Status (Onda 1 Fase 3, Comix Fase 4) ou **reavaliados** (E2). Onde houver conflito, vale o Status.
 
 ### I.A — Higiene & coerência (resíduo, risco ~0)
 

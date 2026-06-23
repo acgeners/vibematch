@@ -11,6 +11,7 @@ import {
   getDeepDivesToday,
   getLastDeepDive,
 } from "@/server/queries/deep-dive"
+import { getPreferenceRules } from "@/server/queries/preference-rules"
 import type { DeepDiveResultRow } from "@/lib/ai-recommendation/types"
 
 // Tipos auxiliares ficam inline pra cumprir a regra do Next "use server":
@@ -37,7 +38,10 @@ export async function deepDiveWorkAction(
       }
     }
 
-    const ctxResult = await getDeepDiveContext(workId)
+    const [ctxResult, preferenceRules] = await Promise.all([
+      getDeepDiveContext(workId),
+      getPreferenceRules(),
+    ])
     if (ctxResult.error || !ctxResult.data) {
       return { error: ctxResult.error ?? "Falha carregando contexto do Deep Dive." }
     }
@@ -46,6 +50,7 @@ export async function deepDiveWorkAction(
     const result = await runDeepDive({
       context: ctxResult.data.context,
       userContext: trimmedContext,
+      preferenceRules,
     })
 
     const supabase = createAdminClient()

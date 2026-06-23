@@ -18,7 +18,7 @@ export function StatCard({ label, value, hint, valueClassName }: StatCardProps) 
     <div className="rounded-md border border-border p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className={cn("mt-1 font-mono text-base", valueClassName)}>{value}</p>
-      {hint != null && <p className="text-[10px] text-muted-foreground">{hint}</p>}
+      {hint != null && <p className="text-[11px] text-muted-foreground">{hint}</p>}
     </div>
   )
 }

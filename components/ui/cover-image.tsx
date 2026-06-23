@@ -51,7 +51,7 @@ export function CoverImage({
     return (
       <div
         className={cn(
-          "flex items-center justify-center bg-muted text-[10px] text-muted-foreground",
+          "flex items-center justify-center bg-muted text-[11px] text-muted-foreground",
           className,
         )}
         aria-hidden

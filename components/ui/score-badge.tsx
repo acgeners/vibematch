@@ -199,7 +199,7 @@ export function ScoreBadge({
         : trimIntegerDecimals && score % 1 === 0
           ? score.toFixed(0)
           : score.toFixed(1)}
-      {showStub && <span className="ml-0.5 opacity-60 text-[10px]">~</span>}
+      {showStub && <span className="ml-0.5 opacity-60 text-[11px]">~</span>}
     </span>
   )
 }

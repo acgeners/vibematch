@@ -122,7 +122,7 @@ export function ScoreColorPercentilesForm({ config }: ScoreColorPercentilesFormP
   return (
     <form onSubmit={handleSubmit(askConfirm)} className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Define a posição relativa <strong>em cada coluna</strong> (Nota.Final / Nota.IA / Nota.Pr) acima da qual a nota ganha cada cor.
+        Define a posição relativa <strong>em cada coluna</strong> (Nota Prevista / Nota.Calc) acima da qual a nota ganha cada cor.
         Cada coluna usa sua própria distribuição — o mesmo percentil pode resultar em valores de corte diferentes entre elas.
         Defaults = quintis (20/40/60/80), cada cor cobrindo 20% das obras dentro da coluna.
       </p>
@@ -179,7 +179,7 @@ export function ScoreColorPercentilesForm({ config }: ScoreColorPercentilesFormP
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="Salvar percentis de cor?"
-        description="As cores das notas agregadas (Nota.Final/IA/Pr) serão recalculadas a partir da distribuição atual do catálogo."
+        description="As cores das notas agregadas (Nota Prevista / Nota.Calc) serão recalculadas a partir da distribuição atual do catálogo."
         confirmText="Salvar"
         onConfirm={handleConfirm}
       />

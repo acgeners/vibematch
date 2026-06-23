@@ -4,6 +4,26 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { deepStripLoneSurrogates } from "@/lib/ai/sanitize"
 import { computeCostUsd } from "./pricing"
 import type { UsageTokens } from "./pricing"
+import { classifyAiError } from "@/lib/ai-observability/classify-error"
+import { AI_OPERATIONS } from "@/lib/ai-observability/types"
+import type {
+  AiCacheStatus,
+  AiErrorCategory,
+  AiImageStatus,
+  AiOperationKey,
+  AiWorkloadType,
+} from "@/lib/ai-observability/types"
+
+/**
+ * Garante um workload_type em toda linha: usa o explícito do caller, senão o
+ * típico da operação no catálogo (admin p/ calibration/tag, recurring p/ as
+ * demais). Linhas históricas continuam classificadas na leitura (conservador).
+ */
+function withWorkloadDefault(meta: LogMeta): LogMeta {
+  if (meta.workloadType) return meta
+  const fallback = AI_OPERATIONS[meta.operation as AiOperationKey]?.typicalWorkload ?? null
+  return fallback ? { ...meta, workloadType: fallback } : meta
+}
 
 export interface LogMeta {
   operation: string
@@ -13,6 +33,14 @@ export interface LogMeta {
   runId?: string | null
   attempt?: number | null
   userId?: string | null
+  /** Observabilidade (Plano 1): agrupa as TENTATIVAS de uma mesma solicitação lógica. */
+  logicalRequestId?: string | null
+  /** Observabilidade: origem da chamada (recurring/admin/experiment/…). */
+  workloadType?: AiWorkloadType | null
+  /** Observabilidade: status do cache de resultado nesta linha (geralmente "miss"). */
+  cacheStatus?: AiCacheStatus | null
+  /** Observabilidade: ciclo de vida da capa (só ai_evaluation). */
+  imageStatus?: AiImageStatus | null
   metadata?: Record<string, unknown>
 }
 
@@ -43,11 +71,20 @@ function extractUsage(message: Anthropic.Messages.Message): UsageTokens {
   }
 }
 
-function buildMetadataBag(meta: LogMeta): Record<string, unknown> | null {
+function buildMetadataBag(
+  meta: LogMeta,
+  extra?: { errorCategory?: AiErrorCategory | null },
+): Record<string, unknown> | null {
   const bag: Record<string, unknown> = { ...(meta.metadata ?? {}) }
   if (meta.workId) bag.work_id = meta.workId
   if (meta.runId) bag.run_id = meta.runId
   if (meta.attempt !== null && meta.attempt !== undefined) bag.attempt = meta.attempt
+  // Campos de observabilidade (Plano 1, Fase B). Só entram quando presentes.
+  if (meta.logicalRequestId) bag.logical_request_id = meta.logicalRequestId
+  if (meta.workloadType) bag.workload_type = meta.workloadType
+  if (meta.cacheStatus) bag.cache_status = meta.cacheStatus
+  if (meta.imageStatus) bag.image_status = meta.imageStatus
+  if (extra?.errorCategory) bag.error_category = extra.errorCategory
   return Object.keys(bag).length > 0 ? bag : null
 }
 
@@ -58,6 +95,7 @@ async function persistLog(args: {
   latencyMs: number
   status: "success" | "error"
   errorMessage?: string | null
+  errorCategory?: AiErrorCategory | null
   stopReason?: string | null
   requestId?: string | null
 }): Promise<string | null> {
@@ -86,7 +124,7 @@ async function persistLog(args: {
         stop_reason: args.stopReason ?? null,
         request_id: args.requestId ?? null,
         user_id: args.meta.userId ?? null,
-        metadata: buildMetadataBag(args.meta),
+        metadata: buildMetadataBag(args.meta, { errorCategory: args.errorCategory }),
       })
       .select("id")
       .single()
@@ -100,6 +138,15 @@ async function persistLog(args: {
     console.warn("[ai-log] insert exception:", err instanceof Error ? err.message : err)
     return null
   }
+}
+
+/** Status HTTP do erro do SDK Anthropic, quando exposto. */
+function httpStatusFromError(err: unknown): number | null {
+  if (typeof err === "object" && err !== null && "status" in err) {
+    const s = (err as { status?: unknown }).status
+    if (typeof s === "number" && Number.isFinite(s)) return s
+  }
+  return null
 }
 
 export async function createLoggedMessage(
@@ -125,7 +172,7 @@ export async function createLoggedMessage(
     const message = await client.messages.stream(safeParams).finalMessage()
     const usage = extractUsage(message)
     const apiCallId = await persistLog({
-      meta,
+      meta: withWorkloadDefault(meta),
       model: message.model ?? modelStr,
       usage,
       latencyMs: Date.now() - start,
@@ -136,8 +183,15 @@ export async function createLoggedMessage(
     return { message, apiCallId, usage }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err)
+    // Classificação central: todo erro que passa pelo provider ganha uma
+    // categoria estável (status HTTP + mensagem), sem expor conteúdo sensível.
+    const errorCategory = classifyAiError({
+      status: httpStatusFromError(err),
+      message: errorMessage,
+      stage: "provider",
+    })
     await persistLog({
-      meta,
+      meta: withWorkloadDefault(meta),
       model: modelStr,
       usage: {
         inputTokens: 0,
@@ -148,6 +202,7 @@ export async function createLoggedMessage(
       latencyMs: Date.now() - start,
       status: "error",
       errorMessage,
+      errorCategory,
     })
     throw err
   }

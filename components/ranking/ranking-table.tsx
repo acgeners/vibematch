@@ -10,6 +10,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { MoodRefineDialog } from "@/components/ranking/mood-refine-dialog"
 import { isMoodActive, sortByMoodAdjusted, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
+import { buildRankingTiers } from "@/lib/ranking/build-tiers"
+import { DEFAULT_TIER_BAND_WIDTH } from "@/lib/ranking/tier-config"
 import type { CriterionSlug } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
@@ -58,11 +60,6 @@ function getSortFieldForColumn(key: string): string | null {
   return COLUMN_TO_SORT_FIELD[key] ?? null
 }
 
-// Margem (em pontos 0–10) dentro da qual duas obras são tratadas como empatadas
-// na Nota de Decisão — fica dentro do erro do preditor (MAE ~0.9), então a
-// ordem entre elas é ruído sem um critério extra.
-const TIE_DELTA = 0.3
-
 interface Tier {
   /** Índice da primeira obra do tier em `entries` (ordenado por decisão desc). */
   startIndex: number
@@ -73,31 +70,29 @@ interface Tier {
 }
 
 /**
- * Particiona TODAS as entries (ordenadas desc pelo campo `scoreOf`) em tiers:
- * faixas equivalentes, agrupando consecutivas dentro de `TIE_DELTA` do topo do
- * tier (= dentro do erro do modelo). `scoreOf` é o campo ordenado (decisão OU
- * Nota Prevista — mesmo eixo da prioridade), pra os tiers ficarem contíguos.
- * Inclui tiers de 1 obra; entries com score null viram um tier no fim.
+ * Particiona as entries (ordenadas desc pelo campo `scoreOf`) em tiers contíguos
+ * via `buildRankingTiers` (banda ancorada na 1ª obra do tier, limite inclusivo —
+ * ver lib/ranking/build-tiers). A largura (`bandWidth`) vem de
+ * `formula_config.tier_band_width` (ajustável sem mudança de código; provisória,
+ * a validar). `scoreOf` é o campo ordenado (decisão OU Nota Prevista). Entries com
+ * score null caem num tier final.
  *
- * Substitui o antigo número por linha: a tabela comunica prioridade por SEPARAÇÃO
- * em tiers, não por um decimal falso dentro da incerteza.
+ * A tabela comunica prioridade por SEPARAÇÃO em tiers, não por um decimal falso
+ * dentro da incerteza do modelo.
  */
-function computeTiers(entries: RankingEntry[], scoreOf: (e: RankingEntry) => number | null): Tier[] {
+function computeTiers(
+  entries: RankingEntry[],
+  scoreOf: (e: RankingEntry) => number | null,
+  bandWidth: number,
+): Tier[] {
+  const tiered = buildRankingTiers(entries, (e) => scoreOf(e), bandWidth)
   const tiers: Tier[] = []
   let i = 0
   let tierNumber = 0
   while (i < entries.length) {
-    const anchor = scoreOf(entries[i])
+    const tierId = tiered[i].tier
     let j = i
-    if (anchor == null) {
-      while (j + 1 < entries.length && scoreOf(entries[j + 1]) == null) j++
-    } else {
-      while (j + 1 < entries.length) {
-        const next = scoreOf(entries[j + 1])
-        if (next == null || Math.abs(anchor - next) > TIE_DELTA) break
-        j++
-      }
-    }
+    while (j + 1 < entries.length && tiered[j + 1].tier === tierId) j++
     tierNumber++
     tiers.push({
       startIndex: i,
@@ -165,6 +160,8 @@ interface RankingTableProps {
   defaultSort?: string
   /** Quando false, o re-rank por IA por-linha ("Rankear") é desabilitado (feature Pago). */
   isPaid?: boolean
+  /** Largura da banda de tiers (formula_config.tier_band_width). Provisória, a validar. */
+  tierBandWidth?: number
 }
 
 const KEY_CRITERIA = ["romance", "fantasy_nobility", "protagonist", "drama", "tragedy"]
@@ -284,7 +281,7 @@ function TitleCell({ entry }: { entry: RankingEntry }) {
               return (
                 <Tooltip key={d.slug}>
                   <TooltipTrigger asChild>
-                    <span className="inline-flex items-center gap-0.5 rounded bg-muted/60 px-1 py-0.5 text-[10px] font-mono text-muted-foreground">
+                    <span className="inline-flex items-center gap-0.5 rounded bg-muted/60 px-1 py-0.5 text-[11px] font-mono text-muted-foreground">
                       <span>{info.emoji}</span>
                       <span>+{d.diff.toFixed(1)}</span>
                     </span>
@@ -407,15 +404,6 @@ function renderCell(
         )}
       </span>
     )
-  if (col.key === "expected_baseline")
-    return <span className="font-mono text-sm text-muted-foreground">{entry.expectedBaseline != null ? entry.expectedBaseline.toFixed(2) : "—"}</span>
-  if (col.key === "expected_quality_adj") {
-    const v = entry.expectedQualityAdj
-    if (v == null) return <span className="font-mono text-sm text-muted-foreground">—</span>
-    const sign = v >= 0 ? "+" : ""
-    const cls = v >= 0 ? "text-emerald-500" : "text-rose-500"
-    return <span className={`font-mono text-sm ${cls}`}>{sign}{v.toFixed(2)}</span>
-  }
   if (col.key === "personal_fit")
     return <AlignmentCell value={entry.personalFit} percentile={entry.personalFitPercentile} showBar={false} />
   if (col.key === "alignment_score")
@@ -428,7 +416,7 @@ function renderCell(
   return null
 }
 
-export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true }: RankingTableProps) {
+export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH }: RankingTableProps) {
   const { widths, setWidth } = useColumnWidths()
   const config = useSyncExternalStore(
     subscribeRankingColumnConfig,
@@ -522,16 +510,16 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
     activeSortDir === "desc" && (activeSortField === "decision" || activeSortField === "expected_score")
       ? activeSortField
       : null
-  const tiersEnabled = tierField != null
   const tiers = useMemo(
     () =>
       tierField
         ? computeTiers(
             entries,
             tierField === "expected_score" ? (e) => e.expectedScore : (e) => e.decisionScore,
+            tierBandWidth,
           )
         : null,
-    [entries, tierField],
+    [entries, tierField, tierBandWidth],
   )
 
   // Dentro de cada tier, ordem default por fit. O mood reordena depois no drawer.
@@ -1033,8 +1021,8 @@ function RankingCard({
           </p>
         </div>
         {entry.alignmentScore != null && (
-          <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-            IA Rk {Math.round(entry.alignmentScore)}
+          <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+            Veredito IA {Math.round(entry.alignmentScore)}
           </p>
         )}
       </div>

@@ -1,15 +1,9 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { ExternalSourceId } from "@/lib/external/types"
-import { getManualReviews } from "@/server/queries/manual-reviews"
-
-/** Review escrita à mão pelo usuário, exibida junto das externas (camelCase p/ a UI). */
-export interface ManualReviewDisplay {
-  id: string
-  text: string
-  userRating: number | null
-  /** Contexto opcional do usuário (não vai pro prompt). */
-  note: string | null
-}
+import {
+  readManualExternalReviewsForDisplay,
+  type ExternalManualReviewDisplayRow,
+} from "@/server/queries/external-manual-reviews"
 
 export interface WorkReview {
   id: string
@@ -34,8 +28,8 @@ export interface WorkReviewsSnapshot {
   /** Total de reviews EXTERNAS (work_reviews). Reviews manuais contam à parte. */
   total: number
   bySource: WorkReviewsBySource[]
-  /** Reviews manuais do usuário (work_manual_reviews) — exibidas junto das externas. */
-  manual: ManualReviewDisplay[]
+  /** Reviews EXTERNAS adicionadas à mão (work_external_reviews_manual) — exibidas junto das scrapadas. */
+  manual: ExternalManualReviewDisplayRow[]
   /** Resumo de consenso das reviews gerado por IA (Haiku). */
   summary: string | null
   summaryAt: string | null
@@ -44,8 +38,8 @@ export interface WorkReviewsSnapshot {
 export async function getWorkReviews(workId: string): Promise<WorkReviewsSnapshot> {
   const supabase = createAdminClient()
 
-  // Resumo, reviews externas e reviews manuais em paralelo (DB remoto ~300ms/RT).
-  const [summaryRes, reviewsRes, manualReviews] = await Promise.all([
+  // Resumo, reviews scrapadas e reviews externas manuais em paralelo (DB remoto ~300ms/RT).
+  const [summaryRes, reviewsRes, manual] = await Promise.all([
     supabase
       .from("works")
       .select("review_summary, review_summary_at")
@@ -58,17 +52,11 @@ export async function getWorkReviews(workId: string): Promise<WorkReviewsSnapsho
       .order("source", { ascending: true })
       .order("match_score", { ascending: false })
       .order("user_rating", { ascending: false, nullsFirst: false }),
-    getManualReviews(workId),
+    readManualExternalReviewsForDisplay(workId),
   ])
 
   const summary = (summaryRes.data?.review_summary as string | null) ?? null
   const summaryAt = (summaryRes.data?.review_summary_at as string | null) ?? null
-  const manual: ManualReviewDisplay[] = manualReviews.map((m) => ({
-    id: m.id,
-    text: m.text,
-    userRating: m.user_rating,
-    note: m.note,
-  }))
 
   const { data, error } = reviewsRes
   if (error) {

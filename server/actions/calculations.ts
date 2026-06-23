@@ -1,7 +1,6 @@
 "use server"
 
 import { revalidatePath, revalidateTag } from "next/cache"
-import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import {
@@ -39,7 +38,14 @@ import {
   weightedTagOverlap,
 } from "@/lib/ai-recommendation/personal-fit"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
-import { buildTasteProfileHeuristic } from "@/lib/ai-recommendation/taste-profile-heuristic"
+import {
+  buildTasteProfileHeuristic,
+  buildRatedTagCounts,
+  mergeDeclaredTagPreferences,
+} from "@/lib/ai-recommendation/taste-profile-heuristic"
+import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
+import type { DeclaredTagPref } from "@/server/queries/tag-preferences"
+import type { TasteProfilePayload } from "@/lib/ai-recommendation/types"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import {
   CRITERION_SLUGS,
@@ -310,6 +316,8 @@ function computeHonestExpectedCvMae(
   blendWeight = 1,
   k = 5,
   seed = 42,
+  /** Tags declaradas (exógenas) — mescladas no perfil de cada fold sem leak. */
+  declared: DeclaredTagPref[] = [],
 ): number | null {
   const n = trainSet.length
   if (n < 30) return null
@@ -362,6 +370,9 @@ function computeHonestExpectedCvMae(
     }
 
     // Perfil de gosto do fold: construído só do treino → sem leak na held-out.
+    // As tags declaradas são EXÓGENAS (ditas pelo usuário, constantes entre folds,
+    // não derivam de rótulo held-out) → incluí-las não vaza e torna o MAE honesto
+    // refletir a feature que existe em produção.
     const profile = buildTasteProfileHeuristic(
       trainWorks.map((w) => ({
         id: w.id,
@@ -373,6 +384,7 @@ function computeHonestExpectedCvMae(
         categoryScores: w.categoryScores,
         tags: w.tags,
       })),
+      declared,
     )
 
     const buildInput = (w: WorkComputed): ExpectedScoreInput => ({
@@ -422,7 +434,19 @@ function computeHonestExpectedCvMae(
  *   6. Bulk upsert em calculated_scores
  *   7. Persiste novo formula_config
  */
-export async function recalculateAll() {
+/**
+ * Contexto de execução do recálculo. EXPLÍCITO (sem heurística de ambiente):
+ *  - "next-runtime": Server Actions/páginas/gatilhos — usa leituras cacheadas
+ *    (`unstable_cache`) e invalida o cache (`revalidatePath`/`revalidateTag`);
+ *  - "headless": CLI/workers/scripts — usa leituras UNCACHED e PULA a invalidação
+ *    de cache (não há request scope; `unstable_cache`/`revalidate*` lançariam
+ *    "incrementalCache/static store missing"). Mesmo núcleo matemático e mesmas
+ *    escritas funcionais nos dois caminhos.
+ */
+export type RecalculateExecutionContext = "next-runtime" | "headless"
+
+export async function recalculateAll(ctx: RecalculateExecutionContext = "next-runtime") {
+  const headless = ctx === "headless"
   const supabase = createAdminClient()
 
   // Offset de atributos (Fase 1.5) — carregado uma vez e aplicado on-read.
@@ -440,7 +464,7 @@ export async function recalculateAll() {
   const plan = await getCurrentPlan(supabase)
   const includeQuality = L0_QUALITY_ENABLED && planAllows(plan, "l0_quality_eval")
 
-  const [worksRes, weightsRes, configRes, tasteProfile] = await Promise.all([
+  const [worksRes, weightsRes, configRes, tasteProfile, declaredTagPrefs] = await Promise.all([
     supabase
       .from("works")
       .select(
@@ -460,6 +484,7 @@ export async function recalculateAll() {
     supabase.from("score_weights").select("*").eq("is_active", true),
     supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
     loadCurrentTasteProfile(),
+    getDeclaredTagPreferences(supabase, { headless }),
   ])
 
   if (worksRes.error) throw new Error(worksRes.error.message)
@@ -630,16 +655,39 @@ export async function recalculateAll() {
     })
   }
 
-  // ---------- 2b) Features derivadas do TasteProfile pro Ridge ----------
-  // Pré-computa loved/avoided tag overlap e criterion_fit a partir do perfil
-  // atual. Quando o perfil é stub ou inexistente, todas ficam null e o
-  // MedianImputer lida no pipeline. Mesmo profile usado em personal_fit (5b).
-  const profileForFeatures = tasteProfile && !tasteProfile.is_stub ? tasteProfile.profile : null
-  if (profileForFeatures) {
+  // ---------- 2b) Perfil efetivo: persistido ⊕ tags declaradas ----------
+  // O perfil persistido (heurístico/LLM) é mesclado com as preferências de tag
+  // DECLARADAS (amo/evito) via prior com encolhimento (λ=n/(n+k)). Aplicado
+  // AQUI (não na geração do perfil) pra as declarações valerem já no próximo
+  // recalc, mesmo com o perfil persistido defasado. Idempotente. Item A.
+  const ratedTagCounts = buildRatedTagCounts(works.filter((w) => w.userScore != null))
+  const baseProfile: TasteProfilePayload = tasteProfile && !tasteProfile.is_stub
+    ? tasteProfile.profile
+    : {
+        loved_tags: [],
+        avoided_tags: [],
+        loved_themes: [],
+        avoided_themes: [],
+        criterion_preferences: {},
+        narrative_patterns: [],
+        summary: "",
+      }
+  const mergedProfile = mergeDeclaredTagPreferences(baseProfile, declaredTagPrefs, ratedTagCounts)
+  // Sem sinal (loved/avoided/prefs vazios) → trata como null (comportamento legado).
+  const effectiveProfile: TasteProfilePayload | null =
+    mergedProfile.loved_tags.length ||
+    mergedProfile.avoided_tags.length ||
+    Object.keys(mergedProfile.criterion_preferences).length
+      ? mergedProfile
+      : null
+
+  // Features derivadas do perfil efetivo pro Ridge. Perfil sem sinal → ficam null
+  // e o MedianImputer lida no pipeline. Mesmo perfil usado em personal_fit (5b).
+  if (effectiveProfile) {
     for (const w of works) {
-      w.lovedTagOverlap = weightedTagOverlap(w.tags, profileForFeatures.loved_tags)
-      w.avoidedTagOverlap = weightedTagOverlap(w.tags, profileForFeatures.avoided_tags)
-      w.criterionFitScore = criterionAlignment(w.categoryScoresCalibrated, profileForFeatures.criterion_preferences)
+      w.lovedTagOverlap = weightedTagOverlap(w.tags, effectiveProfile.loved_tags)
+      w.avoidedTagOverlap = weightedTagOverlap(w.tags, effectiveProfile.avoided_tags)
+      w.criterionFitScore = criterionAlignment(w.categoryScoresCalibrated, effectiveProfile.criterion_preferences)
     }
   }
 
@@ -792,10 +840,10 @@ export async function recalculateAll() {
 
   // ---------- 5) Personal fit (determinístico, a partir do TasteProfile) ----------
   // Independente da Nota Prevista — alinhamento de gosto via tags + critérios.
-  const profilePayload = tasteProfile && !tasteProfile.is_stub ? tasteProfile.profile : null
-  if (profilePayload) {
+  // Usa o MESMO perfil efetivo das features (persistido ⊕ tags declaradas).
+  if (effectiveProfile) {
     for (const w of works) {
-      w.personalFit = computePersonalFit(profilePayload, {
+      w.personalFit = computePersonalFit(effectiveProfile, {
         tags: w.tags,
         categoryScores: w.categoryScoresCalibrated,
       })
@@ -885,6 +933,9 @@ export async function recalculateAll() {
         config.score_weights_auto ?? false,
         includeQuality,
         calcBlendWeight,
+        5,
+        42,
+        declaredTagPrefs,
       )
     } catch (err) {
       console.warn(
@@ -987,12 +1038,18 @@ export async function recalculateAll() {
     console.warn("[recalculateAll] calibration_history insert falhou:", historyErr.message)
   }
 
-  revalidatePath("/titles")
-  revalidatePath("/ranking")
-  revalidatePath("/settings")
-  revalidatePath("/")
-  revalidateTag("score-color-thresholds", "max")
-  revalidateTag("low-coverage", "max")
+  // Invalidação de cache só faz sentido (e só funciona) no runtime do Next.
+  // Headless (CLI) não tem request scope ⇒ pular (senão lança "static store
+  // missing"). O recálculo em si — escritas + limpeza de recalc_pending — já
+  // ocorreu acima; o cache do app revalida no próximo page-load/gatilho normal.
+  if (!headless) {
+    revalidatePath("/titles")
+    revalidatePath("/ranking")
+    revalidatePath("/settings")
+    revalidatePath("/")
+    revalidateTag("score-color-thresholds", "max")
+    revalidateTag("low-coverage", "max")
+  }
 
   return {
     recalculated: works.length,
@@ -1024,7 +1081,13 @@ export async function recalculateAll() {
       expectedTrainWithPostScores: expectedPredictor.trainWithPostScores,
       expectedFeatureNames: expectedPredictor.featureNames,
       expectedCoefficients: expectedPredictor.model.coefficients,
+      // cvMAE INTERNO do RidgeCV (só seleção de α por fold) — otimista/vazado.
+      // Mantido pra diagnóstico; NÃO usar como vitrine.
       expectedCvMAE: expectedPredictor.model.cvMAE,
+      // MAE CV HONESTA (mesmo número da headline cv_mae_expected_stage1):
+      // nested-CV (Free) ou held-out com qualidade estimada (Pago). É a que o
+      // toast/UI deve reportar. NULL em fallback/stub.
+      expectedHonestCvMAE: cvMaeExpected,
       expectedBaselineIndices: expectedPredictor.baselineIndices,
       expectedQualityIndices: expectedPredictor.qualityIndices,
       pseudoVotesNotaM,
@@ -1036,45 +1099,3 @@ export async function recalculateAll() {
   }
 }
 
-/**
- * Recalcula de forma incremental — wrapper compatível com a API antiga.
- * Como Nota.Pr depende de Ridge treinado em todos, recalcular um único
- * título sem retreinar não faz sentido. Reaproveitamos recalculateAll().
- */
-export async function recalculateWork(workId: string) {
-  void workId
-  return recalculateAll()
-}
-
-// Coalescing guard compartilhado: vários saves em sequência (ex.: o fluxo
-// "Terminei de ler" dispara updateWorkStatus + submitPostReadingAttributes, e o
-// usuário pode salvar várias vezes) não devem rodar N recalc-all completos em
-// paralelo. Se já há um em voo, marca um rerun e roda UMA vez ao final.
-let recalcInFlight = false
-let recalcRerunQueued = false
-
-/**
- * Dispara `recalculateAll()` em background via `after()` (não bloqueia a resposta
- * do server action) e coalesce chamadas concorrentes. Use isto em vez de
- * `await recalculateAll()` em qualquer save que só precise que os scores
- * atualizem "logo depois".
- */
-export async function recalculateAllInBackground(context: string): Promise<void> {
-  after(async () => {
-    if (recalcInFlight) {
-      recalcRerunQueued = true
-      return
-    }
-    recalcInFlight = true
-    try {
-      do {
-        recalcRerunQueued = false
-        await recalculateAll()
-      } while (recalcRerunQueued)
-    } catch (error) {
-      console.error(`[${context}] Failed to recalculate scores`, error)
-    } finally {
-      recalcInFlight = false
-    }
-  })
-}

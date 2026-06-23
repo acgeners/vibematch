@@ -5,7 +5,7 @@ import type { CriterionSlug } from "@/types/domain"
  * recomendação (vira texto pro LLM) quanto no ranking (filtros + sort
  * temporários via query param ?mood=ID, não persiste entre sessões).
  *
- * `userContextSnippet` é injetado no campo userContext do run-creator-form;
+ * `userContextSnippet` é injetado no campo userContext do RecommendDialog;
  * `criterionMin/Max` viram filtros de range no ranking; `sortField` (opcional)
  * sobrescreve o sort default pra esse modo.
  */

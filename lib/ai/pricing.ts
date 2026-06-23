@@ -11,6 +11,11 @@
 //   cache_read  = 0.10 × input
 //   cache_write (5min) = 1.25 × input
 
+// Fonte ÚNICA dos preços: lib/ai/pricing-data.json. Compartilhada com o adaptador
+// de logger dos scripts (scripts/lib/ai-log.js) — preços NÃO são duplicados
+// (plano §17). Atualize só o JSON.
+import pricingData from "./pricing-data.json"
+
 export interface ModelPricing {
   inputPerMTok: number
   outputPerMTok: number
@@ -18,28 +23,9 @@ export interface ModelPricing {
   cacheCreationPerMTok: number
 }
 
-export const PRICING_SNAPSHOT_TAG = "static@2026-05-23"
+export const PRICING_SNAPSHOT_TAG = pricingData.snapshotTag
 
-export const MODEL_PRICING: Record<string, ModelPricing> = {
-  "claude-sonnet-4-6": {
-    inputPerMTok: 3,
-    outputPerMTok: 15,
-    cacheReadPerMTok: 0.3,
-    cacheCreationPerMTok: 3.75,
-  },
-  "claude-opus-4-7": {
-    inputPerMTok: 5,
-    outputPerMTok: 25,
-    cacheReadPerMTok: 0.5,
-    cacheCreationPerMTok: 6.25,
-  },
-  "claude-haiku-4-5-20251001": {
-    inputPerMTok: 1,
-    outputPerMTok: 5,
-    cacheReadPerMTok: 0.1,
-    cacheCreationPerMTok: 1.25,
-  },
-}
+export const MODEL_PRICING: Record<string, ModelPricing> = { ...pricingData.models }
 
 export interface UsageTokens {
   inputTokens: number

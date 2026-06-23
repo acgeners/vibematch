@@ -6,6 +6,7 @@ import { FileText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { StatCard } from "@/components/settings/stat-card"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
+import { useRefresh } from "@/lib/use-refresh"
 import {
   consolidatePendingSynopses,
   type ConsolidateSynopsesProgress,
@@ -24,6 +25,7 @@ export function SynopsisConsolidationPanel({
 }: SynopsisConsolidationPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [lastResult, setLastResult] = useState<ConsolidateSynopsesProgress | null>(null)
+  const refresh = useRefresh()
 
   const handleRun = () => {
     startTransition(async () => {
@@ -35,6 +37,9 @@ export function SynopsisConsolidationPanel({
         }
         if (result.data) {
           setLastResult(result.data)
+          // Atualiza o badge "Configurações" da sidebar em tempo real quando
+          // pelo menos uma obra saiu da fila de pendências.
+          if (result.data.consolidated > 0) refresh()
           if (result.data.abortedEarly) {
             toast.warning(
               `Anthropic congestionada — abortei após ${result.data.failed} falhas seguidas. ${result.data.consolidated} obras consolidadas antes do abort. Tente de novo daqui a pouco.`,

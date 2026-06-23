@@ -26,6 +26,8 @@ import {
   type FavoriteCandidate,
 } from "@/server/queries/recommendations"
 import { MAX_CANDIDATES_HARD_LIMIT } from "@/lib/ai-recommendation/limits"
+import { getPreferenceRules } from "@/server/queries/preference-rules"
+import { recordRecommendationSnapshots } from "@/lib/server/predictions/record-prediction"
 import type {
   ChatRecommendationItem,
   RankedCandidate,
@@ -197,6 +199,10 @@ export async function runRecommendationAction(
       }
     }
 
+    // Item B — regras/preferências livres (lidas ao vivo). Disparada aqui pra
+    // sobrepor a latência ao fetch de candidatos; awaited antes do rankFavorites.
+    const preferenceRulesPromise = getPreferenceRules()
+
     // Busca o universo completo primeiro (sem aplicar `n`) pra reportar
     // truncagem na UI; depois slice. Para ranking, getRanking sem topN
     // retorna a base inteira filtrada.
@@ -229,6 +235,7 @@ export async function runRecommendationAction(
       candidates,
       mode: args.mode,
       userContext: args.userContext ?? null,
+      preferenceRules: await preferenceRulesPromise,
     })
 
     const byId = new Map<string, FavoriteCandidate>(candidates.map((c) => [c.id, c]))
@@ -294,7 +301,7 @@ export async function runRecommendationAction(
       console.error("[recommendations] falha persistindo run:", insertError)
     }
 
-    // Persiste alignment_score em calculated_scores pra a coluna "IA Rk." ficar
+    // Persiste alignment_score em calculated_scores pra a coluna "Veredito IA." ficar
     // disponível em qualquer tabela (ranking, favoritos, títulos) — independente
     // do modo da run, já que sempre representa o re-rank mais recente da obra.
     // alignment_payload guarda os campos enriquecidos (sub-fase 2.3.A) — pode
@@ -324,6 +331,16 @@ export async function runRecommendationAction(
       revalidatePath("/ranking")
       revalidatePath("/favorites")
       revalidatePath("/titles")
+
+      // P1: registra snapshots prospectivos (prediction_snapshots) das obras
+      // recomendadas ainda SEM nota — agrupadas sob esta run (ranking_snapshot_id).
+      // Best-effort: o recorder filtra só as prospectivas e nunca lança.
+      await recordRecommendationSnapshots({
+        rankingSnapshotId: runRow.id,
+        workIds: ranked.map((r) => r.work_id),
+        modelVersion: result.modelName,
+        promptVersion: result.promptVersion,
+      })
     }
 
     revalidatePath("/recommendations")
@@ -384,7 +401,7 @@ export interface RerankSingleWorkResult {
 
 /**
  * Re-rank sob demanda de UMA obra específica. Disparado pelo botão "Rankear"
- * que substitui o "—" na cell IA Rk quando `alignment_score` é NULL.
+ * que substitui o "—" na cell Veredito IA quando `alignment_score` é NULL.
  *
  * Compartilha o limite diário com `runRecommendationAction` (cada chamada é 1
  * LLM call). Não cria registro em `recommendation_runs` — só faz o upsert em
@@ -415,7 +432,10 @@ export async function rerankSingleWorkAction(
       }
     }
 
-    const candidate = await getCandidateById(workId)
+    const [candidate, preferenceRules] = await Promise.all([
+      getCandidateById(workId),
+      getPreferenceRules(),
+    ])
     if (!candidate) {
       return { error: "Obra não encontrada (ou arquivada)." }
     }
@@ -425,6 +445,7 @@ export async function rerankSingleWorkAction(
       candidates: [candidate],
       mode: "ranking",
       userContext: null,
+      preferenceRules,
     })
 
     const ranking = result.rankings.find((r) => r.work_id === workId) ?? result.rankings[0]
@@ -476,7 +497,7 @@ export interface RerankStaleBatchResult {
 }
 
 /**
- * Re-rankeia em LOTE as obras com IA Rk desatualizado (alignment_stale=true).
+ * Re-rankeia em LOTE as obras com Veredito IA desatualizado (alignment_stale=true).
  * Espelha o fluxo do re-rank por-obra, mas manda todos os candidatos numa única
  * chamada `rankFavorites` (como a run de ranking) e limpa a flag stale de cada
  * um. Não cria recommendation_run (alignment_run_id=null, como o re-rank
@@ -506,9 +527,12 @@ export async function rerankStaleBatchAction(
     }
 
     const limit = Math.min(Math.max(n ?? MAX_CANDIDATES_HARD_LIMIT, 1), MAX_CANDIDATES_HARD_LIMIT)
-    const allCandidates = await getStaleAlignmentCandidates(MAX_CANDIDATES_HARD_LIMIT)
+    const [allCandidates, preferenceRules] = await Promise.all([
+      getStaleAlignmentCandidates(MAX_CANDIDATES_HARD_LIMIT),
+      getPreferenceRules(),
+    ])
     if (allCandidates.length === 0) {
-      return { error: "Nenhuma obra com IA Rk desatualizado." }
+      return { error: "Nenhuma obra com Veredito IA desatualizado." }
     }
     const truncated = allCandidates.length > limit
     const candidates = truncated ? allCandidates.slice(0, limit) : allCandidates
@@ -518,6 +542,7 @@ export async function rerankStaleBatchAction(
       candidates,
       mode: "ranking",
       userContext: null,
+      preferenceRules,
     })
 
     const supabase = createAdminClient()
@@ -568,7 +593,7 @@ export interface RerankWorksBatchResult {
 }
 
 /**
- * Re-rankeia em LOTE uma lista EXPLÍCITA de obras — os IDs que o painel de IA Rk
+ * Re-rankeia em LOTE uma lista EXPLÍCITA de obras — os IDs que o painel de Veredito IA
  * está exibindo na fila (desatualizados E/OU não avaliados), na ordem visível.
  * Espelha o `predictSynopsisQualityBatchAction`: o cliente chama em blocos pra
  * mostrar progresso, então lê o perfil ATUAL (1 linha) em vez de
@@ -610,7 +635,10 @@ export async function rerankWorksBatchAction(
       return { error: "Nenhuma obra para re-rankear." }
     }
 
-    const candidates = await getCandidatesByIds(ids)
+    const [candidates, preferenceRules] = await Promise.all([
+      getCandidatesByIds(ids),
+      getPreferenceRules(),
+    ])
     if (candidates.length === 0) {
       return { error: "Nenhuma obra elegível (arquivada ou inexistente)." }
     }
@@ -620,6 +648,7 @@ export async function rerankWorksBatchAction(
       candidates,
       mode: "ranking",
       userContext: null,
+      preferenceRules,
     })
 
     const supabase = createAdminClient()
@@ -708,9 +737,11 @@ export async function rerankClusterAction(
       }
     }
 
-    const candidates = (await Promise.all(limited.map((id) => getCandidateById(id)))).filter(
-      (c): c is NonNullable<typeof c> => c != null,
-    )
+    const [candidatesRaw, preferenceRules] = await Promise.all([
+      Promise.all(limited.map((id) => getCandidateById(id))),
+      getPreferenceRules(),
+    ])
+    const candidates = candidatesRaw.filter((c): c is NonNullable<typeof c> => c != null)
     if (candidates.length < 2) {
       return { error: "Obras do cluster não encontradas (ou arquivadas)." }
     }
@@ -720,6 +751,7 @@ export async function rerankClusterAction(
       candidates,
       mode: "ranking",
       userContext: null,
+      preferenceRules,
     })
 
     const supabase = createAdminClient()
@@ -773,10 +805,10 @@ export interface RankSpecificWorksResult {
  * Rankeia um conjunto ESPECÍFICO de obras (por work_id) — usado pelo chat pra
  * "avaliar 1 obra (fit)" e "recomendar entre estas obras". Espelha o
  * `rerankClusterAction`: roda `rankFavorites` (mode "ranking") numa única
- * chamada e PERSISTE o alignment_score em `calculated_scores` (IA Rk fica
+ * chamada e PERSISTE o alignment_score em `calculated_scores` (Veredito IA fica
  * visível em /ranking, /favorites, /titles). Não cria `recommendation_runs` —
  * é ação pontual, como os botões de re-rank. Devolve itens prontos pro card do
- * chat (título, capa, score, justificativa), ordenados por IA Rk desc.
+ * chat (título, capa, score, justificativa), ordenados por Veredito IA desc.
  */
 export async function rankSpecificWorksForChat(args: {
   workIds: string[]
@@ -806,9 +838,11 @@ export async function rankSpecificWorksForChat(args: {
       }
     }
 
-    const candidates = (await Promise.all(limited.map((id) => getCandidateById(id)))).filter(
-      (c): c is NonNullable<typeof c> => c != null,
-    )
+    const [candidatesRaw, preferenceRules] = await Promise.all([
+      Promise.all(limited.map((id) => getCandidateById(id))),
+      getPreferenceRules(),
+    ])
+    const candidates = candidatesRaw.filter((c): c is NonNullable<typeof c> => c != null)
     if (candidates.length === 0) {
       return { error: "Obras não encontradas (ou arquivadas)." }
     }
@@ -818,6 +852,7 @@ export async function rankSpecificWorksForChat(args: {
       candidates,
       mode: "ranking",
       userContext: args.userContext ?? null,
+      preferenceRules,
     })
 
     const byId = new Map<string, FavoriteCandidate>(candidates.map((c) => [c.id, c]))

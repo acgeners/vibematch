@@ -16,6 +16,7 @@
 
 import { createClient } from "@supabase/supabase-js"
 import Anthropic from "@anthropic-ai/sdk"
+import { loggedCreate } from "./lib/ai-log.js"
 
 const APPLY = process.argv.includes("--apply")
 const FORCE = process.argv.includes("--force")
@@ -128,7 +129,7 @@ async function main() {
 
   async function processOne(w) {
     try {
-      const msg = await client.messages.create({
+      const msg = await loggedCreate(client, sb, {
         model: MODEL,
         max_tokens: 600,
         temperature: 0.2,
@@ -136,7 +137,7 @@ async function main() {
         tools: [TOOL],
         tool_choice: { type: "tool", name: TOOL.name },
         messages: [{ role: "user", content: buildUserPrompt(w) }],
-      })
+      }, { operation: "quality_backfill", workloadType: "backfill", promptVersion: PROMPT_VERSION })
       const tool = msg.content.find((c) => c.type === "tool_use" && c.name === TOOL.name)
       if (!tool) {
         failed++

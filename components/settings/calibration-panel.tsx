@@ -7,7 +7,7 @@ import { MaeHistoryChart } from "@/components/settings/calibration/mae-history-c
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
-import { recalculateNow, setStackerEnabled, setScoreWeightsAuto } from "@/server/actions/settings"
+import { recalculateNow, setScoreWeightsAuto } from "@/server/actions/settings"
 import type { CalibrationHistoryEntry } from "@/server/actions/settings"
 import { cn } from "@/lib/utils"
 import type { FormulaConfig } from "@/types/domain"
@@ -15,27 +15,28 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { POST_READING_WEIGHT_LABELS } from "@/lib/constants/post-reading-criteria"
 import type { BucketBreakdown, CalibrationDiff } from "@/lib/calculations/calibration"
+import {
+  selectPrimaryModelMetric,
+  describeMetricSource,
+  calculateRelativeErrorReduction,
+} from "@/lib/metrics/model-evaluation"
+import type { ModelEvaluationMetrics } from "@/lib/metrics/model-evaluation"
 
 interface CalibrationPanelProps {
   accent: SettingsAccent
   config: FormulaConfig
+  /** Métricas de erro do modelo já normalizadas/validadas (F4). */
+  metrics: ModelEvaluationMetrics
   snapshot: {
     totalWorks: number
     trainSize: number
     /** MAE de "chutar a média" das notas pessoais — piso que o modelo precisa bater. */
     baselineMae: number | null
-    maeCalc: number | null
-    maePredicted: number | null
-    maeFinal: number | null
     /** Fase 1 shadow mode: MAE in-sample do expected_score (L1 Ridge cleaned). */
     maeExpected: number | null
-    rmseCalc: number | null
-    rmsePredicted: number | null
-    rmseFinal: number | null
     pseudoVotesNotaM: number | null
     pseudoVotesBlend: number | null
     worstDiffs: CalibrationDiff[]
-    predictorIsStub: boolean
     /** True quando todos os expected_score são null/stub — predictor L1 ainda não rodou ou treino < 20. */
     expectedPredictorIsStub: boolean
     /** Quantas obras têm expected_score preenchido (denominador do MAE expected). */
@@ -78,9 +79,8 @@ function maeColor(value: number | null | undefined): string {
   return "text-rose-500"
 }
 
-export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelProps) {
+export function CalibrationPanel({ accent, config, metrics, snapshot }: CalibrationPanelProps) {
   const [isPending, startTransition] = useTransition()
-  const [isTogglingStacker, startStackerToggle] = useTransition()
   const [isTogglingAutoWeights, startAutoWeightsToggle] = useTransition()
   const [lastRun, setLastRun] = useState<string | null>(null)
   const [showDetails, setShowDetails] = useState(false)
@@ -101,38 +101,22 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
         const result = await recalculateNow()
         const cal = result.calibration
         if (cal) {
-          // Reporta a MESMA métrica do headline (MAE CV da Nota Prevista / L1),
-          // não o cvMAE do preditor Nota.Pr (L2) — que é outro modelo e confunde.
+          // Reporta a MESMA métrica HONESTA da headline: MAE CV da Nota Prevista
+          // (nested-CV / held-out), NÃO o cvMAE interno otimista do RidgeCV.
           setLastRun(
             cal.expectedIsStub
               ? `${result.recalculated} obras recalculadas. ` +
                   `Treino: ${cal.expectedTrainSize ?? cal.trainSize} títulos — Nota Prevista em fallback (precisa de ≥ 20 títulos com nota pessoal).`
               : `${result.recalculated} obras recalculadas. ` +
                   `Treino: ${cal.expectedTrainSize ?? cal.trainSize} títulos · ` +
-                  `MAE CV (Nota Prevista) = ${fmt(cal.expectedCvMAE, 2)}.`
+                  `MAE CV honesta (Nota Prevista) = ${fmt(cal.expectedHonestCvMAE, 2)}.`
           )
-          toast.success(`Recalibrado. MAE CV da Nota Prevista: ${fmt(cal.expectedCvMAE, 2)}`)
+          toast.success(`Recalibrado. MAE CV honesta da Nota Prevista: ${fmt(cal.expectedHonestCvMAE, 2)}`)
         } else {
           toast.success(`${result.recalculated} obras recalculadas.`)
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Erro ao recalibrar")
-      }
-    })
-  }
-
-  const handleToggleStacker = (next: boolean) => {
-    startStackerToggle(async () => {
-      try {
-        const result = await setStackerEnabled(next)
-        toast.success(
-          `Stacker ${next ? "ativado" : "desativado"}. MAE Final: ${fmt(
-            result.calibration?.maeFinal ?? null,
-            3,
-          )}`,
-        )
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao alternar stacker")
       }
     })
   }
@@ -161,24 +145,22 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
     return Math.abs(live - stored) / Math.max(stored, 0.001) > threshold
   }
 
-  const stacker = config.stacker_coefficients
+  // Métrica PRINCIPAL honesta (F4): prospectiva > CV/OOF > indisponível. Nunca
+  // a in-sample. A prospectiva (prediction_ledger) ainda não é alimentada aqui
+  // — vive na página técnica /admin/model-metrics; aqui a principal é a CV/OOF.
+  const primaryMetric = selectPrimaryModelMetric(metrics)
+  const metricCopy = describeMetricSource(primaryMetric.source)
+  const primaryMae = primaryMetric.mae
 
-  // Precisão honesta da PREVISÃO (Nota Prevista / L1) — CV interno do RidgeCV.
-  // É o número que importa pros 2 objetivos: prediz obras NÃO-LIDAS sem usar
-  // sinal pós-leitura.
-  const expectedCvMae =
-    config.cv_mae_expected_stage1 != null && !snapshot.expectedPredictorIsStub
-      ? Number(config.cv_mae_expected_stage1)
-      : null
-
-  // Quanto o modelo ganha do baseline trivial (chutar a média). Se o ganho for
-  // pequeno/negativo, a Nota Prevista não está agregando valor real — sinal de
+  // Quanto o modelo reduz de erro vs o baseline trivial (chutar a média). Se a
+  // redução for pequena/negativa, a Nota Prevista quase não agrega — sinal de
   // que a alavanca é mais dado rotulado, não mexer no modelo.
-  const baselineMae = snapshot.baselineMae
-  const skillGainPct =
-    expectedCvMae != null && baselineMae != null && baselineMae > 0
-      ? ((baselineMae - expectedCvMae) / baselineMae) * 100
+  const baselineMae = metrics.baselineMae
+  const reduction =
+    primaryMae != null && baselineMae != null
+      ? calculateRelativeErrorReduction(primaryMae, baselineMae)
       : null
+  const skillGainPct = reduction != null ? reduction * 100 : null
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -192,18 +174,18 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
             <div className="flex-1 space-y-1">
               <p className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 <span>Precisão da previsão</span>
-                <InfoTooltip
-                  label="MAE CV da Nota Prevista"
-                  text="Erro médio (cross-validation) da Nota Prevista (L1) — a previsão usada pra obras NÃO-LIDAS, sem usar sinal pós-leitura. É a precisão honesta pro objetivo de recomendar. ↓ Menor = mais preciso."
-                />
+                <InfoTooltip label={metricCopy.title} text={metricCopy.tooltip} />
               </p>
               <div className="flex items-baseline gap-3">
-                <p className={cn("font-mono text-3xl font-semibold tabular-nums", maeColor(expectedCvMae))}>
-                  {fmt(expectedCvMae, 2)}
+                <p className={cn("font-mono text-3xl font-semibold tabular-nums", maeColor(primaryMae))}>
+                  {fmt(primaryMae, 2)}
                 </p>
               </div>
               <p className="text-xs text-muted-foreground">
-                MAE CV da Nota Prevista · Treino: {stacker?.trainSize ?? snapshot.trainSize} / {snapshot.totalWorks} obras
+                {metricCopy.title}
+                {primaryMetric.source === "prospective"
+                  ? ` · ${primaryMetric.sampleSize ?? 0} previsões resolvidas`
+                  : ` · Treino: ${snapshot.trainSize} / ${snapshot.totalWorks} obras`}
               </p>
               {baselineMae != null && (
                 <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -222,12 +204,14 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
                             : "bg-rose-500/15 text-rose-600 dark:text-rose-400",
                       )}
                     >
-                      {skillGainPct >= 0 ? "ganha" : "perde"} {Math.abs(skillGainPct).toFixed(0)}% do trivial
+                      {skillGainPct >= 0
+                        ? `${skillGainPct.toFixed(0)}% menos erro que o baseline`
+                        : `${Math.abs(skillGainPct).toFixed(0)}% mais erro que o baseline`}
                     </span>
                   )}
                   <InfoTooltip
                     label="Baseline trivial"
-                    text="MAE de simplesmente prever a média das suas notas pra toda obra. É o piso: se a Nota Prevista não ganha disso com folga, ela quase não agrega — e a alavanca passa a ser mais obras com nota pessoal, não mexer no modelo."
+                    text="MAE de simplesmente prever a média das suas notas pra toda obra. É o piso: se a Nota Prevista não reduz o erro disso com folga, ela quase não agrega — e a alavanca passa a ser mais obras com nota pessoal, não mexer no modelo. (Redução de erro vs baseline — não é acurácia.)"
                   />
                 </p>
               )}
@@ -238,10 +222,10 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
               <Button onClick={handleRecalibrate} disabled={isPending} className={ACCENT_BUTTON[accent]}>
                 {isPending ? "Recalibrando..." : "Recalibrar agora"}
               </Button>
-              <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>
+              <span className="text-[11px] text-muted-foreground" suppressHydrationWarning>
                 Último: {relativeTime}
               </span>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[11px] text-muted-foreground">
                 Versão: <span className="font-mono">{config.formula_version}</span>
               </span>
             </div>
@@ -254,7 +238,7 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
                 ridge={config.expected_ridge_coefficients}
                 label="Origem do sinal na Nota Prevista"
               />
-              <p className="px-1 text-[10px] leading-relaxed text-muted-foreground/70">
+              <p className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
                 O <span className="font-medium">ajuste de observação</span> que você define por obra é
                 aplicado por fora deste modelo, como soma determinística (±0,30) sobre a Nota Prevista —
                 por isso não aparece entre os pesos aprendidos acima.
@@ -275,7 +259,7 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
                   text="Quantos votos uma obra precisa pra a opinião da plataforma valer realmente. Ex.: 1600 → uma obra precisa de ~1600 votos pra a média global ter peso 50% contra sua nota."
                 />
               </span>
-              {snapshot.predictorIsStub && (
+              {snapshot.expectedPredictorIsStub && (
                 <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-500">
                   Modelo em fallback (precisa de ≥ 20 títulos com nota pessoal)
                 </span>
@@ -309,31 +293,6 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
                     className={cn(
                       "inline-block size-4 transform rounded-full bg-white transition-transform",
                       config.score_weights_auto ? "translate-x-4" : "translate-x-0.5",
-                    )}
-                  />
-                </button>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <span className="text-muted-foreground">
-                  Stacker: <span className="font-medium text-foreground">{config.stacker_enabled ? "ativo" : "desativado"}</span>
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={config.stacker_enabled}
-                  disabled={isTogglingStacker || config.stacker_coefficients == null}
-                  onClick={() => handleToggleStacker(!config.stacker_enabled)}
-                  className={cn(
-                    "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
-                    config.stacker_enabled ? "bg-emerald-500" : "bg-muted",
-                    (isTogglingStacker || config.stacker_coefficients == null) && "opacity-50 cursor-not-allowed",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "inline-block size-4 transform rounded-full bg-white transition-transform",
-                      config.stacker_enabled ? "translate-x-4" : "translate-x-0.5",
                     )}
                   />
                 </button>
@@ -426,7 +385,7 @@ export function CalibrationPanel({ accent, config, snapshot }: CalibrationPanelP
                         ? `${(config.gpt_clamp_hit_rate * 100).toFixed(1)}%`
                         : "—"}
                     </p>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[11px] text-muted-foreground">
                       {config.gpt_clamp_hit_rate != null && config.gpt_clamp_hit_rate > 0.2
                         ? "Alto — bônus pode estar empurrando obras pra fora da escala"
                         : "Abaixo de 20% = saudável"}
@@ -489,7 +448,7 @@ function InfoTooltip({ text, label }: { text: string; label?: string }) {
 // Grupos semânticos pra agregar a importância das features da Nota Prevista.
 // Como as features são padronizadas antes do fit, |coef| mede importância
 // relativa direta. A "fatia" de cada grupo é a soma dos |coef| dividida pelo
-// total — uma estimativa de onde o sinal do Nota.Pr vem.
+// total — uma estimativa de onde o sinal da Nota Prevista vem.
 const RIDGE_FEATURE_GROUPS: Array<{
   key: string
   label: string
@@ -605,7 +564,7 @@ function featureLabel(name: string): string {
 
 function RidgeFeatureImportance({
   ridge,
-  label = "Origem do sinal no Nota.Pr",
+  label = "Origem do sinal na Nota Prevista",
 }: {
   ridge: { featureNames: string[]; coefficients: number[] }
   label?: string
@@ -717,7 +676,7 @@ function RidgeFeatureImportance({
                   {coef.toFixed(3)}
                 </span>
                 <span className="text-muted-foreground">{featureLabel(name)}</span>
-                <span className="font-mono text-[10px] text-muted-foreground/50">{name}</span>
+                <span className="font-mono text-[11px] text-muted-foreground/50">{name}</span>
               </li>
             ))}
         </ul>
@@ -891,11 +850,11 @@ function MetricCard({ label, live, stored, mismatch, digits = 4, note, tooltip, 
       <p className="flex items-center gap-1 text-xs text-muted-foreground">
         <span>{label}</span>
         {tooltip && <InfoTooltip text={tooltip} label={label} />}
-        {note && <span className="ml-1 text-[10px] opacity-70">{note}</span>}
+        {note && <span className="ml-1 text-[11px] opacity-70">{note}</span>}
       </p>
       <p className="mt-1 font-mono text-base">{fmt(live, digits)}</p>
       {stored != null && (
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-[11px] text-muted-foreground">
           Salvo: <span className="font-mono">{fmt(stored, digits)}</span>
           {mismatch && (
             <span className="ml-1 text-amber-500">• desatualizado</span>
@@ -903,7 +862,7 @@ function MetricCard({ label, live, stored, mismatch, digits = 4, note, tooltip, 
         </p>
       )}
       {extra && (
-        <p className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+        <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
           <span>
             {extra.label}: <span className="font-mono">{fmt(extra.value ?? null, extra.digits ?? 4)}</span>
           </span>

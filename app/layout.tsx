@@ -6,6 +6,7 @@ import { MobileNav } from "@/components/layout/mobile-nav"
 import { Toaster } from "@/components/ui/sonner"
 import { ThemeProvider } from "@/components/theme-provider"
 import { ActiveChatFab } from "@/components/recommendations/active-chat-fab"
+import { TasksFab } from "@/components/tasks/tasks-fab"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -41,6 +42,7 @@ export default function RootLayout({
           </div>
           <MobileNav />
           <ActiveChatFab />
+          <TasksFab />
           <Toaster />
         </ThemeProvider>
       </body>

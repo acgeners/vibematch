@@ -127,21 +127,17 @@ function ResizeHandle({ columnKey, onResize, startWidth }: ResizeHandleProps) {
 
 const NON_CRITERION_LABELS: Record<string, string> = {
   expected_score: "Prevista",
-  expected_baseline: "Perfil",
-  expected_quality_adj: "Δ Qual.",
   platform_avg: "Externa",
   total_votes: "Votos",
-  alignment_score: "IA Rk.",
+  alignment_score: "Veredito",
   synopsis_q: "Sinopse",
 }
 
 const NON_CRITERION_TOOLTIPS: Record<string, string> = {
   expected_score: "Nota Prevista (L1 single Ridge — substitui N.IA/N.Pr/N.Final)",
-  expected_baseline: "Stage 1 da decomposição — contribuição do perfil (sem qualidade)",
-  expected_quality_adj: "Stage 2 da decomposição — ajuste pelas 8 dimensões de qualidade",
   platform_avg: "Média externa",
   total_votes: "Total de votos nas plataformas",
-  alignment_score: "IA Re-rank — score 0-100 que ordena os resultados das ações 'Recomendar com IA'. Preenchido em batch pela run ou sob demanda pelo botão Rankear.",
+  alignment_score: "Veredito IA — score 0-100 que ordena os resultados das ações 'Recomendar com IA'. Preenchido em batch pela run ou sob demanda pelo botão Rankear.",
   synopsis_q: "Interesse na sinopse (♥ a ♥♥♥♥) — preenchido manualmente",
 }
 
@@ -172,14 +168,6 @@ function getCriterionColor(score: number, slug: string): string {
 function getValueForKey(work: WorkWithRelations, key: string): number | null {
   if (key === "expected_score") {
     const v = work.calculated_scores?.expected_score
-    return v == null ? null : Number(v)
-  }
-  if (key === "expected_baseline") {
-    const v = work.calculated_scores?.expected_baseline
-    return v == null ? null : Number(v)
-  }
-  if (key === "expected_quality_adj") {
-    const v = work.calculated_scores?.expected_quality_adj
     return v == null ? null : Number(v)
   }
   if (key === "platform_avg") {
@@ -314,7 +302,7 @@ export function WorkHeatmapView({
   return (
     <TooltipProvider delayDuration={200}>
       <div className="rounded-lg border border-border/70 bg-card/80 shadow-sm">
-        <p className="border-b bg-muted/40 px-3 py-1.5 text-[10px] text-muted-foreground">
+        <p className="border-b bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
           Heatmap ordena apenas as obras visíveis nesta página · use <span className="font-medium text-foreground">Colunas</span> para escolher as notas.
         </p>
         <table

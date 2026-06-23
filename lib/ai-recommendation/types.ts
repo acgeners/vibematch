@@ -8,6 +8,32 @@ export interface CandidateReview {
   text: string
 }
 
+// ============================================================
+// Review digest estruturado (Item C, Passe 2) — Sonnet 4.6.
+// Preference-agnostic: o casamento com as preferências do user fica a jusante,
+// no consultor (Item B v4). NÃO substitui o `review_summary` (texto Haiku da UI).
+// ============================================================
+export interface ReviewDigestTrait {
+  trait: string
+  /** Como o consenso enxerga o traço — não se o USER gosta dele (isso é a jusante). */
+  polarity: "positive" | "negative" | "mixed"
+  /** Eixo do traço: moralidade, tom, ritmo, arte, romance, personagens, etc. */
+  axis: string
+}
+
+export interface ReviewDigest {
+  /** O que os reviews concordam (1–3 frases). */
+  consensus: string
+  /** Onde as opiniões se dividem. */
+  divergence: string
+  /** Traços recorrentes citados, com polaridade do consenso e eixo. */
+  salient_traits: ReviewDigestTrait[]
+  /** Alertas de conteúdo (violência gráfica, etc.). */
+  content_warnings: string[]
+  /** Qualidade de execução (arte, ritmo, escrita). */
+  execution: string
+}
+
 export interface ProfileTag {
   name: string
   group: string | null
@@ -186,6 +212,10 @@ export interface CandidateWorkInput {
   /** Alinhamento com o perfil (0–1). */
   fitScore: number | null
   reviews: CandidateReview[]
+  /** Resumo de consenso das reviews (Haiku, preference-agnostic). Null se ausente. */
+  reviewSummary: string | null
+  /** Digest estruturado das reviews (Sonnet, Passe 2). Preferido sobre reviewSummary. */
+  reviewDigest: ReviewDigest | null
 }
 
 export interface RankedCandidate extends RankedWork {
@@ -331,6 +361,10 @@ export interface DeepDiveWorkBundle {
   platformAvg: number | null
   totalVotes: number | null
   reviews: CandidateReview[]
+  /** Resumo de consenso das reviews (Haiku, preference-agnostic). Null se ausente. */
+  reviewSummary: string | null
+  /** Digest estruturado das reviews (Sonnet, Passe 2). Preferido sobre reviewSummary. */
+  reviewDigest: ReviewDigest | null
   /** Nota Esperada (L1) — predição offline; âncora de previsão pro consultor. */
   expectedScore: number | null
   /** true quando o expected_score é stub/fallback (poucos labels). */

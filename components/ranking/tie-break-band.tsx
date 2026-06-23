@@ -49,7 +49,7 @@ export function TierDividerRow({
                 "inline-flex items-center gap-1 rounded-md border border-dashed border-primary/40 px-2 py-0.5 text-[11px] font-medium text-primary transition-colors",
                 "hover:border-primary hover:bg-primary/10",
               )}
-              title="Compara estas obras lado a lado. Antes, você pode refinar por mood (o que quer priorizar agora) pra desempatar."
+              title="Grátis: refina por mood (o que quer priorizar agora) e compara lado a lado pra desempatar. O desempate por IA é opcional, dentro da comparação."
             >
               <Scale className="h-3 w-3" />
               <span>Comparar / Refinar</span>

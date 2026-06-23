@@ -32,7 +32,7 @@ lib/
   constants/      – GENERATED files (do not edit by hand)
   external/       – third-party API integrations + multi-source merge logic
   import/         – GENERATED files + CSV/XLSX import pipeline
-  ml/             – Ridge Regression for Nota.Pr (pure TS, no native deps)
+  ml/             – Ridge regression for Nota Prevista / expected_score (pure TS, no native deps)
   supabase/       – client factories
   validations/    – Zod schemas
 types/domain.ts   – canonical domain types (partly GENERATED)
@@ -75,17 +75,17 @@ The canonical list of AI evaluation criteria (`CRITERION_SLUGS`) comes from the 
 
 ## Scoring pipeline
 
-A work's final score flows through four stages:
+> **History (read this first):** the original pipeline had four named scores — Nota.IA → Nota.Calc → Nota.Pr → Nota.Final. The `Nota.Pr` + `Nota.Final` stage was **retired** and replaced by a single **Nota Prevista** (`expected_score`). `lib/calculations/final.ts`/`stacker.ts` were deleted and the `final_score`/`predicted_score` columns dropped in migration 099 (2026-06-14). `lib/calculations/prediction.ts` survives as dead code (no callers) pending cleanup. The user-facing score is now **Nota Prevista**; **Nota.Calc** lives on as an internal ensemble anchor.
 
-1. **GPT (Nota.IA)** — weighted sum of `category_scores` using `score_weights`. Negative-weight criteria (drama, tragedy) only penalise when above `max_negative_threshold`. Result is clamped 0–10 then amplified: `GPT.N = 5 + (GPT - 5) × 1.25`.
+Today a work's score flows through three stages:
 
-2. **Nota.Calc** — blends GPT.N with platform average using Bayesian pseudo-vote pooling, then applies chapter and observation penalties (`lib/calculations/score.ts`).
+1. **GPT (Nota.IA)** — weighted sum of `category_scores` using `score_weights`. Negative-weight criteria (drama, tragedy) only penalise when above `max_negative_threshold`. Result is clamped 0–10 then amplified: `GPT.N = 5 + (GPT - 5) × 1.25` (`lib/calculations/gpt.ts`).
 
-3. **Nota.Pr** — Ridge Regression trained on works with `manual_score` set. Features: all 9 category scores, GPT.N, platform avg, log(votes), chapters, synopsis quality, observation penalty, publication status. Minimum 20 training samples; falls back to mean otherwise (`lib/calculations/prediction.ts`).
+2. **Nota.Calc** (`calc_score`) — blends GPT.N with platform average using Bayesian pseudo-vote pooling, then applies chapter and observation penalties (`lib/calculations/score.ts`). Computed both with and without the observation nudge (`calcScoreNoObs`). Persisted as `calc_score`; kept as a feature/ensemble anchor for stage 3, not shown to the user as the headline score.
 
-4. **Nota.Final** — inverse-variance weighted average of Nota.Calc and Nota.Pr using their respective MAE values stored in `formula_config`.
+3. **Nota Prevista** (`expected_score`) — the headline predicted score. A **single Ridge regression** (`trainExpectedPredictor` in `lib/calculations/expected.ts`) trained on works with a manual `user_score`. Features: the 9 category scores, GPT.N, platform avg, log(votes), chapters, synopsis quality, loved/avoided tag overlap, criterion-fit score, release age, run length, plus categorical publication status (one-hot) and origin country. (8 post-reading "quality" features are added only on the paid plan via `includeQuality`.) The Ridge output is then **blended with Nota.Calc** (`calcScoreNoObs`) using a weight grid-searched on out-of-fold predictions to avoid leakage — `w = 1` (no blend) when training set < 30 or the model is a stub. The observation adjustment is **not** a feature; it is added deterministically once after the blend. Below `MIN_TRAIN = 20` labelled samples the predictor falls back to the training mean. Persisted as `expected_score`.
 
-Recalculation is triggered server-side by `recalculateWork(workId)` or `recalculateAll()` in `server/actions/calculations.ts`.
+Recalculation is triggered server-side by `recalculateWork(workId)` or `recalculateAll()` in `server/actions/calculations.ts`. The honest cross-validated MAE of Nota Prevista (~0.58–0.60) is stored in `formula_config`.
 
 ## AI evaluation flow
 
@@ -116,7 +116,7 @@ Post-processing applied to every evaluation (in `service.ts`):
 - `enforceNeutralCoupleDynamicsWhenNoRomance`: raises `couple_dynamics` to 5.0 when romance ≤ 3 and couple_dynamics < 5
 - `enforceAuditableReviewUsage`: **throws and retries** if reviews were passed but the model didn't cite review IDs (`R1`, `R2`…) both in `review_usage` and in justifications
 
-The model is `claude-sonnet-4-6`, prompt version `v16`, up to 2 attempts (second attempt uses temperature 0 and 4500 max tokens). Opus 4.7 is supported as override but doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
+The model is `claude-sonnet-4-6`, prompt version `v19` (toggled by `CONCISE_OUTPUT` in `service.ts`: `v19` concise output / `v18` verbose — flipping it falls back to the old caches), up to 2 attempts (4500 max tokens on **both** attempts; temperature 0.2 then 0). Opus 4.7 and Haiku 4.5 are supported as per-evaluation overrides (the A/B "Reavaliar com…" buttons); Opus 4.7 doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
 
 ## External data sources
 

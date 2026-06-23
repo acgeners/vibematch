@@ -44,7 +44,7 @@ const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
   { value: "decision", label: "Prioridade" },
   { value: "expected_score", label: "Nota Prevista" },
   { value: "personal_fit", label: "Alinhamento" },
-  { value: "alignment_score", label: "IA Rk" },
+  { value: "alignment_score", label: "Veredito IA" },
   { value: "platform_avg", label: "Nota.M" },
   { value: "total_votes", label: "Votos" },
   { value: "title", label: "Título" },
@@ -203,7 +203,7 @@ interface RankingFiltersProps {
   defaultMinExpected: number | null
   /** Preferência "Alinhamento mínimo" (persistida na coluna min_calc_score, repurposada). */
   defaultMinFit?: number | null
-  /** Preferência "IA Rk mínimo" (persistida na coluna min_predicted_score, repurposada). */
+  /** Preferência "Veredito IA mínimo" (persistida na coluna min_predicted_score, repurposada). */
   defaultMinAlign?: number | null
   basePath?: string
   hidePreferencesControls?: boolean
@@ -746,7 +746,7 @@ function GenreRuleGrid({
                 >
                   <span className="truncate font-medium">{item}</span>
                   {rule && (
-                    <span className="shrink-0 rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] font-semibold">
+                    <span className="shrink-0 rounded-full bg-background/80 px-1.5 py-0.5 text-[11px] font-semibold">
                       {stateLabel[rule]}
                     </span>
                   )}
@@ -900,7 +900,7 @@ function ActiveGroupBody({ items, getRule, renderItem }: ActiveGroupBodyProps) {
               <span className="text-sm font-medium">{section.name}</span>
               <span className="text-xs tabular-nums text-muted-foreground">{section.items.length}</span>
               {selectedCount > 0 && (
-                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-400/25 px-1.5 text-[10px] font-bold tabular-nums text-emerald-100">
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-400/25 px-1.5 text-[11px] font-bold tabular-nums text-emerald-100">
                   {selectedCount}
                 </span>
               )}
@@ -1046,11 +1046,11 @@ function GroupedTagRuleGrid({
           <span className="flex min-w-0 flex-col leading-tight">
             <span className="truncate font-medium">{item.label}</span>
             {withGroupHint && (
-              <span className="truncate text-[10px] font-normal text-muted-foreground">{item.groupName}</span>
+              <span className="truncate text-[11px] font-normal text-muted-foreground">{item.groupName}</span>
             )}
           </span>
           {rule && (
-            <span className="shrink-0 rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] font-semibold">
+            <span className="shrink-0 rounded-full bg-background/80 px-1.5 py-0.5 text-[11px] font-semibold">
               {TAG_STATE_LABEL[rule]}
             </span>
           )}
@@ -1086,7 +1086,7 @@ function GroupedTagRuleGrid({
         <div className="rounded-lg border border-border/65 bg-background/45 px-3 py-2.5">
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <span>Selecionadas</span>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-foreground">
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-foreground">
               {selectedEntries.length}
             </span>
           </div>
@@ -1470,7 +1470,7 @@ export function RankingFilters({
 
   const currentTopN = urlTopN ?? defaultTopN ?? undefined
   const currentMinExpected = urlMinExpected ?? defaultMinExpected ?? undefined
-  // Alinhamento/IA Rk também são preferências (colunas min_calc/min_predicted
+  // Alinhamento/Veredito IA também são preferências (colunas min_calc/min_predicted
   // repurposadas) — preservamos o default ao salvar pra não zerar o que foi
   // definido em /preferencias.
   const currentMinFit = urlMinFit ?? defaultMinFit ?? undefined
@@ -1690,7 +1690,7 @@ export function RankingFilters({
   pushRangeChip("chapters", "Capítulos", "min_chapters", "max_chapters")
   pushRangeChip("expected", "Nota Prevista", "min_expected", "max_expected")
   pushRangeChip("fit", "Alinhamento", "min_fit", "max_fit")
-  pushRangeChip("align", "IA Rk", "min_align", "max_align")
+  pushRangeChip("align", "Veredito IA", "min_align", "max_align")
   pushRangeChip("platform", "Nota.M", "min_platform_avg", "max_platform_avg")
   pushRangeChip("votes", "Votos", "min_votes", "max_votes")
   for (const slug of CRITERION_SLUGS) {
@@ -2101,7 +2101,7 @@ export function RankingFilters({
                 />
                 <ScoreRangeCard
                   emoji="🤖"
-                  label="IA Rk"
+                  label="Veredito IA"
                   tooltip="Re-rank do consultor IA (0–100), sob demanda. Só obras já rankeadas têm valor."
                   minKey="min_align"
                   maxKey="max_align"

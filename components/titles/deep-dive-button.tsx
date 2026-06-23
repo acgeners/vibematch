@@ -73,7 +73,7 @@ export function DeepDiveButton({
                 Análise profunda com extended thinking. Compara a obra com sua biblioteca,
                 sintetiza reviews e dá veredito acionável (agora/guardar/evitar).
               </p>
-              <p className="text-[10px] text-muted-foreground/80">
+              <p className="text-[11px] text-muted-foreground/80">
                 ~$0.21/análise · 25-45s · cap diário de 10
               </p>
             </div>
@@ -104,7 +104,7 @@ export function DeepDiveButton({
               className="flex items-center gap-2 rounded-md border border-border/50 bg-card/40 px-3 py-2 text-left transition-colors hover:bg-card/70"
             >
               {whenMeta && (
-                <Badge variant="outline" className={cn("shrink-0 text-[10px] font-medium", whenMeta.cls)}>
+                <Badge variant="outline" className={cn("shrink-0 text-[11px] font-medium", whenMeta.cls)}>
                   {whenMeta.label}
                 </Badge>
               )}
@@ -118,7 +118,7 @@ export function DeepDiveButton({
                   &ldquo;{lastDive.one_liner}&rdquo;
                 </span>
               )}
-              <span className="shrink-0 text-[10px] text-muted-foreground/70">
+              <span className="shrink-0 text-[11px] text-muted-foreground/70">
                 {timeAgo(lastDive.created_at)}
               </span>
             </button>

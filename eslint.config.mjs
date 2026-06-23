@@ -7,6 +7,9 @@ const eslintConfig = defineConfig([
   ...nextTs,
   // Override default ignores of eslint-config-next.
   globalIgnores([
+    // Cache gerado (browser do FlareSolverr/Comix) — gitignored (.gitignore: `.cache/`),
+    // NÃO é código-fonte do projeto. Excluído p/ o lint refletir só o código versionado.
+    ".cache/**",
     // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",

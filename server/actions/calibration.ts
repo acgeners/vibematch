@@ -15,7 +15,7 @@ import {
   loadLastRun,
   loadWorksForAudit,
 } from "@/server/queries/calibration"
-import { recalculateAll, recalculateWork } from "@/server/actions/calculations"
+import { recalculateScoresNow, recalculateScoresNowResult } from "@/server/actions/recalc-queue"
 import { generateTasteProfileAction } from "@/server/actions/recommendations"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import type {
@@ -26,7 +26,11 @@ import type {
 } from "@/lib/ai-calibration/types"
 import type { ScoreSource } from "@/types/domain"
 
-const AUDIT_CHUNK_SIZE = 40
+// 10 obras/chunk: o modelo emite um objeto audits[] por inconsistência (com
+// justification em PT), e 40 obras estouravam o teto de max_tokens da saída —
+// truncando o tool_use e devolvendo 0 sugestões silenciosamente. Ver guard de
+// stop_reason="max_tokens" em lib/ai-calibration/service.ts.
+const AUDIT_CHUNK_SIZE = 10
 const AUDIT_PARALLEL = 3
 const DEFAULT_AUTO_APPLY_MIN_CONFIDENCE = 0.8
 const DEFAULT_AUTO_APPLY_MAX_DELTA = 1.5
@@ -226,7 +230,7 @@ export async function runCalibrationAuditAction(): Promise<{
     if (nAutoApplied > 0) {
       after(async () => {
         try {
-          await recalculateAll()
+          await recalculateScoresNow()
         } catch (err) {
           console.error("[calibration] recalculateAll falhou:", err)
         }
@@ -406,7 +410,7 @@ export async function acceptSuggestionAction(id: string): Promise<{ ok: boolean;
   if (!res.ok) return { ok: false, error: res.error }
   after(async () => {
     try {
-      await recalculateWork(res.workId)
+      await recalculateScoresNow()
     } catch (err) {
       console.error("[calibration] recalculateWork falhou:", err)
     }
@@ -426,7 +430,7 @@ export async function editSuggestionAction(
   if (!res.ok) return { ok: false, error: res.error }
   after(async () => {
     try {
-      await recalculateWork(res.workId)
+      await recalculateScoresNow()
     } catch (err) {
       console.error("[calibration] recalculateWork falhou:", err)
     }
@@ -482,7 +486,7 @@ export async function revertSuggestionAction(id: string): Promise<{ ok: boolean;
 
   after(async () => {
     try {
-      await recalculateWork(sug.work_id)
+      await recalculateScoresNow()
     } catch (err) {
       console.error("[calibration] recalculateWork falhou:", err)
     }
@@ -528,13 +532,13 @@ export async function bulkAcceptAction(args: {
   }
 
   if (workIds.size > 0) {
+    // Recálculo é GLOBAL e idempotente ⇒ uma única chamada cobre todas as obras do
+    // bulk (antes rodava N recalcs idênticos). Background, deduplicado.
     after(async () => {
-      for (const id of workIds) {
-        try {
-          await recalculateWork(id)
-        } catch (err) {
-          console.error("[calibration] recalculateWork em bulk falhou:", err)
-        }
+      try {
+        await recalculateScoresNow()
+      } catch (err) {
+        console.error("[calibration] recálculo em bulk falhou:", err)
       }
     })
   }
@@ -587,7 +591,7 @@ export async function regenerateCalibratedArtifacts(): Promise<
   }
 
   // 3. Recalcula tudo com o bias atual.
-  const recalc = await recalculateAll()
+  const recalc = await recalculateScoresNowResult()
 
   revalidatePath("/settings/calibration")
   revalidatePath("/ranking")

@@ -145,7 +145,7 @@ export async function requestCalibrationAudit(
       client,
       {
         model: MODEL,
-        max_tokens: attempt === 0 ? 4000 : 5000,
+        max_tokens: 8000,
         temperature: attempt === 0 ? 0.2 : 0,
         system: [
           { type: "text", text: AUDIT_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
@@ -172,6 +172,16 @@ export async function requestCalibrationAudit(
         message.stop_reason === "max_tokens"
           ? "Resposta cortada por max_tokens no audit."
           : "Resposta não chamou submit_audits.",
+      )
+      continue
+    }
+
+    // Truncamento por max_tokens deixa o tool_use.input incompleto. Como o
+    // schema faz `audits.default([])`, um payload truncado faria safeParse
+    // "passar" como 0 sugestões — mascarando a falha. Descarta e tenta de novo.
+    if (message.stop_reason === "max_tokens") {
+      lastError = new Error(
+        "Resposta cortada por max_tokens no audit (tool_use truncado) — payload descartado.",
       )
       continue
     }

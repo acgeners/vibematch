@@ -4,7 +4,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { recalculateAll } from "./calculations"
+import { recalculateScoresNowResult } from "./recalc-queue"
 import {
   computeCalibration,
   computeBucketBreakdown,
@@ -34,7 +34,7 @@ export async function setStackerEnabled(enabled: boolean) {
     .eq("id", config.id)
   if (error) throw new Error(error.message)
 
-  const result = await recalculateAll()
+  const result = await recalculateScoresNowResult()
   revalidatePath("/settings")
   revalidatePath("/ranking")
   revalidatePath("/titles")
@@ -62,7 +62,7 @@ export async function setScoreWeightsAuto(enabled: boolean) {
     .eq("id", config.id)
   if (error) throw new Error(error.message)
 
-  const result = await recalculateAll()
+  const result = await recalculateScoresNowResult()
   revalidatePath("/settings")
   revalidatePath("/preferencias")
   revalidatePath("/ranking")
@@ -107,7 +107,7 @@ export async function updateScoreWeights(updates: ScoreWeightUpdate[]) {
       .eq("formula_version", currentVersion)
   }
 
-  const result = await recalculateAll()
+  const result = await recalculateScoresNowResult()
 
   revalidatePath("/settings")
   revalidatePath("/ranking")
@@ -326,6 +326,10 @@ export async function updateRankingPreferences(update: RankingPreferencesUpdate)
 
   revalidatePath("/settings")
   revalidatePath("/ranking")
+  // getPreferences (app/ranking/page.tsx) é um unstable_cache que revalidatePath
+  // NÃO derruba (entradas de unstable_cache só caem por TTL ou tag). Sem isto a
+  // preferência salva demoraria o TTL (5min) pra refletir no ranking.
+  revalidateTag("ranking-preferences", "max")
   return { error: null }
 }
 
@@ -471,7 +475,7 @@ export async function getCalibrationSnapshot() {
  * Força recalcular tudo (e re-calibrar formula_config automaticamente).
  */
 export async function recalculateNow() {
-  const result = await recalculateAll()
+  const result = await recalculateScoresNowResult()
   revalidatePath("/settings")
   revalidatePath("/titles")
   revalidatePath("/ranking")
@@ -605,7 +609,7 @@ export async function consolidatePendingReviewSummaries(maxWorks = 10): Promise<
   error?: string
 }> {
   try {
-    const { consolidateReviewsDetailed, hashReviewInputs } = await import(
+    const { consolidateReviewsDetailed, hashReviewInputs, packReviewSummaryMeta } = await import(
       "@/lib/ai-recommendation/review-summarizer"
     )
     const { createAdminClient } = await import("@/lib/supabase/admin")
@@ -685,7 +689,10 @@ export async function consolidatePendingReviewSummaries(maxWorks = 10): Promise<
         .update({
           review_summary: result.summary,
           review_summary_at: new Date().toISOString(),
-          review_summary_inputs_hash: hashReviewInputs(inputs),
+          review_summary_inputs_hash: packReviewSummaryMeta(
+            hashReviewInputs(inputs),
+            inputs.filter((i) => i.text.trim().length > 0).length,
+          ),
         })
         .eq("id", id)
       if (upErr) {
@@ -702,6 +709,133 @@ export async function consolidatePendingReviewSummaries(maxWorks = 10): Promise<
     return { data: progress }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Erro ao resumir reviews" }
+  }
+}
+
+export interface ConsolidateReviewDigestsProgress {
+  attempted: number
+  digested: number
+  skipped: number
+  failed: number
+  tokensIn: number
+  tokensOut: number
+  abortedEarly?: boolean
+}
+
+/**
+ * Item C, Passe 2 — gera o DIGEST estruturado (Sonnet) pras obras com reviews
+ * salvas e sem digest fresco (ausente ou de versão antiga). Batch OPT-IN (não
+ * dispara sozinho em saveWorkReviews — o user controla o gasto Sonnet). Mesma
+ * mecânica do backfill de resumo: limita por `maxWorks`, aborta após 3 falhas
+ * de API consecutivas. Tolerante: sem a migration 103 retorna erro explicativo.
+ */
+export async function consolidatePendingReviewDigests(maxWorks = 10): Promise<{
+  data?: ConsolidateReviewDigestsProgress
+  error?: string
+}> {
+  try {
+    const { consolidateReviewsDigestDetailed, REVIEW_DIGEST_VERSION } = await import(
+      "@/lib/ai-recommendation/review-summarizer"
+    )
+    const { createAdminClient } = await import("@/lib/supabase/admin")
+    const supabase = createAdminClient()
+
+    // work_ids distintos com reviews (pagina — work_reviews pode ter milhares).
+    const reviewedIds = new Set<string>()
+    const PAGE = 1000
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("work_reviews")
+        .select("work_id")
+        .range(from, from + PAGE - 1)
+      if (error) return { error: error.message }
+      for (const r of data ?? []) reviewedIds.add(r.work_id as string)
+      if (!data || data.length < PAGE) break
+    }
+
+    const progress: ConsolidateReviewDigestsProgress = {
+      attempted: 0,
+      digested: 0,
+      skipped: 0,
+      failed: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+    }
+    if (reviewedIds.size === 0) return { data: progress }
+
+    const ids = [...reviewedIds]
+    const { data: workRows, error: workErr } = await supabase
+      .from("works")
+      .select("id, review_digest, review_digest_version")
+      .in("id", ids)
+    if (workErr) {
+      return {
+        error: `Digest indisponível (aplique a migration 103_works_review_digest): ${workErr.message}`,
+      }
+    }
+    // Pendente = sem digest OU digest de versão antiga (regenera no bump).
+    const pendingIds = (workRows ?? [])
+      .filter((w) => {
+        const row = w as { review_digest: unknown; review_digest_version: string | null }
+        return row.review_digest == null || row.review_digest_version !== REVIEW_DIGEST_VERSION
+      })
+      .map((w) => w.id as string)
+      .slice(0, maxWorks)
+
+    let consecutiveApiFailures = 0
+    const MAX_CONSECUTIVE_API_FAILURES = 3
+
+    for (const id of pendingIds) {
+      progress.attempted += 1
+      const { data: revRows } = await supabase
+        .from("work_reviews")
+        .select("source, text, user_rating")
+        .eq("work_id", id)
+      const inputs = (revRows ?? []).map((r) => ({
+        source: (r.source as string | null) ?? "desconhecida",
+        text: (r.text as string | null) ?? "",
+        userRating: r.user_rating != null ? Number(r.user_rating) : null,
+      }))
+      const status = await consolidateReviewsDigestDetailed(inputs, { workId: id })
+      if (status.kind === "skipped") {
+        progress.skipped += 1
+        consecutiveApiFailures = 0
+        continue
+      }
+      if (status.kind === "api_failed") {
+        progress.failed += 1
+        consecutiveApiFailures += 1
+        if (consecutiveApiFailures >= MAX_CONSECUTIVE_API_FAILURES) {
+          progress.abortedEarly = true
+          break
+        }
+        continue
+      }
+      consecutiveApiFailures = 0
+      const nNonEmpty = inputs.filter((i) => i.text.trim().length > 0).length
+      const { error: upErr } = await supabase
+        .from("works")
+        .update({
+          review_digest: status.result.digest,
+          review_digest_at: new Date().toISOString(),
+          review_digest_n: nNonEmpty,
+          review_digest_version: REVIEW_DIGEST_VERSION,
+        })
+        .eq("id", id)
+      if (upErr) {
+        console.error("[consolidatePendingReviewDigests] update falhou:", upErr)
+        progress.failed += 1
+        continue
+      }
+      progress.digested += 1
+      progress.tokensIn += status.result.tokensIn
+      progress.tokensOut += status.result.tokensOut
+    }
+
+    revalidatePath("/settings")
+    return { data: progress }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro ao gerar digest de reviews" }
   }
 }
 

@@ -55,7 +55,7 @@ export function FavoritesStatsHeader({ summary, scoreThresholds, actions }: Favo
                 <Badge
                   key={entry.slug}
                   variant="outline"
-                  className="gap-1 text-[10px] font-normal"
+                  className="gap-1 text-[11px] font-normal"
                   title={`${info?.name ?? entry.slug} (n=${entry.n})`}
                 >
                   {info?.emoji} {info?.name ?? entry.slug}

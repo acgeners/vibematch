@@ -130,7 +130,7 @@ export function ColumnPicker({
         <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
           {triggerIcon ?? <Columns3 className="h-3.5 w-3.5" />}
           {triggerLabel}
-          <span className="rounded-full bg-muted/70 px-1.5 py-0 text-[10px] font-medium tabular-nums text-muted-foreground">
+          <span className="rounded-full bg-muted/70 px-1.5 py-0 text-[11px] font-medium tabular-nums text-muted-foreground">
             {visibleCount}/{togglableColumns.length}
           </span>
         </Button>
@@ -148,7 +148,7 @@ export function ColumnPicker({
               variant="ghost"
               size="xs"
               onClick={onReset}
-              className="h-6 gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+              className="h-6 gap-1 text-[11px] text-muted-foreground hover:text-foreground"
             >
               <RotateCcw className="h-3 w-3" />
               Padrão
@@ -165,7 +165,7 @@ export function ColumnPicker({
                   type="button"
                   onClick={() => onTogglePreset?.(preset.id)}
                   className={cn(
-                    "rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors",
+                    "rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors",
                     active
                       ? "border-primary bg-primary/15 text-primary"
                       : "border-border/70 bg-background/60 text-muted-foreground hover:border-border hover:text-foreground"

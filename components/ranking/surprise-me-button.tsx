@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { ExternalLink, ImageOff, Sparkles } from "lucide-react"
+import { ExternalLink, ImageOff, Shuffle } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { Button } from "@/components/ui/button"
 import {
@@ -66,16 +66,22 @@ export function SurpriseMeButton({ entries, poolSize = 20 }: SurpriseMeButtonPro
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)} className="gap-1.5">
-        <Sparkles className="h-3.5 w-3.5" />
-        Surpreenda-me
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen(true)}
+        className="h-9 gap-1.5"
+        title="Não quer decidir? Sorteia leituras do topo do seu ranking (grátis, sem IA)."
+      >
+        <Shuffle className="h-3.5 w-3.5" />
+        Escolhe por mim
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-amber-500" />
+              <Shuffle className="h-4 w-4 text-amber-500" />
               Suas leituras de hoje
             </DialogTitle>
             <DialogDescription>

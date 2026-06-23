@@ -11,7 +11,7 @@ import {
 } from "@/lib/external/index"
 import { saveWorkReviews, loadWorkReviewsAsSourced } from "@/lib/external/persist-reviews"
 import type { ExternalSourceId, SourcedReview } from "@/lib/external/types"
-import { getManualReviews } from "@/server/queries/manual-reviews"
+import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { markRecalcPending } from "./recalc-queue"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import type { AiEvaluation } from "@/types/domain"
@@ -187,18 +187,18 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     }
     const externalMs = Date.now() - externalStart
 
-    // Reviews manuais (work_manual_reviews) — curadas pelo usuário. São tratadas
-    // como evidência DIRETA: sempre entram no prompt (prepend → recebem R1…),
-    // nunca passam pelo cap/sampler das externas e sobrevivem ao snapshot de
-    // work_reviews. "manual" não está no enum ExternalSourceId; o render usa
-    // `isManual`, não a fonte — cast localizado evita widening do tipo.
-    const manualReviews = await getManualReviews(workId)
-    const manualSourced: SourcedReview[] = manualReviews.map((m) => ({
-      source: "manual" as unknown as ExternalSourceId,
+    // Reviews EXTERNAS adicionadas à mão (work_external_reviews_manual) — fallback para
+    // quando a busca automática acha poucas/nenhuma. São tratadas como evidência DIRETA:
+    // sempre entram no prompt (prepend → recebem R1…), nunca passam pelo cap/sampler das
+    // scrapadas. SEM nota pessoal (não é opinião da usuária). A fonte é REAL (anilist,
+    // mangaupdates…) e válida em ExternalSourceId; `isManual` marca a origem manual.
+    const manualExternal = await readManualExternalReviewsForDisplay(workId)
+    const manualSourced: SourcedReview[] = manualExternal.map((m) => ({
+      source: m.source as ExternalSourceId,
       sourceTitle: work.title,
       matchScore: 1,
       text: m.text,
-      userRating: m.user_rating ?? undefined,
+      userRating: undefined,
       textLength: m.text.length,
       isManual: true,
     }))

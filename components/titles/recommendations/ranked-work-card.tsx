@@ -67,11 +67,11 @@ export function RankedWorkCard({ rank, ranked }: RankedWorkCardProps) {
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="max-w-[320px] space-y-1.5">
-                <p className="text-xs font-semibold">IA Re-rank: {Math.round(alignment_score)}/100</p>
+                <p className="text-xs font-semibold">Veredito IA: {Math.round(alignment_score)}/100</p>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Score do Claude pra essa obra considerando seu perfil de gosto + contexto da run.
                 </p>
-                <p className="text-[10px] leading-relaxed text-muted-foreground">
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
                   90+ excepcional · 70–89 forte · 50–69 moderado · 30–49 fraco · &lt;30 pouco alinhado
                 </p>
               </TooltipContent>
@@ -84,7 +84,7 @@ export function RankedWorkCard({ rank, ranked }: RankedWorkCardProps) {
         {top_match_factors.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {top_match_factors.map((factor) => (
-              <Badge key={factor} variant="outline" className="text-[10px] font-normal">
+              <Badge key={factor} variant="outline" className="text-[11px] font-normal">
                 {factor}
               </Badge>
             ))}

@@ -143,6 +143,7 @@ export function StatusActionButton({
 export function UpdateDataActionButton({
   workId,
   currentWork,
+  currentCovers,
 }: {
   workId: string
   currentWork: {
@@ -154,6 +155,7 @@ export function UpdateDataActionButton({
     totalChapters?: number | null
     observations?: string | null
   }
+  currentCovers?: Array<{ url: string; source?: string | null; isPrimary?: boolean }>
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -162,7 +164,14 @@ export function UpdateDataActionButton({
         <RefreshCw className="h-4 w-4" />
         Atualizar dados
       </Button>
-      <UpdateDataDialog workId={workId} currentWork={currentWork} open={open} onOpenChange={setOpen} hideTrigger />
+      <UpdateDataDialog
+        workId={workId}
+        currentWork={currentWork}
+        currentCovers={currentCovers}
+        open={open}
+        onOpenChange={setOpen}
+        hideTrigger
+      />
     </>
   )
 }

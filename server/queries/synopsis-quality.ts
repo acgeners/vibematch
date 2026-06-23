@@ -35,6 +35,7 @@ function pickActiveRaw<T extends { prompt_version?: string | null; predicted_at?
 }
 
 export interface SynopsisQualityPredictionRow {
+  id: string
   workId: string
   predictedQuality: SynopsisQuality
   justification: string | null
@@ -49,6 +50,7 @@ export interface SynopsisQualityPredictionRow {
 
 function mapRow(row: Record<string, unknown>): SynopsisQualityPredictionRow {
   return {
+    id: row.id as string,
     workId: row.work_id as string,
     predictedQuality: row.predicted_quality as SynopsisQuality,
     justification: (row.justification as string | null) ?? null,

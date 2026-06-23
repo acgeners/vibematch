@@ -11,6 +11,31 @@ import { pickPrimaryCover } from "@/lib/work-derived"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quality"
 
+// Tokeniza a busca igual ao filtro antigo do ranking: separa por espaços e
+// pontuação para que o padrão "a depois b depois c" atravesse vírgulas/`?`/etc.
+// presentes no título mas ausentes na busca.
+function searchTokens(search: string): string[] {
+  return search
+    .replace(/[%_]/g, "")
+    .split(/[\s,;:!?·•–—()[\]{}'"`]+/)
+    .filter(Boolean)
+    .map((t) => t.toLowerCase())
+}
+
+// Verdadeiro quando `name` contém todos os tokens na ordem dada (equivalente ao
+// ILIKE `%a%b%c%`). Usado para casar title/original_title/alternative_titles.
+function nameMatchesTokens(name: string | null | undefined, tokens: string[]): boolean {
+  if (!name) return false
+  const haystack = name.toLowerCase()
+  let from = 0
+  for (const token of tokens) {
+    const idx = haystack.indexOf(token, from)
+    if (idx === -1) return false
+    from = idx + token.length
+  }
+  return true
+}
+
 export interface RankingDifferentiator {
   slug: string
   diff: number
@@ -247,6 +272,7 @@ export async function getRanking(
     tagAllIds,
     tagAnyIds,
     tagExcludeIds,
+    searchIds,
   ] = await Promise.all([
     filters.genreAll?.length
       ? supabase
@@ -306,6 +332,36 @@ export async function getRanking(
           .in("tags.slug", filters.tagSlugsExclude)
           .then(({ data }) => [...new Set((data ?? []).map((r) => r.work_id))])
       : Promise.resolve(null),
+    // Resolve a busca por título para IDs. PostgREST não faz ilike sobre text[]
+    // (alternative_titles), então a busca DB antiga só cobria title +
+    // original_title — um título encontrável apenas pelo alias "não aparecia na
+    // busca mas acusava duplicado ao criar". Aqui cobrimos os MESMOS campos da
+    // detecção de duplicata (server/actions/works.ts): title + original_title +
+    // alternative_titles. Mesma técnica de getSearchMatchIds em
+    // server/queries/works.ts; mantém a tokenização atravessa-pontuação.
+    filters.search?.trim()
+      ? (async (): Promise<string[] | null> => {
+          const tokens = searchTokens(filters.search!)
+          if (!tokens.length) return null
+          const { data, error } = await supabase
+            .from("works")
+            .select("id, title, original_title, alternative_titles")
+            .limit(2000)
+          if (error) throw new Error(error.message)
+          return (data ?? [])
+            .filter(
+              (w: {
+                title: string | null
+                original_title: string | null
+                alternative_titles: string[] | null
+              }) =>
+                nameMatchesTokens(w.title, tokens) ||
+                nameMatchesTokens(w.original_title, tokens) ||
+                (w.alternative_titles ?? []).some((alt) => nameMatchesTokens(alt, tokens)),
+            )
+            .map((w: { id: string }) => w.id)
+        })()
+      : Promise.resolve(null),
     ])
 
   // Combine include sets via intersection; expand exclude set.
@@ -314,6 +370,9 @@ export async function getRanking(
   if (genreAnyIds) includeSets.push(genreAnyIds)
   if (tagAllIds) includeSets.push(tagAllIds)
   if (tagAnyIds) includeSets.push(tagAnyIds)
+  // searchIds é null quando não há busca; [] quando a busca não casou nada (a
+  // interseção vazia abaixo retorna [] corretamente).
+  if (searchIds) includeSets.push(searchIds)
   const excludeIds = new Set<string>([
     ...(genreExcludeIds ?? []),
     ...(tagExcludeIds ?? []),
@@ -349,22 +408,8 @@ export async function getRanking(
     worksQuery = worksQuery.eq("is_archived", false)
   }
 
-  if (filters.search?.trim()) {
-    // Tokeniza separando por espaços e pontuação: o padrão `%a%b%c%` permite que
-    // o ILIKE atravesse vírgulas/`?`/etc. presentes no título mas ausentes na
-    // busca. Vírgulas também são separadores do filtro `or` do PostgREST, então
-    // não podem aparecer no valor.
-    const tokens = filters.search
-      .replace(/[%_]/g, "")
-      .split(/[\s,;:!?·•–—()[\]{}'"`]+/)
-      .filter(Boolean)
-    if (tokens.length) {
-      const pattern = `%${tokens.join("%")}%`
-      worksQuery = worksQuery.or(
-        `title.ilike.${pattern},original_title.ilike.${pattern}`
-      )
-    }
-  }
+  // A busca por título agora é resolvida para IDs no bloco paralelo acima
+  // (searchIds → includeSets), cobrindo também alternative_titles.
 
   if (allowedIds) worksQuery = worksQuery.in("id", allowedIds)
   // If only exclude filters are present, apply them via .not(in)
@@ -386,7 +431,10 @@ export async function getRanking(
   if (filters.aiEvalStatus?.length) {
     worksQuery = worksQuery.in("ai_eval_status", filters.aiEvalStatus)
   }
-  if (filters.synopsisQualities?.length) {
+  // Só pré-filtra no SQL quando NÃO há filtro de previsão IA ativo. Com a
+  // previsão ativa os dois filtros viram OR (em memória, abaixo), e este
+  // pré-filtro excluiria do fetch as obras que casam só pela previsão.
+  if (filters.synopsisQualities?.length && !filters.predictedSynopsisQualities?.length) {
     worksQuery = worksQuery.in("synopsis_quality", filters.synopsisQualities)
   }
   if (filters.minTotalChapters != null) {
@@ -516,15 +564,26 @@ export async function getRanking(
   // Filtros de gênero/tag (genreAll/Any/Exclude, tagSlugsAll/Any/Exclude) já são
   // aplicados em SQL via allowedIds/excludeIds (pre-resolução por pivot, acima).
   // O re-filtro em memória era redundante e exigia carregar tags/genres no payload.
-  if (filters.synopsisQualities?.length) {
-    const wanted = new Set(filters.synopsisQualities)
-    entries = entries.filter((e) => e.synopsisQuality != null && wanted.has(e.synopsisQuality))
-  }
-  if (filters.predictedSynopsisQualities?.length) {
-    const wanted = new Set(filters.predictedSynopsisQualities)
-    entries = entries.filter(
-      (e) => e.predictedSynopsisQuality != null && wanted.has(e.predictedSynopsisQuality)
-    )
+  // Interesse na sinopse (manual) e previsão IA são combinados em OR entre si: a
+  // obra entra se casar QUALQUER um dos dois (não precisa casar os dois). Quando
+  // só um está ativo, equivale ao filtro simples daquele campo. Os demais
+  // filtros seguem AND.
+  const wantedSynopsis = filters.synopsisQualities?.length
+    ? new Set(filters.synopsisQualities)
+    : null
+  const wantedSynopsisPred = filters.predictedSynopsisQualities?.length
+    ? new Set(filters.predictedSynopsisQualities)
+    : null
+  if (wantedSynopsis || wantedSynopsisPred) {
+    entries = entries.filter((e) => {
+      const manualMatch =
+        wantedSynopsis != null && e.synopsisQuality != null && wantedSynopsis.has(e.synopsisQuality)
+      const predMatch =
+        wantedSynopsisPred != null &&
+        e.predictedSynopsisQuality != null &&
+        wantedSynopsisPred.has(e.predictedSynopsisQuality)
+      return manualMatch || predMatch
+    })
   }
   if (filters.minTotalChapters != null) {
     const min = filters.minTotalChapters
@@ -565,13 +624,17 @@ export async function getRanking(
       return p != null && p <= max
     })
   }
+  // Veredito IA (alignment) é calculado sob demanda/pago — a maioria das obras tem
+  // alignment_score NULL. Um mínimo/máximo NÃO deve reprovar quem nunca teve o
+  // Veredito calculado (senão o filtro esconde catálogos inteiros, ex: Untracked);
+  // nulo = "não avaliado por este critério" → passa.
   if (filters.minAlignment != null) {
     const min = filters.minAlignment
-    entries = entries.filter((e) => e.alignmentScore != null && e.alignmentScore >= min)
+    entries = entries.filter((e) => e.alignmentScore == null || e.alignmentScore >= min)
   }
   if (filters.maxAlignment != null) {
     const max = filters.maxAlignment
-    entries = entries.filter((e) => e.alignmentScore != null && e.alignmentScore <= max)
+    entries = entries.filter((e) => e.alignmentScore == null || e.alignmentScore <= max)
   }
   if (filters.minPlatformAvg != null) {
     const min = filters.minPlatformAvg

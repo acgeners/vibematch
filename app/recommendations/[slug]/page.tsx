@@ -75,7 +75,7 @@ export default async function RunDetailPage({ params }: PageProps) {
       ? "Próxima leitura"
       : run.mode === "ranking"
         ? "Ranking (filtrado)"
-        : "Análise do gosto"
+        : "Re-ranquear favoritos"
 
   const droppedCount =
     run.nAvailable != null && run.nAvailable > run.nCandidates

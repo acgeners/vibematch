@@ -91,7 +91,7 @@ export function RankedWorksView({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-xs uppercase tracking-wide text-muted-foreground">
-            Min IA Rk
+            Min Veredito IA
           </span>
           {PRESETS.map((p) => (
             <button
@@ -133,7 +133,7 @@ export function RankedWorksView({
 
       {filtered.length === 0 ? (
         <p className="rounded-md border bg-card/40 p-3 text-sm text-muted-foreground">
-          Nenhuma obra com IA Rk ≥ {minAlignment}.
+          Nenhuma obra com Veredito IA ≥ {minAlignment}.
         </p>
       ) : viewMode === "heatmap" ? (
         heatmapWorks.length === 0 ? (

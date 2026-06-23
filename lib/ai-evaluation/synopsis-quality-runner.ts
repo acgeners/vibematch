@@ -1,7 +1,6 @@
 import "server-only"
 import type Anthropic from "@anthropic-ai/sdk"
-import { getCandidateById } from "@/server/queries/recommendations"
-import { computeProfileSignature, loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
+import { computeProfileSignature } from "@/lib/ai-recommendation/taste-profile"
 import { upsertSynopsisPrediction } from "@/server/queries/synopsis-quality"
 import { predictSynopsisQuality, type PredictWorkInput } from "./synopsis-quality-predictor"
 import type { TasteProfileRow } from "@/lib/ai-recommendation/types"
@@ -49,17 +48,17 @@ export async function predictAndPersistSynopsisQuality(
 
 /**
  * Auto-trigger (best-effort) chamado quando uma obra ganha/atualiza a sinopse
- * canônica. SÓ roda quando já existe um perfil de gosto corrente NÃO-stub —
- * nunca gera um perfil LLM aqui (evita custo surpresa no fluxo de save/import).
- * Engole erros: a previsão é acessória ao salvamento da obra.
+ * canônica. Roteado pela orquestração durável (Fase B passo 4): background =
+ * `isBackground` ⇒ só prevê quando o perfil está FRESH (nunca gera/atualiza
+ * perfil — evita custo surpresa no save/import) e quando a assinatura mudou.
+ * Job durável + dedup + readiness por assinatura. Engole erros (acessório ao save).
  */
 export async function autoPredictSynopsisQuality(workId: string): Promise<void> {
   try {
-    const profile = await loadCurrentTasteProfile()
-    if (!profile || profile.is_stub) return
-    const candidate = await getCandidateById(workId)
-    if (!candidate || !candidate.synopsis) return
-    await predictAndPersistSynopsisQuality(profile, candidate)
+    const { ensurePredictInterest, SupabaseInterestGateway } = await import(
+      "@/lib/orchestration/integrations/synopsis-interest"
+    )
+    await ensurePredictInterest(workId, { isBackground: true, gateway: new SupabaseInterestGateway() })
   } catch (err) {
     console.error("[synopsis-quality] auto-predict falhou:", err)
   }

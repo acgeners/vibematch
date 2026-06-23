@@ -188,13 +188,13 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
                         <PublicationStatusBadge
                           statusId={w.publicationStatusId}
                           compact
-                          className="px-2 py-0.5 text-[10px] font-medium"
+                          className="px-2 py-0.5 text-[11px] font-medium"
                         />
                       )}
                       {w.personalStatusId != null && (
                         <PersonalStatusBadge
                           statusId={w.personalStatusId}
-                          className="px-2 py-0.5 text-[10px] font-medium"
+                          className="px-2 py-0.5 text-[11px] font-medium"
                         />
                       )}
                     </div>

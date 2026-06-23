@@ -38,12 +38,22 @@ export function RecalcPendingControl({
     setRunning(true)
     try {
       const res = await triggerRecalcNow()
-      toast.success(
-        `Notas recalculadas (${res.recalculated} obra${res.recalculated === 1 ? "" : "s"}).`,
-      )
-      setDone(true)
-      onDone?.()
-      refresh()
+      if (res.status === "succeeded") {
+        toast.success(`Notas recalculadas (${res.recalculated} obra${res.recalculated === 1 ? "" : "s"}).`)
+        setDone(true)
+        onDone?.()
+        refresh()
+      } else if (res.status === "fresh") {
+        toast.success("As notas já estão atualizadas.")
+        setDone(true)
+        onDone?.()
+      } else if (res.status === "processing") {
+        toast.info("Recálculo em andamento.")
+        refresh()
+      } else {
+        // failed — mantém o botão para retry explícito.
+        toast.error("O recálculo falhou. Tente novamente.")
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Erro ao recalcular")
     } finally {

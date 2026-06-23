@@ -93,7 +93,7 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
       { key: "score:decision", label: "Prioridade" },
       { key: "score:expectedScore", label: "Nota Prevista" },
       { key: "score:personalFit", label: "Alinhamento" },
-      { key: "score:alignmentScore", label: "IA Rk." },
+      { key: "score:alignmentScore", label: "Veredito" },
       { key: "score:platformAvg", label: "Média externa" },
       { key: "score:userScore", label: "Pessoal" },
     ],
@@ -123,7 +123,7 @@ const COMPARE_ROW_COLUMN_DEFS: ColumnPickerColumnDef[] = COMPARE_ROW_GROUPS.flat
   g.rows.map((r) => ({ key: r.key, label: r.label, group: g.id }))
 )
 
-// Default enxuto: visíveis = Capítulos, Ano, Nota Prevista, IA Rk, Média externa,
+// Default enxuto: visíveis = Capítulos, Ano, Nota Prevista, Veredito IA, Média externa,
 // todos os atributos e Gêneros/Tags. Escondidos por padrão: Status e Pessoal.
 const DEFAULT_ROWS_CONFIG: ColumnPickerConfig = {
   order: ALL_ROW_KEYS,
@@ -217,7 +217,7 @@ export function WorkCompareDrawer({
   const [showBestWorst, setShowBestWorst] = useState(true)
   const [reranking, setReranking] = useState(false)
   // Bump pra forçar o re-fetch das obras após o desempate por IA (repovoar a
-  // linha "IA Rk." com os alignment_score recém-computados).
+  // linha "Veredito IA." com os alignment_score recém-computados).
   const [reloadKey, setReloadKey] = useState(0)
   // Veredito do último desempate por IA (popup com 1º/2º/3º + justificativa).
   const [verdict, setVerdict] = useState<VerdictItem[] | null>(null)
@@ -336,7 +336,7 @@ export function WorkCompareDrawer({
 
   // Desempate por IA: roda o re-ranker comparando só as obras do drawer
   // cabeça-a-cabeça (rerankClusterAction), depois re-fetcha pra repovoar a linha
-  // "IA Rk." com os scores/justificativas frescos. O destaque "Melhor/pior"
+  // "Veredito IA." com os scores/justificativas frescos. O destaque "Melhor/pior"
   // marca o vencedor em verde automaticamente.
   const handleRerank = () => {
     if (ids.length < 2 || reranking) return
@@ -362,7 +362,7 @@ export function WorkCompareDrawer({
           }
         })
         setVerdict(items)
-        // Re-fetch em paralelo pra atualizar as linhas IA Rk. / Prioridade no fundo.
+        // Re-fetch em paralelo pra atualizar as linhas Veredito IA. / Prioridade no fundo.
         setReloadKey((k) => k + 1)
       })
       .catch((err: unknown) =>
@@ -435,7 +435,7 @@ export function WorkCompareDrawer({
                 className="h-7 gap-1 text-xs"
                 title={
                   isPaid
-                    ? "Roda o IA re-rank comparando estas obras entre si e desempata por veredito (IA Rk. + justificativa). Conta uma execução do limite diário."
+                    ? "Roda o IA re-rank comparando estas obras entre si e desempata por veredito (Veredito IA + justificativa). Conta uma execução do limite diário."
                     : "Desempate por IA é uma feature do plano Pago."
                 }
               >
@@ -526,7 +526,7 @@ function VerdictDialog({
             Veredito da IA
           </DialogTitle>
           <DialogDescription>
-            Comparação cabeça-a-cabeça destas {total} obras. A IA Rk. (0–100)
+            Comparação cabeça-a-cabeça destas {total} obras. O Veredito IA (0–100)
             ordena o desempate e já entrou na Prioridade de cada uma.
           </DialogDescription>
         </DialogHeader>
@@ -625,7 +625,7 @@ function VerdictCard({ item, position }: { item: VerdictItem; position: number }
           </div>
         )}
         <span className="absolute left-0.5 top-0.5 text-base leading-none drop-shadow">
-          {medal ?? <span className="rounded bg-background/80 px-1 text-[10px] font-bold tabular-nums">{position}º</span>}
+          {medal ?? <span className="rounded bg-background/80 px-1 text-[11px] font-bold tabular-nums">{position}º</span>}
         </span>
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -637,7 +637,7 @@ function VerdictCard({ item, position }: { item: VerdictItem; position: number }
           )}
         </h3>
         <span className="inline-flex w-fit items-center gap-1 rounded-md border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-violet-700 dark:text-violet-300">
-          IA Rk. {Math.round(item.alignmentScore)}
+          Veredito {Math.round(item.alignmentScore)}
         </span>
         <p className="text-xs leading-relaxed text-muted-foreground">{item.justification}</p>
       </div>
@@ -834,7 +834,7 @@ function CompareGrid({
     asAttributeBox?: boolean
   }> = [
     {
-      // Prioridade (0–10) — âncora na Prevista + IA Rk quando há. Mesmo box
+      // Prioridade (0–10) — âncora na Prevista + Veredito IA quando há. Mesmo box
       // colorido dos atributos (escala 0–10).
       key: "score:decision",
       label: "Prioridade",
@@ -859,12 +859,12 @@ function CompareGrid({
       formatScore: (v) => `${Math.round(v)}%`,
     },
     {
-      // IA Rk usa escala 0–100 (diferente dos demais 0–10). thresholds=null
+      // Veredito IA usa escala 0–100 (diferente dos demais 0–10). thresholds=null
       // pula o ScoreBadge colorido por percentil; formatScore mostra inteiro.
       // wrapScore anexa tooltip com a justificativa do LLM no hover do score
       // (em vez de inline, que ocupava muito espaço vertical).
       key: "score:alignmentScore",
-      label: "IA Rk.",
+      label: "Veredito",
       get: (w) => w.alignmentScore,
       thresholds: null,
       formatScore: (v) => `${Math.round(v)}/100`,
@@ -896,7 +896,7 @@ function CompareGrid({
       formatScore: (v) => v.toFixed(2),
       renderExtra: (w) =>
         w.totalVotes > 0 ? (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-[11px] text-muted-foreground">
             {formatVotes(w.totalVotes)} votos
           </span>
         ) : null,
@@ -1143,7 +1143,7 @@ function DifferentialsSummary({ works, compact = false }: { works: CompareWork[]
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Onde elas se diferenciam
         </span>
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-[11px] text-muted-foreground">
           critérios com pelo menos 1.5 ponto de diferença entre maior e menor nota
         </span>
       </div>
@@ -1159,7 +1159,7 @@ function DifferentialsSummary({ works, compact = false }: { works: CompareWork[]
               <div className="flex items-center gap-1.5">
                 <span>{info?.emoji}</span>
                 <span className="font-medium">{info?.name ?? d.slug}</span>
-                <span className="ml-1 rounded-sm bg-amber-200/60 px-1 font-mono text-[10px] font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
+                <span className="ml-1 rounded-sm bg-amber-200/60 px-1 font-mono text-[11px] font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
                   diferença {d.amplitude.toFixed(1)}
                 </span>
               </div>
@@ -1299,7 +1299,7 @@ function SynopsisButton({
         className="max-w-sm space-y-2 p-3 text-sm"
       >
         {synopsisQuality && (
-          <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-1.5 text-[10px] font-semibold text-rose-700">
+          <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-1.5 text-[11px] font-semibold text-rose-700">
             Interesse: {synopsisQuality}
           </span>
         )}
@@ -1349,7 +1349,7 @@ function GenresTagsCell({
         <Badge
           key={`g:${g}`}
           variant="secondary"
-          className="h-5 py-0 text-[10px] font-normal"
+          className="h-5 py-0 text-[11px] font-normal"
         >
           {g}
         </Badge>
@@ -1358,7 +1358,7 @@ function GenresTagsCell({
         <Badge
           key={`t:${t.slug}`}
           variant="outline"
-          className="h-5 py-0 text-[10px] font-normal"
+          className="h-5 py-0 text-[11px] font-normal"
         >
           {t.name}
         </Badge>
@@ -1368,7 +1368,7 @@ function GenresTagsCell({
           <PopoverTrigger asChild>
             <button
               type="button"
-              className="inline-flex h-5 items-center rounded-full border border-dashed border-border/70 bg-background/40 px-2 text-[10px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+              className="inline-flex h-5 items-center rounded-full border border-dashed border-border/70 bg-background/40 px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
             >
               +{remaining} ver
             </button>
@@ -1390,7 +1390,7 @@ function GenresTagsCell({
                     <Badge
                       key={`g:${g}`}
                       variant="secondary"
-                      className="h-5 py-0 text-[10px] font-normal"
+                      className="h-5 py-0 text-[11px] font-normal"
                     >
                       {g}
                     </Badge>
@@ -1428,14 +1428,14 @@ function GenresTagsCell({
                     <div className="space-y-1">
                       {subSections.map((sg) => (
                         <details key={sg.name} className="group">
-                          <summary className="flex cursor-pointer list-none items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                          <summary className="flex cursor-pointer list-none items-center gap-1 text-[11px] font-medium text-muted-foreground">
                             <ChevronDown className="h-2.5 w-2.5 transition-transform group-open:rotate-180" />
                             {sg.name}{" "}
                             <span className="text-muted-foreground/60">({sg.tags.length})</span>
                           </summary>
                           <div className="mt-1 flex flex-wrap gap-1 pl-3.5">
                             {sg.tags.map((t) => (
-                              <Badge key={`t:${t.slug}`} variant="outline" className="h-5 py-0 text-[10px] font-normal">
+                              <Badge key={`t:${t.slug}`} variant="outline" className="h-5 py-0 text-[11px] font-normal">
                                 {t.name}
                               </Badge>
                             ))}
@@ -1449,7 +1449,7 @@ function GenresTagsCell({
                         <Badge
                           key={`t:${t.slug}`}
                           variant="outline"
-                          className="h-5 py-0 text-[10px] font-normal"
+                          className="h-5 py-0 text-[11px] font-normal"
                         >
                           {t.name}
                         </Badge>
@@ -1543,7 +1543,7 @@ interface ScoreRowProps {
   getStub?: (w: CompareWork) => boolean
   renderExtra?: (w: CompareWork) => React.ReactNode
   /** Quando definido, envolve o elemento do score com este wrapper — útil
-   *  pra anexar tooltip/popover (ex.: justificativa do IA Rk no hover). */
+   *  pra anexar tooltip/popover (ex.: justificativa do Veredito IA no hover). */
   wrapScore?: (node: React.ReactNode, w: CompareWork) => React.ReactNode
   /** Renderiza o número no mesmo box dos atributos (CriterionRow) em vez do
    *  ScoreBadge pequeno — usado por Prioridade / Nota Prevista. */

@@ -1,7 +1,7 @@
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { POST_READING_WEIGHT_LABELS, type PostReadingScoreField } from "@/lib/constants/post-reading-criteria"
-import type { CandidateReview, CandidateWorkInput, RatedWorkInput, RecommendationMode, TasteProfilePayload } from "./types"
+import type { CandidateReview, CandidateWorkInput, RatedWorkInput, RecommendationMode, ReviewDigest, ReviewDigestTrait, TasteProfilePayload } from "./types"
 
 const CRITERIA_LIST_TEXT = CRITERION_SLUGS
   .map((slug) => `- ${slug} (${CRITERIA_INFO[slug]?.name ?? slug})`)
@@ -40,6 +40,15 @@ PRINCÍPIOS:
 1. Use o PERFIL DE GOSTO como verdade base. As preferências de critério (\`criterion_preferences\`), tags amadas/evitadas, padrões narrativos e summary são o que define o gosto.
 2. Compare cada candidato contra esse perfil: tags em comum com loved_tags pesam positivamente; presença de avoided_tags pesa negativamente; \`category_scores\` dentro da faixa \`ideal_min..ideal_max\` aumenta o alinhamento.
 3. Quando o usuário fornecer CONTEXTO ADICIONAL (mood, exclusões), trate como viés momentâneo: ajusta a ordem sem substituir o perfil. Ex.: "quero algo leve" reduz drama/tragedy; o perfil ainda dita o resto.
+
+PREFERÊNCIAS E REGRAS DO USUÁRIO (quando o bloco "PREFERÊNCIAS E REGRAS DO USUÁRIO" estiver presente):
+- São declarações do PRÓPRIO usuário, em texto livre. Algumas são CONDICIONAIS ("evito X exceto se Y"); outras são preferências GERAIS ("valorizo arte detalhada mesmo com história simples").
+- Aplique as condicionais como LÓGICA, não como filtro absoluto: só penalize/favoreça quando a condição E a exceção realmente casarem com as tags/category_scores da obra. NÃO rebaixe uma obra só porque o antecedente apareceu — verifique a exceção antes.
+- Trate as gerais como contexto permanente do gosto, no mesmo nível do perfil (mais estável que o CONTEXTO ADICIONAL momentâneo).
+- Quando uma regra mudar sua decisão, CITE-A na justificativa (ou em \`risks\`).
+- Para obras com POUCAS tags ou \`category_scores\` escassos/rasos, apoie-se MAIS nas reviews fornecidas (e nestas preferências) do que nos atributos finos — eles são pouco confiáveis nesses casos.
+- INVERSÃO DE SENTIMENTO: uma review que CONFIRMA um traço que o usuário declarou EVITAR é evidência NEGATIVA pra ele — MESMO que o autor da review AME esse traço. Ex.: "amo que a FL é uma vilã cruel" confirma a crueldade que o usuário evita → conta CONTRA, não a favor. NÃO use nota alta nem o entusiasmo do consenso pra descontar a regra.
+- FORÇA POR EVIDÊNCIA: quando o antecedente de uma regra "evito" é CONFIRMADO por consenso (vários reviews / sinal forte e convergente), reduza o \`alignment_score\` e registre em \`risks\`. Quando a evidência é fraca, única ou incerta (1 review, autor em dúvida), mantenha só como \`risks\` sem derrubar o score.
 4. \`alignment_score\` é 0–100. Use a escala inteira: 90+ é "match excepcional", 70–89 "match forte", 50–69 "match moderado", 30–49 "match fraco", <30 "pouco alinhado". Não comprima tudo perto da média.
 5. Para cada candidato, escreva 1–2 frases justificando o score, citando NOMES de tags e critérios específicos. Quando o candidato tiver bloco \`reviews:\`, vale citar trechos curtos (entre aspas) que reforcem o match ou exponham um risco. Em \`top_match_factors\`, liste 2–4 chips curtos (tags, critérios, padrões ou observações de reviews) que sustentam o score.
 6. Escreva em português brasileiro. Sempre use a tool \`submit_ranking\`. Não retorne texto livre.
@@ -59,6 +68,22 @@ export function truncate(text: string | null | undefined, maxChars: number): str
   const trimmed = text.trim()
   if (trimmed.length <= maxChars) return trimmed
   return `${trimmed.slice(0, maxChars - 1).trimEnd()}…`
+}
+
+/**
+ * Bloco de preferências/regras livres do usuário (Item B) — efeitos cruzados
+ * e orientações gerais que o consultor LLM aplica condicionalmente. Vai no
+ * profileBlock CACHEADO (é fixo entre candidatos/runs; muda só quando o user
+ * edita). Retorna null quando não há regras ativas. Compartilhado pelo ranking
+ * e pelo Deep Dive (deep-dive-prompts importa daqui).
+ */
+export function formatPreferenceRulesBlock(rules: string[] | null | undefined): string | null {
+  if (!rules || rules.length === 0) return null
+  const lines = [
+    "PREFERÊNCIAS E REGRAS DO USUÁRIO (texto livre — orientações pro consultor; condicionais e/ou gerais. Têm precedência sobre o sinal aditivo do perfil quando a condição casar):",
+  ]
+  for (const r of rules) lines.push(`- "${r}"`)
+  return lines.join("\n")
 }
 
 export function formatTagsByGroup(tags: Array<{ name: string; group: string | null }>): string {
@@ -89,6 +114,33 @@ function formatCategoryScores(scores: Partial<Record<string, number>>): string {
     })
     .filter((s): s is string => s !== null)
   return entries.length ? entries.join(", ") : "(sem category_scores)"
+}
+
+/**
+ * Renderiza o digest estruturado das reviews (Item C, Passe 2) num bloco compacto.
+ * Preference-agnostic: a `polarity` é a visão do CONSENSO, não do usuário — o
+ * consultor aplica a inversão de sentimento (traço positivo no consenso que o
+ * user evita conta CONTRA) via instruções no system prompt. Compartilhado pelo
+ * ranking e pelo Deep Dive.
+ */
+export function formatReviewDigestBlock(digest: ReviewDigest): string {
+  const polSym = (p: ReviewDigestTrait["polarity"]) =>
+    p === "positive" ? "+" : p === "negative" ? "−" : "±"
+  const lines = [
+    "consenso das reviews (digest IA estruturado — agnóstico às suas preferências; polaridade = visão do consenso, não a sua):",
+  ]
+  if (digest.consensus) lines.push(`  consenso: ${truncate(digest.consensus, 400)}`)
+  if (digest.divergence) lines.push(`  divergência: ${truncate(digest.divergence, 300)}`)
+  if (digest.salient_traits.length) {
+    const traits = digest.salient_traits
+      .slice(0, 8)
+      .map((t) => `${t.trait} [${t.axis}/${polSym(t.polarity)}]`)
+      .join("; ")
+    lines.push(`  traços salientes: ${traits}`)
+  }
+  if (digest.content_warnings.length) lines.push(`  alertas de conteúdo: ${digest.content_warnings.join("; ")}`)
+  if (digest.execution) lines.push(`  execução: ${truncate(digest.execution, 250)}`)
+  return lines.join("\n")
 }
 
 function formatReviews(reviews: CandidateReview[]): string {
@@ -151,9 +203,14 @@ export function buildRankingUserPromptWithLabel(
   candidates: CandidateWorkInput[],
   modeLabel: string,
   userContext?: string | null,
+  preferenceRules?: string[] | null,
 ): { profileBlock: string; tailBlock: string } {
-  const profileBlock = `PERFIL DE GOSTO (cacheado, base da avaliação):
-${JSON.stringify(profile, null, 2)}`
+  const rulesBlock = formatPreferenceRulesBlock(preferenceRules)
+  const profileBlock = [
+    `PERFIL DE GOSTO (cacheado, base da avaliação):`,
+    JSON.stringify(profile, null, 2),
+    ...(rulesBlock ? ["", rulesBlock] : []),
+  ].join("\n")
 
   const tailLines: string[] = []
 
@@ -181,6 +238,9 @@ ${JSON.stringify(profile, null, 2)}`
     if (plat) tailLines.push(plat)
     if (c.expectedScore != null) tailLines.push(`Nota Esperada (previsão da sua nota)=${c.expectedScore.toFixed(2)}`)
     if (c.fitScore != null) tailLines.push(`fit (alinhamento com seu perfil, 0–1)=${c.fitScore.toFixed(2)}`)
+    // Digest estruturado (Passe 2) tem precedência; cai no resumo-texto (Passe 1).
+    if (c.reviewDigest) tailLines.push(formatReviewDigestBlock(c.reviewDigest))
+    else if (c.reviewSummary) tailLines.push(`consenso das reviews (resumo IA): ${truncate(c.reviewSummary, 600)}`)
     const reviewsBlock = formatReviews(c.reviews)
     if (reviewsBlock) tailLines.push(reviewsBlock)
     tailLines.push("")
@@ -198,6 +258,7 @@ export function buildRankingUserPrompt(
   candidates: CandidateWorkInput[],
   mode: RecommendationMode,
   userContext?: string | null,
+  preferenceRules?: string[] | null,
 ): { profileBlock: string; tailBlock: string } {
   let modeLabel: string
   if (mode === "next_read") {
@@ -207,5 +268,5 @@ export function buildRankingUserPrompt(
   } else {
     modeLabel = "Ranking geral — obras do catálogo respeitando os filtros aplicados pelo usuário (não são necessariamente favoritos). Foco em DESCOBERTA: ranquear quão alinhada cada obra está com o perfil de gosto, destacando obras subestimadas no perfil atual."
   }
-  return buildRankingUserPromptWithLabel(profile, candidates, modeLabel, userContext)
+  return buildRankingUserPromptWithLabel(profile, candidates, modeLabel, userContext, preferenceRules)
 }

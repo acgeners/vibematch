@@ -22,6 +22,10 @@ import { getSynopsisPredictionAccuracy, getSynopsisVersionComparison } from "@/s
 import type { SynopsisPredictionAccuracy, SynopsisVersionComparison } from "@/server/queries/synopsis-quality"
 import { getCurrentPlan } from "@/server/queries/current-user"
 import { planAllows } from "@/lib/plans/capabilities"
+import { SemReviewsTab } from "@/components/ai-evaluation/sem-reviews-tab"
+import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
+import { SemTagsTab } from "@/components/ai-evaluation/sem-tags-tab"
+import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
 
 const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
@@ -524,10 +528,10 @@ function parseSynopsisStates(raw: string | string[] | undefined): SynopsisState[
 }
 
 /**
- * Aba "IA Rk" — fila de re-rank: obras com IA Rk desatualizado E/OU não avaliado
- * (sem IA Rk ainda). Recebe a fila já buscada pelo pai (mesma query do badge, pra
+ * Aba "Veredito IA" — fila de re-rank: obras com Veredito IA desatualizado E/OU não avaliado
+ * (sem Veredito IA ainda). Recebe a fila já buscada pelo pai (mesma query do badge, pra
  * o contador da aba bater com a lista). Compartilha os filtros de Status com a aba
- * de atributos; troca "Estado da avaliação" por "Estado do IA Rk". Sort é no painel.
+ * de atributos; troca "Estado da avaliação" por "Estado do Veredito IA". Sort é no painel.
  */
 function IaRkTab({
   works,
@@ -568,7 +572,7 @@ function IaRkTab({
 /**
  * Aba "Interesse Sinopse" — fila de obras com sinopse canônica que precisam de
  * estimativa IA (desatualizada ou não prevista). Mesmo formato de cards da aba
- * IA Rk. Compartilha os filtros de Status; só os de estado da avaliação não se
+ * Veredito IA. Compartilha os filtros de Status; só os de estado da avaliação não se
  * aplicam.
  */
 function SynopsisTab({
@@ -629,12 +633,34 @@ export default async function AiEvaluationPage({
     tab?: string | string[]
     rk?: string | string[]
     sq?: string | string[]
+    q?: string | string[]
+    src?: string | string[]
+    golden?: string | string[]
+    maxrev?: string | string[]
+    maxtags?: string | string[]
   }>
 }) {
   const params = await searchParams
   const tabRaw = Array.isArray(params.tab) ? params.tab[0] : params.tab
-  const activeTab: "atributos" | "ia-rk" | "sinopse" =
-    tabRaw === "ia-rk" ? "ia-rk" : tabRaw === "sinopse" ? "sinopse" : "atributos"
+  const activeTab: "atributos" | "ia-rk" | "sinopse" | "sem-reviews" | "sem-tags" =
+    tabRaw === "ia-rk" ? "ia-rk"
+    : tabRaw === "sinopse" ? "sinopse"
+    : tabRaw === "sem-reviews" ? "sem-reviews"
+    : tabRaw === "sem-tags" ? "sem-tags"
+    : "atributos"
+
+  // Filtros compartilhados pelas abas de diagnóstico "Sem reviews" e "Sem tags".
+  const noReviewQ = (Array.isArray(params.q) ? params.q[0] : params.q ?? "").trim()
+  const srcRaw = Array.isArray(params.src) ? params.src[0] : params.src
+  const hasExternal: "yes" | "no" | null = srcRaw === "yes" ? "yes" : srcRaw === "no" ? "no" : null
+  const goldenOnly = (Array.isArray(params.golden) ? params.golden[0] : params.golden) === "1"
+  const parseMax = (v: string | string[] | undefined): number => {
+    const raw = Array.isArray(v) ? v[0] : v
+    const n = raw != null && /^\d+$/.test(raw) ? parseInt(raw, 10) : 0
+    return Math.max(0, n)
+  }
+  const maxReviews = parseMax(params.maxrev)
+  const maxTags = parseMax(params.maxtags)
 
   // Filtros de Status + interesse compartilhados pelas 2 abas.
   const { names: pubStatusNames, ids: pubStatusIds } = parseStatusList(params.pub, PUB_STATUS_NAME_TO_ID)
@@ -656,7 +682,7 @@ export default async function AiEvaluationPage({
   // Roda as três filas em paralelo. Todas alimentam o contador do título da aba
   // (precisa estar certo mesmo na aba inativa) e o conteúdo. Queries leves
   // (~tamanho da biblioteca).
-  const [attrResult, iaRkQueue, synopsisQueue, synopsisAccuracy, synopsisComparison, plan] = await Promise.all([
+  const [attrResult, iaRkQueue, synopsisQueue, synopsisAccuracy, synopsisComparison, plan, noReviewResult, noTagsResult] = await Promise.all([
     getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, synopsisQualities, toleranceOverride),
     getAlignmentQueueWorks({
       states: iaRkStates,
@@ -674,10 +700,14 @@ export default async function AiEvaluationPage({
     getSynopsisPredictionAccuracy(),
     getSynopsisVersionComparison(),
     getCurrentPlan(),
+    getWorksWithoutReviews({ q: noReviewQ, pubStatusIds, hasExternal, goldenOnly, maxReviews }),
+    getWorksWithoutTags({ q: noReviewQ, pubStatusIds, hasExternal, goldenOnly, maxTags }),
   ])
   const attrCount = attrResult.works.length
   const iaRkCount = iaRkQueue.length
   const synopsisCount = synopsisQueue.length
+  const noReviewCount = noReviewResult.totalWithoutReviews
+  const noTagsCount = noTagsResult.totalWithoutTags
   const isPaidPlan = planAllows(plan, "smart_shortlist")
 
   // Preserva os filtros ao trocar de aba.
@@ -711,12 +741,28 @@ export default async function AiEvaluationPage({
   if (sq) synParams.set("sq", sq)
   const synHref = `/ai-evaluation?${synParams}`
 
+  const noRevParams = new URLSearchParams({ tab: "sem-reviews" })
+  if (pub) noRevParams.set("pub", pub)
+  if (noReviewQ) noRevParams.set("q", noReviewQ)
+  if (hasExternal) noRevParams.set("src", hasExternal)
+  if (goldenOnly) noRevParams.set("golden", "1")
+  if (maxReviews > 0) noRevParams.set("maxrev", String(maxReviews))
+  const noRevHref = `/ai-evaluation?${noRevParams}`
+
+  const noTagsParams = new URLSearchParams({ tab: "sem-tags" })
+  if (pub) noTagsParams.set("pub", pub)
+  if (noReviewQ) noTagsParams.set("q", noReviewQ)
+  if (hasExternal) noTagsParams.set("src", hasExternal)
+  if (goldenOnly) noTagsParams.set("golden", "1")
+  if (maxTags > 0) noTagsParams.set("maxtags", String(maxTags))
+  const noTagsHref = `/ai-evaluation?${noTagsParams}`
+
   return (
     <div className="space-y-4">
       <Header
         kicker="Avaliação"
         title="Avaliação IA"
-        description="Fila de avaliação/revisão das notas por IA (atributos) e de re-rank (IA Rk) desatualizado ou não avaliado."
+        description="Fila de avaliação/revisão das notas por IA (atributos) e de re-rank (Veredito IA) desatualizado ou não avaliado."
         icon={<Sparkles />}
       />
 
@@ -725,14 +771,40 @@ export default async function AiEvaluationPage({
           IA atributos ({attrCount})
         </EvalTabLink>
         <EvalTabLink href={rkHref} active={activeTab === "ia-rk"}>
-          IA Rk ({iaRkCount})
+          Veredito IA ({iaRkCount})
         </EvalTabLink>
         <EvalTabLink href={synHref} active={activeTab === "sinopse"}>
           Interesse Sinopse ({synopsisCount})
         </EvalTabLink>
+        <EvalTabLink href={noRevHref} active={activeTab === "sem-reviews"}>
+          Sem reviews ({noReviewCount})
+        </EvalTabLink>
+        <EvalTabLink href={noTagsHref} active={activeTab === "sem-tags"}>
+          Sem tags ({noTagsCount})
+        </EvalTabLink>
       </div>
 
-      {activeTab === "sinopse" ? (
+      {activeTab === "sem-reviews" ? (
+        <SemReviewsTab
+          works={noReviewResult.works}
+          totalWithoutReviews={noReviewResult.totalWithoutReviews}
+          q={noReviewQ}
+          activePubStatuses={pubStatusNames}
+          hasExternal={hasExternal}
+          goldenOnly={goldenOnly}
+          maxReviews={maxReviews}
+        />
+      ) : activeTab === "sem-tags" ? (
+        <SemTagsTab
+          works={noTagsResult.works}
+          totalWithoutTags={noTagsResult.totalWithoutTags}
+          q={noReviewQ}
+          activePubStatuses={pubStatusNames}
+          hasExternal={hasExternal}
+          goldenOnly={goldenOnly}
+          maxTags={maxTags}
+        />
+      ) : activeTab === "sinopse" ? (
         <SynopsisTab
           works={synopsisQueue}
           accuracy={synopsisAccuracy}

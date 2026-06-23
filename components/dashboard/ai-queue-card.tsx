@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 interface AiQueueCardProps {
   /** Avaliação de atributos pendente (ai_eval_status pending + review_pending). */
   attributes: number
-  /** Fila de re-rank (IA Rk desatualizado/não avaliado). */
+  /** Fila de re-rank (Veredito IA desatualizado/não avaliado). */
   iaRk: number
   /** Fila de previsão de interesse por sinopse. */
   synopsis: number
@@ -21,7 +21,7 @@ interface QueueRow {
 export function AiQueueCard({ attributes, iaRk, synopsis }: AiQueueCardProps) {
   const rows: QueueRow[] = [
     { label: "Atributos", count: attributes, href: "/ai-evaluation", icon: ListChecks },
-    { label: "IA Rk", count: iaRk, href: "/ai-evaluation?tab=ia-rk", icon: Sparkles },
+    { label: "Veredito IA", count: iaRk, href: "/ai-evaluation?tab=ia-rk", icon: Sparkles },
     { label: "Interesse por sinopse", count: synopsis, href: "/ai-evaluation?tab=sinopse", icon: FileText },
   ]
   const total = attributes + iaRk + synopsis

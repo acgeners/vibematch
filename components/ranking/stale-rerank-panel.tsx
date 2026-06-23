@@ -38,8 +38,8 @@ const DEFAULT_BATCH_SIZE = 30
 const PER_CALL_CHUNK = 10
 
 /**
- * Fila de IA Rk (aba /ai-evaluation?tab=ia-rk): obras desatualizadas (re-rank
- * velho) e/ou não avaliadas (sem IA Rk). Mesmo layout de cards da aba de
+ * Fila de Veredito IA (aba /ai-evaluation?tab=ia-rk): obras desatualizadas (re-rank
+ * velho) e/ou não avaliadas (sem Veredito IA). Mesmo layout de cards da aba de
  * atributos. O botão de lote cobre TODA a fila visível (desatualizados + não
  * avaliados) até `batchSize` por run, em blocos pra mostrar progresso; item a
  * item usa o RerankAiRkButton.
@@ -147,7 +147,7 @@ export function StaleRerankPanel({
             <SelectContent>
               <SelectItem value="default">Padrão</SelectItem>
               <SelectItem value="expected">Nota prevista</SelectItem>
-              <SelectItem value="alignment">IA Rk</SelectItem>
+              <SelectItem value="alignment">Veredito IA</SelectItem>
             </SelectContent>
           </Select>
           <Button
@@ -229,24 +229,24 @@ export function StaleRerankPanel({
                       {w.synopsisQuality && (
                         <span
                           title="Interesse na sinopse"
-                          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300"
+                          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-600 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300"
                         >
                           {w.synopsisQuality}
                         </span>
                       )}
                       {isStale ? (
-                        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-200">
+                        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-200">
                           desatualizado
                         </span>
                       ) : (
-                        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:border-slate-400/20 dark:bg-slate-400/10 dark:text-slate-300">
+                        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-400/20 dark:bg-slate-400/10 dark:text-slate-300">
                           não avaliado
                         </span>
                       )}
                     </div>
 
                     <p className="font-mono text-xs text-muted-foreground tabular-nums">
-                      IA Rk: {w.alignmentScore != null ? Math.round(w.alignmentScore) : "—"}
+                      Veredito IA: {w.alignmentScore != null ? Math.round(w.alignmentScore) : "—"}
                     </p>
                   </div>
 

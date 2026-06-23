@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowRight, MessageCircle, Sparkles } from "lucide-react
 import { Header } from "@/components/layout/header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { CollapsibleCard } from "@/components/ui/collapsible-card"
-import { RunCreatorForm } from "@/components/recommendations/run-creator-form"
+import { RecommendDialog } from "@/components/recommendations/recommend-dialog"
 import { RunHistoryList } from "@/components/recommendations/run-history-list"
 import { RecommendationChat } from "@/components/recommendations/recommendation-chat"
 import { getTasteProfileStatusAction } from "@/server/actions/recommendations"
@@ -28,15 +28,14 @@ export default async function RecommendationsPage() {
   const insufficient = status.ratedWorksCount < 5
   const stubBlocks = status.profile?.is_stub ?? false
 
-  // Gate do form de modo rápido (plano tem prioridade — é o gate de produto).
-  const formDisabled = !canShortlist || insufficient || stubBlocks
-  const formDisabledReason = !canShortlist
-    ? paidOnlyMessage("smart_shortlist")
-    : insufficient
-      ? "Avalie pelo menos 5 obras com user_score pra desbloquear o ranking."
-      : stubBlocks
-        ? "Perfil ainda em modo stub — avalie mais obras pra desbloquear o ranking."
-        : null
+  // Gate do modo rápido: o plano (`smart_shortlist`) é o selo "Pago" do dialog;
+  // o gate de perfil (insuficiente/stub) só vale pra quem já é Pago.
+  const profileDisabled = insufficient || stubBlocks
+  const profileDisabledReason = insufficient
+    ? "Avalie pelo menos 5 obras com user_score pra desbloquear o ranking."
+    : stubBlocks
+      ? "Perfil ainda em modo stub — avalie mais obras pra desbloquear o ranking."
+      : null
 
   // O chat usa o mesmo ranker; avisa antes do usuário tentar e tomar erro.
   const profileGate = insufficient
@@ -87,7 +86,7 @@ export default async function RecommendationsPage() {
                     title={c.title ?? c.slug}
                   >
                     {c.title ?? c.slug}
-                    <span className="ml-1.5 text-[10px] opacity-70">
+                    <span className="ml-1.5 text-[11px] opacity-70">
                       · {formatRelativeDateTime(c.updatedAt)}
                     </span>
                   </Link>
@@ -111,8 +110,12 @@ export default async function RecommendationsPage() {
               </div>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              No plano Free você usa o <strong className="text-foreground">Modo rápido</strong> ao
-              lado pra gerar recomendações one-shot dos seus favoritos.
+              A recomendação por IA — chat e <strong className="text-foreground">Modo rápido</strong> —
+              é uma feature do plano Pago. No Free, o{" "}
+              <Link href="/ranking" className="font-medium text-foreground underline-offset-2 hover:underline">
+                /ranking
+              </Link>{" "}
+              já ordena seus favoritos por Nota Prevista × alinhamento, de graça.
             </CardContent>
           </Card>
         )}
@@ -124,7 +127,19 @@ export default async function RecommendationsPage() {
             description="Ranking one-shot dos seus favoritos. ~$0.05 por execução."
             defaultOpen={!canChat}
           >
-            <RunCreatorForm disabled={formDisabled} disabledReason={formDisabledReason} />
+            <div className="space-y-2">
+              <RecommendDialog
+                context="standalone"
+                size="default"
+                isPaid={canShortlist}
+                disabled={profileDisabled}
+                disabledReason={profileDisabledReason}
+              />
+              <p className="text-xs text-muted-foreground">
+                Escolha o escopo (não-lidos ou todos os favoritos) e, opcionalmente, um
+                mood — gera um ranking one-shot sem abrir conversa.
+              </p>
+            </div>
           </CollapsibleCard>
 
           <section className="space-y-3">

@@ -36,6 +36,9 @@ interface CurrentWork {
 interface UpdateDataDialogProps {
   workId: string
   currentWork: CurrentWork
+  // Capas já salvas na obra (todas, não só a primária). Mostradas no passo de
+  // capas e mantidas por padrão. Quando ausente, cai pra currentWork.coverUrl.
+  currentCovers?: SavedCover[]
   open?: boolean
   onOpenChange?: (open: boolean) => void
   hideTrigger?: boolean
@@ -91,15 +94,66 @@ interface SynopsisChoice {
 }
 
 interface CoverChoice {
-  source: ExternalSourceId
+  // String (não ExternalSourceId): capas já salvas trazem o source do banco, que
+  // pode não ser um ExternalSourceId conhecido. O servidor aceita source: string.
+  source: string
   url: string
   included: boolean
   isPrimary: boolean
+  // true = capa já salva na obra; false = capa nova vinda das fontes externas.
+  saved: boolean
+}
+
+interface SavedCover {
+  url: string
+  source?: string | null
+  isPrimary?: boolean
+}
+
+// Junta as capas já salvas com as capas externas num pool único de escolhas.
+// Default = manter o estado atual: as salvas vêm incluídas (e o primário
+// preservado); as externas vêm desmarcadas (o usuário escolhe quais adicionar).
+// Quando a obra não tem capas salvas, as externas vêm incluídas (comportamento
+// antigo: pegar as capas buscadas).
+function buildCoverPool(
+  externalCovers: Array<{ url: string; source: ExternalSourceId }>,
+  saved: SavedCover[],
+): CoverChoice[] {
+  const hasSaved = saved.length > 0
+  const byUrl = new Map<string, CoverChoice>()
+  for (const c of saved) {
+    if (!c.url) continue
+    byUrl.set(c.url, {
+      source: c.source ?? "atual",
+      url: c.url,
+      included: true,
+      isPrimary: Boolean(c.isPrimary),
+      saved: true,
+    })
+  }
+  for (const c of externalCovers) {
+    if (!c.url || byUrl.has(c.url)) continue
+    byUrl.set(c.url, {
+      source: c.source,
+      url: c.url,
+      included: !hasSaved,
+      isPrimary: false,
+      saved: false,
+    })
+  }
+  const pool = [...byUrl.values()]
+  // Garante exatamente um primário entre os incluídos.
+  if (pool.some((c) => c.included) && !pool.some((c) => c.included && c.isPrimary)) {
+    const firstIncluded = pool.find((c) => c.included)
+    if (firstIncluded) firstIncluded.isPrimary = true
+  }
+  return pool
 }
 
 export function UpdateDataDialog({
   workId,
   currentWork,
+  currentCovers,
   open: controlledOpen,
   onOpenChange,
   hideTrigger = false,
@@ -107,6 +161,11 @@ export function UpdateDataDialog({
 }: UpdateDataDialogProps) {
   const router = useRouter()
   const refresh = useRefresh()
+
+  // Capas atuais da obra (passadas só pelo fluxo "Atualizar dados" da página da
+  // obra). Quando ausente (ex.: revisão de importadas), savedCovers fica vazio e
+  // o picker volta ao comportamento antigo: capas externas marcadas por padrão.
+  const savedCovers: SavedCover[] = (currentCovers ?? []).filter((c) => c.url)
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : uncontrolledOpen
@@ -120,6 +179,7 @@ export function UpdateDataDialog({
   const [resolutions, setResolutions] = useState<Record<string, "current" | "external">>({})
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
+  const [coversNeedPick, setCoversNeedPick] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [activeRefineUrl, setActiveRefineUrl] = useState<string | null>(null)
 
@@ -128,8 +188,21 @@ export function UpdateDataDialog({
     // picker(s) antes do conflict resolver — passo separado pra cada tipo
     // (sinopses → capas) pra dar espaço pra galeria de capas em tamanho grande.
     const synopses = data.multiSynopses ?? []
-    const covers = data.multiCovers ?? []
-    if (synopses.length > 1 || covers.length > 1) {
+    const externalCovers = data.multiCovers ?? []
+    const pool = buildCoverPool(externalCovers, savedCovers)
+
+    // Mostra o passo de capas quando há decisão real a tomar:
+    //  - obra SEM capas salvas e várias externas → escolher entre elas (antigo);
+    //  - obra COM capas salvas e ao menos uma capa externa NOVA → manter as
+    //    atuais (default) e opcionalmente incluir as novas / remover atuais.
+    // Quando o externo não traz nada novo, não há o que decidir → preserva.
+    const savedUrls = new Set(savedCovers.map((c) => c.url))
+    const newExternal = externalCovers.filter((c) => !savedUrls.has(c.url))
+    const coversNeedPick =
+      (savedCovers.length === 0 && externalCovers.length > 1) ||
+      (savedCovers.length > 0 && newExternal.length > 0)
+
+    if (synopses.length > 1 || coversNeedPick) {
       setPendingData(data)
       setSynopsisChoices(
         synopses.map((s, i) => ({
@@ -139,18 +212,12 @@ export function UpdateDataDialog({
           isPrimary: i === 0,
         }))
       )
-      setCoverChoices(
-        covers.map((c, i) => ({
-          source: c.source,
-          url: c.url,
-          included: true,
-          isPrimary: i === 0,
-        }))
-      )
+      setCoverChoices(pool)
+      setCoversNeedPick(coversNeedPick)
       if (synopses.length > 1) {
         setPhase("synopses-pick")
       } else {
-        setActiveRefineUrl(covers[0]?.url ?? null)
+        setActiveRefineUrl(pool.find((c) => c.included)?.url ?? pool[0]?.url ?? null)
         setPhase("covers-pick")
       }
       return
@@ -178,36 +245,61 @@ export function UpdateDataDialog({
   const finalizeChoicesAndProceed = () => {
     if (!pendingData) return
     const includedSynopses = synopsisChoices.filter((s) => s.included)
-    const includedCovers = coverChoices.filter((c) => c.included)
-    const primaryCover = includedCovers.find((c) => c.isPrimary) ?? includedCovers[0]
     const primarySynopsis = includedSynopses.find((s) => s.isPrimary) ?? includedSynopses[0]
     const orderedSynopses = primarySynopsis
       ? [primarySynopsis, ...includedSynopses.filter((s) => s !== primarySynopsis)]
       : includedSynopses
     const selectedSynopses = dedupeSynopsisEntries(orderedSynopses)
-    const next: ExternalWorkData = {
-      ...pendingData,
-      coverUrl: primaryCover?.url ?? pendingData.coverUrl,
-      multiCovers: includedCovers.map((c) => ({ url: c.url, source: c.source })),
-      synopsis: selectedSynopses.find((s) => s.isPrimary)?.text ?? selectedSynopses[0]?.text ?? pendingData.synopsis,
-      multiSynopses: selectedSynopses.map((s) => ({ source: s.source as ExternalSourceId, text: s.text })),
-      synopsisIsMerged: false,
-    }
+
     // O usuário já escolheu sinopse/capa no multipick — não perguntar de novo
     // na tela de conflitos (que comparava só o campo single e dava a impressão
     // de que as outras escolhas estavam sendo descartadas).
     const preResolved: Record<string, "current" | "external"> = {}
     if (includedSynopses.length > 0) preResolved.synopsis = "external"
-    if (includedCovers.length > 0) preResolved.coverUrl = "external"
+
+    const next: ExternalWorkData = {
+      ...pendingData,
+      synopsis: selectedSynopses.find((s) => s.isPrimary)?.text ?? selectedSynopses[0]?.text ?? pendingData.synopsis,
+      multiSynopses: selectedSynopses.map((s) => ({ source: s.source as ExternalSourceId, text: s.text })),
+      synopsisIsMerged: false,
+    }
+
+    // Capas: se a seleção final é idêntica às capas já salvas (mesmas URLs e
+    // mesma primária), NÃO mexe nas capas — resolve como "current" pro server
+    // preservar exatamente o que está salvo (sem delete/insert à toa). Caso
+    // contrário, envia o conjunto escolhido (mantidas + novas, menos removidas).
+    const includedCovers = coverChoices.filter((c) => c.included)
+    const includedUrls = includedCovers.map((c) => c.url)
+    const savedUrlSet = new Set(savedCovers.map((c) => c.url))
+    const sameSet =
+      includedUrls.length === savedUrlSet.size &&
+      includedUrls.every((u) => savedUrlSet.has(u))
+    const savedPrimary = savedCovers.find((c) => c.isPrimary)?.url ?? savedCovers[0]?.url
+    const includedPrimary = (includedCovers.find((c) => c.isPrimary) ?? includedCovers[0])?.url
+    const coversUnchanged = sameSet && includedPrimary === savedPrimary
+
+    if (coversUnchanged) {
+      preResolved.coverUrl = "current"
+    } else {
+      const primaryCover = includedCovers.find((c) => c.isPrimary) ?? includedCovers[0]
+      next.coverUrl = primaryCover?.url ?? pendingData.coverUrl
+      next.multiCovers = includedCovers.map((c) => ({ url: c.url, source: c.source as ExternalSourceId }))
+      preResolved.coverUrl = "external"
+    }
+
     proceedToConflictsOrApply(next, preResolved)
   }
 
   const handleConfirmSynopses = () => {
     if (!pendingData) return
-    // Se há mais de uma capa pra escolher, vai pra galeria; senão pula direto.
-    if (coverChoices.length > 1) {
+    // Vai pra galeria de capas só quando há decisão de capa a tomar; senão
+    // finaliza direto (as capas atuais são preservadas).
+    if (coversNeedPick) {
       const initialUrl =
-        coverChoices.find((c) => c.isPrimary)?.url ?? coverChoices[0]?.url ?? null
+        coverChoices.find((c) => c.included && c.isPrimary)?.url ??
+        coverChoices.find((c) => c.included)?.url ??
+        coverChoices[0]?.url ??
+        null
       setActiveRefineUrl(initialUrl)
       setPhase("covers-pick")
       return
@@ -480,6 +572,7 @@ export function UpdateDataDialog({
     setConflicts([])
     setSynopsisChoices([])
     setCoverChoices([])
+    setCoversNeedPick(false)
     setPreviewUrl(null)
     setActiveRefineUrl(null)
   }
@@ -540,7 +633,7 @@ export function UpdateDataDialog({
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <Badge variant="outline" className="text-[10px]">{s.source}</Badge>
+                      <Badge variant="outline" className="text-[11px]">{s.source}</Badge>
                       <div className="flex items-center gap-3 text-xs">
                         <label className="flex items-center gap-1.5 cursor-pointer">
                           <Checkbox
@@ -582,9 +675,11 @@ export function UpdateDataDialog({
               <div className="space-y-4">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm text-muted-foreground">
-                    {coverChoices.length > 0
-                      ? "Clique numa miniatura pra ver a capa em tamanho maior. Marque quais incluir."
-                      : "Nenhuma capa restante. Você pode continuar sem alterar a capa atual."}
+                    {coverChoices.length === 0
+                      ? "Nenhuma capa restante. Você pode continuar sem alterar a capa atual."
+                      : savedCovers.length > 0
+                        ? "Suas capas atuais já vêm marcadas e serão mantidas. Marque capas novas pra incluir ou desmarque atuais pra remover."
+                        : "Clique numa miniatura pra ver maior. Marque quais capas incluir."}
                   </p>
                   {coverChoices.length > 0 && (
                     <label className="flex items-center gap-1.5 cursor-pointer text-xs shrink-0">
@@ -610,7 +705,15 @@ export function UpdateDataDialog({
                       />
                     </div>
                     <div className="flex items-center justify-between gap-3">
-                      <Badge variant="outline" className="text-[10px]">{activeCover.source}</Badge>
+                      <div className="flex items-center gap-1.5">
+                        <Badge
+                          variant={activeCover.saved ? "secondary" : "default"}
+                          className="text-[11px]"
+                        >
+                          {activeCover.saved ? "Atual" : "Nova"}
+                        </Badge>
+                        <Badge variant="outline" className="text-[11px]">{activeCover.source}</Badge>
+                      </div>
                       <div className="flex items-center gap-3 text-xs">
                         <label className="flex items-center gap-1.5 cursor-pointer">
                           <Checkbox
@@ -680,6 +783,11 @@ export function UpdateDataDialog({
                               P
                             </span>
                           )}
+                          {!c.saved && (
+                            <span className="absolute bottom-0.5 left-0.5 rounded bg-blue-500 px-1 text-[8px] font-semibold text-white">
+                              nova
+                            </span>
+                          )}
                         </button>
                         <button
                           type="button"
@@ -738,7 +846,7 @@ export function UpdateDataDialog({
                           className="mt-0.5 accent-primary shrink-0"
                         />
                         <span className="min-w-0 flex-1 text-sm">
-                          <Badge variant="outline" className="text-[10px] py-0 mr-1.5">{label}</Badge>
+                          <Badge variant="outline" className="text-[11px] py-0 mr-1.5">{label}</Badge>
                           <span className="break-all">{value ?? "—"}</span>
                         </span>
                       </label>

@@ -126,7 +126,7 @@ export function SuggestionRow({ suggestion }: SuggestionRowProps) {
             >
               {suggestion.work_title}
             </Link>
-            <Badge variant="outline" className={cn("text-[10px]", statusColor(suggestion.status))}>
+            <Badge variant="outline" className={cn("text-[11px]", statusColor(suggestion.status))}>
               {statusLabel(suggestion.status)}
             </Badge>
           </div>
@@ -141,11 +141,11 @@ export function SuggestionRow({ suggestion }: SuggestionRowProps) {
             <span className="font-semibold tabular-nums">
               {(suggestion.applied_score ?? suggestion.suggested_score).toFixed(1)}
             </span>
-            <Badge variant="outline" className={cn("text-[10px] tabular-nums", deltaColor(suggestion.delta))}>
+            <Badge variant="outline" className={cn("text-[11px] tabular-nums", deltaColor(suggestion.delta))}>
               Δ {suggestion.delta > 0 ? "+" : ""}
               {suggestion.delta.toFixed(1)}
             </Badge>
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-[11px] text-muted-foreground">
               conf {(suggestion.confidence * 100).toFixed(0)}%
             </span>
           </div>

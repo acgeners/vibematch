@@ -1,7 +1,7 @@
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 
-export type WorkColumnGroup = "basico" | "notas" | "criterios" | "avancado"
+export type WorkColumnGroup = "basico" | "notas" | "criterios"
 
 export interface WorkColumnDef {
   key: string
@@ -25,7 +25,6 @@ export const WORK_COLUMN_GROUP_LABELS: Record<WorkColumnGroup, string> = {
   basico: "Básico",
   notas: "Notas",
   criterios: "Atributos",
-  avancado: "Avançado",
 }
 
 export type WorkColumnNamespace = "titles" | "favorites" | "ranking" | "recommendations"
@@ -73,17 +72,15 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   { key: "year", label: "Ano", description: "Ano de lançamento/início da publicação.", align: "center", defaultHidden: true, group: "basico" },
   { key: "synopsis_q", label: "Sinopse", configLabel: "Interesse na sinopse", description: "O quanto a sinopse te interessou (♥ a ♥♥♥♥), informado na triagem/avaliação.", align: "center", defaultHidden: true, group: "basico" },
   // Prioridade — âncora na Prevista (que já embute o Alinhamento calibrado) +
-  // IA Rk quando há. Default visível em /favorites; opcional nos demais namespaces.
-  { key: "decision", label: "Prioridade", configLabel: "Prioridade", description: "Quão provável que você goste — número único pra decidir o que ler primeiro. Ancorado na Nota Prevista (que já embute o Alinhamento calibrado) e ajustado pela IA Rk quando existe. É um score de PRIORIDADE, não uma previsão de nota.", align: "center", group: "notas" },
+  // Veredito IA quando há. Default visível em /favorites; opcional nos demais namespaces.
+  { key: "decision", label: "Prioridade", configLabel: "Prioridade", description: "Quão provável que você goste — número único pra decidir o que ler primeiro. Ancorado na Nota Prevista (que já embute o Alinhamento calibrado) e ajustado pelo Veredito IA quando existe. É um score de PRIORIDADE, não uma previsão de nota.", align: "center", group: "notas" },
   // Novo (Fase 1.5): expected_score é o L1 que substitui o trio N.IA/N.Pr/N.Final
   { key: "expected_score", label: "Prevista", configLabel: "Nota Prevista", description: "Nota que o modelo prevê que você daria à obra (0–10). É a âncora calibrada — um Ridge L1 que substituiu o antigo trio Nota.IA / Nota.Pr / Nota.Final.", align: "center", group: "notas" },
-  { key: "expected_baseline", label: "Perfil", configLabel: "Prevista — Perfil", description: "Decomposição da Nota Prevista (etapa 1): a parte vinda só do seu perfil de gosto, antes de considerar a qualidade da obra.", align: "center", defaultHidden: true, group: "avancado" },
-  { key: "expected_quality_adj", label: "Δ Qual.", configLabel: "Prevista — Δ Qualidade", description: "Decomposição da Nota Prevista (etapa 2): o ajuste aplicado pelas 8 dimensões de qualidade sobre a parte do perfil.", align: "center", defaultHidden: true, group: "avancado" },
   { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento", description: "O quanto a obra combina com o seu perfil de gosto (fit_score). Quanto maior, mais alinhada às suas preferências de atributos e tags.", align: "center", group: "notas" },
   { key: "platform_avg", label: "N.M", configLabel: "Nota.M", description: "Nota.M — média ponderada das notas das plataformas externas (AniList, MAL, etc.), na escala 0–10. Pondera mais as fontes com mais votos.", align: "center", defaultHidden: true, group: "notas" },
   { key: "total_votes", label: "Votos", configLabel: "Votos", description: "Total de votos/avaliações somados nas plataformas externas. Quanto maior, mais confiável é a Nota.M.", align: "center", defaultHidden: true, group: "notas" },
-  { key: "alignment_score", label: "IA Rk.", configLabel: "IA Rk", description: "Re-rank do consultor IA (0–100), gerado sob demanda. Reordena as recomendações ('Recomendar com IA', 'Próxima leitura', 'Recomendar do ranking') e ajusta a Prioridade. A maioria das obras fica sem valor até passar pelo Rankear.", align: "center", defaultHidden: true, group: "notas" },
-  { key: "ai_status", label: "IA", configLabel: "Status da avaliação IA", description: "Estágio da avaliação por IA: pendente de atributos, pendente de IA Rk, avaliado ou pulado.", align: "center", group: "basico" },
+  { key: "alignment_score", label: "Veredito", configLabel: "Veredito IA", description: "Re-rank do consultor IA (0–100), gerado sob demanda. Reordena as recomendações ('Recomendar com IA', 'Próxima leitura', 'Recomendar do ranking') e ajusta a Prioridade. A maioria das obras fica sem valor até passar pelo Rankear.", align: "center", defaultHidden: true, group: "notas" },
+  { key: "ai_status", label: "IA", configLabel: "Status da avaliação IA", description: "Estágio da avaliação por IA: pendente de atributos, pendente de Veredito IA, avaliado ou pulado.", align: "center", group: "basico" },
   { key: "updated_at", label: "Atual.", configLabel: "Atualizado em", description: "Quando o registro da obra foi atualizado pela última vez.", align: "center", group: "basico" },
   { key: "last_read_at", label: "Últ. leitura", configLabel: "Última leitura", description: "Data da última vez que você leu algum capítulo desta obra.", align: "center", defaultHidden: true, group: "basico" },
   ...CRITERION_SLUGS.map((slug) => ({
@@ -100,16 +97,15 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
 const DEFAULT_COLUMN_KEYS = WORK_TABLE_COLUMNS.map((column) => column.key)
 
 // Per-namespace defaults: /titles foca em geral; /favorites foca em granular.
-// Legacy: N.IA/N.Pr/N.Final + decomposição (baseline/quality_adj) ficam
-// escondidos por padrão em TODOS os namespaces após cutover Fase 1.5.
-// IA Rk. saiu do bucket legacy — continua ativo no fluxo de recomendação
+// Legacy: N.IA/N.Pr/N.Final ficam escondidos por padrão em TODOS os namespaces
+// após cutover Fase 1.5. (As colunas decompostas Perfil/Δ Qualidade foram
+// REMOVIDAS no §6 Bloco 2 — arquitetura 2-stage aposentada.)
+// Veredito IA. saiu do bucket legacy — continua ativo no fluxo de recomendação
 // e é exibido por default em /ranking e /recommendations.
-const LEGACY_AND_DECOMP_HIDDEN = [
+const LEGACY_HIDDEN = [
   "calc_score",
   "predicted_score",
   "final_score",
-  "expected_baseline",
-  "expected_quality_adj",
 ] as const
 
 const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
@@ -125,7 +121,7 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
     "ai_status",
     "updated_at",
     "last_read_at",
-    ...LEGACY_AND_DECOMP_HIDDEN,
+    ...LEGACY_HIDDEN,
     ...CRITERION_SLUGS.map((slug) => `crit_${slug}`),
   ],
   // Favoritos (filosofia: RICA — deep dive). Critérios visíveis; metadados
@@ -139,10 +135,10 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
     "ai_status",
     "updated_at",
     "last_read_at",
-    ...LEGACY_AND_DECOMP_HIDDEN,
+    ...LEGACY_HIDDEN,
   ],
   // Ranking: foco em comparar notas; sinopse, ano e ai_status fora; critérios visíveis.
-  // IA Rk. visível — quem chega aqui geralmente quer ver o re-rank IA.
+  // Veredito IA. visível — quem chega aqui geralmente quer ver o re-rank IA.
   ranking: [
     "decision",
     "publication_status",
@@ -152,10 +148,10 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
     "ai_status",
     "updated_at",
     "last_read_at",
-    ...LEGACY_AND_DECOMP_HIDDEN,
+    ...LEGACY_HIDDEN,
   ],
   // Recomendações: 9 critérios em destaque; resto enxuto.
-  // IA Rk. visível — É a nota que ORDENA o próprio resultado da run.
+  // Veredito IA. visível — É a nota que ORDENA o próprio resultado da run.
   recommendations: [
     "decision",
     "synopsis_q",
@@ -166,7 +162,7 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
     "total_votes",
     "updated_at",
     "last_read_at",
-    ...LEGACY_AND_DECOMP_HIDDEN,
+    ...LEGACY_HIDDEN,
   ],
 }
 
@@ -235,8 +231,6 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   synopsis_q: 90,
   decision: 90,
   expected_score: 90,
-  expected_baseline: 80,
-  expected_quality_adj: 80,
   personal_fit: 64,
   calc_score: 80,
   predicted_score: 80,
@@ -329,8 +323,6 @@ export function writeWorkColumnConfig(
 //   - `synopsis_q` (string de corações ♥-♥♥♥♥ pra interesse na sinopse)
 const SCORE_COLUMN_KEYS = new Set<string>([
   "expected_score",
-  "expected_baseline",
-  "expected_quality_adj",
   "platform_avg",
   "total_votes",
   "alignment_score",

@@ -22,6 +22,7 @@ import {
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { startImport } from "@/server/actions/imports"
+import { refreshChrome } from "@/lib/chrome-refresh"
 import type { ImportColumnMapping, RawImportRow } from "@/types/domain"
 import type { ParsedFile, ParsedSheet } from "@/lib/import/parser"
 
@@ -197,6 +198,9 @@ export function ImportWizard() {
       } else {
         setImportResult(result.data ?? null)
         setStep(6)
+        // Obras importadas nascem `pending` → entram na fila de atributos. Força a
+        // re-busca do badge da sidebar sem esperar reload/navegação.
+        refreshChrome()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro na importação")

@@ -132,7 +132,7 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
                   {failed ? (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted-foreground">
                       <ImageIcon className="h-6 w-6 opacity-50" />
-                      <span className="text-[10px]">indisponível</span>
+                      <span className="text-[11px]">indisponível</span>
                     </div>
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element

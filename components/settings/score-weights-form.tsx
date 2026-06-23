@@ -206,7 +206,7 @@ function CriterionWeightCard({ slug, index, control, register, readOnly, confide
                 <p className="truncate text-sm font-semibold text-foreground">
                   {info?.name ?? slug}
                 </p>
-                <p className="truncate font-mono text-[10px] text-muted-foreground">{slug}</p>
+                <p className="truncate font-mono text-[11px] text-muted-foreground">{slug}</p>
               </div>
               {readOnly && confidence && <ConfidenceChip confidence={confidence} />}
               <span
@@ -261,7 +261,7 @@ function ThresholdField({
         const hasThreshold = field.value != null
         return (
           <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/40 pt-2">
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground">
               Threshold
               <span className="ml-1 italic">
                 ({isNegative ? "piso pra penalizar" : "ponto onde amplifica"})

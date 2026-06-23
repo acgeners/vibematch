@@ -289,7 +289,7 @@ export function RevalidateSourcesDialog({
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium line-clamp-2">{c.title}</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
                               match {Math.round(c.matchScore * 100)}%
                               {c.year ? ` · ${c.year}` : ""}
                               {c.chapters ? ` · ${c.chapters} cap.` : ""}

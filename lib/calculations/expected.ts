@@ -401,7 +401,7 @@ export function verifyDecompositionCovers(predictor: TrainedExpectedPredictor): 
  * expected⊕calc sem leakage — sem OOF, o Ridge memoriza as obras de treino e o
  * peso do blend sairia enviesado pro Ridge (que parece perfeito in-sample).
  *
- * Mesma mecânica do `ridgeOutOfFoldPredictions` (prediction.ts): shuffle
+ * OOF honesto (sem leakage): shuffle
  * determinístico (seed 42), LOOCV abaixo de 50. Retorna null com n < 20.
  */
 export function expectedOutOfFoldPredictions(
