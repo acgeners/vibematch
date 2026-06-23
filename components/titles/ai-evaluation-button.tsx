@@ -5,20 +5,17 @@ import { useRefresh } from "@/lib/use-refresh"
 import { Loader2, Pencil, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation } from "@/server/actions/ai"
+import { runTask } from "@/lib/tasks-store"
+import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import {
   getEvaluationInputs,
-  saveManualReviews,
   updatePrimarySynopsis,
 } from "@/server/actions/manual-reviews"
 import { AiEvaluationReviewForm } from "@/components/ai-evaluation/ai-evaluation-review-form"
 import { AiEvaluationCompare } from "@/components/ai-evaluation/ai-evaluation-compare"
 import type { CompareEval } from "@/components/ai-evaluation/ai-evaluation-compare"
-import {
-  ReviewDraftsField,
-  draftsToManualReviewInput,
-  manualReviewsToDrafts,
-} from "@/components/titles/review-drafts-field"
-import type { ReviewDraft } from "@/components/titles/review-drafts-field"
+import { ExternalManualReviewsSection } from "@/components/titles/external-manual-reviews-section"
+import type { ExternalManualReviewDisplayRow } from "@/server/queries/external-manual-reviews"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Label } from "@/components/ui/label"
@@ -49,6 +46,9 @@ interface AiEvaluationButtonProps {
    * contra esta, sem refazer o modelo atual.
    */
   latestEvaluation?: CompareEval | null
+  /** Gate local aberto? Habilita o editor de reviews EXTERNAS manuais no diálogo. */
+  externalEditorEnabled?: boolean
+  externalReviews?: ExternalManualReviewDisplayRow[]
 }
 
 export function AiEvaluationButton({
@@ -58,8 +58,16 @@ export function AiEvaluationButton({
   coverUrl,
   variant = "cta",
   latestEvaluation,
+  externalEditorEnabled = false,
+  externalReviews = [],
 }: AiEvaluationButtonProps) {
   const refresh = useRefresh()
+  // Lê o store global pra refletir, no próprio botão, uma avaliação desta obra
+  // rodando em segundo plano (sobrevive à navegação — se voltar à página, ainda
+  // mostra "Avaliando…").
+  const evalTaskId = `ai-eval:${workId}`
+  const tasks = useAppTasks()
+  const myEvalRunning = tasks.some((t) => t.id === evalTaskId && t.status === "running")
   const [evaluating, setEvaluating] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [evaluation, setEvaluation] = useState<AiEvaluation | null>(null)
@@ -67,34 +75,28 @@ export function AiEvaluationButton({
   const [noReviewConfirm, setNoReviewConfirm] = useState<NoReviewsReason | null | "none">(null)
   // Comparação Sonnet (existente) vs. Haiku (recém-rodado).
   const [compareData, setCompareData] = useState<{ a: CompareEval; b: AiEvaluation } | null>(null)
-  // Editor de entradas (sinopse + reviews manuais) antes de rodar a IA.
+  // Editor de entradas (sinopse + reviews EXTERNAS manuais) antes de rodar a IA. As reviews
+  // externas são persistidas pelo próprio ExternalManualReviewsSection (imediato); aqui só a
+  // sinopse é draft/salva no "Avaliar". A avaliação lê as reviews externas do banco.
   const [inputsOpen, setInputsOpen] = useState(false)
   const [inputsLoading, setInputsLoading] = useState(false)
   const [savingInputs, setSavingInputs] = useState(false)
   const [synopsisDraft, setSynopsisDraft] = useState("")
-  const [reviewDrafts, setReviewDrafts] = useState<ReviewDraft[]>([])
 
   const openInputsEditor = async () => {
     setInputsOpen(true)
     setInputsLoading(true)
     const inputs = await getEvaluationInputs(workId)
     setSynopsisDraft(inputs.synopsis)
-    setReviewDrafts(manualReviewsToDrafts(inputs.reviews))
     setInputsLoading(false)
   }
 
-  // Persiste sinopse primária + reviews manuais. Retorna false em erro.
+  // Persiste a sinopse primária. Retorna false em erro. (Reviews externas já são persistidas
+  // pelo editor inline, independentemente.)
   const persistInputs = async (): Promise<boolean> => {
-    const [synRes, revRes] = await Promise.all([
-      updatePrimarySynopsis(workId, synopsisDraft),
-      saveManualReviews(workId, draftsToManualReviewInput(reviewDrafts)),
-    ])
+    const synRes = await updatePrimarySynopsis(workId, synopsisDraft)
     if (synRes.error) {
       toast.error(`Falha ao salvar sinopse: ${synRes.error}`)
-      return false
-    }
-    if (revRes.error) {
-      toast.error(`Falha ao salvar reviews: ${revRes.error}`)
       return false
     }
     return true
@@ -117,7 +119,7 @@ export function AiEvaluationButton({
     setSavingInputs(false)
     if (!ok) return
     setInputsOpen(false)
-    await runEvaluation()
+    dispatchEvaluation()
   }
 
   const runEvaluation = async (opts?: { model?: "sonnet" | "opus" | "haiku"; proceedWithoutReviews?: boolean }) => {
@@ -148,7 +150,49 @@ export function AiEvaluationButton({
     return true
   }
 
-  const handleAiEvaluation = () => void runEvaluation()
+  // Dispara a avaliação em SEGUNDO PLANO via store global. Não bloqueia a UI:
+  // o indicador da sidebar mostra "Avaliando…", você pode navegar, e o resultado
+  // (durável — vai pra fila review_pending) te encontra por toast/badge. Se você
+  // ainda estiver nesta página quando terminar, o review abre inline.
+  const dispatchEvaluation = (opts?: { model?: "sonnet" | "opus" | "haiku"; proceedWithoutReviews?: boolean }) => {
+    runTask({
+      id: evalTaskId,
+      kind: "ai-eval",
+      label: `Avaliando: ${workTitle}`,
+      href: "/ai-evaluation",
+      run: () => triggerAiEvaluation(workId, opts),
+      successToast: (result) => {
+        if ("data" in result && result.data?.evaluation) {
+          const reviewsUsed = result.data.reviewsUsed ?? 0
+          return {
+            message:
+              reviewsUsed === 0
+                ? `Avaliação de "${workTitle}" pronta (sem reviews externas)`
+                : `Avaliação de "${workTitle}" pronta (${reviewsUsed} review${reviewsUsed === 1 ? "" : "s"})`,
+            action: { label: "Revisar", href: "/ai-evaluation" },
+          }
+        }
+        return null // gate ("sem reviews") ou erro → sem toast de sucesso
+      },
+      onDone: (result) => {
+        // Gate: sem reviews externas, confirma antes de chamar o LLM.
+        if ("needsReviewConfirmation" in result && result.needsReviewConfirmation) {
+          setNoReviewConfirm(result.noReviewsReason ?? "none")
+          return
+        }
+        if (("error" in result && result.error) || !("data" in result) || !result.data?.evaluation) {
+          toast.error(`Erro na avaliação IA: ${("error" in result && result.error) || "resposta vazia"}`)
+          return
+        }
+        // Se ainda montado (não navegou), abre o review inline.
+        setEvaluation(result.data.evaluation)
+        setCurrentScores(result.data.currentScores ?? {})
+        setReviewOpen(true)
+      },
+    })
+  }
+
+  const handleAiEvaluation = () => dispatchEvaluation()
 
   // Roda o Haiku e abre a comparação contra a avaliação existente (sem refazer
   // o modelo atual). `proceedWithoutReviews` porque a obra já foi avaliada.
@@ -165,7 +209,11 @@ export function AiEvaluationButton({
     setCompareData({ a: latestEvaluation, b: result.data.evaluation })
   }
 
-  const label = evaluating
+  // `evaluating` (modal bloqueante) cobre só os fluxos interativos (comparar
+  // Haiku / reavaliar dentro do review). `myEvalRunning` é a avaliação principal
+  // em segundo plano. Ambos desabilitam os botões; só `evaluating` abre o modal.
+  const busy = evaluating || myEvalRunning
+  const label = busy
     ? "Avaliando..."
     : hasCriteriaScores
     ? "Reavaliar com IA"
@@ -187,14 +235,14 @@ export function AiEvaluationButton({
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
-            <Button onClick={handleAiEvaluation} disabled={evaluating}>
+            <Button onClick={handleAiEvaluation} disabled={busy}>
               <Sparkles className="h-4 w-4" />
               {label}
             </Button>
             <Button
               variant="outline"
               onClick={() => void openInputsEditor()}
-              disabled={evaluating}
+              disabled={busy}
               title="Edite a sinopse usada pela IA e adicione reviews suas antes de avaliar."
             >
               <Pencil className="h-4 w-4" />
@@ -204,7 +252,7 @@ export function AiEvaluationButton({
               <Button
                 variant="outline"
                 onClick={() => void runHaikuCompare()}
-                disabled={evaluating}
+                disabled={busy}
                 title="Roda o Haiku 4.5 e compara lado a lado com a avaliação atual, sem refazer o modelo atual."
               >
                 <Sparkles className="h-4 w-4" />
@@ -215,7 +263,7 @@ export function AiEvaluationButton({
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleAiEvaluation} disabled={evaluating}>
+          <Button variant="outline" size="sm" onClick={handleAiEvaluation} disabled={busy}>
             <Sparkles className="h-4 w-4" />
             {label}
           </Button>
@@ -223,7 +271,7 @@ export function AiEvaluationButton({
             variant="outline"
             size="sm"
             onClick={() => void openInputsEditor()}
-            disabled={evaluating}
+            disabled={busy}
             title="Edite a sinopse usada pela IA e adicione reviews suas antes de avaliar."
           >
             <Pencil className="h-4 w-4" />
@@ -234,7 +282,7 @@ export function AiEvaluationButton({
               variant="outline"
               size="sm"
               onClick={() => void runHaikuCompare()}
-              disabled={evaluating}
+              disabled={busy}
               title="Roda o Haiku 4.5 e compara lado a lado com a avaliação atual."
             >
               <Sparkles className="h-4 w-4" />
@@ -317,10 +365,13 @@ export function AiEvaluationButton({
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label>Reviews manuais</Label>
-                <ReviewDraftsField value={reviewDrafts} onChange={setReviewDrafts} disabled={savingInputs} />
-              </div>
+              {externalEditorEnabled ? (
+                <ExternalManualReviewsSection workId={workId} reviews={externalReviews} />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Reviews externas manuais só podem ser adicionadas em ambiente local (gate).
+                </p>
+              )}
             </div>
           )}
 
@@ -381,7 +432,7 @@ export function AiEvaluationButton({
         cancelText="Cancelar"
         onConfirm={() => {
           setNoReviewConfirm(null)
-          void runEvaluation({ proceedWithoutReviews: true })
+          dispatchEvaluation({ proceedWithoutReviews: true })
         }}
       />
     </>

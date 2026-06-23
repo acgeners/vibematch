@@ -1,11 +1,15 @@
 import { describe, it, expect } from "vitest"
 import {
   selectContextualTags,
+  selectContextualTagsByPriority,
+  isLooksLeadTag,
   sanitizeDigestForLabeling,
+  sanitizeTextOnlyDigestForLabeling,
   DEFAULT_EXCLUDED_TAG_GROUPS,
   MAX_CONTEXTUAL_TAGS,
   type ContextualTag,
 } from "@/lib/synopsis-interest/contextual-package"
+import type { TextOnlyDigest } from "@/lib/synopsis-interest/digest-text-only"
 import {
   CANDIDATES,
   computeCandidateInputSignature,
@@ -124,5 +128,68 @@ describe("experiment — candidatos estendidos (S0/S1/D1/D2/b1/e1)", () => {
     const w = work()
     expect(computeCandidateInputSignature(CANDIDATES.e1, w)).not.toBe(computeCandidateInputSignature(CANDIDATES.e1, work({ reviewContextSig: "OTHER" })))
     expect(computeCandidateInputSignature(CANDIDATES.b1, w)).toBe(computeCandidateInputSignature(CANDIDATES.b1, work({ reviewContextSig: "OTHER" })))
+  })
+})
+
+describe("contextual-package — sanitizeTextOnlyDigestForLabeling (B2.2T)", () => {
+  const base: TextOnlyDigest = {
+    consensus: "Obra elogiada pela ambientação. Nota 9/10 segundo leitores.",
+    divergence: "Alguns acham o ritmo lento.",
+    recurring_positives: ["arte expressiva", "Você vai amar os personagens"],
+    recurring_negatives: ["vilão raso"],
+    narrative_traits: ["narrativa em flashbacks", "  "],
+    content_warnings: ["violência", "★★★★★ recomendadíssimo"],
+  }
+  it("mapeia o schema text-only para SanitizedDigest (positives/negatives → traits; narrative → execution)", () => {
+    const s = sanitizeTextOnlyDigestForLabeling(base)
+    expect(s.traits.map((t) => t.polarity)).toEqual(["positive", "positive", "negative"])
+    expect(s.traits.every((t) => t.axis === "")).toBe(true)
+    expect(s.execution).toContain("flashbacks")
+    expect(s.execution).not.toMatch(/\s\s/) // entradas vazias removidas/colapsadas
+  })
+  it("escruba notas/estrelas/recomendação (mesma política scrub) de TODOS os campos exibidos", () => {
+    const s = sanitizeTextOnlyDigestForLabeling(base)
+    const all = [s.consensus, s.divergence, s.execution, ...s.traits.map((t) => t.trait), ...s.contentWarnings].join(" || ")
+    expect(all).not.toMatch(/9\s*\/\s*10|★|você vai amar|recomendad/i)
+    expect(s.consensus).toContain("ambientação") // conteúdo neutro preservado
+    expect(s.contentWarnings.some((c) => c.includes("violência"))).toBe(true) // aviso legítimo mantido
+  })
+  it("não vaza fonte/nota/rating; traços vazios após scrub são descartados", () => {
+    const s = sanitizeTextOnlyDigestForLabeling({ ...base, recurring_positives: ["10/10", "trama coesa"] })
+    expect(s.traits.map((t) => t.trait)).toContain("trama coesa")
+    expect(s.traits.some((t) => /10\s*\/\s*10/.test(t.trait))).toBe(false)
+  })
+})
+
+describe("contextual-package — selectContextualTagsByPriority (B2.2U)", () => {
+  it("isLooksLeadTag: aparência = true; traço/papel/condição = false", () => {
+    for (const t of ["Handsome Male Lead", "Black-Haired Female Lead", "Blue-Eyed Male Lead", "Dark/Tan Skin Female Lead", "Tall Male Lead", "Fat Female Lead", "Glasses-Wearing Male Lead"]) expect(isLooksLeadTag(t)).toBe(true)
+    for (const t of ["Kind Male Lead", "Knight Female Lead", "Blind Male Lead", "Blushing Female Lead", "Arrogant Male Lead", "Strong Female Lead"]) expect(isLooksLeadTag(t)).toBe(false)
+  })
+  it("prioriza grupos de alta prioridade no corte (tone_mood/romance > LOW)", () => {
+    const tags: ContextualTag[] = [
+      { name: "Slow Burn", group: "romance" }, // prio 3
+      { name: "Dark Ambience", group: "tone_mood" }, // prio 1
+      { name: "Medieval", group: "setting" }, // LOW
+      { name: "Some Element", group: "elements" }, // LOW
+    ]
+    expect(selectContextualTagsByPriority(tags, { maxTags: 2 }).map((t) => t.name)).toEqual(["Dark Ambience", "Slow Burn"])
+  })
+  it("rebaixa Looks dos leads abaixo de traço/papel do mesmo grupo", () => {
+    const tags: ContextualTag[] = [
+      { name: "Handsome Male Lead", group: "male_lead" }, // Looks → LOW
+      { name: "Kind Male Lead", group: "male_lead" }, // prio 4
+    ]
+    expect(selectContextualTagsByPriority(tags, { maxTags: 1 }).map((t) => t.name)).toEqual(["Kind Male Lead"])
+  })
+  it("exclui format/other e é determinístico (independe da ordem de entrada)", () => {
+    const tags: ContextualTag[] = [
+      { name: "Long Strip", group: "format" },
+      { name: "noise", group: "other" },
+      { name: "Romance", group: "romance" },
+    ]
+    const a = selectContextualTagsByPriority(tags)
+    expect(a.map((t) => t.name)).toEqual(["Romance"])
+    expect(selectContextualTagsByPriority([...tags].reverse())).toEqual(a)
   })
 })

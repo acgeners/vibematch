@@ -5,6 +5,7 @@ import {
   classifySummaryReadiness,
   classifyDigestReadiness,
   summaryDedupKey,
+  digestDedupKey,
   type SummaryGateway,
   type DigestGateway,
 } from "@/lib/orchestration/integrations/reviews"
@@ -378,5 +379,18 @@ describe("ensureReviewSummary / ensureReviewDigest (sem provider real)", () => {
     expect(digestDone).toBe(false) // o "save" não esperou o digest
     await delay(60) // deixa o job solto terminar (evita promessa pendente)
     expect(digestDone).toBe(true)
+  })
+})
+
+describe("digestDedupKey — versionamento de cache pela política do corpus (B2.2N)", () => {
+  it("sem tag: chave estável (produção inalterada); com tag: chave versionada", () => {
+    const base = digestDedupKey("w1", "hashX")
+    expect(base).toBe(digestDedupKey("w1", "hashX")) // determinística
+    expect(base).not.toContain(":text-only") // produção não anexa nada
+    const v1 = digestDedupKey("w1", "hashX", "text-only-v1")
+    const v2 = digestDedupKey("w1", "hashX", "text-only-v2")
+    expect(v1).not.toBe(base) // tag muda a chave (não reutiliza o cache de produção)
+    expect(v1).not.toBe(v2) // políticas diferentes ⇒ caches diferentes
+    expect(v1.endsWith(":text-only-v1")).toBe(true)
   })
 })

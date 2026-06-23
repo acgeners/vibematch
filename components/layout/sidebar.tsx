@@ -23,6 +23,7 @@ import { useChromeData } from "@/lib/use-refresh"
 import { AccountChip } from "@/components/layout/account-chip"
 import { BalanceChip } from "@/components/layout/balance-chip"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
+import { SidebarTasks } from "@/components/tasks/sidebar-tasks"
 
 type BadgeKey = "ai-eval" | "settings"
 // Derivado do retorno da action (evita importar o módulo server-only comix-gate no client).
@@ -95,7 +96,9 @@ export function Sidebar() {
   const searchParams = useClientSearchParams()
 
   // Badges de pendências (contagens):
-  //   - "ai-eval":  obras nos filtros padrão de /ai-evaluation
+  //   - "ai-eval":  fila de atributos de /ai-evaluation (aba "IA atributos":
+  //                 pending + review_pending). As filas Veredito IA / Interesse
+  //                 Sinopse têm contadores próprios na página e ficam de fora.
   //   - "settings": pendências do Pipeline de dados de /settings
   // Falha silenciosa em 0.
   const [badgeCounts, setBadgeCounts] = useState<Record<BadgeKey, number>>({
@@ -245,6 +248,8 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+
+      <SidebarTasks />
 
       {(comixHealth === "down" || comixHealth === "degraded") && (
         <Link

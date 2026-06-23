@@ -95,8 +95,15 @@ export function summaryDedupKey(workId: string, contentHash: string): string {
   return `generate_review_summary:${workId}:${contentHash}:${REVIEW_SUMMARIZER_PROMPT_VERSION}`
 }
 
-export function digestDedupKey(workId: string, contentHash: string): string {
-  return `generate_review_digest:${workId}:${contentHash}:${REVIEW_DIGEST_VERSION}`
+/**
+ * Chave de dedup/cache do digest. `tag` OPCIONAL (B2.2N): quando presente, é anexado à chave —
+ * usado pelo executor EXPERIMENTAL para versionar o cache pela política do corpus (text-only),
+ * de modo que trocar a política NÃO reutilize um digest gerado sob a política anterior. Produção
+ * (`persist-reviews.ts`) NÃO passa `tag` ⇒ chave idêntica à de hoje (comportamento inalterado).
+ */
+export function digestDedupKey(workId: string, contentHash: string, tag?: string): string {
+  const base = `generate_review_digest:${workId}:${contentHash}:${REVIEW_DIGEST_VERSION}`
+  return tag ? `${base}:${tag}` : base
 }
 
 // ---- Gateways (IO injetável) ----------------------------------------------
@@ -199,6 +206,8 @@ export interface EnsureDigestDeps extends CommonDeps {
   reviews?: ReviewDigestInput[]
   gateway?: DigestGateway
   consolidate?: (r: ReviewDigestInput[], o: { workId?: string | null }) => Promise<ConsolidateDigestStatus>
+  /** Tag opcional p/ a chave de dedup/cache (B2.2N): executor experimental passa a versão da política do corpus. */
+  dedupTag?: string
 }
 
 const NO_REVIEWS_MSG = "Obra sem reviews úteis — busque/adicione reviews (Atualizar dados / Revalidar fontes) antes."
@@ -324,7 +333,7 @@ export async function ensureReviewDigest(
     {
       action: "generate_review_digest",
       workId,
-      dedupKey: digestDedupKey(workId, contentHash),
+      dedupKey: digestDedupKey(workId, contentHash, deps.dedupTag),
       estimateUsd: gate.estimatedUsd,
       payload: { contentHash, n: nowN, version: REVIEW_DIGEST_VERSION },
     },

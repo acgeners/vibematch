@@ -926,91 +926,29 @@ export async function getSynopsisQueueWorks(opts: {
 }
 
 /**
- * Conta as obras que aparecem nos FILTROS PADRÃO da página /ai-evaluation,
- * tratando as três filas como um CONJUNTO DISTINTO de obras (uma obra que cai em
- * mais de uma fila conta uma vez). Usado pelo badge "Avaliação IA (N)" na
- * sidebar. Seleciona só colunas mínimas — roda a cada navegação. Espelha os
- * defaults de parseFilters / parseIaRkStates / parseSynopsisStates em
- * app/ai-evaluation/page.tsx:
- *   - Atributos:        ai_eval_status ∈ {pending, review_pending}
- *   - Veredito IA:            "stale" (tem alignment_score e alignment_stale)
- *   - Interesse Sinopse: "unpredicted" (sinopse canônica SEM nenhuma previsão)
+ * Conta as obras na fila de ATRIBUTOS de /ai-evaluation (aba "IA atributos"):
+ * ai_eval_status ∈ {pending, review_pending}, não arquivadas. É o número que
+ * alimenta o badge "Avaliação IA" da sidebar — espelha EXATAMENTE o contador
+ * dessa aba.
+ *
+ * Antes, o badge somava a UNIÃO distinta de três filas (atributos ∪ Veredito IA
+ * stale ∪ Interesse Sinopse não-previsto). As duas últimas inflavam o número —
+ * sobretudo após uma regeneração de perfil, que marca centenas de
+ * `alignment_stale` de uma vez — e faziam o badge divergir da aba que o usuário
+ * olha. Essas filas têm seus próprios contadores na página; ficam fora do badge.
+ *
+ * Head-count (`count: "exact", head: true`): agrega no Postgres, sem trafegar
+ * linhas nem paginar.
  */
-export async function getAiEvaluationDefaultQueueCount(): Promise<number> {
+export async function getAttributesQueueCount(): Promise<number> {
   const supabase = createAdminClient()
-
-  // Todas as leituras paginam: works e synopsis_quality_predictions são de escala
-  // catálogo (predictions já passou de 1000) — sem isso o PostgREST corta em 1000
-  // e o badge desce abaixo do real (foi o bug "badge × aba não bate").
-  const [attr, staleScores, synWorks, preds] = await Promise.all([
-    // 1) Atributos — default {pending, review-pending}.
-    fetchAllRows<{ id: string }>(
-      (from, to) =>
-        supabase
-          .from("works")
-          .select("id")
-          .in("ai_eval_status", ["pending", "review_pending"])
-          .eq("is_archived", false)
-          .range(from, to),
-      "Falha contando fila de atributos",
-    ),
-    // 2) Veredito IA — default {stale}: filtra direto em calculated_scores. Arquivadas
-    //    são excluídas abaixo intersectando com works não-arquivadas.
-    fetchAllRows<{ work_id: string }>(
-      (from, to) =>
-        supabase
-          .from("calculated_scores")
-          .select("work_id")
-          .eq("alignment_stale", true)
-          .not("alignment_score", "is", null)
-          .range(from, to),
-      "Falha contando fila de Veredito IA",
-    ),
-    // 3) Interesse Sinopse — obras (não arquivadas) com sinopse canônica.
-    fetchAllRows<{ id: string }>(
-      (from, to) =>
-        supabase
-          .from("works")
-          .select("id")
-          .eq("is_archived", false)
-          .not("canonical_synopsis", "is", null)
-          .range(from, to),
-      "Falha contando fila de sinopse",
-    ),
-    fetchAllRows<{ work_id: string }>(
-      (from, to) => supabase.from("synopsis_quality_predictions").select("work_id").range(from, to),
-      "Falha lendo previsões de sinopse",
-    ),
-  ])
-
-  const ids = new Set<string>()
-
-  for (const w of attr) ids.add(w.id)
-
-  // Veredito IA stale: exclui arquivadas validando os work_ids contra works não-arquivadas.
-  const staleIds = [...new Set(staleScores.map((r) => r.work_id))]
-  for (let i = 0; i < staleIds.length; i += 200) {
-    const chunk = staleIds.slice(i, i + 200)
-    const { data, error } = await supabase
-      .from("works")
-      .select("id")
-      .in("id", chunk)
-      .eq("is_archived", false)
-    if (error) throw new Error(`Falha validando Veredito IA não-arquivadas: ${error.message}`)
-    for (const w of data ?? []) ids.add((w as { id: string }).id)
-  }
-
-  // Badge = só "não previsto": obra com sinopse canônica e SEM nenhuma previsão
-  // (qualquer versão). Desatualizadas (têm previsão velha) NÃO entram no badge.
-  const predictedSynopsis = new Set<string>()
-  for (const p of preds) {
-    predictedSynopsis.add(p.work_id)
-  }
-  for (const w of synWorks) {
-    if (!predictedSynopsis.has(w.id)) ids.add(w.id)
-  }
-
-  return ids.size
+  const { count, error } = await supabase
+    .from("works")
+    .select("id", { count: "exact", head: true })
+    .in("ai_eval_status", ["pending", "review_pending"])
+    .eq("is_archived", false)
+  if (error) throw new Error(`Falha contando fila de atributos: ${error.message}`)
+  return count ?? 0
 }
 
 /**

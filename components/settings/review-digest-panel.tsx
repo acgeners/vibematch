@@ -1,12 +1,14 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState } from "react"
 import { toast } from "sonner"
 import { Layers } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { StatCard } from "@/components/settings/stat-card"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import { useRefresh } from "@/lib/use-refresh"
+import { runTask } from "@/lib/tasks-store"
+import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import {
   consolidatePendingReviewDigests,
   type ConsolidateReviewDigestsProgress,
@@ -23,36 +25,42 @@ interface ReviewDigestPanelProps {
  * a action filtra as pendentes (sem digest ou versão antiga) por conta própria.
  */
 export function ReviewDigestPanel({ accent }: ReviewDigestPanelProps) {
-  const [isPending, startTransition] = useTransition()
   const [lastResult, setLastResult] = useState<ConsolidateReviewDigestsProgress | null>(null)
   const refresh = useRefresh()
+  const tasks = useAppTasks()
+  const isPending = tasks.some((t) => t.id === "digest" && t.status === "running")
 
+  // Roda em segundo plano via store global: aparece no indicador, você pode sair
+  // das configurações enquanto processa. `consolidatePendingReviewDigests` resolve
+  // com { error } | { data } (não lança), então o sucesso/erro vem no onDone.
   const handleRun = () => {
-    startTransition(async () => {
-      try {
-        const result = await consolidatePendingReviewDigests(10)
+    runTask({
+      id: "digest",
+      kind: "digest",
+      label: "Consolidando digests de reviews",
+      run: () => consolidatePendingReviewDigests(10),
+      successToast: () => null, // mensagens específicas vão no onDone (warning/info/success)
+      onDone: (result) => {
         if (result.error) {
           toast.error(result.error)
           return
         }
-        if (result.data) {
-          setLastResult(result.data)
-          if (result.data.digested > 0) refresh()
-          if (result.data.abortedEarly) {
-            toast.warning(
-              `Anthropic congestionada — abortei após ${result.data.failed} falhas seguidas. ${result.data.digested} digests gerados antes do abort.`,
-            )
-          } else if (result.data.digested === 0 && result.data.failed === 0) {
-            toast.info("Nada pra processar — todas as obras com reviews já têm digest em dia.")
-          } else {
-            toast.success(
-              `${result.data.digested} digests gerados (~${(result.data.tokensIn + result.data.tokensOut).toLocaleString("pt-BR")} tokens).`,
-            )
-          }
+        if (!result.data) return
+        setLastResult(result.data)
+        if (result.data.digested > 0) refresh()
+        if (result.data.abortedEarly) {
+          toast.warning(
+            `Anthropic congestionada — abortei após ${result.data.failed} falhas seguidas. ${result.data.digested} digests gerados antes do abort.`,
+          )
+        } else if (result.data.digested === 0 && result.data.failed === 0) {
+          toast.info("Nada pra processar — todas as obras com reviews já têm digest em dia.")
+        } else {
+          toast.success(
+            `${result.data.digested} digests gerados (~${(result.data.tokensIn + result.data.tokensOut).toLocaleString("pt-BR")} tokens).`,
+          )
         }
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao gerar digest de reviews")
-      }
+      },
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Erro ao gerar digest de reviews"),
     })
   }
 

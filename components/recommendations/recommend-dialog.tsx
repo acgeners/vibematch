@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useTransition } from "react"
+import { useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2, Sparkles } from "lucide-react"
@@ -24,6 +24,8 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useRefresh } from "@/lib/use-refresh"
+import { runTask } from "@/lib/tasks-store"
+import { useAppTasks } from "@/components/tasks/use-app-tasks"
 import { runRecommendationAction } from "@/server/actions/recommendations"
 import {
   ALLOWED_CANDIDATE_COUNTS,
@@ -74,12 +76,6 @@ const DEFAULT_LABEL: Record<RecommendContext, string> = {
   standalone: "Recomendar com IA",
 }
 
-const LOADING_STEPS = [
-  "Carregando perfil…",
-  "Avaliando candidatos…",
-  "Gerando explicação…",
-]
-
 interface RecommendDialogProps {
   context: RecommendContext
   /** Aparência do gatilho. */
@@ -112,19 +108,11 @@ export function RecommendDialog({
   const [scope, setScope] = useState<Scope>(scopes[0])
   const [n, setN] = useState<AllowedCandidateCount>(20)
   const [userContext, setUserContext] = useState("")
-  const [isPending, startTransition] = useTransition()
-  const [loadingStepIdx, setLoadingStepIdx] = useState(0)
-
-  useEffect(() => {
-    if (!isPending) return
-    const interval = setInterval(() => {
-      setLoadingStepIdx((i) => (i + 1) % LOADING_STEPS.length)
-    }, 4000)
-    return () => {
-      clearInterval(interval)
-      setLoadingStepIdx(0)
-    }
-  }, [isPending])
+  // Roda em segundo plano via store: o diálogo fecha ao confirmar e a recomendação
+  // aparece no indicador global (você pode navegar). `isPending` reflete a tarefa
+  // "recommend" do store (impede reabrir e disparar de novo enquanto roda).
+  const tasks = useAppTasks()
+  const isPending = tasks.some((t) => t.id === "recommend" && t.status === "running")
 
   const appendPresetToContext = (snippet: string) => {
     setUserContext((prev) => {
@@ -184,32 +172,42 @@ export function RecommendDialog({
       ? parseFiltersFromSearchParams(new URLSearchParams(searchParams.toString()))
       : undefined
 
-    startTransition(async () => {
-      try {
-        const result = await runRecommendationAction({
+    setOpen(false) // fecha o diálogo; a recomendação roda em segundo plano
+    runTask({
+      id: "recommend",
+      kind: "recommend",
+      label: "Gerando recomendação por IA",
+      run: () =>
+        runRecommendationAction({
           mode: SCOPE_TO_MODE[scope],
           n,
           userContext: userContext.trim() || null,
           filters,
-        })
+        }),
+      successToast: (result) => {
+        if (!result.data) return null
+        const dropped = result.data.candidatesAvailable - result.data.candidatesEvaluated
+        return {
+          message:
+            dropped > 0
+              ? `${result.data.candidatesEvaluated} obras rankeadas (${dropped} fora desta run)`
+              : `${result.data.candidatesEvaluated} obras rankeadas`,
+          action: { label: "Ver", href: `/recommendations/${result.data.runSlug}` },
+        }
+      },
+      onDone: (result) => {
         if (result.error) {
           toast.error(result.error)
           return
         }
         if (result.data) {
-          const dropped = result.data.candidatesAvailable - result.data.candidatesEvaluated
-          toast.success(
-            dropped > 0
-              ? `${result.data.candidatesEvaluated} obras rankeadas (${dropped} não entraram nesta run).`
-              : `${result.data.candidatesEvaluated} obras rankeadas.`,
-          )
-          setOpen(false)
+          // Se ainda montado, leva direto pro resultado; o toast cobre o caso de
+          // já ter navegado pra outro lugar.
           router.push(`/recommendations/${result.data.runSlug}`)
           refresh()
         }
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao gerar recomendação")
-      }
+      },
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Erro ao gerar recomendação"),
     })
   }
 
@@ -318,7 +316,7 @@ export function RecommendDialog({
             {isPending ? (
               <>
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                {LOADING_STEPS[loadingStepIdx]}
+                Rodando…
               </>
             ) : (
               "Confirmar e rodar"

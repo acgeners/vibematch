@@ -17,6 +17,13 @@ import type { EnrichedReviewContext } from "./enriched"
 
 export const CONTEXTUAL_LABEL_DOMAIN = ["♥", "♥♥", "♥♥♥", "♥♥♥♥"] as const
 
+/**
+ * Versão da RÚBRICA contextual exibida ao avaliador (`CONTEXTUAL_RUBRIC_HTML` /
+ * [RUBRIC-CONTEXTUAL.md]). Entra na assinatura de equivalência de display
+ * (label-reuse): mudar a rúbrica/instruções invalida o reaproveitamento de labels.
+ */
+export const CONTEXTUAL_RUBRIC_VERSION = "rubric-contextual-v1"
+
 /** Rúbrica CONTEXTUAL (corrige a synopsis-only): mede a OBRA, não só a sinopse. */
 export const CONTEXTUAL_RUBRIC_HTML = `
 <div class="rubric">
@@ -42,6 +49,9 @@ export interface ContextualCard {
   contextualTags: string[]
   reviewContext: EnrichedReviewContext
   sanitizedDigest: SanitizedDigest | null
+  /** Reviews USADAS/total no digest (opcional). Exibido como "(N de M reviews)" quando houve corte
+   * no cap, ou "(N reviews)" quando N=M. `null`/ausente ⇒ não exibe contagem (retrocompatível). */
+  reviewCount?: { used: number; total: number } | null
 }
 
 function esc(s: string): string {
@@ -66,6 +76,11 @@ function renderContext(c: ContextualCard): string {
   if (c.reviewContext === "no_reviews_available" || !c.sanitizedDigest) return `<p class="muted">${esc(NO_REVIEWS_MESSAGE)}</p>`
   const d = c.sanitizedDigest
   const parts: string[] = []
+  if (c.reviewCount && c.reviewCount.total > 0) {
+    const { used, total } = c.reviewCount
+    const label = used < total ? `${used} de ${total} reviews` : `${used} review${used === 1 ? "" : "s"}`
+    parts.push(`<p class="muted reviews-n">(${esc(label)})</p>`)
+  }
   if (d.consensus.trim()) parts.push(`<p><strong>Consenso:</strong> ${esc(d.consensus)}</p>`)
   if (d.divergence.trim()) parts.push(`<p><strong>Divergências:</strong> ${esc(d.divergence)}</p>`)
   if (d.traits.length > 0) {

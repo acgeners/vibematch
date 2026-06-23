@@ -71,7 +71,8 @@ import {
 } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { ChevronDown, ImageIcon, Info, Loader2, Pencil, Plus, Settings2, Trash2, X } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { BarChart3, ChevronDown, ImageIcon, Info, LayoutDashboard, Loader2, Pencil, Plus, Settings2, Tags, Trash2, User, X } from "lucide-react"
 
 export interface WorkFormAiEvaluation {
   model_name: string | null
@@ -91,6 +92,105 @@ interface WorkFormProps {
   aiEvaluation?: WorkFormAiEvaluation | null
   /** Se a avaliação IA roda automaticamente ao criar via "Buscar dados" (setting, default false). */
   aiEvalOnCreate?: boolean
+  /** Conteúdo extra renderizado na aba "Notas e avaliações" (ex.: reviews
+   *  manuais). É independente do form — não é um campo, só um slot visual. */
+  reviewsSlot?: React.ReactNode
+}
+
+type EditTab = "geral" | "notas" | "status" | "tags"
+
+// Mapeia cada campo do form pra aba onde ele aparece, pra trocar de aba e mostrar
+// o erro quando a validação falha num campo de aba inativa (senão o submit
+// "trava em silêncio"). Campos não listados caem em "geral".
+const FIELD_TAB_MAP: Record<string, EditTab> = {
+  // Geral
+  title: "geral", original_title: "geral", alternative_titles: "geral",
+  synopsis: "geral", synopses: "geral", year: "geral", year_end: "geral",
+  publication_status: "geral", publication_status_id: "geral",
+  total_chapters: "geral", cover_url: "geral", covers: "geral", external_ids: "geral",
+  // Notas e avaliações
+  romance: "notas", couple_dynamics: "notas", fantasy_nobility: "notas",
+  action_adventure: "notas", adult_content: "notas", protagonist: "notas",
+  humor: "notas", drama: "notas", tragedy: "notas",
+  mu_rating: "notas", mu_votes: "notas", ap_rating: "notas", ap_votes: "notas",
+  cmx_rating: "notas", cmx_votes: "notas", extra_platform_ratings: "notas",
+  ai_justifications: "notas", ai_eval_status: "notas",
+  // Meu status
+  personal_status: "status", personal_status_id: "status", chapters_read: "status",
+  synopsis_quality: "status", observation_adjustment: "status", observations: "status",
+  user_score: "status",
+  post_story_score: "status", post_fl_score: "status", post_ml_score: "status",
+  post_character_development_score: "status", post_pacing_score: "status",
+  post_art_visual_score: "status", post_impact_immersion_score: "status",
+  post_originality_score: "status",
+  // Gêneros e tags
+  genres: "tags", tags: "tags",
+}
+
+// Mesmo visual das abas da página de exibição (app/titles/[id]/page.tsx).
+const EDIT_TABS_LIST_CLASS =
+  "h-auto w-full flex flex-wrap justify-start gap-2 bg-transparent rounded-none p-0"
+const EDIT_TAB_TRIGGER_CLASS =
+  "flex-1 min-w-[120px] cursor-pointer gap-2.5 rounded-md border border-border bg-card px-4 py-5 text-base font-semibold tracking-normal text-foreground shadow-md transition-all duration-200 hover:bg-primary/5 hover:border-primary/40 hover:text-primary hover:-translate-y-0.5 hover:shadow-lg data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:border-primary data-[state=active]:shadow-[0_0_32px_-2px_hsl(var(--primary)/0.6),0_8px_22px_-6px_hsl(var(--primary)/0.65)] dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground [&_svg]:h-5 [&_svg]:w-5"
+
+// Em edição agrupa as seções em abas; na criação (`flat`) mantém o layout
+// empilhado — a revisão dos dados do "Buscar dados" é melhor numa página só.
+// Componentes de módulo (não inline) pra não remontar o form a cada render.
+function EditTabsShell({
+  flat,
+  activeTab,
+  onTabChange,
+  children,
+}: {
+  flat: boolean
+  activeTab: EditTab
+  onTabChange: (tab: EditTab) => void
+  children: React.ReactNode
+}) {
+  if (flat) return <div className="space-y-6">{children}</div>
+  return (
+    <Tabs value={activeTab} onValueChange={(v) => onTabChange(v as EditTab)} className="w-full">
+      <TabsList className={EDIT_TABS_LIST_CLASS}>
+        <TabsTrigger value="geral" className={EDIT_TAB_TRIGGER_CLASS}>
+          <LayoutDashboard />
+          Geral
+        </TabsTrigger>
+        <TabsTrigger value="notas" className={EDIT_TAB_TRIGGER_CLASS}>
+          <BarChart3 />
+          <span className="hidden sm:inline">Notas e avaliações</span>
+          <span className="sm:hidden">Notas</span>
+        </TabsTrigger>
+        <TabsTrigger value="status" className={EDIT_TAB_TRIGGER_CLASS}>
+          <User />
+          <span className="hidden sm:inline">Meu status</span>
+          <span className="sm:hidden">Status</span>
+        </TabsTrigger>
+        <TabsTrigger value="tags" className={EDIT_TAB_TRIGGER_CLASS}>
+          <Tags />
+          <span className="hidden sm:inline">Gêneros e tags</span>
+          <span className="sm:hidden">Tags</span>
+        </TabsTrigger>
+      </TabsList>
+      {children}
+    </Tabs>
+  )
+}
+
+function TabPanel({
+  flat,
+  tab,
+  children,
+}: {
+  flat: boolean
+  tab: EditTab
+  children: React.ReactNode
+}) {
+  if (flat) return <div className="space-y-6">{children}</div>
+  return (
+    <TabsContent value={tab} className="mt-6 space-y-6">
+      {children}
+    </TabsContent>
+  )
 }
 
 const PLATFORM_FIELDS = [
@@ -529,7 +629,7 @@ const scrollToTop = () => {
   window.scrollTo({ top: 0, behavior: "smooth" })
 }
 
-export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEvalOnCreate = false }: WorkFormProps) {
+export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEvalOnCreate = false, reviewsSlot }: WorkFormProps) {
   const router = useRouter()
   const refresh = useRefresh()
   const isCreating = !workId
@@ -665,6 +765,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
   const synopsisQualityValue = useWatch({ control, name: "synopsis_quality" })
   const [coverPreviewFailedUrl, setCoverPreviewFailedUrl] = useState<string | null>(null)
   const [openSections, setOpenSections] = useState(DEFAULT_OPEN_SECTIONS)
+  const [activeTab, setActiveTab] = useState<EditTab>("geral")
   // Fontes externas reveladas manualmente via "+" mesmo estando vazias. Por
   // padrão só mostramos as preenchidas, pra não poluir o form com ~10 linhas
   // vazias (#8). Chaves = nome normalizado da fonte.
@@ -1127,6 +1228,11 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     }
 
     toast.success(workId ? "Obra atualizada!" : "Obra criada!")
+    // Atualiza o chrome (badge "Avaliação IA" / footer de recálculo) sem esperar
+    // um reload: criar uma obra deixa ela `pending` (entra na fila de atributos) e
+    // editar uma obra marca recálculo pendente. A navegação soft abaixo cai dentro
+    // do TTL do badge, então sem este refresh o número só mudaria após reload.
+    refresh()
     // Navegar SEMPRE pelo slug canônico novo (devolvido pela action). Antes, no
     // update, navegava pelo UUID e deixava /titles/{uuid} fazer um redirect()
     // server-side pro slug — mas esse redirect falha numa navegação soft (RSC),
@@ -1440,6 +1546,13 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     )
   }
 
+  // Quando a validação falha, pula pra aba do primeiro campo com erro — senão o
+  // erro fica escondido numa aba inativa e o submit parece travar sem motivo.
+  const handleInvalidSubmit = (formErrors: Record<string, unknown>) => {
+    const firstKey = Object.keys(formErrors)[0]
+    if (firstKey) setActiveTab(FIELD_TAB_MAP[firstKey] ?? "geral")
+  }
+
   const actionButtons = (
     <div className="flex flex-wrap justify-end gap-3">
       <Button
@@ -1488,7 +1601,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
   )
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} onKeyDown={handleFormKeyDown} className="space-y-6">
+    <form onSubmit={handleSubmit(onSubmit, handleInvalidSubmit)} onKeyDown={handleFormKeyDown} className="space-y-6">
       <ConfirmDialog
         open={pendingLowConfidenceSubmit != null}
         onOpenChange={(open) => {
@@ -1606,6 +1719,8 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
         </DialogContent>
       </Dialog>
 
+      <EditTabsShell flat={isCreating} activeTab={activeTab} onTabChange={setActiveTab}>
+        <TabPanel flat={isCreating} tab="geral">
       {/* 0. Nova Obra — busca */}
       <Card>
         {renderSectionHeader("new", "Nova obra")}
@@ -1886,7 +2001,9 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
           </CardContent>
         )}
       </Card>
+        </TabPanel>
 
+        <TabPanel flat={isCreating} tab="status">
       {/* 2. Status */}
       <Card>
         {renderSectionHeader("status", "Status")}
@@ -2107,7 +2224,9 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
           </CardContent>
         )}
       </Card>
+        </TabPanel>
 
+        <TabPanel flat={isCreating} tab="notas">
       {/* 3. Avaliações externas */}
       <Card>
         {renderSectionHeader("external", "Avaliações externas", {
@@ -2469,6 +2588,10 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
       </Card>
       )}
 
+      {reviewsSlot}
+        </TabPanel>
+
+        <TabPanel flat={isCreating} tab="tags">
       {/* 5. Categorização */}
       <Card>
         {renderSectionHeader("categorization", "Categorização")}
@@ -2503,6 +2626,8 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
           </CardContent>
         )}
       </Card>
+        </TabPanel>
+      </EditTabsShell>
 
       <Separator />
 

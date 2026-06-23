@@ -27,6 +27,7 @@ import {
   type GoldenDigestVersions,
 } from "@/lib/synopsis-interest/golden-digest"
 import { isUsefulReviewText } from "@/lib/reviews/useful-review"
+import { REVIEW_CORPUS_POLICY_VERSION } from "@/lib/synopsis-interest/canonical-review-corpus"
 import { estimateStep, ceilUsdToCents } from "@/lib/orchestration/cost"
 import { REVIEW_DIGEST_VERSION, REVIEW_DIGEST_MODEL } from "@/lib/ai-recommendation/review-summarizer"
 import { PRICING_SNAPSHOT_TAG } from "@/lib/ai/pricing"
@@ -54,6 +55,7 @@ function digestVersions(): GoldenDigestVersions {
     schemaVersion: "v1",
     pricingVersion: PRICING_SNAPSHOT_TAG,
     costPolicyVersion: "safety-1.5+micro-0.02",
+    corpusPolicyVersion: REVIEW_CORPUS_POLICY_VERSION, // B2.2N: entra na planSignature
   }
 }
 
@@ -154,7 +156,7 @@ async function main() {
       return { snapshotValid: true, corpusUnchanged: cur === frozen }
     },
     ensureDigest: async (workId) => {
-      const out = await ensureReviewDigest(workId, { supabase: sb, allowPaid: true, maxCostUsd })
+      const out = await ensureReviewDigest(workId, { supabase: sb, allowPaid: true, maxCostUsd, dedupTag: REVIEW_CORPUS_POLICY_VERSION })
       switch (out.status) {
         case "succeeded": return { status: "succeeded", ranLlm: out.ranLlm, costUsd: out.costUsd }
         case "skipped": return { status: "skipped", ranLlm: false, costUsd: 0 }

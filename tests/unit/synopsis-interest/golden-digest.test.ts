@@ -15,6 +15,7 @@ const VERSIONS: GoldenDigestVersions = {
   experimentVersion: "digest-exp-1", goldenVersion: "pilot-1", snapshotVersion: "base-1",
   digestVersion: "digest-v1", promptVersion: "digest-v1", model: "claude-sonnet-4-6",
   schemaVersion: "v1", pricingVersion: "static@x", costPolicyVersion: "safety-1.5",
+  corpusPolicyVersion: "text-only-v1",
 }
 const COST = (scale: number) => ({ likelyUsd: 0.04 + scale * 0.001, upperBoundUsd: (0.04 + scale * 0.001) * 1.5 })
 
@@ -77,6 +78,11 @@ describe("golden-digest — planGoldenDigestBatch", () => {
   it("mudança de pricing version muda a assinatura", () => {
     const a = plan(items).planSignature
     const b = plan(items, { versions: { ...VERSIONS, pricingVersion: "static@OTHER" } }).planSignature
+    expect(a).not.toBe(b)
+  })
+  it("B2.2N: mudança da POLÍTICA do corpus muda a planSignature (não reutiliza plano)", () => {
+    const a = plan(items).planSignature
+    const b = plan(items, { versions: { ...VERSIONS, corpusPolicyVersion: "text-only-v2" } }).planSignature
     expect(a).not.toBe(b)
   })
   it("custo soma só os elegíveis (likely/upper)", () => {

@@ -25,6 +25,8 @@ import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
+import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
+import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
 import { ScoreBadge, getCriterionColorClass } from "@/components/ui/score-badge"
 import {
   PublicationStatusBadge,
@@ -218,6 +220,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   const stanceBySlug = new Map<string, "love" | "avoid">()
   for (const p of declaredTagPrefs) stanceBySlug.set(p.slug, p.stance)
   const isPaidPlan = planAllows(plan, "deep_dive")
+
+  // Canal ÚNICO de review manual (externas) — para o diálogo "Avaliar" e o card de exibição.
+  // Só editável com o gate local aberto (as Server Actions reexecutam o gate).
+  const externalEditorEnabled = await isLocalExternalReviewEditorAllowed()
+  const externalManualReviews = externalEditorEnabled
+    ? await readManualExternalReviewsForDisplay(work.id as string)
+    : []
 
   const scoreMap: Record<string, number> = {}
   const sourceMap: Record<string, string> = {}
@@ -617,6 +626,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     totalChapters: work.total_chapters != null ? Number(work.total_chapters) : null,
                     observations: work.observations,
                   }}
+                  currentCovers={(work.work_covers ?? []).map(
+                    (c: { url: string; source?: string | null; is_primary?: boolean }) => ({
+                      url: c.url,
+                      source: c.source,
+                      isPrimary: c.is_primary,
+                    })
+                  )}
                 />
               </div>
               {(() => {
@@ -745,6 +761,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         hasCriteriaScores={Object.keys(scoreMap).length > 0}
         coverUrl={primaryCover}
         latestEvaluation={latestAiEval ?? null}
+        externalEditorEnabled={externalEditorEnabled}
+        externalReviews={externalManualReviews}
       />
       {/* Notas e Avaliações Externas side-by-side */}
       <div className={cn(platformRatings.length > 0 && "grid grid-cols-1 lg:grid-cols-2 gap-5")}>

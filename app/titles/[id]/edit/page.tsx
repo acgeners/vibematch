@@ -4,8 +4,9 @@ import { getWorkWithAiEvaluations, getWorkBySlug, getWorkTitleByIdOrSlug } from 
 import { titleToSlug } from "@/lib/utils"
 import { Header } from "@/components/layout/header"
 import { WorkForm, type WorkFormAiEvaluation } from "@/components/titles/work-form"
-import { ManualReviewsCard } from "@/components/titles/manual-reviews-card"
-import { getManualReviews } from "@/server/queries/manual-reviews"
+import { ReviewsEditor } from "@/components/titles/reviews-editor"
+import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
+import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
 import type { WorkFormValues } from "@/lib/validations/work.schema"
 import type { WorkWithRelations } from "@/types/domain"
 import { CRITERION_SLUGS } from "@/types/domain"
@@ -129,7 +130,12 @@ export default async function EditTitlePage({ params }: EditPageProps) {
 
   const slug = titleToSlug(work.title) || work.id
   const initialValues = workToFormValues(work)
-  const manualReviews = await getManualReviews(work.id)
+  // Canal ÚNICO de review manual (externas) — só com o gate local aberto; as Server Actions
+  // reexecutam o gate. Em produção (sem auth) o card não aparece.
+  const externalEditorEnabled = await isLocalExternalReviewEditorAllowed()
+  const externalReviews = externalEditorEnabled
+    ? await readManualExternalReviewsForDisplay(work.id)
+    : []
 
   const aiEvaluations = (work as WorkWithRelations & {
     ai_evaluations?: Array<{
@@ -171,8 +177,14 @@ export default async function EditTitlePage({ params }: EditPageProps) {
         workSlug={slug}
         initialValues={initialValues}
         aiEvaluation={aiEvaluationForForm}
+        reviewsSlot={
+          <ReviewsEditor
+            workId={work.id}
+            externalEditorEnabled={externalEditorEnabled}
+            externalReviews={externalReviews}
+          />
+        }
       />
-      <ManualReviewsCard workId={work.id} initialReviews={manualReviews} />
     </div>
   )
 }

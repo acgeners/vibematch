@@ -85,6 +85,8 @@ export interface GoldenDigestVersions {
   schemaVersion: string
   pricingVersion: string
   costPolicyVersion: string
+  /** Versão da política do corpus (B2.2N) — entra na `planSignature` via `versions`. */
+  corpusPolicyVersion: string
 }
 
 export interface GoldenDigestPlanInput {

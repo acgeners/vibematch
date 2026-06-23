@@ -113,6 +113,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
     tagSlugsAny: multi("tags_any") ?? multi("tags"),
     tagSlugsExclude: multi("tags_exclude"),
     synopsisQualities: multi("synopsis_q"),
+    predictedSynopsisQualities: multi("synopsis_pred"),
     minTotalChapters: num("min_chapters"),
     maxTotalChapters: num("max_chapters"),
     minExpectedScore: num("min_expected"),

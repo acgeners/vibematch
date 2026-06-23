@@ -40,8 +40,8 @@ export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
         <CardContent>
           <p className="text-sm text-muted-foreground">
             Nenhuma review salva ainda. Reviews externas são extraídas quando a
-            Avaliação IA é executada; reviews suas podem ser adicionadas na edição
-            da obra.
+            Avaliação IA é executada; reviews externas também podem ser adicionadas
+            à mão na edição da obra (ambiente local).
           </p>
         </CardContent>
       </Card>
@@ -67,7 +67,7 @@ export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
             {snapshot.manual.length > 0 && (
               <Badge variant="secondary" className="gap-1 text-[11px]">
                 <PenLine className="h-3 w-3" />
-                {snapshot.manual.length} sua{snapshot.manual.length === 1 ? "" : "s"}
+                {snapshot.manual.length} manual{snapshot.manual.length === 1 ? "" : "is"}
               </Badge>
             )}
           </div>
@@ -111,7 +111,7 @@ export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
               <div className="mb-2 flex items-baseline justify-between gap-2">
                 <h3 className="flex items-center gap-1.5 text-sm font-semibold">
                   <PenLine className="h-3.5 w-3.5 text-primary" />
-                  Suas reviews
+                  Reviews externas (manuais)
                 </h3>
                 <span className="text-xs text-muted-foreground">
                   {snapshot.manual.length} review(s)
@@ -124,28 +124,13 @@ export function WorkReviewsCard({ snapshot }: WorkReviewsCardProps) {
                     className="rounded-md border border-primary/30 bg-primary/5 p-3"
                   >
                     <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
-                      <span className="text-muted-foreground">Review manual</span>
-                      {review.userRating != null && (
-                        <span
-                          className={cn(
-                            "font-mono font-semibold tabular-nums",
-                            ratingColor(review.userRating),
-                          )}
-                        >
-                          {review.userRating.toFixed(1)}/10
-                        </span>
-                      )}
+                      <span className="font-semibold">{PLATFORM_LABELS[review.source] ?? review.source}</span>
                     </div>
                     <ExpandableText
                       text={review.text}
                       maxLines={4}
                       className="mt-2 text-sm leading-relaxed text-foreground/90 whitespace-pre-line"
                     />
-                    {review.note && (
-                      <p className="mt-2 text-xs italic text-muted-foreground">
-                        {review.note}
-                      </p>
-                    )}
                   </li>
                 ))}
               </ul>
