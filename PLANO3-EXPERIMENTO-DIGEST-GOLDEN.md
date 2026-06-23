@@ -1,3 +1,5 @@
+> **⚠️ pilot-1 SUPERSEDED (2026-06-23).** O golden pilot-1 deste documento foi substituído pelo golden **prospectivo pilot-2** (motivo: leakage retrospectivo — obras já lidas). Protocolo/infra (incl. candidatos b1/e1) foram reaproveitados; os **resultados finais + o contrato ratificado (b1, sem digest)** estão em [PLANO-MESTRE §24i/§24j](PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md). Mantido como registro histórico.
+
 STATUS: PRONTO PARA ROTULAGEM HUMANA CONTEXTUAL ✅ (B2.2C, 2026-06-20) — ENRICHED-1 E PACOTE CONTEXTUAL CONGELADOS; ZERO CHAMADAS PAGAS NESTA FASE. enrichedSnapshotSignature=8b61084d…, contextualPackageSignature=9e4d1b9f…; 51 digest_available + 29 no_reviews_available; pacote offline validado (0 leakage). Ver PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md. (B2.2B: 51 digests gerados, $0.8578. base-1 preservado; synopsis-only SUPERSEDED.)
 
 > **⚠️ Correção de constructo (Fase B2.1D, 2026-06-19):** o alvo do Plano 3 é **Potencial

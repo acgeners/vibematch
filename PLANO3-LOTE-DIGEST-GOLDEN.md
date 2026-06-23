@@ -1,3 +1,5 @@
+> **⚠️ pilot-1 SUPERSEDED (2026-06-23).** O golden pilot-1 deste documento foi substituído pelo golden **prospectivo pilot-2** (motivo: leakage retrospectivo — obras já lidas). Os digests/infra foram reaproveitados; os **resultados finais + o contrato ratificado (b1, sem digest)** estão em [PLANO-MESTRE §24i/§24j](PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md). Mantido como registro histórico.
+
 STATUS: EXECUTADO ✅ — 51/51 digests gerados (Fase B2.2B, 2026-06-20); custo real US$ 0,8578 ≤ teto US$ 3,50; status `completed`, exit 0. Ver "RESULTADO DA EXECUÇÃO" no fim. B2.2C: enriched-1 + pacote contextual materializados (ver PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md).
 
 # Lote de digests do golden contextual (Plano 3 Fase B2.2A)

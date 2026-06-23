@@ -1,3 +1,5 @@
+> **⚠️ pilot-1 SUPERSEDED (2026-06-23).** O golden pilot-1 deste documento foi substituído pelo golden **prospectivo pilot-2** (motivo: leakage retrospectivo — obras já lidas). Protocolo/infra foram reaproveitados; os **resultados finais + o contrato ratificado (b1, sem digest)** estão em [PLANO-MESTRE §24i/§24j](PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md). Mantido como registro histórico.
+
 STATUS: GOLDEN DATA READINESS: APROVADO PARA SNAPSHOT-BASE → MATERIALIZADO (Fase B2.1C). Snapshot-base (base-1) e pacote cego congelados/validados; PRONTO PARA ROTULAGEM HUMANA. Manifesto: PLANO3-GOLDEN-SNAPSHOT-BASE-MANIFEST.md. Nenhuma chamada paga executada.
 
 # Plano 3 — Golden Data Readiness Gate (Fase B2.1A)

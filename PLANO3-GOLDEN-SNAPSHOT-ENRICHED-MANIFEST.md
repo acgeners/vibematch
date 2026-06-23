@@ -1,5 +1,7 @@
 # Manifesto — Snapshot ENRIQUECIDO (`enriched-1`) + Pacote contextual (Plano 3 Fase B2.2C)
 
+> **⚠️ pilot-1 SUPERSEDED (2026-06-23).** Este snapshot pertence ao golden pilot-1, substituído pelo golden **prospectivo pilot-2** (leakage retrospectivo). A infra foi reaproveitada; os **resultados finais + o contrato ratificado (b1, sem digest)** estão em [PLANO-MESTRE §24i/§24j](PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md). Mantido como registro histórico.
+
 > Manifesto **versionado** (sem sinopses/digests integrais). Gerado por
 > [scripts/synopsis-interest-enriched.ts](scripts/synopsis-interest-enriched.ts) (read-only).
 > Deriva ESTRITAMENTE de [base-1](PLANO3-GOLDEN-SNAPSHOT-BASE-MANIFEST.md) + os 51 digests

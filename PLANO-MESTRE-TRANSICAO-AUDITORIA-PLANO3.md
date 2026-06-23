@@ -11,6 +11,17 @@
 > contrato da previsão antes de qualquer novo gasto, e definir **uma** sequência de
 > trabalho. **Nenhuma implementação funcional aqui.**
 
+> **⚠️ ATUALIZAÇÃO 2026-06-23 — ler antes de §3/§20/§21/§22.** O experimento do Plano 3
+> **foi concluído** sobre um golden **prospectivo** (pilot-2) que **supersede** o pilot-1
+> citado nas seções abaixo. §3, §20, §21 e §22 descrevem o estado de **2026-06-19**
+> (golden pilot-1, 0/90, experimento por rodar) e estão **desatualizadas**: o golden já
+> foi rotulado (90 labels), os candidatos rodaram e há resultado. Estado atual + decisão
+> pendente no novo addendum **§24i** (topo do bloco de addenda). **TL;DR:** LLM ≫ baselines
+> determinísticos (D1/D2); o candidato com digest (e1, MAE holdout 0.441) bate o sem-digest
+> (b1, 0.500) mas com **IC⊃0 (inconclusivo)**. **CONTRATO RATIFICADO 2026-06-23 = `b1`**
+> (LLM perfil+sinopse+tags, **Sonnet**, sem digest) = contrato **v2 atual** (sem nova
+> `prompt_version`, sem migration). **Próximo passo = Lote 02** (~622 obras) sob v2.
+
 ---
 
 ## 1. Objetivo
@@ -69,7 +80,7 @@ Lineage: `feat/data-orchestration` = `feat/synopsis-quality-optimization` (Plano
 |---|---|---|
 | **1 — Arquitetura/orquestração** | **partial** | Os 5 passos da Fase B estão integrados na fila durável; backfill **só de Interesse** existe. Gaps: `runDigestBatch` planejado e **não construído**; lote legado de digest ainda **bypassa** a orquestração; `review_digest` **não** está no contrato de `predict_interest_potential` (decisão adiada, não bug). |
 | **2 — Backfill de Interesse** | **partial** | Piloto (12, $0.62) + Lote 01 (100, $0.75) = **112 previsões modernas fresh**; **~622 pendentes**; **Lote 02 suspenso**; perfil v7 fresh, `recalc_pending=false`. |
-| **3 — Plano 3 (Interesse na Sinopse)** | **partial** | Infra da Fase B pronta (golden sample FROZEN 90 slots, rúbrica, baselines D1/D2, rotulagem cega, métricas, staleness, runner dry-run). Pendente: **golden 0/90 rotulado**, piloto LLM (~$0.78) não rodado, comparação de candidatos não feita, **candidato com digest ainda não existe**. |
+| **3 — Plano 3 (Interesse na Obra)** | **experimento concluído** (ver §24i) | ~~Infra da Fase B pronta; golden 0/90; piloto não rodado~~ → pilot-1 **superseded** (leakage retrospectivo); golden **prospectivo pilot-2** rotulado (90 labels, `a8abddca…`) e candidatos b1/e1/D1/D2 executados. Resultado: **LLM ≫ D1/D2**; **e1 (com digest) MAE 0.441 < b1 (sem) 0.500**, mas IC⊃0 (inconclusivo). **Contrato RATIFICADO 2026-06-23 = b1 (Sonnet, sem digest)**; próximo = **Lote 02** (~622) sob v2. |
 
 ---
 
@@ -122,7 +133,10 @@ calculated_scores = 737  ·  personal_fit não-null = 737/737  ·  max calculate
 
 ### Plano 3 — golden (`synopsis_interest_golden`, migration 109 APLICADA)
 ```
-90 linhas (sample_version=pilot-1)  ·  human_label preenchido = 0/90  ← golden NÃO rotulado
+90 linhas (sample_version=pilot-1)  ·  human_label preenchido = 0/90  ← golden pilot-1 NÃO rotulado em DB
+# NOTA (2026-06-23): pilot-1 foi SUPERSEDED (leakage retrospectivo). O experimento migrou para o
+# golden prospectivo pilot-2 (90 obras não lidas), rotulado e executado LOCALMENTE (.local-experiments,
+# embargado) — esta tabela em DB segue com 0/90 de propósito. Ver §24i.
 ```
 
 ---
@@ -373,7 +387,7 @@ FASE 2B — Finalizar o backfill de Interesse (SÓ após o winner)
 
 | # | Decisão | Recomendação 🟧 |
 |---|---|---|
-| P1 | Digest entra no contrato vencedor? | decidir **após** o experimento (golden rotulado), não antes |
+| P1 | Digest entra no contrato vencedor? | **RATIFICADO 2026-06-23: NÃO** — contrato = `b1` (Sonnet, sem digest). Backfill de digest das 489 **dispensado**. Ver §24i |
 | P2 | Modelo do predictor: manter Sonnet ou testar Haiku/determinístico (AUDIT F10/§18)? | incluir Haiku e D1/D2 como candidatos baratos na comparação |
 | P3 | Construir `runDigestBatch` agora (G2) ou usar per-work no golden? | per-work/IDs no golden basta p/ o experimento; `runDigestBatch` só se o digest vencer |
 | P4 | Auto-refresh de previsões pós-perfil (G4/AUDITORIA §13) ou seguir com lotes manuais? | seguir com lotes manuais até o contrato congelar; reavaliar depois |
@@ -399,7 +413,7 @@ Já gastos: piloto 2B.1 **$0.62** + Lote 01 2C.2 **$0.75** = **$1.37** (112 prev
 ## 17. Migrations conhecidas
 
 Todas as relevantes estão **APLICADAS** (🟩 confirmado por colunas/linhas existentes):
-`085/086` (synopsis_quality_predictions + multi-version), `103` (review_digest), `104` (tier_band_width), `105` (prediction_snapshots), `107` (ai_cache_events), `108` (synopsis_quality provenance), `109` (synopsis_interest_golden), `110` (work_processing_jobs), `111` (input_signature).
+`085/086` (synopsis_quality_predictions + multi-version), `103` (review_digest), `104` (tier_band_width), `105` (prediction_snapshots), `107` (ai_cache_events), `108` (synopsis_quality provenance), `109` (synopsis_interest_golden), `110` (work_processing_jobs), `111` (input_signature), `112` (work_external_reviews_manual — canal de reviews externas manuais text-only), `113` (drop provenance CHECK), `114` (drop metadata → text-only). As **112–114** foram aplicadas à mão **depois** desta etapa-ponte (durante o pilot-2) e mergeadas no PR #9 (commit `c964048`) — ver §24i.
 
 **Esta etapa não cria migration.** O experimento (offline + golden) e um `prompt_version` novo **não exigem** migration. Eventual `runDigestBatch` reusa `work_processing_jobs` (sem migration). Mecanismo de aplicação: à mão no SQL editor (CLI dessincronizada — ver memória do projeto).
 
@@ -456,11 +470,11 @@ Estados: `completed · partial · blocked · planned · deferred · not_applicab
 | Plano 3 | rotulagem cega (fluxo) (c3) | completed | labeling-sheet; `03476ac` | — | — |
 | Plano 3 | métricas + baselines D1/D2 (c4/c6) | completed | metrics.ts/baselines.ts; `deacf0c`/`d238e4c` | — | — |
 | Plano 3 | staleness + runner dry-run (c5) | completed | staleness.ts/synopsis-interest-run.ts; `af93025` | — | — |
-| Plano 3 | **rotular o golden** (humano) | planned | 🟩 `synopsis_interest_golden` 0/90 rotulado | rotular cego (90 slots) | comparação de candidatos |
-| Plano 3 | **piloto LLM** (synopsis_quality_predict no golden) | planned | runner orça ~$0.78; não rodado | aprovar + rodar | comparação |
-| Plano 3 | **candidato COM digest** | planned | não existe em código | construir após digest do golden | escolha do contrato |
-| Plano 3 | fallback digest→summary→no_reviews | planned | não existe em código | definir no candidato | escolha do contrato |
-| Plano 3 | comparar candidatos + escolher contrato | blocked | depende de golden rotulado + digest do golden | rodar após 2A + rotulagem | Fase 2B inteira |
+| Plano 3 | **rotular o golden** (humano) | completed (pilot-2, §24i) | pilot-1 superseded; golden prospectivo pilot-2 rotulado (90 labels, `a8abddca…`) | — | — |
+| Plano 3 | **piloto LLM** (b1, sem digest) | completed (pilot-2, §24i) | b1 90/90; MAE holdout 0.500; $0.66 | — | — |
+| Plano 3 | **candidato COM digest** (e1) | completed (pilot-2, §24i) | e1 90/90; MAE holdout 0.441; $0.79 | — | — |
+| Plano 3 | fallback digest→summary→no_reviews | completed (pilot-2, §24i) | `no_reviews_available` explícito; 9 obras sem reviews tratadas à parte | — | — |
+| Plano 3 | comparar candidatos + escolher contrato | completed (§24i) | comparação FEITA + **contrato RATIFICADO = b1 (Sonnet, sem digest), 2026-06-23** | Lote 02 sob v2 | — |
 
 ---
 
@@ -468,9 +482,9 @@ Estados: `completed · partial · blocked · planned · deferred · not_applicab
 
 | Item | Responsável/fase | Bloqueia? | Critério de fechamento |
 |---|---|:--:|---|
-| Golden 0/90 rotulado | Plano 3 / Fase 3 | **sim** | 80 únicas + 10 repetições rotuladas cego |
-| Piloto LLM Plano 3 não rodado (~$0.78) | Plano 3 / Fase 3 | **sim** | piloto executado, outputs comparáveis ao golden |
-| Candidato com digest inexistente | Plano 3 / Fase 3 | **sim** | candidato implementado (offline) + fallback summary/no_reviews |
+| Golden rotulado | Plano 3 / Fase 3 | **resolvido** (§24i) | pilot-2: 90 labels (`a8abddca…`); pilot-1 superseded por leakage retrospectivo |
+| Piloto LLM Plano 3 | Plano 3 / Fase 3 | **resolvido** (§24i) | b1/e1 executados 90/90; resultados em §24i |
+| Candidato com digest | Plano 3 / Fase 3 | **resolvido** (§24i) | e1 executado; MAE holdout 0.441 (IC⊃0 vs b1) |
 | Digest só nas obras do golden | Fase 2A | **sim** (p/ o candidato digest) | digest válido nas ≤80 obras com review do golden |
 | `runDigestBatch`/`planDigestBatch` (G2) | Arquitetura | não (p/ experimento) | construído **se** digest vencer; reusa `ensureReviewDigest` |
 | Lote legado de digest bypassa o gate (G3) | Arquitetura | não | migrado p/ orquestração ou aposentado |
@@ -483,7 +497,17 @@ Estados: `completed · partial · blocked · planned · deferred · not_applicab
 
 ## 22. Próximo escopo recomendado (UMA etapa — não executar agora)
 
-**Recomendação: retomar o Plano 3 pela rotulagem do golden + piloto LLM** (Fase 3, precedida do mínimo de 2A: digest só no golden). É o **gargalo real** — sem golden rotulado e sem o candidato com digest, não há como congelar o contrato, e sem contrato congelado todo backfill pago é especulativo.
+> **SUPERSEDED por §24i (2026-06-23).** A recomendação histórica abaixo (rotular o golden +
+> piloto LLM) **já foi cumprida** no pilot-2: golden rotulado (90 labels), candidatos
+> b1/e1/D1/D2 executados, resultado registrado. **Contrato RATIFICADO 2026-06-23 = b1;
+> próximo passo = Lote 02** (não mais "ratificar"):
+> - ✅ **`b1` ratificado** (LLM sem digest, Sonnet) como contrato; **não** se faz o backfill de
+>   digest das 489 (o ganho do digest tem IC⊃0 — custo certo ~$23–35 por ganho incerto).
+> - Em seguida: **Fase 2B** = Lote 02 (~622) sob o contrato **v2 atual** (sem nova
+>   `prompt_version`; as 112 previsões existentes seguem válidas como baseline).
+> - Reabrir o digest **só** com mais labels (poder estatístico) — alavanca real, não outra variante.
+
+**Recomendação (histórica, 2026-06-19): retomar o Plano 3 pela rotulagem do golden + piloto LLM** (Fase 3, precedida do mínimo de 2A: digest só no golden). É o **gargalo real** — sem golden rotulado e sem o candidato com digest, não há como congelar o contrato, e sem contrato congelado todo backfill pago é especulativo.
 
 | Campo | Conteúdo |
 |---|---|
@@ -526,7 +550,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 | F7 | personal_fit redundante | deferred | ΔSpearman IC inclui 0; sd 0,058 | hardening pós-Plano 3 | não | percentil/robusto OU sinal ortogonal | repensar pós-contrato |
 | F8 | dois sistemas de mood | deferred | preset × drawer (§10) | decisão de produto | não | unificar semântica | decidir |
 | F9 | validação prospectiva | partial | `prediction_snapshots` mig 105 aplicada; falta dado | operação recorrente | não | acumular recomendações+notas; painel sai do vazio | ligar hooks de evento + acumular |
-| F10 | `synopsis_quality_predict` em Sonnet (custo/modelo) | **partial (no Plano 3)** | $10,3 / 14%; o experimento testa Sonnet × Haiku × D1/D2 | **Plano 3** | não (é o experimento) | experimento responde modelo/custo (§10 do experimento) | B2.0 → Fase 3 |
+| F10 | `synopsis_quality_predict` em Sonnet (custo/modelo) | **partial (respondido em parte, §24i)** | pilot-2: LLM (sonnet) ≫ D1/D2 (MAE 0.44–0.50 vs 0.79–0.91) ⇒ manter LLM | **Plano 3** | não | núcleo respondido (não trocar por determinístico); **Sonnet×Haiku ainda não testado** | ratificar manter-LLM; Haiku = hardening opcional |
 | F11 | staleness / recalc manual | partial | headless-safe (2B.2); recalc ainda 1h/manual | operação recorrente | não | auto-recalc OU flag visível | decidir auto-refresh |
 | F12 | refresh de dados externos estagna | deferred | refetch só manual | operação recorrente | não | **política de atualização** (job de refresh) | definir política |
 | F13 | multicolinearidade / waterfall | partial | drama~tragedy 0,80; "não exibir waterfall" | hardening | não | confirmar waterfall não exibido por feature | verificar UI |
@@ -541,7 +565,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 | L2 | tags enriquecidas (group=null) | partial | fallback group=null | operação recorrente | não | enriquecimento durável cobre novas | monitorar |
 | L3 | reviews ausentes (231 obras) | not_applicable | opt-in manual (classe D) | decisão de produto | não | ausência legítima (não automatizar) | — |
 | L4 | review_summary 68% | partial | 503/734 | operação recorrente | não | backfill opcional OU sob demanda | decidir |
-| L5 | review_digest 2% | **partial (no Plano 3)** | 14/734; experimento + backfill condicional | Plano 3 → backfill final | não | experimento decide; backfill só se vencer | B2.0 → Fase 3 |
+| L5 | review_digest 2% | **partial (respondido, §24i)** | pilot-2: e1(digest) bate b1 mas IC⊃0 (inconclusivo) | Plano 3 → backfill final | não | digest **não recomendado** agora ⇒ backfill 489 dispensado se b1 vencer | ratificar b1; reabrir digest só com mais labels |
 | L6 | taste_profile regen só pago | partial | v7 fresh; auto-refresh deferido | operação recorrente | não | política de refresh fora do pago OU aviso de velho | decidir pós-contrato |
 | L7 | previsões stale (catálogo) | partial | 112 modernas / ~622 pendentes | backfill final | não (suspenso de propósito) | Lote 02 sob contrato final | após winner |
 | L8 | recalc após update (stale) | partial | `markRecalcPending`; headless-safe ok | operação recorrente | não | = F11 | = F11 |
@@ -567,11 +591,11 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 | blocked | — | **0** |
 
 **Principais bloqueadores:**
-- do **experimento (agora):** golden 0/90 rotulado · candidato com digest (preparado em B2.0, execução não construída) · digest dos 51 do golden.
+- do **experimento:** ✅ **resolvidos (§24i)** — golden prospectivo pilot-2 rotulado (90 labels) · candidatos b1/e1/D1/D2 executados · digests do golden gerados. Resta **ratificar o contrato (P1)**.
 - do **deploy (não agora):** **F1** (auth + rate limit).
 
 **Fase responsável por grupo:**
-- **Plano 3 (agora):** F10, L5 (o experimento decide modelo/custo/digest).
+- **Plano 3 (experimento concluído, §24i):** F10, L5 — o experimento decidiu (manter LLM; digest inconclusivo/dispensado). Resta ratificar o contrato (P1).
 - **pré-Plano 3 (feito):** F2, F4.
 - **backfill final:** L7, L14.
 - **pré-deploy:** F1.
@@ -580,6 +604,87 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 - **decisão de produto:** F6, F8, L3, L10.
 
 > Regra mantida: item adiado **não desaparece** (fica nesta matriz); F5/F6/F7/F8/F9 têm destino explícito; F12 tem "política de atualização" como critério; F14/F15 ficam no hardening técnico; F1 segue bloqueando o deploy.
+
+---
+
+## 24j. Addendum — Lote 02 (backfill de Interesse) sob contrato b1 — ✅ CONCLUÍDO (2026-06-23)
+
+> **STATUS: ✅ CONCLUÍDO — 757/757, custo real $5.86.** Primeira execução do backfill de
+> Potencial de Interesse sob o **contrato b1 ratificado** (§24i). Read-only salvo a própria
+> run paga (gated por `planSignature` + teto). **Catálogo agora 100% fresco sob o perfil v8.**
+
+**Decisão e gate:**
+- Contrato = **b1** (v2 atual, **Sonnet**, sem digest) ⇒ sem nova `prompt_version`, sem migration.
+- Escopo: **completo** (catálogo inteiro). Perfil estava **stale** ⇒ o plano **regenera o perfil 1× (v7→v8)** e prevê TODAS as obras elegíveis (não prevê parcial contra perfil stale — aviso do dry-run).
+- Dry-run: total=**757**, fresh=108, stale=626, ausente=23, bloqueadas=0 · likely **$8.34** / upper **$12.51**.
+- 1ª tentativa (planSignature `3936a848…`) **abortou `plan_changed`** ($0, 0 obras previstas) — drift do catálogo entre dry-run e execute; gate de frescor funcionou.
+- Execução válida: re-plano encadeado → planSignature `86a1de3b…`, `--max-cost-usd=13`, concorrência 3, início ~19:19.
+
+**Entradas confirmadas (auditadas hoje):**
+- **Perfil** = sua biblioteca avaliada (`works` com `user_score`, top 200 por `updated_at`): título · nota · status pessoal · sinopse · 9 category_scores · tags · 8 post-scores.
+- **Previsão (b1)** = perfil + título + sinopse (canonical→raw mais longa) + tags. **NÃO** usa digest/summary/reviews nem category-scores da obra-alvo.
+- **Features de tag** verificadas **não degradadas** por casing/group=null (Oportunidade 3 + risco L2-acoplado **refutados** empiricamente: 0 grupos nulos, 0 ambiguidade nome→grupo em 1478 tags / 25.917 work_tags).
+
+**Resultado ✅ (2026-06-23, 19:19 → 19:55):**
+- status: **COMPLETED** · planned=757 · started=757 · **succeeded=757** · failed=0 · blocked=0 · changedDuringRun=0
+- stoppedByCost / stoppedByPlanChange / stoppedByCancel: todos **false**
+- perfil: v7 → **v8** (`profileUpdated=true`) · recalc: **executado, sem falha** (`recalcExecuted=true`, `recalcFailed=false`)
+- **custo real: $5.86** (vs likely $8.34 / upper $12.51 — ~metade do upper, como esperado pelo histórico)
+- duração: **2184s (~36 min)**, concorrência 3
+- cobertura: **757/757** previsões modernas frescas contra o perfil v8 (100% do catálogo elegível)
+
+**Consequência:** o catálogo está **fresco pela 1ª vez** (perfil v8 + 757 previsões + recalc) ⇒ destrava a re-validação de **F5/F6/F7** sob a dimensão de staleness (Oportunidade 1), agora sem o confound de dados velhos.
+
+---
+
+## 24i. Addendum — Pilot-2 prospectivo: experimento CONCLUÍDO + decisão do contrato pendente (2026-06-22 → 23)
+
+> **VIRADA DE ESTADO — addendum mais recente.** O experimento do Plano 3 **rodou e concluiu**
+> sobre um golden **prospectivo** (pilot-2), que **supersede** o pilot-1 descrito em
+> §3/§20/§22 e nos addenda §24–§24h. Resultados **agregados** abaixo; os **rótulos humanos**
+> e outputs por-obra permanecem **embargados** (locais em `.local-experiments/plan3/…`,
+> gitignored) — aqui só agregados/assinaturas, mesma convenção de B2.2B. Plano detalhado em
+> [PLANO3-GOLDEN-PILOT-2-PLAN.md](PLANO3-GOLDEN-PILOT-2-PLAN.md). A infra do **canal de
+> review externo** (migrations 112–114) foi mergeada na `main` (commit `c964048`, PR #9, 2026-06-23).
+
+**Por que pilot-2 (e por que pilot-1 ficou superseded):** ao rotular o `contextual-1` (pilot-1, 80 obras) descobriu-se **leakage retrospectivo** — parte das obras já fora lida, impossibilitando separar *interesse antes de ler* (o alvo do experimento) de opinião pós-leitura. O pilot-2 reconstrói o golden **só com obras não lidas**, classificadas automaticamente por `works.personal_status_id` (`unread` / `partially_read` / `fully_read`; só `unread` entra na métrica prospectiva). O pilot-1 é mantido como **trilha retrospectiva** — nunca entra na métrica prospectiva principal.
+
+**Golden pilot-2 (prospectivo, FROZEN):** 90 obras únicas não lidas (51 carryover `unread` do pilot-1 + 39 novas) · 100 slots (90 + 10 repetições intra-avaliador) · split **56 dev / 34 holdout** · strata ♥/♥♥/♥♥♥/♥♥♥♥ ≈ 22/23/23/22. Corpus de reviews recomputado sob política **text-only-v1** (`base-2r1`, gate `base2r1Signature=b9dc2f27…`). Reviews lidos do corpus canônico (`work_reviews` + `work_external_reviews_manual`); `work_manual_reviews` (opinião pessoal) **proibida** no corpus por guard estático (anti-leakage).
+
+**Rotulagem humana: CONCLUÍDA e CONSOLIDADA** (local, $0) — 99/99 slots rotulados → **90 labels finais** por obra única (89 do pacote + 1 reuso comprovado por assinatura de display do pilot-1). Distribuição **♥15 / ♥♥44 / ♥♥♥22 / ♥♥♥♥9**. `finalLabelsSignature=a8abddca…`. Repetições 10/10 exatas (consistência intra-avaliador). Backup imutável das labels (csvSha `05e4ce77…`).
+
+**Candidatos executados** (offline, contra os 90 labels; métrica principal = MAE ordinal no holdout):
+
+| Candidato | Entradas | Tipo | Custo real | MAE holdout (n=34) | Spearman | pairAcc |
+|---|---|---|--:|--:|--:|--:|
+| **e1** | perfil + sinopse + tags **+ digest de reviews** | LLM (sonnet-4-6) | $0.79 | **0.441** | 0.684 | 0.935 |
+| **b1** | perfil + sinopse + tags (= predictor de produção) | LLM (sonnet-4-6) | $0.66 | 0.500 | 0.620 | 0.908 |
+| d2 | tags + keywords da sinopse | determinístico | $0 | 0.794 | 0.041 | 0.512 |
+| d1 | tags × perfil (overlap ponderado) | determinístico | $0 | 0.912 | −0.041 | 0.480 |
+
+`planSignature(b1/e1)=03f5b6f8…` · 90/90 succeeded cada · custo total pago **$1.45** (≪ hard-cap $3.02) · **0 escrita no banco** (send sem `createLoggedMessage`; só SELECT do perfil). **s0/s1** (contrato congelado, também LLM) **não executados** nesta fase — são pagos e sem substituto inventado (gap honesto, não falha).
+
+**Leitura empírica (fato × inconclusivo):**
+1. **LLM ≫ determinístico, sem ambiguidade (FATO):** b1/e1 (MAE ~0.44–0.50) esmagam d1/d2 (0.79–0.91); d1/d2 têm Spearman ≈ 0 (ordem inútil). ⇒ **manter o predictor LLM**; descartar trocá-lo por baseline determinístico. Responde **AUDIT F10** ("alternativa simples basta?" = **não**).
+2. **Digest (e1) vs sem-digest (b1): direção a favor, mas INCONCLUSIVO.** e1 ganha nas 3 métricas de holdout, mas o **IC da diferença de MAE inclui 0 a n=90** — ganho não demonstrado estatisticamente. Mesmo padrão de Ridge≈calc / alignment / personal_fit no AUDIT_REPORT: **n pequeno não resolve diferenças finas**.
+
+**Decisão do contrato (P1) — RATIFICADA 2026-06-23:**
+- ✅ **Contrato = `b1`** (LLM perfil+sinopse+tags, **Sonnet**, **sem digest**). É o **contrato v2 atual** ⇒ "implementar o winner" é **no-op**: nenhuma nova `prompt_version`, nenhuma migration; as 112 previsões v2 seguem válidas como baseline.
+- ✅ **Digest NÃO entra** — backfill de digest das 489 (~$23–35) **dispensado** (ganho do digest com IC⊃0; custo certo por ganho incerto). Reabrir **só** com mais labels (poder estatístico), não mais uma variante.
+- ✅ **Modelo = Sonnet** (Haiku **não** será testado agora). Base: em regime estacionário o `synopsis_quality_predict` roda pouco (só obras novas/perfil), então a economia recorrente do Haiku é marginal e não paga o passo extra + risco de qualidade não medido. Haiku fica como **hardening opcional** se o volume crescer.
+- ➡️ **Próximo passo = Lote 02** (~622 previsões pendentes) sob v2: dry-run → `--execute` com `planSignature` + teto, em lotes de ~200. Custo ~$5–10 one-time.
+
+**Impacto neste plano (reconciliação):**
+- §22 / §20 / §21: "rotular golden", "piloto LLM", "candidato com digest", "comparar candidatos" → **concluídos** (pilot-2). Gargalo agora = **ratificar o contrato (P1)**, não rodar o experimento.
+- **AUDIT F10** e **AUDITORIA L5**: o experimento **respondeu** (manter LLM; digest inconclusivo/dispensado por ora).
+- **Lote 02 (~622)** e **digest backfill (489)**: seguem corretamente **bloqueados** até a ratificação. Com **b1** vencedor: digest 489 **não é mais necessário** e o Lote 02 roda sob o contrato **v2** (sem re-previsão por mudança de contrato).
+- **112 previsões v2** existentes: continuam como baseline válido; com b1 **não precisam ser re-previstas**.
+
+**Migrations novas (aplicadas à mão, validadas; mergeadas no PR #9):** `112` (`work_external_reviews_manual` — reviews externas manuais, text-only, sem nota pessoal), `113` (drop provenance CHECK), `114` (drop colunas metadata → text-only). Corpus canônico unificado via `readCanonicalReviewCorpus`.
+
+**Custos (reais):** experimento pilot-2 = digest do golden $0.86 (B2.2B) + b1 $0.66 + e1 $0.79 = **$2.31** (d1/d2 grátis). Backfill já gasto (piloto + Lote 01) = $1.37. **Total pago Plano 3 + backfill ≈ $3.68.**
+
+**Fora de escopo / não feito:** nenhuma escrita em `synopsis_quality_predictions` de produção; nenhum digest 489; nenhum Lote 02; nenhum commit dos artefatos do pilot-2 (embargados). `dev:local-editor` parado.
 
 ---
 
