@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { buildRankingTiers } from "@/lib/ranking/build-tiers"
+import { buildRankingTiers, compareWithinTierTieBreak } from "@/lib/ranking/build-tiers"
 
 interface Item {
   id: string
@@ -81,5 +81,46 @@ describe("buildRankingTiers", () => {
     expect(tiersOf(items, 0.3)).toEqual([1, 2, 2])
     // 0.5: 8.0-7.6=0.4<=0.5 → b=t1; 8.0-7.3=0.7>0.5 → c=t2.
     expect(tiersOf(items, 0.5)).toEqual([1, 1, 2])
+  })
+})
+
+describe("compareWithinTierTieBreak", () => {
+  type E = { id: string; tagOverlapNet: number | null; expectedScore: number | null }
+  const order = (es: E[]) => [...es].sort(compareWithinTierTieBreak).map((e) => e.id)
+
+  it("ordena por tagOverlapNet desc", () => {
+    expect(order([
+      { id: "lo", tagOverlapNet: 1, expectedScore: 9 },
+      { id: "hi", tagOverlapNet: 5, expectedScore: 8 },
+      { id: "mid", tagOverlapNet: 3, expectedScore: 7 },
+    ])).toEqual(["hi", "mid", "lo"])
+  })
+
+  it("empate em tagOverlapNet → desempata por expectedScore desc", () => {
+    expect(order([
+      { id: "a", tagOverlapNet: 2, expectedScore: 7.2 },
+      { id: "b", tagOverlapNet: 2, expectedScore: 7.8 },
+    ])).toEqual(["b", "a"])
+  })
+
+  it("tagOverlapNet null afunda para o fim do tier", () => {
+    expect(order([
+      { id: "null", tagOverlapNet: null, expectedScore: 9.9 },
+      { id: "low", tagOverlapNet: -3, expectedScore: 1 },
+    ])).toEqual(["low", "null"])
+  })
+
+  it("ambos null → ordena por expectedScore desc", () => {
+    expect(order([
+      { id: "a", tagOverlapNet: null, expectedScore: 7 },
+      { id: "b", tagOverlapNet: null, expectedScore: 8 },
+    ])).toEqual(["b", "a"])
+  })
+
+  it("NaN/Infinity tratados como ausência", () => {
+    expect(order([
+      { id: "nan", tagOverlapNet: NaN, expectedScore: 9 },
+      { id: "ok", tagOverlapNet: 0, expectedScore: 1 },
+    ])).toEqual(["ok", "nan"])
   })
 })

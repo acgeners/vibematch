@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { MoodRefineDialog } from "@/components/ranking/mood-refine-dialog"
 import { isMoodActive, sortByMoodAdjusted, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
-import { buildRankingTiers } from "@/lib/ranking/build-tiers"
+import { buildRankingTiers, compareWithinTierTieBreak } from "@/lib/ranking/build-tiers"
 import { DEFAULT_TIER_BAND_WIDTH } from "@/lib/ranking/tier-config"
 import type { CriterionSlug } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
@@ -106,11 +106,13 @@ function computeTiers(
 }
 
 /**
- * Desempate dentro de cada tier: reordena por `personalFit` desc (entre obras
- * estatisticamente empatadas, mostra a que mais combina com o perfil primeiro).
- * O fit NÃO vira número — só ordena a ordem default das linhas (o mood reordena
- * depois no drawer). Reatribui os `rank` do tier na ordem exibida pra coluna "#"
- * continuar monotônica. Sort estável.
+ * Desempate dentro de cada tier: reordena por overlap de tags do perfil efetivo
+ * (`tagOverlapNet` desc — LLM + tags declaradas), com `expectedScore` como
+ * desempate secundário (ver `compareWithinTierTieBreak`). Substitui o antigo
+ * desempate por `personalFit` (auditoria 2026-06: ~constante e pior que o acaso
+ * dentro do tier). O sinal NÃO vira número exibido — só ordena a ordem default
+ * das linhas (o mood reordena depois no drawer). Reatribui os `rank` do tier na
+ * ordem exibida pra coluna "#" continuar monotônica. Sort estável.
  */
 function reorderTiersByFit(entries: RankingEntry[], tiers: Tier[]): RankingEntry[] {
   const out = [...entries]
@@ -119,7 +121,7 @@ function reorderTiersByFit(entries: RankingEntry[], tiers: Tier[]): RankingEntry
     const { startIndex, count } = tier
     const slice = out.slice(startIndex, startIndex + count)
     const ranks = slice.map((e) => e.rank) // ranks do tier, em ordem ascendente
-    slice.sort((a, b) => (b.personalFit ?? -Infinity) - (a.personalFit ?? -Infinity))
+    slice.sort(compareWithinTierTieBreak)
     for (let k = 0; k < slice.length; k++) {
       out[startIndex + k] = { ...slice[k], rank: ranks[k] }
     }
