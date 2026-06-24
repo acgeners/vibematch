@@ -207,7 +207,12 @@ interface RankingFiltersProps {
   defaultMinAlign?: number | null
   basePath?: string
   hidePreferencesControls?: boolean
-  /** Sort default efetivo (depende do plano: Free="recommended:desc", Pago="expected_score:desc"). */
+  /**
+   * Sort default efetivo (definido em app/ranking/page.tsx conforme o plano):
+   * ambos os planos = `expected_score:desc` (forma tiers), com nível secundário
+   * Free=`personal_fit:desc` / Pago=`alignment_score:desc`. ("recommended" é um sort
+   * OPT-IN, não o default — e desde #12 também forma tiers.)
+   */
   defaultSort?: string
   /** Conjuntos de filtros salvos do usuário para esta página (base_path). */
   savedPresets?: SavedFilterPreset[]
