@@ -545,9 +545,9 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 | F2 | falha de capa na avaliação IA | completed | base64 prefetch (AUDIT §1B/F2) | pré-Plano 3 | não | — | — (feito) |
 | F3 | falsa precisão / tiers | partial | `tier_band_width` mig 104; largura definitiva a validar | decisão de produto | não | validar largura (fixa×percentil×cluster) sobre dado prospectivo | validar após F9 |
 | F4 | métrica in-sample × OOF | completed | `selectPrimaryModelMetric` (AUDIT §1B/F4) | pré-Plano 3 | não | — | — (feito) |
-| F5 | Ridge × calc sem ganho | deferred | IC inclui 0 (§7.2); shadow-ranking (branch `feat/shadow-ranking`, mig 106) | hardening pós-Plano 3 | não | head-to-head OOF limpo; senão simplificar p/ calc | rodar shadow ranking / decidir |
-| F6 | alignment (Veredito IA) sem ganho | deferred | sem lift no subset (§7.3); shadow-ranking cobre | decisão de produto | não | medir lift ou aposentar | decidir após shadow ranking |
-| F7 | personal_fit redundante | deferred | ΔSpearman IC inclui 0; sd 0,058 | hardening pós-Plano 3 | não | percentil/robusto OU sinal ortogonal | repensar pós-contrato |
+| F5 | Ridge × calc sem ganho | deferred | **re-validado fresco (§24k): OOF honesta 0.570 vs calc 0.588, edge dentro do ruído** | hardening | não | simplificar p/ calc (ganho marginal, $0) — decidir | decidir simplificação |
+| F6 | alignment (Veredito IA) sem ganho | deferred | **re-validado fresco (§24k): lift −0.232 IC exclui 0 (pior); ⚠️ alignment talvez stale** | decisão de produto | não | aposentar (poupa LLM pago) — decidir | decidir aposentar |
+| F7 | personal_fit redundante | deferred | **re-validado fresco (§24k): std 0.065; ρ0.47 sozinho mas Δ incremento IC⊃0** | hardening | não | redundante confirmado; não usar p/ ranking fino | manter só p/ display |
 | F8 | dois sistemas de mood | deferred | preset × drawer (§10) | decisão de produto | não | unificar semântica | decidir |
 | F9 | validação prospectiva | partial | `prediction_snapshots` mig 105 aplicada; falta dado | operação recorrente | não | acumular recomendações+notas; painel sai do vazio | ligar hooks de evento + acumular |
 | F10 | `synopsis_quality_predict` em Sonnet (custo/modelo) | **partial (respondido em parte, §24i)** | pilot-2: LLM (sonnet) ≫ D1/D2 (MAE 0.44–0.50 vs 0.79–0.91) ⇒ manter LLM | **Plano 3** | não | núcleo respondido (não trocar por determinístico); **Sonnet×Haiku ainda não testado** | ratificar manter-LLM; Haiku = hardening opcional |
@@ -604,6 +604,24 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 - **decisão de produto:** F6, F8, L3, L10.
 
 > Regra mantida: item adiado **não desaparece** (fica nesta matriz); F5/F6/F7/F8/F9 têm destino explícito; F12 tem "política de atualização" como critério; F14/F15 ficam no hardening técnico; F1 segue bloqueando o deploy.
+
+---
+
+## 24k. Addendum — Re-validação F5/F6/F7 sobre catálogo fresco (2026-06-23)
+
+> **Resultado: as conclusões "a sofisticação não paga" NÃO eram artefato de staleness.** Offline ($0), read-only, sobre o catálogo fresco do Lote 02 (perfil v8 + 757 previsões + recalc; **n=197** rotuladas). Números da própria produção (`formula_config`) + bootstrap pareado (B=2000). Responde a **Oportunidade 1** levantada pela auditoria de ciclo de vida (era staleness ou sinal real?).
+
+| Finding | Original | Fresco | Veredito |
+|---|---|---|---|
+| **F5** Ridge × calc | ≈ empate, IC⊃0 | OOF honesta expected **0.570** vs calc **0.588** (edge ~0.018, dentro do ruído; in-sample best-case Δ−0.046 IC[−0.077,−0.017]) | **Confirmado** |
+| **F7** personal_fit | constante, sem incremento | std **0.065**; sozinho ρ**0.47** (tem sinal) mas incremento sobre calc Δ**−0.030** IC[−0.098,+0.030]⊃0 | **Confirmado** (redundante, não ruído) |
+| **F6** alignment | sem lift, IC⊃0 (n=103) | alignment ρ**0.12** vs expected ρ**0.35**; lift **−0.232** IC[−0.419,−0.038] **exclui 0** (n=108) | **Reforçado** (ativamente pior) |
+
+- **F5:** ponto OOF honesto da produção; **sem** IC pareado honesto-vs-calc fresco (exigiria reconstruir o pipeline OOF por-obra). In-sample = cota superior do Ridge.
+- **F6:** ⚠️ `alignment_score` é re-rank **sob demanda** e **não foi refrescado** pelo Lote 02 — valores possivelmente stale; confirma "sem lift" mas refrescar é checagem paga separada.
+- **n=197** ainda pequeno; alavanca real = **mais rótulos**.
+
+**Decorrência:** abre a discussão de **simplificar** — retirar `alignment` (ganho mais claro: poupa LLM pago + remove sinal nocivo) e/ou remover o Ridge (simplicidade de código; ganho de MAE marginal, $0 nos dois lados). Junto com a [verificação de tags](project_audit_tag_features_verified) (não-degradadas), fecha as duas pontas que "ficaram pra trás" pela ordem das auditorias.
 
 ---
 
