@@ -678,13 +678,13 @@ export async function getRanking(
       return m * (rawScore(a.expectedScore) - rawScore(b.expectedScore))
     if (field === "decision")
       return m * (rawScore(a.decisionScore) - rawScore(b.decisionScore))
-    if (field === "recommended") {
-      // Free default: Nota Esperada modulada pelo fit_score (0–1).
-      // expected × (0.6 + 0.4·fit). Sem expected, cai pro fim.
-      const reco = (e: RankingEntry) =>
-        e.expectedScore == null ? -Infinity : e.expectedScore * (0.6 + 0.4 * (e.personalFit ?? 0))
-      return m * (reco(a) - reco(b))
-    }
+    if (field === "recommended")
+      // Unificado com expected_score (auditoria 2026-06): o antigo blend
+      // `expected × (0.6 + 0.4·personal_fit)` era ruído — pf é ~constante e ordena
+      // pior que o acaso. "Recomendado" (default Free) agora = Nota Prevista,
+      // agrupada em tiers e diferenciada DENTRO do tier por tag overlap
+      // (reorderTiersByFit no cliente).
+      return m * (rawScore(a.expectedScore) - rawScore(b.expectedScore))
     if (field === "platform_avg") return m * (rawScore(a.platformAvg) - rawScore(b.platformAvg))
     if (field === "personal_fit") {
       const av = a.personalFit ?? -Infinity
