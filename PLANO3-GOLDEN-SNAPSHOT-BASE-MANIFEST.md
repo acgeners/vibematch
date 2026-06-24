@@ -1,5 +1,7 @@
 # Manifesto — Snapshot-base + Pacote cego (Plano 3 Fase B2.1C)
 
+> **⚠️ pilot-1 SUPERSEDED (2026-06-23).** Este snapshot pertence ao golden pilot-1, substituído pelo golden **prospectivo pilot-2** (leakage retrospectivo). A base técnica foi reaproveitada; os **resultados finais + o contrato ratificado (b1, sem digest)** estão em [PLANO-MESTRE §24i/§24j](PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md). Mantido como registro histórico.
+
 > **Nota (B2.1D):** o **snapshot-base `base-1` permanece a base técnica VÁLIDA** (mesmas 80
 > obras/90 slots/split/assinaturas). O **pacote cego synopsis-only** (`golden-labeling.html`)
 > está **SUPERSEDED — NÃO UTILIZAR PARA ROTULAGEM** (o constructo virou contextual: sinopse +

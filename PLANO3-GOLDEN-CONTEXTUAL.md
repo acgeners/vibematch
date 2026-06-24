@@ -1,5 +1,7 @@
 # Plano 3 — Golden CONTEXTUAL (Fase B2.1D)
 
+> **⚠️ pilot-1 SUPERSEDED (2026-06-23).** O golden pilot-1 deste documento foi substituído pelo golden **prospectivo pilot-2** (motivo: leakage retrospectivo — obras já lidas). O constructo contextual e a infra foram reaproveitados; os **resultados finais + o contrato ratificado (b1, sem digest)** estão em [PLANO-MESTRE §24i/§24j](PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md). Mantido como registro histórico.
+
 > Correção do constructo-alvo: de "apelo da sinopse" para **Potencial de Interesse na
 > Obra (Contextual Work Interest)**. Sessão read-only (banco só `SELECT`); zero LLM/
 > digest/previsão/chamada paga. Deriva de [PLANO3-EXPERIMENTO-DIGEST-GOLDEN.md](PLANO3-EXPERIMENTO-DIGEST-GOLDEN.md)
