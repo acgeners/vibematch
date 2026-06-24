@@ -61,3 +61,30 @@ export function buildRankingTiers<T>(
 
   return result
 }
+
+/** Campos mínimos para o desempate dentro do tier. */
+export interface TieBreakFields {
+  /** Overlap de tags do perfil efetivo (LLM + declaradas). Sinal primário. */
+  tagOverlapNet: number | null
+  /** Nota Prevista — desempate secundário (sutil, pois dentro do tier é ~igual). */
+  expectedScore: number | null
+}
+
+const finiteOr = (v: number | null | undefined, fallback: number): number =>
+  typeof v === "number" && Number.isFinite(v) ? v : fallback
+
+/**
+ * Comparador PURO do desempate DENTRO de um tier (obras ~empatadas em expected).
+ *
+ * Ordena por `tagOverlapNet` desc — overlap de tags do perfil EFETIVO (LLM +
+ * preferências declaradas). Substitui `personal_fit` nesse papel (auditoria
+ * 2026-06: personal_fit ~constante e ordena pior que o acaso intra-tier; o
+ * overlap de tags separa melhor). Empate → desempata por `expectedScore` desc.
+ * Sem `tagOverlapNet` (perfil stub/sem tags) → afunda para o fim do tier.
+ */
+export function compareWithinTierTieBreak(a: TieBreakFields, b: TieBreakFields): number {
+  const an = finiteOr(a.tagOverlapNet, -Infinity)
+  const bn = finiteOr(b.tagOverlapNet, -Infinity)
+  if (an !== bn) return bn - an
+  return finiteOr(b.expectedScore, -Infinity) - finiteOr(a.expectedScore, -Infinity)
+}

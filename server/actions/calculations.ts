@@ -893,6 +893,13 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
     rmse_calc: newRmseCalc,
     personal_fit: w.personalFit,
     personal_fit_percentile: w.personalFitPercentile,
+    // Desempate dentro do tier (migration 116) — overlap de tags do perfil EFETIVO
+    // (LLM + declaradas). Substitui personal_fit nesse papel. NULL só quando o perfil
+    // não tem loved/avoided (ambos os overlaps null).
+    tag_overlap_net:
+      w.lovedTagOverlap == null && w.avoidedTagOverlap == null
+        ? null
+        : (w.lovedTagOverlap ?? 0) - (w.avoidedTagOverlap ?? 0),
     formula_version: config.formula_version,
     calculated_at: new Date().toISOString(),
   }))
