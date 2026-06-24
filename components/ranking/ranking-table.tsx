@@ -505,13 +505,18 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
 
   // Tiers (faixas de prioridade equivalente) fazem sentido em qualquer ordenação
   // descendente pelo MESMO eixo da prioridade: por Prioridade (decisão) OU por
-  // Nota Prevista (a âncora da prioridade — praticamente o mesmo eixo). Em outros
-  // sorts não há tier contíguo a sinalizar. O agrupamento usa o campo ordenado
-  // (pra ficar contíguo); a base do mood-refine continua sendo a decisionScore.
+  // Nota Prevista (a âncora da prioridade). "recommended" (default Free) é
+  // UNIFICADO com expected_score — mesmo eixo (Nota Prevista) — então também forma
+  // tiers e diferencia dentro do tier por tag overlap. Em outros sorts não há tier
+  // contíguo a sinalizar. A base do mood-refine continua sendo a decisionScore.
   const tierField: "decision" | "expected_score" | null =
-    activeSortDir === "desc" && (activeSortField === "decision" || activeSortField === "expected_score")
-      ? activeSortField
-      : null
+    activeSortDir !== "desc"
+      ? null
+      : activeSortField === "decision"
+        ? "decision"
+        : activeSortField === "expected_score" || activeSortField === "recommended"
+          ? "expected_score"
+          : null
   const tiers = useMemo(
     () =>
       tierField
