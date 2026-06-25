@@ -8,7 +8,7 @@
  *   ... --execute --min-confidence=alta --reversal=path.jsonl
  */
 import { createAdminClient } from "@/lib/supabase/admin"
-import { buildTagMenu, inferTagsFromText } from "@/lib/tags/infer-from-text"
+import { buildTagMenu, inferTagsFromText, verifyTagsFromText } from "@/lib/tags/infer-from-text"
 import { resolveOrCreateTags } from "@/lib/tags/ingest"
 import fs from "node:fs"
 
@@ -20,6 +20,8 @@ const MIN_CONF = arg("--min-confidence") ?? "alta" // alta | media
 const THRESHOLD = Number(arg("--max-tags") ?? "9") // obras com tagCount <= THRESHOLD (default ≤9 = "<10")
 const LIMIT = arg("--limit") ? Number(arg("--limit")) : Infinity
 const FROM_CSV = arg("--from-csv") // grava a partir de um CSV de dry-run (editado), sem LLM
+const VERIFY = process.argv.includes("--verify") // re-verifica as "média" do CSV com Sonnet
+const WITH_REVIEWS = process.argv.includes("--with-reviews") // passada incremental usando review_summary/digest
 
 const csv = (s: unknown) => `"${String(s ?? "").replace(/"/g, '""')}"`
 const minConfNum = /m[eé]dia/i.test(MIN_CONF) ? 0.6 : 0.9
@@ -43,6 +45,121 @@ function parseCsv(text: string): Record<string, string>[] {
   return rows
     .filter((r) => r.length > 1 || (r.length === 1 && r[0] !== ""))
     .map((r) => Object.fromEntries(header.map((h, i) => [h, r[i] ?? ""])))
+}
+
+/** Monta contexto textual a partir do digest (rico) ou do resumo de reviews. */
+function buildReviewContext(summary: unknown, digest: unknown): string | undefined {
+  const parts: string[] = []
+  const join = (v: unknown) => (Array.isArray(v) ? v.map(String).join("; ") : v ? String(v) : "")
+  if (digest && typeof digest === "object") {
+    const d = digest as Record<string, unknown>
+    if (d.consensus) parts.push(`Consenso dos leitores: ${String(d.consensus)}`)
+    if (d.salient_traits) parts.push(`Traços salientes: ${join(d.salient_traits)}`)
+    if (d.content_warnings) parts.push(`Avisos de conteúdo: ${join(d.content_warnings)}`)
+  }
+  if (parts.length === 0 && summary && String(summary).trim()) parts.push(`Resumo das reviews: ${String(summary).trim()}`)
+  return parts.length ? parts.join("\n") : undefined
+}
+
+/**
+ * Passada incremental: re-infere usando sinopse + reviews (digest/resumo) só nas
+ * obras (do escopo --from-csv) que têm review. Gera CSV só com tags NOVAS (não já
+ * presentes). Gravação/verificação reusam --from-csv (alta) e --verify (média).
+ */
+async function runWithReviews(sb: ReturnType<typeof createAdminClient>) {
+  if (!FROM_CSV) throw new Error("--with-reviews requer --from-csv=<dryrun.csv> (define o escopo da cauda)")
+  const scope = [...new Set(parseCsv(fs.readFileSync(FROM_CSV, "utf8")).map((r) => r.work_id).filter(Boolean))]
+
+  const works: Array<{ id: string; title: string; canonical_synopsis: string | null; review_summary: unknown; review_digest: unknown }> = []
+  const curNames = new Map<string, Set<string>>()
+  for (let i = 0; i < scope.length; i += 200) {
+    const chunk = scope.slice(i, i + 200)
+    const { data: w } = await sb.from("works").select("id, title, canonical_synopsis, review_summary, review_digest").in("id", chunk)
+    works.push(...((w ?? []) as typeof works))
+    const { data: wt } = await sb.from("work_tags").select("work_id, tags(name)").in("work_id", chunk)
+    for (const r of (wt ?? []) as Array<{ work_id: string; tags: { name?: string } | null }>) {
+      const s = curNames.get(r.work_id) ?? new Set<string>()
+      if (r.tags?.name) s.add(String(r.tags.name).toLowerCase())
+      curNames.set(r.work_id, s)
+    }
+  }
+
+  const menu = await buildTagMenu(sb)
+  let targets = works.filter((w) => w.canonical_synopsis && String(w.canonical_synopsis).trim() && buildReviewContext(w.review_summary, w.review_digest))
+  if (Number.isFinite(LIMIT)) targets = targets.slice(0, LIMIT)
+  console.log(`with-reviews: ${targets.length} obras (da cauda) com review | menu ${menu.count} tags | OUT: ${OUT}`)
+  fs.writeFileSync(OUT, "work_id,title,current_tags,tag,confidence,evidence\n")
+
+  let totalNew = 0, withNew = 0, failed = 0
+  for (const w of targets) {
+    const ctx = buildReviewContext(w.review_summary, w.review_digest)
+    let proposals
+    try { proposals = await inferTagsFromText({ supabase: sb, synopsis: String(w.canonical_synopsis), menu, reviewContext: ctx }) }
+    catch (e) { failed++; console.log(`  ✗ "${w.title}": ${e instanceof Error ? e.message : String(e)}`); continue }
+    const cur = curNames.get(w.id) ?? new Set<string>()
+    const fresh = proposals.filter((p) => !cur.has(p.name.toLowerCase())) // só tags que a obra ainda NÃO tem
+    if (fresh.length) { withNew++; totalNew += fresh.length }
+    for (const p of fresh) fs.appendFileSync(OUT, [csv(w.id), csv(w.title), cur.size, csv(p.name), p.confidence, csv(p.evidence)].join(",") + "\n")
+    console.log(`  ~ "${w.title}" (${cur.size}) → +${fresh.length}: ${fresh.map((p) => p.name).join(", ")}`)
+  }
+  console.log(`\n=== WITH-REVIEWS (dry) ===`)
+  console.log(`obras: ${targets.length} | com tag nova: ${withNew} | tags novas (alta+média): ${totalNew} | CSV: ${OUT} | falhas: ${failed}`)
+  console.log(`Depois: alta → --execute --from-csv=${OUT} --min-confidence=alta ; média → --verify --execute --from-csv=${OUT}`)
+}
+
+/** Re-verifica as "média" do CSV com Sonnet (juiz estrito). --execute grava as confirmadas (conf 0.7). */
+async function runVerify(sb: ReturnType<typeof createAdminClient>) {
+  if (!FROM_CSV) throw new Error("--verify requer --from-csv=<dryrun.csv>")
+  const lines = parseCsv(fs.readFileSync(FROM_CSV, "utf8"))
+  const byWork = new Map<string, { title: string; before: number; cands: string[] }>()
+  for (const r of lines) {
+    if (r.confidence !== "0.6") continue // só as "média"
+    const w = byWork.get(r.work_id) ?? { title: r.title, before: Number(r.current_tags) || 0, cands: [] }
+    w.cands.push(r.tag); byWork.set(r.work_id, w)
+  }
+  let entries = [...byWork.entries()]
+  if (Number.isFinite(LIMIT)) entries = entries.slice(0, LIMIT)
+
+  const ids = entries.map(([id]) => id)
+  const synById = new Map<string, string | null>()
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await sb.from("works").select("id, canonical_synopsis").in("id", ids.slice(i, i + 200))
+    for (const w of data ?? []) synById.set(w.id, w.canonical_synopsis)
+  }
+  console.log(`verify (Sonnet): ${entries.length} obras com média | modo: ${EXECUTE ? "EXECUTE" : "DRY (só CSV)"}`)
+  fs.writeFileSync(OUT, "work_id,title,current_tags,tag,confidence,evidence\n")
+  if (REVERSAL && EXECUTE) fs.writeFileSync(REVERSAL, "")
+
+  let cand = 0, kept = 0, written = 0, failed = 0
+  for (const [workId, w] of entries) {
+    const syn = synById.get(workId)
+    if (!syn || !String(syn).trim()) continue
+    cand += w.cands.length
+    let confirmed
+    try { confirmed = await verifyTagsFromText({ synopsis: String(syn), candidates: w.cands }) }
+    catch (e) { failed++; console.log(`  ✗ "${w.title}": ${e instanceof Error ? e.message : String(e)}`); continue }
+    kept += confirmed.length
+    for (const p of confirmed) {
+      fs.appendFileSync(OUT, [csv(workId), csv(w.title), w.before, csv(p.name), p.confidence, csv(p.evidence)].join(",") + "\n")
+    }
+    if (!EXECUTE) { console.log(`  ~ "${w.title}": ${w.cands.length}→${confirmed.length}  [${confirmed.map((p) => p.name).join(", ")}]`); continue }
+    if (!confirmed.length) { console.log(`  · "${w.title}": 0 confirmadas`); continue }
+    const { ids: tids } = await resolveOrCreateTags(sb, confirmed.map((p) => p.name))
+    const { data: cur } = await sb.from("work_tags").select("tag_id").eq("work_id", workId)
+    const existing = new Set((cur ?? []).map((r) => r.tag_id))
+    const newIds = [...new Set(tids)].filter((id) => !existing.has(id))
+    if (!newIds.length) { console.log(`  · "${w.title}": nada novo`); continue }
+    const rows = newIds.map((id) => ({ work_id: workId, tag_id: id, source: "ai_inferred", confidence: 0.7 }))
+    const { error: upErr } = await sb.from("work_tags").upsert(rows, { onConflict: "work_id,tag_id", ignoreDuplicates: true })
+    if (upErr) { failed++; console.log(`  ✗ "${w.title}": ${upErr.message}`); continue }
+    if (REVERSAL) for (const r of rows) fs.appendFileSync(REVERSAL, JSON.stringify({ work_id: r.work_id, tag_id: r.tag_id }) + "\n")
+    written += rows.length
+    console.log(`  ✓ "${w.title}" ${w.before} → ${w.before + rows.length}  (+${rows.length} de ${w.cands.length} média)`)
+  }
+  const pct = cand ? ((kept / cand) * 100).toFixed(0) : "0"
+  console.log(`\n=== VERIFY ${EXECUTE ? "GRAVADO" : "(dry)"} ===`)
+  console.log(`média candidatas: ${cand} | confirmadas: ${kept} (${pct}%) | ${EXECUTE ? `inseridas: ${written}` : `CSV: ${OUT}`} | falhas: ${failed}`)
+  if (EXECUTE) console.log(`Rode 'npm run recalc:scores' pra propagar.`)
 }
 
 /** Grava tags a partir do CSV (editado pelo humano). Sem LLM. --execute gate o write. */
@@ -86,6 +203,8 @@ async function runFromCsv(sb: ReturnType<typeof createAdminClient>) {
 
 async function main() {
   const sb = createAdminClient()
+  if (WITH_REVIEWS) { await runWithReviews(sb); return }
+  if (VERIFY) { await runVerify(sb); return }
   if (FROM_CSV) { await runFromCsv(sb); return }
   const menu = await buildTagMenu(sb)
   console.log(

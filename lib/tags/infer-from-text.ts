@@ -52,8 +52,8 @@ function buildSystemPrompt(menuText: string): string {
 
 Regras:
 - Escolha APENAS tags da lista abaixo (vocabulário fechado). NUNCA invente tags nem use variações de nome.
-- Só inclua uma tag se a sinopse a sustentar. Em caso de dúvida, NÃO inclua.
-- Para cada tag, cite em "evidence" o trecho curto da sinopse que a justifica.
+- Só inclua uma tag se o TEXTO fornecido (sinopse e, quando houver, reviews de leitores) a sustentar. Em caso de dúvida, NÃO inclua.
+- Para cada tag, cite em "evidence" o trecho curto (da sinopse ou das reviews) que a justifica.
 - Prefira precisão a cobertura: poucas tags certas valem mais que muitas duvidosas.
 - confidence "alta" = a sinopse afirma claramente; "média" = fortemente sugerido, não explícito.
 
@@ -132,12 +132,18 @@ export async function inferTagsFromText(opts: {
   supabase: SupabaseAdmin
   synopsis: string
   menu: TagMenu
+  /** Contexto adicional (resumo/digest de reviews) — usado como evidência extra quando presente. */
+  reviewContext?: string
 }): Promise<InferredTag[]> {
   if (!process.env.ANTHROPIC_API_KEY) {
     console.warn("[infer-tags] ANTHROPIC_API_KEY ausente; pulando")
     return []
   }
-  const { menu, synopsis } = opts
+  const { menu, synopsis, reviewContext } = opts
+  const userContent = `Sinopse da obra:\n\n${synopsis.trim()}` +
+    (reviewContext && reviewContext.trim()
+      ? `\n\n--- Contexto adicional (reviews de leitores) ---\n${reviewContext.trim()}`
+      : "")
   const client = getAnthropicClient({ maxRetries: 6 })
   const { message } = await createLoggedMessage(
     client,
@@ -147,9 +153,9 @@ export async function inferTagsFromText(opts: {
       system: [{ type: "text", text: menu.systemPrompt, cache_control: { type: "ephemeral" } }],
       tools: [INFER_TOOL],
       tool_choice: { type: "tool", name: INFER_TOOL.name },
-      messages: [{ role: "user", content: `Sinopse da obra:\n\n${synopsis.trim()}` }],
+      messages: [{ role: "user", content: userContent }],
     },
-    { operation: "tag_inference", metadata: { nCandidates: menu.count } },
+    { operation: "tag_inference", metadata: { nCandidates: menu.count, withReviews: !!reviewContext } },
   )
 
   const toolUse = message.content.find(
@@ -170,6 +176,91 @@ export async function inferTagsFromText(opts: {
       confidence: /alta/i.test(r.confidence ?? "") ? 0.9 : 0.6,
       evidence: r.evidence.trim(),
     })
+  }
+  return out
+}
+
+// ---- Verificação (2º olhar, modelo mais forte e estrito) --------------------
+
+const VERIFY_MODEL = "claude-sonnet-4-6"
+
+const VERIFY_TOOL = {
+  name: "verify_tags",
+  description: "Julga, para cada tag candidata, se a sinopse a sustenta de forma concreta.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      results: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            tag: { type: "string", description: "A tag candidata, exatamente como recebida." },
+            supported: { type: "boolean", description: "true SÓ se a sinopse sustenta concretamente." },
+            evidence: { type: "string", description: "Trecho da sinopse que sustenta (quando supported=true)." },
+          },
+          required: ["tag", "supported", "evidence"],
+        },
+      },
+    },
+    required: ["results"],
+  },
+}
+
+/**
+ * Revisor independente e RIGOROSO: recebe a sinopse + tags candidatas (sem saber
+ * a confiança original) e confirma só as concretamente sustentadas. Sonnet 4.6.
+ * Retorna as confirmadas com confidence 0.7 ("média verificada").
+ */
+export async function verifyTagsFromText(opts: {
+  synopsis: string
+  candidates: string[]
+}): Promise<InferredTag[]> {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.warn("[verify-tags] ANTHROPIC_API_KEY ausente; pulando")
+    return []
+  }
+  if (opts.candidates.length === 0) return []
+  const candByLower = new Map(opts.candidates.map((c) => [c.trim().toLowerCase(), c]))
+
+  const system = `Você é um revisor RIGOROSO de tags de obras (manhwa, webtoon, novel).
+Para CADA tag candidata, decida se a SINOPSE fornece suporte CONCRETO e específico para ela.
+- supported=true SOMENTE se a sinopse sustenta a tag de forma clara — não por suposição genérica de gênero.
+- Na dúvida, supported=false. Prefira REJEITAR a aceitar.
+- Quando supported=true, cite em "evidence" o trecho exato da sinopse.
+Julgue cada candidata de forma independente. Responda SEMPRE chamando verify_tags.`
+
+  const user = `Sinopse:\n\n${opts.synopsis.trim()}\n\nTags candidatas (julgue cada uma):\n${opts.candidates.map((c) => `- ${c}`).join("\n")}`
+
+  const client = getAnthropicClient({ maxRetries: 6 })
+  const { message } = await createLoggedMessage(
+    client,
+    {
+      model: VERIFY_MODEL,
+      max_tokens: 2048,
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      tools: [VERIFY_TOOL],
+      tool_choice: { type: "tool", name: VERIFY_TOOL.name },
+      messages: [{ role: "user", content: user }],
+    },
+    { operation: "tag_verify", metadata: { nCandidates: opts.candidates.length } },
+  )
+
+  const toolUse = message.content.find(
+    (b): b is Extract<typeof b, { type: "tool_use" }> => b.type === "tool_use",
+  )
+  const results = (toolUse?.input as { results?: Array<{ tag?: string; supported?: boolean; evidence?: string }> })?.results ?? []
+
+  const out: InferredTag[] = []
+  const seen = new Set<string>()
+  for (const r of results) {
+    if (r.supported !== true) continue
+    const canonical = candByLower.get((r.tag ?? "").trim().toLowerCase())
+    if (!canonical) continue // só confirma candidatas que de fato enviamos
+    if (!r.evidence || !r.evidence.trim()) continue
+    if (seen.has(canonical)) continue
+    seen.add(canonical)
+    out.push({ name: canonical, confidence: 0.7, evidence: r.evidence.trim() })
   }
   return out
 }
