@@ -4,6 +4,12 @@
 > o que **já está implementado** e as **propostas em andamento**.
 > Atualizado em 2026-06-27.
 
+> **Status 2026-06-27 (sessão de ops de avaliação IA):**
+> - **e1 (digest no Interesse) JÁ ESTÁ NO MAIN** (PR #15, `PROMPT_VERSION="v3"`). Pendente é só **rodar em produção com backfill** → ver `PLANO-E1-PRODUCAO.md`.
+> - **Alinhamento** (`personal_fit`) e o desempate (`tag_overlap_net`) passaram a usar **overlap líquido por NOME** (`netNameOverlap`), não mais os 3 componentes.
+> - **Avaliação IA de atributos** usa **reviews cruas** (manual + raspadas), **não** o digest. Desde **v20** a citação é **genérica** (sem exigir IDs R1/R2; `enforceAuditableReviewUsage` virou não-fatal).
+> - Novas ferramentas na fila "✨ Avaliar": **buscar reviews+digest** e **inferir tags** (individual/fila); flag **"Reviews novas"** quando o pool muda após a avaliação (migration 120).
+
 ---
 
 ## 1. Diagrama de dependências
@@ -70,7 +76,7 @@ flowchart TD
 |---|---|---|---|---|---|
 | **Nota.Calc** | `calc_score` | blend determinístico IA.N + média de plataforma (Bayesiano) | não | 0–10 | âncora interna (entra no blend da Nota Prevista) |
 | **Nota Prevista** | `expected_score` | **Ridge ⊕ Nota.Calc** (treinado nas suas notas) | não (ML local) | 0–10 | **prever a nota que VOCÊ daria** |
-| **Alinhamento** | `personal_fit` | determinística: 40% tags + 30% faixas de critério + 30% consistência | não | 0–1 (exibe percentil) | **overlap com o seu gosto declarado/aprendido**; filtro + insumo do Veredito |
+| **Alinhamento** | `personal_fit` | determinística: **overlap líquido por NOME** (amado − 1,5×evitado, `netNameOverlap`), normalizado [0,1] | não | 0–1 (exibe percentil) | **overlap com o seu gosto declarado/aprendido**; filtro + insumo do Veredito. *(desde 2026-06-27; antes eram 3 componentes — bootstrap mostrou net_name melhor)* |
 | **Veredito IA** | `alignment_score` | **LLM Sonnet** (re-rank holístico) | **sim** | 0–100 | **diferenciar/ordenar e explicar** com leitura de reviews/sinopse |
 | **Interesse na Obra** | `synopsis_quality` / predictions | **LLM Sonnet** | **sim** | ♥–♥♥♥♥ | quão a sinopse te atrairia (antes de ler) |
 
@@ -123,17 +129,16 @@ Retorna `null` se o perfil é stub. **Não é previsão de qualidade** (isso é 
 
 ## 5. Propostas em andamento
 
-### A) e1 — digest na previsão de Interesse  *(GO comprovado, não ligado)*
-Validação `golden-3` (n=180): e1 (com digest) bate b1 (sem) — MAE **0,46 vs 0,67** no dev (ΔMAE −0,21, IC [−0,31;−0,12]); holdout 0,42 vs 0,58 (Δ borderline). Hoje o preditor de Interesse é **b1** (só sinopse + perfil).
+### A) e1 — digest na previsão de Interesse  *(CÓDIGO no main; falta rodar em produção)*
+Validação `golden-3` (n=180): e1 (com digest) bate b1 (sem) — MAE **0,46 vs 0,67** no dev (ΔMAE −0,21, IC [−0,31;−0,12]); holdout 0,42 vs 0,58 (Δ borderline). **O código e1 já foi mergeado no main (PR #15, `PROMPT_VERSION="v3"`)** — o predictor usa `works.review_digest` (fallback resumo) e o digest entra na assinatura de staleness.
 
-**Para produção:**
-1. Adicionar `digest?` ao `synopsis-quality-predictor` e injetar no prompt um **adendo neutro** (digest sanitizado: sem cross-ref de título), com fallback **digest → resumo → sem_reviews**.
-2. Bump `PROMPT_VERSION` `v2` → `v2+digest` (invalida predições → re-prever).
-3. Buscar `works.review_digest` no runner/action e passar adiante; incluir o digest na **assinatura de staleness** (+ coluna `digest_version`).
-4. **Backfill** do catálogo (~758 obras × Sonnet com digest; estimativa ~$15–25, medir em dry-run).
-5. Depende do digest existir antes → a blindagem de ordem (item 4 acima) já ajuda; obra sem reviews cai em "sem_reviews" (= b1), sem regressão.
+**Pendente = operação em produção** (sem código novo) → detalhado em **`PLANO-E1-PRODUCAO.md`**:
+1. Aplicar migrations pendentes (119 toggle canônica, 120 stale por reviews).
+2. **Maximizar tags → reviews → digest** ANTES do backfill (ordem importa: tag muda a assinatura do Interesse; digest é o input do e1).
+3. **Backfill do Interesse** (`planInterestBackfill` dry-run → `runInterestBackfill`, ~$8) — o bump pra v3 deixou as predições "absent", então precisa rodar.
+4. Verificar no painel `/admin/model-metrics`.
 
-**Reaproveitar testes:** os 180 rótulos humanos servem de ground-truth; as predições e1 do teste **não** foram pro banco (0 writes) ⇒ ainda precisa do backfill.
+**Reaproveitar testes:** os 180 rótulos humanos servem de ground-truth; as predições e1 do teste **não** foram pro banco ⇒ o backfill ainda precisa rodar sobre o catálogo.
 
 ### B) Melhorar a Nota Prevista *(hipóteses — validar OOF sem leakage + lift)*
 Já mortos: embeddings/kNN, per-source, digest no Ridge, Interesse como feature, legados (leak). Alavanca dominante: mais rótulos.

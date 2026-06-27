@@ -27,7 +27,7 @@ import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
 import { SemTagsTab } from "@/components/ai-evaluation/sem-tags-tab"
 import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
 
-const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model"] as const
+const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model", "outdated-reviews"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
 
 const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending"]
@@ -297,6 +297,22 @@ async function getEligibleWorks(
           }
         }
         return { filter: "low-confidence" as const, ids }
+      })()
+    )
+  }
+
+  if (filters.includes("outdated-reviews")) {
+    queries.push(
+      (async () => {
+        // Avaliação concluída cujo pool de reviews mudou depois (flag mantida por
+        // saveWorkReviews — migration 120). Query direta, sem o mapa de avaliações.
+        const { data, error } = await supabase
+          .from("works")
+          .select("id")
+          .eq("ai_eval_reviews_stale", true)
+          .eq("is_archived", false)
+        if (error) throw new Error(error.message)
+        return { filter: "outdated-reviews" as const, ids: new Set((data ?? []).map((w) => w.id)) }
       })()
     )
   }

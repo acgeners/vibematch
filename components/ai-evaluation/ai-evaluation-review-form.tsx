@@ -169,12 +169,14 @@ export function AiEvaluationReviewForm({
         }
       }
       case "declined":
+        // Citação genérica (sem IDs) é o caso normal agora — o modelo usou as
+        // reviews no contexto, só não cita R1/R2. Rótulo neutro (não "não usadas").
         return {
           label:
             reviewUsage.available > 0
-              ? `${reviewUsage.available} reviews disponíveis, mas não usadas`
-              : "reviews disponíveis, mas não usadas",
-          className: "border-amber-300 bg-amber-50 text-amber-700",
+              ? `${reviewUsage.available} review(s) externa(s) no contexto`
+              : "reviews externas no contexto",
+          className: "border-sky-300 bg-sky-50 text-sky-700",
         }
       case "unavailable":
       default:

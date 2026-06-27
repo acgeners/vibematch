@@ -48,7 +48,7 @@ interface PendingWork {
   synopsis_quality?: string | null
   cover_url?: string | null
   expected_score?: number | null
-  matchedFilters?: Array<"pending" | "review-pending" | "low-confidence" | "outdated-model">
+  matchedFilters?: Array<"pending" | "review-pending" | "low-confidence" | "outdated-model" | "outdated-reviews">
   evaluation?: {
     confidence: number | null
     modelName: string | null
@@ -1039,6 +1039,14 @@ function FilterBadges({
           title={`Avaliado em ${evaluation.modelName ?? "?"} / ${evaluation.promptVersion ?? "?"}`}
         >
           modelo antigo: {evaluation.modelName ?? "?"}/{evaluation.promptVersion ?? "?"}
+        </span>
+      )}
+      {matchedFilters.includes("outdated-reviews") && (
+        <span
+          className="inline-flex items-center rounded-full border border-fuchsia-300 bg-fuchsia-50 px-2 py-0.5 text-[11px] font-medium text-fuchsia-700 dark:border-fuchsia-400/25 dark:bg-fuchsia-400/12 dark:text-fuchsia-200"
+          title="O conjunto de reviews mudou após a avaliação — atributos podem estar defasados."
+        >
+          reviews novas
         </span>
       )}
     </div>

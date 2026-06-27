@@ -1047,7 +1047,9 @@ export async function createWork(
     // pool em vez de re-buscar na borda. Tag-inference roda depois (usa o que
     // houver de contexto; o resumo é aguardado em saveWorkReviews).
     const { saveWorkReviews } = await import("@/lib/external/persist-reviews")
-    await saveWorkReviews(result.workId, externalReviews)
+    // fromFreshEval: a obra acabou de ser avaliada com estas reviews ⇒ não marca
+    // a avaliação como desatualizada (só atualiza o fingerprint do pool).
+    await saveWorkReviews(result.workId, externalReviews, { fromFreshEval: true })
     after(() => inferTagsForNewWork(result.workId))
   } else {
     // Criada SEM avaliar: extrai + persiste reviews na borda, desacoplado da

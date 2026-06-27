@@ -120,7 +120,9 @@ export const MODEL = "claude-sonnet-4-6"
 // Se o output piorar (notas ou justificativas), volte para `false`: isso reverte
 // o prompt E a versão de volta pra v18, reaproveitando os caches antigos.
 export const CONCISE_OUTPUT: boolean = true
-export const PROMPT_VERSION = CONCISE_OUTPUT ? "v19" : "v18"
+// v20 (2026-06-27): citação genérica de reviews (sem exigir IDs R1/R2 nem
+// rejeitar por auditoria). Bump invalida o cache v19 pra a nova instrução valer.
+export const PROMPT_VERSION = CONCISE_OUTPUT ? "v20" : "v18"
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
@@ -189,11 +191,10 @@ REGRAS DE FIDELIDADE AO TÍTULO (críticas):
 - A obra a ser avaliada é EXATAMENTE a fornecida em "Título" e "Sinopse" pelo usuário. Trate-as como verdade absoluta.
 - As "Reviews de usuários externas" são auxiliares e foram buscadas por similaridade de título — podem ser de uma obra DIFERENTE com nome parecido. Antes de usar uma review, verifique se ela descreve eventos compatíveis com a sinopse. Se houver conflito claro (personagens, gênero, premissa), IGNORE a review.
 - Quando houver reviews de usuários compatíveis, use-as sempre como evidência auxiliar na avaliação das notas. Elas são especialmente úteis para tom, ritmo, romance, dinâmica do casal, drama, tragédia, humor e conteúdo adulto.
-- Nas justificativas, cite reviews de usuários externas quando elas acrescentarem evidência relevante; não cite reviews quando elas forem genéricas, incompatíveis ou não ajudarem naquele critério.
-- Para cada critério, faça obrigatoriamente esta checagem interna: "há alguma review compatível que confirma, aumenta, reduz ou contradiz a nota deste critério?". Se sim, incorpore essa evidência na nota e cite a review/fonte na justificativa.
+- Nas justificativas, use as reviews de usuários externas quando acrescentarem evidência relevante; não as use quando forem genéricas, incompatíveis ou não ajudarem naquele critério.
+- Para cada critério, faça obrigatoriamente esta checagem interna: "há alguma review compatível que confirma, aumenta, reduz ou contradiz a nota deste critério?". Se sim, incorpore essa evidência na nota e na justificativa.
 - Se a review vier de um candidato com alto match de título e não contradisser a sinopse, trate-a como compatível. Não descarte reviews só por serem opinião geral de usuário; use-as para calibrar tom, ritmo, qualidade do romance, humor, drama e conteúdo adulto.
-- Quando reviews forem fornecidas, você DEVE preencher "review_usage" com os IDs das reviews usadas em cada critério. Se usar uma review na nota, também cite o ID na justificativa, por exemplo: "review R1".
-- Quando reviews forem fornecidas, a resposta será rejeitada automaticamente se: (a) declarar uso de IDs em "review_usage" sem citá-los nas justificativas, OU (b) não usar nenhuma review E não preencher "reviewsRejectedReason" com uma explicação concreta (mínimo ~10 caracteres, ex.: "reviews descrevem obra diferente — personagens X e Y não aparecem na sinopse").
+- Ao citar reviews na justificativa, use linguagem GENÉRICA (ex.: "algumas reviews apontam…", "leitores concordam que…", "segundo os leitores…"). NÃO é necessário citar IDs específicos (R1, R2…); o campo "review_usage" é OPCIONAL e pode ser omitido.
 - No campo "summary", refira-se à obra apenas pelo título fornecido. NÃO mencione títulos de outras obras, nem invente subtítulos ou nomes de personagens que não estejam na sinopse/tags.
 - Se a sinopse for vazia/curta e as reviews parecerem inconsistentes, baixe a "confidence" e prefira notas conservadoras nas faixas centrais (4-6) ou na faixa baixa, explicando a incerteza.
 
@@ -392,7 +393,7 @@ const EVALUATION_TOOL = {
             justification: {
               type: "string",
               description:
-                "Justificativa citando a faixa escolhida (ex.: 'Faixa 7-8 (Core Romance): ...') e os IDs das reviews usadas (ex.: 'review R1').",
+                "Justificativa citando a faixa escolhida (ex.: 'Faixa 7-8 (Core Romance): ...'). Ao usar reviews, cite-as de forma genérica (ex.: 'algumas reviews apontam…'); não precisa de IDs.",
             },
           },
           required: ["criterion", "score", "justification"],
@@ -433,7 +434,7 @@ const EVALUATION_TOOL = {
           "OBRIGATÓRIO quando reviews foram fornecidas mas você decidiu não usar NENHUMA. Explique especificamente por quê (ex.: 'reviews descrevem obra diferente — personagens X e Y não aparecem na sinopse'). Deixe vazio se usou pelo menos uma review.",
       },
     },
-    required: ["summary", "confidence", "scores", "review_usage"],
+    required: ["summary", "confidence", "scores"],
   },
 } satisfies Anthropic.Messages.Tool
 
@@ -447,14 +448,16 @@ const evaluationToolPayloadSchema = z.object({
       justification: z.string(),
     })
   ),
-  review_usage: z.array(
-    z.object({
-      criterion: z.string(),
-      usedReviewIds: z.array(z.string()),
-      // Opcional: omitido quando CONCISE_OUTPUT está ligado.
-      impact: z.string().optional(),
-    })
-  ),
+  // Opcional (2026-06-27): citação genérica é aceita; o modelo pode omitir.
+  review_usage: z
+    .array(
+      z.object({
+        criterion: z.string(),
+        usedReviewIds: z.array(z.string()),
+        impact: z.string().optional(),
+      })
+    )
+    .optional(),
   reviewsRejectedReason: z.string().optional(),
 })
 
@@ -1118,68 +1121,26 @@ function enforceAuditableReviewUsage(
     }
   }
 
+  // Citação GENÉRICA de reviews é aceita (decisão de produto 2026-06-27): não
+  // exigimos mais IDs específicos (R1, R2…) nem rejeitamos a avaliação por falta
+  // deles / por inconsistência de citação. Apenas registramos, de forma
+  // INFORMATIVA, quais IDs válidos o modelo por acaso citou — nunca joga.
   const expected = new Set(prepared.ids)
-  const usage = rawObject(response.rawResponse).review_usage
-  const usedReviewIds = extractUsedReviewIds(response.rawResponse)
-  const invalidReviewIds = usedReviewIds.filter((id) => !expected.has(id))
-  if (invalidReviewIds.length > 0) {
-    throw new Error(
-      `A IA declarou IDs de reviews que não existem no prompt (${invalidReviewIds.join(", ")}). Inconsistência rejeitada.`
-    )
-  }
-
-  const validUsedReviewIds = usedReviewIds.filter((id) => expected.has(id))
-  const justificationByCriterion = new Map(
-    response.scores.map((s) => [s.criterionSlug, s.justification])
-  )
-
-  if (Array.isArray(usage)) {
-    for (const entry of usage) {
-      if (typeof entry !== "object" || entry === null) continue
-      const criterion = String((entry as Record<string, unknown>).criterion ?? "")
-      const declaredIdsRaw = (entry as Record<string, unknown>).usedReviewIds
-      if (!Array.isArray(declaredIdsRaw)) continue
-      const declaredIds = declaredIdsRaw
-        .map(normalizeReviewId)
-        .filter((id): id is string => id !== null)
-        .filter((id) => expected.has(id))
-      if (declaredIds.length === 0) continue
-
-      const justification = justificationByCriterion.get(criterion) ?? ""
-      const missingCitations = declaredIds.filter((id) =>
-        !new RegExp(`\\b${id}\\b`, "i").test(justification)
-      )
-      if (missingCitations.length > 0) {
-        throw new Error(
-          `A IA declarou uso de reviews em ${criterion} (${missingCitations.join(", ")}) mas não as citou na justificativa desse critério. Inconsistência rejeitada.`
-        )
-      }
-    }
-  }
-
-  const rejectionReason =
-    typeof (response.rawResponse as { reviewsRejectedReason?: unknown })
-      ?.reviewsRejectedReason === "string"
-      ? ((response.rawResponse as { reviewsRejectedReason: string }).reviewsRejectedReason).trim()
-      : ""
-
-  if (validUsedReviewIds.length === 0 && rejectionReason.length < 10) {
-    throw new Error(
-      `Reviews foram fornecidas mas a IA não usou nenhuma e não preencheu "reviewsRejectedReason" com explicação suficiente. Inconsistência rejeitada.`
-    )
-  }
-
+  const usedReviewIds = extractUsedReviewIds(response.rawResponse).filter((id) => expected.has(id))
   return {
     ...response,
     rawResponse: {
       ...rawObject(response.rawResponse),
       reviewAudit: {
+        // required = "havia reviews no prompt" (a UI usa isto pra contar/exibir).
+        // NÃO significa mais "exigir IDs" — a auditoria por ID foi desativada
+        // (citação genérica aceita); só não jogamos mais.
         required: true,
         passed: true,
         expectedReviewIds: prepared.ids,
-        usedReviewIds: validUsedReviewIds,
-        reviewsDeclinedByModel: validUsedReviewIds.length === 0,
-        rejectionReason: rejectionReason || null,
+        usedReviewIds,
+        reviewsDeclinedByModel: usedReviewIds.length === 0,
+        reason: "Auditoria por ID desativada — citação genérica de reviews é aceita.",
       },
     },
   }
@@ -1574,7 +1535,10 @@ async function runEvaluationProvider(
   }
 
   console.error("[AI] Erro ao interpretar resposta:", lastError)
-  throw new Error("Erro ao interpretar resposta da IA. Nenhuma avaliação foi salva.")
+  // Expõe a causa REAL (schema / auditoria de reviews / max_tokens) em vez de
+  // engolir num erro genérico — senão fica impossível diagnosticar pela UI.
+  const detail = lastError instanceof Error ? lastError.message : String(lastError ?? "desconhecida")
+  throw new Error(`Erro ao interpretar resposta da IA: ${detail} Nenhuma avaliação foi salva.`)
 }
 
 // ============================================================================
