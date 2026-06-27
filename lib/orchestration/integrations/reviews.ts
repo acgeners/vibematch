@@ -18,6 +18,7 @@
 
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { readCanonicalReviewCorpus } from "@/lib/synopsis-interest/digest-corpus"
 import { computeCostUsd } from "@/lib/ai/pricing"
 import {
   consolidateReviewsDetailed,
@@ -145,15 +146,15 @@ class SupabaseSummaryGateway implements SummaryGateway {
   }
 }
 
-class SupabaseDigestGateway implements DigestGateway {
+export class SupabaseDigestGateway implements DigestGateway {
   constructor(private readonly sb: AdminClient) {}
   async readReviews(workId: string): Promise<ReviewDigestInput[]> {
-    const { data } = await this.sb.from("work_reviews").select("text, source, user_rating").eq("work_id", workId)
-    return (data ?? []).map((r) => ({
-      text: String(r.text ?? ""),
-      source: String(r.source ?? "desconhecida"),
-      userRating: (r.user_rating as number | null) ?? null,
-    }))
+    // Corpus CANÔNICO (Fase 2 / 2A): work_reviews (scraped) + work_external_reviews_manual
+    // (manual externa), deduplicado e leakage-proof (sem userRating — notas pessoais não entram).
+    // É a MESMA fonte validada na golden-3 (Fase 1 GO). NÃO inclui work_manual_reviews (opinião
+    // pessoal da usuária), que segue barrado pelo loader canônico.
+    const corpus = await readCanonicalReviewCorpus(workId, this.sb)
+    return corpus.reviews.map((r) => ({ text: r.text, source: r.source, userRating: null }))
   }
   async readArtifact(workId: string) {
     const { data } = await this.sb

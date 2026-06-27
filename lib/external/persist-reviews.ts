@@ -1,7 +1,7 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { SourcedReview, ExternalSourceId } from "@/lib/external/types"
-import type { ReviewSummaryInput, ReviewDigestInput } from "@/lib/ai-recommendation/review-summarizer"
+import type { ReviewSummaryInput } from "@/lib/ai-recommendation/review-summarizer"
 import { ensureReviewSummary, ensureReviewDigest } from "@/lib/orchestration/integrations/reviews"
 
 /**
@@ -96,14 +96,10 @@ export async function saveWorkReviews(
   // deixa de ser fire-and-forget invisível e vira job durável (dedup por conteúdo,
   // status, falha registrada, retomada). Gate próprio (versão/materialidade) dentro
   // de `ensureReviewDigest`. Single-op do save = pré-autorizado (allowPaid).
-  const digestInputs: ReviewDigestInput[] = (persisted ?? [])
-    .map((r) => ({
-      text: String(r.text ?? ""),
-      source: String(r.source ?? "desconhecida"),
-      userRating: r.user_rating ?? null,
-    }))
-    .filter((r) => r.text.trim().length > 0)
-  void ensureReviewDigest(workId, { supabase, reviews: digestInputs, allowPaid: true }).catch((err) =>
+  // Digest (Fase 2 / 2A): NÃO passamos `reviews` — `ensureReviewDigest` lê o corpus CANÔNICO
+  // (work_reviews + work_external_reviews_manual, deduplicado e leakage-proof) via gateway. Assim a
+  // manual externa entra no digest e o digest de produção casa com o que foi validado na golden-3.
+  void ensureReviewDigest(workId, { supabase, allowPaid: true }).catch((err) =>
     console.error("[work_reviews] ensureReviewDigest rejeitou:", err),
   )
 }
