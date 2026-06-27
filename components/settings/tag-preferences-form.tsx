@@ -1,11 +1,12 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { Heart, Ban, ChevronRight, Sparkles, Save, Undo2 } from "lucide-react"
+import { Heart, Ban, ChevronRight, Sparkles, Save, Undo2, Search, X } from "lucide-react"
 import { toast } from "sonner"
 import { saveTagPreferences } from "@/server/actions/tag-preferences"
 import { useRefresh } from "@/lib/use-refresh"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import type { TagOption } from "@/server/queries/tags"
 import type { TagPreferenceRow, TagPrefLevel, TagStance } from "@/server/queries/tag-preferences"
 import { cn } from "@/lib/utils"
@@ -98,6 +99,27 @@ export function TagPreferencesForm({ tags, initialRows }: TagPreferencesFormProp
   const [baseline, setBaseline] = useState<Map<string, Decl>>(() => rowsToMap(initialRows))
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
+  const [search, setSearch] = useState("")
+
+  // Busca por nome/slug da tag. Filtra a árvore: subgrupos/grupos sem tag
+  // correspondente somem. Enquanto há busca, tudo fica expandido pra mostrar
+  // os matches sem precisar abrir cada nó na mão.
+  const query = search.trim().toLowerCase()
+  const filteredGroups = useMemo<GroupNode[]>(() => {
+    if (!query) return groups
+    const match = (t: TagOption) =>
+      t.name.toLowerCase().includes(query) || t.slug.toLowerCase().includes(query)
+    const out: GroupNode[] = []
+    for (const g of groups) {
+      const subgroups = g.subgroups
+        .map((sg) => ({ ...sg, tags: sg.tags.filter(match) }))
+        .filter((sg) => sg.tags.length > 0)
+      const looseTags = g.looseTags.filter(match)
+      if (subgroups.length > 0 || looseTags.length > 0) out.push({ ...g, subgroups, looseTags })
+    }
+    return out
+  }, [groups, query])
+  const searching = query.length > 0
 
   const declaredCount = decls.size
   const dirtyCount = useMemo(() => diffCount(decls, baseline), [decls, baseline])
@@ -192,9 +214,35 @@ export function TagPreferencesForm({ tags, initialRows }: TagPreferencesFormProp
         </div>
       </div>
 
+      {/* Busca por tag — filtra a árvore e expande os nós com match. */}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar tag por nome…"
+          className="h-9 pl-8 pr-8"
+          aria-label="Buscar tag"
+        />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch("")}
+            aria-label="Limpar busca"
+            className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
       <div className="divide-y divide-border/60 rounded-lg border border-border/60">
-        {groups.map((g) => {
-          const gExpanded = expandedGroups.has(g.id)
+        {searching && filteredGroups.length === 0 && (
+          <p className="px-3 py-6 text-center text-sm text-muted-foreground">Nenhuma tag encontrada.</p>
+        )}
+        {filteredGroups.map((g) => {
+          const gExpanded = searching || expandedGroups.has(g.id)
           return (
             <div key={g.id}>
               <NodeRow
@@ -221,7 +269,7 @@ export function TagPreferencesForm({ tags, initialRows }: TagPreferencesFormProp
               {gExpanded && (
                 <div className="bg-muted/20">
                   {g.subgroups.map((sg) => {
-                    const sExpanded = expandedSubs.has(sg.id)
+                    const sExpanded = searching || expandedSubs.has(sg.id)
                     const sDecl = decls.get(keyOf("subgroup", sg.id)) ?? null
                     return (
                       <div key={sg.id}>

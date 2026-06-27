@@ -1,7 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { SourcedReview, ExternalSourceId } from "@/lib/external/types"
-import type { ReviewSummaryInput, ReviewDigestInput } from "@/lib/ai-recommendation/review-summarizer"
 import { ensureReviewSummary, ensureReviewDigest } from "@/lib/orchestration/integrations/reviews"
 
 /**
@@ -69,41 +68,20 @@ export async function saveWorkReviews(
     return
   }
 
-  // Resumo + digest: ambos precisam refletir o conjunto COMPLETO persistido
-  // (merge), não só este batch — senão ignorariam fontes preservadas. Re-lê todas
-  // as reviews da obra (com `source`, que o digest estratifica) antes de consolidar.
-  const { data: persisted, error: readError } = await supabase
-    .from("work_reviews")
-    .select("text, user_rating, source")
-    .eq("work_id", workId)
-  if (readError) {
-    console.error("[work_reviews] erro relendo conjunto p/ resumo:", readError)
-    return
-  }
-  const summaryInputs: ReviewSummaryInput[] = (persisted ?? [])
-    .map((r) => ({ text: String(r.text ?? ""), userRating: r.user_rating ?? null }))
-    .filter((r) => r.text.trim().length > 0)
-  // Resumo (Haiku): AGUARDADO, igual ao comportamento anterior. Agora via job
-  // durável (dedup por hash, status, falha persistida, retomada). Single-op do
-  // save = pré-autorizado (allowPaid) → preserva o auto-run sem confirmação. Não
-  // lança: outcome failed não quebra o save (best-effort, como antes).
-  await ensureReviewSummary(workId, { supabase, reviews: summaryInputs, allowPaid: true }).catch(
+  // Resumo + digest: ambos leem o corpus COMPLETO da obra POR DENTRO de cada `ensure*`
+  // (via gateway) — NÃO passamos `reviews`. O corpus de ambos é canônico (work_reviews
+  // scraped + work_external_reviews_manual manual externa), refletindo o conjunto após o
+  // merge, não só este batch. Resumo MANTÉM as notas; digest as descarta.
+  //
+  // Resumo (Haiku): AGUARDADO (preserva o comportamento). Job durável (dedup por hash de
+  // conteúdo, status, retomada). Single-op do save = pré-autorizado (allowPaid). Não lança.
+  await ensureReviewSummary(workId, { supabase, allowPaid: true }).catch(
     (err) => console.error("[work_reviews] ensureReviewSummary rejeitou:", err),
   )
 
-  // Digest estruturado (Sonnet, Item C Passe 2): ASSÍNCRONO em relação ao save —
-  // SEM await, não bloqueia o retorno (preserva a semântica de hoje). A diferença:
-  // deixa de ser fire-and-forget invisível e vira job durável (dedup por conteúdo,
-  // status, falha registrada, retomada). Gate próprio (versão/materialidade) dentro
-  // de `ensureReviewDigest`. Single-op do save = pré-autorizado (allowPaid).
-  const digestInputs: ReviewDigestInput[] = (persisted ?? [])
-    .map((r) => ({
-      text: String(r.text ?? ""),
-      source: String(r.source ?? "desconhecida"),
-      userRating: r.user_rating ?? null,
-    }))
-    .filter((r) => r.text.trim().length > 0)
-  void ensureReviewDigest(workId, { supabase, reviews: digestInputs, allowPaid: true }).catch((err) =>
+  // Digest (Sonnet): ASSÍNCRONO (sem await, não bloqueia o retorno). Gate próprio
+  // (versão/materialidade por contagem) dentro de `ensureReviewDigest`.
+  void ensureReviewDigest(workId, { supabase, allowPaid: true }).catch((err) =>
     console.error("[work_reviews] ensureReviewDigest rejeitou:", err),
   )
 }

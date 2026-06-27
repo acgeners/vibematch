@@ -9,7 +9,18 @@ import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
 
 export const MODEL = "claude-sonnet-4-6"
-export const PROMPT_VERSION = "v2"
+// v3 (Frente 3): contrato e1 — quando há digest de reviews, o system ganha o
+// adendo neutro e o user recebe o bloco CONTEXTO DE LEITORES. Sinopse segue
+// dominante. Bump invalida as previsões v2 (re-prevê com digest sob demanda).
+export const PROMPT_VERSION = "v3"
+
+/**
+ * Adendo de system PRÉ-COMPROMETIDO (contrato e1, validado na golden-3): instrui
+ * a usar o digest como sinal COMPLEMENTAR, mantendo a SINOPSE dominante. Só entra
+ * quando a obra tem digest — sem digest, o prompt é idêntico ao b1 (v2).
+ */
+export const E1_SYSTEM_ADDENDUM =
+  "Além da sinopse, você recebe um RESUMO AGREGADO DE REVIEWS de leitores (consenso, divergências, traços recorrentes e avisos). Use-o como sinal COMPLEMENTAR ao julgamento — a SINOPSE segue dominante. Se não houver contexto de leitores, ignore esta parte."
 
 /** Sinopse é o sinal principal — folga maior que os 600 chars do ranking. */
 const SYNOPSIS_MAX_CHARS = 900
@@ -84,7 +95,7 @@ function findToolUse(message: Anthropic.Messages.Message, toolName: string) {
 export function buildSynopsisQualityUserPrompt(
   profile: TasteProfilePayload,
   work: PredictWorkInput,
-): { profileBlock: string; tailBlock: string } {
+): { profileBlock: string; tailBlock: string; digestBlock: string | null } {
   const profileBlock = `PERFIL DE GOSTO (cacheado, base da avaliação):
 ${JSON.stringify(profile, null, 2)}`
 
@@ -96,7 +107,13 @@ ${JSON.stringify(profile, null, 2)}`
     `Estime o Interesse Sinopse via tool \`submit_synopsis_quality\`.`,
   ]
 
-  return { profileBlock, tailBlock: tailLines.join("\n") }
+  // Contrato e1: bloco CONTEXTO DE LEITORES com o digest já sanitizado. Vazio ⇒ null.
+  const digest = work.reviewDigest?.trim()
+  const digestBlock = digest
+    ? `CONTEXTO DE LEITORES (resumo agregado de reviews):\n${digest}`
+    : null
+
+  return { profileBlock, tailBlock: tailLines.join("\n"), digestBlock }
 }
 
 export interface PredictWorkInput {
@@ -104,6 +121,12 @@ export interface PredictWorkInput {
   title: string
   synopsis: string | null
   tags: Array<{ name: string; group: string | null }>
+  /**
+   * Digest de reviews JÁ SANITIZADO/FORMATADO (texto) — contrato e1. null/ausente
+   * ⇒ comportamento b1 (só sinopse). A sanitização/format acontece no wiring
+   * (formatDigestForPrompt), não aqui.
+   */
+  reviewDigest?: string | null
 }
 
 export interface SynopsisQualityPrediction {
@@ -136,7 +159,20 @@ export async function predictSynopsisQuality(
   }
 
   const client = args.client ?? getAnthropicClient({ maxRetries: 6 })
-  const { profileBlock, tailBlock } = buildSynopsisQualityUserPrompt(args.profile, args.work)
+  const { profileBlock, tailBlock, digestBlock } = buildSynopsisQualityUserPrompt(args.profile, args.work)
+
+  // Contrato e1: com digest, o system ganha o adendo neutro (2º bloco, NÃO cacheado
+  // pra não invalidar o cache do prompt-base) e o user recebe o bloco de leitores.
+  const system: Anthropic.Messages.TextBlockParam[] = [
+    { type: "text", text: SYNOPSIS_QUALITY_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+  ]
+  if (digestBlock) system.push({ type: "text", text: E1_SYSTEM_ADDENDUM })
+
+  const userContent: Anthropic.Messages.TextBlockParam[] = [
+    { type: "text", text: profileBlock, cache_control: { type: "ephemeral" } },
+    { type: "text", text: tailBlock },
+  ]
+  if (digestBlock) userContent.push({ type: "text", text: digestBlock })
 
   let lastError: unknown = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -146,22 +182,13 @@ export async function predictSynopsisQuality(
         model: MODEL,
         max_tokens: 400,
         temperature: 0,
-        system: [
-          {
-            type: "text",
-            text: SYNOPSIS_QUALITY_SYSTEM_PROMPT,
-            cache_control: { type: "ephemeral" },
-          },
-        ],
+        system,
         tools: [SYNOPSIS_QUALITY_TOOL],
         tool_choice: { type: "tool", name: SYNOPSIS_QUALITY_TOOL.name },
         messages: [
           {
             role: "user",
-            content: [
-              { type: "text", text: profileBlock, cache_control: { type: "ephemeral" } },
-              { type: "text", text: tailBlock },
-            ],
+            content: userContent,
           },
         ],
       },

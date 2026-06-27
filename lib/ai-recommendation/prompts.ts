@@ -1,7 +1,7 @@
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { POST_READING_WEIGHT_LABELS, type PostReadingScoreField } from "@/lib/constants/post-reading-criteria"
-import type { CandidateReview, CandidateWorkInput, RatedWorkInput, RecommendationMode, ReviewDigest, ReviewDigestTrait, TasteProfilePayload } from "./types"
+import type { CandidateWorkInput, RatedWorkInput, RecommendationMode, ReviewDigest, ReviewDigestTrait, TasteProfilePayload } from "./types"
 
 const CRITERIA_LIST_TEXT = CRITERION_SLUGS
   .map((slug) => `- ${slug} (${CRITERIA_INFO[slug]?.name ?? slug})`)
@@ -46,11 +46,11 @@ PREFERÊNCIAS E REGRAS DO USUÁRIO (quando o bloco "PREFERÊNCIAS E REGRAS DO US
 - Aplique as condicionais como LÓGICA, não como filtro absoluto: só penalize/favoreça quando a condição E a exceção realmente casarem com as tags/category_scores da obra. NÃO rebaixe uma obra só porque o antecedente apareceu — verifique a exceção antes.
 - Trate as gerais como contexto permanente do gosto, no mesmo nível do perfil (mais estável que o CONTEXTO ADICIONAL momentâneo).
 - Quando uma regra mudar sua decisão, CITE-A na justificativa (ou em \`risks\`).
-- Para obras com POUCAS tags ou \`category_scores\` escassos/rasos, apoie-se MAIS nas reviews fornecidas (e nestas preferências) do que nos atributos finos — eles são pouco confiáveis nesses casos.
-- INVERSÃO DE SENTIMENTO: uma review que CONFIRMA um traço que o usuário declarou EVITAR é evidência NEGATIVA pra ele — MESMO que o autor da review AME esse traço. Ex.: "amo que a FL é uma vilã cruel" confirma a crueldade que o usuário evita → conta CONTRA, não a favor. NÃO use nota alta nem o entusiasmo do consenso pra descontar a regra.
-- FORÇA POR EVIDÊNCIA: quando o antecedente de uma regra "evito" é CONFIRMADO por consenso (vários reviews / sinal forte e convergente), reduza o \`alignment_score\` e registre em \`risks\`. Quando a evidência é fraca, única ou incerta (1 review, autor em dúvida), mantenha só como \`risks\` sem derrubar o score.
+- Para obras com POUCAS tags ou \`category_scores\` escassos/rasos, apoie-se MAIS no consenso das reviews (digest) e nestas preferências do que nos atributos finos — eles são pouco confiáveis nesses casos.
+- INVERSÃO DE SENTIMENTO: um traço saliente (ou o consenso) do digest que CONFIRMA algo que o usuário declarou EVITAR é evidência NEGATIVA pra ele — MESMO que o consenso AME esse traço. Ex.: o digest registra "FL cruel/vilanesca" como traço saliente → confirma a crueldade que o usuário evita → conta CONTRA, não a favor. NÃO use o entusiasmo do consenso pra descontar a regra.
+- FORÇA POR EVIDÊNCIA: quando o antecedente de uma regra "evito" é CONFIRMADO pelo CONSENSO do digest (traço com polaridade forte / consenso convergente), reduza o \`alignment_score\` e registre em \`risks\`. Quando o sinal é fraco ou incerto (aparece só na DIVERGÊNCIA, ou como traço isolado/misto), mantenha só como \`risks\` sem derrubar o score.
 4. \`alignment_score\` é 0–100. Use a escala inteira: 90+ é "match excepcional", 70–89 "match forte", 50–69 "match moderado", 30–49 "match fraco", <30 "pouco alinhado". Não comprima tudo perto da média.
-5. Para cada candidato, escreva 1–2 frases justificando o score, citando NOMES de tags e critérios específicos. Quando o candidato tiver bloco \`reviews:\`, vale citar trechos curtos (entre aspas) que reforcem o match ou exponham um risco. Em \`top_match_factors\`, liste 2–4 chips curtos (tags, critérios, padrões ou observações de reviews) que sustentam o score.
+5. Para cada candidato, escreva 1–2 frases justificando o score, citando NOMES de tags e critérios específicos. Quando o candidato tiver bloco de consenso das reviews (digest), apoie-se no consenso/divergência e nos traços salientes pra reforçar o match ou expor um risco — sem citar opiniões individuais. Em \`top_match_factors\`, liste 2–4 chips curtos (tags, critérios, padrões ou observações do consenso das reviews) que sustentam o score.
 6. Escreva em português brasileiro. Sempre use a tool \`submit_ranking\`. Não retorne texto livre.
 7. Inclua TODOS os candidatos fornecidos em \`rankings\`, ordenados do mais alinhado pro menos alinhado. Não invente \`work_id\`.
 8. \`mode_summary\`: parágrafo curto (2–3 frases) explicando o padrão dos top resultados — útil pro usuário entender o "porquê" do ranking.
@@ -60,8 +60,7 @@ CAMPOS ENRIQUECIDOS (opcionais — preencha quando há evidência real):
 10. \`risks\` (1–3 itens): razões pra o user NÃO ler essa obra, MESMO QUE alignment_score seja alto. Exemplos: "tem tag tragedy que você marca como avoided", "reviews mencionam pacing lento que você costuma penalizar", "tema religioso (não está no seu padrão)". Frases curtas e específicas. Omita o campo se não houver risco real.
 11. \`similar_loved\` (1–2 work_id): obras na BIBLIOTECA do user que ele AMA (user_score ≥ 8) e que esta candidata lembra. Use APENAS work_id que aparece no profile/biblioteca da request. Não invente. Útil pra "se você curtiu X, vai curtir isto".
 12. \`similar_avoided\` (1–2 work_id): mesmo critério mas pra obras que o user AVALIOU MAL (user_score ≤ 5). Quando presente, indica alerta de risco.
-13. \`review_quotes\` (1–2 quotes): trechos curtos (≤ 150 chars, entre aspas) de reviews FORNECIDAS no bloco \`reviews:\` da candidata. NÃO INVENTE quotes. Cite a fonte ou contexto quando útil. Omita se reviews não foram fornecidas.
-14. \`mood_fit\` (0–1): SOMENTE quando o user enviou CONTEXTO ADICIONAL. Mede quão alinhada essa obra está com o mood específico, independente do alignment_score geral. Ex.: alignment=70 mas mood "quero algo curto" + obra tem 500 caps → mood_fit baixo (0.3). Omita o campo quando não houver mood.`
+13. \`mood_fit\` (0–1): SOMENTE quando o user enviou CONTEXTO ADICIONAL. Mede quão alinhada essa obra está com o mood específico, independente do alignment_score geral. Ex.: alignment=70 mas mood "quero algo curto" + obra tem 500 caps → mood_fit baixo (0.3). Omita o campo quando não houver mood.`
 
 export function truncate(text: string | null | undefined, maxChars: number): string {
   if (!text) return ""
@@ -140,16 +139,6 @@ export function formatReviewDigestBlock(digest: ReviewDigest): string {
   }
   if (digest.content_warnings.length) lines.push(`  alertas de conteúdo: ${digest.content_warnings.join("; ")}`)
   if (digest.execution) lines.push(`  execução: ${truncate(digest.execution, 250)}`)
-  return lines.join("\n")
-}
-
-function formatReviews(reviews: CandidateReview[]): string {
-  if (!reviews || reviews.length === 0) return ""
-  const lines = ["reviews:"]
-  for (const r of reviews) {
-    const star = r.rating != null ? `★${r.rating.toFixed(1)}` : "★?"
-    lines.push(`  [${r.source} ${star}] "${truncate(r.text, 280)}"`)
-  }
   return lines.join("\n")
 }
 
@@ -238,11 +227,12 @@ export function buildRankingUserPromptWithLabel(
     if (plat) tailLines.push(plat)
     if (c.expectedScore != null) tailLines.push(`Nota Esperada (previsão da sua nota)=${c.expectedScore.toFixed(2)}`)
     if (c.fitScore != null) tailLines.push(`fit (alinhamento com seu perfil, 0–1)=${c.fitScore.toFixed(2)}`)
-    // Digest estruturado (Passe 2) tem precedência; cai no resumo-texto (Passe 1).
+    // Sinal de reviews = SÓ consenso/divergência (preference-agnostic): digest
+    // estruturado (Passe 2) tem precedência; cai no resumo-texto (Passe 1). Não
+    // injetamos reviews individuais — o julgamento é sobre consenso, não opinião
+    // pontual (evita citar quotes avulsas e economiza tokens).
     if (c.reviewDigest) tailLines.push(formatReviewDigestBlock(c.reviewDigest))
     else if (c.reviewSummary) tailLines.push(`consenso das reviews (resumo IA): ${truncate(c.reviewSummary, 600)}`)
-    const reviewsBlock = formatReviews(c.reviews)
-    if (reviewsBlock) tailLines.push(reviewsBlock)
     tailLines.push("")
   })
 

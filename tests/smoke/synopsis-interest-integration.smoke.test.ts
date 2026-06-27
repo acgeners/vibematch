@@ -36,7 +36,7 @@ const ENABLED = SMOKE && !!process.env.SUPABASE_SERVICE_ROLE_KEY && !!process.en
 
 const EMPTY: TasteProfilePayload = { loved_tags: [], avoided_tags: [], loved_themes: [], avoided_themes: [], criterion_preferences: {}, narrative_patterns: [], summary: "" }
 const ROW: TasteProfileRow = { id: "p", version: 6, is_current: true, is_stub: false, n_works_used: 12, input_hash: "h", model_name: MODEL, prompt_version: "v1", profile: EMPTY, raw_response: null, created_at: new Date().toISOString() }
-const WORK: InterestWorkData = { title: "Smoke Title", tags: ["x", "y"], canonicalSynopsis: "sinopse canonica longa o suficiente para o smoke", rawSynopsis: null }
+const WORK: InterestWorkData = { title: "Smoke Title", tags: ["x", "y"], canonicalSynopsis: "sinopse canonica longa o suficiente para o smoke", rawSynopsis: null, reviewDigest: null }
 
 class MemGateway implements InterestGateway {
   stored: StoredPrediction | null = null

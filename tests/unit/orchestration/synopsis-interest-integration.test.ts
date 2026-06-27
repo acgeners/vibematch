@@ -31,9 +31,9 @@ function profileRow(payload: TasteProfilePayload = EMPTY, over: Partial<TastePro
   return { id: "p", version: 6, is_current: true, is_stub: false, n_works_used: 12, input_hash: "h", model_name: MODEL, prompt_version: "v1", profile: payload, raw_response: null, created_at: new Date().toISOString(), ...over }
 }
 
-const canonWork: InterestWorkData = { title: "Titulo", tags: ["a", "b"], canonicalSynopsis: "uma sinopse canonica longa o suficiente para o prompt", rawSynopsis: "bruta tambem longa o bastante para uso" }
-const rawOnly: InterestWorkData = { title: "Titulo", tags: ["a"], canonicalSynopsis: null, rawSynopsis: "bruta longa o suficiente para servir de fallback ok" }
-const noSyn: InterestWorkData = { title: "Titulo", tags: ["a"], canonicalSynopsis: null, rawSynopsis: null }
+const canonWork: InterestWorkData = { title: "Titulo", tags: ["a", "b"], canonicalSynopsis: "uma sinopse canonica longa o suficiente para o prompt", rawSynopsis: "bruta tambem longa o bastante para uso", reviewDigest: null }
+const rawOnly: InterestWorkData = { title: "Titulo", tags: ["a"], canonicalSynopsis: null, rawSynopsis: "bruta longa o suficiente para servir de fallback ok", reviewDigest: null }
+const noSyn: InterestWorkData = { title: "Titulo", tags: ["a"], canonicalSynopsis: null, rawSynopsis: null, reviewDigest: null }
 
 function sigFor(work: InterestWorkData, row: TasteProfileRow, source: SynopsisSource): string {
   return computeInterestInputSignature({

@@ -73,6 +73,33 @@ async function generateRunSlug(
   return `${today}-${maxN + 1}`
 }
 
+/**
+ * Insere uma `recommendation_runs` com slug único, re-tentando em colisão de slug
+ * (código 23505) — race entre runs simultâneas. Retorna null (e loga) se falhar
+ * por outro motivo, pra o caller decidir se a persistência era essencial.
+ * Compartilhado por `runRecommendationAction` e pelo "salvar desempate".
+ */
+async function insertRecommendationRun(
+  supabase: ReturnType<typeof createAdminClient>,
+  baseInsert: Record<string, unknown>,
+): Promise<{ id: string; slug: string } | null> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const slug = await generateRunSlug(supabase)
+    const { data, error } = await supabase
+      .from("recommendation_runs")
+      .insert({ ...baseInsert, slug })
+      .select("id, slug")
+      .single()
+    if (!error && data) return { id: data.id as string, slug: data.slug as string }
+    if (error?.code !== "23505") {
+      console.error("[recommendations] falha persistindo run:", error)
+      return null
+    }
+  }
+  console.error("[recommendations] falha persistindo run: colisões de slug esgotaram as tentativas")
+  return null
+}
+
 export interface ProfileStatus {
   hasProfile: boolean
   profile: TasteProfileRow | null
@@ -114,6 +141,7 @@ export async function generateTasteProfileAction(): Promise<{
         modelName: MODEL,
         promptVersion: PROMPT_VERSION,
         rawResponse: null,
+        ratedWorks,
       })
       return { data: saved }
     }
@@ -130,6 +158,7 @@ export async function generateTasteProfileAction(): Promise<{
         modelName: "heuristic",
         promptVersion: "heuristic-v1",
         rawResponse: null,
+        ratedWorks,
       })
       return { data: saved }
     }
@@ -143,6 +172,7 @@ export async function generateTasteProfileAction(): Promise<{
       modelName: result.modelName,
       promptVersion: result.promptVersion,
       rawResponse: result.rawResponse,
+      ratedWorks,
     })
     return { data: saved }
   } catch (err) {
@@ -279,27 +309,7 @@ export async function runRecommendationAction(
       ai_api_call_id: result.apiCallId,
     }
 
-    let runRow: { id: string; slug: string } | null = null
-    let insertError: { code?: string; message: string } | null = null
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const slug = await generateRunSlug(supabase)
-      const { data, error } = await supabase
-        .from("recommendation_runs")
-        .insert({ ...baseInsert, slug })
-        .select("id, slug")
-        .single()
-      if (!error && data) {
-        runRow = { id: data.id as string, slug: data.slug as string }
-        insertError = null
-        break
-      }
-      insertError = error
-      if (error?.code !== "23505") break
-    }
-
-    if (insertError || !runRow) {
-      console.error("[recommendations] falha persistindo run:", insertError)
-    }
+    const runRow = await insertRecommendationRun(supabase, baseInsert)
 
     // Persiste alignment_score em calculated_scores pra a coluna "Veredito IA." ficar
     // disponível em qualquer tabela (ranking, favoritos, títulos) — independente
@@ -698,18 +708,24 @@ export interface RerankClusterResult {
   requested: number
   /** Ranking do cluster (desc por alignment_score) — pro caller montar o veredito. */
   rankings: Array<{ workId: string; alignmentScore: number; justification: string }>
+  /** Slug da run salva, quando `persist` foi pedido e a gravação deu certo. */
+  savedSlug?: string
 }
 
 /**
  * Desempate sob demanda de um CLUSTER de obras tecnicamente empatadas na Nota de
  * Decisão. Envia todas numa ÚNICA chamada `rankFavorites` (mode "ranking") pra o
  * modelo compará-las cabeça-a-cabeça — é o que dá o veredito decisivo — e
- * persiste o alignment_score de cada uma (como o re-rank por-obra:
- * alignment_run_id=null, sem criar recommendation_run). Respeita o gate Pago e
- * o limite diário (1 LLM call por clique).
+ * persiste o alignment_score de cada uma. Respeita o gate Pago e o limite diário
+ * (1 LLM call por clique).
+ *
+ * Por padrão NÃO cria `recommendation_run` (efêmero: alignment_run_id=null). Com
+ * `opts.persist`, salva uma run navegável (mode "ranking", source_meta.tiebreak)
+ * — reusa o `mode_summary` que o modelo já gera — e linka o alignment a ela.
  */
 export async function rerankClusterAction(
   workIds: string[],
+  opts: { persist?: boolean } = {},
 ): Promise<{ data?: RerankClusterResult; error?: string }> {
   try {
     const gate = await ensureCapability("smart_shortlist")
@@ -757,12 +773,43 @@ export async function rerankClusterAction(
     const supabase = createAdminClient()
     const now = new Date().toISOString()
     const candidateIds = new Set(candidates.map((c) => c.id))
+
+    // Persistência opcional: cria uma run navegável (histórico/URL) e linka o
+    // alignment a ela. Sem persist, o alignment fica solto (run_id=null).
+    let savedSlug: string | undefined
+    let alignmentRunId: string | null = null
+    if (opts.persist) {
+      const clusterIds = candidates.map((c) => c.id)
+      const runRow = await insertRecommendationRun(supabase, {
+        mode: "ranking",
+        taste_profile_id: profile.id,
+        user_context: null,
+        n_candidates: candidates.length,
+        n_available: candidates.length,
+        source_meta: { tiebreak: true, work_ids: clusterIds },
+        candidate_work_ids: clusterIds,
+        results: result.rankings,
+        mode_summary: result.modeSummary,
+        model_name: result.modelName,
+        prompt_version: result.promptVersion,
+        input_tokens: result.usage.inputTokens,
+        output_tokens: result.usage.outputTokens,
+        cache_read_tokens: result.usage.cacheReadTokens,
+        cache_creation_tokens: result.usage.cacheCreationTokens,
+        ai_api_call_id: result.apiCallId,
+      })
+      if (runRow) {
+        savedSlug = runRow.slug
+        alignmentRunId = runRow.id
+      }
+    }
+
     const upsertRows = result.rankings
       .filter((r) => candidateIds.has(r.work_id))
       .map((r) => ({
         work_id: r.work_id,
         alignment_score: r.alignment_score,
-        alignment_run_id: null,
+        alignment_run_id: alignmentRunId,
         alignment_justification: r.justification,
         alignment_payload: buildAlignmentPayload(r),
         alignment_at: now,
@@ -780,6 +827,10 @@ export async function rerankClusterAction(
 
     revalidatePath("/ranking")
     revalidatePath("/favorites")
+    if (savedSlug) {
+      revalidatePath("/recommendations")
+      revalidatePath(`/recommendations/${savedSlug}`)
+    }
 
     const rankings = result.rankings
       .filter((r) => candidateIds.has(r.work_id))
@@ -790,7 +841,7 @@ export async function rerankClusterAction(
       }))
       .sort((a, b) => b.alignmentScore - a.alignmentScore)
 
-    return { data: { ranked: upsertRows.length, requested: candidates.length, rankings } }
+    return { data: { ranked: upsertRows.length, requested: candidates.length, rankings, savedSlug } }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Erro desconhecido" }
   }

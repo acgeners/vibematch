@@ -24,7 +24,7 @@ export type SynopsisQuality = (typeof SYNOPSIS_QUALITIES)[number]
 export const AI_EVAL_STATUSES = ["pending", "review_pending", "done", "skipped"] as const
 export type AiEvalStatus = (typeof AI_EVAL_STATUSES)[number]
 
-export const PLATFORMS = ["mangaupdates", "comick", "anilist", "animeplanet", "comix", "mangadex", "kitsu", "myanimelist"] as const
+export const PLATFORMS = ["mangaupdates", "comick", "comix", "animeplanet", "myanimelist", "mangadex", "kitsu", "anilist", "outros"] as const
 export type Platform = (typeof PLATFORMS)[number]
 
 export const CRITERION_SLUGS = [
@@ -363,6 +363,10 @@ export interface FormulaConfig {
     coefficients: number[]
     stage2FeatureNames?: string[]
     stage2Coefficients?: number[] | null
+    /** Peso do blend expected⊕calc (1 = sem blend). */
+    calcBlendWeight?: number
+    /** Assinatura dos inputs da nested-CV honesta — pula o recompute quando idêntica. */
+    cvSig?: string
   } | null
 }
 

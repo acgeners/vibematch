@@ -40,7 +40,7 @@ function profileRow(input_hash: string, profile: TasteProfilePayload = EMPTY, ve
   return { id: "p", version, is_current: true, is_stub: false, n_works_used: 12, input_hash, model_name: MODEL, prompt_version: "v1", profile, raw_response: null, created_at: new Date().toISOString() }
 }
 function work(id: string, over: Partial<BackfillWork> = {}): BackfillWork {
-  return { workId: id, title: `T${id}`, tags: ["a", "b"], canonicalSynopsis: `sinopse canonica ${id} longa o suficiente para o prompt`, rawSynopsis: null, ...over }
+  return { workId: id, title: `T${id}`, tags: ["a", "b"], canonicalSynopsis: `sinopse canonica ${id} longa o suficiente para o prompt`, rawSynopsis: null, reviewDigest: null, ...over }
 }
 function sigFor(w: BackfillWork, profileSig: string, source: SynopsisSource = "canonical"): string {
   return computeInterestInputSignature({

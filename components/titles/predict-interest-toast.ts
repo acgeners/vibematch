@@ -37,15 +37,36 @@ export async function predictInterestWithToast(
       toast.error(`Falhou: ${res.error}. Tente novamente.`)
       break
     case "blocked_cost_confirmation":
-      toast(res.message, {
-        duration: 12000,
-        action: {
-          label: "Confirmar",
-          onClick: () => {
-            void predictInterestWithToast(workId, refresh, { ...opts, confirmCascade: true })
+      if (res.reason === "profile_cascade") {
+        // Custo = regen do perfil (~$0,40). Dois caminhos: prever com o perfil ATUAL
+        // (acceptStaleProfile, ~$0,01) ou atualizar o perfil antes (confirmCascade).
+        // A mensagem já traz o "Perfil ~X% defasado" pra informar a escolha.
+        toast(res.message, {
+          duration: 16000,
+          action: {
+            label: "Prever sem atualizar",
+            onClick: () => {
+              void predictInterestWithToast(workId, refresh, { ...opts, acceptStaleProfile: true, confirmCascade: true })
+            },
           },
-        },
-      })
+          cancel: {
+            label: "Atualizar perfil",
+            onClick: () => {
+              void predictInterestWithToast(workId, refresh, { ...opts, confirmCascade: true })
+            },
+          },
+        })
+      } else {
+        toast(res.message, {
+          duration: 12000,
+          action: {
+            label: "Confirmar",
+            onClick: () => {
+              void predictInterestWithToast(workId, refresh, { ...opts, confirmCascade: true })
+            },
+          },
+        })
+      }
       break
   }
 }

@@ -1118,6 +1118,7 @@ const REVIEW_SOURCE_PRIORITY: Record<ExternalSourceId, number> = {
   comick: 5,
   mangadex: 6,
   comix: 7,
+  outros: 8, // catch-all sem fetcher próprio → menor prioridade
 }
 
 /**
@@ -1770,6 +1771,7 @@ const METADATA_SOURCE_PRIORITY: Record<ExternalSourceId, number> = {
   animeplanet: 5,
   mangadex: 6,
   comix: 7,
+  outros: 8, // catch-all sem fetcher próprio → menor prioridade
 }
 
 function bySourcePriority<T extends { source: ExternalSourceId }>(items: T[]): T[] {

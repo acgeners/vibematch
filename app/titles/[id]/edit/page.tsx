@@ -5,7 +5,7 @@ import { titleToSlug } from "@/lib/utils"
 import { Header } from "@/components/layout/header"
 import { WorkForm, type WorkFormAiEvaluation } from "@/components/titles/work-form"
 import { ReviewsEditor } from "@/components/titles/reviews-editor"
-import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
+import { getWorkReviews } from "@/server/queries/work-reviews"
 import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
 import type { WorkFormValues } from "@/lib/validations/work.schema"
 import type { WorkWithRelations } from "@/types/domain"
@@ -132,10 +132,12 @@ export default async function EditTitlePage({ params }: EditPageProps) {
   const initialValues = workToFormValues(work)
   // Canal ÚNICO de review manual (externas) — só com o gate local aberto; as Server Actions
   // reexecutam o gate. Em produção (sem auth) o card não aparece.
+  // Com o gate aberto, carrega o snapshot completo de reviews: manuais (duráveis) +
+  // buscadas das fontes (work_reviews, efêmeras) — ambas editáveis na seção Reviews.
   const externalEditorEnabled = await isLocalExternalReviewEditorAllowed()
-  const externalReviews = externalEditorEnabled
-    ? await readManualExternalReviewsForDisplay(work.id)
-    : []
+  const reviewsSnapshot = externalEditorEnabled ? await getWorkReviews(work.id) : null
+  const externalReviews = reviewsSnapshot?.manual ?? []
+  const fetchedReviews = reviewsSnapshot?.bySource ?? []
 
   const aiEvaluations = (work as WorkWithRelations & {
     ai_evaluations?: Array<{
@@ -182,6 +184,7 @@ export default async function EditTitlePage({ params }: EditPageProps) {
             workId={work.id}
             externalEditorEnabled={externalEditorEnabled}
             externalReviews={externalReviews}
+            fetchedReviews={fetchedReviews}
           />
         }
       />

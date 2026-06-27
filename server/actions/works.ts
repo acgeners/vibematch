@@ -79,16 +79,25 @@ function scheduleSynopsisConsolidation(workId: string) {
         .eq("id", workId)
 
       // A sinopse canônica mudou ⇒ qualquer previsão de Interesse Sinopse ficou
-      // desatualizada. Marca stale e tenta reprever (só roda se houver perfil
-      // corrente não-stub — caso contrário a flag stale permanece).
+      // desatualizada. DEFERIR (2a): só marcamos `stale` — a recomputação LLM fica
+      // sob gatilho (botão "Prever interesse" / backfill), NÃO eager por-edição.
+      // Assim editar N obras não dispara N previsões; a UI mostra o último valor com
+      // selo "desatualizado" até você acionar. Exceção: 1ª vez (obra sem nenhuma
+      // previsão) ainda prevê eager, pra a obra nova nascer com ♥.
       const { markWorkSynopsisPredictionStale } = await import(
         "@/server/queries/synopsis-quality"
       )
-      const { autoPredictSynopsisQuality } = await import(
-        "@/lib/ai-evaluation/synopsis-quality-runner"
-      )
       await markWorkSynopsisPredictionStale(workId)
-      await autoPredictSynopsisQuality(workId)
+      const { count: predCount } = await supabase
+        .from("synopsis_quality_predictions")
+        .select("id", { count: "exact", head: true })
+        .eq("work_id", workId)
+      if (!predCount) {
+        const { autoPredictSynopsisQuality } = await import(
+          "@/lib/ai-evaluation/synopsis-quality-runner"
+        )
+        await autoPredictSynopsisQuality(workId)
+      }
     } catch (err) {
       console.error("[scheduleSynopsisConsolidation] falhou:", err)
     }

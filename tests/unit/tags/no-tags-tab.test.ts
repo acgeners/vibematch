@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { classifyWorksWithoutTags, type TagWorkMetaRow } from "@/lib/tags/no-tags-classify"
 
 function work(id: string, title: string, over: Partial<TagWorkMetaRow> = {}): TagWorkMetaRow {
-  return { id, title, coverUrl: null, publicationStatus: "Ongoing", personalStatus: "—", aiEvalStatus: "done", canonicalPresent: true, tagCount: 0, ...over }
+  return { id, title, coverUrl: null, publicationStatus: "Ongoing", personalStatus: "—", aiEvalStatus: "done", canonicalPresent: true, tagCount: 0, expectedScore: null, interest: null, ...over }
 }
 
 describe("classifyWorksWithoutTags", () => {
@@ -44,5 +44,23 @@ describe("classifyWorksWithoutTags", () => {
       filters: {},
     })
     expect(r.find((w) => w.id === "a")!.acceptedExternalSources).toEqual(["anilist", "mangaupdates"])
+  })
+  it("filtro de interesse: ♥ casa; 'none' casa só interesse nulo", () => {
+    const works = [
+      work("a", "Alpha", { interest: "♥" }),
+      work("b", "Beta", { interest: null }),
+      work("c", "Gamma", { interest: "♥♥♥" }),
+    ]
+    expect(classifyWorksWithoutTags({ ...base, works, filters: { interest: ["♥"] } }).map((w) => w.id)).toEqual(["a"])
+    expect(classifyWorksWithoutTags({ ...base, works, filters: { interest: ["none"] } }).map((w) => w.id)).toEqual(["b"])
+  })
+  it("ordena por nota prevista (desc) e por nº de tags (desc)", () => {
+    const works = [
+      work("a", "Alpha", { expectedScore: 5.0, tagCount: 2 }),
+      work("b", "Beta", { expectedScore: 9.0, tagCount: 1 }),
+      work("c", "Gamma", { expectedScore: null, tagCount: 4 }),
+    ]
+    expect(classifyWorksWithoutTags({ ...base, works, filters: { sort: { key: "expected", dir: "desc" } } }).map((w) => w.id)).toEqual(["b", "a", "c"])
+    expect(classifyWorksWithoutTags({ ...base, works, filters: { sort: { key: "tags", dir: "desc" } } }).map((w) => w.id)).toEqual(["c", "a", "b"])
   })
 })

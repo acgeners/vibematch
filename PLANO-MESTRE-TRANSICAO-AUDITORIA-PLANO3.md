@@ -20,7 +20,9 @@
 > determinísticos (D1/D2); o candidato com digest (e1, MAE holdout 0.441) bate o sem-digest
 > (b1, 0.500) mas com **IC⊃0 (inconclusivo)**. **CONTRATO RATIFICADO 2026-06-23 = `b1`**
 > (LLM perfil+sinopse+tags, **Sonnet**, sem digest) = contrato **v2 atual** (sem nova
-> `prompt_version`, sem migration). **Próximo passo = Lote 02** (~622 obras) sob v2.
+> `prompt_version`, sem migration). **Lote 02 CONCLUÍDO 2026-06-23** — catálogo inteiro
+> (757/757, $5.86, perfil v8 — §24j); catálogo 100% fresco. As três frentes estão
+> essencialmente fechadas; o que resta é hardening/operação recorrente + **F1 (auth)** antes do deploy.
 
 ---
 
@@ -79,7 +81,7 @@ Lineage: `feat/data-orchestration` = `feat/synopsis-quality-optimization` (Plano
 | Frente | Estado | Uma linha |
 |---|---|---|
 | **1 — Arquitetura/orquestração** | **partial** | Os 5 passos da Fase B estão integrados na fila durável; backfill **só de Interesse** existe. Gaps: `runDigestBatch` planejado e **não construído**; lote legado de digest ainda **bypassa** a orquestração; `review_digest` **não** está no contrato de `predict_interest_potential` (decisão adiada, não bug). |
-| **2 — Backfill de Interesse** | **partial** | Piloto (12, $0.62) + Lote 01 (100, $0.75) = **112 previsões modernas fresh**; **~622 pendentes**; **Lote 02 suspenso**; perfil v7 fresh, `recalc_pending=false`. |
+| **2 — Backfill de Interesse** | **completed** (ver §24j) | Piloto (12, $0.62) + Lote 01 (100, $0.75) + **Lote 02 (catálogo inteiro, 757/757, $5.86, 2026-06-23)**; perfil **v8** fresh, `recalc_pending=false`; catálogo 100% fresco (sem mais split 112/~622). |
 | **3 — Plano 3 (Interesse na Obra)** | **experimento concluído** (ver §24i) | ~~Infra da Fase B pronta; golden 0/90; piloto não rodado~~ → pilot-1 **superseded** (leakage retrospectivo); golden **prospectivo pilot-2** rotulado (90 labels, `a8abddca…`) e candidatos b1/e1/D1/D2 executados. Resultado: **LLM ≫ D1/D2**; **e1 (com digest) MAE 0.441 < b1 (sem) 0.500**, mas IC⊃0 (inconclusivo). **Contrato RATIFICADO 2026-06-23 = b1 (Sonnet, sem digest)**; próximo = **Lote 02** (~622) sob v2. |
 
 ---
@@ -406,7 +408,7 @@ FASE 2B — Finalizar o backfill de Interesse (SÓ após o winner)
 | ensure_taste_profile (se regenerar) | 1 | $0.39 | $0.58 | $0.388 |
 | recalculate_scores | global | $0 | $0 | free (TS puro) |
 
-Já gastos: piloto 2B.1 **$0.62** + Lote 01 2C.2 **$0.75** = **$1.37** (112 previsões + 1 perfil v7).
+Já gastos (atualizado 2026-06-23): piloto 2B.1 **$0.62** + Lote 01 2C.2 **$0.75** + Lote 02 **$5.86** (perfil v8 + 757 previsões) + experimento Plano 3 **$2.31** (51 digests $0.86 + b1 $0.66 + e1 $0.79) = **≈$9.54**. Ver §24i/§24j.
 
 ---
 
@@ -463,7 +465,7 @@ Estados: `completed · partial · blocked · planned · deferred · not_applicab
 | Backfill | piloto 12 obras (2B.1) | completed | PILOTO §RESULTADO; $0.62; `6775003` | — | — |
 | Backfill | recalc headless-safe (2B.2) | completed | `recalculateScoresHeadless`; `recalc_pending=false`; `0ed84d6` | — | — |
 | Backfill | Lote 01 (100 obras, 2C.2) | completed | LOTE-01 §RESULTADO; $0.75; 112 modernas; `aedb4d5` | — | — |
-| Backfill | **Lote 02 (~622 restantes)** | blocked | 🟩 622 pendentes; perfil v7 fresh | **NÃO executar** até winner | conclusão do Prompt 2 |
+| Backfill | **Lote 02 (catálogo inteiro)** | completed (§24j) | 757/757 ($5.86), perfil v8, recalc ok (2026-06-23) | — | — |
 | Backfill | backfill de digest das 489 | deferred | decisão D2; 489 sem digest (🟩) | condicional ao winner | só fluxos pagos (ranker/deep-dive) |
 | Plano 3 | proveniência synopsis_quality (c1) | completed | migration 108; `2a5003a` | — | — |
 | Plano 3 | golden sample + rúbrica (c2) | completed | golden-sample.pilot-1.json (FROZEN); `9c70621` | — | — |
@@ -546,10 +548,10 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 | F3 | falsa precisão / tiers | partial | `tier_band_width` mig 104; largura definitiva a validar | decisão de produto | não | validar largura (fixa×percentil×cluster) sobre dado prospectivo | validar após F9 |
 | F4 | métrica in-sample × OOF | completed | `selectPrimaryModelMetric` (AUDIT §1B/F4) | pré-Plano 3 | não | — | — (feito) |
 | F5 | Ridge × calc sem ganho | deferred | **re-validado fresco (§24k): OOF honesta 0.570 vs calc 0.588, edge dentro do ruído** | hardening | não | simplificar p/ calc (ganho marginal, $0) — decidir | decidir simplificação |
-| F6 | alignment (Veredito IA) sem ganho | deferred | **re-validado fresco (§24k): lift −0.232 IC exclui 0 (pior); ⚠️ alignment talvez stale** | decisão de produto | não | aposentar (poupa LLM pago) — decidir | decidir aposentar |
-| F7 | personal_fit redundante | deferred | **re-validado fresco (§24k): std 0.065; ρ0.47 sozinho mas Δ incremento IC⊃0** | hardening | não | redundante confirmado; não usar p/ ranking fino | manter só p/ display |
+| F6 | alignment (Veredito IA) sem ganho | deferred | **re-validado fresco (§24k): lift −0.232 IC exclui 0 (pior); ⚠️ alignment talvez stale** | decisão de produto | não | re-medir barato (`rerankStaleBatchAction(n)`, amostra ~$0.2–0.5) OU aposentar; **custo idle = 0** (re-rank pago sob demanda) | deferido sem custo: re-medir/aposentar só quando o sort pago importar (perto do multi-user) |
+| F7 | personal_fit redundante | **completed** | **re-validado fresco (§24k): std 0.065; ρ0.47 sozinho mas Δ incremento IC⊃0**; **sort default 'Recomendado' JÁ unificado p/ expected_score + tiers + tag_overlap (PRs #11/#12, ranking.ts:681)** | hardening | não | personal_fit removido do peso do sort; segue só como display | — (feito) |
 | F8 | dois sistemas de mood | deferred | preset × drawer (§10) | decisão de produto | não | unificar semântica | decidir |
-| F9 | validação prospectiva | partial | `prediction_snapshots` mig 105 aplicada; falta dado | operação recorrente | não | acumular recomendações+notas; painel sai do vazio | ligar hooks de evento + acumular |
+| F9 | validação prospectiva | partial | `prediction_snapshots` mig 105 aplicada; **hooks JÁ conectados** (record em `runRecommendationAction` recommendations.ts:338; resolve em `updateWork`/`updateWorkStatus` works.ts:1431); falta só **dado acumulado** | operação recorrente | não | usar o app (recomendar + salvar notas) → painel sai do vazio | **verificar end-to-end no app** + acumular (não é mais "ligar hooks") |
 | F10 | `synopsis_quality_predict` em Sonnet (custo/modelo) | **partial (respondido em parte, §24i)** | pilot-2: LLM (sonnet) ≫ D1/D2 (MAE 0.44–0.50 vs 0.79–0.91) ⇒ manter LLM | **Plano 3** | não | núcleo respondido (não trocar por determinístico); **Sonnet×Haiku ainda não testado** | ratificar manter-LLM; Haiku = hardening opcional |
 | F11 | staleness / recalc manual | partial | headless-safe (2B.2); recalc ainda 1h/manual | operação recorrente | não | auto-recalc OU flag visível | decidir auto-refresh |
 | F12 | refresh de dados externos estagna | deferred | refetch só manual | operação recorrente | não | **política de atualização** (job de refresh) | definir política |
@@ -583,10 +585,10 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 
 | Estado | IDs | n |
 |---|---|--:|
-| completed | F2, F4, L1, L13 | **4** |
+| completed | F2, F4, F7, L1, L13 | **5** |
 | partial | F3, F9, F10, F11, F13, F15, L2, L4, L5, L6, L7, L8, L9, L12, L14 | **15** |
 | planned | F1 | **1** |
-| deferred | F5, F6, F7, F8, F12, L11 | **6** |
+| deferred | F5, F6, F8, F12, L11 | **5** |
 | not_applicable | L3, L10 | **2** |
 | blocked | — | **0** |
 
@@ -604,6 +606,34 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 - **decisão de produto:** F6, F8, L3, L10.
 
 > Regra mantida: item adiado **não desaparece** (fica nesta matriz); F5/F6/F7/F8/F9 têm destino explícito; F12 tem "política de atualização" como critério; F14/F15 ficam no hardening técnico; F1 segue bloqueando o deploy.
+
+---
+
+## 24l. Addendum — Tags inferidas por IA (sinopse + reviews) para obras da cauda — ✅ CONCLUÍDO (2026-06-25)
+
+> **STATUS: ✅ CONCLUÍDO — 1019 tags `ai_inferred` gravadas, custo LLM total ~US$ 2,16, [PR #14](https://github.com/acgeners/vibematch/pull/14) (merged).** Trabalho **fora** do eixo Auditoria→Plano 3, registrado aqui como log da sessão. Doc dedicado: [PLANO-TAGS-IA.md](PLANO-TAGS-IA.md). 🟩 banco (read+write) · 🟦 código · 🟧 decisão.
+
+**Problema.** Obras da cauda com poucas/zero tags. Tags alimentam o **desempate intra-tier `tag_overlap_net`** (maior alavanca de recomendação — §F7/PRs #11-13), a feature do Ridge e o input da avaliação IA. As fontes externas são pobres justo nessas obras → única fonte de tag específica = a **sinopse** (+ reviews).
+
+**Diagnóstico (🟩).** Cauda menor que a premissa: 758 ativas, **45 com ≤5 tags / 10 com 0** (86,5% já com 11+). 100% das ≤5 com sinopse canônica e ID externo.
+
+**Execução (3 frentes):**
+
+| Frente | Mecanismo | Resultado |
+|---|---|---|
+| Backfill grátis | re-ingestão de tags externas (`refreshWorkExternalData`, aditivo) | 194 tags / 44 obras · $0 |
+| Inferência da sinopse | Haiku 4.5, candidate→filter (vocabulário fechado ~630 tags, structured output via forced tool, `evidence` anti-alucinação, filtro client-side) | 673 alta + 158 média |
+| Passada com reviews | `--with-reviews`: `review_summary`/`review_digest` como evidência extra (grava só tags novas) | 144 alta + 44 média |
+
+**Qualidade (🟧).** "alta" = clara no texto; **"média" passa por 2º olhar estrito do Sonnet 4.6** (juiz independente, sem ver a confiança original — ~40-49% confirmadas). O Sonnet rejeitou a média justamente nos grupos "vibe" (tone_mood) e tags genéricas (Character Growth), coerente com a distribuição (%média alto em tone_mood 56%, ~0% em superpowers/character_profile-Role).
+
+**Resultado (🟩).** **1019 tags `ai_inferred`** (673 sinopse-alta + 158 sinopse-média + 144 review-alta + 44 review-média). Cauda **eliminada**: ≤5 tags **45→3**, zero **10→0**, 11+ **86,5%→96%**.
+
+**Proveniência/reversão (🟦).** Migration **117** (aplicada): `work_tags.source`/`confidence`/`created_at`. Reverter: `DELETE FROM work_tags WHERE source='ai_inferred'`.
+
+**Custo (🟩).** ~US$ 2,16 (tag_inference Haiku $1,24 + tag_verify Sonnet $0,92). Caching não pegou (menu ~3,8k tok < mín 4096 do Haiku) — irrelevante no valor.
+
+**Decorrências (🟧).** (a) `review_digest` (L5) ganhou um uso prático — evidência de tag em 10/85 obras — além da previsão de Interesse. (b) Tags mais ricas reforçam o desempate `tag_overlap_net` (F7). (c) Resta opcional: validar no app; eventual 2ª passada das média rejeitadas só com mais sinal.
 
 ---
 

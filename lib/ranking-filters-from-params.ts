@@ -34,7 +34,7 @@ export function parseFiltersFromSearchParams(sp: URLSearchParams): RankingFilter
       ? undefined
       : perStatusParam
         ? perStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
-        : ["Want to Read"]
+        : ["Want to Read", "Untracked"]
 
   const pubStatusParam = sp.get("pub_status")
   const publicationStatus =

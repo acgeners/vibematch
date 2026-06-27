@@ -22,6 +22,7 @@ const LIMIT = arg("--limit") ? Number(arg("--limit")) : Infinity
 const FROM_CSV = arg("--from-csv") // grava a partir de um CSV de dry-run (editado), sem LLM
 const VERIFY = process.argv.includes("--verify") // re-verifica as "média" do CSV com Sonnet
 const WITH_REVIEWS = process.argv.includes("--with-reviews") // passada incremental usando review_summary/digest
+const REVIEWS_OPTIONAL = process.argv.includes("--reviews-optional") // processa TODAS do escopo (review só onde houver)
 
 const csv = (s: unknown) => `"${String(s ?? "").replace(/"/g, '""')}"`
 const minConfNum = /m[eé]dia/i.test(MIN_CONF) ? 0.6 : 0.9
@@ -85,9 +86,11 @@ async function runWithReviews(sb: ReturnType<typeof createAdminClient>) {
   }
 
   const menu = await buildTagMenu(sb)
-  let targets = works.filter((w) => w.canonical_synopsis && String(w.canonical_synopsis).trim() && buildReviewContext(w.review_summary, w.review_digest))
+  // Default: só obras com review. Com --reviews-optional: todas do escopo (review onde houver).
+  let targets = works.filter((w) => w.canonical_synopsis && String(w.canonical_synopsis).trim() && (REVIEWS_OPTIONAL || buildReviewContext(w.review_summary, w.review_digest)))
   if (Number.isFinite(LIMIT)) targets = targets.slice(0, LIMIT)
-  console.log(`with-reviews: ${targets.length} obras (da cauda) com review | menu ${menu.count} tags | OUT: ${OUT}`)
+  const nRev = targets.filter((w) => buildReviewContext(w.review_summary, w.review_digest)).length
+  console.log(`with-reviews${REVIEWS_OPTIONAL ? " (todas, review onde houver)" : ""}: ${targets.length} obras (${nRev} com review) | menu ${menu.count} tags | OUT: ${OUT}`)
   fs.writeFileSync(OUT, "work_id,title,current_tags,tag,confidence,evidence\n")
 
   let totalNew = 0, withNew = 0, failed = 0

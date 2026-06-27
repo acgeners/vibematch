@@ -2,7 +2,9 @@
 
 import { z } from "zod"
 import { revalidatePath } from "next/cache"
+import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensureReviewDigest, ensureReviewSummary } from "@/lib/orchestration/integrations/reviews"
 import { prepareExternalReviewRow } from "@/lib/validations/external-review-row"
 import {
   assertLocalExternalReviewEditorAllowed,
@@ -53,6 +55,28 @@ async function confirmWorkExists(
   return Boolean(data?.id)
 }
 
+/**
+ * Lacuna #1 (fecha o ciclo do 2A): a review manual externa É parte do corpus
+ * CANÔNICO do RESUMO e do DIGEST. Toda edição deliberada (create/update/delete)
+ * muda o corpus ⇒ regenera os DOIS. Roda pós-resposta via `after()`; não bloqueia
+ * o retorno. Cada `ensure*` lê o corpus por dentro (não passamos `reviews`).
+ *  - Resumo (Haiku): gate por content-hash — a mudança no texto já dispara (sem force).
+ *  - Digest (Sonnet): gate por contagem — precisa de `force` (add/edit/delete de 1
+ *    review não cruza o limiar de materialidade); dedup por contentHash evita run redundante.
+ * Custo ~$0,02–0,07/edição (Haiku + Sonnet, allowPaid pré-autorizado).
+ */
+function regenReviewArtifactsAfterManualEdit(workId: string): void {
+  after(async () => {
+    const sb = createAdminClient()
+    const [s, d] = await Promise.allSettled([
+      ensureReviewSummary(workId, { supabase: sb, allowPaid: true }),
+      ensureReviewDigest(workId, { supabase: sb, allowPaid: true, force: true }),
+    ])
+    if (s.status === "rejected") console.error("[external-manual-reviews] ensureReviewSummary rejeitou:", s.reason)
+    if (d.status === "rejected") console.error("[external-manual-reviews] ensureReviewDigest rejeitou:", d.reason)
+  })
+}
+
 export async function createExternalManualReview(
   workId: string,
   rawInput: unknown,
@@ -75,6 +99,7 @@ export async function createExternalManualReview(
     if (conflict) return conflict
     return { ok: false, error: "db", message: error.message }
   }
+  regenReviewArtifactsAfterManualEdit(workId)
   revalidatePath(`/titles/${workId}`)
   return { ok: true, id: data.id as string }
 }
@@ -118,6 +143,7 @@ export async function updateExternalManualReview(
     if (conflict) return conflict
     return { ok: false, error: "db", message: error.message }
   }
+  regenReviewArtifactsAfterManualEdit(workId)
   revalidatePath(`/titles/${workId}`)
   return { ok: true, id: reviewId }
 }
@@ -143,6 +169,7 @@ export async function deleteExternalManualReview(
 
   const { error } = await sb.from("work_external_reviews_manual").delete().eq("id", reviewId).eq("work_id", workId)
   if (error) return { ok: false, error: "db", message: error.message }
+  regenReviewArtifactsAfterManualEdit(workId)
   revalidatePath(`/titles/${workId}`)
   return { ok: true, id: reviewId }
 }

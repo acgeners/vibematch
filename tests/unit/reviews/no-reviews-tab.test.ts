@@ -3,7 +3,7 @@ import { isUsefulReviewText, isUsefulReviewLength, MIN_USEFUL_REVIEW_LENGTH } fr
 import { classifyWorksWithoutReviews, type WorkMetaRow } from "@/lib/reviews/no-review-classify"
 
 function work(id: string, title: string, over: Partial<WorkMetaRow> = {}): WorkMetaRow {
-  return { id, title, coverUrl: null, publicationStatus: "Ongoing", personalStatus: "—", aiEvalStatus: "done", canonicalPresent: true, usefulReviewCount: 0, ...over }
+  return { id, title, coverUrl: null, publicationStatus: "Ongoing", personalStatus: "—", aiEvalStatus: "done", canonicalPresent: true, usefulReviewCount: 0, expectedScore: null, interest: null, ...over }
 }
 
 describe("useful-review rule (centralizada)", () => {
@@ -70,5 +70,32 @@ describe("classifyWorksWithoutReviews", () => {
     })
     expect(r.find((w) => w.id === "a")!.usefulReviewCount).toBe(2)
     expect(r.find((w) => w.id === "b")!.usefulReviewCount).toBe(0)
+  })
+  it("filtro de interesse: ♥ casa; 'none' casa só interesse nulo", () => {
+    const works = [
+      work("a", "Alpha", { interest: "♥♥" }),
+      work("b", "Beta", { interest: null }),
+      work("c", "Gamma", { interest: "♥♥♥♥" }),
+    ]
+    expect(classifyWorksWithoutReviews({ ...base, works, filters: { interest: ["♥♥"] } }).map((w) => w.id)).toEqual(["a"])
+    expect(classifyWorksWithoutReviews({ ...base, works, filters: { interest: ["none"] } }).map((w) => w.id)).toEqual(["b"])
+    expect(classifyWorksWithoutReviews({ ...base, works, filters: { interest: ["♥♥", "none"] } }).map((w) => w.id).sort()).toEqual(["a", "b"])
+  })
+  it("ordena por nota prevista (desc/asc) com null por último em desc", () => {
+    const works = [
+      work("a", "Alpha", { expectedScore: 6.2 }),
+      work("b", "Beta", { expectedScore: 8.1 }),
+      work("c", "Gamma", { expectedScore: null }),
+    ]
+    expect(classifyWorksWithoutReviews({ ...base, works, filters: { sort: { key: "expected", dir: "desc" } } }).map((w) => w.id)).toEqual(["b", "a", "c"])
+    expect(classifyWorksWithoutReviews({ ...base, works, filters: { sort: { key: "expected", dir: "asc" } } }).map((w) => w.id)).toEqual(["c", "a", "b"])
+  })
+  it("ordena por nº de reviews (desc), desempate por título", () => {
+    const works = [
+      work("a", "Alpha", { usefulReviewCount: 1 }),
+      work("b", "Beta", { usefulReviewCount: 3 }),
+      work("c", "Gamma", { usefulReviewCount: 1 }),
+    ]
+    expect(classifyWorksWithoutReviews({ ...base, works, filters: { sort: { key: "reviews", dir: "desc" } } }).map((w) => w.id)).toEqual(["b", "a", "c"])
   })
 })

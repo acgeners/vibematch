@@ -211,7 +211,6 @@ export interface CandidateWorkInput {
   expectedScore: number | null
   /** Alinhamento com o perfil (0–1). */
   fitScore: number | null
-  reviews: CandidateReview[]
   /** Resumo de consenso das reviews (Haiku, preference-agnostic). Null se ausente. */
   reviewSummary: string | null
   /** Digest estruturado das reviews (Sonnet, Passe 2). Preferido sobre reviewSummary. */

@@ -1574,7 +1574,7 @@ export function RankingFilters({
   const selectedSynopsisPred = csvSet("synopsis_pred")
 
   const DEFAULT_PUB_STATUS = "Completed"
-  const DEFAULT_PER_STATUS = "Want to Read"
+  const DEFAULT_PER_STATUSES = ["Want to Read", "Untracked"]
 
   const pubStatusParam = searchParams.get("pub_status")
   const isAllPublication = pubStatusParam === "all"
@@ -1607,7 +1607,7 @@ export function RankingFilters({
     ? new Set<string>()
     : perStatusParam != null
       ? csvSet("per_status")
-      : new Set<string>([DEFAULT_PER_STATUS])
+      : new Set<string>(DEFAULT_PER_STATUSES)
 
   const togglePersonalStatus = (status: string) => {
     if (isAllPersonal) {
@@ -1615,12 +1615,11 @@ export function RankingFilters({
       return
     }
     if (perStatusParam == null) {
-      if (status === DEFAULT_PER_STATUS) {
-        updateParams({ per_status: "all" })
-      } else {
-        const seeded = new Set<string>([DEFAULT_PER_STATUS, status])
-        updateParams({ per_status: [...seeded].join(",") })
-      }
+      // Materializa a seleção default e aplica o toggle por cima.
+      const seeded = new Set<string>(DEFAULT_PER_STATUSES)
+      if (seeded.has(status)) seeded.delete(status)
+      else seeded.add(status)
+      updateParams({ per_status: seeded.size === 0 ? "all" : [...seeded].join(",") })
       return
     }
     toggleCsv("per_status", status)

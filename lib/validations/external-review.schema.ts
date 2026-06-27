@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { PLATFORMS } from "@/types/domain"
 import type { ExternalSourceId } from "@/lib/external/types"
 
 /**
@@ -15,17 +16,12 @@ import type { ExternalSourceId } from "@/lib/external/types"
  * e a montagem da linha ficam em `external-review-row.ts` (server) — ver `prepareExternalReviewRow`.
  */
 
-/** Fontes externas aceitas — espelha `ExternalSourceId` (type-check via `satisfies`). */
-export const EXTERNAL_REVIEW_SOURCES = [
-  "mangaupdates",
-  "anilist",
-  "myanimelist",
-  "kitsu",
-  "animeplanet",
-  "comick",
-  "mangadex",
-  "comix",
-] as const satisfies readonly ExternalSourceId[]
+/**
+ * Fontes externas aceitas para review manual. Deriva de `PLATFORMS` (gerado de `source`
+ * pelo `sync-constants`) — assim o dropdown nunca defasa do banco. O `satisfies` garante
+ * em compile-time que toda plataforma é um `ExternalSourceId` válido.
+ */
+export const EXTERNAL_REVIEW_SOURCES = PLATFORMS satisfies readonly ExternalSourceId[]
 
 export type ExternalReviewSource = (typeof EXTERNAL_REVIEW_SOURCES)[number]
 

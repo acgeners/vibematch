@@ -91,6 +91,7 @@ class SupabaseTasteProfileGateway implements TasteProfileGateway {
       modelName: result.modelName,
       promptVersion: result.promptVersion,
       rawResponse: result.rawResponse,
+      ratedWorks,
     })
     const c = computeCostUsd(result.modelName, result.usage)
     return { profile, costUsd: c.costInputUsd + c.costOutputUsd + c.costCacheReadUsd + c.costCacheCreationUsd }

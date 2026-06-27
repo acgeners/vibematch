@@ -1,4 +1,9 @@
-"use server"
+// NÃO é "use server": este módulo exporta funções PURAS síncronas (computeRecalc,
+// buildWork) usadas pelo recalc e por diagnósticos — e Server Actions exigem que
+// todo export seja async. `recalculateAll` é chamado só server-side (recalc-queue,
+// scripts), nunca como Server Action direta de um client; `server-only` garante
+// que o módulo nunca entre no bundle do cliente.
+import "server-only"
 
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -79,7 +84,7 @@ function applyObsAdjustment(expected: number, observationAdjustment: number): nu
   return Math.max(0, Math.min(10, expected + obs))
 }
 
-interface RawWork {
+export interface RawWork {
   id: string
   publication_status_id: number | null
   total_chapters: number | null
@@ -173,7 +178,7 @@ function detectOrigin(originalTitle: string | null): string {
   return "other"
 }
 
-function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed {
+export function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed {
   const categoryScores: CategoryScoreMap = {}
   const withSource: Partial<Record<CriterionSlug, CategoryScoreWithSource>> = {}
   for (const cs of raw.category_scores ?? []) {
@@ -536,6 +541,236 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   if (works.length === 0) {
     return { recalculated: 0, calibration: null }
   }
+
+  const {
+    rows, pseudoVotesNotaM, pseudoVotesBlend, gptMean, gptClampHits, gptClampHitRate,
+    gptNegativeActivations, negativeActivationRate, inferenceSnapshot, newMaeCalc, newRmseCalc,
+    maeExpected, rmseExpected, maeExpectedBaseline, cvMaeExpected, calcBlendWeight, expectedPredictor,
+    cvSig,
+  } = computeRecalc({ works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork })
+
+  const { error: upsertErr } = await supabase
+    .from("calculated_scores")
+    .upsert(rows, { onConflict: "work_id" })
+  if (upsertErr) throw new Error(upsertErr.message)
+
+  // Atualiza calculated_scores.confidence como pass-through da
+  // ai_evaluations.confidence mais recente. Função criada na migration 022.
+  // Falha aqui não invalida o resto do recalculate.
+  const { error: confidenceErr } = await supabase.rpc("refresh_calculated_scores_confidence")
+  if (confidenceErr) {
+    console.warn("[recalculateAll] refresh_calculated_scores_confidence falhou:", confidenceErr.message)
+  }
+
+  // ---------- 7) Persistir novo formula_config ----------
+  const { error: configUpdateErr } = await supabase
+    .from("formula_config")
+    .update({
+      mae_calc: newMaeCalc,
+      // Ramo legado removido — mae/rmse_predicted, distance_p95, stacker e
+      // ridge_coefficients zerados (serão dropados em migration de follow-up).
+      mae_predicted: null,
+      rmse_calc: newRmseCalc,
+      rmse_predicted: null,
+      pseudo_votes_nota_m: pseudoVotesNotaM,
+      pseudo_votes_blend: pseudoVotesBlend,
+      // Centro da amplificação GPT.N (média do GPT cru deste recalc). Reusado
+      // como `center` em normalizeGPT nos caminhos single-work.
+      gpt_mean: gptMean,
+      gpt_clamp_hit_rate: gptClampHitRate,
+      negative_activation_rate: negativeActivationRate,
+      distance_p95: null,
+      stacker_coefficients: null,
+      ridge_coefficients: null,
+      score_weights_inferred: inferenceSnapshot && !inferenceSnapshot.isStub
+        ? {
+            suggestions: inferenceSnapshot.suggestions,
+            trainSize: inferenceSnapshot.trainSize,
+            alpha: inferenceSnapshot.alpha,
+            cvMAE: inferenceSnapshot.cvMAE,
+          }
+        : null,
+      mae_expected: maeExpected,
+      rmse_expected: rmseExpected,
+      mae_expected_baseline: maeExpectedBaseline,
+      cv_mae_expected_stage1: cvMaeExpected,
+      // Sem treino sequencial: stage2 cvMAE não existe mais; valor de baseline
+      // serve de proxy de "quanto o modelo erra sem qualidade" no painel.
+      cv_mae_expected_stage2: null,
+      expected_stage2_train_size: expectedPredictor.isStub
+        ? null
+        : expectedPredictor.trainWithPostScores,
+      expected_ridge_coefficients: expectedPredictor.isStub
+        ? null
+        : {
+            featureNames: expectedPredictor.featureNames,
+            coefficients: expectedPredictor.model.coefficients,
+            // Peso do blend expected⊕calc aplicado ao score entregue (1 = sem blend).
+            calcBlendWeight,
+            // Assinatura dos inputs da nested-CV (quick-win Q): pula o recompute
+            // de ~550ms quando as obras rotuladas não mudaram entre recalcs.
+            cvSig: cvSig ?? undefined,
+          },
+      last_recalculated_at: new Date().toISOString(),
+      // Limpa a pendência (migration 096) NO MESMO update — corta 1 round-trip
+      // (~450ms no DB remoto) vs o UPDATE separado anterior. 096 está aplicada
+      // (recalc_pending é lido pela fila/sonda). Race conhecido e benigno: uma
+      // edição entre o load das obras e este UPDATE perde o flag até o próximo
+      // trigger (single-user, janela de segundos; a próxima edição re-arma).
+      recalc_pending: false,
+      recalc_last_edit_at: null,
+    })
+    .eq("id", config.id)
+  if (configUpdateErr) throw new Error(configUpdateErr.message)
+
+  // Snapshot histórico — append-only. Falha aqui não invalida o recálculo;
+  // só perde uma entrada do gráfico de tendência.
+  const { error: historyErr } = await supabase.from("calibration_history").insert({
+    formula_version: config.formula_version,
+    stacker_enabled: false,
+    mae_loocv_stacker: null,
+    mae_final: null,
+    mae_calc: newMaeCalc,
+    mae_predicted: null,
+    mae_expected: maeExpected,
+    cv_mae_expected: cvMaeExpected,
+    train_size: expectedPredictor.trainSize,
+    total_works: works.length,
+    stacker_coefficients: null,
+  })
+  if (historyErr) {
+    console.warn("[recalculateAll] calibration_history insert falhou:", historyErr.message)
+  }
+
+  // Invalidação de cache só faz sentido (e só funciona) no runtime do Next.
+  // Headless (CLI) não tem request scope ⇒ pular (senão lança "static store
+  // missing"). O recálculo em si — escritas + limpeza de recalc_pending — já
+  // ocorreu acima; o cache do app revalida no próximo page-load/gatilho normal.
+  if (!headless) {
+    revalidatePath("/titles")
+    revalidatePath("/ranking")
+    revalidatePath("/settings")
+    revalidatePath("/")
+    revalidateTag("score-color-thresholds", "max")
+    revalidateTag("low-coverage", "max")
+  }
+
+  return {
+    recalculated: works.length,
+    diagnostics: {
+      gptClampHits,
+      gptClampHitRate,
+      negativeActivationCounts: gptNegativeActivations,
+      negativeActivationRate,
+    },
+    calibration: {
+      // Campos do ramo legado (Nota.Pr/Final/stacker) zerados — a Nota Prevista
+      // agora é o expected_score. Mantidos na shape pra não quebrar consumidores.
+      trainSize: expectedPredictor.trainSize,
+      isStub: expectedPredictor.isStub,
+      alpha: expectedPredictor.model.alpha,
+      cvMAE: expectedPredictor.model.cvMAE,
+      cvRMSE: expectedPredictor.model.cvRMSE,
+      maeCalc: newMaeCalc,
+      maePredicted: null,
+      maeFinal: null,
+      maeExpected,
+      maeExpectedBaseline,
+      rmseCalc: newRmseCalc,
+      rmsePredicted: null,
+      rmseFinal: null,
+      rmseExpected,
+      expectedIsStub: expectedPredictor.isStub,
+      expectedTrainSize: expectedPredictor.trainSize,
+      expectedTrainWithPostScores: expectedPredictor.trainWithPostScores,
+      expectedFeatureNames: expectedPredictor.featureNames,
+      expectedCoefficients: expectedPredictor.model.coefficients,
+      // cvMAE INTERNO do RidgeCV (só seleção de α por fold) — otimista/vazado.
+      // Mantido pra diagnóstico; NÃO usar como vitrine.
+      expectedCvMAE: expectedPredictor.model.cvMAE,
+      // MAE CV HONESTA (mesmo número da headline cv_mae_expected_stage1):
+      // nested-CV (Free) ou held-out com qualidade estimada (Pago). É a que o
+      // toast/UI deve reportar. NULL em fallback/stub.
+      expectedHonestCvMAE: cvMaeExpected,
+      expectedBaselineIndices: expectedPredictor.baselineIndices,
+      expectedQualityIndices: expectedPredictor.qualityIndices,
+      pseudoVotesNotaM,
+      pseudoVotesBlend,
+      featureNames: expectedPredictor.featureNames,
+      coefficients: expectedPredictor.model.coefficients,
+      stacker: null,
+    },
+  }
+}
+
+/** FNV-1a 32-bit → string curta. Determinístico, sem deps. */
+function hashString(s: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(36)
+}
+
+function stableMap(o: Record<string, unknown> | null | undefined): string {
+  if (!o) return ""
+  return Object.keys(o).sort().map((k) => `${k}=${o[k]}`).join(",")
+}
+
+/**
+ * Assinatura FIEL dos inputs da nested-CV honesta (computeHonestExpectedCvMae).
+ * A MAE honesta depende SÓ das obras ROTULADAS (ordem + label + features que a CV
+ * usa) + pesos-base + flag auto + blend + tags declaradas. Edição de obra NÃO
+ * rotulada (a comum) não muda nada disso ⇒ assinatura idêntica ⇒ reusa a MAE
+ * persistida e pula os ~550ms da nested-CV. Quando uma obra rotulada (ou os votos
+ * globais, via platformAvg) muda, a assinatura muda e a CV recomputa.
+ */
+function cvInputSignature(
+  trainSet: WorkComputed[],
+  weights: ScoreWeight[],
+  scoreWeightsAuto: boolean,
+  calcBlendWeight: number,
+  declared: DeclaredTagPref[],
+): string {
+  const head = [
+    `auto:${scoreWeightsAuto}`,
+    `blend:${calcBlendWeight.toFixed(4)}`,
+    `w:${weights.map((w) => `${w.slug}=${w.weight}`).sort().join("|")}`,
+    `decl:${JSON.stringify(declared)}`,
+  ]
+  const body = trainSet.map((w) =>
+    [
+      w.id, w.userScore, stableMap(w.categoryScores), stableMap(w.categoryScoresCalibrated),
+      w.platformAvg, w.totalVotes, w.totalChapters, w.synopsisQuality, w.observationAdjustment,
+      w.publicationStatus, w.releaseAge, w.runLength, w.origin,
+      stableMap(w.postScores as Record<string, unknown>),
+      w.tags.map((t) => `${t.name}/${t.group ?? ""}`).sort().join(";"),
+    ].join("~"),
+  )
+  return hashString([...head, ...body].join("\n"))
+}
+
+export interface RecalcComputeInput {
+  works: WorkComputed[]
+  weights: ScoreWeight[]
+  config: FormulaConfig
+  tasteProfile: Awaited<ReturnType<typeof loadCurrentTasteProfile>>
+  declaredTagPrefs: DeclaredTagPref[]
+  includeQuality: boolean
+  aiQualityByWork: Map<string, Record<string, number>>
+  /** Pula a nested-CV honesta (cara). Usado no diagnóstico leave-one-out. */
+  fast?: boolean
+}
+
+/**
+ * Núcleo PURO do recálculo (sem I/O — não lê nem escreve no banco). Recebe os
+ * dados já carregados e devolve as linhas de calculated_scores + os agregados
+ * pra formula_config. Extraído de recalculateAll pra testabilidade e pro
+ * diagnóstico de blast radius (recomputar com 1 obra perturbada, em memória).
+ */
+export function computeRecalc(input: RecalcComputeInput) {
+  const { works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork, fast = false } = input
 
   // ---------- 1) Percentis de votos -> pseudo_votes_* ----------
   // Calculamos cedo pra usar nas demais etapas
@@ -904,19 +1139,6 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
     calculated_at: new Date().toISOString(),
   }))
 
-  const { error: upsertErr } = await supabase
-    .from("calculated_scores")
-    .upsert(rows, { onConflict: "work_id" })
-  if (upsertErr) throw new Error(upsertErr.message)
-
-  // Atualiza calculated_scores.confidence como pass-through da
-  // ai_evaluations.confidence mais recente. Função criada na migration 022.
-  // Falha aqui não invalida o resto do recalculate.
-  const { error: confidenceErr } = await supabase.rpc("refresh_calculated_scores_confidence")
-  if (confidenceErr) {
-    console.warn("[recalculateAll] refresh_calculated_scores_confidence falhou:", confidenceErr.message)
-  }
-
   // Agregar diagnósticos antes do persist
   const negativeActivationRate: Record<string, number> = {}
   for (const [slug, count] of Object.entries(gptNegativeActivations)) {
@@ -932,23 +1154,38 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   // NOTA: a trendline vai mostrar um degrau pra cima vs. entradas antigas — não
   // é regressão, é o número virando honesto (saiu de ~0.55 vazado pra ~0.59 real).
   let honestExpectedCvMae: number | null = null
-  if (!expectedPredictor.isStub && !includeQuality) {
-    try {
-      honestExpectedCvMae = computeHonestExpectedCvMae(
-        trainSet,
-        weights,
-        config.score_weights_auto ?? false,
-        includeQuality,
-        calcBlendWeight,
-        5,
-        42,
-        declaredTagPrefs,
-      )
-    } catch (err) {
-      console.warn(
-        "[recalculateAll] computeHonestExpectedCvMae falhou — usando model.cvMAE:",
-        err instanceof Error ? err.message : err,
-      )
+  // Assinatura dos inputs do CV (cara). Calculada quando o CV é elegível pra
+  // (a) decidir reuso e (b) persistir pro próximo recalc. Custo ~ms.
+  const cvSig =
+    !expectedPredictor.isStub && !includeQuality
+      ? cvInputSignature(trainSet, weights, config.score_weights_auto ?? false, calcBlendWeight, declaredTagPrefs)
+      : null
+  if (!fast && !expectedPredictor.isStub && !includeQuality) {
+    const prevSig = config.expected_ridge_coefficients?.cvSig
+    const prevMae = config.cv_mae_expected_stage1
+    if (cvSig != null && prevSig === cvSig && prevMae != null) {
+      // Inputs do CV idênticos ao último recalc → reusa a MAE honesta persistida
+      // e PULA a nested-CV (~550ms). É o quick-win "Q": edição de obra não-rotulada
+      // não toca o CV, então não há por que re-rodá-lo.
+      honestExpectedCvMae = prevMae
+    } else {
+      try {
+        honestExpectedCvMae = computeHonestExpectedCvMae(
+          trainSet,
+          weights,
+          config.score_weights_auto ?? false,
+          includeQuality,
+          calcBlendWeight,
+          5,
+          42,
+          declaredTagPrefs,
+        )
+      } catch (err) {
+        console.warn(
+          "[recalculateAll] computeHonestExpectedCvMae falhou — usando model.cvMAE:",
+          err instanceof Error ? err.message : err,
+        )
+      }
     }
   }
   const cvMaeExpected: number | null = expectedPredictor.isStub
@@ -957,152 +1194,10 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
       ? (honestCvMae ?? expectedPredictor.model.cvMAE)
       : (honestExpectedCvMae ?? expectedPredictor.model.cvMAE)
 
-  // ---------- 7) Persistir novo formula_config ----------
-  const { error: configUpdateErr } = await supabase
-    .from("formula_config")
-    .update({
-      mae_calc: newMaeCalc,
-      // Ramo legado removido — mae/rmse_predicted, distance_p95, stacker e
-      // ridge_coefficients zerados (serão dropados em migration de follow-up).
-      mae_predicted: null,
-      rmse_calc: newRmseCalc,
-      rmse_predicted: null,
-      pseudo_votes_nota_m: pseudoVotesNotaM,
-      pseudo_votes_blend: pseudoVotesBlend,
-      // Centro da amplificação GPT.N (média do GPT cru deste recalc). Reusado
-      // como `center` em normalizeGPT nos caminhos single-work.
-      gpt_mean: gptMean,
-      gpt_clamp_hit_rate: gptClampHitRate,
-      negative_activation_rate: negativeActivationRate,
-      distance_p95: null,
-      stacker_coefficients: null,
-      ridge_coefficients: null,
-      score_weights_inferred: inferenceSnapshot && !inferenceSnapshot.isStub
-        ? {
-            suggestions: inferenceSnapshot.suggestions,
-            trainSize: inferenceSnapshot.trainSize,
-            alpha: inferenceSnapshot.alpha,
-            cvMAE: inferenceSnapshot.cvMAE,
-          }
-        : null,
-      mae_expected: maeExpected,
-      rmse_expected: rmseExpected,
-      mae_expected_baseline: maeExpectedBaseline,
-      cv_mae_expected_stage1: cvMaeExpected,
-      // Sem treino sequencial: stage2 cvMAE não existe mais; valor de baseline
-      // serve de proxy de "quanto o modelo erra sem qualidade" no painel.
-      cv_mae_expected_stage2: null,
-      expected_stage2_train_size: expectedPredictor.isStub
-        ? null
-        : expectedPredictor.trainWithPostScores,
-      expected_ridge_coefficients: expectedPredictor.isStub
-        ? null
-        : {
-            featureNames: expectedPredictor.featureNames,
-            coefficients: expectedPredictor.model.coefficients,
-            // Peso do blend expected⊕calc aplicado ao score entregue (1 = sem blend).
-            calcBlendWeight,
-          },
-      last_recalculated_at: new Date().toISOString(),
-    })
-    .eq("id", config.id)
-  if (configUpdateErr) throw new Error(configUpdateErr.message)
-
-  // Limpa o flag de "recálculo pendente" (migration 096): qualquer recalculateAll
-  // completo — manual, auto após 1h, ou eager (settings/calibração) — satisfaz a
-  // fila. Best-effort: se as colunas ainda não existem, ignora (o recálculo em si
-  // não pode falhar por isso). Race conhecido e benigno: uma edição que cair entre
-  // o load das obras e este UPDATE perde o flag até o próximo trigger — num app
-  // single-user, a janela é de poucos segundos e o dado editado entra no recalc
-  // seguinte (qualquer edição futura re-arma o flag).
-  const { error: clearPendingErr } = await supabase
-    .from("formula_config")
-    .update({ recalc_pending: false, recalc_last_edit_at: null })
-    .eq("id", config.id)
-  if (clearPendingErr) {
-    console.warn(
-      "[recalculateAll] limpeza do flag recalc_pending falhou (migration 096 aplicada?):",
-      clearPendingErr.message,
-    )
-  }
-
-  // Snapshot histórico — append-only. Falha aqui não invalida o recálculo;
-  // só perde uma entrada do gráfico de tendência.
-  const { error: historyErr } = await supabase.from("calibration_history").insert({
-    formula_version: config.formula_version,
-    stacker_enabled: false,
-    mae_loocv_stacker: null,
-    mae_final: null,
-    mae_calc: newMaeCalc,
-    mae_predicted: null,
-    mae_expected: maeExpected,
-    cv_mae_expected: cvMaeExpected,
-    train_size: expectedPredictor.trainSize,
-    total_works: works.length,
-    stacker_coefficients: null,
-  })
-  if (historyErr) {
-    console.warn("[recalculateAll] calibration_history insert falhou:", historyErr.message)
-  }
-
-  // Invalidação de cache só faz sentido (e só funciona) no runtime do Next.
-  // Headless (CLI) não tem request scope ⇒ pular (senão lança "static store
-  // missing"). O recálculo em si — escritas + limpeza de recalc_pending — já
-  // ocorreu acima; o cache do app revalida no próximo page-load/gatilho normal.
-  if (!headless) {
-    revalidatePath("/titles")
-    revalidatePath("/ranking")
-    revalidatePath("/settings")
-    revalidatePath("/")
-    revalidateTag("score-color-thresholds", "max")
-    revalidateTag("low-coverage", "max")
-  }
-
   return {
-    recalculated: works.length,
-    diagnostics: {
-      gptClampHits,
-      gptClampHitRate,
-      negativeActivationCounts: gptNegativeActivations,
-      negativeActivationRate,
-    },
-    calibration: {
-      // Campos do ramo legado (Nota.Pr/Final/stacker) zerados — a Nota Prevista
-      // agora é o expected_score. Mantidos na shape pra não quebrar consumidores.
-      trainSize: expectedPredictor.trainSize,
-      isStub: expectedPredictor.isStub,
-      alpha: expectedPredictor.model.alpha,
-      cvMAE: expectedPredictor.model.cvMAE,
-      cvRMSE: expectedPredictor.model.cvRMSE,
-      maeCalc: newMaeCalc,
-      maePredicted: null,
-      maeFinal: null,
-      maeExpected,
-      maeExpectedBaseline,
-      rmseCalc: newRmseCalc,
-      rmsePredicted: null,
-      rmseFinal: null,
-      rmseExpected,
-      expectedIsStub: expectedPredictor.isStub,
-      expectedTrainSize: expectedPredictor.trainSize,
-      expectedTrainWithPostScores: expectedPredictor.trainWithPostScores,
-      expectedFeatureNames: expectedPredictor.featureNames,
-      expectedCoefficients: expectedPredictor.model.coefficients,
-      // cvMAE INTERNO do RidgeCV (só seleção de α por fold) — otimista/vazado.
-      // Mantido pra diagnóstico; NÃO usar como vitrine.
-      expectedCvMAE: expectedPredictor.model.cvMAE,
-      // MAE CV HONESTA (mesmo número da headline cv_mae_expected_stage1):
-      // nested-CV (Free) ou held-out com qualidade estimada (Pago). É a que o
-      // toast/UI deve reportar. NULL em fallback/stub.
-      expectedHonestCvMAE: cvMaeExpected,
-      expectedBaselineIndices: expectedPredictor.baselineIndices,
-      expectedQualityIndices: expectedPredictor.qualityIndices,
-      pseudoVotesNotaM,
-      pseudoVotesBlend,
-      featureNames: expectedPredictor.featureNames,
-      coefficients: expectedPredictor.model.coefficients,
-      stacker: null,
-    },
+    rows, pseudoVotesNotaM, pseudoVotesBlend, gptMean, gptClampHits, gptClampHitRate,
+    gptNegativeActivations, negativeActivationRate, inferenceSnapshot, newMaeCalc, newRmseCalc,
+    maeExpected, rmseExpected, maeExpectedBaseline, cvMaeExpected, calcBlendWeight, expectedPredictor,
+    cvSig,
   }
 }
-

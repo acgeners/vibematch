@@ -11,7 +11,7 @@ import {
   type CategoryScoreWithSource,
 } from "@/lib/ai-recommendation/calibrated-scores"
 import type { CriterionSlug } from "@/types/domain"
-import type { CandidateReview, CandidateWorkInput, RatedWorkInput, RecommendationMode, ReviewDigest } from "@/lib/ai-recommendation/types"
+import type { CandidateWorkInput, RatedWorkInput, RecommendationMode, ReviewDigest } from "@/lib/ai-recommendation/types"
 import { getRanking, type RankingFilters } from "@/server/queries/ranking"
 import { PROMPT_VERSION as SYNOPSIS_PROMPT_VERSION } from "@/lib/ai-evaluation/synopsis-quality-predictor"
 
@@ -140,137 +140,11 @@ function pickRecommendationSynopsis(
   return [...blocks].sort((a, b) => b.length - a.length)[0] ?? raw
 }
 
-// Piso de qualidade pra uma review CRUA citável chegar ao consultor. Abaixo
-// disto a review é fraca/obscura demais: texto curto = "amei 10/10" (sem
-// conteúdo), match baixo = risco de ser de outra obra (espelha o espírito dos
-// thresholds de aceitação do merge externo em lib/external/index.ts). Não some
-// do pool — só perde prioridade (ver top-up em pickBalancedReviews).
-const MIN_REVIEW_CHARS = 120
-const MIN_REVIEW_MATCH = 0.5
-
-interface ScoredReview {
-  source: string
-  text: string
-  rating: number | null
-  /** match_score × COALESCE(rating, 5): relevância (casamento × sentimento). */
-  relevance: number
-  /** match_score isolado: confiança de que a review é desta obra. */
-  match: number
-}
-
-/**
- * Escolhe `perWork` reviews por obra priorizando QUALIDADE > DIVERSIDADE DE
- * FONTE > relevância. A seleção por `match × nota` antiga super-amostrava as
- * fontes que enchem de reviews com nota (MyAnimeList/AniList — 100%/97% têm
- * nota; o resto, ~7%), enterrando o ângulo das demais. Como 93% das reviews não
- * têm nota, a nota não pode ser o eixo de seleção.
- *
- * Três passos:
- *  1. Piso de qualidade (MIN_REVIEW_CHARS/MIN_REVIEW_MATCH) separa reviews
- *     substanciais e bem-casadas das fracas/obscuras.
- *  2. Round-robin entre fontes sobre o pool que passou no piso (cada fonte
- *     ordenada por match desc) → cobre ângulos distintos sem deixar a nota
- *     decidir.
- *  3. Top-up por relevância (mesmo abaixo do piso) se o piso esvaziar demais —
- *     nunca retorna menos reviews do que retornaria antes.
- */
-function pickBalancedReviews(list: ScoredReview[], perWork: number): CandidateReview[] {
-  const toReview = (r: ScoredReview): CandidateReview => ({
-    source: r.source,
-    text: r.text,
-    rating: r.rating,
-  })
-  const byRelevance = [...list].sort((a, b) => b.relevance - a.relevance)
-  if (list.length <= perWork) return byRelevance.map(toReview)
-
-  // 1) Piso de qualidade.
-  const qualifying = [...list]
-    .filter((r) => r.text.length >= MIN_REVIEW_CHARS && r.match >= MIN_REVIEW_MATCH)
-    .sort((a, b) => b.match - a.match)
-
-  // 2) Round-robin entre fontes (fontes ordenadas pelo melhor match de cada).
-  const bySource = new Map<string, ScoredReview[]>()
-  for (const r of qualifying) {
-    const bucket = bySource.get(r.source)
-    if (bucket) bucket.push(r)
-    else bySource.set(r.source, [r])
-  }
-  const sources = [...bySource.keys()].sort(
-    (a, b) => (bySource.get(b)![0]?.match ?? 0) - (bySource.get(a)![0]?.match ?? 0),
-  )
-  const chosen: ScoredReview[] = []
-  const chosenSet = new Set<ScoredReview>()
-  let progressed = true
-  while (chosen.length < perWork && progressed) {
-    progressed = false
-    for (const s of sources) {
-      if (chosen.length >= perWork) break
-      const next = bySource.get(s)!.find((r) => !chosenSet.has(r))
-      if (next) {
-        chosen.push(next)
-        chosenSet.add(next)
-        progressed = true
-      }
-    }
-  }
-
-  // 3) Top-up por relevância se o piso esvaziou demais.
-  if (chosen.length < perWork) {
-    for (const r of byRelevance) {
-      if (chosen.length >= perWork) break
-      if (!chosenSet.has(r)) {
-        chosen.push(r)
-        chosenSet.add(r)
-      }
-    }
-  }
-
-  return chosen.map(toReview)
-}
-
-/**
- * Top-N reviews por obra, batch. A seleção (piso de qualidade + diversidade de
- * fonte + top-up) fica em `pickBalancedReviews`. Texto truncado pelo caller via
- * prompts.formatReviews.
- */
-async function fetchTopReviewsBatch(
-  workIds: string[],
-  perWork: number,
-): Promise<Map<string, CandidateReview[]>> {
-  const out = new Map<string, CandidateReview[]>()
-  if (workIds.length === 0) return out
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("work_reviews")
-    .select("work_id, source, text, user_rating, match_score")
-    .in("work_id", workIds)
-  if (error) {
-    console.error("[recommendations] erro lendo reviews:", error)
-    return out
-  }
-
-  const grouped = new Map<string, ScoredReview[]>()
-  for (const row of data ?? []) {
-    const r = row as { work_id: string; source: string; text: string | null; user_rating: number | null; match_score: number | null }
-    if (!r.text || !r.text.trim()) continue
-    const match = r.match_score ?? 0
-    const relevance = match * (r.user_rating ?? 5)
-    const list = grouped.get(r.work_id) ?? []
-    list.push({ source: r.source, text: r.text.trim(), rating: r.user_rating, relevance, match })
-    grouped.set(r.work_id, list)
-  }
-  for (const [workId, list] of grouped) {
-    out.set(workId, pickBalancedReviews(list, perWork))
-  }
-  return out
-}
-
 /**
  * Digest estruturado das reviews (Item C, Passe 2), em lote. Fetch SEPARADO e
  * TOLERANTE (não vai no CANDIDATE_WORK_SELECT): se a migration 103 ainda não foi
  * aplicada, a coluna não existe e o select erraria — aqui a falha cai em mapa
- * vazio (consultor usa o review_summary do Passe 1 como fallback). Roda em
- * paralelo com fetchTopReviewsBatch.
+ * vazio (consultor usa o review_summary do Passe 1 como fallback).
  */
 export async function fetchReviewDigestsBatch(workIds: string[]): Promise<Map<string, ReviewDigest>> {
   const out = new Map<string, ReviewDigest>()
@@ -343,7 +217,6 @@ export interface FavoriteCandidate extends CandidateWorkInput {
 
 function mapRowToCandidate(
   row: unknown,
-  reviews: CandidateReview[],
   biasMap: AttributeBiasMap,
   reviewDigest: ReviewDigest | null = null,
 ): FavoriteCandidate {
@@ -375,7 +248,6 @@ function mapRowToCandidate(
     fitScore: calc?.personal_fit != null ? Number(calc.personal_fit) : null,
     platformAvg: calc?.platform_avg != null ? Number(calc.platform_avg) : null,
     totalVotes: calc?.total_votes != null ? Number(calc.total_votes) : null,
-    reviews,
     reviewSummary: (work.review_summary as string | null) ?? null,
     reviewDigest,
     coverUrl,
@@ -406,14 +278,11 @@ export async function getFavoriteCandidates(
 
   const rows = data ?? []
   const ids = rows.map((r) => (r as { id: string }).id)
-  const [reviewsById, digestById] = await Promise.all([
-    fetchTopReviewsBatch(ids, 3),
-    fetchReviewDigestsBatch(ids),
-  ])
+  const digestById = await fetchReviewDigestsBatch(ids)
   const biasMap = await loadBiasMapForRecs(supabase)
   return rows.map((row) => {
     const id = (row as { id: string }).id
-    return mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap, digestById.get(id) ?? null)
+    return mapRowToCandidate(row, biasMap, digestById.get(id) ?? null)
   })
 }
 
@@ -440,15 +309,12 @@ export async function getRankingCandidates(
     .in("id", ids)
   if (error) throw new Error(`Falha hidratando candidatos do ranking: ${error.message}`)
 
-  const [reviewsById, digestById] = await Promise.all([
-    fetchTopReviewsBatch(ids, 3),
-    fetchReviewDigestsBatch(ids),
-  ])
+  const digestById = await fetchReviewDigestsBatch(ids)
   const biasMap = await loadBiasMapForRecs(supabase)
   const byId = new Map<string, FavoriteCandidate>()
   for (const row of data ?? []) {
     const id = (row as { id: string }).id
-    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap, digestById.get(id) ?? null))
+    byId.set(id, mapRowToCandidate(row, biasMap, digestById.get(id) ?? null))
   }
   // Preserva a ordem do ranking original.
   return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
@@ -469,12 +335,9 @@ export async function getCandidateById(workId: string): Promise<FavoriteCandidat
     .maybeSingle()
   if (error) throw new Error(`Falha hidratando obra ${workId}: ${error.message}`)
   if (!data) return null
-  const [reviewsById, digestById] = await Promise.all([
-    fetchTopReviewsBatch([workId], 3),
-    fetchReviewDigestsBatch([workId]),
-  ])
+  const digestById = await fetchReviewDigestsBatch([workId])
   const biasMap = await loadBiasMapForRecs(supabase)
-  return mapRowToCandidate(data, reviewsById.get(workId) ?? [], biasMap, digestById.get(workId) ?? null)
+  return mapRowToCandidate(data, biasMap, digestById.get(workId) ?? null)
 }
 
 export interface StaleAlignmentWork {
@@ -649,15 +512,12 @@ export async function getStaleAlignmentCandidates(limit = 200): Promise<Favorite
     .eq("is_archived", false)
   if (error) throw new Error(`Falha hidratando candidatos stale: ${error.message}`)
 
-  const [reviewsById, digestById] = await Promise.all([
-    fetchTopReviewsBatch(ids, 3),
-    fetchReviewDigestsBatch(ids),
-  ])
+  const digestById = await fetchReviewDigestsBatch(ids)
   const biasMap = await loadBiasMapForRecs(supabase)
   const byId = new Map<string, FavoriteCandidate>()
   for (const row of data ?? []) {
     const id = (row as { id: string }).id
-    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap, digestById.get(id) ?? null))
+    byId.set(id, mapRowToCandidate(row, biasMap, digestById.get(id) ?? null))
   }
   // Preserva a ordem da fila (re-rank mais antigo primeiro).
   return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
@@ -974,15 +834,12 @@ export async function getCandidatesByIds(ids: string[]): Promise<FavoriteCandida
     if (data) rows.push(...data)
   }
 
-  const [reviewsById, digestById] = await Promise.all([
-    fetchTopReviewsBatch(ids, 3),
-    fetchReviewDigestsBatch(ids),
-  ])
+  const digestById = await fetchReviewDigestsBatch(ids)
   const biasMap = await loadBiasMapForRecs(supabase)
   const byId = new Map<string, FavoriteCandidate>()
   for (const row of rows) {
     const id = (row as { id: string }).id
-    byId.set(id, mapRowToCandidate(row, reviewsById.get(id) ?? [], biasMap, digestById.get(id) ?? null))
+    byId.set(id, mapRowToCandidate(row, biasMap, digestById.get(id) ?? null))
   }
   return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
 }
@@ -1026,6 +883,8 @@ export interface RecommendationRunSummary {
   id: string
   slug: string
   mode: RecommendationMode
+  /** Run salva via "Salvar desempate" (mode=ranking + source_meta.tiebreak). */
+  isTiebreak: boolean
   userContext: string | null
   nCandidates: number
   topTitles: string[]
@@ -1040,7 +899,7 @@ export async function listRecommendationRuns(limit = 50): Promise<Recommendation
   const { data, error } = await supabase
     .from("recommendation_runs")
     .select(
-      "id, slug, mode, taste_profile_id, user_context, n_candidates, results, created_at",
+      "id, slug, mode, taste_profile_id, user_context, n_candidates, results, source_meta, created_at",
     )
     .order("created_at", { ascending: false })
     .limit(limit)
@@ -1049,7 +908,7 @@ export async function listRecommendationRuns(limit = 50): Promise<Recommendation
     return []
   }
 
-  const rows = (data ?? []) as Array<Pick<RawRunRow, "id" | "slug" | "mode" | "taste_profile_id" | "user_context" | "n_candidates" | "results" | "created_at">>
+  const rows = (data ?? []) as Array<Pick<RawRunRow, "id" | "slug" | "mode" | "taste_profile_id" | "user_context" | "n_candidates" | "results" | "source_meta" | "created_at">>
   const topWorkIds = new Set<string>()
   const perRunTop: Array<{
     runId: string
@@ -1097,6 +956,7 @@ export async function listRecommendationRuns(limit = 50): Promise<Recommendation
       id: row.id,
       slug: row.slug,
       mode: row.mode,
+      isTiebreak: (row.source_meta as { tiebreak?: boolean } | null)?.tiebreak === true,
       userContext: row.user_context,
       nCandidates: row.n_candidates,
       topTitles,
@@ -1172,13 +1032,11 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
       .from("works")
       .select(CANDIDATE_WORK_SELECT)
       .in("id", workIds)
-    // Pra exibição da run histórica não recarregamos reviews — a justificativa
-    // já foi gerada e está congelada no `results`. Reviews entram só na hora
-    // de gerar uma run nova.
+    // Exibição da run histórica: a justificativa já está congelada no `results`.
     const biasMap = await loadBiasMapForRecs(supabase)
     for (const row of worksData ?? []) {
       const id = (row as { id: string }).id
-      worksById.set(id, mapRowToCandidate(row, [], biasMap))
+      worksById.set(id, mapRowToCandidate(row, biasMap))
     }
   }
 

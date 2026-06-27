@@ -1222,6 +1222,7 @@ export const TAG_GROUPS_CATALOG: Array<{ groupSlug: string; label: string; value
     "Complicated Love Story",
     "Contract Marriage",
     "Contractual Relationship",
+    "couple",
     "Couple Growth",
     "Crush/es",
     "Dating",

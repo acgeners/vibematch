@@ -22,8 +22,9 @@ import {
   PROMPT_VERSION as PREDICT_PROMPT_VERSION,
   predictSynopsisQuality,
 } from "@/lib/ai-evaluation/synopsis-quality-predictor"
+import { formatDigestForPrompt } from "@/lib/synopsis-interest/contextual-package"
 import type { SynopsisQuality } from "@/types/domain"
-import type { TasteProfilePayload, TasteProfileRow } from "@/lib/ai-recommendation/types"
+import type { TasteProfilePayload, TasteProfileRow, ReviewDigest } from "@/lib/ai-recommendation/types"
 import { gateActionCost, estimateStep } from "../cost"
 import { getJobStore, runOrchestratedJob, type JobStore } from "../jobs"
 import { ensureTasteProfile, type EnsureTasteProfileDeps, type EnsureTasteProfileOutcome } from "./taste-profile"
@@ -51,16 +52,33 @@ export interface InterestSignatureParts {
 }
 
 /**
+ * Normalização "de materialidade" da chave de staleness (2a): lowercase, colapsa
+ * whitespace interno e remove pontuação. Mudanças COSMÉTICAS (espaço/caixa/
+ * pontuação/reformatação) deixam de invalidar a previsão → não re-prevê LLM à toa.
+ * O texto ENVIADO ao prompt continua o ORIGINAL — isto é só a chave de detecção
+ * de mudança. Medido (n=761): cosmético 100%→0%; mudança material (frase nova)
+ * segue invalidando 100% (não há over-merge).
+ */
+function normalizeForSignature(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+/**
  * Assinatura determinística de TODAS as entradas funcionais que entram no prompt.
  * Exclui timestamps, ordem acidental de tags, scores, ranking, avaliação IA,
- * review_digest (nesta etapa) e secrets.
+ * review_digest (nesta etapa) e secrets. Título/sinopse passam por normalização
+ * de materialidade (ver normalizeForSignature) — só mudanças significativas contam.
  */
 export function computeInterestInputSignature(parts: InterestSignatureParts): string {
   const canonical = JSON.stringify({
     workId: parts.workId,
     profile: parts.profileSignature,
-    title: parts.title.trim(),
-    synopsis: parts.synopsis.trim(),
+    title: normalizeForSignature(parts.title),
+    synopsis: normalizeForSignature(parts.synopsis),
     source: parts.synopsisSource,
     tags: [...parts.tags].map((t) => t.trim().toLowerCase()).filter(Boolean).sort(),
     model: parts.model,
@@ -114,6 +132,8 @@ export interface InterestWorkData {
   tags: string[]
   canonicalSynopsis: string | null
   rawSynopsis: string | null
+  /** Digest de reviews JÁ formatado (texto sanitizado) — contrato e1. null sem digest. */
+  reviewDigest: string | null
 }
 
 export interface InterestGateway {
@@ -148,7 +168,7 @@ export type PredictInterestOutcome =
 
 export type DefaultPredictFn = (
   profile: TasteProfilePayload,
-  work: { id: string; title: string; synopsis: string; tags: Array<{ name: string; group: string | null }> },
+  work: { id: string; title: string; synopsis: string; tags: Array<{ name: string; group: string | null }>; reviewDigest?: string | null },
 ) => Promise<{
   predictedQuality: SynopsisQuality
   justification: string
@@ -271,6 +291,9 @@ export async function ensurePredictInterest(
     model: PREDICT_MODEL,
     promptVersion: PREDICT_PROMPT_VERSION,
     schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
+    // Frente 3: o digest entra na assinatura ⇒ mudança de digest invalida a
+    // previsão (re-prevê com o consenso novo). Sem digest, extra fica null (b1).
+    extraSources: work.reviewDigest ? { reviewDigest: work.reviewDigest } : undefined,
   })
   const stored = await gateway.loadCurrentPrediction(workId, PREDICT_PROMPT_VERSION)
   const readiness = classifyInterestReadiness({ currentSignature: signature, currentProfileSignature: profileSignature, stored })
@@ -345,6 +368,7 @@ export async function ensurePredictInterest(
         title: work.title,
         synopsis,
         tags: work.tags.map((name) => ({ name, group: null })),
+        reviewDigest: work.reviewDigest,
       })
       await gateway.persistPrediction({
         workId,
@@ -377,7 +401,7 @@ export async function ensurePredictInterest(
 // Predictor default: usa o predictor existente e devolve o custo real.
 async function defaultPredict(
   profile: TasteProfilePayload,
-  work: { id: string; title: string; synopsis: string; tags: Array<{ name: string; group: string | null }> },
+  work: { id: string; title: string; synopsis: string; tags: Array<{ name: string; group: string | null }>; reviewDigest?: string | null },
 ): ReturnType<DefaultPredictFn> {
   const { computeCostUsd } = await import("@/lib/ai/pricing")
   const r = await predictSynopsisQuality({ profile, work })
@@ -438,13 +462,14 @@ export class SupabaseInterestGateway implements InterestGateway {
   async loadWork(workId: string): Promise<InterestWorkData | null> {
     const { data } = await this.sb
       .from("works")
-      .select("title, canonical_synopsis, work_tags(tags(name)), work_synopses(text, is_primary, position)")
+      .select("title, canonical_synopsis, review_digest, work_tags(tags(name)), work_synopses(text, is_primary, position)")
       .eq("id", workId)
       .maybeSingle()
     if (!data) return null
     const row = data as {
       title: string
       canonical_synopsis: string | null
+      review_digest: ReviewDigest | null
       work_tags?: Array<{ tags?: { name?: string | null } | null }> | null
       work_synopses?: Array<{ text?: string | null; is_primary?: boolean | null; position?: number | null }> | null
     }
@@ -454,6 +479,8 @@ export class SupabaseInterestGateway implements InterestGateway {
       tags,
       canonicalSynopsis: row.canonical_synopsis ?? null,
       rawSynopsis: bestRawSynopsis(row.work_synopses),
+      // Contrato e1: digest já sanitizado/formatado pro prompt (null sem digest).
+      reviewDigest: formatDigestForPrompt(row.review_digest),
     }
   }
 

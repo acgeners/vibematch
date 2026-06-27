@@ -9,12 +9,13 @@ export interface TagSuggestion {
 export type ExternalSourceId =
   | "mangaupdates"
   | "comick"
-  | "anilist"
-  | "animeplanet"
   | "comix"
+  | "animeplanet"
+  | "myanimelist"
   | "mangadex"
   | "kitsu"
-  | "myanimelist"
+  | "anilist"
+  | "outros"
 
 export interface ExternalSearchResult {
   id: string           // "anilist:123" | "mu:456" | "kitsu:abc" | "mangadex:uuid" | "mal:789"
