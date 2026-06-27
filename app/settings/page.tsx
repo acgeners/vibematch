@@ -27,10 +27,11 @@ import { ReviewDigestPanel } from "@/components/settings/review-digest-panel"
 import { ResolveComixPanel } from "@/components/settings/resolve-comix-panel"
 import { ComixHealthPanel } from "@/components/settings/comix-health-panel"
 import { AiEvalOnCreateToggle } from "@/components/settings/ai-eval-on-create-toggle"
+import { SynopsisCanonicalOnCreateToggle } from "@/components/settings/synopsis-canonical-on-create-toggle"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
 import { getComixResolverStatus } from "@/server/actions/comix-resolver"
 import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
-import { getAiEvalOnCreate } from "@/server/queries/current-user"
+import { getAiEvalOnCreate, getSynopsisCanonicalOnCreate } from "@/server/queries/current-user"
 import { getSettingsPendingCounts } from "@/server/queries/settings-pending"
 import { parseModelEvaluationMetrics } from "@/lib/metrics/model-evaluation"
 import type { FormulaConfig } from "@/types/domain"
@@ -81,10 +82,11 @@ async function getSettingsData() {
     getSettingsPendingCounts(),
   ])
 
-  const [comixStatus, comixMissing, aiEvalOnCreate] = await Promise.all([
+  const [comixStatus, comixMissing, aiEvalOnCreate, synopsisCanonicalOnCreate] = await Promise.all([
     getComixResolverStatus(),
     getWorksMissingComixHid(),
     getAiEvalOnCreate(),
+    getSynopsisCanonicalOnCreate(),
   ])
 
   if (configRes.error) throw new Error(configRes.error.message)
@@ -103,6 +105,7 @@ async function getSettingsData() {
     comixStatus,
     comixMissing,
     aiEvalOnCreate,
+    synopsisCanonicalOnCreate,
   }
 }
 
@@ -149,6 +152,7 @@ export default async function SettingsPage() {
     comixStatus,
     comixMissing,
     aiEvalOnCreate,
+    synopsisCanonicalOnCreate,
   } = await getSettingsData()
 
   // F4: métricas de erro honestas, validadas por Zod no boundary do servidor.
@@ -224,6 +228,9 @@ export default async function SettingsPage() {
           pendingCount={canonicalSynopsisPending}
           totalCount={worksCount}
         />
+        <div className="mt-4 border-t border-border/60 pt-4">
+          <SynopsisCanonicalOnCreateToggle initialEnabled={synopsisCanonicalOnCreate} />
+        </div>
       </SettingsSection>
 
       <SettingsSection

@@ -38,9 +38,9 @@ import {
 } from "@/lib/ml/weight-inference"
 import { computeCalibration } from "@/lib/calculations/calibration"
 import {
-  computePersonalFit,
   criterionAlignment,
   weightedTagOverlap,
+  netNameOverlap,
 } from "@/lib/ai-recommendation/personal-fit"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import {
@@ -161,6 +161,9 @@ interface WorkComputed {
   personalFit: number | null
   /** Percentil (0–100) do personalFit dentro da biblioteca (migration 071). */
   personalFitPercentile: number | null
+  /** Overlap líquido por NOME (amado − 1.5×evitado) — base do Alinhamento e do
+   * desempate intra-tier (substitui o net por group::name a partir de 2026-06-27). */
+  netName: number | null
 }
 
 const CURRENT_YEAR = new Date().getFullYear()
@@ -266,6 +269,7 @@ export function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed
     expectedIsStub: true,
     personalFit: null,
     personalFitPercentile: null,
+    netName: null,
   }
 }
 
@@ -1077,11 +1081,22 @@ export function computeRecalc(input: RecalcComputeInput) {
   // Independente da Nota Prevista — alinhamento de gosto via tags + critérios.
   // Usa o MESMO perfil efetivo das features (persistido ⊕ tags declaradas).
   if (effectiveProfile) {
+    // Alinhamento = overlap líquido por NOME (amado − 1.5×evitado). Validado
+    // (bootstrap 2026-06-27) como melhor desempate intra-tier que o personal_fit
+    // de 3 componentes (que ficava ABAIXO do acaso, ~0.47) e que o net por
+    // group::name (~0.51). netName cru → tag_overlap_net (desempate); personalFit
+    // = netName normalizado [0,1] (min-max é monotônico → mesmo rank/percentil),
+    // preservando o input `fit` 0–1 do Veredito e o filtro por percentil.
     for (const w of works) {
-      w.personalFit = computePersonalFit(effectiveProfile, {
-        tags: w.tags,
-        categoryScores: w.categoryScoresCalibrated,
-      })
+      w.netName = netNameOverlap(w.tags, effectiveProfile.loved_tags, effectiveProfile.avoided_tags)
+    }
+    const nets = works.map((w) => w.netName).filter((v): v is number => v != null)
+    if (nets.length > 0) {
+      const minN = Math.min(...nets)
+      const rangeN = Math.max(...nets) - minN
+      for (const w of works) {
+        w.personalFit = w.netName == null ? null : rangeN > 0 ? (w.netName - minN) / rangeN : 0.5
+      }
     }
 
     // Percentil dentro da biblioteca (migration 071). O personalFit cru tem
@@ -1128,13 +1143,10 @@ export function computeRecalc(input: RecalcComputeInput) {
     rmse_calc: newRmseCalc,
     personal_fit: w.personalFit,
     personal_fit_percentile: w.personalFitPercentile,
-    // Desempate dentro do tier (migration 116) — overlap de tags do perfil EFETIVO
-    // (LLM + declaradas). Substitui personal_fit nesse papel. NULL só quando o perfil
-    // não tem loved/avoided (ambos os overlaps null).
-    tag_overlap_net:
-      w.lovedTagOverlap == null && w.avoidedTagOverlap == null
-        ? null
-        : (w.lovedTagOverlap ?? 0) - (w.avoidedTagOverlap ?? 0),
+    // Desempate dentro do tier (migration 116). Desde 2026-06-27: overlap líquido
+    // por NOME (amado − 1.5×evitado, `netName`) — valida melhor que o net por
+    // group::name no bootstrap. NULL quando o perfil não tem loved/avoided.
+    tag_overlap_net: w.netName,
     formula_version: config.formula_version,
     calculated_at: new Date().toISOString(),
   }))

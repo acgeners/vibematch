@@ -34,6 +34,26 @@ export interface InferredTag {
   evidence: string
 }
 
+/**
+ * Monta o contexto de leitores p/ a inferência de tags: prefere o DIGEST
+ * estruturado (consensus + salient_traits + content_warnings), cai no resumo-texto.
+ * Mesmo formato validado na passada `--with-reviews` (reviews puxam tags que a
+ * sinopse omite — Cold Female Lead, Power Couple, content). `undefined` = sem
+ * contexto (a inferência roda só com a sinopse).
+ */
+export function buildReviewContext(summary: unknown, digest: unknown): string | undefined {
+  const parts: string[] = []
+  const join = (v: unknown) => (Array.isArray(v) ? v.map(String).join("; ") : v ? String(v) : "")
+  if (digest && typeof digest === "object") {
+    const d = digest as Record<string, unknown>
+    if (d.consensus) parts.push(`Consenso dos leitores: ${String(d.consensus)}`)
+    if (d.salient_traits) parts.push(`Traços salientes: ${join(d.salient_traits)}`)
+    if (d.content_warnings) parts.push(`Avisos de conteúdo: ${join(d.content_warnings)}`)
+  }
+  if (parts.length === 0 && summary && String(summary).trim()) parts.push(`Resumo das reviews: ${String(summary).trim()}`)
+  return parts.length ? parts.join("\n") : undefined
+}
+
 async function pageAll<T = Record<string, unknown>>(
   sb: SupabaseAdmin, table: string, columns: string,
 ): Promise<T[]> {

@@ -55,6 +55,28 @@ export function weightedTagOverlap(
   return total
 }
 
+/**
+ * Overlap líquido por NOME (ignora o grupo): Σ strength das loved presentes na
+ * obra − 1.5 × Σ strength das avoided presentes. Casamento por nome (lowercase)
+ * em vez de `group::name` — valida melhor o desempate intra-tier (bootstrap
+ * 2026-06-27: ~0.544 vs personal_fit 0.474 / tag_overlap_net group::name 0.514).
+ *
+ * Retorna `null` quando o perfil não tem loved nem avoided (sem sinal).
+ */
+export function netNameOverlap(
+  workTags: Array<{ name: string }>,
+  loved: ProfileTag[],
+  avoided: ProfileTag[],
+): number | null {
+  if (loved.length === 0 && avoided.length === 0) return null
+  const work = new Set(workTags.map((t) => t.name.toLowerCase().trim()))
+  let lovedScore = 0
+  let avoidedScore = 0
+  for (const t of loved) if (work.has(t.name.toLowerCase().trim())) lovedScore += clamp01(t.strength)
+  for (const t of avoided) if (work.has(t.name.toLowerCase().trim())) avoidedScore += clamp01(t.strength)
+  return lovedScore - 1.5 * avoidedScore
+}
+
 function tagAlignment(
   workTags: Array<{ name: string; group: string | null }>,
   loved: ProfileTag[],

@@ -29,6 +29,7 @@ import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
+import { getSynopsisCanonicalOnCreate } from "@/server/queries/current-user"
 import { titleToSlug } from "@/lib/utils"
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>
@@ -997,7 +998,12 @@ async function persistNewWork(
   if (coversResult.error) return { ok: false as const, error: { covers: [coversResult.error] } }
   const synopsesResult = await syncWorkSynopses(supabase, workId, normalizeFormSynopses(data))
   if (synopsesResult.error) return { ok: false as const, error: { synopses: [synopsesResult.error] } }
-  scheduleSynopsisConsolidation(workId)
+  // Gate por configuração: gerar a canônica na criação é opcional (toggle em
+  // /settings). Desligado, adia pra depois do save (painel/edição). Tolerante:
+  // default true preserva o comportamento histórico.
+  if (await getSynopsisCanonicalOnCreate(supabase)) {
+    scheduleSynopsisConsolidation(workId)
+  }
   await upsertWorkExternalIds(supabase, workId, data.external_ids)
 
   const hasScores = scores.length >= CRITERION_SLUGS.length
@@ -1026,18 +1032,32 @@ export async function createWork(
 ) {
   const result = await persistNewWork(values, aiMeta)
   if (!result.ok) return { error: result.error }
+  // Inferência de tags (Haiku) em background, SEQUENCIADA após as reviews —
+  // usa o contexto de leitores (digest → resumo) quando disponível, que puxa
+  // tags que a sinopse omite (passada `--with-reviews` validada). Grava tags de
+  // alta confiança (source='ai_inferred'); se adicionou, marca recalc pendente.
+  const inferTagsForNewWork = async (workId: string) => {
+    const { inferAndPersistTagsForWork } = await import("@/lib/tags/auto-infer")
+    const added = await inferAndPersistTagsForWork(workId)
+    if (added > 0) await markRecalcPending("ai_inferred_tags_on_create")
+  }
+
   if (externalReviews && externalReviews.length > 0) {
     // A avaliação (Path B) já buscou as reviews pra montar o prompt — reusa o
-    // pool em vez de re-buscar na borda.
+    // pool em vez de re-buscar na borda. Tag-inference roda depois (usa o que
+    // houver de contexto; o resumo é aguardado em saveWorkReviews).
     const { saveWorkReviews } = await import("@/lib/external/persist-reviews")
     await saveWorkReviews(result.workId, externalReviews)
+    after(() => inferTagsForNewWork(result.workId))
   } else {
     // Criada SEM avaliar: extrai + persiste reviews na borda, desacoplado da
     // avaliação, em background (`after()`). A obra passa a exibir reviews na
     // própria página sem esperar uma avaliação. No-op se não há IDs aceitos.
+    // A inferência de tags roda DEPOIS, na MESMA task (reviews já persistidas).
     after(async () => {
       const { acquireAndPersistWorkReviews } = await import("@/lib/external/acquire-reviews")
       await acquireAndPersistWorkReviews(result.workId)
+      await inferTagsForNewWork(result.workId)
     })
   }
 
