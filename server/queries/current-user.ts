@@ -68,6 +68,28 @@ export async function getAiEvalOnCreate(admin?: AdminClient): Promise<boolean> {
   return (data?.ai_eval_on_create as boolean | undefined) ?? false
 }
 
+// Toggle "gerar sinopse canônica na criação de obras" (migration 119). NÃO
+// cacheado (muda em runtime via /settings). Tolerante: se a coluna ainda não
+// existe, cai pro default `true` — preserva o comportamento histórico (gerava a
+// canônica na criação) até a migration ser aplicada.
+export async function getSynopsisCanonicalOnCreate(admin?: AdminClient): Promise<boolean> {
+  const supabase = admin ?? createAdminClient()
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("synopsis_canonical_on_create")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.warn(
+      `[getSynopsisCanonicalOnCreate] fallback true (coluna indisponível): ${error.message}`,
+    )
+    return true
+  }
+  return (data?.synopsis_canonical_on_create as boolean | undefined) ?? true
+}
+
 export interface CurrentUserProfile {
   userId: string
   displayName: string | null
