@@ -25,7 +25,7 @@ export interface PredictWorkOpts {
 
 export function interestCostMessage(reason: string, likely: number, upper: number): string {
   if (reason === "profile_cascade")
-    return `Gerar/atualizar o perfil e prever custa ~$${likely.toFixed(3)} (provável) / até $${upper.toFixed(3)}. Confirmar?`
+    return `Atualizar o perfil + prever: ~$${likely.toFixed(3)} (provável) / até $${upper.toFixed(3)}. Dá pra prever só com o perfil atual (mais barato).`
   if (reason === "over_cap") return `Custo (até $${upper.toFixed(3)}) acima do teto configurado.`
   if (reason === "pricing_unknown") return "Custo não estimável (preço do modelo desconhecido) — bloqueado."
   return `Esta previsão custa ~$${likely.toFixed(3)} (provável) / até $${upper.toFixed(3)}. Confirmar?`
