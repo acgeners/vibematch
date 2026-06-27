@@ -20,7 +20,7 @@ import { ensureReviewSummary, ensureReviewDigest } from "@/lib/orchestration/int
 export async function saveWorkReviews(
   workId: string,
   reviews: SourcedReview[],
-  opts: { replace?: boolean } = {},
+  opts: { replace?: boolean; fromFreshEval?: boolean } = {},
 ): Promise<void> {
   if (!workId) return
   const supabase = createAdminClient()
@@ -66,6 +66,41 @@ export async function saveWorkReviews(
   if (insError) {
     console.error("[work_reviews] erro inserindo reviews:", insError)
     return
+  }
+
+  // Fingerprint do CONTEÚDO do pool (após o merge). Se mudou em relação ao salvo,
+  // atualiza o hash e — quando a obra já tem avaliação concluída — marca a
+  // avaliação IA como DESATUALIZADA (reviews entram no input da avaliação). Espelha
+  // o `alignment_stale` do Veredito. `fromFreshEval` pula a flag (a obra acabou de
+  // ser avaliada com estas reviews — criação via "Buscar dados"). Tolerante a
+  // colunas ausentes (pré-migration 120): erro só loga.
+  try {
+    const { reviewsFingerprint } = await import("@/lib/reviews/fingerprint")
+    const { data: pool } = await supabase
+      .from("work_reviews")
+      .select("text, user_rating, source")
+      .eq("work_id", workId)
+    const fp = reviewsFingerprint(
+      (pool ?? []).map((r) => ({
+        text: String((r as { text?: string }).text ?? ""),
+        source: (r as { source?: string | null }).source ?? null,
+        userRating: (r as { user_rating?: number | null }).user_rating ?? null,
+      })),
+    )
+    const { data: cur, error: curErr } = await supabase
+      .from("works")
+      .select("reviews_hash, ai_eval_status")
+      .eq("id", workId)
+      .maybeSingle()
+    if (!curErr && cur && (cur as { reviews_hash?: string | null }).reviews_hash !== fp) {
+      const patch: Record<string, unknown> = { reviews_hash: fp }
+      if (!opts.fromFreshEval && (cur as { ai_eval_status?: string }).ai_eval_status === "done") {
+        patch.ai_eval_reviews_stale = true
+      }
+      await supabase.from("works").update(patch).eq("id", workId)
+    }
+  } catch (err) {
+    console.error("[work_reviews] fingerprint/stale falhou (migration 120?):", err)
   }
 
   // Resumo + digest: ambos leem o corpus COMPLETO da obra POR DENTRO de cada `ensure*`

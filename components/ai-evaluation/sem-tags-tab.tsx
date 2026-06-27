@@ -3,6 +3,7 @@ import { AlertTriangle, BookOpen, ExternalLink, ImageOff, Tags } from "lucide-re
 import { Badge } from "@/components/ui/badge"
 import { titleToSlug } from "@/lib/utils"
 import { SemTagsFilters } from "@/components/ai-evaluation/sem-tags-filters"
+import { TagRowAction, TagBatchAction } from "@/components/ai-evaluation/tag-actions"
 import type { NoTagsSort, NoTagsWork } from "@/lib/tags/no-tags-classify"
 
 function bandLabel(min: number, max: number, unit: string): string {
@@ -48,8 +49,9 @@ export function SemTagsTab({
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
         <p className="text-muted-foreground">
           Obras com poucas tags têm <strong>menos sinal</strong> para recomendação e previsão (overlap de tags
-          amadas/evitadas, fit por critério). Adicione tags manualmente ou importe de uma fonte externa. Esta tela é
-          apenas diagnóstico — <strong>não</strong> gera tags, avaliação nem previsão.
+          amadas/evitadas, fit por critério). Use <strong>Inferir tags</strong> (individual ou em fila) pra extrair
+          tags da sinopse + reviews via IA (Haiku, <strong>consome tokens</strong>; só grava alta confiança,{" "}
+          <code>source=ai_inferred</code>). Também dá pra adicionar/importar tags manualmente.
         </p>
       </div>
 
@@ -65,9 +67,12 @@ export function SemTagsTab({
         sort={sort}
       />
 
-      <p className="text-xs text-muted-foreground">
-        {works.length} de {totalWithoutTags} obra(s) {universeLabel} (universo total ativo sem filtro de busca).
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          {works.length} de {totalWithoutTags} obra(s) {universeLabel} (universo total ativo sem filtro de busca).
+        </p>
+        {works.length > 0 ? <TagBatchAction workIds={works.map((w) => w.id)} /> : null}
+      </div>
 
       {works.length === 0 ? (
         <p className="rounded-lg border border-border/60 p-6 text-center text-sm text-muted-foreground">
@@ -127,6 +132,10 @@ export function SemTagsTab({
                         <ExternalLink className="h-3.5 w-3.5" /> Revalidar fontes (pode acessar fontes externas)
                       </Link>
                     ) : null}
+                  </div>
+
+                  <div className="pt-0.5">
+                    <TagRowAction workId={w.id} />
                   </div>
                 </div>
               </li>

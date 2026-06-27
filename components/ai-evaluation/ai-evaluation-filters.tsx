@@ -23,7 +23,7 @@ import {
 import { PERSONAL_STATUSES as PERSONAL_STATUS_NAMES, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 
-type EvaluationFilter = "pending" | "review-pending" | "low-confidence" | "outdated-model"
+type EvaluationFilter = "pending" | "review-pending" | "low-confidence" | "outdated-model" | "outdated-reviews"
 const DEFAULT_FILTERS: EvaluationFilter[] = ["pending", "review-pending"]
 
 const IA_RK_STATE_OPTIONS: Array<{ id: "stale" | "unranked"; label: string; tooltip: string }> = [
@@ -211,6 +211,12 @@ export function AiEvaluationFilters({
       id: "outdated-model",
       label: "Modelo/prompt antigos",
       tooltip: outdatedDescription,
+    },
+    {
+      id: "outdated-reviews",
+      label: "Reviews novas",
+      tooltip:
+        "Avaliação concluída cujo conjunto de reviews mudou depois — os atributos (e a Nota Prevista) podem estar defasados. Re-avaliar incorpora as reviews novas.",
     },
   ]
 

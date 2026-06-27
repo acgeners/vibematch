@@ -337,7 +337,8 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
 
     await supabase
       .from("works")
-      .update({ ai_eval_status: "review_pending" })
+      // avaliação fresca ⇒ não está mais desatualizada por reviews (migration 120)
+      .update({ ai_eval_status: "review_pending", ai_eval_reviews_stale: false })
       .eq("id", workId)
 
     revalidatePath(`/titles/${workId}`)
@@ -434,7 +435,8 @@ export async function submitAiReview(submission: AiReviewSubmission) {
 
   const { error: workError } = await supabase
     .from("works")
-    .update({ ai_eval_status: "done" })
+    // scores aceitos ⇒ avaliação em dia com as reviews atuais (migration 120)
+    .update({ ai_eval_status: "done", ai_eval_reviews_stale: false })
     .eq("id", submission.workId)
 
   if (workError) return { data: null, error: workError.message }

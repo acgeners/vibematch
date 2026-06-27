@@ -3,6 +3,7 @@ import { AlertTriangle, BookOpen, ExternalLink, ImageOff, MessageSquarePlus } fr
 import { Badge } from "@/components/ui/badge"
 import { titleToSlug } from "@/lib/utils"
 import { SemReviewsFilters } from "@/components/ai-evaluation/sem-reviews-filters"
+import { ReviewRowAction, ReviewBatchAction } from "@/components/ai-evaluation/review-actions"
 import type { NoReviewSort, NoReviewWork } from "@/lib/reviews/no-review-classify"
 
 function bandLabel(min: number, max: number, unit: string): string {
@@ -47,9 +48,10 @@ export function SemReviewsTab({
       <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
         <p className="text-muted-foreground">
-          Obras sem reviews podem ser avaliadas ou previstas com <strong>menos contexto</strong>. Isso pode manter
-          o custo semelhante, mas reduzir a qualidade do resultado. Adicione reviews manualmente quando houver uma
-          fonte confiável. Esta tela é apenas diagnóstico — <strong>não</strong> gera reviews, avaliação nem previsão.
+          Obras sem reviews são avaliadas/previstas com <strong>menos contexto</strong> (pior qualidade). Use{" "}
+          <strong>Buscar reviews + digest</strong> (individual ou em fila) pra colher reviews das fontes aceitas e
+          gerar o digest — <strong>consome tokens</strong> (digest Sonnet). Sem fontes externas aceitas, a busca é
+          no-op; nesse caso adicione reviews manualmente.
         </p>
       </div>
 
@@ -65,9 +67,12 @@ export function SemReviewsTab({
         sort={sort}
       />
 
-      <p className="text-xs text-muted-foreground">
-        {works.length} de {totalWithoutReviews} obra(s) {universeLabel} (universo total ativo sem filtro de busca).
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          {works.length} de {totalWithoutReviews} obra(s) {universeLabel} (universo total ativo sem filtro de busca).
+        </p>
+        {works.length > 0 ? <ReviewBatchAction workIds={works.map((w) => w.id)} /> : null}
+      </div>
 
       {works.length === 0 ? (
         <p className="rounded-lg border border-border/60 p-6 text-center text-sm text-muted-foreground">
@@ -139,6 +144,10 @@ export function SemReviewsTab({
                         <ExternalLink className="h-3.5 w-3.5" /> Revalidar fontes (pode acessar fontes externas)
                       </Link>
                     ) : null}
+                  </div>
+
+                  <div className="pt-0.5">
+                    <ReviewRowAction workId={w.id} />
                   </div>
                 </div>
               </li>
