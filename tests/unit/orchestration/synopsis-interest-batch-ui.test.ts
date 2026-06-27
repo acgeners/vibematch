@@ -22,7 +22,7 @@ afterEach(() => __resetSingleFlight())
 
 const EMPTY: TasteProfilePayload = { loved_tags: [], avoided_tags: [], loved_themes: [], avoided_themes: [], criterion_preferences: {}, narrative_patterns: [], summary: "" }
 const ROW: TasteProfileRow = { id: "p", version: 6, is_current: true, is_stub: false, n_works_used: 12, input_hash: "h", model_name: MODEL, prompt_version: "v1", profile: EMPTY, raw_response: null, created_at: new Date().toISOString() }
-const work = (i: number): InterestWorkData => ({ title: `T${i}`, tags: ["a", "b"], canonicalSynopsis: `sinopse canonica numero ${i} longa o suficiente para o prompt`, rawSynopsis: null })
+const work = (i: number): InterestWorkData => ({ title: `T${i}`, tags: ["a", "b"], canonicalSynopsis: `sinopse canonica numero ${i} longa o suficiente para o prompt`, rawSynopsis: null, reviewDigest: null })
 
 function sigFor(id: string, w: InterestWorkData, source: SynopsisSource): string {
   return computeInterestInputSignature({

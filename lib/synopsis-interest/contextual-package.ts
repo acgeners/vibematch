@@ -232,6 +232,36 @@ export function sanitizeDigestForLabeling(digest: ReviewDigest): SanitizedDigest
   }
 }
 
+const DIGEST_POLARITY_PT: Record<string, string> = { positive: "positivo", negative: "negativo", mixed: "misto" }
+
+/**
+ * Formata um `SanitizedDigest` no bloco de texto NEUTRO consumido pelo prompt de
+ * Interesse (contrato e1 validado na golden-3 — `run-b1-e1.ts`). Consenso /
+ * divergências / traços (com polaridade) / execução / avisos. Retorna null quando
+ * o digest não tem nenhum campo útil.
+ */
+export function formatSanitizedDigestForPrompt(d: SanitizedDigest): string | null {
+  const parts: string[] = []
+  if (d.consensus.trim()) parts.push(`Consenso: ${d.consensus}`)
+  if (d.divergence.trim()) parts.push(`Divergências: ${d.divergence}`)
+  if (d.traits.length) {
+    parts.push(`Traços recorrentes: ${d.traits.map((t) => `${t.trait} (${DIGEST_POLARITY_PT[t.polarity] ?? t.polarity})`).join("; ")}`)
+  }
+  if (d.execution.trim()) parts.push(`Execução: ${d.execution}`)
+  if (d.contentWarnings.length) parts.push(`Avisos: ${d.contentWarnings.join("; ")}`)
+  return parts.length ? parts.join("\n") : null
+}
+
+/**
+ * Atalho do predict-time: `works.review_digest` (ReviewDigest) → texto sanitizado
+ * pronto pro prompt. null quando não há digest ou ele é vazio. Mesma cadeia
+ * (sanitize → format) validada na Fase 1.
+ */
+export function formatDigestForPrompt(digest: ReviewDigest | null | undefined): string | null {
+  if (!digest) return null
+  return formatSanitizedDigestForPrompt(sanitizeDigestForLabeling(digest))
+}
+
 /**
  * Adapta o digest `text-only-v1` (B2.2S) ao MESMO display `SanitizedDigest` da política aprovada —
  * REUSA o `scrub` (RECOMMENDATION_RE/RATING_RE inalterados; DIGEST_SANITIZATION_POLICY_VERSION

@@ -51,7 +51,7 @@ export type ArtifactReadiness =
   | { state: "absent" }
   | { state: "fresh" }
   | { state: "immaterial" }
-  | { state: "stale"; reason: "hash" | "version" | "materiality" }
+  | { state: "stale"; reason: "hash" | "version" | "materiality" | "forced" }
 
 /**
  * Gate do SUMMARY — idêntico a persistReviewSummary: hash + materialidade (sem
@@ -84,10 +84,19 @@ export function classifyDigestReadiness(args: {
   storedDigest: unknown
   storedVersion: string | null
   storedN: number | null
+  /**
+   * Força o regen quando há reviews (lacuna #1): o gate por-contagem ignora
+   * edição de corpus que não cresce ≥materialidade (ex.: add/edit/delete de UMA
+   * review manual externa — curadoria deliberada). O path scraped NÃO passa
+   * force ⇒ comportamento/custo inalterados. A dedup por contentHash do job
+   * evita LLM redundante quando o conteúdo de fato não mudou.
+   */
+  force?: boolean
 }): ArtifactReadiness {
   if (args.reviewCount === 0) return { state: "not_applicable", reason: "no_reviews" }
   if (args.storedDigest == null) return { state: "absent" }
   if (args.storedVersion !== REVIEW_DIGEST_VERSION) return { state: "stale", reason: "version" }
+  if (args.force) return { state: "stale", reason: "forced" }
   if (isMaterialReviewChange(args.storedN, args.nowN)) return { state: "stale", reason: "materiality" }
   return { state: "fresh" }
 }
@@ -209,6 +218,8 @@ export interface EnsureDigestDeps extends CommonDeps {
   consolidate?: (r: ReviewDigestInput[], o: { workId?: string | null }) => Promise<ConsolidateDigestStatus>
   /** Tag opcional p/ a chave de dedup/cache (B2.2N): executor experimental passa a versão da política do corpus. */
   dedupTag?: string
+  /** Força o regen ignorando o gate por-contagem (lacuna #1 — curadoria manual externa). */
+  force?: boolean
 }
 
 const NO_REVIEWS_MSG = "Obra sem reviews úteis — busque/adicione reviews (Atualizar dados / Revalidar fontes) antes."
@@ -316,6 +327,7 @@ export async function ensureReviewDigest(
     storedDigest: artifact.digest,
     storedVersion: artifact.version,
     storedN: artifact.n,
+    force: deps.force,
   })
 
   if (readiness.state === "not_applicable") return { status: "not_ready", reason: "no_reviews", message: NO_REVIEWS_MSG }
@@ -340,7 +352,7 @@ export async function ensureReviewDigest(
     },
     async () => {
       const fresh = await gateway.readArtifact(workId)
-      const r2 = classifyDigestReadiness({ reviewCount: cleaned.length, nowN, storedDigest: fresh.digest, storedVersion: fresh.version, storedN: fresh.n })
+      const r2 = classifyDigestReadiness({ reviewCount: cleaned.length, nowN, storedDigest: fresh.digest, storedVersion: fresh.version, storedN: fresh.n, force: deps.force })
       if (r2.state === "fresh") return { costActualUsd: 0 }
       const status = await consolidate(cleaned, { workId })
       if (status.kind === "api_failed") throw new Error(status.error)

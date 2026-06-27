@@ -2,7 +2,9 @@
 
 import { z } from "zod"
 import { revalidatePath } from "next/cache"
+import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensureReviewDigest } from "@/lib/orchestration/integrations/reviews"
 import { prepareExternalReviewRow } from "@/lib/validations/external-review-row"
 import {
   assertLocalExternalReviewEditorAllowed,
@@ -53,6 +55,23 @@ async function confirmWorkExists(
   return Boolean(data?.id)
 }
 
+/**
+ * Lacuna #1 (fecha o ciclo do 2A): a review manual externa É parte do corpus
+ * CANÔNICO do digest. Toda edição deliberada (create/update/delete) muda o corpus
+ * ⇒ força o regen do digest (`force: true`) — o gate por-contagem não dispara em
+ * add/edit/delete de UMA review. Roda pós-resposta via `after()`; fire-and-forget
+ * (não bloqueia o retorno). Dedup por contentHash do job evita LLM redundante.
+ * NÃO regenera o `review_summary` (cujo corpus é só `work_reviews`, sem a manual
+ * externa). Custo ~$0,02–0,05/edição (Sonnet, allowPaid pré-autorizado no save).
+ */
+function regenDigestAfterManualEdit(workId: string): void {
+  after(() =>
+    ensureReviewDigest(workId, { supabase: createAdminClient(), allowPaid: true, force: true }).catch(
+      (err) => console.error("[external-manual-reviews] ensureReviewDigest rejeitou:", err),
+    ),
+  )
+}
+
 export async function createExternalManualReview(
   workId: string,
   rawInput: unknown,
@@ -75,6 +94,7 @@ export async function createExternalManualReview(
     if (conflict) return conflict
     return { ok: false, error: "db", message: error.message }
   }
+  regenDigestAfterManualEdit(workId)
   revalidatePath(`/titles/${workId}`)
   return { ok: true, id: data.id as string }
 }
@@ -118,6 +138,7 @@ export async function updateExternalManualReview(
     if (conflict) return conflict
     return { ok: false, error: "db", message: error.message }
   }
+  regenDigestAfterManualEdit(workId)
   revalidatePath(`/titles/${workId}`)
   return { ok: true, id: reviewId }
 }
@@ -143,6 +164,7 @@ export async function deleteExternalManualReview(
 
   const { error } = await sb.from("work_external_reviews_manual").delete().eq("id", reviewId).eq("work_id", workId)
   if (error) return { ok: false, error: "db", message: error.message }
+  regenDigestAfterManualEdit(workId)
   revalidatePath(`/titles/${workId}`)
   return { ok: true, id: reviewId }
 }

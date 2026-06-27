@@ -38,6 +38,8 @@ import {
   type StoredPrediction,
   type SynopsisSource,
 } from "../integrations/synopsis-interest"
+import { formatDigestForPrompt } from "@/lib/synopsis-interest/contextual-package"
+import type { ReviewDigest } from "@/lib/ai-recommendation/types"
 import {
   ensureTasteProfile,
   classifyTasteProfileReadiness,
@@ -772,7 +774,7 @@ export class SupabaseInterestBackfillGateway implements InterestBackfillGateway 
     for (;;) {
       const { data, error } = await this.sb
         .from("works")
-        .select("id, title, canonical_synopsis, work_tags(tags(name)), work_synopses(text, is_primary, position)")
+        .select("id, title, canonical_synopsis, review_digest, work_tags(tags(name)), work_synopses(text, is_primary, position)")
         .eq("is_archived", false)
         .range(from, from + pageSize - 1)
       if (error) throw new Error(`listWorks: ${error.message}`)
@@ -781,6 +783,7 @@ export class SupabaseInterestBackfillGateway implements InterestBackfillGateway 
           id: string
           title: string
           canonical_synopsis: string | null
+          review_digest: ReviewDigest | null
           work_tags?: Array<{ tags?: { name?: string | null } | null }> | null
           work_synopses?: Array<{ text?: string | null; is_primary?: boolean | null; position?: number | null }> | null
         }
@@ -790,6 +793,7 @@ export class SupabaseInterestBackfillGateway implements InterestBackfillGateway 
           tags: (r.work_tags ?? []).map((wt) => wt.tags?.name).filter((n): n is string => Boolean(n)),
           canonicalSynopsis: r.canonical_synopsis ?? null,
           rawSynopsis: bestRawSynopsis(r.work_synopses),
+          reviewDigest: formatDigestForPrompt(r.review_digest),
         })
       }
       if (!data || data.length < pageSize) break

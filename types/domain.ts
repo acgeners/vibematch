@@ -363,6 +363,10 @@ export interface FormulaConfig {
     coefficients: number[]
     stage2FeatureNames?: string[]
     stage2Coefficients?: number[] | null
+    /** Peso do blend expected⊕calc (1 = sem blend). */
+    calcBlendWeight?: number
+    /** Assinatura dos inputs da nested-CV honesta — pula o recompute quando idêntica. */
+    cvSig?: string
   } | null
 }
 
