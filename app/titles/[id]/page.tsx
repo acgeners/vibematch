@@ -1088,7 +1088,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       )}
 
       {/* Reviews externas — apoiam visualmente os scores da IA */}
-      <WorkReviewsCard snapshot={reviewsSnapshot} />
+      <WorkReviewsCard snapshot={reviewsSnapshot} workId={work.id as string} />
         </TabsContent>
 
             <TabsContent value="tags" className="mt-0 space-y-6">

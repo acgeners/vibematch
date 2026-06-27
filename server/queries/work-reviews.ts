@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { ExternalSourceId } from "@/lib/external/types"
+import type { ReviewDigest } from "@/lib/ai-recommendation/types"
 import {
   readManualExternalReviewsForDisplay,
   type ExternalManualReviewDisplayRow,
@@ -33,6 +34,12 @@ export interface WorkReviewsSnapshot {
   /** Resumo de consenso das reviews gerado por IA (Haiku). */
   summary: string | null
   summaryAt: string | null
+  /** Digest estruturado de reviews (Sonnet) — consenso/divergência/traços/execução/avisos. */
+  digest: ReviewDigest | null
+  digestAt: string | null
+  /** Nº de reviews que entraram no digest. */
+  digestN: number | null
+  digestVersion: string | null
 }
 
 export async function getWorkReviews(workId: string): Promise<WorkReviewsSnapshot> {
@@ -42,7 +49,7 @@ export async function getWorkReviews(workId: string): Promise<WorkReviewsSnapsho
   const [summaryRes, reviewsRes, manual] = await Promise.all([
     supabase
       .from("works")
-      .select("review_summary, review_summary_at")
+      .select("review_summary, review_summary_at, review_digest, review_digest_at, review_digest_n, review_digest_version")
       .eq("id", workId)
       .maybeSingle(),
     supabase
@@ -57,11 +64,15 @@ export async function getWorkReviews(workId: string): Promise<WorkReviewsSnapsho
 
   const summary = (summaryRes.data?.review_summary as string | null) ?? null
   const summaryAt = (summaryRes.data?.review_summary_at as string | null) ?? null
+  const digest = (summaryRes.data?.review_digest as ReviewDigest | null) ?? null
+  const digestAt = (summaryRes.data?.review_digest_at as string | null) ?? null
+  const digestN = (summaryRes.data?.review_digest_n as number | null) ?? null
+  const digestVersion = (summaryRes.data?.review_digest_version as string | null) ?? null
 
   const { data, error } = reviewsRes
   if (error) {
     console.error("[work_reviews] erro lendo reviews:", error)
-    return { fetchedAt: null, total: 0, bySource: [], manual, summary, summaryAt }
+    return { fetchedAt: null, total: 0, bySource: [], manual, summary, summaryAt, digest, digestAt, digestN, digestVersion }
   }
 
   const reviews: WorkReview[] = (data ?? []).map((row) => {
@@ -98,5 +109,9 @@ export async function getWorkReviews(workId: string): Promise<WorkReviewsSnapsho
     manual,
     summary,
     summaryAt,
+    digest,
+    digestAt,
+    digestN,
+    digestVersion,
   }
 }
