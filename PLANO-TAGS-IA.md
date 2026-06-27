@@ -1,6 +1,6 @@
 # PLANO-TAGS-IA — Inferência de tags a partir da sinopse
 
-Status: **em implementação** (2026-06-25). Objetivo: dar tags às obras da cauda
+Status: **✅ CONCLUÍDO (2026-06-25)** — [PR #14](https://github.com/acgeners/vibematch/pull/14) (merged). Objetivo: dar tags às obras da cauda
 (poucas tags) inferindo-as da **sinopse**, com vocabulário fechado e proveniência
 auditável. Complementa o backfill grátis de tags externas (ver
 [[project_tag_backfill_coverage]]), que cobriu a camada macro mas deixou ~18 obras
@@ -88,3 +88,18 @@ não precisa dela).
 | 3 | `--dry-run` → CSV | ~$0,10–0,46 |
 | 4 | revisão à mão → ajuste | $0 |
 | 5 | `--execute` (alta) + recalc | já pago no 3 |
+
+## Resultado final (✅ 2026-06-25)
+
+Executado em 3 frentes; **1019 tags `ai_inferred`** gravadas no banco:
+
+| Frente | Tags |
+|---|---|
+| Sinopse — alta | 673 |
+| Sinopse — média (verificada Sonnet) | 158 |
+| Reviews — alta | 144 |
+| Reviews — média (verificada Sonnet) | 44 |
+
+Cauda eliminada: obras com ≤5 tags **45→3**, com zero **10→0**, 11+ tags **86,5%→96%**. Custo LLM total ~**US$ 2,16** (Haiku $1,24 + Sonnet $0,92). Migration 117 aplicada. Reversível por `source='ai_inferred'`.
+
+Modos adicionados além do plano original: **`--verify`** (Sonnet 4.6 como juiz estrito das "média") e **`--with-reviews`** (passada incremental usando `review_summary`/`review_digest` como evidência extra; grava só tags novas).

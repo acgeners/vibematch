@@ -3,7 +3,14 @@ import { AlertTriangle, BookOpen, ExternalLink, ImageOff, Tags } from "lucide-re
 import { Badge } from "@/components/ui/badge"
 import { titleToSlug } from "@/lib/utils"
 import { SemTagsFilters } from "@/components/ai-evaluation/sem-tags-filters"
-import type { NoTagsWork } from "@/lib/tags/no-tags-classify"
+import type { NoTagsSort, NoTagsWork } from "@/lib/tags/no-tags-classify"
+
+function bandLabel(min: number, max: number, unit: string): string {
+  if (min > 0 && max >= min) return `entre ${min} e ${max} ${unit}`
+  if (min > 0) return `≥ ${min} ${unit}`
+  if (max > 0) return `até ${max} ${unit}`
+  return `sem ${unit}`
+}
 
 /**
  * Aba "Sem tags" — diagnóstico read-only: obras ativas com poucas (ou nenhuma) tags.
@@ -14,19 +21,27 @@ export function SemTagsTab({
   totalWithoutTags,
   q,
   activePubStatuses,
+  activePersonalStatuses,
+  activeInterest,
   hasExternal,
   goldenOnly,
+  minTags,
   maxTags,
+  sort,
 }: {
   works: NoTagsWork[]
   totalWithoutTags: number
   q: string
   activePubStatuses: string[]
+  activePersonalStatuses: string[]
+  activeInterest: string[]
   hasExternal: "yes" | "no" | null
   goldenOnly: boolean
+  minTags: number
   maxTags: number
+  sort: NoTagsSort
 }) {
-  const universeLabel = maxTags > 0 ? `até ${maxTags} tag(s)` : "sem tags"
+  const universeLabel = bandLabel(minTags, maxTags, "tag(s)")
   return (
     <div className="space-y-4">
       <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
@@ -38,7 +53,17 @@ export function SemTagsTab({
         </p>
       </div>
 
-      <SemTagsFilters q={q} activePubStatuses={activePubStatuses} hasExternal={hasExternal} goldenOnly={goldenOnly} maxTags={maxTags} />
+      <SemTagsFilters
+        q={q}
+        activePubStatuses={activePubStatuses}
+        activePersonalStatuses={activePersonalStatuses}
+        activeInterest={activeInterest}
+        hasExternal={hasExternal}
+        goldenOnly={goldenOnly}
+        minTags={minTags}
+        maxTags={maxTags}
+        sort={sort}
+      />
 
       <p className="text-xs text-muted-foreground">
         {works.length} de {totalWithoutTags} obra(s) {universeLabel} (universo total ativo sem filtro de busca).
@@ -75,7 +100,12 @@ export function SemTagsTab({
 
                   <div className="flex flex-wrap items-center gap-1.5 text-xs">
                     <Badge variant="outline">{w.publicationStatus}</Badge>
+                    <Badge variant="outline">{w.personalStatus}</Badge>
                     <Badge variant={w.tagCount === 0 ? "destructive" : "outline"}>{w.tagCount} tag(s)</Badge>
+                    {w.expectedScore != null ? (
+                      <Badge variant="outline">Nota prevista {w.expectedScore.toFixed(1)}</Badge>
+                    ) : null}
+                    {w.interest ? <Badge variant="outline">Interesse {w.interest}</Badge> : null}
                     <Badge variant="outline">{w.aiEvalStatus ?? "—"}</Badge>
                     {!w.canonicalPresent ? <Badge variant="destructive">sem sinopse canônica</Badge> : null}
                     {w.acceptedExternalSources.length > 0 ? (

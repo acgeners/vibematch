@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
-import { ArrowLeft, BookOpen, ChartNoAxesCombined, Sparkles } from "lucide-react"
+import { ArrowLeft, Sparkles } from "lucide-react"
+import { getRunModeDisplay } from "@/components/recommendations/run-mode-display"
 import { Header } from "@/components/layout/header"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -68,14 +69,8 @@ export default async function RunDetailPage({ params }: PageProps) {
   const profileChanged =
     usedProfile != null && currentProfile != null && usedProfile.id !== currentProfile.id
 
-  const ModeIcon =
-    run.mode === "next_read" ? BookOpen : run.mode === "ranking" ? Sparkles : ChartNoAxesCombined
-  const modeLabel =
-    run.mode === "next_read"
-      ? "Próxima leitura"
-      : run.mode === "ranking"
-        ? "Ranking (filtrado)"
-        : "Re-ranquear favoritos"
+  const isTiebreak = (run.sourceMeta as { tiebreak?: boolean } | null)?.tiebreak === true
+  const { label: modeLabel, Icon: ModeIcon } = getRunModeDisplay(run.mode, isTiebreak)
 
   const droppedCount =
     run.nAvailable != null && run.nAvailable > run.nCandidates

@@ -76,6 +76,22 @@ function parseStatusList(
   return { names, ids }
 }
 
+/** Parseia o param de ordenação `<key>-<dir>` validando a chave. Default `{title, asc}`. */
+function parseSort<K extends string>(
+  raw: string | string[] | undefined,
+  allowed: readonly K[],
+): { key: K; dir: "asc" | "desc" } {
+  const value = Array.isArray(raw) ? raw[0] : raw
+  const fallback = { key: "title" as K, dir: "asc" as const }
+  if (!value) return fallback
+  const [k, d] = value.split("-")
+  if (!(allowed as readonly string[]).includes(k)) return fallback
+  return { key: k as K, dir: d === "desc" ? "desc" : "asc" }
+}
+
+const REVIEW_SORT_KEYS = ["title", "expected", "reviews"] as const
+const TAGS_SORT_KEYS = ["title", "expected", "tags"] as const
+
 interface EligibleWork {
   id: string
   title: string
@@ -638,6 +654,10 @@ export default async function AiEvaluationPage({
     golden?: string | string[]
     maxrev?: string | string[]
     maxtags?: string | string[]
+    minrev?: string | string[]
+    mintags?: string | string[]
+    sortr?: string | string[]
+    sortt?: string | string[]
   }>
 }) {
   const params = await searchParams
@@ -661,6 +681,10 @@ export default async function AiEvaluationPage({
   }
   const maxReviews = parseMax(params.maxrev)
   const maxTags = parseMax(params.maxtags)
+  const minReviews = parseMax(params.minrev)
+  const minTags = parseMax(params.mintags)
+  const reviewSort = parseSort(params.sortr, REVIEW_SORT_KEYS)
+  const tagsSort = parseSort(params.sortt, TAGS_SORT_KEYS)
 
   // Filtros de Status + interesse compartilhados pelas 2 abas.
   const { names: pubStatusNames, ids: pubStatusIds } = parseStatusList(params.pub, PUB_STATUS_NAME_TO_ID)
@@ -700,8 +724,28 @@ export default async function AiEvaluationPage({
     getSynopsisPredictionAccuracy(),
     getSynopsisVersionComparison(),
     getCurrentPlan(),
-    getWorksWithoutReviews({ q: noReviewQ, pubStatusIds, hasExternal, goldenOnly, maxReviews }),
-    getWorksWithoutTags({ q: noReviewQ, pubStatusIds, hasExternal, goldenOnly, maxTags }),
+    getWorksWithoutReviews({
+      q: noReviewQ,
+      pubStatusIds,
+      personalStatusIds,
+      hasExternal,
+      goldenOnly,
+      minReviews,
+      maxReviews,
+      interest: synopsisQualities,
+      sort: reviewSort,
+    }),
+    getWorksWithoutTags({
+      q: noReviewQ,
+      pubStatusIds,
+      personalStatusIds,
+      hasExternal,
+      goldenOnly,
+      minTags,
+      maxTags,
+      interest: synopsisQualities,
+      sort: tagsSort,
+    }),
   ])
   const attrCount = attrResult.works.length
   const iaRkCount = iaRkQueue.length
@@ -743,18 +787,26 @@ export default async function AiEvaluationPage({
 
   const noRevParams = new URLSearchParams({ tab: "sem-reviews" })
   if (pub) noRevParams.set("pub", pub)
+  if (personal) noRevParams.set("personal", personal)
+  if (synq) noRevParams.set("synopsis_q", synq)
   if (noReviewQ) noRevParams.set("q", noReviewQ)
   if (hasExternal) noRevParams.set("src", hasExternal)
   if (goldenOnly) noRevParams.set("golden", "1")
+  if (minReviews > 0) noRevParams.set("minrev", String(minReviews))
   if (maxReviews > 0) noRevParams.set("maxrev", String(maxReviews))
+  if (params.sortr) noRevParams.set("sortr", toParam(params.sortr)!)
   const noRevHref = `/ai-evaluation?${noRevParams}`
 
   const noTagsParams = new URLSearchParams({ tab: "sem-tags" })
   if (pub) noTagsParams.set("pub", pub)
+  if (personal) noTagsParams.set("personal", personal)
+  if (synq) noTagsParams.set("synopsis_q", synq)
   if (noReviewQ) noTagsParams.set("q", noReviewQ)
   if (hasExternal) noTagsParams.set("src", hasExternal)
   if (goldenOnly) noTagsParams.set("golden", "1")
+  if (minTags > 0) noTagsParams.set("mintags", String(minTags))
   if (maxTags > 0) noTagsParams.set("maxtags", String(maxTags))
+  if (params.sortt) noTagsParams.set("sortt", toParam(params.sortt)!)
   const noTagsHref = `/ai-evaluation?${noTagsParams}`
 
   return (
@@ -790,9 +842,13 @@ export default async function AiEvaluationPage({
           totalWithoutReviews={noReviewResult.totalWithoutReviews}
           q={noReviewQ}
           activePubStatuses={pubStatusNames}
+          activePersonalStatuses={personalStatusNames}
+          activeInterest={synopsisQualities}
           hasExternal={hasExternal}
           goldenOnly={goldenOnly}
+          minReviews={minReviews}
           maxReviews={maxReviews}
+          sort={reviewSort}
         />
       ) : activeTab === "sem-tags" ? (
         <SemTagsTab
@@ -800,9 +856,13 @@ export default async function AiEvaluationPage({
           totalWithoutTags={noTagsResult.totalWithoutTags}
           q={noReviewQ}
           activePubStatuses={pubStatusNames}
+          activePersonalStatuses={personalStatusNames}
+          activeInterest={synopsisQualities}
           hasExternal={hasExternal}
           goldenOnly={goldenOnly}
+          minTags={minTags}
           maxTags={maxTags}
+          sort={tagsSort}
         />
       ) : activeTab === "sinopse" ? (
         <SynopsisTab

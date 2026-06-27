@@ -187,10 +187,11 @@ export const SYNOPSIS_QUALITY_LABELS: Record<string, string> = {
 export const PLATFORM_LABELS: Record<string, string> = {
   "mangaupdates": "Manga Updates",
   "comick": "ComicK",
-  "anilist": "AniList",
-  "animeplanet": "Anime Planet",
   "comix": "Comix",
+  "animeplanet": "Anime Planet",
+  "myanimelist": "MyAnimeList",
   "mangadex": "MangaDex",
   "kitsu": "Kitsu",
-  "myanimelist": "MyAnimeList",
+  "anilist": "AniList",
+  "outros": "Outros",
 }

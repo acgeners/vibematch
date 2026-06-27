@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
+  Bookmark,
   BookOpen,
   ChevronDown,
   ChevronLeft,
@@ -216,6 +218,10 @@ export function WorkCompareDrawer({
   const [diffOnly, setDiffOnly] = useState(false)
   const [showBestWorst, setShowBestWorst] = useState(true)
   const [reranking, setReranking] = useState(false)
+  // Salvar o desempate como run navegável (histórico/URL). Off por padrão pra não
+  // encher o histórico de /recommendations com cada comparação avulsa.
+  const [persistRun, setPersistRun] = useState(false)
+  const router = useRouter()
   // Bump pra forçar o re-fetch das obras após o desempate por IA (repovoar a
   // linha "Veredito IA." com os alignment_score recém-computados).
   const [reloadKey, setReloadKey] = useState(0)
@@ -341,11 +347,21 @@ export function WorkCompareDrawer({
   const handleRerank = () => {
     if (ids.length < 2 || reranking) return
     setReranking(true)
-    rerankClusterAction(ids)
+    rerankClusterAction(ids, { persist: persistRun })
       .then((res) => {
         if (res.error || !res.data) {
           toast.error(res.error ?? "Erro ao desempatar com IA.")
           return
+        }
+        if (persistRun) {
+          if (res.data.savedSlug) {
+            const slug = res.data.savedSlug
+            toast.success("Desempate salvo no histórico.", {
+              action: { label: "Ver", onClick: () => router.push(`/recommendations/${slug}`) },
+            })
+          } else {
+            toast.warning("Desempate rodou, mas a gravação no histórico falhou.")
+          }
         }
         // Monta o veredito: ordena (já vem desc) e enriquece com título/capa das
         // obras carregadas (estáveis), pra abrir o popup 1º/2º/3º.
@@ -424,6 +440,20 @@ export function WorkCompareDrawer({
                 title="Mostra/oculta o destaque de melhor (verde) e pior (vermelho) por linha"
               >
                 Melhor/pior
+              </Button>
+            )}
+            {works.length >= 2 && isPaid && (
+              <Button
+                variant={persistRun ? "default" : "outline"}
+                size="sm"
+                onClick={() => setPersistRun((v) => !v)}
+                disabled={reranking}
+                className="h-7 gap-1 text-xs"
+                aria-pressed={persistRun}
+                title="Quando ligado, o próximo desempate é salvo como uma recomendação navegável (histórico + URL). Não custa nada a mais."
+              >
+                <Bookmark className="h-3.5 w-3.5" />
+                Salvar
               </Button>
             )}
             {works.length >= 2 && (

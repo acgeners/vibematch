@@ -124,6 +124,8 @@ function getCandidateExternalId(candidate: MergedCandidate, source: ExternalSour
       return candidate.comixHid ?? null
     case "animeplanet":
       return candidate.animePlanetSlug ?? null
+    case "outros":
+      return null // catch-all sem ID externo próprio
   }
 }
 

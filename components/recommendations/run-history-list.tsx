@@ -2,35 +2,17 @@
 
 import Link from "next/link"
 import { useState, useTransition } from "react"
-import {
-  BookOpen,
-  ChartNoAxesCombined,
-  Loader2,
-  MessageCircle,
-  Trash2,
-} from "lucide-react"
+import { Loader2, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
 import { formatRelativeDateTime } from "@/lib/date-utils"
 import type { RecommendationRunSummary } from "@/server/queries/recommendations"
 import { deleteRecommendationRunAction } from "@/server/actions/recommendations"
-import type { RecommendationMode } from "@/lib/ai-recommendation/types"
+import { getRunModeDisplay } from "@/components/recommendations/run-mode-display"
 
 interface RunHistoryListProps {
   runs: RecommendationRunSummary[]
-}
-
-function modeLabel(mode: RecommendationMode): string {
-  if (mode === "next_read") return "Próxima leitura"
-  if (mode === "ranking") return "Conversa com IA"
-  return "Re-ranquear favoritos"
-}
-
-function ModeIcon({ mode }: { mode: RecommendationMode }) {
-  if (mode === "next_read") return <BookOpen className="h-4 w-4" />
-  if (mode === "ranking") return <MessageCircle className="h-4 w-4" />
-  return <ChartNoAxesCombined className="h-4 w-4" />
 }
 
 function alignmentColor(score: number): string {
@@ -65,7 +47,9 @@ export function RunHistoryList({ runs }: RunHistoryListProps) {
   return (
     <>
       <ul className="space-y-1.5">
-        {runs.map((run) => (
+        {runs.map((run) => {
+          const { label: modeLabel, Icon: ModeIcon } = getRunModeDisplay(run.mode, run.isTiebreak)
+          return (
           <li
             key={run.id}
             className="group relative rounded-lg border bg-card/40 transition hover:bg-card/70"
@@ -77,9 +61,9 @@ export function RunHistoryList({ runs }: RunHistoryListProps) {
             >
               <div
                 className="grid size-8 shrink-0 place-items-center rounded-md bg-muted/50 text-muted-foreground"
-                title={modeLabel(run.mode)}
+                title={modeLabel}
               >
-                <ModeIcon mode={run.mode} />
+                <ModeIcon className="h-4 w-4" />
               </div>
 
               <div className="min-w-0 flex-1">
@@ -146,7 +130,8 @@ export function RunHistoryList({ runs }: RunHistoryListProps) {
               </Button>
             </div>
           </li>
-        ))}
+          )
+        })}
       </ul>
       <ConfirmDialog
         open={confirmId !== null}

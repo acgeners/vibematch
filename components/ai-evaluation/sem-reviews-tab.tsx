@@ -3,7 +3,14 @@ import { AlertTriangle, BookOpen, ExternalLink, ImageOff, MessageSquarePlus } fr
 import { Badge } from "@/components/ui/badge"
 import { titleToSlug } from "@/lib/utils"
 import { SemReviewsFilters } from "@/components/ai-evaluation/sem-reviews-filters"
-import type { NoReviewWork } from "@/lib/reviews/no-review-classify"
+import type { NoReviewSort, NoReviewWork } from "@/lib/reviews/no-review-classify"
+
+function bandLabel(min: number, max: number, unit: string): string {
+  if (min > 0 && max >= min) return `entre ${min} e ${max} ${unit}`
+  if (min > 0) return `≥ ${min} ${unit}`
+  if (max > 0) return `até ${max} ${unit}`
+  return `sem ${unit}`
+}
 
 /**
  * Aba "Sem reviews" — diagnóstico read-only: obras ativas sem nenhuma review útil.
@@ -14,19 +21,27 @@ export function SemReviewsTab({
   totalWithoutReviews,
   q,
   activePubStatuses,
+  activePersonalStatuses,
+  activeInterest,
   hasExternal,
   goldenOnly,
+  minReviews,
   maxReviews,
+  sort,
 }: {
   works: NoReviewWork[]
   totalWithoutReviews: number
   q: string
   activePubStatuses: string[]
+  activePersonalStatuses: string[]
+  activeInterest: string[]
   hasExternal: "yes" | "no" | null
   goldenOnly: boolean
+  minReviews: number
   maxReviews: number
+  sort: NoReviewSort
 }) {
-  const universeLabel = maxReviews > 0 ? `até ${maxReviews} review(s) útil(eis)` : "sem review útil"
+  const universeLabel = bandLabel(minReviews, maxReviews, "review(s) útil(eis)")
   return (
     <div className="space-y-4">
       <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
@@ -38,7 +53,17 @@ export function SemReviewsTab({
         </p>
       </div>
 
-      <SemReviewsFilters q={q} activePubStatuses={activePubStatuses} hasExternal={hasExternal} goldenOnly={goldenOnly} maxReviews={maxReviews} />
+      <SemReviewsFilters
+        q={q}
+        activePubStatuses={activePubStatuses}
+        activePersonalStatuses={activePersonalStatuses}
+        activeInterest={activeInterest}
+        hasExternal={hasExternal}
+        goldenOnly={goldenOnly}
+        minReviews={minReviews}
+        maxReviews={maxReviews}
+        sort={sort}
+      />
 
       <p className="text-xs text-muted-foreground">
         {works.length} de {totalWithoutReviews} obra(s) {universeLabel} (universo total ativo sem filtro de busca).
@@ -75,7 +100,12 @@ export function SemReviewsTab({
 
                   <div className="flex flex-wrap items-center gap-1.5 text-xs">
                     <Badge variant="outline">{w.publicationStatus}</Badge>
+                    <Badge variant="outline">{w.personalStatus}</Badge>
                     <Badge variant="outline">{w.usefulReviewCount} review(s) útil(eis)</Badge>
+                    {w.expectedScore != null ? (
+                      <Badge variant="outline">Nota prevista {w.expectedScore.toFixed(1)}</Badge>
+                    ) : null}
+                    {w.interest ? <Badge variant="outline">Interesse {w.interest}</Badge> : null}
                     <Badge variant="outline">{w.aiEvalStatus ?? "—"}</Badge>
                     {!w.canonicalPresent ? <Badge variant="destructive">sem sinopse canônica</Badge> : null}
                     {w.acceptedExternalSources.length > 0 ? (

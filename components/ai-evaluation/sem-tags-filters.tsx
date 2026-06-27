@@ -2,27 +2,43 @@
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { useTransition } from "react"
-import { Search, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Search, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
+import { PERSONAL_STATUSES, SYNOPSIS_QUALITIES } from "@/types/domain"
+import type { NoTagsSort, NoTagsSortKey } from "@/lib/tags/no-tags-classify"
 
 const PUB_OPTIONS = Object.values(PUBLICATION_STATUSES_BY_ID).map((i) => i.status)
+
+const SORT_OPTIONS: { key: NoTagsSortKey; label: string }[] = [
+  { key: "title", label: "Título" },
+  { key: "expected", label: "Nota prevista" },
+  { key: "tags", label: "Nº tags" },
+]
 
 export function SemTagsFilters({
   q,
   activePubStatuses,
+  activePersonalStatuses,
+  activeInterest,
   hasExternal,
   goldenOnly,
+  minTags,
   maxTags,
+  sort,
 }: {
   q: string
   activePubStatuses: string[]
+  activePersonalStatuses: string[]
+  activeInterest: string[]
   hasExternal: "yes" | "no" | null
   goldenOnly: boolean
+  minTags: number
   maxTags: number
+  sort: NoTagsSort
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -39,18 +55,34 @@ export function SemTagsFilters({
     else next.set(key, value)
     commit(next)
   }
-  function togglePub(status: string) {
-    const set = new Set(activePubStatuses)
-    if (set.has(status)) set.delete(status)
-    else set.add(status)
-    setParam("pub", set.size > 0 ? [...set].join(",") : null)
+  function toggleInSet(key: string, active: string[], value: string) {
+    const set = new Set(active)
+    if (set.has(value)) set.delete(value)
+    else set.add(value)
+    setParam(key, set.size > 0 ? [...set].join(",") : null)
   }
-  function setMaxTags(raw: string) {
+  function setCount(key: string, raw: string, current: number) {
     const n = Math.max(0, Math.floor(Number(raw)))
-    setParam("maxtags", Number.isFinite(n) && n > 0 ? String(n) : null)
+    if (n === current) return
+    setParam(key, Number.isFinite(n) && n > 0 ? String(n) : null)
+  }
+  function setSort(key: NoTagsSortKey) {
+    const dir: "asc" | "desc" = sort.key === key ? (sort.dir === "asc" ? "desc" : "asc") : key === "title" ? "asc" : "desc"
+    const isDefault = key === "title" && dir === "asc"
+    setParam("sortt", isDefault ? null : `${key}-${dir}`)
   }
 
-  const hasAny = q || activePubStatuses.length > 0 || hasExternal != null || goldenOnly || maxTags > 0
+  const hasAny =
+    q ||
+    activePubStatuses.length > 0 ||
+    activePersonalStatuses.length > 0 ||
+    activeInterest.length > 0 ||
+    hasExternal != null ||
+    goldenOnly ||
+    minTags > 0 ||
+    maxTags > 0 ||
+    sort.key !== "title" ||
+    sort.dir !== "asc"
 
   return (
     <div className="space-y-3 rounded-lg border border-border/60 p-3">
@@ -75,14 +107,41 @@ export function SemTagsFilters({
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-xs text-muted-foreground">Status:</span>
+        <span className="text-xs text-muted-foreground">Publicação:</span>
         {PUB_OPTIONS.map((s) => (
-          <button key={s} type="button" onClick={() => togglePub(s)} disabled={isPending}>
+          <button key={s} type="button" onClick={() => toggleInSet("pub", activePubStatuses, s)} disabled={isPending}>
             <Badge variant={activePubStatuses.includes(s) ? "default" : "outline"} className={cn("cursor-pointer", isPending && "opacity-60")}>
               {s}
             </Badge>
           </button>
         ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">Leitura:</span>
+        {PERSONAL_STATUSES.map((s) => (
+          <button key={s} type="button" onClick={() => toggleInSet("personal", activePersonalStatuses, s)} disabled={isPending}>
+            <Badge variant={activePersonalStatuses.includes(s) ? "default" : "outline"} className={cn("cursor-pointer", isPending && "opacity-60")}>
+              {s}
+            </Badge>
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">Interesse:</span>
+        {SYNOPSIS_QUALITIES.map((s) => (
+          <button key={s} type="button" onClick={() => toggleInSet("synopsis_q", activeInterest, s)} disabled={isPending}>
+            <Badge variant={activeInterest.includes(s) ? "default" : "outline"} className="cursor-pointer text-sm">
+              {s}
+            </Badge>
+          </button>
+        ))}
+        <button type="button" onClick={() => toggleInSet("synopsis_q", activeInterest, "none")} disabled={isPending}>
+          <Badge variant={activeInterest.includes("none") ? "default" : "outline"} className="cursor-pointer">
+            Não avaliada
+          </Badge>
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -97,19 +156,47 @@ export function SemTagsFilters({
         <button type="button" onClick={() => setParam("golden", goldenOnly ? null : "1")} disabled={isPending}>
           <Badge variant={goldenOnly ? "default" : "outline"} className="cursor-pointer">Só golden pilot-1</Badge>
         </button>
-        <span className="ml-3 text-xs text-muted-foreground">Máx. tags:</span>
+        <span className="ml-3 text-xs text-muted-foreground">Tags (mín/máx):</span>
         <Input
-          key={maxTags}
+          key={`min-${minTags}`}
+          type="number"
+          min={0}
+          step={1}
+          defaultValue={minTags}
+          onKeyDown={(e) => { if (e.key === "Enter") setCount("mintags", (e.target as HTMLInputElement).value, minTags) }}
+          onBlur={(e) => setCount("mintags", e.target.value, minTags)}
+          disabled={isPending}
+          className="h-7 w-16"
+          aria-label="Mínimo de tags"
+        />
+        <span className="text-xs text-muted-foreground">–</span>
+        <Input
+          key={`max-${maxTags}`}
           type="number"
           min={0}
           step={1}
           defaultValue={maxTags}
-          onKeyDown={(e) => { if (e.key === "Enter") setMaxTags((e.target as HTMLInputElement).value) }}
-          onBlur={(e) => { if (Math.max(0, Math.floor(Number(e.target.value))) !== maxTags) setMaxTags(e.target.value) }}
+          onKeyDown={(e) => { if (e.key === "Enter") setCount("maxtags", (e.target as HTMLInputElement).value, maxTags) }}
+          onBlur={(e) => setCount("maxtags", e.target.value, maxTags)}
           disabled={isPending}
           className="h-7 w-16"
           aria-label="Máximo de tags"
         />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">Ordenar:</span>
+        {SORT_OPTIONS.map((opt) => {
+          const active = sort.key === opt.key
+          return (
+            <button key={opt.key} type="button" onClick={() => setSort(opt.key)} disabled={isPending}>
+              <Badge variant={active ? "default" : "outline"} className="cursor-pointer gap-1">
+                {opt.label}
+                {active ? (sort.dir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : null}
+              </Badge>
+            </button>
+          )
+        })}
       </div>
     </div>
   )

@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/tooltip"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { toast } from "sonner"
-import type { CategoryScore, WorkWithRelations } from "@/types/domain"
+import type { CategoryScore, CriterionSlug, WorkWithRelations } from "@/types/domain"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { pickPrimaryCover } from "@/lib/covers"
@@ -73,6 +73,9 @@ import { FavoriteCell } from "@/components/titles/favorite-cell"
 import { AlignmentCell, AlignmentScoreCell, DecisionCell } from "@/components/ranking/ranking-cells"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
+import { MoodRefineDialog } from "@/components/ranking/mood-refine-dialog"
+import { sortByMoodAdjusted, isMoodActive } from "@/lib/calculations/mood-refine"
+import type { MoodRefine, MoodWork } from "@/lib/calculations/mood-refine"
 import { WorkHeatmapView } from "@/components/titles/work-heatmap-view"
 import { WorkColumnPicker } from "@/components/titles/work-column-picker"
 import {
@@ -213,6 +216,10 @@ export function WorkTable({
   const [compareIds, setCompareIds] = useState<string[]>(selectedCompareIds)
   const selectedSet = useMemo(() => new Set(compareIds), [compareIds])
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // Refino por mood: "Comparar" abre primeiro o popup; a escolha (ou pular)
+  // define o moodRefine passado ao drawer. Mesmo fluxo do /ranking.
+  const [moodDialogOpen, setMoodDialogOpen] = useState(false)
+  const [moodRefine, setMoodRefine] = useState<MoodRefine | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
   const updateCompareIds = useCallback(
@@ -246,8 +253,45 @@ export function WorkTable({
     preserveScroll(rootRef.current, () => {
       updateCompareIds([])
       setDrawerOpen(false)
+      setMoodRefine(null)
     })
   }, [updateCompareIds])
+
+  // IDs na ordem do drawer: ordem visível da tabela por padrão. Com mood ativo,
+  // reordena pela Prioridade ajustada (limitada ao MAE) — o mood define a ordem
+  // INICIAL; o drag do usuário dentro do drawer sobrepõe depois.
+  const drawerIds = useMemo(() => {
+    const indexById = new Map(works.map((w, i) => [w.id, i]))
+    const base = [...compareIds].sort(
+      (a, b) =>
+        (indexById.get(a) ?? Number.MAX_SAFE_INTEGER) -
+        (indexById.get(b) ?? Number.MAX_SAFE_INTEGER)
+    )
+    if (!moodRefine || !isMoodActive(moodRefine)) return base
+    const byId = new Map(works.map((w) => [w.id, w]))
+    const moodWorks: MoodWork[] = []
+    for (const id of base) {
+      const w = byId.get(id)
+      if (!w) continue
+      const cs = w.calculated_scores
+      moodWorks.push({
+        id,
+        decisionScore: computeDecisionScore({
+          expected: cs?.expected_score ?? null,
+          alignment: cs?.alignment_score ?? null,
+          confidence: (cs?.alignment_payload as { confidence?: number } | null)?.confidence ?? null,
+        }),
+        scores: Object.fromEntries(
+          CRITERION_SLUGS.map((slug) => [slug, scoreFor(w, slug)])
+        ) as Partial<Record<CriterionSlug, number | null>>,
+        totalChapters: w.total_chapters ?? null,
+        personalFit: cs?.personal_fit ?? null,
+        totalVotes: cs?.total_votes ?? 0,
+        synopsisQuality: (w as { synopsis_quality?: string | null }).synopsis_quality ?? null,
+      })
+    }
+    return sortByMoodAdjusted(moodWorks, moodRefine).map((w) => w.id)
+  }, [compareIds, works, moodRefine])
 
   const allVisibleIds = useMemo(() => works.map((w) => w.id), [works])
   const allSelected =
@@ -345,25 +389,32 @@ export function WorkTable({
           <CompareSelectionBar
             count={compareIds.length}
             favoriteCount={favoriteSelectedIds.length}
-            onOpen={() => setDrawerOpen(true)}
+            onOpen={() => setMoodDialogOpen(true)}
             onClear={clearCompare}
             onUnfavorite={handleBatchUnfavorite}
+          />
+
+          <MoodRefineDialog
+            open={moodDialogOpen}
+            onOpenChange={setMoodDialogOpen}
+            workCount={compareIds.length}
+            onApply={(mood) => {
+              setMoodRefine(mood)
+              setMoodDialogOpen(false)
+              setDrawerOpen(true)
+            }}
+            onSkip={() => {
+              setMoodRefine(null)
+              setMoodDialogOpen(false)
+              setDrawerOpen(true)
+            }}
           />
 
           <WorkCompareDrawer
             open={drawerOpen}
             onOpenChange={setDrawerOpen}
-            ids={(() => {
-              // Reordena pra refletir a ordem visível da tabela atual, não a
-              // ordem cronológica de cliques. IDs fora do pool visível (caso o
-              // usuário tenha filtrado depois de selecionar) vão pro fim.
-              const indexById = new Map(works.map((w, i) => [w.id, i]))
-              return [...compareIds].sort(
-                (a, b) =>
-                  (indexById.get(a) ?? Number.MAX_SAFE_INTEGER) -
-                  (indexById.get(b) ?? Number.MAX_SAFE_INTEGER)
-              )
-            })()}
+            ids={drawerIds}
+            moodRefine={moodRefine}
             onClear={clearCompare}
             onRemoveId={(id) =>
               updateCompareIds(compareIds.filter((x) => x !== id))
