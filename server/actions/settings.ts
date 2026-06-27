@@ -612,6 +612,7 @@ export async function consolidatePendingReviewSummaries(maxWorks = 10): Promise<
     const { consolidateReviewsDetailed, hashReviewInputs, packReviewSummaryMeta } = await import(
       "@/lib/ai-recommendation/review-summarizer"
     )
+    const { readSummaryReviewInputs } = await import("@/lib/synopsis-interest/digest-corpus")
     const { createAdminClient } = await import("@/lib/supabase/admin")
     const supabase = createAdminClient()
 
@@ -657,16 +658,9 @@ export async function consolidatePendingReviewSummaries(maxWorks = 10): Promise<
 
     for (const id of pendingIds) {
       progress.attempted += 1
-      // Reviews da obra por work_id — uma obra tem dezenas de reviews, bem abaixo
-      // do cap de 1000, então pega todas sem paginar.
-      const { data: revRows } = await supabase
-        .from("work_reviews")
-        .select("text, user_rating")
-        .eq("work_id", id)
-      const inputs = (revRows ?? []).map((r) => ({
-        text: (r.text as string | null) ?? "",
-        userRating: r.user_rating != null ? Number(r.user_rating) : null,
-      }))
+      // Corpus do resumo: scraped (work_reviews, com nota) + manual externa
+      // (work_external_reviews_manual, sem nota) — mesma fonte do save/gateway.
+      const inputs = await readSummaryReviewInputs(id, supabase)
       const status = await consolidateReviewsDetailed(inputs, { workId: id })
       if (status.kind === "skipped") {
         progress.skipped += 1

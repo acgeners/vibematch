@@ -27,6 +27,7 @@ import {
   type CanonicalReviewInput,
   type CanonicalReview,
 } from "@/lib/synopsis-interest/canonical-review-corpus"
+import type { ReviewSummaryInput } from "@/lib/ai-recommendation/review-summarizer"
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -72,6 +73,30 @@ export async function readManuallyEnteredExternalReviews(
     .eq("work_id", workId)
   if (error) throw new Error(`readManuallyEnteredExternalReviews: ${error.message}`)
   return manualExternalRowsToCanonicalInput((data ?? []) as ManualExternalReviewRow[])
+}
+
+/**
+ * Inputs do RESUMO (Haiku) — fonte ÚNICA de verdade do corpus do resumo: work_reviews
+ * (scraped, COM `user_rating`) + work_external_reviews_manual (manual externa, text-only
+ * ⇒ sem nota). Diferente do digest (que descarta notas), o resumo MANTÉM a nota da fonte
+ * (exibe "(nota X/10)" no prompt). NÃO inclui `work_manual_reviews` (opinião pessoal).
+ */
+export async function readSummaryReviewInputs(
+  workId: string,
+  sb: AdminClient = createAdminClient(),
+): Promise<ReviewSummaryInput[]> {
+  if (!workId) return []
+  const [scrapedRes, manual] = await Promise.all([
+    sb.from("work_reviews").select("text, user_rating").eq("work_id", workId),
+    readManuallyEnteredExternalReviews(workId, sb),
+  ])
+  if (scrapedRes.error) throw new Error(`readSummaryReviewInputs: ${scrapedRes.error.message}`)
+  const out: ReviewSummaryInput[] = (scrapedRes.data ?? []).map((r) => {
+    const row = r as { text: string | null; user_rating: number | null }
+    return { text: String(row.text ?? ""), userRating: row.user_rating != null ? Number(row.user_rating) : null }
+  })
+  for (const m of manual) out.push({ text: m.text, userRating: null })
+  return out
 }
 
 export interface CanonicalReviewCorpusResult {

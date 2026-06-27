@@ -73,16 +73,22 @@ describe("guard — planner/executor do golden são puros e compartilham o loade
   })
 })
 
-describe("guard — auto-digest de PRODUÇÃO inalterado (B2.2M-AUDIT §5)", () => {
-  it("persist-reviews (auto-digest) NÃO importa o loader canônico", () => {
+describe("guard — auto-resumo/digest de produção: corpus EXTERNO via loader, nunca o store PESSOAL (B2.2M-AUDIT §5)", () => {
+  it("persist-reviews (auto) NÃO importa o loader canônico diretamente", () => {
     const src = read("lib/external/persist-reviews.ts")
     expect(src.includes("digest-corpus")).toBe(false)
     expect(src.includes("readCanonicalReviewCorpus")).toBe(false)
   })
-  it("o gateway de digest de produção lê work_reviews, nunca a tabela externa manual", () => {
+  it("os gateways de produção delegam o corpus ao loader (resumo inclui manual EXTERNA) e nunca consultam o store PESSOAL", () => {
     const src = read("lib/orchestration/integrations/reviews.ts")
-    expect(src).toContain('from("work_reviews")')
-    expect(src.includes("work_external_reviews_manual")).toBe(false)
+    // Resumo e digest delegam a leitura aos loaders centralizados de digest-corpus:
+    // readSummaryReviewInputs (resumo, COM manual externa) e readCanonicalReviewCorpus (digest).
+    expect(src).toContain("readSummaryReviewInputs")
+    expect(src).toContain("readCanonicalReviewCorpus")
+    // reviews.ts NÃO consulta as tabelas de review diretamente (centralizado no loader)…
+    expect(src.includes('from("work_reviews")')).toBe(false)
+    expect(src.includes('from("work_external_reviews_manual")')).toBe(false)
+    // …e NUNCA o store PESSOAL — invariante crítica, inalterada.
     expect(src.includes("work_manual_reviews")).toBe(false)
   })
 })

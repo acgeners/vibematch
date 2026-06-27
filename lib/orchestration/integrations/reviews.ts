@@ -18,7 +18,7 @@
 
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { readCanonicalReviewCorpus } from "@/lib/synopsis-interest/digest-corpus"
+import { readCanonicalReviewCorpus, readSummaryReviewInputs } from "@/lib/synopsis-interest/digest-corpus"
 import { computeCostUsd } from "@/lib/ai/pricing"
 import {
   consolidateReviewsDetailed,
@@ -133,8 +133,10 @@ export interface DigestGateway {
 class SupabaseSummaryGateway implements SummaryGateway {
   constructor(private readonly sb: AdminClient) {}
   async readReviews(workId: string): Promise<ReviewSummaryInput[]> {
-    const { data } = await this.sb.from("work_reviews").select("text, user_rating").eq("work_id", workId)
-    return (data ?? []).map((r) => ({ text: String(r.text ?? ""), userRating: (r.user_rating as number | null) ?? null }))
+    // Corpus do resumo (= sempre): scraped (work_reviews, com nota) + manual externa
+    // (work_external_reviews_manual, sem nota). Mesma fonte que o digest, mas o resumo
+    // mantém as notas. NUNCA inclui work_manual_reviews (opinião pessoal).
+    return readSummaryReviewInputs(workId, this.sb)
   }
   async readArtifact(workId: string) {
     const { data } = await this.sb

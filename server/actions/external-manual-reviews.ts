@@ -4,7 +4,7 @@ import { z } from "zod"
 import { revalidatePath } from "next/cache"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensureReviewDigest } from "@/lib/orchestration/integrations/reviews"
+import { ensureReviewDigest, ensureReviewSummary } from "@/lib/orchestration/integrations/reviews"
 import { prepareExternalReviewRow } from "@/lib/validations/external-review-row"
 import {
   assertLocalExternalReviewEditorAllowed,
@@ -57,19 +57,24 @@ async function confirmWorkExists(
 
 /**
  * Lacuna #1 (fecha o ciclo do 2A): a review manual externa É parte do corpus
- * CANÔNICO do digest. Toda edição deliberada (create/update/delete) muda o corpus
- * ⇒ força o regen do digest (`force: true`) — o gate por-contagem não dispara em
- * add/edit/delete de UMA review. Roda pós-resposta via `after()`; fire-and-forget
- * (não bloqueia o retorno). Dedup por contentHash do job evita LLM redundante.
- * NÃO regenera o `review_summary` (cujo corpus é só `work_reviews`, sem a manual
- * externa). Custo ~$0,02–0,05/edição (Sonnet, allowPaid pré-autorizado no save).
+ * CANÔNICO do RESUMO e do DIGEST. Toda edição deliberada (create/update/delete)
+ * muda o corpus ⇒ regenera os DOIS. Roda pós-resposta via `after()`; não bloqueia
+ * o retorno. Cada `ensure*` lê o corpus por dentro (não passamos `reviews`).
+ *  - Resumo (Haiku): gate por content-hash — a mudança no texto já dispara (sem force).
+ *  - Digest (Sonnet): gate por contagem — precisa de `force` (add/edit/delete de 1
+ *    review não cruza o limiar de materialidade); dedup por contentHash evita run redundante.
+ * Custo ~$0,02–0,07/edição (Haiku + Sonnet, allowPaid pré-autorizado).
  */
-function regenDigestAfterManualEdit(workId: string): void {
-  after(() =>
-    ensureReviewDigest(workId, { supabase: createAdminClient(), allowPaid: true, force: true }).catch(
-      (err) => console.error("[external-manual-reviews] ensureReviewDigest rejeitou:", err),
-    ),
-  )
+function regenReviewArtifactsAfterManualEdit(workId: string): void {
+  after(async () => {
+    const sb = createAdminClient()
+    const [s, d] = await Promise.allSettled([
+      ensureReviewSummary(workId, { supabase: sb, allowPaid: true }),
+      ensureReviewDigest(workId, { supabase: sb, allowPaid: true, force: true }),
+    ])
+    if (s.status === "rejected") console.error("[external-manual-reviews] ensureReviewSummary rejeitou:", s.reason)
+    if (d.status === "rejected") console.error("[external-manual-reviews] ensureReviewDigest rejeitou:", d.reason)
+  })
 }
 
 export async function createExternalManualReview(
@@ -94,7 +99,7 @@ export async function createExternalManualReview(
     if (conflict) return conflict
     return { ok: false, error: "db", message: error.message }
   }
-  regenDigestAfterManualEdit(workId)
+  regenReviewArtifactsAfterManualEdit(workId)
   revalidatePath(`/titles/${workId}`)
   return { ok: true, id: data.id as string }
 }
@@ -138,7 +143,7 @@ export async function updateExternalManualReview(
     if (conflict) return conflict
     return { ok: false, error: "db", message: error.message }
   }
-  regenDigestAfterManualEdit(workId)
+  regenReviewArtifactsAfterManualEdit(workId)
   revalidatePath(`/titles/${workId}`)
   return { ok: true, id: reviewId }
 }
@@ -164,7 +169,7 @@ export async function deleteExternalManualReview(
 
   const { error } = await sb.from("work_external_reviews_manual").delete().eq("id", reviewId).eq("work_id", workId)
   if (error) return { ok: false, error: "db", message: error.message }
-  regenDigestAfterManualEdit(workId)
+  regenReviewArtifactsAfterManualEdit(workId)
   revalidatePath(`/titles/${workId}`)
   return { ok: true, id: reviewId }
 }
