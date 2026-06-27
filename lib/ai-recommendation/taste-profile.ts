@@ -139,6 +139,11 @@ export interface InsertTasteProfileArgs {
   modelName: string
   promptVersion: string
   rawResponse: unknown
+  /**
+   * Obras rotuladas que geraram o perfil — usadas pra gravar o FINGERPRINT
+   * heurístico (drift method-free, migration 118). Opcional/best-effort.
+   */
+  ratedWorks?: RatedWorkInput[]
 }
 
 export async function insertNewTasteProfile(
@@ -177,6 +182,25 @@ export async function insertNewTasteProfile(
   // acima). Cobre TODOS os caminhos de persistência (este é o único sink).
   const { markRecalcPending } = await import("@/server/actions/recalc-queue")
   await markRecalcPending("taste_profile_new_version")
+
+  // Fingerprint heurístico (drift method-free, migration 118): determinístico, das
+  // MESMAS obras que geraram este perfil. Best-effort — se a coluna não existir
+  // (migration pendente) ou faltar `ratedWorks`, apenas avisa e segue.
+  if (args.ratedWorks && args.ratedWorks.length > 0) {
+    try {
+      const { computeHeuristicFingerprint } = await import("./profile-drift")
+      const { error: fpErr } = await supabase
+        .from("taste_profile")
+        .update({ heuristic_fingerprint: computeHeuristicFingerprint(args.ratedWorks) })
+        .eq("id", (data as { id: string }).id)
+      if (fpErr) {
+        console.warn("[insertNewTasteProfile] heuristic_fingerprint não gravado (migration 118 aplicada?):", fpErr.message)
+      }
+    } catch (err) {
+      console.warn("[insertNewTasteProfile] fingerprint falhou:", err instanceof Error ? err.message : err)
+    }
+  }
+
   return rowToTasteProfile(data as Record<string, unknown>)
 }
 

@@ -60,7 +60,22 @@ export async function predictSynopsisQualityForWorkAction(
       revalidatePath(`/titles/${workId}`)
       revalidatePath("/ai-evaluation")
     }
-    return mapInterestOutcome(outcome)
+    const result = mapInterestOutcome(outcome)
+    // Quando o custo é a CASCATA do perfil (~$0,40), anexa o DRIFT method-free pra
+    // o usuário decidir se vale o regen. Informativo — nunca bloqueia.
+    if (result.status === "blocked_cost_confirmation" && result.reason === "profile_cascade") {
+      try {
+        const { getProfileDrift } = await import("@/lib/ai-recommendation/profile-drift")
+        const drift = await getProfileDrift()
+        if (drift.available) {
+          const pct = Math.round(drift.driftPct * 100)
+          result.message += ` Perfil ~${pct}% defasado${drift.changedTags > 0 ? ` (${drift.changedTags} tag${drift.changedTags === 1 ? "" : "s"} mudaram)` : ""}.`
+        }
+      } catch {
+        /* drift é informativo; falha não afeta a previsão */
+      }
+    }
+    return result
   } catch (err) {
     return { status: "failed", error: err instanceof Error ? err.message : "Erro desconhecido" }
   }

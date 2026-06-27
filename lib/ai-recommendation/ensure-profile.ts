@@ -109,6 +109,7 @@ export async function loadOrEnsureProfile(
       modelName: MODEL,
       promptVersion: PROMPT_VERSION,
       rawResponse: null,
+      ratedWorks,
     })
     return { profile: saved, ratedWorksCount: ratedWorks.length, staleRefresh: false }
   }
