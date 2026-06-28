@@ -107,8 +107,8 @@ era **omitido em 3 dos 4 call-sites** de `computeInterestInputSignature`:
 1. `ensurePredictInterest` **Re-check 1** (`synopsis-interest.ts`) → descartava TODA obra-com-digest como stale (1ª execução das 315: `changedDuringRun=315`, 0 salvas, só perfil pago).
 2. `classifySig` e 3. `planItemSig` do **planner** (`interest-backfill.ts`) → marcariam digest-works como stale em re-planos futuros.
 
-**Fix:** passar `extraSources` nos 3. Os 4 call-sites agora incluem o digest. 229 testes orq OK.
-⚠️ **Lacuna de teste:** os fixtures não setam `reviewDigest` → não pegavam o bug. Adicionar regressão.
+**Fix:** passar `extraSources` nos 3. Os 4 call-sites agora incluem o digest.
+✅ **Teste de regressão** (`interest-backfill.test.ts` 6b): obra com digest cuja previsão foi feita COM o digest deve ficar `fresh` — confirmado que **falha sem o fix** (classifica stale) e passa com ele. 230 testes orq OK.
 
 ## Camadas executadas
 | # | Escopo | Ação | Resultado | Custo real |
