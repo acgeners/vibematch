@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureCapability } from "@/server/queries/current-user"
 import { loadOrEnsureProfile } from "@/lib/ai-recommendation/ensure-profile"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
-import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
+import { getSynopsisPredictionForWork, getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
 import { markRecalcPending } from "@/server/actions/recalc-queue"
 import { predictSynopsisQuality } from "@/lib/ai-evaluation/synopsis-quality-predictor"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
@@ -172,6 +172,114 @@ export async function applySynopsisPredictionAction(
     revalidatePath("/ranking")
 
     return { data: { applied: prediction.predictedQuality } }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}
+
+export interface ApplySynopsisBatchResult {
+  processed: number
+  applied: number
+  skipped: number
+  failed: number
+  capped: boolean
+}
+
+/** Teto por execução do "Aplicar em fila" (operação grátis/DB-only). */
+const APPLY_BATCH_CAP = 150
+
+/**
+ * Aplica a previsão IA ao Interesse manual (works.synopsis_quality) em LOTE — o
+ * "Aplicar previsão em fila" da aba "Interesse na Obra". Espelha
+ * applySynopsisPredictionAction, mas:
+ *  - PROTEGE rótulos humanos: pula obras com source='human_manual' (não
+ *    sobrescreve ground-truth);
+ *  - pula obras sem previsão ativa;
+ *  - marca recalc_pending UMA vez no fim (synopsis_quality é feature do Ridge global).
+ * Grátis (sem LLM) — só copia a previsão pro campo manual.
+ */
+export async function applySynopsisPredictionForWorks(
+  workIds: string[],
+): Promise<ApplySynopsisBatchResult> {
+  const ids = [...new Set((workIds ?? []).filter(Boolean))].slice(0, APPLY_BATCH_CAP)
+  if (ids.length === 0) return { processed: 0, applied: 0, skipped: 0, failed: 0, capped: false }
+
+  const supabase = createAdminClient()
+  const [predictions, sourceRows] = await Promise.all([
+    getSynopsisPredictionsByWorkIds(ids),
+    supabase.from("works").select("id, synopsis_quality_source").in("id", ids),
+  ])
+  const sourceById = new Map(
+    ((sourceRows.data ?? []) as Array<{ id: string; synopsis_quality_source: string | null }>).map(
+      (r) => [r.id, r.synopsis_quality_source],
+    ),
+  )
+
+  let applied = 0
+  let skipped = 0
+  let failed = 0
+  for (const id of ids) {
+    const prediction = predictions.get(id)
+    if (!prediction) {
+      skipped++ // sem previsão ativa
+      continue
+    }
+    if (sourceById.get(id) === "human_manual") {
+      skipped++ // protege rótulo humano (ground-truth)
+      continue
+    }
+    const { error } = await supabase
+      .from("works")
+      .update({
+        synopsis_quality: prediction.predictedQuality,
+        synopsis_quality_source: "prediction_applied",
+        synopsis_quality_prediction_id: prediction.id,
+      })
+      .eq("id", id)
+    if (error) {
+      failed++
+      continue
+    }
+    applied++
+  }
+
+  if (applied > 0) await markRecalcPending("applySynopsisPredictionBatch")
+  revalidatePath("/ai-evaluation")
+  revalidatePath("/titles")
+  revalidatePath("/ranking")
+
+  return {
+    processed: ids.length,
+    applied,
+    skipped,
+    failed,
+    capped: (workIds ?? []).length > APPLY_BATCH_CAP,
+  }
+}
+
+/**
+ * "Pular" (ou desfazer) uma obra na fila de Interesse na Obra — sai da fila e do
+ * "Aplicar previsão em fila" (migration 121: works.synopsis_interest_skipped).
+ * Espelha skipAiEvaluation da fila de atributos. NÃO toca em synopsis_quality/fonte.
+ */
+export async function skipSynopsisInterestAction(
+  workId: string,
+  skipped = true,
+): Promise<{ data?: { skipped: boolean }; error?: string }> {
+  try {
+    const supabase = createAdminClient()
+    const { error } = await supabase
+      .from("works")
+      .update({ synopsis_interest_skipped: skipped })
+      .eq("id", workId)
+    if (error) {
+      if (/synopsis_interest_skipped|column|schema cache/i.test(error.message)) {
+        return { error: "Aplique a migration 121 (synopsis_interest_skipped) pra usar o 'Pular'." }
+      }
+      return { error: `Falha ao pular: ${error.message}` }
+    }
+    revalidatePath("/ai-evaluation")
+    return { data: { skipped } }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Erro desconhecido" }
   }

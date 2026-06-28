@@ -3,9 +3,9 @@
 import { useTransition } from "react"
 import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
-import { Sparkles, Loader2, Check } from "lucide-react"
+import { Sparkles, Loader2, Check, SkipForward } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { applySynopsisPredictionAction } from "@/server/actions/synopsis-quality"
+import { applySynopsisPredictionAction, skipSynopsisInterestAction } from "@/server/actions/synopsis-quality"
 import { predictInterestWithToast } from "@/components/titles/predict-interest-toast"
 
 export interface PredictSynopsisRowActionsProps {
@@ -31,6 +31,7 @@ export function PredictSynopsisRowActions({
   const refresh = useRefresh()
   const [predicting, startPredict] = useTransition()
   const [applying, startApply] = useTransition()
+  const [skipping, startSkip] = useTransition()
 
   if (!isPaid) {
     return (
@@ -62,6 +63,18 @@ export function PredictSynopsisRowActions({
     })
   }
 
+  const runSkip = () => {
+    startSkip(async () => {
+      const res = await skipSynopsisInterestAction(workId)
+      if (res.error) {
+        toast.error(res.error)
+        return
+      }
+      toast.success("Obra pulada — fora da fila.")
+      refresh()
+    })
+  }
+
   return (
     <div className="flex flex-col items-stretch gap-2">
       <Button variant="outline" size="sm" onClick={runPredict} disabled={predicting} className="gap-1.5">
@@ -84,6 +97,17 @@ export function PredictSynopsisRowActions({
           {alreadyApplied ? "Aplicado" : "Aplicar"}
         </Button>
       )}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={runSkip}
+        disabled={skipping}
+        className="gap-1.5 text-muted-foreground"
+        title="Pular — tira a obra da fila de Interesse na Obra (não toca no valor)"
+      >
+        {skipping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <SkipForward className="h-3.5 w-3.5" />}
+        Pular
+      </Button>
     </div>
   )
 }

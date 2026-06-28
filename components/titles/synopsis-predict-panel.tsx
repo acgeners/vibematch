@@ -20,10 +20,13 @@ import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
 import { PredictSynopsisRowActions } from "@/components/titles/predict-synopsis-row-actions"
 import { SynopsisQualityPicker } from "@/components/titles/synopsis-quality-picker"
+import { TaskButton } from "@/components/ai-evaluation/task-button"
 import {
   planSynopsisInterestBatchAction,
   runSynopsisInterestBatchAction,
+  applySynopsisPredictionForWorks,
 } from "@/server/actions/synopsis-quality"
+import type { ApplySynopsisBatchResult } from "@/server/actions/synopsis-quality"
 import { cn } from "@/lib/utils"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
@@ -36,7 +39,14 @@ function synopsisLevel(q: string | null): number {
   return idx >= 0 ? idx + 1 : 0
 }
 
-type SortField = "default" | "expected" | "lastRead"
+/** DD/MM/AAAA a partir do ISO (slice — evita mismatch de fuso/hidratação). */
+function fmtPredictedAt(iso: string | null): string | null {
+  if (!iso) return null
+  const [y, m, d] = iso.slice(0, 10).split("-")
+  return y && m && d ? `${d}/${m}/${y}` : null
+}
+
+type SortField = "default" | "expected" | "lastRead" | "predicted"
 
 /** Opções de tamanho de lote por run. Teto do servidor = 100 (SYNOPSIS_BATCH_MAX). */
 const BATCH_OPTIONS = [10, 30, 50, 100] as const
@@ -66,11 +76,12 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
       })
     }
     const mult = sortDir === "asc" ? 1 : -1
-    if (sortField === "lastRead") {
+    if (sortField === "lastRead" || sortField === "predicted") {
       // Datas ISO comparam lexicograficamente = cronologicamente. Nulos no fim.
+      const key = (w: SynopsisQueueWork) => (sortField === "lastRead" ? w.lastReadAt : w.predictedAt)
       return [...works].sort((a, b) => {
-        const ka = a.lastReadAt
-        const kb = b.lastReadAt
+        const ka = key(a)
+        const kb = key(b)
         if (ka == null && kb == null) return 0
         if (ka == null) return 1
         if (kb == null) return -1
@@ -96,6 +107,16 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
   )
   const batchIds = pendingTargets.slice(0, batchSize).map((w) => w.id)
   const remainingAfterBatch = Math.max(pendingTargets.length - batchIds.length, 0)
+
+  // Alvos do "Aplicar em fila" = obras VISÍVEIS com previsão e proveniência
+  // `legacy_unknown` (sem valor OU com valor legado/não-confirmado). Aplicar
+  // substitui o valor pela previsão (source→prediction_applied). NUNCA inclui
+  // `human_manual` (o server protege por garantia). Divergências em obras já
+  // aplicadas ficam no botão "Aplicar" por linha.
+  const applyTargets = useMemo(
+    () => sortedWorks.filter((w) => w.predictedQuality != null && w.synopsisQualitySource === "legacy_unknown"),
+    [sortedWorks],
+  )
 
   // Executa o lote já confirmado (uma autorização da cascata). Custo total
   // governado pelo teto = upper bound do dry-run.
@@ -180,6 +201,7 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
               <SelectItem value="default">Padrão</SelectItem>
               <SelectItem value="expected">Nota prevista</SelectItem>
               <SelectItem value="lastRead">Última leitura</SelectItem>
+              <SelectItem value="predicted">Data da previsão</SelectItem>
             </SelectContent>
           </Select>
           <Button
@@ -193,34 +215,58 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
           </Button>
         </div>
 
-        {isPaid && pendingTargets.length > 0 && (
-          <div className="flex items-center gap-2">
-            <Select
-              value={String(batchSize)}
-              onValueChange={(v) => setBatchSize(Number(v))}
-              disabled={batchRunning}
-            >
-              <SelectTrigger size="sm" className="h-9 w-[78px] text-xs" title="Quantas obras por run (teto 100)">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {BATCH_OPTIONS.map((n) => (
-                  <SelectItem key={n} value={String(n)}>
-                    {n}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button onClick={handlePredictAll} disabled={batchRunning || batchIds.length === 0}>
-              {batchRunning ? (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-              ) : (
-                <Sparkles className="mr-1 h-4 w-4" />
-              )}
-              {batchRunning ? "Processando…" : `Estimar ${batchIds.length} por IA`}
-            </Button>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {isPaid && applyTargets.length > 0 && (
+            <TaskButton
+              taskId="apply-synopsis-batch"
+              kind="apply-synopsis"
+              label={`Aplicar previsão em fila (${applyTargets.length})`}
+              busyLabel="Aplicando fila…"
+              variant="secondary"
+              size="default"
+              run={() => applySynopsisPredictionForWorks(applyTargets.map((w) => w.id))}
+              formatDone={(r) => {
+                const x = r as ApplySynopsisBatchResult
+                return {
+                  ok: x.applied > 0 || (x.failed === 0 && x.processed > 0),
+                  message:
+                    `${x.applied} aplicada${x.applied !== 1 ? "s" : ""}` +
+                    (x.skipped ? ` · ${x.skipped} pulada(s)` : "") +
+                    (x.failed ? ` · ${x.failed} falha(s)` : "") +
+                    (x.capped ? " — limitado, rode de novo" : ""),
+                }
+              }}
+            />
+          )}
+          {isPaid && pendingTargets.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Select
+                value={String(batchSize)}
+                onValueChange={(v) => setBatchSize(Number(v))}
+                disabled={batchRunning}
+              >
+                <SelectTrigger size="sm" className="h-9 w-[78px] text-xs" title="Quantas obras por run (teto 100)">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BATCH_OPTIONS.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button onClick={handlePredictAll} disabled={batchRunning || batchIds.length === 0}>
+                {batchRunning ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="mr-1 h-4 w-4" />
+                )}
+                {batchRunning ? "Processando…" : `Estimar ${batchIds.length} por IA`}
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -316,13 +362,9 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
                             Δ {delta > 0 ? `+${delta}` : delta}
                           </span>
                         )}
-                        {w.previousPredictedQuality && (
-                          <span
-                            className="ml-2 text-muted-foreground/80"
-                            title={`Previsão anterior (${w.previousPromptVersion})`}
-                          >
-                            {w.previousPromptVersion}:{" "}
-                            <span className="text-rose-500/80">{w.previousPredictedQuality}</span>
+                        {w.predictedAt && (
+                          <span className="ml-2 text-muted-foreground/80" title="Data da última previsão">
+                            · prevista em {fmtPredictedAt(w.predictedAt)}
                           </span>
                         )}
                       </p>
