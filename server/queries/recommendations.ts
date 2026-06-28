@@ -11,6 +11,7 @@ import {
   type CategoryScoreWithSource,
 } from "@/lib/ai-recommendation/calibrated-scores"
 import type { CriterionSlug } from "@/types/domain"
+import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { CandidateWorkInput, RatedWorkInput, RecommendationMode, ReviewDigest } from "@/lib/ai-recommendation/types"
 import { getRanking, type RankingFilters } from "@/server/queries/ranking"
 import { PROMPT_VERSION as SYNOPSIS_PROMPT_VERSION } from "@/lib/ai-evaluation/synopsis-quality-predictor"
@@ -551,12 +552,16 @@ export interface SynopsisQueueWork {
   personalStatusId: number | null
   /** Valor MANUAL (works.synopsis_quality). */
   manualSynopsisQuality: string | null
+  /** Proveniência do valor: human_manual | prediction_applied | legacy_unknown | null. */
+  synopsisQualitySource: string | null
   expectedScore: number | null
   /** Data da última leitura (works.last_read_at) — pra ordenação. */
   lastReadAt: string | null
   /** Previsão IA ATIVA (versão atual se houver, senão a mais recente). */
   predictedQuality: string | null
   predictedPromptVersion: string | null
+  /** Data (ISO) da última previsão ATIVA — pra exibir "previsto em…". */
+  predictedAt: string | null
   predictionStale: boolean
   predictedConfidence: number | null
   justification: string | null
@@ -580,10 +585,22 @@ interface SynopsisPredRow {
   confidence?: number | null
   justification?: string | null
   prompt_version?: string | null
+  predicted_at?: string | null
 }
 
 const SYNOPSIS_QUEUE_SELECT =
-  "id, title, publication_status_id, personal_status_id, synopsis_quality, last_read_at, work_covers(url, is_primary, position), calculated_scores(expected_score)"
+  "id, title, publication_status_id, personal_status_id, synopsis_quality, synopsis_quality_source, last_read_at, work_covers(url, is_primary, position), calculated_scores(expected_score)"
+
+// Probe defensivo da coluna `synopsis_interest_skipped` (migration 121). Enquanto a
+// migration não for aplicada, a fila simplesmente não filtra pulados (não quebra).
+let synopsisSkippedColumn: boolean | null = null
+async function hasSynopsisInterestSkippedColumn(sb: ReturnType<typeof createAdminClient>): Promise<boolean> {
+  if (synopsisSkippedColumn != null) return synopsisSkippedColumn
+  const { error } = await sb.from("works").select("synopsis_interest_skipped").limit(1)
+  synopsisSkippedColumn = !error
+  if (error) console.warn("[synopsis-queue] coluna synopsis_interest_skipped ausente — 'Pular' inativo. Aplique a migration 121.")
+  return synopsisSkippedColumn
+}
 
 /** Todas as URLs de capa de uma obra, primária primeiro depois por posição, sem duplicatas. */
 function orderedCoverUrls(covers: RawCoverRow[] | undefined): string[] {
@@ -605,6 +622,13 @@ export async function getSynopsisQueueWorks(opts: {
   pubStatusIds?: number[]
   personalStatusIds?: number[]
   synopsisQualities?: string[]
+  /** Filtra pela VERSÃO de prompt da previsão ATIVA (ex.: ["v3"]). Pós-filtro. */
+  predictionVersions?: string[]
+  /** Filtra pelo VALOR previsto pela IA (♥–♥♥♥♥). Pós-filtro. */
+  predictionQualities?: string[]
+  /** Filtra pelo DELTA previsto − atual (valores exatos "-3".."3"). Só compara com
+   *  valor existente human_manual OU legacy_unknown (não prediction_applied). Pós-filtro. */
+  predictionDeltas?: string[]
   /**
    * Triagem manual: ignora o estado de previsão e lista só obras SEM Interesse
    * manual (synopsis_quality IS NULL). Sobrepõe `states`/`synopsisQualities`.
@@ -619,6 +643,8 @@ export async function getSynopsisQueueWorks(opts: {
   const wantPredicted = states.includes("predicted")
   if (!wantStale && !wantUnpredicted && !wantPredicted) return []
   const supabase = createAdminClient()
+  // Exclui obras "puladas" (migration 121) — só se a coluna existir (probe).
+  const excludeSkipped = await hasSynopsisInterestSkippedColumn(supabase)
 
   // Carrega TODAS as previsões — fonte da verdade do estado de cada obra. A tabela
   // já passou de 1000 linhas, então pagina (sem isso o PostgREST corta em 1000 e
@@ -627,7 +653,7 @@ export async function getSynopsisQueueWorks(opts: {
     (from, to) =>
       supabase
         .from("synopsis_quality_predictions")
-        .select("work_id, predicted_quality, stale, confidence, justification, prompt_version")
+        .select("work_id, predicted_quality, stale, confidence, justification, prompt_version, predicted_at")
         .range(from, to),
     "Falha lendo previsões de sinopse",
   )
@@ -647,8 +673,6 @@ export async function getSynopsisQueueWorks(opts: {
   const predByWork = new Map<string, SynopsisPredRow>()
   const prevByWork = new Map<string, SynopsisPredRow>()
   const outdatedWorks = new Set<string>()
-  const freshIds: string[] = []
-  const staleIds: string[] = []
   for (const [workId, rows] of rowsByWork) {
     const current = rows.find((r) => (r.prompt_version ?? null) === SYNOPSIS_PROMPT_VERSION)
     const sorted = rows.slice().sort((a, b) => verNum(b.prompt_version) - verNum(a.prompt_version))
@@ -659,20 +683,19 @@ export async function getSynopsisQueueWorks(opts: {
     if (previous) prevByWork.set(workId, previous)
     // "Desatualizada" = sem previsão da versão atual, OU a da versão atual ficou
     // stale (perfil/sinopse mudou). Volta pra fila pra re-previsão em lote.
-    const outdated = !current || Boolean(current.stale)
-    if (outdated) {
-      outdatedWorks.add(workId)
-      staleIds.push(workId)
-    } else {
-      freshIds.push(workId)
-    }
+    if (!current || Boolean(current.stale)) outdatedWorks.add(workId)
   }
 
   const pubIds = opts.pubStatusIds ?? []
   const personalIds = opts.personalStatusIds ?? []
-  // "none" é só um sentinela de UI (filtro "Não avaliada") — nunca casa numa
-  // linha real, então é removido antes de qualquer `.in("synopsis_quality", …)`.
-  const synQ = (opts.synopsisQualities ?? []).filter((q) => q !== "none")
+  // "none"/"unknown" são sentinelas de UI — nunca casam num valor real, então são
+  // removidos antes de qualquer `.in("synopsis_quality", …)`.
+  //  - "none"    = "Não avaliada" (synopsis_quality IS NULL) → via missingManual.
+  //  - "unknown" = "Desconhecido": filtra por PROVENIÊNCIA
+  //    (synopsis_quality_source = 'legacy_unknown') em vez de valor — separa os
+  //    valores legados/não-confirmados dos human_manual.
+  const synQ = (opts.synopsisQualities ?? []).filter((q) => q !== "none" && q !== "unknown")
+  const unknownSource = (opts.synopsisQualities ?? []).includes("unknown")
 
   const mapWork = (w: Record<string, unknown>): SynopsisQueueWork => {
     const calc = (w.calculated_scores as { expected_score?: number | null } | null) ?? null
@@ -687,16 +710,48 @@ export async function getSynopsisQueueWorks(opts: {
       publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
       personalStatusId: w.personal_status_id != null ? Number(w.personal_status_id) : null,
       manualSynopsisQuality: (w.synopsis_quality as string | null) ?? null,
+      synopsisQualitySource: (w.synopsis_quality_source as string | null) ?? null,
       expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
       lastReadAt: (w.last_read_at as string | null) ?? null,
       predictedQuality: (pred?.predicted_quality as string | null) ?? null,
       predictedPromptVersion: (pred?.prompt_version as string | null) ?? null,
+      predictedAt: (pred?.predicted_at as string | null) ?? null,
       predictionStale: outdatedWorks.has(w.id as string),
       predictedConfidence: pred?.confidence != null ? Number(pred.confidence) : null,
       justification: (pred?.justification as string | null) ?? null,
       previousPredictedQuality: (prev?.predicted_quality as string | null) ?? null,
       previousPromptVersion: (prev?.prompt_version as string | null) ?? null,
     }
+  }
+
+  // Pós-filtros por previsão (versão e/ou valor da IA). Aplicados ao resultado de
+  // qualquer caminho (a previsão ativa já vem em predByWork). Excluem obras sem
+  // previsão quando algum desses filtros está ativo.
+  const predVersions = opts.predictionVersions ?? []
+  const predQualities = opts.predictionQualities ?? []
+  const predDeltas = opts.predictionDeltas ?? []
+  // Nível ordinal do Interesse (♥=1…♥♥♥♥=4; 0 desconhecido) — pro delta.
+  const levelOf = (q: string | null): number => {
+    if (!q) return 0
+    const i = (SYNOPSIS_QUALITIES as readonly string[]).indexOf(q)
+    return i >= 0 ? i + 1 : 0
+  }
+  const postFilter = (works: SynopsisQueueWork[]): SynopsisQueueWork[] => {
+    let result = works
+    if (predVersions.length > 0)
+      result = result.filter((w) => w.predictedPromptVersion != null && predVersions.includes(w.predictedPromptVersion))
+    if (predQualities.length > 0)
+      result = result.filter((w) => w.predictedQuality != null && predQualities.includes(w.predictedQuality))
+    if (predDeltas.length > 0) {
+      const wantedDeltas = new Set(predDeltas.map((s) => Number(s)))
+      result = result.filter((w) => {
+        // Delta só faz sentido com previsão + valor existente human_manual/legacy_unknown.
+        if (w.predictedQuality == null || w.manualSynopsisQuality == null) return false
+        if (w.synopsisQualitySource !== "human_manual" && w.synopsisQualitySource !== "legacy_unknown") return false
+        return wantedDeltas.has(levelOf(w.predictedQuality) - levelOf(w.manualSynopsisQuality))
+      })
+    }
+    return result
   }
 
   // Triagem manual: lista obras com sinopse canônica e SEM Interesse manual
@@ -713,6 +768,7 @@ export async function getSynopsisQueueWorks(opts: {
         .order("updated_at", { ascending: false })
       if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
       if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
+      if (excludeSkipped) q = q.eq("synopsis_interest_skipped", false)
       return q
     }
     // Sem limite explícito → pagina (a contagem da aba não pode parar em 1000).
@@ -724,65 +780,64 @@ export async function getSynopsisQueueWorks(opts: {
     } else {
       data = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando obras sem Interesse manual")
     }
-    return data.map((w) => mapWork(w))
+    return postFilter(data.map((w) => mapWork(w)))
   }
 
-  const out = new Map<string, SynopsisQueueWork>()
-
-  // 1) Previstas / desatualizadas — hidratadas POR ID (completas, sem limite de
-  // janela). Chunk de 100 IDs pra não estourar o limite de URL do PostgREST.
-  const predSideIds = [...(wantStale ? staleIds : []), ...(wantPredicted ? freshIds : [])]
-  for (let i = 0; i < predSideIds.length; i += 100) {
-    const chunk = predSideIds.slice(i, i + 100)
+  // Scan ÚNICO das obras-com-canônica (filtros em SQL) + classificação por estado
+  // em JS (usando predByWork/outdatedWorks). Substitui a hidratação por-ID em
+  // chunks de 100 + o scan separado de não-previstas → bem menos round-trips no
+  // DB remoto (era ~chunks(414/100)+scan; agora 1 scan paginado).
+  const baseQ = () => {
     let q = supabase
       .from("works")
       .select(SYNOPSIS_QUEUE_SELECT)
-      .in("id", chunk)
       .eq("is_archived", false)
       .not("canonical_synopsis", "is", null)
+      .order("updated_at", { ascending: false })
     if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
     if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
     if (synQ.length > 0) q = q.in("synopsis_quality", synQ)
-    const { data, error } = await q
-    if (error) throw new Error(`Falha hidratando previstas/desatualizadas: ${error.message}`)
-    for (const w of data ?? []) {
-      const row = w as Record<string, unknown>
-      out.set(row.id as string, mapWork(row))
-    }
+    if (unknownSource) q = q.eq("synopsis_quality_source", "legacy_unknown")
+    if (excludeSkipped) q = q.eq("synopsis_interest_skipped", false)
+    return q
+  }
+  let rows: Record<string, unknown>[]
+  if (opts.limit != null) {
+    const res = await baseQ().limit(opts.limit)
+    if (res.error) throw new Error(`Falha listando fila de Interesse: ${res.error.message}`)
+    rows = (res.data ?? []) as Record<string, unknown>[]
+  } else {
+    rows = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando fila de Interesse")
   }
 
-  // 2) Não-previstas — obras com sinopse canônica e SEM previsão.
-  if (wantUnpredicted) {
-    const predIdSet = new Set(predByWork.keys())
-    const baseQ = () => {
-      let q = supabase
-        .from("works")
-        .select(SYNOPSIS_QUEUE_SELECT)
-        .eq("is_archived", false)
-        .not("canonical_synopsis", "is", null)
-        .order("updated_at", { ascending: false })
-      if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
-      if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
-      if (synQ.length > 0) q = q.in("synopsis_quality", synQ)
-      return q
-    }
-    // Sem limite explícito → pagina (a contagem da aba não pode parar em 1000).
-    let data: Record<string, unknown>[]
-    if (opts.limit != null) {
-      const res = await baseQ().limit(opts.limit)
-      if (res.error) throw new Error(`Falha listando não-previstas: ${res.error.message}`)
-      data = (res.data ?? []) as Record<string, unknown>[]
-    } else {
-      data = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando não-previstas")
-    }
-    for (const row of data) {
-      const id = row.id as string
-      if (predIdSet.has(id) || out.has(id)) continue
-      out.set(id, mapWork(row))
-    }
+  const result: SynopsisQueueWork[] = []
+  for (const row of rows) {
+    const id = row.id as string
+    const hasPred = predByWork.has(id)
+    // Estado: sem previsão → unpredicted; previsão desatualizada → stale; senão → predicted.
+    const state = !hasPred ? "unpredicted" : outdatedWorks.has(id) ? "stale" : "predicted"
+    if (state === "stale" && !wantStale) continue
+    if (state === "unpredicted" && !wantUnpredicted) continue
+    if (state === "predicted" && !wantPredicted) continue
+    result.push(mapWork(row))
   }
+  return postFilter(result)
+}
 
-  return [...out.values()]
+/** Versões de prompt distintas presentes em synopsis_quality_predictions (mais nova primeiro). */
+export async function getSynopsisPredictionVersions(): Promise<string[]> {
+  const supabase = createAdminClient()
+  const rows = await fetchAllRows<{ prompt_version: string | null }>(
+    (from, to) => supabase.from("synopsis_quality_predictions").select("prompt_version").range(from, to),
+    "Falha lendo versões de previsão",
+  )
+  const versions = new Set<string>()
+  for (const r of rows ?? []) if (r.prompt_version) versions.add(r.prompt_version)
+  const verNum = (v: string) => {
+    const m = v.match(/(\d+)/)
+    return m ? parseInt(m[1], 10) : -1
+  }
+  return [...versions].sort((a, b) => verNum(b) - verNum(a))
 }
 
 /**

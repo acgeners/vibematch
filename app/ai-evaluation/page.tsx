@@ -11,12 +11,13 @@ import {
 } from "@/lib/constants/criteria"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import Link from "next/link"
+import { Suspense } from "react"
 import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 import { StaleRerankPanel } from "@/components/ranking/stale-rerank-panel"
 import { SynopsisPredictPanel } from "@/components/titles/synopsis-predict-panel"
 import { SynopsisAccuracyBar } from "@/components/titles/synopsis-accuracy-bar"
-import { getAlignmentQueueWorks, getSynopsisQueueWorks } from "@/server/queries/recommendations"
+import { getAlignmentQueueWorks, getSynopsisQueueWorks, getSynopsisPredictionVersions } from "@/server/queries/recommendations"
 import type { AlignmentQueueWork, SynopsisQueueWork } from "@/server/queries/recommendations"
 import { getSynopsisPredictionAccuracy, getSynopsisVersionComparison } from "@/server/queries/synopsis-quality"
 import type { SynopsisPredictionAccuracy, SynopsisVersionComparison } from "@/server/queries/synopsis-quality"
@@ -53,13 +54,37 @@ function parseFilters(raw: string | string[] | undefined): EvaluationFilter[] {
 function parseSynopsisQualities(raw: string | string[] | undefined): string[] {
   const value = Array.isArray(raw) ? raw.join(",") : raw
   if (!value) return []
-  // "none" = sentinela do filtro "Não avaliada" (synopsis_quality IS NULL),
-  // tratado só na fila tab=sinopse; inofensivo nas outras queries.
-  const valid = new Set<string>([...SYNOPSIS_QUALITIES, "none"])
+  // Sentinelas do filtro de Interesse (tratados só na fila tab=sinopse; inofensivos
+  // nas outras queries): "none" = "Não avaliada" (synopsis_quality IS NULL);
+  // "unknown" = "Desconhecido" (synopsis_quality_source = 'legacy_unknown').
+  const valid = new Set<string>([...SYNOPSIS_QUALITIES, "none", "unknown"])
   return value
     .split(",")
     .map((p) => p.trim())
     .filter((p) => valid.has(p))
+}
+
+/** Valores previstos pela IA (♥–♥♥♥♥) — filtro "Previsão da IA" da aba sinopse. */
+function parsePredictionQualities(raw: string | string[] | undefined): string[] {
+  const value = Array.isArray(raw) ? raw.join(",") : raw
+  if (!value) return []
+  const valid = new Set<string>(SYNOPSIS_QUALITIES)
+  return value.split(",").map((p) => p.trim()).filter((p) => valid.has(p))
+}
+
+/** Versões de prompt da previsão (ex.: v3, v2) — filtro "Versão da previsão". */
+function parsePredictionVersions(raw: string | string[] | undefined): string[] {
+  const value = Array.isArray(raw) ? raw.join(",") : raw
+  if (!value) return []
+  return value.split(",").map((p) => p.trim()).filter((p) => /^v\d+$/i.test(p))
+}
+
+/** Delta previsto − atual: valores exatos de "-3" a "3" (níveis ♥). */
+function parsePredictionDeltas(raw: string | string[] | undefined): string[] {
+  const value = Array.isArray(raw) ? raw.join(",") : raw
+  if (!value) return []
+  const valid = new Set(["-3", "-2", "-1", "0", "1", "2", "3"])
+  return value.split(",").map((p) => p.trim()).filter((p) => valid.has(p))
 }
 
 function parseStatusList(
@@ -602,10 +627,11 @@ function IaRkTab({
 }
 
 /**
- * Aba "Interesse Sinopse" — fila de obras com sinopse canônica que precisam de
+ * Aba "Interesse na Obra" — fila de obras com sinopse canônica que precisam de
  * estimativa IA (desatualizada ou não prevista). Mesmo formato de cards da aba
  * Veredito IA. Compartilha os filtros de Status; só os de estado da avaliação não se
- * aplicam.
+ * aplicam. Além de estimar, permite APLICAR a previsão em fila (preenche o
+ * Interesse manual das obras sem rótulo).
  */
 function SynopsisTab({
   works,
@@ -615,6 +641,10 @@ function SynopsisTab({
   personalStatusNames,
   synopsisQualities,
   states,
+  predictionVersions,
+  predictionQualities,
+  predictionDeltas,
+  predictionVersionOptions,
   isPaid,
 }: {
   works: SynopsisQueueWork[]
@@ -624,6 +654,10 @@ function SynopsisTab({
   personalStatusNames: string[]
   synopsisQualities: string[]
   states: SynopsisState[]
+  predictionVersions: string[]
+  predictionQualities: string[]
+  predictionDeltas: string[]
+  predictionVersionOptions: string[]
   isPaid: boolean
 }) {
   return (
@@ -642,6 +676,10 @@ function SynopsisTab({
         showEvalState={false}
         showSynopsisState
         activeSynopsisStates={states}
+        activePredictionVersions={predictionVersions}
+        activePredictionQualities={predictionQualities}
+        activePredictionDeltas={predictionDeltas}
+        predictionVersionOptions={predictionVersionOptions}
       />
       <SynopsisPredictPanel works={works} isPaid={isPaid} />
     </div>
@@ -651,6 +689,81 @@ function SynopsisTab({
 function toParam(v: string | string[] | undefined): string | undefined {
   if (v == null) return undefined
   return Array.isArray(v) ? v.join(",") : v
+}
+
+interface TabHrefs {
+  attr: string
+  rk: string
+  syn: string
+  rev: string
+  tags: string
+}
+
+/** Barra de abas. `counts=null` (fallback do Suspense) mostra "(…)" enquanto os
+ *  contadores carregam — não bloqueia o render do conteúdo da aba ativa. */
+function EvalTabBar({
+  activeTab,
+  hrefs,
+  counts,
+}: {
+  activeTab: string
+  hrefs: TabHrefs
+  counts: { attr: number; iaRk: number; syn: number; rev: number; tags: number } | null
+}) {
+  const n = (v: number | undefined) => (counts ? ` (${v ?? 0})` : " (…)")
+  return (
+    <div className="flex items-center gap-1 border-b border-border/60">
+      <EvalTabLink href={hrefs.attr} active={activeTab === "atributos"}>IA atributos{n(counts?.attr)}</EvalTabLink>
+      <EvalTabLink href={hrefs.rk} active={activeTab === "ia-rk"}>Veredito IA{n(counts?.iaRk)}</EvalTabLink>
+      <EvalTabLink href={hrefs.syn} active={activeTab === "sinopse"}>Interesse na Obra{n(counts?.syn)}</EvalTabLink>
+      <EvalTabLink href={hrefs.rev} active={activeTab === "sem-reviews"}>Sem reviews{n(counts?.rev)}</EvalTabLink>
+      <EvalTabLink href={hrefs.tags} active={activeTab === "sem-tags"}>Sem tags{n(counts?.tags)}</EvalTabLink>
+    </div>
+  )
+}
+
+interface CountArgs {
+  activeFilters: EvaluationFilter[]
+  pubStatusIds: number[]
+  personalStatusIds: number[]
+  synopsisQualities: string[]
+  toleranceOverride: number | null
+  iaRkStates: IaRkState[]
+  synopsisStates: SynopsisState[]
+  predictionVersions: string[]
+  predictionQualities: string[]
+  predictionDeltas: string[]
+  noReviewQ: string
+  hasExternal: "yes" | "no" | null
+  goldenOnly: boolean
+  minReviews: number
+  maxReviews: number
+  minTags: number
+  maxTags: number
+  reviewSort: NonNullable<Parameters<typeof getWorksWithoutReviews>[0]>["sort"]
+  tagsSort: NonNullable<Parameters<typeof getWorksWithoutTags>[0]>["sort"]
+}
+
+/**
+ * Contadores das 5 abas — async, renderizado dentro de um <Suspense> para NÃO
+ * bloquear o conteúdo da aba ativa. As queries são pesadas (full scans), então
+ * fazem streaming: a aba ativa aparece rápido e os números chegam logo depois.
+ */
+async function TabCountsBar({ activeTab, hrefs, args }: { activeTab: string; hrefs: TabHrefs; args: CountArgs }) {
+  const [attr, iaRk, syn, rev, tags] = await Promise.all([
+    getEligibleWorks(args.activeFilters, args.pubStatusIds, args.personalStatusIds, args.synopsisQualities, args.toleranceOverride),
+    getAlignmentQueueWorks({ states: args.iaRkStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities }),
+    getSynopsisQueueWorks({ states: args.synopsisStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities, predictionVersions: args.predictionVersions, predictionQualities: args.predictionQualities, predictionDeltas: args.predictionDeltas, missingManual: args.synopsisQualities.includes("none") }),
+    getWorksWithoutReviews({ q: args.noReviewQ, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, hasExternal: args.hasExternal, goldenOnly: args.goldenOnly, minReviews: args.minReviews, maxReviews: args.maxReviews, interest: args.synopsisQualities, sort: args.reviewSort }),
+    getWorksWithoutTags({ q: args.noReviewQ, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, hasExternal: args.hasExternal, goldenOnly: args.goldenOnly, minTags: args.minTags, maxTags: args.maxTags, interest: args.synopsisQualities, sort: args.tagsSort }),
+  ])
+  return (
+    <EvalTabBar
+      activeTab={activeTab}
+      hrefs={hrefs}
+      counts={{ attr: attr.works.length, iaRk: iaRk.length, syn: syn.length, rev: rev.totalWithoutReviews, tags: tags.totalWithoutTags }}
+    />
+  )
 }
 
 export default async function AiEvaluationPage({
@@ -665,6 +778,9 @@ export default async function AiEvaluationPage({
     tab?: string | string[]
     rk?: string | string[]
     sq?: string | string[]
+    pv?: string | string[]
+    pq?: string | string[]
+    pd?: string | string[]
     q?: string | string[]
     src?: string | string[]
     golden?: string | string[]
@@ -711,6 +827,9 @@ export default async function AiEvaluationPage({
   const synopsisQualities = parseSynopsisQualities(params.synopsis_q)
   const iaRkStates = parseIaRkStates(params.rk)
   const synopsisStates = parseSynopsisStates(params.sq)
+  const predictionVersions = parsePredictionVersions(params.pv)
+  const predictionQualities = parsePredictionQualities(params.pq)
+  const predictionDeltas = parsePredictionDeltas(params.pd)
 
   // Filtros específicos da aba de atributos.
   const activeFilters = parseFilters(params.filter)
@@ -719,56 +838,96 @@ export default async function AiEvaluationPage({
     ? parseInt(toleranceRaw, 10)
     : null
 
-  // Roda as três filas em paralelo. Todas alimentam o contador do título da aba
-  // (precisa estar certo mesmo na aba inativa) e o conteúdo. Queries leves
-  // (~tamanho da biblioteca).
-  const [attrResult, iaRkQueue, synopsisQueue, synopsisAccuracy, synopsisComparison, plan, noReviewResult, noTagsResult] = await Promise.all([
-    getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, synopsisQualities, toleranceOverride),
-    getAlignmentQueueWorks({
-      states: iaRkStates,
-      pubStatusIds,
-      personalStatusIds,
-      synopsisQualities,
-    }),
-    getSynopsisQueueWorks({
-      states: synopsisStates,
-      pubStatusIds,
-      personalStatusIds,
-      synopsisQualities,
-      missingManual: synopsisQualities.includes("none"),
-    }),
-    getSynopsisPredictionAccuracy(),
-    getSynopsisVersionComparison(),
-    getCurrentPlan(),
-    getWorksWithoutReviews({
-      q: noReviewQ,
-      pubStatusIds,
-      personalStatusIds,
-      hasExternal,
-      goldenOnly,
-      minReviews,
-      maxReviews,
-      interest: synopsisQualities,
-      sort: reviewSort,
-    }),
-    getWorksWithoutTags({
-      q: noReviewQ,
-      pubStatusIds,
-      personalStatusIds,
-      hasExternal,
-      goldenOnly,
-      minTags,
-      maxTags,
-      interest: synopsisQualities,
-      sort: tagsSort,
-    }),
-  ])
-  const attrCount = attrResult.works.length
-  const iaRkCount = iaRkQueue.length
-  const synopsisCount = synopsisQueue.length
-  const noReviewCount = noReviewResult.totalWithoutReviews
-  const noTagsCount = noTagsResult.totalWithoutTags
+  // Adiar contadores (Suspense): busca SÓ os dados da aba ATIVA (render rápido).
+  // Os contadores das 5 abas rodam num <Suspense> separado (TabCountsBar), sem
+  // bloquear — a lista da aba ativa aparece e os números chegam depois (streaming).
+  const plan = await getCurrentPlan()
   const isPaidPlan = planAllows(plan, "smart_shortlist")
+
+  let activeContent: ReactNode = null
+  if (activeTab === "sinopse") {
+    const [synopsisQueue, predictionVersionOptions, synopsisAccuracy, synopsisComparison] = await Promise.all([
+      getSynopsisQueueWorks({ states: synopsisStates, pubStatusIds, personalStatusIds, synopsisQualities, predictionVersions, predictionQualities, predictionDeltas, missingManual: synopsisQualities.includes("none") }),
+      getSynopsisPredictionVersions(),
+      getSynopsisPredictionAccuracy(),
+      getSynopsisVersionComparison(),
+    ])
+    activeContent = (
+      <SynopsisTab
+        works={synopsisQueue}
+        accuracy={synopsisAccuracy}
+        comparison={synopsisComparison}
+        pubStatusNames={pubStatusNames}
+        personalStatusNames={personalStatusNames}
+        synopsisQualities={synopsisQualities}
+        states={synopsisStates}
+        predictionVersions={predictionVersions}
+        predictionQualities={predictionQualities}
+        predictionDeltas={predictionDeltas}
+        predictionVersionOptions={predictionVersionOptions}
+        isPaid={isPaidPlan}
+      />
+    )
+  } else if (activeTab === "sem-reviews") {
+    const noReviewResult = await getWorksWithoutReviews({ q: noReviewQ, pubStatusIds, personalStatusIds, hasExternal, goldenOnly, minReviews, maxReviews, interest: synopsisQualities, sort: reviewSort })
+    activeContent = (
+      <SemReviewsTab
+        works={noReviewResult.works}
+        totalWithoutReviews={noReviewResult.totalWithoutReviews}
+        q={noReviewQ}
+        activePubStatuses={pubStatusNames}
+        activePersonalStatuses={personalStatusNames}
+        activeInterest={synopsisQualities}
+        hasExternal={hasExternal}
+        goldenOnly={goldenOnly}
+        minReviews={minReviews}
+        maxReviews={maxReviews}
+        sort={reviewSort}
+      />
+    )
+  } else if (activeTab === "sem-tags") {
+    const noTagsResult = await getWorksWithoutTags({ q: noReviewQ, pubStatusIds, personalStatusIds, hasExternal, goldenOnly, minTags, maxTags, interest: synopsisQualities, sort: tagsSort })
+    activeContent = (
+      <SemTagsTab
+        works={noTagsResult.works}
+        totalWithoutTags={noTagsResult.totalWithoutTags}
+        q={noReviewQ}
+        activePubStatuses={pubStatusNames}
+        activePersonalStatuses={personalStatusNames}
+        activeInterest={synopsisQualities}
+        hasExternal={hasExternal}
+        goldenOnly={goldenOnly}
+        minTags={minTags}
+        maxTags={maxTags}
+        sort={tagsSort}
+      />
+    )
+  } else if (activeTab === "ia-rk") {
+    const iaRkQueue = await getAlignmentQueueWorks({ states: iaRkStates, pubStatusIds, personalStatusIds, synopsisQualities })
+    activeContent = (
+      <IaRkTab
+        works={iaRkQueue}
+        pubStatusNames={pubStatusNames}
+        personalStatusNames={personalStatusNames}
+        synopsisQualities={synopsisQualities}
+        states={iaRkStates}
+        isPaid={isPaidPlan}
+      />
+    )
+  } else {
+    const attrResult = await getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, synopsisQualities, toleranceOverride)
+    activeContent = (
+      <IaAttributesTab
+        works={attrResult.works}
+        activeFilters={activeFilters}
+        promptVersionTolerance={attrResult.promptVersionTolerance}
+        lowConfidenceThreshold={attrResult.lowConfidenceThreshold}
+        pubStatusNames={pubStatusNames}
+        personalStatusNames={personalStatusNames}
+        synopsisQualities={synopsisQualities}
+      />
+    )
+  }
 
   // Preserva os filtros ao trocar de aba.
   const filter = toParam(params.filter)
@@ -778,6 +937,9 @@ export default async function AiEvaluationPage({
   const synq = toParam(params.synopsis_q)
   const rk = toParam(params.rk)
   const sq = toParam(params.sq)
+  const pv = toParam(params.pv)
+  const pq = toParam(params.pq)
+  const pd = toParam(params.pd)
 
   const attrParams = new URLSearchParams()
   if (filter) attrParams.set("filter", filter)
@@ -799,6 +961,9 @@ export default async function AiEvaluationPage({
   if (personal) synParams.set("personal", personal)
   if (synq) synParams.set("synopsis_q", synq)
   if (sq) synParams.set("sq", sq)
+  if (pv) synParams.set("pv", pv)
+  if (pq) synParams.set("pq", pq)
+  if (pd) synParams.set("pd", pd)
   const synHref = `/ai-evaluation?${synParams}`
 
   const noRevParams = new URLSearchParams({ tab: "sem-reviews" })
@@ -825,6 +990,29 @@ export default async function AiEvaluationPage({
   if (params.sortt) noTagsParams.set("sortt", toParam(params.sortt)!)
   const noTagsHref = `/ai-evaluation?${noTagsParams}`
 
+  const hrefs: TabHrefs = { attr: attrHref, rk: rkHref, syn: synHref, rev: noRevHref, tags: noTagsHref }
+  const countArgs: CountArgs = {
+    activeFilters,
+    pubStatusIds,
+    personalStatusIds,
+    synopsisQualities,
+    toleranceOverride,
+    iaRkStates,
+    synopsisStates,
+    predictionVersions,
+    predictionQualities,
+    predictionDeltas,
+    noReviewQ,
+    hasExternal,
+    goldenOnly,
+    minReviews,
+    maxReviews,
+    minTags,
+    maxTags,
+    reviewSort,
+    tagsSort,
+  }
+
   return (
     <div className="space-y-4">
       <Header
@@ -834,83 +1022,11 @@ export default async function AiEvaluationPage({
         icon={<Sparkles />}
       />
 
-      <div className="flex items-center gap-1 border-b border-border/60">
-        <EvalTabLink href={attrHref} active={activeTab === "atributos"}>
-          IA atributos ({attrCount})
-        </EvalTabLink>
-        <EvalTabLink href={rkHref} active={activeTab === "ia-rk"}>
-          Veredito IA ({iaRkCount})
-        </EvalTabLink>
-        <EvalTabLink href={synHref} active={activeTab === "sinopse"}>
-          Interesse Sinopse ({synopsisCount})
-        </EvalTabLink>
-        <EvalTabLink href={noRevHref} active={activeTab === "sem-reviews"}>
-          Sem reviews ({noReviewCount})
-        </EvalTabLink>
-        <EvalTabLink href={noTagsHref} active={activeTab === "sem-tags"}>
-          Sem tags ({noTagsCount})
-        </EvalTabLink>
-      </div>
+      <Suspense fallback={<EvalTabBar activeTab={activeTab} hrefs={hrefs} counts={null} />}>
+        <TabCountsBar activeTab={activeTab} hrefs={hrefs} args={countArgs} />
+      </Suspense>
 
-      {activeTab === "sem-reviews" ? (
-        <SemReviewsTab
-          works={noReviewResult.works}
-          totalWithoutReviews={noReviewResult.totalWithoutReviews}
-          q={noReviewQ}
-          activePubStatuses={pubStatusNames}
-          activePersonalStatuses={personalStatusNames}
-          activeInterest={synopsisQualities}
-          hasExternal={hasExternal}
-          goldenOnly={goldenOnly}
-          minReviews={minReviews}
-          maxReviews={maxReviews}
-          sort={reviewSort}
-        />
-      ) : activeTab === "sem-tags" ? (
-        <SemTagsTab
-          works={noTagsResult.works}
-          totalWithoutTags={noTagsResult.totalWithoutTags}
-          q={noReviewQ}
-          activePubStatuses={pubStatusNames}
-          activePersonalStatuses={personalStatusNames}
-          activeInterest={synopsisQualities}
-          hasExternal={hasExternal}
-          goldenOnly={goldenOnly}
-          minTags={minTags}
-          maxTags={maxTags}
-          sort={tagsSort}
-        />
-      ) : activeTab === "sinopse" ? (
-        <SynopsisTab
-          works={synopsisQueue}
-          accuracy={synopsisAccuracy}
-          comparison={synopsisComparison}
-          pubStatusNames={pubStatusNames}
-          personalStatusNames={personalStatusNames}
-          synopsisQualities={synopsisQualities}
-          states={synopsisStates}
-          isPaid={isPaidPlan}
-        />
-      ) : activeTab === "ia-rk" ? (
-        <IaRkTab
-          works={iaRkQueue}
-          pubStatusNames={pubStatusNames}
-          personalStatusNames={personalStatusNames}
-          synopsisQualities={synopsisQualities}
-          states={iaRkStates}
-          isPaid={isPaidPlan}
-        />
-      ) : (
-        <IaAttributesTab
-          works={attrResult.works}
-          activeFilters={activeFilters}
-          promptVersionTolerance={attrResult.promptVersionTolerance}
-          lowConfidenceThreshold={attrResult.lowConfidenceThreshold}
-          pubStatusNames={pubStatusNames}
-          personalStatusNames={personalStatusNames}
-          synopsisQualities={synopsisQualities}
-        />
-      )}
+      {activeContent}
     </div>
   )
 }

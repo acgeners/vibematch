@@ -31,6 +31,17 @@ const IA_RK_STATE_OPTIONS: Array<{ id: "stale" | "unranked"; label: string; tool
   { id: "unranked", label: "Não avaliado", tooltip: "Ainda não tem Veredito IA (nunca passou pelo re-rank)." },
 ]
 
+// Delta = nível previsto − nível atual (♥=1…♥♥♥♥=4) ⇒ range -3..+3.
+const DELTA_OPTIONS: Array<{ id: string; label: string }> = [
+  { id: "-3", label: "−3" },
+  { id: "-2", label: "−2" },
+  { id: "-1", label: "−1" },
+  { id: "0", label: "0" },
+  { id: "1", label: "+1" },
+  { id: "2", label: "+2" },
+  { id: "3", label: "+3" },
+]
+
 const SYNOPSIS_STATE_OPTIONS: Array<{ id: "stale" | "unpredicted" | "predicted"; label: string; tooltip: string }> = [
   { id: "stale", label: "Desatualizado", tooltip: "Tem previsão, mas ficou velha (perfil de gosto ou sinopse mudou)." },
   { id: "unpredicted", label: "Não previsto", tooltip: "Ainda não tem estimativa de Interesse Sinopse." },
@@ -63,6 +74,14 @@ interface AiEvaluationFiltersProps {
   showSynopsisState?: boolean
   /** Estados de previsão ativos ("stale"/"unpredicted"/"predicted"). */
   activeSynopsisStates?: string[]
+  /** Valores previstos pela IA ativos (♥–♥♥♥♥) — aba Interesse na Obra. */
+  activePredictionQualities?: string[]
+  /** Versões de previsão ativas (ex.: ["v3"]) — aba Interesse na Obra. */
+  activePredictionVersions?: string[]
+  /** Versões de previsão disponíveis (pra montar os chips). */
+  predictionVersionOptions?: string[]
+  /** Deltas previsto−atual ativos ("up"/"eq"/"down") — aba Interesse na Obra. */
+  activePredictionDeltas?: string[]
 }
 
 const PUB_STATUSES = Object.values(PUBLICATION_STATUSES_BY_ID)
@@ -85,6 +104,10 @@ export function AiEvaluationFilters({
   activeIaRkStates = [],
   showSynopsisState = false,
   activeSynopsisStates = [],
+  activePredictionQualities = [],
+  activePredictionVersions = [],
+  predictionVersionOptions = [],
+  activePredictionDeltas = [],
 }: AiEvaluationFiltersProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -159,6 +182,36 @@ export function AiEvaluationFilters({
       if (next.size === 1 && next.has("unpredicted")) params.delete("sq")
       else if (next.size === 0) params.set("sq", "none")
       else params.set("sq", [...next].join(","))
+    })
+  }
+
+  const togglePredictionQuality = (value: string) => {
+    const next = new Set(activePredictionQualities)
+    if (next.has(value)) next.delete(value)
+    else next.add(value)
+    updateParams((params) => {
+      if (next.size === 0) params.delete("pq")
+      else params.set("pq", [...next].join(","))
+    })
+  }
+
+  const togglePredictionVersion = (value: string) => {
+    const next = new Set(activePredictionVersions)
+    if (next.has(value)) next.delete(value)
+    else next.add(value)
+    updateParams((params) => {
+      if (next.size === 0) params.delete("pv")
+      else params.set("pv", [...next].join(","))
+    })
+  }
+
+  const togglePredictionDelta = (value: string) => {
+    const next = new Set(activePredictionDeltas)
+    if (next.has(value)) next.delete(value)
+    else next.add(value)
+    updateParams((params) => {
+      if (next.size === 0) params.delete("pd")
+      else params.set("pd", [...next].join(","))
     })
   }
 
@@ -402,36 +455,119 @@ export function AiEvaluationFilters({
             </div>
           </FilterSection>
 
-          {/* Interesse na sinopse */}
-          <FilterSection title="Interesse na sinopse">
-            <div className="flex flex-wrap items-center gap-1">
-              {SYNOPSIS_QUALITIES.map((q) => {
-                const active = activeSynopsisQualities.includes(q)
-                return (
-                  <button key={q} type="button" onClick={() => toggleSynopsisQuality(q)}>
-                    <Badge
-                      variant={active ? "default" : "outline"}
-                      className="cursor-pointer text-sm"
+          {/* Interesse manual + Previsão da IA + Versão + Δ — lado a lado. Cada um
+              cresce pra preencher mas NÃO encolhe abaixo do conteúdo (sem quebra
+              interna em 2 linhas); se não couberem, a seção inteira vai pra baixo. */}
+          <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-start">
+            <div className="sm:grow sm:shrink-0">
+              <FilterSection title="Interesse na sinopse">
+                <div className="flex flex-wrap items-center gap-1">
+                  {SYNOPSIS_QUALITIES.map((q) => {
+                    const active = activeSynopsisQualities.includes(q)
+                    return (
+                      <button key={q} type="button" onClick={() => toggleSynopsisQuality(q)}>
+                        <Badge
+                          variant={active ? "default" : "outline"}
+                          className="cursor-pointer text-sm"
+                        >
+                          {q}
+                        </Badge>
+                      </button>
+                    )
+                  })}
+                  {/* Triagem manual (só na aba Interesse na Obra): obras ainda sem
+                      Interesse informado (synopsis_quality IS NULL). */}
+                  {showSynopsisState && (
+                    <button type="button" onClick={() => toggleSynopsisQuality("none")}>
+                      <Badge
+                        variant={activeSynopsisQualities.includes("none") ? "default" : "outline"}
+                        className="cursor-pointer text-sm"
+                      >
+                        Não avaliada
+                      </Badge>
+                    </button>
+                  )}
+                  {/* Proveniência legada: tem um valor de Interesse não-confirmado
+                      (source=legacy_unknown) — separa dos human_manual. */}
+                  {showSynopsisState && (
+                    <button
+                      type="button"
+                      onClick={() => toggleSynopsisQuality("unknown")}
+                      title="Tem um valor de Interesse de proveniência legada/não-confirmada (não definido por você)"
                     >
-                      {q}
-                    </Badge>
-                  </button>
-                )
-              })}
-              {/* Triagem manual (só na aba Interesse Sinopse): obras ainda sem
-                  Interesse informado (synopsis_quality IS NULL). */}
-              {showSynopsisState && (
-                <button type="button" onClick={() => toggleSynopsisQuality("none")}>
-                  <Badge
-                    variant={activeSynopsisQualities.includes("none") ? "default" : "outline"}
-                    className="cursor-pointer text-sm"
-                  >
-                    Não avaliada
-                  </Badge>
-                </button>
-              )}
+                      <Badge
+                        variant={activeSynopsisQualities.includes("unknown") ? "default" : "outline"}
+                        className="cursor-pointer text-sm"
+                      >
+                        Desconhecido
+                      </Badge>
+                    </button>
+                  )}
+                </div>
+              </FilterSection>
             </div>
-          </FilterSection>
+
+            {/* Previsão da IA (valor previsto) — separado do Interesse manual ao lado. */}
+            {showSynopsisState && (
+              <div className="sm:grow sm:shrink-0">
+                <FilterSection title="Previsão da IA">
+                  <div className="flex flex-wrap items-center gap-1">
+                    {SYNOPSIS_QUALITIES.map((q) => {
+                      const active = activePredictionQualities.includes(q)
+                      return (
+                        <button key={q} type="button" onClick={() => togglePredictionQuality(q)}>
+                          <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-sm">
+                            {q}
+                          </Badge>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </FilterSection>
+              </div>
+            )}
+
+            {/* Versão da previsão (prompt_version da previsão ativa). */}
+            {showSynopsisState && predictionVersionOptions.length > 0 && (
+              <div className="sm:grow sm:shrink-0">
+                <FilterSection title="Versão da previsão">
+                  <div className="flex flex-wrap items-center gap-1">
+                    {predictionVersionOptions.map((v) => {
+                      const active = activePredictionVersions.includes(v)
+                      return (
+                        <button key={v} type="button" onClick={() => togglePredictionVersion(v)}>
+                          <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-xs">
+                            {v}
+                            {v === currentPromptVersion ? " (atual)" : ""}
+                          </Badge>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </FilterSection>
+              </div>
+            )}
+
+            {/* Δ Previsto × atual = nível previsto − nível atual (manual/desconhecido), range -3..+3. */}
+            {showSynopsisState && (
+              <div className="sm:grow sm:shrink-0">
+                <FilterSection title="Δ Previsto × atual">
+                  <div className="flex flex-wrap items-center gap-1">
+                    {DELTA_OPTIONS.map((opt) => {
+                      const active = activePredictionDeltas.includes(opt.id)
+                      return (
+                        <button key={opt.id} type="button" onClick={() => togglePredictionDelta(opt.id)}>
+                          <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-xs tabular-nums">
+                            {opt.label}
+                          </Badge>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </FilterSection>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </TooltipProvider>
