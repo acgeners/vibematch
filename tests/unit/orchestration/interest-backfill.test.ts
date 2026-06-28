@@ -151,6 +151,28 @@ describe("planner — assinatura e estados", () => {
     expect(plan.fresh).toBe(1)
   })
 
+  it("6b) regressão (bug do digest): obra com digest, previsão feita COM o digest, fica fresh", async () => {
+    // O predict path real injeta o review_digest na input_signature (extraSources).
+    // A classificação do planner PRECISA incluir o digest também — senão TODA obra
+    // com digest casa errado e é descartada/re-prevista (era o bug em 3 call-sites).
+    const gw = new PlanGateway()
+    const w = work("wd", { reviewDigest: "Consenso dos leitores: romance lento, vilã carismática." })
+    gw.works = [w]
+    const realSig = computeInterestInputSignature({
+      workId: w.workId, profileSignature: CUR_SIG, title: w.title,
+      synopsis: w.canonicalSynopsis!, synopsisSource: "canonical", tags: w.tags,
+      model: MODEL, promptVersion: PROMPT_VERSION, schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
+      extraSources: { reviewDigest: w.reviewDigest! },
+    })
+    // Sanidade: a assinatura SEM digest difere — prova que o digest participa.
+    expect(realSig).not.toBe(sigFor(w, CUR_SIG))
+    gw.predictions.set(w.workId, { predictedQuality: "♥♥♥", inputSignature: realSig, tasteProfileHash: CUR_SIG, stale: false })
+    const plan = await planInterestBackfill({ gateway: gw })
+    expect(plan.fresh).toBe(1)
+    expect(plan.stale).toBe(0)
+    expect(plan.itemsToPredict).toHaveLength(0)
+  })
+
   it("7) perfil stale ⇒ refresh + TODAS as elegíveis", async () => {
     const gw = new PlanGateway(); gw.works = [work("w1"), work("w2")]
     gw.profile = { current: profileRow("OLD"), libraryInputHash: "NEW", ratedWorksCount: 50 } // stale
