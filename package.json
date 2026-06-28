@@ -14,6 +14,8 @@
     "sync-constants": "node scripts/sync-constants.js",
     "resolve-comix-hids": "node scripts/resolve-comix-hids.mjs",
     "backfill:interest": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-work-data.ts",
+    "e1:scope": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/e1-prod-scope.ts",
+    "e1:digest": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/e1-prod-digest.ts",
     "recalc:scores": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/recalculate-scores.ts",
     "digest:golden": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/golden-digest-batch.ts",
     "reading-status:auto": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/reading-status-auto.ts",

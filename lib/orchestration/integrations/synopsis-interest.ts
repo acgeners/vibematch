@@ -350,6 +350,9 @@ export async function ensurePredictInterest(
             model: PREDICT_MODEL,
             promptVersion: PREDICT_PROMPT_VERSION,
             schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
+            // Frente 3: o digest entra na assinatura (igual ao cálculo original
+            // acima) — senão TODA obra com digest divergiria e seria descartada.
+            extraSources: w2.reviewDigest ? { reviewDigest: w2.reviewDigest } : undefined,
           })
         : null
       if (sig2 !== signature) {

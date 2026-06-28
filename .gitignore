@@ -73,3 +73,4 @@ lib/synopsis-interest/labeling-sheet.*
 
 # Estado temporário do Supabase CLI — não versionar
 supabase/.temp/
+infer-tags-proposals.csv

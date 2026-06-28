@@ -416,6 +416,9 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
       model: PREDICT_MODEL,
       promptVersion: PREDICT_PROMPT_VERSION,
       schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
+      // Frente 3: o digest entra na assinatura real da previsão; a classificação
+      // precisa incluí-lo, senão obras com digest nunca casam (fresh→stale falso).
+      extraSources: w.reviewDigest ? { reviewDigest: w.reviewDigest } : undefined,
     })
     const stored = predictions.get(w.workId) ?? null
     const state = classifyWorkPredictState({ stored, expectedSignature: classifySig, currentProfileSignature })
@@ -449,6 +452,7 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
             model: PREDICT_MODEL,
             promptVersion: PREDICT_PROMPT_VERSION,
             schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
+            extraSources: w.reviewDigest ? { reviewDigest: w.reviewDigest } : undefined,
           })
         : classifySig
     items.push({
