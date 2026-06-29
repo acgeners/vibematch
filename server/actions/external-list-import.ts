@@ -1,6 +1,6 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
+import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { markRecalcPending } from "@/server/actions/recalc-queue"
 import {
@@ -335,6 +335,7 @@ export async function commitExternalListImport(
     revalidatePath("/")
     revalidatePath("/ranking")
     revalidatePath("/ai-evaluation")
+    revalidateTag("ai-eval-tab-counts", "max")
 
     return { data: result }
   } catch (err) {

@@ -1,6 +1,6 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
+import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { generateTasteProfile, rankFavorites, MODEL, PROMPT_VERSION } from "@/lib/ai-recommendation/service"
 import { type RankingFilters } from "@/server/queries/ranking"
@@ -689,6 +689,7 @@ export async function rerankWorksBatchAction(
     revalidatePath("/ranking/desatualizados")
     revalidatePath("/favorites")
     revalidatePath("/ai-evaluation")
+    revalidateTag("ai-eval-tab-counts", "max")
 
     return {
       data: {

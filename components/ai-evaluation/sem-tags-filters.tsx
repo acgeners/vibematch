@@ -1,12 +1,11 @@
 "use client"
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
-import { useTransition } from "react"
+import { useState, useTransition } from "react"
 import { ArrowDown, ArrowUp, Search, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { cn } from "@/lib/utils"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { PERSONAL_STATUSES, SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { NoTagsSort, NoTagsSortKey } from "@/lib/tags/no-tags-classify"
@@ -18,6 +17,18 @@ const SORT_OPTIONS: { key: NoTagsSortKey; label: string }[] = [
   { key: "expected", label: "Nota prevista" },
   { key: "tags", label: "Nº tags" },
 ]
+
+/** Rascunho local dos filtros — espelha os props (URL aplicada) e só vai pra URL no "Aplicar". */
+interface Draft {
+  q: string
+  pub: string[]
+  personal: string[]
+  interest: string[]
+  src: "yes" | "no" | null
+  golden: boolean
+  min: number
+  max: number
+}
 
 export function SemTagsFilters({
   q,
@@ -45,42 +56,88 @@ export function SemTagsFilters({
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
 
-  function commit(next: URLSearchParams) {
-    next.set("tab", "sem-tags")
-    startTransition(() => router.replace(`${pathname}?${next.toString()}`, { scroll: false }))
+  // Filtros são um RASCUNHO local (staged): mexer nos chips/campos só altera o
+  // estado local; nada navega/bate no banco até clicar "Aplicar". Assim ajusta-se
+  // vários filtros com UMA navegação/refetch só. A ORDENAÇÃO é exceção: aplica no
+  // clique (ação única), levando o rascunho pendente junto pra não perder edições.
+  const makeDraft = (): Draft => ({
+    q,
+    pub: activePubStatuses,
+    personal: activePersonalStatuses,
+    interest: activeInterest,
+    src: hasExternal,
+    golden: goldenOnly,
+    min: minTags,
+    max: maxTags,
+  })
+  const [draft, setDraft] = useState<Draft>(makeDraft)
+  // Re-semeia quando a URL aplicada (props) muda — após Aplicar / troca de aba.
+  const propsSignature = JSON.stringify([q, activePubStatuses, activePersonalStatuses, activeInterest, hasExternal, goldenOnly, minTags, maxTags])
+  const [seenSignature, setSeenSignature] = useState(propsSignature)
+  if (propsSignature !== seenSignature) {
+    setSeenSignature(propsSignature)
+    setDraft(makeDraft())
   }
-  function setParam(key: string, value: string | null) {
-    const next = new URLSearchParams(searchParams.toString())
-    if (value == null || value === "") next.delete(key)
-    else next.set(key, value)
-    commit(next)
+
+  // Serializa o rascunho na URL (preserva params não-gerenciados; força tab).
+  const buildParams = (d: Draft): URLSearchParams => {
+    const p = new URLSearchParams(searchParams.toString())
+    p.set("tab", "sem-tags")
+    const setOrDel = (key: string, value: string | null) => {
+      if (value == null || value === "") p.delete(key)
+      else p.set(key, value)
+    }
+    setOrDel("q", d.q.trim() || null)
+    setOrDel("pub", d.pub.length ? d.pub.join(",") : null)
+    setOrDel("personal", d.personal.length ? d.personal.join(",") : null)
+    setOrDel("synopsis_q", d.interest.length ? d.interest.join(",") : null)
+    setOrDel("src", d.src)
+    setOrDel("golden", d.golden ? "1" : null)
+    setOrDel("mintags", d.min > 0 ? String(d.min) : null)
+    setOrDel("maxtags", d.max > 0 ? String(d.max) : null)
+    return p
   }
-  function toggleInSet(key: string, active: string[], value: string) {
-    const set = new Set(active)
-    if (set.has(value)) set.delete(value)
-    else set.add(value)
-    setParam(key, set.size > 0 ? [...set].join(",") : null)
+
+  const navigate = (p: URLSearchParams) => {
+    startTransition(() => router.replace(`${pathname}?${p.toString()}`, { scroll: false }))
   }
-  function setCount(key: string, raw: string, current: number) {
-    const n = Math.max(0, Math.floor(Number(raw)))
-    if (n === current) return
-    setParam(key, Number.isFinite(n) && n > 0 ? String(n) : null)
+
+  const apply = () => navigate(buildParams(draft))
+
+  // Há mudanças não aplicadas? Compara a assinatura das chaves de filtro (sort à parte).
+  const OWNED_KEYS = ["q", "pub", "personal", "synopsis_q", "src", "golden", "mintags", "maxtags"]
+  const ownedSig = (p: URLSearchParams) => OWNED_KEYS.map((k) => `${k}=${p.get(k) ?? ""}`).join("&")
+  const isDirty = ownedSig(buildParams(draft)) !== ownedSig(new URLSearchParams(searchParams.toString()))
+
+  const toggleIn = (list: string[], value: string) =>
+    list.includes(value) ? list.filter((x) => x !== value) : [...list, value]
+
+  const clearAll = () => {
+    setDraft({ q: "", pub: [], personal: [], interest: [], src: null, golden: false, min: 0, max: 0 })
+    const p = new URLSearchParams()
+    p.set("tab", "sem-tags")
+    navigate(p)
   }
-  function setSort(key: NoTagsSortKey) {
+
+  // Ordenação aplica no clique (instantâneo), carregando o rascunho pendente junto.
+  const setSort = (key: NoTagsSortKey) => {
     const dir: "asc" | "desc" = sort.key === key ? (sort.dir === "asc" ? "desc" : "asc") : key === "title" ? "asc" : "desc"
     const isDefault = key === "title" && dir === "asc"
-    setParam("sortt", isDefault ? null : `${key}-${dir}`)
+    const p = buildParams(draft)
+    if (isDefault) p.delete("sortt")
+    else p.set("sortt", `${key}-${dir}`)
+    navigate(p)
   }
 
   const hasAny =
-    q ||
-    activePubStatuses.length > 0 ||
-    activePersonalStatuses.length > 0 ||
-    activeInterest.length > 0 ||
-    hasExternal != null ||
-    goldenOnly ||
-    minTags > 0 ||
-    maxTags > 0 ||
+    draft.q ||
+    draft.pub.length > 0 ||
+    draft.personal.length > 0 ||
+    draft.interest.length > 0 ||
+    draft.src != null ||
+    draft.golden ||
+    draft.min > 0 ||
+    draft.max > 0 ||
     sort.key !== "title" ||
     sort.dir !== "asc"
 
@@ -90,27 +147,32 @@ export function SemTagsFilters({
         <div className="relative flex-1">
           <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            key={q}
-            defaultValue={q}
-            onKeyDown={(e) => { if (e.key === "Enter") setParam("q", (e.target as HTMLInputElement).value.trim() || null) }}
-            onBlur={(e) => { const v = e.target.value.trim(); if (v !== q) setParam("q", v || null) }}
+            value={draft.q}
+            onChange={(e) => setDraft((d) => ({ ...d, q: e.target.value }))}
+            onKeyDown={(e) => { if (e.key === "Enter") apply() }}
             placeholder="Buscar por título…"
             className="pl-8"
             aria-label="Buscar por título"
           />
         </div>
+        {isDirty && !isPending && (
+          <span className="text-[11px] font-medium text-amber-600 dark:text-amber-500">alterações não aplicadas</span>
+        )}
         {hasAny ? (
-          <Button variant="ghost" size="sm" onClick={() => commit(new URLSearchParams())} disabled={isPending}>
+          <Button variant="ghost" size="sm" onClick={clearAll} disabled={isPending}>
             <X className="mr-1 h-3.5 w-3.5" /> Limpar
           </Button>
         ) : null}
+        <Button size="sm" onClick={apply} disabled={!isDirty || isPending}>
+          {isPending ? "Aplicando…" : "Aplicar"}
+        </Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-xs text-muted-foreground">Publicação:</span>
         {PUB_OPTIONS.map((s) => (
-          <button key={s} type="button" onClick={() => toggleInSet("pub", activePubStatuses, s)} disabled={isPending}>
-            <Badge variant={activePubStatuses.includes(s) ? "default" : "outline"} className={cn("cursor-pointer", isPending && "opacity-60")}>
+          <button key={s} type="button" onClick={() => setDraft((d) => ({ ...d, pub: toggleIn(d.pub, s) }))} disabled={isPending}>
+            <Badge variant={draft.pub.includes(s) ? "default" : "outline"} className="cursor-pointer">
               {s}
             </Badge>
           </button>
@@ -120,8 +182,8 @@ export function SemTagsFilters({
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-xs text-muted-foreground">Leitura:</span>
         {PERSONAL_STATUSES.map((s) => (
-          <button key={s} type="button" onClick={() => toggleInSet("personal", activePersonalStatuses, s)} disabled={isPending}>
-            <Badge variant={activePersonalStatuses.includes(s) ? "default" : "outline"} className={cn("cursor-pointer", isPending && "opacity-60")}>
+          <button key={s} type="button" onClick={() => setDraft((d) => ({ ...d, personal: toggleIn(d.personal, s) }))} disabled={isPending}>
+            <Badge variant={draft.personal.includes(s) ? "default" : "outline"} className="cursor-pointer">
               {s}
             </Badge>
           </button>
@@ -131,14 +193,14 @@ export function SemTagsFilters({
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-xs text-muted-foreground">Interesse:</span>
         {SYNOPSIS_QUALITIES.map((s) => (
-          <button key={s} type="button" onClick={() => toggleInSet("synopsis_q", activeInterest, s)} disabled={isPending}>
-            <Badge variant={activeInterest.includes(s) ? "default" : "outline"} className="cursor-pointer text-sm">
+          <button key={s} type="button" onClick={() => setDraft((d) => ({ ...d, interest: toggleIn(d.interest, s) }))} disabled={isPending}>
+            <Badge variant={draft.interest.includes(s) ? "default" : "outline"} className="cursor-pointer text-sm">
               {s}
             </Badge>
           </button>
         ))}
-        <button type="button" onClick={() => toggleInSet("synopsis_q", activeInterest, "none")} disabled={isPending}>
-          <Badge variant={activeInterest.includes("none") ? "default" : "outline"} className="cursor-pointer">
+        <button type="button" onClick={() => setDraft((d) => ({ ...d, interest: toggleIn(d.interest, "none") }))} disabled={isPending}>
+          <Badge variant={draft.interest.includes("none") ? "default" : "outline"} className="cursor-pointer">
             Não avaliada
           </Badge>
         </button>
@@ -146,38 +208,36 @@ export function SemTagsFilters({
 
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-xs text-muted-foreground">Fonte externa:</span>
-        <button type="button" onClick={() => setParam("src", hasExternal === "yes" ? null : "yes")} disabled={isPending}>
-          <Badge variant={hasExternal === "yes" ? "default" : "outline"} className="cursor-pointer">Possui</Badge>
+        <button type="button" onClick={() => setDraft((d) => ({ ...d, src: d.src === "yes" ? null : "yes" }))} disabled={isPending}>
+          <Badge variant={draft.src === "yes" ? "default" : "outline"} className="cursor-pointer">Possui</Badge>
         </button>
-        <button type="button" onClick={() => setParam("src", hasExternal === "no" ? null : "no")} disabled={isPending}>
-          <Badge variant={hasExternal === "no" ? "default" : "outline"} className="cursor-pointer">Sem fonte aceita</Badge>
+        <button type="button" onClick={() => setDraft((d) => ({ ...d, src: d.src === "no" ? null : "no" }))} disabled={isPending}>
+          <Badge variant={draft.src === "no" ? "default" : "outline"} className="cursor-pointer">Sem fonte aceita</Badge>
         </button>
         <span className="ml-3 text-xs text-muted-foreground">Golden:</span>
-        <button type="button" onClick={() => setParam("golden", goldenOnly ? null : "1")} disabled={isPending}>
-          <Badge variant={goldenOnly ? "default" : "outline"} className="cursor-pointer">Só golden pilot-1</Badge>
+        <button type="button" onClick={() => setDraft((d) => ({ ...d, golden: !d.golden }))} disabled={isPending}>
+          <Badge variant={draft.golden ? "default" : "outline"} className="cursor-pointer">Só golden pilot-1</Badge>
         </button>
         <span className="ml-3 text-xs text-muted-foreground">Tags (mín/máx):</span>
         <Input
-          key={`min-${minTags}`}
           type="number"
           min={0}
           step={1}
-          defaultValue={minTags}
-          onKeyDown={(e) => { if (e.key === "Enter") setCount("mintags", (e.target as HTMLInputElement).value, minTags) }}
-          onBlur={(e) => setCount("mintags", e.target.value, minTags)}
+          value={draft.min || ""}
+          onChange={(e) => setDraft((d) => ({ ...d, min: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))}
+          onKeyDown={(e) => { if (e.key === "Enter") apply() }}
           disabled={isPending}
           className="h-7 w-16"
           aria-label="Mínimo de tags"
         />
         <span className="text-xs text-muted-foreground">–</span>
         <Input
-          key={`max-${maxTags}`}
           type="number"
           min={0}
           step={1}
-          defaultValue={maxTags}
-          onKeyDown={(e) => { if (e.key === "Enter") setCount("maxtags", (e.target as HTMLInputElement).value, maxTags) }}
-          onBlur={(e) => setCount("maxtags", e.target.value, maxTags)}
+          value={draft.max || ""}
+          onChange={(e) => setDraft((d) => ({ ...d, max: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))}
+          onKeyDown={(e) => { if (e.key === "Enter") apply() }}
           disabled={isPending}
           className="h-7 w-16"
           aria-label="Máximo de tags"

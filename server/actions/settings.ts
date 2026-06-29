@@ -153,6 +153,7 @@ export async function updateAiEvalPreferences(update: AiEvalPreferencesUpdate) {
 
   revalidatePath("/settings")
   revalidatePath("/ai-evaluation")
+  revalidateTag("ai-eval-tab-counts", "max")
   return { error: null }
 }
 

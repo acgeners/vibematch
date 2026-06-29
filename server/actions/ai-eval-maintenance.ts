@@ -1,6 +1,6 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
+import { revalidatePath, revalidateTag } from "next/cache"
 import { acquireAndPersistWorkReviews } from "@/lib/external/acquire-reviews"
 import { inferAndPersistTagsForWork } from "@/lib/tags/auto-infer"
 import { generateWorkReviewDigest } from "@/server/actions/review-digest"
@@ -31,6 +31,7 @@ export async function acquireReviewsForWork(workId: string): Promise<AcquireRevi
   // reportar o status — o gate por conteúdo/versão evita regerar (sem custo duplo).
   const d = await generateWorkReviewDigest(workId)
   revalidatePath("/ai-evaluation")
+  revalidateTag("ai-eval-tab-counts", "max")
   return { ok: true, reviews, digest: d.status, message: `${reviews} review(s); digest: ${d.status}` }
 }
 
@@ -61,6 +62,7 @@ export async function acquireReviewsForWorks(workIds: string[]): Promise<Acquire
     }
   }
   revalidatePath("/ai-evaluation")
+  revalidateTag("ai-eval-tab-counts", "max")
   return { processed, reviews, digested, failed, capped: (workIds ?? []).length > REVIEWS_BATCH_CAP }
 }
 
@@ -80,6 +82,7 @@ export async function inferTagsForWork(workId: string): Promise<InferTagsResult>
   const added = await inferAndPersistTagsForWork(workId)
   if (added > 0) await markRecalcPending("infer_tags_ai_eval")
   revalidatePath("/ai-evaluation")
+  revalidateTag("ai-eval-tab-counts", "max")
   return { ok: true, added, message: `${added} tag(s) inferida(s)` }
 }
 
@@ -107,5 +110,6 @@ export async function inferTagsForWorks(workIds: string[]): Promise<InferTagsBat
   }
   if (added > 0) await markRecalcPending("infer_tags_ai_eval_batch")
   revalidatePath("/ai-evaluation")
+  revalidateTag("ai-eval-tab-counts", "max")
   return { processed, added, failed, capped: (workIds ?? []).length > TAGS_BATCH_CAP }
 }
