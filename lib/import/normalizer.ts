@@ -50,6 +50,8 @@ export function normalizePersonalStatus(
     "want-to-read": "Want to Read",
     "want to read": "Want to Read",
     "untracked": "Untracked",
+    "not_now": "Not Now",
+    "not now": "Not Now",
     "reading": "Reading",
     "started": "Started",
     "stalled": "Stalled",

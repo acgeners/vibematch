@@ -11,6 +11,18 @@
 > contrato da previsão antes de qualquer novo gasto, e definir **uma** sequência de
 > trabalho. **Nenhuma implementação funcional aqui.**
 
+> **🟢 ESTADO AUTORITATIVO 2026-06-28 — ler ANTES de tudo (inclusive do banner 06-23 abaixo).**
+> Duas viradas posteriores ao corpo deste doc invalidam decisões registradas como fechadas:
+> **(1)** a **golden-3 (n=180, 2026-06-25)** reverteu o veredito do digest — ΔMAE e1−b1 = **−0,211
+> [IC95 −0,311; −0,117, exclui 0]** ⇒ **GO** para ligar o digest **no preditor de Interesse**.
+> **(2)** o **e1 entrou em produção** (`PROMPT_VERSION="v3"`, PRs #15/#18, 414/758 obras backfilladas,
+> ~$7,1) em 2026-06-27/28. **Consequências:** P1 (§15) está **invertido** (digest **ENTRA** no
+> Interesse; **NÃO** na Nota Prevista/Ridge — ablação mostrou redundância); `runDigestBatch` (G2) e o
+> **digest** estão revisitados (digest virou input do e1; cobertura **medida 2026-06-28 = 481/773 = 62%**,
+> não os 2% do doc de 06-18 — resta só a cauda reviewável ~60–130 obras); a decisão **D2 "adiar digest"** está **superseded**; o "**~622** pendentes de Interesse"
+> está **obsoleto** (Lote 02 fez **757/757**). Branches WIP triadas: 4 obsoletas apagadas, só
+> `feat/shadow-ranking` é única. **Detalhe completo + próximos passos em [§24m](#24m) (topo do bloco de addenda) e no [STATUS-2026-06-28.md](STATUS-2026-06-28.md).**
+
 > **⚠️ ATUALIZAÇÃO 2026-06-23 — ler antes de §3/§20/§21/§22.** O experimento do Plano 3
 > **foi concluído** sobre um golden **prospectivo** (pilot-2) que **supersede** o pilot-1
 > citado nas seções abaixo. §3, §20, §21 e §22 descrevem o estado de **2026-06-19**
@@ -30,8 +42,8 @@
 
 Três frentes derivaram de [AUDIT_REPORT.md](AUDIT_REPORT.md) e se entrelaçaram:
 
-1. **Arquitetura/orquestração de dados** ([ARQUITETURA-ORQUESTRACAO.md](ARQUITETURA-ORQUESTRACAO.md), derivada de [AUDITORIA-CICLO-VIDA-DADOS.md](AUDITORIA-CICLO-VIDA-DADOS.md)).
-2. **Backfill das obras existentes** (Potencial de Interesse) — [PLANO-BACKFILL-ORQUESTRADO.md](PLANO-BACKFILL-ORQUESTRADO.md), [PILOTO-BACKFILL-INTERESSE.md](PILOTO-BACKFILL-INTERESSE.md), [LOTE-01-BACKFILL-INTERESSE.md](LOTE-01-BACKFILL-INTERESSE.md).
+1. **Arquitetura/orquestração de dados** ([ARQUITETURA-ORQUESTRACAO.md](docs/archive/ARQUITETURA-ORQUESTRACAO.md), derivada de [AUDITORIA-CICLO-VIDA-DADOS.md](AUDITORIA-CICLO-VIDA-DADOS.md)).
+2. **Backfill das obras existentes** (Potencial de Interesse) — [PLANO-BACKFILL-ORQUESTRADO.md](docs/archive/PLANO-BACKFILL-ORQUESTRADO.md), [PILOTO-BACKFILL-INTERESSE.md](docs/archive/PILOTO-BACKFILL-INTERESSE.md), [LOTE-01-BACKFILL-INTERESSE.md](docs/archive/LOTE-01-BACKFILL-INTERESSE.md).
 3. **Plano 3 — Interesse na Sinopse** (otimização do `synopsis_quality_predict`; materiais em [lib/synopsis-interest/](lib/synopsis-interest/)).
 
 O conflito a resolver: o plano **previa** `review_digest` como entrada **futura/opcional** do Potencial de Interesse, mas o **predictor atual e as 112 primeiras previsões NÃO usam digest**. Não rodar novos lotes pagos antes de congelar o contrato final da previsão.
@@ -232,7 +244,7 @@ Versões: **model `claude-sonnet-4-6` · prompt `v2` · schema `v1`**.
 
 ## 8. Desvio entre arquitetura aprovada e implementação
 
-Comparando [ARQUITETURA-ORQUESTRACAO.md](ARQUITETURA-ORQUESTRACAO.md) / [AUDITORIA-CICLO-VIDA-DADOS.md](AUDITORIA-CICLO-VIDA-DADOS.md) com o código:
+Comparando [ARQUITETURA-ORQUESTRACAO.md](docs/archive/ARQUITETURA-ORQUESTRACAO.md) / [AUDITORIA-CICLO-VIDA-DADOS.md](AUDITORIA-CICLO-VIDA-DADOS.md) com o código:
 
 | # | Decisão documentada | Implementação atual | Classificação |
 |---|---|---|---|
@@ -389,7 +401,7 @@ FASE 2B — Finalizar o backfill de Interesse (SÓ após o winner)
 
 | # | Decisão | Recomendação 🟧 |
 |---|---|---|
-| P1 | Digest entra no contrato vencedor? | **RATIFICADO 2026-06-23: NÃO** — contrato = `b1` (Sonnet, sem digest). Backfill de digest das 489 **dispensado**. Ver §24i |
+| P1 | Digest entra no contrato vencedor? | ⚠️ **REVISTO 2026-06-28 (§24m): SIM no preditor de Interesse** — golden-3 (n=180) deu GO; e1/`v3` em produção. **NÃO na Nota Prevista** (Ridge, redundante por ablação). Backfill de digest **REABERTO**. _(Histórico: RATIFICADO 2026-06-23 NÃO/`b1` a n=90 com IC⊃0 — ver §24i.)_ |
 | P2 | Modelo do predictor: manter Sonnet ou testar Haiku/determinístico (AUDIT F10/§18)? | incluir Haiku e D1/D2 como candidatos baratos na comparação |
 | P3 | Construir `runDigestBatch` agora (G2) ou usar per-work no golden? | per-work/IDs no golden basta p/ o experimento; `runDigestBatch` só se o digest vencer |
 | P4 | Auto-refresh de previsões pós-perfil (G4/AUDITORIA §13) ou seguir com lotes manuais? | seguir com lotes manuais até o contrato congelar; reavaliar depois |
@@ -457,7 +469,7 @@ Estados: `completed · partial · blocked · planned · deferred · not_applicab
 | Arquitetura | Fase B p3 (taste_profile) | completed | integrations/taste-profile.ts; `809f3ff` | — | — |
 | Arquitetura | Fase B p4 (predict_interest) | completed | synopsis-interest.ts; `3868041`/`3df82d5` | — | — |
 | Arquitetura | Fase B p5 (recalculate_scores) | completed | recalculate-scores.ts; `572d3b4`/`aa70bb7` | — | — |
-| Arquitetura | `runDigestBatch`/`planDigestBatch` (lote orquestrado) | planned | PLANO-BACKFILL §7/§10/§30; **ausente** no código (G2) | construir SÓ se digest vencer | backfill de digest das 489 (não o experimento) |
+| Arquitetura | `runDigestBatch`/`planDigestBatch` (lote orquestrado) | **REABERTO (§24m)** ⚠️ | PLANO-BACKFILL §7/§10/§30; **ausente** no código (G2) | **construir — digest venceu (golden-3); é o que falta p/ backfillar digest do catálogo** | backfill de digest das 489 |
 | Arquitetura | migrar lote legado de digest p/ orquestração | partial | `consolidatePendingReviewDigests` bypassa o gate (G3) | substituir após winner | nada crítico hoje |
 | Arquitetura | Interest sem digest = `ready_partial` (caso §2) | deferred | digest não é input do contrato (G1) | reabrir no contrato do winner | nada (decisão de design) |
 | Backfill | inventário + dry-run + custo | completed | PLANO-BACKFILL §1–4; `dd30a66` | — | — |
@@ -466,7 +478,7 @@ Estados: `completed · partial · blocked · planned · deferred · not_applicab
 | Backfill | recalc headless-safe (2B.2) | completed | `recalculateScoresHeadless`; `recalc_pending=false`; `0ed84d6` | — | — |
 | Backfill | Lote 01 (100 obras, 2C.2) | completed | LOTE-01 §RESULTADO; $0.75; 112 modernas; `aedb4d5` | — | — |
 | Backfill | **Lote 02 (catálogo inteiro)** | completed (§24j) | 757/757 ($5.86), perfil v8, recalc ok (2026-06-23) | — | — |
-| Backfill | backfill de digest das 489 | deferred | decisão D2; 489 sem digest (🟩) | condicional ao winner | só fluxos pagos (ranker/deep-dive) |
+| Backfill | digest da cauda reviewável | **REVISTO (§24m)** ⚠️ | D2 superseded; mas digest **já cobre 481/773 = 62%** (medido 06-28) — resta ~60–130 obras reviewáveis | completar a cauda (~$1–3) + re-prever obras antigas em `v3` | qualidade do e1 na cauda |
 | Plano 3 | proveniência synopsis_quality (c1) | completed | migration 108; `2a5003a` | — | — |
 | Plano 3 | golden sample + rúbrica (c2) | completed | golden-sample.pilot-1.json (FROZEN); `9c70621` | — | — |
 | Plano 3 | rotulagem cega (fluxo) (c3) | completed | labeling-sheet; `03476ac` | — | — |
@@ -609,9 +621,67 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 
 ---
 
+<a id="24m"></a>
+## 24m. Addendum — Virada do digest (golden-3) + e1 em produção + triagem de branches — ✅ ESTADO AUTORITATIVO (2026-06-28)
+
+> **Addendum mais recente — fonte de verdade deste doc.** Reconcilia o corpo (congelado em 06-19,
+> com addenda até §24l/06-25) com as duas viradas posteriores. Onde este addendum conflita com o
+> corpo ou com §24i, **este prevalece**.
+
+### 1. A virada: golden-3 (n=180) inverteu o veredito do digest
+- O pilot-2 (§24i, n=90) deixou e1 (com digest) vs b1 (sem) **inconclusivo** (IC⊃0). Coletou-se mais
+  rótulo → **golden-3, n=180** (digest-v1 de produção, 2026-06-25): **ΔMAE e1−b1 = −0,211
+  [IC95 −0,311; −0,117]** — **exclui 0**, material. MAE ordinal **b1 0,667 → e1 0,456**;
+  exact/QWK/ρ/pairwise todos melhoram (0,41→0,59 / 0,40→0,52 / 0,41→0,57 / 0,77→0,88).
+- Robusto sem reuso (n=129: −0,202), bucket fino 2–4 (−0,255) e rico 10+ (−0,217). Holdout (72)
+  tangencia 0 ([−0,319; 0]). Custo real: digests $3,59 + predições $2,91.
+- **Ressalva honesta:** Protocolo C **infla a magnitude** (humano E e1 veem o digest) — o **sinal** é
+  sólido, a **magnitude** é otimista. Validação contra `user_score` real só virá do ledger
+  `prediction_snapshots` (hoje 0 linhas). b1 é baseline fraco (quase chute); o digest **calibra**
+  (b1 super-estima +0,26 → e1 −0,14).
+
+### 2. e1 em produção (2026-06-27/28)
+- `PROMPT_VERSION` `v2 → "v3"`: digest entra no system+user **e** na `input_signature` (bug corrigido:
+  o digest era omitido em 3 de 4 call-sites da assinatura). PRs **#15** (recalc/materialidade/drift) e
+  **#18** (rollout e1). Backfill operacional: **414/758 obras** com previsão e1 (v3); perfil regenerado
+  até **v16**. Custo total ≈ **$7,1**. _(Medido no banco 2026-06-28: 454/773 obras distinct com previsão `v3`; `review_digest` 481/773 = 62%; `prediction_snapshots` 0 linhas.)_ Migrations **119** (toggle sinopse canônica no create) e **120**
+  (`works.ai_eval_reviews_stale`) aplicadas à mão.
+- **Onde o digest vale:** Interesse na Obra (♥) / Veredito IA / **ordenação holística**.
+  **Onde NÃO vale:** **Nota Prevista (Ridge)** — ablação $0 mostrou SinopseScore legado redundante
+  (ΔMAE +0,0007). Digest **não** entra no preditor de nota.
+
+### 3. Decisões revistas (vs §15/§20/§24i)
+| Decisão antiga | Estado novo (2026-06-28) |
+|---|---|
+| P1: "digest NÃO entra / b1, sem digest" | **Invertida**: digest **ENTRA** no Interesse (e1/v3); **NÃO** na Nota Prevista |
+| D2: "adiar backfill de digest (não alimenta Interesse)" | **Superseded**: e1 usa digest. Mas cobertura **medida 06-28 = 481/773 = 62%** (não os 2% do doc de 06-18 — o rollout do e1 já backfillou via cascata); resta só a cauda reviewável |
+| G2: "`runDigestBatch` só se digest vencer" | **Reaberto**: digest venceu ⇒ é o que falta p/ backfillar digest do catálogo |
+| "Lote 02 = ~622 pendentes" | **Obsoleto**: Lote 02 fez **757/757** ($5,86, perfil v8). Pendência atual = **e1 v3 em ~344 obras** (758−414), por demanda ou lote |
+| F10: "manter LLM" / "LLM ≫ determinístico" | **Mantida** (golden-3 reforça) |
+
+### 4. Triagem das branches WIP (forense de git, 2026-06-28)
+- Todas as 5 saíram do merge-base **2026-06-12** e ficaram **12 PRs atrás** de `main`. Conteúdo do
+  Plano 1/2 (observability + cache) foi **re-implementado e mergeado** via PRs #9–#19 (`main` é superset).
+- **Apagadas (locais + remotas), sem perda:** `feat/realtime-chrome-refresh`, `feat/ai-observability`
+  (PR #8 fechado como superseded), `feat/ai-reliability`, `feat/synopsis-quality-optimization`.
+- **Preservada:** `feat/shadow-ranking` — única com código exclusivo (7 estratégias de ranking +
+  `migration 106 ranking_strategy_snapshots`). **Porém redundante em propósito** (F5/F6/F7 já
+  respondidos offline por §24k). Decisão pendente: descartar **ou** rebasear p/ validação prospectiva
+  contínua (liga-se a F9).
+
+### 5. O que segue em aberto (ver [STATUS-2026-06-28.md](STATUS-2026-06-28.md) p/ a lista completa + próximos passos)
+- **F9 / `prediction_snapshots`**: 0 linhas — só acumula com uso do app; destrava F3 (largura de tier).
+- **`runDigestBatch` + backfill de digest** (reabertos): construir ou aceitar e1 com cobertura parcial.
+- **F1 (auth/rate-limit)** vs deploy público no Fly: tensão a decidir antes de expor a URL.
+- **Auto-refresh pós-perfil/recalc** (F11/G4): recalc ainda 1h/manual.
+- **F6 (alignment/Veredito IA)**: lift −0,232 (IC exclui 0) — aposentar ou re-medir.
+- **Drift do perfil**: proxy heurístico (mig 118) não validado.
+
+---
+
 ## 24l. Addendum — Tags inferidas por IA (sinopse + reviews) para obras da cauda — ✅ CONCLUÍDO (2026-06-25)
 
-> **STATUS: ✅ CONCLUÍDO — 1019 tags `ai_inferred` gravadas, custo LLM total ~US$ 2,16, [PR #14](https://github.com/acgeners/vibematch/pull/14) (merged).** Trabalho **fora** do eixo Auditoria→Plano 3, registrado aqui como log da sessão. Doc dedicado: [PLANO-TAGS-IA.md](PLANO-TAGS-IA.md). 🟩 banco (read+write) · 🟦 código · 🟧 decisão.
+> **STATUS: ✅ CONCLUÍDO — 1019 tags `ai_inferred` gravadas, custo LLM total ~US$ 2,16, [PR #14](https://github.com/acgeners/vibematch/pull/14) (merged).** Trabalho **fora** do eixo Auditoria→Plano 3, registrado aqui como log da sessão. Doc dedicado: [PLANO-TAGS-IA.md](docs/archive/PLANO-TAGS-IA.md). 🟩 banco (read+write) · 🟦 código · 🟧 decisão.
 
 **Problema.** Obras da cauda com poucas/zero tags. Tags alimentam o **desempate intra-tier `tag_overlap_net`** (maior alavanca de recomendação — §F7/PRs #11-13), a feature do Ridge e o input da avaliação IA. As fontes externas são pobres justo nessas obras → única fonte de tag específica = a **sinopse** (+ reviews).
 
@@ -687,12 +757,18 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 
 ## 24i. Addendum — Pilot-2 prospectivo: experimento CONCLUÍDO + decisão do contrato pendente (2026-06-22 → 23)
 
+> **⚠️ SUPERSEDED PARCIAL (2026-06-28, §24m).** A ratificação "**b1, sem digest**" registrada nesta
+> seção valia a **n=90** (e1−b1 com **IC⊃0, inconclusivo**). A **golden-3 (n=180, 2026-06-25)** reverteu:
+> ΔMAE **−0,211 [IC −0,311; −0,117]** ⇒ digest **GO** no preditor de Interesse; **e1/`v3` em produção**.
+> Mantida como registro do estado de 2026-06-23. O "manter LLM (F10)" e o "LLM ≫ determinístico"
+> abaixo **continuam válidos**.
+
 > **VIRADA DE ESTADO — addendum mais recente.** O experimento do Plano 3 **rodou e concluiu**
 > sobre um golden **prospectivo** (pilot-2), que **supersede** o pilot-1 descrito em
 > §3/§20/§22 e nos addenda §24–§24h. Resultados **agregados** abaixo; os **rótulos humanos**
 > e outputs por-obra permanecem **embargados** (locais em `.local-experiments/plan3/…`,
 > gitignored) — aqui só agregados/assinaturas, mesma convenção de B2.2B. Plano detalhado em
-> [PLANO3-GOLDEN-PILOT-2-PLAN.md](PLANO3-GOLDEN-PILOT-2-PLAN.md). A infra do **canal de
+> [PLANO3-GOLDEN-PILOT-2-PLAN.md](docs/archive/PLANO3-GOLDEN-PILOT-2-PLAN.md). A infra do **canal de
 > review externo** (migrations 112–114) foi mergeada na `main` (commit `c964048`, PR #9, 2026-06-23).
 
 **Por que pilot-2 (e por que pilot-1 ficou superseded):** ao rotular o `contextual-1` (pilot-1, 80 obras) descobriu-se **leakage retrospectivo** — parte das obras já fora lida, impossibilitando separar *interesse antes de ler* (o alvo do experimento) de opinião pós-leitura. O pilot-2 reconstrói o golden **só com obras não lidas**, classificadas automaticamente por `works.personal_status_id` (`unread` / `partially_read` / `fully_read`; só `unread` entra na métrica prospectiva). O pilot-1 é mantido como **trilha retrospectiva** — nunca entra na métrica prospectiva principal.
@@ -739,7 +815,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 ## 24h. Addendum — Fase B2.2C: enriched-1 + pacote contextual cego (2026-06-20)
 
 > **PRONTO PARA ROTULAGEM HUMANA CONTEXTUAL.** Read-only; zero chamada paga.
-> Manifesto [PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md](PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md).
+> Manifesto [PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md](docs/archive/PLANO3-GOLDEN-SNAPSHOT-ENRICHED-MANIFEST.md).
 
 - **Pré-verificação (🟩):** base-1 íntegro (`634571c2…`/`8776419e…`), 80 obras, labels 0/90; **51/51 digests** `digest-v1` parseáveis/completos, **corpus inalterado 80/80**; **blocks=0** (sem corpus_changed/stale/inválido/failed). Nenhum summary fallback.
 - **enriched-1** (deriva ESTRITAMENTE de base-1 + digests sanitizados): 51 `digest_available` + 29 `no_reviews_available`; `enrichedSnapshotSignature=8b61084d…`, `sanitizedDigestCorpusSignature=7958c236…` (determinístico — runs idênticas). Carrega congelados de base-1 (título/sinopse/tags/perfil/baseInputSignature); só acrescenta contexto.
@@ -753,7 +829,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 
 ## 24g. Addendum — Fase B2.2B: 51 digests do golden EXECUTADOS (2026-06-20)
 
-> **Execução paga autorizada e concluída.** Detalhes em [PLANO3-LOTE-DIGEST-GOLDEN.md](PLANO3-LOTE-DIGEST-GOLDEN.md) §RESULTADO.
+> **Execução paga autorizada e concluída.** Detalhes em [PLANO3-LOTE-DIGEST-GOLDEN.md](docs/archive/PLANO3-LOTE-DIGEST-GOLDEN.md) §RESULTADO.
 
 - **Gates pré-execução (🟩):** dry-run final idêntico ao aprovado (`planSignature=e44e5996…`, 51 elegíveis, upper $3.41 ≤ $3.50); `snapshotBaseSignature=634571c2…`/`reviewCorpusSignature=8776419e…` batem; SHA dos 51 IDs `7b264c55…`; labels 0/90; 0 jobs ativos; 0 corpus drift; backup gitignored (sha `b0141e0d…`, 51 obras).
 - **Resultado:** **51/51 succeeded**, 0 failed, status `completed`, exit 0, ~12 min. **Custo real $0.8578** (avg $0.0168, min $0.0082, max $0.0385) ≪ likely $2.27 ≪ upper $3.41 ≤ teto $3.50. **Só `review_digest`** — nenhuma outra operação paga.
@@ -767,7 +843,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 
 ## 24f. Addendum — Fase B2.2A: lote de digests do golden (dry-run) (2026-06-20)
 
-> **Lote preparado, NÃO executado** — ver [PLANO3-LOTE-DIGEST-GOLDEN.md](PLANO3-LOTE-DIGEST-GOLDEN.md)
+> **Lote preparado, NÃO executado** — ver [PLANO3-LOTE-DIGEST-GOLDEN.md](docs/archive/PLANO3-LOTE-DIGEST-GOLDEN.md)
 > (`STATUS: NÃO EXECUTADO — AGUARDANDO AUTORIZAÇÃO DE CUSTO`).
 
 - **Compatibilidade (read-only):** o catálogo cresceu (works 734→737, digests 14→17, jobs 114→123) por atividade do app, **mas nenhuma mudança atingiu o golden** — `corpus_changed=0/80`, `reviewCorpusSignature` global bate (`8776419e…`), `base-1` íntegro (`634571c2…`). **Regra bloqueante não disparou** ⇒ não exige `base-2`.
@@ -782,7 +858,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 ## 24e. Addendum — Fase B2.1D: golden CONTEXTUAL + aba "Sem reviews" (2026-06-19)
 
 > **Constructo corrigido** + melhoria operacional. Detalhes em
-> [PLANO3-GOLDEN-CONTEXTUAL.md](PLANO3-GOLDEN-CONTEXTUAL.md).
+> [PLANO3-GOLDEN-CONTEXTUAL.md](docs/archive/PLANO3-GOLDEN-CONTEXTUAL.md).
 
 **Parte A — protocolo:**
 - **Constructo único:** **Potencial de Interesse na Obra** (sinopse + tags + contexto de reviews), **não** "apelo da sinopse". Um golden contextual só.
@@ -804,7 +880,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 ## 24d. Addendum — Fase B2.1C: snapshot-base + pacote cego (2026-06-19)
 
 > **✅ PRONTO PARA ROTULAGEM HUMANA.** Snapshot-base e pacote cego congelados/validados.
-> Manifesto: [PLANO3-GOLDEN-SNAPSHOT-BASE-MANIFEST.md](PLANO3-GOLDEN-SNAPSHOT-BASE-MANIFEST.md).
+> Manifesto: [PLANO3-GOLDEN-SNAPSHOT-BASE-MANIFEST.md](docs/archive/PLANO3-GOLDEN-SNAPSHOT-BASE-MANIFEST.md).
 
 - **Snapshot-base (`base-1`)** materializado read-only: 80 obras únicas, 90 slots (10 repetições intra-avaliador), 50 dev/30 holdout, strata 20×4. `snapshotBaseSignature=634571c2…`, `reviewCorpusSignature=8776419e…` (determinístico — 2 runs idênticas). Conteúdo em `.local-experiments/` (gitignored); manifesto versionado sem texto integral.
 - **Reviews congeladas:** 51 `frozen_current` + 29 `no_reviews`. Regra de invalidação: o digest futuro (`enriched-1`) só roda se `reviewCorpusSignature` atual == congelada; senão `plan_changed` + nova snapshot version.
@@ -818,7 +894,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 ## 24c. Addendum — Fase B2.1B: fechamento do Readiness Gate + S078 (2026-06-19)
 
 > **Golden Data Readiness: APROVADO PARA SNAPSHOT-BASE.** Detalhes em
-> [PLANO3-GOLDEN-DATA-READINESS.md](PLANO3-GOLDEN-DATA-READINESS.md) (Fechamento B2.1B).
+> [PLANO3-GOLDEN-DATA-READINESS.md](docs/archive/PLANO3-GOLDEN-DATA-READINESS.md) (Fechamento B2.1B).
 
 - **Decisões fechadas (✅):** reviews ≤30d **congeladas sem refresh** · **9 summaries não regenerados** (digest os supera; falha de digest ⇒ estado explícito, nunca regen silencioso de summary) · **51 digests = etapa paga separada** (não autorizada; teto após dry-run, upper ~$5,90) · **D1/D2 mantidos** · **alignment fora** desta rodada · **sem nova avaliação IA** · **sem recalc/ratings**.
 - **S078 (0 work_tags):** 🟩 tem 4 gêneros + 4 fontes externas aceitas ⇒ classificada **`missing_tags_recoverable`**; **congelada como `no_tags`** (recuperar = refresh externo, excluído pelo congelamento; golden FROZEN). `tags=[]` é entrada **determinística** (D1→♥; D2 usa sinopse) ⇒ **não bloqueia**; permanece nas 80, no slot holdout/♥♥♥♥, sem alterar split.
@@ -830,7 +906,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 ## 24b. Addendum — Fase B2.1A: Golden Data Readiness Gate (2026-06-19)
 
 > Rotulagem humana **gated** por este readiness gate (fechado em B2.1B, acima). Detalhes em
-> [PLANO3-GOLDEN-DATA-READINESS.md](PLANO3-GOLDEN-DATA-READINESS.md).
+> [PLANO3-GOLDEN-DATA-READINESS.md](docs/archive/PLANO3-GOLDEN-DATA-READINESS.md).
 
 Gate read-only que comprovou a freshness dos dados das 80 obras únicas do golden por candidato (freshness medida com as funções reais de produção):
 
@@ -843,7 +919,7 @@ Gate read-only que comprovou a freshness dos dados das 80 obras únicas do golde
 
 ## 24. Addendum — Fase B2.0 executada (2026-06-19)
 
-Congelamento do protocolo experimental do Plano 3 — ver [PLANO3-EXPERIMENTO-DIGEST-GOLDEN.md](PLANO3-EXPERIMENTO-DIGEST-GOLDEN.md).
+Congelamento do protocolo experimental do Plano 3 — ver [PLANO3-EXPERIMENTO-DIGEST-GOLDEN.md](docs/archive/PLANO3-EXPERIMENTO-DIGEST-GOLDEN.md).
 
 - **Golden auditado (🟩):** 80 únicas — **0 digest**, **51 missing_with_reviews** (todas summary-only), **29 no_reviews**, 0 stale/blocked ⇒ **51 digests** a gerar (não as 489). Previsão v2 do golden: 12 modernas / 68 legadas.
 - **Código (puro, testado):** [lib/synopsis-interest/experiment.ts](lib/synopsis-interest/experiment.ts) — candidatos `b1`/`e1`, fallback explícito `resolveReviewContext`, `computeSnapshotSignature`/`computeCandidateInputSignature`, `planGoldenDigest`/`planCandidateDryRun`. 26 testes ([experiment.test.ts](tests/unit/synopsis-interest/experiment.test.ts)). **Nenhum caminho de execução paga construído.**

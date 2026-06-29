@@ -1,6 +1,5 @@
 "use server"
 
-import { createAdminClient } from "@/lib/supabase/admin"
 import { getAttributesQueueCount } from "@/server/queries/recommendations"
 import { getSettingsBadgePendingTotal } from "@/server/queries/settings-pending"
 import { maybeTriggerStaleRecalc } from "@/server/actions/recalc-queue"
@@ -26,13 +25,15 @@ export interface SidebarBadgeCounts {
  *   próprios contadores na página e NÃO entram no badge (inflavam o número,
  *   sobretudo após regen de perfil). Head-count barato; sempre TS, então o fix
  *   independe de a RPC estar atualizada/aplicada.
- * - settings: total do Pipeline de dados. Caminho rápido: RPC
- *   `get_sidebar_badge_counts` (agrega no Postgres). Fallback TS se a RPC faltar.
+ * - settings: total do Pipeline de dados, via TS (`getSettingsBadgePendingTotal`).
+ *   Usava a RPC `get_sidebar_badge_counts`, mas ela conta `canonical_synopsis`
+ *   só por NULL e NÃO aplica o gate de "consolidável" (≥40 chars) — contava obras
+ *   que o consolidador sempre pula → badge da sidebar divergia dos cards da
+ *   página (preso). O caminho TS reusa as MESMAS contagens da página.
  *
  * Cada parcela falha silenciosa em 0 pra nunca derrubar o layout.
  */
 export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
-  const supabase = createAdminClient()
   // Saúde do Comix: leitura in-memory do gate (mesmo processo) — sem round-trip
   // e independe da migration 098 estar aplicada.
   const comixHealth = getComixStatus().state
@@ -52,7 +53,7 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
       )
       return 0
     }),
-    getSettingsBadgeTotal(supabase),
+    getSettingsBadgeTotal(),
     recalcStatePromise,
   ])
 
@@ -60,30 +61,17 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
 }
 
 /**
- * Total de pendências do Pipeline de dados (badge "Configurações"). Caminho
- * rápido: lê `settings_total` da RPC `get_sidebar_badge_counts` (agrega no
- * Postgres, sem trafegar linhas). Fallback TS (`getSettingsBadgePendingTotal`)
- * se a RPC faltar/erro. Falha total → 0.
+ * Total de pendências do Pipeline de dados (badge "Configurações"), via TS —
+ * `getSettingsBadgePendingTotal` reusa `countPendingCanonicalSynopses` (mesmo
+ * gate de "consolidável" da página), então o badge bate com a soma dos cards.
+ * Falha → 0 (nunca derruba o layout). A RPC `get_sidebar_badge_counts` ficou
+ * órfã (não aplica o gate); pode ser removida num cleanup futuro.
  */
-async function getSettingsBadgeTotal(
-  supabase: ReturnType<typeof createAdminClient>,
-): Promise<number> {
+async function getSettingsBadgeTotal(): Promise<number> {
   try {
-    const { data, error } = await supabase.rpc("get_sidebar_badge_counts")
-    if (error) throw error
-    const row = Array.isArray(data) ? data[0] : data
-    if (row && typeof row.settings_total === "number") return row.settings_total
-    throw new Error("RPC get_sidebar_badge_counts retornou formato inesperado")
-  } catch (rpcErr) {
-    console.warn(
-      "[getSidebarBadgeCounts] RPC indisponível p/ settings, usando fallback TS:",
-      rpcErr instanceof Error ? rpcErr.message : rpcErr,
-    )
-    try {
-      return await getSettingsBadgePendingTotal()
-    } catch (fallbackErr) {
-      console.error("[getSidebarBadgeCounts] fallback settings falhou:", fallbackErr)
-      return 0
-    }
+    return await getSettingsBadgePendingTotal()
+  } catch (err) {
+    console.error("[getSidebarBadgeCounts] contagem de settings falhou:", err)
+    return 0
   }
 }

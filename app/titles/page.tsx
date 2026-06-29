@@ -3,6 +3,7 @@ import { Plus } from "lucide-react"
 import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } from "@/server/queries/ranking"
 import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
+import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
@@ -119,12 +120,13 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   const pageSize = 50
   const page = Math.max(1, parseInt(str("page") ?? "1", 10))
 
-  const [entries, allGenres, allTags, statusOptions, scoreThresholds] = await Promise.all([
+  const [entries, allGenres, allTags, statusOptions, scoreThresholds, criterionPrefs] = await Promise.all([
     getRanking(filters),
     getAllGenres(),
     getAllTags(),
     getStatusOptions(),
     getScoreColorThresholds(),
+    getCriterionColorRanges(),
   ])
 
   const total = entries.length
@@ -163,6 +165,7 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
         pageSize={pageSize}
         searchQuery={str("search")}
         scoreThresholds={scoreThresholds}
+        criterionPrefs={criterionPrefs}
         enableCompare={false}
         enableHeatmap={false}
       />

@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
+import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { Header } from "@/components/layout/header"
 import { WorkTable } from "@/components/titles/work-table"
 import { Button } from "@/components/ui/button"
@@ -31,9 +32,10 @@ export default async function BatchReviewPage({ searchParams }: BatchReviewPageP
     )
   }
 
-  const [works, scoreThresholds] = await Promise.all([
+  const [works, scoreThresholds, criterionPrefs] = await Promise.all([
     getWorksByIds(ids),
     getScoreColorThresholds(),
+    getCriterionColorRanges(),
   ])
 
   return (
@@ -60,6 +62,7 @@ export default async function BatchReviewPage({ searchParams }: BatchReviewPageP
         page={1}
         pageSize={works.length}
         scoreThresholds={scoreThresholds}
+        criterionPrefs={criterionPrefs}
         enableCompare={false}
         enableHeatmap={false}
       />

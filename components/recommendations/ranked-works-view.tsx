@@ -3,6 +3,8 @@
 import { useMemo, useState, useSyncExternalStore } from "react"
 import { LayoutGrid, List } from "lucide-react"
 import { RankedWorkCard } from "@/components/titles/recommendations/ranked-work-card"
+import { RankedWorkFeaturedCard } from "@/components/titles/recommendations/ranked-work-featured-card"
+import { RankedWorkWinnerCard } from "@/components/titles/recommendations/ranked-work-winner-card"
 import { WorkHeatmapView } from "@/components/titles/work-heatmap-view"
 import { WorkColumnPicker } from "@/components/titles/work-column-picker"
 import { cn } from "@/lib/utils"
@@ -150,19 +152,33 @@ export function RankedWorksView({
           />
         )
       ) : (
-        <div className="space-y-2">
-          {filtered.map((r, i) => {
-            const originalRank =
-              ranked.findIndex((x) => x.work_id === r.work_id) + 1
-            return (
-              <RankedWorkCard
-                key={r.work_id}
-                rank={originalRank || i + 1}
-                ranked={r}
-              />
-            )
-          })}
-        </div>
+        (() => {
+          const rankOf = (r: RankedCandidate, i: number) =>
+            ranked.findIndex((x) => x.work_id === r.work_id) + 1 || i + 1
+          // Vencedora (#1) em destaque; #2 e #3 lado a lado; o restante na lista compacta.
+          const winner = filtered[0] ?? null
+          const runnersUp = filtered.slice(1, 3)
+          const rest = filtered.slice(3)
+          return (
+            <div className="space-y-5">
+              {winner && <RankedWorkWinnerCard ranked={winner} totalCount={ranked.length} />}
+              {runnersUp.length > 0 && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {runnersUp.map((r, i) => (
+                    <RankedWorkFeaturedCard key={r.work_id} rank={rankOf(r, i + 1)} ranked={r} compact />
+                  ))}
+                </div>
+              )}
+              {rest.length > 0 && (
+                <div className="space-y-2">
+                  {rest.map((r, i) => (
+                    <RankedWorkCard key={r.work_id} rank={rankOf(r, i + 3)} ranked={r} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })()
       )}
     </div>
   )

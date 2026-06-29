@@ -45,7 +45,9 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { pickPrimaryCover } from "@/lib/covers"
 import { CoverImage } from "@/components/ui/cover-image"
-import { ScoreBadge, getCriterionColorClass, type ColumnThresholds, type ScoreColorThresholds } from "@/components/ui/score-badge"
+import { ScoreBadge, criterionCellClass, type ColumnThresholds, type ScoreColorThresholds, type CriterionRange, type AttrColorMode } from "@/components/ui/score-badge"
+import { readAttrColorMode, subscribeAttrColorMode } from "@/lib/ui/attr-color-mode"
+import { AttrColorModeToggle } from "@/components/titles/attr-color-mode-toggle"
 import {
   AiStatusBadge,
   PersonalStatusBadge,
@@ -70,7 +72,7 @@ import { archiveWork, setFavoriteMany, toggleFavorite, unarchiveWork } from "@/s
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
-import { AlignmentCell, AlignmentScoreCell, DecisionCell } from "@/components/ranking/ranking-cells"
+import { AlignmentCell, AlignmentScoreCell, DecisionCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { MoodRefineDialog } from "@/components/ranking/mood-refine-dialog"
@@ -140,6 +142,8 @@ interface WorkTableProps {
   enableSelectAll?: boolean
   /** Repassado ao drawer de comparação pra liberar o "Desempatar com IA" (Pago). */
   isPaid?: boolean
+  /** Faixas ideais por critério (perfil). Habilita o toggle de cor "Minha faixa". */
+  criterionPrefs?: Record<string, CriterionRange>
 }
 
 function scoreFor(work: WorkWithRelations, slug: string): number | null {
@@ -197,6 +201,7 @@ export function WorkTable({
   enableHeatmap = true,
   enableSelectAll = false,
   isPaid = true,
+  criterionPrefs,
 }: WorkTableProps) {
   const router = useRouter()
   const refresh = useRefresh()
@@ -209,6 +214,8 @@ export function WorkTable({
   )
   const viewMode: ViewMode = !enableHeatmap && storedViewMode === "heatmap" ? "list" : storedViewMode
   const setViewModePersisted = (mode: ViewMode) => writeViewMode(namespace, mode)
+  // Só oferece o toggle "Minha faixa" quando há perfil com faixas ideais.
+  const hasCriterionPrefs = criterionPrefs != null && Object.keys(criterionPrefs).length > 0
 
   // Selection lives in client state to avoid a full Next.js server re-render
   // (which re-runs getRanking + getWorksByIds + …) on every checkbox click.
@@ -231,7 +238,10 @@ export function WorkTable({
       for (const id of nextIds) params.append("compare", id)
       const qs = params.toString()
       const url = qs ? `${basePath}?${qs}` : basePath
-      window.history.replaceState(null, "", url)
+      // Preserva o `history.state` do Next (markers internos do App Router). Passar
+      // `null` aqui apaga esses markers → o router trata como navegação externa e
+      // dá um scrollIntoView na raiz da página (a tela "rola pra cima" na 1ª seleção).
+      window.history.replaceState(window.history.state, "", url)
     },
     [basePath]
   )
@@ -290,8 +300,8 @@ export function WorkTable({
         synopsisQuality: (w as { synopsis_quality?: string | null }).synopsis_quality ?? null,
       })
     }
-    return sortByMoodAdjusted(moodWorks, moodRefine).map((w) => w.id)
-  }, [compareIds, works, moodRefine])
+    return sortByMoodAdjusted(moodWorks, moodRefine, criterionPrefs).map((w) => w.id)
+  }, [compareIds, works, moodRefine, criterionPrefs])
 
   const allVisibleIds = useMemo(() => works.map((w) => w.id), [works])
   const allSelected =
@@ -331,6 +341,9 @@ export function WorkTable({
           )}
         </p>
         <div className="flex items-center gap-2">
+          {(viewMode === "list" || viewMode === "heatmap") && hasCriterionPrefs && (
+            <AttrColorModeToggle />
+          )}
           {(viewMode === "list" || viewMode === "heatmap") && (
             <WorkColumnPicker namespace={namespace} />
           )}
@@ -360,6 +373,7 @@ export function WorkTable({
           someSelected={someSelected}
           onSelectAll={selectAllVisible}
           onClearAll={clearCompare}
+          criterionPrefs={criterionPrefs}
         />
       ) : (
         <WorkListView
@@ -377,6 +391,7 @@ export function WorkTable({
           someSelected={someSelected}
           onSelectAll={selectAllVisible}
           onClearAll={clearCompare}
+          criterionPrefs={criterionPrefs}
         />
       )}
 
@@ -408,6 +423,7 @@ export function WorkTable({
               setMoodDialogOpen(false)
               setDrawerOpen(true)
             }}
+            hasRanges={hasCriterionPrefs}
           />
 
           <WorkCompareDrawer
@@ -420,6 +436,7 @@ export function WorkTable({
               updateCompareIds(compareIds.filter((x) => x !== id))
             }
             scoreThresholds={scoreThresholds}
+            criterionPrefs={criterionPrefs}
             isPaid={isPaid}
           />
         </>
@@ -704,6 +721,7 @@ function WorkListView({
   someSelected = false,
   onSelectAll,
   onClearAll,
+  criterionPrefs,
 }: {
   works: WorkWithRelations[]
   searchParams: ReturnType<typeof useSearchParams>
@@ -719,8 +737,10 @@ function WorkListView({
   someSelected?: boolean
   onSelectAll?: () => void
   onClearAll?: () => void
+  criterionPrefs?: Record<string, CriterionRange>
 }) {
   const refresh = useRefresh()
+  const colorMode = useSyncExternalStore(subscribeAttrColorMode, readAttrColorMode, () => "catalog" as const)
   const columnConfig = useSyncExternalStore(
     (onChange) => subscribeWorkColumnConfig(onChange, namespace),
     () => readWorkColumnConfig(namespace),
@@ -742,6 +762,7 @@ function WorkListView({
     chapters_read: { field: "chapters_read", label: "Capítulos lidos" },
     year: { field: "year", label: "Ano" },
     synopsis_q: { field: "synopsis_q", label: "Sinopse" },
+    synopsis_pred: { field: "synopsis_pred", label: "Interesse IA (previsão)" },
     decision: { field: "decision", label: "Prioridade" },
     expected_score: { field: "expected_score", label: "Nota Prevista" },
     personal_fit: { field: "personal_fit", label: "Alinhamento" },
@@ -844,6 +865,13 @@ function WorkListView({
         <span className="text-muted-foreground">—</span>
       )
     },
+    synopsis_pred: (work) => (
+      <SynopsisPredictionCell
+        quality={work.predicted_synopsis_quality ?? null}
+        stale={work.predicted_synopsis_stale ?? false}
+        confidence={work.predicted_synopsis_confidence ?? null}
+      />
+    ),
     decision: (work) => {
       const cs = work.calculated_scores
       const score = computeDecisionScore({
@@ -1027,7 +1055,7 @@ function WorkListView({
   }
 
   const columns: ColumnDef<WorkWithRelations>[] = configuredColumns.map((col) => {
-    const renderer = columnRenderers[col.key] ?? makeCriterionRenderer(col.key, scoreThresholds?.criteria)
+    const renderer = columnRenderers[col.key] ?? makeCriterionRenderer(col.key, scoreThresholds?.criteria, colorMode, criterionPrefs)
     const defaultSize = DEFAULT_COLUMN_WIDTHS[col.key] ?? (col.key.startsWith("crit_") ? 48 : 100)
     return {
       id: col.key,
@@ -1332,7 +1360,9 @@ function WorkListView({
 function renderCriterionCell(
   slug: string,
   work: WorkWithRelations,
-  thresholds?: ScoreColorThresholds | null,
+  thresholds: ScoreColorThresholds | null | undefined,
+  colorMode: AttrColorMode,
+  range: CriterionRange | null | undefined,
 ): ReactNode {
   const score = scoreFor(work, slug)
   if (score == null) return <span className="text-muted-foreground">—</span>
@@ -1340,7 +1370,7 @@ function renderCriterionCell(
     <span
       className={cn(
         "inline-grid h-8 w-12 place-items-center rounded-md font-mono text-xs font-bold",
-        getCriterionColorClass(score, slug, thresholds)
+        criterionCellClass({ score, slug, mode: colorMode, thresholds, range })
       )}
     >
       {score.toFixed(1)}
@@ -1350,12 +1380,14 @@ function renderCriterionCell(
 
 function makeCriterionRenderer(
   columnKey: string,
-  criteriaThresholds?: Record<string, ScoreColorThresholds>,
+  criteriaThresholds: Record<string, ScoreColorThresholds> | undefined,
+  colorMode: AttrColorMode,
+  criterionPrefs: Record<string, CriterionRange> | undefined,
 ): (work: WorkWithRelations) => ReactNode {
   if (!columnKey.startsWith("crit_")) return renderEmpty
   const slug = columnKey.slice("crit_".length)
   return function renderCriterion(work: WorkWithRelations): ReactNode {
-    return renderCriterionCell(slug, work, criteriaThresholds?.[slug])
+    return renderCriterionCell(slug, work, criteriaThresholds?.[slug], colorMode, criterionPrefs?.[slug])
   }
 }
 

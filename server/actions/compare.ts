@@ -8,6 +8,9 @@ import type { CriterionSlug, WorkWithRelations } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 import { getAllTags } from "@/server/queries/tags"
+import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
+import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
+import { buildTagStanceLookup, resolveTagStance, type TagStance, type TagStanceLookup } from "@/lib/tags/segment"
 
 export interface CompareCriterionEntry {
   slug: CriterionSlug
@@ -43,7 +46,8 @@ export interface CompareWork {
   alignmentJustification: string | null
   alignmentAt: string | null
   genres: string[]
-  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName: string | null }>
+  /** `stance` = amada/evitada pelo gosto do usuário (perfil ∪ preferências declaradas). */
+  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName: string | null; stance: TagStance | null }>
   criteria: CompareCriterionEntry[]
 }
 
@@ -62,7 +66,7 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
   if (unique.length === 0) return []
 
   const supabase = createAdminClient()
-  const [works, aiJustifications, tagCatalog] = await Promise.all([
+  const [works, aiJustifications, tagCatalog, declaredPrefs, profileRow] = await Promise.all([
     getWorksByIds(unique),
     supabase
       .from("ai_evaluations")
@@ -74,11 +78,19 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
       .in("work_id", unique)
       .order("created_at", { ascending: false }),
     getAllTags(),
+    getDeclaredTagPreferences(supabase),
+    loadCurrentTasteProfile(),
   ])
   const subGroupBySlug = new Map<string, string>()
   for (const t of tagCatalog) {
     if (t.subGroupName) subGroupBySlug.set(t.slug, t.subGroupName)
   }
+  // Stance (amada/evitada) por tag: preferências declaradas ∪ perfil de gosto.
+  const stanceLookup = buildTagStanceLookup(
+    declaredPrefs.map((p) => ({ slug: p.slug, stance: p.stance })),
+    profileRow?.profile.loved_tags ?? [],
+    profileRow?.profile.avoided_tags ?? [],
+  )
 
   // For each work, pick the most recent ai_evaluation justifications by criterion.
   const justificationByWork = new Map<string, Map<string, string>>()
@@ -94,13 +106,14 @@ export async function fetchCompareWorks(ids: string[]): Promise<CompareWork[]> {
     justificationByWork.set(row.work_id, map)
   }
 
-  return works.map((work) => mapWorkToCompare(work, justificationByWork.get(work.id), subGroupBySlug))
+  return works.map((work) => mapWorkToCompare(work, justificationByWork.get(work.id), subGroupBySlug, stanceLookup))
 }
 
 function mapWorkToCompare(
   work: WorkWithRelations,
   justifications: Map<string, string> | undefined,
-  subGroupBySlug: Map<string, string>
+  subGroupBySlug: Map<string, string>,
+  stanceLookup: TagStanceLookup,
 ): CompareWork {
   const scoreByCrit: Record<string, number> = {}
   for (const cs of work.category_scores ?? []) {
@@ -112,12 +125,14 @@ function mapWorkToCompare(
     .map((t) => {
       const groupId = (t.tag_group_id ?? null) as string | null
       const slug = (t.slug ?? "") as string
+      const name = (t.name ?? "") as string
       return {
         slug,
-        name: (t.name ?? "") as string,
+        name,
         groupId,
         groupName: groupId ? GROUP_ID_TO_LABEL[groupId] ?? null : null,
         subGroupName: subGroupBySlug.get(slug) ?? null,
+        stance: resolveTagStance({ slug, name }, stanceLookup),
       }
     })
     .filter((t) => t.name)

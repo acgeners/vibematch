@@ -49,12 +49,15 @@ export function MoodRefineDialog({
   workCount,
   onApply,
   onSkip,
+  hasRanges = false,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   workCount: number
   onApply: (mood: MoodRefine) => void
   onSkip: () => void
+  /** Há perfil com faixas ideais → níveis intermediários miram a borda da faixa. */
+  hasRanges?: boolean
 }) {
   const [mood, setMood] = useState<MoodRefine>(EMPTY_MOOD)
 
@@ -149,6 +152,11 @@ export function MoodRefineDialog({
                 <Plus className="h-2.5 w-2.5 text-emerald-500" />
               </span>
             </div>
+            {hasRanges && (
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Os níveis do meio miram a <span className="text-foreground">borda da sua faixa ideal</span> (Evitar = piso · Priorizar = topo); os extremos vão ao <span className="text-foreground">mínimo/máximo absoluto</span>.
+              </p>
+            )}
             <div className="space-y-1.5">
               {CRITERION_SLUGS.map((slug) => {
                 const info = CRITERIA_INFO[slug]
@@ -167,12 +175,12 @@ export function MoodRefineDialog({
           </div>
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="ghost" onClick={onSkip}>
-            Comparar sem refinar
-          </Button>
-          <Button onClick={() => onApply(mood)} disabled={!active}>
-            Aplicar e comparar
+        <DialogFooter>
+          {/* Botão único condicional: sem nada selecionado, compara sem refinar
+              (onSkip); ao escolher/alterar qualquer coisa, vira "Aplicar e
+              comparar" (onApply com o mood montado). */}
+          <Button onClick={() => (active ? onApply(mood) : onSkip())}>
+            {active ? "Aplicar e comparar" : "Comparar sem refinar"}
           </Button>
         </DialogFooter>
       </DialogContent>

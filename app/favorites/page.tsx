@@ -11,12 +11,14 @@ import { planAllows } from "@/lib/plans/capabilities"
 import { getRanking, type RankingFilters, type SortLevel } from "@/server/queries/ranking"
 import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
+import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getFavoritesSummary } from "@/server/queries/favorites"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
 import { getFilterPresets } from "@/server/queries/filter-presets"
 import { CRITERION_SLUGS } from "@/types/domain"
+import type { SynopsisQuality } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 
 interface FavoritesPageProps {
@@ -132,7 +134,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
     sortLevels,
   }
 
-  const [entries, allGenres, allTags, statusOptions, summary, scoreThresholds, savedPresets] = await Promise.all([
+  const [entries, allGenres, allTags, statusOptions, summary, scoreThresholds, savedPresets, criterionPrefs] = await Promise.all([
     getRanking(filters),
     getAllGenres(),
     getAllTags(),
@@ -140,11 +142,27 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
     getFavoritesSummary(),
     getScoreColorThresholds(),
     getFilterPresets("/favorites"),
+    getCriterionColorRanges(),
   ])
 
   const orderedIds = entries.map((e) => e.workId)
   const works = await getWorksByIds(orderedIds)
   const isPaid = planAllows(await getCurrentPlan(), "smart_shortlist")
+
+  // A previsão de interesse na sinopse (Interesse IA) vive no getRanking, não
+  // no getWorksByIds — mescla por workId para a coluna "Interesse IA" do
+  // heatmap/tabela ter dado em /favorites.
+  const entryById = new Map(entries.map((e) => [e.workId, e]))
+  const worksWithPred = works.map((w) => {
+    const e = entryById.get(w.id)
+    if (!e) return w
+    return {
+      ...w,
+      predicted_synopsis_quality: e.predictedSynopsisQuality as SynopsisQuality | null,
+      predicted_synopsis_stale: e.predictedSynopsisStale,
+      predicted_synopsis_confidence: e.predictedSynopsisConfidence,
+    }
+  })
 
   return (
     <div className="space-y-4">
@@ -163,6 +181,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
       <FavoritesStatsHeader
         summary={summary}
         scoreThresholds={scoreThresholds?.expected ?? null}
+        shownCount={worksWithPred.length}
         actions={
           <>
             <RecommendDialog context="favorites" isPaid={isPaid} />
@@ -184,12 +203,13 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
       />
 
       <WorkTable
-        works={works}
-        total={works.length}
+        works={worksWithPred}
+        total={worksWithPred.length}
         page={1}
-        pageSize={works.length || 1}
+        pageSize={worksWithPred.length || 1}
         searchQuery={str("search")}
         scoreThresholds={scoreThresholds}
+        criterionPrefs={criterionPrefs}
         selectedCompareIds={toArray(params.compare).slice(0, MAX_COMPARE_WORKS)}
         namespace="favorites"
         basePath="/favorites"

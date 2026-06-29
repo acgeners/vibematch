@@ -1,20 +1,58 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
-import { ArrowLeft, Sparkles } from "lucide-react"
+import type { ReactNode } from "react"
+import { ArrowLeft, ArrowRight, BrainCircuit, CalendarCheck, Clock, Sparkles, Users } from "lucide-react"
 import { getRunModeDisplay } from "@/components/recommendations/run-mode-display"
 import { Header } from "@/components/layout/header"
-import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { CollapsibleCard } from "@/components/ui/collapsible-card"
 import { RankedWorksView } from "@/components/recommendations/ranked-works-view"
 import { TasteProfileSummary } from "@/components/titles/recommendations/taste-profile-summary"
+import { ProfileStatusBadge } from "@/components/recommendations/profile-status-badge"
+import { ProfileDiffSummary } from "@/components/recommendations/profile-diff-summary"
 import { RunDetailActions } from "@/components/recommendations/run-detail-actions"
+import { RunDeleteButton } from "@/components/recommendations/run-delete-button"
 import { getRecommendationRun } from "@/server/queries/recommendations"
 import { getWorksByIds } from "@/server/queries/works"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { formatRelativeDateTime } from "@/lib/date-utils"
+import { formatRelativeDate, formatRelativeDateTime } from "@/lib/date-utils"
 import type { RankedCandidate, TasteProfileRow } from "@/lib/ai-recommendation/types"
 import type { WorkWithRelations } from "@/types/domain"
+
+/** "claude-sonnet-4-6" → "Claude Sonnet 4.6" (junta os dígitos finais como versão). */
+function prettyModel(model: string): string {
+  const parts = model.split("-")
+  const nums: string[] = []
+  while (parts.length && /^\d+$/.test(parts[parts.length - 1])) nums.unshift(parts.pop()!)
+  const words = parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(" ")
+  return nums.length ? `${words} ${nums.join(".")}` : words
+}
+
+/** Item do container de infos: ícone + rótulo + valor. */
+function MetaItem({
+  icon,
+  label,
+  value,
+  children,
+}: {
+  icon: ReactNode
+  label: string
+  value?: ReactNode
+  children?: ReactNode
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/5 text-primary ring-1 ring-primary/20 shadow-sm [&_svg]:size-4">
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60">{label}</p>
+        <div className="text-sm font-semibold text-foreground mt-0.5">{children ?? value}</div>
+      </div>
+    </div>
+  )
+}
 
 export const revalidate = 300
 
@@ -66,11 +104,14 @@ export default async function RunDetailPage({ params }: PageProps) {
   const worksById: Record<string, WorkWithRelations> = {}
   for (const w of fullWorks) worksById[w.id] = w
 
-  const profileChanged =
-    usedProfile != null && currentProfile != null && usedProfile.id !== currentProfile.id
-
   const isTiebreak = (run.sourceMeta as { tiebreak?: boolean } | null)?.tiebreak === true
   const { label: modeLabel, Icon: ModeIcon } = getRunModeDisplay(run.mode, isTiebreak)
+
+  // Status do perfil usado: quantas versões atrás do atual (null = sem comparação).
+  const versionsBehind =
+    usedProfile != null && currentProfile != null
+      ? currentProfile.version - usedProfile.version
+      : null
 
   const droppedCount =
     run.nAvailable != null && run.nAvailable > run.nCandidates
@@ -79,39 +120,55 @@ export default async function RunDetailPage({ params }: PageProps) {
 
   return (
     <div className="w-full space-y-4">
-      <div>
+      <div className="flex items-center justify-between gap-2">
         <Link
           href="/recommendations"
           className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-3 w-3" /> voltar pra histórico
         </Link>
+        <RunDeleteButton runId={run.id} />
       </div>
 
       <Header
-        kicker="IA"
-        title="Execução de recomendação"
-        description={`${modeLabel} · ${formatRelativeDateTime(run.createdAt)}`}
-        icon={<Sparkles />}
+        kicker="Execução de recomendação"
+        title={modeLabel}
+        description={
+          <span className="inline-flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <CalendarCheck className="h-3.5 w-3.5 text-muted-foreground/80" />
+              Análise concluída em {validRanked.length} obra{validRanked.length !== 1 ? "s" : ""}
+            </span>
+            <span className="text-muted-foreground/45 select-none">•</span>
+            <span className="inline-flex items-center gap-1">
+              <Clock className="h-3.5 w-3.5 text-muted-foreground/80" />
+              {formatRelativeDateTime(run.createdAt)}
+            </span>
+          </span>
+        }
+        icon={<ModeIcon />}
       />
 
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <Badge variant="outline" className="gap-1">
-          <ModeIcon className="h-3 w-3" /> {modeLabel}
-        </Badge>
-        <Badge variant="outline">{run.nCandidates} candidatos</Badge>
-        <Badge variant="outline">{run.modelName}</Badge>
-        <Badge variant="outline">prompt {run.promptVersion}</Badge>
-        {run.cacheReadTokens != null && run.cacheReadTokens > 0 && (
-          <Badge variant="outline" className="text-emerald-600 border-emerald-500/40">
-            cache hit {run.cacheReadTokens} tokens
-          </Badge>
-        )}
-        {profileChanged && (
-          <Badge variant="outline" className="text-amber-700 border-amber-500/40">
-            perfil de gosto mudou desde essa execução
-          </Badge>
-        )}
+      {/* Container de infos principais da execução */}
+      <div className="rounded-xl border border-border/80 bg-card/25 p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
+            <MetaItem icon={<BrainCircuit />} label="Modelo" value={prettyModel(run.modelName)} />
+            <MetaItem icon={<Sparkles />} label="Prompt" value={run.promptVersion} />
+            <MetaItem icon={<Users />} label="Candidatos" value={`${run.nCandidates} obras`} />
+            {usedProfile && (
+              <MetaItem icon={<Clock />} label="Perfil considerado">
+                <ProfileStatusBadge
+                  bare
+                  version={usedProfile.version}
+                  createdAt={usedProfile.created_at}
+                  versionsBehind={versionsBehind}
+                />
+              </MetaItem>
+            )}
+          </div>
+          <RunDetailActions runId={run.id} />
+        </div>
       </div>
 
       {droppedCount > 0 && (
@@ -136,8 +193,6 @@ export default async function RunDetailPage({ params }: PageProps) {
         </Card>
       )}
 
-      <RunDetailActions runId={run.id} />
-
       {run.modeSummary && (
         <p className="rounded-md bg-muted/40 p-3 text-sm leading-relaxed text-foreground/90">
           {run.modeSummary}
@@ -160,6 +215,8 @@ export default async function RunDetailPage({ params }: PageProps) {
                 alignment_score: r.alignment_score,
                 justification: r.justification,
                 top_match_factors: r.top_match_factors,
+                risks: r.risks,
+                confidence: r.confidence,
                 work: r.work!,
                 coverUrl: r.coverUrl,
               }),
@@ -184,15 +241,26 @@ export default async function RunDetailPage({ params }: PageProps) {
         )}
       </section>
 
+      {usedProfile && versionsBehind != null && versionsBehind > 0 && currentProfile && (
+        <ProfileDiffSummary used={usedProfile.profile} current={currentProfile.profile} />
+      )}
+
       {usedProfile && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Perfil de gosto usado nesta execução</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <TasteProfileSummary profile={usedProfile} />
-          </CardContent>
-        </Card>
+        <CollapsibleCard
+          title="Perfil de gosto usado nesta execução"
+          description={`v${usedProfile.version} · gerado ${formatRelativeDate(usedProfile.created_at)}`}
+          defaultOpen={false}
+          action={
+            <Link
+              href="/conta/perfil"
+              className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-medium text-primary hover:underline"
+            >
+              Ver perfil atual <ArrowRight className="h-3 w-3" />
+            </Link>
+          }
+        >
+          <TasteProfileSummary profile={usedProfile} />
+        </CollapsibleCard>
       )}
     </div>
   )

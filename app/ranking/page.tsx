@@ -2,6 +2,7 @@ import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } f
 import { getCurrentPlan } from "@/server/queries/current-user"
 import { planAllows } from "@/lib/plans/capabilities"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
+import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getTierBandWidth } from "@/server/queries/tier-band-width"
 import { getLowCoverageWorkIds } from "@/server/queries/calibration-guards"
 import { getAllGenres } from "@/server/queries/genres"
@@ -225,13 +226,14 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     sortLevels,
   }
 
-  const [rawEntries, scoreThresholds, tierBandWidth, lowCoverageIds, staleAlignmentCount, recalcState] = await Promise.all([
+  const [rawEntries, scoreThresholds, tierBandWidth, lowCoverageIds, staleAlignmentCount, recalcState, criterionPrefs] = await Promise.all([
     getRanking(filters),
     getScoreColorThresholds(),
     getTierBandWidth(),
     getLowCoverageWorkIds(),
     countStaleAlignmentWorks(),
     getRecalcPendingState(),
+    getCriterionColorRanges(),
   ])
   // Marca obras não-lidas com baixa cobertura de gênero (badge ⚠ na Nota esperada).
   const entries = rawEntries.map((e) => ({ ...e, lowCoverage: lowCoverageIds.has(e.workId) }))
@@ -338,7 +340,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
 
       <TierBandControl defaultBand={tierBandWidth} />
 
-      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} />
+      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} />
     </div>
   )
 }

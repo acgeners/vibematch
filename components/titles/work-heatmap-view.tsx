@@ -15,7 +15,10 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
-import { AlignmentScoreCell } from "@/components/ranking/ranking-cells"
+import { AlignmentCell, AlignmentScoreCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
+import { pickCriterionTierByRange } from "@/components/ui/score-badge"
+import type { AttrColorMode, CriterionRange, CriterionTier } from "@/components/ui/score-badge"
+import { readAttrColorMode, subscribeAttrColorMode } from "@/lib/ui/attr-color-mode"
 import {
   getConfiguredWorkColumns,
   getDefaultWorkColumnConfig,
@@ -40,6 +43,8 @@ interface WorkHeatmapViewProps {
   someSelected?: boolean
   onSelectAll?: () => void
   onClearAll?: () => void
+  /** Faixas ideais por critério (perfil). Habilita o modo de cor "Minha faixa". */
+  criterionPrefs?: Record<string, CriterionRange>
 }
 
 const HEATMAP_TITLE_COL_WIDTH = 280
@@ -127,18 +132,22 @@ function ResizeHandle({ columnKey, onResize, startWidth }: ResizeHandleProps) {
 
 const NON_CRITERION_LABELS: Record<string, string> = {
   expected_score: "Prevista",
+  personal_fit: "Alinh.",
   platform_avg: "Externa",
   total_votes: "Votos",
   alignment_score: "Veredito",
   synopsis_q: "Sinopse",
+  synopsis_pred: "Prev. IA",
 }
 
 const NON_CRITERION_TOOLTIPS: Record<string, string> = {
   expected_score: "Nota Prevista (L1 single Ridge — substitui N.IA/N.Pr/N.Final)",
+  personal_fit: "Alinhamento — o quanto a obra combina com o seu perfil de gosto (percentil 0–100 dentro da biblioteca).",
   platform_avg: "Média externa",
   total_votes: "Total de votos nas plataformas",
   alignment_score: "Veredito IA — score 0-100 que ordena os resultados das ações 'Recomendar com IA'. Preenchido em batch pela run ou sob demanda pelo botão Rankear.",
   synopsis_q: "Interesse na sinopse (♥ a ♥♥♥♥) — preenchido manualmente",
+  synopsis_pred: "Interesse IA — previsão da IA de quanto a sinopse vai te interessar (♥ a ♥♥♥♥), com base no seu perfil. Diferente de 'Sinopse', que é o que você informou.",
 }
 
 function formatVoteCount(count: number): string {
@@ -152,7 +161,26 @@ function scoreFor(work: WorkWithRelations, slug: string): number | null {
   return cs?.score != null ? Number(cs.score) : null
 }
 
-function getCriterionColor(score: number, slug: string): string {
+// Paleta de blocos sólidos do heatmap (mantém o visual atual; sem bordas/pílula).
+const HEATMAP_TIER_CLASS: Record<CriterionTier, string> = {
+  top: "bg-emerald-100 text-emerald-800",
+  high: "bg-green-100 text-green-800",
+  mid: "bg-yellow-100 text-yellow-800",
+  low: "bg-orange-100 text-orange-800",
+  bottom: "bg-red-100 text-red-800",
+  neutral: "bg-muted text-muted-foreground",
+}
+
+function getCriterionColor(
+  score: number,
+  slug: string,
+  mode: AttrColorMode,
+  range?: CriterionRange | null,
+): string {
+  // Modo "faixa ideal": cor pela distância à faixa do perfil (drama/tragédia
+  // deixam de ser caso especial — viram só uma faixa baixa).
+  if (mode === "range" && range) return HEATMAP_TIER_CLASS[pickCriterionTierByRange(score, range)]
+  // Modo "catálogo" (histórico, limiares fixos; drama/tragédia invertidos).
   const isNegative = slug === "drama" || slug === "tragedy"
   if (isNegative) {
     if (score <= 3) return "bg-green-100 text-green-800"
@@ -186,6 +214,19 @@ function getValueForKey(work: WorkWithRelations, key: string): number | null {
     if (!v) return null
     const n = v.length // 1 char por coração
     return n > 0 && n <= 4 ? n : null
+  }
+  if (key === "synopsis_pred") {
+    // Mesma lógica do synopsis_q, mas pra previsão da IA (♥..♥♥♥♥ → 1..4).
+    const v = work.predicted_synopsis_quality?.trim()
+    if (!v) return null
+    const n = v.length
+    return n > 0 && n <= 4 ? n : null
+  }
+  if (key === "personal_fit") {
+    // Ordena pelo percentil (0–100) exibido; fallback no valor cru × 100.
+    const cs = work.calculated_scores
+    if (cs?.personal_fit_percentile != null) return cs.personal_fit_percentile
+    return cs?.personal_fit != null ? cs.personal_fit * 100 : null
   }
   if (key === "alignment_score") return work.calculated_scores?.alignment_score ?? null
   if (key.startsWith("crit_")) {
@@ -221,12 +262,16 @@ export function WorkHeatmapView({
   someSelected = false,
   onSelectAll,
   onClearAll,
+  criterionPrefs,
 }: WorkHeatmapViewProps) {
   const columnConfig = useSyncExternalStore(
     (onChange) => subscribeWorkColumnConfig(onChange, namespace),
     () => readWorkColumnConfig(namespace),
     () => getDefaultWorkColumnConfig(namespace)
   )
+  // Modo de cor global (catálogo vs. faixa ideal). Em "range" sem perfil, o
+  // ScoreCell cai pro catálogo por célula.
+  const colorMode = useSyncExternalStore(subscribeAttrColorMode, readAttrColorMode, () => "catalog" as const)
 
   const visibleScoreColumns = useMemo(
     () => getConfiguredWorkColumns(columnConfig).filter((c) => isScoreColumn(c.key)),
@@ -431,6 +476,8 @@ export function WorkHeatmapView({
                         <ScoreCell
                           col={col}
                           work={work}
+                          colorMode={colorMode}
+                          criterionPrefs={criterionPrefs}
                         />
                       </td>
                     )
@@ -448,9 +495,13 @@ export function WorkHeatmapView({
 function ScoreCell({
   col,
   work,
+  colorMode,
+  criterionPrefs,
 }: {
   col: WorkColumnDef
   work: WorkWithRelations
+  colorMode: AttrColorMode
+  criterionPrefs?: Record<string, CriterionRange>
 }) {
   const tooltipLabel = getTooltipLabel(col)
 
@@ -473,9 +524,34 @@ function ScoreCell({
     )
   }
 
+  // synopsis_pred (Interesse IA) também é string ♥..♥♥♥♥ — render via a mesma
+  // pílula da tabela/ranking (com stale + confiança no tooltip).
+  if (col.key === "synopsis_pred") {
+    const v = work.predicted_synopsis_quality?.trim()
+    if (!v) return <EmptyCell />
+    return (
+      <SynopsisPredictionCell
+        quality={v}
+        stale={work.predicted_synopsis_stale ?? false}
+        confidence={work.predicted_synopsis_confidence ?? null}
+      />
+    )
+  }
+
   const score = getValueForKey(work, col.key)
 
   if (score == null) return <EmptyCell />
+
+  if (col.key === "personal_fit") {
+    // Alinhamento — percentil colorido por faixa (mesma célula da tabela).
+    return (
+      <AlignmentCell
+        value={work.calculated_scores?.personal_fit ?? null}
+        percentile={work.calculated_scores?.personal_fit_percentile ?? null}
+        showBar={false}
+      />
+    )
+  }
 
   if (col.key === "platform_avg") {
     return (
@@ -517,13 +593,14 @@ function ScoreCell({
 
   // Criterion / personal scores get a colored block.
   const colorSlug = col.key.startsWith("crit_") ? col.key.slice("crit_".length) : "positive"
+  const range = criterionPrefs?.[colorSlug] ?? null
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
           className={cn(
             "mx-auto inline-grid h-9 w-full min-w-0 max-w-[96px] place-items-center rounded-md font-mono text-sm font-bold",
-            getCriterionColor(score, colorSlug)
+            getCriterionColor(score, colorSlug, colorMode, range)
           )}
         >
           {score.toFixed(1)}

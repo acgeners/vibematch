@@ -36,6 +36,20 @@ export type ConsolidateSynopsisStatus =
   | { kind: "api_failed"; error: string }
 
 /**
+ * Tamanho mínimo (chars) de um bloco de sinopse pra valer consolidação — blocos
+ * menores (1-2 palavras) são descartados. Exportado pra que a CONTAGEM de
+ * pendência (`countPendingCanonicalSynopses`) use o MESMO gate da consolidação e
+ * não conte obras que o consolidador sempre pula (badge "preso"). Ver
+ * `hasConsolidatableBlocks`.
+ */
+export const SYNOPSIS_MIN_BLOCK_CHARS = 40
+
+/** Há ≥1 bloco longo o bastante pra consolidar (mesmo gate de `consolidateSynopsisDetailed`). */
+export function hasConsolidatableBlocks(blocks: string[]): boolean {
+  return blocks.some((b) => b.trim().length >= SYNOPSIS_MIN_BLOCK_CHARS)
+}
+
+/**
  * Pega um array de blocos de sinopse (de fontes diferentes) e devolve uma
  * sinopse canônica consolidada via Haiku. Retorna `{ kind: "skipped" }` quando
  * não há conteúdo útil ou `{ kind: "api_failed" }` quando a Anthropic falha.
@@ -63,7 +77,7 @@ export async function consolidateSynopsisDetailed(
 
   const cleaned = blocks
     .map((b) => b.trim())
-    .filter((b) => b.length >= 40) // só descarta blocos minúsculos (1-2 palavras)
+    .filter((b) => b.length >= SYNOPSIS_MIN_BLOCK_CHARS) // descarta blocos minúsculos (1-2 palavras)
   if (cleaned.length === 0) return { kind: "skipped", reason: "no_content" }
   // Sempre roda Haiku quando há conteúdo. Mesmo bloco único curto vale o custo
   // (~$0.002) porque traduz pra PT-BR e padroniza o estilo da sinopse.

@@ -1045,6 +1045,8 @@ export interface RecommendationRunWithWorks {
     alignment_score: number
     justification: string
     top_match_factors: string[]
+    risks: string[]
+    confidence: number | null
     work: FavoriteCandidate | null
     coverUrl: string | null
     workMissing: boolean
@@ -1074,6 +1076,8 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
         alignment_score?: number
         justification?: string
         top_match_factors?: string[]
+        risks?: string[]
+        confidence?: number | null
       }>)
     : []
 
@@ -1115,6 +1119,8 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
         alignment_score: Number(r.alignment_score),
         justification: r.justification ?? "",
         top_match_factors: Array.isArray(r.top_match_factors) ? r.top_match_factors : [],
+        risks: Array.isArray(r.risks) ? r.risks : [],
+        confidence: r.confidence != null ? Number(r.confidence) : null,
         work,
         coverUrl: work?.coverUrl ?? null,
         workMissing: work === null,

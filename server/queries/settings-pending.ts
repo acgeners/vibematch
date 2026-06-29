@@ -1,5 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { countStaleEmbeddings } from "@/server/actions/embeddings"
+import { hasConsolidatableBlocks } from "@/lib/ai-recommendation/synopsis-consolidator"
+import { splitSynopsesFromText } from "@/lib/work-derived"
 
 /**
  * Pendências do "Pipeline de dados" da página /settings.
@@ -14,15 +16,32 @@ import { countStaleEmbeddings } from "@/server/actions/embeddings"
  * Nenhuma faz chamada de LLM/OpenAI.
  */
 
-/** Obras (não arquivadas) sem sinopse canônica consolidada. Head-count barato. */
+/**
+ * Obras (não arquivadas) sem sinopse canônica E que são CONSOLIDÁVEIS — i.e.
+ * têm ≥1 bloco de sinopse longo o bastante (`hasConsolidatableBlocks`, mesmo
+ * gate de `consolidatePendingSynopses`). Excluir as curtas/sem-sinopse evita o
+ * badge "preso" (contava obras que o consolidador SEMPRE pula como "muito
+ * curtas"). Espelha a expansão por bloco da própria ação de consolidação.
+ */
 export async function countPendingCanonicalSynopses(): Promise<number> {
   const supabase = createAdminClient()
-  const { count } = await supabase
+  const { data } = await supabase
     .from("works")
-    .select("id", { count: "exact", head: true })
+    .select("id, work_synopses(text)")
     .is("canonical_synopsis", null)
     .eq("is_archived", false)
-  return count ?? 0
+  let pending = 0
+  for (const w of data ?? []) {
+    const rawTexts = ((w as { work_synopses?: Array<{ text: string | null }> }).work_synopses ?? [])
+      .map((r) => (r.text ?? "").trim())
+      .filter((t) => t.length > 0)
+    const expanded = rawTexts.flatMap((t) => {
+      const blocks = splitSynopsesFromText(t)
+      return blocks.length > 0 ? blocks : [t]
+    })
+    if (hasConsolidatableBlocks(expanded)) pending += 1
+  }
+  return pending
 }
 
 /**

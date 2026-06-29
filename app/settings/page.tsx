@@ -179,7 +179,14 @@ export default async function SettingsPage() {
         icon={<Settings />}
       />
 
-      <SettingsIndex />
+      <SettingsIndex
+        pending={{
+          embeddings: embeddingsPending,
+          "synopsis-canonical": canonicalSynopsisPending,
+          "review-summary": reviewSummaryPending,
+          comix: comixMissing.length,
+        }}
+      />
 
       <IndexSpacer />
 
@@ -330,7 +337,7 @@ export default async function SettingsPage() {
   )
 }
 
-function SettingsIndex() {
+function SettingsIndex({ pending }: { pending: Record<string, number> }) {
   return (
     <nav
       aria-label="Índice de configurações"
@@ -355,6 +362,7 @@ function SettingsIndex() {
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
               {group.sections.map((section) => {
                 const styles = ACCENT_STYLES[section.accent]
+                const pendingCount = pending[section.id] ?? 0
                 return (
                   <a
                     key={section.id}
@@ -379,9 +387,17 @@ function SettingsIndex() {
                     >
                       {section.icon}
                     </span>
-                    <span className="min-w-0 text-sm font-semibold text-foreground">
+                    <span className="min-w-0 truncate text-sm font-semibold text-foreground">
                       {section.title}
                     </span>
+                    {pendingCount > 0 && (
+                      <span
+                        aria-label={`${pendingCount} ${pendingCount === 1 ? "item pendente" : "itens pendentes"}`}
+                        className="ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-bold leading-none text-primary-foreground shadow-sm shadow-primary/30 ring-1 ring-white/15"
+                      >
+                        {pendingCount > 99 ? "99+" : pendingCount}
+                      </span>
+                    )}
                   </a>
                 )
               })}

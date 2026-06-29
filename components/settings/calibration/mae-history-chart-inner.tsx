@@ -31,7 +31,13 @@ export function MaeHistoryChart({ history }: { history: CalibrationHistoryEntry[
     if (!lastPerDay.has(k)) lastPerDay.set(k, h)
   }
 
-  if (lastPerDay.size < 2) {
+  const entries = Array.from(lastPerDay.values()).reverse()
+  // O eixo começa no primeiro dia COM cv_mae_expected gravado (e termina no
+  // último): esconde o trecho vazio à esquerda (snapshots antigos sem CV) que
+  // poluía o gráfico antes da linha começar.
+  const cvEntries = entries.filter((h) => h.cv_mae_expected != null)
+
+  if (cvEntries.length < 2) {
     return (
       <div className="rounded-md border border-dashed border-border bg-muted/20 p-6 text-center text-xs text-muted-foreground">
         Histórico ainda não disponível — recalibre em pelo menos dois dias diferentes pra começar a
@@ -40,9 +46,8 @@ export function MaeHistoryChart({ history }: { history: CalibrationHistoryEntry[
     )
   }
 
-  const entries = Array.from(lastPerDay.values()).reverse()
-  const minDay = new Date(dayKey(entries[0].recorded_at) + "T00:00:00")
-  const maxDay = new Date(dayKey(entries[entries.length - 1].recorded_at) + "T00:00:00")
+  const minDay = new Date(dayKey(cvEntries[0].recorded_at) + "T00:00:00")
+  const maxDay = new Date(dayKey(cvEntries[cvEntries.length - 1].recorded_at) + "T00:00:00")
   const entriesByDay = new Map(entries.map((h) => [dayKey(h.recorded_at), h]))
 
   const data: HistoryChartDatum[] = []
@@ -56,6 +61,16 @@ export function MaeHistoryChart({ history }: { history: CalibrationHistoryEntry[
       trainSize: h?.train_size ?? null,
     })
   }
+
+  // Domínio do Y apertado em torno dos dados (com folga proporcional) — em vez de
+  // [0, auto], que espremia a faixa real (~0,55–0,60) no topo e escondia as
+  // diferenças diárias. Adaptativo: acompanha o MAE se ele cair com o tempo.
+  const cvValues = data.map((d) => d.cvExpected).filter((v): v is number => v != null)
+  const cvMin = Math.min(...cvValues)
+  const cvMax = Math.max(...cvValues)
+  const pad = Math.max(0.02, (cvMax - cvMin) * 0.6)
+  const yMin = Math.max(0, Number((cvMin - pad).toFixed(3)))
+  const yMax = Number((cvMax + pad).toFixed(3))
 
   return (
     <div className="h-[200px] w-full">
@@ -72,7 +87,9 @@ export function MaeHistoryChart({ history }: { history: CalibrationHistoryEntry[
             tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
             tickLine={false}
             stroke="hsl(var(--border))"
-            domain={[0, "auto"]}
+            domain={[yMin, yMax]}
+            tickCount={6}
+            allowDecimals
             tickFormatter={(v: number) => v.toFixed(2)}
           />
           <RechartsTooltip

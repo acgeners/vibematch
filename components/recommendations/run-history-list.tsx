@@ -82,33 +82,35 @@ export function RunHistoryList({ runs }: RunHistoryListProps) {
                 ) : (
                   <p className="text-sm text-muted-foreground">Sem resultados salvos</p>
                 )}
-                <p className="mt-1 text-[11px] text-muted-foreground">
+              </div>
+
+              <div className="flex flex-col items-end gap-1 shrink-0 pl-2">
+                {run.topAlignment != null && (
+                  <span
+                    className={cn(
+                      "inline-flex items-baseline gap-1 rounded-md border px-1.5 py-0.5",
+                      alignmentColor(run.topAlignment),
+                    )}
+                    title="Faixa de Veredito IA (match) das obras desta execução — do maior ao menor"
+                  >
+                    <span className="text-[9px] font-semibold uppercase tracking-wide opacity-80">
+                      Veredito IA
+                    </span>
+                    <span className="text-xs font-bold tabular-nums">
+                      {Math.round(run.topAlignment)}
+                      {run.lowAlignment != null &&
+                        Math.round(run.lowAlignment) !== Math.round(run.topAlignment) && (
+                          <span className="font-medium opacity-70">
+                            –{Math.round(run.lowAlignment)}
+                          </span>
+                        )}
+                    </span>
+                  </span>
+                )}
+                <p className="text-[10px] text-muted-foreground/75 leading-none select-none text-right">
                   {formatRelativeDateTime(run.createdAt)} · {run.nCandidates} candidatos
                 </p>
               </div>
-
-              {run.topAlignment != null && (
-                <span
-                  className={cn(
-                    "inline-flex shrink-0 items-baseline gap-1 rounded-md border px-1.5 py-0.5",
-                    alignmentColor(run.topAlignment),
-                  )}
-                  title="Faixa de Veredito IA (match) das obras desta execução — do maior ao menor"
-                >
-                  <span className="text-[9px] font-semibold uppercase tracking-wide opacity-80">
-                    Veredito IA
-                  </span>
-                  <span className="text-xs font-bold tabular-nums">
-                    {Math.round(run.topAlignment)}
-                    {run.lowAlignment != null &&
-                      Math.round(run.lowAlignment) !== Math.round(run.topAlignment) && (
-                        <span className="font-medium opacity-70">
-                          –{Math.round(run.lowAlignment)}
-                        </span>
-                      )}
-                  </span>
-                </span>
-              )}
             </Link>
 
             <div className="absolute right-1.5 top-1.5 opacity-0 transition group-hover:opacity-100">

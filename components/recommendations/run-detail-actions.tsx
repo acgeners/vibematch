@@ -3,13 +3,9 @@
 import { useRouter } from "next/navigation"
 import { useRefresh } from "@/lib/use-refresh"
 import { useState, useTransition } from "react"
-import { Loader2, RefreshCw, Trash2 } from "lucide-react"
+import { Loader2, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import {
-  deleteRecommendationRunAction,
-  rerunRecommendationFromExistingAction,
-} from "@/server/actions/recommendations"
+import { rerunRecommendationFromExistingAction } from "@/server/actions/recommendations"
 
 interface RunDetailActionsProps {
   runId: string
@@ -18,9 +14,7 @@ interface RunDetailActionsProps {
 export function RunDetailActions({ runId }: RunDetailActionsProps) {
   const router = useRouter()
   const refresh = useRefresh()
-  const [confirmDelete, setConfirmDelete] = useState(false)
   const [rerunning, startRerun] = useTransition()
-  const [deleting, startDelete] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
   const handleRerun = () => {
@@ -35,50 +29,22 @@ export function RunDetailActions({ runId }: RunDetailActionsProps) {
     })
   }
 
-  const handleDelete = () => {
-    setError(null)
-    startDelete(async () => {
-      const res = await deleteRecommendationRunAction(runId)
-      if (!res.ok && res.error) {
-        setError(res.error)
-        return
-      }
-      router.push("/recommendations")
-      refresh()
-    })
-  }
-
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={handleRerun} disabled={rerunning || deleting}>
-          {rerunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-          Rodar de novo com mesmo contexto
+      <div className="flex flex-col items-center gap-1">
+        <Button size="sm" onClick={handleRerun} disabled={rerunning} className="w-full sm:w-auto px-4">
+          {rerunning ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+          Rodar novamente
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setConfirmDelete(true)}
-          disabled={rerunning || deleting}
-          className="text-destructive hover:text-destructive"
-        >
-          {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-          Excluir
-        </Button>
+        <span className="text-[10px] font-semibold text-muted-foreground/75 tracking-wide select-none">
+          com mesmo contexto
+        </span>
       </div>
       {error && (
         <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
           {error}
         </div>
       )}
-      <ConfirmDialog
-        open={confirmDelete}
-        onOpenChange={setConfirmDelete}
-        title="Excluir esta execução?"
-        description="A run salva será removida do histórico. Esta ação não pode ser desfeita."
-        confirmText="Excluir"
-        onConfirm={handleDelete}
-      />
     </div>
   )
 }

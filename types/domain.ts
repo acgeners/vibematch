@@ -8,6 +8,7 @@ export type PublicationStatus = (typeof PUBLICATION_STATUSES)[number]
 export const PERSONAL_STATUSES = [
   "Want to Read",
   "Untracked",
+  "Not Now",
   "Reading",
   "Started",
   "Stalled",
@@ -202,6 +203,15 @@ export interface WorkWithRelations extends Work {
   tags: Tag[]
   work_covers?: WorkCover[]
   work_synopses?: WorkSynopsis[]
+  /**
+   * Previsão de interesse na sinopse (♥–♥♥♥♥) feita pela IA. Não vem do
+   * `getWorksByIds`; é mesclada na /favorites a partir dos entries do
+   * `getRanking` (irmã da `synopsis_quality`, que é o valor informado pelo
+   * usuário). Ausente nas demais telas.
+   */
+  predicted_synopsis_quality?: SynopsisQuality | null
+  predicted_synopsis_stale?: boolean
+  predicted_synopsis_confidence?: number | null
 }
 
 export interface AiEvaluationScore {
