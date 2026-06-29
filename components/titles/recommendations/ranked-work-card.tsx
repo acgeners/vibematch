@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ExternalLink, ImageOff } from "lucide-react"
+import { AlertTriangle, Check, ExternalLink, ImageOff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CoverImage } from "@/components/ui/cover-image"
@@ -23,6 +23,7 @@ function alignmentColor(score: number): string {
 
 export function RankedWorkCard({ rank, ranked }: RankedWorkCardProps) {
   const { work, coverUrl, alignment_score, justification, top_match_factors } = ranked
+  const risks = ranked.risks ?? []
 
   return (
     <div className="flex gap-3 rounded-lg border bg-card/40 p-3 transition hover:bg-card/70">
@@ -81,11 +82,26 @@ export function RankedWorkCard({ rank, ranked }: RankedWorkCardProps) {
 
         <p className="text-xs leading-relaxed text-muted-foreground">{justification}</p>
 
-        {top_match_factors.length > 0 && (
+        {(top_match_factors.length > 0 || risks.length > 0) && (
           <div className="flex flex-wrap gap-1">
             {top_match_factors.map((factor) => (
-              <Badge key={factor} variant="outline" className="text-[11px] font-normal">
+              <Badge
+                key={`pro:${factor}`}
+                variant="outline"
+                className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-[11px] font-normal text-emerald-700 dark:text-emerald-300"
+              >
+                <Check className="h-3 w-3 shrink-0" />
                 {factor}
+              </Badge>
+            ))}
+            {risks.map((risk) => (
+              <Badge
+                key={`con:${risk}`}
+                variant="outline"
+                className="gap-1 border-rose-500/40 bg-rose-500/10 text-[11px] font-normal text-rose-700 dark:text-rose-300"
+              >
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                {risk}
               </Badge>
             ))}
           </div>

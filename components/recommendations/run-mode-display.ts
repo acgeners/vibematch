@@ -15,8 +15,19 @@ export interface RunModeDisplay {
  * como uma recomendação de ranking comum.
  */
 export function getRunModeDisplay(mode: RecommendationMode, isTiebreak: boolean): RunModeDisplay {
-  if (isTiebreak) return { label: "Desempate", Icon: Scale }
-  if (mode === "next_read") return { label: "Próxima leitura", Icon: BookOpen }
-  if (mode === "ranking") return { label: "Ranking (filtrado)", Icon: Sparkles }
-  return { label: "Re-ranquear favoritos", Icon: ChartNoAxesCombined }
+  if (isTiebreak) return { label: "Desempate de comparação", Icon: Scale }
+  if (mode === "next_read") return { label: "Próxima leitura (não-lidos)", Icon: BookOpen }
+  if (mode === "ranking") return { label: "Recomendado do ranking", Icon: Sparkles }
+  return { label: "Recomendação geral (favoritos)", Icon: ChartNoAxesCombined }
 }
+
+/**
+ * Legenda dos ícones de modo exibidos nos cards do histórico. Derivada de
+ * `getRunModeDisplay` pra ficar sempre em sincronia com os rótulos/ícones reais.
+ */
+export const RUN_MODE_LEGEND: RunModeDisplay[] = [
+  getRunModeDisplay("full_analysis", false), // Re-ranquear favoritos
+  getRunModeDisplay("next_read", false), // Próxima leitura
+  getRunModeDisplay("ranking", false), // Ranking (filtrado)
+  getRunModeDisplay("ranking", true), // Desempate
+]

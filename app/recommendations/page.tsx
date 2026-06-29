@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { CollapsibleCard } from "@/components/ui/collapsible-card"
 import { RecommendDialog } from "@/components/recommendations/recommend-dialog"
 import { RunHistoryList } from "@/components/recommendations/run-history-list"
+import { RUN_MODE_LEGEND } from "@/components/recommendations/run-mode-display"
 import { RecommendationChat } from "@/components/recommendations/recommendation-chat"
 import { getTasteProfileStatusAction } from "@/server/actions/recommendations"
 import { listRecommendationRuns } from "@/server/queries/recommendations"
@@ -121,33 +122,62 @@ export default async function RecommendationsPage() {
         )}
 
         {/* Coluna direita: modo rápido + histórico */}
-        <div className="space-y-4">
-          <CollapsibleCard
-            title="Modo rápido (sem conversa)"
-            description="Ranking one-shot dos seus favoritos. ~$0.05 por execução."
-            defaultOpen={!canChat}
-          >
-            <div className="space-y-2">
-              <RecommendDialog
-                context="standalone"
-                size="default"
-                isPaid={canShortlist}
-                disabled={profileDisabled}
-                disabledReason={profileDisabledReason}
-              />
-              <p className="text-xs text-muted-foreground">
-                Escolha o escopo (não-lidos ou todos os favoritos) e, opcionalmente, um
-                mood — gera um ranking one-shot sem abrir conversa.
-              </p>
-            </div>
-          </CollapsibleCard>
+        <div className="space-y-5">
+          <Card className="border border-border/80 bg-card/25 shadow-sm">
+            <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="grid size-7 place-items-center rounded-lg bg-primary/10 text-primary">
+                    <Sparkles className="h-3.5 w-3.5" />
+                  </span>
+                  <h3 className="font-bold text-sm text-foreground">Modo rápido (sem conversa)</h3>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Escolha o escopo (não-lidos ou todos) e, opcionalmente, um mood — gera um ranking one-shot sem abrir conversa.
+                </p>
+                <div className="text-[10px] text-muted-foreground/60 font-semibold tracking-wide uppercase">
+                  Custo estimado: ~$0.05 por execução
+                </div>
+              </div>
+              <div className="shrink-0 w-full sm:w-auto">
+                <RecommendDialog
+                  context="standalone"
+                  size="default"
+                  isPaid={canShortlist}
+                  disabled={profileDisabled}
+                  disabledReason={profileDisabledReason}
+                />
+              </div>
+            </CardContent>
+          </Card>
 
-          <section className="space-y-3">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Histórico
-              </h2>
-              <span className="text-xs text-muted-foreground">{runs.length} salva(s)</span>
+          <section className="space-y-4">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-baseline justify-between">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Histórico
+                </h2>
+                <span className="text-xs text-muted-foreground select-none">{runs.length} salva(s)</span>
+              </div>
+              
+              {runs.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60 select-none pl-0.5">
+                    Legenda
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                    {RUN_MODE_LEGEND.map(({ label, Icon }) => (
+                      <div
+                        key={label}
+                        className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-card/25 px-2.5 py-1.5 text-xs text-muted-foreground select-none"
+                      >
+                        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/85" />
+                        <span className="font-semibold text-[11px] leading-tight">{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <RunHistoryList runs={runs} />
           </section>

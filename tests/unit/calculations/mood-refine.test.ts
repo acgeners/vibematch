@@ -98,3 +98,35 @@ describe("computeMoodAdjusted", () => {
     expect(computeMoodFit(cluster(), NONE).get("A")).toBeNull()
   })
 })
+
+describe("alvo por faixa ideal (±1)", () => {
+  // cluster romance: A=9, B=5, C=2
+  it("+1 mira o TOPO da faixa (ideal_max), não o máximo absoluto", () => {
+    // Faixa romance 4–6 → +1 alvo 6. Distâncias: A=3, B=1, C=4 → B mais perto.
+    const order = sortByMoodAdjusted(cluster(), { attributes: { romance: 1 } }, { romance: { ideal_min: 4, ideal_max: 6 } }).map((w) => w.id)
+    expect(order[0]).toBe("B")
+    // Sem faixa, +1 vira monótono (alvo 10) → A (romance 9) no topo.
+    const monotone = sortByMoodAdjusted(cluster(), { attributes: { romance: 1 } }).map((w) => w.id)
+    expect(monotone[0]).toBe("A")
+  })
+
+  it("-1 mira o PISO da faixa (ideal_min); -2 vai ao mínimo absoluto", () => {
+    // Faixa romance 5–8 → -1 alvo 5. Distâncias: A=4, B=0, C=3 → B no topo.
+    const edge = sortByMoodAdjusted(cluster(), { attributes: { romance: -1 } }, { romance: { ideal_min: 5, ideal_max: 8 } }).map((w) => w.id)
+    expect(edge[0]).toBe("B")
+    // -2 alvo 0 → C (romance 2) mais perto do mínimo, no topo.
+    const extreme = sortByMoodAdjusted(cluster(), { attributes: { romance: -2 } }, { romance: { ideal_min: 5, ideal_max: 8 } }).map((w) => w.id)
+    expect(extreme[0]).toBe("C")
+  })
+
+  it("+2 ignora a faixa (alvo 10 = máximo) — backward-compatible", () => {
+    const order = sortByMoodAdjusted(cluster(), { attributes: { romance: 2 } }, { romance: { ideal_min: 4, ideal_max: 6 } }).map((w) => w.id)
+    expect(order[0]).toBe("A") // romance 9, mesmo com faixa estreita
+  })
+
+  it("sem faixa, +1 e +2 produzem a mesma ordem (ambos monótonos)", () => {
+    const a = sortByMoodAdjusted(cluster(), { attributes: { romance: 1 } }).map((w) => w.id)
+    const b = sortByMoodAdjusted(cluster(), { attributes: { romance: 2 } }).map((w) => w.id)
+    expect(a).toEqual(b)
+  })
+})

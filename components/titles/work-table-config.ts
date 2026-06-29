@@ -41,11 +41,13 @@ export const DEFAULT_WORK_COLUMN_NAMESPACE: WorkColumnNamespace = "titles"
 // favorites v7 → v8: adiciona a coluna "Prioridade" (decision) visível por padrão.
 // Bump em todos os namespaces ao aposentar as colunas legado N.IA/Pr/Final
 // (limpa configs salvos que referenciavam as colunas removidas).
+// Bump em todos ao adicionar a coluna "Interesse IA (previsão)" (synopsis_pred)
+// oculta por padrão — sem o bump, configs salvos a exibiriam vazia ("—").
 const NAMESPACE_STORAGE_VERSION: Record<WorkColumnNamespace, string> = {
-  titles: "v7",
-  favorites: "v9",
-  ranking: "v6",
-  recommendations: "v5",
+  titles: "v8",
+  favorites: "v10",
+  ranking: "v7",
+  recommendations: "v6",
 }
 
 function storageKeyFor(namespace: WorkColumnNamespace): string {
@@ -80,6 +82,9 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   { key: "platform_avg", label: "N.M", configLabel: "Nota.M", description: "Nota.M — média ponderada das notas das plataformas externas (AniList, MAL, etc.), na escala 0–10. Pondera mais as fontes com mais votos.", align: "center", defaultHidden: true, group: "notas" },
   { key: "total_votes", label: "Votos", configLabel: "Votos", description: "Total de votos/avaliações somados nas plataformas externas. Quanto maior, mais confiável é a Nota.M.", align: "center", defaultHidden: true, group: "notas" },
   { key: "alignment_score", label: "Veredito", configLabel: "Veredito IA", description: "Re-rank do consultor IA (0–100), gerado sob demanda. Reordena as recomendações ('Recomendar com IA', 'Próxima leitura', 'Recomendar do ranking') e ajusta a Prioridade. A maioria das obras fica sem valor até passar pelo Rankear.", align: "center", defaultHidden: true, group: "notas" },
+  // Previsão de interesse na sinopse (Interesse IA). Dado só é mesclado em
+  // /favorites (vem do getRanking); nas demais telas fica vazio ("—").
+  { key: "synopsis_pred", label: "Prev. IA", configLabel: "Interesse IA (previsão)", description: "A previsão da IA de quanto a sinopse vai te interessar (♥ a ♥♥♥♥), com base no seu perfil de gosto. Diferente da coluna \"Sinopse\" (Interesse na sinopse), que é o valor que VOCÊ informou. Só preenchida em obras que passaram pela estimativa (feature Paga).", align: "center", defaultHidden: true, group: "notas" },
   { key: "ai_status", label: "IA", configLabel: "Status da avaliação IA", description: "Estágio da avaliação por IA: pendente de atributos, pendente de Veredito IA, avaliado ou pulado.", align: "center", group: "basico" },
   { key: "updated_at", label: "Atual.", configLabel: "Atualizado em", description: "Quando o registro da obra foi atualizado pela última vez.", align: "center", group: "basico" },
   { key: "last_read_at", label: "Últ. leitura", configLabel: "Última leitura", description: "Data da última vez que você leu algum capítulo desta obra.", align: "center", defaultHidden: true, group: "basico" },
@@ -118,6 +123,7 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
     "decision",
     "chapters_read",
     "personal_fit",
+    "synopsis_pred",
     "ai_status",
     "updated_at",
     "last_read_at",
@@ -132,6 +138,7 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
     "personal_status",
     "chapters_read",
     "chapters_progress",
+    "synopsis_pred",
     "ai_status",
     "updated_at",
     "last_read_at",
@@ -145,6 +152,7 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
     "personal_status",
     "chapters_read",
     "chapters_progress",
+    "synopsis_pred",
     "ai_status",
     "updated_at",
     "last_read_at",
@@ -155,6 +163,7 @@ const NAMESPACE_HIDDEN: Record<WorkColumnNamespace, string[]> = {
   recommendations: [
     "decision",
     "synopsis_q",
+    "synopsis_pred",
     "year",
     "ai_status",
     "chapters_read",
@@ -238,6 +247,7 @@ export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   platform_avg: 80,
   total_votes: 70,
   alignment_score: 70,
+  synopsis_pred: 110,
   ai_status: 80,
   updated_at: 110,
   last_read_at: 110,
@@ -319,14 +329,18 @@ export function writeWorkColumnConfig(
 
 // Colunas renderizáveis no heatmap. Inclui:
 //   - notas 0-10 com color coding (final, calc, predicted, expected, criterios)
+//   - `personal_fit` (Alinhamento — percentil 0-100, célula própria)
 //   - `total_votes` (count sem color coding — formatado como 1.5k/50k)
-//   - `synopsis_q` (string de corações ♥-♥♥♥♥ pra interesse na sinopse)
+//   - `synopsis_q` (string de corações ♥-♥♥♥♥ pra interesse na sinopse informado)
+//   - `synopsis_pred` (Interesse IA — previsão ♥-♥♥♥♥; dado só em /favorites)
 const SCORE_COLUMN_KEYS = new Set<string>([
   "expected_score",
+  "personal_fit",
   "platform_avg",
   "total_votes",
   "alignment_score",
   "synopsis_q",
+  "synopsis_pred",
   ...CRITERION_SLUGS.map((slug) => `crit_${slug}`),
 ])
 

@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
+  Ban,
   Bookmark,
   BookOpen,
   ChevronDown,
@@ -12,6 +13,7 @@ import {
   ChevronRight,
   ExternalLink,
   GripVertical,
+  Heart,
   ImageOff,
   Loader2,
   Minus,
@@ -37,7 +39,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { ScoreBadge, getCriterionColorClass, type ColumnThresholds, type ScoreColorThresholds } from "@/components/ui/score-badge"
+import { ScoreBadge, getCriterionColorClass, criterionCellClass, type ColumnThresholds, type ScoreColorThresholds, type CriterionRange, type AttrColorMode } from "@/components/ui/score-badge"
+import { readAttrColorMode, subscribeAttrColorMode } from "@/lib/ui/attr-color-mode"
 import {
   PersonalStatusBadge,
   PublicationStatusBadge,
@@ -52,6 +55,7 @@ import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug } from "@/types/domain"
 import { computeMoodAdjusted, isMoodActive, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
+import { segmentTags, lowercasedNameSet, type TagStance } from "@/lib/tags/segment"
 import { cn } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
 import { fetchCompareWorks, type CompareWork } from "@/server/actions/compare"
@@ -200,6 +204,8 @@ interface WorkCompareDrawerProps {
   /** Refino por mood (desempate dentro do tier). Quando ativo, mostra a linha
    *  "Prioridade ajustada" + resumo; os `ids` já chegam ordenados pelo mood. */
   moodRefine?: MoodRefine | null
+  /** Faixas ideais por critério (perfil). Habilita a cor + melhor/pior "Minha faixa". */
+  criterionPrefs?: Record<string, CriterionRange>
 }
 
 export function WorkCompareDrawer({
@@ -211,7 +217,9 @@ export function WorkCompareDrawer({
   scoreThresholds,
   isPaid = true,
   moodRefine = null,
+  criterionPrefs,
 }: WorkCompareDrawerProps) {
+  const colorMode = useSyncExternalStore(subscribeAttrColorMode, readAttrColorMode, () => "catalog" as const)
   const [works, setWorks] = useState<CompareWork[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -519,6 +527,8 @@ export function WorkCompareDrawer({
               hiddenRows={hiddenRows}
               rowOrder={rowsConfig.order}
               moodRefine={moodRefine}
+              colorMode={colorMode}
+              criterionPrefs={criterionPrefs}
             />
           )}
         </div>
@@ -754,11 +764,22 @@ interface CompareGridProps {
   rowOrder: string[]
   /** Refino por mood ativo → mostra a linha "Prioridade ajustada" no topo. */
   moodRefine?: MoodRefine | null
+  /** Modo de cor ativo (catálogo vs. faixa ideal). */
+  colorMode: AttrColorMode
+  /** Faixas ideais por critério (perfil). */
+  criterionPrefs?: Record<string, CriterionRange>
 }
 
 type SectionKey = "notas" | "criterios" | "tags-generos"
 
 const NEGATIVE_CRITERIA = new Set<string>(["drama", "tragedy"])
+
+/** Distância de uma nota até a faixa ideal (0 = dentro; >0 = fora). */
+function distanceToRange(score: number, range: CriterionRange): number {
+  if (score < range.ideal_min) return range.ideal_min - score
+  if (score > range.ideal_max) return score - range.ideal_max
+  return 0
+}
 
 /** Reordena `items` pra refletir a posição da sua key em `order`. Items
  *  cuja key não está em `order` vão pro fim mantendo ordem canônica. */
@@ -781,6 +802,8 @@ function CompareGrid({
   hiddenRows,
   rowOrder,
   moodRefine = null,
+  colorMode,
+  criterionPrefs,
 }: CompareGridProps) {
   const n = works.length
 
@@ -799,8 +822,8 @@ function CompareGrid({
       totalVotes: w.totalVotes,
       synopsisQuality: w.synopsisQuality,
     }))
-    return computeMoodAdjusted(moodWorks, moodRefine)
-  }, [works, moodActive, moodRefine])
+    return computeMoodAdjusted(moodWorks, moodRefine, criterionPrefs)
+  }, [works, moodActive, moodRefine, criterionPrefs])
   const [collapsed, setCollapsed] = useState<Set<SectionKey>>(new Set())
   const [draggedOverIndex, setDraggedOverIndex] = useState<number | null>(null)
 
@@ -1097,11 +1120,20 @@ function CompareGrid({
           visibleCritSlugs.map((slug) => {
             const info = CRITERIA_INFO[slug]
             const isNegative = slug === "drama" || slug === "tragedy"
+            // Faixa ideal ativa pra este critério (peso ≥ ínfimo) → melhor = mais
+            // perto da faixa (métrica = -distância, maior = melhor; sem inversão).
+            const range =
+              colorMode === "range" ? criterionPrefs?.[slug] ?? null : null
+            const useRange = range != null && range.weight >= 0.05
             const { bestIndex, worstIndex } = highlightBestWorst
               ? getUniqueBestWorst(
                   works,
-                  (w) => w.criteria.find((c) => c.slug === slug)?.score ?? null,
-                  isNegative
+                  (w) => {
+                    const s = w.criteria.find((c) => c.slug === slug)?.score ?? null
+                    if (s == null) return null
+                    return useRange ? -distanceToRange(s, range!) : s
+                  },
+                  useRange ? false : isNegative
                 )
               : { bestIndex: null, worstIndex: null }
             return (
@@ -1114,6 +1146,8 @@ function CompareGrid({
                 bestIndex={bestIndex}
                 worstIndex={worstIndex}
                 thresholds={scoreThresholds?.criteria?.[slug] ?? null}
+                colorMode={colorMode}
+                range={range}
               />
             )
           })}
@@ -1341,26 +1375,40 @@ function SynopsisButton({
   )
 }
 
+/** Cor do chip conforme a stance (amada=verde, evitada=vermelho). */
+const STANCE_BADGE_CLASS: Record<TagStance, string> = {
+  love: "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  avoid: "border-rose-500/50 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+}
+
 function GenresTagsCell({
   genres,
   tags,
 }: {
   genres: string[]
-  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName?: string | null }>
+  tags: Array<{ slug: string; name: string; groupId: string | null; groupName: string | null; subGroupName?: string | null; stance?: TagStance | null }>
 }) {
   const total = genres.length + tags.length
   if (total === 0) {
     return <span className="text-xs italic text-muted-foreground">—</span>
   }
+  // Segmenta: Categorias (gêneros) › Amadas › Evitadas › Resto. Tags com nome de
+  // gênero saem da segmentação (já aparecem em Categorias) — sem duplicar.
+  const genreNameSet = lowercasedNameSet(genres)
+  const { loved, avoided, rest } = segmentTags(tags, (t) => t.stance ?? null, genreNameSet)
+
+  // Preview inline: gêneros, depois amadas › evitadas › resto (ordem de prioridade).
+  const orderedTags = [...loved, ...avoided, ...rest]
   const VISIBLE = 5
   const visibleGenres = genres.slice(0, VISIBLE)
   const remainingForTags = Math.max(0, VISIBLE - visibleGenres.length)
-  const visibleTags = tags.slice(0, remainingForTags)
+  const visibleTags = orderedTags.slice(0, remainingForTags)
   const remaining = total - visibleGenres.length - visibleTags.length
 
-  const groupedTags = (() => {
-    const groups = new Map<string, typeof tags>()
-    for (const tag of tags) {
+  // Resto agrupado por grupo → sub-grupo (mesma lógica de antes, só sobre o resto).
+  const groupedRest = (() => {
+    const groups = new Map<string, typeof rest>()
+    for (const tag of rest) {
       const label = tag.groupName ?? "Sem grupo"
       const list = groups.get(label) ?? []
       list.push(tag)
@@ -1388,7 +1436,7 @@ function GenresTagsCell({
         <Badge
           key={`t:${t.slug}`}
           variant="outline"
-          className="h-5 py-0 text-[11px] font-normal"
+          className={cn("h-5 py-0 text-[11px] font-normal", t.stance ? STANCE_BADGE_CLASS[t.stance] : undefined)}
         >
           {t.name}
         </Badge>
@@ -1428,7 +1476,37 @@ function GenresTagsCell({
                 </div>
               </div>
             )}
-            {groupedTags.map(([groupName, groupTags]) => {
+            {loved.length > 0 && (
+              <div>
+                <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  <Heart className="h-2.5 w-2.5" /> Amadas{" "}
+                  <span className="text-emerald-600/60 dark:text-emerald-400/60">({loved.length})</span>
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {loved.map((t) => (
+                    <Badge key={`t:${t.slug}`} variant="outline" className={cn("h-5 py-0 text-[11px] font-normal", STANCE_BADGE_CLASS.love)}>
+                      {t.name}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            {avoided.length > 0 && (
+              <div>
+                <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+                  <Ban className="h-2.5 w-2.5" /> Evitadas{" "}
+                  <span className="text-rose-600/60 dark:text-rose-400/60">({avoided.length})</span>
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {avoided.map((t) => (
+                    <Badge key={`t:${t.slug}`} variant="outline" className={cn("h-5 py-0 text-[11px] font-normal", STANCE_BADGE_CLASS.avoid)}>
+                      {t.name}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            {groupedRest.map(([groupName, groupTags]) => {
               // Split into collapsible sub-group sections when the group has any.
               const subSections = groupTags.some((t) => t.subGroupName)
                 ? (() => {
@@ -1649,9 +1727,11 @@ interface CriterionRowProps {
   bestIndex: number | null
   worstIndex: number | null
   thresholds: ScoreColorThresholds | null
+  colorMode: AttrColorMode
+  range: CriterionRange | null
 }
 
-function CriterionRow({ slug, label, emoji, works, bestIndex, worstIndex, thresholds }: CriterionRowProps) {
+function CriterionRow({ slug, label, emoji, works, bestIndex, worstIndex, thresholds, colorMode, range }: CriterionRowProps) {
   return (
     <>
       <div className="sticky left-0 z-10 flex items-center gap-1.5 bg-background text-xs text-muted-foreground">
@@ -1675,7 +1755,7 @@ function CriterionRow({ slug, label, emoji, works, bestIndex, worstIndex, thresh
                 <span
                   className={cn(
                     "grid h-7 w-12 place-items-center rounded-md font-mono text-sm font-bold",
-                    getCriterionColorClass(score, slug, thresholds)
+                    criterionCellClass({ score, slug, mode: colorMode, thresholds, range })
                   )}
                 >
                   {score.toFixed(1)}

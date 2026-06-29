@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
-import { BarChart3, ChevronDown, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
+import { BarChart3, Ban, ChevronDown, Heart, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { CalculationBreakdown } from "@/components/titles/calculation-breakdown"
 import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-watcher"
@@ -13,6 +13,8 @@ import { TagsExpandAll } from "@/components/titles/tags-expand-all"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug } from "@/server/queries/works"
 import { getAllTags } from "@/server/queries/tags"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
+import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
+import { buildTagStanceLookup, resolveTagStance, segmentTags, lowercasedNameSet } from "@/lib/tags/segment"
 import {
   getLatestAiEvaluationAttributes,
   getExistingPostReadingAssessment,
@@ -200,7 +202,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction, declaredTagPrefs] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -211,14 +213,19 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getAllTags(),
     getSynopsisPredictionForWork(work.id as string),
     getDeclaredTagPreferences(configClient),
+    loadCurrentTasteProfile(),
   ])
   const subGroupBySlug = new Map<string, string>()
   for (const t of allTagsCatalog) {
     if (t.subGroupName) subGroupBySlug.set(t.slug, t.subGroupName)
   }
-  // Stance declarada (amo/evito) por slug de tag — pra colorir os badges.
-  const stanceBySlug = new Map<string, "love" | "avoid">()
-  for (const p of declaredTagPrefs) stanceBySlug.set(p.slug, p.stance)
+  // Stance (amada/evitada) por tag: preferências declaradas (por slug) ∪ perfil
+  // de gosto (loved_tags/avoided_tags, por nome).
+  const tagStanceLookup = buildTagStanceLookup(
+    declaredTagPrefs.map((p) => ({ slug: p.slug, stance: p.stance })),
+    tasteProfileRow?.profile.loved_tags ?? [],
+    tasteProfileRow?.profile.avoided_tags ?? [],
+  )
   const isPaidPlan = planAllows(plan, "deep_dive")
 
   // Canal ÚNICO de review manual (externas) — para o diálogo "Avaliar" e o card de exibição.
@@ -267,22 +274,40 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   const tags = Array.isArray(work.tags) ? work.tags.filter(Boolean) : []
   const primaryCover = pickPrimaryCover(work.work_covers)
   const primarySynopsis = pickPrimarySynopsis(work.work_synopses)
-  const tagGroupMap = new Map<string, DetailTag[]>()
+  // Normaliza cada tag com nome/slug/grupo + stance (perfil ∪ preferências).
+  type NormTag = DetailTag & { name: string; slug?: string; groupLabel: string }
+  const normalizedTags: NormTag[] = []
   for (const tag of tags as Array<WorkTagForDisplay | string>) {
     const label = typeof tag === "string" ? tag : tag.name
     if (!label) continue
-    const groupLabel = typeof tag === "string" ? "Sem grupo" : getTagGroupLabel(tag.tag_group_id)
     const slug = typeof tag === "string" ? undefined : tag.slug
-    const groupTags = tagGroupMap.get(groupLabel) ?? []
-    groupTags.push({
+    const groupLabel = typeof tag === "string" ? "Sem grupo" : getTagGroupLabel(tag.tag_group_id)
+    normalizedTags.push({
       key: typeof tag === "string" ? tag : tag.id ?? tag.slug ?? label,
       label,
+      name: label,
+      slug,
+      groupLabel,
       subGroupName: slug ? subGroupBySlug.get(slug) : undefined,
-      stance: slug ? stanceBySlug.get(slug) : undefined,
+      stance: resolveTagStance({ slug, name: label }, tagStanceLookup) ?? undefined,
     })
-    tagGroupMap.set(groupLabel, groupTags)
   }
+
+  // Segmenta: Categorias (gêneros, card próprio) › Amadas › Evitadas › Resto.
+  // Tags com nome de gênero saem da segmentação (já aparecem em Categorias).
   const byTagLabel = (a: DetailTag, b: DetailTag) => a.label.localeCompare(b.label)
+  const genreNameSet = lowercasedNameSet(genres)
+  const segmented = segmentTags(normalizedTags, (t) => t.stance ?? null, genreNameSet)
+  const lovedTags = [...segmented.loved].sort(byTagLabel)
+  const avoidedTags = [...segmented.avoided].sort(byTagLabel)
+
+  // Resto agrupado por grupo → sub-grupo (mesma lógica de antes, só sobre o resto).
+  const tagGroupMap = new Map<string, DetailTag[]>()
+  for (const t of segmented.rest) {
+    const groupTags = tagGroupMap.get(t.groupLabel) ?? []
+    groupTags.push(t)
+    tagGroupMap.set(t.groupLabel, groupTags)
+  }
   const tagGroups = Array.from(tagGroupMap.entries())
     .map(([groupName, groupTags]) => {
       // When the group has applied sub-groups, split into collapsible sections.
@@ -1133,14 +1158,56 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {tags.length} {tags.length === 1 ? "tag" : "tags"} em {tagGroups.length}{" "}
-                      {tagGroups.length === 1 ? "grupo" : "grupos"}
+                      {tags.length} {tags.length === 1 ? "tag" : "tags"}
                     </span>
                     {tagGroups.some((g) => g.subGroups) && <TagsExpandAll targetId="work-tags-masonry" />}
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="pt-0">
+                {lovedTags.length > 0 && (
+                  <section className="mb-5 space-y-2">
+                    <div className="flex items-baseline gap-2 border-b-2 border-emerald-500/40 pb-1">
+                      <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-300">
+                        <Heart className="h-3 w-3" /> Amadas
+                      </h3>
+                      <span className="text-[11px] font-semibold text-muted-foreground/70">{lovedTags.length}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {lovedTags.map((tag) => (
+                        <Badge
+                          key={tag.key}
+                          variant="outline"
+                          className={cn("rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors", tagStanceClass("love"))}
+                        >
+                          {tag.label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                {avoidedTags.length > 0 && (
+                  <section className="mb-5 space-y-2">
+                    <div className="flex items-baseline gap-2 border-b-2 border-rose-500/40 pb-1">
+                      <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.14em] text-rose-700 dark:text-rose-300">
+                        <Ban className="h-3 w-3" /> Evitadas
+                      </h3>
+                      <span className="text-[11px] font-semibold text-muted-foreground/70">{avoidedTags.length}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {avoidedTags.map((tag) => (
+                        <Badge
+                          key={tag.key}
+                          variant="outline"
+                          className={cn("rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors", tagStanceClass("avoid"))}
+                        >
+                          {tag.label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                {tagGroups.length > 0 && (
                 <div id="work-tags-masonry" className="gap-x-6 sm:columns-2 [&>section]:mb-5 [&>section]:break-inside-avoid">
                   {tagGroups.map((group) => (
                     <section key={group.groupName} className="space-y-2">
@@ -1201,6 +1268,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </section>
                   ))}
                 </div>
+                )}
               </CardContent>
             </Card>
           )}

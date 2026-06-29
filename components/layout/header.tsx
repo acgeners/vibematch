@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils"
 
 interface HeaderProps {
   title: ReactNode
-  description?: string
+  description?: ReactNode
   actions?: ReactNode
   kicker?: string
   icon?: ReactNode

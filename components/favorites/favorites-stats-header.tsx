@@ -8,11 +8,17 @@ import type { FavoritesSummary } from "@/server/queries/favorites"
 interface FavoritesStatsHeaderProps {
   summary: FavoritesSummary
   scoreThresholds: ScoreColorThresholds | null
+  /**
+   * Quantas obras estão sendo exibidas após os filtros. Quando informado e
+   * menor que o total, o card "Total" vira "X/Y" (exibidas/cadastradas).
+   */
+  shownCount?: number
   /** Ações (ex.: recomendar com IA) renderizadas na mesma linha dos cards. */
   actions?: ReactNode
 }
 
-export function FavoritesStatsHeader({ summary, scoreThresholds, actions }: FavoritesStatsHeaderProps) {
+export function FavoritesStatsHeader({ summary, scoreThresholds, shownCount, actions }: FavoritesStatsHeaderProps) {
+  const isFiltered = shownCount != null && shownCount !== summary.total
   return (
     <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
       <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-3">
@@ -20,8 +26,12 @@ export function FavoritesStatsHeader({ summary, scoreThresholds, actions }: Favo
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Total
         </p>
-        <p className="mt-1 text-2xl font-bold tabular-nums">{summary.total}</p>
-        <p className="text-xs text-muted-foreground">favoritos cadastrados</p>
+        <p className="mt-1 text-2xl font-bold tabular-nums">
+          {isFiltered ? `${shownCount}/${summary.total}` : summary.total}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {isFiltered ? "exibidas de cadastradas" : "favoritos cadastrados"}
+        </p>
       </div>
 
       <div className="rounded-lg border bg-card/40 p-3">

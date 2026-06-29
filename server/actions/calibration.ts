@@ -498,18 +498,26 @@ export async function revertSuggestionAction(id: string): Promise<{ ok: boolean;
 export async function bulkAcceptAction(args: {
   minConfidence: number
   maxAbsDelta?: number
+  /** Aceita só sugestões com |Δ| ≥ este valor (espelha o filtro "|Δ| mínimo" da UI). */
+  minAbsDelta?: number
+  /** Restringe a um critério (espelha o filtro "Critério" da UI). */
+  criterionSlug?: string
 }): Promise<{ accepted: number; failed: number; errors: string[] }> {
   const supabase = createAdminClient()
-  const { data, error } = await supabase
+  let query = supabase
     .from("score_calibration_suggestions")
     .select("id, suggested_score, confidence, delta")
     .eq("status", "pending")
     .gte("confidence", args.minConfidence)
+  if (args.criterionSlug) query = query.eq("criterion_slug", args.criterionSlug)
+  const { data, error } = await query
   if (error) return { accepted: 0, failed: 0, errors: [error.message] }
 
   const filtered = (data ?? []).filter((s) => {
     const delta = Math.abs(Number(s.delta))
-    return args.maxAbsDelta == null || delta <= args.maxAbsDelta
+    if (args.maxAbsDelta != null && delta > args.maxAbsDelta) return false
+    if (args.minAbsDelta != null && delta < args.minAbsDelta) return false
+    return true
   })
 
   let accepted = 0

@@ -37,11 +37,15 @@ async function countRatedWorks(): Promise<number> {
 }
 
 export default async function CalibrationPage() {
-  const [lastAudit, lastBias, ratedWorksCount, suggestions, pendingCount, runHistory, attributeBias, predictionHealth] = await Promise.all([
+  const [lastAudit, lastBias, ratedWorksCount, pendingSuggestions, historySuggestions, pendingCount, runHistory, attributeBias, predictionHealth] = await Promise.all([
     loadLastRun("audit"),
     loadLastRun("bias"),
     countRatedWorks(),
-    loadSuggestions({ limit: 300 }),
+    // Pendentes: carrega TODAS (cap alto) — não só as 300 mais recentes — pra que
+    // a lista, o filtro/ordenação e o "elegíveis" do bulk reflitam o conjunto real.
+    loadSuggestions({ status: "pending", limit: 1000 }),
+    // Histórico: já-processadas, as 300 mais recentes bastam.
+    loadSuggestions({ status: ["auto_applied", "accepted", "edited", "rejected", "reverted"], limit: 300 }),
     countPendingSuggestions(),
     loadRunHistory(20),
     getAttributeBiasOverview(),
@@ -74,14 +78,10 @@ export default async function CalibrationPage() {
           <TabsTrigger value="runs">Runs</TabsTrigger>
         </TabsList>
         <TabsContent value="pending" className="mt-4">
-          <SuggestionsList
-            suggestions={suggestions.filter((s) => s.status === "pending")}
-          />
+          <SuggestionsList suggestions={pendingSuggestions} totalAvailable={pendingCount} />
         </TabsContent>
         <TabsContent value="history" className="mt-4">
-          <SuggestionsList
-            suggestions={suggestions.filter((s) => s.status !== "pending")}
-          />
+          <SuggestionsList suggestions={historySuggestions} />
         </TabsContent>
         <TabsContent value="bias" className="mt-4">
           {lastBias?.bias_report ? (

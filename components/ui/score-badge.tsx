@@ -150,6 +150,69 @@ export function getCriterionColorClass(
   return CRITERION_TIER_CLASS.bottom
 }
 
+// ── Coloração por FAIXA IDEAL (perfil) ───────────────────────────────────────
+// Alternativa ao percentil-no-catálogo: a cor mede a DISTÂNCIA da nota até a
+// faixa ideal do usuário [ideal_min, ideal_max]. Dentro da faixa = melhor;
+// fora, decai por proximidade. Drama/tragédia deixam de ser caso especial —
+// viram apenas uma faixa ideal baixa. Reusa a lógica de decaimento do
+// `criterionAlignment` (personal-fit) em forma de tiers de cor.
+
+export type AttrColorMode = "catalog" | "range"
+
+export interface CriterionRange {
+  ideal_min: number
+  ideal_max: number
+  weight: number
+}
+
+export type CriterionTier = "top" | "high" | "mid" | "low" | "bottom" | "neutral"
+
+// Peso abaixo disso = critério que o usuário não liga → cor neutra (cinza),
+// pintar de verde/vermelho seria enganoso.
+const RANGE_NEUTRAL_WEIGHT = 0.05
+
+const NEUTRAL_CRITERION_CLASS = "bg-muted/60 text-muted-foreground border border-border/50"
+
+/**
+ * Tier de uma nota de atributo pela DISTÂNCIA até a faixa ideal do perfil.
+ * Dentro de [ideal_min, ideal_max] → "top". Fora, decai: ≤1 pt → high, ≤2 →
+ * mid, ≤3 → low, além → bottom. Peso ~0 → "neutral". Arredonda a 1 casa
+ * (mesma granularidade do display) pra evitar flips invisíveis na fronteira.
+ */
+export function pickCriterionTierByRange(score: number, range: CriterionRange): CriterionTier {
+  if (range.weight < RANGE_NEUTRAL_WEIGHT) return "neutral"
+  const s = Math.round(score * 10) / 10
+  if (s >= range.ideal_min && s <= range.ideal_max) return "top"
+  const distance = s < range.ideal_min ? range.ideal_min - s : s - range.ideal_max
+  if (distance <= 1) return "high"
+  if (distance <= 2) return "mid"
+  if (distance <= 3) return "low"
+  return "bottom"
+}
+
+/** Classe de pílula soft pela faixa ideal (mesma paleta de `getCriterionColorClass`). */
+export function getCriterionColorClassByRange(score: number, range: CriterionRange): string {
+  const tier = pickCriterionTierByRange(score, range)
+  return tier === "neutral" ? NEUTRAL_CRITERION_CLASS : CRITERION_TIER_CLASS[tier]
+}
+
+/**
+ * Dispatcher único da cor de célula de atributo, pelo modo ativo:
+ * - "range": distância à faixa ideal do perfil (quando há pref pro slug).
+ * - "catalog": percentil no catálogo (histórico; drama/tragédia invertidos).
+ * Cai pro catálogo quando não há faixa pro slug.
+ */
+export function criterionCellClass(opts: {
+  score: number
+  slug: string
+  mode: AttrColorMode
+  thresholds?: ScoreColorThresholds | null
+  range?: CriterionRange | null
+}): string {
+  if (opts.mode === "range" && opts.range) return getCriterionColorClassByRange(opts.score, opts.range)
+  return getCriterionColorClass(opts.score, opts.slug, opts.thresholds)
+}
+
 const sizeClasses = {
   sm: "text-xs px-1.5 py-0.5 min-w-[2rem]",
   md: "text-sm px-2 py-0.5 min-w-[2.5rem]",

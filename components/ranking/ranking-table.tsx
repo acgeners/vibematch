@@ -19,7 +19,7 @@ import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { formatPercentile } from "@/lib/calculations/percentile"
 import { ScoreBadge } from "@/components/ui/score-badge"
-import type { ColumnThresholds } from "@/components/ui/score-badge"
+import type { ColumnThresholds, CriterionRange } from "@/components/ui/score-badge"
 import { PublicationStatusBadge, PersonalStatusBadge, AiStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
@@ -164,6 +164,8 @@ interface RankingTableProps {
   isPaid?: boolean
   /** Largura da banda de tiers (formula_config.tier_band_width). Provisória, a validar. */
   tierBandWidth?: number
+  /** Faixas ideais por critério (perfil) — repassadas ao drawer de comparação. */
+  criterionPrefs?: Record<string, CriterionRange>
 }
 
 const KEY_CRITERIA = ["romance", "fantasy_nobility", "protagonist", "drama", "tragedy"]
@@ -267,36 +269,47 @@ function entryToPreview(entry: RankingEntry): WorkPreview {
 
 function TitleCell({ entry }: { entry: RankingEntry }) {
   return (
-    <div className="flex flex-col gap-0.5 min-w-0">
-      <WorkTitleLink
-        title={entry.title}
-        workId={entry.workId}
-        preview={entryToPreview(entry)}
-        className="font-medium hover:underline line-clamp-1 block"
-      />
-      {entry.differentiators.length > 0 ? (
-        <TooltipProvider delayDuration={150}>
-          <div className="flex flex-wrap gap-1">
-            {entry.differentiators.map((d) => {
-              const info = CRITERIA_INFO[d.slug]
-              if (!info) return null
-              return (
-                <Tooltip key={d.slug}>
-                  <TooltipTrigger asChild>
-                    <span className="inline-flex items-center gap-0.5 rounded bg-muted/60 px-1 py-0.5 text-[11px] font-mono text-muted-foreground">
-                      <span>{info.emoji}</span>
-                      <span>+{d.diff.toFixed(1)}</span>
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {info.name}: destaca-se em +{d.diff.toFixed(1)} vs. obras vizinhas no ranking
-                  </TooltipContent>
-                </Tooltip>
-              )
-            })}
+    <div className="flex items-center gap-2.5 min-w-0">
+      <div className="relative h-14 w-10 shrink-0 overflow-hidden rounded border bg-muted/40">
+        {entry.coverUrl ? (
+          <CoverImage url={entry.coverUrl} className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+            <ImageOff className="h-4 w-4 opacity-40" />
           </div>
-        </TooltipProvider>
-      ) : null}
+        )}
+      </div>
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <WorkTitleLink
+          title={entry.title}
+          workId={entry.workId}
+          preview={entryToPreview(entry)}
+          className="font-medium hover:underline line-clamp-1 block"
+        />
+        {entry.differentiators.length > 0 ? (
+          <TooltipProvider delayDuration={150}>
+            <div className="flex flex-wrap gap-1">
+              {entry.differentiators.map((d) => {
+                const info = CRITERIA_INFO[d.slug]
+                if (!info) return null
+                return (
+                  <Tooltip key={d.slug}>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex items-center gap-0.5 rounded bg-muted/60 px-1 py-0.5 text-[11px] font-mono text-muted-foreground">
+                        <span>{info.emoji}</span>
+                        <span>+{d.diff.toFixed(1)}</span>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {info.name}: destaca-se em +{d.diff.toFixed(1)} vs. obras vizinhas no ranking
+                    </TooltipContent>
+                  </Tooltip>
+                )
+              })}
+            </div>
+          </TooltipProvider>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -418,7 +431,7 @@ function renderCell(
   return null
 }
 
-export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH }: RankingTableProps) {
+export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs }: RankingTableProps) {
   const { widths, setWidth } = useColumnWidths()
   const config = useSyncExternalStore(
     subscribeRankingColumnConfig,
@@ -563,8 +576,8 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
         synopsisQuality: e.synopsisQuality,
       })
     }
-    return sortByMoodAdjusted(moodWorks, moodRefine).map((w) => w.id)
-  }, [selectedIds, displayEntries, moodRefine, entries])
+    return sortByMoodAdjusted(moodWorks, moodRefine, criterionPrefs).map((w) => w.id)
+  }, [selectedIds, displayEntries, moodRefine, entries, criterionPrefs])
 
   const updateSort = (field: string) => {
     const params = new URLSearchParams(window.location.search)
@@ -799,6 +812,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
         workCount={moodClusterIds.length}
         onApply={(mood) => openCompareWithMood(mood)}
         onSkip={() => openCompareWithMood(null)}
+        hasRanges={criterionPrefs != null && Object.keys(criterionPrefs).length > 0}
       />
 
       <WorkCompareDrawer
@@ -809,6 +823,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
         onClear={clearSelection}
         onRemoveId={removeSelection}
         scoreThresholds={scoreThresholds}
+        criterionPrefs={criterionPrefs}
         isPaid={isPaid}
       />
     </div>

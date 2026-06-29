@@ -66,32 +66,57 @@ export function isMoodActive(mood: MoodRefine): boolean {
   )
 }
 
+/** Faixas ideais por critério (subset do perfil) — alvo de borda dos sliders. */
+export type MoodCriterionRanges = Record<string, { ideal_min: number; ideal_max: number }>
+
+/**
+ * Alvo (0–10) de um atributo conforme o nível escolhido, relativo à FAIXA IDEAL:
+ *   −2 → 0 (mínimo absoluto) · −1 → ideal_min · +1 → ideal_max · +2 → 10 (máximo)
+ * A obra é pontuada por PROXIMIDADE a esse alvo (não por "maior/menor"). Sem
+ * faixa pro atributo, ±1 cai no extremo (vira ±2) — i.e. volta ao monótono.
+ *
+ * Como a normalização é feita DENTRO do cluster (ver `computeMoodFit`), os
+ * alvos extremos (0/10) reproduzem EXATAMENTE o comportamento monótono antigo
+ * de ±2 — só ±1 ganha o alvo de borda. Backward-compatible por construção.
+ */
+function attributeTarget(level: AttributeWeight, range: { ideal_min: number; ideal_max: number } | undefined): number {
+  switch (level) {
+    case 2: return 10
+    case 1: return range?.ideal_max ?? 10
+    case -1: return range?.ideal_min ?? 0
+    case -2: return 0
+  }
+}
+
 interface Dimension {
-  accessor: (w: MoodWork) => number | null
-  /** true → menor é melhor (evitar / capítulos curtos). */
-  invert: boolean
+  /** Métrica onde MAIOR = melhor (já codifica direção/alvo); null = sem dado. */
+  metric: (w: MoodWork) => number | null
   /** Peso relativo da dimensão na média (atributos: 1 ou 2; práticas: 1). */
   weight: number
 }
 
-function activeDimensions(mood: MoodRefine): Dimension[] {
+function activeDimensions(mood: MoodRefine, ranges?: MoodCriterionRanges): Dimension[] {
   const dims: Dimension[] = []
   for (const [slug, w] of Object.entries(mood.attributes) as Array<[CriterionSlug, AttributeWeight]>) {
-    dims.push({ accessor: (mw) => mw.scores[slug] ?? null, invert: w < 0, weight: Math.abs(w) })
+    const target = attributeTarget(w, ranges?.[slug])
+    // Proximidade ao alvo: −|nota − alvo| → quanto mais perto, MAIOR a métrica.
+    dims.push({ metric: (mw) => { const v = mw.scores[slug]; return v == null ? null : -Math.abs(v - target) }, weight: Math.abs(w) })
   }
-  if (mood.chapters) dims.push({ accessor: (w) => w.totalChapters, invert: mood.chapters === "curto", weight: 1 })
-  if (mood.alignment) dims.push({ accessor: (w) => w.personalFit, invert: false, weight: 1 })
-  if (mood.popularity) dims.push({ accessor: (w) => w.totalVotes, invert: false, weight: 1 })
-  if (mood.synopsis) dims.push({ accessor: (w) => (w.synopsisQuality ? w.synopsisQuality.length : null), invert: false, weight: 1 })
+  if (mood.chapters) {
+    const shorter = mood.chapters === "curto"
+    dims.push({ metric: (w) => (w.totalChapters == null ? null : (shorter ? -w.totalChapters : w.totalChapters)), weight: 1 })
+  }
+  if (mood.alignment) dims.push({ metric: (w) => w.personalFit, weight: 1 })
+  if (mood.popularity) dims.push({ metric: (w) => w.totalVotes, weight: 1 })
+  if (mood.synopsis) dims.push({ metric: (w) => (w.synopsisQuality ? w.synopsisQuality.length : null), weight: 1 })
   return dims
 }
 
 /** Contribuição [0,1] de uma dimensão pra uma obra, normalizada no cluster. */
 function dimensionContribution(dim: Dimension, work: MoodWork, min: number, max: number): number {
-  const v = dim.accessor(work)
+  const v = dim.metric(work)
   if (v == null) return 0.5 // sem dado → neutro
-  const norm = max > min ? (v - min) / (max - min) : 0.5
-  return dim.invert ? 1 - norm : norm
+  return max > min ? (v - min) / (max - min) : 0.5
 }
 
 /**
@@ -99,20 +124,20 @@ function dimensionContribution(dim: Dimension, work: MoodWork, min: number, max:
  * ativas (peso do atributo: ±±=2, ±=1). Retorna `null` quando não há dimensão
  * ativa (mood vazio).
  */
-export function computeMoodFit(works: MoodWork[], mood: MoodRefine): Map<string, number | null> {
-  const dims = activeDimensions(mood)
+export function computeMoodFit(works: MoodWork[], mood: MoodRefine, ranges?: MoodCriterionRanges): Map<string, number | null> {
+  const dims = activeDimensions(mood, ranges)
   const out = new Map<string, number | null>()
   if (dims.length === 0) {
     for (const w of works) out.set(w.id, null)
     return out
   }
 
-  // min/max por dimensão sobre o cluster (só valores não-nulos).
-  const ranges = dims.map((dim) => {
+  // min/max da MÉTRICA por dimensão sobre o cluster (só valores não-nulos).
+  const bounds = dims.map((dim) => {
     let min = Infinity
     let max = -Infinity
     for (const w of works) {
-      const v = dim.accessor(w)
+      const v = dim.metric(w)
       if (v == null) continue
       if (v < min) min = v
       if (v > max) max = v
@@ -124,7 +149,7 @@ export function computeMoodFit(works: MoodWork[], mood: MoodRefine): Map<string,
   for (const w of works) {
     let sum = 0
     for (let i = 0; i < dims.length; i++) {
-      sum += dims[i].weight * dimensionContribution(dims[i], w, ranges[i].min, ranges[i].max)
+      sum += dims[i].weight * dimensionContribution(dims[i], w, bounds[i].min, bounds[i].max)
     }
     out.set(w.id, sum / totalWeight)
   }
@@ -139,8 +164,8 @@ export function computeMoodFit(works: MoodWork[], mood: MoodRefine): Map<string,
  * base (`decisionScore == null`) ficam `null`. Sem dimensão ativa → devolve a
  * base inalterada (clamp 0–10).
  */
-export function computeMoodAdjusted(works: MoodWork[], mood: MoodRefine): Map<string, number | null> {
-  const fit = computeMoodFit(works, mood)
+export function computeMoodAdjusted(works: MoodWork[], mood: MoodRefine, ranges?: MoodCriterionRanges): Map<string, number | null> {
+  const fit = computeMoodFit(works, mood, ranges)
   const out = new Map<string, number | null>()
 
   const rankable = works.filter((w) => w.decisionScore != null)
@@ -167,8 +192,8 @@ export function computeMoodAdjusted(works: MoodWork[], mood: MoodRefine): Map<st
  * Ordena os `works` pela Prioridade ajustada ao mood (desc). Obras sem base vão
  * pro fim. Estável (preserva ordem de entrada em empates).
  */
-export function sortByMoodAdjusted(works: MoodWork[], mood: MoodRefine): MoodWork[] {
-  const adjusted = computeMoodAdjusted(works, mood)
+export function sortByMoodAdjusted(works: MoodWork[], mood: MoodRefine, ranges?: MoodCriterionRanges): MoodWork[] {
+  const adjusted = computeMoodAdjusted(works, mood, ranges)
   return [...works].sort((a, b) => {
     const av = adjusted.get(a.id)
     const bv = adjusted.get(b.id)
