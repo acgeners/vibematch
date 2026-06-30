@@ -103,8 +103,10 @@ export function UntrackedStatusPanel({ works }: { works: UntrackedWork[] }) {
         </div>
       </div>
 
-      {/* Cards (multi-seleção: clicar no card alterna) */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      {/* Cards (multi-seleção: clicar no card alterna). Sem ações por card (a ação é
+          em lote, no topo), então adensamos as colunas em telas largas pra não
+          sobrar metade do card vazia. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {works.map((w) => (
           <Card
             key={w.id}
