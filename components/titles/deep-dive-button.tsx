@@ -16,6 +16,12 @@ interface DeepDiveButtonProps {
   variant?: "cta" | "compact"
   /** Deep Dive é exclusivo do Pago — quando false, mostra CTA de upgrade. */
   isPaid?: boolean
+  /**
+   * Permite criar uma NOVA análise. Quando false (ex.: obra Completed/Dropped),
+   * o card vira só-leitura: esconde o botão de criar e o custo, mantendo apenas
+   * "Ver análise" pra reabrir o deep dive salvo.
+   */
+  allowNew?: boolean
 }
 
 function timeAgo(iso: string): string {
@@ -44,6 +50,7 @@ export function DeepDiveButton({
   lastDive,
   variant = "cta",
   isPaid = true,
+  allowNew = true,
 }: DeepDiveButtonProps) {
   const [open, setOpen] = useState(false)
   const [startView, setStartView] = useState<"result" | "form">("result")
@@ -73,9 +80,11 @@ export function DeepDiveButton({
                 Análise profunda com extended thinking. Compara a obra com sua biblioteca,
                 sintetiza reviews e dá veredito acionável (agora/guardar/evitar).
               </p>
-              <p className="text-[11px] text-muted-foreground/80">
-                ~$0.21/análise · 25-45s · cap diário de 10
-              </p>
+              {allowNew && (
+                <p className="text-[11px] text-muted-foreground/80">
+                  ~$0.21/análise · 25-45s · cap diário de 10
+                </p>
+              )}
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
               {isPaid && lastDive && (
@@ -84,15 +93,17 @@ export function DeepDiveButton({
                   Ver análise
                 </Button>
               )}
-              <Button
-                onClick={openNew}
-                disabled={!isPaid}
-                variant="outline"
-                className="border-violet-500/40 bg-violet-500/10 text-violet-700 hover:bg-violet-500/20 dark:text-violet-300"
-              >
-                <Sparkles className="h-4 w-4" />
-                {!isPaid ? "Plano Pago" : lastDive ? "Nova análise" : "Analisar"}
-              </Button>
+              {allowNew && (
+                <Button
+                  onClick={openNew}
+                  disabled={!isPaid}
+                  variant="outline"
+                  className="border-violet-500/40 bg-violet-500/10 text-violet-700 hover:bg-violet-500/20 dark:text-violet-300"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {!isPaid ? "Plano Pago" : lastDive ? "Nova análise" : "Analisar"}
+                </Button>
+              )}
             </div>
           </div>
 

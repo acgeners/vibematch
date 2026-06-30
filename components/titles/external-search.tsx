@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, type Ref } from "react"
+import { useRef, useState, type Ref } from "react"
 import Image from "next/image"
 import { toast } from "sonner"
-import { Search, Loader2, Sparkles, Trash2 } from "lucide-react"
+import { Search, Loader2, Sparkles, Trash2, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -60,6 +60,17 @@ interface ExternalSearchProps {
   evaluateAi?: boolean
   /** Quando false, pula a checagem de obra duplicada (usado pelo fallback do "Atualizar dados", onde a obra-alvo já existe). Default: true. */
   checkDuplicates?: boolean
+  /**
+   * Liga o cache temporário de resultados (#4): reabrir "Buscar dados" com o mesmo
+   * título dentro do TTL restaura a lista + a obra já baixada. Default: false
+   * (só o "Buscar dados" da criação/edição liga; o fallback do "Atualizar dados" não).
+   */
+  enableResultCache?: boolean
+  /**
+   * IDs externos já vinculados à obra (edição). Usado pra exibir/manter um hid da
+   * Comix existente no passo de seleção de fontes. Ex.: `{ comix: "003kd" }`.
+   */
+  existingExternalIds?: Record<string, string>
 }
 
 type Phase = "idle" | "searching" | "results" | "sourcepick" | "duplicate" | "loading" | "evaluating" | "multipick-synopses" | "multipick-covers" | "conflicts"
@@ -68,24 +79,95 @@ interface CoverChoice { url: string; source: string; included: boolean; isPrimar
 interface SynopsisChoice { source: string; text: string; included: boolean; isPrimary: boolean }
 type SourceSelectionValue = string | "rejected" | "none"
 
+// ── Cache da busca externa (#4) ──────────────────────────────────────────────
+// Mantém, por pouco tempo e em memória de módulo, o que foi retornado da busca +
+// o estado da seleção em andamento (obra já baixada, escolhas de sinopse/capa).
+// Assim, fechar a janela lateral e reabrir "Buscar dados" com o mesmo título
+// dentro do TTL restaura tudo, sem re-buscar as fontes. Some no reload da página.
+// Exceção: se a obra selecionada teve erro na Comix/ComicK (FlareSolverr), a
+// seleção NÃO é restaurada — o fetch é refeito pra tentar de novo.
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000
+
+interface SelectionSnapshot {
+  pendingCandidate: MergedCandidate
+  pendingData: ExternalWorkData | null
+  phase: Phase
+  coverChoices: CoverChoice[]
+  synopsisChoices: SynopsisChoice[]
+  conflicts: ConflictField[]
+  resolutions: Record<string, unknown>
+  sourceSelection: Partial<Record<ExternalSourceId, SourceSelectionValue>>
+  activeRefineUrl: string | null
+  /** A obra selecionada teve erro na Comix/ComicK (FlareSolverr) ⇒ refazer o fetch. */
+  comixComickFailed: boolean
+}
+
+interface ExternalSearchCacheEntry {
+  query: string
+  ts: number
+  candidates: MergedCandidate[]
+  selection: SelectionSnapshot | null
+}
+
+let externalSearchCache: ExternalSearchCacheEntry | null = null
+
+const normalizeSearchQuery = (q: string) => q.trim().toLowerCase()
+
+function readFreshCache(query: string): ExternalSearchCacheEntry | null {
+  if (!externalSearchCache) return null
+  if (externalSearchCache.query !== normalizeSearchQuery(query)) return null
+  if (Date.now() - externalSearchCache.ts >= SEARCH_CACHE_TTL_MS) {
+    externalSearchCache = null
+    return null
+  }
+  return externalSearchCache
+}
+
+// Mutações do cache vivem em funções de módulo (não no corpo do componente) pra
+// não violarem as regras de pureza do react-hooks (sem reassign de global / sem
+// Date.now() no render). São chamadas só por event handlers.
+function writeSearchCache(
+  query: string,
+  candidates: MergedCandidate[],
+  selection: SelectionSnapshot | null,
+) {
+  externalSearchCache = { query: normalizeSearchQuery(query), ts: Date.now(), candidates, selection }
+}
+
+function clearSearchCache() {
+  externalSearchCache = null
+}
+
 const SOURCE_COLORS: Partial<Record<string, string>> = {
   anilist: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
   mangaupdates: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
 }
 
+// Comix fica por ÚLTIMO: a busca dela é gateada (token/FlareSolverr), entra só
+// via hid manual e é validada à parte. Mantê-la no fim da ordenação garante que,
+// mesmo depois de validar e salvar o hid, o bloco da Comix permaneça no final.
 const SOURCE_ORDER: ExternalSourceId[] = [
   "anilist",
   "animeplanet",
-  "comix",
   "comick",
   "kitsu",
   "mangadex",
   "mangaupdates",
   "myanimelist",
+  "comix",
 ]
 
 function getSourceLabel(source: string) {
   return PLATFORM_LABELS[source] ?? source
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value)
+    return u.protocol === "http:" || u.protocol === "https:"
+  } catch {
+    return false
+  }
 }
 
 function uniqueStringList(values: Array<string | null | undefined>) {
@@ -286,8 +368,13 @@ export function ExternalSearch({
   searchButtonRef,
   evaluateAi = true,
   checkDuplicates = true,
+  enableResultCache = false,
+  existingExternalIds,
 }: ExternalSearchProps) {
   const [isOpen, setIsOpen] = useState(false)
+  // A obra selecionada teve erro na Comix/ComicK no último fetch (FlareSolverr)?
+  // Quando true, a seleção cacheada NÃO é restaurada — o fetch é refeito.
+  const comixComickFailedRef = useRef(false)
   const [phase, setPhase] = useState<Phase>("idle")
   const [candidates, setCandidates] = useState<MergedCandidate[]>([])
   const [pendingData, setPendingData] = useState<ExternalWorkData | null>(null)
@@ -302,21 +389,62 @@ export function ExternalSearch({
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
   const [activeRefineUrl, setActiveRefineUrl] = useState<string | null>(null)
+  // Capa por link manual durante a seleção (mesmo recurso do CoversManager na edição).
+  const [manualCoverUrl, setManualCoverUrl] = useState("")
+  const [manualCoverError, setManualCoverError] = useState<string | null>(null)
   // Gate "sem reviews externas": resolve a Promise quando o usuário decide.
   const [noReviewGate, setNoReviewGate] = useState<{
     noReviewsReason: NoReviewsReason | null
     resolve: (proceed: boolean) => void
   } | null>(null)
 
+  const restoreSelectionFromCache = (sel: SelectionSnapshot) => {
+    // Só restauramos seleções com fetch OK (a falha vai pro caminho de re-fetch),
+    // então o flag volta a false pra um eventual novo fechamento não herdar stale.
+    comixComickFailedRef.current = false
+    setPendingCandidate(sel.pendingCandidate)
+    setPendingData(sel.pendingData)
+    setCoverChoices(sel.coverChoices)
+    setSynopsisChoices(sel.synopsisChoices)
+    setConflicts(sel.conflicts)
+    setResolutions(sel.resolutions)
+    setSourceSelection(sel.sourceSelection)
+    setActiveRefineUrl(sel.activeRefineUrl)
+    setPhase(sel.phase)
+  }
+
   const handleSearch = async () => {
     if (!titleQuery.trim()) return
+    setDuplicateUpdateTarget(null)
+
+    // #4: reabrir com o mesmo título dentro do TTL restaura o que já foi buscado.
+    if (enableResultCache) {
+      const cached = readFreshCache(titleQuery)
+      if (cached) {
+        setIsOpen(true)
+        setCandidates(cached.candidates)
+        const sel = cached.selection
+        if (sel?.comixComickFailed) {
+          // Comix/ComicK falharam (FlareSolverr) na 1ª vez ⇒ refaz o fetch da obra.
+          setPendingCandidate(sel.pendingCandidate)
+          setPhase("loading")
+          await proceedWithCandidate(sel.pendingCandidate)
+        } else if (sel) {
+          restoreSelectionFromCache(sel)
+        } else {
+          setPhase("results")
+        }
+        return
+      }
+    }
+
     setIsOpen(true)
     setPhase("searching")
     setCandidates([])
-    setDuplicateUpdateTarget(null)
     try {
       const found = await searchExternalTitles(titleQuery)
       setCandidates(found)
+      if (enableResultCache) writeSearchCache(titleQuery, found, null)
     } catch (error) {
       console.error("[ExternalSearch] searchExternalTitles failed", error)
       setCandidates([])
@@ -325,15 +453,27 @@ export function ExternalSearch({
     }
   }
 
+  // #2: se a obra (em edição) já tem um hid da Comix vinculado, injeta no
+  // candidato pra que apareça — e seja mantido — no passo de seleção de fontes.
+  const injectExistingComixHid = (candidate: MergedCandidate): MergedCandidate => {
+    const existing = existingExternalIds?.comix?.trim()
+    if (!existing || candidate.comixHid) return candidate
+    const sources = candidate.sources.includes("comix")
+      ? candidate.sources
+      : [...candidate.sources, "comix" as ExternalSourceId]
+    return { ...candidate, comixHid: existing, sources }
+  }
+
   const handleSelect = async (candidate: MergedCandidate) => {
-    setPendingCandidate(candidate)
-    const groups = getSourceMatchGroups(candidate)
+    const withExisting = injectExistingComixHid(candidate)
+    setPendingCandidate(withExisting)
+    const groups = getSourceMatchGroups(withExisting)
     if (groups.length > 0) {
-      setSourceSelection(buildInitialSourceSelection(candidate))
+      setSourceSelection(buildInitialSourceSelection(withExisting))
       setPhase("sourcepick")
       return
     }
-    await startCandidateImport(candidate)
+    await startCandidateImport(withExisting)
   }
 
   const startCandidateImport = async (candidate: MergedCandidate) => {
@@ -445,6 +585,9 @@ export function ExternalSearch({
     } else {
       onSelect(merged)
     }
+    // Seleção consumida (dados já foram pro form) ⇒ descarta o cache pra que a
+    // próxima busca seja nova.
+    clearSearchCache()
     setIsOpen(false)
     setPhase("idle")
     setPendingCandidate(null)
@@ -455,6 +598,8 @@ export function ExternalSearch({
     setCoverChoices([])
     setSynopsisChoices([])
     setActiveRefineUrl(null)
+    setManualCoverUrl("")
+    setManualCoverError(null)
   }
 
   const proceedWithCandidate = async (candidate: MergedCandidate, updateTarget?: ExistingWorkMatch | null) => {
@@ -476,6 +621,11 @@ export function ExternalSearch({
       if (apResult.status === "rejected") {
         console.error("[ExternalSearch] fetchAnimePlanetClient failed", apResult.reason)
       }
+
+      // #4: marca falha de Comix/ComicK (FlareSolverr) — quando o fetch da ComicK
+      // esperado lançou erro. Resultado nulo (= sem match) NÃO conta como falha.
+      // Com a flag ligada a seleção cacheada não é restaurada; o fetch é refeito.
+      comixComickFailedRef.current = wantsComicK && cmxResult.status === "rejected"
 
       const result = serverResult.status === "fulfilled" ? serverResult.value : null
       if (!result) {
@@ -627,6 +777,28 @@ export function ExternalSearch({
       setActiveRefineUrl(remaining[0]?.url ?? null)
     }
   }
+  const addManualCover = () => {
+    const trimmed = manualCoverUrl.trim()
+    if (!trimmed) {
+      setManualCoverError("URL obrigatória")
+      return
+    }
+    if (!isHttpUrl(trimmed)) {
+      setManualCoverError("URL precisa começar com http:// ou https://")
+      return
+    }
+    if (coverChoices.some((c) => c.url === trimmed)) {
+      setManualCoverError("Essa URL já está na lista")
+      return
+    }
+    setManualCoverError(null)
+    setCoverChoices((prev) => [
+      ...prev,
+      { url: trimmed, source: "manual", included: true, isPrimary: prev.length === 0 },
+    ])
+    setActiveRefineUrl(trimmed)
+    setManualCoverUrl("")
+  }
   const allCoversIncluded = coverChoices.length > 0 && coverChoices.every((c) => c.included)
   const someCoversIncluded = coverChoices.some((c) => c.included)
   const toggleAllCovers = () => {
@@ -674,6 +846,28 @@ export function ExternalSearch({
   }
 
   const handleClose = () => {
+    // #4: ao fechar a janela, guarda o que já foi buscado/selecionado pra
+    // restaurar numa reabertura rápida (mesmo título, dentro do TTL). Só guarda
+    // a seleção quando o usuário está num passo estável (não em loading/eval).
+    const STABLE_SELECTION_PHASES: Phase[] = ["sourcepick", "multipick-synopses", "multipick-covers", "conflicts"]
+    if (enableResultCache && candidates.length > 0) {
+      const selection: SelectionSnapshot | null =
+        pendingCandidate && STABLE_SELECTION_PHASES.includes(phase)
+          ? {
+              pendingCandidate,
+              pendingData,
+              phase,
+              coverChoices,
+              synopsisChoices,
+              conflicts,
+              resolutions,
+              sourceSelection,
+              activeRefineUrl,
+              comixComickFailed: comixComickFailedRef.current,
+            }
+          : null
+      writeSearchCache(titleQuery, candidates, selection)
+    }
     setIsOpen(false)
     setPhase("idle")
     setDuplicates([])
@@ -685,6 +879,8 @@ export function ExternalSearch({
     setCoverChoices([])
     setSynopsisChoices([])
     setActiveRefineUrl(null)
+    setManualCoverUrl("")
+    setManualCoverError(null)
   }
 
   const sourceMatchGroups = pendingCandidate ? getSourceMatchGroups(pendingCandidate) : []
@@ -888,6 +1084,12 @@ export function ExternalSearch({
 
                     {group.source === "comix" && (
                       <div className="mt-1 space-y-1.5 rounded-md border border-dashed border-border p-2">
+                        {value && value !== "none" && value !== "rejected" && (
+                          <p className="text-[11px]">
+                            <span className="text-muted-foreground">Vínculo atual: </span>
+                            <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">{value}</span>
+                          </p>
+                        )}
                         <p className="text-[11px] text-muted-foreground">
                           A busca da Comix é bloqueada — cole o hid (ex.: <span className="font-mono">003kd</span>) ou a
                           URL da comix.to. O título é validado antes de vincular.
@@ -1202,6 +1404,24 @@ export function ExternalSearch({
                       </div>
                     )
                   })}
+                </div>
+
+                <div className="space-y-1.5 rounded-md border border-dashed p-2">
+                  <p className="text-[11px] text-muted-foreground">Adicionar capa por link manual</p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="url"
+                      value={manualCoverUrl}
+                      onChange={(e) => { setManualCoverUrl(e.target.value); if (manualCoverError) setManualCoverError(null) }}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addManualCover() } }}
+                      placeholder="https://..."
+                      className="h-8 text-xs"
+                    />
+                    <Button type="button" size="sm" variant="outline" onClick={addManualCover} disabled={!manualCoverUrl.trim()} className="shrink-0 gap-1">
+                      <Plus className="h-3.5 w-3.5" /> Adicionar
+                    </Button>
+                  </div>
+                  {manualCoverError && <p className="text-[11px] text-destructive">{manualCoverError}</p>}
                 </div>
 
                 <Separator />

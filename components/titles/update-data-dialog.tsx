@@ -4,10 +4,11 @@ import { useEffect, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { useRefresh } from "@/lib/use-refresh"
-import { Loader2, RefreshCw, Trash2 } from "lucide-react"
+import { Loader2, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -21,6 +22,7 @@ import { ExternalSearch } from "@/components/titles/external-search"
 import { updateWorkExternalData, refreshWorkExternalData } from "@/server/actions/works"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
+import { titleToSlug } from "@/lib/utils"
 import type { ExternalSourceId, ExternalWorkData } from "@/lib/external/types"
 
 interface CurrentWork {
@@ -58,6 +60,15 @@ interface FieldConflict {
 function formatValue(value: string | number | null | undefined): string {
   if (value == null) return "—"
   return String(value)
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value)
+    return u.protocol === "http:" || u.protocol === "https:"
+  } catch {
+    return false
+  }
 }
 
 function getConflicts(current: CurrentWork, external: ExternalWorkData): FieldConflict[] {
@@ -182,6 +193,32 @@ export function UpdateDataDialog({
   const [coversNeedPick, setCoversNeedPick] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [activeRefineUrl, setActiveRefineUrl] = useState<string | null>(null)
+  // Capa por link manual durante a seleção (mesmo recurso do CoversManager na edição).
+  const [manualCoverUrl, setManualCoverUrl] = useState("")
+  const [manualCoverError, setManualCoverError] = useState<string | null>(null)
+
+  const addManualCover = () => {
+    const trimmed = manualCoverUrl.trim()
+    if (!trimmed) {
+      setManualCoverError("URL obrigatória")
+      return
+    }
+    if (!isHttpUrl(trimmed)) {
+      setManualCoverError("URL precisa começar com http:// ou https://")
+      return
+    }
+    if (coverChoices.some((c) => c.url === trimmed)) {
+      setManualCoverError("Essa URL já está na lista")
+      return
+    }
+    setManualCoverError(null)
+    setCoverChoices((prev) => [
+      ...prev,
+      { source: "manual", url: trimmed, included: true, isPrimary: prev.length === 0, saved: false },
+    ])
+    setActiveRefineUrl(trimmed)
+    setManualCoverUrl("")
+  }
 
   const handleSelect = (data: ExternalWorkData) => {
     // Quando há múltiplas sinopses/capas vindas das fontes vinculadas, mostra
@@ -550,11 +587,17 @@ export function UpdateDataDialog({
       onSaved(workId)
       return
     }
-    // Se o título mudou, navegar pelo UUID evita depender do cache slug->id.
-    // A rota /titles/{uuid} redireciona para o slug canônico lido do banco.
+    // Se o título mudou, navega DIRETO pro slug canônico novo (devolvido pela
+    // action). Navegar pelo UUID dependia do redirect() server-side de
+    // /titles/{uuid} → slug, que FALHA numa navegação soft (RSC) e mostra
+    // erro/404; só funcionava após reload. Ir direto no slug elimina o redirect
+    // (mesmo padrão já adotado no work-form).
     const newTitle = typeof updates.title === "string" ? updates.title : null
-    if (newTitle && newTitle !== currentWork.title) {
-      router.push(`/titles/${workId}`)
+    const newSlug = result.data?.slug ?? (newTitle ? titleToSlug(newTitle) : null)
+    const titleChanged =
+      newTitle != null && titleToSlug(currentWork.title) !== (newSlug ?? titleToSlug(newTitle))
+    if (titleChanged && newSlug) {
+      router.push(`/titles/${newSlug}`)
     } else {
       refresh()
     }
@@ -575,6 +618,8 @@ export function UpdateDataDialog({
     setCoversNeedPick(false)
     setPreviewUrl(null)
     setActiveRefineUrl(null)
+    setManualCoverUrl("")
+    setManualCoverError(null)
   }
 
   return (
@@ -801,6 +846,24 @@ export function UpdateDataDialog({
                       </div>
                     )
                   })}
+                </div>
+
+                <div className="space-y-1.5 rounded-md border border-dashed p-2">
+                  <p className="text-[11px] text-muted-foreground">Adicionar capa por link manual</p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="url"
+                      value={manualCoverUrl}
+                      onChange={(e) => { setManualCoverUrl(e.target.value); if (manualCoverError) setManualCoverError(null) }}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addManualCover() } }}
+                      placeholder="https://..."
+                      className="h-8 text-xs"
+                    />
+                    <Button type="button" size="sm" variant="outline" onClick={addManualCover} disabled={!manualCoverUrl.trim()} className="shrink-0 gap-1">
+                      <Plus className="h-3.5 w-3.5" /> Adicionar
+                    </Button>
+                  </div>
+                  {manualCoverError && <p className="text-[11px] text-destructive">{manualCoverError}</p>}
                 </div>
 
                 <Separator />

@@ -442,6 +442,30 @@ export async function getWorkBySlug(slug: string) {
   return getWorkWithAiEvaluations(id)
 }
 
+/**
+ * IDs externos ACEITOS de uma obra (`work_external_ids`, exceto rejeitados),
+ * como mapa `{ source: external_id }`. Usado na edição pra exibir/manter vínculos
+ * já atribuídos (ex.: o hid da Comix) no passo de seleção de fontes.
+ */
+export async function getWorkExternalIds(workId: string): Promise<Record<string, string>> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("work_external_ids")
+    .select("source, external_id, is_rejected")
+    .eq("work_id", workId)
+  if (error) {
+    console.error("[getWorkExternalIds] failed:", error.message)
+    return {}
+  }
+  const map: Record<string, string> = {}
+  for (const row of data ?? []) {
+    if (row.is_rejected !== true && row.external_id) {
+      map[row.source as string] = String(row.external_id)
+    }
+  }
+  return map
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
