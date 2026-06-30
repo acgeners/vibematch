@@ -3,7 +3,7 @@
 import { useRef, useState, type Ref } from "react"
 import Image from "next/image"
 import { toast } from "sonner"
-import { Search, Loader2, Sparkles, Trash2, Plus } from "lucide-react"
+import { Search, Loader2, Sparkles, Trash2, Plus, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -73,7 +73,7 @@ interface ExternalSearchProps {
   existingExternalIds?: Record<string, string>
 }
 
-type Phase = "idle" | "searching" | "results" | "sourcepick" | "duplicate" | "loading" | "evaluating" | "multipick-synopses" | "multipick-covers" | "conflicts"
+type Phase = "idle" | "searching" | "results" | "sourcepick" | "duplicate" | "loading" | "evaluating" | "multipick-synopses" | "multipick-covers" | "conflicts" | "comick-failed"
 
 interface CoverChoice { url: string; source: string; included: boolean; isPrimary: boolean }
 interface SynopsisChoice { source: string; text: string; included: boolean; isPrimary: boolean }
@@ -107,6 +107,9 @@ interface ExternalSearchCacheEntry {
   ts: number
   candidates: MergedCandidate[]
   selection: SelectionSnapshot | null
+  /** A busca do ComicK falhou (FlareSolverr/Cloudflare) — preserva o sinal pra que
+   * uma reabertura cacheada ainda re-tente o ComicK em vez de descartá-lo. */
+  comickSearchFailed: boolean
 }
 
 let externalSearchCache: ExternalSearchCacheEntry | null = null
@@ -130,8 +133,9 @@ function writeSearchCache(
   query: string,
   candidates: MergedCandidate[],
   selection: SelectionSnapshot | null,
+  comickSearchFailed: boolean,
 ) {
-  externalSearchCache = { query: normalizeSearchQuery(query), ts: Date.now(), candidates, selection }
+  externalSearchCache = { query: normalizeSearchQuery(query), ts: Date.now(), candidates, selection, comickSearchFailed }
 }
 
 function clearSearchCache() {
@@ -167,6 +171,20 @@ function isHttpUrl(value: string): boolean {
     return u.protocol === "http:" || u.protocol === "https:"
   } catch {
     return false
+  }
+}
+
+// Aceita um hid solto ou uma URL da comick.io (comick.io/comic/{slug}) e devolve
+// o último segmento do caminho como identificador. Best-effort: a API do ComicK
+// resolve hid; se o slug não resolver, o fetch volta "sem dados" (não quebra).
+function extractComickHid(input: string): string {
+  const trimmed = input.trim()
+  if (!isHttpUrl(trimmed)) return trimmed
+  try {
+    const parts = new URL(trimmed).pathname.split("/").filter(Boolean)
+    return parts[parts.length - 1] ?? trimmed
+  } catch {
+    return trimmed
   }
 }
 
@@ -375,6 +393,10 @@ export function ExternalSearch({
   // A obra selecionada teve erro na Comix/ComicK no último fetch (FlareSolverr)?
   // Quando true, a seleção cacheada NÃO é restaurada — o fetch é refeito.
   const comixComickFailedRef = useRef(false)
+  // A BUSCA do ComicK falhou (FlareSolverr/Cloudflare) ⇒ ComicK some dos resultados
+  // em silêncio. Quando ligado, proceedWithCandidate re-tenta o ComicK pra dar
+  // feedback/retry (em vez de descartá-lo). Setado por handleSearch.
+  const comickSearchFailedRef = useRef(false)
   const [phase, setPhase] = useState<Phase>("idle")
   const [candidates, setCandidates] = useState<MergedCandidate[]>([])
   const [pendingData, setPendingData] = useState<ExternalWorkData | null>(null)
@@ -386,6 +408,14 @@ export function ExternalSearch({
   const [sourceSelection, setSourceSelection] = useState<Partial<Record<ExternalSourceId, SourceSelectionValue>>>({})
   const [manualComixHid, setManualComixHid] = useState("")
   const [validatingComix, setValidatingComix] = useState(false)
+  // Etapa de falha do ComicK (FlareSolverr/Cloudflare): guarda o que já foi
+  // mesclado pra continuar após um retry ou ao seguir sem a fonte.
+  const [comickManualHid, setComickManualHid] = useState("")
+  const [retryingComick, setRetryingComick] = useState(false)
+  const comickFailContextRef = useRef<{ merged: ExternalWorkData; conflicts: ConflictField[] } | null>(null)
+  // Sentinela no fim do passo de fontes — após vincular um hid da Comix, rolamos
+  // até aqui pra revelar o vínculo recém-criado e o botão de continuar.
+  const sourcepickBottomRef = useRef<HTMLDivElement>(null)
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
   const [activeRefineUrl, setActiveRefineUrl] = useState<string | null>(null)
@@ -423,6 +453,7 @@ export function ExternalSearch({
       if (cached) {
         setIsOpen(true)
         setCandidates(cached.candidates)
+        comickSearchFailedRef.current = cached.comickSearchFailed
         const sel = cached.selection
         if (sel?.comixComickFailed) {
           // Comix/ComicK falharam (FlareSolverr) na 1ª vez ⇒ refaz o fetch da obra.
@@ -442,11 +473,13 @@ export function ExternalSearch({
     setPhase("searching")
     setCandidates([])
     try {
-      const found = await searchExternalTitles(titleQuery)
+      const { candidates: found, failedSources } = await searchExternalTitles(titleQuery)
+      comickSearchFailedRef.current = failedSources.includes("comick")
       setCandidates(found)
-      if (enableResultCache) writeSearchCache(titleQuery, found, null)
+      if (enableResultCache) writeSearchCache(titleQuery, found, null, comickSearchFailedRef.current)
     } catch (error) {
       console.error("[ExternalSearch] searchExternalTitles failed", error)
+      comickSearchFailedRef.current = false
       setCandidates([])
     } finally {
       setPhase("results")
@@ -602,13 +635,69 @@ export function ExternalSearch({
     setManualCoverError(null)
   }
 
+  // Decide o próximo passo após mesclar os dados das fontes: escolha de
+  // sinopses/capas múltiplas → resolução de conflitos → finalizar. Extraído do
+  // proceedWithCandidate pra que a etapa de falha do ComicK possa continuar daqui
+  // depois de um retry (ou ao seguir sem a fonte).
+  const continueAfterMerge = async (
+    merged: ExternalWorkData,
+    allConflicts: ConflictField[],
+    updateTarget: ExistingWorkMatch | null,
+  ) => {
+    const covers = merged.multiCovers ?? []
+    const synopses = merged.multiSynopses ?? []
+    const hasMultiCover = covers.length > 1
+    const hasMultiSynopsis = synopses.length > 1
+
+    if (hasMultiCover || hasMultiSynopsis) {
+      setCoverChoices(
+        covers.map((c, i) => ({ url: c.url, source: c.source, included: true, isPrimary: i === 0 }))
+      )
+      setSynopsisChoices(
+        synopses.map((s, i) => ({ source: s.source, text: s.text, included: true, isPrimary: i === 0 }))
+      )
+      const defaultResolutions: Record<string, unknown> = {}
+      for (const c of allConflicts) defaultResolutions[c.field] = c.options[0].value
+      setPendingData(merged)
+      setConflicts(allConflicts)
+      setResolutions(defaultResolutions)
+      setActiveRefineUrl(covers[0]?.url ?? null)
+      setPhase(hasMultiSynopsis ? "multipick-synopses" : "multipick-covers")
+      return
+    }
+
+    if (allConflicts.length > 0) {
+      const defaultResolutions: Record<string, unknown> = {}
+      for (const c of allConflicts) {
+        defaultResolutions[c.field] = c.options[0].value
+      }
+      setPendingData(merged)
+      setConflicts(allConflicts)
+      setResolutions(defaultResolutions)
+      setPhase("conflicts")
+    } else {
+      await finalizeSelection(merged, updateTarget)
+    }
+  }
+
   const proceedWithCandidate = async (candidate: MergedCandidate, updateTarget?: ExistingWorkMatch | null) => {
     try {
-      const wantsComicK = candidate.sources.includes("comick") || Boolean(candidate.comickHid)
+      // Tenta o ComicK quando ele foi um match confirmado da busca OU quando a busca
+      // do ComicK FALHOU (FlareSolverr/Cloudflare) — nesse 2º caso ele some dos
+      // resultados em silêncio, então re-tentamos aqui pra dar feedback/retry. NÃO
+      // tentamos quando o ComicK simplesmente não tem a obra (busca OK, sem match):
+      // buscar por título às cegas poderia mesclar dados de outra obra. Respeita
+      // rejeição explícita do usuário.
+      const comickRejected = sourceSelection.comick === "rejected"
+      const attemptComicK =
+        !comickRejected &&
+        (candidate.sources.includes("comick") ||
+          Boolean(candidate.comickHid) ||
+          comickSearchFailedRef.current)
       const wantsAnimePlanet = candidate.sources.includes("animeplanet") || Boolean(candidate.animePlanetSlug)
       const [serverResult, cmxResult, apResult] = await Promise.allSettled([
         fetchExternalData(candidate),
-        wantsComicK ? fetchComicKClient(candidate.title, candidate.comickHid) : Promise.resolve(null),
+        attemptComicK ? fetchComicKClient(candidate.title, candidate.comickHid) : Promise.resolve(null),
         wantsAnimePlanet ? fetchAnimePlanetClient(candidate.title, candidate.animePlanetSlug) : Promise.resolve(null),
       ])
 
@@ -622,10 +711,11 @@ export function ExternalSearch({
         console.error("[ExternalSearch] fetchAnimePlanetClient failed", apResult.reason)
       }
 
-      // #4: marca falha de Comix/ComicK (FlareSolverr) — quando o fetch da ComicK
-      // esperado lançou erro. Resultado nulo (= sem match) NÃO conta como falha.
-      // Com a flag ligada a seleção cacheada não é restaurada; o fetch é refeito.
-      comixComickFailedRef.current = wantsComicK && cmxResult.status === "rejected"
+      // #4: marca falha do ComicK (FlareSolverr/Cloudflare) — quando o fetch lançou
+      // (rota 502). Resultado nulo (= sem match) NÃO conta como falha. Com a flag
+      // ligada a seleção cacheada não é restaurada; o fetch é refeito.
+      const comickDidFail = attemptComicK && cmxResult.status === "rejected"
+      comixComickFailedRef.current = comickDidFail
 
       const result = serverResult.status === "fulfilled" ? serverResult.value : null
       if (!result) {
@@ -665,44 +755,98 @@ export function ExternalSearch({
         upsertExternalTags(merged.tags).catch(() => {})
       }
 
-      const covers = merged.multiCovers ?? []
-      const synopses = merged.multiSynopses ?? []
-      const hasMultiCover = covers.length > 1
-      const hasMultiSynopsis = synopses.length > 1
-
-      if (hasMultiCover || hasMultiSynopsis) {
-        setCoverChoices(
-          covers.map((c, i) => ({ url: c.url, source: c.source, included: true, isPrimary: i === 0 }))
-        )
-        setSynopsisChoices(
-          synopses.map((s, i) => ({ source: s.source, text: s.text, included: true, isPrimary: i === 0 }))
-        )
-        const defaultResolutions: Record<string, unknown> = {}
-        for (const c of allConflicts) defaultResolutions[c.field] = c.options[0].value
-        setPendingData(merged)
-        setConflicts(allConflicts)
-        setResolutions(defaultResolutions)
-        setActiveRefineUrl(covers[0]?.url ?? null)
-        setPhase(hasMultiSynopsis ? "multipick-synopses" : "multipick-covers")
+      // ComicK indisponível (FlareSolverr/Cloudflare): em vez de finalizar em
+      // silêncio descartando a fonte, guarda o que já foi mesclado e leva a uma
+      // etapa de falha onde dá pra tentar de novo (só o ComicK), informar o
+      // hid/URL manualmente, ou seguir sem ela.
+      if (comickDidFail) {
+        comickFailContextRef.current = { merged, conflicts: allConflicts }
+        setComickManualHid("")
+        setPhase("comick-failed")
         return
       }
 
-      if (allConflicts.length > 0) {
-        const defaultResolutions: Record<string, unknown> = {}
-        for (const c of allConflicts) {
-          defaultResolutions[c.field] = c.options[0].value
-        }
-        setPendingData(merged)
-        setConflicts(allConflicts)
-        setResolutions(defaultResolutions)
-        setPhase("conflicts")
-      } else {
-        await finalizeSelection(merged, updateTarget)
-      }
+      await continueAfterMerge(merged, allConflicts, updateTarget ?? duplicateUpdateTarget)
     } catch (error) {
       console.error("[ExternalSearch] proceedWithCandidate failed", error)
       setPhase("results")
     }
+  }
+
+  // Re-busca SÓ o ComicK (etapa de falha), mescla no que já foi buscado e segue o
+  // fluxo. `hid` informado = busca essa obra específica; senão usa o hid/título do
+  // candidato. Lança (fonte indisponível) ⇒ permanece na etapa; null (sem dados)
+  // ⇒ segue sem ComicK; dados ⇒ mescla e continua.
+  const runComickRetry = async (hid?: string, opts?: { manual?: boolean }) => {
+    const ctx = comickFailContextRef.current
+    if (!pendingCandidate || !ctx) return
+    setRetryingComick(true)
+    try {
+      const cmx = await fetchComicKClient(pendingCandidate.title, hid ?? pendingCandidate.comickHid)
+      // Hid manual que não resolve: permanece na etapa pra corrigir (a fonte
+      // respondeu, mas esse hid/URL não tem dados) — não segue sem ComicK em silêncio.
+      if (!cmx && opts?.manual) {
+        toast.warning("Esse hid/URL não retornou dados do ComicK. Confira e tente outro.")
+        return
+      }
+      const merged: ExternalWorkData = { ...ctx.merged }
+      let conflicts = ctx.conflicts
+      if (cmx) {
+        if (cmx.rating != null) merged.cmxRating = cmx.rating
+        if (cmx.votes != null) merged.cmxVotes = cmx.votes
+        if (cmx.chapters != null) {
+          merged.totalChapters = cmx.chapters
+          // ComicK trouxe capítulos ⇒ o conflito de totalChapters some.
+          conflicts = conflicts.filter((c) => c.field !== "totalChapters")
+        }
+        if (cmx.tags?.length) {
+          merged.tags = mergeTagArrays(merged.tags, cmx.tags)
+          upsertExternalTags(merged.tags).catch(() => {})
+        }
+        const usedHid = hid ?? pendingCandidate.comickHid
+        if (usedHid) merged.externalIds = { ...merged.externalIds, comick: usedHid }
+        toast.success("Dados do ComicK adicionados.")
+      } else {
+        toast.warning("O ComicK não retornou dados para esta obra.")
+      }
+      comickFailContextRef.current = null
+      comixComickFailedRef.current = false
+      await continueAfterMerge(merged, conflicts, duplicateUpdateTarget)
+    } catch {
+      // Fonte ainda indisponível — permanece na etapa de falha pra nova tentativa.
+      toast.error("ComicK ainda indisponível (Cloudflare/FlareSolverr). Tente de novo em instantes.")
+    } finally {
+      setRetryingComick(false)
+    }
+  }
+
+  const handleRetryComick = () => {
+    void runComickRetry()
+  }
+
+  const handleUseComickManualHid = () => {
+    const raw = comickManualHid.trim()
+    if (!raw) return
+    void runComickRetry(extractComickHid(raw), { manual: true })
+  }
+
+  const handleSkipComick = async () => {
+    const ctx = comickFailContextRef.current
+    comickFailContextRef.current = null
+    comixComickFailedRef.current = false
+    if (!ctx) {
+      setPhase("results")
+      return
+    }
+    await continueAfterMerge(ctx.merged, ctx.conflicts, duplicateUpdateTarget)
+  }
+
+  // Volta ao passo de escolha de fontes (pendingCandidate + sourceSelection seguem
+  // em estado). Útil pra reescolher/retomar fontes — ex.: re-tentar Comix/ComicK
+  // quando estavam fora — sem reabrir a busca do zero.
+  const handleBackToSources = () => {
+    comickFailContextRef.current = null
+    setPhase("sourcepick")
   }
 
   const finalizeMultiPickChoices = async () => {
@@ -866,7 +1010,7 @@ export function ExternalSearch({
               comixComickFailed: comixComickFailedRef.current,
             }
           : null
-      writeSearchCache(titleQuery, candidates, selection)
+      writeSearchCache(titleQuery, candidates, selection, comickSearchFailedRef.current)
     }
     setIsOpen(false)
     setPhase("idle")
@@ -933,6 +1077,11 @@ export function ExternalSearch({
       setSourceMatchSelection("comix" as ExternalSourceId, hid)
       setManualComixHid("")
       toast.success(`Comix vinculada: "${res.title}"`)
+      // Rola até o fim do passo de fontes pra revelar o vínculo recém-criado e o
+      // botão "Buscar dados dessas fontes" (o bloco da Comix fica por último).
+      requestAnimationFrame(() => {
+        sourcepickBottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+      })
     } finally {
       setValidatingComix(false)
     }
@@ -1133,6 +1282,73 @@ export function ExternalSearch({
                   Buscar dados dessas fontes
                 </Button>
               </div>
+              <div ref={sourcepickBottomRef} />
+            </div>
+          )}
+
+          {phase === "comick-failed" && pendingCandidate && (
+            <div className="space-y-4">
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                      Não foi possível buscar o ComicK
+                    </p>
+                    <p className="text-xs text-amber-800/90 dark:text-amber-300/80">
+                      A fonte está bloqueada agora (Cloudflare/FlareSolverr). O resto dos dados já foi
+                      buscado — tente de novo só o ComicK, informe o hid/URL manualmente, ou siga sem ele.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 rounded-md border border-dashed border-border p-3">
+                <p className="text-[11px] text-muted-foreground">
+                  Tem o hid (ex.: <span className="font-mono">aBc123</span>) ou a URL da comick.io? Cole pra
+                  buscar essa obra específica.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={comickManualHid}
+                    onChange={(e) => setComickManualHid(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        handleUseComickManualHid()
+                      }
+                    }}
+                    placeholder="hid ou URL da comick.io"
+                    disabled={retryingComick}
+                    className="h-8 text-xs"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleUseComickManualHid}
+                    disabled={retryingComick || !comickManualHid.trim()}
+                  >
+                    {retryingComick ? <Loader2 className="size-3.5 animate-spin" /> : "Validar e buscar"}
+                  </Button>
+                </div>
+              </div>
+
+              <Separator />
+              <div className="flex flex-wrap justify-end gap-2 pb-2">
+                <Button type="button" variant="ghost" onClick={handleSkipComick} disabled={retryingComick}>
+                  Seguir sem ComicK
+                </Button>
+                <Button type="button" onClick={handleRetryComick} disabled={retryingComick}>
+                  {retryingComick ? (
+                    <>
+                      <Loader2 className="mr-2 size-4 animate-spin" /> Tentando...
+                    </>
+                  ) : (
+                    "Tentar de novo"
+                  )}
+                </Button>
+              </div>
             </div>
           )}
 
@@ -1278,7 +1494,8 @@ export function ExternalSearch({
               </section>
 
               <Separator />
-              <div className="flex gap-2 justify-end pb-2">
+              <div className="flex flex-wrap gap-2 justify-end pb-2">
+                <Button type="button" variant="ghost" onClick={handleBackToSources} className="mr-auto">Voltar às fontes</Button>
                 <Button type="button" variant="outline" onClick={handleClose}>Cancelar</Button>
                 <Button type="button" onClick={handleConfirmMultiPickSynopses}>Continuar</Button>
               </div>
@@ -1434,6 +1651,7 @@ export function ExternalSearch({
                     <span />
                   )}
                   <div className="flex gap-2">
+                    <Button type="button" variant="ghost" onClick={handleBackToSources}>Voltar às fontes</Button>
                     <Button type="button" variant="outline" onClick={handleClose}>Cancelar</Button>
                     <Button type="button" onClick={handleConfirmMultiPickCovers}>Continuar</Button>
                   </div>
@@ -1485,7 +1703,10 @@ export function ExternalSearch({
                 </div>
               ))}
               <Separator />
-              <div className="flex gap-2 justify-end pb-2">
+              <div className="flex flex-wrap gap-2 justify-end pb-2">
+                <Button type="button" variant="ghost" onClick={handleBackToSources} className="mr-auto">
+                  Voltar às fontes
+                </Button>
                 <Button type="button" variant="outline" onClick={handleClose}>
                   Cancelar
                 </Button>

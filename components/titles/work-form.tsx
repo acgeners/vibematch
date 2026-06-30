@@ -1204,10 +1204,10 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
   const executeCreateSubmit = async (values: WorkFormValues) => {
     scrollToTop()
     const shouldCheckDuplicate = !workId && Object.keys(values.external_ids ?? {}).length === 0
-    setTopFeedback(workId ? "Atualizando obra..." : shouldCheckDuplicate ? "Verificando duplicidade..." : "Criando obra e recalculando notas...")
+    setTopFeedback(workId ? "Atualizando obra..." : shouldCheckDuplicate ? "Verificando duplicidade..." : "Criando obra...")
     if (shouldCheckDuplicate && await checkDuplicateBeforeCreate(values, "create")) return
 
-    setTopFeedback(workId ? "Atualizando obra..." : "Criando obra e recalculando notas...")
+    setTopFeedback(workId ? "Atualizando obra..." : "Criando obra...")
     const result = workId
       ? await updateWork(workId, values)
       : await createWork(values, aiMeta ?? undefined, pendingExternalReviews ?? undefined)
@@ -1219,11 +1219,6 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
         .flat()
         .some((message) => message?.toLowerCase().includes("já existe"))
       if (!workId && duplicateError && await checkDuplicateBeforeCreate(values, "create")) {
-        return
-      }
-      if (!workId && result.data?.id) {
-        toast.warning(firstError ?? "Obra criada, mas houve um aviso ao finalizar.")
-        router.push(`/titles/${values.title ? titleToSlug(values.title) : result.data.id}`)
         return
       }
       toast.error(firstError ?? "Erro ao salvar obra")
@@ -1362,6 +1357,45 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
   }
 
   const handleEditDraft = (draft: BatchDraft) => {
+    // Já está editando este mesmo draft — só re-foca, nada a preservar.
+    if (editingDraftId === draft.localId) {
+      const titleField = document.getElementById("title") as HTMLInputElement | null
+      titleField?.focus()
+      return
+    }
+
+    // Preserva a obra em progresso no form antes de carregar a selecionada, pra
+    // não perder o que estava sendo digitado/avaliado. Se já havia um draft em
+    // edição, grava as alterações de volta nele; senão, com título preenchido,
+    // guarda o que está no form como um novo item em standby.
+    const currentValues = getValues() as WorkFormValues
+    const currentTitle = (currentValues.title ?? "").trim()
+    if (editingDraftId) {
+      persistDrafts(
+        batchDrafts.map((item) =>
+          item.localId === editingDraftId
+            ? {
+                ...item,
+                values: currentValues,
+                aiMeta: aiMeta ?? null,
+                externalReviews: pendingExternalReviews ?? null,
+              }
+            : item,
+        ),
+      )
+    } else if (currentTitle) {
+      persistDrafts([
+        ...batchDrafts,
+        {
+          localId: createLocalId(),
+          values: currentValues,
+          aiMeta: aiMeta ?? null,
+          externalReviews: pendingExternalReviews ?? null,
+        },
+      ])
+      toast.success(`"${currentTitle}" guardada em standby.`)
+    }
+
     setEditingDraftId(draft.localId)
     reset({
       ...draft.values,
@@ -1389,7 +1423,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     if (!isCreating || batchDrafts.length === 0) return
     setBatchSubmitting(true)
     scrollToTop()
-    setTopFeedback("Criando lote e recalculando notas...")
+    setTopFeedback("Criando lote...")
     try {
       const currentValues = getValues() as WorkFormValues
       const currentTitle = currentValues.title?.trim()
@@ -1416,15 +1450,23 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
           setTopFeedback("Verificando duplicidade...")
           if (await checkDuplicateBeforeCreate(normalizedCurrent, "addMore")) return
         }
-        setTopFeedback("Criando lote e recalculando notas...")
-        itemsToCreate = [
-          ...itemsToCreate,
-          {
-            values: normalizedCurrent,
-            aiMeta: aiMeta ?? undefined,
-            externalReviews: pendingExternalReviews ?? undefined,
-          },
-        ]
+        setTopFeedback("Criando lote...")
+        const currentItem = {
+          values: normalizedCurrent,
+          aiMeta: aiMeta ?? undefined,
+          externalReviews: pendingExternalReviews ?? undefined,
+        }
+        // Se o form está editando um draft que já está no standby, substitui esse
+        // item pelos valores atuais do form — anexar duplicaria a obra (e o lote
+        // seria rejeitado por título repetido). Caso contrário (obra nova, ou
+        // draft em edição já removido), anexa.
+        const editingIndex = editingDraftId
+          ? batchDrafts.findIndex((draft) => draft.localId === editingDraftId)
+          : -1
+        itemsToCreate =
+          editingIndex >= 0
+            ? itemsToCreate.map((item, idx) => (idx === editingIndex ? currentItem : item))
+            : [...itemsToCreate, currentItem]
       }
 
       const result = await createWorksBatch(itemsToCreate)
@@ -1455,7 +1497,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
       persistDrafts([])
       setEditingDraftId(null)
       resetForNewEntry()
-      toast.success(`${created.length} obra${created.length === 1 ? "" : "s"} criada${created.length === 1 ? "" : "s"} e recalculada${created.length === 1 ? "" : "s"}.`)
+      toast.success(`${created.length} obra${created.length === 1 ? "" : "s"} criada${created.length === 1 ? "" : "s"}. A Nota Prevista é calculada após a Avaliação IA.`)
       refresh()
       if (created[0]) {
         const idsParam = created.map((c) => c.id).join(",")

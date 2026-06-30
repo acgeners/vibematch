@@ -18,8 +18,9 @@ import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { formatPercentile } from "@/lib/calculations/percentile"
-import { ScoreBadge } from "@/components/ui/score-badge"
-import type { ColumnThresholds, CriterionRange } from "@/components/ui/score-badge"
+import { ScoreBadge, criterionCellTextClass } from "@/components/ui/score-badge"
+import type { ColumnThresholds, CriterionRange, AttrColorMode } from "@/components/ui/score-badge"
+import { readAttrColorMode, subscribeAttrColorMode } from "@/lib/ui/attr-color-mode"
 import { PublicationStatusBadge, PersonalStatusBadge, AiStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
@@ -327,7 +328,9 @@ function renderCell(
   col: RankingColumnDef,
   scoreThresholds: ColumnThresholds | null | undefined,
   isPaid: boolean = true,
-  affinity: number | null = null
+  affinity: number | null = null,
+  colorMode: AttrColorMode = "catalog",
+  criterionPrefs?: Record<string, CriterionRange>,
 ) {
   if (col.key === "rank") return <span className="font-mono text-sm text-muted-foreground">{entry.rank}</span>
   if (col.key === "percentile") {
@@ -426,7 +429,16 @@ function renderCell(
   if (col.key.startsWith("crit_")) {
     const slug = col.key.slice(5)
     const score = entry.scores[slug]
-    return <span className="font-mono text-sm">{score != null ? Math.ceil(score) : "—"}</span>
+    if (score == null) return <span className="font-mono text-sm text-muted-foreground">—</span>
+    // Cor na FONTE (sem pílula) — mesma lógica do heatmap (faixa por centro /
+    // catálogo por percentil), respeitando o toggle global Catálogo/Minha faixa.
+    const textClass = criterionCellTextClass({
+      score,
+      slug,
+      mode: colorMode,
+      range: criterionPrefs?.[slug] ?? null,
+    })
+    return <span className={cn("font-mono text-sm", textClass)}>{Math.ceil(score)}</span>
   }
   return null
 }
@@ -440,6 +452,8 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   )
   const columns = getConfiguredRankingColumns(config)
   const viewMode = useSyncExternalStore(subscribeViewMode, readViewMode, () => "list" as const)
+  // Modo de cor global (Catálogo/Minha faixa) — colore as colunas de critério.
+  const attrColorMode = useSyncExternalStore(subscribeAttrColorMode, readAttrColorMode, () => "catalog" as const)
 
   // Multi-select pra comparação. Estado local (não persiste entre páginas) —
   // suficiente porque o WorkCompareDrawer busca os dados completos por ID, então
@@ -738,7 +752,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                             aria-label={`Selecionar ${entry.title} para comparar`}
                           />
                         ) : (
-                          renderCell(entry, col, scoreThresholds, isPaid, null)
+                          renderCell(entry, col, scoreThresholds, isPaid, null, attrColorMode, criterionPrefs)
                         )}
                       </div>
                     </td>

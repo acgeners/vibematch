@@ -4,7 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG, normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { TAG_GROUPS_CATALOG, GENRE_NAMES } from "@/lib/constants/tags"
-import { searchAllSources, fetchMultiSourceDetails, fetchExternalEvaluationContextForWork, fetchExternalEvaluationContextForCandidate, buildCandidateFromExternalIds, SEARCH_CONNECTORS, bestTitleMatch } from "@/lib/external/index"
+import { searchAllSourcesWithStatus, fetchMultiSourceDetails, fetchExternalEvaluationContextForWork, fetchExternalEvaluationContextForCandidate, buildCandidateFromExternalIds, SEARCH_CONNECTORS, bestTitleMatch } from "@/lib/external/index"
+import type { SearchAllSourcesResult } from "@/lib/external/index"
 import { fetchMangaUpdatesAlternativeTitles } from "@/lib/external/mangaupdates"
 import { fetchComixById } from "@/lib/external/comix"
 import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
@@ -76,8 +77,8 @@ export async function listGenreCatalog(): Promise<TagCatalogItem[]> {
     }))
 }
 
-export async function searchExternalTitles(query: string): Promise<MergedCandidate[]> {
-  return searchAllSources(query)
+export async function searchExternalTitles(query: string): Promise<SearchAllSourcesResult> {
+  return searchAllSourcesWithStatus(query)
 }
 
 export interface ExistingWorkMatch {

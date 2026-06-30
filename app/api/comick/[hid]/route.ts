@@ -52,8 +52,15 @@ export async function GET(
 ) {
   const { hid } = await params
   try {
-    return NextResponse.json(await fetchJson(`/comic/${hid}`))
+    const data = await fetchJson(`/comic/${hid}`)
+    // `fetchJson` só devolve null quando TODAS as bases falharam (Cloudflare/
+    // FlareSolverr/rede). Sinaliza como 502 em vez de 200+null, pra o client
+    // distinguir "fonte indisponível" (retryável) de "sem dados" e oferecer retry.
+    if (data == null) {
+      return NextResponse.json({ error: "comick_upstream_unavailable" }, { status: 502 })
+    }
+    return NextResponse.json(data)
   } catch {
-    return NextResponse.json(null)
+    return NextResponse.json({ error: "comick_upstream_unavailable" }, { status: 502 })
   }
 }

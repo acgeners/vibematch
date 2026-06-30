@@ -162,9 +162,11 @@ function scoreFor(work: WorkWithRelations, slug: string): number | null {
 }
 
 // Paleta de blocos sólidos do heatmap (mantém o visual atual; sem bordas/pílula).
+// top e high são 2 TONS DE VERDE distintos (forte vs suave) — antes eram quase
+// iguais (emerald-100 vs green-100), o que deixava o heatmap uniforme.
 const HEATMAP_TIER_CLASS: Record<CriterionTier, string> = {
-  top: "bg-emerald-100 text-emerald-800",
-  high: "bg-green-100 text-green-800",
+  top: "bg-green-300 text-green-950",
+  high: "bg-green-100 text-green-700",
   mid: "bg-yellow-100 text-yellow-800",
   low: "bg-orange-100 text-orange-800",
   bottom: "bg-red-100 text-red-800",
@@ -183,12 +185,12 @@ function getCriterionColor(
   // Modo "catálogo" (histórico, limiares fixos; drama/tragédia invertidos).
   const isNegative = slug === "drama" || slug === "tragedy"
   if (isNegative) {
-    if (score <= 3) return "bg-green-100 text-green-800"
+    if (score <= 3) return "bg-green-300 text-green-950"
     if (score <= 5) return "bg-yellow-100 text-yellow-800"
     return "bg-red-100 text-red-800"
   }
-  if (score >= 8) return "bg-emerald-100 text-emerald-800"
-  if (score >= 6) return "bg-green-100 text-green-800"
+  if (score >= 8) return "bg-green-300 text-green-950"
+  if (score >= 6) return "bg-green-100 text-green-700"
   if (score >= 4) return "bg-yellow-100 text-yellow-800"
   return "bg-red-100 text-red-800"
 }
