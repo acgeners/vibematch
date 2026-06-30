@@ -1647,6 +1647,37 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   return { data: { id } }
 }
 
+/**
+ * Troca o status de leitura (personal_status) de VÁRIAS obras de uma vez —
+ * action enxuta pra aba "Untracked" do /ai-evaluation. Ao contrário de
+ * `updateWorkStatus` (form completo), só mexe em `personal_status_id`, sem tocar
+ * notas/observações/capítulos. 1 update em lote + 1 recalc deferido.
+ */
+export async function setReadingStatusForWorks(ids: string[], status: string) {
+  const cleanIds = [...new Set((ids ?? []).filter(Boolean))]
+  if (cleanIds.length === 0) return { error: "Nenhuma obra selecionada." }
+  const statusId = getPersonalStatusIdByName(status)
+  if (statusId == null) return { error: `Status de leitura inválido: ${status}` }
+
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from("works")
+    .update({ personal_status_id: statusId })
+    .in("id", cleanIds)
+  if (error) return { error: error.message }
+
+  await markRecalcPending("setReadingStatusForWorks")
+
+  revalidatePath("/ai-evaluation")
+  revalidateTag("ai-eval-tab-counts", "max")
+  revalidatePath("/titles")
+  revalidateTag("works-slug-index", "max")
+  revalidatePath("/ranking")
+  revalidatePath("/")
+  revalidateFavorites()
+  return { data: { updated: cleanIds.length } }
+}
+
 export async function deleteWork(id: string) {
   const supabase = createAdminClient()
   const { error } = await supabase.from("works").delete().eq("id", id)

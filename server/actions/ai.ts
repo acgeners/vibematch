@@ -1,6 +1,6 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
+import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation } from "@/lib/ai-evaluation/service"
 import {
@@ -343,6 +343,7 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
 
     revalidatePath(`/titles/${workId}`)
     revalidatePath("/ai-evaluation")
+    revalidateTag("ai-eval-tab-counts", "max")
     return { data: { evaluation: completedEvaluation as AiEvaluation, currentScores, reviewsUsed: response.reviewsUsed } }
   } catch (err) {
     if (evaluationId) {
@@ -454,6 +455,7 @@ export async function submitAiReview(submission: AiReviewSubmission) {
   revalidatePath(`/titles/${submission.workId}`)
   revalidatePath("/ai-evaluation")
   revalidatePath("/ranking")
+  revalidateTag("ai-eval-tab-counts", "max")
   return { data: null, error: null }
 }
 
@@ -464,5 +466,6 @@ export async function skipAiEvaluation(workId: string) {
     .update({ ai_eval_status: "skipped" })
     .eq("id", workId)
   revalidatePath("/ai-evaluation")
+  revalidateTag("ai-eval-tab-counts", "max")
   return { data: null, error: null }
 }

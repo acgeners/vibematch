@@ -1,6 +1,6 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
+import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureCapability } from "@/server/queries/current-user"
 import { loadOrEnsureProfile } from "@/lib/ai-recommendation/ensure-profile"
@@ -59,6 +59,7 @@ export async function predictSynopsisQualityForWorkAction(
       revalidatePath("/titles")
       revalidatePath(`/titles/${workId}`)
       revalidatePath("/ai-evaluation")
+      revalidateTag("ai-eval-tab-counts", "max")
     }
     const result = mapInterestOutcome(outcome)
     // Quando o custo é a CASCATA do perfil (~$0,40), anexa o DRIFT method-free pra
@@ -245,6 +246,7 @@ export async function applySynopsisPredictionForWorks(
 
   if (applied > 0) await markRecalcPending("applySynopsisPredictionBatch")
   revalidatePath("/ai-evaluation")
+  revalidateTag("ai-eval-tab-counts", "max")
   revalidatePath("/titles")
   revalidatePath("/ranking")
 
@@ -279,6 +281,7 @@ export async function skipSynopsisInterestAction(
       return { error: `Falha ao pular: ${error.message}` }
     }
     revalidatePath("/ai-evaluation")
+    revalidateTag("ai-eval-tab-counts", "max")
     return { data: { skipped } }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Erro desconhecido" }
@@ -318,6 +321,7 @@ export async function setSynopsisQualityAction(
     revalidatePath(`/titles/${workId}`)
     revalidatePath("/ranking")
     revalidatePath("/ai-evaluation")
+    revalidateTag("ai-eval-tab-counts", "max")
 
     return { data: { synopsisQuality: quality } }
   } catch (err) {
@@ -414,6 +418,7 @@ export async function runSynopsisInterestBatchAction(
     })
 
     revalidatePath("/ai-evaluation")
+    revalidateTag("ai-eval-tab-counts", "max")
     revalidatePath("/titles")
     return { status: "ok", report }
   } catch (err) {

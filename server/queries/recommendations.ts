@@ -421,6 +421,9 @@ export interface AlignmentQueueWork {
   expectedScore: number | null
   alignmentScore: number | null
   alignmentStale: boolean
+  /** Hidratados só na aba ativa (cards) — ausentes no caminho do cache de contagens. */
+  tagCount?: number | null
+  reviewCount?: number | null
 }
 
 /**
@@ -492,6 +495,65 @@ export async function getAlignmentQueueWorks(opts: {
       alignmentStale,
     })
   }
+  return rows
+}
+
+export interface UntrackedWork {
+  id: string
+  title: string
+  coverUrl: string | null
+  coverUrls: string[]
+  publicationStatusId: number | null
+  personalStatusId: number | null
+  synopsisQuality: string | null
+  expectedScore: number | null
+}
+
+/**
+ * Obras com personal_status = "Untracked" (id 10 — sem status de leitura ativo),
+ * pra a aba /ai-evaluation?tab=untracked, onde se atribui um status em lote.
+ * Filtra por publicação + Interesse na sinopse em SQL (o filtro de Leitura não se
+ * aplica: todas são Untracked). Espelha `getAlignmentQueueWorks`.
+ */
+export async function getUntrackedWorks(opts: {
+  pubStatusIds?: number[]
+  synopsisQualities?: string[]
+  limit?: number
+}): Promise<UntrackedWork[]> {
+  const supabase = createAdminClient()
+  let query = supabase
+    .from("works")
+    .select(
+      "id, title, publication_status_id, personal_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score)",
+    )
+    .eq("is_archived", false)
+    .eq("personal_status_id", 10) // Untracked (PERSONAL_STATUSES_BY_ID[10])
+  if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
+    query = query.in("publication_status_id", opts.pubStatusIds)
+  }
+  if (opts.synopsisQualities && opts.synopsisQualities.length > 0) {
+    query = query.in("synopsis_quality", opts.synopsisQualities)
+  }
+  const { data, error } = await query.limit(opts.limit ?? 5000)
+  if (error) throw new Error(`Falha listando obras Untracked: ${error.message}`)
+
+  const rows: UntrackedWork[] = []
+  for (const row of data ?? []) {
+    const w = row as Record<string, unknown>
+    const calc = (w.calculated_scores as { expected_score?: number | null } | null) ?? null
+    const coverUrls = orderedCoverUrls(w.work_covers as RawCoverRow[] | undefined)
+    rows.push({
+      id: w.id as string,
+      title: w.title as string,
+      coverUrl: coverUrls[0] ?? null,
+      coverUrls,
+      publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
+      personalStatusId: w.personal_status_id != null ? Number(w.personal_status_id) : null,
+      synopsisQuality: (w.synopsis_quality as string | null) ?? null,
+      expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
+    })
+  }
+  rows.sort((a, b) => String(a.title ?? "").localeCompare(String(b.title ?? "")))
   return rows
 }
 
@@ -568,6 +630,11 @@ export interface SynopsisQueueWork {
   /** Previsão de uma versão de prompt ANTERIOR (pra comparar v1 × v2 no card). */
   previousPredictedQuality: string | null
   previousPromptVersion: string | null
+  /** Inputs que o preditor usa — hidratados só na aba ativa (popover "inputs da
+   *  previsão"), ausentes no caminho do cache de contagens. */
+  canonicalSynopsis?: string | null
+  tags?: string[]
+  reviewDigest?: ReviewDigest | null
 }
 
 /**

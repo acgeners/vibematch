@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
-import { useTransition } from "react"
+import { useState, useTransition } from "react"
 import { Filter, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -66,6 +66,9 @@ interface AiEvaluationFiltersProps {
   activeSynopsisQualities?: string[]
   /** Quando false, esconde a seção "Estado da avaliação" (usado na aba Veredito IA). */
   showEvalState?: boolean
+  /** Quando false, esconde o grupo de status "Leitura" (usado na aba Untracked, onde
+   *  todas as obras são Untracked). */
+  showPersonalStatus?: boolean
   /** Mostra a seção "Estado do Veredito IA" (Desatualizado/Não avaliado) — aba Veredito IA. */
   showIaRkState?: boolean
   /** Estados de Veredito IA ativos ("stale"/"unranked"). */
@@ -89,6 +92,21 @@ const PERSONAL_STATUSES = PERSONAL_STATUS_NAMES.map((name) =>
   Object.values(PERSONAL_STATUSES_BY_ID).find((info) => info.status === name)
 ).filter((info): info is PersonalStatusInfo => !!info)
 
+/** Rascunho local dos filtros — espelha os props (já parseados no server) e só é
+ *  serializado na URL quando o usuário clica "Aplicar". */
+interface FilterDraft {
+  filters: EvaluationFilter[]
+  pub: string[]
+  personal: string[]
+  synQ: string[]
+  iaRk: string[]
+  synState: string[]
+  predQ: string[]
+  predV: string[]
+  predD: string[]
+  tolerance: number
+}
+
 export function AiEvaluationFilters({
   activeFilters,
   currentModel,
@@ -100,6 +118,7 @@ export function AiEvaluationFilters({
   activePersonalStatuses,
   activeSynopsisQualities = [],
   showEvalState = true,
+  showPersonalStatus = true,
   showIaRkState = false,
   activeIaRkStates = [],
   showSynopsisState = false,
@@ -114,127 +133,159 @@ export function AiEvaluationFilters({
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
 
-  const updateParams = (mutate: (p: URLSearchParams) => void) => {
-    const params = new URLSearchParams(searchParams.toString())
-    mutate(params)
-    const qs = params.toString()
+  // Filtros viram um RASCUNHO local: alternar chips só muda o estado local; nada
+  // navega/bate no banco até clicar "Aplicar". Assim dá pra ajustar vários filtros
+  // e disparar UMA navegação/refetch só (antes era 1 round-trip por clique, caro
+  // contra o DB remoto). O rascunho é semeado pelos props (já parseados no server)
+  // e re-semeado quando a URL aplicada muda (após Aplicar / troca de aba).
+  const makeDraft = (): FilterDraft => ({
+    filters: activeFilters,
+    pub: activePubStatuses,
+    personal: activePersonalStatuses,
+    synQ: activeSynopsisQualities,
+    iaRk: activeIaRkStates,
+    synState: activeSynopsisStates,
+    predQ: activePredictionQualities,
+    predV: activePredictionVersions,
+    predD: activePredictionDeltas,
+    tolerance: promptVersionTolerance,
+  })
+  const [draft, setDraft] = useState<FilterDraft>(makeDraft)
+  // Re-semeia o rascunho quando a URL aplicada (props) muda — após Aplicar / troca
+  // de aba. Padrão "ajustar estado na renderização" (sem useEffect): compara a
+  // assinatura dos props e re-semeia quando difere.
+  const propsSignature = JSON.stringify([
+    activeFilters, activePubStatuses, activePersonalStatuses, activeSynopsisQualities,
+    activeIaRkStates, activeSynopsisStates, activePredictionQualities,
+    activePredictionVersions, activePredictionDeltas, promptVersionTolerance,
+  ])
+  const [seenSignature, setSeenSignature] = useState(propsSignature)
+  if (propsSignature !== seenSignature) {
+    setSeenSignature(propsSignature)
+    setDraft(makeDraft())
+  }
+
+  // Serializa o rascunho na URL, preservando params não-gerenciados (tab, busca das
+  // abas sem-reviews/sem-tags, etc.). Cada dimensão só é escrita na aba que a exibe
+  // (mesma condição da UI) pra não injetar params de outra aba.
+  const buildParams = (d: FilterDraft): URLSearchParams => {
+    const p = new URLSearchParams(searchParams.toString())
+    if (showEvalState) {
+      const f = new Set(d.filters)
+      if (f.size === 0 || isDefaultFilterSet(f)) p.delete("filter")
+      else p.set("filter", [...f].join(","))
+      if (d.tolerance <= 0) p.delete("tolerance")
+      else p.set("tolerance", String(d.tolerance))
+    }
+    if (d.pub.length === 0) p.delete("pub")
+    else p.set("pub", d.pub.join(","))
+    if (d.personal.length === 0) p.delete("personal")
+    else p.set("personal", d.personal.join(","))
+    if (d.synQ.length === 0) p.delete("synopsis_q")
+    else p.set("synopsis_q", d.synQ.join(","))
+    if (showIaRkState) {
+      const rk = new Set(d.iaRk)
+      // Default da aba Veredito IA = {stale} → URL limpa.
+      if (rk.size === 1 && rk.has("stale")) p.delete("rk")
+      else if (rk.size === 0) p.set("rk", "none")
+      else p.set("rk", [...rk].join(","))
+    }
+    if (showSynopsisState) {
+      const sq = new Set(d.synState)
+      // Default da aba Sinopse = {unpredicted} → URL limpa.
+      if (sq.size === 1 && sq.has("unpredicted")) p.delete("sq")
+      else if (sq.size === 0) p.set("sq", "none")
+      else p.set("sq", [...sq].join(","))
+      if (d.predQ.length === 0) p.delete("pq")
+      else p.set("pq", d.predQ.join(","))
+      if (d.predV.length === 0) p.delete("pv")
+      else p.set("pv", d.predV.join(","))
+      if (d.predD.length === 0) p.delete("pd")
+      else p.set("pd", d.predD.join(","))
+    }
+    return p
+  }
+
+  const navigate = (p: URLSearchParams) => {
+    const qs = p.toString()
     startTransition(() => {
       router.replace(qs ? `${pathname}?${qs}` : pathname)
     })
   }
 
-  const setFilter = (filter: EvaluationFilter, on: boolean) => {
-    const next = new Set(activeFilters)
-    if (on) next.add(filter)
-    else next.delete(filter)
+  const apply = () => navigate(buildParams(draft))
 
-    updateParams((params) => {
-      if (next.size === 0 || isDefaultFilterSet(next)) {
-        params.delete("filter")
-      } else {
-        params.set("filter", [...next].join(","))
-      }
-    })
+  // Há mudanças não aplicadas? Compara a assinatura das chaves gerenciadas.
+  const OWNED_KEYS = ["filter", "pub", "personal", "synopsis_q", "tolerance", "rk", "sq", "pq", "pv", "pd"]
+  const ownedSig = (p: URLSearchParams) => OWNED_KEYS.map((k) => `${k}=${p.get(k) ?? ""}`).join("&")
+  const isDirty = ownedSig(buildParams(draft)) !== ownedSig(new URLSearchParams(searchParams.toString()))
+
+  const toggleIn = (list: string[], value: string) =>
+    list.includes(value) ? list.filter((x) => x !== value) : [...list, value]
+
+  const setFilter = (filter: EvaluationFilter, on: boolean) => {
+    setDraft((d) => ({
+      ...d,
+      filters: on
+        ? (d.filters.includes(filter) ? d.filters : [...d.filters, filter])
+        : d.filters.filter((f) => f !== filter),
+    }))
   }
 
-  const toggleStatus = (key: "pub" | "personal", value: string, current: string[]) => {
-    const next = new Set(current)
-    if (next.has(value)) next.delete(value)
-    else next.add(value)
-
-    updateParams((params) => {
-      if (next.size === 0) params.delete(key)
-      else params.set(key, [...next].join(","))
-    })
+  const toggleStatus = (key: "pub" | "personal", value: string) => {
+    setDraft((d) =>
+      key === "pub"
+        ? { ...d, pub: toggleIn(d.pub, value) }
+        : { ...d, personal: toggleIn(d.personal, value) },
+    )
   }
 
   const toggleSynopsisQuality = (value: string) => {
-    const next = new Set(activeSynopsisQualities)
-    if (next.has(value)) next.delete(value)
-    else next.add(value)
-
-    updateParams((params) => {
-      if (next.size === 0) params.delete("synopsis_q")
-      else params.set("synopsis_q", [...next].join(","))
-    })
+    setDraft((d) => ({ ...d, synQ: toggleIn(d.synQ, value) }))
   }
 
   const toggleIaRkState = (value: string) => {
-    const next = new Set(activeIaRkStates)
-    if (next.has(value)) next.delete(value)
-    else next.add(value)
-
-    updateParams((params) => {
-      // Default da aba Veredito IA = {stale} (só "Desatualizado") → URL limpa.
-      if (next.size === 1 && next.has("stale")) params.delete("rk")
-      else if (next.size === 0) params.set("rk", "none")
-      else params.set("rk", [...next].join(","))
-    })
+    setDraft((d) => ({ ...d, iaRk: toggleIn(d.iaRk, value) }))
   }
 
   const toggleSynopsisState = (value: string) => {
-    const next = new Set(activeSynopsisStates)
-    if (next.has(value)) next.delete(value)
-    else next.add(value)
-
-    updateParams((params) => {
-      // Default da aba Sinopse = {unpredicted} (só "Não previsto") → URL limpa.
-      if (next.size === 1 && next.has("unpredicted")) params.delete("sq")
-      else if (next.size === 0) params.set("sq", "none")
-      else params.set("sq", [...next].join(","))
-    })
+    setDraft((d) => ({ ...d, synState: toggleIn(d.synState, value) }))
   }
 
   const togglePredictionQuality = (value: string) => {
-    const next = new Set(activePredictionQualities)
-    if (next.has(value)) next.delete(value)
-    else next.add(value)
-    updateParams((params) => {
-      if (next.size === 0) params.delete("pq")
-      else params.set("pq", [...next].join(","))
-    })
+    setDraft((d) => ({ ...d, predQ: toggleIn(d.predQ, value) }))
   }
 
   const togglePredictionVersion = (value: string) => {
-    const next = new Set(activePredictionVersions)
-    if (next.has(value)) next.delete(value)
-    else next.add(value)
-    updateParams((params) => {
-      if (next.size === 0) params.delete("pv")
-      else params.set("pv", [...next].join(","))
-    })
+    setDraft((d) => ({ ...d, predV: toggleIn(d.predV, value) }))
   }
 
   const togglePredictionDelta = (value: string) => {
-    const next = new Set(activePredictionDeltas)
-    if (next.has(value)) next.delete(value)
-    else next.add(value)
-    updateParams((params) => {
-      if (next.size === 0) params.delete("pd")
-      else params.set("pd", [...next].join(","))
-    })
+    setDraft((d) => ({ ...d, predD: toggleIn(d.predD, value) }))
   }
 
   const clearAll = () => {
-    updateParams((params) => {
-      params.delete("filter")
-      params.delete("pub")
-      params.delete("personal")
-      params.delete("synopsis_q")
-      params.delete("tolerance")
-      params.delete("rk")
-      params.delete("sq")
-    })
+    const cleared: FilterDraft = {
+      filters: [...DEFAULT_FILTERS],
+      pub: [],
+      personal: [],
+      synQ: [],
+      iaRk: ["stale"],
+      synState: ["unpredicted"],
+      predQ: [],
+      predV: [],
+      predD: [],
+      tolerance: 0,
+    }
+    setDraft(cleared)
+    navigate(buildParams(cleared))
   }
 
   const setTolerance = (value: number) => {
-    updateParams((params) => {
-      if (value <= 0) params.delete("tolerance")
-      else params.set("tolerance", String(value))
-    })
+    setDraft((d) => ({ ...d, tolerance: value }))
   }
 
-  const isOn = (f: EvaluationFilter) => activeFilters.includes(f)
+  const isOn = (f: EvaluationFilter) => draft.filters.includes(f)
 
   const outdatedDescription = (() => {
     if (promptVersionTolerance <= 0) {
@@ -274,29 +325,29 @@ export function AiEvaluationFilters({
   ]
 
   const evalFilterCount =
-    showEvalState && !isDefaultFilterSet(activeFilters) ? activeFilters.length : 0
+    showEvalState && !isDefaultFilterSet(draft.filters) ? draft.filters.length : 0
   // Default da aba Veredito IA = {stale} (só "Desatualizado"). Qualquer desvio conta.
   const iaRkFilterActive =
-    showIaRkState && [...activeIaRkStates].sort().join(",") !== "stale"
+    showIaRkState && [...draft.iaRk].sort().join(",") !== "stale"
   // Default da aba Sinopse = {unpredicted} (só "Não previsto"). Qualquer desvio
   // conta como filtro ativo.
   const synopsisFilterActive =
-    showSynopsisState && [...activeSynopsisStates].sort().join(",") !== "unpredicted"
+    showSynopsisState && [...draft.synState].sort().join(",") !== "unpredicted"
   const activeCount =
     evalFilterCount +
     (iaRkFilterActive ? 1 : 0) +
     (synopsisFilterActive ? 1 : 0) +
-    activePubStatuses.length +
-    activePersonalStatuses.length +
-    activeSynopsisQualities.length
+    draft.pub.length +
+    draft.personal.length +
+    draft.synQ.length
 
   const hasAnyActive =
-    (showEvalState && !isDefaultFilterSet(activeFilters)) ||
+    (showEvalState && !isDefaultFilterSet(draft.filters)) ||
     iaRkFilterActive ||
     synopsisFilterActive ||
-    activePubStatuses.length > 0 ||
-    activePersonalStatuses.length > 0 ||
-    activeSynopsisQualities.length > 0
+    draft.pub.length > 0 ||
+    draft.personal.length > 0 ||
+    draft.synQ.length > 0
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -323,12 +374,22 @@ export function AiEvaluationFilters({
             </p>
           </div>
 
-          {hasAnyActive && (
-            <Button variant="ghost" size="xs" onClick={clearAll} disabled={isPending}>
-              <X className="h-3 w-3" />
-              Limpar
+          <div className="flex items-center gap-1.5">
+            {isDirty && !isPending && (
+              <span className="text-[11px] font-medium text-amber-600 dark:text-amber-500">
+                alterações não aplicadas
+              </span>
+            )}
+            {hasAnyActive && (
+              <Button variant="ghost" size="xs" onClick={clearAll} disabled={isPending}>
+                <X className="h-3 w-3" />
+                Limpar
+              </Button>
+            )}
+            <Button size="xs" onClick={apply} disabled={!isDirty || isPending}>
+              {isPending ? "Aplicando…" : "Aplicar"}
             </Button>
-          )}
+          </div>
         </div>
 
         <div className="space-y-1.5">
@@ -368,8 +429,9 @@ export function AiEvaluationFilters({
                         type="number"
                         min={0}
                         max={currentPromptVersionNum}
-                        value={promptVersionTolerance}
+                        value={draft.tolerance}
                         onChange={(e) => setTolerance(Math.max(0, parseInt(e.target.value) || 0))}
+                        onKeyDown={(e) => { if (e.key === "Enter") apply() }}
                         className="h-5 w-12 px-1 py-0 text-xs"
                         disabled={isPending}
                       />
@@ -388,7 +450,7 @@ export function AiEvaluationFilters({
             <FilterSection title="Estado do Veredito IA">
               <div className="flex flex-wrap items-center gap-1">
                 {IA_RK_STATE_OPTIONS.map((opt) => {
-                  const active = activeIaRkStates.includes(opt.id)
+                  const active = draft.iaRk.includes(opt.id)
                   return (
                     <Tooltip key={opt.id}>
                       <TooltipTrigger asChild>
@@ -413,7 +475,7 @@ export function AiEvaluationFilters({
             <FilterSection title="Estado da previsão">
               <div className="flex flex-wrap items-center gap-1">
                 {SYNOPSIS_STATE_OPTIONS.map((opt) => {
-                  const active = activeSynopsisStates.includes(opt.id)
+                  const active = draft.synState.includes(opt.id)
                   return (
                     <Tooltip key={opt.id}>
                       <TooltipTrigger asChild>
@@ -440,18 +502,20 @@ export function AiEvaluationFilters({
               <StatusGroup
                 label="Publicação"
                 options={PUB_STATUSES}
-                active={activePubStatuses}
-                onToggle={(value) => toggleStatus("pub", value, activePubStatuses)}
+                active={draft.pub}
+                onToggle={(value) => toggleStatus("pub", value)}
               />
-              <StatusGroup
-                label="Leitura"
-                options={PERSONAL_STATUSES}
-                active={activePersonalStatuses}
-                onToggle={(value) => toggleStatus("personal", value, activePersonalStatuses)}
-                tooltipFor={(opt) =>
-                  getPersonalStatusDescription(opt.status, (opt as PersonalStatusInfo).comment)
-                }
-              />
+              {showPersonalStatus && (
+                <StatusGroup
+                  label="Leitura"
+                  options={PERSONAL_STATUSES}
+                  active={draft.personal}
+                  onToggle={(value) => toggleStatus("personal", value)}
+                  tooltipFor={(opt) =>
+                    getPersonalStatusDescription(opt.status, (opt as PersonalStatusInfo).comment)
+                  }
+                />
+              )}
             </div>
           </FilterSection>
 
@@ -463,7 +527,7 @@ export function AiEvaluationFilters({
               <FilterSection title="Interesse na sinopse">
                 <div className="flex flex-wrap items-center gap-1">
                   {SYNOPSIS_QUALITIES.map((q) => {
-                    const active = activeSynopsisQualities.includes(q)
+                    const active = draft.synQ.includes(q)
                     return (
                       <button key={q} type="button" onClick={() => toggleSynopsisQuality(q)}>
                         <Badge
@@ -480,7 +544,7 @@ export function AiEvaluationFilters({
                   {showSynopsisState && (
                     <button type="button" onClick={() => toggleSynopsisQuality("none")}>
                       <Badge
-                        variant={activeSynopsisQualities.includes("none") ? "default" : "outline"}
+                        variant={draft.synQ.includes("none") ? "default" : "outline"}
                         className="cursor-pointer text-sm"
                       >
                         Não avaliada
@@ -496,7 +560,7 @@ export function AiEvaluationFilters({
                       title="Tem um valor de Interesse de proveniência legada/não-confirmada (não definido por você)"
                     >
                       <Badge
-                        variant={activeSynopsisQualities.includes("unknown") ? "default" : "outline"}
+                        variant={draft.synQ.includes("unknown") ? "default" : "outline"}
                         className="cursor-pointer text-sm"
                       >
                         Desconhecido
@@ -513,7 +577,7 @@ export function AiEvaluationFilters({
                 <FilterSection title="Previsão da IA">
                   <div className="flex flex-wrap items-center gap-1">
                     {SYNOPSIS_QUALITIES.map((q) => {
-                      const active = activePredictionQualities.includes(q)
+                      const active = draft.predQ.includes(q)
                       return (
                         <button key={q} type="button" onClick={() => togglePredictionQuality(q)}>
                           <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-sm">
@@ -533,7 +597,7 @@ export function AiEvaluationFilters({
                 <FilterSection title="Versão da previsão">
                   <div className="flex flex-wrap items-center gap-1">
                     {predictionVersionOptions.map((v) => {
-                      const active = activePredictionVersions.includes(v)
+                      const active = draft.predV.includes(v)
                       return (
                         <button key={v} type="button" onClick={() => togglePredictionVersion(v)}>
                           <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-xs">
@@ -554,7 +618,7 @@ export function AiEvaluationFilters({
                 <FilterSection title="Δ Previsto × atual">
                   <div className="flex flex-wrap items-center gap-1">
                     {DELTA_OPTIONS.map((opt) => {
-                      const active = activePredictionDeltas.includes(opt.id)
+                      const active = draft.predD.includes(opt.id)
                       return (
                         <button key={opt.id} type="button" onClick={() => togglePredictionDelta(opt.id)}>
                           <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-xs tabular-nums">
