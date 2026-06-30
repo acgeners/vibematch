@@ -859,20 +859,25 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   <div className="flex flex-col items-start gap-1">
                     <ScoreLabelTooltip
                       name="Alinhamento"
-                      description="fit_score (0–100%): alinhamento determinístico entre a obra e o seu TasteProfile (gêneros/tags amados e evitados + preferências por critério). Não usa LLM."
+                      description="Alinhamento (percentil 0–100): posição da obra no catálogo pelo overlap líquido de tags do seu perfil (amadas − 1,5× evitadas). É o MESMO valor que o filtro do ranking usa. Determinístico, sem LLM."
                     />
-                    <span className="text-[11px] text-muted-foreground">Quão a obra combina com seu perfil</span>
+                    <span className="text-[11px] text-muted-foreground">Posição no catálogo pelo seu perfil (percentil)</span>
                   </div>
                   {(() => {
-                    const fit = work.calculated_scores.personal_fit as number
+                    // Mostra o PERCENTIL (mesma métrica que o ranking/filtro usam:
+                    // personalFitPercentile ?? personal_fit*100). Antes mostrava o
+                    // personal_fit cru ×100, divergindo do número do ranking.
+                    const pf = work.calculated_scores.personal_fit as number
+                    const pctRaw = work.calculated_scores.personal_fit_percentile as number | null
+                    const shown = pctRaw != null ? pctRaw : pf * 100
                     const cls =
-                      fit >= 0.75 ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-300"
-                      : fit >= 0.5 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
-                      : fit >= 0.3 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
+                      shown >= 75 ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-300"
+                      : shown >= 50 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
+                      : shown >= 30 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
                       : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
                     return (
                       <span className={cn("flex h-10 w-14 items-center justify-center rounded-md border font-mono text-lg font-bold shrink-0", cls)}>
-                        {Math.round(fit * 100)}%
+                        {Math.round(shown)}%
                       </span>
                     )
                   })()}
