@@ -94,23 +94,28 @@ import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 
 type ViewMode = "list" | "cards" | "heatmap"
 
-function viewStorageKey(namespace: WorkColumnNamespace): string {
+// O namespace de VIEW é só uma chave de localStorage (string) — desacoplado do
+// namespace de COLUNAS (WorkColumnNamespace). Assim a tela de lote pode ter um
+// padrão/persistência de visualização próprios sem precisar de uma config de
+// colunas dedicada.
+function viewStorageKey(namespace: string): string {
   return `${namespace}_view_mode_v1`
 }
 
-function viewEventName(namespace: WorkColumnNamespace): string {
+function viewEventName(namespace: string): string {
   return `${namespace}-view-mode-change`
 }
 
-function readViewMode(namespace: WorkColumnNamespace): ViewMode {
-  if (typeof window === "undefined") return "list"
+function readViewMode(namespace: string, defaultMode: ViewMode = "list"): ViewMode {
+  if (typeof window === "undefined") return defaultMode
   const stored = window.localStorage.getItem(viewStorageKey(namespace))
   if (stored === "cards") return "cards"
   if (stored === "heatmap") return "heatmap"
-  return "list"
+  if (stored === "list") return "list"
+  return defaultMode
 }
 
-function subscribeViewMode(namespace: WorkColumnNamespace, onChange: () => void) {
+function subscribeViewMode(namespace: string, onChange: () => void) {
   if (typeof window === "undefined") return () => {}
   const event = viewEventName(namespace)
   window.addEventListener(event, onChange)
@@ -121,7 +126,7 @@ function subscribeViewMode(namespace: WorkColumnNamespace, onChange: () => void)
   }
 }
 
-function writeViewMode(namespace: WorkColumnNamespace, mode: ViewMode) {
+function writeViewMode(namespace: string, mode: ViewMode) {
   if (typeof window === "undefined") return
   window.localStorage.setItem(viewStorageKey(namespace), mode)
   window.dispatchEvent(new CustomEvent(viewEventName(namespace)))
@@ -136,6 +141,11 @@ interface WorkTableProps {
   scoreThresholds?: ColumnThresholds | null
   selectedCompareIds?: string[]
   namespace?: WorkColumnNamespace
+  /** Namespace SÓ da visualização (lista/cards/heatmap). Default = `namespace`.
+   * Permite uma tela (ex.: lote) ter view própria sem config de colunas dedicada. */
+  viewNamespace?: string
+  /** Visualização inicial quando nada foi salvo nesse `viewNamespace`. Default "list". */
+  defaultViewMode?: ViewMode
   basePath?: string
   enableCompare?: boolean
   enableHeatmap?: boolean
@@ -196,6 +206,8 @@ export function WorkTable({
   scoreThresholds = null,
   selectedCompareIds = [],
   namespace = "titles",
+  viewNamespace,
+  defaultViewMode = "list",
   basePath = "/titles",
   enableCompare = true,
   enableHeatmap = true,
@@ -207,13 +219,14 @@ export function WorkTable({
   const refresh = useRefresh()
   const searchParams = useSearchParams()
 
+  const resolvedViewNamespace = viewNamespace ?? namespace
   const storedViewMode = useSyncExternalStore(
-    (onChange) => subscribeViewMode(namespace, onChange),
-    () => readViewMode(namespace),
-    () => "list" as const,
+    (onChange) => subscribeViewMode(resolvedViewNamespace, onChange),
+    () => readViewMode(resolvedViewNamespace, defaultViewMode),
+    () => defaultViewMode,
   )
   const viewMode: ViewMode = !enableHeatmap && storedViewMode === "heatmap" ? "list" : storedViewMode
-  const setViewModePersisted = (mode: ViewMode) => writeViewMode(namespace, mode)
+  const setViewModePersisted = (mode: ViewMode) => writeViewMode(resolvedViewNamespace, mode)
   // Só oferece o toggle "Minha faixa" quando há perfil com faixas ideais.
   const hasCriterionPrefs = criterionPrefs != null && Object.keys(criterionPrefs).length > 0
 

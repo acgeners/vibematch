@@ -148,12 +148,26 @@ function stripPunctForQuery(s: string): string {
   return s.replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim()
 }
 
+/** Sinaliza que a BUSCA do ComicK não pôde ser feita por indisponibilidade da
+ * fonte (todas as bases falharam — Cloudflare/FlareSolverr/rede), distinto de
+ * "sem resultado". A camada de cima usa isso pra avisar/oferecer retry em vez de
+ * descartar o ComicK em silêncio. */
+export class ComickSearchUnavailableError extends Error {
+  constructor() {
+    super("comick_search_unavailable")
+    this.name = "ComickSearchUnavailableError"
+  }
+}
+
 async function fetchComicKSearchRows(query: string): Promise<unknown[]> {
   const url = new URL("/v1.0/search/", COMICK_BASES[0])
   url.searchParams.set("q", query)
   url.searchParams.set("limit", "5")
   url.searchParams.set("type", "comic")
   const data = await fetchJson(url.pathname, url.search)
+  // `fetchJson` devolve null SÓ quando todas as bases falharam (fonte indisponível).
+  // Lança pra distinguir de uma resposta vazia legítima (array sem itens).
+  if (data == null) throw new ComickSearchUnavailableError()
   return Array.isArray(data) ? data : []
 }
 
@@ -165,6 +179,15 @@ export async function searchComicK(search: string): Promise<ExternalSearchResult
       : [search]
 
     const settled = await Promise.allSettled(queries.map((q) => fetchComicKSearchRows(q)))
+    // Se TODAS as variantes falharam por indisponibilidade, a fonte está fora —
+    // propaga (≠ "sem resultado") pra camada de cima poder avisar/oferecer retry.
+    if (
+      settled.length > 0 &&
+      settled.every((s) => s.status === "rejected") &&
+      settled.some((s) => s.status === "rejected" && s.reason instanceof ComickSearchUnavailableError)
+    ) {
+      throw new ComickSearchUnavailableError()
+    }
     const seenHids = new Set<string>()
     const mergedRows: unknown[] = []
     let rawCount = 0
@@ -213,7 +236,9 @@ export async function searchComicK(search: string): Promise<ExternalSearchResult
         }
       })
       .filter((item): item is ExternalSearchResult => item !== null)
-  } catch {
+  } catch (err) {
+    // Indisponibilidade é propagada (≠ "sem resultado"); o resto degrada pra [].
+    if (err instanceof ComickSearchUnavailableError) throw err
     return []
   }
 }

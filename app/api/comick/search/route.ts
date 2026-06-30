@@ -58,8 +58,15 @@ export async function GET(req: NextRequest) {
     url.searchParams.set("limit", "3")
     url.searchParams.set("type", "comic")
 
-    return NextResponse.json(await fetchJson(url))
+    const data = await fetchJson(url)
+    // null = todas as bases falharam (Cloudflare/FlareSolverr/rede). "Sem match"
+    // genuíno volta como `[]` (200). Sinaliza a falha real como 502 pra o client
+    // poder distinguir indisponibilidade de ausência de resultado.
+    if (data == null) {
+      return NextResponse.json({ error: "comick_upstream_unavailable" }, { status: 502 })
+    }
+    return NextResponse.json(data)
   } catch {
-    return NextResponse.json(null)
+    return NextResponse.json({ error: "comick_upstream_unavailable" }, { status: 502 })
   }
 }

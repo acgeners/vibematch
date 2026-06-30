@@ -691,13 +691,22 @@ export const SEARCH_CONNECTORS = [
   { source: "comix", search: searchComix },
 ] satisfies SearchConnector[]
 
-export async function searchAllSources(query: string): Promise<MergedCandidate[]> {
+export interface SearchAllSourcesResult {
+  candidates: MergedCandidate[]
+  /** Fontes cuja BUSCA falhou por indisponibilidade (timeout/erro de conector,
+   * ex.: ComicK quando o FlareSolverr cai) — distinto de "0 resultados". A UI usa
+   * pra avisar/oferecer retry em vez de descartar a fonte em silêncio. */
+  failedSources: ExternalSourceId[]
+}
+
+export async function searchAllSourcesWithStatus(query: string): Promise<SearchAllSourcesResult> {
   if (DEBUG_SEARCH) debugLog(`query="${query}"`)
   const settled = await Promise.allSettled(
     SEARCH_CONNECTORS.map((connector) =>
       withTimeout(connector.search(query), TIMEOUT_SEARCH_MS, `search:${connector.source}`)
     )
   )
+  const failedSources: ExternalSourceId[] = []
   const results = settled.flatMap((entry, i) => {
     const connectorName = SEARCH_CONNECTORS[i].source
     if (entry.status === "fulfilled") {
@@ -707,6 +716,7 @@ export async function searchAllSources(query: string): Promise<MergedCandidate[]
       }
       return entry.value
     }
+    failedSources.push(connectorName)
     console.error(
       `[searchAllSources] connector ${connectorName} failed for query="${query}"`,
       entry.reason instanceof Error ? entry.reason.message : entry.reason
@@ -726,7 +736,11 @@ export async function searchAllSources(query: string): Promise<MergedCandidate[]
       debugLog(`    "${c.title}" matchScore=${(c.matchScore ?? 0).toFixed(2)} sources=[${c.sources.join(", ")}]`)
     }
   }
-  return refined
+  return { candidates: refined, failedSources }
+}
+
+export async function searchAllSources(query: string): Promise<MergedCandidate[]> {
+  return (await searchAllSourcesWithStatus(query)).candidates
 }
 
 // ============================================================================

@@ -1075,21 +1075,12 @@ export async function createWork(
 
   const slug = titleToSlug(values.title)
 
-  // Recalcular todos (orquestrado, AGUARDADO): a média global muda quando um título
-  // é adicionado. Preserva a semântica síncrona do create — só troca o motor (job
-  // global free, deduplicado) por baixo.
-  const recalc = await recalculateScoresNow()
-  if (recalc.status === "failed") {
-    console.error("[createWork] Falha ao recalcular scores:", recalc.error)
-    return {
-      error: {
-        _root: [
-          "Obra criada, mas houve erro ao recalcular as notas. Tente recalcular em Configurações.",
-        ],
-      },
-      data: { id: result.workId, slug },
-    }
-  }
+  // Recalc DEFERIDO (não-bloqueante): a obra recém-criada ainda não tem dados pra
+  // uma Nota Prevista significativa (segue pra Avaliação IA) e adicionar um título
+  // não-rotulado não muda o modelo global. Evita um recalc do catálogo inteiro a
+  // cada create. A nota é preenchida no próximo recalc (auto ≥1h, "Recalcular
+  // agora" ou o recalc do aceite da IA). Mesmo padrão que updateWork/createWorksBatch.
+  await markRecalcPending("createWork")
 
   revalidatePath("/titles")
   revalidatePath(`/titles/${slug}`)
@@ -1178,18 +1169,13 @@ export async function createWorksBatch(
     })
   }
 
-  const batchRecalc = await recalculateScoresNow()
-  if (batchRecalc.status === "failed") {
-    console.error("[createWorksBatch] Falha ao recalcular scores:", batchRecalc.error)
-    return {
-      error: {
-        _root: [
-          "Obras criadas, mas houve erro ao recalcular as notas. Tente recalcular em Configurações.",
-        ],
-      },
-      data: { created },
-    }
-  }
+  // Recalc DEFERIDO (não-bloqueante): obras recém-criadas em lote ainda não têm
+  // dados pra uma Nota Prevista significativa (vão direto pra Avaliação IA). Evita
+  // um recalc global (re-treina o Ridge + recalcula ~todo o catálogo) a cada lote,
+  // que só produziria uma nota sem sentido para essas obras. A Nota Prevista é
+  // preenchida no próximo recalc (auto ≥1h, "Recalcular agora" ou o recalc do
+  // aceite da IA). Mesmo padrão que updateWork usa.
+  await markRecalcPending("createWorksBatch")
 
   revalidatePath("/titles")
   revalidateTag("works-slug-index", "max")
