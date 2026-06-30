@@ -95,6 +95,9 @@ interface WorkFormProps {
   /** Conteúdo extra renderizado na aba "Notas e avaliações" (ex.: reviews
    *  manuais). É independente do form — não é um campo, só um slot visual. */
   reviewsSlot?: React.ReactNode
+  /** IDs externos já vinculados à obra (edição) — ex.: `{ comix: "003kd" }`.
+   *  Exibidos/mantidos no passo de seleção de fontes do "Buscar dados". */
+  existingExternalIds?: Record<string, string>
 }
 
 type EditTab = "geral" | "notas" | "status" | "tags"
@@ -629,7 +632,7 @@ const scrollToTop = () => {
   window.scrollTo({ top: 0, behavior: "smooth" })
 }
 
-export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEvalOnCreate = false, reviewsSlot }: WorkFormProps) {
+export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEvalOnCreate = false, reviewsSlot, existingExternalIds }: WorkFormProps) {
   const router = useRouter()
   const refresh = useRefresh()
   const isCreating = !workId
@@ -1753,6 +1756,8 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                 onSelect={handleExternalSelect}
                 onDuplicateUpdate={handleExternalDuplicateUpdate}
                 evaluateAi={aiEvalOnCreate}
+                enableResultCache
+                existingExternalIds={existingExternalIds}
               />
             </div>
             {errors.title && (
