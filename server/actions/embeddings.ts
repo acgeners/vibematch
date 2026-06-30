@@ -13,6 +13,7 @@ import {
   MAX_BATCH_SIZE,
 } from "@/lib/ml/embeddings"
 import { pickPrimarySynopsis } from "@/lib/work-derived"
+import { buildReviewContext } from "@/lib/tags/infer-from-text"
 
 const QUERY_LIMIT = 2000
 
@@ -70,6 +71,9 @@ function buildWorkFromRow(row: Record<string, unknown>): WorkForEmbedding {
     })),
   )
 
+  const reviewContext =
+    buildReviewContext(row.review_summary, row.review_digest) ?? null
+
   return {
     workId: row.id as string,
     data: {
@@ -77,6 +81,7 @@ function buildWorkFromRow(row: Record<string, unknown>): WorkForEmbedding {
       synopsis,
       tags,
       categoryScores,
+      reviewContext,
     },
   }
 }
@@ -94,7 +99,7 @@ async function loadEmbeddingCandidates(): Promise<{
     supabase
       .from("works")
       .select(
-        `id, title,
+        `id, title, review_digest, review_summary,
          category_scores(criterion_slug, score),
          work_tags(tags(name, tag_group_id)),
          work_synopses(text, is_primary, position)`,
