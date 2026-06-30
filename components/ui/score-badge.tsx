@@ -106,15 +106,58 @@ export function getScoreTextColor(
 const NEGATIVE_CRITERIA = new Set<string>(["drama", "tragedy"])
 
 // Pílulas soft por tier — usadas pelas células de atributo (escala 0–10).
+// top e high são DOIS TONS DE VERDE distintos (forte vs suave) — antes eram quase
+// iguais (emerald-100 vs green-100), o que deixava o heatmap num paredão uniforme.
 const CRITERION_TIER_CLASS: Record<"top" | "high" | "mid" | "low" | "bottom", string> = {
-  top: "bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25",
-  high: "bg-green-100 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-400 dark:border-green-500/25",
+  top: "bg-green-300 text-green-950 border border-green-400 dark:bg-green-500/40 dark:text-green-100 dark:border-green-500/55",
+  high: "bg-green-100 text-green-700 border border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20",
   mid: "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-500/15 dark:text-yellow-400 dark:border-yellow-500/25",
   low: "bg-orange-100 text-orange-800 border border-orange-200 dark:bg-orange-500/15 dark:text-orange-400 dark:border-orange-500/25",
   bottom: "bg-red-100 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-400 dark:border-red-500/25",
 }
 
+// Variante COR-DE-FONTE dos mesmos tiers — usada onde não queremos pílula com
+// fundo (ex.: colunas de critério do /ranking, que privilegiam densidade). top
+// (verde forte/negrito) vs high (verde suave) seguem distinguíveis.
+const CRITERION_TIER_TEXT_CLASS: Record<"top" | "high" | "mid" | "low" | "bottom", string> = {
+  top: "text-green-600 dark:text-green-300 font-bold",
+  high: "text-green-600/55 dark:text-green-500/65 font-normal",
+  mid: "text-yellow-600 dark:text-yellow-400 font-medium",
+  low: "text-orange-600 dark:text-orange-400 font-semibold",
+  bottom: "text-red-600 dark:text-red-400 font-semibold",
+}
+
 const TIER_ORDER = ["top", "high", "mid", "low", "bottom"] as const
+
+type CriterionFilledTier = "top" | "high" | "mid" | "low" | "bottom"
+
+/** Tier de uma nota de atributo no modo CATÁLOGO (percentil; drama/tragédia
+ * invertidos). Extraído pra ser reusado tanto pela pílula (cor de fundo) quanto
+ * pela cor de fonte. */
+function pickCriterionTierCatalog(
+  score: number,
+  slug: string,
+  thresholds?: ScoreColorThresholds | null,
+): CriterionFilledTier {
+  const isNegative = NEGATIVE_CRITERIA.has(slug)
+  if (thresholds) {
+    const tier = pickTier(score, thresholds)
+    if (!isNegative) return tier
+    // Inverte: top↔bottom, high↔low, mid fica.
+    const idx = TIER_ORDER.indexOf(tier)
+    return TIER_ORDER[TIER_ORDER.length - 1 - idx]
+  }
+  // Fallback fixo (comportamento histórico).
+  if (isNegative) {
+    if (score <= 3) return "high"
+    if (score <= 5) return "mid"
+    return "bottom"
+  }
+  if (score >= 8) return "top"
+  if (score >= 6) return "high"
+  if (score >= 4) return "mid"
+  return "bottom"
+}
 
 /**
  * Classe de cor (pílula soft) pra uma nota de atributo (0–10).
@@ -129,25 +172,7 @@ export function getCriterionColorClass(
   slug: string,
   thresholds?: ScoreColorThresholds | null,
 ): string {
-  const isNegative = NEGATIVE_CRITERIA.has(slug)
-  if (thresholds) {
-    const tier = pickTier(score, thresholds)
-    if (!isNegative) return CRITERION_TIER_CLASS[tier]
-    // Inverte: top↔bottom, high↔low, mid fica.
-    const idx = TIER_ORDER.indexOf(tier)
-    const inverted = TIER_ORDER[TIER_ORDER.length - 1 - idx]
-    return CRITERION_TIER_CLASS[inverted]
-  }
-  // Fallback fixo (comportamento histórico).
-  if (isNegative) {
-    if (score <= 3) return CRITERION_TIER_CLASS.high
-    if (score <= 5) return CRITERION_TIER_CLASS.mid
-    return CRITERION_TIER_CLASS.bottom
-  }
-  if (score >= 8) return CRITERION_TIER_CLASS.top
-  if (score >= 6) return CRITERION_TIER_CLASS.high
-  if (score >= 4) return CRITERION_TIER_CLASS.mid
-  return CRITERION_TIER_CLASS.bottom
+  return CRITERION_TIER_CLASS[pickCriterionTierCatalog(score, slug, thresholds)]
 }
 
 // ── Coloração por FAIXA IDEAL (perfil) ───────────────────────────────────────
@@ -174,19 +199,27 @@ const RANGE_NEUTRAL_WEIGHT = 0.05
 const NEUTRAL_CRITERION_CLASS = "bg-muted/60 text-muted-foreground border border-border/50"
 
 /**
- * Tier de uma nota de atributo pela DISTÂNCIA até a faixa ideal do perfil.
- * Dentro de [ideal_min, ideal_max] → "top". Fora, decai: ≤1 pt → high, ≤2 →
- * mid, ≤3 → low, além → bottom. Peso ~0 → "neutral". Arredonda a 1 casa
- * (mesma granularidade do display) pra evitar flips invisíveis na fronteira.
+ * Tier de uma nota de atributo pela posição relativa à faixa ideal do perfil.
+ * DENTRO de [ideal_min, ideal_max] gradua por proximidade ao CENTRO — perto do
+ * centro → "top" (verde forte), perto das bordas → "high" (verde suave); isso
+ * quebra o paredão de cor uniforme (antes tudo na faixa virava "top"). FORA da
+ * faixa decai por distância: ≤1 → mid (amarelo), ≤2.5 → low (laranja), além →
+ * bottom (vermelho). Peso ~0 → "neutral". Arredonda a 1 casa (mesma granularidade
+ * do display) pra evitar flips invisíveis na fronteira.
  */
 export function pickCriterionTierByRange(score: number, range: CriterionRange): CriterionTier {
   if (range.weight < RANGE_NEUTRAL_WEIGHT) return "neutral"
   const s = Math.round(score * 10) / 10
-  if (s >= range.ideal_min && s <= range.ideal_max) return "top"
+  if (s >= range.ideal_min && s <= range.ideal_max) {
+    const center = (range.ideal_min + range.ideal_max) / 2
+    const halfWidth = (range.ideal_max - range.ideal_min) / 2
+    if (halfWidth <= 0) return "top"
+    // Metade central da faixa → forte; metade externa → suave.
+    return Math.abs(s - center) <= halfWidth * 0.5 ? "top" : "high"
+  }
   const distance = s < range.ideal_min ? range.ideal_min - s : s - range.ideal_max
-  if (distance <= 1) return "high"
-  if (distance <= 2) return "mid"
-  if (distance <= 3) return "low"
+  if (distance <= 1) return "mid"
+  if (distance <= 2.5) return "low"
   return "bottom"
 }
 
@@ -211,6 +244,25 @@ export function criterionCellClass(opts: {
 }): string {
   if (opts.mode === "range" && opts.range) return getCriterionColorClassByRange(opts.score, opts.range)
   return getCriterionColorClass(opts.score, opts.slug, opts.thresholds)
+}
+
+/**
+ * Igual ao `criterionCellClass`, mas devolve só COR DE FONTE (sem pílula/fundo) —
+ * pros lugares que privilegiam densidade (ex.: colunas de critério do /ranking).
+ * Mesmo tiering dos dois modos (faixa por centro / catálogo por percentil).
+ */
+export function criterionCellTextClass(opts: {
+  score: number
+  slug: string
+  mode: AttrColorMode
+  thresholds?: ScoreColorThresholds | null
+  range?: CriterionRange | null
+}): string {
+  const tier: CriterionTier =
+    opts.mode === "range" && opts.range
+      ? pickCriterionTierByRange(opts.score, opts.range)
+      : pickCriterionTierCatalog(opts.score, opts.slug, opts.thresholds)
+  return tier === "neutral" ? "text-muted-foreground" : CRITERION_TIER_TEXT_CLASS[tier]
 }
 
 const sizeClasses = {
