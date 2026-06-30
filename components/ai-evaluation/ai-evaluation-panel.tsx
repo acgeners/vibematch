@@ -25,6 +25,7 @@ import {
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
+import { CountBadges } from "@/components/ai-evaluation/count-badges"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { titleToSlug } from "@/lib/utils"
 import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
@@ -48,6 +49,8 @@ interface PendingWork {
   synopsis_quality?: string | null
   cover_url?: string | null
   expected_score?: number | null
+  tagCount?: number | null
+  reviewCount?: number | null
   matchedFilters?: Array<"pending" | "review-pending" | "low-confidence" | "outdated-model" | "outdated-reviews">
   evaluation?: {
     confidence: number | null
@@ -756,6 +759,7 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                       matchedFilters={work.matchedFilters}
                       evaluation={work.evaluation}
                     />
+                    <CountBadges tagCount={work.tagCount} reviewCount={work.reviewCount} />
                   </div>
 
                   <EvaluationMetaLine evaluation={work.evaluation} />

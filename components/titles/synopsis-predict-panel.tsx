@@ -20,6 +20,7 @@ import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
 import { PredictSynopsisRowActions } from "@/components/titles/predict-synopsis-row-actions"
 import { SynopsisQualityPicker } from "@/components/titles/synopsis-quality-picker"
+import { SynopsisInputsPopover } from "@/components/ai-evaluation/synopsis-inputs-popover"
 import { TaskButton } from "@/components/ai-evaluation/task-button"
 import {
   planSynopsisInterestBatchAction,
@@ -371,6 +372,11 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
                       {w.justification && (
                         <p className="line-clamp-2 text-[11px] leading-4 text-muted-foreground">{w.justification}</p>
                       )}
+                      <SynopsisInputsPopover
+                        canonicalSynopsis={w.canonicalSynopsis}
+                        tags={w.tags}
+                        reviewDigest={w.reviewDigest}
+                      />
                     </div>
                   </div>
 

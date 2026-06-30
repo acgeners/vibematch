@@ -19,6 +19,7 @@ import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/sta
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
+import { CountBadges } from "@/components/ai-evaluation/count-badges"
 import { rerankWorksBatchAction } from "@/server/actions/recommendations"
 import type { AlignmentQueueWork } from "@/server/queries/recommendations"
 
@@ -243,6 +244,7 @@ export function StaleRerankPanel({
                           não avaliado
                         </span>
                       )}
+                      <CountBadges tagCount={w.tagCount} reviewCount={w.reviewCount} />
                     </div>
 
                     <p className="font-mono text-xs text-muted-foreground tabular-nums">

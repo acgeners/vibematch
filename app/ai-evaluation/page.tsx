@@ -18,8 +18,9 @@ import { cn } from "@/lib/utils"
 import { StaleRerankPanel } from "@/components/ranking/stale-rerank-panel"
 import { SynopsisPredictPanel } from "@/components/titles/synopsis-predict-panel"
 import { SynopsisAccuracyBar } from "@/components/titles/synopsis-accuracy-bar"
-import { getAlignmentQueueWorks, getSynopsisQueueWorks, getSynopsisPredictionVersions } from "@/server/queries/recommendations"
-import type { AlignmentQueueWork, SynopsisQueueWork } from "@/server/queries/recommendations"
+import { getAlignmentQueueWorks, getSynopsisQueueWorks, getSynopsisPredictionVersions, getUntrackedWorks } from "@/server/queries/recommendations"
+import type { AlignmentQueueWork, SynopsisQueueWork, UntrackedWork } from "@/server/queries/recommendations"
+import { UntrackedStatusPanel } from "@/components/ai-evaluation/untracked-status-panel"
 import { getSynopsisPredictionAccuracy, getSynopsisVersionComparison } from "@/server/queries/synopsis-quality"
 import type { SynopsisPredictionAccuracy, SynopsisVersionComparison } from "@/server/queries/synopsis-quality"
 import { getCurrentPlan } from "@/server/queries/current-user"
@@ -28,6 +29,7 @@ import { SemReviewsTab } from "@/components/ai-evaluation/sem-reviews-tab"
 import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
 import { SemTagsTab } from "@/components/ai-evaluation/sem-tags-tab"
 import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
+import { getWorkTagReviewCounts, getSynopsisInputsBatch } from "@/server/queries/work-card-meta"
 
 const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model", "outdated-reviews"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
@@ -128,6 +130,9 @@ interface EligibleWork {
   synopsis_quality: string | null
   cover_url?: string | null
   expected_score: number | null
+  /** Hidratados só na aba ativa (cards) — ausentes no caminho do cache de contagens. */
+  tagCount?: number | null
+  reviewCount?: number | null
   /** Razões pelas quais a obra apareceu (intersecção com os filtros ativos). */
   matchedFilters: EvaluationFilter[]
   evaluation: {
@@ -562,6 +567,40 @@ function IaAttributesTab({
   )
 }
 
+/**
+ * Aba "Untracked" — obras com status de leitura = Untracked. Permite atribuir um
+ * status de leitura a VÁRIAS de uma vez (multi-seleção + aplicar). Reusa o filtro
+ * de Publicação + Interesse (esconde "Leitura": todas são Untracked).
+ */
+function UntrackedTab({
+  works,
+  pubStatusNames,
+  synopsisQualities,
+}: {
+  works: UntrackedWork[]
+  pubStatusNames: string[]
+  synopsisQualities: string[]
+}) {
+  return (
+    <div className="space-y-4">
+      <AiEvaluationFilters
+        activeFilters={[]}
+        currentModel={MODEL}
+        currentPromptVersion={PROMPT_VERSION}
+        currentPromptVersionNum={CURRENT_PROMPT_VERSION_NUM}
+        promptVersionTolerance={0}
+        lowConfidenceThreshold={DEFAULT_LOW_CONFIDENCE_THRESHOLD}
+        activePubStatuses={pubStatusNames}
+        activePersonalStatuses={[]}
+        activeSynopsisQualities={synopsisQualities}
+        showEvalState={false}
+        showPersonalStatus={false}
+      />
+      <UntrackedStatusPanel works={works} />
+    </div>
+  )
+}
+
 const IA_RK_STATES = ["stale", "unranked"] as const
 type IaRkState = (typeof IA_RK_STATES)[number]
 
@@ -698,6 +737,7 @@ interface TabHrefs {
   syn: string
   rev: string
   tags: string
+  untracked: string
 }
 
 /** Barra de abas. `counts=null` (fallback do Suspense) mostra "(…)" enquanto os
@@ -709,7 +749,7 @@ function EvalTabBar({
 }: {
   activeTab: string
   hrefs: TabHrefs
-  counts: { attr: number; iaRk: number; syn: number; rev: number; tags: number } | null
+  counts: TabCounts | null
 }) {
   const n = (v: number | undefined) => (counts ? ` (${v ?? 0})` : " (…)")
   return (
@@ -719,6 +759,7 @@ function EvalTabBar({
       <EvalTabLink href={hrefs.syn} active={activeTab === "sinopse"}>Interesse na Obra{n(counts?.syn)}</EvalTabLink>
       <EvalTabLink href={hrefs.rev} active={activeTab === "sem-reviews"}>Sem reviews{n(counts?.rev)}</EvalTabLink>
       <EvalTabLink href={hrefs.tags} active={activeTab === "sem-tags"}>Sem tags{n(counts?.tags)}</EvalTabLink>
+      <EvalTabLink href={hrefs.untracked} active={activeTab === "untracked"}>Untracked{n(counts?.untracked)}</EvalTabLink>
     </div>
   )
 }
@@ -751,6 +792,7 @@ interface TabCounts {
   syn: number
   rev: number
   tags: number
+  untracked: number
 }
 
 /**
@@ -767,16 +809,17 @@ interface TabCounts {
  */
 const getAiEvalTabCounts = unstable_cache(
   async (args: CountArgs): Promise<TabCounts> => {
-    const [attr, iaRk, syn, rev, tags] = await Promise.all([
+    const [attr, iaRk, syn, rev, tags, untracked] = await Promise.all([
       getEligibleWorks(args.activeFilters, args.pubStatusIds, args.personalStatusIds, args.synopsisQualities, args.toleranceOverride),
       getAlignmentQueueWorks({ states: args.iaRkStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities }),
       getSynopsisQueueWorks({ states: args.synopsisStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities, predictionVersions: args.predictionVersions, predictionQualities: args.predictionQualities, predictionDeltas: args.predictionDeltas, missingManual: args.synopsisQualities.includes("none") }),
       getWorksWithoutReviews({ q: args.noReviewQ, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, hasExternal: args.hasExternal, goldenOnly: args.goldenOnly, minReviews: args.minReviews, maxReviews: args.maxReviews, interest: args.synopsisQualities, sort: args.reviewSort }),
       getWorksWithoutTags({ q: args.noReviewQ, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, hasExternal: args.hasExternal, goldenOnly: args.goldenOnly, minTags: args.minTags, maxTags: args.maxTags, interest: args.synopsisQualities, sort: args.tagsSort }),
+      getUntrackedWorks({ pubStatusIds: args.pubStatusIds, synopsisQualities: args.synopsisQualities }),
     ])
-    return { attr: attr.works.length, iaRk: iaRk.length, syn: syn.length, rev: rev.totalWithoutReviews, tags: tags.totalWithoutTags }
+    return { attr: attr.works.length, iaRk: iaRk.length, syn: syn.length, rev: rev.totalWithoutReviews, tags: tags.totalWithoutTags, untracked: untracked.length }
   },
-  ["ai-eval-tab-counts-v1"],
+  ["ai-eval-tab-counts-v2"],
   { revalidate: 60, tags: ["ai-eval-tab-counts"] },
 )
 
@@ -786,6 +829,7 @@ const ACTIVE_TAB_COUNT_KEY: Record<string, keyof TabCounts> = {
   sinopse: "syn",
   "sem-reviews": "rev",
   "sem-tags": "tags",
+  untracked: "untracked",
 }
 
 /**
@@ -831,11 +875,12 @@ export default async function AiEvaluationPage({
 }) {
   const params = await searchParams
   const tabRaw = Array.isArray(params.tab) ? params.tab[0] : params.tab
-  const activeTab: "atributos" | "ia-rk" | "sinopse" | "sem-reviews" | "sem-tags" =
+  const activeTab: "atributos" | "ia-rk" | "sinopse" | "sem-reviews" | "sem-tags" | "untracked" =
     tabRaw === "ia-rk" ? "ia-rk"
     : tabRaw === "sinopse" ? "sinopse"
     : tabRaw === "sem-reviews" ? "sem-reviews"
     : tabRaw === "sem-tags" ? "sem-tags"
+    : tabRaw === "untracked" ? "untracked"
     : "atributos"
 
   // Filtros compartilhados pelas abas de diagnóstico "Sem reviews" e "Sem tags".
@@ -898,9 +943,19 @@ export default async function AiEvaluationPage({
     ])
     const isPaidPlan = planAllows(plan, "smart_shortlist")
     activeCount = synopsisQueue.length
+    const inputs = await getSynopsisInputsBatch(synopsisQueue.map((w) => w.id))
+    const works = synopsisQueue.map((w) => {
+      const inp = inputs.get(w.id)
+      return {
+        ...w,
+        canonicalSynopsis: inp?.canonicalSynopsis ?? null,
+        tags: inp?.tags ?? [],
+        reviewDigest: inp?.reviewDigest ?? null,
+      }
+    })
     activeContent = (
       <SynopsisTab
-        works={synopsisQueue}
+        works={works}
         accuracy={synopsisAccuracy}
         comparison={synopsisComparison}
         pubStatusNames={pubStatusNames}
@@ -957,9 +1012,15 @@ export default async function AiEvaluationPage({
     ])
     const isPaidPlan = planAllows(plan, "smart_shortlist")
     activeCount = iaRkQueue.length
+    const counts = await getWorkTagReviewCounts(iaRkQueue.map((w) => w.id))
+    const works = iaRkQueue.map((w) => ({
+      ...w,
+      tagCount: counts.get(w.id)?.tagCount ?? 0,
+      reviewCount: counts.get(w.id)?.reviewCount ?? 0,
+    }))
     activeContent = (
       <IaRkTab
-        works={iaRkQueue}
+        works={works}
         pubStatusNames={pubStatusNames}
         personalStatusNames={personalStatusNames}
         synopsisQualities={synopsisQualities}
@@ -967,12 +1028,28 @@ export default async function AiEvaluationPage({
         isPaid={isPaidPlan}
       />
     )
+  } else if (activeTab === "untracked") {
+    const untrackedWorks = await getUntrackedWorks({ pubStatusIds, synopsisQualities })
+    activeCount = untrackedWorks.length
+    activeContent = (
+      <UntrackedTab
+        works={untrackedWorks}
+        pubStatusNames={pubStatusNames}
+        synopsisQualities={synopsisQualities}
+      />
+    )
   } else {
     const attrResult = await getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, synopsisQualities, toleranceOverride)
     activeCount = attrResult.works.length
+    const counts = await getWorkTagReviewCounts(attrResult.works.map((w) => w.id))
+    const works = attrResult.works.map((w) => ({
+      ...w,
+      tagCount: counts.get(w.id)?.tagCount ?? 0,
+      reviewCount: counts.get(w.id)?.reviewCount ?? 0,
+    }))
     activeContent = (
       <IaAttributesTab
-        works={attrResult.works}
+        works={works}
         activeFilters={activeFilters}
         promptVersionTolerance={attrResult.promptVersionTolerance}
         lowConfidenceThreshold={attrResult.lowConfidenceThreshold}
@@ -1044,7 +1121,12 @@ export default async function AiEvaluationPage({
   if (params.sortt) noTagsParams.set("sortt", toParam(params.sortt)!)
   const noTagsHref = `/ai-evaluation?${noTagsParams}`
 
-  const hrefs: TabHrefs = { attr: attrHref, rk: rkHref, syn: synHref, rev: noRevHref, tags: noTagsHref }
+  const untrackedParams = new URLSearchParams({ tab: "untracked" })
+  if (pub) untrackedParams.set("pub", pub)
+  if (synq) untrackedParams.set("synopsis_q", synq)
+  const untrackedHref = `/ai-evaluation?${untrackedParams}`
+
+  const hrefs: TabHrefs = { attr: attrHref, rk: rkHref, syn: synHref, rev: noRevHref, tags: noTagsHref, untracked: untrackedHref }
   const countArgs: CountArgs = {
     activeFilters,
     pubStatusIds,

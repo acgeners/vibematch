@@ -66,6 +66,9 @@ interface AiEvaluationFiltersProps {
   activeSynopsisQualities?: string[]
   /** Quando false, esconde a seção "Estado da avaliação" (usado na aba Veredito IA). */
   showEvalState?: boolean
+  /** Quando false, esconde o grupo de status "Leitura" (usado na aba Untracked, onde
+   *  todas as obras são Untracked). */
+  showPersonalStatus?: boolean
   /** Mostra a seção "Estado do Veredito IA" (Desatualizado/Não avaliado) — aba Veredito IA. */
   showIaRkState?: boolean
   /** Estados de Veredito IA ativos ("stale"/"unranked"). */
@@ -115,6 +118,7 @@ export function AiEvaluationFilters({
   activePersonalStatuses,
   activeSynopsisQualities = [],
   showEvalState = true,
+  showPersonalStatus = true,
   showIaRkState = false,
   activeIaRkStates = [],
   showSynopsisState = false,
@@ -501,15 +505,17 @@ export function AiEvaluationFilters({
                 active={draft.pub}
                 onToggle={(value) => toggleStatus("pub", value)}
               />
-              <StatusGroup
-                label="Leitura"
-                options={PERSONAL_STATUSES}
-                active={draft.personal}
-                onToggle={(value) => toggleStatus("personal", value)}
-                tooltipFor={(opt) =>
-                  getPersonalStatusDescription(opt.status, (opt as PersonalStatusInfo).comment)
-                }
-              />
+              {showPersonalStatus && (
+                <StatusGroup
+                  label="Leitura"
+                  options={PERSONAL_STATUSES}
+                  active={draft.personal}
+                  onToggle={(value) => toggleStatus("personal", value)}
+                  tooltipFor={(opt) =>
+                    getPersonalStatusDescription(opt.status, (opt as PersonalStatusInfo).comment)
+                  }
+                />
+              )}
             </div>
           </FilterSection>
 
