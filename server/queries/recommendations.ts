@@ -635,6 +635,9 @@ export interface SynopsisQueueWork {
   canonicalSynopsis?: string | null
   tags?: string[]
   reviewDigest?: ReviewDigest | null
+  /** #tags e #reviews úteis (hidratados na aba ativa) — pro badge e o filtro de "dados suficientes". */
+  tagCount?: number
+  reviewCount?: number
 }
 
 /**

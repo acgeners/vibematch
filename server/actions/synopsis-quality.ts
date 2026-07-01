@@ -6,6 +6,9 @@ import { ensureCapability } from "@/server/queries/current-user"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getSynopsisPredictionForWork, getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
 import { markRecalcPending } from "@/server/actions/recalc-queue"
+import { fetchAllRows } from "@/lib/supabase/paginate"
+import { estimateStep } from "@/lib/orchestration/cost"
+import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
 import type {
@@ -355,6 +358,65 @@ export async function runSynopsisInterestBatchAction(
     revalidateTag("ai-eval-tab-counts", "max")
     revalidatePath("/titles")
     return { status: "ok", report }
+  } catch (err) {
+    return { status: "failed", error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}
+
+export interface InterestBackfillPlan {
+  status: "ok"
+  /** Obras não-frescas a processar (o run pula as já frescas — reuse). */
+  targetIds: string[]
+  /** Total de ids recebidos (o conjunto FILTRADO na UI). */
+  total: number
+  /** Já frescas na versão ATIVA (puladas sem custo). */
+  fresh: number
+  /** Quantas precisam de chamada LLM. */
+  needCalls: number
+  likelyUsd: number
+  upperBoundUsd: number
+}
+
+/**
+ * Dry-run do BACKFILL de Interesse sobre um conjunto de obras JÁ FILTRADO na UI
+ * (respeita os filtros aplicados na aba — status, estado, mín. tags/reviews). Recebe
+ * os work_ids EXIBIDOS, remove os já frescos na versão de prompt ATIVA (v4 com a
+ * flag; v3 sem) e estima o custo do restante. NÃO executa nada.
+ */
+export async function planInterestBackfillForIds(
+  workIds: string[],
+): Promise<InterestBackfillPlan | { status: "blocked_manual"; message: string } | { status: "failed"; error: string }> {
+  try {
+    const gate = await ensureCapability("smart_shortlist")
+    if (!gate.ok) return { status: "blocked_manual", message: gate.error }
+    const ids = [...new Set((workIds ?? []).filter(Boolean))]
+    if (ids.length === 0) return { status: "ok", targetIds: [], total: 0, fresh: 0, needCalls: 0, likelyUsd: 0, upperBoundUsd: 0 }
+    const supabase = createAdminClient()
+
+    // Já frescas na versão ativa ⇒ puladas (reuse). Estima só o restante.
+    const activeVersion = resolveInterestPromptVersion()
+    const fresh = await fetchAllRows<{ work_id: string }>(
+      (from, to) =>
+        supabase
+          .from("synopsis_quality_predictions")
+          .select("work_id")
+          .eq("prompt_version", activeVersion)
+          .eq("stale", false)
+          .range(from, to),
+      "Falha listando previsões frescas",
+    )
+    const freshSet = new Set(fresh.map((r) => r.work_id))
+    const targetIds = ids.filter((id) => !freshSet.has(id))
+    const est = estimateStep("predict_interest_potential", targetIds.length)
+    return {
+      status: "ok",
+      targetIds,
+      total: ids.length,
+      fresh: ids.length - targetIds.length,
+      needCalls: targetIds.length,
+      likelyUsd: est.likelyUsd,
+      upperBoundUsd: est.upperBoundUsd,
+    }
   } catch (err) {
     return { status: "failed", error: err instanceof Error ? err.message : "Erro desconhecido" }
   }

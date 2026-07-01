@@ -17,6 +17,7 @@ import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 import { StaleRerankPanel } from "@/components/ranking/stale-rerank-panel"
 import { SynopsisPredictPanel } from "@/components/titles/synopsis-predict-panel"
+import { InterestBackfillButton } from "@/components/titles/interest-backfill-button"
 import { SynopsisAccuracyBar } from "@/components/titles/synopsis-accuracy-bar"
 import { getAlignmentQueueWorks, getSynopsisQueueWorks, getSynopsisPredictionVersions, getUntrackedWorks } from "@/server/queries/recommendations"
 import type { AlignmentQueueWork, SynopsisQueueWork, UntrackedWork } from "@/server/queries/recommendations"
@@ -685,6 +686,8 @@ function SynopsisTab({
   predictionQualities,
   predictionDeltas,
   predictionVersionOptions,
+  minTags,
+  minReviews,
   isPaid,
 }: {
   works: SynopsisQueueWork[]
@@ -698,6 +701,8 @@ function SynopsisTab({
   predictionQualities: string[]
   predictionDeltas: string[]
   predictionVersionOptions: string[]
+  minTags: number
+  minReviews: number
   isPaid: boolean
 }) {
   return (
@@ -715,12 +720,20 @@ function SynopsisTab({
         activeSynopsisQualities={synopsisQualities}
         showEvalState={false}
         showSynopsisState
+        showDataFilters
+        activeMinTags={minTags}
+        activeMinReviews={minReviews}
         activeSynopsisStates={states}
         activePredictionVersions={predictionVersions}
         activePredictionQualities={predictionQualities}
         activePredictionDeltas={predictionDeltas}
         predictionVersionOptions={predictionVersionOptions}
       />
+      {isPaid && (
+        <div className="flex justify-end">
+          <InterestBackfillButton works={works} isPaid={isPaid} />
+        </div>
+      )}
       <SynopsisPredictPanel works={works} isPaid={isPaid} />
     </div>
   )
@@ -942,17 +955,39 @@ export default async function AiEvaluationPage({
       planPromise ?? getCurrentPlan(),
     ])
     const isPaidPlan = planAllows(plan, "smart_shortlist")
-    activeCount = synopsisQueue.length
-    const inputs = await getSynopsisInputsBatch(synopsisQueue.map((w) => w.id))
-    const works = synopsisQueue.map((w) => {
+    const idsToHydrate = synopsisQueue.map((w) => w.id)
+    const [inputs, counts] = await Promise.all([
+      getSynopsisInputsBatch(idsToHydrate),
+      getWorkTagReviewCounts(idsToHydrate),
+    ])
+    let works = synopsisQueue.map((w) => {
       const inp = inputs.get(w.id)
+      const c = counts.get(w.id)
       return {
         ...w,
         canonicalSynopsis: inp?.canonicalSynopsis ?? null,
         tags: inp?.tags ?? [],
         reviewDigest: inp?.reviewDigest ?? null,
+        tagCount: c?.tagCount ?? 0,
+        reviewCount: c?.reviewCount ?? 0,
       }
     })
+    // Default da aba sinopse: exclui Completed/Dropped/Stalled (obra finalizada/
+    // abandonada/travada não precisa de estimativa de interesse). Só quando NÃO há
+    // filtro de status explícito — escolher status na aba sobrepõe o default.
+    if (personalStatusIds.length === 0) {
+      const excludeIds = new Set(
+        ["Completed", "Dropped", "Stalled"]
+          .map((s) => PERSONAL_STATUS_NAME_TO_ID[s])
+          .filter((id): id is number => id != null),
+      )
+      works = works.filter((w) => w.personalStatusId == null || !excludeIds.has(w.personalStatusId))
+    }
+    // Filtro "dados suficientes" (aba sinopse) — pós-hidratação dos counts. O
+    // activeCount reflete o pós-filtro pra o badge da aba bater com a lista.
+    if (minTags > 0) works = works.filter((w) => (w.tagCount ?? 0) >= minTags)
+    if (minReviews > 0) works = works.filter((w) => (w.reviewCount ?? 0) >= minReviews)
+    activeCount = works.length
     activeContent = (
       <SynopsisTab
         works={works}
@@ -966,6 +1001,8 @@ export default async function AiEvaluationPage({
         predictionQualities={predictionQualities}
         predictionDeltas={predictionDeltas}
         predictionVersionOptions={predictionVersionOptions}
+        minTags={minTags}
+        minReviews={minReviews}
         isPaid={isPaidPlan}
       />
     )
