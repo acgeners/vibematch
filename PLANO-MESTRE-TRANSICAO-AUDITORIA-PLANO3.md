@@ -20,8 +20,9 @@
 > Interesse; **NÃO** na Nota Prevista/Ridge — ablação mostrou redundância); `runDigestBatch` (G2) e o
 > **digest** estão revisitados (digest virou input do e1; cobertura **medida 2026-06-28 = 481/773 = 62%**,
 > não os 2% do doc de 06-18 — resta só a cauda reviewável ~60–130 obras); a decisão **D2 "adiar digest"** está **superseded**; o "**~622** pendentes de Interesse"
-> está **obsoleto** (Lote 02 fez **757/757**). Branches WIP triadas: 4 obsoletas apagadas, só
-> `feat/shadow-ranking` é única. **Detalhe completo + próximos passos em [§24m](#24m) (topo do bloco de addenda) e no [STATUS-2026-06-28.md](STATUS-2026-06-28.md).**
+> está **obsoleto** (Lote 02 fez **757/757**). Branches WIP triadas: 4 obsoletas apagadas (**+3 merjadas
+> podadas em 2026-06-30**); `feat/shadow-ranking` preservada, mas **não é mais a única WIP** — ver **[§24n](#24n)**.
+> **Detalhe completo + próximos passos em [§24n](#24n)/[§24m](#24m) (topo do bloco de addenda) e no [STATUS-2026-06-28.md §0](STATUS-2026-06-28.md).**
 
 > **⚠️ ATUALIZAÇÃO 2026-06-23 — ler antes de §3/§20/§21/§22.** O experimento do Plano 3
 > **foi concluído** sobre um golden **prospectivo** (pilot-2) que **supersede** o pilot-1
@@ -622,7 +623,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 ---
 
 <a id="24n"></a>
-## 24n. Addendum — Injeção das preferências livres (Item B) no preditor de Interesse — investigação OFFLINE + decisão de formato (2026-06-30)
+## 24n. Addendum — Injeção das preferências livres (Item B) no preditor de Interesse — investigação OFFLINE + decisão de formato (2026-06-30); IMPLEMENTADA 2026-07-01 (Peças 2+3, PR #30)
 
 > Investigação isolada: **offline, 0 escrita no banco, 0 commit de código, ~$5,3 LLM** (5 runs sobre o golden pilot-2). Decidiu um **FORMATO**; **nada em produção ainda**. Fonte detalhada na memória `project_interest_predictor_prefs_injection`.
 
@@ -648,6 +649,27 @@ n=90; CI overall ainda **⊃0** (sinal robusto = correção de viés, não MAE p
 1. **Peça 2 (integração) PRIMEIRO** — param aditivo `compiledPreferences?` em buildSynopsisQualityUserPrompt/predictSynopsisQuality (default null = comportamento atual); bloco no profileBlock **cacheado** + addendum no system; wiring em `ensurePredictInterest`; feature flag; bump `PROMPT_VERSION`. **Seed com o bloco v3.3 HARDCODED** (sem compilador ainda), flag só pro user, validar no app.
 2. **Peça 3 (backfill)** = **deferred batch + botão** (edit recompila → marca previsões "pref-stale" → badge "N desatualizadas — [Reprocessar]"). NÃO eager/lazy/soft-drift. Ativação = **1 backfill completo único (~$5–8)** (previsões atuais são sem-regras).
 3. **Peça 1 (compilador-LLM) POR ÚLTIMO** — regras cruas→artefato, recompila só no edit, cacheado (`user_settings.compiled_preferences`), com **preview/aprovação** na UI. Só necessário p/ edits frequentes ou multi-user; o meta-prompt embute os princípios (drop-meta/split/merge/trait-vs-plot/existência≠aprovação/teto-configurável/err-high) = o ativo.
+
+<a id="24o"></a>
+## 24o. Addendum — Console /settings + trava de recálculo + poda de branches (2026-06-30)
+
+> Addendum **mais recente**. Trabalho de **UI/ops** — não mexe na ciência/roadmap de notas; por isso o §24m
+> segue como estado autoritativo da frente de dados. Detalhe completo em **[STATUS-2026-06-28.md §0](STATUS-2026-06-28.md)**.
+
+- **PR #26 merjado** (`feat/pag-titles` → `main`, `f781b68`): console **`/settings` reorganizado por natureza**
+  em 4 grupos ordenados por frequência (Calibração das notas → Gerado por IA → Fontes externas/Comix →
+  Avançado/recolhido); 1 accent por grupo, **chips de custo/cadência**, **tooltips (ⓘ) por grupo**, card
+  **Comix unificado**, toggles de criação reunidos. **Trava de recálculo** (`AiPendingGuardDialog`): "Recalibrar
+  agora" (painel) **e** o botão de recalcular da sidebar/banner avisam quando há artefatos de IA pendentes
+  (embeddings/sinopse canônica/resumo). Calibração de critérios IA: confiança default **90**, filtro
+  "Critério"→**"Atributo"**. Limpeza de `revalidatePath` redundantes.
+  - Nota técnica: `recalculateNow` (painel) e `triggerRecalcNow` (sidebar) são **o mesmo job**
+    (`recalculateAll`, single-flight, force=true) — só mudam o contrato de retorno.
+- **Poda de branches:** origin agora = **`main` + `feat/shadow-ranking`**. Apagadas (merjadas): `feat/pag-titles`
+  (#25/#26), `perf/ai-evaluation-…` (#23), `feat/exploration` (#22 — origin; worktree/local mantidos).
+- **Correção à triagem de §24m/§1:** **`feat/shadow-ranking` NÃO é mais a única WIP.** Há nova WIP real (fora do
+  `main`, sem PR): **`feat/review-embeddings-ranking-transparency`** (worktree `animedb`) — ranking pré-filtros
+  + Alinhamento por percentil (`c39a562`) e embeddings com digest/resumo no texto embedado (`9c8082e`).
 
 ---
 

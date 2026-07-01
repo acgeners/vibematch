@@ -497,14 +497,14 @@ export async function getCalibrationSnapshot() {
 
 /**
  * Força recalcular tudo (e re-calibrar formula_config automaticamente).
+ *
+ * Mesmo job global de `recalculateScoresNow` (single-flight, force=true),
+ * desembrulhando o resultado completo (MAE CV etc.) pro painel de calibração. O
+ * `recalculateAll` já revalida /settings, /titles, /ranking e / por dentro — não
+ * precisa repetir aqui.
  */
 export async function recalculateNow() {
-  const result = await recalculateScoresNowResult()
-  revalidatePath("/settings")
-  revalidatePath("/titles")
-  revalidatePath("/ranking")
-  revalidatePath("/")
-  return result
+  return recalculateScoresNowResult()
 }
 
 export interface ConsolidateSynopsesProgress {
