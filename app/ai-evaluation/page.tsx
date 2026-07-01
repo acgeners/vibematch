@@ -45,6 +45,17 @@ const PERSONAL_STATUS_NAME_TO_ID: Record<string, number> = Object.fromEntries(
   Object.values(PERSONAL_STATUSES_BY_ID).map((info) => [info.status, info.id])
 )
 
+/** Status "de leitura" ocultos por PADRÃO na aba Interesse (obra finalizada/
+ *  abandonada/travada não precisa de estimativa de interesse). Escolha explícita
+ *  de status no filtro sobrepõe. */
+const INTEREST_HIDDEN_PERSONAL_STATUSES = ["Completed", "Dropped", "Stalled"]
+const INTEREST_DEFAULT_PERSONAL_NAMES = Object.keys(PERSONAL_STATUS_NAME_TO_ID).filter(
+  (s) => !INTEREST_HIDDEN_PERSONAL_STATUSES.includes(s),
+)
+const INTEREST_DEFAULT_PERSONAL_IDS = INTEREST_DEFAULT_PERSONAL_NAMES
+  .map((s) => PERSONAL_STATUS_NAME_TO_ID[s])
+  .filter((id): id is number => id != null)
+
 function parseFilters(raw: string | string[] | undefined): EvaluationFilter[] {
   const value = Array.isArray(raw) ? raw.join(",") : raw
   if (!value) return DEFAULT_FILTERS
@@ -517,10 +528,10 @@ function EvalTabLink({
     <Link
       href={href}
       className={cn(
-        "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+        "-mb-px rounded-t-md border-b-2 px-3 py-2 text-sm transition-colors",
         active
-          ? "border-primary text-foreground"
-          : "border-transparent text-muted-foreground hover:text-foreground",
+          ? "border-primary bg-primary/10 font-semibold text-primary"
+          : "border-transparent font-medium text-muted-foreground hover:border-border hover:text-foreground",
       )}
     >
       {children}
@@ -687,7 +698,10 @@ function SynopsisTab({
   predictionDeltas,
   predictionVersionOptions,
   minTags,
+  maxTags,
   minReviews,
+  maxReviews,
+  defaultPersonalStatuses,
   isPaid,
 }: {
   works: SynopsisQueueWork[]
@@ -702,7 +716,10 @@ function SynopsisTab({
   predictionDeltas: string[]
   predictionVersionOptions: string[]
   minTags: number
+  maxTags: number
   minReviews: number
+  maxReviews: number
+  defaultPersonalStatuses: string[]
   isPaid: boolean
 }) {
   return (
@@ -722,7 +739,10 @@ function SynopsisTab({
         showSynopsisState
         showDataFilters
         activeMinTags={minTags}
+        activeMaxTags={maxTags}
         activeMinReviews={minReviews}
+        activeMaxReviews={maxReviews}
+        defaultPersonalStatuses={defaultPersonalStatuses}
         activeSynopsisStates={states}
         activePredictionVersions={predictionVersions}
         activePredictionQualities={predictionQualities}
@@ -947,8 +967,14 @@ export default async function AiEvaluationPage({
   // (badge da aba aberta nunca stale, bate com a lista exibida).
   let activeCount = 0
   if (activeTab === "sinopse") {
+    // Default da aba: quando o usuário NÃO escolheu status, mostra todos MENOS
+    // Completed/Dropped/Stalled (o filtro exibe esses selecionados). Escolha
+    // explícita de status sobrepõe.
+    const sinopseUsesDefaultPersonal = personalStatusNames.length === 0
+    const sinopsePersonalNames = sinopseUsesDefaultPersonal ? INTEREST_DEFAULT_PERSONAL_NAMES : personalStatusNames
+    const sinopsePersonalIds = sinopseUsesDefaultPersonal ? INTEREST_DEFAULT_PERSONAL_IDS : personalStatusIds
     const [synopsisQueue, predictionVersionOptions, synopsisAccuracy, synopsisComparison, plan] = await Promise.all([
-      getSynopsisQueueWorks({ states: synopsisStates, pubStatusIds, personalStatusIds, synopsisQualities, predictionVersions, predictionQualities, predictionDeltas, missingManual: synopsisQualities.includes("none") }),
+      getSynopsisQueueWorks({ states: synopsisStates, pubStatusIds, personalStatusIds: sinopsePersonalIds, synopsisQualities, predictionVersions, predictionQualities, predictionDeltas, missingManual: synopsisQualities.includes("none") }),
       getSynopsisPredictionVersions(),
       getSynopsisPredictionAccuracy(),
       getSynopsisVersionComparison(),
@@ -972,21 +998,12 @@ export default async function AiEvaluationPage({
         reviewCount: c?.reviewCount ?? 0,
       }
     })
-    // Default da aba sinopse: exclui Completed/Dropped/Stalled (obra finalizada/
-    // abandonada/travada não precisa de estimativa de interesse). Só quando NÃO há
-    // filtro de status explícito — escolher status na aba sobrepõe o default.
-    if (personalStatusIds.length === 0) {
-      const excludeIds = new Set(
-        ["Completed", "Dropped", "Stalled"]
-          .map((s) => PERSONAL_STATUS_NAME_TO_ID[s])
-          .filter((id): id is number => id != null),
-      )
-      works = works.filter((w) => w.personalStatusId == null || !excludeIds.has(w.personalStatusId))
-    }
-    // Filtro "dados suficientes" (aba sinopse) — pós-hidratação dos counts. O
-    // activeCount reflete o pós-filtro pra o badge da aba bater com a lista.
+    // Filtro "Dados (nº)": faixa mín–máx de tags/reviews (aba sinopse), pós-hidratação
+    // dos counts. O activeCount reflete o pós-filtro pra o badge da aba bater com a lista.
     if (minTags > 0) works = works.filter((w) => (w.tagCount ?? 0) >= minTags)
+    if (maxTags > 0) works = works.filter((w) => (w.tagCount ?? 0) <= maxTags)
     if (minReviews > 0) works = works.filter((w) => (w.reviewCount ?? 0) >= minReviews)
+    if (maxReviews > 0) works = works.filter((w) => (w.reviewCount ?? 0) <= maxReviews)
     activeCount = works.length
     activeContent = (
       <SynopsisTab
@@ -994,7 +1011,8 @@ export default async function AiEvaluationPage({
         accuracy={synopsisAccuracy}
         comparison={synopsisComparison}
         pubStatusNames={pubStatusNames}
-        personalStatusNames={personalStatusNames}
+        personalStatusNames={sinopsePersonalNames}
+        defaultPersonalStatuses={INTEREST_DEFAULT_PERSONAL_NAMES}
         synopsisQualities={synopsisQualities}
         states={synopsisStates}
         predictionVersions={predictionVersions}
@@ -1002,7 +1020,9 @@ export default async function AiEvaluationPage({
         predictionDeltas={predictionDeltas}
         predictionVersionOptions={predictionVersionOptions}
         minTags={minTags}
+        maxTags={maxTags}
         minReviews={minReviews}
+        maxReviews={maxReviews}
         isPaid={isPaidPlan}
       />
     )

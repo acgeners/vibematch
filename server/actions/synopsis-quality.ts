@@ -407,15 +407,19 @@ export async function planInterestBackfillForIds(
     )
     const freshSet = new Set(fresh.map((r) => r.work_id))
     const targetIds = ids.filter((id) => !freshSet.has(id))
-    const est = estimateStep("predict_interest_potential", targetIds.length)
+    // Custo = por-obra (estimateStep com scale=1) × nº de obras, IGUAL ao
+    // planInterestBatch. `estimateStep(action, N)` NÃO escala linear aqui (o custo é
+    // ~fixo por CHAMADA, base domina), então multiplicamos nós — senão o teto do
+    // plano vem ~1 chamada e o 1º lote de 100 estoura.
+    const per = estimateStep("predict_interest_potential", 1)
     return {
       status: "ok",
       targetIds,
       total: ids.length,
       fresh: ids.length - targetIds.length,
       needCalls: targetIds.length,
-      likelyUsd: est.likelyUsd,
-      upperBoundUsd: est.upperBoundUsd,
+      likelyUsd: per.likelyUsd * targetIds.length,
+      upperBoundUsd: per.upperBoundUsd * targetIds.length,
     }
   } catch (err) {
     return { status: "failed", error: err instanceof Error ? err.message : "Erro desconhecido" }
