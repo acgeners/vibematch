@@ -625,7 +625,7 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 <a id="24n"></a>
 ## 24n. Addendum — Injeção das preferências livres (Item B) no preditor de Interesse — investigação OFFLINE + decisão de formato (2026-06-30); IMPLEMENTADA 2026-07-01 (Peças 2+3, PR #30)
 
-> Investigação isolada: **offline, 0 escrita no banco, 0 commit de código, ~$5,3 LLM** (5 runs sobre o golden pilot-2). Decidiu um **FORMATO**; **nada em produção ainda**. Fonte detalhada na memória `project_interest_predictor_prefs_injection`.
+> Investigação isolada (offline, ~$5,3 LLM, 5 runs sobre o golden pilot-2) que decidiu o **FORMATO v3.3**. **STATUS 2026-07-01: Peças 2+3 IMPLEMENTADAS + merjadas na `main` (PR #30)** — flag `INTEREST_PREFS_V33`, backfill filtro-aware, #tags/#reviews + filtro nos cards; **ativação ~77%** (530 v4, $4.99); **falta terminar backfill (~160) + Peça 1 (compilador-LLM)**. Fonte detalhada na memória `project_interest_predictor_prefs_injection`. (O texto abaixo é o registro histórico da investigação offline.)
 
 ### 1. Pergunta
 As **preferências livres** (Item B, `user_settings.preference_rules`, texto livre) **NÃO chegam** ao preditor de Interesse (`lib/ai-evaluation/synopsis-quality-predictor.ts` — só perfil+sinopse+digest). Item B só alimenta o consultor LLM ao vivo (ranking/recomendar/deep-dive/chat), nunca o modelo offline. Motivador: obra cruel (*The Villainess Turns the Hourglass*) previu **♥♥♥♥** ignorando a regra declarada "não gosto de protagonista cruel".
