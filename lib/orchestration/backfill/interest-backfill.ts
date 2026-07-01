@@ -22,7 +22,8 @@ import { createHash } from "node:crypto"
 import { PRICING_SNAPSHOT_TAG } from "@/lib/ai/pricing"
 import { computeProfileSignature, computeInputHash, loadCurrentTasteProfile, MIN_WORKS_FOR_FULL_PROFILE } from "@/lib/ai-recommendation/taste-profile"
 import type { TasteProfileRow } from "@/lib/ai-recommendation/types"
-import { MODEL as PREDICT_MODEL, PROMPT_VERSION as PREDICT_PROMPT_VERSION } from "@/lib/ai-evaluation/synopsis-quality-predictor"
+import { MODEL as PREDICT_MODEL } from "@/lib/ai-evaluation/synopsis-quality-predictor"
+import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
 import { estimateStep } from "../cost"
 import { getJobStore, type JobStore } from "../jobs"
 import { isProductionBuildPhase } from "../integrations/build-phase"
@@ -326,10 +327,13 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
   const profilePolicy = deps.profilePolicy ?? "default"
   const scope: BackfillScope = deps.scope ?? { kind: "full" }
   const now = deps.now ?? Date.now
+  // Peça 2: versão de prompt ATIVA (v3 base / v4 com preferências). Planejamento,
+  // leitura de previsões e assinaturas seguem o que ensurePredictInterest vai gravar.
+  const promptVersion = resolveInterestPromptVersion()
 
   const [works, predictions, profileSnap, jobs] = await Promise.all([
     gateway.listWorks(),
-    gateway.listPredictions(PREDICT_PROMPT_VERSION),
+    gateway.listPredictions(promptVersion),
     gateway.loadProfileSnapshot(),
     gateway.listBackfillJobs(),
   ])
@@ -414,7 +418,7 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
       synopsisSource: resolved.source,
       tags: w.tags,
       model: PREDICT_MODEL,
-      promptVersion: PREDICT_PROMPT_VERSION,
+      promptVersion,
       schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
       // Frente 3: o digest entra na assinatura real da previsão; a classificação
       // precisa incluí-lo, senão obras com digest nunca casam (fresh→stale falso).
@@ -450,7 +454,7 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
             synopsisSource: resolved.source,
             tags: w.tags,
             model: PREDICT_MODEL,
-            promptVersion: PREDICT_PROMPT_VERSION,
+            promptVersion,
             schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
             extraSources: w.reviewDigest ? { reviewDigest: w.reviewDigest } : undefined,
           })
@@ -483,7 +487,7 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
     profileSignatureOrRegen: profileState === "stale" ? PENDING_PROFILE_REGEN : currentProfileSignature ?? "none",
     profileFunctionalVersion: profileSnap.current?.version ?? null,
     model: PREDICT_MODEL,
-    promptVersion: PREDICT_PROMPT_VERSION,
+    promptVersion,
     schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
     costVersion: PRICING_SNAPSHOT_TAG,
     items: items.map((i) => ({ workId: i.workId, expectedInputSignature: i.expectedInputSignature, reason: i.reason })),
@@ -519,7 +523,7 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
     minMaxCostUsd: upperBoundUsd,
     recommendedConcurrency: { predict_interest_potential: 3, ensure_taste_profile: 1, recalculate_scores: 1 },
     recalcPlanned,
-    actionVersions: { model: PREDICT_MODEL, promptVersion: PREDICT_PROMPT_VERSION, schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION, costVersion: PRICING_SNAPSHOT_TAG },
+    actionVersions: { model: PREDICT_MODEL, promptVersion, schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION, costVersion: PRICING_SNAPSHOT_TAG },
     abandonedJobs,
     warnings,
     createdAt: new Date().toISOString(),

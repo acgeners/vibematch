@@ -22,6 +22,8 @@ import {
   PROMPT_VERSION as PREDICT_PROMPT_VERSION,
   predictSynopsisQuality,
 } from "@/lib/ai-evaluation/synopsis-quality-predictor"
+import { getActiveCompiledPreferences, resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
+import type { CompiledPreferences } from "@/lib/ai-evaluation/compiled-preferences"
 import { formatDigestForPrompt } from "@/lib/synopsis-interest/contextual-package"
 import type { SynopsisQuality } from "@/types/domain"
 import type { TasteProfilePayload, TasteProfileRow, ReviewDigest } from "@/lib/ai-recommendation/types"
@@ -169,6 +171,7 @@ export type PredictInterestOutcome =
 export type DefaultPredictFn = (
   profile: TasteProfilePayload,
   work: { id: string; title: string; synopsis: string; tags: Array<{ name: string; group: string | null }>; reviewDigest?: string | null },
+  compiledPreferences?: CompiledPreferences | null,
 ) => Promise<{
   predictedQuality: SynopsisQuality
   justification: string
@@ -215,6 +218,11 @@ export async function ensurePredictInterest(
   const predict = deps.predict ?? defaultPredict
   const micro = deps.microThresholdUsd
   const usedFallbacks: string[] = []
+  // Peça 2: preferências compiladas ativas (flag). null ⇒ flag off ⇒ versão base
+  // v3 e nenhuma injeção (comportamento idêntico ao atual). A versão resolvida
+  // (v3/v4) governa assinatura, readiness e persistência desta obra.
+  const compiled = getActiveCompiledPreferences()
+  const promptVersion = compiled?.promptVersion ?? PREDICT_PROMPT_VERSION
 
   // 1) Dependência: perfil de gosto (cascata).
   let profile: TasteProfileRow
@@ -289,13 +297,13 @@ export async function ensurePredictInterest(
     synopsisSource: source,
     tags: work.tags,
     model: PREDICT_MODEL,
-    promptVersion: PREDICT_PROMPT_VERSION,
+    promptVersion,
     schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
     // Frente 3: o digest entra na assinatura ⇒ mudança de digest invalida a
     // previsão (re-prevê com o consenso novo). Sem digest, extra fica null (b1).
     extraSources: work.reviewDigest ? { reviewDigest: work.reviewDigest } : undefined,
   })
-  const stored = await gateway.loadCurrentPrediction(workId, PREDICT_PROMPT_VERSION)
+  const stored = await gateway.loadCurrentPrediction(workId, promptVersion)
   const readiness = classifyInterestReadiness({ currentSignature: signature, currentProfileSignature: profileSignature, stored })
 
   const partial = usedFallbacks.length > 0
@@ -328,7 +336,7 @@ export async function ensurePredictInterest(
         synopsisSource: source,
         nTags: work.tags.length,
         model: PREDICT_MODEL,
-        promptVersion: PREDICT_PROMPT_VERSION,
+        promptVersion,
         schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
       },
     },
@@ -348,7 +356,7 @@ export async function ensurePredictInterest(
             synopsisSource: src2,
             tags: w2.tags,
             model: PREDICT_MODEL,
-            promptVersion: PREDICT_PROMPT_VERSION,
+            promptVersion,
             schemaVersion: SYNOPSIS_INTEREST_SCHEMA_VERSION,
             // Frente 3: o digest entra na assinatura (igual ao cálculo original
             // acima) — senão TODA obra com digest divergiria e seria descartada.
@@ -361,7 +369,7 @@ export async function ensurePredictInterest(
       }
 
       // Re-check 2: outro processo já persistiu a MESMA assinatura?
-      const fresh2 = await gateway.loadCurrentPrediction(workId, PREDICT_PROMPT_VERSION)
+      const fresh2 = await gateway.loadCurrentPrediction(workId, promptVersion)
       if (fresh2 && fresh2.inputSignature === signature) {
         predicted = fresh2.predictedQuality
         return { costActualUsd: 0 }
@@ -372,7 +380,7 @@ export async function ensurePredictInterest(
         synopsis,
         tags: work.tags.map((name) => ({ name, group: null })),
         reviewDigest: work.reviewDigest,
-      })
+      }, compiled)
       await gateway.persistPrediction({
         workId,
         predictedQuality: pred.predictedQuality,
@@ -396,7 +404,7 @@ export async function ensurePredictInterest(
   if (inputChanged) return { status: "stale", reason: "input_changed" }
   if (predicted) return { status: "succeeded", predictedQuality: predicted, ranLlm, costUsd, partial, usedFallbacks }
   // Waiter do single-flight: recarrega o que o runner persistiu.
-  const after = await gateway.loadCurrentPrediction(workId, PREDICT_PROMPT_VERSION)
+  const after = await gateway.loadCurrentPrediction(workId, promptVersion)
   if (after) return { status: "succeeded", predictedQuality: after.predictedQuality, ranLlm: false, costUsd: 0, partial, usedFallbacks }
   return { status: "failed", error: "Previsão concluiu sem resultado." }
 }
@@ -405,9 +413,10 @@ export async function ensurePredictInterest(
 async function defaultPredict(
   profile: TasteProfilePayload,
   work: { id: string; title: string; synopsis: string; tags: Array<{ name: string; group: string | null }>; reviewDigest?: string | null },
+  compiledPreferences?: CompiledPreferences | null,
 ): ReturnType<DefaultPredictFn> {
   const { computeCostUsd } = await import("@/lib/ai/pricing")
-  const r = await predictSynopsisQuality({ profile, work })
+  const r = await predictSynopsisQuality({ profile, work, compiledPreferences })
   const c = computeCostUsd(r.modelName, {
     inputTokens: r.usage.inputTokens,
     outputTokens: r.usage.outputTokens,
@@ -577,8 +586,9 @@ export async function planInterestBatch(
   let fresh = 0
   let stale = 0
   let absent = 0
+  const promptVersion = resolveInterestPromptVersion()
   for (const id of workIds) {
-    const stored = await args.gateway.loadCurrentPrediction(id, PREDICT_PROMPT_VERSION)
+    const stored = await args.gateway.loadCurrentPrediction(id, promptVersion)
     if (!stored) {
       absent += 1
       continue

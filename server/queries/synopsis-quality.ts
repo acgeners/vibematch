@@ -1,6 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { PROMPT_VERSION } from "@/lib/ai-evaluation/synopsis-quality-predictor"
+import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
 
@@ -25,7 +25,8 @@ function pickActiveRaw<T extends { prompt_version?: string | null; predicted_at?
   rows: T[],
 ): T | null {
   if (rows.length === 0) return null
-  const current = rows.find((r) => (r.prompt_version ?? null) === PROMPT_VERSION)
+  const activeVersion = resolveInterestPromptVersion()
+  const current = rows.find((r) => (r.prompt_version ?? null) === activeVersion)
   if (current) return current
   return rows.slice().sort((a, b) => {
     const dv = promptVersionNum(b.prompt_version) - promptVersionNum(a.prompt_version)
@@ -224,7 +225,7 @@ export interface SynopsisPredictionAccuracy {
  * preencheu independentemente.
  */
 export async function getSynopsisPredictionAccuracy(
-  version: string = PROMPT_VERSION,
+  version: string = resolveInterestPromptVersion(),
 ): Promise<SynopsisPredictionAccuracy> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
@@ -288,7 +289,7 @@ export interface SynopsisVersionComparison {
  * diferentes. Retorna null quando não há versão anterior nem nenhum par ainda.
  */
 export async function getSynopsisVersionComparison(
-  currentVersion: string = PROMPT_VERSION,
+  currentVersion: string = resolveInterestPromptVersion(),
 ): Promise<SynopsisVersionComparison | null> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
