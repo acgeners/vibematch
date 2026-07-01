@@ -6,7 +6,10 @@ import { Loader2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { triggerRecalcNow } from "@/server/actions/recalc-queue"
+import { triggerRecalcNow, getAiPendingCounts } from "@/server/actions/recalc-queue"
+import type { AiPendingCounts } from "@/server/actions/recalc-queue"
+import { AiPendingGuardDialog } from "@/components/settings/ai-pending-guard-dialog"
+import type { AiPendingItem } from "@/components/settings/ai-pending-guard-dialog"
 
 interface RecalcPendingControlProps {
   /** Estado vindo do server (banner) ou do fetch de badges (sidebar). */
@@ -17,11 +20,24 @@ interface RecalcPendingControlProps {
   onDone?: () => void
 }
 
+/** Monta a lista de pendências de IA (só as com count > 0), com links pro /settings. */
+function buildAiPendingItems(counts: AiPendingCounts): AiPendingItem[] {
+  return [
+    { label: "Embeddings", count: counts.embeddings, href: "/settings#embeddings" },
+    { label: "Sinopse canônica", count: counts.canonicalSynopsis, href: "/settings#synopsis-canonical" },
+    { label: "Resumo de reviews", count: counts.reviewSummary, href: "/settings#review-summary" },
+  ].filter((i) => i.count > 0)
+}
+
 /**
  * Botão "Recalcular agora" da fila de recálculo. Aparece quando há edições de
  * nota não recalculadas (recalc_pending). Roda recalculateAll na hora; some ao
  * concluir. O recálculo automático (até 1h após a última edição) é independente
  * deste botão — aqui é só o atalho manual.
+ *
+ * Trava: antes de recalcular, checa se há artefatos gerados por IA pendentes
+ * (embeddings, sinopse canônica, resumo). Se houver, abre um aviso pro usuário
+ * decidir seguir mesmo assim ou resolver antes — mesma regra da calibração.
  */
 export function RecalcPendingControl({
   pending,
@@ -30,9 +46,14 @@ export function RecalcPendingControl({
 }: RecalcPendingControlProps) {
   const refresh = useRefresh()
   const [running, setRunning] = useState(false)
+  const [checking, setChecking] = useState(false)
   const [done, setDone] = useState(false)
+  const [showGuard, setShowGuard] = useState(false)
+  const [pendingItems, setPendingItems] = useState<AiPendingItem[]>([])
 
   if (!pending || done) return null
+
+  const busy = running || checking
 
   const handleRecalc = async () => {
     setRunning(true)
@@ -61,23 +82,56 @@ export function RecalcPendingControl({
     }
   }
 
+  // Clique no botão: checa pendências de IA antes; se houver, avisa; senão recalcula.
+  const handleClick = async () => {
+    setChecking(true)
+    try {
+      const items = buildAiPendingItems(await getAiPendingCounts())
+      if (items.length > 0) {
+        setPendingItems(items)
+        setShowGuard(true)
+        return
+      }
+      await handleRecalc()
+    } catch {
+      // Se a checagem falhar, não trava o fluxo — recalcula direto.
+      await handleRecalc()
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const guard = (
+    <AiPendingGuardDialog
+      open={showGuard}
+      onOpenChange={setShowGuard}
+      items={pendingItems}
+      onProceed={handleRecalc}
+      description="O recálculo das notas usa esses artefatos gerados por IA como sinal (o kNN dos embeddings, entre outros). Recalcular agora usa dados possivelmente desatualizados — a Nota Prevista e o ranking podem sair piores. Resolva as pendências primeiro ou siga mesmo assim."
+      proceedLabel="Recalcular mesmo assim"
+    />
+  )
+
   if (variant === "compact") {
     return (
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={handleRecalc}
-        disabled={running}
-        className="w-full gap-2 border-amber-500/50 text-amber-600 dark:text-amber-400"
-      >
-        {running ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <RefreshCw className="h-4 w-4" />
-        )}
-        {running ? "Recalculando…" : "Recalcular notas"}
-      </Button>
+      <>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleClick}
+          disabled={busy}
+          className="w-full gap-2 border-amber-500/50 text-amber-600 dark:text-amber-400"
+        >
+          {busy ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          {running ? "Recalculando…" : "Recalcular notas"}
+        </Button>
+        {guard}
+      </>
     )
   }
 
@@ -93,17 +147,18 @@ export function RecalcPendingControl({
       </div>
       <Button
         type="button"
-        onClick={handleRecalc}
-        disabled={running}
+        onClick={handleClick}
+        disabled={busy}
         className="w-full gap-2 sm:w-auto"
       >
-        {running ? (
+        {busy ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : (
           <RefreshCw className="h-4 w-4" />
         )}
         {running ? "Recalculando…" : "Recalcular agora"}
       </Button>
+      {guard}
     </div>
   )
 }

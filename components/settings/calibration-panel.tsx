@@ -5,6 +5,8 @@ import { toast } from "sonner"
 import { ChevronDown, Info, Layers } from "lucide-react"
 import { MaeHistoryChart } from "@/components/settings/calibration/mae-history-chart"
 import { Button } from "@/components/ui/button"
+import { AiPendingGuardDialog } from "@/components/settings/ai-pending-guard-dialog"
+import type { AiPendingItem } from "@/components/settings/ai-pending-guard-dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import { recalculateNow, setScoreWeightsAuto } from "@/server/actions/settings"
@@ -24,6 +26,8 @@ import type { ModelEvaluationMetrics } from "@/lib/metrics/model-evaluation"
 
 interface CalibrationPanelProps {
   accent: SettingsAccent
+  /** Pendências dos itens "Gerado por IA". Se houver, a recalibração pede confirmação. */
+  aiPending?: AiPendingItem[]
   config: FormulaConfig
   /** Métricas de erro do modelo já normalizadas/validadas (F4). */
   metrics: ModelEvaluationMetrics
@@ -79,11 +83,15 @@ function maeColor(value: number | null | undefined): string {
   return "text-rose-500"
 }
 
-export function CalibrationPanel({ accent, config, metrics, snapshot }: CalibrationPanelProps) {
+export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot }: CalibrationPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [isTogglingAutoWeights, startAutoWeightsToggle] = useTransition()
   const [lastRun, setLastRun] = useState<string | null>(null)
   const [showDetails, setShowDetails] = useState(false)
+  const [showPendingGuard, setShowPendingGuard] = useState(false)
+
+  // Trava: só entram itens gerados por IA que estão de fato pendentes.
+  const pendingItems = (aiPending ?? []).filter((i) => i.count > 0)
   // formatRelativeTime depende de Date.now(), que difere entre server-render
   // e client-hydrate — evita hydration mismatch renderizando "—" no SSR e
   // populando depois do mount. Atualiza a cada 30s pra ficar live.
@@ -94,6 +102,12 @@ export function CalibrationPanel({ accent, config, metrics, snapshot }: Calibrat
     const id = setInterval(update, 30_000)
     return () => clearInterval(id)
   }, [config.last_recalculated_at])
+
+  // Clique no botão: se há artefatos de IA pendentes, avisa antes; senão recalibra direto.
+  const handleRecalibrateClick = () => {
+    if (pendingItems.length > 0) setShowPendingGuard(true)
+    else handleRecalibrate()
+  }
 
   const handleRecalibrate = () => {
     startTransition(async () => {
@@ -219,9 +233,14 @@ export function CalibrationPanel({ accent, config, metrics, snapshot }: Calibrat
 
             {/* Ação */}
             <div className="flex flex-col items-stretch gap-1 sm:items-end">
-              <Button onClick={handleRecalibrate} disabled={isPending} className={ACCENT_BUTTON[accent]}>
+              <Button onClick={handleRecalibrateClick} disabled={isPending} className={ACCENT_BUTTON[accent]}>
                 {isPending ? "Recalibrando..." : "Recalibrar agora"}
               </Button>
+              {pendingItems.length > 0 && (
+                <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                  {pendingItems.length} item(ns) de IA pendente(s)
+                </span>
+              )}
               <span className="text-[11px] text-muted-foreground" suppressHydrationWarning>
                 Último: {relativeTime}
               </span>
@@ -229,6 +248,16 @@ export function CalibrationPanel({ accent, config, metrics, snapshot }: Calibrat
                 Versão: <span className="font-mono">{config.formula_version}</span>
               </span>
             </div>
+
+            <AiPendingGuardDialog
+              open={showPendingGuard}
+              onOpenChange={setShowPendingGuard}
+              items={pendingItems}
+              onProceed={handleRecalibrate}
+              description="A calibração usa esses artefatos como sinal (o kNN dos embeddings, entre outros). Recalibrar agora usa dados possivelmente desatualizados — a Nota Prevista pode sair pior. Resolva as pendências primeiro ou siga mesmo assim."
+              proceedLabel="Recalibrar mesmo assim"
+              proceedClassName={ACCENT_BUTTON[accent]}
+            />
           </div>
 
           {/* Origem do sinal na Nota Prevista (o modelo do headline) */}

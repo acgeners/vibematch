@@ -30,7 +30,7 @@ const SORT_LABELS: Record<SortKey, string> = {
   delta_desc: "|Δ| ↓",
   delta_asc: "|Δ| ↑",
   title_asc: "Obra A→Z",
-  criterion_asc: "Critério A→Z",
+  criterion_asc: "Atributo A→Z",
 }
 
 const criterionName = (slug: string) => CRITERIA_INFO[slug]?.name ?? slug
@@ -52,9 +52,8 @@ interface SuggestionsListProps {
 
 export function SuggestionsList({ suggestions, totalAvailable }: SuggestionsListProps) {
   const [criterion, setCriterion] = useState<string>("all")
-  const [search, setSearch] = useState("")
   const [minDelta, setMinDelta] = useState("0.5")
-  const [minConf, setMinConf] = useState("0")
+  const [minConf, setMinConf] = useState("90")
   const [sort, setSort] = useState<SortKey>("conf_desc")
   const [bulkPending, startBulk] = useTransition()
   const [bulkMsg, setBulkMsg] = useState<string | null>(null)
@@ -67,9 +66,8 @@ export function SuggestionsList({ suggestions, totalAvailable }: SuggestionsList
   const minConfPct = Number(minConf.replace(",", ".")) || 0
   const minConfNum = minConfPct / 100
 
-  // Condição ESTRUTURAL (critério + |Δ| mínimo + confiança mínima) — a mesma que
-  // o "Aplicar em massa" usa no servidor. A busca por título NÃO entra aqui (é só
-  // pra navegar) e por isso o bulk a ignora.
+  // Condição ESTRUTURAL (atributo + |Δ| mínimo + confiança mínima) — a mesma que
+  // o "Aplicar em massa" usa no servidor.
   const matchesStructural = useCallback(
     (s: SuggestionWithWork) =>
       (criterion === "all" || s.criterion_slug === criterion) &&
@@ -78,13 +76,10 @@ export function SuggestionsList({ suggestions, totalAvailable }: SuggestionsList
     [criterion, minDeltaNum, minConfNum],
   )
 
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    const out = suggestions.filter(
-      (s) => matchesStructural(s) && (!term || s.work_title.toLowerCase().includes(term)),
-    )
-    return out.sort(SORT_CMP[sort])
-  }, [suggestions, matchesStructural, search, sort])
+  const filtered = useMemo(
+    () => suggestions.filter(matchesStructural).sort(SORT_CMP[sort]),
+    [suggestions, matchesStructural, sort],
+  )
 
   // Elegíveis pro bulk: pendentes que batem a condição estrutural (sobre TODAS as
   // carregadas — com a carga de pendentes completa, = todas as pendentes).
@@ -120,14 +115,10 @@ export function SuggestionsList({ suggestions, totalAvailable }: SuggestionsList
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
-        <div className="flex-1 min-w-[160px]">
-          <label className="mb-1 block text-xs text-muted-foreground">Busca por título</label>
-          <Input placeholder="Filtrar obras..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <div className="w-44">
-          <label className="mb-1 block text-xs text-muted-foreground">Critério</label>
+        <div className="w-72">
+          <label className="mb-1 block text-sm font-semibold text-foreground">Atributo</label>
           <Select value={criterion} onValueChange={setCriterion}>
-            <SelectTrigger>
+            <SelectTrigger className="h-11 w-full text-base">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -168,9 +159,7 @@ export function SuggestionsList({ suggestions, totalAvailable }: SuggestionsList
       {hasPending && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
           <div className="text-xs text-muted-foreground">
-            Aplicar em massa nas pendentes que batem os filtros — conf ≥ {minConfPct}%, |Δ| ≥{" "}
-            {minDeltaNum.toFixed(1)}
-            {criterion !== "all" ? `, ${criterionName(criterion)}` : ""} (ignora a busca por título):
+            Aceitar em massa as pendentes que batem os filtros acima:
           </div>
           <Badge variant="outline">{eligible.length} elegível(eis)</Badge>
           <Button size="sm" onClick={handleBulk} disabled={bulkPending || eligible.length === 0}>
