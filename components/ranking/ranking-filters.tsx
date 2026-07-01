@@ -1676,6 +1676,8 @@ export function RankingFilters({
     const min = searchParams.get(minKey)
     const max = searchParams.get(maxKey)
     if (!min && !max) return
+    // Override =0 desliga um pré-filtro de preferência; ">= 0" não é filtro real.
+    if (min === "0" && !max) return
     const suffix = min && max ? `${min} - ${max}` : min ? `>= ${min}` : `<= ${max}`
     activeFilterChips.push({
       key,
@@ -1684,7 +1686,7 @@ export function RankingFilters({
     })
   }
 
-  if (searchParams.has("top_n")) {
+  if (searchParams.has("top_n") && searchParams.get("top_n") !== "0") {
     activeFilterChips.push({
       key: "top_n",
       label: `Top N: ${searchParams.get("top_n")}`,
@@ -1786,6 +1788,31 @@ export function RankingFilters({
       onRemove: () => setTagRule(slug, null),
     })
   })
+
+  // Pré-filtros de preferência: pisos vindos de /preferencias (formula_config),
+  // NÃO da URL. Antes ficavam invisíveis e "sumiam" obras sem aviso. Mostra cada
+  // piso ativo como chip removível; remover grava um override =0 nesta busca e
+  // aplica na hora (não altera o padrão salvo em /preferencias).
+  const overrideAndApply = (updates: Record<string, string | null>) => {
+    const params = new URLSearchParams(draftSearch)
+    for (const [k, v] of Object.entries(updates)) {
+      if (v == null || v === "") params.delete(k)
+      else params.set(k, v)
+    }
+    const qs = params.toString()
+    setDraftSearch(qs)
+    startTransition(() => router.replace(qs ? `${basePath}?${qs}` : basePath))
+  }
+  const prefGateChips: Array<{ key: string; label: string; onRemove: () => void }> = []
+  const pushPrefGate = (key: string, label: string, param: string, current: number | undefined) => {
+    if (current == null || current <= 0) return
+    if (searchParams.has(param)) return // já exibido como filtro normal da URL
+    prefGateChips.push({ key, label, onRemove: () => overrideAndApply({ [param]: "0" }) })
+  }
+  pushPrefGate("pref-exp", `Nota Prevista ≥ ${currentMinExpected}`, "min_expected", currentMinExpected)
+  pushPrefGate("pref-fit", `Alinhamento ≥ ${currentMinFit}`, "min_fit", currentMinFit)
+  pushPrefGate("pref-align", `Veredito IA ≥ ${currentMinAlign}`, "min_align", currentMinAlign)
+  pushPrefGate("pref-topn", `Top ${currentTopN}`, "top_n", currentTopN)
 
   const activeFilterLabel =
     activeFilterChips.length === 1 ? "1 seleção" : `${activeFilterChips.length} seleções`
@@ -2218,6 +2245,37 @@ export function RankingFilters({
                 não aplicados
               </span>
             )}
+          </div>
+        </div>
+      )}
+
+      {!collapsed && prefGateChips.length > 0 && (
+        <div className="mt-3 border-t border-border/60 pt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-300">
+              Pré-filtros de preferência
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              ocultam obras — clique pra remover nesta busca
+            </span>
+            {prefGateChips.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={chip.onRemove}
+                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-amber-400/50 bg-amber-400/10 px-2.5 text-xs font-medium text-amber-700 transition-colors hover:border-amber-500/70 hover:bg-amber-400/20 dark:text-amber-200"
+                title="Remover este pré-filtro nesta busca (não altera o padrão em /preferencias)"
+              >
+                {chip.label}
+                <X className="h-3 w-3" />
+              </button>
+            ))}
+            <a
+              href="/preferencias"
+              className="ml-1 text-[11px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              ajustar padrão
+            </a>
           </div>
         </div>
       )}

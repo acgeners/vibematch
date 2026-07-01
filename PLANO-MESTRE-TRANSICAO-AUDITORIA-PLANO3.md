@@ -623,7 +623,35 @@ Acesso: somente SELECT (2 scripts temporários, já removidos).
 ---
 
 <a id="24n"></a>
-## 24n. Addendum — Console /settings + trava de recálculo + poda de branches (2026-06-30)
+## 24n. Addendum — Injeção das preferências livres (Item B) no preditor de Interesse — investigação OFFLINE + decisão de formato (2026-06-30); IMPLEMENTADA 2026-07-01 (Peças 2+3, PR #30)
+
+> Investigação isolada: **offline, 0 escrita no banco, 0 commit de código, ~$5,3 LLM** (5 runs sobre o golden pilot-2). Decidiu um **FORMATO**; **nada em produção ainda**. Fonte detalhada na memória `project_interest_predictor_prefs_injection`.
+
+### 1. Pergunta
+As **preferências livres** (Item B, `user_settings.preference_rules`, texto livre) **NÃO chegam** ao preditor de Interesse (`lib/ai-evaluation/synopsis-quality-predictor.ts` — só perfil+sinopse+digest). Item B só alimenta o consultor LLM ao vivo (ranking/recomendar/deep-dive/chat), nunca o modelo offline. Motivador: obra cruel (*The Villainess Turns the Hourglass*) previu **♥♥♥♥** ignorando a regra declarada "não gosto de protagonista cruel".
+
+### 2. Método
+Golden pilot-2 (90 labels, sig a8abddca), **e1 baseline reusado** (perfil ATUAL b6e9e8f7; drift vs congelado 23eb13f0 do pilot — perfil velho não arquivado, `taste_profile` é singleton sem histórico ⇒ re-rodar e1 no perfil atual p/ ablação limpa). Scripts temp deletados; artefatos preservados em `.local-experiments/plan3/digest-exp-1/pilot-2/candidates/rules-exp{,-v3,-v32,-v33,-v34}/result.json`.
+
+### 3. Achados
+- **Dump cru das regras = ~nulo** (ΔMAE −0,01; love-rules tipo "amo FL forte" inflam pra cima e são redundantes com o perfil).
+- **Compilar à mão** (drop meta; split mistas; merge dups; A1 crueldade = **TRAÇO do protagonista, não plot de vingança**; peso por **existência no digest ≠ aprovação dos leitores**; 4 aversões + 3 promoções capadas) → **calibrador de over-rating**: MAE 0,478→0,404 (v3.2), viés +0,19→+0,07, crueldade-subset consertada.
+- **Utilidade do user é ASSIMÉTRICA**: subestimar = caro/silencioso (gem enterrada, não vê); superestimar = barato/visível (vê, abre, ajusta). ⇒ **MAE (simétrica) é a métrica errada**; usar **gems-perdidas** (gold≥♥♥♥ & pred<gold) + matriz de confusão. O prompt base do preditor manda "na dúvida→faixa MENOR" = **oposto** da utilidade.
+
+### 4. Decisão de formato: **v3.3**
+Compiled + **desempate-pra-cima** ("na dúvida entre faixas adjacentes → a MAIOR", sobrepõe o base; aversão que dispara não é "dúvida"), **teto de promoção em ♥♥♥ MANTIDO**. Métricas: MAE 0,433 · viés +0,14 · **0 dano** · Hourglass **♥♥♥** via A1 (motivo certo) · gems-lost 7 (mas **6/7 param em ♥♥♥**, visível; só 1 em ♥♥). **v3.4** (teto solto → ♥♥♥♥ alcançável) recupera gems (recall ♥♥♥♥ 22%→56%, gems-lost 7→4) **MAS** inunda ♥♥♥♥ (7%→**19%**, precisão só **29%**) e MAE→0,500 → **REJEITADO** (user tria por ♥♥♥+♥♥♥♥, então gem em ♥♥♥ já é vista).
+- **Bloco v3.3 canônico** (fonte pro seed hardcoded da peça 2): `rules-exp-v33/result.json` → `compiledBlock` (2667 ch, teto ♥♥♥) + `rulesSystemAddendum` (1002 ch, desempate-pra-cima).
+
+### 5. Caveats
+n=90; CI overall ainda **⊃0** (sinal robusto = correção de viés, não MAE pontual); erro residual = confusão **♥♥↔♥♥♥** (miolo).
+
+### 6. Plano de produção (3 peças — sequência APROVADA pelo user)
+1. **Peça 2 (integração) PRIMEIRO** — param aditivo `compiledPreferences?` em buildSynopsisQualityUserPrompt/predictSynopsisQuality (default null = comportamento atual); bloco no profileBlock **cacheado** + addendum no system; wiring em `ensurePredictInterest`; feature flag; bump `PROMPT_VERSION`. **Seed com o bloco v3.3 HARDCODED** (sem compilador ainda), flag só pro user, validar no app.
+2. **Peça 3 (backfill)** = **deferred batch + botão** (edit recompila → marca previsões "pref-stale" → badge "N desatualizadas — [Reprocessar]"). NÃO eager/lazy/soft-drift. Ativação = **1 backfill completo único (~$5–8)** (previsões atuais são sem-regras).
+3. **Peça 1 (compilador-LLM) POR ÚLTIMO** — regras cruas→artefato, recompila só no edit, cacheado (`user_settings.compiled_preferences`), com **preview/aprovação** na UI. Só necessário p/ edits frequentes ou multi-user; o meta-prompt embute os princípios (drop-meta/split/merge/trait-vs-plot/existência≠aprovação/teto-configurável/err-high) = o ativo.
+
+<a id="24o"></a>
+## 24o. Addendum — Console /settings + trava de recálculo + poda de branches (2026-06-30)
 
 > Addendum **mais recente**. Trabalho de **UI/ops** — não mexe na ciência/roadmap de notas; por isso o §24m
 > segue como estado autoritativo da frente de dados. Detalhe completo em **[STATUS-2026-06-28.md §0](STATUS-2026-06-28.md)**.

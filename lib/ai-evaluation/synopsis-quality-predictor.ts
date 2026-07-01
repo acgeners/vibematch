@@ -7,12 +7,14 @@ import type { TasteProfilePayload } from "@/lib/ai-recommendation/types"
 import type { UsageTokens } from "@/lib/ai/pricing"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
+import { BASE_INTEREST_PROMPT_VERSION } from "./compiled-preferences"
+import type { CompiledPreferences } from "./compiled-preferences"
 
 export const MODEL = "claude-sonnet-4-6"
 // v3 (Frente 3): contrato e1 — quando há digest de reviews, o system ganha o
 // adendo neutro e o user recebe o bloco CONTEXTO DE LEITORES. Sinopse segue
 // dominante. Bump invalida as previsões v2 (re-prevê com digest sob demanda).
-export const PROMPT_VERSION = "v3"
+export const PROMPT_VERSION = BASE_INTEREST_PROMPT_VERSION
 
 /**
  * Adendo de system PRÉ-COMPROMETIDO (contrato e1, validado na golden-3): instrui
@@ -95,9 +97,16 @@ function findToolUse(message: Anthropic.Messages.Message, toolName: string) {
 export function buildSynopsisQualityUserPrompt(
   profile: TasteProfilePayload,
   work: PredictWorkInput,
+  compiledPreferences?: CompiledPreferences | null,
 ): { profileBlock: string; tailBlock: string; digestBlock: string | null } {
-  const profileBlock = `PERFIL DE GOSTO (cacheado, base da avaliação):
+  // Peça 2: com preferências compiladas ativas, o bloco v3.3 é ANEXADO aqui dentro
+  // do bloco do PERFIL, que é cacheado (ephemeral). Como perfil + bloco são
+  // constantes por lote, o cache do prompt segue quente (mesma economia ~3×).
+  let profileBlock = `PERFIL DE GOSTO (cacheado, base da avaliação):
 ${JSON.stringify(profile, null, 2)}`
+  if (compiledPreferences) {
+    profileBlock += `\n\n${compiledPreferences.compiledBlock}`
+  }
 
   const tailLines: string[] = [
     `OBRA A AVALIAR: work_id=${work.id} — "${work.title}"`,
@@ -144,6 +153,12 @@ export interface PredictSynopsisQualityArgs {
   work: PredictWorkInput
   /** Reutiliza um client já criado no lote pra manter o cache do perfil quente. */
   client?: Anthropic
+  /**
+   * Preferências compiladas (Peça 2). null/ausente ⇒ prompt v3 sem injeção
+   * (comportamento atual). Presente ⇒ bloco no perfil cacheado + addendum no
+   * system, e a previsão é carimbada com `compiledPreferences.promptVersion` (v4).
+   */
+  compiledPreferences?: CompiledPreferences | null
 }
 
 /**
@@ -159,7 +174,9 @@ export async function predictSynopsisQuality(
   }
 
   const client = args.client ?? getAnthropicClient({ maxRetries: 6 })
-  const { profileBlock, tailBlock, digestBlock } = buildSynopsisQualityUserPrompt(args.profile, args.work)
+  const compiled = args.compiledPreferences ?? null
+  const promptVersion = compiled?.promptVersion ?? PROMPT_VERSION
+  const { profileBlock, tailBlock, digestBlock } = buildSynopsisQualityUserPrompt(args.profile, args.work, compiled)
 
   // Contrato e1: com digest, o system ganha o adendo neutro (2º bloco, NÃO cacheado
   // pra não invalidar o cache do prompt-base) e o user recebe o bloco de leitores.
@@ -167,6 +184,9 @@ export async function predictSynopsisQuality(
     { type: "text", text: SYNOPSIS_QUALITY_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
   ]
   if (digestBlock) system.push({ type: "text", text: E1_SYSTEM_ADDENDUM })
+  // Peça 2: addendum de preferências como bloco de system NÃO cacheado (mesmo
+  // padrão do E1_SYSTEM_ADDENDUM), depois do prompt-base cacheado.
+  if (compiled) system.push({ type: "text", text: compiled.systemAddendum })
 
   const userContent: Anthropic.Messages.TextBlockParam[] = [
     { type: "text", text: profileBlock, cache_control: { type: "ephemeral" } },
@@ -194,7 +214,7 @@ export async function predictSynopsisQuality(
       },
       {
         operation: "synopsis_quality_predict",
-        promptVersion: PROMPT_VERSION,
+        promptVersion,
         attempt,
         workId: args.work.id,
       },
@@ -225,7 +245,7 @@ export async function predictSynopsisQuality(
       justification: parsed.data.justification,
       confidence: parsed.data.confidence ?? null,
       modelName: MODEL,
-      promptVersion: PROMPT_VERSION,
+      promptVersion,
       usage,
       apiCallId,
     }

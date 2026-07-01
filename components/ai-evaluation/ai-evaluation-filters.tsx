@@ -85,6 +85,17 @@ interface AiEvaluationFiltersProps {
   predictionVersionOptions?: string[]
   /** Deltas previsto−atual ativos ("up"/"eq"/"down") — aba Interesse na Obra. */
   activePredictionDeltas?: string[]
+  /** Mostra a seção "Dados (nº)" (faixa mín–máx de tags / reviews) — aba Interesse Sinopse. */
+  showDataFilters?: boolean
+  /** Faixa de tags ativa (0 = sem limite). */
+  activeMinTags?: number
+  activeMaxTags?: number
+  /** Faixa de reviews úteis ativa (0 = sem limite). */
+  activeMinReviews?: number
+  activeMaxReviews?: number
+  /** Seleção-padrão de status "Leitura" (quando a URL não tem `personal`) — usada
+   *  pro clean-URL e "Limpar". Vazio = default é "todos". */
+  defaultPersonalStatuses?: string[]
 }
 
 const PUB_STATUSES = Object.values(PUBLICATION_STATUSES_BY_ID)
@@ -104,6 +115,10 @@ interface FilterDraft {
   predQ: string[]
   predV: string[]
   predD: string[]
+  minTags: number
+  maxTags: number
+  minReviews: number
+  maxReviews: number
   tolerance: number
 }
 
@@ -127,6 +142,12 @@ export function AiEvaluationFilters({
   activePredictionVersions = [],
   predictionVersionOptions = [],
   activePredictionDeltas = [],
+  showDataFilters = false,
+  activeMinTags = 0,
+  activeMaxTags = 0,
+  activeMinReviews = 0,
+  activeMaxReviews = 0,
+  defaultPersonalStatuses = [],
 }: AiEvaluationFiltersProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -148,6 +169,10 @@ export function AiEvaluationFilters({
     predQ: activePredictionQualities,
     predV: activePredictionVersions,
     predD: activePredictionDeltas,
+    minTags: activeMinTags,
+    maxTags: activeMaxTags,
+    minReviews: activeMinReviews,
+    maxReviews: activeMaxReviews,
     tolerance: promptVersionTolerance,
   })
   const [draft, setDraft] = useState<FilterDraft>(makeDraft)
@@ -157,7 +182,7 @@ export function AiEvaluationFilters({
   const propsSignature = JSON.stringify([
     activeFilters, activePubStatuses, activePersonalStatuses, activeSynopsisQualities,
     activeIaRkStates, activeSynopsisStates, activePredictionQualities,
-    activePredictionVersions, activePredictionDeltas, promptVersionTolerance,
+    activePredictionVersions, activePredictionDeltas, activeMinTags, activeMaxTags, activeMinReviews, activeMaxReviews, promptVersionTolerance,
   ])
   const [seenSignature, setSeenSignature] = useState(propsSignature)
   if (propsSignature !== seenSignature) {
@@ -179,7 +204,7 @@ export function AiEvaluationFilters({
     }
     if (d.pub.length === 0) p.delete("pub")
     else p.set("pub", d.pub.join(","))
-    if (d.personal.length === 0) p.delete("personal")
+    if (sameSet(d.personal, defaultPersonalStatuses)) p.delete("personal")
     else p.set("personal", d.personal.join(","))
     if (d.synQ.length === 0) p.delete("synopsis_q")
     else p.set("synopsis_q", d.synQ.join(","))
@@ -203,6 +228,13 @@ export function AiEvaluationFilters({
       if (d.predD.length === 0) p.delete("pd")
       else p.set("pd", d.predD.join(","))
     }
+    if (showDataFilters) {
+      const setNum = (key: string, v: number) => (v > 0 ? p.set(key, String(v)) : p.delete(key))
+      setNum("mintags", d.minTags)
+      setNum("maxtags", d.maxTags)
+      setNum("minrev", d.minReviews)
+      setNum("maxrev", d.maxReviews)
+    }
     return p
   }
 
@@ -216,7 +248,7 @@ export function AiEvaluationFilters({
   const apply = () => navigate(buildParams(draft))
 
   // Há mudanças não aplicadas? Compara a assinatura das chaves gerenciadas.
-  const OWNED_KEYS = ["filter", "pub", "personal", "synopsis_q", "tolerance", "rk", "sq", "pq", "pv", "pd"]
+  const OWNED_KEYS = ["filter", "pub", "personal", "synopsis_q", "tolerance", "rk", "sq", "pq", "pv", "pd", "mintags", "maxtags", "minrev", "maxrev"]
   const ownedSig = (p: URLSearchParams) => OWNED_KEYS.map((k) => `${k}=${p.get(k) ?? ""}`).join("&")
   const isDirty = ownedSig(buildParams(draft)) !== ownedSig(new URLSearchParams(searchParams.toString()))
 
@@ -268,13 +300,17 @@ export function AiEvaluationFilters({
     const cleared: FilterDraft = {
       filters: [...DEFAULT_FILTERS],
       pub: [],
-      personal: [],
+      personal: [...defaultPersonalStatuses],
       synQ: [],
       iaRk: ["stale"],
       synState: ["unpredicted"],
       predQ: [],
       predV: [],
       predD: [],
+      minTags: 0,
+      maxTags: 0,
+      minReviews: 0,
+      maxReviews: 0,
       tolerance: 0,
     }
     setDraft(cleared)
@@ -284,6 +320,11 @@ export function AiEvaluationFilters({
   const setTolerance = (value: number) => {
     setDraft((d) => ({ ...d, tolerance: value }))
   }
+
+  const setMinTags = (value: number) => setDraft((d) => ({ ...d, minTags: value }))
+  const setMaxTags = (value: number) => setDraft((d) => ({ ...d, maxTags: value }))
+  const setMinReviews = (value: number) => setDraft((d) => ({ ...d, minReviews: value }))
+  const setMaxReviews = (value: number) => setDraft((d) => ({ ...d, maxReviews: value }))
 
   const isOn = (f: EvaluationFilter) => draft.filters.includes(f)
 
@@ -631,10 +672,75 @@ export function AiEvaluationFilters({
                 </FilterSection>
               </div>
             )}
+
+            {showDataFilters && (
+              <div className="sm:grow sm:shrink-0">
+                <FilterSection title="Dados (nº)">
+                  <div className="flex flex-wrap items-start gap-3">
+                    <NumRange label="tags" min={draft.minTags} max={draft.maxTags} onMin={setMinTags} onMax={setMaxTags} onEnter={apply} />
+                    <NumRange label="reviews úteis" min={draft.minReviews} max={draft.maxReviews} onMin={setMinReviews} onMax={setMaxReviews} onEnter={apply} />
+                  </div>
+                </FilterSection>
+              </div>
+            )}
           </div>
         </div>
       </div>
     </TooltipProvider>
+  )
+}
+
+/** Igualdade de conjunto (ordem-independente) — pro clean-URL do filtro de status. */
+function sameSet(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((x) => b.includes(x))
+}
+
+const parseCount = (v: string) => Math.max(0, Math.floor(Number(v) || 0))
+
+function NumRange({
+  label,
+  min,
+  max,
+  onMin,
+  onMax,
+  onEnter,
+}: {
+  label: string
+  min: number
+  max: number
+  onMin: (n: number) => void
+  onMax: (n: number) => void
+  onEnter: () => void
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</Label>
+      <div className="flex items-center gap-1">
+        <Input
+          type="number"
+          min={0}
+          step={1}
+          value={min || ""}
+          placeholder="mín"
+          onChange={(e) => onMin(parseCount(e.target.value))}
+          onKeyDown={(e) => { if (e.key === "Enter") onEnter() }}
+          className="h-7 w-16 tabular-nums"
+          aria-label={`${label} mínimo`}
+        />
+        <span className="text-xs text-muted-foreground">–</span>
+        <Input
+          type="number"
+          min={0}
+          step={1}
+          value={max || ""}
+          placeholder="máx"
+          onChange={(e) => onMax(parseCount(e.target.value))}
+          onKeyDown={(e) => { if (e.key === "Enter") onEnter() }}
+          className="h-7 w-16 tabular-nums"
+          aria-label={`${label} máximo`}
+        />
+      </div>
+    </div>
   )
 }
 

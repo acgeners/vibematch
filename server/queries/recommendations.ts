@@ -14,7 +14,7 @@ import type { CriterionSlug } from "@/types/domain"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { CandidateWorkInput, RatedWorkInput, RecommendationMode, ReviewDigest } from "@/lib/ai-recommendation/types"
 import { getRanking, type RankingFilters } from "@/server/queries/ranking"
-import { PROMPT_VERSION as SYNOPSIS_PROMPT_VERSION } from "@/lib/ai-evaluation/synopsis-quality-predictor"
+import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
 
 const POST_SCORE_FIELDS = [
   "post_story_score",
@@ -635,6 +635,9 @@ export interface SynopsisQueueWork {
   canonicalSynopsis?: string | null
   tags?: string[]
   reviewDigest?: ReviewDigest | null
+  /** #tags e #reviews úteis (hidratados na aba ativa) — pro badge e o filtro de "dados suficientes". */
+  tagCount?: number
+  reviewCount?: number
 }
 
 /**
@@ -740,8 +743,9 @@ export async function getSynopsisQueueWorks(opts: {
   const predByWork = new Map<string, SynopsisPredRow>()
   const prevByWork = new Map<string, SynopsisPredRow>()
   const outdatedWorks = new Set<string>()
+  const activeVersion = resolveInterestPromptVersion()
   for (const [workId, rows] of rowsByWork) {
-    const current = rows.find((r) => (r.prompt_version ?? null) === SYNOPSIS_PROMPT_VERSION)
+    const current = rows.find((r) => (r.prompt_version ?? null) === activeVersion)
     const sorted = rows.slice().sort((a, b) => verNum(b.prompt_version) - verNum(a.prompt_version))
     const active = current ?? sorted[0]
     predByWork.set(workId, active)

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { useRefresh } from "@/lib/use-refresh"
-import { ArrowDown, ArrowUp, Loader2, Sparkles } from "lucide-react"
+import { ArrowDown, ArrowUp, Loader2, Sparkles, Tag, MessageSquare } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -303,6 +303,30 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
                     <div className="flex flex-wrap items-center gap-1.5">
                       <PublicationStatusBadge statusId={w.publicationStatusId} />
                       <PersonalStatusBadge statusId={w.personalStatusId} />
+                      <span
+                        title="Tags da obra"
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tabular-nums",
+                          (w.tagCount ?? 0) === 0
+                            ? "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200"
+                            : "border-border/60 bg-muted/40 text-muted-foreground",
+                        )}
+                      >
+                        <Tag className="h-3 w-3" />
+                        {w.tagCount ?? 0}
+                      </span>
+                      <span
+                        title="Reviews úteis (≥40 chars) que alimentam o digest/previsão"
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tabular-nums",
+                          (w.reviewCount ?? 0) === 0
+                            ? "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200"
+                            : "border-border/60 bg-muted/40 text-muted-foreground",
+                        )}
+                      >
+                        <MessageSquare className="h-3 w-3" />
+                        {w.reviewCount ?? 0}
+                      </span>
                       {w.manualSynopsisQuality && (
                         <span
                           title="Interesse na sinopse (manual)"

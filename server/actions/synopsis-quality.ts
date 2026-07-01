@@ -3,11 +3,12 @@
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureCapability } from "@/server/queries/current-user"
-import { loadOrEnsureProfile } from "@/lib/ai-recommendation/ensure-profile"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getSynopsisPredictionForWork, getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
 import { markRecalcPending } from "@/server/actions/recalc-queue"
-import { predictSynopsisQuality } from "@/lib/ai-evaluation/synopsis-quality-predictor"
+import { fetchAllRows } from "@/lib/supabase/paginate"
+import { estimateStep } from "@/lib/orchestration/cost"
+import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
 import type {
@@ -17,17 +18,8 @@ import type {
 import { mapInterestOutcome } from "@/lib/orchestration/integrations/interest-ui"
 import type { WorkPredictResult, PredictWorkOpts } from "@/lib/orchestration/integrations/interest-ui"
 
-const STUB_PROFILE_ERROR =
-  "Perfil de gosto ainda em modo stub — avalie mais obras com nota pessoal pra desbloquear a previsão de Interesse Sinopse."
-
 /** Teto de obras por run do lote — protege gasto e a duração da request. */
 const SYNOPSIS_BATCH_MAX = 100
-
-export interface PredictSynopsisQualityResult {
-  predictedQuality: SynopsisQuality
-  justification: string
-  confidence: number | null
-}
 
 export type { WorkPredictResult, PredictWorkOpts } from "@/lib/orchestration/integrations/interest-ui"
 
@@ -79,61 +71,6 @@ export async function predictSynopsisQualityForWorkAction(
     return result
   } catch (err) {
     return { status: "failed", error: err instanceof Error ? err.message : "Erro desconhecido" }
-  }
-}
-
-export interface DraftSynopsisQualityInput {
-  title: string
-  /** A SINOPSE CANÔNICA (consolidada) — mesmo sinal que o caminho da obra salva. */
-  synopsis: string
-  /** Nomes de tags do form (sem grupo). */
-  tags: string[]
-}
-
-/**
- * Estima o Interesse Sinopse de um RASCUNHO (form de /titles/new), antes da obra
- * existir no banco. Roda a previsão em memória contra a sinopse canônica + tags
- * do form — NÃO persiste nada (nem em synopsis_quality_predictions, nem em works).
- * A sugestão só entra no pipeline se o usuário clicar "Aplicar" (seta o campo do
- * form) e depois salvar a obra. Mesmo gate Pago e perfil não-stub do caminho da
- * obra salva.
- */
-export async function predictSynopsisQualityForDraftAction(
-  input: DraftSynopsisQualityInput,
-): Promise<{ data?: PredictSynopsisQualityResult; error?: string }> {
-  try {
-    const gate = await ensureCapability("smart_shortlist")
-    if (!gate.ok) return { error: gate.error }
-
-    const profileResult = await loadOrEnsureProfile()
-    if ("error" in profileResult) return { error: profileResult.error }
-    const profile = profileResult.profile
-    if (profile.is_stub) return { error: STUB_PROFILE_ERROR }
-
-    const synopsis = input.synopsis?.trim()
-    if (!synopsis) {
-      return { error: "Gere a sinopse canônica antes de estimar o Interesse Sinopse." }
-    }
-
-    const result = await predictSynopsisQuality({
-      profile: profile.profile,
-      work: {
-        id: "draft",
-        title: input.title?.trim() || "(sem título)",
-        synopsis,
-        tags: (input.tags ?? []).map((name) => ({ name, group: null })),
-      },
-    })
-
-    return {
-      data: {
-        predictedQuality: result.predictedQuality,
-        justification: result.justification,
-        confidence: result.confidence,
-      },
-    }
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Erro desconhecido" }
   }
 }
 
@@ -421,6 +358,69 @@ export async function runSynopsisInterestBatchAction(
     revalidateTag("ai-eval-tab-counts", "max")
     revalidatePath("/titles")
     return { status: "ok", report }
+  } catch (err) {
+    return { status: "failed", error: err instanceof Error ? err.message : "Erro desconhecido" }
+  }
+}
+
+export interface InterestBackfillPlan {
+  status: "ok"
+  /** Obras não-frescas a processar (o run pula as já frescas — reuse). */
+  targetIds: string[]
+  /** Total de ids recebidos (o conjunto FILTRADO na UI). */
+  total: number
+  /** Já frescas na versão ATIVA (puladas sem custo). */
+  fresh: number
+  /** Quantas precisam de chamada LLM. */
+  needCalls: number
+  likelyUsd: number
+  upperBoundUsd: number
+}
+
+/**
+ * Dry-run do BACKFILL de Interesse sobre um conjunto de obras JÁ FILTRADO na UI
+ * (respeita os filtros aplicados na aba — status, estado, mín. tags/reviews). Recebe
+ * os work_ids EXIBIDOS, remove os já frescos na versão de prompt ATIVA (v4 com a
+ * flag; v3 sem) e estima o custo do restante. NÃO executa nada.
+ */
+export async function planInterestBackfillForIds(
+  workIds: string[],
+): Promise<InterestBackfillPlan | { status: "blocked_manual"; message: string } | { status: "failed"; error: string }> {
+  try {
+    const gate = await ensureCapability("smart_shortlist")
+    if (!gate.ok) return { status: "blocked_manual", message: gate.error }
+    const ids = [...new Set((workIds ?? []).filter(Boolean))]
+    if (ids.length === 0) return { status: "ok", targetIds: [], total: 0, fresh: 0, needCalls: 0, likelyUsd: 0, upperBoundUsd: 0 }
+    const supabase = createAdminClient()
+
+    // Já frescas na versão ativa ⇒ puladas (reuse). Estima só o restante.
+    const activeVersion = resolveInterestPromptVersion()
+    const fresh = await fetchAllRows<{ work_id: string }>(
+      (from, to) =>
+        supabase
+          .from("synopsis_quality_predictions")
+          .select("work_id")
+          .eq("prompt_version", activeVersion)
+          .eq("stale", false)
+          .range(from, to),
+      "Falha listando previsões frescas",
+    )
+    const freshSet = new Set(fresh.map((r) => r.work_id))
+    const targetIds = ids.filter((id) => !freshSet.has(id))
+    // Custo = por-obra (estimateStep com scale=1) × nº de obras, IGUAL ao
+    // planInterestBatch. `estimateStep(action, N)` NÃO escala linear aqui (o custo é
+    // ~fixo por CHAMADA, base domina), então multiplicamos nós — senão o teto do
+    // plano vem ~1 chamada e o 1º lote de 100 estoura.
+    const per = estimateStep("predict_interest_potential", 1)
+    return {
+      status: "ok",
+      targetIds,
+      total: ids.length,
+      fresh: ids.length - targetIds.length,
+      needCalls: targetIds.length,
+      likelyUsd: per.likelyUsd * targetIds.length,
+      upperBoundUsd: per.upperBoundUsd * targetIds.length,
+    }
   } catch (err) {
     return { status: "failed", error: err instanceof Error ? err.message : "Erro desconhecido" }
   }
