@@ -22,6 +22,7 @@ import {
   PROMPT_VERSION as PREDICT_PROMPT_VERSION,
   predictSynopsisQuality,
 } from "@/lib/ai-evaluation/synopsis-quality-predictor"
+import type { DeclaredTagForPrompt } from "@/lib/ai-evaluation/synopsis-quality-predictor"
 import { getActiveCompiledPreferences, resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
 import type { CompiledPreferences } from "@/lib/ai-evaluation/compiled-preferences"
 import { formatDigestForPrompt } from "@/lib/synopsis-interest/contextual-package"
@@ -172,6 +173,7 @@ export type DefaultPredictFn = (
   profile: TasteProfilePayload,
   work: { id: string; title: string; synopsis: string; tags: Array<{ name: string; group: string | null }>; reviewDigest?: string | null },
   compiledPreferences?: CompiledPreferences | null,
+  declaredTags?: DeclaredTagForPrompt[] | null,
 ) => Promise<{
   predictedQuality: SynopsisQuality
   justification: string
@@ -194,6 +196,13 @@ export interface EnsurePredictInterestDeps {
   gateway?: InterestGateway
   ensureProfile?: (deps: EnsureTasteProfileDeps) => Promise<EnsureTasteProfileOutcome>
   predict?: DefaultPredictFn
+  /**
+   * MEDIDA TEMPORÁRIA — shadow A/B. Override do bloco + Item A pra o arm B. Ausente
+   * ⇒ arm A (comportamento normal: getActiveCompiledPreferences(), sem Item A). A
+   * `promptVersion` é derivada de `arm.compiled.promptVersion` (ex.: "v5s") ⇒ linha
+   * separada, dedup próprio.
+   */
+  arm?: { compiled: CompiledPreferences | null; declaredTags?: DeclaredTagForPrompt[] | null }
 }
 
 function predictUpperBoundUsd(): number {
@@ -221,7 +230,10 @@ export async function ensurePredictInterest(
   // Peça 2: preferências compiladas ativas (flag). null ⇒ flag off ⇒ versão base
   // v3 e nenhuma injeção (comportamento idêntico ao atual). A versão resolvida
   // (v3/v4) governa assinatura, readiness e persistência desta obra.
-  const compiled = getActiveCompiledPreferences()
+  // Shadow A/B: `deps.arm` sobrepõe o bloco e injeta Item A (arm B). A versão sai
+  // do bloco do arm (ex.: "v5s") ⇒ linha/assinatura/dedup separados do arm A.
+  const compiled = deps.arm ? deps.arm.compiled : getActiveCompiledPreferences()
+  const declaredTags = deps.arm?.declaredTags ?? null
   const promptVersion = compiled?.promptVersion ?? PREDICT_PROMPT_VERSION
 
   // 1) Dependência: perfil de gosto (cascata).
@@ -380,7 +392,7 @@ export async function ensurePredictInterest(
         synopsis,
         tags: work.tags.map((name) => ({ name, group: null })),
         reviewDigest: work.reviewDigest,
-      }, compiled)
+      }, compiled, declaredTags)
       await gateway.persistPrediction({
         workId,
         predictedQuality: pred.predictedQuality,
@@ -414,9 +426,10 @@ async function defaultPredict(
   profile: TasteProfilePayload,
   work: { id: string; title: string; synopsis: string; tags: Array<{ name: string; group: string | null }>; reviewDigest?: string | null },
   compiledPreferences?: CompiledPreferences | null,
+  declaredTags?: DeclaredTagForPrompt[] | null,
 ): ReturnType<DefaultPredictFn> {
   const { computeCostUsd } = await import("@/lib/ai/pricing")
-  const r = await predictSynopsisQuality({ profile, work, compiledPreferences })
+  const r = await predictSynopsisQuality({ profile, work, compiledPreferences, declaredTags })
   const c = computeCostUsd(r.modelName, {
     inputTokens: r.usage.inputTokens,
     outputTokens: r.usage.outputTokens,

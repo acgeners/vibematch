@@ -69,3 +69,47 @@ export function getActiveCompiledPreferences(): CompiledPreferences | null {
 export function resolveInterestPromptVersion(): string {
   return getActiveCompiledPreferences()?.promptVersion ?? BASE_INTEREST_PROMPT_VERSION
 }
+
+// ============================================================================
+// MEDIDA TEMPORÁRIA — shadow A/B (arm B). Ver PLANO-INTERESSE-PREFS-CONFIANCA.md §Shadow.
+// arm A (exibido) = COMPILED_PREFERENCES_V33 (bloco v3.3, prompt "v4").
+// arm B (guardado, não exibido) = bloco v4 (saída do meta-prompt v4/Opus, CONGELADA
+// como constante — NÃO regerada ao vivo) + Item A (tags declaradas, injetado no
+// preditor). Mesma calibração do arm A (systemAddendum reusado) pra ISOLAR o efeito
+// do bloco+ItemA. prompt "v5s" ⇒ linha separada; pickActiveRaw prefere "v4" ⇒ B nunca
+// vira headline. Remover tudo isto (constante + flag + linhas prompt_version='v5s')
+// quando a decisão A×B for tomada.
+// ============================================================================
+
+export const COMPILED_PREFERENCES_V4_SHADOW: CompiledPreferences = {
+  promptVersion: "v5s",
+  compiledBlock: `AVERSÕES (puxam a faixa pra BAIXO — disparar só com sinal EXPLÍCITO do polo negativo; ausência de sinal não penaliza):
+
+A1. Penalizar obras cujo TOM GERAL no decorrer da trama é pesado, denso ou de sentimento muito negativo — especialmente as que são tragédia do começo ao fim e deixam sensação sombria persistente. DISPARA quando o clima pesado/trágico permeia a obra como um todo. NÃO DISPARA por eventos trágicos isolados, momentos difíceis pontuais ou peso restrito ao background; drama contido dentro de uma jornada de tom elevado não conta.
+
+A2. Penalizar conteúdo sexual apresentado SEM romance, sem contexto narrativo, ou de teor sórdido/degradante. DISPARA quando o sexo é gratuito, desconectado de vínculo afetivo ou explora sordidez. NÃO DISPARA quando o conteúdo sexual está integrado a um relacionamento e a uma narrativa (esse caso é tratado como plus pelo seu próprio critério de promoção).
+
+A3. Penalizar FORTEMENTE protagonistas que são cruéis e maldosos DE PROPÓSITO e/ou que prejudicam pessoas inocentes a troco de nada; penalização máxima para MCs que sentem PRAZER em ver os outros sofrerem. DISPARA por crueldade como TRAÇO DE CARÁTER do protagonista. NÃO DISPARA por vingança, retribuição ou dureza contra quem prejudicou o protagonista (recurso de enredo comum); na dúvida entre traço cruel e recurso de enredo, NÃO dispara.
+
+A4. Penalizar obras com HARÉM que se mantém ao longo de toda a obra como configuração romântica central. DISPARA quando o harém persiste como estrutura permanente. NÃO DISPARA quando o harém se resolve em casal único, nem por interesse romântico plural apenas transitório que converge para um par definitivo.
+
+PROMOÇÕES (puxam a faixa pra CIMA — TETO ♥♥♥, no máximo +1 faixa; exigir evidência clara do polo positivo; ausência de sinal não promove):
+
+P1. Promover obras EMOCIONANTES de tom motivador que elevam o espírito — narrativas inspiradoras, de superação, energia positiva e clima geral animador ao longo da obra. DISPARA quando a evidência aponta tom motivador/edificante como característica dominante.
+
+P2. Promover conteúdo sexual quando integrado a uma obra com FL (interesse/protagonista feminina) de presença marcante, boa história e ALTA dinâmica de casal — nesse contexto o conteúdo sexual é um grande plus. DISPARA apenas quando TODOS os elementos coexistem: FL marcante E narrativa sólida E química/dinâmica forte do casal, com o sexo integrado a esse vínculo.
+
+P3. Promover obras com CASAL ÚNICO de interação positiva — par central bem definido, com dinâmica saudável e envolvente entre os dois. DISPARA quando há foco romântico monogâmico com boa química.
+
+P4. Promover obras com FL de PRESENÇA FORTE — personagem forte, inteligente, overpowered, ou proativa que faz as coisas acontecerem e move o enredo. DISPARA quando a FL exibe protagonismo, competência ou poder relevantes.`,
+  // Mesma calibração validada do arm A (err-high + inversão) — só o bloco e o Item A mudam.
+  systemAddendum: COMPILED_PREFERENCES_V33.systemAddendum,
+}
+
+/** Nome da env-flag do shadow A/B (medida temporária). */
+export const INTEREST_SHADOW_FLAG = "INTEREST_SHADOW"
+
+/** O shadow A/B está ligado? Quando on, cada previsão nova (create/update) roda o arm B. */
+export function isInterestShadowEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[INTEREST_SHADOW_FLAG] === "1"
+}

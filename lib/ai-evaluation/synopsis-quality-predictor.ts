@@ -24,6 +24,34 @@ export const PROMPT_VERSION = BASE_INTEREST_PROMPT_VERSION
 export const E1_SYSTEM_ADDENDUM =
   "Além da sinopse, você recebe um RESUMO AGREGADO DE REVIEWS de leitores (consenso, divergências, traços recorrentes e avisos). Use-o como sinal COMPLEMENTAR ao julgamento — a SINOPSE segue dominante. Se não houver contexto de leitores, ignore esta parte."
 
+/**
+ * Item A — tags declaradas do usuário (shadow arm B). Só entra quando `declaredTags`
+ * é passado (o arm A não passa). Instrui a pesá-las ACIMA do perfil inferido.
+ */
+export const DECLARED_TAGS_SYSTEM_ADDENDUM =
+  "As TAGS DECLARADAS PELO USUÁRIO (no bloco do perfil) são preferências EXPLÍCITAS — alta convicção; pesam ACIMA dos loved/avoided inferidos do perfil. Tag EVITADA presente na obra puxa a faixa pra BAIXO; tag AMADA presente reforça pra CIMA; quando o mesmo traço também aparece no perfil, convicção MÁXIMA. Ausência de tag declarada NÃO penaliza nem promove."
+
+/** Tag declarada (Item A) na forma mínima que o prompt precisa (desacopla de server/queries). */
+export interface DeclaredTagForPrompt {
+  name: string
+  stance: "love" | "avoid"
+  weight: number
+}
+
+/** Formata as tags declaradas num bloco pro prompt. null se vazio. */
+function formatDeclaredTags(tags: DeclaredTagForPrompt[]): string | null {
+  if (!tags || tags.length === 0) return null
+  const fmt = (arr: DeclaredTagForPrompt[]) =>
+    arr.map((t) => (t.weight >= 2 ? `${t.name} (forte)` : t.name)).join(", ")
+  const loved = tags.filter((t) => t.stance === "love")
+  const avoided = tags.filter((t) => t.stance === "avoid")
+  const lines: string[] = []
+  if (loved.length) lines.push(`ama: ${fmt(loved)}`)
+  if (avoided.length) lines.push(`evita: ${fmt(avoided)}`)
+  if (lines.length === 0) return null
+  return `TAGS DECLARADAS PELO USUÁRIO (declarações diretas — pesam ACIMA do perfil inferido):\n${lines.join("\n")}`
+}
+
 /** Sinopse é o sinal principal — folga maior que os 600 chars do ranking. */
 const SYNOPSIS_MAX_CHARS = 900
 
@@ -98,6 +126,7 @@ export function buildSynopsisQualityUserPrompt(
   profile: TasteProfilePayload,
   work: PredictWorkInput,
   compiledPreferences?: CompiledPreferences | null,
+  declaredTags?: DeclaredTagForPrompt[] | null,
 ): { profileBlock: string; tailBlock: string; digestBlock: string | null } {
   // Peça 2: com preferências compiladas ativas, o bloco v3.3 é ANEXADO aqui dentro
   // do bloco do PERFIL, que é cacheado (ephemeral). Como perfil + bloco são
@@ -106,6 +135,11 @@ export function buildSynopsisQualityUserPrompt(
 ${JSON.stringify(profile, null, 2)}`
   if (compiledPreferences) {
     profileBlock += `\n\n${compiledPreferences.compiledBlock}`
+  }
+  // Item A (shadow arm B): tags declaradas anexadas ao bloco cacheado do perfil.
+  const declaredBlock = declaredTags ? formatDeclaredTags(declaredTags) : null
+  if (declaredBlock) {
+    profileBlock += `\n\n${declaredBlock}`
   }
 
   const tailLines: string[] = [
@@ -159,6 +193,8 @@ export interface PredictSynopsisQualityArgs {
    * system, e a previsão é carimbada com `compiledPreferences.promptVersion` (v4).
    */
   compiledPreferences?: CompiledPreferences | null
+  /** Item A (shadow arm B): tags declaradas do usuário. Ausente ⇒ não injeta. */
+  declaredTags?: DeclaredTagForPrompt[] | null
 }
 
 /**
@@ -175,8 +211,9 @@ export async function predictSynopsisQuality(
 
   const client = args.client ?? getAnthropicClient({ maxRetries: 6 })
   const compiled = args.compiledPreferences ?? null
+  const declaredTags = args.declaredTags ?? null
   const promptVersion = compiled?.promptVersion ?? PROMPT_VERSION
-  const { profileBlock, tailBlock, digestBlock } = buildSynopsisQualityUserPrompt(args.profile, args.work, compiled)
+  const { profileBlock, tailBlock, digestBlock } = buildSynopsisQualityUserPrompt(args.profile, args.work, compiled, declaredTags)
 
   // Contrato e1: com digest, o system ganha o adendo neutro (2º bloco, NÃO cacheado
   // pra não invalidar o cache do prompt-base) e o user recebe o bloco de leitores.
@@ -187,6 +224,10 @@ export async function predictSynopsisQuality(
   // Peça 2: addendum de preferências como bloco de system NÃO cacheado (mesmo
   // padrão do E1_SYSTEM_ADDENDUM), depois do prompt-base cacheado.
   if (compiled) system.push({ type: "text", text: compiled.systemAddendum })
+  // Item A (shadow arm B): addendum de peso das tags declaradas (só quando há).
+  if (declaredTags && declaredTags.length > 0) {
+    system.push({ type: "text", text: DECLARED_TAGS_SYSTEM_ADDENDUM })
+  }
 
   const userContent: Anthropic.Messages.TextBlockParam[] = [
     { type: "text", text: profileBlock, cache_control: { type: "ephemeral" } },

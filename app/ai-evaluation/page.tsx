@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 import { StaleRerankPanel } from "@/components/ranking/stale-rerank-panel"
 import { SynopsisPredictPanel } from "@/components/titles/synopsis-predict-panel"
 import { InterestBackfillButton } from "@/components/titles/interest-backfill-button"
+import { ShadowComparePanel } from "@/components/titles/shadow-compare-panel"
 import { SynopsisAccuracyBar } from "@/components/titles/synopsis-accuracy-bar"
 import { getAlignmentQueueWorks, getSynopsisQueueWorks, getSynopsisPredictionVersions, getUntrackedWorks } from "@/server/queries/recommendations"
 import type { AlignmentQueueWork, SynopsisQueueWork, UntrackedWork } from "@/server/queries/recommendations"
@@ -725,6 +726,7 @@ function SynopsisTab({
   return (
     <div className="space-y-4">
       <SynopsisAccuracyBar accuracy={accuracy} comparison={comparison} />
+      <ShadowComparePanel />
       <AiEvaluationFilters
         activeFilters={[]}
         currentModel={MODEL}

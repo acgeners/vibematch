@@ -72,7 +72,7 @@ métricas do golden pilot-2 (MAE ~0,433, **0 obra amada rebaixada**), sem inflar
 | Recebe | 7 regras livres (texto cru) | perfil + compilado + Item A + tags obra + sinopse + digest |
 | Produz | `{ compiledBlock }` (aversões/promoções) | faixa ♥ + justificativa + confiança |
 | Roda | só ao **editar** as regras (raro) | por obra (backfill / sob demanda) |
-| Modelo | Sonnet (a decidir; barato) | `claude-sonnet-4-6` (atual) |
+| Modelo | **Opus** `claude-opus-4-8` (Q1; sem `temperature`) | `claude-sonnet-4-6` (atual) |
 
 > A **calibração** (err-high, inversão, leitura de sinais) **NÃO** é gerada pelo LLM 1 — é
 > **constante fixa** no LLM 2 (§6). O compilador só produz o bloco de aversões/promoções.
@@ -94,6 +94,8 @@ métricas do golden pilot-2 (MAE ~0,433, **0 obra amada rebaixada**), sem inflar
 | D9 | Confiança é sinal de **primeira classe** → usos 1 (badge) + 2 (triar) + 3 (priorizar backfill). | 2026-07-01 |
 | D10 | Mudança do bloco compilado / Item A entra na **assinatura/versão** → invalida → re-backfill (como o bump v3↔v4). | 2026-06-30 |
 | D11 | Compilação recompila **só no edit**, cacheada, persistida em `user_settings.compiled_preferences`, com **preview + aprovação** na UI antes de virar ativa. | 2026-06-30 |
+| D12 | **Generalidade obrigatória:** o meta-prompt compila QUALQUER conjunto de regras; **proibido overfitar** as 7 atuais. Princípios gerais (taxonomia + varredura de polos + espectro), nunca lógica rule-specific. | 2026-07-01 |
+| D13 | **Regra de espectro** ("prefiro Y sem X"): negativo explícito (mesmo secundário/parênteses) vira **aversão própria**; positivo explícito vira **promoção**; **meio neutro** (ausência de sinal não mexe). Ex. harém: harém explícito→penaliza, nada→neutro, casal único explícito→promove. | 2026-07-01 🟦 |
 
 ---
 
@@ -132,9 +134,11 @@ auditoria só pro preview — não persiste no artefato ativo).
 
 | # | Observação | Ação | Status |
 |---|---|---|---|
-| R1 | **Inventa nomes de tags** ("grimdark", "smut") que podem não existir no catálogo → risco de match | instruir "descreva o traço, não invente tag"; idealmente **referenciar as tags declaradas reais** | ⬜ |
-| R2 | **Verboso** (4773 vs 2667 chars do v3.3) | pedir densidade (cortar `##`/`---`/listas de exemplo) | ⬜ |
-| R3 | **A2⇄P2 acoplados** ("P2 só se A2 não dispara") | decidir: manter acoplamento ou alavancas independentes | ⬜ |
+| R1 | **Inventa nomes de tags** ("grimdark", "smut") que podem não existir no catálogo → risco de match | ✅ meta-prompt v2+ proíbe inventar tag; descreve o traço | ✅ v2 |
+| R2 | **Verboso** (4773 vs 2667 chars do v3.3) | ✅ v4 = 2846 chars, sem markdown | ✅ v2 |
+| R3 | **A2⇄P2 acoplados** ("P2 só se A2 não dispara") | ✅ desacoplado (Q2/D13); resíduo de mesmo-eixo aceito | ✅ v4 |
+
+**Estado do meta-prompt:** `.local-experiments/plan3/prefs-compiler/meta-prompt.v4.md` = **candidato final** (Opus). Bloco gerado 2846 chars, todas as decisões D1–D13 refletidas. **Falta o gate de acurácia (golden §10.1) antes de virar o seed de F2.**
 | R4 | Addendum **§5 extrapolado** (o LLM inventou "assimetria de evidência") | irrelevante depois de D1 (calibração é fixa, LLM 1 não gera addendum) | ✅ resolvido por D1 |
 
 ---
@@ -315,8 +319,53 @@ faixa/justificativa/confiança coerentes.
 
 | Q | Pergunta | Dono |
 |---|---|---|
-| Q1 | Modelo do compilador — Sonnet (barato) ou Opus (qualidade, roda raro)? | ⬜ |
-| Q2 | R3 — A2/P2 acoplados ou alavancas independentes? | ⬜ |
+| Q1 | ✅ **Opus** (`claude-opus-4-8`) — melhor bloco na comparação qualitativa v2; custo irrelevante (roda raro). Não aceita `temperature`. | ✅ 2026-07-01 |
+| Q2 | ✅ **Desacoplado** — split A+P sem acoplamento duro; permitido só esclarecimento de mesmo-eixo. | ✅ 2026-07-01 |
 | Q3 | Buckets de confiança (baixa/média/alta) — thresholds calibrados no golden | ⬜ |
-| Q4 | Item A: resolver hierarquia server-side ou passar rótulo de nível pro LLM? | ⬜ |
-| Q5 | Resolver async (§F7) — refactor completo (recomendado) vs minimizar ripple | ⬜ |
+| Q4 | Item A: resolver hierarquia server-side ou passar rótulo de nível pro LLM? | ✅ `getDeclaredTagPreferences` já resolve hierarquia (grupo→subgrupo→tag) |
+| Q5 | Resolver async (§F7) — refactor completo (recomendado) vs minimizar ripple | ⬜ (só na Fase 1, se acontecer) |
+
+---
+
+## 15. Medida temporária — Shadow A/B (✅ IMPLEMENTADA 2026-07-01)
+
+Em vez do golden ($1–2) + re-backfill ($5), roda os **dois arms em paralelo** só nas
+previsões **novas** (create/update) e acumula comparação vs. a sua nota manual, organicamente.
+
+- **Arm A** (exibido) = atual: bloco **v3.3**, `prompt_version="v4"`.
+- **Arm B** (guardado, não exibido) = **bloco v4** (congelado da saída Opus, **sem** compilador
+  ao vivo) **+ Item A** (tags declaradas), mesma calibração do A, `prompt_version="v5s"`.
+- Custo: **+1 chamada por previsão nova** (background via `after()`, latência do A intocada),
+  **zero backfill**. Backfill em massa **não** dispara o shadow.
+
+### Como ligar / ver
+- Env: **`INTEREST_SHADOW=1`** (+ `INTEREST_PREFS_V33=1` pra o arm A ser o v4/v3.3). Ligar,
+  criar/atualizar obras → o arm B roda em background.
+- Painel: **/ai-evaluation?tab=sinopse** → card **"Shadow A/B"** (auto-gated pela flag): métricas
+  de decisão + tabela por-obra (A ♥·conf / B ♥·conf / manual), **discordantes primeiro**.
+
+### Métrica de decisão (quando houver dados)
+Trocar pra B **só se**: B mais perto que A com **significância** (teste de sinal p<0,05) **E**
+gems perdidas(B) ≤ gems(A) **E** precisão ♥♥♥♥(B) não pior. Sinal vem **só das discordâncias** —
+acúmulo lento (1 rótulo por vez).
+
+### Arquivos (S1–S6, todos ✅)
+| # | Arquivo | O quê |
+|---|---|---|
+| S1 | `lib/ai-evaluation/compiled-preferences.ts` | `COMPILED_PREFERENCES_V4_SHADOW` (v5s) + flag `INTEREST_SHADOW` |
+| S2 | `lib/ai-evaluation/synopsis-quality-predictor.ts` | param `declaredTags` + bloco "TAGS DECLARADAS" + addendum de peso |
+| S3 | `lib/orchestration/integrations/synopsis-interest.ts` | override `arm{compiled,declaredTags}` em `ensurePredictInterest` |
+| S4 | `server/actions/synopsis-quality.ts` | `after()` dispara o arm B pós-response (flag-gated) |
+| S5 | `server/queries/synopsis-quality.ts` | `getSynopsisVersionComparison` + gems-lost/precisão ♥♥♥♥/discordantes/teste de sinal; `getShadowComparisonRows` |
+| S6 | `components/titles/shadow-compare-panel.tsx` + `app/ai-evaluation/page.tsx` | painel `ShadowComparePanel` |
+
+Validação: tsc 0, 1089 testes ✅, lint limpo. **Não commitado ainda** (aguardando OK).
+
+### ⚠️ Limitações aceitas (temporário forward-only)
+- Item A **fora da assinatura** → editar tags declaradas **não** re-roda arm B (só previsões novas).
+- Bloco v4 **congelado** → se editar as **regras livres**, avisar pra regerar + re-hardcodar.
+
+### Como remover (quando decidir A×B)
+Apagar: `COMPILED_PREFERENCES_V4_SHADOW` + flag; o override `arm` (S3) + gatilho (S4);
+`getShadowComparisonRows` + métricas extras (S5, opcional manter); `ShadowComparePanel` (S6);
+e as linhas `prompt_version='v5s'` no banco.
