@@ -41,7 +41,19 @@ function verdict(c: SynopsisVersionComparison): { label: string; tone: "b" | "a"
 export async function ShadowComparePanel() {
   if (!isInterestShadowEnabled()) return null
   const [rows, comparison] = await Promise.all([getShadowComparisonRows(), getSynopsisVersionComparison()])
-  if (rows.length === 0) return null
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+        <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+          Shadow A/B · ativo
+        </span>
+        <span className="ml-2 text-xs text-muted-foreground">
+          Sem obras com o arm B ainda. Clique <b>&quot;Reprever&quot;</b> numa obra (perfil precisa estar
+          fresco), espere ~30s e recarregue — o arm B roda em background.
+        </span>
+      </div>
+    )
+  }
 
   const withManual = rows.filter((r) => r.manual != null).length
   const discordant = rows.filter((r) => r.discordant).length

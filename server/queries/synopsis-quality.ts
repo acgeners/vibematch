@@ -230,7 +230,7 @@ export async function getSynopsisPredictionAccuracy(
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("synopsis_quality_predictions")
-    .select("predicted_quality, works(synopsis_quality)")
+    .select("predicted_quality, works!work_id(synopsis_quality)")
     .eq("stale", false)
     .eq("prompt_version", version)
   if (error) {
@@ -322,7 +322,7 @@ export async function getSynopsisVersionComparison(
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("synopsis_quality_predictions")
-    .select("work_id, predicted_quality, prompt_version, works(synopsis_quality)")
+    .select("work_id, predicted_quality, prompt_version, works!work_id(synopsis_quality)")
   if (error) {
     console.warn("[synopsis-pred] getSynopsisVersionComparison falhou:", error.message)
     return null
@@ -441,7 +441,7 @@ export async function getShadowComparisonRows(): Promise<ShadowCompareRow[]> {
 
   const { data: bRows, error: bErr } = await supabase
     .from("synopsis_quality_predictions")
-    .select("work_id, predicted_quality, confidence, works(title, synopsis_quality)")
+    .select("work_id, predicted_quality, confidence, works!work_id(title, synopsis_quality)")
     .eq("prompt_version", armBVer)
   if (bErr) {
     console.warn("[shadow] getShadowComparisonRows (arm B) falhou:", bErr.message)
