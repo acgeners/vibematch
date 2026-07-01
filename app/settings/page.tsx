@@ -2,18 +2,21 @@ import type { ReactNode } from "react"
 import { promises as fs } from "node:fs"
 import path from "node:path"
 import {
-  Activity,
   ArrowRight,
   BookOpen,
   Brain,
+  ChevronDown,
   Compass,
   Database,
+  FileText,
   Gauge,
   Info,
   Layers,
+  MessageSquareText,
   Settings,
   Sparkles,
   Tags,
+  Wand2,
 } from "lucide-react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { Header } from "@/components/layout/header"
@@ -28,6 +31,7 @@ import { ResolveComixPanel } from "@/components/settings/resolve-comix-panel"
 import { ComixHealthPanel } from "@/components/settings/comix-health-panel"
 import { AiEvalOnCreateToggle } from "@/components/settings/ai-eval-on-create-toggle"
 import { SynopsisCanonicalOnCreateToggle } from "@/components/settings/synopsis-canonical-on-create-toggle"
+import { GroupInfoTooltip } from "@/components/settings/group-info-tooltip"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
 import { getComixResolverStatus } from "@/server/actions/comix-resolver"
 import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
@@ -109,34 +113,53 @@ async function getSettingsData() {
   }
 }
 
-const SECTION_GROUPS = [
+// Grupos por NATUREZA (não por tópico vago), ordenados por frequência de uso.
+// 1 accent por grupo — cor vira hierarquia, não decoração por-item.
+const SECTION_GROUPS: {
+  label: string
+  sections: { id: string; title: string; icon: ReactNode; accent: SettingsAccent }[]
+}[] = [
   {
-    label: "Pipeline de dados",
+    label: "Calibração das notas",
     sections: [
-      { id: "embeddings", title: "Embeddings", icon: <Brain />, accent: "emerald" as const },
-      { id: "calibration", title: "Calibração", icon: <Gauge />, accent: "cyan" as const },
-      { id: "synopsis-canonical", title: "Sinopse canônica", icon: <Brain />, accent: "violet" as const },
-      { id: "review-summary", title: "Resumo de reviews", icon: <Sparkles />, accent: "amber" as const },
-      { id: "review-digest", title: "Digest de reviews", icon: <Layers />, accent: "amber" as const },
+      { id: "calibration", title: "Calibração automática", icon: <Gauge />, accent: "violet" },
+      { id: "ai-calibration", title: "Calibração de critérios IA", icon: <Sparkles />, accent: "violet" },
     ],
   },
   {
-    label: "Casos especiais",
+    label: "Gerado por IA",
     sections: [
-      { id: "sync", title: "Sincronização", icon: <Database />, accent: "indigo" as const },
-      { id: "ai-calibration", title: "Calibração IA", icon: <Sparkles />, accent: "rose" as const },
-      { id: "tags", title: "Consolidação de tags", icon: <Tags />, accent: "fuchsia" as const },
+      { id: "embeddings", title: "Embeddings", icon: <Brain />, accent: "cyan" },
+      { id: "synopsis-canonical", title: "Sinopse canônica", icon: <FileText />, accent: "cyan" },
+      { id: "review-summary", title: "Resumo de reviews", icon: <MessageSquareText />, accent: "cyan" },
+      { id: "review-digest", title: "Digest de reviews", icon: <Layers />, accent: "cyan" },
+      { id: "on-create", title: "Comportamento na criação", icon: <Wand2 />, accent: "cyan" },
     ],
   },
   {
-    label: "Comix & criação",
+    label: "Fontes externas (Comix)",
+    sections: [{ id: "comix", title: "Comix", icon: <BookOpen />, accent: "amber" }],
+  },
+  {
+    label: "Avançado / manutenção",
     sections: [
-      { id: "comix-health", title: "Diagnóstico Comix", icon: <Activity />, accent: "slate" as const },
-      { id: "comix", title: "Comix", icon: <BookOpen />, accent: "slate" as const },
-      { id: "ai-on-create", title: "Avaliação na criação", icon: <Sparkles />, accent: "amber" as const },
+      { id: "tags", title: "Consolidação de tags", icon: <Tags />, accent: "slate" },
+      { id: "sync", title: "Sincronização de constantes", icon: <Database />, accent: "slate" },
     ],
   },
 ]
+
+// Explicação de cada grupo (mostrada na tooltip do cabeçalho e do índice).
+const GROUP_INFO: Record<string, string> = {
+  "Gerado por IA":
+    "Artefatos que a IA produz e guarda por obra — embeddings (OpenAI), sinopse canônica, resumo e digest de reviews (Claude). Regeneram sozinhos quando sinopse, tags ou critérios mudam. Rode-os após adicionar ou alterar obras; consomem tokens.",
+  "Calibração das notas":
+    "Ajusta a acurácia das notas previstas. A calibração automática recalcula MAEs e pseudo-votos (roda sozinha ao salvar uma obra); a de critérios IA audita e corrige vieses nos category_scores. Atualize os embeddings antes.",
+  "Fontes externas (Comix)":
+    "Operação da Comix, a principal fonte de reviews. Resolve o hid das obras (habilita a coleta de reviews) e testa a conexão. Use quando obras novas estão sem reviews.",
+  "Avançado / manutenção":
+    "Tarefas raras de manutenção: consolidar/mesclar tags duplicadas e regenerar os arquivos de constantes a partir do banco (só quando o schema do DB muda). Recolhido por padrão.",
+}
 
 export default async function SettingsPage() {
   const {
@@ -175,7 +198,7 @@ export default async function SettingsPage() {
       <Header
         kicker="Sistema"
         title="Configurações"
-        description="Manutenção, calibração e parâmetros derivados"
+        description="Console de operação: jobs do pipeline, curadoria e manutenção"
         icon={<Settings />}
       />
 
@@ -190,20 +213,68 @@ export default async function SettingsPage() {
 
       <IndexSpacer />
 
-      {/* ── Pipeline de dados ─────────────────────────────────────── */}
-      <GroupHeading label="Pipeline de dados" />
-      <RecommendedOrderBanner />
+      {/* ── Calibração das notas ───────────────────────────────────── */}
+      <GroupHeading label="Calibração das notas" hint="acurácia das notas previstas" />
+      <SectionNote accent="violet">
+        A calibração usa o kNN dos <span className="font-medium text-foreground">Embeddings</span> —
+        atualize-os (Passo 1, grupo abaixo) antes de recalibrar (Passo 2).
+      </SectionNote>
+
+      <SettingsSection
+        id="calibration"
+        title="Calibração automática"
+        description="MAEs e pseudo-votos são recalculados a partir dos dados reais sempre que um título é incluído ou alterado."
+        icon={<Gauge />}
+        accent="violet"
+        chips={[
+          { kind: "step", label: "Passo 2" },
+          { kind: "cost", tier: "free", label: "Grátis" },
+        ]}
+      >
+        <CalibrationPanel
+          config={config}
+          metrics={modelMetrics}
+          snapshot={snapshot}
+          accent="violet"
+          aiPending={[
+            { label: "Embeddings", count: embeddingsPending, href: "#embeddings" },
+            { label: "Sinopse canônica", count: canonicalSynopsisPending, href: "#synopsis-canonical" },
+            { label: "Resumo de reviews", count: reviewSummaryPending, href: "#review-summary" },
+          ]}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        id="ai-calibration"
+        title="Calibração de critérios IA"
+        description="Auditoria por obra com auto-apply de sugestões e detecção de viés sistemático nos category_scores."
+        icon={<Sparkles />}
+        accent="violet"
+        chips={[{ kind: "cadence", label: "Frequente" }]}
+      >
+        <NavLink href="/settings/calibration" accent="violet" label="Abrir página de calibração" />
+      </SettingsSection>
+
+      {/* ── Gerado por IA ─────────────────────────────────────────── */}
+      <GroupHeading label="Gerado por IA" hint="derivados por modelo, cacheados por obra" />
+      <SectionNote accent="cyan">
+        Artefatos produzidos por modelo (OpenAI/Claude) e cacheados por obra — só regeneram quando
+        sinopse, tags ou critérios mudam. Custam tokens.
+      </SectionNote>
 
       <SettingsSection
         id="embeddings"
         title="Embeddings das obras"
         description="Representação vetorial via OpenAI para 'obras parecidas' e kNN predictor. Cacheado por obra — só re-embeda quando sinopse/tags/critérios mudam."
         icon={<Brain />}
-        accent="emerald"
-        badge={{ label: "Passo 1", variant: "step" }}
+        accent="cyan"
+        chips={[
+          { kind: "step", label: "Passo 1" },
+          { kind: "cost", tier: "low", label: "OpenAI ~$" },
+        ]}
       >
         <EmbeddingsPanel
-          accent="emerald"
+          accent="cyan"
           initialCachedCount={embeddingsCount}
           initialPendingCount={embeddingsPending}
           totalWorks={worksCount}
@@ -212,47 +283,35 @@ export default async function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection
-        id="calibration"
-        title="Calibração automática"
-        description="MAEs e pseudo-votos são recalculados a partir dos dados reais sempre que um título é incluído ou alterado."
-        icon={<Gauge />}
-        accent="cyan"
-        badge={{ label: "Passo 2", variant: "step" }}
-      >
-        <CalibrationPanel config={config} metrics={modelMetrics} snapshot={snapshot} accent="cyan" />
-      </SettingsSection>
-
-      <SettingsSection
         id="synopsis-canonical"
         title="Sinopse canônica"
         description="Consolida múltiplas sinopses por obra em uma única canônica via Haiku — usada nos prompts de recomendação."
-        icon={<Brain />}
-        accent="violet"
-        badge={{ label: "Independente", variant: "independent" }}
+        icon={<FileText />}
+        accent="cyan"
+        chips={[
+          { kind: "cadence", label: "Independente" },
+          { kind: "cost", tier: "low", label: "Haiku $" },
+        ]}
       >
         <SynopsisConsolidationPanel
-          accent="violet"
+          accent="cyan"
           pendingCount={canonicalSynopsisPending}
           totalCount={worksCount}
         />
-        <div className="mt-4 border-t border-border/60 pt-4">
-          <SynopsisCanonicalOnCreateToggle initialEnabled={synopsisCanonicalOnCreate} />
-        </div>
       </SettingsSection>
 
       <SettingsSection
         id="review-summary"
         title="Resumo de reviews"
         description="Resume as reviews externas de cada obra em um parágrafo de consenso via Haiku — mostrado na aba Notas & Avaliações."
-        icon={<Sparkles />}
-        accent="amber"
-        badge={{ label: "Independente", variant: "independent" }}
+        icon={<MessageSquareText />}
+        accent="cyan"
+        chips={[
+          { kind: "cadence", label: "Independente" },
+          { kind: "cost", tier: "low", label: "Haiku $" },
+        ]}
       >
-        <ReviewSummaryPanel
-          accent="amber"
-          pendingCount={reviewSummaryPending}
-          totalCount={worksCount}
-        />
+        <ReviewSummaryPanel accent="cyan" pendingCount={reviewSummaryPending} totalCount={worksCount} />
       </SettingsSection>
 
       <SettingsSection
@@ -260,77 +319,100 @@ export default async function SettingsPage() {
         title="Digest estruturado de reviews"
         description="Destila as reviews num digest estruturado (Sonnet) que o consultor IA consome — consenso, traços salientes, alertas. Opt-in (custo Sonnet)."
         icon={<Layers />}
-        accent="amber"
-        badge={{ label: "Independente", variant: "independent" }}
+        accent="cyan"
+        chips={[
+          { kind: "cadence", label: "Independente" },
+          { kind: "cost", tier: "high", label: "Sonnet $$" },
+        ]}
       >
-        <ReviewDigestPanel accent="amber" />
-      </SettingsSection>
-
-      {/* ── Casos especiais ───────────────────────────────────────── */}
-      <GroupHeading label="Casos especiais" />
-
-      <SettingsSection
-        id="sync"
-        title="Sincronização de constantes"
-        description="Regenera os arquivos locais de constantes a partir do Supabase. Só precisa quando o schema/tabelas de constantes do DB mudam."
-        icon={<Database />}
-        accent="indigo"
-      >
-        <SyncConstantsPanel initialLastRun={syncConstantsLastRun} accent="indigo" />
+        <ReviewDigestPanel accent="cyan" />
       </SettingsSection>
 
       <SettingsSection
-        id="ai-calibration"
-        title="Calibração de critérios IA"
-        description="Auditoria por obra com auto-apply de sugestões e detecção de viés sistemático nos category_scores."
-        icon={<Sparkles />}
-        accent="rose"
+        id="on-create"
+        title="Comportamento na criação"
+        description="O que roda automaticamente ao criar uma obra via 'Buscar dados'. Desligado por padrão pra evitar custo de tokens não intencional."
+        icon={<Wand2 />}
+        accent="cyan"
+        chips={[{ kind: "cadence", label: "Preferência" }]}
       >
-        <NavLink href="/settings/calibration" accent="rose" label="Abrir página de calibração" />
+        <div className="divide-y divide-border/60">
+          <div className="pb-4">
+            <p className="mb-1.5 text-sm font-semibold text-foreground">Avaliação IA</p>
+            <AiEvalOnCreateToggle initialEnabled={aiEvalOnCreate} />
+          </div>
+          <div className="pt-4">
+            <p className="mb-1.5 text-sm font-semibold text-foreground">Sinopse canônica</p>
+            <SynopsisCanonicalOnCreateToggle initialEnabled={synopsisCanonicalOnCreate} />
+          </div>
+        </div>
       </SettingsSection>
 
-      <SettingsSection
-        id="tags"
-        title="Consolidação de tags"
-        description="Revise clusters semânticos propostos pela IA e mescle tags duplicadas."
-        icon={<Tags />}
-        accent="fuchsia"
-      >
-        <NavLink href="/settings/tag-consolidation" accent="fuchsia" label="Abrir página de consolidação" />
-      </SettingsSection>
-
-      {/* ── Comix & criação ───────────────────────────────────────── */}
-      <GroupHeading label="Comix & criação" />
-
-      <SettingsSection
-        id="comix-health"
-        title="Diagnóstico da Comix"
-        description="Testa se as chamadas pra Comix estão funcionando (FlareSolverr, detalhe, reviews, imagem) sem precisar abrir uma obra."
-        icon={<Activity />}
-        accent="slate"
-      >
-        <ComixHealthPanel accent="slate" />
-      </SettingsSection>
+      {/* ── Fontes externas (Comix) ────────────────────────────────── */}
+      <GroupHeading label="Fontes externas (Comix)" hint="a principal fonte de reviews" />
 
       <SettingsSection
         id="comix"
-        title="Cobertura da Comix"
-        description="Resolve o hid da Comix das obras (pra habilitar reviews) e permite preencher manualmente as não encontradas. A Comix é a fonte principal de reviews."
+        title="Comix"
+        description="A fonte principal de reviews. Resolve o hid das obras (pra habilitar reviews), permite preencher manualmente as não encontradas e testar a conexão."
         icon={<BookOpen />}
-        accent="slate"
+        accent="amber"
+        chips={[{ kind: "cadence", label: "Quando faltam reviews" }]}
       >
-        <ResolveComixPanel accent="slate" initialStatus={comixStatus} initialMissing={comixMissing} />
+        <div className="space-y-5">
+          <div>
+            <p className="mb-2 text-sm font-semibold text-foreground">Cobertura</p>
+            <ResolveComixPanel accent="amber" initialStatus={comixStatus} initialMissing={comixMissing} />
+          </div>
+          <div className="border-t border-border/60 pt-4">
+            <p className="mb-2 text-sm font-semibold text-foreground">Diagnóstico</p>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Testa se as chamadas pra Comix estão funcionando (FlareSolverr, detalhe, reviews,
+              imagem) sem precisar abrir uma obra.
+            </p>
+            <ComixHealthPanel accent="amber" />
+          </div>
+        </div>
       </SettingsSection>
 
-      <SettingsSection
-        id="ai-on-create"
-        title="Avaliação IA na criação"
-        description="Controla se a avaliação IA roda automaticamente ao criar uma obra via Buscar dados. Desabilitada por padrão pra evitar custo de tokens não intencional."
-        icon={<Sparkles />}
-        accent="amber"
-      >
-        <AiEvalOnCreateToggle initialEnabled={aiEvalOnCreate} />
-      </SettingsSection>
+      {/* ── Avançado / manutenção (recolhido) ──────────────────────── */}
+      <details className="group/adv mt-2">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-1 pt-2 [&::-webkit-details-marker]:hidden">
+          <ChevronDown className="h-3.5 w-3.5 -rotate-90 text-muted-foreground transition-transform group-open/adv:rotate-0" />
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            Avançado / manutenção
+          </p>
+          <GroupInfoTooltip text={GROUP_INFO["Avançado / manutenção"]} />
+          <span className="ml-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/60">
+            raro
+          </span>
+          <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
+        </summary>
+
+        <div className="mt-4 space-y-4">
+          <SettingsSection
+            id="tags"
+            title="Consolidação de tags"
+            description="Revise clusters semânticos propostos pela IA e mescle tags duplicadas."
+            icon={<Tags />}
+            accent="slate"
+            chips={[{ kind: "cadence", label: "Ocasional" }]}
+          >
+            <NavLink href="/settings/tag-consolidation" accent="slate" label="Abrir página de consolidação" />
+          </SettingsSection>
+
+          <SettingsSection
+            id="sync"
+            title="Sincronização de constantes"
+            description="Regenera os arquivos locais de constantes a partir do Supabase. Só precisa quando o schema/tabelas de constantes do DB mudam."
+            icon={<Database />}
+            accent="slate"
+            chips={[{ kind: "cadence", label: "Raro · dev" }]}
+          >
+            <SyncConstantsPanel initialLastRun={syncConstantsLastRun} accent="slate" />
+          </SettingsSection>
+        </div>
+      </details>
 
       <ScrollToTop />
     </div>
@@ -356,9 +438,12 @@ function SettingsIndex({ pending }: { pending: Record<string, number> }) {
       <div className="space-y-4">
         {SECTION_GROUPS.map((group) => (
           <div key={group.label} className="space-y-2">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">
-              {group.label}
-            </p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">
+                {group.label}
+              </p>
+              {GROUP_INFO[group.label] && <GroupInfoTooltip text={GROUP_INFO[group.label]} />}
+            </div>
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
               {group.sections.map((section) => {
                 const styles = ACCENT_STYLES[section.accent]
@@ -514,7 +599,65 @@ const ACCENT_STYLES: Record<
   },
 }
 
-type SectionBadge = { label: string; variant: "step" | "independent" }
+// Chips do cabeçalho da seção: cadência (quando rodar) + custo (token/$).
+// Custo usa cor semântica (verde→grátis, âmbar→barato, rosa→caro), independente
+// do accent do grupo — vira um "semáforo" de custo legível de cara.
+type Chip =
+  | { kind: "step"; label: string }
+  | { kind: "cadence"; label: string }
+  | { kind: "cost"; tier: "free" | "low" | "high"; label: string }
+
+const COST_TIER_STYLES: Record<"free" | "low" | "high", string> = {
+  free: "bg-emerald-500/15 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300",
+  low: "bg-amber-500/15 text-amber-700 ring-amber-500/30 dark:text-amber-300",
+  high: "bg-rose-500/15 text-rose-700 ring-rose-500/30 dark:text-rose-300",
+}
+
+function SectionChips({ chips, accent }: { chips: Chip[]; accent: Accent }) {
+  const styles = ACCENT_STYLES[accent]
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      {chips.map((chip, i) => {
+        if (chip.kind === "step") {
+          return (
+            <span
+              key={i}
+              className={cn(
+                "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1",
+                styles.iconBg,
+                styles.iconText,
+                styles.ring
+              )}
+            >
+              {chip.label}
+            </span>
+          )
+        }
+        if (chip.kind === "cost") {
+          return (
+            <span
+              key={i}
+              className={cn(
+                "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1",
+                COST_TIER_STYLES[chip.tier]
+              )}
+            >
+              {chip.label}
+            </span>
+          )
+        }
+        return (
+          <span
+            key={i}
+            className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+          >
+            {chip.label}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
 
 function SettingsSection({
   id,
@@ -522,7 +665,7 @@ function SettingsSection({
   description,
   icon,
   accent,
-  badge,
+  chips,
   children,
 }: {
   id?: string
@@ -530,7 +673,7 @@ function SettingsSection({
   description: string
   icon: ReactNode
   accent: Accent
-  badge?: SectionBadge
+  chips?: Chip[]
   children: ReactNode
 }) {
   const styles = ACCENT_STYLES[accent]
@@ -553,11 +696,9 @@ function SettingsSection({
             {icon}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold leading-tight text-foreground">{title}</h2>
-              {badge && <SectionBadge badge={badge} accent={accent} />}
-            </div>
-            <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+            <h2 className="text-base font-semibold leading-tight text-foreground">{title}</h2>
+            {chips && chips.length > 0 && <SectionChips chips={chips} accent={accent} />}
+            <p className="mt-1 text-xs text-muted-foreground">{description}</p>
           </div>
         </div>
         <div>{children}</div>
@@ -566,52 +707,44 @@ function SettingsSection({
   )
 }
 
-function SectionBadge({ badge, accent }: { badge: SectionBadge; accent: Accent }) {
-  const styles = ACCENT_STYLES[accent]
-  if (badge.variant === "step") {
-    return (
-      <span
-        className={cn(
-          "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1",
-          styles.iconBg,
-          styles.iconText,
-          styles.ring
-        )}
-      >
-        {badge.label}
-      </span>
-    )
-  }
+function GroupHeading({ label, hint }: { label: string; hint?: string }) {
   return (
-    <span className="inline-flex shrink-0 items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-      {badge.label}
-    </span>
-  )
-}
-
-function GroupHeading({ label }: { label: string }) {
-  return (
-    <div className="flex items-center gap-3 px-1 pt-2">
+    <div className="flex items-center gap-2 px-1 pt-2">
       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
         {label}
       </p>
+      {GROUP_INFO[label] && <GroupInfoTooltip text={GROUP_INFO[label]} />}
+      {hint && (
+        <span className="ml-1 text-[10px] lowercase tracking-wide text-muted-foreground/60">
+          {hint}
+        </span>
+      )}
       <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
     </div>
   )
 }
 
-function RecommendedOrderBanner() {
+const NOTE_ACCENT: Record<Accent, string> = {
+  cyan: "border-cyan-500/30 bg-cyan-500/5",
+  violet: "border-violet-500/30 bg-violet-500/5",
+  emerald: "border-emerald-500/30 bg-emerald-500/5",
+  slate: "border-slate-500/30 bg-slate-500/5",
+  amber: "border-amber-500/30 bg-amber-500/5",
+  indigo: "border-indigo-500/30 bg-indigo-500/5",
+  rose: "border-rose-500/30 bg-rose-500/5",
+  fuchsia: "border-fuchsia-500/30 bg-fuchsia-500/5",
+}
+
+function SectionNote({ accent, children }: { accent: Accent; children: ReactNode }) {
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs text-muted-foreground">
-      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-600 dark:text-cyan-400" />
-      <p>
-        <span className="font-medium text-foreground">Ordem recomendada:</span> atualize os{" "}
-        <span className="font-medium">Embeddings</span> (Passo 1) antes de{" "}
-        <span className="font-medium">Recalibrar</span> (Passo 2) — a calibração usa o kNN derivado
-        dos embeddings. <span className="font-medium">Sinopse canônica</span> e{" "}
-        <span className="font-medium">Resumo de reviews</span> são independentes e podem rodar a
-        qualquer momento.
-      </p>
+    <div
+      className={cn(
+        "flex items-start gap-2 rounded-lg border px-3 py-2 text-xs text-muted-foreground",
+        NOTE_ACCENT[accent]
+      )}
+    >
+      <Info className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", ACCENT_STYLES[accent].iconText)} />
+      <p>{children}</p>
     </div>
   )
 }

@@ -1,10 +1,14 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { recalculateAll, type RecalculateExecutionContext } from "@/server/actions/calculations"
 import { ensureRecalculateScores } from "@/lib/orchestration/integrations/recalculate-scores"
+import {
+  countMissingEmbeddings,
+  countPendingCanonicalSynopses,
+  countPendingReviewSummaries,
+} from "@/server/queries/settings-pending"
 
 // Janela de debounce do recálculo automático: só dispara sozinho depois de 1h
 // SEM novas edições de nota. Uma avaliação IA de atributos já leva >60s, então
@@ -16,6 +20,27 @@ export interface RecalcPendingState {
   pending: boolean
   /** Timestamp da última edição (a janela de 1h conta daqui). */
   lastEditAt: string | null
+}
+
+export interface AiPendingCounts {
+  embeddings: number
+  canonicalSynopsis: number
+  reviewSummary: number
+}
+
+/**
+ * Pendências dos artefatos gerados por IA — versão BARATA (sinais leves, sem o
+ * hashing de embeddings), pra alimentar a trava do botão de recalcular sem
+ * atrasar o clique. Espelha `getSettingsBadgePendingTotal`, mas devolve o
+ * detalhamento por item em vez do total.
+ */
+export async function getAiPendingCounts(): Promise<AiPendingCounts> {
+  const [embeddings, canonicalSynopsis, reviewSummary] = await Promise.all([
+    countMissingEmbeddings().catch(() => 0),
+    countPendingCanonicalSynopses().catch(() => 0),
+    countPendingReviewSummaries().catch(() => 0),
+  ])
+  return { embeddings, canonicalSynopsis, reviewSummary }
 }
 
 /**
@@ -159,7 +184,5 @@ export async function maybeTriggerStaleRecalc(): Promise<RecalcPendingState> {
  * já revalida /ranking, /titles, /settings e / por dentro. Devolve estado tipado.
  */
 export async function triggerRecalcNow() {
-  const result = await recalculateScoresNow()
-  revalidatePath("/ranking")
-  return result
+  return recalculateScoresNow()
 }
