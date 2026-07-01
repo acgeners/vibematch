@@ -15,7 +15,7 @@ import {
 export interface AiPendingItem {
   label: string
   count: number
-  /** Âncora/URL da seção correspondente (ex.: "/settings#embeddings"). */
+  /** URL da seção correspondente (ex.: "/settings?s=embeddings"). */
   href: string
 }
 
