@@ -15,7 +15,6 @@ import { ChipInput } from "@/components/ui/chip-input"
 import { Textarea } from "@/components/ui/textarea"
 import { ExternalSearch } from "@/components/titles/external-search"
 import { CoversManager } from "@/components/titles/covers-manager"
-import { SynopsisQualityDraftSuggestion } from "@/components/titles/synopsis-quality-draft-suggestion"
 import type { ExternalWorkData } from "@/lib/external/types"
 import type { ExistingWorkMatch } from "@/server/actions/external"
 import { createWork, createWorksBatch, findDuplicateWorkById, findDuplicateWorkByTitle, updateWork } from "@/server/actions/works"
@@ -737,14 +736,6 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     void generateCanonicalPreview(blocks)
   }, [generateCanonicalPreview, getValues])
 
-  // Entrada FRESCA (no clique) para a sugestão IA de Interesse Sinopse: usa a
-  // sinopse CANÔNICA consolidada (mesmo sinal do caminho da obra salva), título
-  // e tags do form. Nada é persistido — só vira sugestão.
-  const getSynopsisPredictionInput = useCallback(() => ({
-    title: (getValues("title") ?? "").trim(),
-    synopsis: (canonicalPreview ?? "").trim(),
-    tags: getValues("tags") ?? [],
-  }), [canonicalPreview, getValues])
   const {
     fields: extraPlatformFields,
   } = useFieldArray({
@@ -2122,20 +2113,6 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                   )}
                 </div>
               </div>
-
-              {/* Sugestão IA do Interesse Sinopse — aparece quando a sinopse
-                  canônica é consolidada (após a busca externa / "Usar"). */}
-              {(canonicalPreview || canonicalLoading) && (
-                <SynopsisQualityDraftSuggestion
-                  getInput={getSynopsisPredictionInput}
-                  hasCanonicalSynopsis={Boolean(canonicalPreview?.trim())}
-                  canonicalLoading={canonicalLoading}
-                  manualValue={synopsisQualityValue ?? null}
-                  onApply={(q) =>
-                    setValue("synopsis_quality", q, { shouldValidate: true, shouldDirty: true })
-                  }
-                />
-              )}
 
               <div className="space-y-1.5">
                 <Label htmlFor="observations">Observações</Label>
