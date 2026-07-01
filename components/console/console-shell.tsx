@@ -117,15 +117,24 @@ function NavChip({
       aria-current={active ? "page" : undefined}
       title={section.title}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-lg border px-1.5 py-1 text-xs font-medium transition-colors",
+        "inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-all",
         active
-          ? "border-border bg-muted/70 text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+          ? cn(
+              "font-semibold text-foreground ring-1 shadow-[inset_0_1px_4px_rgba(0,0,0,0.28)]",
+              styles.cardBg,
+              styles.cardBorder,
+              styles.ring
+            )
+          : cn(
+              "border-transparent text-muted-foreground hover:-translate-y-0.5 hover:bg-card/55 hover:text-foreground hover:shadow-md",
+              styles.cardHoverBorder,
+              styles.cardHoverShadow
+            )
       )}
     >
       <span
         className={cn(
-          "grid size-5 shrink-0 place-items-center rounded-md ring-1 [&_svg]:size-3.5",
+          "grid size-6 shrink-0 place-items-center rounded-md ring-1 [&_svg]:size-4",
           styles.iconBg,
           styles.iconText,
           styles.ring
@@ -137,7 +146,7 @@ function NavChip({
       {pending > 0 && (
         <span
           aria-label={`${pending} ${pending === 1 ? "item pendente" : "itens pendentes"}`}
-          className="inline-flex min-w-4 items-center justify-center rounded-full bg-primary px-1 py-0.5 text-[10px] font-bold leading-none text-primary-foreground ring-1 ring-white/15"
+          className="inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-bold leading-none text-primary-foreground ring-1 ring-white/15"
         >
           {pending > 99 ? "99+" : pending}
         </span>
