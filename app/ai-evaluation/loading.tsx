@@ -1,39 +1,71 @@
+import { Sparkles } from "lucide-react"
 import { Header } from "@/components/layout/header"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 
+/**
+ * Skeleton da fila de /ai-evaluation — espelha o layout real: header + tab-strip
+ * (5 abas) + card de filtro + toolbar de seleção + grid 2-col de WorkQueueCard
+ * (capa 96×144 à esquerda, título/meta/estado à direita, nota no canto).
+ */
 export default function AiEvaluationLoading() {
   return (
     <div className="space-y-4">
-      <Header title="Avaliação IA" description="Carregando fila…" />
+      <Header
+        kicker="Avaliação"
+        title="Avaliação IA"
+        description="Fila de avaliação/revisão das notas por IA (atributos) e de re-rank (Veredito IA) desatualizado ou não avaliado."
+        icon={<Sparkles />}
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Card key={i}>
-            <CardHeader className="pb-2">
-              <Skeleton className="h-4 w-32" />
-            </CardHeader>
-            <CardContent>
-              <Skeleton className="h-7 w-16" />
-            </CardContent>
-          </Card>
+      {/* Tab bar — 5 abas */}
+      <div className="flex items-center gap-1 border-b border-border/60">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="-mb-px px-3 py-2">
+            <Skeleton className="h-5 w-24" />
+          </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Card de filtro */}
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-3 p-3.5">
+          <Skeleton className="h-7 w-28" />
+          <Skeleton className="h-7 w-32" />
+          <Skeleton className="h-7 w-24" />
+          <Skeleton className="h-7 w-36" />
+        </CardContent>
+      </Card>
+
+      {/* Toolbar de seleção */}
+      <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-card/58 p-2.5 shadow-sm">
+        <Skeleton className="h-4 w-4 rounded" />
+        <Skeleton className="h-4 w-28" />
+        <div className="mx-1 h-4 w-px bg-border/80" />
+        <Skeleton className="h-7 w-[150px]" />
+      </div>
+
+      {/* Grid 2-col de cards */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {Array.from({ length: 6 }).map((_, i) => (
           <Card key={i}>
-            <CardHeader>
-              <Skeleton className="h-5 w-3/4" />
-              <Skeleton className="h-3 w-1/2 mt-2" />
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                {Array.from({ length: 4 }).map((_, j) => (
-                  <Skeleton key={j} className="h-6 w-16" />
-                ))}
+            <CardContent className="p-3.5">
+              <div className="flex items-start gap-4">
+                <Skeleton className="h-36 w-24 shrink-0 rounded-md" />
+                <div className="flex min-w-0 flex-1 flex-col gap-2 py-0.5">
+                  <Skeleton className="h-5 w-3/4" />
+                  <div className="flex items-center gap-3">
+                    <Skeleton className="h-4 w-16" />
+                    <Skeleton className="h-4 w-10" />
+                    <Skeleton className="h-4 w-10" />
+                  </div>
+                  <Skeleton className="h-6 w-28 rounded-full" />
+                </div>
+                <div className="flex shrink-0 flex-col items-stretch gap-2 self-center">
+                  <Skeleton className="h-8 w-28" />
+                  <Skeleton className="h-8 w-28" />
+                </div>
               </div>
-              <Skeleton className="h-9 w-32" />
             </CardContent>
           </Card>
         ))}

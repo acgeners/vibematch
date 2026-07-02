@@ -100,7 +100,7 @@ export function QueueToolbar({
   showStatusAction?: boolean
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-card/58 p-2.5 shadow-sm">
+    <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-card/95 p-2.5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80">
       <Checkbox
         checked={allSelected}
         onCheckedChange={(v) => onToggleAll(!!v)}

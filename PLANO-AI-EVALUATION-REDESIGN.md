@@ -156,10 +156,26 @@ extras → sobra só "Editar obra".
 - [x] `tsc` + `lint` + **1089 testes** verdes; 6 abas HTTP 200 sem marcadores de erro
       (sem-reviews/sem-tags confirmadas renderizando conteúdo). **NÃO commitado.**
 - [ ] **Revisão iterativa com o usuário** (densidade do card de Interesse, veto do
-      "Mudar status" removido de Atributos/Veredito, sticky toolbar).
-- [ ] Corrigir `loading.tsx` (skeleton não bate com o layout real).
-- [ ] Perf follow-up (opcional): popover lazy (tirar `getSynopsisInputsBatch` do crítico);
-      VIEW/RPC agregando tag+review count; `dynamic()` nos 6 painéis.
+      "Mudar status" removido de Atributos/Veredito).
+- [x] Corrigir `loading.tsx` (skeleton não bate com o layout real). **FEITO 2026-07-02**
+      (branch `feat/ai-eval-polish-perf`): espelha header + tab-strip 5-pills + filtro +
+      toolbar + grid 2-col de card-skeletons.
+- [x] **Sticky toolbar** — `sticky top-0 z-20` + frosted-glass na raiz do `QueueToolbar`
+      (1 linha → 5 abas). Verificado no browser (fixa após scroll, sem gap).
+- [x] Perf follow-up: **popover lazy FEITO** (server-action `getSynopsisInputsAction` on-open;
+      tirou `getSynopsisInputsBatch` do crítico → untracked −40%, sinopse neutra pois o batch
+      não era o long-pole). VIEW/RPC tag+review count = já feito na Fatia 3 (mig 122).
+      **`dynamic()` = redundante** (RSC já code-splita por boundary; só o painel ativo embarca —
+      confirmado). **Aba sinopse:** bottleneck medido = load de 2076 previsões (~300ms) dentro
+      de `getSynopsisQueueWorks`.
+- [x] **EGRESS (A) FEITO** — `justification` = **72% do payload** dessa query (medido:
+      ~1650KB→~464KB, economia ~1185KB/load). Bulk de previsões dropou `justification`;
+      `hydrateJustifications` busca o texto só das obras exibidas com previsão (0 na aba padrão);
+      opt `countOnly` no contador pula a hidratação. Verificado: 531/531 justificativas na view
+      `?sq=predicted`; tabs 200; tsc+1089 testes. Egress −72% (aba padrão + contador), −53%
+      (pior view). Conta na cota do Supabase mesmo server-to-server.
+- [ ] **Latência (B) DEFERIDO** — view/RPC DISTINCT-ON por obra (~1-2 linhas em vez de ~2,8);
+      precisa migration à mão + medição em prod (dev noise-dominated).
 
 ---
 

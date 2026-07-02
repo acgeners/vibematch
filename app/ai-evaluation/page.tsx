@@ -30,7 +30,7 @@ import { TagsReviewsTab } from "@/components/ai-evaluation/tags-reviews-tab"
 import type { TagsReviewsWork } from "@/components/ai-evaluation/tags-reviews-tab"
 import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
 import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
-import { getWorkTagReviewCounts, getSynopsisInputsBatch } from "@/server/queries/work-card-meta"
+import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
 
 const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model", "outdated-reviews"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
@@ -574,9 +574,6 @@ function UntrackedTab({
   synopsisQualities,
 }: {
   works: (UntrackedWork & {
-    canonicalSynopsis: string | null
-    tags: string[]
-    reviewDigest: import("@/lib/ai-recommendation/types").ReviewDigest | null
     tagCount: number
     reviewCount: number
   })[]
@@ -823,7 +820,7 @@ const getAiEvalTabCounts = unstable_cache(
     const [attr, iaRk, syn, revC, tagsC, untracked] = await Promise.all([
       getEligibleWorks(args.activeFilters, args.pubStatusIds, args.personalStatusIds, args.synopsisQualities, args.toleranceOverride),
       getAlignmentQueueWorks({ states: args.iaRkStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities }),
-      getSynopsisQueueWorks({ states: args.synopsisStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities, predictionVersions: args.predictionVersions, predictionQualities: args.predictionQualities, predictionDeltas: args.predictionDeltas, missingManual: args.synopsisQualities.includes("none") }),
+      getSynopsisQueueWorks({ states: args.synopsisStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities, predictionVersions: args.predictionVersions, predictionQualities: args.predictionQualities, predictionDeltas: args.predictionDeltas, missingManual: args.synopsisQualities.includes("none"), countOnly: true }),
       getWorksWithoutReviews({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minReviews: args.minReviews, maxReviews: args.maxReviews }, { countOnly: true }),
       getWorksWithoutTags({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minTags: args.minTags, maxTags: args.maxTags }, { countOnly: true }),
       getUntrackedWorks({ pubStatusIds: args.pubStatusIds, synopsisQualities: args.synopsisQualities }),
@@ -949,19 +946,14 @@ export default async function AiEvaluationPage({
       planPromise ?? getCurrentPlan(),
     ])
     const isPaidPlan = planAllows(plan, "smart_shortlist")
+    // Só as contagens 🏷/💬 (badge + filtro de faixa) entram no crítico. Os inputs
+    // pesados do popover (sinopse/tags/digest) carregam sob demanda ao abrir.
     const idsToHydrate = synopsisQueue.map((w) => w.id)
-    const [inputs, counts] = await Promise.all([
-      getSynopsisInputsBatch(idsToHydrate),
-      getWorkTagReviewCounts(idsToHydrate),
-    ])
+    const counts = await getWorkTagReviewCounts(idsToHydrate)
     let works = synopsisQueue.map((w) => {
-      const inp = inputs.get(w.id)
       const c = counts.get(w.id)
       return {
         ...w,
-        canonicalSynopsis: inp?.canonicalSynopsis ?? null,
-        tags: inp?.tags ?? [],
-        reviewDigest: inp?.reviewDigest ?? null,
         tagCount: c?.tagCount ?? 0,
         reviewCount: c?.reviewCount ?? 0,
       }
@@ -1069,19 +1061,14 @@ export default async function AiEvaluationPage({
   } else if (activeTab === "untracked") {
     const untrackedWorks = await getUntrackedWorks({ pubStatusIds, synopsisQualities })
     activeCount = untrackedWorks.length
+    // Inputs do popover carregam sob demanda (getSynopsisInputsAction) — só as
+    // contagens 🏷/💬 entram no crítico.
     const idsToHydrate = untrackedWorks.map((w) => w.id)
-    const [inputs, counts] = await Promise.all([
-      getSynopsisInputsBatch(idsToHydrate),
-      getWorkTagReviewCounts(idsToHydrate),
-    ])
+    const counts = await getWorkTagReviewCounts(idsToHydrate)
     const works = untrackedWorks.map((w) => {
-      const inp = inputs.get(w.id)
       const c = counts.get(w.id)
       return {
         ...w,
-        canonicalSynopsis: inp?.canonicalSynopsis ?? null,
-        tags: inp?.tags ?? [],
-        reviewDigest: inp?.reviewDigest ?? null,
         tagCount: c?.tagCount ?? 0,
         reviewCount: c?.reviewCount ?? 0,
       }

@@ -255,11 +255,7 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
                 )}
                 {w.predictedAt && <span className="ml-2">· prevista em {fmtPredictedAt(w.predictedAt)}</span>}
               </p>
-              <SynopsisInputsPopover
-                canonicalSynopsis={w.canonicalSynopsis}
-                tags={w.tags}
-                reviewDigest={w.reviewDigest}
-              />
+              <SynopsisInputsPopover workId={w.id} />
             </>
           )
 
