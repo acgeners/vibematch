@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { useState, useTransition } from "react"
-import { Filter, X } from "lucide-react"
+import { ChevronRight, Filter, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -55,20 +55,25 @@ function isDefaultFilterSet(filters: Set<EvaluationFilter> | EvaluationFilter[])
 
 interface AiEvaluationFiltersProps {
   activeFilters: EvaluationFilter[]
-  currentModel: string
-  currentPromptVersion: string
-  currentPromptVersionNum: number
-  promptVersionTolerance: number
-  lowConfidenceThreshold: number
+  /** Config do modelo/prompt — só usada na seção "Estado da avaliação" (showEvalState).
+   *  Opcional: abas sem essa seção (Veredito/Interesse/Tags&Reviews/Untracked) não passam. */
+  currentModel?: string
+  currentPromptVersion?: string
+  currentPromptVersionNum?: number
+  promptVersionTolerance?: number
+  lowConfidenceThreshold?: number
   activePubStatuses: string[]
   activePersonalStatuses: string[]
-  /** Interesse na sinopse (♥–♥♥♥♥) ativos. Compartilhado pelas 2 abas. */
+  /** Interesse na sinopse (♥–♥♥♥♥) ativos. Compartilhado por várias abas. */
   activeSynopsisQualities?: string[]
   /** Quando false, esconde a seção "Estado da avaliação" (usado na aba Veredito IA). */
   showEvalState?: boolean
   /** Quando false, esconde o grupo de status "Leitura" (usado na aba Untracked, onde
    *  todas as obras são Untracked). */
   showPersonalStatus?: boolean
+  /** Mostra o chip "Não avaliada" (Interesse ainda não informado) — abas Interesse
+   *  Sinopse e Tags & Reviews. Na aba Interesse é implícito por showSynopsisState. */
+  showInterestNone?: boolean
   /** Mostra a seção "Estado do Veredito IA" (Desatualizado/Não avaliado) — aba Veredito IA. */
   showIaRkState?: boolean
   /** Estados de Veredito IA ativos ("stale"/"unranked"). */
@@ -85,7 +90,8 @@ interface AiEvaluationFiltersProps {
   predictionVersionOptions?: string[]
   /** Deltas previsto−atual ativos ("up"/"eq"/"down") — aba Interesse na Obra. */
   activePredictionDeltas?: string[]
-  /** Mostra a seção "Dados (nº)" (faixa mín–máx de tags / reviews) — aba Interesse Sinopse. */
+  /** Mostra a seção "Dados (nº)" (faixa mín–máx de tags / reviews) — abas Interesse
+   *  Sinopse e Tags & Reviews. */
   showDataFilters?: boolean
   /** Faixa de tags ativa (0 = sem limite). */
   activeMinTags?: number
@@ -124,16 +130,17 @@ interface FilterDraft {
 
 export function AiEvaluationFilters({
   activeFilters,
-  currentModel,
-  currentPromptVersion,
-  currentPromptVersionNum,
-  promptVersionTolerance,
-  lowConfidenceThreshold,
+  currentModel = "",
+  currentPromptVersion = "",
+  currentPromptVersionNum = 0,
+  promptVersionTolerance = 0,
+  lowConfidenceThreshold = 0.8,
   activePubStatuses,
   activePersonalStatuses,
   activeSynopsisQualities = [],
   showEvalState = true,
   showPersonalStatus = true,
+  showInterestNone = false,
   showIaRkState = false,
   activeIaRkStates = [],
   showSynopsisState = false,
@@ -182,7 +189,8 @@ export function AiEvaluationFilters({
   const propsSignature = JSON.stringify([
     activeFilters, activePubStatuses, activePersonalStatuses, activeSynopsisQualities,
     activeIaRkStates, activeSynopsisStates, activePredictionQualities,
-    activePredictionVersions, activePredictionDeltas, activeMinTags, activeMaxTags, activeMinReviews, activeMaxReviews, promptVersionTolerance,
+    activePredictionVersions, activePredictionDeltas, activeMinTags, activeMaxTags,
+    activeMinReviews, activeMaxReviews, promptVersionTolerance,
   ])
   const [seenSignature, setSeenSignature] = useState(propsSignature)
   if (propsSignature !== seenSignature) {
@@ -190,9 +198,15 @@ export function AiEvaluationFilters({
     setDraft(makeDraft())
   }
 
-  // Serializa o rascunho na URL, preservando params não-gerenciados (tab, busca das
-  // abas sem-reviews/sem-tags, etc.). Cada dimensão só é escrita na aba que a exibe
-  // (mesma condição da UI) pra não injetar params de outra aba.
+  // "Mais filtros" (avançadas) — abre por padrão só quando já há alguma ativa.
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(() =>
+    (showSynopsisState ? activePredictionQualities.length + activePredictionVersions.length + activePredictionDeltas.length : 0) +
+    (showDataFilters ? [activeMinTags, activeMaxTags, activeMinReviews, activeMaxReviews].filter((n) => n > 0).length : 0) > 0,
+  )
+
+  // Serializa o rascunho na URL, preservando params não-gerenciados (tab, etc.).
+  // Cada dimensão só é escrita na aba que a exibe (mesma condição da UI) pra não
+  // injetar params de outra aba.
   const buildParams = (d: FilterDraft): URLSearchParams => {
     const p = new URLSearchParams(searchParams.toString())
     if (showEvalState) {
@@ -241,7 +255,7 @@ export function AiEvaluationFilters({
   const navigate = (p: URLSearchParams) => {
     const qs = p.toString()
     startTransition(() => {
-      router.replace(qs ? `${pathname}?${qs}` : pathname)
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
     })
   }
 
@@ -374,13 +388,25 @@ export function AiEvaluationFilters({
   // conta como filtro ativo.
   const synopsisFilterActive =
     showSynopsisState && [...draft.synState].sort().join(",") !== "unpredicted"
+
+  // Filtros "avançados" (recolhidos em "Mais filtros"): previsão/versão/Δ, faixas
+  // numéricas, fonte externa, golden.
+  const dataActiveCount = showDataFilters
+    ? [draft.minTags, draft.maxTags, draft.minReviews, draft.maxReviews].filter((n) => n > 0).length
+    : 0
+  const advancedActiveCount =
+    (showSynopsisState ? draft.predQ.length + draft.predV.length + draft.predD.length : 0) +
+    dataActiveCount
+  const hasAdvanced = showSynopsisState || showDataFilters
+
   const activeCount =
     evalFilterCount +
     (iaRkFilterActive ? 1 : 0) +
     (synopsisFilterActive ? 1 : 0) +
     draft.pub.length +
     draft.personal.length +
-    draft.synQ.length
+    draft.synQ.length +
+    advancedActiveCount
 
   const hasAnyActive =
     (showEvalState && !isDefaultFilterSet(draft.filters)) ||
@@ -388,7 +414,10 @@ export function AiEvaluationFilters({
     synopsisFilterActive ||
     draft.pub.length > 0 ||
     draft.personal.length > 0 ||
-    draft.synQ.length > 0
+    draft.synQ.length > 0 ||
+    advancedActiveCount > 0
+
+  const showInterestNoneChip = showInterestNone || showSynopsisState
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -410,9 +439,6 @@ export function AiEvaluationFilters({
                 {activeCount}
               </span>
             )}
-            <p className="hidden text-xs text-muted-foreground sm:block">
-              Uma obra aparece se atende qualquer filtro.
-            </p>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -560,130 +586,146 @@ export function AiEvaluationFilters({
             </div>
           </FilterSection>
 
-          {/* Interesse manual + Previsão da IA + Versão + Δ — lado a lado. Cada um
-              cresce pra preencher mas NÃO encolhe abaixo do conteúdo (sem quebra
-              interna em 2 linhas); se não couberem, a seção inteira vai pra baixo. */}
-          <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-start">
-            <div className="sm:grow sm:shrink-0">
-              <FilterSection title="Interesse na sinopse">
-                <div className="flex flex-wrap items-center gap-1">
-                  {SYNOPSIS_QUALITIES.map((q) => {
-                    const active = draft.synQ.includes(q)
-                    return (
-                      <button key={q} type="button" onClick={() => toggleSynopsisQuality(q)}>
-                        <Badge
-                          variant={active ? "default" : "outline"}
-                          className="cursor-pointer text-sm"
-                        >
-                          {q}
-                        </Badge>
-                      </button>
-                    )
-                  })}
-                  {/* Triagem manual (só na aba Interesse na Obra): obras ainda sem
-                      Interesse informado (synopsis_quality IS NULL). */}
-                  {showSynopsisState && (
-                    <button type="button" onClick={() => toggleSynopsisQuality("none")}>
-                      <Badge
-                        variant={draft.synQ.includes("none") ? "default" : "outline"}
-                        className="cursor-pointer text-sm"
-                      >
-                        Não avaliada
-                      </Badge>
-                    </button>
-                  )}
-                  {/* Proveniência legada: tem um valor de Interesse não-confirmado
-                      (source=legacy_unknown) — separa dos human_manual. */}
-                  {showSynopsisState && (
-                    <button
-                      type="button"
-                      onClick={() => toggleSynopsisQuality("unknown")}
-                      title="Tem um valor de Interesse de proveniência legada/não-confirmada (não definido por você)"
+          {/* Interesse manual — primário, sempre visível. */}
+          <FilterSection title="Interesse">
+            <div className="flex flex-wrap items-center gap-1">
+              {SYNOPSIS_QUALITIES.map((q) => {
+                const active = draft.synQ.includes(q)
+                return (
+                  <button key={q} type="button" onClick={() => toggleSynopsisQuality(q)}>
+                    <Badge
+                      variant={active ? "default" : "outline"}
+                      className="cursor-pointer text-sm"
                     >
-                      <Badge
-                        variant={draft.synQ.includes("unknown") ? "default" : "outline"}
-                        className="cursor-pointer text-sm"
-                      >
-                        Desconhecido
-                      </Badge>
-                    </button>
+                      {q}
+                    </Badge>
+                  </button>
+                )
+              })}
+              {/* Triagem manual: obras ainda sem Interesse informado (synopsis_quality IS NULL). */}
+              {showInterestNoneChip && (
+                <button type="button" onClick={() => toggleSynopsisQuality("none")}>
+                  <Badge
+                    variant={draft.synQ.includes("none") ? "default" : "outline"}
+                    className="cursor-pointer text-sm"
+                  >
+                    Não avaliada
+                  </Badge>
+                </button>
+              )}
+              {/* Proveniência legada: tem um valor de Interesse não-confirmado
+                  (source=legacy_unknown) — separa dos human_manual. */}
+              {showSynopsisState && (
+                <button
+                  type="button"
+                  onClick={() => toggleSynopsisQuality("unknown")}
+                  title="Tem um valor de Interesse de proveniência legada/não-confirmada (não definido por você)"
+                >
+                  <Badge
+                    variant={draft.synQ.includes("unknown") ? "default" : "outline"}
+                    className="cursor-pointer text-sm"
+                  >
+                    Desconhecido
+                  </Badge>
+                </button>
+              )}
+            </div>
+          </FilterSection>
+
+          {/* "Mais filtros" — dimensões avançadas recolhidas (previsão da IA, versão,
+              Δ previsto×atual, faixas numéricas). Só nas abas que as exibem. */}
+          {hasAdvanced && (
+            <div className="rounded-lg border border-border/65 bg-background/40">
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((v) => !v)}
+                className="flex w-full items-center gap-1.5 bg-card/60 px-3 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <ChevronRight className={cn("h-3 w-3 transition-transform", showAdvanced && "rotate-90")} />
+                Mais filtros
+                {advancedActiveCount > 0 && (
+                  <span className="rounded-full border border-border/70 px-1.5 text-[10px] font-medium normal-case tracking-normal">
+                    {advancedActiveCount}
+                  </span>
+                )}
+              </button>
+              {showAdvanced && (
+                <div className="flex flex-col gap-1.5 border-t border-border/60 p-2.5 sm:flex-row sm:flex-wrap sm:items-start">
+                  {/* Previsão da IA (valor previsto). */}
+                  {showSynopsisState && (
+                    <div className="sm:grow sm:shrink-0">
+                      <FilterSection title="Previsão da IA">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {SYNOPSIS_QUALITIES.map((q) => {
+                            const active = draft.predQ.includes(q)
+                            return (
+                              <button key={q} type="button" onClick={() => togglePredictionQuality(q)}>
+                                <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-sm">
+                                  {q}
+                                </Badge>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </FilterSection>
+                    </div>
+                  )}
+
+                  {/* Versão da previsão (prompt_version da previsão ativa). */}
+                  {showSynopsisState && predictionVersionOptions.length > 0 && (
+                    <div className="sm:grow sm:shrink-0">
+                      <FilterSection title="Versão da previsão">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {predictionVersionOptions.map((v) => {
+                            const active = draft.predV.includes(v)
+                            return (
+                              <button key={v} type="button" onClick={() => togglePredictionVersion(v)}>
+                                <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-xs">
+                                  {v}
+                                  {v === currentPromptVersion ? " (atual)" : ""}
+                                </Badge>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </FilterSection>
+                    </div>
+                  )}
+
+                  {/* Δ Previsto × atual = nível previsto − nível atual (manual/desconhecido), range -3..+3. */}
+                  {showSynopsisState && (
+                    <div className="sm:grow sm:shrink-0">
+                      <FilterSection title="Δ Previsto × atual">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {DELTA_OPTIONS.map((opt) => {
+                            const active = draft.predD.includes(opt.id)
+                            return (
+                              <button key={opt.id} type="button" onClick={() => togglePredictionDelta(opt.id)}>
+                                <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-xs tabular-nums">
+                                  {opt.label}
+                                </Badge>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </FilterSection>
+                    </div>
+                  )}
+
+                  {showDataFilters && (
+                    <div className="sm:grow sm:shrink-0">
+                      <FilterSection title="Dados (nº)">
+                        <div className="flex flex-wrap items-start gap-3">
+                          <NumRange label="tags" min={draft.minTags} max={draft.maxTags} onMin={setMinTags} onMax={setMaxTags} onEnter={apply} />
+                          <NumRange label="reviews úteis" min={draft.minReviews} max={draft.maxReviews} onMin={setMinReviews} onMax={setMaxReviews} onEnter={apply} />
+                        </div>
+                      </FilterSection>
+                    </div>
                   )}
                 </div>
-              </FilterSection>
+              )}
             </div>
-
-            {/* Previsão da IA (valor previsto) — separado do Interesse manual ao lado. */}
-            {showSynopsisState && (
-              <div className="sm:grow sm:shrink-0">
-                <FilterSection title="Previsão da IA">
-                  <div className="flex flex-wrap items-center gap-1">
-                    {SYNOPSIS_QUALITIES.map((q) => {
-                      const active = draft.predQ.includes(q)
-                      return (
-                        <button key={q} type="button" onClick={() => togglePredictionQuality(q)}>
-                          <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-sm">
-                            {q}
-                          </Badge>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </FilterSection>
-              </div>
-            )}
-
-            {/* Versão da previsão (prompt_version da previsão ativa). */}
-            {showSynopsisState && predictionVersionOptions.length > 0 && (
-              <div className="sm:grow sm:shrink-0">
-                <FilterSection title="Versão da previsão">
-                  <div className="flex flex-wrap items-center gap-1">
-                    {predictionVersionOptions.map((v) => {
-                      const active = draft.predV.includes(v)
-                      return (
-                        <button key={v} type="button" onClick={() => togglePredictionVersion(v)}>
-                          <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-xs">
-                            {v}
-                            {v === currentPromptVersion ? " (atual)" : ""}
-                          </Badge>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </FilterSection>
-              </div>
-            )}
-
-            {/* Δ Previsto × atual = nível previsto − nível atual (manual/desconhecido), range -3..+3. */}
-            {showSynopsisState && (
-              <div className="sm:grow sm:shrink-0">
-                <FilterSection title="Δ Previsto × atual">
-                  <div className="flex flex-wrap items-center gap-1">
-                    {DELTA_OPTIONS.map((opt) => {
-                      const active = draft.predD.includes(opt.id)
-                      return (
-                        <button key={opt.id} type="button" onClick={() => togglePredictionDelta(opt.id)}>
-                          <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-xs tabular-nums">
-                            {opt.label}
-                          </Badge>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </FilterSection>
-              </div>
-            )}
-
-            {showDataFilters && (
-              <div className="sm:grow sm:shrink-0">
-                <FilterSection title="Dados (nº)">
-                  <div className="flex flex-wrap items-start gap-3">
-                    <NumRange label="tags" min={draft.minTags} max={draft.maxTags} onMin={setMinTags} onMax={setMaxTags} onEnter={apply} />
-                    <NumRange label="reviews úteis" min={draft.minReviews} max={draft.maxReviews} onMin={setMinReviews} onMax={setMaxReviews} onEnter={apply} />
-                  </div>
-                </FilterSection>
-              </div>
-            )}
-          </div>
+          )}
         </div>
       </div>
     </TooltipProvider>

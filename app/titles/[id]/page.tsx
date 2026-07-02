@@ -1146,41 +1146,33 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     <span className="text-4xl leading-none" aria-hidden>
                       {info.emoji}
                     </span>
-                    {score == null ? (
+                    {score != null ? (
+                      <div
+                        className={cn(
+                          "grid place-items-center w-14 h-9 rounded-md font-mono text-xl font-bold leading-none",
+                          getCriterionColorClass(score, slug, scoreThresholds?.criteria?.[slug])
+                        )}
+                      >
+                        {score.toFixed(1)}
+                      </div>
+                    ) : (
                       <div className="grid place-items-center w-14 h-9 rounded-md border border-dashed text-muted-foreground text-base">
                         —
                       </div>
-                    ) : (() => {
-                      const justification = aiScore?.justification?.trim() || null
-                      const scoreBadge = (
-                        <div
-                          className={cn(
-                            "grid place-items-center w-14 h-9 rounded-md font-mono text-xl font-bold leading-none",
-                            getCriterionColorClass(score, slug, scoreThresholds?.criteria?.[slug]),
-                            justification && "cursor-help",
-                          )}
-                        >
-                          {score.toFixed(1)}
-                        </div>
-                      )
-                      if (!justification) return scoreBadge
-                      return (
-                        <TooltipProvider delayDuration={150}>
-                          <Tooltip>
-                            <TooltipTrigger asChild>{scoreBadge}</TooltipTrigger>
-                            <TooltipContent side="right" className="max-w-xs whitespace-pre-line text-left leading-relaxed">
-                              {justification}
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      )
-                    })()}
+                    )}
                   </div>
                   <div className="flex-1 min-w-0 space-y-1.5">
                     <CriterionTitleTooltip
                       name={info.name}
                       description={info.description}
                     />
+                    {aiScore?.justification && (
+                      <ExpandableText
+                        text={aiScore.justification}
+                        limit={140}
+                        className="text-[11px] leading-4 text-muted-foreground/80"
+                      />
+                    )}
                     {aiScore && aiScore.suggested_score != null && aiScore.suggested_score !== score && (
                       <p className="text-[11px] text-muted-foreground/70">
                         Sugestão IA:{" "}

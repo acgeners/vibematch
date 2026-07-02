@@ -38,9 +38,16 @@ function verdict(c: SynopsisVersionComparison): { label: string; tone: "b" | "a"
   return { label: "Inconclusivo — sem diferença significativa ainda", tone: "tie" }
 }
 
-export async function ShadowComparePanel() {
+export async function ShadowComparePanel({
+  comparison: comparisonProp,
+}: {
+  /** Reusa a comparação já buscada pela página (SynopsisAccuracyBar) — evita
+   *  refazer `getSynopsisVersionComparison()` na aba Interesse. */
+  comparison?: SynopsisVersionComparison | null
+} = {}) {
   if (!isInterestShadowEnabled()) return null
-  const [rows, comparison] = await Promise.all([getShadowComparisonRows(), getSynopsisVersionComparison()])
+  const rows = await getShadowComparisonRows()
+  const comparison = comparisonProp !== undefined ? comparisonProp : await getSynopsisVersionComparison()
   if (rows.length === 0) {
     return (
       <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">

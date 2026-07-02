@@ -1,5 +1,6 @@
 "use client"
 
+import { Sparkles } from "lucide-react"
 import { TaskButton } from "./task-button"
 import {
   acquireReviewsForWork,
@@ -16,8 +17,10 @@ export function ReviewRowAction({ workId }: { workId: string }) {
     <TaskButton
       taskId={`acquire-reviews:${workId}`}
       kind="acquire-reviews"
-      label="Buscar reviews + digest"
+      label="Buscar reviews"
       busyLabel="Buscando…"
+      variant="default"
+      icon={<Sparkles className="h-3.5 w-3.5" />}
       run={() => acquireReviewsForWork(workId)}
       formatDone={(r) => {
         const x = r as AcquireReviewsResult
@@ -40,6 +43,7 @@ export function ReviewBatchAction({ workIds }: { workIds: string[] }) {
       label={`Buscar reviews em fila (${n})`}
       busyLabel="Buscando fila…"
       variant="default"
+      icon={<Sparkles className="h-3.5 w-3.5" />}
       run={() => acquireReviewsForWorks(workIds)}
       disabled={workIds.length === 0}
       formatDone={(r) => {

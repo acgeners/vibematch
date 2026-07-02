@@ -1,10 +1,12 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRowsParallel } from "@/lib/supabase/paginate"
 import { pickPrimaryCover } from "@/lib/work-derived"
 import { isUsefulReviewLength, isUsefulReviewText } from "@/lib/reviews/useful-review"
 import { PUBLICATION_STATUSES_BY_ID, PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { classifyWorksWithoutReviews, type NoReviewWork, type NoReviewFilters, type WorkMetaRow } from "@/lib/reviews/no-review-classify"
 import { loadEffectiveInterest } from "@/lib/synopsis-interest/effective-interest"
+import { workCardCountsRpc } from "@/server/queries/work-card-meta"
 
 export type { NoReviewWork, NoReviewFilters } from "@/lib/reviews/no-review-classify"
 
@@ -12,6 +14,11 @@ export interface NoReviewResult {
   works: NoReviewWork[]
   /** total sem filtro de busca/golden/external (universo "faixa min..máx de reviews úteis"). */
   totalWithoutReviews: number
+  /** ids do universo (faixa de reviews) — populado no `countOnly` p/ unir com a aba de tags. */
+  ids?: string[]
+  /** Reviews úteis por obra (TODAS as obras, já computado no scan) — reaproveitado pela
+   *  aba "Tags & Reviews" pra não re-varrer work_reviews no card. */
+  usefulCountByWork?: Map<string, number>
 }
 
 /**
@@ -19,42 +26,51 @@ export interface NoReviewResult {
  * buscadas (text_length+fetched_at), reviews externas manuais (text → regra de utilidade),
  * external ids aceitos, golden ids. A contagem de "reviews úteis" soma buscadas + manuais.
  * NÃO carrega texto de digest. NÃO dispara LLM/summary/digest/avaliação.
+ *
+ * `countOnly` (caminho do badge/contador de aba): computa só `totalWithoutReviews`
+ * (que só depende de status + faixa de reviews úteis, não de busca/golden/external/
+ * interesse) e pula a hidratação de capas/fontes/golden/interesse/classificação.
  */
-export async function getWorksWithoutReviews(filters: NoReviewFilters = {}): Promise<NoReviewResult> {
+export async function getWorksWithoutReviews(
+  filters: NoReviewFilters = {},
+  opts: { countOnly?: boolean } = {},
+): Promise<NoReviewResult> {
   const sb = createAdminClient()
-  const PAGE = 1000
 
-  // 1) reviews: agrega useful-count + last fetched por obra (colunas leves).
+  // 1) reviews úteis por obra: as duas tabelas (buscadas + manuais) escaneadas em
+  // paralelo, cada uma com scan paralelo interno (contagem order-independent).
+  // Caminho rápido: RPC agregada (migration 122) — reviews úteis por obra em SQL, 1
+  // chamada (work_reviews text_length≥40 + manual trim≥40). Fallback: scan paralelo
+  // das duas tabelas (contagem em JS). `lastFetched` (fetched_at) não é mais consumido
+  // (card simplificado) → só populado no fallback, por compat. da assinatura do classify.
   const usefulCount = new Map<string, number>()
   const lastFetched = new Map<string, string | null>()
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await sb
-      .from("work_reviews")
-      .select("work_id, text_length, fetched_at")
-      .range(from, from + PAGE - 1)
-    if (error) throw new Error(`work_reviews: ${error.message}`)
-    for (const r of (data ?? []) as Array<{ work_id: string; text_length: number | null; fetched_at: string | null }>) {
+  const rpcCounts = await workCardCountsRpc(sb, null)
+  if (rpcCounts) {
+    for (const [id, c] of rpcCounts) usefulCount.set(id, c.reviewCount)
+  } else {
+    const [fetchedRows, manualRows] = await Promise.all([
+      fetchAllRowsParallel<{ work_id: string; text_length: number | null; fetched_at: string | null }>(
+        () => sb.from("work_reviews").select("work_id", { count: "exact", head: true }),
+        (from, to) => sb.from("work_reviews").select("work_id, text_length, fetched_at").range(from, to),
+        "work_reviews",
+      ),
+      // reviews EXTERNAS adicionadas à mão — também alimentam digest/avaliação, então
+      // contam pra faixa min/máx. Sem `text_length` na tabela: regra por texto (≥40).
+      fetchAllRowsParallel<{ work_id: string; text: string | null }>(
+        () => sb.from("work_external_reviews_manual").select("work_id", { count: "exact", head: true }),
+        (from, to) => sb.from("work_external_reviews_manual").select("work_id, text").range(from, to),
+        "work_external_reviews_manual",
+      ),
+    ])
+    for (const r of fetchedRows) {
       if (isUsefulReviewLength(r.text_length)) usefulCount.set(r.work_id, (usefulCount.get(r.work_id) ?? 0) + 1)
       const prev = lastFetched.get(r.work_id) ?? null
       if (r.fetched_at && (!prev || r.fetched_at > prev)) lastFetched.set(r.work_id, r.fetched_at)
     }
-    if (!data || data.length < PAGE) break
-  }
-
-  // 1b) reviews EXTERNAS adicionadas à mão (work_external_reviews_manual) — também alimentam
-  //     o digest e a avaliação IA, então contam para a faixa min/máx (antes só `work_reviews`
-  //     entravam, e obras com reviews só manuais apareciam como "sem review"). Sem `text_length`
-  //     na tabela: aplica a regra por texto (≥40). Soma no mesmo mapa que as buscadas.
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await sb
-      .from("work_external_reviews_manual")
-      .select("work_id, text")
-      .range(from, from + PAGE - 1)
-    if (error) throw new Error(`work_external_reviews_manual: ${error.message}`)
-    for (const r of (data ?? []) as Array<{ work_id: string; text: string | null }>) {
+    for (const r of manualRows) {
       if (isUsefulReviewText(r.text ?? "")) usefulCount.set(r.work_id, (usefulCount.get(r.work_id) ?? 0) + 1)
     }
-    if (!data || data.length < PAGE) break
   }
 
   // 2) works ativas (+ pub/personal filter no SQL). Colunas leves; canonical só presença.
@@ -87,26 +103,33 @@ export async function getWorksWithoutReviews(filters: NoReviewFilters = {}): Pro
   const totalWithoutReviews = activeNoReview.length
   const ids = activeNoReview.map((w) => w.id)
 
-  // 3) external ids aceitos + golden (chunked, leves).
+  // Badge/contador de aba: o total já está pronto e não depende de
+  // busca/golden/external/interesse — pula toda a hidratação abaixo. Devolve os
+  // ids do universo pra aba "Tags & Reviews" unir com o universo de tags.
+  if (opts.countOnly) return { works: [], totalWithoutReviews, ids, usefulCountByWork: usefulCount }
+
+  // 3) external ids aceitos + golden (chunked, leves; chunks em paralelo).
   const acceptedSources = new Map<string, string[]>()
   const goldenIds = new Set<string>()
   const chunk = <T,>(a: T[], n: number) => { const o: T[][] = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o }
-  for (const c of chunk(ids, 200)) {
-    const { data, error } = await sb.from("work_external_ids").select("work_id, source, is_rejected").in("work_id", c)
-    if (error) throw new Error(`work_external_ids: ${error.message}`)
-    for (const r of (data ?? []) as Array<{ work_id: string; source: string; is_rejected: boolean | null }>) {
-      if (!r.is_rejected) {
-        const list = acceptedSources.get(r.work_id) ?? []
-        list.push(r.source)
-        acceptedSources.set(r.work_id, list)
+  await Promise.all([
+    Promise.all(chunk(ids, 200).map(async (c) => {
+      const { data, error } = await sb.from("work_external_ids").select("work_id, source, is_rejected").in("work_id", c)
+      if (error) throw new Error(`work_external_ids: ${error.message}`)
+      for (const r of (data ?? []) as Array<{ work_id: string; source: string; is_rejected: boolean | null }>) {
+        if (!r.is_rejected) {
+          const list = acceptedSources.get(r.work_id) ?? []
+          list.push(r.source)
+          acceptedSources.set(r.work_id, list)
+        }
       }
-    }
-  }
-  for (const c of chunk(ids, 200)) {
-    const { data, error } = await sb.from("synopsis_interest_golden").select("work_id").in("work_id", c)
-    if (error) throw new Error(`synopsis_interest_golden: ${error.message}`)
-    for (const r of (data ?? []) as Array<{ work_id: string }>) goldenIds.add(r.work_id)
-  }
+    })),
+    Promise.all(chunk(ids, 200).map(async (c) => {
+      const { data, error } = await sb.from("synopsis_interest_golden").select("work_id").in("work_id", c)
+      if (error) throw new Error(`synopsis_interest_golden: ${error.message}`)
+      for (const r of (data ?? []) as Array<{ work_id: string }>) goldenIds.add(r.work_id)
+    })),
+  ])
 
   // 4) Interesse efetivo (manual ?? previsto) só quando o filtro de interesse está ativo —
   //    a previsão exige paginar synopsis_quality_predictions, evitado no caminho padrão.
@@ -122,7 +145,9 @@ export async function getWorksWithoutReviews(filters: NoReviewFilters = {}): Pro
     title: w.title,
     coverUrl: pickPrimaryCover(w.work_covers),
     publicationStatus: w.publication_status_id != null ? (PUBLICATION_STATUSES_BY_ID[w.publication_status_id]?.status ?? "Unknown") : "Unknown",
+    publicationStatusId: w.publication_status_id,
     personalStatus: w.personal_status_id != null ? (PERSONAL_STATUSES_BY_ID[w.personal_status_id]?.status ?? "—") : "—",
+    personalStatusId: w.personal_status_id,
     aiEvalStatus: w.ai_eval_status,
     canonicalPresent: !!(w.canonical_synopsis && String(w.canonical_synopsis).trim()),
     usefulReviewCount: usefulCount.get(w.id) ?? 0,
@@ -137,5 +162,5 @@ export async function getWorksWithoutReviews(filters: NoReviewFilters = {}): Pro
     goldenWorkIds: goldenIds,
     filters,
   })
-  return { works: result, totalWithoutReviews }
+  return { works: result, totalWithoutReviews, usefulCountByWork: usefulCount }
 }

@@ -1,9 +1,11 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRowsParallel } from "@/lib/supabase/paginate"
 import { pickPrimaryCover } from "@/lib/work-derived"
 import { PUBLICATION_STATUSES_BY_ID, PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { classifyWorksWithoutTags, type NoTagsWork, type NoTagsFilters, type TagWorkMetaRow } from "@/lib/tags/no-tags-classify"
 import { loadEffectiveInterest } from "@/lib/synopsis-interest/effective-interest"
+import { workCardCountsRpc } from "@/server/queries/work-card-meta"
 
 export type { NoTagsWork, NoTagsFilters } from "@/lib/tags/no-tags-classify"
 
@@ -11,29 +13,44 @@ export interface NoTagsResult {
   works: NoTagsWork[]
   /** total sem filtro de busca/golden/external (universo "faixa min..máx de tags"). */
   totalWithoutTags: number
+  /** ids do universo (faixa de tags) — populado no `countOnly` p/ unir com a aba de reviews. */
+  ids?: string[]
+  /** Nº de tags por obra (TODAS as obras, já computado no scan) — reaproveitado pela
+   *  aba "Tags & Reviews" pra não re-varrer work_tags no card. */
+  tagCountByWork?: Map<string, number>
 }
 
 /**
  * Loader server-only. Read-only. Espelha `getWorksWithoutReviews`. Poucas queries
  * (sem N+1): work_tags (só work_id), works ativas, external ids aceitos, golden ids.
  * NÃO carrega texto de review/sinopse. NÃO dispara LLM/summary/digest/avaliação.
+ *
+ * `countOnly` (caminho do badge/contador de aba): computa só `totalWithoutTags`
+ * (que só depende de status + faixa de tags, não de busca/golden/external/interesse)
+ * e pula a hidratação de capas/fontes/golden/interesse/classificação. Sai bem mais
+ * barato no fan-out de contadores das abas.
  */
-export async function getWorksWithoutTags(filters: NoTagsFilters = {}): Promise<NoTagsResult> {
+export async function getWorksWithoutTags(
+  filters: NoTagsFilters = {},
+  opts: { countOnly?: boolean } = {},
+): Promise<NoTagsResult> {
   const sb = createAdminClient()
-  const PAGE = 1000
 
-  // 1) tags: agrega contagem por obra (coluna leve work_id).
+  // 1) tags: agrega contagem por obra (coluna leve work_id). Scan paralelo:
+  // conta primeiro, dispara as páginas juntas (a contagem é order-independent).
+  // Caminho rápido: RPC agregada (migration 122) — contagem por obra em SQL, 1 chamada.
+  // Fallback: scan paralelo de work_tags (contagem em JS) se a RPC não existir.
   const tagCount = new Map<string, number>()
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await sb
-      .from("work_tags")
-      .select("work_id")
-      .range(from, from + PAGE - 1)
-    if (error) throw new Error(`work_tags: ${error.message}`)
-    for (const r of (data ?? []) as Array<{ work_id: string }>) {
-      tagCount.set(r.work_id, (tagCount.get(r.work_id) ?? 0) + 1)
-    }
-    if (!data || data.length < PAGE) break
+  const rpcCounts = await workCardCountsRpc(sb, null)
+  if (rpcCounts) {
+    for (const [id, c] of rpcCounts) tagCount.set(id, c.tagCount)
+  } else {
+    const tagRows = await fetchAllRowsParallel<{ work_id: string }>(
+      () => sb.from("work_tags").select("work_id", { count: "exact", head: true }),
+      (from, to) => sb.from("work_tags").select("work_id").range(from, to),
+      "work_tags",
+    )
+    for (const r of tagRows) tagCount.set(r.work_id, (tagCount.get(r.work_id) ?? 0) + 1)
   }
 
   // 2) works ativas (+ pub/personal filter no SQL). Colunas leves; canonical só presença.
@@ -66,26 +83,33 @@ export async function getWorksWithoutTags(filters: NoTagsFilters = {}): Promise<
   const totalWithoutTags = activeFewTags.length
   const ids = activeFewTags.map((w) => w.id)
 
-  // 3) external ids aceitos + golden (chunked, leves).
+  // Badge/contador de aba: o total já está pronto e não depende de
+  // busca/golden/external/interesse — pula toda a hidratação abaixo. Devolve os
+  // ids do universo pra aba "Tags & Reviews" unir com o universo de reviews.
+  if (opts.countOnly) return { works: [], totalWithoutTags, ids, tagCountByWork: tagCount }
+
+  // 3) external ids aceitos + golden (chunked, leves; chunks em paralelo).
   const acceptedSources = new Map<string, string[]>()
   const goldenIds = new Set<string>()
   const chunk = <T,>(a: T[], n: number) => { const o: T[][] = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o }
-  for (const c of chunk(ids, 200)) {
-    const { data, error } = await sb.from("work_external_ids").select("work_id, source, is_rejected").in("work_id", c)
-    if (error) throw new Error(`work_external_ids: ${error.message}`)
-    for (const r of (data ?? []) as Array<{ work_id: string; source: string; is_rejected: boolean | null }>) {
-      if (!r.is_rejected) {
-        const list = acceptedSources.get(r.work_id) ?? []
-        list.push(r.source)
-        acceptedSources.set(r.work_id, list)
+  await Promise.all([
+    Promise.all(chunk(ids, 200).map(async (c) => {
+      const { data, error } = await sb.from("work_external_ids").select("work_id, source, is_rejected").in("work_id", c)
+      if (error) throw new Error(`work_external_ids: ${error.message}`)
+      for (const r of (data ?? []) as Array<{ work_id: string; source: string; is_rejected: boolean | null }>) {
+        if (!r.is_rejected) {
+          const list = acceptedSources.get(r.work_id) ?? []
+          list.push(r.source)
+          acceptedSources.set(r.work_id, list)
+        }
       }
-    }
-  }
-  for (const c of chunk(ids, 200)) {
-    const { data, error } = await sb.from("synopsis_interest_golden").select("work_id").in("work_id", c)
-    if (error) throw new Error(`synopsis_interest_golden: ${error.message}`)
-    for (const r of (data ?? []) as Array<{ work_id: string }>) goldenIds.add(r.work_id)
-  }
+    })),
+    Promise.all(chunk(ids, 200).map(async (c) => {
+      const { data, error } = await sb.from("synopsis_interest_golden").select("work_id").in("work_id", c)
+      if (error) throw new Error(`synopsis_interest_golden: ${error.message}`)
+      for (const r of (data ?? []) as Array<{ work_id: string }>) goldenIds.add(r.work_id)
+    })),
+  ])
 
   // 4) Interesse efetivo (manual ?? previsto) só quando o filtro de interesse está ativo.
   const manualInterest = new Map<string, string | null>()
@@ -100,7 +124,9 @@ export async function getWorksWithoutTags(filters: NoTagsFilters = {}): Promise<
     title: w.title,
     coverUrl: pickPrimaryCover(w.work_covers),
     publicationStatus: w.publication_status_id != null ? (PUBLICATION_STATUSES_BY_ID[w.publication_status_id]?.status ?? "Unknown") : "Unknown",
+    publicationStatusId: w.publication_status_id,
     personalStatus: w.personal_status_id != null ? (PERSONAL_STATUSES_BY_ID[w.personal_status_id]?.status ?? "—") : "—",
+    personalStatusId: w.personal_status_id,
     aiEvalStatus: w.ai_eval_status,
     canonicalPresent: !!(w.canonical_synopsis && String(w.canonical_synopsis).trim()),
     tagCount: tagCount.get(w.id) ?? 0,
@@ -114,5 +140,5 @@ export async function getWorksWithoutTags(filters: NoTagsFilters = {}): Promise<
     goldenWorkIds: goldenIds,
     filters,
   })
-  return { works: result, totalWithoutTags }
+  return { works: result, totalWithoutTags, tagCountByWork: tagCount }
 }

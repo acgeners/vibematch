@@ -1,7 +1,10 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { toast } from "sonner"
+import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { useRefresh } from "@/lib/use-refresh"
 import { runTask } from "@/lib/tasks-store"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
@@ -20,6 +23,7 @@ export function TaskButton({
   formatDone,
   variant = "outline",
   size = "sm",
+  icon,
   className,
   disabled,
 }: {
@@ -32,6 +36,8 @@ export function TaskButton({
   formatDone: (result: unknown) => { message: string; ok: boolean }
   variant?: "default" | "outline" | "secondary" | "ghost"
   size?: "sm" | "default"
+  /** Ícone à esquerda do rótulo (trocado por spinner enquanto ocupado). */
+  icon?: ReactNode
   className?: string
   disabled?: boolean
 }) {
@@ -45,7 +51,7 @@ export function TaskButton({
       variant={variant}
       size={size}
       disabled={busy || disabled}
-      className={className}
+      className={cn("gap-1.5", className)}
       onClick={() =>
         runTask({
           id: taskId,
@@ -63,6 +69,7 @@ export function TaskButton({
         })
       }
     >
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : icon}
       {busy ? busyLabel : label}
     </Button>
   )

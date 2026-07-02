@@ -19,10 +19,12 @@ privada 6PN), sem loteria de capacidade e sem timeout de serverless.
 
 ## Particularidades que guiam o setup
 
-- **Supabase fica em AWS us-east-2 (Ohio) — sem migração.** Por isso o app vai na
-  região **`iad` (Ashburn, Virginia)**, ~10-20ms do Supabase → corta o round-trip
-  de DB de ~300ms (dev BR) pra ~10-15ms. **Não** usar `gru` (São Paulo): o app é
-  pesado em queries, e proximidade do **DB** ganha da proximidade do usuário BR.
+- **Supabase MIGROU pra AWS sa-east-1 (São Paulo) em 2026-07-02** (projeto novo
+  `obwlwukwovetgjqdpizd`; o antigo em Ohio `djbreiyzwoevbmoscqiq` = backup). Por isso
+  o app vai na região **`gru` (São Paulo)**, ao lado do DB → round-trip ~10-15ms.
+  (Antes o DB ficava em Ohio e o plano era `iad`; **obsoleto**.) A regra segue a
+  mesma — co-localizar app **+** DB ganha (o app é pesado em queries) — só mudou o
+  continente, e agora ainda fica perto do usuário BR de brinde.
 - **FlareSolverr é app separado e interno.** O app principal chama via rede
   privada; FlareSolverr **não expõe porta pública** (seguro por padrão).
 - **Comix + Cloudflare:** o fetch do Comix depende de **sessão de FlareSolverr**.
@@ -42,11 +44,11 @@ Internet
   ↓ HTTPS (TLS automático)
 Fly proxy  →  vibematch.fly.dev
   ↓ :3000
-app (Next.js standalone, região iad)
+app (Next.js standalone, região gru)
   ↓ rede privada Fly (flycast/.internal)
-flaresolverr (:8191, INTERNO, região iad)
+flaresolverr (:8191, INTERNO, região gru)
 
-app  →  Supabase (AWS us-east-2 Ohio, ~10-20ms de iad)
+app  →  Supabase (AWS sa-east-1 São Paulo, ~10-15ms de gru)
 app  →  Anthropic / OpenAI
 ```
 
@@ -70,7 +72,7 @@ Sobe o FlareSolverr como app próprio, **sem serviço público**. Crie
 
 ```toml
 app = "vibematch-flaresolverr"
-primary_region = "iad"
+primary_region = "gru"
 
 [build]
   image = "ghcr.io/flaresolverr/flaresolverr:latest"
@@ -121,7 +123,7 @@ Reusa o `Dockerfile` existente (não muda nada nele). Crie `fly.toml`:
 
 ```toml
 app = "vibematch"
-primary_region = "iad"
+primary_region = "gru"
 
 [build]
   dockerfile = "Dockerfile"
@@ -225,9 +227,9 @@ parecido com o da Vercel (sem os preview-deploys por PR, que o Fly não faz nati
   request (cold start de poucos segundos) → quase só paga quando em uso. Total
   realista ~**$5-10/mês**. Pra cortar mais: deixar o app também com `min=1` só se
   o cold start incomodar.
-- **Região:** `iad` por causa do Supabase em Ohio. **Futuro:** se um dia migrar o
-  Supabase pra São Paulo (`sa-east-1`), aí compensa mover o app pra `gru` e ter
-  localidade BR completa (navegador→app **e** app→DB perto). Hoje, DB ganha.
+- **Região:** `gru` (São Paulo) — o Supabase migrou pra `sa-east-1` em 2026-07-02,
+  então agora tem localidade BR completa: navegador→app **e** app→DB perto. (Era
+  `iad`/Ohio; obsoleto.)
 - **Arquivos do repo:** o `Dockerfile` é reusado como está. O **`docker-compose.yml`
   e o `Caddyfile` não são usados pelo Fly** (Fly usa `fly.toml` + TLS próprio) —
   ficam pra dev local / referência do plano Oracle.

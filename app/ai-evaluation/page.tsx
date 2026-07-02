@@ -17,7 +17,6 @@ import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 import { StaleRerankPanel } from "@/components/ranking/stale-rerank-panel"
 import { SynopsisPredictPanel } from "@/components/titles/synopsis-predict-panel"
-import { InterestBackfillButton } from "@/components/titles/interest-backfill-button"
 import { ShadowComparePanel } from "@/components/titles/shadow-compare-panel"
 import { SynopsisAccuracyBar } from "@/components/titles/synopsis-accuracy-bar"
 import { getAlignmentQueueWorks, getSynopsisQueueWorks, getSynopsisPredictionVersions, getUntrackedWorks } from "@/server/queries/recommendations"
@@ -27,9 +26,9 @@ import { getSynopsisPredictionAccuracy, getSynopsisVersionComparison } from "@/s
 import type { SynopsisPredictionAccuracy, SynopsisVersionComparison } from "@/server/queries/synopsis-quality"
 import { getCurrentPlan } from "@/server/queries/current-user"
 import { planAllows } from "@/lib/plans/capabilities"
-import { SemReviewsTab } from "@/components/ai-evaluation/sem-reviews-tab"
+import { TagsReviewsTab } from "@/components/ai-evaluation/tags-reviews-tab"
+import type { TagsReviewsWork } from "@/components/ai-evaluation/tags-reviews-tab"
 import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
-import { SemTagsTab } from "@/components/ai-evaluation/sem-tags-tab"
 import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
 import { getWorkTagReviewCounts, getSynopsisInputsBatch } from "@/server/queries/work-card-meta"
 
@@ -116,22 +115,6 @@ function parseStatusList(
   const ids = names.map((n) => nameToId[n])
   return { names, ids }
 }
-
-/** Parseia o param de ordenação `<key>-<dir>` validando a chave. Default `{title, asc}`. */
-function parseSort<K extends string>(
-  raw: string | string[] | undefined,
-  allowed: readonly K[],
-): { key: K; dir: "asc" | "desc" } {
-  const value = Array.isArray(raw) ? raw[0] : raw
-  const fallback = { key: "title" as K, dir: "asc" as const }
-  if (!value) return fallback
-  const [k, d] = value.split("-")
-  if (!(allowed as readonly string[]).includes(k)) return fallback
-  return { key: k as K, dir: d === "desc" ? "desc" : "asc" }
-}
-
-const REVIEW_SORT_KEYS = ["title", "expected", "reviews"] as const
-const TAGS_SORT_KEYS = ["title", "expected", "tags"] as const
 
 interface EligibleWork {
   id: string
@@ -590,7 +573,13 @@ function UntrackedTab({
   pubStatusNames,
   synopsisQualities,
 }: {
-  works: UntrackedWork[]
+  works: (UntrackedWork & {
+    canonicalSynopsis: string | null
+    tags: string[]
+    reviewDigest: import("@/lib/ai-recommendation/types").ReviewDigest | null
+    tagCount: number
+    reviewCount: number
+  })[]
   pubStatusNames: string[]
   synopsisQualities: string[]
 }) {
@@ -751,11 +740,6 @@ function SynopsisTab({
         activePredictionDeltas={predictionDeltas}
         predictionVersionOptions={predictionVersionOptions}
       />
-      {isPaid && (
-        <div className="flex justify-end">
-          <InterestBackfillButton works={works} isPaid={isPaid} />
-        </div>
-      )}
       <SynopsisPredictPanel works={works} isPaid={isPaid} />
     </div>
   )
@@ -770,8 +754,7 @@ interface TabHrefs {
   attr: string
   rk: string
   syn: string
-  rev: string
-  tags: string
+  tagsReviews: string
   untracked: string
 }
 
@@ -792,8 +775,7 @@ function EvalTabBar({
       <EvalTabLink href={hrefs.attr} active={activeTab === "atributos"}>IA atributos{n(counts?.attr)}</EvalTabLink>
       <EvalTabLink href={hrefs.rk} active={activeTab === "ia-rk"}>Veredito IA{n(counts?.iaRk)}</EvalTabLink>
       <EvalTabLink href={hrefs.syn} active={activeTab === "sinopse"}>Interesse na Obra{n(counts?.syn)}</EvalTabLink>
-      <EvalTabLink href={hrefs.rev} active={activeTab === "sem-reviews"}>Sem reviews{n(counts?.rev)}</EvalTabLink>
-      <EvalTabLink href={hrefs.tags} active={activeTab === "sem-tags"}>Sem tags{n(counts?.tags)}</EvalTabLink>
+      <EvalTabLink href={hrefs.tagsReviews} active={activeTab === "tags-reviews"}>Tags &amp; Reviews{n(counts?.tagsReviews)}</EvalTabLink>
       <EvalTabLink href={hrefs.untracked} active={activeTab === "untracked"}>Untracked{n(counts?.untracked)}</EvalTabLink>
     </div>
   )
@@ -810,23 +792,17 @@ interface CountArgs {
   predictionVersions: string[]
   predictionQualities: string[]
   predictionDeltas: string[]
-  noReviewQ: string
-  hasExternal: "yes" | "no" | null
-  goldenOnly: boolean
   minReviews: number
   maxReviews: number
   minTags: number
   maxTags: number
-  reviewSort: NonNullable<Parameters<typeof getWorksWithoutReviews>[0]>["sort"]
-  tagsSort: NonNullable<Parameters<typeof getWorksWithoutTags>[0]>["sort"]
 }
 
 interface TabCounts {
   attr: number
   iaRk: number
   syn: number
-  rev: number
-  tags: number
+  tagsReviews: number
   untracked: number
 }
 
@@ -844,15 +820,18 @@ interface TabCounts {
  */
 const getAiEvalTabCounts = unstable_cache(
   async (args: CountArgs): Promise<TabCounts> => {
-    const [attr, iaRk, syn, rev, tags, untracked] = await Promise.all([
+    const [attr, iaRk, syn, revC, tagsC, untracked] = await Promise.all([
       getEligibleWorks(args.activeFilters, args.pubStatusIds, args.personalStatusIds, args.synopsisQualities, args.toleranceOverride),
       getAlignmentQueueWorks({ states: args.iaRkStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities }),
       getSynopsisQueueWorks({ states: args.synopsisStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities, predictionVersions: args.predictionVersions, predictionQualities: args.predictionQualities, predictionDeltas: args.predictionDeltas, missingManual: args.synopsisQualities.includes("none") }),
-      getWorksWithoutReviews({ q: args.noReviewQ, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, hasExternal: args.hasExternal, goldenOnly: args.goldenOnly, minReviews: args.minReviews, maxReviews: args.maxReviews, interest: args.synopsisQualities, sort: args.reviewSort }),
-      getWorksWithoutTags({ q: args.noReviewQ, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, hasExternal: args.hasExternal, goldenOnly: args.goldenOnly, minTags: args.minTags, maxTags: args.maxTags, interest: args.synopsisQualities, sort: args.tagsSort }),
+      getWorksWithoutReviews({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minReviews: args.minReviews, maxReviews: args.maxReviews }, { countOnly: true }),
+      getWorksWithoutTags({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minTags: args.minTags, maxTags: args.maxTags }, { countOnly: true }),
       getUntrackedWorks({ pubStatusIds: args.pubStatusIds, synopsisQualities: args.synopsisQualities }),
     ])
-    return { attr: attr.works.length, iaRk: iaRk.length, syn: syn.length, rev: rev.totalWithoutReviews, tags: tags.totalWithoutTags, untracked: untracked.length }
+    // "Tags & Reviews" = união dos universos (obra com faixa de reviews OU faixa de
+    // tags). Conta ids distintos (não soma, pra não duplicar quem falta ambos).
+    const tagsReviews = new Set([...(revC.ids ?? []), ...(tagsC.ids ?? [])]).size
+    return { attr: attr.works.length, iaRk: iaRk.length, syn: syn.length, tagsReviews, untracked: untracked.length }
   },
   ["ai-eval-tab-counts-v2"],
   { revalidate: 60, tags: ["ai-eval-tab-counts"] },
@@ -862,8 +841,7 @@ const ACTIVE_TAB_COUNT_KEY: Record<string, keyof TabCounts> = {
   atributos: "attr",
   "ia-rk": "iaRk",
   sinopse: "syn",
-  "sem-reviews": "rev",
-  "sem-tags": "tags",
+  "tags-reviews": "tagsReviews",
   untracked: "untracked",
 }
 
@@ -897,32 +875,22 @@ export default async function AiEvaluationPage({
     pv?: string | string[]
     pq?: string | string[]
     pd?: string | string[]
-    q?: string | string[]
-    src?: string | string[]
-    golden?: string | string[]
     maxrev?: string | string[]
     maxtags?: string | string[]
     minrev?: string | string[]
     mintags?: string | string[]
-    sortr?: string | string[]
-    sortt?: string | string[]
   }>
 }) {
   const params = await searchParams
   const tabRaw = Array.isArray(params.tab) ? params.tab[0] : params.tab
-  const activeTab: "atributos" | "ia-rk" | "sinopse" | "sem-reviews" | "sem-tags" | "untracked" =
+  const activeTab: "atributos" | "ia-rk" | "sinopse" | "tags-reviews" | "untracked" =
     tabRaw === "ia-rk" ? "ia-rk"
     : tabRaw === "sinopse" ? "sinopse"
-    : tabRaw === "sem-reviews" ? "sem-reviews"
-    : tabRaw === "sem-tags" ? "sem-tags"
+    // "sem-reviews"/"sem-tags" (URLs antigas) redirecionam pra aba unificada.
+    : tabRaw === "tags-reviews" || tabRaw === "sem-reviews" || tabRaw === "sem-tags" ? "tags-reviews"
     : tabRaw === "untracked" ? "untracked"
     : "atributos"
 
-  // Filtros compartilhados pelas abas de diagnóstico "Sem reviews" e "Sem tags".
-  const noReviewQ = (Array.isArray(params.q) ? params.q[0] : params.q ?? "").trim()
-  const srcRaw = Array.isArray(params.src) ? params.src[0] : params.src
-  const hasExternal: "yes" | "no" | null = srcRaw === "yes" ? "yes" : srcRaw === "no" ? "no" : null
-  const goldenOnly = (Array.isArray(params.golden) ? params.golden[0] : params.golden) === "1"
   const parseMax = (v: string | string[] | undefined): number => {
     const raw = Array.isArray(v) ? v[0] : v
     const n = raw != null && /^\d+$/.test(raw) ? parseInt(raw, 10) : 0
@@ -932,8 +900,6 @@ export default async function AiEvaluationPage({
   const maxTags = parseMax(params.maxtags)
   const minReviews = parseMax(params.minrev)
   const minTags = parseMax(params.mintags)
-  const reviewSort = parseSort(params.sortr, REVIEW_SORT_KEYS)
-  const tagsSort = parseSort(params.sortt, TAGS_SORT_KEYS)
 
   // Filtros de Status + interesse compartilhados pelas 2 abas.
   const { names: pubStatusNames, ids: pubStatusIds } = parseStatusList(params.pub, PUB_STATUS_NAME_TO_ID)
@@ -1028,40 +994,53 @@ export default async function AiEvaluationPage({
         isPaid={isPaidPlan}
       />
     )
-  } else if (activeTab === "sem-reviews") {
-    const noReviewResult = await getWorksWithoutReviews({ q: noReviewQ, pubStatusIds, personalStatusIds, hasExternal, goldenOnly, minReviews, maxReviews, interest: synopsisQualities, sort: reviewSort })
-    activeCount = noReviewResult.totalWithoutReviews
+  } else if (activeTab === "tags-reviews") {
+    // Fusão "Tags & Reviews": roda os dois universos (sem reviews / sem tags) em
+    // paralelo e UNE por id, marcando de qual eixo cada obra veio.
+    const [revRes, tagRes] = await Promise.all([
+      getWorksWithoutReviews({ pubStatusIds, personalStatusIds, minReviews, maxReviews, interest: synopsisQualities }),
+      getWorksWithoutTags({ pubStatusIds, personalStatusIds, minTags, maxTags, interest: synopsisQualities }),
+    ])
+    const merged = new Map<string, TagsReviewsWork>()
+    const base = (w: { id: string; title: string; coverUrl: string | null; publicationStatusId?: number | null; personalStatusId?: number | null; interest: string | null; canonicalPresent: boolean; inGolden: boolean; expectedScore: number | null }) => ({
+      id: w.id,
+      title: w.title,
+      coverUrl: w.coverUrl,
+      publicationStatusId: w.publicationStatusId ?? null,
+      personalStatusId: w.personalStatusId ?? null,
+      interest: w.interest,
+      canonicalPresent: w.canonicalPresent,
+      inGolden: w.inGolden,
+      expectedScore: w.expectedScore,
+      tagCount: 0,
+      reviewCount: 0,
+    })
+    for (const w of revRes.works) merged.set(w.id, { ...base(w), reviewGap: true, tagGap: false })
+    for (const w of tagRes.works) {
+      const ex = merged.get(w.id)
+      if (ex) ex.tagGap = true
+      else merged.set(w.id, { ...base(w), reviewGap: false, tagGap: true })
+    }
+    const mergedWorks = [...merged.values()]
+    // Reaproveita as contagens JÁ computadas nos scans de getWorksWithout* (mapas de
+    // TODAS as obras) — evita re-varrer work_tags/work_reviews aqui (getWorkTagReviewCounts).
+    const tagCounts = tagRes.tagCountByWork ?? new Map<string, number>()
+    const revCounts = revRes.usefulCountByWork ?? new Map<string, number>()
+    for (const w of mergedWorks) {
+      w.tagCount = tagCounts.get(w.id) ?? 0
+      w.reviewCount = revCounts.get(w.id) ?? 0
+    }
+    activeCount = mergedWorks.length
     activeContent = (
-      <SemReviewsTab
-        works={noReviewResult.works}
-        totalWithoutReviews={noReviewResult.totalWithoutReviews}
-        q={noReviewQ}
+      <TagsReviewsTab
+        works={mergedWorks}
         activePubStatuses={pubStatusNames}
         activePersonalStatuses={personalStatusNames}
         activeInterest={synopsisQualities}
-        hasExternal={hasExternal}
-        goldenOnly={goldenOnly}
         minReviews={minReviews}
         maxReviews={maxReviews}
-        sort={reviewSort}
-      />
-    )
-  } else if (activeTab === "sem-tags") {
-    const noTagsResult = await getWorksWithoutTags({ q: noReviewQ, pubStatusIds, personalStatusIds, hasExternal, goldenOnly, minTags, maxTags, interest: synopsisQualities, sort: tagsSort })
-    activeCount = noTagsResult.totalWithoutTags
-    activeContent = (
-      <SemTagsTab
-        works={noTagsResult.works}
-        totalWithoutTags={noTagsResult.totalWithoutTags}
-        q={noReviewQ}
-        activePubStatuses={pubStatusNames}
-        activePersonalStatuses={personalStatusNames}
-        activeInterest={synopsisQualities}
-        hasExternal={hasExternal}
-        goldenOnly={goldenOnly}
         minTags={minTags}
         maxTags={maxTags}
-        sort={tagsSort}
       />
     )
   } else if (activeTab === "ia-rk") {
@@ -1090,9 +1069,26 @@ export default async function AiEvaluationPage({
   } else if (activeTab === "untracked") {
     const untrackedWorks = await getUntrackedWorks({ pubStatusIds, synopsisQualities })
     activeCount = untrackedWorks.length
+    const idsToHydrate = untrackedWorks.map((w) => w.id)
+    const [inputs, counts] = await Promise.all([
+      getSynopsisInputsBatch(idsToHydrate),
+      getWorkTagReviewCounts(idsToHydrate),
+    ])
+    const works = untrackedWorks.map((w) => {
+      const inp = inputs.get(w.id)
+      const c = counts.get(w.id)
+      return {
+        ...w,
+        canonicalSynopsis: inp?.canonicalSynopsis ?? null,
+        tags: inp?.tags ?? [],
+        reviewDigest: inp?.reviewDigest ?? null,
+        tagCount: c?.tagCount ?? 0,
+        reviewCount: c?.reviewCount ?? 0,
+      }
+    })
     activeContent = (
       <UntrackedTab
-        works={untrackedWorks}
+        works={works}
         pubStatusNames={pubStatusNames}
         synopsisQualities={synopsisQualities}
       />
@@ -1156,36 +1152,22 @@ export default async function AiEvaluationPage({
   if (pd) synParams.set("pd", pd)
   const synHref = `/ai-evaluation?${synParams}`
 
-  const noRevParams = new URLSearchParams({ tab: "sem-reviews" })
-  if (pub) noRevParams.set("pub", pub)
-  if (personal) noRevParams.set("personal", personal)
-  if (synq) noRevParams.set("synopsis_q", synq)
-  if (noReviewQ) noRevParams.set("q", noReviewQ)
-  if (hasExternal) noRevParams.set("src", hasExternal)
-  if (goldenOnly) noRevParams.set("golden", "1")
-  if (minReviews > 0) noRevParams.set("minrev", String(minReviews))
-  if (maxReviews > 0) noRevParams.set("maxrev", String(maxReviews))
-  if (params.sortr) noRevParams.set("sortr", toParam(params.sortr)!)
-  const noRevHref = `/ai-evaluation?${noRevParams}`
-
-  const noTagsParams = new URLSearchParams({ tab: "sem-tags" })
-  if (pub) noTagsParams.set("pub", pub)
-  if (personal) noTagsParams.set("personal", personal)
-  if (synq) noTagsParams.set("synopsis_q", synq)
-  if (noReviewQ) noTagsParams.set("q", noReviewQ)
-  if (hasExternal) noTagsParams.set("src", hasExternal)
-  if (goldenOnly) noTagsParams.set("golden", "1")
-  if (minTags > 0) noTagsParams.set("mintags", String(minTags))
-  if (maxTags > 0) noTagsParams.set("maxtags", String(maxTags))
-  if (params.sortt) noTagsParams.set("sortt", toParam(params.sortt)!)
-  const noTagsHref = `/ai-evaluation?${noTagsParams}`
+  const tagsReviewsParams = new URLSearchParams({ tab: "tags-reviews" })
+  if (pub) tagsReviewsParams.set("pub", pub)
+  if (personal) tagsReviewsParams.set("personal", personal)
+  if (synq) tagsReviewsParams.set("synopsis_q", synq)
+  if (minReviews > 0) tagsReviewsParams.set("minrev", String(minReviews))
+  if (maxReviews > 0) tagsReviewsParams.set("maxrev", String(maxReviews))
+  if (minTags > 0) tagsReviewsParams.set("mintags", String(minTags))
+  if (maxTags > 0) tagsReviewsParams.set("maxtags", String(maxTags))
+  const tagsReviewsHref = `/ai-evaluation?${tagsReviewsParams}`
 
   const untrackedParams = new URLSearchParams({ tab: "untracked" })
   if (pub) untrackedParams.set("pub", pub)
   if (synq) untrackedParams.set("synopsis_q", synq)
   const untrackedHref = `/ai-evaluation?${untrackedParams}`
 
-  const hrefs: TabHrefs = { attr: attrHref, rk: rkHref, syn: synHref, rev: noRevHref, tags: noTagsHref, untracked: untrackedHref }
+  const hrefs: TabHrefs = { attr: attrHref, rk: rkHref, syn: synHref, tagsReviews: tagsReviewsHref, untracked: untrackedHref }
   const countArgs: CountArgs = {
     activeFilters,
     pubStatusIds,
@@ -1197,15 +1179,10 @@ export default async function AiEvaluationPage({
     predictionVersions,
     predictionQualities,
     predictionDeltas,
-    noReviewQ,
-    hasExternal,
-    goldenOnly,
     minReviews,
     maxReviews,
     minTags,
     maxTags,
-    reviewSort,
-    tagsSort,
   }
 
   return (

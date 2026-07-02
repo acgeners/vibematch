@@ -16,7 +16,9 @@ export interface NoTagsWork {
   title: string
   coverUrl: string | null
   publicationStatus: string
+  publicationStatusId?: number | null
   personalStatus: string
+  personalStatusId?: number | null
   aiEvalStatus: string | null
   canonicalPresent: boolean
   tagCount: number
@@ -50,7 +52,9 @@ export interface TagWorkMetaRow {
   title: string
   coverUrl: string | null
   publicationStatus: string
+  publicationStatusId?: number | null
   personalStatus: string
+  personalStatusId?: number | null
   aiEvalStatus: string | null
   canonicalPresent: boolean
   tagCount: number
@@ -107,7 +111,9 @@ export function classifyWorksWithoutTags(args: {
       title: w.title,
       coverUrl: w.coverUrl,
       publicationStatus: w.publicationStatus,
+      publicationStatusId: w.publicationStatusId,
       personalStatus: w.personalStatus,
+      personalStatusId: w.personalStatusId,
       aiEvalStatus: w.aiEvalStatus,
       canonicalPresent: w.canonicalPresent,
       tagCount: w.tagCount,
