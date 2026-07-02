@@ -1,12 +1,19 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Info, Tag, FileText, MessageSquare, AlertTriangle } from "lucide-react"
+import { Info, Tag, FileText, MessageSquare, AlertTriangle, Loader2 } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { ReviewDigest } from "@/lib/ai-recommendation/types"
-import { getEffectiveTagStanceAction } from "@/server/actions/recommendations"
+import { getEffectiveTagStanceAction, getSynopsisInputsAction } from "@/server/actions/recommendations"
+
+/** Inputs do preditor de Interesse — carregados sob demanda ao abrir o popover. */
+type SynopsisInputsData = {
+  canonicalSynopsis: string | null
+  tags: string[]
+  reviewDigest: ReviewDigest | null
+}
 
 function polarityClass(polarity: "positive" | "negative" | "mixed"): string {
   if (polarity === "positive") return "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
@@ -46,17 +53,27 @@ function loadTasteTags(): Promise<TasteTags> {
  * Popover que mostra os INPUTS usados pra prever o Interesse na sinopse: tags
  * agrupadas, sinopse canônica e digest de reviews (consenso/traços/alertas) —
  * exatamente o que o preditor recebe. Trigger discreto "inputs da previsão".
+ *
+ * Os inputs são carregados SOB DEMANDA (`getSynopsisInputsAction`) ao abrir o
+ * popover — tirando o batch de hidratação do caminho crítico do SSR da fila.
  */
-export function SynopsisInputsPopover({
-  canonicalSynopsis,
-  tags,
-  reviewDigest,
-}: {
-  canonicalSynopsis?: string | null
-  tags?: string[]
-  reviewDigest?: ReviewDigest | null
-}) {
-  const hasAny = !!(canonicalSynopsis || (tags && tags.length) || reviewDigest)
+export function SynopsisInputsPopover({ workId }: { workId: string }) {
+  // Inputs (sinopse/tags/digest) carregados lazy na 1ª abertura do popover.
+  const [inputs, setInputs] = useState<SynopsisInputsData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const onOpenChange = (open: boolean) => {
+    if (open && inputs == null && !loading) {
+      setLoading(true)
+      getSynopsisInputsAction(workId)
+        .then(setInputs)
+        .catch((e) => console.error(e))
+        .finally(() => setLoading(false))
+    }
+  }
+  const canonicalSynopsis = inputs?.canonicalSynopsis ?? null
+  const tags = inputs?.tags ?? []
+  const reviewDigest = inputs?.reviewDigest ?? null
+  const hasAny = !!(canonicalSynopsis || tags.length || reviewDigest)
 
   // Carrega o perfil (tags amadas/evitadas) no mount, via `loadTasteTags` (promise
   // cacheada no módulo → 1 fetch por página, sem N+1). Assim as cores já estão
@@ -75,7 +92,7 @@ export function SynopsisInputsPopover({
   const avoidedTagsSet = taste?.avoided ?? EMPTY_TASTE.avoided
 
   return (
-    <Popover>
+    <Popover onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -85,7 +102,11 @@ export function SynopsisInputsPopover({
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="max-h-[36rem] w-[550px] max-w-[95vw] overflow-y-auto text-xs p-4 shadow-xl border border-border/80 bg-popover">
-        {!hasAny ? (
+        {loading && inputs == null ? (
+          <p className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carregando inputs…
+          </p>
+        ) : !hasAny ? (
           <p className="text-muted-foreground">Sem inputs hidratados para esta obra.</p>
         ) : (
           <div className="space-y-5">

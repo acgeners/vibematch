@@ -7,8 +7,6 @@ import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
 import { QueueToolbar } from "@/components/ai-evaluation/queue/queue-toolbar"
 import { useWorkSelection } from "@/components/ai-evaluation/queue/use-work-selection"
 
-import type { ReviewDigest } from "@/lib/ai-recommendation/types"
-
 export interface UntrackedWorkWithMeta {
   id: string
   title: string
@@ -18,9 +16,6 @@ export interface UntrackedWorkWithMeta {
   personalStatusId: number | null
   synopsisQuality: string | null
   expectedScore: number | null
-  canonicalSynopsis: string | null
-  tags: string[]
-  reviewDigest: ReviewDigest | null
   tagCount: number
   reviewCount: number
 }
@@ -51,13 +46,7 @@ export function UntrackedStatusPanel({ works }: { works: UntrackedWorkWithMeta[]
 
       <WorkQueueGrid dense>
         {works.map((w) => {
-          const details = (
-            <SynopsisInputsPopover
-              canonicalSynopsis={w.canonicalSynopsis}
-              tags={w.tags}
-              reviewDigest={w.reviewDigest}
-            />
-          )
+          const details = <SynopsisInputsPopover workId={w.id} />
 
           return (
             <WorkQueueCard

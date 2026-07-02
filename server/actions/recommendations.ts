@@ -29,6 +29,8 @@ import { MAX_CANDIDATES_HARD_LIMIT } from "@/lib/ai-recommendation/limits"
 import { getPreferenceRules } from "@/server/queries/preference-rules"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import type { TagStance } from "@/server/queries/tag-preferences"
+import { getSynopsisInputsBatch } from "@/server/queries/work-card-meta"
+import type { SynopsisInputs } from "@/server/queries/work-card-meta"
 import { recordRecommendationSnapshots } from "@/lib/server/predictions/record-prediction"
 import type {
   ChatRecommendationItem,
@@ -163,6 +165,18 @@ export async function getEffectiveTagStanceAction(): Promise<{ loved: string[]; 
   const avoided: string[] = []
   for (const [name, s] of stance) (s === "love" ? loved : avoided).push(name)
   return { loved, avoided }
+}
+
+/**
+ * Inputs do preditor de Interesse (sinopse canônica + tags + digest de reviews)
+ * de UMA obra, sob demanda. Chamado pelo `SynopsisInputsPopover` ao ABRIR (lazy),
+ * tirando `getSynopsisInputsBatch` do caminho crítico do SSR das abas sinopse/
+ * untracked — o popover só carrega quando o usuário realmente o abre.
+ */
+export async function getSynopsisInputsAction(workId: string): Promise<SynopsisInputs> {
+  if (!workId) return { canonicalSynopsis: null, tags: [], reviewDigest: null }
+  const map = await getSynopsisInputsBatch([workId])
+  return map.get(workId) ?? { canonicalSynopsis: null, tags: [], reviewDigest: null }
 }
 
 export async function generateTasteProfileAction(): Promise<{

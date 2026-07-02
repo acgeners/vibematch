@@ -647,11 +647,6 @@ export interface SynopsisQueueWork {
   /** Previsão de uma versão de prompt ANTERIOR (pra comparar v1 × v2 no card). */
   previousPredictedQuality: string | null
   previousPromptVersion: string | null
-  /** Inputs que o preditor usa — hidratados só na aba ativa (popover "inputs da
-   *  previsão"), ausentes no caminho do cache de contagens. */
-  canonicalSynopsis?: string | null
-  tags?: string[]
-  reviewDigest?: ReviewDigest | null
   /** #tags e #reviews úteis (hidratados na aba ativa) — pro badge e o filtro de "dados suficientes". */
   tagCount?: number
   reviewCount?: number
@@ -667,6 +662,8 @@ export interface SynopsisQueueWork {
  * Filtra por status em SQL; estado em JS. Sort é no client.
  */
 interface SynopsisPredRow {
+  /** PK da previsão — usado pra hidratar `justification` sob demanda (só das exibidas). */
+  id?: string
   predicted_quality?: string | null
   stale?: boolean | null
   confidence?: number | null
@@ -722,6 +719,9 @@ export async function getSynopsisQueueWorks(opts: {
    */
   missingManual?: boolean
   limit?: number
+  /** Fan-out de contadores: só precisa de `.length`, então pula a hidratação de
+   *  `justification` (evita transferir o texto que o contador nunca lê). */
+  countOnly?: boolean
 }): Promise<SynopsisQueueWork[]> {
   const states: Array<"stale" | "unpredicted" | "predicted"> =
     opts.states ?? ["unpredicted"]
@@ -736,12 +736,15 @@ export async function getSynopsisQueueWorks(opts: {
   // Carrega TODAS as previsões — fonte da verdade do estado de cada obra. A tabela
   // já passou de 1000 linhas, então pagina (sem isso o PostgREST corta em 1000 e
   // obras previstas reapareceriam como "não previsto").
+  // `justification` (texto longo ≈ 72% do payload) fica FORA deste lote — é
+  // hidratada sob demanda só pras obras exibidas (`hydrateJustifications`), cortando
+  // ~1,2MB de egress por load. O `id` entra pra permitir esse fetch direcionado.
   const predRows = await fetchAllRowsParallel<{ work_id: string } & SynopsisPredRow>(
     () => supabase.from("synopsis_quality_predictions").select("work_id", { count: "exact", head: true }),
     (from, to) =>
       supabase
         .from("synopsis_quality_predictions")
-        .select("work_id, predicted_quality, stale, confidence, justification, prompt_version, predicted_at")
+        .select("id, work_id, predicted_quality, stale, confidence, prompt_version, predicted_at")
         .range(from, to),
     "Falha lendo previsões de sinopse",
   )
@@ -843,6 +846,39 @@ export async function getSynopsisQueueWorks(opts: {
     return result
   }
 
+  // Hidrata `justification` (deixada fora do lote de previsões) SÓ das obras
+  // exibidas que têm previsão ativa — 1 fetch direcionado pelo `id` da linha ativa.
+  // Assim o texto (≈72% do payload) só trafega pras que aparecem; na aba padrão
+  // ("não previsto") o rowIds fica vazio → zero fetch. Pulado no `countOnly` (o
+  // contador só usa `.length`, nunca lê justification). Mutação in-place em
+  // predByWork → mapWork abaixo já enxerga o texto.
+  const hydrateJustifications = async (workIds: string[]): Promise<void> => {
+    if (opts.countOnly) return
+    const rowIds: string[] = []
+    for (const wid of workIds) {
+      const active = predByWork.get(wid)
+      if (active?.id) rowIds.push(active.id)
+    }
+    if (rowIds.length === 0) return
+    const byId = new Map<string, string | null>()
+    // Chunk de 100 ids (URL do PostgREST ~16KB; 100 uuids ≈ 3.7KB).
+    for (let i = 0; i < rowIds.length; i += 100) {
+      const c = rowIds.slice(i, i + 100)
+      const { data, error } = await supabase
+        .from("synopsis_quality_predictions")
+        .select("id, justification")
+        .in("id", c)
+      if (error) throw new Error(`Falha hidratando justificativas: ${error.message}`)
+      for (const r of (data ?? []) as Array<{ id: string; justification: string | null }>) {
+        byId.set(r.id, r.justification ?? null)
+      }
+    }
+    for (const wid of workIds) {
+      const active = predByWork.get(wid)
+      if (active?.id && byId.has(active.id)) active.justification = byId.get(active.id) ?? null
+    }
+  }
+
   // Triagem manual: lista obras com sinopse canônica e SEM Interesse manual
   // (synopsis_quality IS NULL), independente do estado de previsão. As previsões
   // carregadas acima ainda alimentam a exibição (sugestão IA no card).
@@ -869,6 +905,7 @@ export async function getSynopsisQueueWorks(opts: {
     } else {
       data = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando obras sem Interesse manual")
     }
+    await hydrateJustifications(data.map((w) => w.id as string))
     return postFilter(data.map((w) => mapWork(w)))
   }
 
@@ -899,7 +936,7 @@ export async function getSynopsisQueueWorks(opts: {
     rows = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando fila de Interesse")
   }
 
-  const result: SynopsisQueueWork[] = []
+  const displayed: Record<string, unknown>[] = []
   for (const row of rows) {
     const id = row.id as string
     const hasPred = predByWork.has(id)
@@ -908,9 +945,10 @@ export async function getSynopsisQueueWorks(opts: {
     if (state === "stale" && !wantStale) continue
     if (state === "unpredicted" && !wantUnpredicted) continue
     if (state === "predicted" && !wantPredicted) continue
-    result.push(mapWork(row))
+    displayed.push(row)
   }
-  return postFilter(result)
+  await hydrateJustifications(displayed.map((r) => r.id as string))
+  return postFilter(displayed.map((row) => mapWork(row)))
 }
 
 /** Versões de prompt distintas presentes em synopsis_quality_predictions (mais nova primeiro). */
