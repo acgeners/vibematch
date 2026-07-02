@@ -77,7 +77,7 @@ export function PredictSynopsisRowActions({
 
   return (
     <div className="flex flex-col items-stretch gap-2">
-      <Button variant="outline" size="sm" onClick={runPredict} disabled={predicting} className="gap-1.5">
+      <Button size="sm" onClick={runPredict} disabled={predicting} className="gap-1.5">
         {predicting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
         {predicting ? "Estimando…" : hasPrediction ? "Reprever" : "Prever"}
       </Button>
@@ -98,11 +98,11 @@ export function PredictSynopsisRowActions({
         </Button>
       )}
       <Button
-        variant="ghost"
+        variant="outline"
         size="sm"
         onClick={runSkip}
         disabled={skipping}
-        className="gap-1.5 text-muted-foreground"
+        className="gap-1.5"
         title="Pular — tira a obra da fila de Interesse na Obra (não toca no valor)"
       >
         {skipping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <SkipForward className="h-3.5 w-3.5" />}

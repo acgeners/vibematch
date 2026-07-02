@@ -1,15 +1,45 @@
 "use client"
 
-import { Info } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Info, Tag, FileText, MessageSquare, AlertTriangle } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { ReviewDigest } from "@/lib/ai-recommendation/types"
+import { getEffectiveTagStanceAction } from "@/server/actions/recommendations"
 
 function polarityClass(polarity: "positive" | "negative" | "mixed"): string {
-  if (polarity === "positive") return "border-emerald-300 text-emerald-700 dark:border-emerald-400/30 dark:text-emerald-300"
-  if (polarity === "negative") return "border-rose-300 text-rose-700 dark:border-rose-400/30 dark:text-rose-300"
-  return "border-amber-300 text-amber-700 dark:border-amber-400/30 dark:text-amber-300"
+  if (polarity === "positive") return "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+  if (polarity === "negative") return "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300"
+  return "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
+}
+
+type TasteTags = { loved: Set<string>; avoided: Set<string> }
+const EMPTY_TASTE: TasteTags = { loved: new Set(), avoided: new Set() }
+
+/**
+ * Carrega as tags amadas/evitadas do perfil UMA vez por página (promise cacheada
+ * no módulo). Cada card monta o próprio popover; sem esse cache, abrir a fila do
+ * Interesse (~32 cards) dispararia ~32 chamadas idênticas ao perfil. A busca é
+ * disparada só quando um popover ABRE (lazy) — cards fechados custam zero.
+ */
+/**
+ * Carrega os nomes de tags amadas/evitadas EFETIVOS (perfil de gosto ∪ preferências
+ * declaradas pelo usuário) 1× por página via promise cacheada no módulo (sem N+1).
+ * O server já une as duas fontes, dá precedência às declaradas e normaliza os nomes.
+ */
+let tasteTagsPromise: Promise<TasteTags> | null = null
+function loadTasteTags(): Promise<TasteTags> {
+  if (!tasteTagsPromise) {
+    tasteTagsPromise = getEffectiveTagStanceAction()
+      .then(({ loved, avoided }) => ({ loved: new Set(loved), avoided: new Set(avoided) }))
+      .catch((e) => {
+        console.error(e)
+        tasteTagsPromise = null // permite retry
+        return EMPTY_TASTE
+      })
+  }
+  return tasteTagsPromise
 }
 
 /**
@@ -27,85 +57,148 @@ export function SynopsisInputsPopover({
   reviewDigest?: ReviewDigest | null
 }) {
   const hasAny = !!(canonicalSynopsis || (tags && tags.length) || reviewDigest)
+
+  // Carrega o perfil (tags amadas/evitadas) no mount, via `loadTasteTags` (promise
+  // cacheada no módulo → 1 fetch por página, sem N+1). Assim as cores já estão
+  // prontas ANTES de abrir o popover — sem flash de "tags sem cor" na 1ª abertura.
+  const [taste, setTaste] = useState<TasteTags | null>(null)
+  useEffect(() => {
+    let active = true
+    void loadTasteTags().then((t) => {
+      if (active) setTaste(t)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
+  const lovedTagsSet = taste?.loved ?? EMPTY_TASTE.loved
+  const avoidedTagsSet = taste?.avoided ?? EMPTY_TASTE.avoided
+
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+          className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
         >
-          <Info className="h-3 w-3" /> inputs da previsão
+          <Info className="h-3 w-3" /> Informações sobre a obra
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="max-h-[28rem] w-96 overflow-y-auto text-xs">
+      <PopoverContent align="start" className="max-h-[36rem] w-[550px] max-w-[95vw] overflow-y-auto text-xs p-4 shadow-xl border border-border/80 bg-popover">
         {!hasAny ? (
           <p className="text-muted-foreground">Sem inputs hidratados para esta obra.</p>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-5">
             {tags && tags.length > 0 && (
-              <section>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Tags ({tags.length})
-                </p>
+              <section className="space-y-2">
+                <div className="flex items-center gap-1.5 border-b border-border/30 pb-1.5">
+                  <Tag className="h-3.5 w-3.5 text-primary/80" />
+                  <h3 className="text-xs font-semibold text-foreground">
+                    Tags da Obra <span className="ml-1 text-[10px] font-normal text-muted-foreground">({tags.length})</span>
+                  </h3>
+                </div>
                 <div className="flex flex-wrap gap-1">
-                  {tags.map((t) => (
-                    <Badge key={t} variant="outline" className="text-[11px] font-normal">
-                      {t}
-                    </Badge>
-                  ))}
+                  {tags.map((t) => {
+                    const lowerTag = t.toLowerCase()
+                    const isLoved = lovedTagsSet.has(lowerTag)
+                    const isAvoided = avoidedTagsSet.has(lowerTag)
+
+                    return (
+                      <Badge
+                        key={t}
+                        variant="outline"
+                        className={cn(
+                          "px-2 py-0.5 text-[11px] font-normal rounded-md border transition-colors",
+                          isLoved
+                            ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/40"
+                            : isAvoided
+                              ? "bg-rose-500/10 text-rose-700 border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/40"
+                              : "bg-muted/30 border-border/80 text-muted-foreground"
+                        )}
+                        title={isLoved ? "Tag amada por você" : isAvoided ? "Tag evitada por você" : undefined}
+                      >
+                        {t}
+                      </Badge>
+                    )
+                  })}
                 </div>
               </section>
             )}
 
             {canonicalSynopsis && (
-              <section>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Sinopse canônica
-                </p>
-                <p className="whitespace-pre-line leading-5 text-muted-foreground">{canonicalSynopsis}</p>
+              <section className="space-y-2">
+                <div className="flex items-center gap-1.5 border-b border-border/30 pb-1.5">
+                  <FileText className="h-3.5 w-3.5 text-primary/80" />
+                  <h3 className="text-xs font-semibold text-foreground">Sinopse Canônica</h3>
+                </div>
+                <div className="rounded-lg border border-border/40 bg-muted/20 p-3 leading-relaxed text-muted-foreground text-[11.5px] whitespace-pre-line">
+                  {canonicalSynopsis}
+                </div>
               </section>
             )}
 
             {reviewDigest && (
-              <section className="space-y-1.5">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Digest de reviews
-                </p>
-                {reviewDigest.consensus && (
-                  <p>
-                    <span className="font-medium text-foreground">Consenso:</span> {reviewDigest.consensus}
-                  </p>
-                )}
-                {reviewDigest.divergence && (
-                  <p>
-                    <span className="font-medium text-foreground">Divergência:</span> {reviewDigest.divergence}
-                  </p>
-                )}
-                {reviewDigest.salient_traits && reviewDigest.salient_traits.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {reviewDigest.salient_traits.map((t, i) => (
-                      <Badge
-                        key={`${t.trait}-${i}`}
-                        variant="outline"
-                        className={cn("text-[11px] font-normal", polarityClass(t.polarity))}
-                        title={t.axis}
-                      >
-                        {t.trait}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-                {reviewDigest.content_warnings && reviewDigest.content_warnings.length > 0 && (
-                  <p>
-                    <span className="font-medium text-foreground">Alertas:</span>{" "}
-                    {reviewDigest.content_warnings.join(", ")}
-                  </p>
-                )}
-                {reviewDigest.execution && (
-                  <p>
-                    <span className="font-medium text-foreground">Execução:</span> {reviewDigest.execution}
-                  </p>
-                )}
+              <section className="space-y-2">
+                <div className="flex items-center gap-1.5 border-b border-border/30 pb-1.5">
+                  <MessageSquare className="h-3.5 w-3.5 text-primary/80" />
+                  <h3 className="text-xs font-semibold text-foreground">Digest de Reviews</h3>
+                </div>
+
+                <div className="rounded-lg border border-border/40 bg-muted/20 p-3 space-y-3 text-[11.5px] leading-relaxed">
+                  {reviewDigest.consensus && (
+                    <div>
+                      <span className="font-semibold text-foreground mr-1.5">Consenso:</span>
+                      <span className="text-muted-foreground">{reviewDigest.consensus}</span>
+                    </div>
+                  )}
+
+                  {reviewDigest.divergence && (
+                    <div>
+                      <span className="font-semibold text-foreground mr-1.5">Divergência:</span>
+                      <span className="text-muted-foreground">{reviewDigest.divergence}</span>
+                    </div>
+                  )}
+
+                  {reviewDigest.execution && (
+                    <div>
+                      <span className="font-semibold text-foreground mr-1.5">Execução:</span>
+                      <span className="text-muted-foreground">{reviewDigest.execution}</span>
+                    </div>
+                  )}
+
+                  {reviewDigest.content_warnings && reviewDigest.content_warnings.length > 0 && (
+                    <div className="flex items-start gap-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-rose-600 dark:text-rose-400" />
+                      <div>
+                        <span className="font-semibold text-rose-600 dark:text-rose-400 mr-1.5">Alertas:</span>
+                        <span className="text-muted-foreground">{reviewDigest.content_warnings.join(", ")}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {reviewDigest.salient_traits && reviewDigest.salient_traits.length > 0 && (
+                    <div className="pt-2.5 border-t border-border/30 mt-1">
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                        Traços Marcantes
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {reviewDigest.salient_traits.map((t, i) => (
+                          <Badge
+                            key={`${t.trait}-${i}`}
+                            variant="outline"
+                            className={cn(
+                              "px-2 py-0.5 text-[11px] font-normal rounded-md border",
+                              polarityClass(t.polarity)
+                            )}
+                            title={t.axis}
+                          >
+                            {t.trait}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </section>
             )}
           </div>

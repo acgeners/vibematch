@@ -27,6 +27,8 @@ import {
 } from "@/server/queries/recommendations"
 import { MAX_CANDIDATES_HARD_LIMIT } from "@/lib/ai-recommendation/limits"
 import { getPreferenceRules } from "@/server/queries/preference-rules"
+import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
+import type { TagStance } from "@/server/queries/tag-preferences"
 import { recordRecommendationSnapshots } from "@/lib/server/predictions/record-prediction"
 import type {
   ChatRecommendationItem,
@@ -121,6 +123,46 @@ export async function getTasteProfileStatusAction(): Promise<ProfileStatus> {
     currentHash,
     ratedWorksCount: ratedWorks.length,
   }
+}
+
+/**
+ * Nomes de tags amadas/evitadas EFETIVOS do usuário: perfil de gosto UNIDO às
+ * preferências DECLARADAS (`user_tag_preferences`, expandidas por tag). As
+ * declaradas são explícitas e PRECEDEM o perfil inferido. Usado pra colorir tags
+ * (verde amada / vermelho evitada) no popover de inputs da obra.
+ *
+ * Nomes do perfil (LLM) podem vir com qualificador — "Harem (sem contexto…)" →
+ * indexa também "harem" pra casar com a tag da obra. As declaradas têm nome limpo
+ * (catálogo). Tudo em minúsculas.
+ */
+export async function getEffectiveTagStanceAction(): Promise<{ loved: string[]; avoided: string[] }> {
+  const [profileRow, declared] = await Promise.all([
+    loadCurrentTasteProfile(),
+    getDeclaredTagPreferences(),
+  ])
+  const stance = new Map<string, TagStance>()
+  const addProfile = (name: unknown, s: TagStance) => {
+    if (!name) return
+    const full = String(name).toLowerCase().trim()
+    if (!full) return
+    stance.set(full, s)
+    const head = full.split("(")[0].trim()
+    if (head && head !== full) stance.set(head, s)
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const p = profileRow?.profile as any
+  // Perfil: avoided antes de loved (love vence conflito interno do perfil).
+  for (const t of p?.avoided_tags ?? []) addProfile(t?.name, "avoid")
+  for (const t of p?.loved_tags ?? []) addProfile(t?.name, "love")
+  // Declaradas por último → precedem o perfil (nome limpo do catálogo).
+  for (const d of declared) {
+    const n = d.name.toLowerCase().trim()
+    if (n) stance.set(n, d.stance)
+  }
+  const loved: string[] = []
+  const avoided: string[] = []
+  for (const [name, s] of stance) (s === "love" ? loved : avoided).push(name)
+  return { loved, avoided }
 }
 
 export async function generateTasteProfileAction(): Promise<{

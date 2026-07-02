@@ -1,6 +1,7 @@
 "use server"
 
 import { revalidatePath, revalidateTag } from "next/cache"
+import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureCapability } from "@/server/queries/current-user"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
@@ -8,7 +9,12 @@ import { getSynopsisPredictionForWork, getSynopsisPredictionsByWorkIds } from "@
 import { markRecalcPending } from "@/server/actions/recalc-queue"
 import { fetchAllRows } from "@/lib/supabase/paginate"
 import { estimateStep } from "@/lib/orchestration/cost"
-import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
+import {
+  resolveInterestPromptVersion,
+  isInterestShadowEnabled,
+  COMPILED_PREFERENCES_V4_SHADOW,
+} from "@/lib/ai-evaluation/compiled-preferences"
+import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
 import type {
@@ -52,6 +58,29 @@ export async function predictSynopsisQualityForWorkAction(
       revalidatePath(`/titles/${workId}`)
       revalidatePath("/ai-evaluation")
       revalidateTag("ai-eval-tab-counts", "max")
+    }
+
+    // MEDIDA TEMPORÁRIA — shadow A/B. Após o response, roda o arm B (bloco v4 + Item A)
+    // em background, sem afetar a latência do arm A. Dispara quando o arm A rodou
+    // (`succeeded`) OU já estava fresco (`fresh`) — assim "Reprever" SEMEIA o arm B pra
+    // qualquer obra, mesmo sem mudança. O arm B dedupa sozinho (não re-roda se já fresco).
+    // Fica como linha `prompt_version="v5s"`, não exibida como headline.
+    if (
+      (outcome.status === "succeeded" || outcome.status === "fresh") &&
+      isInterestShadowEnabled()
+    ) {
+      after(async () => {
+        try {
+          const declaredTags = await getDeclaredTagPreferences()
+          await ensurePredictInterest(workId, {
+            gateway: new SupabaseInterestGateway(),
+            isBackground: true,
+            arm: { compiled: COMPILED_PREFERENCES_V4_SHADOW, declaredTags },
+          })
+        } catch (err) {
+          console.warn("[shadow] arm B falhou:", err instanceof Error ? err.message : err)
+        }
+      })
     }
     const result = mapInterestOutcome(outcome)
     // Quando o custo é a CASCATA do perfil (~$0,40), anexa o DRIFT method-free pra

@@ -1,6 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
+import { resolveInterestPromptVersion, COMPILED_PREFERENCES_V4_SHADOW } from "@/lib/ai-evaluation/compiled-preferences"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
 
@@ -230,7 +230,7 @@ export async function getSynopsisPredictionAccuracy(
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("synopsis_quality_predictions")
-    .select("predicted_quality, works(synopsis_quality)")
+    .select("predicted_quality, works!work_id(synopsis_quality)")
     .eq("stale", false)
     .eq("prompt_version", version)
   if (error) {
@@ -280,6 +280,34 @@ export interface SynopsisVersionComparison {
   betterRate: number
   sameRate: number
   worseRate: number
+  // --- Métricas de decisão A×B (shadow) ---
+  /** Obras onde as previsões DIFEREM (cur≠prev) — as que carregam sinal. */
+  discordant: number
+  /** Gems perdidas (manual ≥ ♥♥♥ e previsto < manual) — o erro caro. */
+  gemsLostCurrent: number
+  gemsLostPrevious: number
+  /** Precisão de ♥♥♥♥ (dos previstos ♥♥♥♥, quantos são ♥♥♥♥ manual). null se nenhum previu ♥♥♥♥. */
+  highPrecCurrent: number | null
+  highPrecPrevious: number | null
+  /** p-valor bicaudal do teste de sinal (cur-melhor × prev-melhor). <0,05 = diferença significativa. */
+  signP: number
+}
+
+/**
+ * Teste de sinal bicaudal (binomial exata, p=0,5). a = # cur-melhor, b = # prev-melhor.
+ * Retorna 1 quando não há discordâncias de erro (n=0).
+ */
+function binomialTwoSidedP(a: number, b: number): number {
+  const n = a + b
+  if (n === 0) return 1
+  const k = Math.min(a, b)
+  let pmf = Math.pow(0.5, n) // pmf(0) = C(n,0)·0.5^n
+  let cdf = pmf
+  for (let i = 1; i <= k; i += 1) {
+    pmf *= (n - i + 1) / i // pmf(i)/pmf(i-1) = (n-i+1)/i
+    cdf += pmf
+  }
+  return Math.min(1, 2 * cdf)
 }
 
 /**
@@ -294,7 +322,7 @@ export async function getSynopsisVersionComparison(
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("synopsis_quality_predictions")
-    .select("work_id, predicted_quality, prompt_version, works(synopsis_quality)")
+    .select("work_id, predicted_quality, prompt_version, works!work_id(synopsis_quality)")
   if (error) {
     console.warn("[synopsis-pred] getSynopsisVersionComparison falhou:", error.message)
     return null
@@ -337,6 +365,13 @@ export async function getSynopsisVersionComparison(
   let better = 0
   let same = 0
   let worse = 0
+  let discordant = 0
+  let gemsC = 0
+  let gemsP = 0
+  let pred4C = 0
+  let tp4C = 0
+  let pred4P = 0
+  let tp4P = 0
   for (const agg of works.values()) {
     const cur = agg.byVer.get(currentVersion)
     const prev = agg.byVer.get(previousVersion)
@@ -351,6 +386,13 @@ export async function getSynopsisVersionComparison(
     if (Math.abs(dC) < Math.abs(dP)) better += 1
     else if (Math.abs(dC) === Math.abs(dP)) same += 1
     else worse += 1
+    if (cur !== prev) discordant += 1
+    // Gems perdidas: obra amada (manual ≥ ♥♥♥) prevista abaixo do manual.
+    if (agg.manual >= 3 && cur < agg.manual) gemsC += 1
+    if (agg.manual >= 3 && prev < agg.manual) gemsP += 1
+    // Precisão de ♥♥♥♥ (guarda-corpo anti-inundação do topo).
+    if (cur === 4) { pred4C += 1; if (agg.manual === 4) tp4C += 1 }
+    if (prev === 4) { pred4P += 1; if (agg.manual === 4) tp4P += 1 }
   }
   if (nPaired === 0) return null
   return {
@@ -364,7 +406,92 @@ export async function getSynopsisVersionComparison(
     betterRate: better / nPaired,
     sameRate: same / nPaired,
     worseRate: worse / nPaired,
+    discordant,
+    gemsLostCurrent: gemsC,
+    gemsLostPrevious: gemsP,
+    highPrecCurrent: pred4C > 0 ? tp4C / pred4C : null,
+    highPrecPrevious: pred4P > 0 ? tp4P / pred4P : null,
+    signP: binomialTwoSidedP(better, worse),
   }
+}
+
+// ============================================================================
+// MEDIDA TEMPORÁRIA — shadow A/B: linhas por-obra com os DOIS arms + confiança.
+// ============================================================================
+
+export interface ShadowCompareRow {
+  workId: string
+  title: string
+  armA: { quality: string | null; confidence: number | null }
+  armB: { quality: string | null; confidence: number | null }
+  manual: string | null
+  /** true quando as faixas previstas diferem (o que carrega sinal). */
+  discordant: boolean
+}
+
+/**
+ * Obras com previsão dos DOIS arms (A = versão ativa; B = "v5s"). Bounded pelo
+ * tamanho do arm B (só obras previstas desde que o shadow foi ligado) — busca o
+ * arm B primeiro (pequeno), depois o arm A só desses work_ids. Discordantes 1º.
+ */
+export async function getShadowComparisonRows(): Promise<ShadowCompareRow[]> {
+  const armAVer = resolveInterestPromptVersion()
+  const armBVer = COMPILED_PREFERENCES_V4_SHADOW.promptVersion
+  const supabase = createAdminClient()
+
+  const { data: bRows, error: bErr } = await supabase
+    .from("synopsis_quality_predictions")
+    .select("work_id, predicted_quality, confidence, works!work_id(title, synopsis_quality)")
+    .eq("prompt_version", armBVer)
+  if (bErr) {
+    console.warn("[shadow] getShadowComparisonRows (arm B) falhou:", bErr.message)
+    return []
+  }
+  const bByWork = new Map<string, { quality: string | null; confidence: number | null; title: string; manual: string | null }>()
+  for (const row of bRows ?? []) {
+    const r = row as { work_id: string; predicted_quality: string | null; confidence: number | null; works: { title: string | null; synopsis_quality: string | null } | { title: string | null; synopsis_quality: string | null }[] | null }
+    const w = Array.isArray(r.works) ? r.works[0] : r.works
+    bByWork.set(r.work_id, {
+      quality: r.predicted_quality,
+      confidence: r.confidence != null ? Number(r.confidence) : null,
+      title: w?.title ?? "(sem título)",
+      manual: w?.synopsis_quality ?? null,
+    })
+  }
+  const workIds = [...bByWork.keys()]
+  if (workIds.length === 0) return []
+
+  const { data: aRows, error: aErr } = await supabase
+    .from("synopsis_quality_predictions")
+    .select("work_id, predicted_quality, confidence")
+    .eq("prompt_version", armAVer)
+    .in("work_id", workIds)
+  if (aErr) {
+    console.warn("[shadow] getShadowComparisonRows (arm A) falhou:", aErr.message)
+    return []
+  }
+  const aByWork = new Map<string, { quality: string | null; confidence: number | null }>()
+  for (const row of aRows ?? []) {
+    const r = row as { work_id: string; predicted_quality: string | null; confidence: number | null }
+    aByWork.set(r.work_id, { quality: r.predicted_quality, confidence: r.confidence != null ? Number(r.confidence) : null })
+  }
+
+  const out: ShadowCompareRow[] = []
+  for (const [workId, b] of bByWork) {
+    const a = aByWork.get(workId)
+    if (!a) continue // precisa dos DOIS arms
+    out.push({
+      workId,
+      title: b.title,
+      armA: { quality: a.quality, confidence: a.confidence },
+      armB: { quality: b.quality, confidence: b.confidence },
+      manual: b.manual,
+      discordant: a.quality !== b.quality,
+    })
+  }
+  // Discordantes primeiro; depois por título.
+  out.sort((x, y) => (Number(y.discordant) - Number(x.discordant)) || x.title.localeCompare(y.title))
+  return out
 }
 
 /** Marca a previsão de UMA obra como desatualizada (ex.: sinopse canônica mudou). */

@@ -59,6 +59,25 @@ export async function autoPredictSynopsisQuality(workId: string): Promise<void> 
       "@/lib/orchestration/integrations/synopsis-interest"
     )
     await ensurePredictInterest(workId, { isBackground: true, gateway: new SupabaseInterestGateway() })
+
+    // MEDIDA TEMPORÁRIA — shadow A/B: pra obra nova, roda também o arm B (bloco v4 +
+    // Item A), best-effort e background. Ver PLANO-INTERESSE-PREFS-CONFIANCA.md §15.
+    const { isInterestShadowEnabled, COMPILED_PREFERENCES_V4_SHADOW } = await import(
+      "@/lib/ai-evaluation/compiled-preferences"
+    )
+    if (isInterestShadowEnabled()) {
+      try {
+        const { getDeclaredTagPreferences } = await import("@/server/queries/tag-preferences")
+        const declaredTags = await getDeclaredTagPreferences()
+        await ensurePredictInterest(workId, {
+          isBackground: true,
+          gateway: new SupabaseInterestGateway(),
+          arm: { compiled: COMPILED_PREFERENCES_V4_SHADOW, declaredTags },
+        })
+      } catch (e) {
+        console.warn("[shadow] arm B (auto) falhou:", e instanceof Error ? e.message : e)
+      }
+    }
   } catch (err) {
     console.error("[synopsis-quality] auto-predict falhou:", err)
   }

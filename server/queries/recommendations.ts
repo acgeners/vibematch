@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { fetchAllRows } from "@/lib/supabase/paginate"
+import { fetchAllRows, fetchAllRowsParallel } from "@/lib/supabase/paginate"
 import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
@@ -421,6 +421,7 @@ export interface AlignmentQueueWork {
   expectedScore: number | null
   alignmentScore: number | null
   alignmentStale: boolean
+  alignmentAt?: string | null
   /** Hidratados só na aba ativa (cards) — ausentes no caminho do cache de contagens. */
   tagCount?: number | null
   reviewCount?: number | null
@@ -441,17 +442,26 @@ export async function getAlignmentQueueWorks(opts: {
   personalStatusIds?: number[]
   synopsisQualities?: string[]
   limit?: number
+  /** Caminho do badge: pula o join de capas/título — só o suficiente pra filtrar
+   *  o estado e contar (evita hidratar covers de ~750 obras à toa no fan-out). */
+  countOnly?: boolean
 }): Promise<AlignmentQueueWork[]> {
   const states: Array<"stale" | "unranked"> = opts.states ?? ["stale", "unranked"]
   const wantStale = states.includes("stale")
   const wantUnranked = states.includes("unranked")
   const supabase = createAdminClient()
+  // String não-literal (`: string`) de propósito: um ternário de literais no
+  // `.select()` faz o parser de tipos do supabase-js estourar (ParserError). As
+  // linhas já são lidas via `Record<string, unknown>` abaixo, então o `any` aqui
+  // é inofensivo.
+  const selectCols: string = opts.countOnly
+    ? "id, calculated_scores(alignment_score, alignment_stale)"
+    : "id, title, publication_status_id, personal_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score, alignment_score, alignment_stale, alignment_at)"
   let query = supabase
     .from("works")
-    .select(
-      "id, title, publication_status_id, personal_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score, alignment_score, alignment_stale)",
-    )
+    .select(selectCols)
     .eq("is_archived", false)
+    .neq("ai_eval_status", "skipped")
   if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
     query = query.in("publication_status_id", opts.pubStatusIds)
   }
@@ -468,19 +478,25 @@ export async function getAlignmentQueueWorks(opts: {
   if (error) throw new Error(`Falha listando fila de Veredito IA: ${error.message}`)
 
   const rows: AlignmentQueueWork[] = []
-  for (const row of data ?? []) {
+  for (const row of (data ?? []) as unknown[]) {
     const w = row as Record<string, unknown>
     const calc =
       (w.calculated_scores as {
         expected_score?: number | null
         alignment_score?: number | null
         alignment_stale?: boolean | null
+        alignment_at?: string | null
       } | null) ?? null
     const alignmentScore = calc?.alignment_score != null ? Number(calc.alignment_score) : null
     const alignmentStale = Boolean(calc?.alignment_stale)
     const isStale = alignmentScore != null && alignmentStale
     const isUnranked = alignmentScore == null
     if (!((wantStale && isStale) || (wantUnranked && isUnranked))) continue
+    if (opts.countOnly) {
+      // Só o comprimento importa pro badge — evita montar covers/campos por obra.
+      rows.push({ id: w.id as string } as AlignmentQueueWork)
+      continue
+    }
     const coverUrls = orderedCoverUrls(w.work_covers as RawCoverRow[] | undefined)
     rows.push({
       id: w.id as string,
@@ -493,6 +509,7 @@ export async function getAlignmentQueueWorks(opts: {
       expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
       alignmentScore,
       alignmentStale,
+      alignmentAt: calc?.alignment_at ?? null,
     })
   }
   return rows
@@ -719,7 +736,8 @@ export async function getSynopsisQueueWorks(opts: {
   // Carrega TODAS as previsões — fonte da verdade do estado de cada obra. A tabela
   // já passou de 1000 linhas, então pagina (sem isso o PostgREST corta em 1000 e
   // obras previstas reapareceriam como "não previsto").
-  const predRows = await fetchAllRows<{ work_id: string } & SynopsisPredRow>(
+  const predRows = await fetchAllRowsParallel<{ work_id: string } & SynopsisPredRow>(
+    () => supabase.from("synopsis_quality_predictions").select("work_id", { count: "exact", head: true }),
     (from, to) =>
       supabase
         .from("synopsis_quality_predictions")

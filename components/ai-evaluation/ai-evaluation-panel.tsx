@@ -2,31 +2,22 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowDown, ArrowUp, CalendarDays, CheckSquare, Cpu, ExternalLink, Gauge, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
+import { CalendarDays, Cpu, ExternalLink, ListChecks, Loader2, Sparkles, SkipForward, X } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation, skipAiEvaluation, prewarmEvaluationContext } from "@/server/actions/ai"
 import { getComixHealthStatus } from "@/server/actions/comix-resolver"
 import { useRefresh } from "@/lib/use-refresh"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
 import { AiEvaluationCompare } from "./ai-evaluation-compare"
-import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { WorkTitleLink } from "@/components/titles/work-title-link"
-import { ScoreBadge } from "@/components/ui/score-badge"
-import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
-import { CountBadges } from "@/components/ai-evaluation/count-badges"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { WorkQueueCard, type WorkQueueState } from "@/components/ai-evaluation/queue/work-queue-card"
+import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
+import { QueueToolbar, QueueSortSelect } from "@/components/ai-evaluation/queue/queue-toolbar"
+import { useWorkSelection } from "@/components/ai-evaluation/queue/use-work-selection"
 import { titleToSlug } from "@/lib/utils"
 import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
@@ -152,10 +143,6 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
     void prewarmEvaluationContext(work.id).catch(() => {})
   }
 
-  // Selection mode
-  const [selectionMode, setSelectionMode] = useState(false)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-
   // Sort
   type SortField = "default" | "expected_score" | "confidence" | "evaluatedAt" | "modelName"
   const [sortField, setSortField] = useState<SortField>("default")
@@ -204,27 +191,8 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
     })
   }, [pendingWorks, sortField, sortDir, sortField2, sortDir2])
 
-  const toggleSelectionMode = () => {
-    setSelectionMode((v) => !v)
-    setSelected(new Set())
-  }
-
-  const toggleItem = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
-      } else {
-        next.add(id)
-      }
-      return next
-    })
-  }
-
-  const selectAll = () => setSelected(new Set(pendingWorks.map((w) => w.id)))
-  const deselectAll = () => setSelected(new Set())
-  const allSelected = selected.size === pendingWorks.length
-  const someSelected = selected.size > 0 && !allSelected
+  const ids = useMemo(() => sortedWorks.map((w) => w.id), [sortedWorks])
+  const selection = useWorkSelection(ids)
 
   // Normaliza o retorno (união) de triggerAiEvaluation num EvalOutcome.
   const toOutcome = (
@@ -471,16 +439,14 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
   }
 
   const handleEvaluateSelected = async () => {
-    const works = pendingWorks.filter((w) => selected.has(w.id))
-    setSelectionMode(false)
-    setSelected(new Set())
+    const works = pendingWorks.filter((w) => selection.isSelected(w.id))
+    selection.clear()
     await startQueue(works)
   }
 
   const handleSkipSelected = async () => {
-    const ids = [...selected]
-    setSelectionMode(false)
-    setSelected(new Set())
+    const ids = selection.selectedIds
+    selection.clear()
     for (const id of ids) {
       await skipAiEvaluation(id)
     }
@@ -572,117 +538,53 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Toolbar */}
+      {/* Toolbar / Seleção unificados */}
       {!isInQueue && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-card/58 p-2.5 shadow-sm">
-          {selectionMode ? (
+        <QueueToolbar
+          count={selection.count}
+          allSelected={selection.allSelected}
+          onToggleAll={selection.toggleAll}
+          onClear={selection.clear}
+          selectedIds={selection.selectedIds}
+          sort={
             <>
-              {/* Select all checkbox */}
-              <Checkbox
-                checked={allSelected ? true : someSelected ? "indeterminate" : false}
-                onCheckedChange={(v) => (v ? selectAll() : deselectAll())}
-                className="shrink-0"
-              />
-              <span className="text-xs text-muted-foreground">
-                {selected.size} selecionada{selected.size !== 1 ? "s" : ""}
-              </span>
-
-              <div className="flex-1" />
-
-              <Button
-                variant="outline"
-                size="xs"
-                onClick={handleSkipSelected}
-                disabled={selected.size === 0}
-              >
-                <SkipForward className="h-3 w-3" />
-                Pular selecionadas
-              </Button>
-              <Button
-                size="xs"
-                onClick={handleEvaluateSelected}
-                disabled={selected.size === 0}
-              >
-                <Sparkles className="h-3 w-3" />
-                Avaliar selecionadas ({selected.size})
-              </Button>
-              <Button variant="ghost" size="xs" onClick={toggleSelectionMode}>
-                <X className="h-3 w-3" />
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button variant="outline" size="xs" onClick={toggleSelectionMode}>
-                <CheckSquare className="h-3 w-3" />
-                Selecionar
-              </Button>
-
-              <span className="text-xs text-muted-foreground ml-2">Ordenar:</span>
-              <Select
+              <QueueSortSelect
+                width="w-[160px]"
                 value={sortField}
-                onValueChange={(v) => setSortField(v as SortField)}
-              >
-                <SelectTrigger size="sm" className="h-7 w-[160px] text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="default">Padrão</SelectItem>
-                  <SelectItem value="expected_score">Nota Prevista</SelectItem>
-                  <SelectItem value="confidence">Confiança IA</SelectItem>
-                  <SelectItem value="evaluatedAt">Data avaliação</SelectItem>
-                  <SelectItem value="modelName">Modelo</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                variant="outline"
-                size="icon-xs"
-                onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
-                disabled={sortField === "default"}
-                title={sortDir === "asc" ? "Crescente" : "Decrescente"}
-              >
-                {sortDir === "asc" ? (
-                  <ArrowUp className="h-3 w-3" />
-                ) : (
-                  <ArrowDown className="h-3 w-3" />
-                )}
-              </Button>
-
+                onChange={(v) => setSortField(v as SortField)}
+                options={[
+                  { value: "default", label: "Padrão" },
+                  { value: "expected_score", label: "Nota Prevista" },
+                  { value: "confidence", label: "Confiança IA" },
+                  { value: "evaluatedAt", label: "Data avaliação" },
+                  { value: "modelName", label: "Modelo" },
+                ]}
+                dir={sortDir}
+                onToggleDir={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+                dirDisabled={sortField === "default"}
+              />
               {sortField !== "default" && (
-                <>
-                  <span className="text-xs text-muted-foreground ml-1">depois:</span>
-                  <Select
-                    value={sortField2}
-                    onValueChange={(v) => setSortField2(v as SortField)}
-                  >
-                    <SelectTrigger size="sm" className="h-7 w-[140px] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="default">Nenhum</SelectItem>
-                      <SelectItem value="expected_score" disabled={sortField === "expected_score"}>Nota Prevista</SelectItem>
-                      <SelectItem value="confidence" disabled={sortField === "confidence"}>Confiança IA</SelectItem>
-                      <SelectItem value="evaluatedAt" disabled={sortField === "evaluatedAt"}>Data avaliação</SelectItem>
-                      <SelectItem value="modelName" disabled={sortField === "modelName"}>Modelo</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    variant="outline"
-                    size="icon-xs"
-                    onClick={() => setSortDir2((d) => (d === "asc" ? "desc" : "asc"))}
-                    disabled={sortField2 === "default"}
-                    title={sortDir2 === "asc" ? "Crescente" : "Decrescente"}
-                  >
-                    {sortDir2 === "asc" ? (
-                      <ArrowUp className="h-3 w-3" />
-                    ) : (
-                      <ArrowDown className="h-3 w-3" />
-                    )}
-                  </Button>
-                </>
+                <QueueSortSelect
+                  label="depois:"
+                  width="w-[140px]"
+                  value={sortField2}
+                  onChange={(v) => setSortField2(v as SortField)}
+                  options={[
+                    { value: "default", label: "Nenhum" },
+                    { value: "expected_score", label: "Nota Prevista", disabled: sortField === "expected_score" },
+                    { value: "confidence", label: "Confiança IA", disabled: sortField === "confidence" },
+                    { value: "evaluatedAt", label: "Data avaliação", disabled: sortField === "evaluatedAt" },
+                    { value: "modelName", label: "Modelo", disabled: sortField === "modelName" },
+                  ]}
+                  dir={sortDir2}
+                  onToggleDir={() => setSortDir2((d) => (d === "asc" ? "desc" : "asc"))}
+                  dirDisabled={sortField2 === "default"}
+                />
               )}
-
-              <div className="flex-1" />
-
+            </>
+          }
+          idleExtras={
+            <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">Quantos:</span>
               <Input
                 type="number"
@@ -696,109 +598,114 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
                 <ListChecks className="h-3 w-3" />
                 Avaliar em fila
               </Button>
+            </div>
+          }
+          selectedActions={
+            <>
+              <Button size="sm" variant="outline" onClick={handleSkipSelected} disabled={selection.count === 0}>
+                <SkipForward className="mr-1 h-3.5 w-3.5" />
+                Pular selecionadas
+              </Button>
+              <Button size="sm" onClick={handleEvaluateSelected} disabled={selection.count === 0}>
+                <Sparkles className="mr-1 h-3.5 w-3.5" />
+                Avaliar selecionadas ({selection.count})
+              </Button>
             </>
-          )}
-        </div>
+          }
+        />
       )}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        {sortedWorks.map((work) => (
-          <Card
-            key={work.id}
-            className={[
-              "transition-all hover:border-primary/30 hover:bg-card hover:shadow-md hover:shadow-primary/10",
-              evaluatingId === work.id ? "opacity-60" : "",
-              selectionMode ? "cursor-pointer" : "",
-              selectionMode && selected.has(work.id) ? "border-primary/60 bg-primary/5" : "",
-            ].filter(Boolean).join(" ")}
-            onClick={selectionMode ? () => toggleItem(work.id) : undefined}
-          >
-            <CardContent className="py-2.5">
-              <div className="flex items-center gap-3">
-                {selectionMode && (
-                  <Checkbox
-                    checked={selected.has(work.id)}
-                    onCheckedChange={() => toggleItem(work.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="shrink-0"
-                  />
-                )}
+      <WorkQueueGrid>
+        {sortedWorks.map((work) => {
+          const isPending = work.matchedFilters?.includes("pending")
+          const isReview = work.matchedFilters?.includes("review-pending")
+          const isLowConf = work.matchedFilters?.includes("low-confidence")
+          const isOutdatedModel = work.matchedFilters?.includes("outdated-model")
+          const isOutdatedReviews = work.matchedFilters?.includes("outdated-reviews")
 
-                {/* Cover thumb (esquerda) — aspect 2:3 de manga */}
-                <CoverThumb url={work.cover_url} />
+          // 1 chip de estado, por precedência.
+          const state: WorkQueueState | null = isOutdatedModel
+            ? { label: "Modelo antigo", tone: "rose" }
+            : isOutdatedReviews
+              ? { label: "Reviews novas", tone: "orange" }
+              : isLowConf
+                ? { label: `Confiança ${Math.round((work.evaluation?.confidence ?? 0) * 100)}%`, tone: "amber" }
+                : isReview
+                  ? { label: "Aguardando revisão", tone: "sky" }
+                  : isPending
+                    ? { label: "Nunca avaliada pela IA", tone: "slate" }
+                    : null
 
-                {/* Conteúdo central */}
-                <div className="flex-1 min-w-0 space-y-1.5">
-                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                    <span onClick={(e) => e.stopPropagation()} className="min-w-0">
-                      <WorkTitleLink
-                        title={work.title}
-                        workId={work.id}
-                        className="text-sm font-semibold hover:underline line-clamp-2 break-words"
-                      />
-                    </span>
-                    {work.expected_score != null && (
-                      <span title="Nota Prevista" className="inline-flex shrink-0">
-                        <ScoreBadge score={work.expected_score} size="sm" />
-                      </span>
-                    )}
-                  </div>
+          const details = work.evaluation ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mt-1">
+              <span className="inline-flex items-center gap-1">
+                <CalendarDays className="h-3 w-3" />
+                {formatEvaluatedAt(work.evaluation.evaluatedAt)}
+              </span>
+              {(work.evaluation.modelName || work.evaluation.promptVersion) && (
+                <span className="inline-flex items-center gap-1">
+                  <Cpu className="h-3 w-3" />
+                  <span className="font-mono">
+                    {work.evaluation.modelName ?? "?"}/{work.evaluation.promptVersion ?? "?"}
+                  </span>
+                </span>
+              )}
+            </div>
+          ) : null
 
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <PublicationStatusBadge statusId={work.publication_status_id ?? null} />
-                    <PersonalStatusBadge statusId={work.personal_status_id ?? null} />
-                    {work.synopsis_quality && (
-                      <span
-                        title="Interesse na sinopse"
-                        className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-600 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300"
-                      >
-                        {work.synopsis_quality}
-                      </span>
-                    )}
-                    <FilterBadges
-                      matchedFilters={work.matchedFilters}
-                      evaluation={work.evaluation}
-                    />
-                    <CountBadges tagCount={work.tagCount} reviewCount={work.reviewCount} />
-                  </div>
+          const actions = (
+            <>
+              <Button
+                size="sm"
+                onClick={() => handleEvaluate(work)}
+                onMouseEnter={() => prewarm(work)}
+                onFocus={() => prewarm(work)}
+                disabled={!!evaluatingId || !!skippingId || isInQueue}
+              >
+                <Sparkles className="h-3.5 w-3.5 mr-1" />
+                {evaluatingId === work.id
+                  ? "Avaliando..."
+                  : work.evaluation
+                    ? "Reavaliar"
+                    : "Avaliar"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleSkip(work.id)}
+                disabled={!!evaluatingId || !!skippingId || isInQueue}
+                title="Marcar para pular avaliação IA"
+              >
+                <SkipForward className="h-3.5 w-3.5 mr-1" />
+                Pular
+              </Button>
+            </>
+          )
 
-                  <EvaluationMetaLine evaluation={work.evaluation} />
-                </div>
-
-                {/* Ações (direita) — stack vertical, Reavaliar destaque */}
-                {!selectionMode && (
-                  <div className="flex shrink-0 flex-col items-stretch gap-2.5">
-                    <Button
-                      size="sm"
-                      onClick={() => handleEvaluate(work)}
-                      onMouseEnter={() => prewarm(work)}
-                      onFocus={() => prewarm(work)}
-                      disabled={!!evaluatingId || !!skippingId || isInQueue}
-                    >
-                      <Sparkles className="h-3.5 w-3.5" />
-                      {evaluatingId === work.id
-                        ? "Avaliando..."
-                        : work.evaluation
-                          ? "Reavaliar"
-                          : "Avaliar"}
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      onClick={() => handleSkip(work.id)}
-                      disabled={!!evaluatingId || !!skippingId || isInQueue}
-                      title="Marcar para pular avaliação IA"
-                    >
-                      <SkipForward className="h-3 w-3" />
-                      Pular
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+          return (
+            <WorkQueueCard
+              key={work.id}
+              workId={work.id}
+              title={work.title}
+              coverUrl={work.cover_url}
+              expectedScore={work.expected_score}
+              publicationStatusId={work.publication_status_id}
+              personalStatusId={work.personal_status_id}
+              interest={work.synopsis_quality}
+              tagCount={work.tagCount}
+              reviewCount={work.reviewCount}
+              state={state}
+              details={details}
+              showDetailsDirectly
+              actions={actions}
+              selectable
+              selected={selection.isSelected(work.id)}
+              onToggleSelect={() => selection.toggle(work.id)}
+              dimmed={evaluatingId === work.id}
+            />
+          )
+        })}
+      </WorkQueueGrid>
 
       {/* Review Dialog */}
       <Dialog open={reviewData != null && compareData == null} onOpenChange={(open) => !open && handleCancel()}>
@@ -968,91 +875,3 @@ function formatEvaluatedAt(iso: string | null): string {
   })
 }
 
-function EvaluationMetaLine({ evaluation }: { evaluation?: PendingWork["evaluation"] }) {
-  if (!evaluation) {
-    return (
-      <p className="text-xs italic text-muted-foreground">Nunca avaliada pela IA</p>
-    )
-  }
-  const confidence = evaluation.confidence
-  const confidenceTone =
-    confidence == null
-      ? ""
-      : confidence >= 0.75
-        ? "text-emerald-600 dark:text-emerald-300"
-        : confidence >= 0.5
-          ? "text-amber-600 dark:text-amber-300"
-          : "text-rose-600 dark:text-rose-300"
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-      <span className="inline-flex items-center gap-1">
-        <CalendarDays className="h-3 w-3" />
-        {formatEvaluatedAt(evaluation.evaluatedAt)}
-      </span>
-      {(evaluation.modelName || evaluation.promptVersion) && (
-        <span className="inline-flex items-center gap-1">
-          <Cpu className="h-3 w-3" />
-          <span className="font-mono">
-            {evaluation.modelName ?? "?"}/{evaluation.promptVersion ?? "?"}
-          </span>
-        </span>
-      )}
-      {confidence != null && (
-        <span
-          className="inline-flex items-center gap-1"
-          title="Confiança declarada pela IA"
-        >
-          <Gauge className="h-3 w-3" />
-          <span className={`font-semibold ${confidenceTone}`}>
-            {Math.round(confidence * 100)}%
-          </span>
-        </span>
-      )}
-    </div>
-  )
-}
-
-function FilterBadges({
-  matchedFilters,
-  evaluation,
-}: {
-  matchedFilters?: PendingWork["matchedFilters"]
-  evaluation?: PendingWork["evaluation"]
-}) {
-  if (!matchedFilters?.length) return null
-  return (
-    <div className="flex flex-wrap gap-1 mt-1">
-      {matchedFilters.includes("pending") && (
-        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-400/20 dark:bg-slate-400/10 dark:text-slate-300">
-          sem avaliação IA
-        </span>
-      )}
-      {matchedFilters.includes("review-pending") && (
-        <span className="inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:border-sky-400/25 dark:bg-sky-400/12 dark:text-sky-200">
-          aguardando revisão
-        </span>
-      )}
-      {matchedFilters.includes("low-confidence") && evaluation?.confidence != null && (
-        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-200">
-          confiança {Math.round(evaluation.confidence * 100)}%
-        </span>
-      )}
-      {matchedFilters.includes("outdated-model") && evaluation && (
-        <span
-          className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700 dark:border-rose-400/25 dark:bg-rose-400/12 dark:text-rose-200"
-          title={`Avaliado em ${evaluation.modelName ?? "?"} / ${evaluation.promptVersion ?? "?"}`}
-        >
-          modelo antigo: {evaluation.modelName ?? "?"}/{evaluation.promptVersion ?? "?"}
-        </span>
-      )}
-      {matchedFilters.includes("outdated-reviews") && (
-        <span
-          className="inline-flex items-center rounded-full border border-fuchsia-300 bg-fuchsia-50 px-2 py-0.5 text-[11px] font-medium text-fuchsia-700 dark:border-fuchsia-400/25 dark:bg-fuchsia-400/12 dark:text-fuchsia-200"
-          title="O conjunto de reviews mudou após a avaliação — atributos podem estar defasados."
-        >
-          reviews novas
-        </span>
-      )}
-    </div>
-  )
-}

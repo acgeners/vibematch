@@ -1,5 +1,6 @@
 "use client"
 
+import { Sparkles } from "lucide-react"
 import { TaskButton } from "./task-button"
 import {
   inferTagsForWork,
@@ -18,6 +19,8 @@ export function TagRowAction({ workId }: { workId: string }) {
       kind="infer-tags"
       label="Inferir tags"
       busyLabel="Inferindo…"
+      variant="default"
+      icon={<Sparkles className="h-3.5 w-3.5" />}
       run={() => inferTagsForWork(workId)}
       formatDone={(r) => {
         const x = r as InferTagsResult
@@ -37,6 +40,7 @@ export function TagBatchAction({ workIds }: { workIds: string[] }) {
       label={`Inferir tags em fila (${n})`}
       busyLabel="Inferindo fila…"
       variant="default"
+      icon={<Sparkles className="h-3.5 w-3.5" />}
       run={() => inferTagsForWorks(workIds)}
       disabled={workIds.length === 0}
       formatDone={(r) => {

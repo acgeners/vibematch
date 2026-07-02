@@ -16,7 +16,9 @@ export interface NoReviewWork {
   title: string
   coverUrl: string | null
   publicationStatus: string
+  publicationStatusId?: number | null
   personalStatus: string
+  personalStatusId?: number | null
   aiEvalStatus: string | null
   canonicalPresent: boolean
   usefulReviewCount: number
@@ -51,7 +53,9 @@ export interface WorkMetaRow {
   title: string
   coverUrl: string | null
   publicationStatus: string
+  publicationStatusId?: number | null
   personalStatus: string
+  personalStatusId?: number | null
   aiEvalStatus: string | null
   canonicalPresent: boolean
   usefulReviewCount: number
@@ -110,7 +114,9 @@ export function classifyWorksWithoutReviews(args: {
       title: w.title,
       coverUrl: w.coverUrl,
       publicationStatus: w.publicationStatus,
+      publicationStatusId: w.publicationStatusId,
       personalStatus: w.personalStatus,
+      personalStatusId: w.personalStatusId,
       aiEvalStatus: w.aiEvalStatus,
       canonicalPresent: w.canonicalPresent,
       usefulReviewCount: w.usefulReviewCount,

@@ -29,14 +29,13 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true }: RerankAiRk
   if (!isPaid) {
     return (
       <Button
-        variant="outline"
         size="sm"
         className="gap-1.5"
         disabled
         title="Re-rank por IA é uma feature do plano Pago."
       >
         <Sparkles className="h-3.5 w-3.5" />
-        Calcular Veredito IA
+        Calcular
         <span className="ml-1 rounded bg-muted px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Pago
         </span>
@@ -53,20 +52,20 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true }: RerankAiRk
       }
       const score = result.data?.alignmentScore
       toast.success(
-        score != null ? `Veredito IA calculado: ${Math.round(score)}` : "Veredito IA calculado.",
+        score != null ? `Veredito IA calculado: ${Math.round(score)}` : "Veredito IA calculated.",
       )
       refresh()
     })
   }
 
   return (
-    <Button variant="outline" size="sm" onClick={run} disabled={isPending} className="gap-1.5">
+    <Button size="sm" onClick={run} disabled={isPending} className="gap-1.5">
       {isPending ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
       ) : (
         <Sparkles className="h-3.5 w-3.5" />
       )}
-      {isPending ? "Calculando…" : hasScore ? "Recalcular Veredito IA" : "Calcular Veredito IA"}
+      {isPending ? "Calculando…" : hasScore ? "Recalcular" : "Calcular"}
     </Button>
   )
 }
