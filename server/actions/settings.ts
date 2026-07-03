@@ -666,15 +666,19 @@ export async function consolidatePendingReviewSummaries(maxWorks = 10): Promise<
     }
     if (reviewedIds.size === 0) return { data: progress }
 
-    const ids = [...reviewedIds]
-    const { data: workRows, error: workErr } = await supabase
-      .from("works")
-      .select("id, review_summary")
-      .in("id", ids)
+    // Filtra em LOTES: `.in("id", [671 ids])` num único request estoura a URL
+    // (~25KB) e o gateway do Supabase devolve 400 "Bad Request". Ver selectByIdsInChunks.
+    const { selectByIdsInChunks } = await import("@/lib/supabase/paginate")
+    const { data: workRows, error: workErr } = await selectByIdsInChunks<{
+      id: string
+      review_summary: string | null
+    }>([...reviewedIds], (chunk) =>
+      supabase.from("works").select("id, review_summary").in("id", chunk),
+    )
     if (workErr) return { error: workErr.message }
-    const pendingIds = (workRows ?? [])
-      .filter((w) => (w as { review_summary: string | null }).review_summary == null)
-      .map((w) => w.id as string)
+    const pendingIds = workRows
+      .filter((w) => w.review_summary == null)
+      .map((w) => w.id)
       .slice(0, maxWorks)
 
     let consecutiveApiFailures = 0
@@ -781,23 +785,25 @@ export async function consolidatePendingReviewDigests(maxWorks = 10): Promise<{
     }
     if (reviewedIds.size === 0) return { data: progress }
 
-    const ids = [...reviewedIds]
-    const { data: workRows, error: workErr } = await supabase
-      .from("works")
-      .select("id, review_digest, review_digest_version")
-      .in("id", ids)
+    // Filtra em LOTES (mesmo motivo do resumo: `.in()` com 671 ids → URL >24KB →
+    // 400 "Bad Request" do gateway). Ver selectByIdsInChunks.
+    const { selectByIdsInChunks } = await import("@/lib/supabase/paginate")
+    const { data: workRows, error: workErr } = await selectByIdsInChunks<{
+      id: string
+      review_digest: unknown
+      review_digest_version: string | null
+    }>([...reviewedIds], (chunk) =>
+      supabase.from("works").select("id, review_digest, review_digest_version").in("id", chunk),
+    )
     if (workErr) {
       return {
         error: `Digest indisponível (aplique a migration 103_works_review_digest): ${workErr.message}`,
       }
     }
     // Pendente = sem digest OU digest de versão antiga (regenera no bump).
-    const pendingIds = (workRows ?? [])
-      .filter((w) => {
-        const row = w as { review_digest: unknown; review_digest_version: string | null }
-        return row.review_digest == null || row.review_digest_version !== REVIEW_DIGEST_VERSION
-      })
-      .map((w) => w.id as string)
+    const pendingIds = workRows
+      .filter((w) => w.review_digest == null || w.review_digest_version !== REVIEW_DIGEST_VERSION)
+      .map((w) => w.id)
       .slice(0, maxWorks)
 
     let consecutiveApiFailures = 0
