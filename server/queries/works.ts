@@ -17,7 +17,7 @@ const WORK_WITH_RELATIONS_SELECT = `
   category_scores(*),
   platform_ratings(*),
   calculated_scores(*),
-  work_tags(tag_id, tags(*)),
+  work_tags(tag_id, source, confidence, tags(*)),
   work_genres(genre_id, genres(id, name, slug)),
   work_covers(id, url, source, is_primary, position),
   work_synopses(id, source, text, is_primary, position)
@@ -573,9 +573,15 @@ export async function getWorksByIds(ids: string[]): Promise<WorkWithRelations[]>
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalizeWorkRelations(data: any): WorkWithRelations {
+  // Preserva a proveniência da linha work_tags (source/confidence) junto de cada
+  // tag — usado na página da obra pra distinguir externa/manual de ai_inferred.
   const tags = (data.work_tags ?? [])
-    .map((wt: { tags: unknown }) => wt.tags)
-    .filter(Boolean) as Array<{ name?: string; tag_group_id?: string | null }>
+    .filter((wt: { tags: unknown }) => Boolean(wt.tags))
+    .map((wt: { tags: Record<string, unknown>; source?: string | null; confidence?: number | null }) => ({
+      ...wt.tags,
+      source: wt.source ?? null,
+      confidence: wt.confidence ?? null,
+    })) as Array<{ name?: string; tag_group_id?: string | null; source?: string | null; confidence?: number | null }>
   const genres = ((data.work_genres ?? []) as Array<{ genres?: { name?: string } | null }>)
     .map((wg) => wg.genres?.name)
     .filter((name): name is string => Boolean(name))
