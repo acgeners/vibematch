@@ -191,6 +191,9 @@ export interface RankingFilters {
   /** "Só obras com nota" — filtra por Nota Prevista presente (era finalScore). */
   onlyWithFinalScore?: boolean
   onlyFavorites?: boolean
+  /** Restringe o resultado a um conjunto explícito de IDs (grupos de favoritos).
+   *  Lista vazia => nenhum resultado. Combina (AND) com os demais filtros. */
+  onlyWorkIds?: string[]
   /** Quando true, não aplica o hard filter que esconde obras Completed/Dropped.
    *  Default false (mantém semântica de "ranking de o que ler"). Páginas tipo
    *  /titles e /favorites devem passar true. */
@@ -460,6 +463,15 @@ export async function getRanking(
   }
   if (filters.onlyFavorites) {
     worksQuery = worksQuery.eq("is_favorite", true)
+  }
+  // Escopo por grupo de favoritos: AND com o allowedIds/exclude acima. Lista
+  // vazia => força match vazio (grupo sem obras não deve vazar o catálogo).
+  if (filters.onlyWorkIds) {
+    if (filters.onlyWorkIds.length === 0) {
+      worksQuery = worksQuery.eq("id", "00000000-0000-0000-0000-000000000000")
+    } else {
+      worksQuery = worksQuery.in("id", filters.onlyWorkIds)
+    }
   }
 
   const { data, error } = await worksQuery.order("title").limit(2000)
