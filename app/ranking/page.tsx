@@ -5,7 +5,7 @@ import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getTierBandWidth } from "@/server/queries/tier-band-width"
 import { getLowCoverageWorkIds } from "@/server/queries/calibration-guards"
-import { getAllGenres } from "@/server/queries/genres"
+import { getAllGenres, getGenreCatTypes } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { getStatusOptions } from "@/server/queries/status-options"
@@ -132,10 +132,11 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // do evito (deprioriza via personal_fit) vale sempre, sem este toggle.
   const hideMode = str("hide_avoided") // "strong" | "all" | undefined
   const hideActive = hideMode === "strong" || hideMode === "all"
-  const [plan, prefs, allGenres, allTags, statusOptions, savedPresets, declaredPrefs] = await Promise.all([
+  const [plan, prefs, allGenres, genreCatTypes, allTags, statusOptions, savedPresets, declaredPrefs] = await Promise.all([
     getCurrentPlan(),
     getPreferences(),
     getAllGenres(),
+    getGenreCatTypes(),
     getAllTags(),
     getStatusOptions(),
     getFilterPresets("/ranking"),
@@ -332,6 +333,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
 
       <RankingFiltersComponent
         availableGenres={allGenres}
+        genreCatTypes={genreCatTypes}
         availableTags={allTags}
         publicationStatuses={statusOptions.publicationStatuses}
         personalStatuses={statusOptions.personalStatuses}

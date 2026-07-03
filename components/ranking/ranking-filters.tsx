@@ -194,6 +194,10 @@ interface StatusOption {
 
 interface RankingFiltersProps {
   availableGenres: string[]
+  /** Mapa name → cat_type ('category' | 'demographics') da tabela genres. Quando
+   *  presente, a aba Gêneros separa Demografia (topo) de Gêneros. /ranking passa;
+   *  outras páginas omitem → grid único (comportamento antigo). */
+  genreCatTypes?: Record<string, string>
   availableTags: Array<{ slug: string; name: string; tag_group_id?: string | null; groupName?: string; subGroupName?: string; subGroupSlug?: string }>
   publicationStatuses?: StatusOption[]
   personalStatuses?: StatusOption[]
@@ -748,6 +752,22 @@ interface GenreRuleGridProps {
   selectedAny: Set<string>
   selectedExclude: Set<string>
   onSetRule: (value: string, rule: FacetRule) => void
+  /** Mostra a legenda AND/OR/EXCLUDE acima do grid. False quando a legenda já é
+   *  exibida uma vez acima de vários grids (split Gêneros/Demografia). */
+  showLegend?: boolean
+}
+
+/** Rótulo de sub-grupo dentro da aba Gêneros (Demografia / Gêneros). */
+function GenreGroupLabel({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      <span>{label}</span>
+      <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-foreground">
+        {count}
+      </span>
+      <span className="h-px flex-1 bg-border/60" />
+    </div>
+  )
 }
 
 function GenreRuleGrid({
@@ -756,6 +776,7 @@ function GenreRuleGrid({
   selectedAny,
   selectedExclude,
   onSetRule,
+  showLegend = true,
 }: GenreRuleGridProps) {
   const [expanded, setExpanded] = useState(false)
   const selectedCount = selectedAll.size + selectedAny.size + selectedExclude.size
@@ -803,7 +824,7 @@ function GenreRuleGrid({
 
   return (
     <div className="space-y-3">
-      <FacetLegend />
+      {showLegend && <FacetLegend />}
 
       <div className="rounded-lg border border-border/65 bg-background/45 p-3">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
@@ -1517,6 +1538,7 @@ function SavedFiltersControl({
 
 export function RankingFilters({
   availableGenres,
+  genreCatTypes,
   availableTags,
   publicationStatuses = [],
   personalStatuses = [],
@@ -1690,6 +1712,16 @@ export function RankingFilters({
     () =>
       availableGenres.filter((g) => g.toLowerCase().includes(genreSearch.toLowerCase())),
     [availableGenres, genreSearch]
+  )
+  // Split por cat_type: Demografia (topo) × Gêneros. Só quando genreCatTypes veio
+  // (/ranking); sem ele, cai no grid único mais abaixo (favorites etc.).
+  const demographicGenres = useMemo(
+    () => filteredGenres.filter((g) => (genreCatTypes?.[g] ?? "category") === "demographics"),
+    [filteredGenres, genreCatTypes]
+  )
+  const categoryGenres = useMemo(
+    () => filteredGenres.filter((g) => (genreCatTypes?.[g] ?? "category") !== "demographics"),
+    [filteredGenres, genreCatTypes]
   )
   const [tagSearch, setTagSearch] = useState("")
   const filteredTags = useMemo(
@@ -2164,13 +2196,50 @@ export function RankingFilters({
                 onChange={(e) => setGenreSearch(e.target.value)}
               />
             </div>
-            <GenreRuleGrid
-              items={filteredGenres}
-              selectedAll={selectedGenreAll}
-              selectedAny={selectedGenreAny}
-              selectedExclude={selectedGenreExclude}
-              onSetRule={setGenreRule}
-            />
+            {genreCatTypes ? (
+              <div className="space-y-4">
+                <FacetLegend />
+                {demographicGenres.length > 0 && (
+                  <div className="space-y-2">
+                    <GenreGroupLabel label="Demografia" count={demographicGenres.length} />
+                    <GenreRuleGrid
+                      items={demographicGenres}
+                      selectedAll={selectedGenreAll}
+                      selectedAny={selectedGenreAny}
+                      selectedExclude={selectedGenreExclude}
+                      onSetRule={setGenreRule}
+                      showLegend={false}
+                    />
+                  </div>
+                )}
+                {categoryGenres.length > 0 && (
+                  <div className="space-y-2">
+                    <GenreGroupLabel label="Gêneros" count={categoryGenres.length} />
+                    <GenreRuleGrid
+                      items={categoryGenres}
+                      selectedAll={selectedGenreAll}
+                      selectedAny={selectedGenreAny}
+                      selectedExclude={selectedGenreExclude}
+                      onSetRule={setGenreRule}
+                      showLegend={false}
+                    />
+                  </div>
+                )}
+                {demographicGenres.length === 0 && categoryGenres.length === 0 && (
+                  <div className="rounded-lg border bg-background p-3 text-xs text-muted-foreground">
+                    Sem resultados
+                  </div>
+                )}
+              </div>
+            ) : (
+              <GenreRuleGrid
+                items={filteredGenres}
+                selectedAll={selectedGenreAll}
+                selectedAny={selectedGenreAny}
+                selectedExclude={selectedGenreExclude}
+                onSetRule={setGenreRule}
+              />
+            )}
           </FilterSection>
         </TabsContent>
 
