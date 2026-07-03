@@ -11,15 +11,32 @@ import {
 
 const BATCH_CAP = 25
 
-/** Botão por obra: infere tags (Haiku) da sinopse + reviews. */
-export function TagRowAction({ workId }: { workId: string }) {
+/** Botão por obra: infere tags (Haiku) da sinopse + reviews. Props opcionais
+ *  permitem reusar num peso mais leve (ex.: "Re-inferir" ghost no rodapé da obra). */
+export function TagRowAction({
+  workId,
+  variant = "default",
+  label = "Inferir tags",
+  busyLabel = "Inferindo…",
+  size = "sm",
+  className,
+}: {
+  workId: string
+  variant?: "default" | "outline" | "secondary" | "ghost"
+  label?: string
+  busyLabel?: string
+  size?: "sm" | "default"
+  className?: string
+}) {
   return (
     <TaskButton
       taskId={`infer-tags:${workId}`}
       kind="infer-tags"
-      label="Inferir tags"
-      busyLabel="Inferindo…"
-      variant="default"
+      label={label}
+      busyLabel={busyLabel}
+      variant={variant}
+      size={size}
+      className={className}
       icon={<Sparkles className="h-3.5 w-3.5" />}
       run={() => inferTagsForWork(workId)}
       formatDone={(r) => {

@@ -167,6 +167,8 @@ export interface Work {
   last_read_at: string | null
   created_at: string
   updated_at: string
+  /** Última vez que a inferência de tags por IA rodou (mesmo achando 0). NULL = nunca. */
+  tags_inferred_at: string | null
 }
 
 export interface WorkCover {

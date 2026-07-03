@@ -180,8 +180,10 @@ async function runFromCsv(sb: ReturnType<typeof createAdminClient>) {
   if (REVERSAL && EXECUTE) fs.writeFileSync(REVERSAL, "")
 
   let written = 0, failed = 0
+  const ran: string[] = [] // obras cuja inferência foi aplicada (p/ tags_inferred_at)
   for (const [workId, w] of byWork) {
     if (!EXECUTE) { console.log(`  ~ "${w.title}" (${w.before}) → +${w.tags.length}: ${w.tags.map((t) => t.name).join(", ")}`); continue }
+    ran.push(workId)
     const { ids } = await resolveOrCreateTags(sb, w.tags.map((t) => t.name))
     const confByName = new Map(w.tags.map((t) => [t.name.toLowerCase(), t.confidence]))
     const { data: cur } = await sb.from("work_tags").select("tag_id").eq("work_id", workId)
@@ -199,6 +201,12 @@ async function runFromCsv(sb: ReturnType<typeof createAdminClient>) {
     written += insertRows.length
     console.log(`  ✓ "${w.title}" ${w.before} → ${w.before + insertRows.length}  (+${insertRows.length})`)
   }
+  if (EXECUTE && ran.length) {
+    const { error: tsErr } = await sb.from("works").update({ tags_inferred_at: new Date().toISOString() }).in("id", ran)
+    if (tsErr) console.log(`  ! falha ao marcar tags_inferred_at: ${tsErr.message}`)
+    else console.log(`  · tags_inferred_at marcado em ${ran.length} obras`)
+  }
+
   console.log(`\n=== ${EXECUTE ? "GRAVADO" : "PREVIEW"} (from-csv) ===`)
   console.log(`obras: ${byWork.size} | inseridas: ${written} | falhas: ${failed}`)
   if (EXECUTE) console.log(`Rode 'npm run recalc:scores' pra propagar nas features.`)
@@ -237,6 +245,7 @@ async function main() {
   if (REVERSAL && EXECUTE) fs.writeFileSync(REVERSAL, "")
 
   let proposed = 0, written = 0, withAny = 0, failed = 0
+  const ran: string[] = [] // obras onde a inferência efetivamente rodou (p/ tags_inferred_at)
   for (const w of targets) {
     const before = tagCount.get(w.id) ?? 0
     let proposals
@@ -247,6 +256,7 @@ async function main() {
     }
     if (proposals.length) withAny++
     proposed += proposals.length
+    if (EXECUTE) ran.push(w.id) // rodou (mesmo que nada seja gravado abaixo)
 
     if (!EXECUTE) {
       for (const p of proposals) {
@@ -276,6 +286,12 @@ async function main() {
     if (REVERSAL) for (const r of rows) fs.appendFileSync(REVERSAL, JSON.stringify({ work_id: r.work_id, tag_id: r.tag_id }) + "\n")
     written += rows.length
     console.log(`  ✓ "${w.title}" ${before} → ${before + rows.length}  (+${rows.length})`)
+  }
+
+  if (EXECUTE && ran.length) {
+    const { error: tsErr } = await sb.from("works").update({ tags_inferred_at: new Date().toISOString() }).in("id", ran)
+    if (tsErr) console.log(`  ! falha ao marcar tags_inferred_at: ${tsErr.message}`)
+    else console.log(`  · tags_inferred_at marcado em ${ran.length} obras`)
   }
 
   console.log(`\n=== ${EXECUTE ? "GRAVADO" : "DRY-RUN"} ===`)

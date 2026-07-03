@@ -51,6 +51,7 @@ import { BackButton } from "@/components/titles/back-button"
 import { CriterionTitleTooltip } from "@/components/titles/criterion-title-tooltip"
 import { ScoreLabelTooltip } from "@/components/titles/score-label-tooltip"
 import { Badge } from "@/components/ui/badge"
+import { TagRowAction } from "@/components/ai-evaluation/tag-actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ExpandableText } from "@/components/ui/expandable-text"
@@ -80,6 +81,9 @@ type DetailTag = {
   label: string
   subGroupName?: string
   stance?: "love" | "avoid"
+  /** Proveniência: "ai_inferred" = inferida por IA; null/ausente = externa/manual. */
+  source?: string | null
+  confidence?: number | null
 }
 
 type WorkTagForDisplay = {
@@ -87,6 +91,8 @@ type WorkTagForDisplay = {
   slug?: string
   name?: string
   tag_group_id?: string | null
+  source?: string | null
+  confidence?: number | null
 }
 
 function normalizePlatformName(name: string) {
@@ -123,6 +129,54 @@ function tagStanceClass(stance?: "love" | "avoid"): string {
   if (stance === "avoid")
     return "border-rose-500/50 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 hover:text-rose-800 dark:text-rose-300 dark:hover:text-rose-200"
   return ""
+}
+
+/** Rótulo do tooltip de uma tag inferida por IA (null quando externa/manual). */
+function tagProvenanceLabel(tag: DetailTag): string | null {
+  if (tag.source !== "ai_inferred") return null
+  const conf = typeof tag.confidence === "number" ? tag.confidence : null
+  // Sonnet verifica as de confiança "média" e grava 0,7; Haiku "alta" grava 0,9.
+  const engine = conf != null && conf <= 0.75 ? "Sonnet verificou" : "Haiku"
+  const confStr = conf != null ? ` · confiança ${conf.toFixed(2).replace(".", ",")}` : ""
+  return `Inferida por IA · ${engine}${confStr}`
+}
+
+/**
+ * Badge de tag com proveniência: contorno tracejado + ponto violeta quando a tag
+ * foi inferida por IA (source="ai_inferred"), com tooltip de fonte/confiança. A
+ * cor de stance (amada/evitada) manda no corpo; o marcador de IA só se soma.
+ */
+function TagBadge({ tag, stance }: { tag: DetailTag; stance?: "love" | "avoid" }) {
+  const effectiveStance = stance ?? tag.stance
+  const isAi = tag.source === "ai_inferred"
+  const badge = (
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors",
+        effectiveStance ? tagStanceClass(effectiveStance) : "hover:bg-accent hover:text-accent-foreground",
+        isAi && "border-dashed",
+      )}
+    >
+      {tag.label}
+      {isAi && <span aria-hidden className="ml-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" />}
+    </Badge>
+  )
+  const tip = tagProvenanceLabel(tag)
+  if (!tip) return badge
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          tabIndex={0}
+          className="inline-flex rounded-full outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+        >
+          {badge}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{tip}</TooltipContent>
+    </Tooltip>
+  )
 }
 
 /**
@@ -289,16 +343,31 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       groupLabel,
       subGroupName: slug ? subGroupBySlug.get(slug) : undefined,
       stance: resolveTagStance({ slug, name: label }, tagStanceLookup) ?? undefined,
+      source: typeof tag === "string" ? null : tag.source ?? null,
+      confidence: typeof tag === "string" ? null : tag.confidence ?? null,
     })
   }
+
+  // Cobertura de proveniência (rodapé do card de tags): quantas vieram de IA.
+  const aiTagCount = normalizedTags.filter((t) => t.source === "ai_inferred").length
+  const externalTagCount = normalizedTags.length - aiTagCount
+  const tagsInferredAt = work.tags_inferred_at ?? null
+  // "Passou pela inferência" = flag setada OU já tem tag de IA (histórico pré-flag).
+  const tagsInferenceRan = tagsInferredAt != null || aiTagCount > 0
 
   // Segmenta: Categorias (gêneros, card próprio) › Amadas › Evitadas › Resto.
   // Tags com nome de gênero saem da segmentação (já aparecem em Categorias).
   const byTagLabel = (a: DetailTag, b: DetailTag) => a.label.localeCompare(b.label)
+  // Nas Amadas/Evitadas: externas primeiro, inferidas por IA agrupadas ao fim
+  // (cada bloco alfabético). O tracejado+ponto já distingue; a ordem agrupa.
+  const byProvenanceThenLabel = (a: DetailTag, b: DetailTag) => {
+    const aiRank = (t: DetailTag) => (t.source === "ai_inferred" ? 1 : 0)
+    return aiRank(a) - aiRank(b) || a.label.localeCompare(b.label)
+  }
   const genreNameSet = lowercasedNameSet(genres)
   const segmented = segmentTags(normalizedTags, (t) => t.stance ?? null, genreNameSet)
-  const lovedTags = [...segmented.loved].sort(byTagLabel)
-  const avoidedTags = [...segmented.avoided].sort(byTagLabel)
+  const lovedTags = [...segmented.loved].sort(byProvenanceThenLabel)
+  const avoidedTags = [...segmented.avoided].sort(byProvenanceThenLabel)
 
   // Resto agrupado por grupo → sub-grupo (mesma lógica de antes, só sobre o resto).
   const tagGroupMap = new Map<string, DetailTag[]>()
@@ -1256,6 +1325,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 </div>
               </CardHeader>
               <CardContent className="pt-0">
+                <TooltipProvider delayDuration={150}>
                 {lovedTags.length > 0 && (
                   <section className="mb-5 space-y-2">
                     <div className="flex items-baseline gap-2 border-b-2 border-emerald-500/40 pb-1">
@@ -1266,13 +1336,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {lovedTags.map((tag) => (
-                        <Badge
-                          key={tag.key}
-                          variant="outline"
-                          className={cn("rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors", tagStanceClass("love"))}
-                        >
-                          {tag.label}
-                        </Badge>
+                        <TagBadge key={tag.key} tag={tag} stance="love" />
                       ))}
                     </div>
                   </section>
@@ -1287,13 +1351,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {avoidedTags.map((tag) => (
-                        <Badge
-                          key={tag.key}
-                          variant="outline"
-                          className={cn("rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors", tagStanceClass("avoid"))}
-                        >
-                          {tag.label}
-                        </Badge>
+                        <TagBadge key={tag.key} tag={tag} stance="avoid" />
                       ))}
                     </div>
                   </section>
@@ -1321,18 +1379,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                               </summary>
                               <div className="flex flex-wrap gap-1.5 px-2 pb-2 pl-6">
                                 {sg.tags.map((tag) => (
-                                  <Badge
-                                    key={tag.key}
-                                    variant="outline"
-                                    className={cn(
-                                      "rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors",
-                                      tag.stance
-                                        ? tagStanceClass(tag.stance)
-                                        : "hover:bg-accent hover:text-accent-foreground",
-                                    )}
-                                  >
-                                    {tag.label}
-                                  </Badge>
+                                  <TagBadge key={tag.key} tag={tag} />
                                 ))}
                               </div>
                             </details>
@@ -1341,18 +1388,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       ) : (
                         <div className="flex flex-wrap gap-1.5">
                           {group.tags.map((tag) => (
-                            <Badge
-                              key={tag.key}
-                              variant="outline"
-                              className={cn(
-                                "rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors",
-                                tag.stance
-                                  ? tagStanceClass(tag.stance)
-                                  : "hover:bg-accent hover:text-accent-foreground",
-                              )}
-                            >
-                              {tag.label}
-                            </Badge>
+                            <TagBadge key={tag.key} tag={tag} />
                           ))}
                         </div>
                       )}
@@ -1360,6 +1396,44 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   ))}
                 </div>
                 )}
+                <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-dashed border-border/60 pt-3 text-[11px] text-muted-foreground">
+                  {aiTagCount > 0 && (
+                    <>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="inline-block h-2.5 w-2.5 rounded-full border border-border" /> Fonte externa / manual
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="inline-flex h-2.5 w-2.5 items-center justify-center rounded-full border border-dashed border-violet-400">
+                          <span className="h-1 w-1 rounded-full bg-violet-500" />
+                        </span>
+                        Inferida por IA
+                      </span>
+                    </>
+                  )}
+                  <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1.5 tabular-nums">
+                    {aiTagCount > 0 && (
+                      <span>cobertura: <b className="font-semibold text-foreground/80">{aiTagCount}</b> por IA · {externalTagCount} externas</span>
+                    )}
+                    {tagsInferenceRan ? (
+                      <span
+                        className="inline-flex items-center gap-1"
+                        title={tagsInferredAt ? `Inferência rodou em ${new Date(tagsInferredAt).toLocaleDateString("pt-BR")}` : "Tem tags inferidas por IA (backfill anterior ao registro de data)"}
+                      >
+                        <Sparkles className="h-3 w-3 text-violet-500" /> inferência de tags aplicada
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                        <Sparkles className="h-3 w-3" /> inferência de tags: nunca rodou
+                      </span>
+                    )}
+                    {tagsInferenceRan ? (
+                      <TagRowAction workId={work.id} variant="ghost" label="Re-inferir" className="h-6 gap-1 px-2 text-[11px]" />
+                    ) : (
+                      <TagRowAction workId={work.id} label="Inferir tags" className="h-6 gap-1 px-2 text-[11px]" />
+                    )}
+                  </div>
+                </div>
+                </TooltipProvider>
               </CardContent>
             </Card>
           )}

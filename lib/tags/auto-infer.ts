@@ -58,6 +58,15 @@ export async function inferAndPersistTagsForWork(
     const reviewContext = buildReviewContext(work?.review_summary, work?.review_digest)
     const menu = await buildTagMenu(supabase)
     const proposals = await inferTagsFromText({ supabase, synopsis, menu, reviewContext })
+
+    // A inferência RODOU nesta obra (o modelo foi chamado com sinopse utilizável).
+    // Marca a flag ANTES de filtrar/retornar — assim "rodou e achou 0" fica
+    // distinguível de "nunca rodou" no sinal de cobertura da página. Best-effort.
+    await supabase
+      .from("works")
+      .update({ tags_inferred_at: new Date().toISOString() })
+      .eq("id", workId)
+
     const keep = proposals.filter((p) => p.confidence >= MIN_CONFIDENCE)
     if (keep.length === 0) return 0
 
