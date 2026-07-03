@@ -41,7 +41,13 @@ export function ReviewSummaryPanel({ accent, pendingCount, totalCount }: ReviewS
               `Anthropic congestionada — abortei após ${result.data.failed} falhas seguidas. ${result.data.summarized} obras resumidas antes do abort. Tente de novo daqui a pouco.`,
             )
           } else if (result.data.summarized === 0 && result.data.failed === 0) {
-            toast.info("Nada pra resumir — todas as obras com reviews já estão em dia.")
+            if (result.data.skipped > 0) {
+              toast.info(
+                `${result.data.skipped} obra(s) puladas — reviews curtas demais (< 40 caracteres) para resumir.`,
+              )
+            } else {
+              toast.info("Nada pra resumir — todas as obras com reviews já estão em dia.")
+            }
           } else {
             toast.success(
               `${result.data.summarized} obras resumidas (~${(result.data.tokensIn + result.data.tokensOut).toLocaleString("pt-BR")} tokens).`,

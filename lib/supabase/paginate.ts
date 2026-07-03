@@ -41,6 +41,30 @@ export async function fetchAllRows<T>(
  * Fallback: se o PostgREST não devolver `count` (null), cai pro `fetchAllRows`
  * sequencial — nunca perde linhas.
  */
+/**
+ * Roda um `.in(coluna, ids)` em LOTES de `chunkSize` ids e concatena as linhas.
+ * Existe porque o PostgREST manda o filtro `.in(...)` na query string de um GET:
+ * com centenas de UUIDs a URL passa de ~24KB e o gateway do Supabase responde
+ * **400 "Bad Request"** (foi o bug do backfill de resumo/digest de reviews, com
+ * 671 obras). Cada lote vira uma URL curta. NÃO lança — devolve o 1º erro do
+ * PostgREST pra o chamador tratar (ex.: mensagem específica de migration).
+ *
+ * Uso: `selectByIdsInChunks(ids, (chunk) => sb.from("works").select("id").in("id", chunk))`.
+ */
+export async function selectByIdsInChunks<T>(
+  ids: string[],
+  makeChunkQuery: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  chunkSize = 100,
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const out: T[] = []
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const { data, error } = await makeChunkQuery(ids.slice(i, i + chunkSize))
+    if (error) return { data: out, error }
+    out.push(...(data ?? []))
+  }
+  return { data: out, error: null }
+}
+
 export async function fetchAllRowsParallel<T>(
   countQuery: () => PromiseLike<{ count: number | null; error: { message: string } | null }>,
   makeRangeQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,

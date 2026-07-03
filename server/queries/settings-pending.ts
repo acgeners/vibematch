@@ -45,10 +45,12 @@ export async function countPendingCanonicalSynopses(): Promise<number> {
 }
 
 /**
- * Obras com reviews salvas mas ainda sem `review_summary`. Usa o agregado de
- * contagem embutido do PostgREST (`work_reviews(count)`) filtrando só as obras
- * sem resumo — evita paginar milhares de linhas de `work_reviews`. Exatamente
- * equivalente a "tem ≥1 review E não tem resumo".
+ * Obras com reviews RESUMÍVEIS salvas mas ainda sem `review_summary`. Usa o
+ * agregado de contagem embutido do PostgREST (`work_reviews(count)`) filtrando
+ * só as obras sem resumo. O filtro embedded `text_length>=40` espelha o limiar
+ * do resumidor (review-summarizer.ts: reviews < 40 chars são descartadas) —
+ * sem ele, uma obra cujo único review é minúsculo (ex.: 37 chars) contava como
+ * "pendente" pra sempre, já que o backfill sempre a pulava (`no_content`).
  */
 export async function countPendingReviewSummaries(): Promise<number> {
   const supabase = createAdminClient()
@@ -57,6 +59,7 @@ export async function countPendingReviewSummaries(): Promise<number> {
     .select("id, work_reviews(count)")
     .is("review_summary", null)
     .eq("is_archived", false)
+    .gte("work_reviews.text_length", 40)
   let pending = 0
   for (const w of data ?? []) {
     const rel = (w as { work_reviews?: Array<{ count: number }> }).work_reviews

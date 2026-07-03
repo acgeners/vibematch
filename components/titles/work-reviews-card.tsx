@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { ChevronDown, Layers, Loader2, MessageSquareText, PenLine, RefreshCw, Sparkles } from "lucide-react"
+import { AlertTriangle, ChevronDown, Layers, Loader2, MessageSquareText, PenLine, RefreshCw, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -113,6 +113,28 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
     )
   }
 
+  // Reviews existem, mas NENHUMA chega ao mínimo do resumidor (< 40 chars) → o
+  // resumo nunca é gerado (fica `no_content`). Espelha o limiar de
+  // review-summarizer.ts e da contagem de pendentes (settings-pending.ts). Só
+  // avisa quando não há resumo salvo — some sozinho quando entrar uma review ≥ 40.
+  const MIN_SUMMARY_CHARS = 40
+  const shortReviews = [
+    ...snapshot.bySource.flatMap((s) =>
+      s.reviews.map((r) => ({
+        label: PLATFORM_LABELS[s.source] ?? s.source,
+        text: r.text,
+        len: r.textLength ?? r.text.length,
+      })),
+    ),
+    ...snapshot.manual.map((r) => ({
+      label: PLATFORM_LABELS[r.source] ?? r.source,
+      text: r.text,
+      len: r.text.trim().length,
+    })),
+  ]
+  const noSummarizableReview =
+    !snapshot.summary && shortReviews.length > 0 && shortReviews.every((r) => r.len < MIN_SUMMARY_CHARS)
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -166,6 +188,39 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
             <p className="whitespace-pre-line text-sm leading-relaxed text-foreground/90">
               {snapshot.summary}
             </p>
+          </div>
+        </CardContent>
+      )}
+      {noSummarizableReview && (
+        <CardContent className="pb-3 pt-0">
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+              <span className="text-xs font-semibold text-foreground">Sem resumo — reviews curtas demais</span>
+            </div>
+            <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+              A(s) review(s) desta obra têm texto curto demais (menos de {MIN_SUMMARY_CHARS} caracteres)
+              para gerar um resumo. Busque mais reviews ou adicione uma review externa maior.
+            </p>
+            <ul className="mt-2.5 space-y-1.5">
+              {shortReviews.slice(0, 5).map((r, i) => (
+                <li
+                  key={i}
+                  className="flex flex-wrap items-baseline gap-2 rounded border border-border/60 bg-background/40 px-2 py-1.5 text-xs text-muted-foreground"
+                >
+                  <span className="font-semibold text-foreground/90">{r.label}</span>
+                  <span className="line-clamp-1 max-w-[24rem] italic text-muted-foreground">
+                    “{r.text.trim()}”
+                  </span>
+                  <span className="ml-auto font-mono text-[11px] text-amber-600 dark:text-amber-400">
+                    {r.len} car.
+                  </span>
+                </li>
+              ))}
+              {shortReviews.length > 5 && (
+                <li className="text-[11px] text-muted-foreground">+{shortReviews.length - 5} mais</li>
+              )}
+            </ul>
           </div>
         </CardContent>
       )}

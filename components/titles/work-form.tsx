@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { useRouter } from "next/navigation"
 import { useRefresh } from "@/lib/use-refresh"
+import { refreshChrome } from "@/lib/chrome-refresh"
 import { useFieldArray, useForm, useWatch, type FieldPath } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
@@ -1217,11 +1218,6 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     }
 
     toast.success(workId ? "Obra atualizada!" : "Obra criada!")
-    // Atualiza o chrome (badge "Avaliação IA" / footer de recálculo) sem esperar
-    // um reload: criar uma obra deixa ela `pending` (entra na fila de atributos) e
-    // editar uma obra marca recálculo pendente. A navegação soft abaixo cai dentro
-    // do TTL do badge, então sem este refresh o número só mudaria após reload.
-    refresh()
     // Navegar SEMPRE pelo slug canônico novo (devolvido pela action). Antes, no
     // update, navegava pelo UUID e deixava /titles/{uuid} fazer um redirect()
     // server-side pro slug — mas esse redirect falha numa navegação soft (RSC),
@@ -1231,6 +1227,13 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     const newSlug = result.data?.slug ?? (values.title ? titleToSlug(values.title) : "")
     const destination = newSlug || result.data?.id || workSlug || workId
     router.push(`/titles/${destination}`)
+    // Chrome (badge "Avaliação IA" / footer de recálculo): atualiza pelo barramento,
+    // SEM router.refresh(). Chamar router.refresh() logo ANTES do push() cria uma
+    // corrida que ENGOLE a navegação — o WorkForm não desmonta e o overlay
+    // "Atualizando obra..." (topFeedback, só limpo no erro) fica preso pra sempre.
+    // A rota de destino já vem fresca via revalidatePath() na server action; só os
+    // chips persistentes do chrome (client) precisam do nudge.
+    refreshChrome()
   }
 
   // Handler do react-hook-form. Quando a IA reportou confiança baixa, segura o

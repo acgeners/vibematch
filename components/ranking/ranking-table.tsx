@@ -3,7 +3,8 @@
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react"
-import { AlertTriangle, ChevronDown, ChevronUp, ImageOff, LayoutGrid, List, X } from "lucide-react"
+import type { ReactNode } from "react"
+import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, ImageOff, LayoutGrid, List, Sparkles, Star, Target, Users, X } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -975,13 +976,83 @@ function RankingCardsView({
   scoreThresholds: ColumnThresholds | null
 }) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {entries.map((entry) => (
         <RankingCard key={entry.workId} entry={entry} scoreThresholds={scoreThresholds} />
       ))}
     </div>
   )
 }
+
+/** Cor por faixa (0–100) — verde alto / âmbar médio / vermelho baixo. Usada em Veredito e Alinhamento. */
+function bandText(pct: number): string {
+  return pct >= 75
+    ? "text-emerald-500 dark:text-emerald-400"
+    : pct >= 50
+      ? "text-amber-500 dark:text-amber-400"
+      : "text-rose-500 dark:text-rose-400"
+}
+
+/** Renderiza a escala de 4 corações a partir da string ♥ (preenchidos = valor, resto esmaecido). */
+function heartSet(quality: string, variant: "manual" | "pred"): ReactNode {
+  const filled = Math.min(4, Math.max(0, [...quality].length))
+  const empty = 4 - filled
+  return (
+    <span
+      className={cn(
+        "text-[17px] leading-none tracking-[0.12em]",
+        variant === "manual" ? "text-red-500" : "text-orange-500",
+      )}
+    >
+      {"♥".repeat(filled)}
+      {empty > 0 && <span className="opacity-25">{"♥".repeat(empty)}</span>}
+    </span>
+  )
+}
+
+/** Interesse na obra: manual (♥ sólido) + previsto (♥ esmaecido + selo IA), sem label. */
+function InterestHearts({
+  manual,
+  predicted,
+  predictedStale,
+}: {
+  manual: string | null
+  predicted: string | null
+  predictedStale: boolean
+}) {
+  if (!manual && !predicted) return null
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap" aria-label="Interesse na obra">
+      {manual && heartSet(manual, "manual")}
+      {manual && predicted && <span className="h-3.5 w-px bg-border/70" aria-hidden />}
+      {predicted && (
+        <span className="inline-flex items-center gap-1">
+          {heartSet(predicted, "pred")}
+          <span
+            className={cn(
+              "rounded border border-orange-500/40 px-[3px] text-[8px] font-extrabold leading-[1.4] tracking-wide text-orange-500 dark:text-orange-400",
+              predictedStale && "opacity-60",
+            )}
+          >
+            IA
+          </span>
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** Célula da tira de notas 2×2: label pequeno + ícone/valor centralizados. */
+function MetricCell({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-1 py-1.5">
+      <span className="whitespace-nowrap text-[8px] font-bold uppercase text-muted-foreground/70">{label}</span>
+      <span className="inline-flex items-center gap-1 text-[13px] font-bold leading-none tabular-nums">{children}</span>
+    </div>
+  )
+}
+
+const EMPTY_METRIC = <span className="text-muted-foreground">—</span>
 
 function RankingCard({
   entry,
@@ -992,76 +1063,137 @@ function RankingCard({
 }) {
   const slug = titleToSlug(entry.title)
   const isTop3 = entry.rank <= 3
+  const alignPct =
+    entry.personalFitPercentile ?? (entry.personalFit != null ? entry.personalFit * 100 : null)
 
   return (
-    <Link
-      href={`/titles/${slug}`}
-      className="group flex flex-col gap-2 text-left transition-transform hover:-translate-y-0.5 focus-visible:-translate-y-0.5 focus-visible:outline-none"
+    <div
+      className={cn(
+        "group relative flex overflow-hidden rounded-xl border bg-card shadow-sm transition-all",
+        "hover:-translate-y-0.5 hover:shadow-md focus-within:-translate-y-0.5",
+        rankCardStyles(entry.rank),
+      )}
     >
-      <div
-        className={cn(
-          "relative aspect-[2/3] overflow-hidden rounded-lg border bg-muted/40 shadow-sm transition-shadow",
-          "group-hover:shadow-md group-focus-visible:shadow-md",
-          rankCardStyles(entry.rank)
-        )}
-      >
+      {/* Link esticado: clicar em qualquer lugar do card abre a obra (o coração fica por cima). */}
+      <Link
+        href={`/titles/${slug}`}
+        aria-label={entry.title}
+        className="absolute inset-0 z-10 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+      />
+
+      {/* Capa: rank (canto sup-esq) + Nota Prevista (canto sup-dir) */}
+      <div className="relative w-[150px] shrink-0 self-stretch overflow-hidden bg-muted/40">
         {entry.coverUrl ? (
           <CoverImage
             url={entry.coverUrl}
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+          <div className="flex h-full min-h-[150px] w-full items-center justify-center text-muted-foreground">
             <ImageOff className="size-7 opacity-40" />
           </div>
         )}
 
-        {/* Rank badge — the headline element */}
         <div
           className={cn(
             "absolute left-1.5 top-1.5 inline-flex items-center justify-center rounded-full font-bold tabular-nums",
-            isTop3 ? "h-9 min-w-9 px-2 text-base" : entry.rank <= 10 ? "h-8 min-w-8 px-1.5 text-sm" : "h-7 min-w-7 px-1.5 text-xs",
-            rankBadgeStyles(entry.rank)
+            isTop3 ? "h-7 min-w-7 px-1.5 text-sm" : "h-6 min-w-6 px-1.5 text-xs",
+            rankBadgeStyles(entry.rank),
           )}
           aria-label={`Posição ${entry.rank}`}
         >
           {entry.rank}
         </div>
 
-        {/* Score badge — Nota Prevista */}
         {entry.expectedScore != null && (
           <div className="absolute right-1.5 top-1.5">
-            <ScoreBadge score={entry.expectedScore} size="sm" showStub={entry.expectedIsStub} thresholds={scoreThresholds?.expected} />
+            <ScoreBadge
+              score={entry.expectedScore}
+              size="md"
+              showStub={entry.expectedIsStub}
+              thresholds={scoreThresholds?.expected}
+            />
           </div>
         )}
-
-        {/* Footer overlay with status */}
-        <div className="absolute inset-x-0 bottom-0 flex items-end gap-1 bg-gradient-to-t from-black/75 via-black/30 to-transparent p-1.5">
-          <PublicationStatusBadge statusId={entry.publicationStatusId} />
-          <PersonalStatusBadge statusId={entry.personalStatusId} />
-        </div>
       </div>
 
-      <div className="px-0.5">
-        <div className="flex items-baseline gap-1.5">
-          <span
-            className={cn(
-              "shrink-0 font-mono text-[10px] font-bold uppercase tracking-wide",
-              isTop3 ? "text-foreground" : "text-muted-foreground"
+      {/* Corpo */}
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5 px-2.5 py-3.5">
+        <div className="flex items-start justify-between gap-1.5">
+          <div className="min-w-0">
+            <h3 className="line-clamp-2 min-h-[2.5em] text-[13.5px] font-semibold leading-tight text-foreground group-hover:text-primary">
+              {entry.title}
+            </h3>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <PublicationStatusBadge statusId={entry.publicationStatusId} compact className="gap-1 px-1.5 py-0 text-[10px]" />
+              {entry.totalChapters != null && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold tabular-nums text-muted-foreground">
+                  <BookOpen className="size-3 text-muted-foreground/70" />
+                  {entry.totalChapters}
+                </span>
+              )}
+              <InterestHearts
+                manual={entry.synopsisQuality}
+                predicted={entry.predictedSynopsisQuality}
+                predictedStale={entry.predictedSynopsisStale}
+              />
+            </div>
+          </div>
+          {/* Favoritar — acima do link esticado */}
+          <div className="relative z-20 shrink-0">
+            <FavoriteCell workId={entry.workId} workTitle={entry.title} isFavorite={entry.isFavorite} />
+          </div>
+        </div>
+
+        {/* Notas 2×2: Externa · Votos / Veredito · Alinhamento — fixadas na base */}
+        <div className="mt-auto grid grid-cols-2 overflow-hidden rounded-lg border border-border/60 bg-background/30 [&>*:nth-child(2n)]:border-l [&>*:nth-child(2n)]:border-border/60 [&>*:nth-child(n+3)]:border-t [&>*:nth-child(n+3)]:border-border/60">
+          <MetricCell label="Externa">
+            {entry.platformAvg != null ? (
+              <>
+                <Star className="size-3 fill-amber-500 text-amber-500" />
+                {entry.platformAvg.toFixed(1)}
+              </>
+            ) : (
+              EMPTY_METRIC
             )}
-          >
-            #{entry.rank}
-          </span>
-          <p className="line-clamp-2 text-xs font-semibold leading-snug text-foreground group-hover:text-primary">
-            {entry.title}
-          </p>
+          </MetricCell>
+          <MetricCell label="Votos">
+            {entry.totalVotes > 0 ? (
+              <>
+                <Users className="size-3 text-muted-foreground/70" />
+                {formatVotes(entry.totalVotes)}
+              </>
+            ) : (
+              EMPTY_METRIC
+            )}
+          </MetricCell>
+          <MetricCell label="Veredito IA">
+            {entry.alignmentScore != null ? (
+              <>
+                <Sparkles className="size-3 text-sky-400" />
+                <span className={cn(bandText(entry.alignmentScore), entry.alignmentStale && "opacity-60")}>
+                  {Math.round(entry.alignmentScore)}
+                </span>
+              </>
+            ) : (
+              EMPTY_METRIC
+            )}
+          </MetricCell>
+          <MetricCell label="Alinham.">
+            {alignPct != null ? (
+              <>
+                <Target className="size-3 text-violet-400" />
+                <span className={bandText(alignPct)}>
+                  {Math.round(alignPct)}
+                  <span className="ml-0.5 text-[9px] font-semibold text-muted-foreground">%</span>
+                </span>
+              </>
+            ) : (
+              EMPTY_METRIC
+            )}
+          </MetricCell>
         </div>
-        {entry.alignmentScore != null && (
-          <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-            Veredito IA {Math.round(entry.alignmentScore)}
-          </p>
-        )}
       </div>
-    </Link>
+    </div>
   )
 }

@@ -917,6 +917,8 @@ function WorkListView({
         value={work.calculated_scores?.personal_fit ?? null}
         percentile={work.calculated_scores?.personal_fit_percentile ?? null}
         showBar={false}
+        // /favorites esconde a tooltip do Alinhamento (texto redundante p/ toda obra).
+        showTooltip={namespace !== "favorites"}
       />
     ),
     platform_avg: (work) => {

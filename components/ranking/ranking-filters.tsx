@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useMemo, useState, useTransition } from "react"
 import type { ReactNode } from "react"
-import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, ChevronUp, Filter, Loader2, Minus, Pencil, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, ChevronUp, Filter, Loader2, Minus, Pencil, Plus, Save, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -18,7 +18,6 @@ import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
-import { updateRankingPreferences } from "@/server/actions/settings"
 import { saveFilterPreset, renameFilterPreset, deleteFilterPreset } from "@/server/actions/filter-presets"
 
 interface SavedFilterPreset {
@@ -141,7 +140,7 @@ function SortLevelsSection({ searchParams, updateParams, className, defaultSort 
       }
     >
       <div className="space-y-2">
-        <div className={`grid gap-2 ${levels.length > 1 ? "sm:grid-cols-2" : "grid-cols-1"}`}>
+        <div className="grid grid-cols-1 gap-2">
         {levels.map((level, i) => (
           <div key={i} className="grid grid-cols-[1.25rem_minmax(0,1fr)_4.5rem_2rem] items-center gap-2 rounded-lg border border-border/55 bg-background/45 p-1.5">
             <span className="text-xs text-muted-foreground w-4 shrink-0 text-right">{i + 1}.</span>
@@ -199,14 +198,7 @@ interface RankingFiltersProps {
   publicationStatuses?: StatusOption[]
   personalStatuses?: StatusOption[]
   defaultTopN: number | null
-  /** Preferência "Nota Prevista mínima" (persistida na coluna min_final_score, repurposada). */
-  defaultMinExpected: number | null
-  /** Preferência "Alinhamento mínimo" (persistida na coluna min_calc_score, repurposada). */
-  defaultMinFit?: number | null
-  /** Preferência "Veredito IA mínimo" (persistida na coluna min_predicted_score, repurposada). */
-  defaultMinAlign?: number | null
   basePath?: string
-  hidePreferencesControls?: boolean
   /**
    * Sort default efetivo (definido em app/ranking/page.tsx conforme o plano):
    * ambos os planos = `expected_score:desc` (forma tiers), com nível secundário
@@ -216,6 +208,8 @@ interface RankingFiltersProps {
   defaultSort?: string
   /** Conjuntos de filtros salvos do usuário para esta página (base_path). */
   savedPresets?: SavedFilterPreset[]
+  /** Largura de tier padrão (formula_config.tier_band_width) — controle movido pra dentro do filtro. */
+  defaultBand?: number
 }
 
 interface FilterSectionProps {
@@ -249,169 +243,6 @@ function FilterSection({
   )
 }
 
-function FilterField({
-  label,
-  children,
-  className,
-}: {
-  label: string
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    <div className={`space-y-1.5 ${className ?? ""}`}>
-      <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </Label>
-      {children}
-    </div>
-  )
-}
-
-function ScoreRangeCard({
-  emoji,
-  label,
-  tooltip,
-  minKey,
-  maxKey,
-  searchParams,
-  updateParams,
-  step = 0.5,
-  min = 0,
-  max = 10,
-  className,
-}: {
-  emoji?: string
-  label: string
-  tooltip?: string
-  minKey: string
-  maxKey: string
-  searchParams: Pick<URLSearchParams, "get">
-  updateParams: (updates: Record<string, string | null>) => void
-  step?: number
-  min?: number
-  max?: number
-  className?: string
-}) {
-  const urlMin = num(searchParams.get(minKey))
-  const urlMax = num(searchParams.get(maxKey))
-  const committed: [number, number] = [urlMin ?? min, urlMax ?? max]
-  const [dragValue, setDragValue] = useState<[number, number] | null>(null)
-  const display = dragValue ?? committed
-
-  const isActive = urlMin !== undefined || urlMax !== undefined
-  const decimals = step < 1 ? (step.toString().split(".")[1]?.length ?? 1) : 0
-  const fmt = (v: number) => v.toFixed(decimals)
-  const rangeLabel = dragValue || isActive ? `${fmt(display[0])} – ${fmt(display[1])}` : "Qualquer"
-
-  const commit = (next: number[]) => {
-    const [lo, hi] = next as [number, number]
-    updateParams({
-      [minKey]: lo > min ? String(lo) : null,
-      [maxKey]: hi < max ? String(hi) : null,
-    })
-    setDragValue(null)
-  }
-
-  const reset = () => {
-    setDragValue(null)
-    updateParams({ [minKey]: null, [maxKey]: null })
-  }
-
-  const heading = (
-    <div className="flex min-w-0 items-center gap-2">
-      {emoji && <span className="text-base leading-none">{emoji}</span>}
-      <span className="truncate text-sm font-medium">{label}</span>
-    </div>
-  )
-
-  return (
-    <div
-      className={`group rounded-lg border bg-background/45 px-3 py-2.5 transition-colors ${
-        isActive ? "border-primary/55 bg-primary/[0.04]" : "border-border/65 hover:border-border"
-      } ${className ?? ""}`}
-    >
-      <div className="mb-2.5 flex items-center justify-between gap-2">
-        {tooltip ? (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button type="button" className="min-w-0 cursor-help text-left">
-                  {heading}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-xs whitespace-pre-line text-xs">{tooltip}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : (
-          heading
-        )}
-        <div className="flex shrink-0 items-center gap-1">
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                title="Editar manualmente"
-                className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums transition-colors hover:ring-1 hover:ring-primary/40 ${
-                  isActive ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                {rangeLabel}
-              </button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-auto p-2">
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min={min}
-                  max={max}
-                  step={step}
-                  placeholder="Mín"
-                  size="sm"
-                  className="h-8 w-20 text-xs"
-                  value={searchParams.get(minKey) ?? ""}
-                  onChange={(e) => updateParams({ [minKey]: e.target.value || null })}
-                />
-                <span className="text-xs text-muted-foreground">–</span>
-                <Input
-                  type="number"
-                  min={min}
-                  max={max}
-                  step={step}
-                  placeholder="Máx"
-                  size="sm"
-                  className="h-8 w-20 text-xs"
-                  value={searchParams.get(maxKey) ?? ""}
-                  onChange={(e) => updateParams({ [maxKey]: e.target.value || null })}
-                />
-              </div>
-            </PopoverContent>
-          </Popover>
-          <button
-            type="button"
-            onClick={reset}
-            disabled={!isActive}
-            aria-label="Limpar"
-            className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:cursor-default disabled:opacity-0"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-      <Slider
-        value={display}
-        min={min}
-        max={max}
-        step={step}
-        minStepsBetweenThumbs={1}
-        onValueChange={(v) => setDragValue([v[0], v[1]] as [number, number])}
-        onValueCommit={commit}
-        className="px-1"
-      />
-    </div>
-  )
-}
-
 const VOTES_PRESETS: Array<{ label: string; min: number | null }> = [
   { label: "Qualquer", min: null },
   { label: "≥100", min: 100 },
@@ -428,94 +259,309 @@ function formatVotes(n: number): string {
   return String(n)
 }
 
-function VotesPresetCard({
+function num(v: string | null | undefined): number | undefined {
+  if (!v) return undefined
+  const n = parseFloat(v)
+  return isNaN(n) ? undefined : n
+}
+
+// ============================================================================
+// Redesign dos filtros: toggles de Interesse com tons distintos (Manual = rosa /
+// Prev. IA = salmão), controle de Largura dos tiers embutido, e a grade de
+// "pills" de nota (grade fixa + editor que abre abaixo do grupo).
+// ============================================================================
+
+/** Toggles ♥ do Interesse — tom rosa (manual) ou salmão (Prev. IA). */
+function QualityToggles({
+  values,
+  selected,
+  onToggle,
+  tone,
+}: {
+  values: readonly string[]
+  selected: Set<string>
+  onToggle: (v: string) => void
+  tone: "rose" | "salmon"
+}) {
+  const base = tone === "rose" ? "text-red-500" : "text-orange-500"
+  const onCls =
+    tone === "rose"
+      ? "border-red-500/60 bg-red-500/15 text-red-500"
+      : "border-orange-500/60 bg-orange-500/15 text-orange-500"
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {values.map((q) => {
+        const on = selected.has(q)
+        return (
+          <button
+            key={q}
+            type="button"
+            onClick={() => onToggle(q)}
+            aria-pressed={on}
+            className={`inline-flex h-8 items-center justify-center rounded-full border px-3 text-xs font-semibold tracking-tight transition-colors ${
+              on ? onCls : `border-border/70 bg-background/45 hover:border-border ${base}`
+            }`}
+          >
+            <span className="text-[14px] leading-none tracking-[0.12em]">{q}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Largura dos tiers — movido pra dentro do filtro (draft; aplica com "Aplicar filtros"). */
+function TierBandSection({
   searchParams,
   updateParams,
+  defaultBand,
   className,
+  contentClassName,
 }: {
   searchParams: Pick<URLSearchParams, "get">
   updateParams: (updates: Record<string, string | null>) => void
+  defaultBand: number
   className?: string
+  contentClassName?: string
+}) {
+  const active = searchParams.get("band")
+  const chip = (on: boolean) =>
+    `inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold tabular-nums transition-colors ${
+      on
+        ? "border-primary/45 bg-primary/10 text-primary"
+        : "border-border/70 bg-background/45 text-muted-foreground hover:border-border hover:text-foreground"
+    }`
+  return (
+    <FilterSection title="Largura dos tiers" className={className} contentClassName={contentClassName}>
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          onClick={() => updateParams({ band: null })}
+          className={chip(active == null)}
+          title={`Usa o valor salvo no banco (${defaultBand.toFixed(2).replace(".", ",")})`}
+        >
+          Padrão ({defaultBand.toFixed(2).replace(".", ",")})
+        </button>
+        {[0.3, 0.4, 0.5, 0.6, 0.8].map((b) => (
+          <button
+            key={b}
+            type="button"
+            onClick={() => updateParams({ band: String(b) })}
+            className={chip(active === String(b))}
+            title={`Agrupa no mesmo tier obras a até ${b} de distância na nota`}
+          >
+            {b.toFixed(1).replace(".", ",")}
+          </button>
+        ))}
+      </div>
+    </FilterSection>
+  )
+}
+
+// ---- Grade de pills de nota (aba Notas) ----
+
+type ScoreDef = {
+  key: string
+  emoji: string
+  label: string
+  minKey: string
+  maxKey: string
+  min: number
+  max: number
+  step: number
+  presets: number[]
+  kind?: "votes"
+  fullWidth?: boolean
+}
+
+const CRITERION_SCORE_DEFS: ScoreDef[] = CRITERION_SLUGS.map((slug) => ({
+  key: slug,
+  emoji: CRITERIA_INFO[slug]?.emoji ?? "",
+  label: CRITERION_LABELS[slug] ?? slug,
+  minKey: `min_${slug}`,
+  maxKey: `max_${slug}`,
+  min: 0,
+  max: 10,
+  step: 1,
+  presets: [5, 6, 7, 8],
+}))
+
+const GENERAL_SCORE_DEFS: ScoreDef[] = [
+  { key: "expected", emoji: "🎯", label: "Nota Prevista", minKey: "min_expected", maxKey: "max_expected", min: 0, max: 10, step: 0.5, presets: [6, 7, 7.5, 8] },
+  { key: "fit", emoji: "🧭", label: "Alinhamento", minKey: "min_fit", maxKey: "max_fit", min: 0, max: 100, step: 5, presets: [50, 75, 90] },
+  { key: "platform", emoji: "🌐", label: "Média externa", minKey: "min_platform_avg", maxKey: "max_platform_avg", min: 0, max: 10, step: 0.5, presets: [6, 7, 8] },
+  { key: "align", emoji: "🤖", label: "Veredito IA", minKey: "min_align", maxKey: "max_align", min: 0, max: 100, step: 5, presets: [50, 75, 90] },
+  { key: "votes", emoji: "🗳️", label: "Votos", minKey: "min_votes", maxKey: "max_votes", min: 0, max: 0, step: 1, presets: [], kind: "votes", fullWidth: true },
+]
+
+function scoreDecimals(step: number): number {
+  return step < 1 ? (step.toString().split(".")[1]?.length ?? 1) : 0
+}
+function fmtScore(def: ScoreDef, v: number): string {
+  if (def.kind === "votes") return formatVotes(v)
+  return v.toFixed(scoreDecimals(def.step))
+}
+
+/** Estado/rótulo atual de uma nota: Qualquer / ≥X / X–Y / ≤X. */
+function scoreValueInfo(def: ScoreDef, searchParams: Pick<URLSearchParams, "get">) {
+  const rawMin = searchParams.get(def.minKey)
+  const rawMax = searchParams.get(def.maxKey)
+  const hasMin = rawMin != null && rawMin !== ""
+  const hasMax = rawMax != null && rawMax !== ""
+  const vMin = num(rawMin)
+  const vMax = num(rawMax)
+  let label = "Qualquer"
+  if (hasMin && hasMax && vMin != null && vMax != null) label = `${fmtScore(def, vMin)}–${fmtScore(def, vMax)}`
+  else if (hasMin && vMin != null) label = `≥ ${fmtScore(def, vMin)}`
+  else if (hasMax && vMax != null) label = `≤ ${fmtScore(def, vMax)}`
+  return { hasMin, hasMax, vMin, vMax, active: hasMin || hasMax, maxOnly: hasMax && !hasMin, label }
+}
+
+function editorChip(on: boolean): string {
+  return `inline-flex h-7 items-center rounded-lg border px-3 text-xs font-semibold tabular-nums transition-colors ${
+    on
+      ? "border-transparent bg-primary text-primary-foreground"
+      : "border-border/70 bg-background text-muted-foreground hover:border-border hover:text-foreground"
+  }`
+}
+
+function ScorePill({
+  def,
+  searchParams,
+  selected,
+  onSelect,
+}: {
+  def: ScoreDef
+  searchParams: Pick<URLSearchParams, "get">
+  selected: boolean
+  onSelect: () => void
+}) {
+  const info = scoreValueInfo(def, searchParams)
+  const tint = info.maxOnly
+    ? "border-amber-400/45 bg-amber-400/[0.08]"
+    : info.active
+      ? "border-primary/45 bg-primary/[0.08]"
+      : "border-border/65 bg-background/45 hover:border-border"
+  const ring = selected ? "ring-1 ring-primary/60 !border-primary/70 bg-primary/[0.12]" : ""
+  const valCls = info.maxOnly
+    ? "bg-amber-400/15 text-amber-500 dark:text-amber-300"
+    : info.active
+      ? "bg-primary/15 text-primary"
+      : "text-muted-foreground"
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`flex min-w-0 items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors ${tint} ${ring} ${def.fullWidth ? "col-span-full" : ""}`}
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="text-base leading-none">{def.emoji}</span>
+        <span className="truncate text-sm font-medium">{def.label}</span>
+      </span>
+      <span className="flex shrink-0 items-center gap-1">
+        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${valCls}`}>{info.label}</span>
+        {selected && <ChevronDown className="h-3.5 w-3.5 text-primary" />}
+      </span>
+    </button>
+  )
+}
+
+function ScoreThresholdEditor({
+  def,
+  searchParams,
+  updateParams,
+}: {
+  def: ScoreDef
+  searchParams: Pick<URLSearchParams, "get">
+  updateParams: (updates: Record<string, string | null>) => void
+}) {
+  const info = scoreValueInfo(def, searchParams)
+  const [dragValue, setDragValue] = useState<[number, number] | null>(null)
+  const committed: [number, number] = [info.vMin ?? def.min, info.vMax ?? def.max]
+  const display = dragValue ?? committed
+  const commit = (next: number[]) => {
+    const [lo, hi] = next as [number, number]
+    updateParams({
+      [def.minKey]: lo > def.min ? String(lo) : null,
+      [def.maxKey]: hi < def.max ? String(hi) : null,
+    })
+    setDragValue(null)
+  }
+  const setMinPreset = (p: number | null) => {
+    setDragValue(null)
+    updateParams({ [def.minKey]: p != null ? String(p) : null, [def.maxKey]: null })
+  }
+  const presetActive = (p: number) => !info.hasMax && info.vMin === p
+  return (
+    <>
+      <div className="flex flex-wrap gap-1.5">
+        <button type="button" onClick={() => setMinPreset(null)} className={editorChip(!info.active)}>
+          Qualquer
+        </button>
+        {def.presets.map((p) => (
+          <button key={p} type="button" onClick={() => setMinPreset(p)} className={editorChip(presetActive(p))}>
+            ≥ {fmtScore(def, p)}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Faixa</span>
+        <Slider
+          value={display}
+          min={def.min}
+          max={def.max}
+          step={def.step}
+          minStepsBetweenThumbs={1}
+          onValueChange={(v) => setDragValue([v[0], v[1]] as [number, number])}
+          onValueCommit={commit}
+          className="flex-1"
+        />
+        <span className="w-20 shrink-0 text-right text-xs font-semibold tabular-nums text-primary">
+          {fmtScore(def, display[0])} – {fmtScore(def, display[1])}
+        </span>
+      </div>
+    </>
+  )
+}
+
+function VotesThresholdEditor({
+  searchParams,
+  updateParams,
+}: {
+  searchParams: Pick<URLSearchParams, "get">
+  updateParams: (updates: Record<string, string | null>) => void
 }) {
   const currentMin = num(searchParams.get("min_votes"))
-  const currentMax = num(searchParams.get("max_votes"))
-  const isActive = currentMin !== undefined || currentMax !== undefined
-
-  let activeLabel = "Qualquer"
-  if (currentMin !== undefined && currentMax !== undefined) {
-    activeLabel = `${formatVotes(currentMin)} – ${formatVotes(currentMax)}`
-  } else if (currentMin !== undefined) {
-    activeLabel = `≥${formatVotes(currentMin)}`
-  } else if (currentMax !== undefined) {
-    activeLabel = `≤${formatVotes(currentMax)}`
-  }
-
-  const activePreset = currentMax === undefined ? currentMin ?? null : undefined
-
+  const hasMax = searchParams.get("max_votes") != null
+  const presetActive = (p: number | null) =>
+    !hasMax && (p == null ? currentMin === undefined : currentMin === p)
   return (
-    <div
-      className={`rounded-lg border bg-background/45 px-3 py-2.5 transition-colors ${
-        isActive ? "border-primary/55 bg-primary/[0.04]" : "border-border/65"
-      } ${className ?? ""}`}
-    >
-      <div className="mb-2.5 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-base leading-none">🗳️</span>
-          <span className="truncate text-sm font-medium">Votos</span>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
-              isActive ? "bg-primary/15 text-primary" : "bg-muted/60 text-muted-foreground"
-            }`}
-          >
-            {activeLabel}
-          </span>
-          <button
-            type="button"
-            onClick={() => updateParams({ min_votes: null, max_votes: null })}
-            disabled={!isActive}
-            aria-label="Limpar"
-            className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:cursor-default disabled:opacity-0"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
+    <>
       <div className="flex flex-wrap gap-1.5">
-        {VOTES_PRESETS.map((preset) => {
-          const active =
-            activePreset !== undefined &&
-            preset.min === activePreset &&
-            (preset.min !== null || !isActive)
-          return (
-            <button
-              key={preset.label}
-              type="button"
-              onClick={() =>
-                updateParams({
-                  min_votes: preset.min !== null ? String(preset.min) : null,
-                  max_votes: null,
-                })
-              }
-            >
-              <Badge
-                variant={active ? "default" : "outline"}
-                className="inline-flex h-7 cursor-pointer items-center rounded-full px-3 text-xs font-medium transition-transform hover:-translate-y-px"
-              >
-                {preset.label}
-              </Badge>
-            </button>
-          )
-        })}
+        {VOTES_PRESETS.map((preset) => (
+          <button
+            key={preset.label}
+            type="button"
+            onClick={() =>
+              updateParams({ min_votes: preset.min != null ? String(preset.min) : null, max_votes: null })
+            }
+            className={editorChip(presetActive(preset.min))}
+          >
+            {preset.label}
+          </button>
+        ))}
       </div>
-      <div className="mt-2.5 flex items-center gap-2">
-        <Label className="shrink-0 text-xs font-medium text-muted-foreground">Manual</Label>
+      <div className="flex items-center gap-2">
+        <Label className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+          Manual
+        </Label>
         <Input
           type="number"
           min={0}
           step={1}
           placeholder="Mín"
+          size="sm"
           className="h-8 w-24 text-xs"
           value={searchParams.get("min_votes") ?? ""}
           onChange={(e) => updateParams({ min_votes: e.target.value || null })}
@@ -526,19 +572,69 @@ function VotesPresetCard({
           min={0}
           step={1}
           placeholder="Máx"
+          size="sm"
           className="h-8 w-24 text-xs"
           value={searchParams.get("max_votes") ?? ""}
           onChange={(e) => updateParams({ max_votes: e.target.value || null })}
         />
       </div>
-    </div>
+    </>
   )
 }
 
-function num(v: string | null | undefined): number | undefined {
-  if (!v) return undefined
-  const n = parseFloat(v)
-  return isNaN(n) ? undefined : n
+function ScorePillGroup({
+  title,
+  defs,
+  cols,
+  searchParams,
+  updateParams,
+}: {
+  title: string
+  defs: ScoreDef[]
+  cols: 2 | 3
+  searchParams: Pick<URLSearchParams, "get">
+  updateParams: (updates: Record<string, string | null>) => void
+}) {
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const selectedDef = defs.find((d) => d.key === selectedKey) ?? null
+  const gridCls = cols === 3 ? "grid grid-cols-2 gap-2 lg:grid-cols-3" : "grid grid-cols-2 gap-2"
+  return (
+    <FilterSection title={title}>
+      <div className={gridCls}>
+        {defs.map((def) => (
+          <ScorePill
+            key={def.key}
+            def={def}
+            searchParams={searchParams}
+            selected={selectedKey === def.key}
+            onSelect={() => setSelectedKey((cur) => (cur === def.key ? null : def.key))}
+          />
+        ))}
+      </div>
+      {selectedDef && (
+        <div className="mt-2.5 flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/[0.05] p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2 text-sm font-semibold">
+              <span className="text-base leading-none">{selectedDef.emoji}</span>
+              {selectedDef.label}
+            </span>
+            <button
+              type="button"
+              onClick={() => updateParams({ [selectedDef.minKey]: null, [selectedDef.maxKey]: null })}
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              limpar <X className="h-3 w-3" />
+            </button>
+          </div>
+          {selectedDef.kind === "votes" ? (
+            <VotesThresholdEditor searchParams={searchParams} updateParams={updateParams} />
+          ) : (
+            <ScoreThresholdEditor def={selectedDef} searchParams={searchParams} updateParams={updateParams} />
+          )}
+        </div>
+      )}
+    </FilterSection>
+  )
 }
 
 function csvValueToSet(value: string | null | undefined): Set<string> {
@@ -1425,13 +1521,10 @@ export function RankingFilters({
   publicationStatuses = [],
   personalStatuses = [],
   defaultTopN,
-  defaultMinExpected,
-  defaultMinFit = null,
-  defaultMinAlign = null,
   basePath = "/ranking",
-  hidePreferencesControls = false,
   defaultSort,
   savedPresets = [],
+  defaultBand = 0.5,
 }: RankingFiltersProps) {
   const router = useRouter()
   const appliedSearchParams = useSearchParams()
@@ -1465,41 +1558,8 @@ export function RankingFilters({
   const filtersDirty = draftSearch !== appliedSearchString
   const hasFilters = draftSearch !== "" || appliedSearchString !== ""
 
-  // Top N + nota prevista mínima (URL pode sobrescrever as preferências do DB).
-  // O legado min_calc/min_pr saiu — a preferência "Nota Prevista mínima" é
-  // persistida na coluna min_final_score (repurposada no cutover Fase 1.5).
+  // Top N (URL pode sobrescrever a preferência do DB). Alimenta o campo "Obras exibidas".
   const urlTopN = num(searchParams.get("top_n"))
-  const urlMinExpected = num(searchParams.get("min_expected"))
-  const urlMinFit = num(searchParams.get("min_fit"))
-  const urlMinAlign = num(searchParams.get("min_align"))
-
-  const currentTopN = urlTopN ?? defaultTopN ?? undefined
-  const currentMinExpected = urlMinExpected ?? defaultMinExpected ?? undefined
-  // Alinhamento/Veredito IA também são preferências (colunas min_calc/min_predicted
-  // repurposadas) — preservamos o default ao salvar pra não zerar o que foi
-  // definido em /preferencias.
-  const currentMinFit = urlMinFit ?? defaultMinFit ?? undefined
-  const currentMinAlign = urlMinAlign ?? defaultMinAlign ?? undefined
-
-  const prefsDirty =
-    (urlTopN !== undefined && urlTopN !== (defaultTopN ?? undefined)) ||
-    (urlMinExpected !== undefined && urlMinExpected !== (defaultMinExpected ?? undefined)) ||
-    (urlMinFit !== undefined && urlMinFit !== (defaultMinFit ?? undefined)) ||
-    (urlMinAlign !== undefined && urlMinAlign !== (defaultMinAlign ?? undefined))
-
-  const savePrefs = async () => {
-    const result = await updateRankingPreferences({
-      top_n: currentTopN ?? null,
-      min_calc_score: currentMinFit ?? null,
-      min_predicted_score: currentMinAlign ?? null,
-      min_final_score: currentMinExpected ?? null,
-    })
-    if (result.error) {
-      toast.error(`Erro ao salvar: ${result.error}`)
-      return
-    }
-    toast.success("Preferências de ranking atualizadas")
-  }
 
   const applyAllFilters = () => {
     const target = draftSearch ? `${basePath}?${draftSearch}` : basePath
@@ -1694,6 +1754,7 @@ export function RankingFilters({
     })
   }
   pushRangeChip("chapters", "Capítulos", "min_chapters", "max_chapters")
+  pushRangeChip("year", "Ano", "min_year", "max_year")
   pushRangeChip("expected", "Nota Prevista", "min_expected", "max_expected")
   pushRangeChip("fit", "Alinhamento", "min_fit", "max_fit")
   pushRangeChip("align", "Veredito IA", "min_align", "max_align")
@@ -1789,31 +1850,6 @@ export function RankingFilters({
     })
   })
 
-  // Pré-filtros de preferência: pisos vindos de /preferencias (formula_config),
-  // NÃO da URL. Antes ficavam invisíveis e "sumiam" obras sem aviso. Mostra cada
-  // piso ativo como chip removível; remover grava um override =0 nesta busca e
-  // aplica na hora (não altera o padrão salvo em /preferencias).
-  const overrideAndApply = (updates: Record<string, string | null>) => {
-    const params = new URLSearchParams(draftSearch)
-    for (const [k, v] of Object.entries(updates)) {
-      if (v == null || v === "") params.delete(k)
-      else params.set(k, v)
-    }
-    const qs = params.toString()
-    setDraftSearch(qs)
-    startTransition(() => router.replace(qs ? `${basePath}?${qs}` : basePath))
-  }
-  const prefGateChips: Array<{ key: string; label: string; onRemove: () => void }> = []
-  const pushPrefGate = (key: string, label: string, param: string, current: number | undefined) => {
-    if (current == null || current <= 0) return
-    if (searchParams.has(param)) return // já exibido como filtro normal da URL
-    prefGateChips.push({ key, label, onRemove: () => overrideAndApply({ [param]: "0" }) })
-  }
-  pushPrefGate("pref-exp", `Nota Prevista ≥ ${currentMinExpected}`, "min_expected", currentMinExpected)
-  pushPrefGate("pref-fit", `Alinhamento ≥ ${currentMinFit}`, "min_fit", currentMinFit)
-  pushPrefGate("pref-align", `Veredito IA ≥ ${currentMinAlign}`, "min_align", currentMinAlign)
-  pushPrefGate("pref-topn", `Top ${currentTopN}`, "top_n", currentTopN)
-
   const activeFilterLabel =
     activeFilterChips.length === 1 ? "1 seleção" : `${activeFilterChips.length} seleções`
 
@@ -1890,8 +1926,9 @@ export function RankingFilters({
         </TabsList>
 
         <TabsContent value="geral">
-          <div className="grid grid-cols-12 gap-3">
-            <div className="col-span-12 grid gap-3 md:grid-cols-[44.5fr_55.5fr]">
+          <div className="grid gap-3">
+            {/* LINHA 1: Publicação · Status pessoal · Largura dos tiers */}
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_max-content]">
             <FilterSection
               title={`Publicação${isAllPublication ? " (todos)" : selectedPublicationStatuses.size ? ` (${selectedPublicationStatuses.size})` : ""}`}
               headerAction={
@@ -1948,207 +1985,165 @@ export function RankingFilters({
                 ))}
               </div>
             </FilterSection>
-            </div>
 
-            <FilterSection
-              title="Critérios gerais"
-              className="col-span-12 xl:col-span-6 flex flex-col"
-              contentClassName="flex-1 flex flex-col justify-center"
-            >
-              {!hidePreferencesControls && prefsDirty && (
-                <div className="mb-4 flex justify-end">
-                  <Button variant="outline" size="sm" onClick={savePrefs} className="h-8">
-                    <Save className="mr-1.5 h-3.5 w-3.5" /> Salvar como padrão
-                  </Button>
-                </div>
-              )}
-              <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-4">
-                {/* Top N */}
-                <div className="flex items-center gap-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
-                    Top N
-                  </Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={30}
-                    placeholder="Todas"
-                    size="sm"
-                    className="w-16 text-center h-8"
-                    value={urlTopN ?? defaultTopN ?? ""}
-                    onChange={(e) => updateParams({ top_n: e.target.value || null })}
-                  />
-                </div>
-
-                {/* Divisor vertical */}
-                <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
-
-                {/* Capítulos */}
-                <div className="flex items-center gap-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
-                    Capítulos
-                  </Label>
-                  <div className="flex items-center gap-1.5">
-                    <Input
-                      type="number"
-                      min={0}
-                      placeholder="Mín"
-                      size="sm"
-                      className="w-16 text-center h-8"
-                      value={searchParams.get("min_chapters") ?? ""}
-                      onChange={(e) => updateParams({ min_chapters: e.target.value || null })}
-                    />
-                    <span className="text-xs font-semibold text-muted-foreground shrink-0">-</span>
-                    <Input
-                      type="number"
-                      min={0}
-                      placeholder="Máx"
-                      size="sm"
-                      className="w-16 text-center h-8"
-                      value={searchParams.get("max_chapters") ?? ""}
-                      onChange={(e) => updateParams({ max_chapters: e.target.value || null })}
-                    />
-                  </div>
-                </div>
-
-                {/* Divisor vertical */}
-                <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
-
-                {/* Interesse na Sinopse */}
-                <div className="flex items-center gap-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
-                    Interesse
-                  </Label>
-                  <div className="flex items-center gap-1.5">
-                    {SYNOPSIS_QUALITIES.map((q) => (
-                      <button key={q} type="button" onClick={() => toggleCsv("synopsis_q", q)}>
-                        <Badge
-                          variant={selectedSynopsisQ.has(q) ? "default" : "outline"}
-                          className="inline-flex h-8 cursor-pointer items-center justify-center rounded-full px-3 text-xs font-semibold transition-all hover:scale-105 active:scale-95 duration-200"
-                        >
-                          {q}
-                        </Badge>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Divisor vertical */}
-                <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
-
-                {/* Previsão de Interesse na Sinopse (IA) */}
-                <div className="flex items-center gap-2">
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Label className="cursor-help text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
-                          Prev. IA
-                        </Label>
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs text-xs">
-                        Previsão da IA de quanto a sinopse vai te interessar (♥ a ♥♥♥♥), com base no
-                        seu perfil de gosto. Diferente do interesse que você informou.
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                  <div className="flex items-center gap-1.5">
-                    {SYNOPSIS_QUALITIES.map((q) => (
-                      <button key={q} type="button" onClick={() => toggleCsv("synopsis_pred", q)}>
-                        <Badge
-                          variant={selectedSynopsisPred.has(q) ? "default" : "outline"}
-                          className="inline-flex h-8 cursor-pointer items-center justify-center rounded-full px-3 text-xs font-semibold transition-all hover:scale-105 active:scale-95 duration-200"
-                        >
-                          {q}
-                        </Badge>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </FilterSection>
-
-            <SortLevelsSection
+            <TierBandSection
               searchParams={searchParams}
               updateParams={updateParams}
-              className="col-span-12 xl:col-span-6"
-              defaultSort={defaultSort}
+              defaultBand={defaultBand}
+              className="flex flex-col"
+              contentClassName="flex-1 flex flex-col justify-center"
             />
+            </div>
+
+            {/* LINHA 2: Interesse na obra · Critérios gerais · Ordenação */}
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.2fr)_minmax(0,1.05fr)]">
+              <FilterSection title="Interesse na obra">
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-2">
+                    <Label className="w-16 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Manual
+                    </Label>
+                    <QualityToggles
+                      values={SYNOPSIS_QUALITIES}
+                      selected={selectedSynopsisQ}
+                      onToggle={(q) => toggleCsv("synopsis_q", q)}
+                      tone="rose"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Label className="w-16 shrink-0 cursor-help text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            Prev. IA
+                          </Label>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs text-xs">
+                          Previsão da IA de quanto a sinopse vai te interessar (♥ a ♥♥♥♥), com base no
+                          seu perfil de gosto. Diferente do interesse que você informou.
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <QualityToggles
+                      values={SYNOPSIS_QUALITIES}
+                      selected={selectedSynopsisPred}
+                      onToggle={(q) => toggleCsv("synopsis_pred", q)}
+                      tone="salmon"
+                    />
+                  </div>
+                </div>
+              </FilterSection>
+
+              <FilterSection
+                title="Critérios gerais"
+                className="flex flex-col"
+                contentClassName="flex-1 flex flex-col justify-center"
+              >
+                <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-4">
+                  {/* Obras exibidas */}
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+                      Obras exibidas
+                    </Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={100}
+                      placeholder="Todas"
+                      size="sm"
+                      className="w-16 text-center h-8"
+                      value={(urlTopN && urlTopN > 0 ? urlTopN : null) ?? defaultTopN ?? ""}
+                      onChange={(e) => updateParams({ top_n: e.target.value || null })}
+                    />
+                  </div>
+
+                  {/* Divisor vertical */}
+                  <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
+
+                  {/* Capítulos */}
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+                      Capítulos
+                    </Label>
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Mín"
+                        size="sm"
+                        className="w-16 text-center h-8"
+                        value={searchParams.get("min_chapters") ?? ""}
+                        onChange={(e) => updateParams({ min_chapters: e.target.value || null })}
+                      />
+                      <span className="text-xs font-semibold text-muted-foreground shrink-0">-</span>
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Máx"
+                        size="sm"
+                        className="w-16 text-center h-8"
+                        value={searchParams.get("max_chapters") ?? ""}
+                        onChange={(e) => updateParams({ max_chapters: e.target.value || null })}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Divisor vertical */}
+                  <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
+
+                  {/* Ano */}
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+                      Ano
+                    </Label>
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        type="number"
+                        placeholder="Mín"
+                        size="sm"
+                        className="w-16 text-center h-8"
+                        value={searchParams.get("min_year") ?? ""}
+                        onChange={(e) => updateParams({ min_year: e.target.value || null })}
+                      />
+                      <span className="text-xs font-semibold text-muted-foreground shrink-0">-</span>
+                      <Input
+                        type="number"
+                        placeholder="Máx"
+                        size="sm"
+                        className="w-16 text-center h-8"
+                        value={searchParams.get("max_year") ?? ""}
+                        onChange={(e) => updateParams({ max_year: e.target.value || null })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </FilterSection>
+
+              <SortLevelsSection
+                searchParams={searchParams}
+                updateParams={updateParams}
+                defaultSort={defaultSort}
+              />
+            </div>
           </div>
         </TabsContent>
 
         <TabsContent value="notas">
           <div className="grid gap-3 xl:grid-cols-2">
-            <FilterSection title="Notas por critério">
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                {CRITERION_SLUGS.map((slug) => (
-                  <ScoreRangeCard
-                    key={slug}
-                    emoji={CRITERIA_INFO[slug]?.emoji}
-                    label={CRITERION_LABELS[slug]}
-                    tooltip={CRITERIA_INFO[slug]?.description}
-                    minKey={`min_${slug}`}
-                    maxKey={`max_${slug}`}
-                    step={1}
-                    searchParams={searchParams}
-                    updateParams={updateParams}
-                  />
-                ))}
-              </div>
-            </FilterSection>
-
-            <FilterSection title="Notas gerais">
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                <ScoreRangeCard
-                  emoji="🎯"
-                  label="Nota Prevista"
-                  tooltip="Nota que o modelo prevê que você daria à obra (0–10). Headline do ranking."
-                  minKey="min_expected"
-                  maxKey="max_expected"
-                  step={0.5}
-                  searchParams={searchParams}
-                  updateParams={updateParams}
-                />
-                <ScoreRangeCard
-                  emoji="🧭"
-                  label="Alinhamento"
-                  tooltip="Percentil de alinhamento com seu perfil de gosto (0–100). Top 25% = ≥ 75."
-                  minKey="min_fit"
-                  maxKey="max_fit"
-                  step={5}
-                  min={0}
-                  max={100}
-                  searchParams={searchParams}
-                  updateParams={updateParams}
-                />
-                <ScoreRangeCard
-                  emoji="🌐"
-                  label="Média externa"
-                  tooltip="Nota.M — média ponderada das plataformas externas (0–10)."
-                  minKey="min_platform_avg"
-                  maxKey="max_platform_avg"
-                  step={0.5}
-                  searchParams={searchParams}
-                  updateParams={updateParams}
-                />
-                <ScoreRangeCard
-                  emoji="🤖"
-                  label="Veredito IA"
-                  tooltip="Re-rank do consultor IA (0–100), sob demanda. Só obras já rankeadas têm valor."
-                  minKey="min_align"
-                  maxKey="max_align"
-                  step={5}
-                  min={0}
-                  max={100}
-                  searchParams={searchParams}
-                  updateParams={updateParams}
-                />
-                <VotesPresetCard
-                  searchParams={searchParams}
-                  updateParams={updateParams}
-                  className="lg:col-span-2"
-                />
-              </div>
-            </FilterSection>
+            <ScorePillGroup
+              title="Notas por critério"
+              defs={CRITERION_SCORE_DEFS}
+              cols={2}
+              searchParams={searchParams}
+              updateParams={updateParams}
+            />
+            <ScorePillGroup
+              title="Notas gerais"
+              defs={GENERAL_SCORE_DEFS}
+              cols={2}
+              searchParams={searchParams}
+              updateParams={updateParams}
+            />
           </div>
         </TabsContent>
 
@@ -2249,36 +2244,6 @@ export function RankingFilters({
         </div>
       )}
 
-      {!collapsed && prefGateChips.length > 0 && (
-        <div className="mt-3 border-t border-border/60 pt-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-300">
-              Pré-filtros de preferência
-            </span>
-            <span className="text-[11px] text-muted-foreground">
-              ocultam obras — clique pra remover nesta busca
-            </span>
-            {prefGateChips.map((chip) => (
-              <button
-                key={chip.key}
-                type="button"
-                onClick={chip.onRemove}
-                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-amber-400/50 bg-amber-400/10 px-2.5 text-xs font-medium text-amber-700 transition-colors hover:border-amber-500/70 hover:bg-amber-400/20 dark:text-amber-200"
-                title="Remover este pré-filtro nesta busca (não altera o padrão em /preferencias)"
-              >
-                {chip.label}
-                <X className="h-3 w-3" />
-              </button>
-            ))}
-            <a
-              href="/preferencias"
-              className="ml-1 text-[11px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-            >
-              ajustar padrão
-            </a>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

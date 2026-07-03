@@ -58,6 +58,8 @@ export function parseFiltersFromSearchParams(sp: URLSearchParams): RankingFilter
     synopsisQualities: multi("synopsis_q"),
     minTotalChapters: num("min_chapters"),
     maxTotalChapters: num("max_chapters"),
+    minYear: num("min_year"),
+    maxYear: num("max_year"),
     minExpectedScore: num("min_expected"),
     maxExpectedScore: num("max_expected"),
     minPersonalFitPct: num("min_fit"),
