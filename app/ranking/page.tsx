@@ -16,7 +16,6 @@ import { Header } from "@/components/layout/header"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
 import { RankingTable } from "@/components/ranking/ranking-table"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
-import { TierBandControl } from "@/components/ranking/tier-band-control"
 import { tierBandWidthSchema } from "@/lib/ranking/tier-config"
 import { SurpriseMeButton } from "@/components/ranking/surprise-me-button"
 import { MOOD_PRESETS_BY_ID } from "@/lib/constants/mood-presets"
@@ -187,7 +186,11 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
 
   // URL pode sobrescrever as preferências (ex: usuário ajusta direto na barra).
   // A preferência "Nota Prevista mínima" é persistida em min_final_score (repurposada).
-  const overrideTopN = num("top_n")
+  // top_n ≤ 0 (estado degenerado "mostrar todas" que grudava na URL) é tratado como
+  // ausente → cai no default do formula_config (40). O input tem min=1, então 0 nunca
+  // é entrada válida; normalizar aqui evita a página carregar presa em 0.
+  const rawTopN = num("top_n")
+  const overrideTopN = rawTopN != null && rawTopN > 0 ? rawTopN : undefined
   const overrideMinExpected = num("min_expected")
 
   const filters: RankingFilters = {
@@ -210,6 +213,8 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     predictedSynopsisQualities: multi("synopsis_pred"),
     minTotalChapters: num("min_chapters"),
     maxTotalChapters: num("max_chapters"),
+    minYear: num("min_year"),
+    maxYear: num("max_year"),
     minExpectedScore: overrideMinExpected ?? prefs.minFinal ?? undefined,
     maxExpectedScore: num("max_expected"),
     minPersonalFitPct: num("min_fit") ?? prefs.minFit ?? undefined,
@@ -331,14 +336,10 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         publicationStatuses={statusOptions.publicationStatuses}
         personalStatuses={statusOptions.personalStatuses}
         defaultTopN={prefs.topN}
-        defaultMinExpected={prefs.minFinal}
-        defaultMinFit={prefs.minFit}
-        defaultMinAlign={prefs.minAlign}
         defaultSort={defaultSort}
         savedPresets={savedPresets}
+        defaultBand={tierBandWidth}
       />
-
-      <TierBandControl defaultBand={tierBandWidth} />
 
       <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} />
     </div>

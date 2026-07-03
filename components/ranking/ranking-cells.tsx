@@ -329,7 +329,7 @@ export function SynopsisPredictionCell({
           </p>
           <p className="text-[11px] text-muted-foreground">
             Estimativa da IA de quanto a sinopse combina com o seu perfil de gosto. Não é o
-            valor que você informou (coluna &ldquo;Sinopse&rdquo;).
+            valor que você informou (coluna &ldquo;Interesse&rdquo;).
           </p>
           {confidence != null && (
             <p className="text-[11px] text-muted-foreground">
@@ -452,14 +452,18 @@ export function AlignmentCell({
   value,
   percentile,
   showBar = true,
+  showTooltip = true,
 }: {
   value: number | null
   /** Percentil (0-100) dentro da biblioteca. Quando presente, usado como display. */
   percentile?: number | null
   /** Quando false, mostra só o número colorido por faixa (sem a barra). */
   showBar?: boolean
+  /** Quando false, exibe só o valor sem a tooltip (ex.: /favorites, texto redundante). */
+  showTooltip?: boolean
 }) {
   if (value == null) {
+    if (!showTooltip) return <span className="font-mono text-sm text-muted-foreground">—</span>
     return (
       <TooltipProvider>
         <Tooltip>
@@ -500,22 +504,26 @@ export function AlignmentCell({
     : percentile >= 25 ? "Abaixo da mediana"
     : "Bottom 25%"
 
+  const trigger = showBar ? (
+    <div className="inline-flex items-center gap-1.5">
+      <div className="h-1.5 w-12 rounded-full bg-muted overflow-hidden">
+        <div className={cn("h-full transition-all", color)} style={{ width: `${displayPct}%` }} />
+      </div>
+      <span className="font-mono text-xs tabular-nums">{displayPct}%</span>
+    </div>
+  ) : (
+    <span className={cn("font-mono text-xs font-medium tabular-nums", textColor)}>
+      {displayPct}%
+    </span>
+  )
+
+  if (!showTooltip) return trigger
+
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          {showBar ? (
-            <div className="inline-flex items-center gap-1.5 cursor-help">
-              <div className="h-1.5 w-12 rounded-full bg-muted overflow-hidden">
-                <div className={cn("h-full transition-all", color)} style={{ width: `${displayPct}%` }} />
-              </div>
-              <span className="font-mono text-xs tabular-nums">{displayPct}%</span>
-            </div>
-          ) : (
-            <span className={cn("font-mono text-xs font-medium tabular-nums cursor-help", textColor)}>
-              {displayPct}%
-            </span>
-          )}
+          <span className="cursor-help">{trigger}</span>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[280px] space-y-1">
           {percentile != null ? (

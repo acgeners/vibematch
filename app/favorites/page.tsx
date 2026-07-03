@@ -196,9 +196,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
         publicationStatuses={statusOptions.publicationStatuses}
         personalStatuses={statusOptions.personalStatuses}
         defaultTopN={null}
-        defaultMinExpected={null}
         basePath="/favorites"
-        hidePreferencesControls
         savedPresets={savedPresets}
       />
 

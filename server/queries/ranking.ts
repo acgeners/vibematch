@@ -172,6 +172,8 @@ export interface RankingFilters {
   predictedSynopsisQualities?: string[]
   minTotalChapters?: number
   maxTotalChapters?: number
+  minYear?: number
+  maxYear?: number
   /** Nota Prevista (expected_score, escala 0–10) — filtro headline do novo pipeline. */
   minExpectedScore?: number
   maxExpectedScore?: number
@@ -450,6 +452,12 @@ export async function getRanking(
   if (filters.maxTotalChapters != null) {
     worksQuery = worksQuery.lte("total_chapters", filters.maxTotalChapters)
   }
+  if (filters.minYear != null) {
+    worksQuery = worksQuery.gte("year", filters.minYear)
+  }
+  if (filters.maxYear != null) {
+    worksQuery = worksQuery.lte("year", filters.maxYear)
+  }
   if (filters.onlyFavorites) {
     worksQuery = worksQuery.eq("is_favorite", true)
   }
@@ -600,6 +608,14 @@ export async function getRanking(
   if (filters.maxTotalChapters != null) {
     const max = filters.maxTotalChapters
     entries = entries.filter((e) => e.totalChapters != null && e.totalChapters <= max)
+  }
+  if (filters.minYear != null) {
+    const min = filters.minYear
+    entries = entries.filter((e) => e.year != null && e.year >= min)
+  }
+  if (filters.maxYear != null) {
+    const max = filters.maxYear
+    entries = entries.filter((e) => e.year != null && e.year <= max)
   }
 
   // Filtros de notas mínimas (vindos das preferências de ranking)
