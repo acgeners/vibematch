@@ -19,15 +19,12 @@ import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/
 import { tierBandWidthSchema } from "@/lib/ranking/tier-config"
 import { SurpriseMeButton } from "@/components/ranking/surprise-me-button"
 import { MOOD_PRESETS_BY_ID } from "@/lib/constants/mood-presets"
-import { RecommendDialog } from "@/components/recommendations/recommend-dialog"
-import { ChatRecommendButton } from "@/components/recommendations/chat-recommend-button"
-import { Button } from "@/components/ui/button"
+import { RankingAiMenu } from "@/components/ranking/ranking-ai-menu"
+import { FavoritesIconLink } from "@/components/ranking/favorites-icon-link"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { FormulaConfig } from "@/types/domain"
 import { unstable_cache } from "next/cache"
-import Link from "next/link"
-import { Ban, Heart, RotateCw } from "lucide-react"
 
 interface RankingPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -263,70 +260,37 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   const queryString = queryParams.toString()
   const favoritesUrl = `/favorites${queryString ? `?${queryString}` : ""}`
 
-  // Ciclo do filtro "esconder evitadas": off → 2× → todas → off (preserva params).
-  const nextHideMode = hideMode === "strong" ? "all" : hideMode === "all" ? null : "strong"
-  const hideAvoidedParams = new URLSearchParams(queryString)
-  if (nextHideMode) hideAvoidedParams.set("hide_avoided", nextHideMode)
-  else hideAvoidedParams.delete("hide_avoided")
-  const hideAvoidedToggleUrl = `/ranking${hideAvoidedParams.toString() ? `?${hideAvoidedParams}` : ""}`
-  const hideAvoidedLabel =
-    hideMode === "strong"
-      ? "Escondendo evitadas 2×"
-      : hideMode === "all"
-        ? "Escondendo todas evitadas"
-        : "Esconder evitadas"
+  // Filtro "esconder evitadas" (3 estados) — URLs por estado pro segmented control
+  // no painel (Critérios Gerais). Preserva os demais params.
+  const buildHideUrl = (mode: "strong" | "all" | null) => {
+    const p = new URLSearchParams(queryString)
+    if (mode) p.set("hide_avoided", mode)
+    else p.delete("hide_avoided")
+    return `/ranking${p.toString() ? `?${p}` : ""}`
+  }
+  const hideAvoided = {
+    current: (hideMode ?? "off") as "off" | "strong" | "all",
+    offUrl: buildHideUrl(null),
+    strongUrl: buildHideUrl("strong"),
+    allUrl: buildHideUrl("all"),
+  }
 
   return (
     <div className="space-y-4">
-      <RecalcPendingControl pending={recalcState.pending} variant="banner" />
-
       <Header
         kicker="Ranking"
-        title="Ranking"
+        title={
+          <span className="inline-flex items-center gap-3">
+            Ranking
+            <RecalcPendingControl pending={recalcState.pending} variant="indicator" />
+          </span>
+        }
         description="Obras ordenadas pela Nota Prevista"
         actions={
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" asChild className="h-9 gap-1.5">
-              <Link href={favoritesUrl}>
-                <Heart className="h-4 w-4 text-rose-500 fill-rose-500/25" />
-                <span>Ir para Favoritos</span>
-              </Link>
-            </Button>
-            {staleAlignmentCount > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                asChild
-                className="h-9 gap-1.5 border-amber-500/50 text-amber-600 dark:text-amber-400"
-              >
-                <Link href="/ai-evaluation?tab=ia-rk">
-                  <RotateCw className="h-4 w-4" />
-                  <span>Veredito IA desatualizados ({staleAlignmentCount})</span>
-                </Link>
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              asChild
-              className={
-                hideActive
-                  ? "h-9 gap-1.5 border-rose-500/50 text-rose-600 dark:text-rose-400"
-                  : "h-9 gap-1.5"
-              }
-            >
-              <Link
-                href={hideAvoidedToggleUrl}
-                title="Esconde obras com tags que você declarou evitar (em /preferencias). Clique pra alternar: só 2× → todas → desligado."
-              >
-                <Ban className="h-4 w-4" />
-                <span>{hideAvoidedLabel}</span>
-              </Link>
-            </Button>
-            <SurpriseMeButton entries={entries} />
-            <div className="mx-1 h-5 w-px self-center bg-border" aria-hidden />
-            <ChatRecommendButton isPaid={isPaid} />
-            <RecommendDialog context="ranking" isPaid={isPaid} />
+          <div className="flex items-center gap-2">
+            <FavoritesIconLink href={favoritesUrl} />
+            <SurpriseMeButton entries={entries} iconOnly />
+            <RankingAiMenu isPaid={isPaid} staleAlignmentCount={staleAlignmentCount} />
           </div>
         }
       />
@@ -334,6 +298,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
       <RankingFiltersComponent
         availableGenres={allGenres}
         genreCatTypes={genreCatTypes}
+        hideAvoided={hideAvoided}
         availableTags={allTags}
         publicationStatuses={statusOptions.publicationStatuses}
         personalStatuses={statusOptions.personalStatuses}

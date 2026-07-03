@@ -88,6 +88,11 @@ interface RecommendDialogProps {
   /** Gate não-plano (perfil insuficiente / stub). Só vale quando `isPaid`. */
   disabled?: boolean
   disabledReason?: string | null
+  /** Controle externo do diálogo (abrir a partir de um menu). Quando `hideTrigger`,
+   *  o botão-gatilho não é renderizado — só o diálogo controlado. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  hideTrigger?: boolean
 }
 
 export function RecommendDialog({
@@ -98,13 +103,18 @@ export function RecommendDialog({
   isPaid = true,
   disabled = false,
   disabledReason = null,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
 }: RecommendDialogProps) {
   const router = useRouter()
   const refresh = useRefresh()
   const searchParams = useSearchParams()
 
   const scopes = SCOPES_BY_CONTEXT[context]
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
+  const setOpen: (open: boolean) => void = onOpenChange ?? setInternalOpen
   const [scope, setScope] = useState<Scope>(scopes[0])
   const [n, setN] = useState<AllowedCandidateCount>(20)
   const [userContext, setUserContext] = useState("")
@@ -126,8 +136,9 @@ export function RecommendDialog({
 
   const buttonLabel = label ?? DEFAULT_LABEL[context]
 
-  // Selo "Pago" tem prioridade sobre o gate de perfil.
-  if (!isPaid) {
+  // Selo "Pago" tem prioridade sobre o gate de perfil. Com hideTrigger (dentro de um
+  // menu), o gate é responsabilidade do item do menu — aqui só renderiza o diálogo.
+  if (!hideTrigger && !isPaid) {
     return (
       <Button
         variant={variant}
@@ -145,7 +156,7 @@ export function RecommendDialog({
     )
   }
 
-  if (disabled) {
+  if (!hideTrigger && disabled) {
     return (
       <Button
         variant={variant}
@@ -213,12 +224,14 @@ export function RecommendDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant={variant} size={size} className="gap-1.5">
-          <Sparkles className="h-3.5 w-3.5" />
-          {buttonLabel}
-        </Button>
-      </DialogTrigger>
+      {!hideTrigger && (
+        <DialogTrigger asChild>
+          <Button variant={variant} size={size} className="gap-1.5">
+            <Sparkles className="h-3.5 w-3.5" />
+            {buttonLabel}
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Recomendar com IA</DialogTitle>
