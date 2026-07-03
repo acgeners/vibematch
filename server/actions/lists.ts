@@ -1,0 +1,245 @@
+"use server"
+
+import { randomUUID } from "node:crypto"
+import { revalidatePath, revalidateTag } from "next/cache"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { runRecommendationAction } from "./recommendations"
+import type { ListComment } from "@/server/queries/lists"
+
+// ────────────────────────────────────────────────────────────────────────────
+// Grupos de favoritos (work_lists). CRUD + associação obra<->grupo.
+// Semântica: adicionar uma obra a um grupo também marca is_favorite=TRUE
+// (grupo ⊂ favoritos). Remover do grupo NÃO desmarca. Ver migration 123 e
+// [[project_favorites_groups_feature]].
+// ────────────────────────────────────────────────────────────────────────────
+
+type ActionResult<T> = { data: T } | { error: string }
+
+interface WorkListInput {
+  name: string
+  description?: string | null
+  color?: string | null
+  coverWorkIds?: string[]
+}
+
+function revalidateLists(listId?: string) {
+  revalidatePath("/favorites")
+  if (listId) revalidatePath(`/favorites/${listId}`)
+  // Adicionar obras muda is_favorite → toca as mesmas superfícies do toggle.
+  revalidatePath("/ranking")
+  revalidatePath("/titles")
+  revalidateTag("favorites-summary", "max")
+}
+
+function cleanName(name: string): string {
+  return name.trim().slice(0, 80)
+}
+
+function cleanCoverIds(ids: string[] | undefined | null): string[] {
+  if (!ids) return []
+  return Array.from(new Set(ids.filter(Boolean))).slice(0, 3)
+}
+
+export async function createWorkList(input: WorkListInput): Promise<ActionResult<{ id: string }>> {
+  const name = cleanName(input.name ?? "")
+  if (!name) return { error: "Dê um nome ao grupo." }
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("work_lists")
+    .insert({
+      name,
+      description: input.description?.trim() || null,
+      color: input.color || null,
+      cover_work_ids: cleanCoverIds(input.coverWorkIds),
+    })
+    .select("id")
+    .single()
+
+  if (error) return { error: error.message }
+  revalidateLists()
+  return { data: { id: data.id as string } }
+}
+
+export async function updateWorkList(
+  id: string,
+  input: WorkListInput,
+): Promise<ActionResult<null>> {
+  const name = cleanName(input.name ?? "")
+  if (!name) return { error: "Dê um nome ao grupo." }
+
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from("work_lists")
+    .update({
+      name,
+      description: input.description?.trim() || null,
+      color: input.color || null,
+      cover_work_ids: cleanCoverIds(input.coverWorkIds),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+
+  if (error) return { error: error.message }
+  revalidateLists(id)
+  return { data: null }
+}
+
+export async function deleteWorkList(id: string): Promise<ActionResult<null>> {
+  const supabase = createAdminClient()
+  // work_list_items cai por ON DELETE CASCADE (migration 123). Obras intactas.
+  const { error } = await supabase.from("work_lists").delete().eq("id", id)
+  if (error) return { error: error.message }
+  revalidateLists()
+  return { data: null }
+}
+
+export async function addWorksToList(
+  listId: string,
+  workIds: string[],
+): Promise<ActionResult<{ count: number }>> {
+  const ids = Array.from(new Set(workIds.filter(Boolean)))
+  if (ids.length === 0) return { data: { count: 0 } }
+
+  const supabase = createAdminClient()
+  const { error: insertError } = await supabase
+    .from("work_list_items")
+    .upsert(
+      ids.map((wid) => ({ list_id: listId, work_id: wid })),
+      { onConflict: "list_id,work_id", ignoreDuplicates: true },
+    )
+  if (insertError) return { error: insertError.message }
+
+  // Grupo ⊂ favoritos: garante que todo item aparece no universo de favoritos.
+  const { error: favError } = await supabase
+    .from("works")
+    .update({ is_favorite: true })
+    .in("id", ids)
+  if (favError) return { error: favError.message }
+
+  revalidateLists(listId)
+  return { data: { count: ids.length } }
+}
+
+export async function removeWorksFromList(
+  listId: string,
+  workIds: string[],
+): Promise<ActionResult<{ count: number }>> {
+  const ids = Array.from(new Set(workIds.filter(Boolean)))
+  if (ids.length === 0) return { data: { count: 0 } }
+
+  const supabase = createAdminClient()
+  // Remover do grupo NÃO desmarca is_favorite (pode estar em outros grupos).
+  const { error } = await supabase
+    .from("work_list_items")
+    .delete()
+    .eq("list_id", listId)
+    .in("work_id", ids)
+  if (error) return { error: error.message }
+
+  revalidateLists(listId)
+  return { data: { count: ids.length } }
+}
+
+// ── Comentários do grupo (log JSONB em work_lists.comments) ──────────────────
+
+async function readComments(
+  supabase: ReturnType<typeof createAdminClient>,
+  listId: string,
+): Promise<ListComment[] | null> {
+  const { data, error } = await supabase
+    .from("work_lists")
+    .select("comments")
+    .eq("id", listId)
+    .maybeSingle()
+  if (error || !data) return null
+  return Array.isArray(data.comments) ? (data.comments as ListComment[]) : []
+}
+
+export async function addListComment(
+  listId: string,
+  text: string,
+): Promise<ActionResult<{ id: string }>> {
+  const trimmed = text.trim()
+  if (!trimmed) return { error: "Escreva algo no comentário." }
+
+  const supabase = createAdminClient()
+  const comments = await readComments(supabase, listId)
+  if (comments == null) return { error: "Grupo não encontrado." }
+
+  const entry: ListComment = {
+    id: randomUUID(),
+    text: trimmed.slice(0, 2000),
+    created_at: new Date().toISOString(),
+  }
+  const { error } = await supabase
+    .from("work_lists")
+    .update({ comments: [...comments, entry], updated_at: new Date().toISOString() })
+    .eq("id", listId)
+  if (error) return { error: error.message }
+
+  revalidateLists(listId)
+  return { data: { id: entry.id } }
+}
+
+export async function deleteListComment(
+  listId: string,
+  commentId: string,
+): Promise<ActionResult<null>> {
+  const supabase = createAdminClient()
+  const comments = await readComments(supabase, listId)
+  if (comments == null) return { error: "Grupo não encontrado." }
+
+  const next = comments.filter((c) => c.id !== commentId)
+  const { error } = await supabase
+    .from("work_lists")
+    .update({ comments: next, updated_at: new Date().toISOString() })
+    .eq("id", listId)
+  if (error) return { error: error.message }
+
+  revalidateLists(listId)
+  return { data: null }
+}
+
+// ── Recomendação/desempate com IA escopada ao grupo ──────────────────────────
+// Reusa o fluxo existente (runRecommendationAction, mode="ranking") escopado
+// às obras do grupo via filters.onlyWorkIds, e carimba list_id no run gerado
+// (que segue navegável em /recommendations). Ver migration 124.
+
+export async function recommendGroup(
+  listId: string,
+  opts?: { userContext?: string | null; n?: number },
+): Promise<ActionResult<{ slug: string }>> {
+  const supabase = createAdminClient()
+  const { data: items, error: itemsErr } = await supabase
+    .from("work_list_items")
+    .select("work_id")
+    .eq("list_id", listId)
+  if (itemsErr) return { error: itemsErr.message }
+
+  const workIds = (items ?? []).map((r) => (r as { work_id: string }).work_id)
+  if (workIds.length < 2) {
+    return { error: "Adicione ao menos 2 obras ao grupo pra recomendar/desempatar." }
+  }
+
+  const res = await runRecommendationAction({
+    mode: "ranking",
+    n: Math.min(30, workIds.length),
+    userContext: opts?.userContext?.trim() || null,
+    filters: {
+      onlyWorkIds: workIds,
+      includeFinishedDropped: true,
+      sortBy: "expected_score",
+      sortDir: "desc",
+    },
+  })
+  if (res.error || !res.data) return { error: res.error ?? "Falha ao recomendar." }
+
+  // Carimba o grupo no run (se ele foi persistido).
+  if (res.data.runId && res.data.runId !== "unsaved") {
+    await supabase.from("recommendation_runs").update({ list_id: listId }).eq("id", res.data.runId)
+  }
+
+  revalidateLists(listId)
+  return { data: { slug: res.data.runSlug } }
+}
