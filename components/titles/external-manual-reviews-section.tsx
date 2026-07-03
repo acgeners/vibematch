@@ -39,7 +39,7 @@ interface FormFields {
   text: string
 }
 
-const EMPTY: FormFields = { source: "comix", text: "" }
+const EMPTY: FormFields = { source: "outros", text: "" }
 
 const resolver = zodResolver(externalReviewInputSchema) as unknown as Resolver<FormFields>
 

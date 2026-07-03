@@ -707,7 +707,7 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
   const { data, error } = await supabase
     .from("works")
     .select(`
-      id, title, synopsis_quality,
+      id, title, synopsis_quality, canonical_synopsis,
       publication_status_id, observations, year,
       work_covers(url, is_primary, position),
       work_synopses(source, text, is_primary, position),
@@ -721,12 +721,15 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
   const calc = (data as { calculated_scores?: { platform_avg?: number | null; total_votes?: number | null } | null }).calculated_scores
   const covers = (data as { work_covers?: Parameters<typeof pickPrimaryCover>[0] }).work_covers
   const synopses = (data as { work_synopses?: Parameters<typeof pickPrimarySynopsis>[0] }).work_synopses
+  // Hover mostra a sinopse CANÔNICA (consolidada via IA) quando existe; cai na
+  // primária das fontes enquanto a obra não passou pela consolidação.
+  const canonicalSynopsis = ((data.canonical_synopsis as string | null) ?? "").trim()
 
   return {
     workId: data.id as string,
     title: data.title as string,
     coverUrl: pickPrimaryCover(covers),
-    synopsis: pickPrimarySynopsis(synopses),
+    synopsis: canonicalSynopsis || pickPrimarySynopsis(synopses),
     synopsisQuality: (data.synopsis_quality as string | null) ?? null,
     publicationStatusId: (data.publication_status_id as number | null) ?? null,
     observations: (data.observations as string | null) ?? null,
