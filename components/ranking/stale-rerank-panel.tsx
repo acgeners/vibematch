@@ -15,6 +15,7 @@ import { WorkQueueCard, type WorkQueueState } from "@/components/ai-evaluation/q
 import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
 import { QueueToolbar, QueueSortSelect } from "@/components/ai-evaluation/queue/queue-toolbar"
 import { useWorkSelection } from "@/components/ai-evaluation/queue/use-work-selection"
+import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
 
 type SortField = "default" | "expected" | "alignment"
 
@@ -28,12 +29,15 @@ function fmtAlignmentAt(iso: string | null | undefined): string | null {
 
 export function StaleRerankPanel({
   works,
+  readIds = [],
   isPaid = true,
 }: {
   works: AlignmentQueueWork[]
+  readIds?: string[]
   isPaid?: boolean
 }) {
   const refresh = useRefresh()
+  const { isRead, unmark } = useToggleRead("veredito", readIds)
   const [sortField, setSortField] = useState<SortField>("default")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [batchRunning, setBatchRunning] = useState(false)
@@ -275,6 +279,8 @@ export function StaleRerankPanel({
               selected={selection.isSelected(w.id)}
               onToggleSelect={() => selection.toggle(w.id)}
               dimmed={skippingId === w.id}
+              read={isRead(w.id)}
+              onToggleRead={() => unmark(w.id)}
             />
           )
         })}

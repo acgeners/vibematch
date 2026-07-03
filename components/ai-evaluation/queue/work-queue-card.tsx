@@ -1,7 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { Tag, MessageSquare } from "lucide-react"
+import { Tag, MessageSquare, Check, X } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScoreBadge } from "@/components/ui/score-badge"
@@ -73,6 +73,11 @@ export interface WorkQueueCardProps {
   onToggleSelect?: () => void
 
   dimmed?: boolean
+
+  /** Pendência marcada como "lida" (silenciada, mas ainda na fila). Esmaece o
+   *  card e exibe um selo "Lida" clicável que desmarca via `onToggleRead`. */
+  read?: boolean
+  onToggleRead?: () => void
 }
 
 /**
@@ -103,13 +108,15 @@ export function WorkQueueCard({
   selected,
   onToggleSelect,
   dimmed,
+  read,
+  onToggleRead,
 }: WorkQueueCardProps) {
   return (
     <Card
       className={cn(
         "relative transition-all hover:border-primary/30 hover:bg-card hover:shadow-md hover:shadow-primary/10",
         selected && "border-primary/60 bg-primary/5",
-        dimmed && "opacity-60",
+        (dimmed || read) && "opacity-60",
       )}
     >
       <CardContent className="p-3.5">
@@ -176,6 +183,23 @@ export function WorkQueueCard({
                     {reviewCount ?? 0}
                   </span>
                 </>
+              )}
+              {/* Selo "Lida" — na linha de badges, logo abaixo do título. Largura
+                  FIXA no hover (só troca cor + ícone ✓→✕), então não empurra nada. */}
+              {read && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onToggleRead?.()
+                  }}
+                  title="Marcada como lida — clique para desmarcar"
+                  className="group inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 transition-colors hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 dark:border-emerald-400/25 dark:bg-emerald-400/12 dark:text-emerald-200 dark:hover:border-rose-400/30 dark:hover:bg-rose-400/10 dark:hover:text-rose-300"
+                >
+                  <Check className="h-3 w-3 group-hover:hidden" aria-hidden />
+                  <X className="hidden h-3 w-3 group-hover:inline" aria-hidden />
+                  Lida
+                </button>
               )}
             </div>
 

@@ -31,6 +31,9 @@ import type { TagsReviewsWork } from "@/components/ai-evaluation/tags-reviews-ta
 import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
 import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
+import { getReadAckSets, getEvalReadSummary } from "@/server/queries/ai-eval-read"
+import type { ReadQueue } from "@/server/queries/ai-eval-read"
+import { MarkReadButton } from "@/components/ai-evaluation/mark-read-button"
 
 const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model", "outdated-reviews"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
@@ -502,22 +505,31 @@ async function getEligibleWorks(
 function EvalTabLink({
   href,
   active,
+  dot,
   children,
 }: {
   href: string
   active: boolean
+  /** Pontinho: a aba tem não-lidas que somam no badge da sidebar (some quando lida). */
+  dot?: boolean
   children: ReactNode
 }) {
   return (
     <Link
       href={href}
       className={cn(
-        "-mb-px rounded-t-md border-b-2 px-3 py-2 text-sm transition-colors",
+        "relative -mb-px rounded-t-md border-b-2 px-3 py-2 text-sm transition-colors",
         active
           ? "border-primary bg-primary/10 font-semibold text-primary"
           : "border-transparent font-medium text-muted-foreground hover:border-border hover:text-foreground",
       )}
     >
+      {dot && (
+        <span
+          className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary/70"
+          aria-label="pendências não lidas"
+        />
+      )}
       {children}
     </Link>
   )
@@ -530,6 +542,7 @@ function EvalTabLink({
  */
 function IaAttributesTab({
   works,
+  readIds,
   activeFilters,
   promptVersionTolerance,
   lowConfidenceThreshold,
@@ -538,6 +551,7 @@ function IaAttributesTab({
   synopsisQualities,
 }: {
   works: EligibleWork[]
+  readIds: string[]
   activeFilters: EvaluationFilter[]
   promptVersionTolerance: number
   lowConfidenceThreshold: number
@@ -558,7 +572,7 @@ function IaAttributesTab({
         activePersonalStatuses={personalStatusNames}
         activeSynopsisQualities={synopsisQualities}
       />
-      <AiEvaluationPanel pendingWorks={works} />
+      <AiEvaluationPanel pendingWorks={works} readIds={readIds} />
     </div>
   )
 }
@@ -570,6 +584,7 @@ function IaAttributesTab({
  */
 function UntrackedTab({
   works,
+  readIds,
   pubStatusNames,
   synopsisQualities,
 }: {
@@ -577,6 +592,7 @@ function UntrackedTab({
     tagCount: number
     reviewCount: number
   })[]
+  readIds: string[]
   pubStatusNames: string[]
   synopsisQualities: string[]
 }) {
@@ -595,7 +611,7 @@ function UntrackedTab({
         showEvalState={false}
         showPersonalStatus={false}
       />
-      <UntrackedStatusPanel works={works} />
+      <UntrackedStatusPanel works={works} readIds={readIds} />
     </div>
   )
 }
@@ -631,6 +647,7 @@ function parseSynopsisStates(raw: string | string[] | undefined): SynopsisState[
  */
 function IaRkTab({
   works,
+  readIds,
   pubStatusNames,
   personalStatusNames,
   synopsisQualities,
@@ -638,6 +655,7 @@ function IaRkTab({
   isPaid,
 }: {
   works: AlignmentQueueWork[]
+  readIds: string[]
   pubStatusNames: string[]
   personalStatusNames: string[]
   synopsisQualities: string[]
@@ -660,7 +678,7 @@ function IaRkTab({
         showIaRkState
         activeIaRkStates={states}
       />
-      <StaleRerankPanel works={works} isPaid={isPaid} />
+      <StaleRerankPanel works={works} readIds={readIds} isPaid={isPaid} />
     </div>
   )
 }
@@ -674,6 +692,7 @@ function IaRkTab({
  */
 function SynopsisTab({
   works,
+  readIds,
   accuracy,
   comparison,
   pubStatusNames,
@@ -692,6 +711,7 @@ function SynopsisTab({
   isPaid,
 }: {
   works: SynopsisQueueWork[]
+  readIds: string[]
   accuracy: SynopsisPredictionAccuracy
   comparison: SynopsisVersionComparison | null
   pubStatusNames: string[]
@@ -737,7 +757,7 @@ function SynopsisTab({
         activePredictionDeltas={predictionDeltas}
         predictionVersionOptions={predictionVersionOptions}
       />
-      <SynopsisPredictPanel works={works} isPaid={isPaid} />
+      <SynopsisPredictPanel works={works} readIds={readIds} isPaid={isPaid} />
     </div>
   )
 }
@@ -769,9 +789,9 @@ function EvalTabBar({
   const n = (v: number | undefined) => (counts ? ` (${v ?? 0})` : " (…)")
   return (
     <div className="flex items-center gap-1 border-b border-border/60">
-      <EvalTabLink href={hrefs.attr} active={activeTab === "atributos"}>IA atributos{n(counts?.attr)}</EvalTabLink>
-      <EvalTabLink href={hrefs.rk} active={activeTab === "ia-rk"}>Veredito IA{n(counts?.iaRk)}</EvalTabLink>
-      <EvalTabLink href={hrefs.syn} active={activeTab === "sinopse"}>Interesse na Obra{n(counts?.syn)}</EvalTabLink>
+      <EvalTabLink href={hrefs.attr} active={activeTab === "atributos"} dot={(counts?.attr ?? 0) > 0}>IA atributos{n(counts?.attr)}</EvalTabLink>
+      <EvalTabLink href={hrefs.rk} active={activeTab === "ia-rk"} dot={(counts?.iaRk ?? 0) > 0}>Veredito IA{n(counts?.iaRk)}</EvalTabLink>
+      <EvalTabLink href={hrefs.syn} active={activeTab === "sinopse"} dot={(counts?.syn ?? 0) > 0}>Interesse na Obra{n(counts?.syn)}</EvalTabLink>
       <EvalTabLink href={hrefs.tagsReviews} active={activeTab === "tags-reviews"}>Tags &amp; Reviews{n(counts?.tagsReviews)}</EvalTabLink>
       <EvalTabLink href={hrefs.untracked} active={activeTab === "untracked"}>Untracked{n(counts?.untracked)}</EvalTabLink>
     </div>
@@ -817,20 +837,33 @@ interface TabCounts {
  */
 const getAiEvalTabCounts = unstable_cache(
   async (args: CountArgs): Promise<TabCounts> => {
-    const [attr, iaRk, syn, revC, tagsC, untracked] = await Promise.all([
+    const [attr, iaRk, syn, revC, tagsC, untracked, ackSets] = await Promise.all([
       getEligibleWorks(args.activeFilters, args.pubStatusIds, args.personalStatusIds, args.synopsisQualities, args.toleranceOverride),
       getAlignmentQueueWorks({ states: args.iaRkStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities }),
       getSynopsisQueueWorks({ states: args.synopsisStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities, predictionVersions: args.predictionVersions, predictionQualities: args.predictionQualities, predictionDeltas: args.predictionDeltas, missingManual: args.synopsisQualities.includes("none"), countOnly: true }),
       getWorksWithoutReviews({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minReviews: args.minReviews, maxReviews: args.maxReviews }, { countOnly: true }),
       getWorksWithoutTags({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minTags: args.minTags, maxTags: args.maxTags }, { countOnly: true }),
       getUntrackedWorks({ pubStatusIds: args.pubStatusIds, synopsisQualities: args.synopsisQualities }),
+      getReadAckSets(),
     ])
+    // Contadores = NÃO-LIDAS: subtrai as obras marcadas como lidas em cada fila.
+    const ackAttr = ackSets.get("attr")!
+    const ackVer = ackSets.get("veredito")!
+    const ackInt = ackSets.get("interesse")!
+    const ackTR = ackSets.get("tags_reviews")!
+    const ackUn = ackSets.get("untracked")!
     // "Tags & Reviews" = união dos universos (obra com faixa de reviews OU faixa de
     // tags). Conta ids distintos (não soma, pra não duplicar quem falta ambos).
-    const tagsReviews = new Set([...(revC.ids ?? []), ...(tagsC.ids ?? [])]).size
-    return { attr: attr.works.length, iaRk: iaRk.length, syn: syn.length, tagsReviews, untracked: untracked.length }
+    const tagsReviews = [...new Set([...(revC.ids ?? []), ...(tagsC.ids ?? [])])].filter((id) => !ackTR.has(id)).length
+    return {
+      attr: attr.works.filter((w) => !ackAttr.has(w.id)).length,
+      iaRk: iaRk.filter((w) => !ackVer.has(w.id)).length,
+      syn: syn.filter((w) => !ackInt.has(w.id)).length,
+      tagsReviews,
+      untracked: untracked.filter((w) => !ackUn.has(w.id)).length,
+    }
   },
-  ["ai-eval-tab-counts-v2"],
+  ["ai-eval-tab-counts-v3"],
   { revalidate: 60, tags: ["ai-eval-tab-counts"] },
 )
 
@@ -855,6 +888,24 @@ async function TabCountsBar({ activeTab, hrefs, args, activeCount }: { activeTab
   const counts = await getAiEvalTabCounts(args)
   const merged: TabCounts = { ...counts, [ACTIVE_TAB_COUNT_KEY[activeTab] ?? "attr"]: activeCount }
   return <EvalTabBar activeTab={activeTab} hrefs={hrefs} counts={merged} />
+}
+
+/**
+ * Estado do toggle "Marcar tudo como lido" (defaults das 5 filas). Cacheado
+ * (60s + tag `ai-eval-tab-counts`, invalidada nas mutações de leitura) pra não
+ * re-varrer as filas a cada navegação. Renderiza no slot de ações do Header.
+ */
+const getEvalReadSummaryCached = unstable_cache(
+  async () => getEvalReadSummary(),
+  ["ai-eval-read-summary-v1"],
+  { revalidate: 60, tags: ["ai-eval-tab-counts"] },
+)
+
+async function MarkReadControl() {
+  const summary = await getEvalReadSummaryCached()
+  // Nada pendente nem lido ⇒ nada a fazer: esconde o botão.
+  if (!summary.hasAnyRead && summary.totalUnread === 0) return null
+  return <MarkReadButton allRead={summary.allRead} />
 }
 
 export default async function AiEvaluationPage({
@@ -927,6 +978,16 @@ export default async function AiEvaluationPage({
   const needsPlan = activeTab === "sinopse" || activeTab === "ia-rk"
   const planPromise = needsPlan ? getCurrentPlan() : null
 
+  // Obras marcadas como "lidas" por fila (silenciadas). Os cards exibem o selo
+  // "Lida" e o activeCount abaixo desconta as lidas (bate com o contador da aba).
+  const ackSets = await getReadAckSets()
+  // IDs lidos (interseção com as obras exibidas) da fila da aba ativa — passados
+  // ao painel pra pintar o selo "Lida". Array (props RSC não serializam Set).
+  const readIdsFor = (queue: ReadQueue, works: { id: string }[]): string[] => {
+    const set = ackSets.get(queue)!
+    return works.filter((w) => set.has(w.id)).map((w) => w.id)
+  }
+
   let activeContent: ReactNode = null
   // Contagem fresca da aba ativa — sobrescreve o valor cacheado no TabCountsBar
   // (badge da aba aberta nunca stale, bate com a lista exibida).
@@ -964,10 +1025,12 @@ export default async function AiEvaluationPage({
     if (maxTags > 0) works = works.filter((w) => (w.tagCount ?? 0) <= maxTags)
     if (minReviews > 0) works = works.filter((w) => (w.reviewCount ?? 0) >= minReviews)
     if (maxReviews > 0) works = works.filter((w) => (w.reviewCount ?? 0) <= maxReviews)
-    activeCount = works.length
+    const readIds = readIdsFor("interesse", works)
+    activeCount = works.length - readIds.length
     activeContent = (
       <SynopsisTab
         works={works}
+        readIds={readIds}
         accuracy={synopsisAccuracy}
         comparison={synopsisComparison}
         pubStatusNames={pubStatusNames}
@@ -1022,10 +1085,12 @@ export default async function AiEvaluationPage({
       w.tagCount = tagCounts.get(w.id) ?? 0
       w.reviewCount = revCounts.get(w.id) ?? 0
     }
-    activeCount = mergedWorks.length
+    const readIds = readIdsFor("tags_reviews", mergedWorks)
+    activeCount = mergedWorks.length - readIds.length
     activeContent = (
       <TagsReviewsTab
         works={mergedWorks}
+        readIds={readIds}
         activePubStatuses={pubStatusNames}
         activePersonalStatuses={personalStatusNames}
         activeInterest={synopsisQualities}
@@ -1041,16 +1106,18 @@ export default async function AiEvaluationPage({
       planPromise ?? getCurrentPlan(),
     ])
     const isPaidPlan = planAllows(plan, "smart_shortlist")
-    activeCount = iaRkQueue.length
     const counts = await getWorkTagReviewCounts(iaRkQueue.map((w) => w.id))
     const works = iaRkQueue.map((w) => ({
       ...w,
       tagCount: counts.get(w.id)?.tagCount ?? 0,
       reviewCount: counts.get(w.id)?.reviewCount ?? 0,
     }))
+    const readIds = readIdsFor("veredito", works)
+    activeCount = works.length - readIds.length
     activeContent = (
       <IaRkTab
         works={works}
+        readIds={readIds}
         pubStatusNames={pubStatusNames}
         personalStatusNames={personalStatusNames}
         synopsisQualities={synopsisQualities}
@@ -1060,7 +1127,6 @@ export default async function AiEvaluationPage({
     )
   } else if (activeTab === "untracked") {
     const untrackedWorks = await getUntrackedWorks({ pubStatusIds, synopsisQualities })
-    activeCount = untrackedWorks.length
     // Inputs do popover carregam sob demanda (getSynopsisInputsAction) — só as
     // contagens 🏷/💬 entram no crítico.
     const idsToHydrate = untrackedWorks.map((w) => w.id)
@@ -1073,25 +1139,30 @@ export default async function AiEvaluationPage({
         reviewCount: c?.reviewCount ?? 0,
       }
     })
+    const readIds = readIdsFor("untracked", works)
+    activeCount = works.length - readIds.length
     activeContent = (
       <UntrackedTab
         works={works}
+        readIds={readIds}
         pubStatusNames={pubStatusNames}
         synopsisQualities={synopsisQualities}
       />
     )
   } else {
     const attrResult = await getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, synopsisQualities, toleranceOverride)
-    activeCount = attrResult.works.length
     const counts = await getWorkTagReviewCounts(attrResult.works.map((w) => w.id))
     const works = attrResult.works.map((w) => ({
       ...w,
       tagCount: counts.get(w.id)?.tagCount ?? 0,
       reviewCount: counts.get(w.id)?.reviewCount ?? 0,
     }))
+    const readIds = readIdsFor("attr", works)
+    activeCount = works.length - readIds.length
     activeContent = (
       <IaAttributesTab
         works={works}
+        readIds={readIds}
         activeFilters={activeFilters}
         promptVersionTolerance={attrResult.promptVersionTolerance}
         lowConfidenceThreshold={attrResult.lowConfidenceThreshold}
@@ -1179,6 +1250,11 @@ export default async function AiEvaluationPage({
         title="Avaliação IA"
         description="Fila de avaliação/revisão das notas por IA (atributos) e de re-rank (Veredito IA) desatualizado ou não avaliado."
         icon={<Sparkles />}
+        actions={
+          <Suspense fallback={null}>
+            <MarkReadControl />
+          </Suspense>
+        }
       />
 
       <Suspense fallback={<EvalTabBar activeTab={activeTab} hrefs={hrefs} counts={null} />}>

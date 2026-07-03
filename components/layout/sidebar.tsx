@@ -96,9 +96,10 @@ export function Sidebar() {
   const searchParams = useClientSearchParams()
 
   // Badges de pendências (contagens):
-  //   - "ai-eval":  fila de atributos de /ai-evaluation (aba "IA atributos":
-  //                 pending + review_pending). As filas Veredito IA / Interesse
-  //                 Sinopse têm contadores próprios na página e ficam de fora.
+  //   - "ai-eval":  obras NÃO-LIDAS nas 3 primeiras abas de /ai-evaluation
+  //                 (atributos + Veredito IA + Interesse), união distinta.
+  //                 "Marcar como lido" na página silencia sem resolver → o badge
+  //                 some (só é renderizado quando > 0).
   //   - "settings": pendências do Pipeline de dados de /settings
   // Falha silenciosa em 0.
   const [badgeCounts, setBadgeCounts] = useState<Record<BadgeKey, number>>({

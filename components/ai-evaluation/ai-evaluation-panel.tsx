@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { triggerAiEvaluation, skipAiEvaluation, prewarmEvaluationContext } from "@/server/actions/ai"
 import { getComixHealthStatus } from "@/server/actions/comix-resolver"
 import { useRefresh } from "@/lib/use-refresh"
+import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
 import { AiEvaluationCompare } from "./ai-evaluation-compare"
 import { Button } from "@/components/ui/button"
@@ -53,6 +54,7 @@ interface PendingWork {
 
 interface AiEvaluationPanelProps {
   pendingWorks: PendingWork[]
+  readIds?: string[]
 }
 
 // Quantas avaliações IA rodam em paralelo no lote. O gargalo é a chamada do
@@ -101,10 +103,11 @@ function EvaluatingProgress({ estimateMs = 55000 }: { estimateMs?: number }) {
   )
 }
 
-export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
+export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPanelProps) {
   // refresh() atualiza os contadores das abas (server component) E o chrome da
   // sidebar (badge/saldo) na mesma rota, via o evento de refresh do chrome.
   const refreshQueue = useRefresh()
+  const { isRead, unmark } = useToggleRead("attr", readIds)
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null)
   const [skippingId, setSkippingId] = useState<string | null>(null)
   const [reviewData, setReviewData] = useState<ReviewData | null>(null)
@@ -702,6 +705,8 @@ export function AiEvaluationPanel({ pendingWorks }: AiEvaluationPanelProps) {
               selected={selection.isSelected(work.id)}
               onToggleSelect={() => selection.toggle(work.id)}
               dimmed={evaluatingId === work.id}
+              read={isRead(work.id)}
+              onToggleRead={() => unmark(work.id)}
             />
           )
         })}

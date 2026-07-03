@@ -1,13 +1,13 @@
 "use server"
 
-import { getAttributesQueueCount } from "@/server/queries/recommendations"
+import { getEvalBadgeUnreadCount } from "@/server/queries/ai-eval-read"
 import { getSettingsBadgePendingTotal } from "@/server/queries/settings-pending"
 import { maybeTriggerStaleRecalc } from "@/server/actions/recalc-queue"
 import { getComixStatus } from "@/lib/external/comix-gate"
 import type { ComixHealthState } from "@/lib/external/comix-gate"
 
 export interface SidebarBadgeCounts {
-  /** Obras na fila de atributos de /ai-evaluation (aba "IA atributos": pending + review_pending). */
+  /** Obras NÃO-LIDAS nas 3 primeiras abas de /ai-evaluation (atributos + Veredito IA + Interesse), união distinta. Marcar como lido silencia sem resolver. */
   aiEval: number
   /** Pendências do Pipeline de dados de /settings (soma). */
   settings: number
@@ -20,11 +20,11 @@ export interface SidebarBadgeCounts {
 /**
  * Totais dos badges de pendência da sidebar.
  *
- * - aiEval: SÓ a fila de atributos (pending + review_pending) — casa com a aba
- *   "IA atributos". As filas de Veredito IA (stale) e Interesse Sinopse têm seus
- *   próprios contadores na página e NÃO entram no badge (inflavam o número,
- *   sobretudo após regen de perfil). Head-count barato; sempre TS, então o fix
- *   independe de a RPC estar atualizada/aplicada.
+ * - aiEval: união DISTINTA das obras NÃO-LIDAS nas 3 primeiras abas (atributos +
+ *   Veredito IA "stale" + Interesse "não previsto"). "Marcar como lido" em
+ *   /ai-evaluation silencia pendências sem resolvê-las, então o antigo problema
+ *   de inflar o badge (regen de perfil) é neutralizado pelo próprio usuário. Ver
+ *   `getEvalBadgeUnreadCount`. A sidebar oculta o badge quando isto é 0.
  * - settings: total do Pipeline de dados, via TS (`getSettingsBadgePendingTotal`).
  *   Usava a RPC `get_sidebar_badge_counts`, mas ela conta `canonical_synopsis`
  *   só por NULL e NÃO aplica o gate de "consolidável" (≥40 chars) — contava obras
@@ -46,9 +46,9 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
   }))
 
   const [aiEval, settings, recalc] = await Promise.all([
-    getAttributesQueueCount().catch((err) => {
+    getEvalBadgeUnreadCount().catch((err) => {
       console.warn(
-        "[getSidebarBadgeCounts] contagem de atributos falhou:",
+        "[getSidebarBadgeCounts] contagem de não-lidas falhou:",
         err instanceof Error ? err.message : err,
       )
       return 0
