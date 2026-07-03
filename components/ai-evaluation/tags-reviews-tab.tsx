@@ -45,6 +45,7 @@ export function TagsReviewsTab({
   activePubStatuses,
   activePersonalStatuses,
   activeInterest,
+  activePredictionQualities = [],
   minReviews,
   maxReviews,
   minTags,
@@ -55,6 +56,7 @@ export function TagsReviewsTab({
   activePubStatuses: string[]
   activePersonalStatuses: string[]
   activeInterest: string[]
+  activePredictionQualities?: string[]
   minReviews: number
   maxReviews: number
   minTags: number
@@ -105,9 +107,10 @@ export function TagsReviewsTab({
         activePubStatuses={activePubStatuses}
         activePersonalStatuses={activePersonalStatuses}
         activeSynopsisQualities={activeInterest}
+        activePredictionQualities={activePredictionQualities}
         showEvalState={false}
-        showInterestNone
         showDataFilters
+        dataFiltersPrimary
         activeMinTags={minTags}
         activeMaxTags={maxTags}
         activeMinReviews={minReviews}

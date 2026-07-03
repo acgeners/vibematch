@@ -33,6 +33,7 @@ import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
 import { getReadAckSets, getEvalReadSummary } from "@/server/queries/ai-eval-read"
 import type { ReadQueue } from "@/server/queries/ai-eval-read"
+import { filterWorkIdsByInterest } from "@/server/queries/interest-filter"
 import { MarkReadButton } from "@/components/ai-evaluation/mark-read-button"
 
 const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model", "outdated-reviews"] as const
@@ -549,6 +550,7 @@ function IaAttributesTab({
   pubStatusNames,
   personalStatusNames,
   synopsisQualities,
+  predictionQualities,
 }: {
   works: EligibleWork[]
   readIds: string[]
@@ -558,6 +560,7 @@ function IaAttributesTab({
   pubStatusNames: string[]
   personalStatusNames: string[]
   synopsisQualities: string[]
+  predictionQualities: string[]
 }) {
   return (
     <div className="space-y-4">
@@ -571,6 +574,7 @@ function IaAttributesTab({
         activePubStatuses={pubStatusNames}
         activePersonalStatuses={personalStatusNames}
         activeSynopsisQualities={synopsisQualities}
+        activePredictionQualities={predictionQualities}
       />
       <AiEvaluationPanel pendingWorks={works} readIds={readIds} />
     </div>
@@ -587,6 +591,7 @@ function UntrackedTab({
   readIds,
   pubStatusNames,
   synopsisQualities,
+  predictionQualities,
 }: {
   works: (UntrackedWork & {
     tagCount: number
@@ -595,6 +600,7 @@ function UntrackedTab({
   readIds: string[]
   pubStatusNames: string[]
   synopsisQualities: string[]
+  predictionQualities: string[]
 }) {
   return (
     <div className="space-y-4">
@@ -608,6 +614,7 @@ function UntrackedTab({
         activePubStatuses={pubStatusNames}
         activePersonalStatuses={[]}
         activeSynopsisQualities={synopsisQualities}
+        activePredictionQualities={predictionQualities}
         showEvalState={false}
         showPersonalStatus={false}
       />
@@ -651,6 +658,7 @@ function IaRkTab({
   pubStatusNames,
   personalStatusNames,
   synopsisQualities,
+  predictionQualities,
   states,
   isPaid,
 }: {
@@ -659,6 +667,7 @@ function IaRkTab({
   pubStatusNames: string[]
   personalStatusNames: string[]
   synopsisQualities: string[]
+  predictionQualities: string[]
   states: IaRkState[]
   isPaid: boolean
 }) {
@@ -674,6 +683,7 @@ function IaRkTab({
         activePubStatuses={pubStatusNames}
         activePersonalStatuses={personalStatusNames}
         activeSynopsisQualities={synopsisQualities}
+        activePredictionQualities={predictionQualities}
         showEvalState={false}
         showIaRkState
         activeIaRkStates={states}
@@ -838,12 +848,12 @@ interface TabCounts {
 const getAiEvalTabCounts = unstable_cache(
   async (args: CountArgs): Promise<TabCounts> => {
     const [attr, iaRk, syn, revC, tagsC, untracked, ackSets] = await Promise.all([
-      getEligibleWorks(args.activeFilters, args.pubStatusIds, args.personalStatusIds, args.synopsisQualities, args.toleranceOverride),
-      getAlignmentQueueWorks({ states: args.iaRkStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities }),
+      getEligibleWorks(args.activeFilters, args.pubStatusIds, args.personalStatusIds, [], args.toleranceOverride),
+      getAlignmentQueueWorks({ states: args.iaRkStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds }),
       getSynopsisQueueWorks({ states: args.synopsisStates, pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, synopsisQualities: args.synopsisQualities, predictionVersions: args.predictionVersions, predictionQualities: args.predictionQualities, predictionDeltas: args.predictionDeltas, missingManual: args.synopsisQualities.includes("none"), countOnly: true }),
       getWorksWithoutReviews({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minReviews: args.minReviews, maxReviews: args.maxReviews }, { countOnly: true }),
       getWorksWithoutTags({ pubStatusIds: args.pubStatusIds, personalStatusIds: args.personalStatusIds, minTags: args.minTags, maxTags: args.maxTags }, { countOnly: true }),
-      getUntrackedWorks({ pubStatusIds: args.pubStatusIds, synopsisQualities: args.synopsisQualities }),
+      getUntrackedWorks({ pubStatusIds: args.pubStatusIds }),
       getReadAckSets(),
     ])
     // Contadores = NÃO-LIDAS: subtrai as obras marcadas como lidas em cada fila.
@@ -852,18 +862,30 @@ const getAiEvalTabCounts = unstable_cache(
     const ackInt = ackSets.get("interesse")!
     const ackTR = ackSets.get("tags_reviews")!
     const ackUn = ackSets.get("untracked")!
+    // Interesse (manual + Previsão da IA) filtrado uniformemente pós-fetch nas 4
+    // filas cujas queries não filtram por isso (a aba Interesse já filtra internamente).
+    // No-op barato quando nenhum filtro de interesse está ativo.
+    const attrIds = attr.works.map((w) => w.id)
+    const verIds = iaRk.map((w) => w.id)
+    const unIds = untracked.map((w) => w.id)
     // "Tags & Reviews" = união dos universos (obra com faixa de reviews OU faixa de
     // tags). Conta ids distintos (não soma, pra não duplicar quem falta ambos).
-    const tagsReviews = [...new Set([...(revC.ids ?? []), ...(tagsC.ids ?? [])])].filter((id) => !ackTR.has(id)).length
+    const trIds = [...new Set([...(revC.ids ?? []), ...(tagsC.ids ?? [])])]
+    const [keepAttr, keepVer, keepUn, keepTR] = await Promise.all([
+      filterWorkIdsByInterest(attrIds, args.synopsisQualities, args.predictionQualities),
+      filterWorkIdsByInterest(verIds, args.synopsisQualities, args.predictionQualities),
+      filterWorkIdsByInterest(unIds, args.synopsisQualities, args.predictionQualities),
+      filterWorkIdsByInterest(trIds, args.synopsisQualities, args.predictionQualities),
+    ])
     return {
-      attr: attr.works.filter((w) => !ackAttr.has(w.id)).length,
-      iaRk: iaRk.filter((w) => !ackVer.has(w.id)).length,
+      attr: attrIds.filter((id) => keepAttr.has(id) && !ackAttr.has(id)).length,
+      iaRk: verIds.filter((id) => keepVer.has(id) && !ackVer.has(id)).length,
       syn: syn.filter((w) => !ackInt.has(w.id)).length,
-      tagsReviews,
-      untracked: untracked.filter((w) => !ackUn.has(w.id)).length,
+      tagsReviews: trIds.filter((id) => keepTR.has(id) && !ackTR.has(id)).length,
+      untracked: unIds.filter((id) => keepUn.has(id) && !ackUn.has(id)).length,
     }
   },
-  ["ai-eval-tab-counts-v3"],
+  ["ai-eval-tab-counts-v4"],
   { revalidate: 60, tags: ["ai-eval-tab-counts"] },
 )
 
@@ -1053,8 +1075,8 @@ export default async function AiEvaluationPage({
     // Fusão "Tags & Reviews": roda os dois universos (sem reviews / sem tags) em
     // paralelo e UNE por id, marcando de qual eixo cada obra veio.
     const [revRes, tagRes] = await Promise.all([
-      getWorksWithoutReviews({ pubStatusIds, personalStatusIds, minReviews, maxReviews, interest: synopsisQualities }),
-      getWorksWithoutTags({ pubStatusIds, personalStatusIds, minTags, maxTags, interest: synopsisQualities }),
+      getWorksWithoutReviews({ pubStatusIds, personalStatusIds, minReviews, maxReviews }),
+      getWorksWithoutTags({ pubStatusIds, personalStatusIds, minTags, maxTags }),
     ])
     const merged = new Map<string, TagsReviewsWork>()
     const base = (w: { id: string; title: string; coverUrl: string | null; publicationStatusId?: number | null; personalStatusId?: number | null; interest: string | null; canonicalPresent: boolean; inGolden: boolean; expectedScore: number | null }) => ({
@@ -1076,7 +1098,10 @@ export default async function AiEvaluationPage({
       if (ex) ex.tagGap = true
       else merged.set(w.id, { ...base(w), reviewGap: false, tagGap: true })
     }
-    const mergedWorks = [...merged.values()]
+    const mergedAll = [...merged.values()]
+    // Filtro de Interesse (manual + Previsão da IA) pós-fetch, uniforme.
+    const keep = await filterWorkIdsByInterest(mergedAll.map((w) => w.id), synopsisQualities, predictionQualities)
+    const mergedWorks = mergedAll.filter((w) => keep.has(w.id))
     // Reaproveita as contagens JÁ computadas nos scans de getWorksWithout* (mapas de
     // TODAS as obras) — evita re-varrer work_tags/work_reviews aqui (getWorkTagReviewCounts).
     const tagCounts = tagRes.tagCountByWork ?? new Map<string, number>()
@@ -1094,6 +1119,7 @@ export default async function AiEvaluationPage({
         activePubStatuses={pubStatusNames}
         activePersonalStatuses={personalStatusNames}
         activeInterest={synopsisQualities}
+        activePredictionQualities={predictionQualities}
         minReviews={minReviews}
         maxReviews={maxReviews}
         minTags={minTags}
@@ -1102,12 +1128,14 @@ export default async function AiEvaluationPage({
     )
   } else if (activeTab === "ia-rk") {
     const [iaRkQueue, plan] = await Promise.all([
-      getAlignmentQueueWorks({ states: iaRkStates, pubStatusIds, personalStatusIds, synopsisQualities }),
+      getAlignmentQueueWorks({ states: iaRkStates, pubStatusIds, personalStatusIds }),
       planPromise ?? getCurrentPlan(),
     ])
     const isPaidPlan = planAllows(plan, "smart_shortlist")
-    const counts = await getWorkTagReviewCounts(iaRkQueue.map((w) => w.id))
-    const works = iaRkQueue.map((w) => ({
+    const keep = await filterWorkIdsByInterest(iaRkQueue.map((w) => w.id), synopsisQualities, predictionQualities)
+    const members = iaRkQueue.filter((w) => keep.has(w.id))
+    const counts = await getWorkTagReviewCounts(members.map((w) => w.id))
+    const works = members.map((w) => ({
       ...w,
       tagCount: counts.get(w.id)?.tagCount ?? 0,
       reviewCount: counts.get(w.id)?.reviewCount ?? 0,
@@ -1121,12 +1149,15 @@ export default async function AiEvaluationPage({
         pubStatusNames={pubStatusNames}
         personalStatusNames={personalStatusNames}
         synopsisQualities={synopsisQualities}
+        predictionQualities={predictionQualities}
         states={iaRkStates}
         isPaid={isPaidPlan}
       />
     )
   } else if (activeTab === "untracked") {
-    const untrackedWorks = await getUntrackedWorks({ pubStatusIds, synopsisQualities })
+    const untrackedAll = await getUntrackedWorks({ pubStatusIds })
+    const keep = await filterWorkIdsByInterest(untrackedAll.map((w) => w.id), synopsisQualities, predictionQualities)
+    const untrackedWorks = untrackedAll.filter((w) => keep.has(w.id))
     // Inputs do popover carregam sob demanda (getSynopsisInputsAction) — só as
     // contagens 🏷/💬 entram no crítico.
     const idsToHydrate = untrackedWorks.map((w) => w.id)
@@ -1147,12 +1178,17 @@ export default async function AiEvaluationPage({
         readIds={readIds}
         pubStatusNames={pubStatusNames}
         synopsisQualities={synopsisQualities}
+        predictionQualities={predictionQualities}
       />
     )
   } else {
-    const attrResult = await getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, synopsisQualities, toleranceOverride)
-    const counts = await getWorkTagReviewCounts(attrResult.works.map((w) => w.id))
-    const works = attrResult.works.map((w) => ({
+    // Interesse (manual + Previsão da IA) filtrado uniformemente pós-fetch (não no
+    // getEligibleWorks) — cobre ♥/none/unknown + previsão em todas as abas.
+    const attrResult = await getEligibleWorks(activeFilters, pubStatusIds, personalStatusIds, [], toleranceOverride)
+    const keep = await filterWorkIdsByInterest(attrResult.works.map((w) => w.id), synopsisQualities, predictionQualities)
+    const members = attrResult.works.filter((w) => keep.has(w.id))
+    const counts = await getWorkTagReviewCounts(members.map((w) => w.id))
+    const works = members.map((w) => ({
       ...w,
       tagCount: counts.get(w.id)?.tagCount ?? 0,
       reviewCount: counts.get(w.id)?.reviewCount ?? 0,
@@ -1169,6 +1205,7 @@ export default async function AiEvaluationPage({
         pubStatusNames={pubStatusNames}
         personalStatusNames={personalStatusNames}
         synopsisQualities={synopsisQualities}
+        predictionQualities={predictionQualities}
       />
     )
   }

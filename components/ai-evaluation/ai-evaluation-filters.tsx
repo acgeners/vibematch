@@ -4,6 +4,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { useState, useTransition } from "react"
 import { ChevronRight, Filter, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { QualityHearts } from "@/components/ui/quality-hearts"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -71,9 +72,6 @@ interface AiEvaluationFiltersProps {
   /** Quando false, esconde o grupo de status "Leitura" (usado na aba Untracked, onde
    *  todas as obras são Untracked). */
   showPersonalStatus?: boolean
-  /** Mostra o chip "Não avaliada" (Interesse ainda não informado) — abas Interesse
-   *  Sinopse e Tags & Reviews. Na aba Interesse é implícito por showSynopsisState. */
-  showInterestNone?: boolean
   /** Mostra a seção "Estado do Veredito IA" (Desatualizado/Não avaliado) — aba Veredito IA. */
   showIaRkState?: boolean
   /** Estados de Veredito IA ativos ("stale"/"unranked"). */
@@ -93,6 +91,9 @@ interface AiEvaluationFiltersProps {
   /** Mostra a seção "Dados (nº)" (faixa mín–máx de tags / reviews) — abas Interesse
    *  Sinopse e Tags & Reviews. */
   showDataFilters?: boolean
+  /** Sobe os filtros de Dados (Tags/Reviews) do "Mais filtros" pro TOPO (acima do
+   *  Status) — usado na aba Tags & Reviews, onde são o filtro principal. */
+  dataFiltersPrimary?: boolean
   /** Faixa de tags ativa (0 = sem limite). */
   activeMinTags?: number
   activeMaxTags?: number
@@ -140,7 +141,6 @@ export function AiEvaluationFilters({
   activeSynopsisQualities = [],
   showEvalState = true,
   showPersonalStatus = true,
-  showInterestNone = false,
   showIaRkState = false,
   activeIaRkStates = [],
   showSynopsisState = false,
@@ -150,6 +150,7 @@ export function AiEvaluationFilters({
   predictionVersionOptions = [],
   activePredictionDeltas = [],
   showDataFilters = false,
+  dataFiltersPrimary = false,
   activeMinTags = 0,
   activeMaxTags = 0,
   activeMinReviews = 0,
@@ -222,6 +223,9 @@ export function AiEvaluationFilters({
     else p.set("personal", d.personal.join(","))
     if (d.synQ.length === 0) p.delete("synopsis_q")
     else p.set("synopsis_q", d.synQ.join(","))
+    // Previsão da IA (pq): filtro padrão em TODAS as abas → serializa sempre.
+    if (d.predQ.length === 0) p.delete("pq")
+    else p.set("pq", d.predQ.join(","))
     if (showIaRkState) {
       const rk = new Set(d.iaRk)
       // Default da aba Veredito IA = {stale} → URL limpa.
@@ -235,8 +239,6 @@ export function AiEvaluationFilters({
       if (sq.size === 1 && sq.has("unpredicted")) p.delete("sq")
       else if (sq.size === 0) p.set("sq", "none")
       else p.set("sq", [...sq].join(","))
-      if (d.predQ.length === 0) p.delete("pq")
-      else p.set("pq", d.predQ.join(","))
       if (d.predV.length === 0) p.delete("pv")
       else p.set("pv", d.predV.join(","))
       if (d.predD.length === 0) p.delete("pd")
@@ -394,10 +396,14 @@ export function AiEvaluationFilters({
   const dataActiveCount = showDataFilters
     ? [draft.minTags, draft.maxTags, draft.minReviews, draft.maxReviews].filter((n) => n > 0).length
     : 0
-  const advancedActiveCount =
-    (showSynopsisState ? draft.predQ.length + draft.predV.length + draft.predD.length : 0) +
-    dataActiveCount
-  const hasAdvanced = showSynopsisState || showDataFilters
+  const predAdvActive = showSynopsisState ? draft.predV.length + draft.predD.length : 0
+  // Total das dimensões avançadas (onde quer que estejam) — entra no activeCount.
+  // Previsão da IA (predQ) foi promovida pro filtro PADRÃO (ao lado do Interesse).
+  const advancedActiveCount = predAdvActive + dataActiveCount
+  // Badge do "Mais filtros" = só o que está DENTRO do acordeão (Dados sai quando
+  // `dataFiltersPrimary` o promove pro topo, na aba Tags & Reviews).
+  const advancedBadgeCount = predAdvActive + (dataFiltersPrimary ? 0 : dataActiveCount)
+  const hasAdvanced = showSynopsisState || (showDataFilters && !dataFiltersPrimary)
 
   const activeCount =
     evalFilterCount +
@@ -406,6 +412,7 @@ export function AiEvaluationFilters({
     draft.pub.length +
     draft.personal.length +
     draft.synQ.length +
+    draft.predQ.length +
     advancedActiveCount
 
   const hasAnyActive =
@@ -415,15 +422,30 @@ export function AiEvaluationFilters({
     draft.pub.length > 0 ||
     draft.personal.length > 0 ||
     draft.synQ.length > 0 ||
+    draft.predQ.length > 0 ||
     advancedActiveCount > 0
 
-  const showInterestNoneChip = showInterestNone || showSynopsisState
+  // "Não avaliada" e "Desconhecido" agora aparecem em TODAS as abas (o filtro de
+  // Interesse é o mesmo em toda a página).
+
+  // Dados (nº) = 2 campos (Tags / Reviews úteis). Renderizados no topo
+  // (dataFiltersPrimary, aba Tags & Reviews) ou dentro do "Mais filtros" (Interesse).
+  const dataFields = showDataFilters && (
+    <>
+      <FilterField title="Tags (nº)">
+        <NumRange label="tags" min={draft.minTags} max={draft.maxTags} onMin={setMinTags} onMax={setMaxTags} onEnter={apply} />
+      </FilterField>
+      <FilterField title="Reviews úteis (nº)">
+        <NumRange label="reviews úteis" min={draft.minReviews} max={draft.maxReviews} onMin={setMinReviews} onMax={setMaxReviews} onEnter={apply} />
+      </FilterField>
+    </>
+  )
 
   return (
     <TooltipProvider delayDuration={300}>
       <div
         className={cn(
-          "rounded-xl border border-border/70 bg-card/58 p-3 shadow-sm shadow-black/5 backdrop-blur",
+          "rounded-2xl border border-border/60 bg-card/55 p-3.5 shadow-sm shadow-black/5 backdrop-blur",
           isPending && "opacity-60"
         )}
       >
@@ -459,11 +481,11 @@ export function AiEvaluationFilters({
           </div>
         </div>
 
-        <div className="space-y-1.5">
+        <div className="space-y-2.5">
           {/* Estado da avaliação */}
           {showEvalState && (
           <FilterSection title="Estado da avaliação">
-            <div className="flex flex-wrap items-center gap-1">
+            <div className="flex flex-wrap items-center gap-1.5">
               {stateOptions.map((opt) => {
                 const active = isOn(opt.id)
                 return (
@@ -475,7 +497,7 @@ export function AiEvaluationFilters({
                       >
                         <Badge
                           variant={active ? "default" : "outline"}
-                          className="cursor-pointer text-xs"
+                          className="cursor-pointer px-3 py-1 text-[13px]"
                         >
                           {opt.label}
                         </Badge>
@@ -515,7 +537,7 @@ export function AiEvaluationFilters({
 
           {showIaRkState && (
             <FilterSection title="Estado do Veredito IA">
-              <div className="flex flex-wrap items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {IA_RK_STATE_OPTIONS.map((opt) => {
                   const active = draft.iaRk.includes(opt.id)
                   return (
@@ -524,7 +546,7 @@ export function AiEvaluationFilters({
                         <button type="button" onClick={() => toggleIaRkState(opt.id)}>
                           <Badge
                             variant={active ? "default" : "outline"}
-                            className="cursor-pointer text-xs"
+                            className="cursor-pointer px-3 py-1 text-[13px]"
                           >
                             {opt.label}
                           </Badge>
@@ -540,7 +562,7 @@ export function AiEvaluationFilters({
 
           {showSynopsisState && (
             <FilterSection title="Estado da previsão">
-              <div className="flex flex-wrap items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {SYNOPSIS_STATE_OPTIONS.map((opt) => {
                   const active = draft.synState.includes(opt.id)
                   return (
@@ -549,7 +571,7 @@ export function AiEvaluationFilters({
                         <button type="button" onClick={() => toggleSynopsisState(opt.id)}>
                           <Badge
                             variant={active ? "default" : "outline"}
-                            className="cursor-pointer text-xs"
+                            className="cursor-pointer px-3 py-1 text-[13px]"
                           >
                             {opt.label}
                           </Badge>
@@ -563,9 +585,18 @@ export function AiEvaluationFilters({
             </FilterSection>
           )}
 
-          {/* Status */}
+          {/* Dados (nº) como filtro PRINCIPAL, acima do Status — aba Tags & Reviews. */}
+          {dataFiltersPrimary && dataFields && (
+            <FilterSection>
+              <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">{dataFields}</div>
+            </FilterSection>
+          )}
+
+          {/* Status + Interesse/Previsão na MESMA linha, MESMA altura (items-stretch). */}
+          <div className="grid gap-2.5 lg:grid-cols-[1.7fr_1fr] lg:items-stretch">
+          {/* Status — Publicação estreita, Leitura larga (tem mais chips). */}
           <FilterSection title="Status">
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-[1fr_1.6fr]">
               <StatusGroup
                 label="Publicação"
                 options={PUB_STATUSES}
@@ -586,142 +617,123 @@ export function AiEvaluationFilters({
             </div>
           </FilterSection>
 
-          {/* Interesse manual — primário, sempre visível. */}
+          {/* Interesse (título do cartão) — User (manual) | Previsão da IA. */}
           <FilterSection title="Interesse">
-            <div className="flex flex-wrap items-center gap-1">
+            <div className="grid grid-cols-1 gap-x-3 gap-y-4 sm:grid-cols-[1.1fr_1fr]">
+          <FilterField title="User">
+            <div className="flex flex-wrap items-center gap-1.5">
               {SYNOPSIS_QUALITIES.map((q) => {
                 const active = draft.synQ.includes(q)
                 return (
                   <button key={q} type="button" onClick={() => toggleSynopsisQuality(q)}>
-                    <Badge
-                      variant={active ? "default" : "outline"}
-                      className="cursor-pointer text-sm"
-                    >
-                      {q}
+                    <Badge variant={active ? "default" : "outline"} className="cursor-pointer px-3.5 py-1 text-sm">
+                      <QualityHearts quality={q} variant="manual" showEmpty={false} />
                     </Badge>
                   </button>
                 )
               })}
               {/* Triagem manual: obras ainda sem Interesse informado (synopsis_quality IS NULL). */}
-              {showInterestNoneChip && (
-                <button type="button" onClick={() => toggleSynopsisQuality("none")}>
-                  <Badge
-                    variant={draft.synQ.includes("none") ? "default" : "outline"}
-                    className="cursor-pointer text-sm"
-                  >
-                    Não avaliada
-                  </Badge>
-                </button>
-              )}
+              <button type="button" onClick={() => toggleSynopsisQuality("none")}>
+                <Badge
+                  variant={draft.synQ.includes("none") ? "default" : "outline"}
+                  className="cursor-pointer px-3.5 py-1 text-sm"
+                >
+                  Não avaliada
+                </Badge>
+              </button>
               {/* Proveniência legada: tem um valor de Interesse não-confirmado
                   (source=legacy_unknown) — separa dos human_manual. */}
-              {showSynopsisState && (
-                <button
-                  type="button"
-                  onClick={() => toggleSynopsisQuality("unknown")}
-                  title="Tem um valor de Interesse de proveniência legada/não-confirmada (não definido por você)"
+              <button
+                type="button"
+                onClick={() => toggleSynopsisQuality("unknown")}
+                title="Tem um valor de Interesse de proveniência legada/não-confirmada (não definido por você)"
+              >
+                <Badge
+                  variant={draft.synQ.includes("unknown") ? "default" : "outline"}
+                  className="cursor-pointer px-3.5 py-1 text-sm"
                 >
-                  <Badge
-                    variant={draft.synQ.includes("unknown") ? "default" : "outline"}
-                    className="cursor-pointer text-sm"
-                  >
-                    Desconhecido
-                  </Badge>
-                </button>
-              )}
+                  Desconhecido
+                </Badge>
+              </button>
+            </div>
+          </FilterField>
+
+          <FilterField title="Previsão da IA">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {SYNOPSIS_QUALITIES.map((q) => {
+                const active = draft.predQ.includes(q)
+                return (
+                  <button key={q} type="button" onClick={() => togglePredictionQuality(q)}>
+                    <Badge variant={active ? "default" : "outline"} className="cursor-pointer px-3.5 py-1 text-sm">
+                      <QualityHearts quality={q} variant="pred" showEmpty={false} />
+                    </Badge>
+                  </button>
+                )
+              })}
+            </div>
+          </FilterField>
             </div>
           </FilterSection>
+          </div>
 
           {/* "Mais filtros" — dimensões avançadas recolhidas (previsão da IA, versão,
               Δ previsto×atual, faixas numéricas). Só nas abas que as exibem. */}
           {hasAdvanced && (
-            <div className="rounded-lg border border-border/65 bg-background/40">
+            <div className="overflow-hidden rounded-xl border border-foreground/[0.05] bg-background/50">
               <button
                 type="button"
                 onClick={() => setShowAdvanced((v) => !v)}
-                className="flex w-full items-center gap-1.5 bg-card/60 px-3 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+                className="flex w-full items-center gap-1.5 px-3.5 py-2.5 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/80 transition-colors hover:text-foreground"
               >
                 <ChevronRight className={cn("h-3 w-3 transition-transform", showAdvanced && "rotate-90")} />
                 Mais filtros
-                {advancedActiveCount > 0 && (
+                {advancedBadgeCount > 0 && (
                   <span className="rounded-full border border-border/70 px-1.5 text-[10px] font-medium normal-case tracking-normal">
-                    {advancedActiveCount}
+                    {advancedBadgeCount}
                   </span>
                 )}
               </button>
               {showAdvanced && (
-                <div className="flex flex-col gap-1.5 border-t border-border/60 p-2.5 sm:flex-row sm:flex-wrap sm:items-start">
-                  {/* Previsão da IA (valor previsto). */}
-                  {showSynopsisState && (
-                    <div className="sm:grow sm:shrink-0">
-                      <FilterSection title="Previsão da IA">
-                        <div className="flex flex-wrap items-center gap-1">
-                          {SYNOPSIS_QUALITIES.map((q) => {
-                            const active = draft.predQ.includes(q)
-                            return (
-                              <button key={q} type="button" onClick={() => togglePredictionQuality(q)}>
-                                <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-sm">
-                                  {q}
-                                </Badge>
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </FilterSection>
-                    </div>
-                  )}
-
+                <div className="grid grid-cols-1 gap-x-8 gap-y-4 border-t border-foreground/[0.05] p-3.5 sm:grid-cols-2 lg:grid-cols-4">
                   {/* Versão da previsão (prompt_version da previsão ativa). */}
                   {showSynopsisState && predictionVersionOptions.length > 0 && (
-                    <div className="sm:grow sm:shrink-0">
-                      <FilterSection title="Versão da previsão">
-                        <div className="flex flex-wrap items-center gap-1">
-                          {predictionVersionOptions.map((v) => {
-                            const active = draft.predV.includes(v)
-                            return (
-                              <button key={v} type="button" onClick={() => togglePredictionVersion(v)}>
-                                <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-xs">
-                                  {v}
-                                  {v === currentPromptVersion ? " (atual)" : ""}
-                                </Badge>
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </FilterSection>
-                    </div>
+                    <FilterField title="Versão da previsão">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {predictionVersionOptions.map((v) => {
+                          const active = draft.predV.includes(v)
+                          return (
+                            <button key={v} type="button" onClick={() => togglePredictionVersion(v)}>
+                              <Badge variant={active ? "default" : "outline"} className="cursor-pointer px-3 py-1 text-[13px]">
+                                {v}
+                                {v === currentPromptVersion ? " (atual)" : ""}
+                              </Badge>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </FilterField>
                   )}
 
                   {/* Δ Previsto × atual = nível previsto − nível atual (manual/desconhecido), range -3..+3. */}
                   {showSynopsisState && (
-                    <div className="sm:grow sm:shrink-0">
-                      <FilterSection title="Δ Previsto × atual">
-                        <div className="flex flex-wrap items-center gap-1">
-                          {DELTA_OPTIONS.map((opt) => {
-                            const active = draft.predD.includes(opt.id)
-                            return (
-                              <button key={opt.id} type="button" onClick={() => togglePredictionDelta(opt.id)}>
-                                <Badge variant={active ? "default" : "outline"} className="cursor-pointer text-xs tabular-nums">
-                                  {opt.label}
-                                </Badge>
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </FilterSection>
-                    </div>
+                    <FilterField title="Δ Previsto × atual">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {DELTA_OPTIONS.map((opt) => {
+                          const active = draft.predD.includes(opt.id)
+                          return (
+                            <button key={opt.id} type="button" onClick={() => togglePredictionDelta(opt.id)}>
+                              <Badge variant={active ? "default" : "outline"} className="cursor-pointer px-3 py-1 text-[13px] tabular-nums">
+                                {opt.label}
+                              </Badge>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </FilterField>
                   )}
 
-                  {showDataFilters && (
-                    <div className="sm:grow sm:shrink-0">
-                      <FilterSection title="Dados (nº)">
-                        <div className="flex flex-wrap items-start gap-3">
-                          <NumRange label="tags" min={draft.minTags} max={draft.maxTags} onMin={setMinTags} onMax={setMaxTags} onEnter={apply} />
-                          <NumRange label="reviews úteis" min={draft.minReviews} max={draft.maxReviews} onMin={setMinReviews} onMax={setMaxReviews} onEnter={apply} />
-                        </div>
-                      </FilterSection>
-                    </div>
-                  )}
+                  {/* Dados (nº) = 2 campos — só aqui quando não foi promovido pro topo. */}
+                  {!dataFiltersPrimary && dataFields}
                 </div>
               )}
             </div>
@@ -754,9 +766,10 @@ function NumRange({
   onMax: (n: number) => void
   onEnter: () => void
 }) {
+  // Sem rótulo visível — o título do box (FilterSection) já nomeia; o `label` só
+  // alimenta os aria-labels. Assim os inputs alinham no topo dos dois boxes.
   return (
-    <div className="space-y-1.5">
-      <Label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</Label>
+    <div>
       <div className="flex items-center gap-1">
         <Input
           type="number"
@@ -766,10 +779,10 @@ function NumRange({
           placeholder="mín"
           onChange={(e) => onMin(parseCount(e.target.value))}
           onKeyDown={(e) => { if (e.key === "Enter") onEnter() }}
-          className="h-7 w-16 tabular-nums"
+          className="h-8 w-20 text-sm tabular-nums"
           aria-label={`${label} mínimo`}
         />
-        <span className="text-xs text-muted-foreground">–</span>
+        <span className="text-sm text-muted-foreground">–</span>
         <Input
           type="number"
           min={0}
@@ -778,7 +791,7 @@ function NumRange({
           placeholder="máx"
           onChange={(e) => onMax(parseCount(e.target.value))}
           onKeyDown={(e) => { if (e.key === "Enter") onEnter() }}
-          className="h-7 w-16 tabular-nums"
+          className="h-8 w-20 text-sm tabular-nums"
           aria-label={`${label} máximo`}
         />
       </div>
@@ -801,11 +814,11 @@ function StatusGroup({
   tooltipFor?: (opt: PublicationStatusInfo | PersonalStatusInfo) => string
 }) {
   return (
-    <div className="space-y-1.5">
-      <Label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="space-y-2">
+      <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/80">
         {label}
       </Label>
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap gap-1.5">
         {options.map((opt) => {
           const isActive = active.includes(opt.status)
           const tip = tooltipFor?.(opt)
@@ -813,7 +826,7 @@ function StatusGroup({
             <button type="button" onClick={() => onToggle(opt.status)}>
               <Badge
                 variant={isActive ? "default" : "outline"}
-                className="cursor-pointer gap-1 text-xs"
+                className="cursor-pointer gap-1.5 px-3 py-1 text-[13px]"
               >
                 <span aria-hidden>{opt.symbol}</span>
                 {opt.status}
@@ -835,23 +848,54 @@ function StatusGroup({
   )
 }
 
-interface FilterSectionProps {
-  title: string
-  defaultOpen?: boolean
-  children: React.ReactNode
+/** Rótulo micro (uppercase, esparso) de um campo de filtro. */
+function FilterFieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/80">
+      {children}
+    </div>
+  )
 }
 
-function FilterSection({ title, children }: FilterSectionProps) {
+/** Campo de filtro SEM caixa — só rótulo + conteúdo. Usado dentro dos cartões
+ *  (ex.: Interesse | Previsão lado a lado, ou as colunas de "Mais filtros"). */
+function FilterField({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border/65 bg-background/40">
-      <div className="flex w-full items-center justify-between gap-3 bg-card/60 px-3 py-1.5 text-left">
-        <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {title}
-        </span>
-      </div>
-      <div className="border-t border-border/60 px-3 py-2.5">
-        {children}
-      </div>
+    <div className="min-w-0">
+      <FilterFieldLabel>{title}</FilterFieldLabel>
+      {children}
+    </div>
+  )
+}
+
+/**
+ * Cartão suave que agrupa um filtro: fundo levemente preenchido + borda tênue,
+ * cantos arredondados, SEM faixa de cabeçalho (o rótulo fica solto no topo).
+ * `recess` = superfície recuada (mais escura), usada pelo "Mais filtros".
+ */
+function FilterSection({
+  title,
+  recess = false,
+  className,
+  children,
+}: {
+  title?: string
+  recess?: boolean
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-xl border p-3.5",
+        recess
+          ? "border-foreground/[0.05] bg-background/50"
+          : "border-foreground/[0.06] bg-foreground/[0.022]",
+        className,
+      )}
+    >
+      {title && <FilterFieldLabel>{title}</FilterFieldLabel>}
+      {children}
     </div>
   )
 }
