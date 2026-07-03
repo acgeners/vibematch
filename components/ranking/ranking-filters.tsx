@@ -1,6 +1,7 @@
 "use client"
 
 import { useRouter, useSearchParams } from "next/navigation"
+import Link from "next/link"
 import { useCallback, useMemo, useState, useTransition } from "react"
 import type { ReactNode } from "react"
 import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, ChevronUp, Filter, Loader2, Minus, Pencil, Plus, Save, Search, Trash2, X } from "lucide-react"
@@ -194,6 +195,18 @@ interface StatusOption {
 
 interface RankingFiltersProps {
   availableGenres: string[]
+  /** Mapa name → cat_type ('category' | 'demographics') da tabela genres. Quando
+   *  presente, a aba Gêneros separa Demografia (topo) de Gêneros. /ranking passa;
+   *  outras páginas omitem → grid único (comportamento antigo). */
+  genreCatTypes?: Record<string, string>
+  /** Filtro "esconder evitadas" (3 estados) — URLs por estado + estado atual. Só
+   *  /ranking passa; ausente = o controle não aparece (favorites etc.). */
+  hideAvoided?: {
+    current: "off" | "strong" | "all"
+    offUrl: string
+    strongUrl: string
+    allUrl: string
+  }
   availableTags: Array<{ slug: string; name: string; tag_group_id?: string | null; groupName?: string; subGroupName?: string; subGroupSlug?: string }>
   publicationStatuses?: StatusOption[]
   personalStatuses?: StatusOption[]
@@ -748,6 +761,54 @@ interface GenreRuleGridProps {
   selectedAny: Set<string>
   selectedExclude: Set<string>
   onSetRule: (value: string, rule: FacetRule) => void
+  /** Mostra a legenda AND/OR/EXCLUDE acima do grid. False quando a legenda já é
+   *  exibida uma vez acima de vários grids (split Gêneros/Demografia). */
+  showLegend?: boolean
+}
+
+/** Um segmento do controle "Esconder evitadas" (navega ao clicar; estado ativo em rosa). */
+function HideAvoidedSegment({
+  href,
+  active,
+  label,
+  tooltip,
+}: {
+  href: string
+  active: boolean
+  label: string
+  tooltip: string
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Link
+          href={href}
+          scroll={false}
+          className={`inline-flex h-7 items-center rounded px-2.5 text-xs font-medium transition-colors ${
+            active
+              ? "bg-rose-500/15 text-rose-600 dark:text-rose-300"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {label}
+        </Link>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" sideOffset={6} className="w-[220px] text-pretty">{tooltip}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** Rótulo de sub-grupo dentro da aba Gêneros (Demografia / Gêneros). */
+function GenreGroupLabel({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      <span>{label}</span>
+      <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-foreground">
+        {count}
+      </span>
+      <span className="h-px flex-1 bg-border/60" />
+    </div>
+  )
 }
 
 function GenreRuleGrid({
@@ -756,6 +817,7 @@ function GenreRuleGrid({
   selectedAny,
   selectedExclude,
   onSetRule,
+  showLegend = true,
 }: GenreRuleGridProps) {
   const [expanded, setExpanded] = useState(false)
   const selectedCount = selectedAll.size + selectedAny.size + selectedExclude.size
@@ -803,7 +865,7 @@ function GenreRuleGrid({
 
   return (
     <div className="space-y-3">
-      <FacetLegend />
+      {showLegend && <FacetLegend />}
 
       <div className="rounded-lg border border-border/65 bg-background/45 p-3">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
@@ -1517,6 +1579,8 @@ function SavedFiltersControl({
 
 export function RankingFilters({
   availableGenres,
+  genreCatTypes,
+  hideAvoided,
   availableTags,
   publicationStatuses = [],
   personalStatuses = [],
@@ -1690,6 +1754,16 @@ export function RankingFilters({
     () =>
       availableGenres.filter((g) => g.toLowerCase().includes(genreSearch.toLowerCase())),
     [availableGenres, genreSearch]
+  )
+  // Split por cat_type: Demografia (topo) × Gêneros. Só quando genreCatTypes veio
+  // (/ranking); sem ele, cai no grid único mais abaixo (favorites etc.).
+  const demographicGenres = useMemo(
+    () => filteredGenres.filter((g) => (genreCatTypes?.[g] ?? "category") === "demographics"),
+    [filteredGenres, genreCatTypes]
+  )
+  const categoryGenres = useMemo(
+    () => filteredGenres.filter((g) => (genreCatTypes?.[g] ?? "category") !== "demographics"),
+    [filteredGenres, genreCatTypes]
   )
   const [tagSearch, setTagSearch] = useState("")
   const filteredTags = useMemo(
@@ -2039,81 +2113,122 @@ export function RankingFilters({
                 className="flex flex-col"
                 contentClassName="flex-1 flex flex-col justify-center"
               >
-                <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-4">
-                  {/* Obras exibidas */}
-                  <div className="flex items-center gap-2">
-                    <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
-                      Obras exibidas
-                    </Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={100}
-                      placeholder="Todas"
-                      size="sm"
-                      className="w-16 text-center h-8"
-                      value={(urlTopN && urlTopN > 0 ? urlTopN : null) ?? defaultTopN ?? ""}
-                      onChange={(e) => updateParams({ top_n: e.target.value || null })}
-                    />
-                  </div>
-
-                  {/* Divisor vertical */}
-                  <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
-
-                  {/* Capítulos */}
-                  <div className="flex items-center gap-2">
-                    <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
-                      Capítulos
-                    </Label>
-                    <div className="flex items-center gap-1.5">
+                <div className="flex flex-col gap-4">
+                  {/* Linha de cima: Obras exibidas + Esconder tags evitadas (sem min/máx) */}
+                  <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-4">
+                    {/* Obras exibidas */}
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+                        Obras exibidas
+                      </Label>
                       <Input
                         type="number"
-                        min={0}
-                        placeholder="Mín"
+                        min={1}
+                        max={100}
+                        placeholder="Todas"
                         size="sm"
                         className="w-16 text-center h-8"
-                        value={searchParams.get("min_chapters") ?? ""}
-                        onChange={(e) => updateParams({ min_chapters: e.target.value || null })}
-                      />
-                      <span className="text-xs font-semibold text-muted-foreground shrink-0">-</span>
-                      <Input
-                        type="number"
-                        min={0}
-                        placeholder="Máx"
-                        size="sm"
-                        className="w-16 text-center h-8"
-                        value={searchParams.get("max_chapters") ?? ""}
-                        onChange={(e) => updateParams({ max_chapters: e.target.value || null })}
+                        value={(urlTopN && urlTopN > 0 ? urlTopN : null) ?? defaultTopN ?? ""}
+                        onChange={(e) => updateParams({ top_n: e.target.value || null })}
                       />
                     </div>
+
+                    {hideAvoided && (
+                      <>
+                        {/* Divisor vertical */}
+                        <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
+                        {/* Esconder tags evitadas — esconde obras com tags declaradas como evitadas */}
+                        <div className="flex items-center gap-2">
+                          <Label
+                            className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0 leading-tight text-left"
+                            title="Esconde obras com tags que você declarou evitar (em /preferencias). Fortes = só as marcadas 2×."
+                          >
+                            Esconder<br />tags evitadas
+                          </Label>
+                          <TooltipProvider delayDuration={150} disableHoverableContent>
+                            <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
+                              <HideAvoidedSegment
+                                href={hideAvoided.offUrl}
+                                active={hideAvoided.current === "off"}
+                                label="Não"
+                                tooltip="Não esconde nada; mostra todas as obras."
+                              />
+                              <HideAvoidedSegment
+                                href={hideAvoided.strongUrl}
+                                active={hideAvoided.current === "strong"}
+                                label="Fortes"
+                                tooltip="Esconde obras com tags evitadas marcadas como fortes (2×)."
+                              />
+                              <HideAvoidedSegment
+                                href={hideAvoided.allUrl}
+                                active={hideAvoided.current === "all"}
+                                label="Todas"
+                                tooltip="Esconde obras com qualquer tag evitada."
+                              />
+                            </div>
+                          </TooltipProvider>
+                        </div>
+                      </>
+                    )}
                   </div>
 
-                  {/* Divisor vertical */}
-                  <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
+                  {/* Linha de baixo: os dois com Mín/Máx (Capítulos + Ano) */}
+                  <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-4">
+                    {/* Capítulos */}
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+                        Capítulos
+                      </Label>
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          type="number"
+                          min={0}
+                          placeholder="Mín"
+                          size="sm"
+                          className="w-16 text-center h-8"
+                          value={searchParams.get("min_chapters") ?? ""}
+                          onChange={(e) => updateParams({ min_chapters: e.target.value || null })}
+                        />
+                        <span className="text-xs font-semibold text-muted-foreground shrink-0">-</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          placeholder="Máx"
+                          size="sm"
+                          className="w-16 text-center h-8"
+                          value={searchParams.get("max_chapters") ?? ""}
+                          onChange={(e) => updateParams({ max_chapters: e.target.value || null })}
+                        />
+                      </div>
+                    </div>
 
-                  {/* Ano */}
-                  <div className="flex items-center gap-2">
-                    <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
-                      Ano
-                    </Label>
-                    <div className="flex items-center gap-1.5">
-                      <Input
-                        type="number"
-                        placeholder="Mín"
-                        size="sm"
-                        className="w-16 text-center h-8"
-                        value={searchParams.get("min_year") ?? ""}
-                        onChange={(e) => updateParams({ min_year: e.target.value || null })}
-                      />
-                      <span className="text-xs font-semibold text-muted-foreground shrink-0">-</span>
-                      <Input
-                        type="number"
-                        placeholder="Máx"
-                        size="sm"
-                        className="w-16 text-center h-8"
-                        value={searchParams.get("max_year") ?? ""}
-                        onChange={(e) => updateParams({ max_year: e.target.value || null })}
-                      />
+                    {/* Divisor vertical */}
+                    <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
+
+                    {/* Ano */}
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+                        Ano
+                      </Label>
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          type="number"
+                          placeholder="Mín"
+                          size="sm"
+                          className="w-16 text-center h-8"
+                          value={searchParams.get("min_year") ?? ""}
+                          onChange={(e) => updateParams({ min_year: e.target.value || null })}
+                        />
+                        <span className="text-xs font-semibold text-muted-foreground shrink-0">-</span>
+                        <Input
+                          type="number"
+                          placeholder="Máx"
+                          size="sm"
+                          className="w-16 text-center h-8"
+                          value={searchParams.get("max_year") ?? ""}
+                          onChange={(e) => updateParams({ max_year: e.target.value || null })}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2164,13 +2279,50 @@ export function RankingFilters({
                 onChange={(e) => setGenreSearch(e.target.value)}
               />
             </div>
-            <GenreRuleGrid
-              items={filteredGenres}
-              selectedAll={selectedGenreAll}
-              selectedAny={selectedGenreAny}
-              selectedExclude={selectedGenreExclude}
-              onSetRule={setGenreRule}
-            />
+            {genreCatTypes ? (
+              <div className="space-y-4">
+                <FacetLegend />
+                {demographicGenres.length > 0 && (
+                  <div className="space-y-2">
+                    <GenreGroupLabel label="Demografia" count={demographicGenres.length} />
+                    <GenreRuleGrid
+                      items={demographicGenres}
+                      selectedAll={selectedGenreAll}
+                      selectedAny={selectedGenreAny}
+                      selectedExclude={selectedGenreExclude}
+                      onSetRule={setGenreRule}
+                      showLegend={false}
+                    />
+                  </div>
+                )}
+                {categoryGenres.length > 0 && (
+                  <div className="space-y-2">
+                    <GenreGroupLabel label="Gêneros" count={categoryGenres.length} />
+                    <GenreRuleGrid
+                      items={categoryGenres}
+                      selectedAll={selectedGenreAll}
+                      selectedAny={selectedGenreAny}
+                      selectedExclude={selectedGenreExclude}
+                      onSetRule={setGenreRule}
+                      showLegend={false}
+                    />
+                  </div>
+                )}
+                {demographicGenres.length === 0 && categoryGenres.length === 0 && (
+                  <div className="rounded-lg border bg-background p-3 text-xs text-muted-foreground">
+                    Sem resultados
+                  </div>
+                )}
+              </div>
+            ) : (
+              <GenreRuleGrid
+                items={filteredGenres}
+                selectedAll={selectedGenreAll}
+                selectedAny={selectedGenreAny}
+                selectedExclude={selectedGenreExclude}
+                onSetRule={setGenreRule}
+              />
+            )}
           </FilterSection>
         </TabsContent>
 

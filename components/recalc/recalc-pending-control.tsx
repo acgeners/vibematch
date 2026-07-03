@@ -2,10 +2,11 @@
 
 import { useState } from "react"
 import { useRefresh } from "@/lib/use-refresh"
-import { Loader2, RefreshCw } from "lucide-react"
+import { AlertTriangle, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { triggerRecalcNow, getAiPendingCounts } from "@/server/actions/recalc-queue"
 import type { AiPendingCounts } from "@/server/actions/recalc-queue"
 import { AiPendingGuardDialog } from "@/components/settings/ai-pending-guard-dialog"
@@ -14,8 +15,9 @@ import type { AiPendingItem } from "@/components/settings/ai-pending-guard-dialo
 interface RecalcPendingControlProps {
   /** Estado vindo do server (banner) ou do fetch de badges (sidebar). */
   pending: boolean
-  /** "banner" = faixa âmbar no topo do /ranking; "compact" = botão na sidebar. */
-  variant?: "banner" | "compact"
+  /** "banner" = faixa âmbar; "compact" = botão na sidebar; "indicator" = ícone de
+   *  atenção clicável (hover→tooltip, clique→recalcula) ao lado do título do /ranking. */
+  variant?: "banner" | "compact" | "indicator"
   /** Callback opcional pra o pai sincronizar o estado após o recálculo. */
   onDone?: () => void
 }
@@ -111,6 +113,43 @@ export function RecalcPendingControl({
       proceedLabel="Recalcular mesmo assim"
     />
   )
+
+  // Ícone de atenção ao lado do título do /ranking (substitui a faixa): hover mostra
+  // o texto do aviso, clique dispara o recálculo (mesma trava de IA do banner).
+  if (variant === "indicator") {
+    return (
+      <>
+        <TooltipProvider delayDuration={150}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleClick}
+                disabled={busy}
+                aria-label="Notas alteradas — recálculo pendente. Clique para recalcular."
+                className="relative inline-grid size-8 shrink-0 place-items-center rounded-lg border border-amber-500/40 bg-amber-400/10 text-amber-600 transition-colors hover:bg-amber-400/20 disabled:opacity-70 dark:text-amber-400"
+              >
+                {busy ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <AlertTriangle className="size-4" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" align="start" className="max-w-xs text-left">
+              <span className="font-semibold">Notas alteradas — recálculo pendente</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                A Nota Prevista e o ranking ainda não refletem suas últimas edições.
+                Clique para recalcular agora ou aguarde o recálculo automático (até 1h
+                após a última alteração).
+              </span>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        {guard}
+      </>
+    )
+  }
 
   if (variant === "compact") {
     return (

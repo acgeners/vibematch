@@ -30,6 +30,8 @@ import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import { getSynopsisCanonicalOnCreate } from "@/server/queries/current-user"
+import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
+import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
 import { titleToSlug } from "@/lib/utils"
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>
@@ -695,7 +697,12 @@ export interface WorkPreview {
   coverUrl: string | null
   synopsis: string | null
   synopsisQuality: string | null
+  /** Previsão IA de Interesse (♥..♥♥♥♥) — synopsis_quality_predictions. NULL se nunca prevista. */
+  predictedSynopsisQuality: string | null
+  /** True quando a previsão de Interesse ficou desatualizada (perfil/sinopse mudou). */
+  predictedSynopsisStale: boolean
   publicationStatusId: number | null
+  totalChapters: number | null
   observations: string | null
   year: number | null
   platformAvg: number | null
@@ -704,17 +711,21 @@ export interface WorkPreview {
 
 export async function getWorkPreview(workId: string): Promise<WorkPreview | null> {
   const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("works")
-    .select(`
-      id, title, synopsis_quality, canonical_synopsis,
-      publication_status_id, observations, year,
-      work_covers(url, is_primary, position),
-      work_synopses(source, text, is_primary, position),
-      calculated_scores(platform_avg, total_votes)
-    `)
-    .eq("id", workId)
-    .maybeSingle()
+  // Predição de Interesse buscada em paralelo com a obra (round-trip único).
+  const [{ data, error }, prediction] = await Promise.all([
+    supabase
+      .from("works")
+      .select(`
+        id, title, synopsis_quality, canonical_synopsis,
+        publication_status_id, total_chapters, observations, year,
+        work_covers(url, is_primary, position),
+        work_synopses(source, text, is_primary, position),
+        calculated_scores(platform_avg, total_votes)
+      `)
+      .eq("id", workId)
+      .maybeSingle(),
+    getSynopsisPredictionForWork(workId),
+  ])
 
   if (error || !data) return null
 
@@ -731,12 +742,27 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
     coverUrl: pickPrimaryCover(covers),
     synopsis: canonicalSynopsis || pickPrimarySynopsis(synopses),
     synopsisQuality: (data.synopsis_quality as string | null) ?? null,
+    predictedSynopsisQuality: prediction?.predictedQuality ?? null,
+    predictedSynopsisStale: prediction?.stale ?? false,
     publicationStatusId: (data.publication_status_id as number | null) ?? null,
+    totalChapters: (data.total_chapters as number | null) ?? null,
     observations: (data.observations as string | null) ?? null,
     year: (data.year as number | null) ?? null,
     platformAvg: calc?.platform_avg ?? null,
     totalVotes: calc?.total_votes ?? 0,
   }
+}
+
+/**
+ * Contagem de tags + reviews úteis de UMA obra, para o hover do título.
+ * Reusa a RPC agregada `work_card_counts` (mesma regra do /ai-evaluation), então
+ * os números batem com os cards da fila. Chamada sob demanda no hover (1 por obra).
+ */
+export async function getWorkHoverCounts(
+  workId: string,
+): Promise<{ tagCount: number; reviewCount: number }> {
+  const counts = await getWorkTagReviewCounts([workId])
+  return counts.get(workId) ?? { tagCount: 0, reviewCount: 0 }
 }
 
 export async function findDuplicateWorkByTitle(

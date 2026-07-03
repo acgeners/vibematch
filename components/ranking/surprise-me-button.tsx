@@ -15,11 +15,14 @@ import {
 } from "@/components/ui/dialog"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CoverImage } from "@/components/ui/cover-image"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { titleToSlug } from "@/lib/utils"
 
 interface SurpriseMeButtonProps {
   entries: RankingEntry[]
   poolSize?: number
+  /** Renderiza só o ícone (pro header enxuto do /ranking). */
+  iconOnly?: boolean
 }
 
 // Hash determinístico FNV-1a 32-bit. Suficiente pra estabilidade dia-a-dia.
@@ -55,7 +58,7 @@ function pickEntries(entries: RankingEntry[], count: number, rerollOffset: numbe
 
 const PICK_COUNT = 3
 
-export function SurpriseMeButton({ entries, poolSize = 20 }: SurpriseMeButtonProps) {
+export function SurpriseMeButton({ entries, poolSize = 20, iconOnly = false }: SurpriseMeButtonProps) {
   const [open, setOpen] = useState(false)
   const [reroll, setReroll] = useState(0)
 
@@ -64,18 +67,41 @@ export function SurpriseMeButton({ entries, poolSize = 20 }: SurpriseMeButtonPro
 
   if (pool.length === 0) return null
 
+  const triggerTitle = "Escolhe por mim — sorteia leituras do topo do seu ranking (grátis, sem IA)."
+
   return (
     <>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setOpen(true)}
-        className="h-9 gap-1.5"
-        title="Não quer decidir? Sorteia leituras do topo do seu ranking (grátis, sem IA)."
-      >
-        <Shuffle className="h-3.5 w-3.5" />
-        Escolhe por mim
-      </Button>
+      {iconOnly ? (
+        <TooltipProvider delayDuration={150}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setOpen(true)}
+                className="size-9"
+                aria-label="Escolhe por mim"
+              >
+                <Shuffle className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              Escolhe por mim — sorteia obras do topo do ranking (sem IA)
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setOpen(true)}
+          className="h-9 gap-1.5"
+          title={triggerTitle}
+        >
+          <Shuffle className="h-3.5 w-3.5" />
+          Escolhe por mim
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg">

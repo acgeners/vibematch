@@ -261,7 +261,10 @@ function entryToPreview(entry: RankingEntry): WorkPreview {
     coverUrl: entry.coverUrl,
     synopsis: entry.synopsis,
     synopsisQuality: entry.synopsisQuality,
+    predictedSynopsisQuality: entry.predictedSynopsisQuality,
+    predictedSynopsisStale: entry.predictedSynopsisStale,
     publicationStatusId: entry.publicationStatusId,
+    totalChapters: entry.totalChapters,
     observations: entry.observations,
     year: entry.year,
     platformAvg: entry.platformAvg,
@@ -739,7 +742,9 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                     <td
                       key={col.key}
                       className={cn(
-                        "h-14 py-3 align-middle overflow-hidden",
+                        // last:pr-3 = mesmo gap (12px) da 1ª coluna à esquerda: a
+                        // última coluna costuma ser um critério (px-1=4px) e ficava colada na borda.
+                        "h-14 py-3 align-middle overflow-hidden last:pr-3",
                         col.key.startsWith("crit_") ? "px-1" : "px-3"
                       )}
                       style={{ textAlign: col.align ?? "left" }}

@@ -406,7 +406,7 @@ export async function getRanking(
     .select(`
       id, title, publication_status_id, personal_status_id, ai_eval_status,
       total_chapters, chapters_read, user_score, is_archived, is_favorite,
-      synopsis_quality, observations, year, updated_at, last_read_at,
+      synopsis_quality, canonical_synopsis, observations, year, updated_at, last_read_at,
       calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
       category_scores(criterion_slug, score),
       work_covers(url, is_primary, position)
@@ -547,7 +547,13 @@ export async function getRanking(
       totalChapters: w.total_chapters,
       chaptersRead: w.chapters_read ?? null,
       coverUrl: pickPrimaryCover(w.work_covers),
-      synopsis: primarySynopses.get(w.id) ?? null,
+      // Prefere a sinopse CANÔNICA (consolidada via IA) quando existe; cai na
+      // primária das fontes enquanto a obra não passou pela consolidação.
+      // Mesma regra do getWorkPreview (hover fora do ranking).
+      synopsis:
+        typeof w.canonical_synopsis === "string" && w.canonical_synopsis.trim()
+          ? w.canonical_synopsis.trim()
+          : primarySynopses.get(w.id) ?? null,
       synopsisQuality: w.synopsis_quality ?? null,
       predictedSynopsisQuality: synopsisPred?.predictedQuality ?? null,
       predictedSynopsisStale: synopsisPred?.stale ?? false,
