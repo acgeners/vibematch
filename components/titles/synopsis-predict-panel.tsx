@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { useRefresh } from "@/lib/use-refresh"
+import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
 import { Loader2, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 
@@ -50,8 +51,9 @@ function needsPrediction(w: SynopsisQueueWork): boolean {
  * unificado `WorkQueueCard` + seleção em lote: as ações (Prever/Aplicar) agem sobre
  * as obras selecionadas; item a item continua no `PredictSynopsisRowActions`.
  */
-export function SynopsisPredictPanel({ works, isPaid = true }: { works: SynopsisQueueWork[]; isPaid?: boolean }) {
+export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { works: SynopsisQueueWork[]; readIds?: string[]; isPaid?: boolean }) {
   const refresh = useRefresh()
+  const { isRead, unmark } = useToggleRead("interesse", readIds)
   const [sortField, setSortField] = useState<SortField>("default")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [batchRunning, setBatchRunning] = useState(false)
@@ -293,6 +295,8 @@ export function SynopsisPredictPanel({ works, isPaid = true }: { works: Synopsis
               selectable
               selected={selection.isSelected(w.id)}
               onToggleSelect={() => selection.toggle(w.id)}
+              read={isRead(w.id)}
+              onToggleRead={() => unmark(w.id)}
             />
           )
         })}

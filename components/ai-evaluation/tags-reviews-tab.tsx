@@ -12,6 +12,7 @@ import { WorkQueueCard, type WorkQueueState } from "@/components/ai-evaluation/q
 import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
 import { QueueToolbar, QueueSortSelect } from "@/components/ai-evaluation/queue/queue-toolbar"
 import { useWorkSelection } from "@/components/ai-evaluation/queue/use-work-selection"
+import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
 
 /** Obra da aba unificada — união dos universos "sem reviews" e "sem tags". */
 export interface TagsReviewsWork {
@@ -40,18 +41,22 @@ export interface TagsReviewsWork {
  */
 export function TagsReviewsTab({
   works,
+  readIds = [],
   activePubStatuses,
   activePersonalStatuses,
   activeInterest,
+  activePredictionQualities = [],
   minReviews,
   maxReviews,
   minTags,
   maxTags,
 }: {
   works: TagsReviewsWork[]
+  readIds?: string[]
   activePubStatuses: string[]
   activePersonalStatuses: string[]
   activeInterest: string[]
+  activePredictionQualities?: string[]
   minReviews: number
   maxReviews: number
   minTags: number
@@ -76,6 +81,7 @@ export function TagsReviewsTab({
 
   const ids = useMemo(() => sortedWorks.map((w) => w.id), [sortedWorks])
   const selection = useWorkSelection(ids)
+  const { isRead, unmark } = useToggleRead("tags_reviews", readIds)
 
   // Ações em lote por EIXO — só as obras selecionadas com o gap correspondente.
   const byId = useMemo(() => new Map(works.map((w) => [w.id, w])), [works])
@@ -101,9 +107,10 @@ export function TagsReviewsTab({
         activePubStatuses={activePubStatuses}
         activePersonalStatuses={activePersonalStatuses}
         activeSynopsisQualities={activeInterest}
+        activePredictionQualities={activePredictionQualities}
         showEvalState={false}
-        showInterestNone
         showDataFilters
+        dataFiltersPrimary
         activeMinTags={minTags}
         activeMaxTags={maxTags}
         activeMinReviews={minReviews}
@@ -198,6 +205,8 @@ export function TagsReviewsTab({
                 selectable
                 selected={selection.isSelected(w.id)}
                 onToggleSelect={() => selection.toggle(w.id)}
+                read={isRead(w.id)}
+                onToggleRead={() => unmark(w.id)}
               />
             )
           })}
