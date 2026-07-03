@@ -1,5 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { resolveInterestPromptVersion, COMPILED_PREFERENCES_V4_SHADOW } from "@/lib/ai-evaluation/compiled-preferences"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
@@ -112,33 +113,40 @@ export async function getSynopsisPredictionsByWorkIds(
 }
 
 /**
- * Carrega a previsão ATIVA de Interesse Sinopse de TODAS as obras de uma vez
- * (a tabela é pequena — uma linha por obra/versão de prompt). Usado pelo ranking
- * pra enriquecer as entries sem precisar de um IN gigante de work_ids. Agrupa por
- * obra e escolhe a versão ativa (atual se houver, senão a de maior versão).
+ * Carrega a previsão ATIVA de Interesse Sinopse de TODAS as obras de uma vez.
+ * Usado pelo ranking pra enriquecer as entries sem precisar de um IN gigante de
+ * work_ids. Agrupa por obra e escolhe a versão ativa (atual se houver, senão a de
+ * maior versão).
+ *
+ * PAGINA: a tabela tem VÁRIAS linhas por obra (versões de prompt/perfil, histórico)
+ * e já passou de 1000 no total — um .select() sem range corta em 1000 (cap do
+ * PostgREST) e derrubava silenciosamente a previsão de ~260 obras no ranking.
  */
 export async function getAllActiveSynopsisPredictions(): Promise<
   Map<string, SynopsisQualityPredictionRow>
 > {
   const out = new Map<string, SynopsisQualityPredictionRow>()
   const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("synopsis_quality_predictions")
-    .select("*")
-  if (error) {
-    console.warn("[synopsis-pred] getAllActiveSynopsisPredictions falhou:", error.message)
+  let rows: Array<Record<string, unknown>>
+  try {
+    rows = await fetchAllRows<Record<string, unknown>>(
+      (from, to) =>
+        supabase.from("synopsis_quality_predictions").select("*").range(from, to),
+      "getAllActiveSynopsisPredictions",
+    )
+  } catch (e) {
+    console.warn("[synopsis-pred] getAllActiveSynopsisPredictions falhou:", (e as Error).message)
     return out
   }
   const byWork = new Map<string, Array<Record<string, unknown>>>()
-  for (const row of data ?? []) {
-    const r = row as Record<string, unknown>
+  for (const r of rows) {
     const id = r.work_id as string
     const list = byWork.get(id)
     if (list) list.push(r)
     else byWork.set(id, [r])
   }
-  for (const [id, rows] of byWork) {
-    const active = pickActiveRaw(rows)
+  for (const [id, grouped] of byWork) {
+    const active = pickActiveRaw(grouped)
     if (active) out.set(id, mapRow(active))
   }
   return out
