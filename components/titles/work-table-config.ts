@@ -11,7 +11,6 @@ export interface WorkColumnDef {
   description?: string
   align?: "left" | "right" | "center"
   locked?: boolean
-  defaultHidden?: boolean
   group: WorkColumnGroup
 }
 
@@ -43,10 +42,13 @@ export const DEFAULT_WORK_COLUMN_NAMESPACE: WorkColumnNamespace = "titles"
 // (limpa configs salvos que referenciavam as colunas removidas).
 // Bump em todos ao adicionar a coluna "Interesse IA (previsão)" (synopsis_pred)
 // oculta por padrão — sem o bump, configs salvos a exibiriam vazia ("—").
+// ranking v7 → v9: /ranking migrou do sistema próprio (ranking-table-config.ts,
+// já removido) para este. Pulamos v8 de propósito: a chave gerada seria
+// `ranking_col_config_v8`, IDÊNTICA à do sistema antigo — v9 garante clean slate.
 const NAMESPACE_STORAGE_VERSION: Record<WorkColumnNamespace, string> = {
   titles: "v8",
   favorites: "v10",
-  ranking: "v7",
+  ranking: "v9",
   recommendations: "v6",
 }
 
@@ -71,29 +73,28 @@ export const WORK_TABLE_COLUMNS: WorkColumnDef[] = [
   { key: "chapters_total", label: "Caps.", configLabel: "Capítulos totais", description: "Número total de capítulos da obra, quando conhecido.", align: "center", group: "basico" },
   { key: "chapters_read", label: "Lidos", configLabel: "Capítulos lidos", description: "Quantos capítulos você já marcou como lidos.", align: "center", group: "basico" },
   { key: "chapters_progress", label: "% Lido", configLabel: "% lido", description: "Progresso de leitura: capítulos lidos ÷ total de capítulos.", align: "center", group: "basico" },
-  { key: "year", label: "Ano", description: "Ano de lançamento/início da publicação.", align: "center", defaultHidden: true, group: "basico" },
-  { key: "synopsis_q", label: "Sinopse", configLabel: "Interesse na sinopse", description: "O quanto a sinopse te interessou (♥ a ♥♥♥♥), informado na triagem/avaliação.", align: "center", defaultHidden: true, group: "basico" },
+  { key: "year", label: "Ano", description: "Ano de lançamento/início da publicação.", align: "center", group: "basico" },
+  { key: "synopsis_q", label: "Sinopse", configLabel: "Interesse na sinopse", description: "O quanto a sinopse te interessou (♥ a ♥♥♥♥), informado na triagem/avaliação.", align: "center", group: "basico" },
   // Prioridade — âncora na Prevista (que já embute o Alinhamento calibrado) +
   // Veredito IA quando há. Default visível em /favorites; opcional nos demais namespaces.
   { key: "decision", label: "Prioridade", configLabel: "Prioridade", description: "Quão provável que você goste — número único pra decidir o que ler primeiro. Ancorado na Nota Prevista (que já embute o Alinhamento calibrado) e ajustado pelo Veredito IA quando existe. É um score de PRIORIDADE, não uma previsão de nota.", align: "center", group: "notas" },
   // Novo (Fase 1.5): expected_score é o L1 que substitui o trio N.IA/N.Pr/N.Final
   { key: "expected_score", label: "Prevista", configLabel: "Nota Prevista", description: "Nota que o modelo prevê que você daria à obra (0–10). É a âncora calibrada — um Ridge L1 que substituiu o antigo trio Nota.IA / Nota.Pr / Nota.Final.", align: "center", group: "notas" },
   { key: "personal_fit", label: "Alinh.", configLabel: "Alinhamento", description: "O quanto a obra combina com o seu perfil de gosto (fit_score). Quanto maior, mais alinhada às suas preferências de atributos e tags.", align: "center", group: "notas" },
-  { key: "platform_avg", label: "N.M", configLabel: "Nota.M", description: "Nota.M — média ponderada das notas das plataformas externas (AniList, MAL, etc.), na escala 0–10. Pondera mais as fontes com mais votos.", align: "center", defaultHidden: true, group: "notas" },
-  { key: "total_votes", label: "Votos", configLabel: "Votos", description: "Total de votos/avaliações somados nas plataformas externas. Quanto maior, mais confiável é a Nota.M.", align: "center", defaultHidden: true, group: "notas" },
-  { key: "alignment_score", label: "Veredito", configLabel: "Veredito IA", description: "Re-rank do consultor IA (0–100), gerado sob demanda. Reordena as recomendações ('Recomendar com IA', 'Próxima leitura', 'Recomendar do ranking') e ajusta a Prioridade. A maioria das obras fica sem valor até passar pelo Rankear.", align: "center", defaultHidden: true, group: "notas" },
+  { key: "platform_avg", label: "N.M", configLabel: "Nota.M", description: "Nota.M — média ponderada das notas das plataformas externas (AniList, MAL, etc.), na escala 0–10. Pondera mais as fontes com mais votos.", align: "center", group: "notas" },
+  { key: "total_votes", label: "Votos", configLabel: "Votos", description: "Total de votos/avaliações somados nas plataformas externas. Quanto maior, mais confiável é a Nota.M.", align: "center", group: "notas" },
+  { key: "alignment_score", label: "Veredito", configLabel: "Veredito IA", description: "Re-rank do consultor IA (0–100), gerado sob demanda. Reordena as recomendações ('Recomendar com IA', 'Próxima leitura', 'Recomendar do ranking') e ajusta a Prioridade. A maioria das obras fica sem valor até passar pelo Rankear.", align: "center", group: "notas" },
   // Previsão de interesse na sinopse (Interesse IA). Dado só é mesclado em
   // /favorites (vem do getRanking); nas demais telas fica vazio ("—").
-  { key: "synopsis_pred", label: "Prev. IA", configLabel: "Interesse IA (previsão)", description: "A previsão da IA de quanto a sinopse vai te interessar (♥ a ♥♥♥♥), com base no seu perfil de gosto. Diferente da coluna \"Sinopse\" (Interesse na sinopse), que é o valor que VOCÊ informou. Só preenchida em obras que passaram pela estimativa (feature Paga).", align: "center", defaultHidden: true, group: "notas" },
+  { key: "synopsis_pred", label: "Prev. IA", configLabel: "Interesse IA (previsão)", description: "A previsão da IA de quanto a sinopse vai te interessar (♥ a ♥♥♥♥), com base no seu perfil de gosto. Diferente da coluna \"Sinopse\" (Interesse na sinopse), que é o valor que VOCÊ informou. Só preenchida em obras que passaram pela estimativa (feature Paga).", align: "center", group: "notas" },
   { key: "ai_status", label: "IA", configLabel: "Status da avaliação IA", description: "Estágio da avaliação por IA: pendente de atributos, pendente de Veredito IA, avaliado ou pulado.", align: "center", group: "basico" },
   { key: "updated_at", label: "Atual.", configLabel: "Atualizado em", description: "Quando o registro da obra foi atualizado pela última vez.", align: "center", group: "basico" },
-  { key: "last_read_at", label: "Últ. leitura", configLabel: "Última leitura", description: "Data da última vez que você leu algum capítulo desta obra.", align: "center", defaultHidden: true, group: "basico" },
+  { key: "last_read_at", label: "Últ. leitura", configLabel: "Última leitura", description: "Data da última vez que você leu algum capítulo desta obra.", align: "center", group: "basico" },
   ...CRITERION_SLUGS.map((slug) => ({
     key: `crit_${slug}`,
     label: CRITERIA_INFO[slug]?.emoji ?? slug,
     configLabel: `${CRITERIA_INFO[slug]?.emoji ?? ""} ${CRITERIA_INFO[slug]?.name ?? slug}`.trim(),
     align: "center" as const,
-    defaultHidden: true,
     group: "criterios" as const,
   })),
   { key: "actions", label: "", align: "center", locked: true, group: "basico" },
@@ -228,6 +229,10 @@ export function normalizeWorkColumnConfig(
 
 // Default sizes per column key (px). Used when no user-set width exists.
 export const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
+  // `rank` só existe no /ranking (coluna "#" estrutural, prependada pelo
+  // RankingTable — não é uma coluna selecionável do picker). Fica aqui só para
+  // o RankingTable achar a largura padrão via este mapa compartilhado.
+  rank: 48,
   select: 40,
   fav: 44,
   title: 360,
@@ -348,17 +353,26 @@ export function isScoreColumn(key: string): boolean {
   return SCORE_COLUMN_KEYS.has(key)
 }
 
-export type WorkColumnPreset = "tudo" | "geral" | "notas" | "criterios"
+export type WorkColumnPreset = "tudo" | "compacto" | "geral" | "notas" | "criterios"
 
 export const WORK_COLUMN_PRESETS: Array<{ id: WorkColumnPreset; label: string }> = [
   { id: "tudo", label: "Tudo" },
+  { id: "compacto", label: "Compacto" },
   { id: "geral", label: "Geral" },
   { id: "notas", label: "Notas" },
   { id: "criterios", label: "Atributos" },
 ]
 
+// "tudo" e "compacto" são presets de conjunto EXATO (clicar substitui as colunas
+// visíveis). "geral"/"notas"/"criterios" são toggles ADITIVOS por grupo (a união
+// dos grupos ativos). Ver EXACT_SET_PRESETS + o handler do WorkColumnPicker.
+export const EXACT_SET_PRESETS = new Set<WorkColumnPreset>(["tudo", "compacto"])
+
 const PRESET_VISIBLE_KEYS: Record<WorkColumnPreset, string[]> = {
   tudo: WORK_TABLE_COLUMNS.filter((c) => !c.locked).map((c) => c.key),
+  // Visão enxuta herdada do /ranking: status + as duas notas-âncora. `title` é
+  // locked (sempre visível), então não precisa ser listado.
+  compacto: ["publication_status", "personal_status", "expected_score", "personal_fit"],
   geral: WORK_TABLE_COLUMNS.filter((c) => !c.locked && c.group === "basico").map((c) => c.key),
   notas: WORK_TABLE_COLUMNS.filter((c) => !c.locked && c.group === "notas").map((c) => c.key),
   criterios: WORK_TABLE_COLUMNS.filter((c) => !c.locked && c.group === "criterios").map((c) => c.key),
@@ -391,7 +405,31 @@ export function getPresetSetConfig(presets: Iterable<WorkColumnPreset>): WorkCol
   })
 }
 
-// Um preset está "ativo" quando todas as colunas que ele exporia estão visíveis.
+// True quando `config` é IDÊNTICO ao default do namespace (estado inicial / após
+// "Padrão"). Usado pra NÃO marcar nenhum preset na visualização padrão: o default
+// é um recorte curado próprio, não um preset — mesmo que por acaso deixe um grupo
+// inteiro visível (ex.: critérios), acender "Atributos" ali seria enganoso.
+// Normaliza os dois lados porque o default cru carrega chaves legadas (calc_score
+// etc.) que a normalização descarta.
+export function isDefaultWorkColumnConfig(
+  config: WorkColumnConfig,
+  namespace: WorkColumnNamespace = DEFAULT_WORK_COLUMN_NAMESPACE,
+): boolean {
+  const a = normalizeWorkColumnConfig(config)
+  const b = normalizeWorkColumnConfig(getDefaultWorkColumnConfig(namespace))
+  if (a.order.length !== b.order.length) return false
+  for (let i = 0; i < a.order.length; i++) {
+    if (a.order[i] !== b.order[i]) return false
+  }
+  if (a.hidden.length !== b.hidden.length) return false
+  const aHidden = new Set(a.hidden)
+  return b.hidden.every((key) => aHidden.has(key))
+}
+
+// Um preset por GRUPO está "ativo" quando todas as colunas que ele exporia estão
+// visíveis (modelo aditivo). Um preset de conjunto EXATO (tudo/compacto) só está
+// ativo quando o conjunto visível é EXATAMENTE o dele — senão "Compacto" acenderia
+// junto de "Tudo" (que também expõe as colunas dele).
 export function getActivePresetSet(config: WorkColumnConfig): Set<WorkColumnPreset> {
   const normalized = normalizeWorkColumnConfig(config)
   const hiddenSet = new Set(normalized.hidden)
@@ -399,6 +437,16 @@ export function getActivePresetSet(config: WorkColumnConfig): Set<WorkColumnPres
   for (const preset of WORK_COLUMN_PRESETS) {
     const keys = PRESET_VISIBLE_KEYS[preset.id]
     if (keys.length === 0) continue
+    if (EXACT_SET_PRESETS.has(preset.id)) {
+      const expected = new Set(getPresetConfig(preset.id).hidden)
+      if (
+        expected.size === hiddenSet.size &&
+        [...expected].every((key) => hiddenSet.has(key))
+      ) {
+        active.add(preset.id)
+      }
+      continue
+    }
     if (keys.every((key) => !hiddenSet.has(key))) active.add(preset.id)
   }
   return active
