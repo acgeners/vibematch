@@ -83,6 +83,8 @@ export interface CostConfirmRequest {
   description?: string
   /** Override do rótulo do botão de confirmar (o custo é anexado automaticamente). */
   confirmLabel?: string
+  /** Override do rótulo do botão de cancelar (ex.: "Salvar sem IA"). */
+  cancelLabel?: string
   /** Passos de cascata a itemizar. */
   steps?: CostStep[]
 }
@@ -218,7 +220,9 @@ export function CostConfirmProvider({ children }: { children: React.ReactNode })
             )}
 
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => settle(false)}>Cancelar</AlertDialogCancel>
+              <AlertDialogCancel onClick={() => settle(false)}>
+                {req.cancelLabel ?? "Cancelar"}
+              </AlertDialogCancel>
               <AlertDialogAction onClick={() => settle(true)}>
                 {req.confirmLabel ?? "Confirmar"} · {formatUsd(preview.likelyUsd)}
               </AlertDialogAction>

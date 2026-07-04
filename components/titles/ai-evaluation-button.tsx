@@ -7,6 +7,8 @@ import { toast } from "sonner"
 import { triggerAiEvaluation } from "@/server/actions/ai"
 import { runTask } from "@/lib/tasks-store"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
+import { previewCascade } from "@/lib/cost-preview/catalog"
 import {
   getEvaluationInputs,
   updatePrimarySynopsis,
@@ -62,6 +64,7 @@ export function AiEvaluationButton({
   externalReviews = [],
 }: AiEvaluationButtonProps) {
   const refresh = useRefresh()
+  const confirmCost = useCostConfirm()
   // Lê o store global pra refletir, no próprio botão, uma avaliação desta obra
   // rodando em segundo plano (sobrevive à navegação — se voltar à página, ainda
   // mostra "Avaliando…").
@@ -114,6 +117,7 @@ export function AiEvaluationButton({
   }
 
   const handleSaveInputsAndEvaluate = async () => {
+    if (!(await confirmEvalCost())) return
     setSavingInputs(true)
     const ok = await persistInputs()
     setSavingInputs(false)
@@ -192,7 +196,34 @@ export function AiEvaluationButton({
     })
   }
 
-  const handleAiEvaluation = () => dispatchEvaluation()
+  // Custo real de "✨ Avaliar": a avaliação (Sonnet) + resumo (Haiku) + digest
+  // (Sonnet) embutidos em triggerAiEvaluation quando o pool de reviews muda.
+  const confirmEvalCost = async (): Promise<boolean> => {
+    const cascade = previewCascade([
+      { action: "ai_evaluation", label: "Avaliação dos 9 critérios" },
+      { action: "review_summary", label: "Resumo de reviews" },
+      { action: "review_digest", label: "Digest de reviews" },
+    ])
+    return confirmCost({
+      estimate: {
+        likelyUsd: cascade.likelyUsd,
+        upperBoundUsd: cascade.upperBoundUsd,
+        etaSeconds: cascade.etaSeconds,
+        background: true,
+        scale: 1,
+      },
+      steps: cascade.steps,
+      title: hasCriteriaScores ? `Reavaliar "${workTitle}" com IA?` : `Avaliar "${workTitle}" com IA?`,
+      description:
+        "Roda a avaliação dos 9 critérios e, se as reviews externas mudarem, gera resumo + digest.",
+      confirmLabel: hasCriteriaScores ? "Reavaliar" : "Avaliar",
+    })
+  }
+
+  const handleAiEvaluation = async () => {
+    if (!(await confirmEvalCost())) return
+    dispatchEvaluation()
+  }
 
   // Roda o Haiku e abre a comparação contra a avaliação existente (sem refazer
   // o modelo atual). `proceedWithoutReviews` porque a obra já foi avaliada.
@@ -235,7 +266,7 @@ export function AiEvaluationButton({
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
-            <Button onClick={handleAiEvaluation} disabled={busy}>
+            <Button onClick={() => void handleAiEvaluation()} disabled={busy}>
               <Sparkles className="h-4 w-4" />
               {label}
             </Button>
@@ -263,7 +294,7 @@ export function AiEvaluationButton({
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleAiEvaluation} disabled={busy}>
+          <Button variant="outline" size="sm" onClick={() => void handleAiEvaluation()} disabled={busy}>
             <Sparkles className="h-4 w-4" />
             {label}
           </Button>

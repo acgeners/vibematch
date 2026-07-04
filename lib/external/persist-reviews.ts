@@ -20,7 +20,7 @@ import { ensureReviewSummary, ensureReviewDigest } from "@/lib/orchestration/int
 export async function saveWorkReviews(
   workId: string,
   reviews: SourcedReview[],
-  opts: { replace?: boolean; fromFreshEval?: boolean } = {},
+  opts: { replace?: boolean; fromFreshEval?: boolean; skipPaidEnrichment?: boolean } = {},
 ): Promise<void> {
   if (!workId) return
   const supabase = createAdminClient()
@@ -102,6 +102,11 @@ export async function saveWorkReviews(
   } catch (err) {
     console.error("[work_reviews] fingerprint/stale falhou (migration 120?):", err)
   }
+
+  // `skipPaidEnrichment`: persiste as reviews (exibição) mas NÃO gera resumo/digest
+  // pagos. Usado quando o usuário optou por salvar a obra sem enriquecimento IA
+  // (Flow B do popup de custo) — o resumo/digest podem ser gerados sob demanda depois.
+  if (opts.skipPaidEnrichment) return
 
   // Resumo + digest: ambos leem o corpus COMPLETO da obra POR DENTRO de cada `ensure*`
   // (via gateway) — NÃO passamos `reviews`. O corpus de ambos é canônico (work_reviews

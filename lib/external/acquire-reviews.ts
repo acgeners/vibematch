@@ -24,7 +24,10 @@ import type { ExternalSourceId } from "@/lib/external/types"
  *
  * @returns tamanho do pool de reviews colhido nesta rodada (0 se pulou/falhou).
  */
-export async function acquireAndPersistWorkReviews(workId: string): Promise<number> {
+export async function acquireAndPersistWorkReviews(
+  workId: string,
+  opts: { skipPaidEnrichment?: boolean } = {},
+): Promise<number> {
   if (!workId) return 0
   try {
     const supabase = createAdminClient()
@@ -66,7 +69,7 @@ export async function acquireAndPersistWorkReviews(workId: string): Promise<numb
     })
 
     // Persiste o pool COMPLETO (merge não-destrutivo). Conjunto vazio = no-op.
-    await saveWorkReviews(workId, allReviews ?? [])
+    await saveWorkReviews(workId, allReviews ?? [], { skipPaidEnrichment: opts.skipPaidEnrichment })
     return allReviews?.length ?? 0
   } catch (err) {
     console.error(

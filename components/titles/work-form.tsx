@@ -23,6 +23,8 @@ import type { DuplicateWorkForForm } from "@/server/actions/works"
 import { previewCanonicalSynopsis } from "@/server/actions/synopsis"
 import { GENRE_NAMES, TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
 import { evaluateCandidateForCreate, listGenreCatalog } from "@/server/actions/external"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
+import { previewCascade } from "@/lib/cost-preview/catalog"
 import {
   PUBLICATION_STATUSES,
   PERSONAL_STATUSES,
@@ -635,6 +637,7 @@ const scrollToTop = () => {
 export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEvalOnCreate = false, reviewsSlot, existingExternalIds }: WorkFormProps) {
   const router = useRouter()
   const refresh = useRefresh()
+  const confirmCost = useCostConfirm()
   const isCreating = !workId
 
   // Em edição, sempre mostra as notas. Na criação, só mostra se a avaliação IA
@@ -1193,7 +1196,10 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     aiMeta?.confidence != null &&
     aiMeta.confidence < CREATE_FLOW_CONFIRM_THRESHOLD
 
-  const executeCreateSubmit = async (values: WorkFormValues) => {
+  const executeCreateSubmit = async (
+    values: WorkFormValues,
+    submitOpts?: { skipAiEnrichment?: boolean },
+  ) => {
     scrollToTop()
     const shouldCheckDuplicate = !workId && Object.keys(values.external_ids ?? {}).length === 0
     setTopFeedback(workId ? "Atualizando obra..." : shouldCheckDuplicate ? "Verificando duplicidade..." : "Criando obra...")
@@ -1202,7 +1208,9 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     setTopFeedback(workId ? "Atualizando obra..." : "Criando obra...")
     const result = workId
       ? await updateWork(workId, values)
-      : await createWork(values, aiMeta ?? undefined, pendingExternalReviews ?? undefined)
+      : await createWork(values, aiMeta ?? undefined, pendingExternalReviews ?? undefined, {
+          skipAiEnrichment: submitOpts?.skipAiEnrichment,
+        })
 
     if (result.error) {
       setTopFeedback(null)
@@ -1236,6 +1244,38 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     refreshChrome()
   }
 
+  // Flow 1 do popup de custo: ao CRIAR uma obra com dados externos, o createWork
+  // dispara enriquecimento pago em 2º plano (tags + resumo/digest de reviews).
+  // Mostra a cascata; Confirmar = salva + enriquece, Cancelar = salva sem IA.
+  // Sem dados externos (entrada manual) o enriquecimento é negligível → sem popup.
+  const resolveCreateEnrichment = async (values: WorkFormValues): Promise<boolean> => {
+    const hasExternal =
+      Object.keys(values.external_ids ?? {}).length > 0 || pendingExternalReviews != null
+    if (!hasExternal) return false
+    const cascade = previewCascade([
+      { action: "infer_tags", label: "Inferir tags" },
+      { action: "review_summary", label: "Resumo de reviews" },
+      { action: "review_digest", label: "Digest de reviews" },
+    ])
+    const ok = await confirmCost({
+      estimate: {
+        likelyUsd: cascade.likelyUsd,
+        upperBoundUsd: cascade.upperBoundUsd,
+        etaSeconds: cascade.etaSeconds,
+        background: true,
+        scale: 1,
+      },
+      steps: cascade.steps,
+      title: "Salvar e enriquecer com IA?",
+      description:
+        "Gravar a obra é grátis. Em 2º plano posso enriquecê-la com IA: tags da sinopse + resumo/digest das reviews externas.",
+      confirmLabel: "Salvar e enriquecer",
+      cancelLabel: "Salvar sem IA",
+    })
+    // Confirmar → enriquece (skip=false); Cancelar/Esc → salva sem IA (skip=true).
+    return !ok
+  }
+
   // Handler do react-hook-form. Quando a IA reportou confiança baixa, segura o
   // submit e mostra o ConfirmDialog antes de prosseguir.
   const onSubmit = async (rawValues: WorkFormValues) => {
@@ -1244,7 +1284,8 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
       setPendingLowConfidenceSubmit({ kind: "create", values })
       return
     }
-    await executeCreateSubmit(values)
+    const skipAiEnrichment = await resolveCreateEnrichment(values)
+    await executeCreateSubmit(values, { skipAiEnrichment })
   }
 
   const persistDrafts = (drafts: BatchDraft[]) => {

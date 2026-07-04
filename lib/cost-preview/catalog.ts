@@ -39,6 +39,9 @@ export type CostActionId =
   | "consolidate_synopsis"
   | "calibration_audit"
   | "bias_report"
+  | "ai_evaluation"
+  | "taste_profile"
+  | "chat_message"
 
 interface CostSpec {
   /** Rótulo curto da ação (título default do popup). */
@@ -156,6 +159,59 @@ const CATALOG: Record<CostActionId, CostSpec> = {
     etaSeconds: 30,
     background: false,
   },
+  ai_evaluation: {
+    label: "Avaliação IA",
+    model: SONNET,
+    // Envia a capa em base64 (input alto) + reviews amostradas + os 9 critérios.
+    base: tokens(8000, 1500),
+    etaSeconds: 60,
+    background: true,
+  },
+  taste_profile: {
+    label: "Destilar perfil de gosto",
+    model: SONNET,
+    // ~500 tok/obra rotulada (título/tags/notas/sinopse); max_tokens alto.
+    base: tokens(3000, 6000),
+    perItem: tokens(500, 0),
+    etaSeconds: 40,
+    background: true,
+  },
+  chat_message: {
+    label: "Mensagem do chat",
+    model: SONNET,
+    base: tokens(5000, 800),
+    etaSeconds: 12,
+    background: false,
+  },
+}
+
+/** Um passo de cascata (compatível com CostStep da UI). */
+export interface CascadeStep {
+  label: string
+  model: string
+  likelyUsd: number
+  etaSeconds: number
+}
+
+/**
+ * Soma várias ações numa cascata (ex.: "Salvar obra" → resumo + digest + tags…):
+ * total = soma dos custos/tempos; `steps` para o breakdown itemizado no popup.
+ */
+export function previewCascade(
+  parts: { action: CostActionId; scale?: number; label?: string }[],
+): { likelyUsd: number; upperBoundUsd: number; etaSeconds: number; steps: CascadeStep[] } {
+  const pvs = parts.map((p) => ({ p, pv: previewCost(p.action, p.scale) }))
+  return {
+    likelyUsd: pvs.reduce((s, { pv }) => s + pv.likelyUsd, 0),
+    upperBoundUsd: pvs.reduce((s, { pv }) => s + pv.upperBoundUsd, 0),
+    etaSeconds: pvs.reduce((s, { pv }) => s + pv.etaSeconds, 0),
+    steps: pvs.map(({ p, pv }) => ({
+      label: p.label ?? pv.label,
+      model: pv.model,
+      likelyUsd: pv.likelyUsd,
+      etaSeconds: pv.etaSeconds,
+    })),
+  }
 }
 
 export interface CostPreview {
