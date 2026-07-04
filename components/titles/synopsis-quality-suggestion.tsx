@@ -9,6 +9,8 @@ import { applySynopsisPredictionAction } from "@/server/actions/synopsis-quality
 import { predictInterestWithToast } from "@/components/titles/predict-interest-toast"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import type { SynopsisQuality } from "@/types/domain"
+import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
+import { GenerationGate } from "@/components/generation/generation-gate"
 
 export interface SynopsisQualitySuggestionProps {
   workId: string
@@ -20,8 +22,11 @@ export interface SynopsisQualitySuggestionProps {
     confidence: number | null
     stale: boolean
   } | null
-  /** A obra tem sinopse canônica? Sem ela não há o que avaliar. */
+  /** A obra tem sinopse canônica? Fallback quando `readiness` não é passado. */
   hasCanonicalSynopsis: boolean
+  /** Prontidão do gerador (motor de orquestração → UI). Quando presente, dita o
+   *  bloqueio/âmbar/selo; senão cai no check antigo de `hasCanonicalSynopsis`. */
+  readiness?: UiReadiness | null
   /** Previsão IA é feature do plano Pago. Controla só a aparência. */
   isPaid?: boolean
 }
@@ -36,6 +41,7 @@ export function SynopsisQualitySuggestion({
   manualValue,
   prediction,
   hasCanonicalSynopsis,
+  readiness,
   isPaid = true,
 }: SynopsisQualitySuggestionProps) {
   const refresh = useRefresh()
@@ -71,24 +77,39 @@ export function SynopsisQualitySuggestion({
 
   const alreadyApplied = prediction != null && manualValue === prediction.predictedQuality
 
+  // Prontidão do motor de orquestração (quando passada). Dita bloqueio/âmbar/selo;
+  // sem ela, mantém o check antigo de sinopse canônica.
+  const gate = readiness ?? null
+  const blocked = gate ? !gate.ready : !hasCanonicalSynopsis
+  const blockTitle =
+    gate && !gate.ready
+      ? [`Falta ${gate.blocking.map((b) => b.label).join(", ")}`, gate.blocking[0]?.instruction]
+          .filter(Boolean)
+          .join(" — ")
+      : hasCanonicalSynopsis
+        ? undefined
+        : "Sem sinopse canônica para avaliar."
+
+  const predictButton = (
+    <Button
+      variant="outline"
+      size="sm"
+      className="h-7 gap-1.5 text-xs"
+      onClick={runPredict}
+      disabled={predicting || blocked}
+      title={blockTitle}
+    >
+      {predicting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+      {predicting ? "Estimando…" : prediction ? "Reprever" : "Prever"}
+    </Button>
+  )
+
   return (
     <div className="mt-3 space-y-2 border-t border-border/40 pt-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          <Sparkles className="h-3.5 w-3.5" /> Interesse sinopse (sugestão IA)
-        </span>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 gap-1.5 text-xs"
-          onClick={runPredict}
-          disabled={predicting || !hasCanonicalSynopsis}
-          title={hasCanonicalSynopsis ? undefined : "Sem sinopse canônica para avaliar."}
-        >
-          {predicting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-          {predicting ? "Estimando…" : prediction ? "Reprever" : "Prever"}
-        </Button>
-      </div>
+      <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <Sparkles className="h-3.5 w-3.5" /> Interesse sinopse (sugestão IA)
+      </span>
+      {gate ? <GenerationGate readiness={gate}>{predictButton}</GenerationGate> : predictButton}
 
       {prediction ? (
         <div className="space-y-1.5">

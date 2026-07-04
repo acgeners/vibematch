@@ -6,6 +6,7 @@ import { PUBLICATION_STATUSES_BY_ID, PERSONAL_STATUSES_BY_ID } from "@/lib/const
 import { classifyWorksWithoutTags, type NoTagsWork, type NoTagsFilters, type TagWorkMetaRow } from "@/lib/tags/no-tags-classify"
 import { loadEffectiveInterest } from "@/lib/synopsis-interest/effective-interest"
 import { workCardCountsRpc } from "@/server/queries/work-card-meta"
+import { checkInferTags, TAG_MIN_SYNOPSIS_CHARS } from "@/lib/orchestration/ui-readiness"
 
 export type { NoTagsWork, NoTagsFilters } from "@/lib/tags/no-tags-classify"
 
@@ -92,6 +93,16 @@ export async function getWorksWithoutTags(
   const acceptedSources = new Map<string, string[]>()
   const goldenIds = new Set<string>()
   const chunk = <T,>(a: T[], n: number) => { const o: T[][] = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o }
+
+  // Sinais do gate de "Inferir tags": comprimento da sinopse (canônica OU bruta
+  // ≥ 80 chars, regra do gerador) + contexto de reviews (ajuda). A canônica já
+  // veio no scan; só busco as BRUTAS das que têm canônica curta (bounded).
+  const canonLen = new Map<string, number>()
+  for (const w of activeFewTags) canonLen.set(w.id, String(w.canonical_synopsis ?? "").trim().length)
+  const sub80Ids = activeFewTags.filter((w) => (canonLen.get(w.id) ?? 0) < TAG_MIN_SYNOPSIS_CHARS).map((w) => w.id)
+  const maxRawLen = new Map<string, number>()
+  const hasReviewContext = new Set<string>()
+
   await Promise.all([
     Promise.all(chunk(ids, 200).map(async (c) => {
       const { data, error } = await sb.from("work_external_ids").select("work_id, source, is_rejected").in("work_id", c)
@@ -108,6 +119,26 @@ export async function getWorksWithoutTags(
       const { data, error } = await sb.from("synopsis_interest_golden").select("work_id").in("work_id", c)
       if (error) throw new Error(`synopsis_interest_golden: ${error.message}`)
       for (const r of (data ?? []) as Array<{ work_id: string }>) goldenIds.add(r.work_id)
+    })),
+    // Sinopses BRUTAS só das de canônica curta → maior comprimento (pro gate tags).
+    Promise.all(chunk(sub80Ids, 200).map(async (c) => {
+      const { data, error } = await sb.from("work_synopses").select("work_id, text").in("work_id", c)
+      if (error) throw new Error(`work_synopses: ${error.message}`)
+      for (const r of (data ?? []) as Array<{ work_id: string; text?: string | null }>) {
+        const len = String(r.text ?? "").trim().length
+        if (len > (maxRawLen.get(r.work_id) ?? 0)) maxRawLen.set(r.work_id, len)
+      }
+    })),
+    // Contexto de reviews (digest/summary) — presença JSONB-safe (só `.not null`).
+    Promise.all(chunk(ids, 200).map(async (c) => {
+      const [d, s] = await Promise.all([
+        sb.from("works").select("id").in("id", c).not("review_digest", "is", null),
+        sb.from("works").select("id").in("id", c).not("review_summary", "is", null),
+      ])
+      if (d.error) throw new Error(`review_digest: ${d.error.message}`)
+      if (s.error) throw new Error(`review_summary: ${s.error.message}`)
+      for (const r of (d.data ?? []) as Array<{ id: string }>) hasReviewContext.add(r.id)
+      for (const r of (s.data ?? []) as Array<{ id: string }>) hasReviewContext.add(r.id)
     })),
   ])
 
@@ -132,6 +163,10 @@ export async function getWorksWithoutTags(
     tagCount: tagCount.get(w.id) ?? 0,
     expectedScore: w.calculated_scores?.expected_score != null ? Number(w.calculated_scores.expected_score) : null,
     interest: effectiveInterest.get(w.id) ?? null,
+    readiness: checkInferTags({
+      maxSynopsisChars: Math.max(canonLen.get(w.id) ?? 0, maxRawLen.get(w.id) ?? 0),
+      hasReviewContext: hasReviewContext.has(w.id),
+    }),
   }))
 
   const result = classifyWorksWithoutTags({
