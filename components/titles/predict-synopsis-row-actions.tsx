@@ -7,6 +7,7 @@ import { Sparkles, Loader2, Check, SkipForward } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { applySynopsisPredictionAction, skipSynopsisInterestAction } from "@/server/actions/synopsis-quality"
 import { predictInterestWithToast } from "@/components/titles/predict-interest-toast"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { GenerationGate } from "@/components/generation/generation-gate"
 import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
 
@@ -34,6 +35,7 @@ export function PredictSynopsisRowActions({
   isPaid = true,
 }: PredictSynopsisRowActionsProps) {
   const refresh = useRefresh()
+  const confirmCost = useCostConfirm()
   const [predicting, startPredict] = useTransition()
   const [applying, startApply] = useTransition()
   const [skipping, startSkip] = useTransition()
@@ -50,7 +52,8 @@ export function PredictSynopsisRowActions({
     )
   }
 
-  const runPredict = () => {
+  const runPredict = async () => {
+    if (!(await confirmCost({ action: "predict_interest" }))) return
     startPredict(async () => {
       await predictInterestWithToast(workId, refresh)
     })
@@ -90,7 +93,7 @@ export function PredictSynopsisRowActions({
       : undefined
 
   const predictButton = (
-    <Button size="sm" onClick={runPredict} disabled={predicting || blocked} title={blockTitle} className="w-full gap-1.5">
+    <Button size="sm" onClick={() => void runPredict()} disabled={predicting || blocked} title={blockTitle} className="w-full gap-1.5">
       {predicting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
       {predicting ? "Estimando…" : hasPrediction ? "Reprever" : "Prever"}
     </Button>

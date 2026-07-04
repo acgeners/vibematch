@@ -26,6 +26,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { useRefresh } from "@/lib/use-refresh"
 import { runTask } from "@/lib/tasks-store"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
+import { CostSummary } from "@/components/cost/cost-summary"
+import { previewCost } from "@/lib/cost-preview/catalog"
 import { runRecommendationAction } from "@/server/actions/recommendations"
 import {
   ALLOWED_CANDIDATE_COUNTS,
@@ -319,6 +321,8 @@ export function RecommendDialog({
               Ajusta a ordem sem mudar seu perfil de gosto cacheado.
             </p>
           </div>
+
+          <CostSummary preview={previewCost("recommend", n)} />
         </div>
 
         <DialogFooter>

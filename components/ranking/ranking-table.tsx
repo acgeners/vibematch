@@ -31,28 +31,44 @@ import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
 import type { WorkPreview } from "@/server/actions/works"
 import {
-  getConfiguredRankingColumns,
-  getDefaultRankingColumnConfig,
-  readRankingColumnConfig,
-  subscribeRankingColumnConfig,
-  RANKING_TABLE_COLUMNS,
-} from "@/components/ranking/ranking-table-config"
-import type { RankingColumnDef } from "@/components/ranking/ranking-table-config"
-import { RankingColumnPicker } from "@/components/ranking/ranking-column-picker"
+  DEFAULT_COLUMN_WIDTHS,
+  getConfiguredWorkColumns,
+  getDefaultWorkColumnConfig,
+  readWorkColumnConfig,
+  subscribeWorkColumnConfig,
+} from "@/components/titles/work-table-config"
+import type { WorkColumnDef } from "@/components/titles/work-table-config"
+import { WorkColumnPicker } from "@/components/titles/work-column-picker"
 
+// Coluna "#" (posição). É estrutural do /ranking — não existe no vocabulário
+// compartilhado (work-table-config) nem no picker. O RankingTable a prepende
+// à lista de colunas configuradas.
+const RANK_COL: WorkColumnDef = {
+  key: "rank",
+  label: "#",
+  configLabel: "Posição",
+  description: "Posição da obra na ordenação atual da tabela.",
+  align: "center",
+  locked: true,
+  group: "basico",
+}
+
+// Chave da coluna (vocabulário work-table-config) → campo de ordenação aceito
+// pelo server. A maioria é identidade; os pares divergentes vêm do rename ao
+// unificar o /ranking com o sistema Work (chapters_total→chapters etc.).
 const COLUMN_TO_SORT_FIELD: Record<string, string> = {
   title: "title",
-  pub: "publication_status",
-  per_status: "personal_status",
+  publication_status: "publication_status",
+  personal_status: "personal_status",
   year: "year",
-  chapters: "chapters",
+  chapters_total: "chapters",
   chapters_read: "chapters_read",
   synopsis_q: "synopsis_q",
   synopsis_pred: "synopsis_pred",
   platform_avg: "platform_avg",
   total_votes: "total_votes",
   decision: "decision",
-  expected: "expected_score",
+  expected_score: "expected_score",
   personal_fit: "personal_fit",
   alignment_score: "alignment_score",
 }
@@ -203,9 +219,9 @@ const KEY_CRITERIA = ["romance", "fantasy_nobility", "protagonist", "drama", "tr
 const STORAGE_KEY = "ranking_col_widths_v1"
 
 function useColumnWidths() {
-  const [widths, setWidths] = useState<Record<string, number>>(() =>
-    Object.fromEntries(RANKING_TABLE_COLUMNS.map((c) => [c.key, c.defaultWidth]))
-  )
+  const [widths, setWidths] = useState<Record<string, number>>(() => ({
+    ...DEFAULT_COLUMN_WIDTHS,
+  }))
 
   // Hydrate from localStorage after mount.
   // setState during effect is intentional here (client-only hydration without
@@ -357,7 +373,7 @@ function formatVotes(votes: number): string {
 
 function renderCell(
   entry: RankingEntry,
-  col: RankingColumnDef,
+  col: WorkColumnDef,
   scoreThresholds: ColumnThresholds | null | undefined,
   isPaid: boolean = true,
   affinity: number | null = null,
@@ -379,10 +395,10 @@ function renderCell(
   if (col.key === "fav")
     return <FavoriteCell workId={entry.workId} workTitle={entry.title} isFavorite={entry.isFavorite} />
   if (col.key === "title") return <TitleCell entry={entry} />
-  if (col.key === "pub") return <PublicationStatusBadge statusId={entry.publicationStatusId} compact />
-  if (col.key === "per_status") return <PersonalStatusBadge statusId={entry.personalStatusId} iconOnly />
+  if (col.key === "publication_status") return <PublicationStatusBadge statusId={entry.publicationStatusId} compact />
+  if (col.key === "personal_status") return <PersonalStatusBadge statusId={entry.personalStatusId} iconOnly />
   if (col.key === "year") return <span className="font-mono text-sm text-muted-foreground">{entry.year ?? "—"}</span>
-  if (col.key === "chapters") return <span className="font-mono text-sm">{entry.totalChapters ?? "—"}</span>
+  if (col.key === "chapters_total") return <span className="font-mono text-sm">{entry.totalChapters ?? "—"}</span>
   if (col.key === "chapters_read") return <span className="font-mono text-sm">{entry.chaptersRead ?? "—"}</span>
   if (col.key === "chapters_progress") {
     const pct = readingProgressPercent(entry.chaptersRead, entry.totalChapters)
@@ -442,7 +458,7 @@ function renderCell(
         alignment={entry.alignmentScore}
       />
     )
-  if (col.key === "expected") {
+  if (col.key === "expected_score") {
     const expectedBadge = (
       <ScoreBadge score={entry.expectedScore} size="sm" showStub={entry.expectedIsStub} thresholds={scoreThresholds?.expected} />
     )
@@ -490,12 +506,23 @@ function renderCell(
 
 export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs }: RankingTableProps) {
   const { widths, setWidth } = useColumnWidths()
+  // Colunas do /ranking vêm do vocabulário COMPARTILHADO (work-table-config,
+  // namespace "ranking"). Prependa a coluna "#" estrutural e descarta as colunas
+  // estruturais do Work que o /ranking não usa (select/actions).
   const config = useSyncExternalStore(
-    subscribeRankingColumnConfig,
-    readRankingColumnConfig,
-    getDefaultRankingColumnConfig
+    (cb) => subscribeWorkColumnConfig(cb, "ranking"),
+    () => readWorkColumnConfig("ranking"),
+    () => getDefaultWorkColumnConfig("ranking")
   )
-  const columns = getConfiguredRankingColumns(config)
+  const columns = useMemo(
+    () => [
+      RANK_COL,
+      ...getConfiguredWorkColumns(config).filter(
+        (c) => c.key !== "select" && c.key !== "actions"
+      ),
+    ],
+    [config]
+  )
   const viewMode = useSyncExternalStore(subscribeViewMode, readViewMode, () => "list" as const)
   const tiersEnabled = useSyncExternalStore(subscribeTiersEnabled, readTiersEnabled, () => true)
   // Modo de cor global (Catálogo/Minha faixa) — colore as colunas de critério.
@@ -564,7 +591,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   const naturalWidthOf = (key: string): number => {
     const stored = widths[key]
     if (stored != null) return stored
-    return columns.find((c) => c.key === key)?.defaultWidth ?? 100
+    return DEFAULT_COLUMN_WIDTHS[key] ?? 100
   }
   const totalNaturalWidth = columns.reduce((sum, c) => sum + naturalWidthOf(c.key), 0)
   const widthPercentOf = (key: string): string =>
@@ -787,7 +814,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                   <ResizeHandle
                     columnKey={col.key}
                     onResize={setWidth}
-                    startWidth={widths[col.key] ?? col.defaultWidth}
+                    startWidth={widths[col.key] ?? DEFAULT_COLUMN_WIDTHS[col.key] ?? 100}
                   />
                 </th>
                 )
@@ -995,7 +1022,7 @@ function ViewModeToolbar({
       <div className="flex items-center gap-2">
         {viewMode === "list" && (
           <>
-            <RankingColumnPicker />
+            <WorkColumnPicker namespace="ranking" />
             <button
               type="button"
               onClick={() => onTiersChange(!tiersEnabled)}

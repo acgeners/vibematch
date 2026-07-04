@@ -45,6 +45,7 @@ export function TagRowAction({
       className={className}
       icon={<Sparkles className="h-3.5 w-3.5" />}
       disabled={!!gate && !gate.ready}
+      cost={{ action: "infer_tags" }}
       run={() => inferTagsForWork(workId)}
       formatDone={(r) => {
         const x = r as InferTagsResult
@@ -72,6 +73,7 @@ export function TagBatchAction({ workIds }: { workIds: string[] }) {
       busyLabel="Inferindo fila…"
       variant="default"
       icon={<Sparkles className="h-3.5 w-3.5" />}
+      cost={{ action: "infer_tags", scale: n }}
       run={() => inferTagsForWorks(workIds)}
       disabled={workIds.length === 0}
       formatDone={(r) => {

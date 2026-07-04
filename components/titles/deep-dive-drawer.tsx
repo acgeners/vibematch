@@ -16,6 +16,8 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { deepDiveWorkAction } from "@/server/actions/deep-dive"
 import { DeepDiveResultView } from "./deep-dive/deep-dive-result-view"
+import { CostSummary } from "@/components/cost/cost-summary"
+import { previewCost } from "@/lib/cost-preview/catalog"
 import type { DeepDiveResultRow } from "@/lib/ai-recommendation/types"
 
 const LOADING_STEPS = [
@@ -211,15 +213,14 @@ function IdleForm({
 }: IdleFormProps) {
   return (
     <div className="space-y-4">
-      <div className="space-y-2 rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+      <div className="space-y-3 rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
         <p>
           O Consultor IA usa <span className="font-medium text-foreground">extended thinking</span>{" "}
           (8K tokens) pra cruzar perfil de gosto, biblioteca, reviews externas e mood. Devolve um
           veredito (agora/guardar/evitar) com justificativa em cada eixo.
         </p>
-        <p className="text-[11px] text-muted-foreground/80">
-          Custo ≈ <span className="font-mono">$0.21</span> · 25-45s · cap diário de 10
-        </p>
+        <CostSummary preview={previewCost("deep_dive")} />
+        <p className="text-[11px] text-muted-foreground/80">cap diário de 10 análises</p>
       </div>
 
       <div className="space-y-1.5">

@@ -7,6 +7,7 @@ import { Sparkles, Loader2, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { applySynopsisPredictionAction } from "@/server/actions/synopsis-quality"
 import { predictInterestWithToast } from "@/components/titles/predict-interest-toast"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import type { SynopsisQuality } from "@/types/domain"
 import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
@@ -47,8 +48,10 @@ export function SynopsisQualitySuggestion({
   const refresh = useRefresh()
   const [predicting, startPredict] = useTransition()
   const [applying, startApply] = useTransition()
+  const confirmCost = useCostConfirm()
 
-  const runPredict = () => {
+  const runPredict = async () => {
+    if (!(await confirmCost({ action: "predict_interest" }))) return
     startPredict(async () => {
       await predictInterestWithToast(workId, refresh)
     })
@@ -95,7 +98,7 @@ export function SynopsisQualitySuggestion({
       variant="outline"
       size="sm"
       className="h-7 gap-1.5 text-xs"
-      onClick={runPredict}
+      onClick={() => void runPredict()}
       disabled={predicting || blocked}
       title={blockTitle}
     >

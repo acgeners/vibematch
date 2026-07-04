@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 import { AlignmentTooltipContent, VerdictTooltipContent } from "@/components/ranking/score-tooltip-content"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
 import type { AlignmentPayload } from "@/components/ranking/score-tooltip-content"
 
 /**
@@ -20,7 +21,9 @@ import type { AlignmentPayload } from "@/components/ranking/score-tooltip-conten
 function useRerankSingleWork(workId: string) {
   const [isPending, startTransition] = useTransition()
   const refresh = useRefresh()
-  const run = () => {
+  const confirmCost = useCostConfirm()
+  const run = async () => {
+    if (!(await confirmCost({ action: "rerank_single" }))) return
     startTransition(async () => {
       const result = await rerankSingleWorkAction(workId)
       if (result.error || !result.data) {
@@ -47,7 +50,7 @@ function RerankSingleWorkButton({ workId }: { workId: string }) {
         <TooltipTrigger asChild>
           <button
             type="button"
-            onClick={run}
+            onClick={() => void run()}
             disabled={isPending}
             className="inline-flex items-center gap-1 rounded-md border border-dashed border-muted-foreground/40 px-1.5 py-0.5 text-xs text-muted-foreground hover:border-violet-500/60 hover:text-violet-600 dark:hover:text-violet-400 disabled:opacity-50 disabled:cursor-wait"
           >
@@ -82,7 +85,7 @@ function RerankStaleButton({ workId }: { workId: string }) {
             type="button"
             onClick={(e) => {
               e.stopPropagation()
-              run()
+              void run()
             }}
             disabled={isPending}
             aria-label="Atualizar Veredito IA (desatualizado)"
