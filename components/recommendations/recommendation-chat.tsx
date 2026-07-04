@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { cn, titleToSlug } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { sendChatMessageAction, getChatAction } from "@/server/actions/recommendation-chat"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { setActiveChat, clearActiveChat, readActiveChat } from "@/lib/active-chat"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import type {
@@ -141,22 +142,40 @@ export function RecommendationChat({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- só no mount
   }, [])
 
+  const confirmCost = useCostConfirm()
+  // Custo do chat: confirmado UMA vez por entrada na conversa (escolha do usuário),
+  // porque um popup por mensagem mataria o fluxo e o custo por msg varia (a IA
+  // decide se busca/compara obras). O ref reseta ao remontar = 1× por entrada.
+  const costConfirmedRef = useRef(false)
+
   const runTurn = (opts: { userText?: string; forceRecommend?: boolean }) => {
     if (isPending) return
     const trimmed = opts.userText?.trim() ?? ""
     if (!trimmed && !opts.forceRecommend) return
-    if (trimmed) {
-      const userMessage: ChatMessage = { role: "user", content: trimmed }
-      setMessages((prev) => [...prev, userMessage])
-      setInput("")
-    }
-
-    // Feedback imediato: a IA "responde" na hora com uma frase de aviso antes de
-    // ir pensar (em vez de só um spinner).
-    setPendingAck(pickRandom(PENDING_ACKS))
-    setIsPending(true)
 
     void (async () => {
+      if (!costConfirmedRef.current) {
+        const ok = await confirmCost({
+          action: "chat_message",
+          title: "Conversar com o consultor por IA?",
+          description:
+            "Cada mensagem chama a Claude (~$0,03) e conta no limite de 60/dia. Se eu buscar ou comparar obras, a mensagem custa um pouco mais. Confirmo só uma vez por conversa.",
+          confirmLabel: "Começar a conversar",
+        })
+        if (!ok) return
+        costConfirmedRef.current = true
+      }
+
+      if (trimmed) {
+        setMessages((prev) => [...prev, { role: "user", content: trimmed }])
+        setInput("")
+      }
+
+      // Feedback imediato: a IA "responde" na hora com uma frase de aviso antes de
+      // ir pensar (em vez de só um spinner).
+      setPendingAck(pickRandom(PENDING_ACKS))
+      setIsPending(true)
+
       try {
         const res = await sendChatMessageAction({
           slug,

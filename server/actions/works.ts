@@ -1058,14 +1058,21 @@ export async function createWork(
   values: WorkFormValues,
   aiMeta?: CreateWorkAiMeta,
   externalReviews?: SourcedReview[],
+  opts: { skipAiEnrichment?: boolean } = {},
 ) {
   const result = await persistNewWork(values, aiMeta)
   if (!result.ok) return { error: result.error }
+  // `skipAiEnrichment`: o usuário optou por salvar SEM o enriquecimento pago
+  // (Flow B do popup de custo). Pula a inferência de tags (Haiku) e o resumo/
+  // digest de reviews (Haiku/Sonnet). As reviews ainda são persistidas (exibição);
+  // resumo/digest/tags podem ser gerados sob demanda depois. O scraping é grátis.
+  const skipAi = opts.skipAiEnrichment === true
   // Inferência de tags (Haiku) em background, SEQUENCIADA após as reviews —
   // usa o contexto de leitores (digest → resumo) quando disponível, que puxa
   // tags que a sinopse omite (passada `--with-reviews` validada). Grava tags de
   // alta confiança (source='ai_inferred'); se adicionou, marca recalc pendente.
   const inferTagsForNewWork = async (workId: string) => {
+    if (skipAi) return
     const { inferAndPersistTagsForWork } = await import("@/lib/tags/auto-infer")
     const added = await inferAndPersistTagsForWork(workId)
     if (added > 0) await markRecalcPending("ai_inferred_tags_on_create")
@@ -1078,7 +1085,7 @@ export async function createWork(
     const { saveWorkReviews } = await import("@/lib/external/persist-reviews")
     // fromFreshEval: a obra acabou de ser avaliada com estas reviews ⇒ não marca
     // a avaliação como desatualizada (só atualiza o fingerprint do pool).
-    await saveWorkReviews(result.workId, externalReviews, { fromFreshEval: true })
+    await saveWorkReviews(result.workId, externalReviews, { fromFreshEval: true, skipPaidEnrichment: skipAi })
     after(() => inferTagsForNewWork(result.workId))
   } else {
     // Criada SEM avaliar: extrai + persiste reviews na borda, desacoplado da
@@ -1087,7 +1094,7 @@ export async function createWork(
     // A inferência de tags roda DEPOIS, na MESMA task (reviews já persistidas).
     after(async () => {
       const { acquireAndPersistWorkReviews } = await import("@/lib/external/acquire-reviews")
-      await acquireAndPersistWorkReviews(result.workId)
+      await acquireAndPersistWorkReviews(result.workId, { skipPaidEnrichment: skipAi })
       await inferTagsForNewWork(result.workId)
     })
   }

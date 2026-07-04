@@ -7,6 +7,8 @@ import { toast } from "sonner"
 import { triggerAiEvaluation, skipAiEvaluation, prewarmEvaluationContext } from "@/server/actions/ai"
 import { getComixHealthStatus } from "@/server/actions/comix-resolver"
 import { useRefresh } from "@/lib/use-refresh"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
+import { previewCascade } from "@/lib/cost-preview/catalog"
 import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
 import { AiEvaluationCompare } from "./ai-evaluation-compare"
@@ -103,7 +105,17 @@ function EvaluatingProgress({ estimateMs = 55000 }: { estimateMs?: number }) {
   )
 }
 
+/** Custo por obra de uma avaliação: eval (Sonnet) + resumo (Haiku) + digest (Sonnet). */
+function evalCascadePerWork() {
+  return previewCascade([
+    { action: "ai_evaluation", label: "Avaliação dos 9 critérios" },
+    { action: "review_summary", label: "Resumo de reviews" },
+    { action: "review_digest", label: "Digest de reviews" },
+  ])
+}
+
 export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPanelProps) {
+  const confirmCost = useCostConfirm()
   // refresh() atualiza os contadores das abas (server component) E o chrome da
   // sidebar (badge/saldo) na mesma rota, via o evento de refresh do chrome.
   const refreshQueue = useRefresh()
@@ -263,6 +275,15 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
   }
 
   const handleEvaluate = async (work: PendingWork) => {
+    const c = evalCascadePerWork()
+    const ok = await confirmCost({
+      estimate: { likelyUsd: c.likelyUsd, upperBoundUsd: c.upperBoundUsd, etaSeconds: c.etaSeconds, background: true, scale: 1 },
+      steps: c.steps,
+      title: `Avaliar "${work.title}" com IA?`,
+      description: "Avaliação dos 9 critérios e, se as reviews externas mudarem, resumo + digest.",
+      confirmLabel: "Avaliar",
+    })
+    if (!ok) return
     const outcome = await runEvaluation(work)
     if (outcome.kind === "review") setReviewData(outcome.data)
     else if (outcome.kind === "needs-confirm") {
@@ -367,6 +388,23 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
   const startQueue = async (works?: PendingWork[]) => {
     const source = works ?? sortedWorks.slice(0, Math.max(1, Math.min(queueSize, sortedWorks.length)))
     if (source.length === 0) return
+
+    const n = source.length
+    const per = evalCascadePerWork()
+    const ok = await confirmCost({
+      estimate: {
+        likelyUsd: per.likelyUsd * n,
+        upperBoundUsd: per.upperBoundUsd * n,
+        // Rodam em paralelo (QUEUE_CONCURRENCY workers).
+        etaSeconds: per.etaSeconds * Math.ceil(n / QUEUE_CONCURRENCY),
+        background: true,
+        scale: n,
+      },
+      title: `Avaliar ${n} obra${n !== 1 ? "s" : ""} da fila?`,
+      description: "Cada obra: avaliação dos 9 critérios + resumo/digest de reviews. Rodam em paralelo.",
+      confirmLabel: `Avaliar ${n}`,
+    })
+    if (!ok) return
 
     queueCancelledRef.current = false
     setReviewData(null)
