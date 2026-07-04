@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { ReactNode } from "react"
-import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, ImageOff, LayoutGrid, List, Sparkles, Star, Target, Users, X } from "lucide-react"
+import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, ImageOff, Layers, LayoutGrid, List, Sparkles, Star, Target, Users, X } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -155,6 +155,34 @@ function writeViewMode(mode: ViewMode) {
   if (typeof window === "undefined") return
   window.localStorage.setItem(VIEW_STORAGE_KEY, mode)
   window.dispatchEvent(new CustomEvent(VIEW_EVENT))
+}
+
+// Separação em tiers (faixas de prioridade equivalente): preferência de
+// visualização client-side, ligada por padrão. Desligada, o ranking fica
+// corrido — o toggle só afeta o agrupamento visual, nunca a ordenação.
+const TIERS_STORAGE_KEY = "ranking_tiers_enabled_v1"
+const TIERS_EVENT = "ranking-tiers-enabled-change"
+
+function readTiersEnabled(): boolean {
+  if (typeof window === "undefined") return true
+  // Default ligado; só desligado quando explicitamente "off".
+  return window.localStorage.getItem(TIERS_STORAGE_KEY) !== "off"
+}
+
+function subscribeTiersEnabled(onChange: () => void) {
+  if (typeof window === "undefined") return () => {}
+  window.addEventListener(TIERS_EVENT, onChange)
+  window.addEventListener("storage", onChange)
+  return () => {
+    window.removeEventListener(TIERS_EVENT, onChange)
+    window.removeEventListener("storage", onChange)
+  }
+}
+
+function writeTiersEnabled(enabled: boolean) {
+  if (typeof window === "undefined") return
+  window.localStorage.setItem(TIERS_STORAGE_KEY, enabled ? "on" : "off")
+  window.dispatchEvent(new CustomEvent(TIERS_EVENT))
 }
 
 interface RankingTableProps {
@@ -469,6 +497,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   )
   const columns = getConfiguredRankingColumns(config)
   const viewMode = useSyncExternalStore(subscribeViewMode, readViewMode, () => "list" as const)
+  const tiersEnabled = useSyncExternalStore(subscribeTiersEnabled, readTiersEnabled, () => true)
   // Modo de cor global (Catálogo/Minha faixa) — colore as colunas de critério.
   const attrColorMode = useSyncExternalStore(subscribeAttrColorMode, readAttrColorMode, () => "catalog" as const)
 
@@ -553,14 +582,22 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   // UNIFICADO com expected_score — mesmo eixo (Nota Prevista) — então também forma
   // tiers e diferencia dentro do tier por tag overlap. Em outros sorts não há tier
   // contíguo a sinalizar. A base do mood-refine continua sendo a decisionScore.
+  // Ordenação elegível a tiers: descendente pelo eixo da prioridade
+  // (Prioridade / Nota Prevista / Recomendado). Fora disso não há faixa contígua
+  // a sinalizar e o switch de Tiers fica neutro/desabilitado.
+  const tierSortEligible =
+    activeSortDir === "desc" &&
+    (activeSortField === "decision" ||
+      activeSortField === "expected_score" ||
+      activeSortField === "recommended")
+  // O switch "Tiers" (client-side) permite desligar o agrupamento e ver o
+  // ranking corrido — sem alterar a ordenação.
   const tierField: "decision" | "expected_score" | null =
-    activeSortDir !== "desc"
+    !tiersEnabled || !tierSortEligible
       ? null
       : activeSortField === "decision"
         ? "decision"
-        : activeSortField === "expected_score" || activeSortField === "recommended"
-          ? "expected_score"
-          : null
+        : "expected_score"
   const tiers = useMemo(
     () =>
       tierField
@@ -623,7 +660,14 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
     const hasActiveFilters = searchParams.size > 0
     return (
       <div className="space-y-3">
-        <ViewModeToolbar count={0} viewMode={viewMode} onChange={writeViewMode} />
+        <ViewModeToolbar
+          count={0}
+          viewMode={viewMode}
+          onChange={writeViewMode}
+          tiersEnabled={tiersEnabled}
+          tiersAvailable={tierSortEligible}
+          onTiersChange={writeTiersEnabled}
+        />
         <div className="flex flex-col items-center gap-3 rounded-lg border border-border/70 bg-card/80 py-16 text-center text-sm text-muted-foreground shadow-sm">
           <span>Nenhuma obra encontrada com os filtros aplicados</span>
           {hasActiveFilters && (
@@ -639,7 +683,14 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
   if (viewMode === "cards") {
     return (
       <div className="space-y-3">
-        <ViewModeToolbar count={entries.length} viewMode={viewMode} onChange={writeViewMode} />
+        <ViewModeToolbar
+          count={entries.length}
+          viewMode={viewMode}
+          onChange={writeViewMode}
+          tiersEnabled={tiersEnabled}
+          tiersAvailable={tierSortEligible}
+          onTiersChange={writeTiersEnabled}
+        />
         <RankingCardsView entries={entries} scoreThresholds={scoreThresholds} />
       </div>
     )
@@ -647,7 +698,14 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
 
   return (
     <div className="space-y-3">
-      <ViewModeToolbar count={entries.length} viewMode={viewMode} onChange={writeViewMode} />
+      <ViewModeToolbar
+        count={entries.length}
+        viewMode={viewMode}
+        onChange={writeViewMode}
+        tiersEnabled={tiersEnabled}
+        tiersAvailable={tierSortEligible}
+        onTiersChange={writeTiersEnabled}
+      />
 
       {/* Desktop table */}
       <TooltipProvider delayDuration={150}>
@@ -916,18 +974,66 @@ function ViewModeToolbar({
   count,
   viewMode,
   onChange,
+  tiersEnabled,
+  tiersAvailable,
+  onTiersChange,
 }: {
   count: number
   viewMode: ViewMode
   onChange: (mode: ViewMode) => void
+  tiersEnabled: boolean
+  /** Falso quando a ordenação atual não forma tiers — o switch fica desabilitado. */
+  tiersAvailable: boolean
+  onTiersChange: (enabled: boolean) => void
 }) {
+  const tiersActive = tiersEnabled && tiersAvailable
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="text-xs text-muted-foreground">
         {count} obra{count !== 1 ? "s" : ""} no ranking
       </p>
       <div className="flex items-center gap-2">
-        {viewMode === "list" && <RankingColumnPicker />}
+        {viewMode === "list" && (
+          <>
+            <RankingColumnPicker />
+            <button
+              type="button"
+              onClick={() => onTiersChange(!tiersEnabled)}
+              aria-pressed={tiersEnabled}
+              disabled={!tiersAvailable}
+              title={
+                tiersAvailable
+                  ? "Agrupar o ranking em tiers (faixas de prioridade equivalente). Desligue para ver o ranking corrido."
+                  : "Tiers só se aplicam ao ordenar por Prioridade ou Nota Prevista (decrescente)."
+              }
+              className={cn(
+                "inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-medium transition-colors",
+                tiersActive
+                  ? "border-primary/30 bg-primary/10 text-primary"
+                  : "border-border/70 bg-background/60 text-muted-foreground hover:text-foreground",
+                !tiersAvailable && "cursor-not-allowed opacity-50 hover:text-muted-foreground",
+              )}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Layers className="h-3.5 w-3.5" />
+                Tiers
+              </span>
+              <span
+                className={cn(
+                  "relative h-[18px] w-[34px] flex-none rounded-full transition-colors",
+                  tiersActive ? "bg-primary" : "bg-muted-foreground/40",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform",
+                    tiersEnabled && "translate-x-4",
+                  )}
+                />
+              </span>
+            </button>
+          </>
+        )}
         <div className="inline-flex items-center rounded-md border border-border/70 bg-background/60 p-0.5">
           <button
             type="button"
