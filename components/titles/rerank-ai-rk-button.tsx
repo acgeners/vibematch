@@ -5,7 +5,10 @@ import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
 import { Loader2, RotateCw, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
+import { GenerationGate } from "@/components/generation/generation-gate"
+import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
 
 interface RerankAiRkButtonProps {
   workId: string
@@ -19,6 +22,8 @@ interface RerankAiRkButtonProps {
    * pode passar funções/componentes como prop. "rotate" = ↻ num "Recalcular" stale.
    */
   icon?: "sparkles" | "rotate"
+  /** Prontidão do Veredito (motor → UI). Quando presente, gate/selo no botão. */
+  readiness?: UiReadiness | null
 }
 
 /**
@@ -28,10 +33,18 @@ interface RerankAiRkButtonProps {
  * `calculated_scores`. O servidor é a fonte da verdade do gate — este `isPaid` só
  * controla a aparência do botão.
  */
-export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "sparkles" }: RerankAiRkButtonProps) {
+export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "sparkles", readiness }: RerankAiRkButtonProps) {
   const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
   const Icon = icon === "rotate" ? RotateCw : Sparkles
+  const gate = readiness ?? null
+  const blocked = gate ? !gate.ready : false
+  const blockTitle =
+    gate && !gate.ready
+      ? [`Falta ${gate.blocking.map((b) => b.label).join(", ")}`, gate.blocking[0]?.instruction]
+          .filter(Boolean)
+          .join(" — ")
+      : undefined
 
   if (!isPaid) {
     return (
@@ -65,8 +78,8 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "spar
     })
   }
 
-  return (
-    <Button size="sm" onClick={run} disabled={isPending} className="gap-1.5">
+  const button = (
+    <Button size="sm" onClick={run} disabled={isPending || blocked} title={blockTitle} className={cn("gap-1.5", gate && "w-full")}>
       {isPending ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
       ) : (
@@ -74,5 +87,13 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "spar
       )}
       {isPending ? "Calculando…" : hasScore ? "Recalcular" : "Calcular"}
     </Button>
+  )
+
+  return gate ? (
+    <GenerationGate readiness={gate} stretch>
+      {button}
+    </GenerationGate>
+  ) : (
+    button
   )
 }

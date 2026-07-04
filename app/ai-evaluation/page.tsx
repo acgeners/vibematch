@@ -1103,8 +1103,12 @@ export default async function AiEvaluationPage({
     for (const w of revRes.works) merged.set(w.id, { ...base(w), reviewGap: true, tagGap: false })
     for (const w of tagRes.works) {
       const ex = merged.get(w.id)
-      if (ex) ex.tagGap = true
-      else merged.set(w.id, { ...base(w), reviewGap: false, tagGap: true })
+      if (ex) {
+        ex.tagGap = true
+        ex.readiness = w.readiness
+      } else {
+        merged.set(w.id, { ...base(w), reviewGap: false, tagGap: true, readiness: w.readiness })
+      }
     }
     const mergedAll = [...merged.values()]
     // Filtro de Interesse (manual + Previsão da IA) pós-fetch, uniforme.

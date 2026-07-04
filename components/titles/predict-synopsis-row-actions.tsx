@@ -7,6 +7,8 @@ import { Sparkles, Loader2, Check, SkipForward } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { applySynopsisPredictionAction, skipSynopsisInterestAction } from "@/server/actions/synopsis-quality"
 import { predictInterestWithToast } from "@/components/titles/predict-interest-toast"
+import { GenerationGate } from "@/components/generation/generation-gate"
+import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
 
 export interface PredictSynopsisRowActionsProps {
   workId: string
@@ -14,6 +16,8 @@ export interface PredictSynopsisRowActionsProps {
   hasPrediction: boolean
   /** Previsão já igual ao valor manual? Desabilita Aplicar. */
   alreadyApplied: boolean
+  /** Prontidão do gerador (motor → UI). Quando presente, gate no "Prever". */
+  readiness?: UiReadiness | null
   isPaid?: boolean
 }
 
@@ -26,6 +30,7 @@ export function PredictSynopsisRowActions({
   workId,
   hasPrediction,
   alreadyApplied,
+  readiness,
   isPaid = true,
 }: PredictSynopsisRowActionsProps) {
   const refresh = useRefresh()
@@ -75,12 +80,31 @@ export function PredictSynopsisRowActions({
     })
   }
 
+  const gate = readiness ?? null
+  const blocked = gate ? !gate.ready : false
+  const blockTitle =
+    gate && !gate.ready
+      ? [`Falta ${gate.blocking.map((b) => b.label).join(", ")}`, gate.blocking[0]?.instruction]
+          .filter(Boolean)
+          .join(" — ")
+      : undefined
+
+  const predictButton = (
+    <Button size="sm" onClick={runPredict} disabled={predicting || blocked} title={blockTitle} className="w-full gap-1.5">
+      {predicting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+      {predicting ? "Estimando…" : hasPrediction ? "Reprever" : "Prever"}
+    </Button>
+  )
+
   return (
     <div className="flex flex-col items-stretch gap-2">
-      <Button size="sm" onClick={runPredict} disabled={predicting} className="gap-1.5">
-        {predicting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-        {predicting ? "Estimando…" : hasPrediction ? "Reprever" : "Prever"}
-      </Button>
+      {gate ? (
+        <GenerationGate readiness={gate} stretch>
+          {predictButton}
+        </GenerationGate>
+      ) : (
+        predictButton
+      )}
       {hasPrediction && (
         <Button
           variant={alreadyApplied ? "ghost" : "secondary"}

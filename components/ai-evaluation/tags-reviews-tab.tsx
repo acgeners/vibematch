@@ -13,6 +13,7 @@ import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
 import { QueueToolbar, QueueSortSelect } from "@/components/ai-evaluation/queue/queue-toolbar"
 import { useWorkSelection } from "@/components/ai-evaluation/queue/use-work-selection"
 import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
+import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
 
 /** Obra da aba unificada — união dos universos "sem reviews" e "sem tags". */
 export interface TagsReviewsWork {
@@ -23,6 +24,8 @@ export interface TagsReviewsWork {
   personalStatusId: number | null
   interest: string | null
   canonicalPresent: boolean
+  /** Prontidão da inferência de tags (checkInferTags → UI); gate/selo no card. */
+  readiness?: UiReadiness | null
   inGolden: boolean
   expectedScore: number | null
   /** Entrou por falta de reviews (faixa de reviews úteis). */
@@ -161,9 +164,10 @@ export function TagsReviewsTab({
 
             // Chip só p/ estados não óbvios; os gaps aparecem no 🏷/💬 (âmbar) do card.
             // Não exibe o marcador de teste/golden pilot nesta aba.
-            const state: WorkQueueState | null = !w.canonicalPresent
-              ? { label: "sem sinopse", tone: "rose" }
-              : null
+            // Gate REAL da inferência (sinopse ≥80 chars, canônica OU bruta) —
+            // não só presença da canônica (o chip antigo mentia pros dois lados).
+            const state: WorkQueueState | null =
+              w.readiness && !w.readiness.ready ? { label: "sinopse curta", tone: "rose" } : null
 
             // "Editar obra" na coluna esquerda (abaixo das infos): botão outline
             // compacto — claramente clicável, mas secundário às ações de IA.
@@ -180,7 +184,7 @@ export function TagsReviewsTab({
             const actions = (
               <>
                 <ReviewRowAction workId={w.id} />
-                <TagRowAction workId={w.id} />
+                <TagRowAction workId={w.id} readiness={w.readiness} />
               </>
             )
 

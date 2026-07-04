@@ -271,6 +271,7 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
                 workId={w.id}
                 hasPrediction={w.predictedQuality != null}
                 alreadyApplied={alreadyApplied}
+                readiness={w.readiness}
                 isPaid={isPaid}
               />
             </>
