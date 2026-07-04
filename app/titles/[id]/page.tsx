@@ -636,7 +636,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 </span>
               )}
             </div>
-            {work.calculated_scores?.expected_score != null && (
+            {work.calculated_scores?.expected_score != null ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   {work.user_score != null ? "Prevista / Real" : "Nota Prevista"}
@@ -664,6 +664,18 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     thresholds={scoreThresholds?.expected}
                   />
                 )}
+              </div>
+            ) : (
+              // Sem os 9 atributos IA → expected_score é null (não existe nota
+              // "parcial"). Mostra "—" no mesmo slot em vez de sumir, espelhando o
+              // fallback do Interesse ao lado.
+              <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Nota Prevista
+                </span>
+                <span title="Aparece após a avaliação IA dos atributos da obra">
+                  <ScoreBadge score={null} size="md" />
+                </span>
               </div>
             )}
           </div>
@@ -892,7 +904,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 <Calculator className="h-4.5 w-4.5 text-muted-foreground" />
                 <CardTitle className="text-base font-bold text-foreground">Notas calculadas</CardTitle>
               </div>
-              {work.calculated_scores?.expected_score != null && (
+              {work.calculated_scores?.expected_score != null ? (
                 <TooltipProvider delayDuration={150}>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -914,6 +926,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
+              ) : (
+                // Sem os 9 atributos IA não há Nota Prevista real (ver expected.ts /
+                // gate no recalc). Estado explícito no lugar do número oculto.
+                <div className="text-right shrink-0" title="Aparece após a avaliação IA dos atributos da obra">
+                  <p className="text-xs font-medium text-muted-foreground">Nota Prevista</p>
+                  <p className="text-3xl font-black font-mono leading-none text-muted-foreground">—</p>
+                  <p className="text-xs text-muted-foreground">após avaliação IA</p>
+                </div>
               )}
             </div>
           </CardHeader>

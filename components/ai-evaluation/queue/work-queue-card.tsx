@@ -120,11 +120,20 @@ export function WorkQueueCard({
       )}
     >
       <CardContent className="p-3.5">
-        {expectedScore != null && (
-          <span title="Nota prevista" className="absolute top-3.5 right-3.5 z-10">
-            <ScoreBadge score={expectedScore} size="lg" />
-          </span>
-        )}
+        {/* Slot da nota (canto sup. dir.). Com nota → pílula colorida; sem nota
+            (obra sem os 9 atributos IA → expected_score null) → o "—" cinza que o
+            ScoreBadge já renderiza pra valor nulo, com tooltip do que a destrava.
+            Sempre presente pra o slot não ficar vazio (o título reserva pr-14). */}
+        <span
+          title={
+            expectedScore != null
+              ? "Nota prevista"
+              : "Sem Nota Prevista ainda — aparece após a avaliação IA dos atributos da obra"
+          }
+          className="absolute top-3.5 right-3.5 z-10"
+        >
+          <ScoreBadge score={expectedScore} size="lg" />
+        </span>
 
         <div className="flex items-start gap-4">
           {selectable && (

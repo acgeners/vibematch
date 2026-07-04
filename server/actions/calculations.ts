@@ -980,6 +980,21 @@ export function computeRecalc(input: RecalcComputeInput) {
   for (let i = 0; i < works.length; i++) {
     const p = expectedPredictions[i]
     const w = works[i]
+    // Nota Prevista SÓ existe quando os 9 atributos da IA estão presentes. Sem
+    // eles, os features dominantes do Ridge (category_scores + IA(n) + criterionFit)
+    // são median-imputados e a predição colapsa no calc_score (média do público) →
+    // uma nota "parcial" que não reflete previsão nenhuma (ex.: 3.1 numa obra sem
+    // avaliação). Nesses casos deixamos expected_score = null: some de todas as
+    // telas (badges gateiam em `expected_score != null`; o ranking joga essas
+    // obras pro fim via -Infinity). Presença é source-independente (IA/import/manual).
+    const hasAiAttributes = CRITERION_SLUGS.every((slug) => w.categoryScores[slug] != null)
+    if (!hasAiAttributes) {
+      w.expectedScore = null
+      w.expectedBaseline = null
+      w.expectedQualityAdj = null
+      w.expectedIsStub = expectedPredictor.isStub
+      continue
+    }
     // Blend com o calc determinístico (sem obs), depois aplica obs UMA vez.
     const blendedNoObs = calcBlendWeight * p.expected + (1 - calcBlendWeight) * w.calcScoreNoObs
     // observation_adjustment é um nudge manual DETERMINÍSTICO (±0.30) somado sobre
