@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { StatCard } from "@/components/settings/stat-card"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import { useRefresh } from "@/lib/use-refresh"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
 import {
   consolidatePendingSynopses,
   type ConsolidateSynopsesProgress,
@@ -26,8 +27,11 @@ export function SynopsisConsolidationPanel({
   const [isPending, startTransition] = useTransition()
   const [lastResult, setLastResult] = useState<ConsolidateSynopsesProgress | null>(null)
   const refresh = useRefresh()
+  const confirmCost = useCostConfirm()
 
-  const handleRun = () => {
+  const handleRun = async () => {
+    const scale = Math.min(pendingCount, 10)
+    if (!(await confirmCost({ action: "consolidate_synopsis", scale }))) return
     startTransition(async () => {
       try {
         const result = await consolidatePendingSynopses(10)
@@ -77,7 +81,7 @@ export function SynopsisConsolidationPanel({
         </div>
         <Button
           type="button"
-          onClick={handleRun}
+          onClick={() => void handleRun()}
           disabled={isPending || pendingCount === 0}
           className={ACCENT_BUTTON[accent]}
         >

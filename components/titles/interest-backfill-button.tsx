@@ -6,6 +6,7 @@ import { Loader2, Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useRefresh } from "@/lib/use-refresh"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { planInterestBackfillForIds, runSynopsisInterestBatchAction } from "@/server/actions/synopsis-quality"
 import type { SynopsisQueueWork } from "@/server/queries/recommendations"
 
@@ -22,6 +23,7 @@ const CHUNK = 100
  */
 export function InterestBackfillButton({ works, isPaid = true }: { works: SynopsisQueueWork[]; isPaid?: boolean }) {
   const refresh = useRefresh()
+  const confirmCost = useCostConfirm()
   const [running, setRunning] = useState(false)
   if (!isPaid) return null
 
@@ -71,31 +73,34 @@ export function InterestBackfillButton({ works, isPaid = true }: { works: Synops
   const onClick = async () => {
     if (running) return
     setRunning(true)
-    try {
-      const plan = await planInterestBackfillForIds(works.map((w) => w.id))
-      if (plan.status !== "ok") {
-        toast.error("message" in plan ? plan.message : plan.error)
-        return
-      }
-      if (plan.needCalls === 0) {
-        toast.success(
-          `Nada a reprocessar — as ${plan.total} obras do filtro atual já estão frescas. (Flag ligada? Ajuste os filtros.)`,
-        )
-        return
-      }
-      const mins = Math.max(1, Math.round((plan.needCalls * 10) / 3 / 60))
-      const cap = Math.max(plan.upperBoundUsd, 0.01)
-      toast(
-        `Backfill de Interesse (respeita os filtros): ${plan.needCalls} obra(s) a prever (de ${plan.total} exibidas). ` +
-          `~$${plan.likelyUsd.toFixed(2)} provável / até $${plan.upperBoundUsd.toFixed(2)} · ~${mins} min.`,
-        {
-          duration: 20000,
-          action: { label: "Reprocessar", onClick: () => void runLoop(plan.targetIds, cap) },
-        },
-      )
-    } finally {
-      setRunning(false)
+    const plan = await planInterestBackfillForIds(works.map((w) => w.id)).finally(() =>
+      setRunning(false),
+    )
+    if (plan.status !== "ok") {
+      toast.error("message" in plan ? plan.message : plan.error)
+      return
     }
+    if (plan.needCalls === 0) {
+      toast.success(
+        `Nada a reprocessar — as ${plan.total} obras do filtro atual já estão frescas. (Flag ligada? Ajuste os filtros.)`,
+      )
+      return
+    }
+    const cap = Math.max(plan.upperBoundUsd, 0.01)
+    const ok = await confirmCost({
+      estimate: {
+        likelyUsd: plan.likelyUsd,
+        upperBoundUsd: plan.upperBoundUsd,
+        etaSeconds: (plan.needCalls * 10) / 3,
+        model: "claude-sonnet-4-6",
+        background: false,
+        scale: plan.needCalls,
+      },
+      title: `Reprocessar Interesse — ${plan.needCalls} obra(s)?`,
+      description: `Respeita os filtros: ${plan.needCalls} a prever (de ${plan.total} exibidas). Pula as já frescas.`,
+      confirmLabel: "Reprocessar",
+    })
+    if (ok) void runLoop(plan.targetIds, cap)
   }
 
   return (

@@ -15,6 +15,7 @@ import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
 import { QueueToolbar, QueueSortSelect } from "@/components/ai-evaluation/queue/queue-toolbar"
 import { useWorkSelection } from "@/components/ai-evaluation/queue/use-work-selection"
 import { InterestBackfillButton } from "@/components/titles/interest-backfill-button"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
 import {
   planSynopsisInterestBatchAction,
   runSynopsisInterestBatchAction,
@@ -54,6 +55,7 @@ function needsPrediction(w: SynopsisQueueWork): boolean {
 export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { works: SynopsisQueueWork[]; readIds?: string[]; isPaid?: boolean }) {
   const refresh = useRefresh()
   const { isRead, unmark } = useToggleRead("interesse", readIds)
+  const confirmCost = useCostConfirm()
   const [sortField, setSortField] = useState<SortField>("default")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [batchRunning, setBatchRunning] = useState(false)
@@ -127,40 +129,41 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
     }
   }
 
-  // Fluxo: DRY-RUN obrigatório → mostra contagens + custo → confirmação única → execução.
+  // Fluxo: DRY-RUN obrigatório → popup de custo com os números REAIS do plano →
+  // confirmação única → execução.
   const predictSelected = async () => {
     const batchIds = selection.selectedIds
     if (batchIds.length === 0 || batchRunning) return
     setBatchRunning(true)
-    try {
-      const planned = await planSynopsisInterestBatchAction(batchIds)
-      if (planned.status !== "ok") {
-        toast.error("message" in planned ? planned.message : planned.error)
-        return
-      }
-      const p = planned.plan
-      const needCalls = p.stale + p.absent
-      if (needCalls === 0) {
-        toast.success("As obras selecionadas já estão atualizadas — nada a estimar.")
-        return
-      }
-      const profileNote = p.needsProfile ? " · inclui gerar/atualizar o perfil" : ""
-      const maxCostUsd = Math.max(p.upperBoundUsd, 0.01)
-      toast(
-        `Lote: ${needCalls} previsão(ões)${profileNote}. Custo ~$${p.likelyUsd.toFixed(3)} (provável) / até $${p.upperBoundUsd.toFixed(3)}.`,
-        {
-          duration: 15000,
-          action: {
-            label: "Executar",
-            onClick: () => {
-              void executeBatch(batchIds, maxCostUsd)
-            },
-          },
-        },
-      )
-    } finally {
-      setBatchRunning(false)
+    const planned = await planSynopsisInterestBatchAction(batchIds).finally(() =>
+      setBatchRunning(false),
+    )
+    if (planned.status !== "ok") {
+      toast.error("message" in planned ? planned.message : planned.error)
+      return
     }
+    const p = planned.plan
+    const needCalls = p.stale + p.absent
+    if (needCalls === 0) {
+      toast.success("As obras selecionadas já estão atualizadas — nada a estimar.")
+      return
+    }
+    const profileNote = p.needsProfile ? " Inclui gerar/atualizar o seu perfil de gosto." : ""
+    const maxCostUsd = Math.max(p.upperBoundUsd, 0.01)
+    const ok = await confirmCost({
+      estimate: {
+        likelyUsd: p.likelyUsd,
+        upperBoundUsd: p.upperBoundUsd,
+        etaSeconds: needCalls * 15,
+        model: "claude-sonnet-4-6",
+        background: false,
+        scale: needCalls,
+      },
+      title: `Prever Interesse — ${needCalls} obra(s)?`,
+      description: `Dry-run real: ${needCalls} previsão(ões), uma chamada Sonnet por obra.${profileNote}`,
+      confirmLabel: "Executar",
+    })
+    if (ok) void executeBatch(batchIds, maxCostUsd)
   }
 
   if (works.length === 0) {

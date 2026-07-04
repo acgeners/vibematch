@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 import { GenerationGate } from "@/components/generation/generation-gate"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
 import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
 
 interface RerankAiRkButtonProps {
@@ -36,6 +37,7 @@ interface RerankAiRkButtonProps {
 export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "sparkles", readiness }: RerankAiRkButtonProps) {
   const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
+  const confirmCost = useCostConfirm()
   const Icon = icon === "rotate" ? RotateCw : Sparkles
   const gate = readiness ?? null
   const blocked = gate ? !gate.ready : false
@@ -63,7 +65,8 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "spar
     )
   }
 
-  const run = () => {
+  const run = async () => {
+    if (!(await confirmCost({ action: "rerank_single" }))) return
     startTransition(async () => {
       const result = await rerankSingleWorkAction(workId)
       if (result.error) {
@@ -79,7 +82,7 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "spar
   }
 
   const button = (
-    <Button size="sm" onClick={run} disabled={isPending || blocked} title={blockTitle} className={cn("gap-1.5", gate && "w-full")}>
+    <Button size="sm" onClick={() => void run()} disabled={isPending || blocked} title={blockTitle} className={cn("gap-1.5", gate && "w-full")}>
       {isPending ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
       ) : (

@@ -11,6 +11,7 @@ import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
 import { formatRelativeDateTime } from "@/lib/date-utils"
 import { useRefresh } from "@/lib/use-refresh"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { generateWorkReviewDigest } from "@/server/actions/review-digest"
 import type { ReviewDigest } from "@/lib/ai-recommendation/types"
 import type { WorkReviewsSnapshot } from "@/server/queries/work-reviews"
@@ -68,9 +69,11 @@ function ratingColor(rating: number | null): string {
 export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
   const [expanded, setExpanded] = useState(false)
   const refresh = useRefresh()
+  const confirmCost = useCostConfirm()
   const [generating, startGenerate] = useTransition()
 
-  const runGenerate = (force: boolean) => {
+  const runGenerate = async (force: boolean) => {
+    if (!(await confirmCost({ action: "review_digest" }))) return
     startGenerate(async () => {
       const res = await generateWorkReviewDigest(workId, { force })
       if (!res.ok) {
@@ -243,7 +246,7 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
                 variant="ghost"
                 className="h-6 gap-1 px-2 text-[11px] text-muted-foreground"
                 disabled={generating}
-                onClick={() => runGenerate(true)}
+                onClick={() => void runGenerate(true)}
                 title="Regenera o digest a partir das reviews atuais (custo Sonnet ~$0,02–0,05)"
               >
                 {generating ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
@@ -265,7 +268,7 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
               variant="outline"
               className="h-7 gap-1.5 text-xs"
               disabled={generating}
-              onClick={() => runGenerate(false)}
+              onClick={() => void runGenerate(false)}
               title="Gera o digest a partir das reviews (custo Sonnet ~$0,02–0,05)"
             >
               {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}

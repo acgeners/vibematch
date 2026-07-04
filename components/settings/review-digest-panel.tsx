@@ -9,6 +9,7 @@ import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import { useRefresh } from "@/lib/use-refresh"
 import { runTask } from "@/lib/tasks-store"
 import { useAppTasks } from "@/components/tasks/use-app-tasks"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
 import {
   consolidatePendingReviewDigests,
   type ConsolidateReviewDigestsProgress,
@@ -28,12 +29,23 @@ export function ReviewDigestPanel({ accent }: ReviewDigestPanelProps) {
   const [lastResult, setLastResult] = useState<ConsolidateReviewDigestsProgress | null>(null)
   const refresh = useRefresh()
   const tasks = useAppTasks()
+  const confirmCost = useCostConfirm()
   const isPending = tasks.some((t) => t.id === "digest" && t.status === "running")
 
   // Roda em segundo plano via store global: aparece no indicador, você pode sair
   // das configurações enquanto processa. `consolidatePendingReviewDigests` resolve
   // com { error } | { data } (não lança), então o sucesso/erro vem no onDone.
-  const handleRun = () => {
+  const handleRun = async () => {
+    // Processa até 10 pendentes por clique — estima pelo teto do lote.
+    if (
+      !(await confirmCost({
+        action: "review_digest",
+        scale: 10,
+        title: "Gerar digests pendentes (até 10 obras)?",
+      }))
+    ) {
+      return
+    }
     runTask({
       id: "digest",
       kind: "digest",
@@ -83,7 +95,7 @@ export function ReviewDigestPanel({ accent }: ReviewDigestPanelProps) {
         </div>
         <Button
           type="button"
-          onClick={handleRun}
+          onClick={() => void handleRun()}
           disabled={isPending}
           className={ACCENT_BUTTON[accent]}
         >

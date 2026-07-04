@@ -4,7 +4,7 @@ import { useState, useTransition } from "react"
 import { ChartNoAxesCombined, Loader2, ScanSearch } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { runBiasReportAction, runCalibrationAuditAction } from "@/server/actions/calibration"
 import { formatRelativeDateTime } from "@/lib/date-utils"
 import type { CalibrationRunRow } from "@/lib/ai-calibration/types"
@@ -15,25 +15,29 @@ interface CalibrationTriggerCardsProps {
   ratedWorksCount: number
 }
 
-function estimateAuditCost(nWorks: number): string {
-  // ~0.0015 USD por obra com cache. Ajuste empírico.
-  const usd = nWorks * 0.0015
-  return usd < 0.05 ? "<$0.05" : `~$${usd.toFixed(2)}`
-}
-
 export function CalibrationTriggerCards({
   lastAudit,
   lastBias,
   ratedWorksCount,
 }: CalibrationTriggerCardsProps) {
-  const [auditConfirmOpen, setAuditConfirmOpen] = useState(false)
-  const [biasConfirmOpen, setBiasConfirmOpen] = useState(false)
   const [auditPending, startAudit] = useTransition()
   const [biasPending, startBias] = useTransition()
   const [auditMsg, setAuditMsg] = useState<string | null>(null)
   const [biasMsg, setBiasMsg] = useState<string | null>(null)
+  const confirmCost = useCostConfirm()
 
-  const handleAudit = () => {
+  const handleAudit = async () => {
+    if (
+      !(await confirmCost({
+        action: "calibration_audit",
+        scale: ratedWorksCount,
+        title: "Rodar auditoria de critérios?",
+        description: `Analisa ${ratedWorksCount} obras com nota pessoal e sugere ajustes. Scores com source "manual" ou "ai_edited" não são tocados.`,
+        confirmLabel: "Rodar",
+      }))
+    ) {
+      return
+    }
     setAuditMsg(null)
     startAudit(async () => {
       const res = await runCalibrationAuditAction()
@@ -47,7 +51,17 @@ export function CalibrationTriggerCards({
     })
   }
 
-  const handleBias = () => {
+  const handleBias = async () => {
+    if (
+      !(await confirmCost({
+        action: "bias_report",
+        title: "Gerar relatório de viés?",
+        description: "Análise agregada usando estatísticas e exemplos de outliers. Não altera scores.",
+        confirmLabel: "Gerar",
+      }))
+    ) {
+      return
+    }
     setBiasMsg(null)
     startBias(async () => {
       const res = await runBiasReportAction()
@@ -59,11 +73,8 @@ export function CalibrationTriggerCards({
     })
   }
 
-  const cost = estimateAuditCost(ratedWorksCount)
-
   return (
-    <>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -91,7 +102,7 @@ export function CalibrationTriggerCards({
             </div>
             <Button
               size="sm"
-              onClick={() => setAuditConfirmOpen(true)}
+              onClick={() => void handleAudit()}
               disabled={auditPending || ratedWorksCount === 0}
             >
               {auditPending ? (
@@ -127,7 +138,7 @@ export function CalibrationTriggerCards({
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => setBiasConfirmOpen(true)}
+              onClick={() => void handleBias()}
               disabled={biasPending || ratedWorksCount === 0}
             >
               {biasPending ? (
@@ -140,25 +151,6 @@ export function CalibrationTriggerCards({
             {biasMsg && <p className="text-xs text-foreground/80">{biasMsg}</p>}
           </CardContent>
         </Card>
-      </div>
-
-      <ConfirmDialog
-        open={auditConfirmOpen}
-        onOpenChange={setAuditConfirmOpen}
-        title="Rodar auditoria de critérios?"
-        description={`Vai analisar ${ratedWorksCount} obras com nota pessoal e gerar sugestões de ajuste. Custo estimado: ${cost}. Scores com source "manual" ou "ai_edited" não são tocados.`}
-        confirmText="Rodar"
-        onConfirm={handleAudit}
-      />
-
-      <ConfirmDialog
-        open={biasConfirmOpen}
-        onOpenChange={setBiasConfirmOpen}
-        title="Gerar relatório de viés?"
-        description="Análise agregada usando estatísticas e exemplos de outliers. Custo estimado: ~$0.05. Não altera scores."
-        confirmText="Gerar"
-        onConfirm={handleBias}
-      />
-    </>
+    </div>
   )
 }
