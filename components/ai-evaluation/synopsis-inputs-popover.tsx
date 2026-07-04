@@ -96,9 +96,9 @@ export function SynopsisInputsPopover({ workId }: { workId: string }) {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
-          <Info className="h-3 w-3" /> Informações sobre a obra
+          <Info className="h-4 w-4" /> Informações sobre a obra
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="max-h-[36rem] w-[550px] max-w-[95vw] overflow-y-auto text-xs p-4 shadow-xl border border-border/80 bg-popover">

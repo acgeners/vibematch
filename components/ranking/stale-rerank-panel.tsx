@@ -238,7 +238,7 @@ export function StaleRerankPanel({
 
           const details = w.alignmentAt ? (
             <p className="text-xs text-muted-foreground mt-1">
-              última avaliação em {fmtAlignmentAt(w.alignmentAt)}
+              Última avaliação em {fmtAlignmentAt(w.alignmentAt)}
             </p>
           ) : null
 

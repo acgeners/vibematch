@@ -18,7 +18,8 @@ import { cn } from "@/lib/utils"
 import { StaleRerankPanel } from "@/components/ranking/stale-rerank-panel"
 import { SynopsisPredictPanel } from "@/components/titles/synopsis-predict-panel"
 import { ShadowComparePanel } from "@/components/titles/shadow-compare-panel"
-import { SynopsisAccuracyBar } from "@/components/titles/synopsis-accuracy-bar"
+import { PredictionDiagnosticsPopover } from "@/components/titles/prediction-diagnostics-popover"
+import { isInterestShadowEnabled } from "@/lib/ai-evaluation/compiled-preferences"
 import { getAlignmentQueueWorks, getSynopsisQueueWorks, getSynopsisPredictionVersions, getUntrackedWorks } from "@/server/queries/recommendations"
 import type { AlignmentQueueWork, SynopsisQueueWork, UntrackedWork } from "@/server/queries/recommendations"
 import { UntrackedStatusPanel } from "@/components/ai-evaluation/untracked-status-panel"
@@ -741,8 +742,15 @@ function SynopsisTab({
 }) {
   return (
     <div className="space-y-4">
-      <SynopsisAccuracyBar accuracy={accuracy} comparison={comparison} />
-      <ShadowComparePanel />
+      {/* Diagnóstico da previsão (confiança/versões/Shadow A/B) fora do topo: pílula
+          discreta que abre um popover. O Shadow é server-only → passado como prop. */}
+      <div className="flex justify-start">
+        <PredictionDiagnosticsPopover
+          accuracy={accuracy}
+          comparison={comparison}
+          shadow={isInterestShadowEnabled() ? <ShadowComparePanel comparison={comparison} /> : null}
+        />
+      </div>
       <AiEvaluationFilters
         activeFilters={[]}
         currentModel={MODEL}
