@@ -67,3 +67,33 @@ describe("toUiReadiness · Interesse", () => {
     expect(r.confidence).toBe("média")
   })
 })
+
+const uiV = (s: WorkReadinessSnapshot) =>
+  toUiReadiness("run_alignment", buildPlan("run_alignment", s), s)
+
+describe("toUiReadiness · Veredito (run_alignment, sem inputs no contrato)", () => {
+  it("perfil ok + 9 attrs + sinopse + digest → ready, alta", () => {
+    const r = uiV(snap({ categoryScoresAiCount: 9 }))
+    expect(r.ready).toBe(true)
+    expect(r.weakening).toHaveLength(0)
+    expect(r.confidence).toBe("alta")
+  })
+
+  it("perfil stub → bloqueia (HARD de UI, fora do contrato)", () => {
+    const r = uiV(snap({ categoryScoresAiCount: 9, tasteProfile: { present: true, isStub: true, stale: false } }))
+    expect(r.ready).toBe(false)
+    expect(r.blocking.some((b) => b.dataKey === "taste_profile")).toBe(true)
+  })
+
+  it("sem perfil → bloqueia", () => {
+    const r = uiV(snap({ categoryScoresAiCount: 9, tasteProfile: { present: false, isStub: false, stale: false } }))
+    expect(r.ready).toBe(false)
+  })
+
+  it("sem avaliação IA (attrs<9) → âmbar (importa), confiança média", () => {
+    const r = uiV(snap({ categoryScoresAiCount: 0 }))
+    expect(r.ready).toBe(true)
+    expect(r.weakening.some((i) => i.dataKey === "category_scores_ai")).toBe(true)
+    expect(r.confidence).toBe("média")
+  })
+})

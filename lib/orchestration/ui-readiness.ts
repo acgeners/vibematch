@@ -83,12 +83,23 @@ interface ExtraSoftInput {
   present: (s: WorkReadinessSnapshot) => boolean
 }
 
+/** Bloqueio HARD expresso na UI (fora do contrato de execução) — ex.: o Veredito
+ *  exige perfil não-stub, mas `run_alignment` tem inputs:[] no contrato. */
+interface ExtraBlockingInput {
+  dataKey: DataKey
+  present: (s: WorkReadinessSnapshot) => boolean
+  instruction: string
+  label?: string
+}
+
 interface GeneratorUi {
   label: string
   /** Impacto de cada input opcional-com-fallback do contrato (default "ajuda"). */
   inputImpact?: Partial<Record<DataKey, InputImpact>>
   /** Inputs opcionais de UI, fora do contrato de execução. */
   extraSoft?: ExtraSoftInput[]
+  /** Bloqueios HARD de UI, fora do contrato de execução. */
+  extraBlocking?: ExtraBlockingInput[]
 }
 
 /**
@@ -117,6 +128,41 @@ export const GENERATOR_UI: Partial<Record<ActionName, GeneratorUi>> = {
       },
     ],
   },
+  run_alignment: {
+    label: "Veredito IA",
+    // O contrato `run_alignment` tem inputs:[] (motor não modela). Tudo aqui.
+    extraBlocking: [
+      {
+        // Único HARD: o ranker erra de cara com perfil stub.
+        dataKey: "taste_profile",
+        label: "perfil de gosto",
+        present: (s) => s.tasteProfile.present && !s.tasteProfile.isStub,
+        instruction: "Gere seu perfil de gosto (avalie ≥10 obras) antes do Veredito.",
+      },
+    ],
+    extraSoft: [
+      {
+        // Sem os 9 atributos o veredito se apoia só em título/tags/perfil — fraco.
+        // (expected_score é null exatamente quando attrs<9, então não o listo à parte.)
+        dataKey: "category_scores_ai",
+        impact: "importa",
+        hint: "sem a avaliação IA o veredito se baseia só em título/tags/perfil",
+        present: (s) => s.categoryScoresAiCount >= 9,
+      },
+      {
+        dataKey: "canonical_synopsis",
+        impact: "ajuda",
+        hint: "a sinopse afina o veredito",
+        present: (s) => s.canonical.present || s.rawSynopsisCount > 0,
+      },
+      {
+        dataKey: "review_digest",
+        impact: "ajuda",
+        hint: "reviews afinam o veredito",
+        present: (s) => s.digest.present || s.summary.present,
+      },
+    ],
+  },
 }
 
 /**
@@ -136,6 +182,16 @@ export function toUiReadiness(
     label: labelFor(b.dataKey),
     instruction: b.instruction,
   }))
+
+  // Bloqueios HARD de UI (fora do contrato) — ex.: perfil não-stub p/ Veredito.
+  for (const eb of ui.extraBlocking ?? []) {
+    if (eb.present(snapshot)) continue
+    blocking.push({
+      dataKey: eb.dataKey,
+      label: eb.label ?? labelFor(eb.dataKey),
+      instruction: eb.instruction,
+    })
+  }
 
   const weakening: UiReadinessItem[] = []
   const softMissing: UiReadinessItem[] = []
