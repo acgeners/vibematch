@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useRef, useState, useSyncExternalStore } from "react"
+import type { MouseEvent as ReactMouseEvent } from "react"
 import { createPortal } from "react-dom"
 
 const noopSubscribe = () => () => {}
@@ -33,6 +34,11 @@ export function WorkTitleLink({ title, workId, preview, href, className, childre
   const mounted = useSyncExternalStore(noopSubscribe, getClientSnapshot, getServerSnapshot)
   const enterTimer = useRef<number | null>(null)
   const fetching = useRef(false)
+  // Latest cursor position over the link. Title links are full-width blocks
+  // (`line-clamp`/`block`), so the element rect spans the whole column and its
+  // right edge sits far from the visible text — we anchor the preview at the
+  // cursor X instead, keeping it next to what the user is actually pointing at.
+  const mouse = useRef({ x: 0, y: 0 })
 
   const canHover = Boolean(preview || workId)
 
@@ -52,18 +58,26 @@ export function WorkTitleLink({ title, workId, preview, href, className, childre
       })
   }
 
-  const onEnter = () => {
+  const onEnter = (e: ReactMouseEvent<HTMLAnchorElement>) => {
     if (!canHover) return
+    mouse.current = { x: e.clientX, y: e.clientY }
     // Kick off the fetch immediately so it's likely ready by the time the
     // delay expires. The popup itself still waits 280ms to avoid flicker.
     startFetch()
     if (enterTimer.current) window.clearTimeout(enterTimer.current)
     enterTimer.current = window.setTimeout(() => {
       if (ref.current) {
-        setRect(ref.current.getBoundingClientRect())
+        const r = ref.current.getBoundingClientRect()
+        // Zero-width rect at the cursor X, spanning the link's vertical extent —
+        // the preview flies out beside the cursor, not the far column edge.
+        setRect(new DOMRect(mouse.current.x, r.top, 0, r.height))
         setHovered(true)
       }
     }, 280)
+  }
+
+  const onMove = (e: ReactMouseEvent<HTMLAnchorElement>) => {
+    mouse.current = { x: e.clientX, y: e.clientY }
   }
 
   const onLeave = () => {
@@ -83,6 +97,7 @@ export function WorkTitleLink({ title, workId, preview, href, className, childre
         ref={ref}
         href={finalHref}
         onMouseEnter={onEnter}
+        onMouseMove={onMove}
         onMouseLeave={onLeave}
         className={linkClassName}
       >

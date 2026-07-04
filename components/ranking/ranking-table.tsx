@@ -414,10 +414,22 @@ function renderCell(
         alignment={entry.alignmentScore}
       />
     )
-  if (col.key === "expected")
+  if (col.key === "expected") {
+    const expectedBadge = (
+      <ScoreBadge score={entry.expectedScore} size="sm" showStub={entry.expectedIsStub} thresholds={scoreThresholds?.expected} />
+    )
     return (
       <span className="inline-flex items-center gap-1">
-        <ScoreBadge score={entry.expectedScore} size="sm" showStub={entry.expectedIsStub} thresholds={scoreThresholds?.expected} />
+        {entry.expectedScore == null ? (
+          // Caso nulo: obra sem os 9 atributos da IA ainda não tem Nota Prevista.
+          // ScoreBadge não aceita title no estado "—", então o wrapper carrega o
+          // tooltip nativo (mesmo texto do card da fila e da página da obra).
+          <span title="Sem Nota Prevista ainda — aparece após a avaliação IA dos atributos da obra">
+            {expectedBadge}
+          </span>
+        ) : (
+          expectedBadge
+        )}
         {entry.lowCoverage && (
           <AlertTriangle
             className="h-3 w-3 text-amber-500"
@@ -426,6 +438,7 @@ function renderCell(
         )}
       </span>
     )
+  }
   if (col.key === "personal_fit")
     return <AlignmentCell value={entry.personalFit} percentile={entry.personalFitPercentile} showBar={false} />
   if (col.key === "alignment_score")
@@ -442,7 +455,7 @@ function renderCell(
       mode: colorMode,
       range: criterionPrefs?.[slug] ?? null,
     })
-    return <span className={cn("font-mono text-sm", textClass)}>{Math.ceil(score)}</span>
+    return <span className={cn("font-mono text-sm", textClass, "font-bold")}>{Math.ceil(score)}</span>
   }
   return null
 }
