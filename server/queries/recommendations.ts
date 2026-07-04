@@ -15,6 +15,9 @@ import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { CandidateWorkInput, RatedWorkInput, RecommendationMode, ReviewDigest } from "@/lib/ai-recommendation/types"
 import { getRanking, type RankingFilters } from "@/server/queries/ranking"
 import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
+import { buildPlan } from "@/lib/orchestration"
+import { loadWorkReadinessSnapshots } from "@/lib/orchestration/integrations/readiness-loader"
+import { toUiReadiness, type UiReadiness } from "@/lib/orchestration/ui-readiness"
 
 const POST_SCORE_FIELDS = [
   "post_story_score",
@@ -650,6 +653,9 @@ export interface SynopsisQueueWork {
   /** #tags e #reviews úteis (hidratados na aba ativa) — pro badge e o filtro de "dados suficientes". */
   tagCount?: number
   reviewCount?: number
+  /** Prontidão do gerador de Interesse (motor de orquestração → UI). Anexada só
+   *  na fila EXIBIDA (não no countOnly). null quando o cálculo falhou. */
+  readiness?: UiReadiness | null
 }
 
 /**
@@ -846,6 +852,29 @@ export async function getSynopsisQueueWorks(opts: {
     return result
   }
 
+  // Anexa a prontidão do gerador de Interesse (motor → UI) só na fila EXIBIDA
+  // (pulada no countOnly, que só usa `.length`). Não-fatal: sem readiness a fila
+  // ainda funciona (só sem selo/gate). 1 batch de queries só-id (sem texto).
+  const withReadiness = async (list: SynopsisQueueWork[]): Promise<SynopsisQueueWork[]> => {
+    if (opts.countOnly || list.length === 0) return list
+    try {
+      const snaps = await loadWorkReadinessSnapshots(list.map((w) => w.id), { supabase })
+      for (const w of list) {
+        const snap = snaps.get(w.id)
+        if (snap) {
+          w.readiness = toUiReadiness(
+            "predict_interest_potential",
+            buildPlan("predict_interest_potential", snap),
+            snap,
+          )
+        }
+      }
+    } catch (err) {
+      console.warn("[getSynopsisQueueWorks] readiness falhou:", err instanceof Error ? err.message : err)
+    }
+    return list
+  }
+
   // Hidrata `justification` (deixada fora do lote de previsões) SÓ das obras
   // exibidas que têm previsão ativa — 1 fetch direcionado pelo `id` da linha ativa.
   // Assim o texto (≈72% do payload) só trafega pras que aparecem; na aba padrão
@@ -906,7 +935,7 @@ export async function getSynopsisQueueWorks(opts: {
       data = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando obras sem Interesse manual")
     }
     await hydrateJustifications(data.map((w) => w.id as string))
-    return postFilter(data.map((w) => mapWork(w)))
+    return withReadiness(postFilter(data.map((w) => mapWork(w))))
   }
 
   // Scan ÚNICO das obras-com-canônica (filtros em SQL) + classificação por estado
@@ -948,7 +977,7 @@ export async function getSynopsisQueueWorks(opts: {
     displayed.push(row)
   }
   await hydrateJustifications(displayed.map((r) => r.id as string))
-  return postFilter(displayed.map((row) => mapWork(row)))
+  return withReadiness(postFilter(displayed.map((row) => mapWork(row))))
 }
 
 /** Versões de prompt distintas presentes em synopsis_quality_predictions (mais nova primeiro). */

@@ -22,15 +22,18 @@ export function GenerationGate({
   readiness,
   children,
   showSeal = true,
+  stretch = false,
   className,
 }: {
   readiness: UiReadiness
   children: ReactNode
   showSeal?: boolean
+  /** Filhos ocupam a largura toda (trilhos de ação); default = largura natural. */
+  stretch?: boolean
   className?: string
 }) {
   return (
-    <div className={cn("flex flex-col items-start gap-1.5", className)}>
+    <div className={cn("flex flex-col gap-1.5", stretch ? "items-stretch" : "items-start", className)}>
       {readiness.ready ? (
         children
       ) : (
@@ -39,7 +42,7 @@ export function GenerationGate({
             {/* span-trigger: o botão desabilitado não dispara eventos de hover;
                 o span por fora garante que o tooltip apareça. */}
             <TooltipTrigger asChild>
-              <span className="inline-flex cursor-not-allowed">{children}</span>
+              <span className={cn("inline-flex cursor-not-allowed", stretch && "w-full")}>{children}</span>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-xs text-left leading-relaxed">
               <p className="font-semibold">
