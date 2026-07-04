@@ -160,11 +160,10 @@ export function TagsReviewsTab({
             const slug = titleToSlug(w.title)
 
             // Chip só p/ estados não óbvios; os gaps aparecem no 🏷/💬 (âmbar) do card.
+            // Não exibe o marcador de teste/golden pilot nesta aba.
             const state: WorkQueueState | null = !w.canonicalPresent
               ? { label: "sem sinopse", tone: "rose" }
-              : w.inGolden
-                ? { label: "golden pilot-1", tone: "amber" }
-                : null
+              : null
 
             // "Editar obra" na coluna esquerda (abaixo das infos): botão outline
             // compacto — claramente clicável, mas secundário às ações de IA.
