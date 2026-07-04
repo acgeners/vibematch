@@ -25,6 +25,7 @@ import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
+import { getGenerationReadiness } from "@/server/queries/generation-readiness"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
@@ -280,6 +281,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     tasteProfileRow?.profile.avoided_tags ?? [],
   )
   const isPaidPlan = planAllows(plan, "deep_dive")
+
+  // Prontidão do gerador de Interesse (motor de orquestração → UI). Só no plano
+  // Pago, que é quando a sugestão IA aparece. Loader roda suas queries em
+  // paralelo internamente (~1 round-trip). (Recarrega perfil/nº-rotuladas — ok
+  // por ora; dá pra passar os globais já carregados numa otimização futura.)
+  const interestReadiness = isPaidPlan
+    ? await getGenerationReadiness(work.id as string, "predict_interest_potential")
+    : null
 
   // Canal ÚNICO de review manual (externas) — para o diálogo "Avaliar" e o card de exibição.
   // Só editável com o gate local aberto (as Server Actions reexecutam o gate).
@@ -836,6 +845,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     workId={work.id as string}
                     manualValue={(work.synopsis_quality as SynopsisQuality | null) ?? null}
                     hasCanonicalSynopsis={Boolean(work.canonical_synopsis)}
+                    readiness={interestReadiness}
                     isPaid={isPaidPlan}
                     prediction={
                       synopsisPrediction
