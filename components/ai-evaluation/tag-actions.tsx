@@ -8,6 +8,8 @@ import {
   type InferTagsResult,
   type InferTagsBatchResult,
 } from "@/server/actions/ai-eval-maintenance"
+import { GenerationGate } from "@/components/generation/generation-gate"
+import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
 
 const BATCH_CAP = 25
 
@@ -20,6 +22,7 @@ export function TagRowAction({
   busyLabel = "Inferindo…",
   size = "sm",
   className,
+  readiness,
 }: {
   workId: string
   variant?: "default" | "outline" | "secondary" | "ghost"
@@ -27,8 +30,11 @@ export function TagRowAction({
   busyLabel?: string
   size?: "sm" | "default"
   className?: string
+  /** Prontidão (checkInferTags → UI). Quando presente, gate no botão. */
+  readiness?: UiReadiness | null
 }) {
-  return (
+  const gate = readiness ?? null
+  const button = (
     <TaskButton
       taskId={`infer-tags:${workId}`}
       kind="infer-tags"
@@ -38,12 +44,20 @@ export function TagRowAction({
       size={size}
       className={className}
       icon={<Sparkles className="h-3.5 w-3.5" />}
+      disabled={!!gate && !gate.ready}
       run={() => inferTagsForWork(workId)}
       formatDone={(r) => {
         const x = r as InferTagsResult
         return { ok: x.ok, message: x.ok ? `${x.added} tag(s) inferida(s)` : x.message ?? "Falhou" }
       }}
     />
+  )
+  return gate ? (
+    <GenerationGate readiness={gate} stretch>
+      {button}
+    </GenerationGate>
+  ) : (
+    button
   )
 }
 

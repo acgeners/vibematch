@@ -4,6 +4,8 @@
  * (server/queries) monta os mapas e chama `classifyWorksWithoutTags`.
  */
 
+import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
+
 /** Chaves de ordenação da lista. `expected` = nota prevista, `tags` = nº de tags. */
 export type NoTagsSortKey = "title" | "expected" | "tags"
 export interface NoTagsSort {
@@ -28,6 +30,8 @@ export interface NoTagsWork {
   expectedScore: number | null
   /** Interesse efetivo (manual `synopsis_quality`, senão o previsto), ♥–♥♥♥♥ ou null. */
   interest: string | null
+  /** Prontidão da inferência de tags (checkInferTags → UI). null se não computada. */
+  readiness?: UiReadiness | null
 }
 
 export interface NoTagsFilters {
@@ -62,6 +66,8 @@ export interface TagWorkMetaRow {
   expectedScore: number | null
   /** Interesse efetivo já resolvido (manual ?? previsto) pelo loader, ♥–♥♥♥♥ ou null. */
   interest: string | null
+  /** Prontidão da inferência de tags (checkInferTags → UI). Computada no loader. */
+  readiness?: UiReadiness | null
 }
 
 /** Ordena `out` in-place pela chave/direção pedidas, com desempate por título (asc). */
@@ -121,6 +127,7 @@ export function classifyWorksWithoutTags(args: {
       inGolden,
       expectedScore: w.expectedScore,
       interest: w.interest,
+      readiness: w.readiness ?? null,
     })
   }
   sortNoTagsWorks(out, filters.sort)

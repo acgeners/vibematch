@@ -37,7 +37,8 @@ export interface UiAutoStep {
 }
 
 export interface UiReadiness {
-  action: ActionName
+  /** ActionName do contrato, ou id de gerador fora do motor (ex.: "infer_tags"). */
+  action: string
   label: string
   /** Nenhum bloqueio → o botão pode disparar. */
   ready: boolean
@@ -227,4 +228,59 @@ export function toUiReadiness(
   else confidence = "alta"
 
   return { action, label: ui.label, ready, blocking, weakening, softMissing, autoSteps, confidence }
+}
+
+// ── Geradores FORA do motor de contratos ────────────────────────────────────
+// A inferência de tags-da-sinopse (botão "Inferir tags") não é uma ActionName —
+// `tags` tem producer null nos contratos e a regra é por COMPRIMENTO (≥80 chars),
+// não presença. Então tem um check dedicado, sem buildPlan, mas com o mesmo
+// formato `UiReadiness` (mesmo selo/gate na UI).
+
+/** Espelha `MIN_SYNOPSIS_CHARS` em lib/tags/auto-infer.ts (client-safe aqui). */
+export const TAG_MIN_SYNOPSIS_CHARS = 80
+
+export interface InferTagsSignals {
+  /** Maior comprimento de sinopse disponível (canônica OU bruta), em chars. */
+  maxSynopsisChars: number
+  /** Tem contexto de leitores (review_digest/summary)? Só melhora a precisão. */
+  hasReviewContext: boolean
+}
+
+/**
+ * Prontidão da inferência de tags. HARD = sinopse ≥ 80 chars (o gerador pula em
+ * silêncio abaixo disso); contexto de reviews é "ajuda" (só o selo).
+ */
+export function checkInferTags(s: InferTagsSignals): UiReadiness {
+  const synopsisOk = s.maxSynopsisChars >= TAG_MIN_SYNOPSIS_CHARS
+  const blocking: UiReadinessItem[] = synopsisOk
+    ? []
+    : [
+        {
+          dataKey: "raw_synopsis",
+          label: "sinopse",
+          instruction: `Precisa de ≥ ${TAG_MIN_SYNOPSIS_CHARS} caracteres de sinopse (canônica ou bruta) pra inferir tags.`,
+        },
+      ]
+  const softMissing: UiReadinessItem[] = s.hasReviewContext
+    ? []
+    : [
+        {
+          dataKey: "review_digest",
+          label: "contexto de reviews",
+          impact: "ajuda",
+          hint: "reviews puxam tags que a sinopse omite",
+        },
+      ]
+  const ready = blocking.length === 0
+  const confidence: InputConfidence = !ready ? "baixa" : softMissing.length > 0 ? "média" : "alta"
+  return {
+    action: "infer_tags",
+    label: "Inferir tags",
+    ready,
+    blocking,
+    weakening: [],
+    softMissing,
+    autoSteps: [],
+    confidence,
+  }
 }

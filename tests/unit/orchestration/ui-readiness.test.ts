@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { buildPlan } from "@/lib/orchestration/planner"
 import { emptyReadinessSnapshot, type WorkReadinessSnapshot } from "@/lib/orchestration/readiness"
-import { toUiReadiness } from "@/lib/orchestration/ui-readiness"
+import { toUiReadiness, checkInferTags } from "@/lib/orchestration/ui-readiness"
 
 /** Snapshot base "pronto p/ Interesse" com overrides. */
 function snap(over: Partial<WorkReadinessSnapshot> = {}): WorkReadinessSnapshot {
@@ -94,6 +94,33 @@ describe("toUiReadiness · Veredito (run_alignment, sem inputs no contrato)", ()
     const r = uiV(snap({ categoryScoresAiCount: 0 }))
     expect(r.ready).toBe(true)
     expect(r.weakening.some((i) => i.dataKey === "category_scores_ai")).toBe(true)
+    expect(r.confidence).toBe("média")
+  })
+})
+
+describe("checkInferTags · Inferir tags (fora do motor)", () => {
+  it("sinopse ≥80 + contexto de reviews → ready, alta", () => {
+    const r = checkInferTags({ maxSynopsisChars: 300, hasReviewContext: true })
+    expect(r.ready).toBe(true)
+    expect(r.confidence).toBe("alta")
+    expect(r.action).toBe("infer_tags")
+  })
+
+  it("sinopse <80 → bloqueia (o gerador pularia em silêncio)", () => {
+    const r = checkInferTags({ maxSynopsisChars: 40, hasReviewContext: true })
+    expect(r.ready).toBe(false)
+    expect(r.blocking).toHaveLength(1)
+    expect(r.confidence).toBe("baixa")
+  })
+
+  it("exatamente 80 → passa (limiar inclusivo)", () => {
+    expect(checkInferTags({ maxSynopsisChars: 80, hasReviewContext: false }).ready).toBe(true)
+  })
+
+  it("sinopse ok mas sem contexto de reviews → ready, média (ajuda no selo)", () => {
+    const r = checkInferTags({ maxSynopsisChars: 300, hasReviewContext: false })
+    expect(r.ready).toBe(true)
+    expect(r.softMissing.some((i) => i.dataKey === "review_digest")).toBe(true)
     expect(r.confidence).toBe("média")
   })
 })
