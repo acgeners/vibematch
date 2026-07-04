@@ -8,7 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchComixById, fetchComixReviews } from "@/lib/external/comix"
 import { extractComixHid } from "@/lib/external/comix-hid"
 import { isBlockedCoverUrl, recordCoverUrlResult } from "@/lib/external/blocked-covers"
-import { flareSolverrHealth } from "@/lib/external/flaresolverr"
+import { flareSolverrHealth, isFlareSolverrCircuitOpen } from "@/lib/external/flaresolverr"
 import { getComixStatus } from "@/lib/external/comix-gate"
 
 const CACHE_DIR = path.join(process.cwd(), ".cache")
@@ -288,10 +288,19 @@ async function enrichComixDataForWork(workId: string): Promise<boolean> {
 
 export async function resolveComixHidForWork(workId: string): Promise<void> {
   if (!workId) return
+  // Já tem hid do Comix (ex.: vínculo manual)? Pula a descoberta (Puppeteer/Chrome)
+  // e vai direto pro enrich resiliente (reaquece o FlareSolverr + retry).
+  if ((await getComixResolutionStatus(workId)).resolved) {
+    await resolveComixDataResilient(workId)
+    return
+  }
   console.log(`[resolveComixHidForWork] disparado para work ${workId}`)
   try {
     const code = await runResolverScript(["--work", workId])
     if (code !== 0) return
+    // Reaquece a Comix (bounded) se a sessão do FlareSolverr estiver fria/expirada,
+    // pra o enrich não falhar à toa logo após achar o hid.
+    await ensureComixReady()
     // Achou o hid → grava rating/sinopse/capa do Comix; recalcula só se o rating mudou
     // (pra a bayesiana e a Nota Prevista refletirem a fonte). A sinopse/capa entram como
     // fonte secundária e aparecem no próximo refresh da página (watcher).
@@ -330,6 +339,61 @@ export async function resolveComixHidsPending(workIds?: string[]): Promise<void>
   }
 }
 
+// Backoff (ms) entre tentativas de reaquecer a Comix. ~6 tentativas cobrem ~3 min
+// — o suficiente pra uma expiração de sessão do FlareSolverr voltar sozinha.
+const COMIX_WARM_BACKOFF_MS = [3_000, 8_000, 20_000, 45_000, 90_000]
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Garante que a Comix esteja utilizável. Se não estiver, roda o warm (o MESMO
+ * canário do botão "Testar agora", que reaquece o FlareSolverr + a sessão "comix")
+ * e re-tenta com backoff até `getComixStatus()` voltar a "ok" ou esgotar as
+ * tentativas. Bounded (não trava pra sempre) e barato quando já está "ok".
+ */
+export async function ensureComixReady(
+  opts?: { maxAttempts?: number },
+): Promise<{ ok: boolean; attempts: number }> {
+  const max = Math.max(1, opts?.maxAttempts ?? 6)
+  for (let attempt = 1; attempt <= max; attempt++) {
+    if (getComixStatus().state === "ok") return { ok: true, attempts: attempt }
+    await checkComixHealth().catch(() => {}) // reaquece FlareSolverr + sessão "comix"
+    if (getComixStatus().state === "ok") return { ok: true, attempts: attempt }
+    if (attempt < max) {
+      await sleep(COMIX_WARM_BACKOFF_MS[Math.min(attempt - 1, COMIX_WARM_BACKOFF_MS.length - 1)])
+    }
+  }
+  return { ok: getComixStatus().state === "ok", attempts: max }
+}
+
+/**
+ * Enriquece os dados da Comix de uma obra que JÁ tem hid (capa/sinopse/rating),
+ * reaquecendo a Comix antes se preciso e re-tentando (bounded). É o núcleo do
+ * "salva já + background": a obra é salva na hora com o hid; isto roda em
+ * `after()` e preenche os dados quando o FlareSolverr volta — sem retry manual.
+ */
+export async function resolveComixDataResilient(workId: string): Promise<void> {
+  if (!workId) return
+  try {
+    const ready = await ensureComixReady()
+    if (!ready.ok) {
+      console.warn(
+        `[resolveComixDataResilient] Comix indisponível após ${ready.attempts} tentativas — work ${workId} fica pendente`,
+      )
+      return
+    }
+    const wrote = await enrichComixDataForWork(workId)
+    if (wrote) {
+      const { recalculateScoresNow } = await import("@/server/actions/recalc-queue")
+      await recalculateScoresNow()
+    }
+  } catch (err) {
+    console.error("[resolveComixDataResilient] falha:", err instanceof Error ? err.message : err)
+  }
+}
+
 /**
  * Preenchimento manual do hid da Comix pra uma obra. Aceita hid cru ou URL,
  * VALIDA via fetchComixById (SSR token-free — não precisa de browser) e só
@@ -344,6 +408,9 @@ interface ComixManualResult {
   chapters?: number | null
   synopsis?: string | null
   error?: string
+  /** hid aceito "otimista" (formato válido) porque a Comix está fora agora — os
+   *  dados (título/capa/sinopse) ainda não foram resolvidos; virão no background. */
+  pending?: boolean
 }
 
 /**
@@ -357,6 +424,14 @@ export async function validateComixHid(hidOrUrl: string): Promise<ComixManualRes
 
   const detail = await fetchComixById(hid)
   if (!detail || !detail.title) {
+    // Não resolveu. É hid errado ou a infra da Comix (FlareSolverr) está fora?
+    // Se a infra está fora, aceita OTIMISTA (formato do hid é válido) — os dados
+    // vêm no enrich resiliente em background. Se a infra está OK, é hid errado.
+    const fsHealthy = !isFlareSolverrCircuitOpen() && (await flareSolverrHealth()).ok
+    const infraDown = !fsHealthy || getComixStatus().state === "down"
+    if (infraDown) {
+      return { ok: true, hid, pending: true }
+    }
     return { ok: false, error: `O hid "${hid}" não resolve na Comix. Confira o hid/URL.` }
   }
 

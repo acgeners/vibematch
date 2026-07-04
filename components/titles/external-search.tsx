@@ -1076,7 +1076,13 @@ export function ExternalSearch({
       })
       setSourceMatchSelection("comix" as ExternalSourceId, hid)
       setManualComixHid("")
-      toast.success(`Comix vinculada: "${res.title}"`)
+      if (res.pending) {
+        toast.warning(
+          `Comix instável agora — hid "${hid}" vinculado assim mesmo. Capa, sinopse e reviews serão buscadas em segundo plano quando a conexão voltar.`,
+        )
+      } else {
+        toast.success(`Comix vinculada: "${res.title}"`)
+      }
       // Rola até o fim do passo de fontes pra revelar o vínculo recém-criado e o
       // botão "Buscar dados dessas fontes" (o bloco da Comix fica por último).
       requestAnimationFrame(() => {
