@@ -3,7 +3,7 @@
 import { useTransition } from "react"
 import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
-import { Sparkles, Loader2 } from "lucide-react"
+import { Loader2, RotateCw, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 
@@ -13,6 +13,12 @@ interface RerankAiRkButtonProps {
   hasScore: boolean
   /** Re-rank por IA é feature do plano Pago. Quando false, mostra selo "Pago". */
   isPaid?: boolean
+  /**
+   * Ícone do botão (default "sparkles"). Um DISCRIMINADOR string — não o componente
+   * do ícone — porque este é um Client Component e um Server Component (page.tsx) não
+   * pode passar funções/componentes como prop. "rotate" = ↻ num "Recalcular" stale.
+   */
+  icon?: "sparkles" | "rotate"
 }
 
 /**
@@ -22,9 +28,10 @@ interface RerankAiRkButtonProps {
  * `calculated_scores`. O servidor é a fonte da verdade do gate — este `isPaid` só
  * controla a aparência do botão.
  */
-export function RerankAiRkButton({ workId, hasScore, isPaid = true }: RerankAiRkButtonProps) {
+export function RerankAiRkButton({ workId, hasScore, isPaid = true, icon = "sparkles" }: RerankAiRkButtonProps) {
   const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
+  const Icon = icon === "rotate" ? RotateCw : Sparkles
 
   if (!isPaid) {
     return (
@@ -34,7 +41,7 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true }: RerankAiRk
         disabled
         title="Re-rank por IA é uma feature do plano Pago."
       >
-        <Sparkles className="h-3.5 w-3.5" />
+        <Icon className="h-3.5 w-3.5" />
         Calcular
         <span className="ml-1 rounded bg-muted px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Pago
@@ -63,7 +70,7 @@ export function RerankAiRkButton({ workId, hasScore, isPaid = true }: RerankAiRk
       {isPending ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
       ) : (
-        <Sparkles className="h-3.5 w-3.5" />
+        <Icon className="h-3.5 w-3.5" />
       )}
       {isPending ? "Calculando…" : hasScore ? "Recalcular" : "Calcular"}
     </Button>

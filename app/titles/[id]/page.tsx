@@ -49,7 +49,7 @@ import { WorkCoverGallery } from "@/components/titles/work-cover-gallery"
 import { SynopsesViewer } from "@/components/titles/synopses-viewer"
 import { BackButton } from "@/components/titles/back-button"
 import { CriterionTitleTooltip } from "@/components/titles/criterion-title-tooltip"
-import { ScoreLabelTooltip } from "@/components/titles/score-label-tooltip"
+import { AlignmentTooltipContent, VerdictTooltipContent } from "@/components/ranking/score-tooltip-content"
 import { Badge } from "@/components/ui/badge"
 import { TagRowAction } from "@/components/ai-evaluation/tag-actions"
 import { Button } from "@/components/ui/button"
@@ -893,27 +893,16 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 <CardTitle className="text-base font-bold text-foreground">Notas calculadas</CardTitle>
               </div>
               {work.calculated_scores?.expected_score != null && (
-                <TooltipProvider delayDuration={150}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="text-right shrink-0 cursor-help">
-                        <p className="text-xs font-medium text-muted-foreground underline-offset-4 decoration-dotted hover:underline">
-                          Nota Prevista
-                        </p>
-                        <p className={cn(
-                          "text-3xl font-black font-mono leading-none",
-                          getScoreTextColor(work.calculated_scores.expected_score, scoreThresholds?.expected),
-                        )}>
-                          {work.calculated_scores.expected_score.toFixed(2)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">estimativa principal</p>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-xs whitespace-pre-line text-left leading-relaxed">
-                      {`A previsão vem do Perfil (encaixe com seu tipo de obra): ${work.calculated_scores.expected_score.toFixed(2)}. As 9 notas por critério (que alimentam o Perfil) vêm da avaliação da IA. As 8 dimensões pós-leitura que você preenche NÃO entram na previsão — alimentam seu user_score e o ajuste de bias das notas-IA.`}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <div className="text-right shrink-0">
+                  <p className="text-xs font-medium text-muted-foreground">Nota Prevista</p>
+                  <p className={cn(
+                    "text-3xl font-black font-mono leading-none",
+                    getScoreTextColor(work.calculated_scores.expected_score, scoreThresholds?.expected),
+                  )}>
+                    {work.calculated_scores.expected_score.toFixed(2)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">estimativa principal</p>
+                </div>
               )}
             </div>
           </CardHeader>
@@ -926,10 +915,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   spanLastVerdict && lastVerdict === "fit" && "sm:col-span-2",
                 )}>
                   <div className="flex flex-col items-start gap-1">
-                    <ScoreLabelTooltip
-                      name="Alinhamento"
-                      description="Alinhamento (percentil 0–100): posição da obra no catálogo pelo overlap líquido de tags do seu perfil (amadas − 1,5× evitadas). É o MESMO valor que o filtro do ranking usa. Determinístico, sem LLM."
-                    />
+                    <span className="text-xs font-medium text-muted-foreground">Alinhamento</span>
                     <span className="text-[11px] text-muted-foreground">Posição no catálogo pelo seu perfil (percentil)</span>
                   </div>
                   {(() => {
@@ -945,48 +931,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       : shown >= 30 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
                       : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
                     return (
-                      <span className={cn("flex h-10 w-14 items-center justify-center rounded-md border font-mono text-lg font-bold shrink-0", cls)}>
-                        {Math.round(shown)}%
-                      </span>
-                    )
-                  })()}
-                </div>
-              )}
-
-              {work.calculated_scores?.alignment_score != null && (
-                <div className={cn(
-                  "flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
-                  spanLastVerdict && lastVerdict === "align" && "sm:col-span-2",
-                )}>
-                  <div className="flex flex-col items-start gap-1">
-                    <ScoreLabelTooltip
-                      name="Veredito IA"
-                      description="match_score / Veredito IA (0–100): veredito do consultor LLM sob demanda ('Recomendar com IA' / Deep Dive). Preenchido ao rodar o re-rank."
-                    />
-                    <span className="text-[11px] text-muted-foreground">Veredito do consultor IA (0–100)</span>
-                  </div>
-                  {(() => {
-                    const rk = work.calculated_scores.alignment_score
-                    const cls =
-                      rk >= 80 ? "bg-violet-500/15 text-violet-700 border-violet-500/40 dark:text-violet-300"
-                      : rk >= 60 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
-                      : rk >= 40 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
-                      : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
-                    const justification = (work.calculated_scores.alignment_justification as string | null)?.trim() || null
-                    const risks = (work.calculated_scores.alignment_payload?.risks as string[] | undefined) ?? []
-                    const badge = (
-                      <span className={cn("flex h-10 w-14 items-center justify-center rounded-md border font-mono text-lg font-bold shrink-0", cls, justification && "cursor-help")}>
-                        {Math.round(rk)}
-                      </span>
-                    )
-                    if (!justification) return badge
-                    return (
                       <TooltipProvider delayDuration={150}>
                         <Tooltip>
-                          <TooltipTrigger asChild>{badge}</TooltipTrigger>
-                          <TooltipContent side="left" className="max-w-xs whitespace-pre-line text-left leading-relaxed">
-                            {justification}
-                            {risks.length > 0 && `\n\nRiscos: ${risks.join("; ")}`}
+                          <TooltipTrigger asChild>
+                            <span className={cn("flex h-10 w-14 items-center justify-center rounded-md border font-mono text-lg font-bold shrink-0 cursor-help", cls)}>
+                              {Math.round(shown)}%
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="left" className="max-w-[280px] space-y-1">
+                            <AlignmentTooltipContent value={pf} percentile={pctRaw} />
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
@@ -995,16 +948,74 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 </div>
               )}
 
+              {work.calculated_scores?.alignment_score != null && (() => {
+                const rk = work.calculated_scores.alignment_score
+                const stale = work.calculated_scores.alignment_stale ?? false
+                const alignAt = work.calculated_scores.alignment_at
+                const cls =
+                  rk >= 80 ? "bg-violet-500/15 text-violet-700 border-violet-500/40 dark:text-violet-300"
+                  : rk >= 60 ? "bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300"
+                  : rk >= 40 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
+                  : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
+                return (
+                  <div className={cn(
+                    "flex items-center justify-between p-4 rounded-xl border bg-card/30 hover:bg-card/50 transition-all duration-200 shadow-sm",
+                    stale
+                      ? "border-amber-500/55 hover:border-amber-500/70"
+                      : "border-border/80 hover:border-border",
+                    spanLastVerdict && lastVerdict === "align" && "sm:col-span-2",
+                  )}>
+                    <div className="flex flex-col items-start gap-1">
+                      <span className="text-xs font-medium text-muted-foreground">Veredito IA</span>
+                      {stale ? (
+                        <span className="inline-flex items-center rounded-full border border-amber-500/55 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                          Desatualizado
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground">
+                          {alignAt
+                            ? `Calculado em ${new Date(alignAt).toLocaleDateString("pt-BR")}`
+                            : "Veredito do consultor IA (0–100)"}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {/* Recalcular aparece SÓ quando desatualizado, atrelado ao Veredito, antes da nota. */}
+                      {stale && <RerankAiRkButton workId={work.id} hasScore isPaid={isPaidPlan} icon="rotate" />}
+                      <TooltipProvider delayDuration={150}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className={cn(
+                              "flex h-10 w-14 items-center justify-center rounded-md border font-mono text-lg font-bold shrink-0 cursor-help",
+                              cls,
+                              // !important: o reset global `* { border-color }` (globals.css,
+                              // sem @layer) vence utilities no Tailwind v4; sem o ! a borda fica cinza.
+                              stale && "border-amber-600! dark:border-amber-400!",
+                            )}>
+                              {Math.round(rk)}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="left" className="max-w-[400px] space-y-1.5">
+                            <VerdictTooltipContent
+                              score={rk}
+                              justification={work.calculated_scores.alignment_justification}
+                              payload={work.calculated_scores.alignment_payload}
+                            />
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                  </div>
+                )
+              })()}
+
               {deepDivePresent && (
                 <div className={cn(
                   "flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
                   spanLastVerdict && lastVerdict === "deep" && "sm:col-span-2",
                 )}>
                   <div className="flex flex-col items-start gap-1">
-                    <ScoreLabelTooltip
-                      name="Deep Dive"
-                      description="match_score (0–100): veredito do Consultor IA (Deep Dive) — análise profunda single-work com extended thinking. A análise completa fica logo abaixo."
-                    />
+                    <span className="text-xs font-medium text-muted-foreground">Deep Dive</span>
                     <span className="text-[11px] text-muted-foreground">
                       {new Date(lastDeepDive!.created_at).toLocaleDateString("pt-BR")}
                     </span>
@@ -1043,10 +1054,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     <summary className="flex cursor-pointer list-none items-center justify-between p-4 [&::-webkit-details-marker]:hidden">
                       <div className="flex flex-col items-start gap-1">
                         <div className="flex items-center gap-1.5">
-                          <ScoreLabelTooltip
-                            name="Pessoal"
-                            description="Média ponderada das suas avaliações por estrelas pós-leitura (Ritmo, Arte, Impacto, Originalidade, etc). Calculada automaticamente conforme você preenche os critérios."
-                          />
+                          <span className="text-xs font-medium text-muted-foreground">Pessoal</span>
                           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
                         </div>
                         <span className="text-[11px] text-muted-foreground">Sua nota pós-leitura</span>
@@ -1069,10 +1077,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 ) : (
                   <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm sm:col-span-2">
                     <div className="flex flex-col items-start gap-1">
-                      <ScoreLabelTooltip
-                        name="Pessoal"
-                        description="Média ponderada das suas avaliações por estrelas pós-leitura (Ritmo, Arte, Impacto, Originalidade, etc). Calculada automaticamente conforme você preenche os critérios."
-                      />
+                      <span className="text-xs font-medium text-muted-foreground">Pessoal</span>
                       <span className="text-[11px] text-muted-foreground">Sua nota pós-leitura</span>
                     </div>
                     <ScoreBadge score={work.user_score ?? null} size="lg" className="h-10 w-14 text-lg font-bold shrink-0" />
@@ -1080,13 +1085,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 )
               )}
             </div>
-            <div className="mt-4 flex justify-end border-t border-border/40 pt-3">
-              <RerankAiRkButton
-                workId={work.id}
-                hasScore={work.calculated_scores?.alignment_score != null}
-                isPaid={isPaidPlan}
-              />
-            </div>
+            {/* Veredito ainda não calculado: única forma de disparar o "Calcular"
+                inicial (não há badge pra atrelar). Some assim que o Veredito existe —
+                daí em diante o recálculo vive na linha do Veredito, só quando stale. */}
+            {work.calculated_scores?.alignment_score == null && (
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-border/40 pt-3">
+                <span className="text-xs text-muted-foreground">Veredito IA ainda não calculado</span>
+                <RerankAiRkButton workId={work.id} hasScore={false} isPaid={isPaidPlan} />
+              </div>
+            )}
           </CardContent>
         </Card>
 

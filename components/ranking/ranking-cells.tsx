@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
+import { AlignmentTooltipContent, VerdictTooltipContent } from "@/components/ranking/score-tooltip-content"
+import type { AlignmentPayload } from "@/components/ranking/score-tooltip-content"
 
 /**
  * Hook compartilhado pelo re-rank de uma obra. Dispara `rerankSingleWorkAction`
@@ -108,16 +110,6 @@ function RerankStaleButton({ workId }: { workId: string }) {
  * se `workId` está presente, vira um botão "Rankear" que dispara o re-rank
  * inline pra aquela obra.
  */
-/** Payload enriquecido (sub-fase 2.3.A — Smart Shortlist v2+). */
-export interface AlignmentPayload {
-  confidence?: number
-  risks?: string[]
-  similar_loved?: string[]
-  similar_avoided?: string[]
-  review_quotes?: string[]
-  mood_fit?: number
-}
-
 export function AlignmentScoreCell({
   score,
   justification,
@@ -179,17 +171,6 @@ export function AlignmentScoreCell({
     : score >= 40 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300"
     : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
 
-  const hasEnriched = Boolean(
-    payload && (
-      payload.confidence != null ||
-      (payload.risks?.length ?? 0) > 0 ||
-      (payload.similar_loved?.length ?? 0) > 0 ||
-      (payload.similar_avoided?.length ?? 0) > 0 ||
-      (payload.review_quotes?.length ?? 0) > 0 ||
-      payload.mood_fit != null
-    ),
-  )
-
   // Confidence dot: indicador visual sutil ao lado do score. Verde = ≥0.75 (alta),
   // âmbar = 0.5-0.75 (média), cinza = <0.5 (baixa). Omitido quando ausente.
   const confidenceDot = payload?.confidence != null
@@ -222,70 +203,27 @@ export function AlignmentScoreCell({
               />
             )}
             {Math.round(score)}
-            {stale && !canRerankStale && (
-              <RotateCw className="h-3 w-3 text-amber-500" aria-label="Desatualizado" />
-            )}
           </span>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[400px] space-y-1.5">
-          {stale && (
-            <p className="flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
-              <RotateCw className="h-3 w-3" />
-              Desatualizado — a obra mudou desde este re-rank. Rode o IA re-rank de novo pra atualizar.
-            </p>
-          )}
-          <div className="flex items-center justify-between gap-3">
-            <p className="font-semibold text-xs">Veredito IA: {Math.round(score)}/100</p>
-            {payload?.confidence != null && (
-              <span className="text-[11px] text-muted-foreground">
-                Confiança: <span className="font-semibold text-foreground">{(payload.confidence * 100).toFixed(0)}%</span>
-              </span>
-            )}
-          </div>
-          {payload?.mood_fit != null && (
-            <p className="text-[11px] text-muted-foreground">
-              Fit com mood: <span className="font-mono font-semibold text-foreground">{(payload.mood_fit * 100).toFixed(0)}%</span>
-            </p>
-          )}
-          {justification && <p className="text-xs leading-relaxed">{justification}</p>}
-          {hasEnriched && (
-            <div className="border-t border-border/40 pt-1.5 space-y-1.5">
-              {payload?.risks && payload.risks.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-500">⚠ Riscos</p>
-                  <ul className="mt-0.5 text-xs space-y-0.5">
-                    {payload.risks.map((r, i) => (
-                      <li key={i} className="leading-snug">• {r}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {payload?.review_quotes && payload.review_quotes.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Reviews citadas</p>
-                  <ul className="mt-0.5 text-xs italic space-y-0.5">
-                    {payload.review_quotes.map((q, i) => (
-                      <li key={i} className="leading-snug">&ldquo;{q}&rdquo;</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {payload?.similar_loved && payload.similar_loved.length > 0 && (
-                <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
-                  Lembra de obras que você ama ({payload.similar_loved.length} similar{payload.similar_loved.length > 1 ? "es" : ""})
-                </p>
-              )}
-              {payload?.similar_avoided && payload.similar_avoided.length > 0 && (
-                <p className="text-[11px] text-rose-600 dark:text-rose-400">
-                  Lembra de obras que você não curtiu ({payload.similar_avoided.length})
-                </p>
-              )}
-            </div>
-          )}
+          <VerdictTooltipContent
+            score={score}
+            justification={justification}
+            payload={payload}
+          />
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
-      {canRerankStale && <RerankStaleButton workId={workId!} />}
+      {/* Slot de largura fixa SEMPRE reservado: mantém o número do badge na mesma
+          posição em todas as linhas, com ou sem o ícone de desatualizado. */}
+      <span className="inline-flex w-4 shrink-0 items-center justify-center">
+        {stale &&
+          (canRerankStale ? (
+            <RerankStaleButton workId={workId!} />
+          ) : (
+            <RotateCw className="h-3 w-3 text-amber-500" aria-label="Desatualizado" />
+          ))}
+      </span>
     </span>
   )
 }
@@ -325,15 +263,11 @@ export function SynopsisPredictionCell({
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[260px] space-y-1">
           <p className="text-xs font-semibold">
-            Previsão de interesse: {quality}{label ? ` — ${label}` : ""}
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            Estimativa da IA de quanto a sinopse combina com o seu perfil de gosto. Não é o
-            valor que você informou (coluna &ldquo;Interesse&rdquo;).
+            Previsão: {label || quality}
           </p>
           {confidence != null && (
             <p className="text-[11px] text-muted-foreground">
-              Confiança: <span className="font-semibold text-foreground">{Math.round(confidence * 100)}%</span>
+              Confiança: <span className="font-semibold">{Math.round(confidence * 100)}%</span>
             </p>
           )}
           {stale && (
@@ -481,7 +415,6 @@ export function AlignmentCell({
 
   // Display preference: percentile (mais honesto) > valor cru (fallback)
   const displayPct = percentile != null ? Math.round(percentile) : Math.round(value * 100)
-  const rawPct = Math.round(value * 100)
   const color =
     displayPct >= 75 ? "bg-emerald-500"
     : displayPct >= 50 ? "bg-amber-500"
@@ -493,16 +426,6 @@ export function AlignmentCell({
     : displayPct >= 50 ? "text-amber-600 dark:text-amber-400"
     : displayPct >= 25 ? "text-orange-600 dark:text-orange-400"
     : "text-muted-foreground"
-
-  // Top label quando estamos exibindo percentile
-  const topLabel =
-    percentile == null ? null
-    : percentile >= 95 ? "Top 5%"
-    : percentile >= 90 ? "Top 10%"
-    : percentile >= 75 ? "Top 25%"
-    : percentile >= 50 ? "Acima da mediana"
-    : percentile >= 25 ? "Abaixo da mediana"
-    : "Bottom 25%"
 
   const trigger = showBar ? (
     <div className="inline-flex items-center gap-1.5">
@@ -526,24 +449,7 @@ export function AlignmentCell({
           <span className="cursor-help">{trigger}</span>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[280px] space-y-1">
-          {percentile != null ? (
-            <>
-              <p className="text-xs font-semibold">{topLabel} da sua biblioteca</p>
-              <p className="text-[11px] text-muted-foreground">
-                Alinhamento bruto: <span className="font-mono">{rawPct}%</span> (escala 0–55% típica).
-                Percentil mostra onde essa obra está RELATIVO ao resto da sua biblioteca — mais
-                honesto que o valor cru, que tem teto matemático baixo.
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-xs">Alinhamento determinístico com seu perfil de gosto.</p>
-              <p className="text-[11px] text-muted-foreground">
-                Combina tags amadas/evitadas (40%), faixas ideais de critério (30%) e consistência
-                geral (30%). Re-rode o cálculo pra ganhar a versão percentil (Top X%).
-              </p>
-            </>
-          )}
+          <AlignmentTooltipContent value={value} percentile={percentile} />
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

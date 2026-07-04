@@ -112,6 +112,8 @@ export interface CalculatedScore {
   alignment_run_id: string | null
   alignment_justification: string | null
   alignment_at: string | null
+  /** True quando o Veredito IA ficou desatualizado (obra editada/re-avaliada). */
+  alignment_stale: boolean | null
   /**
    * Payload enriquecido do consultor (sub-fase 2.3.A, prompt v2+). Campos
    * opcionais — runs antigas (v1) ficam NULL.
