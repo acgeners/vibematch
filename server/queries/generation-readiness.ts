@@ -17,4 +17,15 @@ export async function getGenerationReadiness(
   return toUiReadiness(action, plan, snapshot)
 }
 
+/** Vários geradores pra a MESMA obra — carrega o snapshot UMA vez só. */
+export async function getGenerationReadinessMany(
+  workId: string,
+  actions: ActionName[],
+): Promise<Record<string, UiReadiness>> {
+  const snapshot = await loadWorkReadinessSnapshot(workId)
+  const out: Record<string, UiReadiness> = {}
+  for (const action of actions) out[action] = toUiReadiness(action, buildPlan(action, snapshot), snapshot)
+  return out
+}
+
 export type { UiReadiness } from "@/lib/orchestration/ui-readiness"

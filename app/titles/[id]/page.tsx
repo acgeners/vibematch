@@ -25,7 +25,7 @@ import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
-import { getGenerationReadiness } from "@/server/queries/generation-readiness"
+import { getGenerationReadinessMany } from "@/server/queries/generation-readiness"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
@@ -282,13 +282,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   )
   const isPaidPlan = planAllows(plan, "deep_dive")
 
-  // Prontidão do gerador de Interesse (motor de orquestração → UI). Só no plano
-  // Pago, que é quando a sugestão IA aparece. Loader roda suas queries em
-  // paralelo internamente (~1 round-trip). (Recarrega perfil/nº-rotuladas — ok
-  // por ora; dá pra passar os globais já carregados numa otimização futura.)
-  const interestReadiness = isPaidPlan
-    ? await getGenerationReadiness(work.id as string, "predict_interest_potential")
+  // Prontidão dos geradores (motor de orquestração → UI). Só no plano Pago, que é
+  // quando as ações IA aparecem. UM snapshot pra os dois (Interesse + Veredito).
+  const genReadiness = isPaidPlan
+    ? await getGenerationReadinessMany(work.id as string, ["predict_interest_potential", "run_alignment"])
     : null
+  const interestReadiness = genReadiness?.["predict_interest_potential"] ?? null
+  const alignmentReadiness = genReadiness?.["run_alignment"] ?? null
 
   // Canal ÚNICO de review manual (externas) — para o diálogo "Avaliar" e o card de exibição.
   // Só editável com o gate local aberto (as Server Actions reexecutam o gate).
@@ -1022,7 +1022,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {/* Recalcular aparece SÓ quando desatualizado, atrelado ao Veredito, antes da nota. */}
-                      {stale && <RerankAiRkButton workId={work.id} hasScore isPaid={isPaidPlan} icon="rotate" />}
+                      {stale && <RerankAiRkButton workId={work.id} hasScore isPaid={isPaidPlan} icon="rotate" readiness={alignmentReadiness} />}
                       <TooltipProvider delayDuration={150}>
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -1132,7 +1132,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             {work.calculated_scores?.alignment_score == null && (
               <div className="mt-4 flex items-center justify-between gap-3 border-t border-border/40 pt-3">
                 <span className="text-xs text-muted-foreground">Veredito IA ainda não calculado</span>
-                <RerankAiRkButton workId={work.id} hasScore={false} isPaid={isPaidPlan} />
+                <RerankAiRkButton workId={work.id} hasScore={false} isPaid={isPaidPlan} readiness={alignmentReadiness} />
               </div>
             )}
           </CardContent>
