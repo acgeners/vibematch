@@ -229,6 +229,12 @@ export function getCriterionColorClassByRange(score: number, range: CriterionRan
   return tier === "neutral" ? NEUTRAL_CRITERION_CLASS : CRITERION_TIER_CLASS[tier]
 }
 
+/** Classe de pílula (bg + borda + texto) para um tier já resolvido — usada pela
+ * legenda de cores da toolbar, que reusa exatamente a paleta das células. */
+export function criterionTierPillClass(tier: CriterionTier): string {
+  return tier === "neutral" ? NEUTRAL_CRITERION_CLASS : CRITERION_TIER_CLASS[tier]
+}
+
 /**
  * Dispatcher único da cor de célula de atributo, pelo modo ativo:
  * - "range": distância à faixa ideal do perfil (quando há pref pro slug).
