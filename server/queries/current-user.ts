@@ -90,6 +90,76 @@ export async function getSynopsisCanonicalOnCreate(admin?: AdminClient): Promise
   return (data?.synopsis_canonical_on_create as boolean | undefined) ?? true
 }
 
+// Toggles "gerar Resumo / Digest de reviews" (migration 127). NÃO cacheados
+// (mudam em runtime via /settings). Lidos numa query só (mesma linha singleton)
+// porque saveWorkReviews consulta os dois juntos. Tolerante: se as colunas ainda
+// não existem, cai pro default `true` — preserva o comportamento histórico
+// (ambos rodavam sempre no save) até a migration ser aplicada.
+// Toggle "inferir tags por IA (Haiku) na criação" (migration 128). NÃO cacheado
+// (muda em runtime via /settings). Tolerante: se a coluna ainda não existe, cai
+// pro default `true` — preserva o comportamento histórico (inferia sempre na
+// criação) até a migration ser aplicada.
+export async function getTagInferenceOnCreate(admin?: AdminClient): Promise<boolean> {
+  const supabase = admin ?? createAdminClient()
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("tag_inference_on_create")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.warn(`[getTagInferenceOnCreate] fallback true (coluna indisponível): ${error.message}`)
+    return true
+  }
+  return (data?.tag_inference_on_create as boolean | undefined) ?? true
+}
+
+// Toggle "shadow A/B da Previsão de Interesse na criação" (migration 128). NÃO
+// cacheado. Tolerante: se a coluna ainda não existe, cai pro default `false` —
+// preserva o comportamento atual (shadow só liga via env INTEREST_SHADOW).
+export async function getInterestShadowOnCreate(admin?: AdminClient): Promise<boolean> {
+  const supabase = admin ?? createAdminClient()
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("interest_shadow_on_create")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.warn(`[getInterestShadowOnCreate] fallback false (coluna indisponível): ${error.message}`)
+    return false
+  }
+  return (data?.interest_shadow_on_create as boolean | undefined) ?? false
+}
+
+export interface ReviewSynthesisToggles {
+  summaryEnabled: boolean
+  digestEnabled: boolean
+}
+
+export async function getReviewSynthesisToggles(
+  admin?: AdminClient,
+): Promise<ReviewSynthesisToggles> {
+  const supabase = admin ?? createAdminClient()
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("review_summary_enabled, review_digest_enabled")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.warn(`[getReviewSynthesisToggles] fallback true (colunas indisponíveis): ${error.message}`)
+    return { summaryEnabled: true, digestEnabled: true }
+  }
+  return {
+    summaryEnabled: (data?.review_summary_enabled as boolean | undefined) ?? true,
+    digestEnabled: (data?.review_digest_enabled as boolean | undefined) ?? true,
+  }
+}
+
 export interface CurrentUserProfile {
   userId: string
   displayName: string | null

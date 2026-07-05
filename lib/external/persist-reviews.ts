@@ -2,6 +2,7 @@ import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { SourcedReview, ExternalSourceId } from "@/lib/external/types"
 import { ensureReviewSummary, ensureReviewDigest } from "@/lib/orchestration/integrations/reviews"
+import { getReviewSynthesisToggles } from "@/server/queries/current-user"
 
 /**
  * Salva snapshot de reviews externas de uma obra — estratégia NÃO-DESTRUTIVA
@@ -108,6 +109,11 @@ export async function saveWorkReviews(
   // (Flow B do popup de custo) — o resumo/digest podem ser gerados sob demanda depois.
   if (opts.skipPaidEnrichment) return
 
+  // Toggles globais (user_settings, migration 127): o usuário pode desligar a
+  // geração paga do Resumo e/ou do Digest em qualquer save. Uma leitura só (mesma
+  // linha singleton); default `true` (preserva o comportamento histórico).
+  const { summaryEnabled, digestEnabled } = await getReviewSynthesisToggles(supabase)
+
   // Resumo + digest: ambos leem o corpus COMPLETO da obra POR DENTRO de cada `ensure*`
   // (via gateway) — NÃO passamos `reviews`. O corpus de ambos é canônico (work_reviews
   // scraped + work_external_reviews_manual manual externa), refletindo o conjunto após o
@@ -115,15 +121,19 @@ export async function saveWorkReviews(
   //
   // Resumo (Haiku): AGUARDADO (preserva o comportamento). Job durável (dedup por hash de
   // conteúdo, status, retomada). Single-op do save = pré-autorizado (allowPaid). Não lança.
-  await ensureReviewSummary(workId, { supabase, allowPaid: true }).catch(
-    (err) => console.error("[work_reviews] ensureReviewSummary rejeitou:", err),
-  )
+  if (summaryEnabled) {
+    await ensureReviewSummary(workId, { supabase, allowPaid: true }).catch(
+      (err) => console.error("[work_reviews] ensureReviewSummary rejeitou:", err),
+    )
+  }
 
   // Digest (Sonnet): ASSÍNCRONO (sem await, não bloqueia o retorno). Gate próprio
   // (versão/materialidade por contagem) dentro de `ensureReviewDigest`.
-  void ensureReviewDigest(workId, { supabase, allowPaid: true }).catch((err) =>
-    console.error("[work_reviews] ensureReviewDigest rejeitou:", err),
-  )
+  if (digestEnabled) {
+    void ensureReviewDigest(workId, { supabase, allowPaid: true }).catch((err) =>
+      console.error("[work_reviews] ensureReviewDigest rejeitou:", err),
+    )
+  }
 }
 
 /**

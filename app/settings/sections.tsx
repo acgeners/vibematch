@@ -175,10 +175,14 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         id: "on-create",
         title: "Comportamento na criação",
         description:
-          "O que roda automaticamente ao criar uma obra via 'Buscar dados'. Desligado por padrão pra evitar custo de tokens não intencional.",
-        help: "Ao criar uma obra pelo “Buscar dados”, você pode deixar a Avaliação IA e/ou a Sinopse canônica rodarem sozinhas na hora. Vem desligado de propósito, pra uma importação em massa não gastar tokens sem você querer.",
+          "Liga/desliga as etapas de IA que rodam sozinhas ao salvar uma obra — Avaliação IA, Sinopse canônica, Inferência de tags, Resumo e Digest de reviews, o shadow de Interesse e os pesos automáticos.",
+        help: "As chaves que controlam quando a IA gasta tokens sozinha. Avaliação IA, Sinopse canônica e Inferência de tags (Haiku) só rodam na CRIAÇÃO via “Buscar dados”. Resumo (Haiku) e Digest (Sonnet) de reviews rodam em QUALQUER save (criação e “Atualizar dados”) — desligá-los persiste as reviews sem a síntese paga, que você gera depois pela seção “Síntese de reviews”. O shadow de Interesse é um experimento A/B de dev que DOBRA o custo do Interesse na criação (fica desligado, salvo testes). Pesos automáticos é a mesma chave da Calibração automática: usa pesos inferidos do seu histórico e recalcula o catálogo ao alternar. Deixe desligado o que não quiser que dispare sem você pedir.",
         icon: Wand2,
-        chips: [{ kind: "cadence", label: "Preferência" }],
+        chips: [
+          { kind: "cadence", label: "Preferência" },
+          { kind: "cost", tier: "low", label: "Haiku $" },
+          { kind: "cost", tier: "high", label: "Sonnet $$" },
+        ],
       },
       {
         id: "tags",
