@@ -1,5 +1,8 @@
+import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { countStaleEmbeddings } from "@/server/actions/embeddings"
+import { countPendingSuggestions } from "@/server/queries/calibration"
+import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
 import { hasConsolidatableBlocks } from "@/lib/ai-recommendation/synopsis-consolidator"
 import { splitSynopsesFromText } from "@/lib/work-derived"
 
@@ -128,3 +131,34 @@ export async function getSettingsBadgePendingTotal(): Promise<number> {
   ])
   return embeddings + canonicalSynopsis + reviewSummary
 }
+
+/**
+ * Pendências por ITEM (card) do console /settings — `Record<sectionId, count>`,
+ * com o `sectionId` do registry (`app/settings/sections.tsx`). Cada fonte mapeia
+ * 1:1 com um item; o badge do GRUPO (sub-nav) é a soma dos itens do grupo e o
+ * badge da sidebar é a soma de tudo — assim os três níveis (sidebar → tópico →
+ * card) batem. Memoizado por request (`cache`) para o layout (grupos) e a page
+ * (cards) compartilharem uma única computação. Só entram itens com pendência
+ * acionável; contagens baratas, em paralelo, sem LLM. Cada parcela falha em 0.
+ */
+export const getSettingsItemPending = cache(
+  async (): Promise<Record<string, number>> => {
+    const [suggestions, embeddings, canonicalSynopsis, reviewSummary, comixMissing] =
+      await Promise.all([
+        countPendingSuggestions().catch(() => 0),
+        countMissingEmbeddings().catch(() => 0),
+        countPendingCanonicalSynopses().catch(() => 0),
+        countPendingReviewSummaries().catch(() => 0),
+        getWorksMissingComixHid()
+          .then((w) => w.length)
+          .catch(() => 0),
+      ])
+    return {
+      "ai-calibration": suggestions,
+      embeddings,
+      "synopsis-canonical": canonicalSynopsis,
+      "review-synthesis": reviewSummary,
+      comix: comixMissing,
+    }
+  },
+)

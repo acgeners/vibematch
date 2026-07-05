@@ -1,7 +1,7 @@
 "use server"
 
 import { getEvalBadgeUnreadCount } from "@/server/queries/ai-eval-read"
-import { getSettingsBadgePendingTotal } from "@/server/queries/settings-pending"
+import { getSettingsItemPending } from "@/server/queries/settings-pending"
 import { maybeTriggerStaleRecalc } from "@/server/actions/recalc-queue"
 import { getComixStatus } from "@/lib/external/comix-gate"
 import type { ComixHealthState } from "@/lib/external/comix-gate"
@@ -9,7 +9,7 @@ import type { ComixHealthState } from "@/lib/external/comix-gate"
 export interface SidebarBadgeCounts {
   /** Obras NÃO-LIDAS nas 3 primeiras abas de /ai-evaluation (atributos + Veredito IA + Interesse), união distinta. Marcar como lido silencia sem resolver. */
   aiEval: number
-  /** Pendências do Pipeline de dados de /settings (soma). */
+  /** Soma de todas as pendências acionáveis de /settings (todos os tópicos). */
   settings: number
   /** Há edições de nota aguardando recálculo (fila de recálculo, migration 096). */
   recalcPending: boolean
@@ -25,11 +25,11 @@ export interface SidebarBadgeCounts {
  *   /ai-evaluation silencia pendências sem resolvê-las, então o antigo problema
  *   de inflar o badge (regen de perfil) é neutralizado pelo próprio usuário. Ver
  *   `getEvalBadgeUnreadCount`. A sidebar oculta o badge quando isto é 0.
- * - settings: total do Pipeline de dados, via TS (`getSettingsBadgePendingTotal`).
- *   Usava a RPC `get_sidebar_badge_counts`, mas ela conta `canonical_synopsis`
- *   só por NULL e NÃO aplica o gate de "consolidável" (≥40 chars) — contava obras
- *   que o consolidador sempre pula → badge da sidebar divergia dos cards da
- *   página (preso). O caminho TS reusa as MESMAS contagens da página.
+ * - settings: soma de TODAS as pendências acionáveis de /settings (sugestões de
+ *   critérios + embeddings + sinopse + resumo + comix), via `getSettingsItemPending`
+ *   — as MESMAS contagens por-item que a página e a sub-nav usam, então sidebar →
+ *   tópico → card batem. Antes somava só o grupo "Gerado por IA"
+ *   (embeddings+sinopse+resumo), ignorando o 99+ de critérios e o comix.
  *
  * Cada parcela falha silenciosa em 0 pra nunca derrubar o layout.
  */
@@ -61,15 +61,14 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
 }
 
 /**
- * Total de pendências do Pipeline de dados (badge "Configurações"), via TS —
- * `getSettingsBadgePendingTotal` reusa `countPendingCanonicalSynopses` (mesmo
- * gate de "consolidável" da página), então o badge bate com a soma dos cards.
- * Falha → 0 (nunca derruba o layout). A RPC `get_sidebar_badge_counts` ficou
- * órfã (não aplica o gate); pode ser removida num cleanup futuro.
+ * Total de pendências de /settings (badge "Configurações") = soma dos itens de
+ * `getSettingsItemPending` (as MESMAS contagens por-item da página/sub-nav).
+ * Falha → 0 (nunca derruba o layout).
  */
 async function getSettingsBadgeTotal(): Promise<number> {
   try {
-    return await getSettingsBadgePendingTotal()
+    const itemPending = await getSettingsItemPending()
+    return Object.values(itemPending).reduce((sum, n) => sum + n, 0)
   } catch (err) {
     console.error("[getSidebarBadgeCounts] contagem de settings falhou:", err)
     return 0
