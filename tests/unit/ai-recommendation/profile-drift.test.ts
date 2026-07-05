@@ -12,7 +12,8 @@ import {
   type HeuristicFingerprint,
   type ProfileStalenessArgs,
 } from "@/lib/ai-recommendation/profile-drift"
-import type { RatedWorkInput } from "@/lib/ai-recommendation/types"
+import { computeProfileStalenessKey } from "@/lib/ai-recommendation/taste-profile"
+import type { RatedWorkInput, TasteProfilePayload } from "@/lib/ai-recommendation/types"
 
 const fp = (loved: string[], avoided: string[]): HeuristicFingerprint => ({ loved, avoided, criteria: [] })
 
@@ -146,5 +147,35 @@ describe("profile-drift — classifyProfileStaleness (gate composto)", () => {
     const r = classifyProfileStaleness(base({ savedFingerprint: null }))
     expect(r.stale).toBe(false)
     expect(r.reason).toBe("identical")
+  })
+})
+
+describe("computeProfileStalenessKey — chave de staleness do Interesse (follow-up b)", () => {
+  const payload = (loved: string[]): TasteProfilePayload => ({
+    loved_tags: loved.map((name) => ({ name, group: null, strength: 0.5 })),
+    avoided_tags: [], loved_themes: [], avoided_themes: [], criterion_preferences: {}, narrative_patterns: [], summary: "qualquer",
+  })
+
+  it("MESMO fingerprint ⇒ MESMA chave, ainda que o output LLM (payload) mude — mata o churn de regen", () => {
+    const fpX = fp(["action", "romance"], ["gore"])
+    // Dois 'regens' do MESMO acervo: fingerprint idêntico, mas summary/tags do LLM diferentes.
+    const a = computeProfileStalenessKey({ heuristic_fingerprint: fpX, profile: payload(["action", "romance", "comedy"]) })
+    const b = computeProfileStalenessKey({ heuristic_fingerprint: fpX, profile: payload(["drama", "isekai"]) })
+    expect(a).toBe(b)
+  })
+
+  it("fingerprint DIFERENTE ⇒ chave diferente (mudança material invalida)", () => {
+    const a = computeProfileStalenessKey({ heuristic_fingerprint: fp(["action"], []), profile: payload(["action"]) })
+    const b = computeProfileStalenessKey({ heuristic_fingerprint: fp(["horror"], []), profile: payload(["action"]) })
+    expect(a).not.toBe(b)
+  })
+
+  it("sem fingerprint (ou vazio) ⇒ fallback pra computeProfileSignature (sensível ao payload)", () => {
+    const a = computeProfileStalenessKey({ heuristic_fingerprint: null, profile: payload(["action"]) })
+    const b = computeProfileStalenessKey({ heuristic_fingerprint: null, profile: payload(["horror"]) })
+    expect(a).not.toBe(b) // sem fingerprint, cai no comportamento legado (payload conta)
+    // fingerprint todo-vazio também cai no fallback
+    const empty = computeProfileStalenessKey({ heuristic_fingerprint: { loved: [], avoided: [], criteria: [] }, profile: payload(["action"]) })
+    expect(empty).toBe(a)
   })
 })

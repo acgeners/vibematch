@@ -20,7 +20,7 @@
 import "server-only"
 import { createHash } from "node:crypto"
 import { PRICING_SNAPSHOT_TAG } from "@/lib/ai/pricing"
-import { computeProfileSignature, computeInputHash, loadCurrentTasteProfile, MIN_WORKS_FOR_FULL_PROFILE } from "@/lib/ai-recommendation/taste-profile"
+import { computeProfileStalenessKey, computeInputHash, loadCurrentTasteProfile, MIN_WORKS_FOR_FULL_PROFILE } from "@/lib/ai-recommendation/taste-profile"
 import type { TasteProfileRow } from "@/lib/ai-recommendation/types"
 import { MODEL as PREDICT_MODEL } from "@/lib/ai-evaluation/synopsis-quality-predictor"
 import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
@@ -346,8 +346,10 @@ export async function planInterestBackfill(deps: PlanInterestBackfillDeps = {}):
     current: profileSnap.current ? { isStub: profileSnap.current.is_stub, inputHash: profileSnap.current.input_hash } : null,
     libraryHash: profileSnap.libraryInputHash,
   })
+  // Chave determinística (fingerprint), coerente com o que o store grava. Um
+  // backfill EXPLÍCITO re-prevê linhas de chave-antiga (migração intencional).
   const currentProfileSignature =
-    profileSnap.current && !profileSnap.current.is_stub ? computeProfileSignature(profileSnap.current.profile) : null
+    profileSnap.current && !profileSnap.current.is_stub ? computeProfileStalenessKey(profileSnap.current) : null
 
   let profileState: BackfillProfileState
   let profileAction: ProfileAction
@@ -658,7 +660,7 @@ export async function runInterestBackfill(deps: RunInterestBackfillDeps): Promis
       case "stale":
         return { status: "profile_failed", message: "Perfil permaneceu stale (refresh não solicitado)." }
     }
-    runningProfileSignature = resolvedProfile ? computeProfileSignature(resolvedProfile.profile) : runningProfileSignature
+    runningProfileSignature = resolvedProfile ? computeProfileStalenessKey(resolvedProfile) : runningProfileSignature
   }
 
   // Injeta o perfil JÁ RESOLVIDO em ensurePredictInterest (não regenera/regate).

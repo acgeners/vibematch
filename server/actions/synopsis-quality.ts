@@ -323,7 +323,7 @@ export async function planSynopsisInterestBatchAction(workIds: string[]): Promis
 
     const { SupabaseInterestGateway, planInterestBatch } = await import("@/lib/orchestration/integrations/synopsis-interest")
     const { classifyTasteProfileReadiness } = await import("@/lib/orchestration/integrations/taste-profile")
-    const { computeInputHash, computeProfileSignature, MIN_WORKS_FOR_FULL_PROFILE } = await import("@/lib/ai-recommendation/taste-profile")
+    const { computeInputHash, computeProfileSignature, computeProfileStalenessKey, MIN_WORKS_FOR_FULL_PROFILE } = await import("@/lib/ai-recommendation/taste-profile")
     const { computeHeuristicFingerprint } = await import("@/lib/ai-recommendation/profile-drift")
     const { getRatedWorksForProfile } = await import("@/server/queries/recommendations")
 
@@ -349,10 +349,12 @@ export async function planSynopsisInterestBatchAction(workIds: string[]): Promis
     if (needsGen && ratedWorks.length < MIN_WORKS_FOR_FULL_PROFILE) {
       return { status: "blocked_manual", message: `Avalie ao menos ${MIN_WORKS_FOR_FULL_PROFILE} obras (você tem ${ratedWorks.length}) para gerar o perfil do lote.` }
     }
-    const profileSignature = current && !current.is_stub ? computeProfileSignature(current.profile) : null
+    const profileSignature = current && !current.is_stub ? computeProfileStalenessKey(current) : null
+    const profileSignatureLegacy = current && !current.is_stub ? computeProfileSignature(current.profile) : null
     const plan = await planInterestBatch(ids, {
       gateway: new SupabaseInterestGateway(),
       profileSignature,
+      profileSignatureLegacy,
       profileNeedsGeneration: needsGen,
       profileScale: ratedWorks.length,
     })

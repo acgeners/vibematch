@@ -142,6 +142,15 @@ describe("assinatura + readiness", () => {
     expect(classifyInterestReadiness({ currentSignature: sig, currentProfileSignature: "ph", stored: { predictedQuality: "♥♥♥", inputSignature: null, tasteProfileHash: "ph", stale: true } })).toBe("stale")
     expect(classifyInterestReadiness({ currentSignature: sig, currentProfileSignature: "ph", stored: null })).toBe("absent")
   })
+  it("transição de chave (dual-read): assinatura/hash com a chave ANTIGA seguem FRESH", () => {
+    const base = { currentSignature: "SIG_NOVA", currentSignatureLegacy: "SIG_ANTIGA", currentProfileSignature: "KEY_NOVA", currentProfileSignatureLegacy: "KEY_ANTIGA" }
+    // moderno gravado com a chave antiga ⇒ casa via *Legacy ⇒ fresh (não re-prevê)
+    expect(classifyInterestReadiness({ ...base, stored: { predictedQuality: "♥♥♥", inputSignature: "SIG_ANTIGA", tasteProfileHash: "x", stale: false } })).toBe("fresh")
+    // moderno que não casa com nenhuma ⇒ stale
+    expect(classifyInterestReadiness({ ...base, stored: { predictedQuality: "♥♥♥", inputSignature: "OUTRA", tasteProfileHash: "x", stale: false } })).toBe("stale")
+    // legado com hash da chave antiga ⇒ casa via *Legacy ⇒ fresh
+    expect(classifyInterestReadiness({ ...base, stored: { predictedQuality: "♥♥♥", inputSignature: null, tasteProfileHash: "KEY_ANTIGA", stale: false } })).toBe("fresh")
+  })
 })
 
 // ---- ensurePredictInterest -------------------------------------------------
