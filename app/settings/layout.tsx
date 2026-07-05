@@ -6,30 +6,19 @@ import {
   SettingsSubnav,
 } from "@/components/settings/settings-nav"
 import type { SubnavGroup } from "@/components/settings/settings-nav"
-import {
-  countMissingEmbeddings,
-  countPendingCanonicalSynopses,
-  countPendingReviewSummaries,
-} from "@/server/queries/settings-pending"
-import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
-import { countPendingSuggestions } from "@/server/queries/calibration"
+import { getSettingsItemPending } from "@/server/queries/settings-pending"
 
-// Pendências por GRUPO (badge na sub-nav). Contagens baratas, buscadas em
-// paralelo. O grupo "Avançado" não tem pendência acionável → 0.
+// Pendências por GRUPO (badge na sub-nav) = soma das pendências dos itens do
+// grupo. Fonte única `getSettingsItemPending` (memoizada por request, compartilhada
+// com a page e o badge da sidebar). "Avançado" não tem item com pendência → 0.
 async function loadGroupPending(): Promise<Record<string, number>> {
-  const [embeddings, synopsis, reviewSummary, comixMissing, aiCalibration] = await Promise.all([
-    countMissingEmbeddings(),
-    countPendingCanonicalSynopses(),
-    countPendingReviewSummaries(),
-    getWorksMissingComixHid(),
-    countPendingSuggestions(),
-  ])
-  return {
-    notas: aiCalibration,
-    ia: embeddings + synopsis + reviewSummary,
-    fontes: comixMissing.length,
-    avancado: 0,
-  }
+  const itemPending = await getSettingsItemPending()
+  return Object.fromEntries(
+    SETTINGS_GROUPS.map((g) => [
+      g.id,
+      g.sections.reduce((sum, s) => sum + (itemPending[s.id] ?? 0), 0),
+    ]),
+  )
 }
 
 // Layout da área /settings: navegação em DUAS CAMADAS. A camada 1 (menu do site)

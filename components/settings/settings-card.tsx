@@ -25,6 +25,7 @@ export function SettingsCard({
   collapsible = false,
   forceOpen = false,
   storageKeyPrefix = "settings-card",
+  pending = 0,
   children,
 }: {
   section: SettingsSection
@@ -34,6 +35,8 @@ export function SettingsCard({
   forceOpen?: boolean
   /** Prefixo da chave do localStorage — separa /settings de /preferencias. */
   storageKeyPrefix?: string
+  /** Pendências deste item — mostra uma pílula no cabeçalho quando > 0. */
+  pending?: number
   children: ReactNode
 }) {
   const s = ACCENT_STYLES[accent]
@@ -62,6 +65,23 @@ export function SettingsCard({
         )}
         <p className="mt-1 text-xs text-muted-foreground">{section.description}</p>
       </div>
+      {pending > 0 && (
+        <span
+          className={cn(
+            "mt-0.5 inline-flex shrink-0 items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-xs font-bold ring-1",
+            s.cardBg,
+            s.iconText,
+            s.ring
+          )}
+          title={`${pending} ${pending === 1 ? "pendência" : "pendências"} neste item`}
+        >
+          <span aria-hidden className="size-1.5 rounded-full bg-current" />
+          {pending > 99 ? "99+" : pending}
+          <span className="font-medium opacity-75">
+            {pending === 1 ? "pendente" : "pendentes"}
+          </span>
+        </span>
+      )}
     </>
   )
 

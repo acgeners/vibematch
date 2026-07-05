@@ -44,6 +44,7 @@ import {
   countMissingEmbeddings,
   countPendingCanonicalSynopses,
   countPendingReviewSummaries,
+  getSettingsItemPending,
 } from "@/server/queries/settings-pending"
 import { parseModelEvaluationMetrics } from "@/lib/metrics/model-evaluation"
 import type { FormulaConfig } from "@/types/domain"
@@ -117,6 +118,9 @@ export default async function SettingsPage({
   const GroupIcon = group.icon
   // Itens do tópico ganham seta de colapso — exceto quando o tópico tem 1 só.
   const collapsible = group.sections.length > 1
+  // Pendências por item (badge no card). Memoizado por request → mesma computação
+  // que o layout já fez pra sub-nav (não recontabiliza).
+  const itemPending = await getSettingsItemPending()
 
   return (
     <div className="w-full max-w-5xl">
@@ -149,6 +153,7 @@ export default async function SettingsPage({
             collapsible={collapsible}
             forceOpen={openId === section.id}
             storageKeyPrefix="settings-card"
+            pending={itemPending[section.id] ?? 0}
           >
             <Suspense fallback={<BodySkeleton />}>
               <ItemBody
