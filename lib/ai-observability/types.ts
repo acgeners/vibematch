@@ -14,8 +14,9 @@
 
 // ── Operações ───────────────────────────────────────────────────────────────
 // Chaves exatamente como gravadas em ai_api_calls.operation pelos call sites.
-// As 11 primeiras têm tráfego real medido; as 3 de tag são registradas no código
-// (ações de tag-consolidation) e podem ter 0 chamadas no período.
+// tag_inference/tag_verify vêm do pipeline de tags da SINOPSE (lib/tags/*);
+// tag_clustering/classifier/enricher vêm das ações administrativas de
+// tag-consolidation (podem ter 0 chamadas no período).
 
 export const AI_OPERATION_KEYS = [
   "ai_evaluation",
@@ -29,6 +30,8 @@ export const AI_OPERATION_KEYS = [
   "review_digest",
   "deep_dive",
   "synopsis_consolidator",
+  "tag_inference",
+  "tag_verify",
   "tag_clustering",
   "tag_classifier",
   "tag_enricher",
@@ -232,6 +235,24 @@ export const AI_OPERATIONS: Record<AiOperationKey, AiOperationDefinition> = {
     typicalWorkload: "recurring",
     hasResultCache: false,
     description: "Funde múltiplas sinopses externas numa só (Haiku).",
+  },
+  tag_inference: {
+    key: "tag_inference",
+    label: "Inferência de tags",
+    defaultModel: "claude-haiku-4-5-20251001",
+    typicalWorkload: "recurring",
+    hasResultCache: false,
+    description:
+      "Infere tags de uma obra a partir da sinopse (+ contexto de reviews), restrita ao vocabulário existente e com evidência (Haiku).",
+  },
+  tag_verify: {
+    key: "tag_verify",
+    label: "Verificação de tags",
+    defaultModel: "claude-sonnet-4-6",
+    typicalWorkload: "backfill",
+    hasResultCache: false,
+    description:
+      "Revalida as tags candidatas inferidas numa passada rica (Sonnet); usada no backfill de tags via scripts/infer-tags.ts.",
   },
   tag_clustering: {
     key: "tag_clustering",
