@@ -34,6 +34,18 @@ interface Decl {
   weight: number
 }
 
+/** Uma declaração ativa, com rótulo resolvido — item exibido no resumo do topo. */
+interface SelectedItem {
+  key: string
+  level: TagPrefLevel
+  id: string
+  stance: TagStance
+  weight: number
+  label: string
+  /** "subgrupo"/"grupo" quando a declaração não é de tag (some pra tags). */
+  kindLabel?: string
+}
+
 const SIN_GRUPO = "Sem grupo"
 
 function keyOf(level: TagPrefLevel, id: string): string {
@@ -100,6 +112,43 @@ export function TagPreferencesForm({ tags, initialRows }: TagPreferencesFormProp
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState("")
+
+  // Mapas de rótulo por id — pra exibir cada declaração no resumo do topo.
+  const labelMaps = useMemo(() => {
+    const tagName = new Map<string, string>()
+    const subLabel = new Map<string, string>()
+    const groupLabel = new Map<string, string>()
+    for (const t of tags) {
+      tagName.set(t.id, t.name)
+      if (t.tag_subgroup_id && t.subGroupName) subLabel.set(t.tag_subgroup_id, t.subGroupName)
+      if (t.tag_group_id && t.groupName) groupLabel.set(t.tag_group_id, t.groupName)
+    }
+    return { tagName, subLabel, groupLabel }
+  }, [tags])
+
+  // Declarações ativas com rótulo resolvido — as "selecionadas" que sobem pro topo.
+  const selected = useMemo<SelectedItem[]>(() => {
+    const out: SelectedItem[] = []
+    for (const [key, decl] of decls) {
+      const idx = key.indexOf(":")
+      const level = key.slice(0, idx) as TagPrefLevel
+      const id = key.slice(idx + 1)
+      let label = id
+      let kindLabel: string | undefined
+      if (level === "tag") label = labelMaps.tagName.get(id) ?? id
+      else if (level === "subgroup") {
+        label = labelMaps.subLabel.get(id) ?? id
+        kindLabel = "subgrupo"
+      } else {
+        label = labelMaps.groupLabel.get(id) ?? id
+        kindLabel = "grupo"
+      }
+      out.push({ key, level, id, stance: decl.stance, weight: decl.weight, label, kindLabel })
+    }
+    return out.sort((a, b) => a.label.localeCompare(b.label))
+  }, [decls, labelMaps])
+  const loved = selected.filter((x) => x.stance === "love")
+  const avoided = selected.filter((x) => x.stance === "avoid")
 
   // Busca por nome/slug da tag. Filtra a árvore: subgrupos/grupos sem tag
   // correspondente somem. Enquanto há busca, tudo fica expandido pra mostrar
@@ -213,6 +262,49 @@ export function TagPreferencesForm({ tags, initialRows }: TagPreferencesFormProp
           </Button>
         </div>
       </div>
+
+      {/* Selecionadas em destaque no topo (mesmo padrão da página da obra). */}
+      {selected.length > 0 && (
+        <div className="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <Ban className="h-3 w-3" />/<Heart className="h-3 w-3" /> mover entre amadas e evitadas
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <Sparkles className="h-3 w-3" /> 2× ênfase forte
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <X className="h-3 w-3" /> remover
+            </span>
+          </div>
+          {loved.length > 0 && (
+            <div>
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                <Heart className="h-3 w-3 fill-current" /> Amadas
+                <span className="font-semibold text-muted-foreground/70">{loved.length}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {loved.map((item) => (
+                  <SelectedChip key={item.key} item={item} disabled={isPending} onSet={apply} />
+                ))}
+              </div>
+            </div>
+          )}
+          {avoided.length > 0 && (
+            <div>
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-rose-600 dark:text-rose-400">
+                <Ban className="h-3 w-3" /> Evitadas
+                <span className="font-semibold text-muted-foreground/70">{avoided.length}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {avoided.map((item) => (
+                  <SelectedChip key={item.key} item={item} disabled={isPending} onSet={apply} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Busca por tag — filtra a árvore e expande os nós com match. */}
       <div className="relative">
@@ -443,6 +535,84 @@ function NodeRow({
       </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Chip de uma tag selecionada (no resumo do topo). Carrega os mesmos controles da
+ * árvore — ✨2× (peso) e o par de stance (aqui só o oposto, pra "mover") — mais um
+ * ✕ destacado pra remover. A cor segue o padrão da obra: amada=verde, evitada=vermelho.
+ */
+function SelectedChip({
+  item,
+  disabled,
+  onSet,
+}: {
+  item: SelectedItem
+  disabled?: boolean
+  onSet: (level: TagPrefLevel, targetId: string, stance: TagStance | null, weight: number) => void
+}) {
+  const isLove = item.stance === "love"
+  const emphatic = item.weight >= 2
+  const opposite: TagStance = isLove ? "avoid" : "love"
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border py-1 pl-3 pr-1 text-xs",
+        isLove
+          ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          : "border-rose-500/50 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+      )}
+    >
+      <span className="font-medium">
+        {item.label}
+        {item.kindLabel && <span className="ml-1 opacity-60">· {item.kindLabel}</span>}
+      </span>
+      <span className="flex items-center gap-1 border-l border-current/25 pl-1.5">
+        {/* Ênfase 2× — alterna peso 2 ↔ 1. */}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onSet(item.level, item.id, item.stance, emphatic ? 1 : 2)}
+          title={emphatic ? "Ênfase forte (2×) — clique pra voltar a 1×" : "Marcar ênfase forte (2×)"}
+          className={cn(
+            "flex h-6 items-center gap-0.5 rounded px-1.5 text-[10px] font-bold transition-colors disabled:opacity-50",
+            emphatic
+              ? "bg-amber-500/20 text-amber-700 dark:text-amber-300"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Sparkles className="h-3 w-3" />
+          {emphatic ? "2×" : ""}
+        </button>
+        {/* Só a stance OPOSTA — a atual é redundante (cor + seção já dizem). */}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onSet(item.level, item.id, opposite, item.weight)}
+          title={isLove ? "Mover pra Evitadas" : "Mover pra Amadas"}
+          className={cn(
+            "flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors disabled:opacity-50",
+            isLove
+              ? "hover:bg-rose-500/15 hover:text-rose-600"
+              : "hover:bg-emerald-500/15 hover:text-emerald-600",
+          )}
+        >
+          {isLove ? <Ban className="h-3.5 w-3.5" /> : <Heart className="h-3.5 w-3.5" />}
+        </button>
+        {/* Divisor + remover (ação destrutiva distinta). */}
+        <span aria-hidden className="mx-0.5 h-4 w-px bg-current/25" />
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onSet(item.level, item.id, null, item.weight)}
+          title="Remover seleção"
+          className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-rose-600 hover:text-white disabled:opacity-50"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </span>
+    </span>
   )
 }
 

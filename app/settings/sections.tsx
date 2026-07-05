@@ -48,8 +48,10 @@ export interface SettingsGroup {
   hint: string
   /** Texto do tooltip (ⓘ) do grupo, se houver. */
   info?: string
-  /** Ícone do tópico na sub-nav + no cabeçalho do grupo. */
+  /** Ícone do tópico no cabeçalho do grupo (server). */
   icon: LucideIcon
+  /** Nome do ícone (string serializável) pra sub-nav client. */
+  iconName: string
   /** Uma cor por grupo. */
   accent: SettingsAccent
   sections: SettingsSection[]
@@ -62,6 +64,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     hint: "acurácia das notas previstas",
     info: "Ajusta a acurácia das notas previstas. A calibração automática recalcula MAEs e pseudo-votos (roda sozinha ao salvar uma obra); a de critérios IA audita e corrige vieses nos category_scores. Atualize os embeddings antes.",
     icon: Gauge,
+    iconName: "Gauge",
     accent: "violet",
     sections: [
       {
@@ -95,6 +98,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     hint: "derivados por modelo, cacheados por obra",
     info: "Artefatos que a IA produz e guarda por obra — embeddings (OpenAI), sinopse canônica, resumo e digest de reviews (Claude). Regeneram sozinhos quando sinopse, tags ou critérios mudam. Rode-os após adicionar ou alterar obras; consomem tokens.",
     icon: Sparkles,
+    iconName: "Sparkles",
     accent: "cyan",
     sections: [
       {
@@ -144,6 +148,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     hint: "Comix — a principal fonte de reviews",
     info: "Operação da Comix, a principal fonte de reviews. Resolve o hid das obras (habilita a coleta de reviews) e testa a conexão. Use quando obras novas estão sem reviews.",
     icon: BookOpen,
+    iconName: "BookOpen",
     accent: "amber",
     sections: [
       {
@@ -163,6 +168,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     hint: "preferências e tarefas raras",
     info: "Preferências de criação e tarefas raras de manutenção: comportamento ao criar obras, consolidar/mesclar tags duplicadas e regenerar os arquivos de constantes a partir do banco.",
     icon: Wrench,
+    iconName: "Wrench",
     accent: "slate",
     sections: [
       {
