@@ -45,6 +45,8 @@ interface Props {
   subgroups: Subgroup[]
   subgroupsWithTags: SubgroupWithTags[]
   unassignedTags: UnassignedTag[]
+  /** Rota que a navegação de filtros reescreve (default = página dedicada). */
+  basePath?: string
 }
 
 const SUB_STATUSES: Array<{ value: SubgroupStatus; label: string }> = [
@@ -67,6 +69,7 @@ export function TagSubgroupsPanel({
   subgroups,
   subgroupsWithTags,
   unassignedTags,
+  basePath = "/settings/tag-consolidation",
 }: Props) {
   const router = useRouter() // mantido pro router.replace em updateQuery
   const doRefresh = useRefresh()
@@ -100,7 +103,7 @@ export function TagSubgroupsPanel({
     }
     if (patch.phase) params.set("phase", patch.phase)
     if (patch.status) params.set("status", patch.status)
-    router.replace(`/settings/tag-consolidation?${params.toString()}`, { scroll: false })
+    router.replace(`${basePath}?${params.toString()}`, { scroll: false })
   }
 
   // ---- Phase 1 handlers ----

@@ -70,6 +70,9 @@ interface Props {
   subgroups: Subgroup[]
   subgroupsWithTags: SubgroupWithTags[]
   unassignedSubgroupTags: UnassignedSubgroupTag[]
+  /** Rota que a navegação de filtros reescreve. Default = a página dedicada;
+   *  quando embutida inline em /settings, recebe "/settings" pra ficar na pilha. */
+  basePath?: string
 }
 
 const STATUSES: Array<{ value: ProposalStatus; label: string }> = [
@@ -93,6 +96,7 @@ export function TagConsolidationClient({
   subgroups,
   subgroupsWithTags,
   unassignedSubgroupTags,
+  basePath = "/settings/tag-consolidation",
 }: Props) {
   const router = useRouter() // mantido pro router.replace em updateQuery
   const doRefresh = useRefresh()
@@ -126,7 +130,7 @@ export function TagConsolidationClient({
       else params.set("group", patch.group)
     }
     if (patch.status) params.set("status", patch.status)
-    router.replace(`/settings/tag-consolidation?${params.toString()}`, { scroll: false })
+    router.replace(`${basePath}?${params.toString()}`, { scroll: false })
   }
 
   const switchView = (target: View) => {
@@ -135,7 +139,7 @@ export function TagConsolidationClient({
     params.set("view", target)
     // Reset status to pending on view change (different lifecycles).
     params.set("status", "pending")
-    router.replace(`/settings/tag-consolidation?${params.toString()}`, { scroll: false })
+    router.replace(`${basePath}?${params.toString()}`, { scroll: false })
   }
 
   const runBulkClusters = async (status: "approved" | "rejected" | "pending") => {
@@ -438,6 +442,7 @@ export function TagConsolidationClient({
           subgroups={subgroups}
           subgroupsWithTags={subgroupsWithTags}
           unassignedTags={unassignedSubgroupTags}
+          basePath={basePath}
         />
       ) : view === "groupmoves" ? (
         <GroupMovesPanel
