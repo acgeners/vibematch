@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug } from "@/lib/utils"
+import { LABELS } from "@/lib/constants/ui-labels"
 import type { RankedCandidate } from "@/lib/ai-recommendation/types"
 
 interface RankedWorkCardProps {
@@ -68,7 +69,7 @@ export function RankedWorkCard({ rank, ranked }: RankedWorkCardProps) {
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="max-w-[320px] space-y-1.5">
-                <p className="text-xs font-semibold">Veredito IA: {Math.round(alignment_score)}/100</p>
+                <p className="text-xs font-semibold">{LABELS.alignment_score.full}: {Math.round(alignment_score)}/100</p>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Score do Claude pra essa obra considerando seu perfil de gosto + contexto da run.
                 </p>

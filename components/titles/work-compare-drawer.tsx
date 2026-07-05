@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/sheet"
 import { ScoreBadge, getCriterionColorClass, criterionCellClass, type ColumnThresholds, type ScoreColorThresholds, type CriterionRange, type AttrColorMode } from "@/components/ui/score-badge"
 import { readAttrColorMode, subscribeAttrColorMode } from "@/lib/ui/attr-color-mode"
+import { LABELS } from "@/lib/constants/ui-labels"
 import {
   PersonalStatusBadge,
   PublicationStatusBadge,
@@ -97,7 +98,7 @@ const COMPARE_ROW_GROUPS: CompareRowGroup[] = [
     label: "Notas",
     rows: [
       { key: "score:decision", label: "Prioridade" },
-      { key: "score:expectedScore", label: "Nota Prevista" },
+      { key: "score:expectedScore", label: LABELS.expected_score.full },
       { key: "score:personalFit", label: "Alinhamento" },
       { key: "score:alignmentScore", label: "Veredito" },
       { key: "score:platformAvg", label: "Média externa" },
@@ -897,7 +898,7 @@ function CompareGrid({
     },
     {
       key: "score:expectedScore",
-      label: "Nota Prevista",
+      label: LABELS.expected_score.full,
       get: (w) => w.expectedScore,
       thresholds: scoreThresholds?.expected ?? null,
       asAttributeBox: true,

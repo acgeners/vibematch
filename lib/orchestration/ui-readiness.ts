@@ -13,6 +13,7 @@
  */
 
 import type { ActionName, CostTier, DataKey } from "./contracts"
+import { LABELS } from "@/lib/constants/ui-labels"
 import type { ExecutionPlan } from "./planner"
 import type { WorkReadinessSnapshot } from "./readiness"
 
@@ -130,7 +131,7 @@ export const GENERATOR_UI: Partial<Record<ActionName, GeneratorUi>> = {
     ],
   },
   run_alignment: {
-    label: "Veredito IA",
+    label: LABELS.alignment_score.full,
     // O contrato `run_alignment` tem inputs:[] (motor não modela). Tudo aqui.
     extraBlocking: [
       {

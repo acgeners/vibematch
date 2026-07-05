@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
+import { LABELS } from "@/lib/constants/ui-labels"
 import { CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { saveFilterPreset, renameFilterPreset, deleteFilterPreset } from "@/server/actions/filter-presets"
@@ -41,22 +42,22 @@ const CRITERION_LABELS: Record<string, string> = {
 
 const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
   { value: "recommended", label: "Recomendado" },
-  { value: "decision", label: "Prioridade" },
-  { value: "expected_score", label: "Nota Prevista" },
-  { value: "personal_fit", label: "Alinhamento" },
-  { value: "alignment_score", label: "Veredito IA" },
-  { value: "platform_avg", label: "Nota.M" },
-  { value: "total_votes", label: "Votos" },
-  { value: "title", label: "Título" },
-  { value: "chapters", label: "Capítulos" },
-  { value: "chapters_read", label: "Capítulos lidos" },
-  { value: "year", label: "Ano" },
-  { value: "synopsis_q", label: "Sinopse" },
-  { value: "synopsis_pred", label: "Prev. sinopse (IA)" },
-  { value: "publication_status", label: "Publicação" },
-  { value: "personal_status", label: "Status pessoal" },
-  { value: "updated_at", label: "Atualizado" },
-  { value: "last_read_at", label: "Última leitura" },
+  { value: "decision", label: LABELS.decision.short },
+  { value: "expected_score", label: LABELS.expected_score.short },
+  { value: "personal_fit", label: LABELS.personal_fit.short },
+  { value: "alignment_score", label: LABELS.alignment_score.short },
+  { value: "platform_avg", label: LABELS.platform_avg.short },
+  { value: "total_votes", label: LABELS.total_votes.short },
+  { value: "title", label: LABELS.title.short },
+  { value: "chapters", label: LABELS.chapters_total.short },
+  { value: "chapters_read", label: LABELS.chapters_read.short },
+  { value: "year", label: LABELS.year.short },
+  { value: "synopsis_q", label: LABELS.synopsis_q.short },
+  { value: "synopsis_pred", label: LABELS.synopsis_pred.short },
+  { value: "publication_status", label: LABELS.publication_status.short },
+  { value: "personal_status", label: LABELS.personal_status.short },
+  { value: "updated_at", label: LABELS.updated_at.short },
+  { value: "last_read_at", label: LABELS.last_read_at.short },
   ...CRITERION_SLUGS.map((slug) => ({
     value: `crit_${slug}`,
     label: CRITERION_LABELS[slug] ?? slug,
@@ -400,11 +401,11 @@ const CRITERION_SCORE_DEFS: ScoreDef[] = CRITERION_SLUGS.map((slug) => ({
 }))
 
 const GENERAL_SCORE_DEFS: ScoreDef[] = [
-  { key: "expected", emoji: "🎯", label: "Nota Prevista", minKey: "min_expected", maxKey: "max_expected", min: 0, max: 10, step: 0.5, presets: [6, 7, 7.5, 8] },
-  { key: "fit", emoji: "🧭", label: "Alinhamento", minKey: "min_fit", maxKey: "max_fit", min: 0, max: 100, step: 5, presets: [50, 75, 90] },
-  { key: "platform", emoji: "🌐", label: "Média externa", minKey: "min_platform_avg", maxKey: "max_platform_avg", min: 0, max: 10, step: 0.5, presets: [6, 7, 8] },
-  { key: "align", emoji: "🤖", label: "Veredito IA", minKey: "min_align", maxKey: "max_align", min: 0, max: 100, step: 5, presets: [50, 75, 90] },
-  { key: "votes", emoji: "🗳️", label: "Votos", minKey: "min_votes", maxKey: "max_votes", min: 0, max: 0, step: 1, presets: [], kind: "votes", fullWidth: true },
+  { key: "expected", emoji: "🎯", label: LABELS.expected_score.full, minKey: "min_expected", maxKey: "max_expected", min: 0, max: 10, step: 0.5, presets: [6, 7, 7.5, 8] },
+  { key: "fit", emoji: "🧭", label: LABELS.personal_fit.full, minKey: "min_fit", maxKey: "max_fit", min: 0, max: 100, step: 5, presets: [50, 75, 90] },
+  { key: "platform", emoji: "🌐", label: LABELS.platform_avg.full, minKey: "min_platform_avg", maxKey: "max_platform_avg", min: 0, max: 10, step: 0.5, presets: [6, 7, 8] },
+  { key: "align", emoji: "🤖", label: LABELS.alignment_score.full, minKey: "min_align", maxKey: "max_align", min: 0, max: 100, step: 5, presets: [50, 75, 90] },
+  { key: "votes", emoji: "🗳️", label: LABELS.total_votes.full, minKey: "min_votes", maxKey: "max_votes", min: 0, max: 0, step: 1, presets: [], kind: "votes", fullWidth: true },
 ]
 
 function scoreDecimals(step: number): number {
@@ -1827,13 +1828,13 @@ export function RankingFilters({
       onRemove: () => updateParams({ top_n: null }),
     })
   }
-  pushRangeChip("chapters", "Capítulos", "min_chapters", "max_chapters")
-  pushRangeChip("year", "Ano", "min_year", "max_year")
-  pushRangeChip("expected", "Nota Prevista", "min_expected", "max_expected")
-  pushRangeChip("fit", "Alinhamento", "min_fit", "max_fit")
-  pushRangeChip("align", "Veredito IA", "min_align", "max_align")
-  pushRangeChip("platform", "Nota.M", "min_platform_avg", "max_platform_avg")
-  pushRangeChip("votes", "Votos", "min_votes", "max_votes")
+  pushRangeChip("chapters", LABELS.chapters_total.short, "min_chapters", "max_chapters")
+  pushRangeChip("year", LABELS.year.short, "min_year", "max_year")
+  pushRangeChip("expected", LABELS.expected_score.full, "min_expected", "max_expected")
+  pushRangeChip("fit", LABELS.personal_fit.full, "min_fit", "max_fit")
+  pushRangeChip("align", LABELS.alignment_score.full, "min_align", "max_align")
+  pushRangeChip("platform", LABELS.platform_avg.full, "min_platform_avg", "max_platform_avg")
+  pushRangeChip("votes", LABELS.total_votes.full, "min_votes", "max_votes")
   for (const slug of CRITERION_SLUGS) {
     pushRangeChip(`crit-${slug}`, CRITERION_LABELS[slug] ?? slug, `min_${slug}`, `max_${slug}`)
   }
@@ -2089,12 +2090,11 @@ export function RankingFilters({
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Label className="w-16 shrink-0 cursor-help text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                            Prev. IA
+                            {LABELS.synopsis_pred.abbrev}
                           </Label>
                         </TooltipTrigger>
                         <TooltipContent className="max-w-xs text-xs">
-                          Previsão da IA de quanto a sinopse vai te interessar (♥ a ♥♥♥♥), com base no
-                          seu perfil de gosto. Diferente do interesse que você informou.
+                          {LABELS.synopsis_pred.tooltip_full}
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>

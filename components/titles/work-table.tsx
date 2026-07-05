@@ -32,6 +32,7 @@ import {
   X,
 } from "lucide-react"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
+import { LABELS } from "@/lib/constants/ui-labels"
 import {
   Tooltip,
   TooltipContent,
@@ -777,11 +778,11 @@ function WorkListView({
     synopsis_q: { field: "synopsis_q", label: "Sinopse" },
     synopsis_pred: { field: "synopsis_pred", label: "Interesse IA (previsão)" },
     decision: { field: "decision", label: "Prioridade" },
-    expected_score: { field: "expected_score", label: "Nota Prevista" },
+    expected_score: { field: "expected_score", label: LABELS.expected_score.full },
     personal_fit: { field: "personal_fit", label: "Alinhamento" },
     platform_avg: { field: "platform_avg", label: "Nota.M" },
     total_votes: { field: "total_votes", label: "Votos" },
-    alignment_score: { field: "alignment_score", label: "Veredito IA" },
+    alignment_score: { field: "alignment_score", label: LABELS.alignment_score.full },
     ai_status: { field: "ai_eval_status", label: "Status IA" },
     updated_at: { field: "updated_at", label: "Atualizado" },
     last_read_at: { field: "last_read_at", label: "Última leitura" },

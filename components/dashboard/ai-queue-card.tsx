@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { Brain, ListChecks, Sparkles, FileText, ArrowRight } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { LABELS } from "@/lib/constants/ui-labels"
 
 interface AiQueueCardProps {
   /** Avaliação de atributos pendente (ai_eval_status pending + review_pending). */
@@ -21,7 +22,7 @@ interface QueueRow {
 export function AiQueueCard({ attributes, iaRk, synopsis }: AiQueueCardProps) {
   const rows: QueueRow[] = [
     { label: "Atributos", count: attributes, href: "/ai-evaluation", icon: ListChecks },
-    { label: "Veredito IA", count: iaRk, href: "/ai-evaluation?tab=ia-rk", icon: Sparkles },
+    { label: LABELS.alignment_score.full, count: iaRk, href: "/ai-evaluation?tab=ia-rk", icon: Sparkles },
     { label: "Interesse por sinopse", count: synopsis, href: "/ai-evaluation?tab=sinopse", icon: FileText },
   ]
   const total = attributes + iaRk + synopsis
