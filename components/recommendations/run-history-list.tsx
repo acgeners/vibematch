@@ -6,6 +6,7 @@ import { Loader2, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
+import { LABELS } from "@/lib/constants/ui-labels"
 import { formatRelativeDateTime } from "@/lib/date-utils"
 import type { RecommendationRunSummary } from "@/server/queries/recommendations"
 import { deleteRecommendationRunAction } from "@/server/actions/recommendations"
@@ -94,7 +95,7 @@ export function RunHistoryList({ runs }: RunHistoryListProps) {
                     title="Faixa de Veredito IA (match) das obras desta execução — do maior ao menor"
                   >
                     <span className="text-[9px] font-semibold uppercase tracking-wide opacity-80">
-                      Veredito IA
+                      {LABELS.alignment_score.full}
                     </span>
                     <span className="text-xs font-bold tabular-nums">
                       {Math.round(run.topAlignment)}

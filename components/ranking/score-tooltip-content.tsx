@@ -8,6 +8,8 @@
  * tanto no server component da obra quanto nas cells client do ranking.
  */
 
+import { LABELS } from "@/lib/constants/ui-labels"
+
 /** Payload enriquecido do consultor (sub-fase 2.3.A — Smart Shortlist v2+). */
 export interface AlignmentPayload {
   confidence?: number
@@ -89,7 +91,7 @@ export function VerdictTooltipContent({
   return (
     <>
       <div className="flex items-center justify-between gap-3">
-        <p className="font-semibold text-xs">Veredito IA: {Math.round(score)}/100</p>
+        <p className="font-semibold text-xs">{LABELS.alignment_score.full}: {Math.round(score)}/100</p>
         {payload?.confidence != null && (
           <span className="text-[11px] text-muted-foreground">
             Confiança: <span className="font-semibold">{(payload.confidence * 100).toFixed(0)}%</span>

@@ -22,6 +22,7 @@ import { TagFilter } from "@/components/titles/tag-filter"
 import type { TagOption } from "@/server/queries/tags"
 import { AI_EVAL_STATUSES, CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
+import { LABELS } from "@/lib/constants/ui-labels"
 import { cn } from "@/lib/utils"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 
@@ -38,11 +39,11 @@ const CRITERION_LABELS: Record<string, string> = {
 }
 
 const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
-  { value: "expected_score", label: "Nota Prevista" },
-  { value: "platform_avg", label: "Nota.M" },
-  { value: "total_votes", label: "Votos" },
-  { value: "title", label: "Título" },
-  { value: "chapters", label: "Capítulos" },
+  { value: "expected_score", label: LABELS.expected_score.short },
+  { value: "platform_avg", label: LABELS.platform_avg.short },
+  { value: "total_votes", label: LABELS.total_votes.short },
+  { value: "title", label: LABELS.title.short },
+  { value: "chapters", label: LABELS.chapters_total.short },
 ]
 
 const AI_STATUS_LABELS: Record<string, string> = {
@@ -680,11 +681,11 @@ export function TitleFilters({
       onRemove: () => updateParams({ [minKey]: null, [maxKey]: null }),
     })
   }
-  pushRange("chapters", "Capítulos", "min_chapters", "max_chapters")
-  pushRange("expected", "Nota Prevista", "min_expected", "max_expected")
-  pushRange("fit", "Alinhamento", "min_fit", "max_fit")
-  pushRange("platform", "Nota.M", "min_platform_avg", "max_platform_avg")
-  pushRange("votes", "Votos", "min_votes", "max_votes")
+  pushRange("chapters", LABELS.chapters_total.short, "min_chapters", "max_chapters")
+  pushRange("expected", LABELS.expected_score.full, "min_expected", "max_expected")
+  pushRange("fit", LABELS.personal_fit.full, "min_fit", "max_fit")
+  pushRange("platform", LABELS.platform_avg.full, "min_platform_avg", "max_platform_avg")
+  pushRange("votes", LABELS.total_votes.full, "min_votes", "max_votes")
   for (const slug of CRITERION_SLUGS) {
     pushRange(`crit-${slug}`, CRITERION_LABELS[slug] ?? slug, `min_${slug}`, `max_${slug}`)
   }
@@ -975,7 +976,7 @@ export function TitleFilters({
 
             <ScoreRangeCard
               emoji="🎯"
-              label="Nota Prevista"
+              label={LABELS.expected_score.full}
               tooltip="Nota que o modelo prevê que você daria à obra (0–10)."
               minKey="min_expected"
               maxKey="max_expected"

@@ -1854,6 +1854,16 @@ export async function updateWorkExternalData(
       })
     }
 
+    // Se um hid do Comix foi (re)vinculado, resolve os dados da Comix (capa/sinopse/
+    // rating) em background, reaquecendo o FlareSolverr se preciso e re-tentando —
+    // o "salva já + resolve depois" (dispensa o retry manual via /settings "Testar").
+    if (updates.externalIds?.comix?.trim()) {
+      after(async () => {
+        const { resolveComixDataResilient } = await import("@/server/actions/comix-resolver")
+        await resolveComixDataResilient(id)
+      })
+    }
+
     // "Atualizar dados" mexe em ratings/sinopse/tags que alimentam o re-rank →
     // invalida o IA Rk (alignment_score) persistido. Marca como desatualizado
     // (não recomputa; re-rank é manual). No-op se a obra nunca foi rankeada.

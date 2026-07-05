@@ -8,6 +8,8 @@
  * Convenção de erro: erro = actual - predicted (positivo = modelo subestimou).
  */
 
+import { LABELS } from "@/lib/constants/ui-labels"
+
 export interface ResolvedSnapshot {
   /** Obra a que o snapshot pertence (pra dedup por obra nas métricas globais). */
   workId: string
@@ -259,8 +261,8 @@ export function computeBaselines(records: ResolvedSnapshot[]): BaselineRow[] {
 
   return [
     { key: "mean", label: "Baseline (média)", count: meanStats.count, mae: meanStats.mae, rmse: meanStats.rmse },
-    { key: "expected", label: "Nota Prevista", count: expected.count, mae: expected.mae, rmse: expected.rmse },
-    { key: "calc", label: "Nota.Calc", count: calc.count, mae: calc.mae, rmse: calc.rmse },
+    { key: "expected", label: LABELS.expected_score.full, count: expected.count, mae: expected.mae, rmse: expected.rmse },
+    { key: "calc", label: LABELS.calc_score.full, count: calc.count, mae: calc.mae, rmse: calc.rmse },
     { key: "decision", label: "Prioridade (decisão)", count: decision.count, mae: decision.mae, rmse: decision.rmse },
   ]
 }
@@ -291,8 +293,8 @@ export function computeBaselinesOnCommonSubset(records: ResolvedSnapshot[]): Com
     subsetCount: subset.length,
     rows: [
       { key: "mean", label: "Baseline (média)", count: meanStats.count, mae: meanStats.mae, rmse: meanStats.rmse },
-      { key: "expected", label: "Nota Prevista", count: expected.count, mae: expected.mae, rmse: expected.rmse },
-      { key: "calc", label: "Nota.Calc", count: calc.count, mae: calc.mae, rmse: calc.rmse },
+      { key: "expected", label: LABELS.expected_score.full, count: expected.count, mae: expected.mae, rmse: expected.rmse },
+      { key: "calc", label: LABELS.calc_score.full, count: calc.count, mae: calc.mae, rmse: calc.rmse },
       { key: "decision", label: "Prioridade (decisão)", count: decision.count, mae: decision.mae, rmse: decision.rmse },
     ],
   }

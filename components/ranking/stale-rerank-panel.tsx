@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { LABELS } from "@/lib/constants/ui-labels"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { rerankWorksBatchAction } from "@/server/actions/recommendations"
 import { skipAiEvaluation } from "@/server/actions/ai"
@@ -181,7 +182,7 @@ export function StaleRerankPanel({
             options={[
               { value: "default", label: "Padrão" },
               { value: "expected", label: "Nota prevista" },
-              { value: "alignment", label: "Veredito IA" },
+              { value: "alignment", label: LABELS.alignment_score.full },
             ]}
             dir={sortDir}
             onToggleDir={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
@@ -232,7 +233,7 @@ export function StaleRerankPanel({
 
           const headline = w.alignmentScore != null ? (
             <span>
-              Veredito IA: <span className="font-bold text-foreground">{Math.round(w.alignmentScore)}</span>
+              {LABELS.alignment_score.full}: <span className="font-bold text-foreground">{Math.round(w.alignmentScore)}</span>
             </span>
           ) : null
 

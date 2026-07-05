@@ -22,6 +22,7 @@ import { WorkQueueGrid } from "@/components/ai-evaluation/queue/work-queue-grid"
 import { QueueToolbar, QueueSortSelect } from "@/components/ai-evaluation/queue/queue-toolbar"
 import { useWorkSelection } from "@/components/ai-evaluation/queue/use-work-selection"
 import { titleToSlug } from "@/lib/utils"
+import { LABELS } from "@/lib/constants/ui-labels"
 import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import {
@@ -595,7 +596,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
                 onChange={(v) => setSortField(v as SortField)}
                 options={[
                   { value: "default", label: "Padrão" },
-                  { value: "expected_score", label: "Nota Prevista" },
+                  { value: "expected_score", label: LABELS.expected_score.full },
                   { value: "confidence", label: "Confiança IA" },
                   { value: "evaluatedAt", label: "Data avaliação" },
                   { value: "modelName", label: "Modelo" },
@@ -612,7 +613,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
                   onChange={(v) => setSortField2(v as SortField)}
                   options={[
                     { value: "default", label: "Nenhum" },
-                    { value: "expected_score", label: "Nota Prevista", disabled: sortField === "expected_score" },
+                    { value: "expected_score", label: LABELS.expected_score.full, disabled: sortField === "expected_score" },
                     { value: "confidence", label: "Confiança IA", disabled: sortField === "confidence" },
                     { value: "evaluatedAt", label: "Data avaliação", disabled: sortField === "evaluatedAt" },
                     { value: "modelName", label: "Modelo", disabled: sortField === "modelName" },
