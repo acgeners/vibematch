@@ -1,7 +1,6 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import {
   MODEL,
@@ -15,7 +14,7 @@ import {
   loadLastRun,
   loadWorksForAudit,
 } from "@/server/queries/calibration"
-import { recalculateScoresNow, recalculateScoresNowResult } from "@/server/actions/recalc-queue"
+import { markRecalcPending, recalculateScoresNowResult } from "@/server/actions/recalc-queue"
 import { generateTasteProfileAction } from "@/server/actions/recommendations"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import type {
@@ -171,6 +170,19 @@ export async function runCalibrationAuditAction(): Promise<{
       const appliedScore = shouldAutoApply ? sug.suggestedScore : null
       const appliedAt = shouldAutoApply ? new Date().toISOString() : null
 
+      // Substitui a pendente ANTERIOR do mesmo (obra, atributo): esta run é um
+      // julgamento mais fresco. Sem isso, rodar a auditoria de novo empilha
+      // duplicatas (e violaria o índice único parcial de pendentes da mig 129).
+      const { error: supersedeError } = await supabase
+        .from("score_calibration_suggestions")
+        .update({ status: "superseded", reviewed_at: new Date().toISOString() })
+        .eq("work_id", sug.workId)
+        .eq("criterion_slug", sug.criterionSlug)
+        .eq("status", "pending")
+      if (supersedeError) {
+        console.error("[calibration] erro substituindo pendente anterior:", supersedeError)
+      }
+
       const { error: sugError } = await supabase
         .from("score_calibration_suggestions")
         .insert({
@@ -227,14 +239,10 @@ export async function runCalibrationAuditAction(): Promise<{
       })
       .eq("id", runId)
 
+    // Não recalcula na hora: marca a base como pendente (igual a edição de obra).
+    // O usuário dispara pelo banner "Recalcular notas" — ou o auto-recalc de 1h.
     if (nAutoApplied > 0) {
-      after(async () => {
-        try {
-          await recalculateScoresNow()
-        } catch (err) {
-          console.error("[calibration] recalculateAll falhou:", err)
-        }
-      })
+      await markRecalcPending("calibration-auto-apply")
     }
 
     revalidatePath("/settings/calibration")
@@ -408,13 +416,7 @@ export async function acceptSuggestionAction(id: string): Promise<{ ok: boolean;
 
   const res = await applySuggestionWithConflictCheck(id, Number(sug.suggested_score), "accepted")
   if (!res.ok) return { ok: false, error: res.error }
-  after(async () => {
-    try {
-      await recalculateScoresNow()
-    } catch (err) {
-      console.error("[calibration] recalculateWork falhou:", err)
-    }
-  })
+  await markRecalcPending("calibration-accept")
   revalidatePath("/settings/calibration")
   return { ok: true }
 }
@@ -428,13 +430,7 @@ export async function editSuggestionAction(
   }
   const res = await applySuggestionWithConflictCheck(id, score, "edited")
   if (!res.ok) return { ok: false, error: res.error }
-  after(async () => {
-    try {
-      await recalculateScoresNow()
-    } catch (err) {
-      console.error("[calibration] recalculateWork falhou:", err)
-    }
-  })
+  await markRecalcPending("calibration-edit")
   revalidatePath("/settings/calibration")
   return { ok: true }
 }
@@ -484,13 +480,7 @@ export async function revertSuggestionAction(id: string): Promise<{ ok: boolean;
     })
     .eq("id", id)
 
-  after(async () => {
-    try {
-      await recalculateScoresNow()
-    } catch (err) {
-      console.error("[calibration] recalculateWork falhou:", err)
-    }
-  })
+  await markRecalcPending("calibration-revert")
   revalidatePath("/settings/calibration")
   return { ok: true }
 }
@@ -540,19 +530,78 @@ export async function bulkAcceptAction(args: {
   }
 
   if (workIds.size > 0) {
-    // Recálculo é GLOBAL e idempotente ⇒ uma única chamada cobre todas as obras do
-    // bulk (antes rodava N recalcs idênticos). Background, deduplicado.
-    after(async () => {
-      try {
-        await recalculateScoresNow()
-      } catch (err) {
-        console.error("[calibration] recálculo em bulk falhou:", err)
-      }
-    })
+    // Marca recálculo pendente (banner "Recalcular notas") em vez de rodar na
+    // hora — igual a edição de obra. O usuário dispara quando terminar a revisão.
+    await markRecalcPending("calibration-bulk")
   }
 
   revalidatePath("/settings/calibration")
   return { accepted, failed, errors }
+}
+
+/**
+ * Aceita um conjunto EXPLÍCITO de sugestões (multi-select por checkbox).
+ * Diferente do `bulkAcceptAction` (que age por filtro sobre o banco todo),
+ * aqui o usuário escolheu linhas específicas. Ignora ids que não estão mais
+ * pendentes. Marca recálculo pendente ao final (banner), sem recalcular na hora.
+ */
+export async function bulkAcceptByIdsAction(
+  ids: string[],
+): Promise<{ accepted: number; failed: number; errors: string[] }> {
+  if (ids.length === 0) return { accepted: 0, failed: 0, errors: [] }
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("score_calibration_suggestions")
+    .select("id, suggested_score")
+    .in("id", ids)
+    .eq("status", "pending")
+  if (error) return { accepted: 0, failed: 0, errors: [error.message] }
+
+  let accepted = 0
+  let failed = 0
+  const errors: string[] = []
+  const workIds = new Set<string>()
+  for (const s of data ?? []) {
+    const res = await applySuggestionWithConflictCheck(
+      s.id as string,
+      Number(s.suggested_score),
+      "accepted",
+    )
+    if (res.ok) {
+      accepted += 1
+      workIds.add(res.workId)
+    } else {
+      failed += 1
+      if (errors.length < 5) errors.push(res.error)
+    }
+  }
+
+  if (workIds.size > 0) {
+    await markRecalcPending("calibration-bulk-ids")
+  }
+
+  revalidatePath("/settings/calibration")
+  return { accepted, failed, errors }
+}
+
+/**
+ * Rejeita um conjunto EXPLÍCITO de sugestões pendentes (multi-select por
+ * checkbox). Não altera scores ⇒ não precisa recalcular.
+ */
+export async function bulkRejectByIdsAction(
+  ids: string[],
+): Promise<{ rejected: number; error?: string }> {
+  if (ids.length === 0) return { rejected: 0 }
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("score_calibration_suggestions")
+    .update({ status: "rejected", reviewed_at: new Date().toISOString() })
+    .in("id", ids)
+    .eq("status", "pending")
+    .select("id")
+  if (error) return { rejected: 0, error: error.message }
+  revalidatePath("/settings/calibration")
+  return { rejected: data?.length ?? 0 }
 }
 
 export async function getLastRunsAction(): Promise<{
