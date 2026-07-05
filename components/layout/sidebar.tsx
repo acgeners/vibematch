@@ -56,14 +56,57 @@ interface NavItem {
   badgeKey?: BadgeKey
 }
 
+// Accent por seção — mesmo vocabulário visual da sub-nav de /settings e
+// /preferencias (cartão + chip com anel + trilho), restrito aqui a dois accents:
+// Principal na cor da marca (primary) e Gerenciar em violet. Strings de classe
+// completas (sem interpolação) para o Tailwind capturá-las.
+type SidebarAccent = "primary" | "violet"
+
+interface SidebarAccentClasses {
+  /** Chip do ícone quando o item está inativo. */
+  chipIdle: string
+  /** Chip do ícone no item ativo. */
+  chipActive: string
+  /**
+   * Fundo + borda do cartão do item ativo. A borda leva `!` (important) porque o
+   * `* { border-color }` global (globals.css, sem layer) vence utilities normais
+   * do Tailwind v4 — só borda quando selecionado.
+   */
+  itemActive: string
+  /** Cor sólida do accent (trilho + pontinho de badge no modo trilho). */
+  solid: string
+  /** Fundo + texto do badge de pendências. */
+  badge: string
+}
+
+const SIDEBAR_ACCENTS: Record<SidebarAccent, SidebarAccentClasses> = {
+  primary: {
+    chipIdle: "bg-primary/15 text-primary ring-primary/25 group-hover:bg-primary/25",
+    chipActive: "bg-primary/25 text-primary ring-primary/45",
+    itemActive: "border-primary/45! bg-primary/15",
+    solid: "bg-primary",
+    badge: "bg-primary text-primary-foreground",
+  },
+  violet: {
+    chipIdle:
+      "bg-violet-500/15 text-violet-600 ring-violet-500/25 group-hover:bg-violet-500/25 dark:text-violet-300",
+    chipActive: "bg-violet-500/25 text-violet-600 ring-violet-500/45 dark:text-violet-300",
+    itemActive: "border-violet-500/50! bg-violet-500/15",
+    solid: "bg-violet-500",
+    badge: "bg-violet-500 text-white",
+  },
+}
+
 interface NavSection {
   title: string
+  accent: SidebarAccent
   items: NavItem[]
 }
 
 const NAV_SECTIONS: NavSection[] = [
   {
     title: "Principal",
+    accent: "primary",
     items: [
       { href: "/", icon: LayoutDashboard, label: "Dashboard" },
       { href: "/titles", icon: BookOpen, label: "Títulos" },
@@ -75,6 +118,7 @@ const NAV_SECTIONS: NavSection[] = [
   },
   {
     title: "Gerenciar",
+    accent: "violet",
     items: [
       { href: "/preferencias", icon: SlidersHorizontal, label: "Preferências" },
       { href: "/settings", icon: Settings, label: "Configurações", badgeKey: "settings" },
@@ -252,69 +296,77 @@ export function Sidebar() {
       </div>
 
       <nav className="flex flex-1 flex-col gap-5 overflow-y-auto p-3">
-        {NAV_SECTIONS.map((section) => (
-          <div key={section.title} className="space-y-1">
-            {!collapsed && (
-              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-                {section.title}
-              </p>
-            )}
-            {section.items.map((item) => {
-              const { href, icon: Icon, label } = item
-              const active = isItemActive(item, section.items)
-              const badgeCount = item.badgeKey ? badgeCounts[item.badgeKey] : 0
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  title={collapsed ? label : undefined}
-                  className={cn(
-                    "group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
-                    collapsed && "justify-center px-0",
-                    active
-                      ? "bg-gradient-to-r from-primary/25 via-primary/15 to-primary/5 text-sidebar-foreground shadow-sm shadow-primary/15"
-                      : "text-sidebar-foreground/75 hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground"
-                  )}
-                >
-                  <span
-                    aria-hidden
+        {NAV_SECTIONS.map((section) => {
+          const accent = SIDEBAR_ACCENTS[section.accent]
+          return (
+            <div key={section.title} className="space-y-1">
+              {!collapsed && (
+                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/60">
+                  {section.title}
+                </p>
+              )}
+              {section.items.map((item) => {
+                const { href, icon: Icon, label } = item
+                const active = isItemActive(item, section.items)
+                const badgeCount = item.badgeKey ? badgeCounts[item.badgeKey] : 0
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    title={collapsed ? label : undefined}
                     className={cn(
-                      "absolute left-0 top-1/2 h-7 w-[3px] -translate-y-1/2 rounded-r-full transition-all",
+                      "group relative flex items-center gap-2.5 rounded-xl border px-2.5 py-2.5 text-sm font-medium transition-colors",
+                      collapsed && "justify-center px-0",
                       active
-                        ? "bg-primary opacity-100 shadow-[0_0_10px_hsl(var(--primary)/0.5)]"
-                        : "opacity-0"
-                    )}
-                  />
-                  <span
-                    className={cn(
-                      "relative grid size-7 place-items-center rounded-md transition-colors",
-                      active
-                        ? "bg-primary/25 text-primary ring-1 ring-primary/30"
-                        : "text-sidebar-foreground/55 group-hover:bg-sidebar-accent group-hover:text-sidebar-foreground"
+                        ? cn("text-sidebar-foreground", accent.itemActive)
+                        : // `border-transparent!` vence o `* { border-color }` global
+                          // (sem layer) → item inativo fica SEM borda; só o selecionado tem.
+                          "border-transparent! text-sidebar-foreground/75 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
                     )}
                   >
-                    <Icon className="size-4" />
-                    {collapsed && badgeCount > 0 && (
-                      <span
-                        aria-label={`${badgeCount} na fila`}
-                        className="absolute -right-1 -top-1 size-2.5 rounded-full bg-primary ring-2 ring-sidebar"
-                      />
-                    )}
-                  </span>
-                  {!collapsed && <span className="truncate">{label}</span>}
-                  {!collapsed && badgeCount > 0 && (
                     <span
-                      aria-label={`${badgeCount} ${badgeCount === 1 ? "item" : "itens"} na fila`}
-                      className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-bold leading-none text-primary-foreground shadow-sm shadow-primary/30 ring-1 ring-white/15"
+                      aria-hidden
+                      className={cn(
+                        "absolute -left-px top-2 bottom-2 w-[3px] rounded-r-full transition-opacity",
+                        accent.solid,
+                        active ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        "relative grid size-8 shrink-0 place-items-center rounded-lg ring-1 transition-colors",
+                        active ? accent.chipActive : accent.chipIdle
+                      )}
                     >
-                      {badgeCount > 99 ? "99+" : badgeCount}
+                      <Icon className="size-[18px]" />
+                      {collapsed && badgeCount > 0 && (
+                        <span
+                          aria-label={`${badgeCount} na fila`}
+                          className={cn(
+                            "absolute -right-1 -top-1 size-2.5 rounded-full ring-2 ring-sidebar",
+                            accent.solid
+                          )}
+                        />
+                      )}
                     </span>
-                  )}
-                </Link>
-              )
-            })}
-          </div>
-        ))}
+                    {!collapsed && <span className="truncate">{label}</span>}
+                    {!collapsed && badgeCount > 0 && (
+                      <span
+                        aria-label={`${badgeCount} ${badgeCount === 1 ? "item" : "itens"} na fila`}
+                        className={cn(
+                          "ml-auto inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-bold leading-none shadow-sm ring-1 ring-white/15",
+                          accent.badge
+                        )}
+                      >
+                        {badgeCount > 99 ? "99+" : badgeCount}
+                      </span>
+                    )}
+                  </Link>
+                )
+              })}
+            </div>
+          )
+        })}
       </nav>
 
       {!collapsed && <SidebarTasks />}

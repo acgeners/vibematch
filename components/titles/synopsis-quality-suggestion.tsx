@@ -53,7 +53,7 @@ export function SynopsisQualitySuggestion({
   const runPredict = async () => {
     if (!(await confirmCost({ action: "predict_interest" }))) return
     startPredict(async () => {
-      await predictInterestWithToast(workId, refresh)
+      await predictInterestWithToast(workId, refresh, {}, confirmCost)
     })
   }
 
