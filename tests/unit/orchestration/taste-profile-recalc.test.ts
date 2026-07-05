@@ -5,7 +5,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 // Mocks isolados a ESTE arquivo (vitest isola módulos por arquivo).
 
 const h = vi.hoisted(() => {
-  const state = { insertError: false as boolean }
+  // prevRow = perfil ANTERIOR devolvido por loadCurrentTasteProfile (gate de
+  // materialidade da invalidação). null ⇒ sem anterior (material ⇒ marca stale).
+  const state = { insertError: false as boolean, prevRow: null as Record<string, unknown> | null }
   const seq: string[] = []
   const okRow = () => ({
     id: "p9", version: 6, is_current: true, is_stub: false, n_works_used: 12,
@@ -14,9 +16,10 @@ const h = vi.hoisted(() => {
     raw_response: null, created_at: new Date().toISOString(),
   })
   const builder: Record<string, (...a: unknown[]) => unknown> = {}
-  for (const m of ["from", "update", "select", "order", "limit", "insert"]) builder[m] = () => builder
-  builder.eq = () => Promise.resolve({ data: null, error: null })
-  builder.maybeSingle = () => Promise.resolve({ data: { version: 5 }, error: null })
+  // eq é CHAINABLE (retorna o builder) p/ suportar .eq().order().limit() de
+  // loadCurrentTasteProfile; onde é terminal (update().eq()) o resultado é ignorado.
+  for (const m of ["from", "update", "select", "order", "limit", "insert", "eq"]) builder[m] = () => builder
+  builder.maybeSingle = () => Promise.resolve({ data: state.prevRow, error: null })
   builder.single = () => Promise.resolve(state.insertError ? { data: null, error: { message: "db down" } } : { data: okRow(), error: null })
   return { state, seq, builder }
 })
@@ -35,15 +38,29 @@ import type { RatedWorkInput, TasteProfileRow } from "@/lib/ai-recommendation/ty
 const EMPTY = { loved_tags: [], avoided_tags: [], loved_themes: [], avoided_themes: [], criterion_preferences: {}, narrative_patterns: [], summary: "" }
 const ARGS = { profile: EMPTY, nWorks: 12, inputHash: "h", isStub: false, modelName: "m", promptVersion: "v6", rawResponse: null }
 
-beforeEach(() => { h.state.insertError = false; h.seq.length = 0 })
+beforeEach(() => { h.state.insertError = false; h.state.prevRow = null; h.seq.length = 0 })
 afterEach(() => __resetSingleFlight())
 
 // ---- marcação em insertNewTasteProfile (sink único) ------------------------
 
 describe("Correção 2 — recalc_pending após nova versão de perfil", () => {
-  it("2) perfil novo persistido ⇒ marca recalc_pending (depois do synopsis stale)", async () => {
-    await insertNewTasteProfile(ARGS)
+  it("2) perfil novo persistido (material/sem anterior) ⇒ synopsis stale + recalc_pending", async () => {
+    await insertNewTasteProfile(ARGS) // prevRow=null ⇒ material ⇒ marca stale
     expect(h.seq).toEqual(["synopsis_stale", "recalc_pending"]) // ordem: após persist e após stale das previsões
+  })
+
+  it("2b) regen IMATERIAL (mesma chave que o anterior) ⇒ NÃO marca previsões stale (sem churn)", async () => {
+    // Anterior com o MESMO gosto destilado (profile idêntico ao de ARGS, sem
+    // fingerprint ⇒ chave = computeProfileSignature). Regen do mesmo acervo não
+    // deve tocar a coluna `stale` — o coração do follow-up (b).
+    h.state.prevRow = {
+      id: "prev", version: 5, is_current: true, is_stub: false, n_works_used: 12,
+      input_hash: "h", model_name: "m", prompt_version: "v6", profile: EMPTY,
+      raw_response: null, created_at: new Date().toISOString(), heuristic_fingerprint: null,
+    }
+    await insertNewTasteProfile(ARGS)
+    expect(h.seq).not.toContain("synopsis_stale") // invalidação PULADA (imaterial)
+    expect(h.seq).toContain("recalc_pending") // recalc de personal_fit ainda dispara
   })
 
   it("4) persistência falha ⇒ NÃO marca recalc_pending", async () => {

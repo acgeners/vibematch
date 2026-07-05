@@ -78,6 +78,27 @@ export function computeProfileSignature(profile: TasteProfilePayload): string {
   return createHash("sha256").update(canonical).digest("hex")
 }
 
+/**
+ * Chave de staleness do INTERESSE derivada do fingerprint heurístico
+ * DETERMINÍSTICO (das obras rotuladas), não do output LLM do perfil. Motivo: o
+ * output do perfil muda 57–73% a cada regeneração do MESMO acervo (sampling temp
+ * 0.2) — `computeProfileSignature` então invalidava ~todas as previsões a cada
+ * regen, mesmo sem o gosto mudar. Como o fingerprint só muda quando a biblioteca
+ * muda MATERIALMENTE, regen do mesmo acervo → mesma chave → zero churn.
+ * Fallback p/ `computeProfileSignature` quando não há fingerprint (perfil
+ * pré-migration 118 ou biblioteca sem tags qualificadas) — preserva o legado.
+ */
+export function computeProfileStalenessKey(profile: {
+  heuristic_fingerprint?: { loved: string[]; avoided: string[]; criteria: string[] } | null
+  profile: TasteProfilePayload
+}): string {
+  const fp = profile.heuristic_fingerprint ?? null
+  if (fp && (fp.loved.length > 0 || fp.avoided.length > 0 || fp.criteria.length > 0)) {
+    return createHash("sha256").update(JSON.stringify({ l: fp.loved, a: fp.avoided, c: fp.criteria })).digest("hex")
+  }
+  return computeProfileSignature(profile.profile)
+}
+
 function rowToTasteProfile(row: Record<string, unknown>): TasteProfileRow {
   return {
     id: row.id as string,
@@ -91,6 +112,8 @@ function rowToTasteProfile(row: Record<string, unknown>): TasteProfileRow {
     profile: row.profile as TasteProfilePayload,
     raw_response: row.raw_response,
     created_at: row.created_at as string,
+    heuristic_fingerprint:
+      (row.heuristic_fingerprint as { loved: string[]; avoided: string[]; criteria: string[] } | null | undefined) ?? null,
   }
 }
 
@@ -149,8 +172,11 @@ export interface InsertTasteProfileArgs {
 export async function insertNewTasteProfile(
   args: InsertTasteProfileArgs,
 ): Promise<TasteProfileRow> {
-  await markAllProfilesAsStale()
   const supabase = createAdminClient()
+  // Perfil anterior lido ANTES de markAllProfilesAsStale (que zera is_current) —
+  // base pra decidir se o gosto mudou MATERIALMENTE (gate da invalidação abaixo).
+  const prev = await loadCurrentTasteProfile()
+  await markAllProfilesAsStale()
   const version = await nextVersion()
   const { data, error } = await supabase
     .from("taste_profile")
@@ -170,11 +196,31 @@ export async function insertNewTasteProfile(
   if (error || !data) {
     throw new Error(`Erro persistindo perfil de gosto: ${error?.message ?? "desconhecido"}`)
   }
-  // Um novo perfil virou o corrente ⇒ previsões de Interesse Sinopse só ficam
-  // desatualizadas se o CONTEÚDO material do perfil mudou (assinatura), não a cada
-  // mexida na biblioteca. Best-effort (não bloqueia a geração do perfil).
-  const { markSynopsisPredictionsStale } = await import("@/server/queries/synopsis-quality")
-  await markSynopsisPredictionsStale(computeProfileSignature(args.profile))
+
+  // Fingerprint heurístico DETERMINÍSTICO das MESMAS obras (migration 118),
+  // computado UMA vez: é a base da chave de staleness E é gravado na linha.
+  let newFingerprint: { loved: string[]; avoided: string[]; criteria: string[] } | null = null
+  if (args.ratedWorks && args.ratedWorks.length > 0) {
+    try {
+      const { computeHeuristicFingerprint } = await import("./profile-drift")
+      newFingerprint = computeHeuristicFingerprint(args.ratedWorks)
+    } catch (err) {
+      console.warn("[insertNewTasteProfile] fingerprint falhou:", err instanceof Error ? err.message : err)
+    }
+  }
+
+  // Invalidação de Interesse GATED por materialidade: só marca previsões stale
+  // quando a chave determinística (fingerprint) MUDA vs o perfil anterior. Regen
+  // do mesmo acervo → mesma chave → NÃO toca a coluna `stale` (sem churn/flip).
+  // A chave vem do fingerprint, NÃO do output LLM (que re-rola 57–73% por regen).
+  // Best-effort (não bloqueia a geração do perfil).
+  const newKey = computeProfileStalenessKey({ heuristic_fingerprint: newFingerprint, profile: args.profile })
+  const prevKey = prev ? computeProfileStalenessKey(prev) : null
+  if (prevKey !== newKey) {
+    const { markSynopsisPredictionsStale } = await import("@/server/queries/synopsis-quality")
+    await markSynopsisPredictionsStale(newKey)
+  }
+
   // Uma nova versão de perfil torna `personal_fit` (derivado por recalculateAll a
   // partir do perfil efetivo) STALE. Sinaliza recálculo pendente — NÃO recalcula
   // aqui (apenas marca; reusa o mecanismo existente). Marcado SÓ após o insert
@@ -183,21 +229,15 @@ export async function insertNewTasteProfile(
   const { markRecalcPending } = await import("@/server/actions/recalc-queue")
   await markRecalcPending("taste_profile_new_version")
 
-  // Fingerprint heurístico (drift method-free, migration 118): determinístico, das
-  // MESMAS obras que geraram este perfil. Best-effort — se a coluna não existir
-  // (migration pendente) ou faltar `ratedWorks`, apenas avisa e segue.
-  if (args.ratedWorks && args.ratedWorks.length > 0) {
-    try {
-      const { computeHeuristicFingerprint } = await import("./profile-drift")
-      const { error: fpErr } = await supabase
-        .from("taste_profile")
-        .update({ heuristic_fingerprint: computeHeuristicFingerprint(args.ratedWorks) })
-        .eq("id", (data as { id: string }).id)
-      if (fpErr) {
-        console.warn("[insertNewTasteProfile] heuristic_fingerprint não gravado (migration 118 aplicada?):", fpErr.message)
-      }
-    } catch (err) {
-      console.warn("[insertNewTasteProfile] fingerprint falhou:", err instanceof Error ? err.message : err)
+  // Grava o fingerprint na linha (best-effort; reusa o já computado). Se a coluna
+  // não existir (migration pendente) ou faltar `ratedWorks`, apenas avisa e segue.
+  if (newFingerprint) {
+    const { error: fpErr } = await supabase
+      .from("taste_profile")
+      .update({ heuristic_fingerprint: newFingerprint })
+      .eq("id", (data as { id: string }).id)
+    if (fpErr) {
+      console.warn("[insertNewTasteProfile] heuristic_fingerprint não gravado (migration 118 aplicada?):", fpErr.message)
     }
   }
 

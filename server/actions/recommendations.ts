@@ -7,6 +7,7 @@ import { type RankingFilters } from "@/server/queries/ranking"
 import { ensureCapability, getCurrentPlan } from "@/server/queries/current-user"
 import { planAllows } from "@/lib/plans/capabilities"
 import { buildTasteProfileHeuristic } from "@/lib/ai-recommendation/taste-profile-heuristic"
+import { classifyProfileStaleness, computeHeuristicFingerprint } from "@/lib/ai-recommendation/profile-drift"
 import { loadOrEnsureProfile } from "@/lib/ai-recommendation/ensure-profile"
 import {
   buildStubProfile,
@@ -118,10 +119,22 @@ export async function getTasteProfileStatusAction(): Promise<ProfileStatus> {
     getRatedWorksForProfile(),
   ])
   const currentHash = computeInputHash(ratedWorks)
+  const isStale =
+    profile != null &&
+    classifyProfileStaleness({
+      savedFingerprint: profile.heuristic_fingerprint ?? null,
+      currentFingerprint: computeHeuristicFingerprint(ratedWorks),
+      savedInputHash: profile.input_hash,
+      currentInputHash: currentHash,
+      savedNWorks: profile.n_works_used,
+      currentNWorks: ratedWorks.length,
+      savedCreatedAt: profile.created_at,
+      nowMs: Date.now(),
+    }).stale
   return {
     hasProfile: profile != null,
     profile,
-    isStale: profile != null && profile.input_hash !== currentHash,
+    isStale,
     currentHash,
     ratedWorksCount: ratedWorks.length,
   }

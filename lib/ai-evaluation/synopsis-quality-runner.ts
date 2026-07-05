@@ -1,6 +1,6 @@
 import "server-only"
 import type Anthropic from "@anthropic-ai/sdk"
-import { computeProfileSignature } from "@/lib/ai-recommendation/taste-profile"
+import { computeProfileStalenessKey } from "@/lib/ai-recommendation/taste-profile"
 import { upsertSynopsisPrediction } from "@/server/queries/synopsis-quality"
 import { predictSynopsisQuality, type PredictWorkInput } from "./synopsis-quality-predictor"
 import type { TasteProfileRow } from "@/lib/ai-recommendation/types"
@@ -31,9 +31,9 @@ export async function predictAndPersistSynopsisQuality(
     confidence: prediction.confidence,
     tasteProfileId: profile.id,
     tasteProfileVersion: profile.version,
-    // Assinatura de CONTEÚDO do perfil (não o input_hash da biblioteca) — chave
-    // de staleness: só invalida quando o gosto destilado realmente muda.
-    tasteProfileHash: computeProfileSignature(profile.profile),
+    // Chave de staleness determinística (fingerprint heurístico), NÃO o output
+    // LLM do perfil — que re-rola 57–73% por regen e churnava as previsões.
+    tasteProfileHash: computeProfileStalenessKey(profile),
     modelName: prediction.modelName,
     promptVersion: prediction.promptVersion,
     aiApiCallId: prediction.apiCallId,

@@ -16,7 +16,7 @@
 
 import "server-only"
 import { createHash } from "node:crypto"
-import { computeProfileSignature } from "@/lib/ai-recommendation/taste-profile"
+import { computeProfileSignature, computeProfileStalenessKey } from "@/lib/ai-recommendation/taste-profile"
 import {
   MODEL as PREDICT_MODEL,
   PROMPT_VERSION as PREDICT_PROMPT_VERSION,
@@ -106,21 +106,33 @@ export interface StoredPrediction {
 }
 
 /**
- * Readiness da previsão. Dual-read: linhas NOVAS (com input_signature) comparam
- * a assinatura completa; linhas LEGADAS (sem) caem na regra antiga (flag stale +
- * taste_profile_hash). Assim não invalidamos o catálogo pago de uma vez.
+ * Readiness da previsão. Dois eixos de dual-read:
+ *  1. linhas NOVAS (com input_signature) vs LEGADAS (flag stale + taste_profile_hash);
+ *  2. TRANSIÇÃO de chave de perfil: `*Legacy` = assinatura montada com a chave
+ *     antiga (`computeProfileSignature`, output LLM). Uma linha gravada antes da
+ *     migração p/ a chave determinística casa via `*Legacy` e segue FRESH — não
+ *     invalidamos o catálogo pago de uma vez. (Remover os `*Legacy` quando o
+ *     catálogo tiver migrado — re-previsto com a chave nova.)
  */
 export function classifyInterestReadiness(args: {
   currentSignature: string
+  currentSignatureLegacy?: string
   currentProfileSignature: string
+  currentProfileSignatureLegacy?: string
   stored: StoredPrediction | null
 }): InterestReadinessState {
   if (!args.stored) return "absent"
   if (args.stored.inputSignature != null) {
-    return args.stored.inputSignature === args.currentSignature ? "fresh" : "stale"
+    const match =
+      args.stored.inputSignature === args.currentSignature ||
+      (args.currentSignatureLegacy != null && args.stored.inputSignature === args.currentSignatureLegacy)
+    return match ? "fresh" : "stale"
   }
   if (args.stored.stale) return "stale"
-  return args.stored.tasteProfileHash === args.currentProfileSignature ? "fresh" : "stale"
+  const match =
+    args.stored.tasteProfileHash === args.currentProfileSignature ||
+    (args.currentProfileSignatureLegacy != null && args.stored.tasteProfileHash === args.currentProfileSignatureLegacy)
+  return match ? "fresh" : "stale"
 }
 
 export function interestDedupKey(workId: string, signature: string): string {
@@ -299,11 +311,13 @@ export async function ensurePredictInterest(
     return { status: "blocked_manual", reason: "no_synopsis", message: "Obra sem sinopse utilizável — adicione/consolide a sinopse." }
   }
 
-  // 3) Assinatura + readiness.
-  const profileSignature = computeProfileSignature(profile.profile)
-  const signature = computeInterestInputSignature({
+  // 3) Assinatura + readiness. `profileSignature` é a chave DETERMINÍSTICA
+  // (fingerprint); `profileSignatureLegacy` é a antiga (output LLM) só p/ o
+  // dual-read da transição. Store/dedup usam SEMPRE a nova.
+  const profileSignature = computeProfileStalenessKey(profile)
+  const profileSignatureLegacy = computeProfileSignature(profile.profile)
+  const sigParts = {
     workId,
-    profileSignature,
     title: work.title,
     synopsis,
     synopsisSource: source,
@@ -314,9 +328,17 @@ export async function ensurePredictInterest(
     // Frente 3: o digest entra na assinatura ⇒ mudança de digest invalida a
     // previsão (re-prevê com o consenso novo). Sem digest, extra fica null (b1).
     extraSources: work.reviewDigest ? { reviewDigest: work.reviewDigest } : undefined,
-  })
+  }
+  const signature = computeInterestInputSignature({ ...sigParts, profileSignature })
+  const signatureLegacy = computeInterestInputSignature({ ...sigParts, profileSignature: profileSignatureLegacy })
   const stored = await gateway.loadCurrentPrediction(workId, promptVersion)
-  const readiness = classifyInterestReadiness({ currentSignature: signature, currentProfileSignature: profileSignature, stored })
+  const readiness = classifyInterestReadiness({
+    currentSignature: signature,
+    currentSignatureLegacy: signatureLegacy,
+    currentProfileSignature: profileSignature,
+    currentProfileSignatureLegacy: profileSignatureLegacy,
+    stored,
+  })
 
   const partial = usedFallbacks.length > 0
   if (readiness === "fresh" && stored) {
@@ -550,7 +572,7 @@ export class SupabaseInterestGateway implements InterestGateway {
       confidence: args.confidence,
       tasteProfileId: args.profile.id,
       tasteProfileVersion: args.profile.version,
-      tasteProfileHash: computeProfileSignature(args.profile.profile),
+      tasteProfileHash: computeProfileStalenessKey(args.profile),
       modelName: args.modelName,
       promptVersion: args.promptVersion,
       aiApiCallId: args.aiApiCallId,
@@ -591,6 +613,8 @@ export async function planInterestBatch(
   args: {
     gateway: InterestGateway
     profileSignature: string | null
+    /** Chave antiga (output LLM) — dual-read da transição p/ não super-contar stale. */
+    profileSignatureLegacy?: string | null
     /** Readiness do perfil: 'fresh' não soma custo; senão soma o upper do perfil. */
     profileNeedsGeneration: boolean
     profileScale: number
@@ -611,7 +635,9 @@ export async function planInterestBatch(
     const looksFresh =
       stored.inputSignature != null
         ? false /* assinatura existe mas não recomputada aqui ⇒ trata como a confirmar */
-        : !stored.stale && args.profileSignature != null && stored.tasteProfileHash === args.profileSignature
+        : !stored.stale &&
+          ((args.profileSignature != null && stored.tasteProfileHash === args.profileSignature) ||
+            (args.profileSignatureLegacy != null && stored.tasteProfileHash === args.profileSignatureLegacy))
     if (looksFresh) fresh += 1
     else stale += 1
   }

@@ -28,6 +28,8 @@ import {
   MIN_WORKS_FOR_FULL_PROFILE,
 } from "@/lib/ai-recommendation/taste-profile"
 import { generateTasteProfile, MODEL, PROMPT_VERSION } from "@/lib/ai-recommendation/service"
+import { classifyProfileStaleness, computeHeuristicFingerprint } from "@/lib/ai-recommendation/profile-drift"
+import type { HeuristicFingerprint } from "@/lib/ai-recommendation/profile-drift"
 import type { RatedWorkInput, TasteProfileRow } from "@/lib/ai-recommendation/types"
 import { DEFAULT_MICRO_THRESHOLD_USD, gateActionCost } from "../cost"
 import { getJobStore, runOrchestratedJob, type JobStore } from "../jobs"
@@ -42,16 +44,41 @@ export type TasteProfileReadiness =
 
 /**
  * Readiness do perfil a partir dos sinais existentes: perfil atual + is_stub +
- * input_hash vs hash da biblioteca elegível. Espelha a lógica de loadOrEnsureProfile.
+ * gate de staleness por MATERIALIDADE (classifyProfileStaleness) em vez da
+ * igualdade crua de input_hash. Assim uma edição imaterial NÃO vira "stale" (nem
+ * dispara o auto-regen pago). O input_hash segue como identidade/dedup — só a
+ * decisão fresh×stale mudou. Espelha a lógica de loadOrEnsureProfile.
  */
+const EMPTY_FINGERPRINT: HeuristicFingerprint = { loved: [], avoided: [], criteria: [] }
+
 export function classifyTasteProfileReadiness(args: {
-  current: { isStub: boolean; inputHash: string } | null
+  current: {
+    isStub: boolean
+    inputHash: string
+    /** Ausente ⇒ fallback legado (input_hash). Passe p/ o gate por materialidade. */
+    fingerprint?: HeuristicFingerprint | null
+    nWorks?: number
+    createdAt?: string | null
+  } | null
   libraryHash: string
+  /** Fingerprint da biblioteca atual — só usado quando current.fingerprint existe. */
+  libraryFingerprint?: HeuristicFingerprint
+  libraryNWorks?: number
+  nowMs?: number
 }): TasteProfileReadiness {
   if (!args.current) return { state: "absent" }
   if (args.current.isStub) return { state: "stub" }
-  if (args.current.inputHash !== args.libraryHash) return { state: "stale" }
-  return { state: "fresh" }
+  const st = classifyProfileStaleness({
+    savedFingerprint: args.current.fingerprint ?? null,
+    currentFingerprint: args.libraryFingerprint ?? EMPTY_FINGERPRINT,
+    savedInputHash: args.current.inputHash,
+    currentInputHash: args.libraryHash,
+    savedNWorks: args.current.nWorks ?? 0,
+    currentNWorks: args.libraryNWorks ?? 0,
+    savedCreatedAt: args.current.createdAt ?? null,
+    nowMs: args.nowMs ?? Date.now(),
+  })
+  return st.stale ? { state: "stale" } : { state: "fresh" }
 }
 
 export function tasteProfileDedupKey(inputHash: string): string {
@@ -142,8 +169,19 @@ export async function ensureTasteProfile(
   const current = await gateway.loadCurrent()
 
   const readiness = classifyTasteProfileReadiness({
-    current: current ? { isStub: current.is_stub, inputHash: current.input_hash } : null,
+    current: current
+      ? {
+          isStub: current.is_stub,
+          inputHash: current.input_hash,
+          fingerprint: current.heuristic_fingerprint ?? null,
+          nWorks: current.n_works_used,
+          createdAt: current.created_at,
+        }
+      : null,
     libraryHash,
+    libraryFingerprint: computeHeuristicFingerprint(ratedWorks),
+    libraryNWorks: count,
+    nowMs: Date.now(),
   })
 
   // Perfil atual e fresh ⇒ devolve já; sem job, sem LLM, custo zero.
