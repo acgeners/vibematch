@@ -4,6 +4,7 @@ import { BalanceCard } from "@/components/settings/ai-usage/balance-card"
 import { CallLog } from "@/components/settings/ai-usage/call-log"
 import { CollapsibleSection } from "@/components/settings/ai-usage/collapsible-section"
 import { CostByOperationChart } from "@/components/settings/ai-usage/cost-by-operation-chart"
+import { CostMenu } from "@/components/settings/ai-usage/cost-menu"
 import { DailyCostChart } from "@/components/settings/ai-usage/daily-cost-chart"
 import { KpiStrip } from "@/components/settings/ai-usage/kpi-strip"
 import { OperationFilter } from "@/components/settings/ai-usage/operation-filter"
@@ -95,6 +96,8 @@ export default async function AiUsagePage({
       />
 
       <BalanceCard status={balance} />
+
+      <CostMenu />
 
       {hasUnknownPricing && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
