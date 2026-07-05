@@ -3,17 +3,14 @@ import type { ReactNode } from "react"
 import { promises as fs } from "node:fs"
 import path from "node:path"
 import Link from "next/link"
-import { ArrowRight, Settings } from "lucide-react"
+import { ChevronDown } from "lucide-react"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { Header } from "@/components/layout/header"
 import { ScrollToTop } from "@/components/layout/scroll-to-top"
-import { ConsoleShell } from "@/components/console/console-shell"
-import {
-  ConsolePanelSkeleton,
-  ConsoleSectionNote,
-  ConsoleSectionShell,
-} from "@/components/console/console-section"
+import { SettingsCard } from "@/components/settings/settings-card"
+import { ConsoleSectionNote } from "@/components/console/console-section"
+import { ACCENT_STYLES } from "@/components/console/console-registry"
 import { CalibrationPanel } from "@/components/settings/calibration-panel"
+import { CalibrationCriteriaTool } from "@/components/settings/calibration/calibration-criteria-tool"
 import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
@@ -23,10 +20,15 @@ import { ResolveComixPanel } from "@/components/settings/resolve-comix-panel"
 import { ComixHealthPanel } from "@/components/settings/comix-health-panel"
 import { AiEvalOnCreateToggle } from "@/components/settings/ai-eval-on-create-toggle"
 import { SynopsisCanonicalOnCreateToggle } from "@/components/settings/synopsis-canonical-on-create-toggle"
+import {
+  TagConsolidationTool,
+  type TagConsolidationParams,
+} from "@/components/settings/tag-consolidation/tag-consolidation-tool"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
 import { getComixResolverStatus } from "@/server/actions/comix-resolver"
 import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
 import { getAiEvalOnCreate, getSynopsisCanonicalOnCreate } from "@/server/queries/current-user"
+import { countPendingSuggestions } from "@/server/queries/calibration"
 import {
   countMissingEmbeddings,
   countPendingCanonicalSynopses,
@@ -34,13 +36,19 @@ import {
 } from "@/server/queries/settings-pending"
 import { parseModelEvaluationMetrics } from "@/lib/metrics/model-evaluation"
 import type { FormulaConfig } from "@/types/domain"
-import { ACCENT_LINK } from "@/lib/settings-accent"
-import { findSection, normalizeSectionId, SETTINGS_GROUPS } from "@/app/settings/sections"
+import type { SettingsAccent } from "@/lib/settings-accent"
+import {
+  DEFAULT_GROUP_ID,
+  findGroup,
+  groupIdOfSection,
+  normalizeGroupId,
+  normalizeOpenId,
+  SETTINGS_GROUPS,
+} from "@/app/settings/sections"
+import type { SettingsSection } from "@/app/settings/sections"
 import { cn } from "@/lib/utils"
 
 async function getSyncConstantsMtime(): Promise<string | null> {
-  // criteria.ts é sempre reescrito por `npm run sync-constants`, então o mtime
-  // dele é o melhor proxy pra "último disparo".
   try {
     const stat = await fs.stat(path.join(process.cwd(), "lib/constants/criteria.ts"))
     return stat.mtime.toISOString()
@@ -58,74 +66,104 @@ function activeWorksCount() {
     .then((r) => r.count ?? 0)
 }
 
-// Badges do OVERVIEW (barato). Só chamado no modo overview — em modo painel os
-// badges nem aparecem, então não pagamos essas 4 contagens à toa. Nada de
-// `countStaleEmbeddings` (catálogo + hashing, ~5-16s): usamos a barata
-// `countMissingEmbeddings` ("nunca embedada"). A detecção EXATA de stale
-// continua no botão "Atualizar" do painel (`refreshEmbeddings`).
-async function loadBadges(): Promise<Record<string, number>> {
-  const [embeddings, canonicalSynopsis, reviewSummary, comixMissing] = await Promise.all([
-    countMissingEmbeddings(),
-    countPendingCanonicalSynopses(),
-    countPendingReviewSummaries(),
-    getWorksMissingComixHid(),
-  ])
-  return {
-    embeddings,
-    "synopsis-canonical": canonicalSynopsis,
-    "review-summary": reviewSummary,
-    comix: comixMissing.length,
-  }
-}
+const firstParam = (v: string | string[] | undefined): string | undefined =>
+  Array.isArray(v) ? v[0] : v
 
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ s?: string | string[] }>
+  searchParams: Promise<
+    {
+      g?: string | string[]
+      open?: string | string[]
+      s?: string | string[]
+    } & Record<keyof TagConsolidationParams, string | string[] | undefined>
+  >
 }) {
   const sp = await searchParams
-  // `explicit` = seleção do usuário via `?s=` (null = overview). Os badges
-  // alimentam tanto os cards do overview quanto a tab-strip do painel (sinal de
-  // pendência visível ao navegar), então são buscados sempre — são baratos.
-  const explicit = normalizeSectionId(sp.s)
-  const badges = await loadBadges()
+
+  // Resolve o grupo ativo. `?g=` é a fonte; `?s=<item>` (deep-link antigo) é
+  // resolvido pro grupo dono do item (e abre, se for colapsável).
+  let groupId = normalizeGroupId(sp.g)
+  let openId = normalizeOpenId(sp.open)
+  const legacy = Array.isArray(sp.s) ? sp.s[0] : sp.s
+  if (!groupId && legacy) {
+    groupId = groupIdOfSection(legacy)
+    if (!openId) openId = normalizeOpenId(legacy)
+  }
+
+  // Params da ferramenta de tags (só usados quando o card "tags" está expandido).
+  const tagParams: TagConsolidationParams = {
+    view: firstParam(sp.view),
+    group: firstParam(sp.group),
+    status: firstParam(sp.status),
+    phase: firstParam(sp.phase),
+  }
+
+  const group = findGroup(groupId ?? DEFAULT_GROUP_ID) ?? SETTINGS_GROUPS[0]
+  const accent = group.accent
+  const s = ACCENT_STYLES[accent]
+  const GroupIcon = group.icon
 
   return (
-    <div className="w-full max-w-6xl space-y-4">
-      <Header
-        kicker="Sistema"
-        title="Configurações"
-        description="Console de operação: jobs do pipeline, curadoria e manutenção"
-        icon={<Settings />}
-      />
+    <div className="w-full max-w-5xl">
+      <header className="mb-6 flex items-center gap-3.5">
+        <div
+          className={cn(
+            "grid size-12 shrink-0 place-items-center rounded-xl ring-1 [&_svg]:size-6",
+            s.iconBg,
+            s.iconText,
+            s.ring
+          )}
+        >
+          <GroupIcon />
+        </div>
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">{group.label}</h1>
+          <p className="text-sm text-muted-foreground first-letter:uppercase">{group.hint}</p>
+        </div>
+        <span className="ml-auto shrink-0 rounded-full border border-border/60 bg-card/60 px-3 py-1 text-xs font-medium text-muted-foreground">
+          {group.sections.length} {group.sections.length === 1 ? "item" : "itens"}
+        </span>
+      </header>
 
-      <ConsoleShell groups={SETTINGS_GROUPS} basePath="/settings" explicit={explicit} badges={badges}>
-        {explicit && (
-          <Suspense key={explicit} fallback={<ConsolePanelSkeleton section={findSection(explicit)} />}>
-            <SettingsPanel section={explicit} />
-          </Suspense>
-        )}
-      </ConsoleShell>
+      <div className="space-y-4">
+        {group.sections.map((section) => (
+          <SettingsCard key={section.id} section={section} accent={accent}>
+            <Suspense fallback={<BodySkeleton />}>
+              <ItemBody
+                section={section}
+                accent={accent}
+                open={openId === section.id}
+                tagParams={tagParams}
+              />
+            </Suspense>
+          </SettingsCard>
+        ))}
+      </div>
 
       <ScrollToTop />
     </div>
   )
 }
 
-// ── Switch de painéis (server) — renderiza SÓ o painel ativo ─────────────────
-// É aqui que o lazy acontece: só o client component do case selecionado entra na
-// árvore RSC, então só o chunk dele é enviado ao browser; e só os dados desse
-// painel são buscados.
-async function SettingsPanel({ section }: { section: string }) {
-  switch (section) {
+// ── Corpo de cada card (lazy, streamado por <Suspense>) ──────────────────────
+async function ItemBody({
+  section,
+  accent,
+  open,
+  tagParams,
+}: {
+  section: SettingsSection
+  accent: SettingsAccent
+  open: boolean
+  tagParams: TagConsolidationParams
+}) {
+  switch (section.id) {
     case "calibration": {
       const supabase = createAdminClient()
       const [configRes, snapshot, embeddings, canonicalSynopsis, reviewSummary] = await Promise.all([
-        supabase
-          .from("formula_config")
-          .select("*")
-          .order("updated_at", { ascending: false })
-          .limit(1),
+        supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
         getCalibrationSnapshot(),
         countMissingEmbeddings(),
         countPendingCanonicalSynopses(),
@@ -135,13 +173,9 @@ async function SettingsPanel({ section }: { section: string }) {
       const config = configRes.data?.[0] as FormulaConfig | undefined
       if (!config) throw new Error("formula_config não encontrado")
 
-      // F4: métricas de erro honestas, validadas por Zod no boundary do servidor.
-      // crossValidationMae é gated por stub (mesma regra antiga da headline).
       const modelMetrics = parseModelEvaluationMetrics({
         trainMae: config.mae_expected,
-        crossValidationMae: snapshot.expectedPredictorIsStub
-          ? null
-          : config.cv_mae_expected_stage1,
+        crossValidationMae: snapshot.expectedPredictorIsStub ? null : config.cv_mae_expected_stage1,
         prospectiveMae: null,
         baselineMae: snapshot.baselineMae,
         sampleSize: snapshot.trainSize,
@@ -152,45 +186,72 @@ async function SettingsPanel({ section }: { section: string }) {
       })
 
       return (
-        <SectionShell id="calibration">
-          <div className="space-y-4">
-            <ConsoleSectionNote accent="violet">
-              A calibração usa o kNN dos{" "}
-              <Link href="/settings?s=embeddings" className="font-medium text-foreground underline-offset-2 hover:underline">
-                Embeddings
-              </Link>{" "}
-              — atualize-os (Passo 1, grupo &ldquo;Gerado por IA&rdquo;) antes de recalibrar (Passo 2).
-            </ConsoleSectionNote>
-            <CalibrationPanel
-              config={config}
-              metrics={modelMetrics}
-              snapshot={snapshot}
-              accent="violet"
-              aiPending={[
-                { label: "Embeddings", count: embeddings, href: "/settings?s=embeddings" },
-                {
-                  label: "Sinopse canônica",
-                  count: canonicalSynopsis,
-                  href: "/settings?s=synopsis-canonical",
-                },
-                {
-                  label: "Resumo de reviews",
-                  count: reviewSummary,
-                  href: "/settings?s=review-summary",
-                },
-              ]}
-            />
-          </div>
-        </SectionShell>
+        <div className="space-y-4">
+          <ConsoleSectionNote accent="violet">
+            A calibração usa o kNN dos{" "}
+            <Link
+              href="/settings?g=ia#card-embeddings"
+              className="font-medium text-foreground underline-offset-2 hover:underline"
+            >
+              Embeddings
+            </Link>{" "}
+            — atualize-os (Passo 1, grupo &ldquo;Gerado por IA&rdquo;) antes de recalibrar (Passo 2).
+          </ConsoleSectionNote>
+          <CalibrationPanel
+            config={config}
+            metrics={modelMetrics}
+            snapshot={snapshot}
+            accent="violet"
+            aiPending={[
+              { label: "Embeddings", count: embeddings, href: "/settings?g=ia#card-embeddings" },
+              {
+                label: "Sinopse canônica",
+                count: canonicalSynopsis,
+                href: "/settings?g=ia#card-synopsis-canonical",
+              },
+              {
+                label: "Resumo de reviews",
+                count: reviewSummary,
+                href: "/settings?g=ia#card-review-synthesis",
+              },
+            ]}
+          />
+        </div>
       )
     }
 
-    case "ai-calibration":
+    case "ai-calibration": {
+      const pending = await countPendingSuggestions()
       return (
-        <SectionShell id="ai-calibration">
-          <SectionNav id="ai-calibration" />
-        </SectionShell>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              {pending > 0 ? (
+                <>
+                  <span className="font-semibold text-foreground">{pending}</span> sugestões pendentes
+                  de revisão.
+                </>
+              ) : (
+                "Sem sugestões pendentes no momento."
+              )}
+            </p>
+            <ExpandControl
+              groupId="notas"
+              sectionId="ai-calibration"
+              open={open}
+              openLabel="Abrir auditoria"
+            />
+          </div>
+          {open && (
+            <div className="border-t border-border/60 pt-4">
+              <Suspense fallback={<BodySkeleton />}>
+                <CalibrationCriteriaTool />
+              </Suspense>
+            </div>
+          )}
+        </div>
       )
+    }
 
     case "embeddings": {
       const supabase = createAdminClient()
@@ -209,15 +270,13 @@ async function SettingsPanel({ section }: { section: string }) {
         countMissingEmbeddings(),
       ])
       return (
-        <SectionShell id="embeddings">
-          <EmbeddingsPanel
-            accent="cyan"
-            initialCachedCount={embeddingsCount}
-            initialPendingCount={pendingCount}
-            totalWorks={worksCount}
-            initialLastRun={(lastRunRes.data?.updated_at as string | undefined) ?? null}
-          />
-        </SectionShell>
+        <EmbeddingsPanel
+          accent={accent}
+          initialCachedCount={embeddingsCount}
+          initialPendingCount={pendingCount}
+          totalWorks={worksCount}
+          initialLastRun={(lastRunRes.data?.updated_at as string | undefined) ?? null}
+        />
       )
     }
 
@@ -227,53 +286,28 @@ async function SettingsPanel({ section }: { section: string }) {
         countPendingCanonicalSynopses(),
       ])
       return (
-        <SectionShell id="synopsis-canonical">
-          <SynopsisConsolidationPanel
-            accent="cyan"
-            pendingCount={pendingCount}
-            totalCount={worksCount}
-          />
-        </SectionShell>
+        <SynopsisConsolidationPanel accent={accent} pendingCount={pendingCount} totalCount={worksCount} />
       )
     }
 
-    case "review-summary": {
+    case "review-synthesis": {
       const [worksCount, pendingCount] = await Promise.all([
         activeWorksCount(),
         countPendingReviewSummaries(),
       ])
       return (
-        <SectionShell id="review-summary">
-          <ReviewSummaryPanel accent="cyan" pendingCount={pendingCount} totalCount={worksCount} />
-        </SectionShell>
-      )
-    }
-
-    case "review-digest":
-      return (
-        <SectionShell id="review-digest">
-          <ReviewDigestPanel accent="cyan" />
-        </SectionShell>
-      )
-
-    case "on-create": {
-      const [aiEvalOnCreate, synopsisCanonicalOnCreate] = await Promise.all([
-        getAiEvalOnCreate(),
-        getSynopsisCanonicalOnCreate(),
-      ])
-      return (
-        <SectionShell id="on-create">
-          <div className="divide-y divide-border/60">
-            <div className="pb-4">
-              <p className="mb-1.5 text-sm font-semibold text-foreground">Avaliação IA</p>
-              <AiEvalOnCreateToggle initialEnabled={aiEvalOnCreate} />
-            </div>
-            <div className="pt-4">
-              <p className="mb-1.5 text-sm font-semibold text-foreground">Sinopse canônica</p>
-              <SynopsisCanonicalOnCreateToggle initialEnabled={synopsisCanonicalOnCreate} />
-            </div>
+        <div className="space-y-5">
+          <div>
+            <p className="mb-2 text-sm font-semibold text-foreground">Resumo · exibido no app</p>
+            <ReviewSummaryPanel accent={accent} pendingCount={pendingCount} totalCount={worksCount} />
           </div>
-        </SectionShell>
+          <div className="border-t border-border/60 pt-4">
+            <p className="mb-2 text-sm font-semibold text-foreground">
+              Digest estruturado · consumido pela IA
+            </p>
+            <ReviewDigestPanel accent={accent} />
+          </div>
+        </div>
       )
     }
 
@@ -282,40 +316,83 @@ async function SettingsPanel({ section }: { section: string }) {
         getComixResolverStatus(),
         getWorksMissingComixHid(),
       ])
+      const missingCount = comixMissing.length
       return (
-        <SectionShell id="comix">
-          <div className="space-y-5">
-            <div>
-              <p className="mb-2 text-sm font-semibold text-foreground">Cobertura</p>
+        <div className="space-y-5">
+          <div>
+            <p className="mb-2 text-sm font-semibold text-foreground">Diagnóstico</p>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Testa se as chamadas pra Comix estão funcionando (FlareSolverr, detalhe, reviews,
+              imagem) sem precisar abrir uma obra.
+            </p>
+            <ComixHealthPanel accent="amber" />
+          </div>
+
+          {/* Cobertura: recolhida por padrão; abre sozinha quando há hid pendente. */}
+          <details open={missingCount > 0} className="group/cob border-t border-border/60 pt-4">
+            <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+              <ChevronDown className="size-4 -rotate-90 text-muted-foreground transition-transform group-open/cob:rotate-0" />
+              <span className="text-sm font-semibold text-foreground">Cobertura</span>
+              {missingCount > 0 && (
+                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[11px] font-bold leading-none text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-300">
+                  {missingCount}
+                </span>
+              )}
+            </summary>
+            <div className="pt-3">
               <ResolveComixPanel accent="amber" initialStatus={comixStatus} initialMissing={comixMissing} />
             </div>
-            <div className="border-t border-border/60 pt-4">
-              <p className="mb-2 text-sm font-semibold text-foreground">Diagnóstico</p>
-              <p className="mb-3 text-xs text-muted-foreground">
-                Testa se as chamadas pra Comix estão funcionando (FlareSolverr, detalhe, reviews,
-                imagem) sem precisar abrir uma obra.
-              </p>
-              <ComixHealthPanel accent="amber" />
-            </div>
+          </details>
+        </div>
+      )
+    }
+
+    case "on-create": {
+      const [aiEvalOnCreate, synopsisCanonicalOnCreate] = await Promise.all([
+        getAiEvalOnCreate(),
+        getSynopsisCanonicalOnCreate(),
+      ])
+      return (
+        <div className="divide-y divide-border/60">
+          <div className="pb-4">
+            <p className="mb-1.5 text-sm font-semibold text-foreground">Avaliação IA</p>
+            <AiEvalOnCreateToggle initialEnabled={aiEvalOnCreate} />
           </div>
-        </SectionShell>
+          <div className="pt-4">
+            <p className="mb-1.5 text-sm font-semibold text-foreground">Sinopse canônica</p>
+            <SynopsisCanonicalOnCreateToggle initialEnabled={synopsisCanonicalOnCreate} />
+          </div>
+        </div>
       )
     }
 
     case "tags":
       return (
-        <SectionShell id="tags">
-          <SectionNav id="tags" />
-        </SectionShell>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              Revise os clusters semânticos e mescle tags duplicadas propostas pela IA.
+            </p>
+            <ExpandControl
+              groupId="avancado"
+              sectionId="tags"
+              open={open}
+              openLabel="Abrir consolidação"
+            />
+          </div>
+          {open && (
+            <div className="border-t border-border/60 pt-4">
+              <Suspense fallback={<BodySkeleton />}>
+                <TagConsolidationTool params={tagParams} basePath="/settings" />
+              </Suspense>
+            </div>
+          )}
+        </div>
       )
 
     case "sync": {
       const syncConstantsLastRun = await getSyncConstantsMtime()
-      return (
-        <SectionShell id="sync">
-          <SyncConstantsPanel initialLastRun={syncConstantsLastRun} accent="slate" />
-        </SectionShell>
-      )
+      return <SyncConstantsPanel initialLastRun={syncConstantsLastRun} accent="slate" />
     }
 
     default:
@@ -323,27 +400,37 @@ async function SettingsPanel({ section }: { section: string }) {
   }
 }
 
-// ── Cabeçalho + moldura do painel ativo (reusa a metadata do registry) ───────
-// Moldura do painel: resolve a metadata pelo id e delega ao shell compartilhado.
-function SectionShell({ id, children }: { id: string; children: ReactNode }) {
-  const section = findSection(id)
-  if (!section) return null
-  return <ConsoleSectionShell section={section}>{children}</ConsoleSectionShell>
+// Link que expande/recolhe uma ferramenta pesada inline (via ?open=), sem navegar.
+function ExpandControl({
+  groupId,
+  sectionId,
+  open,
+  openLabel,
+}: {
+  groupId: string
+  sectionId: string
+  open: boolean
+  openLabel: string
+}) {
+  const href = open
+    ? `/settings?g=${groupId}#card-${sectionId}`
+    : `/settings?g=${groupId}&open=${sectionId}#card-${sectionId}`
+  return (
+    <Link
+      href={href}
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border/70 bg-card/60 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/60"
+    >
+      <ChevronDown className={cn("size-4 transition-transform", open ? "" : "-rotate-90")} />
+      {open ? "Recolher" : openLabel}
+    </Link>
+  )
 }
 
-function SectionNav({ id }: { id: string }) {
-  const section = findSection(id)
-  if (!section?.nav) return null
+function BodySkeleton(): ReactNode {
   return (
-    <a
-      href={section.nav.href}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-        ACCENT_LINK[section.accent]
-      )}
-    >
-      {section.nav.label}
-      <ArrowRight className="h-3.5 w-3.5" />
-    </a>
+    <div className="space-y-2">
+      <div className="h-9 w-full animate-pulse rounded bg-muted/60" />
+      <div className="h-9 w-3/4 animate-pulse rounded bg-muted/60" />
+    </div>
   )
 }
