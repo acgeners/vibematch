@@ -324,14 +324,26 @@ export async function planSynopsisInterestBatchAction(workIds: string[]): Promis
     const { SupabaseInterestGateway, planInterestBatch } = await import("@/lib/orchestration/integrations/synopsis-interest")
     const { classifyTasteProfileReadiness } = await import("@/lib/orchestration/integrations/taste-profile")
     const { computeInputHash, computeProfileSignature, MIN_WORKS_FOR_FULL_PROFILE } = await import("@/lib/ai-recommendation/taste-profile")
+    const { computeHeuristicFingerprint } = await import("@/lib/ai-recommendation/profile-drift")
     const { getRatedWorksForProfile } = await import("@/server/queries/recommendations")
 
     const ratedWorks = await getRatedWorksForProfile()
     const libraryHash = computeInputHash(ratedWorks)
     const current = await loadCurrentTasteProfile()
     const readiness = classifyTasteProfileReadiness({
-      current: current ? { isStub: current.is_stub, inputHash: current.input_hash } : null,
+      current: current
+        ? {
+            isStub: current.is_stub,
+            inputHash: current.input_hash,
+            fingerprint: current.heuristic_fingerprint ?? null,
+            nWorks: current.n_works_used,
+            createdAt: current.created_at,
+          }
+        : null,
       libraryHash,
+      libraryFingerprint: computeHeuristicFingerprint(ratedWorks),
+      libraryNWorks: ratedWorks.length,
+      nowMs: Date.now(),
     })
     const needsGen = readiness.state !== "fresh"
     if (needsGen && ratedWorks.length < MIN_WORKS_FOR_FULL_PROFILE) {

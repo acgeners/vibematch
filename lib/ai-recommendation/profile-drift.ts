@@ -73,10 +73,89 @@ export function compareFingerprints(saved: HeuristicFingerprint, now: HeuristicF
   }
 }
 
+// ---------------------------------------------------------------------------
+// Gate de STALENESS por MATERIALIDADE (θ calibrado — ver
+// scripts/calibrate-profile-drift-threshold.ts). Substitui o gate binário
+// `input_hash` (que marcava stale a CADA edição): acumula alterações e só
+// considera desatualizado quando o gosto destilado de fato se move. Enviesado
+// LIBERAL — catálogo pré-filtrado ⇒ poucas edições quase nunca movem o perfil.
+//
+// Composto (OR): magnitude do drift heurístico, OU fração de obras novas (pega
+// drift TEMÁTICO que o heurístico não lê — ele ignora sinopse), OU idade (pega
+// drift lento + updates de modelo/prompt). `input_hash` deixa de decidir
+// staleness, mas continua sendo a IDENTIDADE/dedup da geração.
+// ---------------------------------------------------------------------------
+
+/** Drift heurístico (1 − Jaccard médio de tags amadas/evitadas) que marca stale. */
+export const PROFILE_DRIFT_THRESHOLD = 0.15
+/** |ΔnObras| / nObras_geração que marca stale (rede p/ o ponto cego temático). */
+export const PROFILE_STALE_FRACTION_NEW = 0.15
+/** Idade do perfil (dias) que marca stale independentemente do drift. */
+export const PROFILE_STALE_AGE_DAYS = 90
+
+export type ProfileStaleReason = "fresh" | "identical" | "drift" | "fraction_new" | "age" | "legacy_hash"
+
+export interface ProfileStalenessArgs {
+  /** Fingerprint gravado na geração do perfil corrente (null p/ perfis pré-migration 118). */
+  savedFingerprint: HeuristicFingerprint | null
+  /** Fingerprint heurístico da biblioteca ATUAL (computeHeuristicFingerprint). */
+  currentFingerprint: HeuristicFingerprint
+  /** input_hash do perfil corrente × da biblioteca atual — identidade/fallback. */
+  savedInputHash: string
+  currentInputHash: string
+  /** n_works_used na geração × nº de obras rotuladas hoje. */
+  savedNWorks: number
+  currentNWorks: number
+  /** created_at do perfil corrente (ISO) — null desativa o teto de idade. */
+  savedCreatedAt: string | null
+  /** Date.now() injetado (testabilidade). */
+  nowMs: number
+}
+
+export interface ProfileStaleness {
+  stale: boolean
+  reason: ProfileStaleReason
+  driftPct: number
+  changedTags: number
+  lovedJaccard: number
+  avoidedJaccard: number
+  fractionNew: number
+  ageDays: number | null
+}
+
+/**
+ * PURO: decide staleness do perfil pelo gate composto. Não lê o banco.
+ * Ordem de curto-circuito: biblioteca idêntica (input_hash igual) → fresh;
+ * sem fingerprint → cai na regra LEGADA (input_hash diverge = stale); senão,
+ * OR de drift / fração-de-obras-novas / idade.
+ */
+export function classifyProfileStaleness(a: ProfileStalenessArgs): ProfileStaleness {
+  const ageDays = a.savedCreatedAt ? (a.nowMs - Date.parse(a.savedCreatedAt)) / 86_400_000 : null
+  const fractionNew = a.savedNWorks > 0 ? Math.abs(a.currentNWorks - a.savedNWorks) / a.savedNWorks : 0
+  const ageStale = ageDays != null && ageDays >= PROFILE_STALE_AGE_DAYS
+  const base = { fractionNew, ageDays }
+
+  // Biblioteca byte-idêntica: nada mudou (só pode virar stale por idade).
+  if (a.savedInputHash === a.currentInputHash) {
+    return { stale: ageStale, reason: ageStale ? "age" : "identical", driftPct: 0, changedTags: 0, lovedJaccard: 1, avoidedJaccard: 1, ...base }
+  }
+  // Sem fingerprint gravado ⇒ não dá pra medir materialidade → regra legada
+  // (input_hash mudou = stale). Só atinge perfis pré-migration 118.
+  if (!a.savedFingerprint) {
+    return { stale: true, reason: "legacy_hash", driftPct: 0, changedTags: 0, lovedJaccard: 1, avoidedJaccard: 1, ...base }
+  }
+  const cmp = compareFingerprints(a.savedFingerprint, a.currentFingerprint)
+  const driftStale = cmp.driftPct >= PROFILE_DRIFT_THRESHOLD
+  const fractionStale = fractionNew >= PROFILE_STALE_FRACTION_NEW
+  const stale = driftStale || fractionStale || ageStale
+  const reason: ProfileStaleReason = !stale ? "fresh" : driftStale ? "drift" : fractionStale ? "fraction_new" : "age"
+  return { stale, reason, driftPct: cmp.driftPct, changedTags: cmp.changedTags, lovedJaccard: cmp.lovedJaccard, avoidedJaccard: cmp.avoidedJaccard, ...base }
+}
+
 export interface ProfileDriftResult {
   /** false quando não há fingerprint salvo (perfil antigo / pré-migration) → drift desconhecido. */
   available: boolean
-  /** input_hash diverge do atual (= o app considera o perfil stale). */
+  /** perfil considerado desatualizado pelo gate composto (drift ∨ fração ∨ idade). */
   stale: boolean
   /** 0..1: 1 − média(Jaccard loved, Jaccard avoided). Alto = gosto mudou muito. */
   driftPct: number
@@ -94,18 +173,33 @@ export async function getProfileDrift(): Promise<ProfileDriftResult> {
     available: false, stale: false, driftPct: 0, lovedJaccard: 1, avoidedJaccard: 1, changedTags: 0, ratedNow: rated.length,
   }
 
-  // input_hash (coluna antiga, sempre existe) → staleness.
-  const { data: hashRow } = await supabase
-    .from("taste_profile").select("input_hash").eq("is_current", true).maybeSingle()
-  if (!hashRow) return base
-  const stale = (hashRow as { input_hash: string }).input_hash !== computeInputHash(rated)
+  const { data: row, error } = await supabase
+    .from("taste_profile")
+    .select("input_hash, heuristic_fingerprint, n_works_used, created_at")
+    .eq("is_current", true)
+    .maybeSingle()
+  if (error || !row) return base
+  const r = row as { input_hash: string; heuristic_fingerprint: HeuristicFingerprint | null; n_works_used: number; created_at: string }
 
-  // fingerprint (coluna nova) — tolera ausência (pré-migration) → available=false.
-  const { data: fpRow, error } = await supabase
-    .from("taste_profile").select("heuristic_fingerprint").eq("is_current", true).maybeSingle()
-  const fp = !error ? ((fpRow as { heuristic_fingerprint: HeuristicFingerprint | null } | null)?.heuristic_fingerprint ?? null) : null
-  if (!fp) return { ...base, stale }
-
-  const now = computeHeuristicFingerprint(rated)
-  return { available: true, stale, ...compareFingerprints(fp, now), ratedNow: rated.length }
+  const st = classifyProfileStaleness({
+    savedFingerprint: r.heuristic_fingerprint ?? null,
+    currentFingerprint: computeHeuristicFingerprint(rated),
+    savedInputHash: r.input_hash,
+    currentInputHash: computeInputHash(rated),
+    savedNWorks: r.n_works_used ?? 0,
+    currentNWorks: rated.length,
+    savedCreatedAt: r.created_at ?? null,
+    nowMs: Date.now(),
+  })
+  // available=false quando não há fingerprint (drift heurístico não medível);
+  // stale ainda reflete o gate (que cai no legado do input_hash nesse caso).
+  return {
+    available: r.heuristic_fingerprint != null,
+    stale: st.stale,
+    driftPct: st.driftPct,
+    lovedJaccard: st.lovedJaccard,
+    avoidedJaccard: st.avoidedJaccard,
+    changedTags: st.changedTags,
+    ratedNow: rated.length,
+  }
 }

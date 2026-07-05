@@ -91,6 +91,8 @@ function rowToTasteProfile(row: Record<string, unknown>): TasteProfileRow {
     profile: row.profile as TasteProfilePayload,
     raw_response: row.raw_response,
     created_at: row.created_at as string,
+    heuristic_fingerprint:
+      (row.heuristic_fingerprint as { loved: string[]; avoided: string[]; criteria: string[] } | null | undefined) ?? null,
   }
 }
 

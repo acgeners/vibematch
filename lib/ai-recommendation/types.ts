@@ -69,6 +69,13 @@ export interface TasteProfileRow {
   profile: TasteProfilePayload
   raw_response: unknown
   created_at: string
+  /**
+   * Fingerprint heurístico das obras que geraram o perfil (migration 118) —
+   * base do gate de staleness por materialidade (classifyProfileStaleness).
+   * null em perfis pré-migration. Shape = HeuristicFingerprint (inline p/ evitar
+   * ciclo de import com profile-drift.ts).
+   */
+  heuristic_fingerprint?: { loved: string[]; avoided: string[]; criteria: string[] } | null
 }
 
 export interface RankedWork {

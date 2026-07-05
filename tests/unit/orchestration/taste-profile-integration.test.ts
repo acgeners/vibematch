@@ -93,11 +93,35 @@ const ALLOW = { allowPaid: true }
 // ---- readiness puro ---------------------------------------------------------
 
 describe("classifyTasteProfileReadiness", () => {
-  it("absent / stub / stale / fresh", () => {
-    expect(classifyTasteProfileReadiness({ current: null, libraryHash: "h" }).state).toBe("absent")
-    expect(classifyTasteProfileReadiness({ current: { isStub: true, inputHash: "h" }, libraryHash: "h" }).state).toBe("stub")
-    expect(classifyTasteProfileReadiness({ current: { isStub: false, inputHash: "old" }, libraryHash: "h" }).state).toBe("stale")
-    expect(classifyTasteProfileReadiness({ current: { isStub: false, inputHash: "h" }, libraryHash: "h" }).state).toBe("fresh")
+  const fp = (loved: string[]) => ({ loved, avoided: [] as string[], criteria: [] as string[] })
+  const NOW = Date.parse("2026-07-05T00:00:00.000Z")
+  const RECENT = "2026-07-01T00:00:00.000Z"
+  const cur = (over: Partial<{ isStub: boolean; inputHash: string; fingerprint: ReturnType<typeof fp> | null; nWorks: number; createdAt: string | null }> = {}) => ({
+    isStub: false, inputHash: "h", fingerprint: fp(["a", "b"]), nWorks: 12, createdAt: RECENT, ...over,
+  })
+  const lib = { libraryHash: "h", libraryFingerprint: fp(["a", "b"]), libraryNWorks: 12, nowMs: NOW }
+
+  it("absent / stub", () => {
+    expect(classifyTasteProfileReadiness({ current: null, ...lib }).state).toBe("absent")
+    expect(classifyTasteProfileReadiness({ current: cur({ isStub: true }), ...lib }).state).toBe("stub")
+  })
+  it("input igual ⇒ fresh", () => {
+    expect(classifyTasteProfileReadiness({ current: cur(), ...lib }).state).toBe("fresh")
+  })
+  it("input mudou mas gosto IMATERIAL (mesmo fingerprint) ⇒ fresh (novo gate)", () => {
+    expect(classifyTasteProfileReadiness({ current: cur({ inputHash: "old" }), ...lib }).state).toBe("fresh")
+  })
+  it("input mudou e gosto MATERIAL (fingerprint divergiu) ⇒ stale", () => {
+    expect(
+      classifyTasteProfileReadiness({
+        current: cur({ inputHash: "old", fingerprint: fp(["a", "b", "c", "d"]) }),
+        ...lib,
+        libraryFingerprint: fp(["w", "x", "y", "z"]),
+      }).state,
+    ).toBe("stale")
+  })
+  it("sem fingerprint (legado) + input mudou ⇒ stale (fallback input_hash)", () => {
+    expect(classifyTasteProfileReadiness({ current: cur({ inputHash: "old", fingerprint: null }), ...lib }).state).toBe("stale")
   })
 })
 

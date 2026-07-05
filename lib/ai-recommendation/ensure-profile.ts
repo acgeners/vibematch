@@ -3,6 +3,7 @@ import { getRatedWorksForProfile } from "@/server/queries/recommendations"
 import { recordCacheEventAsync } from "@/server/queries/ai-cache"
 import { MODEL, PROMPT_VERSION } from "./service"
 import { ensureTasteProfile } from "@/lib/orchestration/integrations/taste-profile"
+import { classifyProfileStaleness, computeHeuristicFingerprint } from "./profile-drift"
 import {
   buildStubProfile,
   computeInputHash,
@@ -90,7 +91,19 @@ export async function loadOrEnsureProfile(
 
   if (existing) {
     const canRegen = !!opts.refreshIfStale && ratedWorks.length >= MIN_WORKS_FOR_FULL_PROFILE
-    const isStale = existing.input_hash !== inputHash
+    // Gate por materialidade (não mais igualdade crua de input_hash): edição
+    // imaterial mantém "fresh" e NÃO dispara o regen pago. Mesmo gate do
+    // ensureTasteProfile, então as duas camadas concordam.
+    const isStale = classifyProfileStaleness({
+      savedFingerprint: existing.heuristic_fingerprint ?? null,
+      currentFingerprint: computeHeuristicFingerprint(ratedWorks),
+      savedInputHash: existing.input_hash,
+      currentInputHash: inputHash,
+      savedNWorks: existing.n_works_used,
+      currentNWorks: ratedWorks.length,
+      savedCreatedAt: existing.created_at,
+      nowMs: Date.now(),
+    }).stale
     if (canRegen && (existing.is_stub || isStale)) {
       const saved = await regenerateFullProfile(ratedWorks, inputHash)
       return { profile: saved, ratedWorksCount: ratedWorks.length, staleRefresh: true }
