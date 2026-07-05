@@ -1,6 +1,6 @@
 "use client"
 
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   Bar,
   BarChart,
@@ -13,7 +13,7 @@ import {
 } from "recharts"
 
 interface Props {
-  data: Array<{ operation: string; totalCostUsd: number; nCalls: number }>
+  data: Array<{ operation: string; label: string; totalCostUsd: number; nCalls: number }>
   active?: string | null
 }
 
@@ -35,19 +35,24 @@ function formatUsd(value: number): string {
 
 export function CostByOperationChart({ data, active }: Props) {
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const filtered = data.filter((d) => d.totalCostUsd > 0).slice(0, 8)
   if (filtered.length === 0) {
     return (
       <div className="flex h-44 items-center justify-center text-xs text-muted-foreground">
-        Sem chamadas com custo nos últimos 30 dias.
+        Sem chamadas com custo no período.
       </div>
     )
   }
   function goToOperation(operation: string | undefined) {
     if (!operation) return
-    router.push(
-      operation === active ? "/ai-usage" : `/ai-usage?op=${encodeURIComponent(operation)}`,
-    )
+    // Preserva o período (?range=) ao alternar o filtro de operação.
+    const params = new URLSearchParams(searchParams.toString())
+    if (operation === active) params.delete("op")
+    else params.set("op", operation)
+    const qs = params.toString()
+    router.push(qs ? `${pathname}?${qs}` : pathname)
   }
   return (
     <div className="h-44 w-full">
@@ -65,7 +70,7 @@ export function CostByOperationChart({ data, active }: Props) {
           />
           <YAxis
             type="category"
-            dataKey="operation"
+            dataKey="label"
             tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
             width={130}
           />

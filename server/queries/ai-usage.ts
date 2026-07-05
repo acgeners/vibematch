@@ -6,12 +6,47 @@ import {
   aggregateOperationMetrics,
   buildAiCallRecord,
   compareImplementationPeriods,
+  percentile,
   summarizeCacheMetrics,
   type AiCallRecord,
+  type AiCacheStatus,
+  type AiErrorCategory,
+  type AiImageStatus,
+  type AiWorkloadType,
   type CacheMetrics,
   type ImplementationPeriodComparison,
   type OperationMetrics,
 } from "@/lib/ai-observability"
+
+// ── Períodos (?range=) ───────────────────────────────────────────────────────
+// Fonte única do seletor de período do painel. `days=null` = "Tudo" (sem corte).
+// `chartDays` é a janela usada por gráficos/sparkline que precisam de um número
+// finito de dias mesmo quando o período é "Tudo".
+
+export const AI_USAGE_RANGES = [
+  { key: "24h", label: "24h", days: 1 },
+  { key: "7d", label: "7 dias", days: 7 },
+  { key: "30d", label: "30 dias", days: 30 },
+  { key: "90d", label: "90 dias", days: 90 },
+  { key: "all", label: "Tudo", days: null },
+] as const
+
+export type AiUsageRangeKey = (typeof AI_USAGE_RANGES)[number]["key"]
+
+export interface ResolvedRange {
+  key: AiUsageRangeKey
+  label: string
+  /** Corte em dias; null = período completo. */
+  days: number | null
+  /** Janela finita p/ gráficos diários/sparkline (days ?? 90). */
+  chartDays: number
+}
+
+/** Resolve o `?range=` da URL num período conhecido (default 30d). */
+export function resolveRange(input: string | null | undefined): ResolvedRange {
+  const found = AI_USAGE_RANGES.find((r) => r.key === input) ?? AI_USAGE_RANGES[2]!
+  return { key: found.key, label: found.label, days: found.days, chartDays: found.days ?? 90 }
+}
 
 export interface UsageAggregate {
   nCalls: number
@@ -23,10 +58,6 @@ export interface UsageAggregate {
   totalCostUsd: number
   avgLatencyMs: number | null
   errorRate: number
-}
-
-export interface OperationAggregate extends UsageAggregate {
-  operation: string
 }
 
 export interface ModelAggregate extends UsageAggregate {
@@ -51,6 +82,13 @@ export interface AiCallRow {
   errorMessage: string | null
   stopReason: string | null
   metadata: Record<string, unknown> | null
+  // ── Campos derivados (via buildAiCallRecord) p/ o detalhe do log ──
+  workload: AiWorkloadType
+  cacheStatus: AiCacheStatus | null
+  imageStatus: AiImageStatus | null
+  errorCategory: AiErrorCategory | null
+  logicalRequestId: string | null
+  attempt: number | null
 }
 
 interface RawRow {
@@ -77,6 +115,8 @@ function rowToCall(r: RawRow): AiCallRow {
   const output = r.output_tokens ?? 0
   const cacheRead = r.cache_read_tokens ?? 0
   const cacheCreate = r.cache_creation_tokens ?? 0
+  // Deriva workload/cache/image/erro do metadata — mesma lógica pura do diagnóstico.
+  const rec = buildAiCallRecord(r)
   return {
     id: r.id,
     createdAt: r.created_at,
@@ -95,6 +135,12 @@ function rowToCall(r: RawRow): AiCallRow {
     errorMessage: r.error_message,
     stopReason: r.stop_reason,
     metadata: r.metadata,
+    workload: rec.workload,
+    cacheStatus: rec.cacheStatus,
+    imageStatus: rec.imageStatus,
+    errorCategory: rec.errorCategory,
+    logicalRequestId: rec.logicalRequestId,
+    attempt: rec.attempt,
   }
 }
 
@@ -203,24 +249,118 @@ export async function getAiUsageTotals(operation?: string | null): Promise<{
   }
 }
 
-export async function getAiUsageByOperation(rangeDays: number): Promise<OperationAggregate[]> {
-  const rows = await fetchRows(rangeStartIso(rangeDays))
-  const byOp = new Map<string, RawRow[]>()
+// ── KPIs do período selecionado (range-aware, com delta vs. período anterior) ──
+// Substitui as 4 janelas fixas na página /ai-usage: mostra custo/chamadas/lat.
+// p95/erro DO período escolhido, comparados ao período imediatamente anterior de
+// mesma duração + uma sparkline de custo diário. "Tudo" não tem período anterior.
+
+export interface KpiMetric {
+  cost: number
+  calls: number
+  tokens: number
+  errorRate: number
+  latencyP50: number | null
+  latencyP95: number | null
+}
+
+export interface KpiDeltas {
+  /** (cur − prev) / prev; null quando prev = 0 ou inexistente. */
+  costPct: number | null
+  callsPct: number | null
+  /** Diferença absoluta de taxa (cur − prev), em fração 0–1. */
+  errorRatePts: number | null
+  latencyP95Pct: number | null
+}
+
+export interface AiUsageKpis {
+  rangeDays: number | null
+  current: KpiMetric
+  previous: KpiMetric | null
+  deltas: KpiDeltas | null
+  /** Custo por dia dentro da janela atual (cronológico) — p/ sparkline. */
+  sparkline: number[]
+}
+
+function kpiMetric(rows: RawRow[]): KpiMetric {
+  const agg = aggregate(rows)
+  const latencies = rows
+    .map((r) => r.latency_ms)
+    .filter((v): v is number => v != null && Number.isFinite(v))
+  return {
+    cost: agg.totalCostUsd,
+    calls: agg.nCalls,
+    tokens: agg.totalTokens,
+    errorRate: agg.errorRate,
+    latencyP50: percentile(latencies, 50),
+    latencyP95: percentile(latencies, 95),
+  }
+}
+
+function ratioDelta(cur: number, prev: number): number | null {
+  return prev > 0 ? (cur - prev) / prev : null
+}
+
+/** Série de custo por dia (cronológica) para os últimos `days` dias. */
+function dailyCostValues(rows: RawRow[], days: number): number[] {
+  const byDay = new Map<string, number>()
   for (const r of rows) {
-    const list = byOp.get(r.operation) ?? []
-    list.push(r)
-    byOp.set(r.operation, list)
+    const day = r.created_at.slice(0, 10)
+    byDay.set(day, (byDay.get(day) ?? 0) + Number(r.cost_total_usd ?? 0))
   }
-  const result: OperationAggregate[] = []
-  for (const [operation, opRows] of byOp.entries()) {
-    result.push({ operation, ...aggregate(opRows) })
+  const out: number[] = []
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    out.push(byDay.get(d) ?? 0)
   }
-  result.sort((a, b) => b.totalCostUsd - a.totalCostUsd || b.nCalls - a.nCalls)
-  return result
+  return out
+}
+
+export async function getAiUsageKpis(
+  rangeDays: number | null,
+  operation?: string | null,
+): Promise<AiUsageKpis> {
+  if (rangeDays == null) {
+    // "Tudo": sem período anterior; sparkline dos últimos 90 dias.
+    const rows = await fetchRows(null, operation)
+    return {
+      rangeDays: null,
+      current: kpiMetric(rows),
+      previous: null,
+      deltas: null,
+      sparkline: dailyCostValues(rows, 90),
+    }
+  }
+  // Busca 2× a janela e divide em atual / anterior (mesma duração).
+  const spanMs = rangeDays * 24 * 60 * 60 * 1000
+  const now = Date.now()
+  const rows = await fetchRows(new Date(now - 2 * spanMs).toISOString(), operation)
+  const curCutoff = now - spanMs
+  const cur: RawRow[] = []
+  const prev: RawRow[] = []
+  for (const r of rows) {
+    ;(new Date(r.created_at).getTime() >= curCutoff ? cur : prev).push(r)
+  }
+  const current = kpiMetric(cur)
+  const previous = kpiMetric(prev)
+  return {
+    rangeDays,
+    current,
+    previous,
+    deltas: {
+      costPct: ratioDelta(current.cost, previous.cost),
+      callsPct: ratioDelta(current.calls, previous.calls),
+      errorRatePts: previous.calls > 0 ? current.errorRate - previous.errorRate : null,
+      latencyP95Pct:
+        previous.latencyP95 != null && current.latencyP95 != null
+          ? ratioDelta(current.latencyP95, previous.latencyP95)
+          : null,
+    },
+    sparkline: dailyCostValues(cur, rangeDays),
+  }
 }
 
 export async function getAiUsageByModel(
-  rangeDays: number,
+  rangeDays: number | null,
   operation?: string | null,
 ): Promise<ModelAggregate[]> {
   const rows = await fetchRows(rangeStartIso(rangeDays), operation)
@@ -323,6 +463,7 @@ export async function getAnthropicBalanceStatus(): Promise<BalanceStatus> {
 export async function getRecentAiCalls(
   limit: number,
   operation?: string | null,
+  rangeDays?: number | null,
 ): Promise<AiCallRow[]> {
   const supabase = createAdminClient()
   let query = supabase
@@ -331,6 +472,8 @@ export async function getRecentAiCalls(
     .order("created_at", { ascending: false })
     .limit(limit)
   if (operation) query = query.eq("operation", operation)
+  const sinceIso = rangeStartIso(rangeDays ?? null)
+  if (sinceIso) query = query.gte("created_at", sinceIso)
   const { data, error } = await query
   if (error) {
     console.error("[ai-usage] getRecentAiCalls falhou:", error.message)
@@ -356,7 +499,8 @@ function recordsFromRows(rows: RawRow[]): AiCallRecord[] {
 }
 
 export interface AiOperationDiagnostics {
-  rangeDays: number
+  /** Corte em dias; null = período completo ("Tudo"). */
+  rangeDays: number | null
   generatedAtIso: string
   /** Métricas por operação (ordenadas por custo desc). */
   operations: OperationMetrics[]
@@ -367,9 +511,10 @@ export interface AiOperationDiagnostics {
 }
 
 export async function getAiOperationDiagnostics(
-  rangeDaysInput = 30,
+  rangeDaysInput: number | null = 30,
 ): Promise<AiOperationDiagnostics> {
-  const rangeDays = rangeDaysSchema.parse(rangeDaysInput)
+  // null = "Tudo" (sem corte); qualquer número passa pela validação (1..365).
+  const rangeDays = rangeDaysInput == null ? null : rangeDaysSchema.parse(rangeDaysInput)
   const rows = await fetchRows(rangeStartIso(rangeDays))
   const records = recordsFromRows(rows)
   return {

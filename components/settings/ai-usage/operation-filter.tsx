@@ -4,8 +4,13 @@ import { Filter } from "lucide-react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useTransition } from "react"
 
+interface OperationOption {
+  key: string
+  label: string
+}
+
 interface Props {
-  operations: string[]
+  operations: OperationOption[]
   active: string | null
 }
 
@@ -37,12 +42,12 @@ export function OperationFilter({ operations, active }: Props) {
         value={active ?? ""}
         onChange={handleChange}
         disabled={pending}
-        className="cursor-pointer bg-transparent font-mono text-[11px] font-medium text-foreground outline-none disabled:opacity-50"
+        className="max-w-[200px] cursor-pointer truncate bg-transparent text-[11px] font-medium text-foreground outline-none disabled:opacity-50"
       >
         <option value="">Todas</option>
         {operations.map((op) => (
-          <option key={op} value={op}>
-            {op}
+          <option key={op.key} value={op.key}>
+            {op.label}
           </option>
         ))}
       </select>
