@@ -29,7 +29,7 @@ import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
-import { getSynopsisCanonicalOnCreate } from "@/server/queries/current-user"
+import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate } from "@/server/queries/current-user"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
 import { titleToSlug } from "@/lib/utils"
@@ -1073,6 +1073,9 @@ export async function createWork(
   // alta confiança (source='ai_inferred'); se adicionou, marca recalc pendente.
   const inferTagsForNewWork = async (workId: string) => {
     if (skipAi) return
+    // Gate por configuração (toggle em /settings). Desligado, a obra nasce sem
+    // tags ai_inferred e você as gera depois. Default true preserva o histórico.
+    if (!(await getTagInferenceOnCreate())) return
     const { inferAndPersistTagsForWork } = await import("@/lib/tags/auto-infer")
     const added = await inferAndPersistTagsForWork(workId)
     if (added > 0) await markRecalcPending("ai_inferred_tags_on_create")

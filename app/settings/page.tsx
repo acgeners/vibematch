@@ -20,6 +20,11 @@ import { ResolveComixPanel } from "@/components/settings/resolve-comix-panel"
 import { ComixHealthPanel } from "@/components/settings/comix-health-panel"
 import { AiEvalOnCreateToggle } from "@/components/settings/ai-eval-on-create-toggle"
 import { SynopsisCanonicalOnCreateToggle } from "@/components/settings/synopsis-canonical-on-create-toggle"
+import { ReviewSummaryEnabledToggle } from "@/components/settings/review-summary-enabled-toggle"
+import { ReviewDigestEnabledToggle } from "@/components/settings/review-digest-enabled-toggle"
+import { ScoreWeightsAutoToggle } from "@/components/settings/score-weights-auto-toggle"
+import { TagInferenceOnCreateToggle } from "@/components/settings/tag-inference-on-create-toggle"
+import { InterestShadowOnCreateToggle } from "@/components/settings/interest-shadow-on-create-toggle"
 import {
   TagConsolidationTool,
   type TagConsolidationParams,
@@ -27,7 +32,13 @@ import {
 import { getCalibrationSnapshot } from "@/server/actions/settings"
 import { getComixResolverStatus } from "@/server/actions/comix-resolver"
 import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
-import { getAiEvalOnCreate, getSynopsisCanonicalOnCreate } from "@/server/queries/current-user"
+import {
+  getAiEvalOnCreate,
+  getSynopsisCanonicalOnCreate,
+  getReviewSynthesisToggles,
+  getTagInferenceOnCreate,
+  getInterestShadowOnCreate,
+} from "@/server/queries/current-user"
 import { countPendingSuggestions } from "@/server/queries/calibration"
 import {
   countMissingEmbeddings,
@@ -348,19 +359,61 @@ async function ItemBody({
     }
 
     case "on-create": {
-      const [aiEvalOnCreate, synopsisCanonicalOnCreate] = await Promise.all([
+      const supabase = createAdminClient()
+      const [
+        aiEvalOnCreate,
+        synopsisCanonicalOnCreate,
+        tagInferenceOnCreate,
+        reviewToggles,
+        interestShadowOnCreate,
+        weightsConfigRes,
+      ] = await Promise.all([
         getAiEvalOnCreate(),
         getSynopsisCanonicalOnCreate(),
+        getTagInferenceOnCreate(supabase),
+        getReviewSynthesisToggles(supabase),
+        getInterestShadowOnCreate(supabase),
+        supabase
+          .from("formula_config")
+          .select("score_weights_auto")
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
       ])
+      const scoreWeightsAuto =
+        (weightsConfigRes.data?.score_weights_auto as boolean | undefined) ?? true
       return (
         <div className="divide-y divide-border/60">
           <div className="pb-4">
             <p className="mb-1.5 text-sm font-semibold text-foreground">Avaliação IA</p>
             <AiEvalOnCreateToggle initialEnabled={aiEvalOnCreate} />
           </div>
-          <div className="pt-4">
+          <div className="py-4">
             <p className="mb-1.5 text-sm font-semibold text-foreground">Sinopse canônica</p>
             <SynopsisCanonicalOnCreateToggle initialEnabled={synopsisCanonicalOnCreate} />
+          </div>
+          <div className="py-4">
+            <p className="mb-1.5 text-sm font-semibold text-foreground">Inferência de tags por IA</p>
+            <TagInferenceOnCreateToggle initialEnabled={tagInferenceOnCreate} />
+          </div>
+          <div className="py-4">
+            <p className="mb-1.5 text-sm font-semibold text-foreground">Resumo de reviews</p>
+            <ReviewSummaryEnabledToggle initialEnabled={reviewToggles.summaryEnabled} />
+          </div>
+          <div className="py-4">
+            <p className="mb-1.5 text-sm font-semibold text-foreground">Digest de reviews</p>
+            <ReviewDigestEnabledToggle initialEnabled={reviewToggles.digestEnabled} />
+          </div>
+          <div className="py-4">
+            <p className="mb-1.5 text-sm font-semibold text-foreground">
+              Previsão de Interesse — shadow A/B{" "}
+              <span className="text-xs font-normal text-muted-foreground">(dev · dobra custo)</span>
+            </p>
+            <InterestShadowOnCreateToggle initialEnabled={interestShadowOnCreate} />
+          </div>
+          <div className="pt-4">
+            <p className="mb-1.5 text-sm font-semibold text-foreground">Pesos automáticos dos atributos</p>
+            <ScoreWeightsAutoToggle initialEnabled={scoreWeightsAuto} />
           </div>
         </div>
       )

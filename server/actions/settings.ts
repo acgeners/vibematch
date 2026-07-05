@@ -207,6 +207,116 @@ export async function setSynopsisCanonicalOnCreate(enabled: boolean) {
   return { error: null }
 }
 
+/**
+ * Liga/desliga GLOBALMENTE a geração do Resumo de reviews (Haiku) no save de
+ * reviews (migration 127). Persiste em user_settings (singleton). Default true
+ * (ver getReviewSynthesisToggles). Gate lido em lib/external/persist-reviews.ts.
+ */
+export async function setReviewSummaryEnabled(enabled: boolean) {
+  const supabase = createAdminClient()
+  const { data: row } = await supabase
+    .from("user_settings")
+    .select("id")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (!row?.id) return { error: "user_settings sem linha singleton (rode a migration 074)" }
+
+  const { error } = await supabase
+    .from("user_settings")
+    .update({ review_summary_enabled: enabled })
+    .eq("id", row.id as string)
+
+  if (error) return { error: error.message }
+
+  revalidatePath("/settings")
+  return { error: null }
+}
+
+/**
+ * Liga/desliga GLOBALMENTE a geração do Digest de reviews (Sonnet) no save de
+ * reviews (migration 127). Persiste em user_settings (singleton). Default true
+ * (ver getReviewSynthesisToggles). Gate lido em lib/external/persist-reviews.ts.
+ */
+export async function setReviewDigestEnabled(enabled: boolean) {
+  const supabase = createAdminClient()
+  const { data: row } = await supabase
+    .from("user_settings")
+    .select("id")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (!row?.id) return { error: "user_settings sem linha singleton (rode a migration 074)" }
+
+  const { error } = await supabase
+    .from("user_settings")
+    .update({ review_digest_enabled: enabled })
+    .eq("id", row.id as string)
+
+  if (error) return { error: error.message }
+
+  revalidatePath("/settings")
+  return { error: null }
+}
+
+/**
+ * Liga/desliga a inferência de tags por IA (Haiku) na criação de obras
+ * (migration 128). Persiste em user_settings (singleton). Default true
+ * (ver getTagInferenceOnCreate). Gate lido em server/actions/works.ts.
+ */
+export async function setTagInferenceOnCreate(enabled: boolean) {
+  const supabase = createAdminClient()
+  const { data: row } = await supabase
+    .from("user_settings")
+    .select("id")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (!row?.id) return { error: "user_settings sem linha singleton (rode a migration 074)" }
+
+  const { error } = await supabase
+    .from("user_settings")
+    .update({ tag_inference_on_create: enabled })
+    .eq("id", row.id as string)
+
+  if (error) return { error: error.message }
+
+  revalidatePath("/settings")
+  revalidatePath("/titles/new")
+  return { error: null }
+}
+
+/**
+ * Liga/desliga o arm B (shadow A/B) da Previsão de Interesse na criação
+ * (migration 128) — DOBRA o custo do Interesse quando ligado. Persiste em
+ * user_settings (singleton). Default false; soma-se à env INTEREST_SHADOW no
+ * caminho automático (lib/ai-evaluation/synopsis-quality-runner.ts).
+ */
+export async function setInterestShadowOnCreate(enabled: boolean) {
+  const supabase = createAdminClient()
+  const { data: row } = await supabase
+    .from("user_settings")
+    .select("id")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (!row?.id) return { error: "user_settings sem linha singleton (rode a migration 074)" }
+
+  const { error } = await supabase
+    .from("user_settings")
+    .update({ interest_shadow_on_create: enabled })
+    .eq("id", row.id as string)
+
+  if (error) return { error: error.message }
+
+  revalidatePath("/settings")
+  return { error: null }
+}
+
 export interface ScoreColorPercentilesUpdate {
   score_color_pct_top: number
   score_color_pct_high: number
