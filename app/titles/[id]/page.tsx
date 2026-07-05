@@ -21,6 +21,7 @@ import {
 import { getCurrentUserId, getCurrentPlan } from "@/server/queries/current-user"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import { planAllows } from "@/lib/plans/capabilities"
+import { LABELS } from "@/lib/constants/ui-labels"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
@@ -648,7 +649,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             {work.calculated_scores?.expected_score != null ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {work.user_score != null ? "Prevista / Real" : "Nota Prevista"}
+                  {work.user_score != null ? "Prevista / Real" : LABELS.expected_score.full}
                 </span>
                 {work.user_score != null ? (
                   <div className="flex items-center gap-1.5">
@@ -680,7 +681,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               // fallback do Interesse ao lado.
               <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Nota Prevista
+                  {LABELS.expected_score.full}
                 </span>
                 <span title="Aparece após a avaliação IA dos atributos da obra">
                   <ScoreBadge score={null} size="md" />
@@ -920,7 +921,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     <TooltipTrigger asChild>
                       <div className="text-right shrink-0 cursor-help">
                         <p className="text-xs font-medium text-muted-foreground underline-offset-4 decoration-dotted hover:underline">
-                          Nota Prevista
+                          {LABELS.expected_score.full}
                         </p>
                         <p className={cn(
                           "text-3xl font-black font-mono leading-none",
@@ -940,7 +941,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 // Sem os 9 atributos IA não há Nota Prevista real (ver expected.ts /
                 // gate no recalc). Estado explícito no lugar do número oculto.
                 <div className="text-right shrink-0" title="Aparece após a avaliação IA dos atributos da obra">
-                  <p className="text-xs font-medium text-muted-foreground">Nota Prevista</p>
+                  <p className="text-xs font-medium text-muted-foreground">{LABELS.expected_score.full}</p>
                   <p className="text-3xl font-black font-mono leading-none text-muted-foreground">—</p>
                   <p className="text-xs text-muted-foreground">após avaliação IA</p>
                 </div>
@@ -1007,7 +1008,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     spanLastVerdict && lastVerdict === "align" && "sm:col-span-2",
                   )}>
                     <div className="flex flex-col items-start gap-1">
-                      <span className="text-xs font-medium text-muted-foreground">Veredito IA</span>
+                      <span className="text-xs font-medium text-muted-foreground">{LABELS.alignment_score.full}</span>
                       {stale ? (
                         <span className="inline-flex items-center rounded-full border border-amber-500/55 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
                           Desatualizado

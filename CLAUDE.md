@@ -14,7 +14,7 @@ npm run sync-constants  # regenerates constant files from Supabase DB (requires 
 npm run lint
 ```
 
-`sync-constants` needs `SUPABASE_SERVICE_ROLE_KEY` in env. It overwrites 7 files — never hand-edit the files listed in the **Constants generated from DB** section below.
+`sync-constants` needs `SUPABASE_SERVICE_ROLE_KEY` in env. It overwrites the files listed in the **Constants generated from DB** section below — never hand-edit them.
 
 ## Architecture
 
@@ -64,6 +64,8 @@ These files are **fully overwritten** by `npm run sync-constants` and must not b
 | `lib/constants/criteria.ts` | `criteria` (eval_type=IA) + `publication_status` + `personal_status` + `source` |
 | `lib/constants/post-reading-criteria.ts` | `criteria` (eval_type=User) |
 | `lib/constants/tag-groups.ts` | `tag_group` |
+| `lib/constants/tags.ts` | `tags` + `genres` (autocomplete catalog) |
+| `lib/constants/ui-labels.ts` | `ui_labels` (`LABELS` keyed by field → `{full, short, abbrev, tooltip_full, tooltip_short}`; free-floating UI names/tooltips not owned by another table) |
 | `lib/external/types.ts` | `source` (ExternalSourceId only, rest preserved) |
 | `lib/import/mapper.ts` | `criteria` aliases |
 | `lib/import/normalizer.ts` | `publication_status` + `personal_status` maps |

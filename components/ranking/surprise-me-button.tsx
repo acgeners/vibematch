@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
+import { LABELS } from "@/lib/constants/ui-labels"
 import { CoverImage } from "@/components/ui/cover-image"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { titleToSlug } from "@/lib/utils"
@@ -160,7 +161,7 @@ function SurprisePickCard({ entry, onNavigate }: { entry: RankingEntry; onNaviga
         </h3>
         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
           <span>#{entry.rank}</span>
-          {entry.expectedScore != null && <span>Nota Prevista {entry.expectedScore.toFixed(1)}</span>}
+          {entry.expectedScore != null && <span>{LABELS.expected_score.full} {entry.expectedScore.toFixed(1)}</span>}
           {entry.year != null && <span>{entry.year}</span>}
         </div>
         <p className="text-xs leading-relaxed text-muted-foreground">{justification}</p>

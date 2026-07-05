@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { ChevronDown, ChevronUp, ImageOff } from "lucide-react"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
+import { LABELS } from "@/lib/constants/ui-labels"
 import { cn } from "@/lib/utils"
 import { pickPrimaryCover } from "@/lib/covers"
 import { CoverImage } from "@/components/ui/cover-image"
@@ -131,23 +132,23 @@ function ResizeHandle({ columnKey, onResize, startWidth }: ResizeHandleProps) {
 }
 
 const NON_CRITERION_LABELS: Record<string, string> = {
-  expected_score: "Prevista",
-  personal_fit: "Alinh.",
-  platform_avg: "Externa",
-  total_votes: "Votos",
-  alignment_score: "Veredito",
-  synopsis_q: "Sinopse",
-  synopsis_pred: "Prev. IA",
+  expected_score: LABELS.expected_score.short,
+  personal_fit: LABELS.personal_fit.abbrev,
+  platform_avg: LABELS.platform_avg.short,
+  total_votes: LABELS.total_votes.short,
+  alignment_score: LABELS.alignment_score.short,
+  synopsis_q: LABELS.synopsis_q.abbrev,
+  synopsis_pred: LABELS.synopsis_pred.abbrev,
 }
 
 const NON_CRITERION_TOOLTIPS: Record<string, string> = {
-  expected_score: "Nota Prevista (L1 single Ridge — substitui N.IA/N.Pr/N.Final)",
-  personal_fit: "Alinhamento — o quanto a obra combina com o seu perfil de gosto (percentil 0–100 dentro da biblioteca).",
-  platform_avg: "Média externa",
-  total_votes: "Total de votos nas plataformas",
-  alignment_score: "Veredito IA — score 0-100 que ordena os resultados das ações 'Recomendar com IA'. Preenchido em batch pela run ou sob demanda pelo botão Rankear.",
-  synopsis_q: "Interesse na sinopse (♥ a ♥♥♥♥) — preenchido manualmente",
-  synopsis_pred: "Interesse IA — previsão da IA de quanto a sinopse vai te interessar (♥ a ♥♥♥♥), com base no seu perfil. Diferente de 'Sinopse', que é o que você informou.",
+  expected_score: LABELS.expected_score.tooltip_full,
+  personal_fit: LABELS.personal_fit.tooltip_full,
+  platform_avg: LABELS.platform_avg.tooltip_full,
+  total_votes: LABELS.total_votes.tooltip_full,
+  alignment_score: LABELS.alignment_score.tooltip_full,
+  synopsis_q: LABELS.synopsis_q.tooltip_full,
+  synopsis_pred: LABELS.synopsis_pred.tooltip_full,
 }
 
 function formatVoteCount(count: number): string {

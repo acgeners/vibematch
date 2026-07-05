@@ -11,6 +11,7 @@ import { PersonalStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
+import { LABELS } from "@/lib/constants/ui-labels"
 import { cn, titleToSlug } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
 import type { SimilarWork } from "@/server/queries/similar-works"
@@ -375,7 +376,7 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
                         </span>
                       </Metric>
                     )}
-                    <Metric label="Veredito IA">
+                    <Metric label={LABELS.alignment_score.full}>
                       {w.alignmentScore != null ? (
                         <span
                           className={cn(

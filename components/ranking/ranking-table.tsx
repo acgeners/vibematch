@@ -16,6 +16,7 @@ import { DEFAULT_TIER_BAND_WIDTH } from "@/lib/ranking/tier-config"
 import type { CriterionSlug } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
+import { LABELS } from "@/lib/constants/ui-labels"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { formatPercentile } from "@/lib/calculations/percentile"
@@ -1298,7 +1299,7 @@ function RankingCard({
 
         {/* Notas 2×2: Externa · Votos / Veredito · Alinhamento — fixadas na base */}
         <div className="mt-auto grid grid-cols-2 overflow-hidden rounded-lg border border-border/60 bg-background/30 [&>*:nth-child(2n)]:border-l [&>*:nth-child(2n)]:border-border/60 [&>*:nth-child(n+3)]:border-t [&>*:nth-child(n+3)]:border-border/60">
-          <MetricCell label="Externa">
+          <MetricCell label={LABELS.platform_avg.short}>
             {entry.platformAvg != null ? (
               <>
                 <Star className="size-3 fill-amber-500 text-amber-500" />
@@ -1308,7 +1309,7 @@ function RankingCard({
               EMPTY_METRIC
             )}
           </MetricCell>
-          <MetricCell label="Votos">
+          <MetricCell label={LABELS.total_votes.short}>
             {entry.totalVotes > 0 ? (
               <>
                 <Users className="size-3 text-muted-foreground/70" />
@@ -1318,7 +1319,7 @@ function RankingCard({
               EMPTY_METRIC
             )}
           </MetricCell>
-          <MetricCell label="Veredito IA">
+          <MetricCell label={LABELS.alignment_score.short}>
             {entry.alignmentScore != null ? (
               <>
                 <Sparkles className="size-3 text-sky-400" />
@@ -1330,7 +1331,7 @@ function RankingCard({
               EMPTY_METRIC
             )}
           </MetricCell>
-          <MetricCell label="Alinham.">
+          <MetricCell label={LABELS.personal_fit.abbrev}>
             {alignPct != null ? (
               <>
                 <Target className="size-3 text-violet-400" />

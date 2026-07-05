@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug } from "@/lib/utils"
+import { LABELS } from "@/lib/constants/ui-labels"
 import type { RankedCandidate } from "@/lib/ai-recommendation/types"
 
 interface RankedWorkFeaturedCardProps {
@@ -92,11 +93,11 @@ export function RankedWorkFeaturedCard({ rank, ranked }: RankedWorkFeaturedCardP
                   <span className={cn("text-base font-black leading-none tabular-nums", q.scoreClass)}>
                     {Math.round(alignment_score)}
                   </span>
-                  <span className="text-[6px] font-bold uppercase tracking-wider text-muted-foreground mt-0.5">Veredito IA</span>
+                  <span className="text-[6px] font-bold uppercase tracking-wider text-muted-foreground mt-0.5">{LABELS.alignment_score.full}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent side="top" className="max-w-[300px] space-y-1.5">
-                <p className="text-xs font-semibold">Veredito IA: {Math.round(alignment_score)}/100</p>
+                <p className="text-xs font-semibold">{LABELS.alignment_score.full}: {Math.round(alignment_score)}/100</p>
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
                   90+ excepcional · 70–89 forte · 50–69 moderado · 30–49 fraco · &lt;30 pouco alinhado
                 </p>
