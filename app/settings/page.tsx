@@ -82,8 +82,8 @@ export default async function SettingsPage({
 }) {
   const sp = await searchParams
 
-  // Resolve o grupo ativo. `?g=` é a fonte; `?s=<item>` (deep-link antigo) é
-  // resolvido pro grupo dono do item (e abre, se for colapsável).
+  // Resolve o tópico ativo. `?g=` é a fonte; `?s=<item>` (deep-link antigo) é
+  // resolvido pro grupo dono do item (e abre a ferramenta, se for colapsável).
   let groupId = normalizeGroupId(sp.g)
   let openId = normalizeOpenId(sp.open)
   const legacy = Array.isArray(sp.s) ? sp.s[0] : sp.s
@@ -104,6 +104,8 @@ export default async function SettingsPage({
   const accent = group.accent
   const s = ACCENT_STYLES[accent]
   const GroupIcon = group.icon
+  // Itens do tópico ganham seta de colapso — exceto quando o tópico tem 1 só.
+  const collapsible = group.sections.length > 1
 
   return (
     <div className="w-full max-w-5xl">
@@ -129,7 +131,14 @@ export default async function SettingsPage({
 
       <div className="space-y-4">
         {group.sections.map((section) => (
-          <SettingsCard key={section.id} section={section} accent={accent}>
+          <SettingsCard
+            key={section.id}
+            section={section}
+            accent={accent}
+            collapsible={collapsible}
+            forceOpen={openId === section.id}
+            storageKeyPrefix="settings-card"
+          >
             <Suspense fallback={<BodySkeleton />}>
               <ItemBody
                 section={section}

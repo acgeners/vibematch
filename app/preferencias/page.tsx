@@ -64,6 +64,8 @@ export default async function PreferenciasPage({
   const accent = group.accent
   const s = ACCENT_STYLES[accent]
   const GroupIcon = group.icon
+  // Itens do tópico ganham seta de colapso — exceto quando o tópico tem 1 só.
+  const collapsible = group.sections.length > 1
 
   return (
     <div className="w-full max-w-5xl">
@@ -89,7 +91,13 @@ export default async function PreferenciasPage({
 
       <div className="space-y-4">
         {group.sections.map((section) => (
-          <SettingsCard key={section.id} section={section} accent={accent}>
+          <SettingsCard
+            key={section.id}
+            section={section}
+            accent={accent}
+            collapsible={collapsible}
+            storageKeyPrefix="preferencias-card"
+          >
             <Suspense fallback={<BodySkeleton />}>
               <ItemBody section={section} />
             </Suspense>
