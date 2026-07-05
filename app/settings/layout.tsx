@@ -42,6 +42,7 @@ export default async function SettingsLayout({ children }: { children: ReactNode
   const groups: SubnavGroup[] = SETTINGS_GROUPS.map((g) => ({
     id: g.id,
     label: g.label,
+    iconName: g.iconName,
     accent: g.accent,
     itemCount: g.sections.length,
     pending: pending[g.id] ?? 0,
@@ -49,11 +50,18 @@ export default async function SettingsLayout({ children }: { children: ReactNode
   return (
     <div className="md:-mx-7 md:-my-7 md:flex md:min-h-dvh md:items-stretch">
       <Suspense>
-        <SettingsSubnav groups={groups} defaultGroup={DEFAULT_GROUP_ID} />
+        <SettingsSubnav
+          groups={groups}
+          defaultGroup={DEFAULT_GROUP_ID}
+          basePath="/settings"
+          title="Configurações"
+          subtitle="Console de operação"
+          headerIconName="Settings"
+        />
       </Suspense>
       <div className="min-w-0 flex-1 md:px-7 md:py-7">
         <Suspense>
-          <SettingsMobileNav groups={groups} defaultGroup={DEFAULT_GROUP_ID} />
+          <SettingsMobileNav groups={groups} defaultGroup={DEFAULT_GROUP_ID} basePath="/settings" />
         </Suspense>
         {children}
       </div>

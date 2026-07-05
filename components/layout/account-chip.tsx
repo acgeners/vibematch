@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils"
  * Busca o resumo no client (como os badges) e re-busca a cada navegação pra
  * refletir edições feitas em /conta. Falha silenciosa → cai pro placeholder.
  */
-export function AccountChip() {
+export function AccountChip({ compact = false }: { compact?: boolean }) {
   const pathname = usePathname()
   const [summary, setSummary] = useState<AccountSummary | null>(null)
   const [imgError, setImgError] = useState(false)
@@ -37,8 +37,10 @@ export function AccountChip() {
     <Link
       href="/conta"
       aria-current={active ? "page" : undefined}
+      title={compact ? name : undefined}
       className={cn(
         "group flex items-center gap-3 rounded-lg px-2 py-2 transition-colors",
+        compact && "justify-center gap-0 px-0",
         active ? "bg-sidebar-accent/70" : "hover:bg-sidebar-accent/80",
       )}
     >
@@ -54,17 +56,19 @@ export function AccountChip() {
           <UserCircle />
         )}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-semibold text-sidebar-foreground">{name}</span>
-        <span
-          className={cn(
-            "block truncate text-[11px] font-medium",
-            summary ? (isPaid ? "text-primary/80" : "text-muted-foreground/70") : "text-muted-foreground/70",
-          )}
-        >
-          {summary ? (isPaid ? "Plano Pago" : "Plano Free") : "v1 · catálogo pessoal"}
+      {!compact && (
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-sidebar-foreground">{name}</span>
+          <span
+            className={cn(
+              "block truncate text-[11px] font-medium",
+              summary ? (isPaid ? "text-primary/80" : "text-muted-foreground/70") : "text-muted-foreground/70",
+            )}
+          >
+            {summary ? (isPaid ? "Plano Pago" : "Plano Free") : "v1 · catálogo pessoal"}
+          </span>
         </span>
-      </span>
+      )}
     </Link>
   )
 }

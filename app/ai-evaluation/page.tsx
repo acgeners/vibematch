@@ -36,6 +36,8 @@ import { getReadAckSets, getEvalReadSummary } from "@/server/queries/ai-eval-rea
 import type { ReadQueue } from "@/server/queries/ai-eval-read"
 import { filterWorkIdsByInterest } from "@/server/queries/interest-filter"
 import { MarkReadButton } from "@/components/ai-evaluation/mark-read-button"
+import { AiEvalSettingsDialog } from "@/components/ai-evaluation/ai-eval-settings-dialog"
+import type { FormulaConfig } from "@/types/domain"
 
 const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model", "outdated-reviews"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
@@ -938,6 +940,26 @@ async function MarkReadControl() {
   return <MarkReadButton allRead={summary.allRead} />
 }
 
+// Config dos filtros da fila (tolerância de versão + limiar de confiança). Veio das
+// Preferências pra cá, onde os knobs de fato agem. Busca a config e abre num diálogo.
+async function AiEvalSettingsControl() {
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from("formula_config")
+    .select("*")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+  const config = data?.[0] as FormulaConfig | undefined
+  if (!config) return null
+  return (
+    <AiEvalSettingsDialog
+      config={config}
+      currentPromptVersion={PROMPT_VERSION}
+      currentPromptVersionNum={CURRENT_PROMPT_VERSION_NUM}
+    />
+  )
+}
+
 export default async function AiEvaluationPage({
   searchParams,
 }: {
@@ -1300,9 +1322,14 @@ export default async function AiEvaluationPage({
         description="Fila de avaliação/revisão das notas por IA (atributos) e de re-rank (Veredito IA) desatualizado ou não avaliado."
         icon={<Sparkles />}
         actions={
-          <Suspense fallback={null}>
-            <MarkReadControl />
-          </Suspense>
+          <>
+            <Suspense fallback={null}>
+              <AiEvalSettingsControl />
+            </Suspense>
+            <Suspense fallback={null}>
+              <MarkReadControl />
+            </Suspense>
+          </>
         }
       />
 

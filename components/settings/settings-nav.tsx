@@ -2,7 +2,17 @@
 
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { BookOpen, Gauge, Settings, Sparkles, Wrench } from "lucide-react"
+import {
+  BookOpen,
+  Gauge,
+  Palette,
+  Scale,
+  Settings,
+  SlidersHorizontal,
+  Sparkles,
+  Trophy,
+  Wrench,
+} from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { ACCENT_STYLES } from "@/components/console/console-registry"
 import type { SettingsAccent } from "@/lib/settings-accent"
@@ -11,47 +21,70 @@ import { cn } from "@/lib/utils"
 export interface SubnavGroup {
   id: string
   label: string
+  /** Nome do ícone (serializável — o registry de ícones vive aqui no client). */
+  iconName: string
   accent: SettingsAccent
   itemCount: number
   pending: number
 }
 
-// Ícone por tópico (o registry vive no servidor; aqui mapeamos por id — 4 grupos).
-const GROUP_ICONS: Record<string, LucideIcon> = {
-  notas: Gauge,
-  ia: Sparkles,
-  fontes: BookOpen,
-  avancado: Wrench,
+// Ícones por NOME. O registry das seções vive no servidor e não pode cruzar
+// LucideIcon como prop pro client, então mapeamos por string aqui. Cobre os dois
+// consoles que usam esta sub-nav (Configurações e Preferências).
+const NAV_ICONS: Record<string, LucideIcon> = {
+  Gauge,
+  Sparkles,
+  BookOpen,
+  Wrench,
+  Trophy,
+  Scale,
+  Palette,
+  Settings,
+  SlidersHorizontal,
+}
+
+interface SubnavProps {
+  groups: SubnavGroup[]
+  defaultGroup: string
+  /** Base da rota do console (ex.: "/settings", "/preferencias"). */
+  basePath: string
+  /** Cabeçalho da sub-camada. */
+  title: string
+  subtitle: string
+  headerIconName: string
 }
 
 /**
- * Camada 2 — a sub-camada de Configurações. Colada na sidebar do site (o layout
- * quebra o padding do <main>), mesmo padrão visual. Lista os 4 tópicos.
+ * Camada 2 — a sub-camada de um console. Colada na sidebar do site (o layout
+ * quebra o padding do <main>), mesmo padrão visual. Lista os tópicos do console.
+ * Compartilhada por /settings e /preferencias (parametrizada por `basePath`).
  */
 export function SettingsSubnav({
   groups,
   defaultGroup,
-}: {
-  groups: SubnavGroup[]
-  defaultGroup: string
-}) {
+  basePath,
+  title,
+  subtitle,
+  headerIconName,
+}: SubnavProps) {
   const sp = useSearchParams()
   const active = sp.get("g") ?? defaultGroup
+  const HeaderIcon = NAV_ICONS[headerIconName] ?? Settings
 
   return (
     <aside
       className="hidden shrink-0 border-r border-border/70 bg-card/40 backdrop-blur md:flex md:w-[244px] md:flex-col"
-      aria-label="Configurações — tópicos"
+      aria-label={`${title} — tópicos`}
     >
       <div className="sticky top-0 flex max-h-dvh flex-col">
         <div className="flex h-16 items-center gap-2.5 border-b border-border/70 bg-gradient-to-b from-card/70 to-card/25 px-4 shadow-sm shadow-black/5">
           <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/15 text-primary ring-1 ring-primary/25 [&_svg]:size-[18px]">
-            <Settings />
+            <HeaderIcon />
           </span>
           <div className="min-w-0">
-            <p className="text-sm font-bold leading-tight text-foreground">Configurações</p>
+            <p className="text-sm font-bold leading-tight text-foreground">{title}</p>
             <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              Console de operação
+              {subtitle}
             </p>
           </div>
         </div>
@@ -63,7 +96,7 @@ export function SettingsSubnav({
           <ul className="space-y-1">
             {groups.map((g) => (
               <li key={g.id}>
-                <TopicLink group={g} active={g.id === active} />
+                <TopicLink group={g} basePath={basePath} active={g.id === active} />
               </li>
             ))}
           </ul>
@@ -73,12 +106,20 @@ export function SettingsSubnav({
   )
 }
 
-function TopicLink({ group, active }: { group: SubnavGroup; active: boolean }) {
+function TopicLink({
+  group,
+  basePath,
+  active,
+}: {
+  group: SubnavGroup
+  basePath: string
+  active: boolean
+}) {
   const s = ACCENT_STYLES[group.accent]
-  const Icon = GROUP_ICONS[group.id] ?? Settings
+  const Icon = NAV_ICONS[group.iconName] ?? Settings
   return (
     <Link
-      href={`/settings?g=${group.id}`}
+      href={`${basePath}?g=${group.id}`}
       aria-current={active ? "page" : undefined}
       className={cn(
         "group relative flex items-center gap-2.5 rounded-xl border px-2.5 py-2.5 transition-colors",
@@ -129,19 +170,21 @@ function TopicLink({ group, active }: { group: SubnavGroup; active: boolean }) {
 export function SettingsMobileNav({
   groups,
   defaultGroup,
+  basePath,
 }: {
   groups: SubnavGroup[]
   defaultGroup: string
+  basePath: string
 }) {
   const sp = useSearchParams()
   const router = useRouter()
   const active = sp.get("g") ?? defaultGroup
   return (
     <label className="mb-4 block md:hidden">
-      <span className="sr-only">Tópico de configuração</span>
+      <span className="sr-only">Tópico</span>
       <select
         value={active}
-        onChange={(e) => router.push(`/settings?g=${e.target.value}`)}
+        onChange={(e) => router.push(`${basePath}?g=${e.target.value}`)}
         className="w-full rounded-xl border border-border/70 bg-card/60 px-3 py-2.5 text-sm font-medium text-foreground outline-none"
       >
         {groups.map((g) => (

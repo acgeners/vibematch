@@ -27,7 +27,7 @@ function formatUsd(value: number): string {
  * pra /ai-usage (onde se edita o valor). Busca no client (como o AccountChip)
  * e re-busca a cada navegação pra refletir o gasto recente. Falha silenciosa.
  */
-export function BalanceChip() {
+export function BalanceChip({ compact = false }: { compact?: boolean }) {
   const pathname = usePathname()
   const [status, setStatus] = useState<BalanceStatus | null>(null)
 
@@ -58,15 +58,33 @@ export function BalanceChip() {
         ? "text-sidebar-foreground"
         : "text-muted-foreground/70"
 
+  const title =
+    hasBalance && remaining != null
+      ? `Saldo Anthropic: ${formatUsd(remaining)} restante (estimado)`
+      : "Definir saldo Anthropic"
+
+  // No trilho: só a carteira, colorida pelo tom (âmbar/vermelho = saldo baixo/negativo).
+  if (compact) {
+    return (
+      <Link
+        href="/ai-usage"
+        aria-current={active ? "page" : undefined}
+        title={title}
+        className={cn(
+          "grid size-9 place-items-center rounded-lg transition-colors",
+          active ? "bg-sidebar-accent/70" : "hover:bg-sidebar-accent/80",
+        )}
+      >
+        <Wallet className={cn("size-4", tone)} />
+      </Link>
+    )
+  }
+
   return (
     <Link
       href="/ai-usage"
       aria-current={active ? "page" : undefined}
-      title={
-        hasBalance && remaining != null
-          ? `Saldo Anthropic: ${formatUsd(remaining)} restante (estimado)`
-          : "Definir saldo Anthropic"
-      }
+      title={title}
       className={cn(
         "flex shrink-0 flex-col items-end rounded-lg px-2.5 py-1.5 transition-colors",
         active ? "bg-sidebar-accent/70" : "hover:bg-sidebar-accent/80",

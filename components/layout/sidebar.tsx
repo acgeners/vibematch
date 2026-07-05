@@ -16,6 +16,8 @@ import {
   Wand2,
   Activity,
   AlertTriangle,
+  ChevronLeft,
+  Calculator,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getSidebarBadgeCounts } from "@/server/actions/badges"
@@ -33,6 +35,15 @@ type ComixHealth = Awaited<ReturnType<typeof getSidebarBadgeCounts>>["comixHealt
 // que esvaziam filas forçam o re-fetch na hora (evento global), então a navegação
 // não precisa recontar a cada troca de rota (cada chamada ~450ms no DB remoto).
 const BADGES_TTL_MS = 30_000
+
+// Colapso do menu do site. As consoles de duas camadas (/settings, /preferencias)
+// já têm a própria sub-nav, então o menu recolhe pra trilho ao entrar nelas
+// (evita "duas barras"). Fora delas, a escolha manual persiste no navegador.
+const SIDEBAR_COLLAPSED_KEY = "sidebar:collapsed"
+const CONSOLE_ROUTE_PREFIXES = ["/settings", "/preferencias"]
+function isConsoleRoute(pathname: string): boolean {
+  return CONSOLE_ROUTE_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"))
+}
 
 interface NavItem {
   href: string
@@ -95,6 +106,31 @@ export function Sidebar() {
   const pathname = usePathname()
   const searchParams = useClientSearchParams()
 
+  // Trilho ↔ expandido. Inicial = derivado da rota (determinístico p/ SSR, sem
+  // localStorage). Sincroniza durante o render a cada troca de rota (padrão
+  // "adjust-during-render", igual ao useClientSearchParams acima — evita o
+  // cascading render do useEffect): nas consoles recolhe; fora delas aplica a
+  // preferência salva no navegador.
+  const [collapsed, setCollapsed] = useState<boolean>(() => isConsoleRoute(pathname))
+  const [collapseSyncedPath, setCollapseSyncedPath] = useState<string | null>(null)
+  if (typeof window !== "undefined" && pathname !== collapseSyncedPath) {
+    setCollapseSyncedPath(pathname)
+    setCollapsed(
+      isConsoleRoute(pathname)
+        ? true
+        : window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1",
+    )
+  }
+  const toggleCollapsed = () =>
+    setCollapsed((prev) => {
+      const next = !prev
+      // Só persiste fora das consoles — nelas o padrão é recolher ao entrar.
+      if (!isConsoleRoute(pathname)) {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0")
+      }
+      return next
+    })
+
   // Badges de pendências (contagens):
   //   - "ai-eval":  obras NÃO-LIDAS nas 3 primeiras abas de /ai-evaluation
   //                 (atributos + Veredito IA + Interesse), união distinta.
@@ -155,9 +191,28 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="relative z-20 hidden min-h-screen w-64 shrink-0 flex-col border-r border-sidebar-border/80 bg-sidebar/95 shadow-[10px_0_30px_hsl(220_30%_5%/0.14)] backdrop-blur md:flex">
-      <div className="flex h-16 items-center gap-3 border-b border-sidebar-border/70 px-4">
-        <div className="grid size-10 place-items-center rounded-xl bg-gradient-to-br from-primary to-[hsl(200_98%_50%)] text-white shadow-md shadow-primary/30 ring-1 ring-white/15">
+    <aside
+      className={cn(
+        "relative z-20 hidden min-h-screen shrink-0 flex-col border-r border-sidebar-border/80 bg-sidebar/95 shadow-[10px_0_30px_hsl(220_30%_5%/0.14)] backdrop-blur transition-[width] duration-200 md:flex",
+        collapsed ? "w-[76px]" : "w-64"
+      )}
+    >
+      <button
+        type="button"
+        onClick={toggleCollapsed}
+        aria-label={collapsed ? "Expandir menu" : "Recolher menu"}
+        title={collapsed ? "Expandir menu" : "Recolher menu"}
+        className="absolute -right-3 top-[4.3rem] z-30 hidden size-6 items-center justify-center rounded-full border border-sidebar-border/80 bg-sidebar text-muted-foreground shadow-md transition-colors hover:text-sidebar-foreground md:flex"
+      >
+        <ChevronLeft className={cn("size-3.5 transition-transform", collapsed && "rotate-180")} />
+      </button>
+      <div
+        className={cn(
+          "flex h-16 items-center gap-3 border-b border-sidebar-border/70 px-4",
+          collapsed && "justify-center px-2"
+        )}
+      >
+        <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary to-[hsl(200_98%_50%)] text-white shadow-md shadow-primary/30 ring-1 ring-white/15">
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -182,24 +237,28 @@ export function Sidebar() {
             />
           </svg>
         </div>
-        <div className="min-w-0">
-          <span className="block text-base font-bold tracking-tight text-sidebar-foreground">
-            Sator<span className="text-primary">IA</span>
-          </span>
-          <span className="mt-0.5 block text-[10px] font-semibold uppercase leading-tight tracking-[0.18em] text-muted-foreground">
-            Recomendações
-            <br />
-            que te entendem
-          </span>
-        </div>
+        {!collapsed && (
+          <div className="min-w-0">
+            <span className="block text-base font-bold tracking-tight text-sidebar-foreground">
+              Sator<span className="text-primary">IA</span>
+            </span>
+            <span className="mt-0.5 block text-[10px] font-semibold uppercase leading-tight tracking-[0.18em] text-muted-foreground">
+              Recomendações
+              <br />
+              que te entendem
+            </span>
+          </div>
+        )}
       </div>
 
       <nav className="flex flex-1 flex-col gap-5 overflow-y-auto p-3">
         {NAV_SECTIONS.map((section) => (
           <div key={section.title} className="space-y-1">
-            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-              {section.title}
-            </p>
+            {!collapsed && (
+              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+                {section.title}
+              </p>
+            )}
             {section.items.map((item) => {
               const { href, icon: Icon, label } = item
               const active = isItemActive(item, section.items)
@@ -208,8 +267,10 @@ export function Sidebar() {
                 <Link
                   key={href}
                   href={href}
+                  title={collapsed ? label : undefined}
                   className={cn(
                     "group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                    collapsed && "justify-center px-0",
                     active
                       ? "bg-gradient-to-r from-primary/25 via-primary/15 to-primary/5 text-sidebar-foreground shadow-sm shadow-primary/15"
                       : "text-sidebar-foreground/75 hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground"
@@ -226,16 +287,22 @@ export function Sidebar() {
                   />
                   <span
                     className={cn(
-                      "grid size-7 place-items-center rounded-md transition-colors",
+                      "relative grid size-7 place-items-center rounded-md transition-colors",
                       active
                         ? "bg-primary/25 text-primary ring-1 ring-primary/30"
                         : "text-sidebar-foreground/55 group-hover:bg-sidebar-accent group-hover:text-sidebar-foreground"
                     )}
                   >
                     <Icon className="size-4" />
+                    {collapsed && badgeCount > 0 && (
+                      <span
+                        aria-label={`${badgeCount} na fila`}
+                        className="absolute -right-1 -top-1 size-2.5 rounded-full bg-primary ring-2 ring-sidebar"
+                      />
+                    )}
                   </span>
-                  <span className="truncate">{label}</span>
-                  {badgeCount > 0 && (
+                  {!collapsed && <span className="truncate">{label}</span>}
+                  {!collapsed && badgeCount > 0 && (
                     <span
                       aria-label={`${badgeCount} ${badgeCount === 1 ? "item" : "itens"} na fila`}
                       className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-bold leading-none text-primary-foreground shadow-sm shadow-primary/30 ring-1 ring-white/15"
@@ -250,7 +317,7 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <SidebarTasks />
+      {!collapsed && <SidebarTasks />}
 
       {(comixHealth === "down" || comixHealth === "degraded") && (
         <Link
@@ -262,33 +329,66 @@ export function Sidebar() {
           }
           className={cn(
             "flex items-center gap-2 border-t border-sidebar-border/60 px-3 py-2 text-xs font-medium transition-colors",
+            collapsed && "justify-center px-0",
             comixHealth === "down"
               ? "text-rose-500 hover:bg-rose-500/10"
               : "text-amber-500 hover:bg-amber-500/10",
           )}
         >
           <AlertTriangle className="size-3.5 shrink-0" />
-          <span className="truncate">
-            Comix {comixHealth === "down" ? "fora" : "instável"}
-          </span>
+          {!collapsed && (
+            <span className="truncate">
+              Comix {comixHealth === "down" ? "fora" : "instável"}
+            </span>
+          )}
         </Link>
       )}
 
-      {recalcPending && (
-        <div className="border-t border-sidebar-border/60 px-3 py-2.5">
-          <RecalcPendingControl
-            pending={recalcPending}
-            variant="compact"
-            onDone={() => setRecalcPending(false)}
-          />
-        </div>
-      )}
+      {recalcPending &&
+        (collapsed ? (
+          // No trilho: indicador abreviado (ícone + ponto). Clicar expande pra
+          // revelar o controle completo de recálculo.
+          <div className="flex justify-center border-t border-sidebar-border/60 py-2">
+            <button
+              type="button"
+              onClick={() => setCollapsed(false)}
+              title="Há notas aguardando recálculo — clique pra abrir"
+              aria-label="Notas aguardando recálculo"
+              className="relative grid size-9 place-items-center rounded-lg text-amber-500 transition-colors hover:bg-amber-500/10"
+            >
+              <Calculator className="size-4" />
+              <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-amber-500 ring-2 ring-sidebar" />
+            </button>
+          </div>
+        ) : (
+          <div className="border-t border-sidebar-border/60 px-3 py-2.5">
+            <RecalcPendingControl
+              pending={recalcPending}
+              variant="compact"
+              onDone={() => setRecalcPending(false)}
+            />
+          </div>
+        ))}
 
-      <div className="flex items-center gap-2 border-t border-sidebar-border/60 p-3">
-        <div className="min-w-0 flex-1">
-          <AccountChip />
-        </div>
-        <BalanceChip />
+      <div
+        className={cn(
+          "flex items-center gap-2 border-t border-sidebar-border/60 p-3",
+          collapsed && "flex-col justify-center gap-2 p-2"
+        )}
+      >
+        {collapsed ? (
+          <>
+            <BalanceChip compact />
+            <AccountChip compact />
+          </>
+        ) : (
+          <>
+            <div className="min-w-0 flex-1">
+              <AccountChip />
+            </div>
+            <BalanceChip />
+          </>
+        )}
       </div>
     </aside>
   )
