@@ -4,6 +4,7 @@ import {
   COST_TIER_STYLES,
 } from "@/components/console/console-registry"
 import { ItemHelpPopover } from "@/components/settings/item-help-popover"
+import { CollapsibleCardInner } from "@/components/settings/collapsible-card"
 import type { SettingsAccent } from "@/lib/settings-accent"
 import type { SettingsChip, SettingsSection } from "@/app/settings/sections"
 import { panelTitleOf } from "@/app/settings/sections"
@@ -13,50 +14,79 @@ import { cn } from "@/lib/utils"
  * Card de um item na pilha do tópico. Cabeçalho (trilho de accent + ícone + título
  * + ⓘ + chips + descrição) e o corpo (`children`). Um accent por grupo — a cor é
  * hierarquia de grupo, não decoração por-item. `id` ancorável (`#card-<id>`).
+ *
+ * `collapsible` (tópicos com 2+ itens): o card ganha uma seta que expande/recolhe
+ * o corpo, com estado lembrado por card. Item único de um tópico fica sempre
+ * aberto, sem seta.
  */
 export function SettingsCard({
   section,
   accent,
+  collapsible = false,
+  forceOpen = false,
+  storageKeyPrefix = "settings-card",
   children,
 }: {
   section: SettingsSection
   accent: SettingsAccent
+  collapsible?: boolean
+  /** Deep-link `?open=` — mantém este card aberto mesmo se estava recolhido. */
+  forceOpen?: boolean
+  /** Prefixo da chave do localStorage — separa /settings de /preferencias. */
+  storageKeyPrefix?: string
   children: ReactNode
 }) {
   const s = ACCENT_STYLES[accent]
   const Icon = section.icon
   const title = panelTitleOf(section)
+
+  const headerInner = (
+    <>
+      <div
+        className={cn(
+          "grid size-11 shrink-0 place-items-center rounded-xl ring-1 [&_svg]:size-[22px]",
+          s.iconBg,
+          s.iconText,
+          s.ring
+        )}
+      >
+        <Icon />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold leading-tight text-foreground">{title}</h2>
+          <ItemHelpPopover title={title} help={section.help} accent={accent} />
+        </div>
+        {section.chips && section.chips.length > 0 && (
+          <Chips chips={section.chips} accent={accent} />
+        )}
+        <p className="mt-1 text-xs text-muted-foreground">{section.description}</p>
+      </div>
+    </>
+  )
+
   return (
     <section
       id={`card-${section.id}`}
       className="relative scroll-mt-6 overflow-hidden rounded-2xl border border-border/70 bg-card/55 shadow-sm shadow-black/5"
     >
       <div aria-hidden className={cn("absolute inset-y-0 left-0 w-1", s.rail)} />
-      <div className="space-y-4 px-5 py-5 pl-6">
-        <div className="flex items-start gap-3.5">
-          <div
-            className={cn(
-              "grid size-11 shrink-0 place-items-center rounded-xl ring-1 [&_svg]:size-[22px]",
-              s.iconBg,
-              s.iconText,
-              s.ring
-            )}
+      {collapsible ? (
+        <div className="px-5 py-5 pl-6">
+          <CollapsibleCardInner
+            storageKey={`${storageKeyPrefix}:${section.id}`}
+            forceOpen={forceOpen}
+            headerInner={headerInner}
           >
-            <Icon />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold leading-tight text-foreground">{title}</h2>
-              <ItemHelpPopover title={title} help={section.help} accent={accent} />
-            </div>
-            {section.chips && section.chips.length > 0 && (
-              <Chips chips={section.chips} accent={accent} />
-            )}
-            <p className="mt-1 text-xs text-muted-foreground">{section.description}</p>
-          </div>
+            {children}
+          </CollapsibleCardInner>
         </div>
-        <div>{children}</div>
-      </div>
+      ) : (
+        <div className="space-y-4 px-5 py-5 pl-6">
+          <div className="flex items-start gap-3.5">{headerInner}</div>
+          <div>{children}</div>
+        </div>
+      )}
     </section>
   )
 }
