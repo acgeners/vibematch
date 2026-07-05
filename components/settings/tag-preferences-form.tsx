@@ -112,6 +112,9 @@ export function TagPreferencesForm({ tags, initialRows }: TagPreferencesFormProp
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState("")
+  // Contêineres do resumo (Amadas/Evitadas) — colapsados por padrão.
+  const [showLoved, setShowLoved] = useState(false)
+  const [showAvoided, setShowAvoided] = useState(false)
 
   // Mapas de rótulo por id — pra exibir cada declaração no resumo do topo.
   const labelMaps = useMemo(() => {
@@ -263,45 +266,29 @@ export function TagPreferencesForm({ tags, initialRows }: TagPreferencesFormProp
         </div>
       </div>
 
-      {/* Selecionadas em destaque no topo (mesmo padrão da página da obra). */}
-      {selected.length > 0 && (
-        <div className="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <Ban className="h-3 w-3" />/<Heart className="h-3 w-3" /> mover entre amadas e evitadas
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <Sparkles className="h-3 w-3" /> 2× ênfase forte
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <X className="h-3 w-3" /> remover
-            </span>
-          </div>
+      {/* Selecionadas no topo — Amadas/Evitadas em contêineres separados,
+          colapsados por padrão (clique no cabeçalho pra expandir). */}
+      {(loved.length > 0 || avoided.length > 0) && (
+        <div className="space-y-2">
           {loved.length > 0 && (
-            <div>
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-                <Heart className="h-3 w-3 fill-current" /> Amadas
-                <span className="font-semibold text-muted-foreground/70">{loved.length}</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {loved.map((item) => (
-                  <SelectedChip key={item.key} item={item} disabled={isPending} onSet={apply} />
-                ))}
-              </div>
-            </div>
+            <SelectedContainer
+              stance="love"
+              items={loved}
+              open={showLoved}
+              onToggle={() => setShowLoved((v) => !v)}
+              disabled={isPending}
+              onSet={apply}
+            />
           )}
           {avoided.length > 0 && (
-            <div>
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-rose-600 dark:text-rose-400">
-                <Ban className="h-3 w-3" /> Evitadas
-                <span className="font-semibold text-muted-foreground/70">{avoided.length}</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {avoided.map((item) => (
-                  <SelectedChip key={item.key} item={item} disabled={isPending} onSet={apply} />
-                ))}
-              </div>
-            </div>
+            <SelectedContainer
+              stance="avoid"
+              items={avoided}
+              open={showAvoided}
+              onToggle={() => setShowAvoided((v) => !v)}
+              disabled={isPending}
+              onSet={apply}
+            />
           )}
         </div>
       )}
@@ -533,6 +520,91 @@ function NodeRow({
           onClick={() => onSet(decl?.stance === "avoid" ? null : "avoid", decl?.weight ?? 1)}
         />
       </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Contêiner colapsável de um lado do resumo (Amadas ou Evitadas). Cabeçalho
+ * clicável (chevron + ícone + rótulo + contagem); corpo com legenda + chips.
+ * Colapsado por padrão.
+ */
+function SelectedContainer({
+  stance,
+  items,
+  open,
+  onToggle,
+  disabled,
+  onSet,
+}: {
+  stance: TagStance
+  items: SelectedItem[]
+  open: boolean
+  onToggle: () => void
+  disabled?: boolean
+  onSet: (level: TagPrefLevel, targetId: string, stance: TagStance | null, weight: number) => void
+}) {
+  const isLove = stance === "love"
+  const Icon = isLove ? Heart : Ban
+  return (
+    <div
+      className={cn(
+        "overflow-hidden rounded-lg border",
+        isLove
+          ? "border-emerald-500/35 bg-emerald-500/[0.04]"
+          : "border-rose-500/35 bg-rose-500/[0.04]",
+      )}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
+      >
+        <ChevronRight
+          className={cn(
+            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-90",
+          )}
+        />
+        <Icon
+          className={cn(
+            "h-3.5 w-3.5 shrink-0",
+            isLove ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400",
+            isLove && "fill-current",
+          )}
+        />
+        <span
+          className={cn(
+            "text-[11px] font-bold uppercase tracking-wide",
+            isLove ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400",
+          )}
+        >
+          {isLove ? "Amadas" : "Evitadas"}
+        </span>
+        <span className="text-[11px] font-semibold text-muted-foreground/70">{items.length}</span>
+      </button>
+      {open && (
+        <div className="border-t border-border/40 px-3 py-2.5">
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <Sparkles className="h-3 w-3" /> 2× ênfase
+            </span>
+            <span className="inline-flex items-center gap-1">
+              {isLove ? <Ban className="h-3 w-3" /> : <Heart className="h-3 w-3" />} mover pra{" "}
+              {isLove ? "evitadas" : "amadas"}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <X className="h-3 w-3" /> remover
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {items.map((item) => (
+              <SelectedChip key={item.key} item={item} disabled={disabled} onSet={onSet} />
+            ))}
+          </div>
+        </div>
       )}
     </div>
   )
