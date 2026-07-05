@@ -5,6 +5,7 @@ import Link from "next/link"
 import { Check, Loader2, MoreHorizontal, Pencil, X, RotateCcw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import {
   Popover,
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { cn, titleToSlug } from "@/lib/utils"
+import { useRefresh } from "@/lib/use-refresh"
 import {
   acceptSuggestionAction,
   editSuggestionAction,
@@ -29,6 +31,10 @@ import type { SuggestionStatus, SuggestionWithWork } from "@/lib/ai-calibration/
 
 interface SuggestionRowProps {
   suggestion: SuggestionWithWork
+  /** Mostra o checkbox de seleção (só faz sentido em linhas pendentes). */
+  selectable?: boolean
+  selected?: boolean
+  onSelectChange?: (checked: boolean) => void
 }
 
 function deltaColor(delta: number): string {
@@ -52,6 +58,8 @@ function statusLabel(status: SuggestionStatus): string {
       return "Rejeitada"
     case "reverted":
       return "Revertida"
+    case "superseded":
+      return "Substituída"
   }
 }
 
@@ -67,15 +75,22 @@ function statusColor(status: SuggestionStatus): string {
     case "rejected":
       return "bg-muted text-muted-foreground border-border"
     case "reverted":
+    case "superseded":
       return "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
   }
 }
 
-export function SuggestionRow({ suggestion }: SuggestionRowProps) {
+export function SuggestionRow({
+  suggestion,
+  selectable = false,
+  selected = false,
+  onSelectChange,
+}: SuggestionRowProps) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [editValue, setEditValue] = useState(suggestion.suggested_score.toFixed(1))
+  const refresh = useRefresh()
 
   const info = CRITERIA_INFO[suggestion.criterion_slug]
   const isPending = suggestion.status === "pending"
@@ -86,6 +101,7 @@ export function SuggestionRow({ suggestion }: SuggestionRowProps) {
     startTransition(async () => {
       const res = await acceptSuggestionAction(suggestion.id)
       if (!res.ok && res.error) setError(res.error)
+      else refresh()
     })
   }
 
@@ -94,6 +110,7 @@ export function SuggestionRow({ suggestion }: SuggestionRowProps) {
     startTransition(async () => {
       const res = await rejectSuggestionAction(suggestion.id)
       if (!res.ok && res.error) setError(res.error)
+      else refresh()
     })
   }
 
@@ -103,7 +120,10 @@ export function SuggestionRow({ suggestion }: SuggestionRowProps) {
     startTransition(async () => {
       const res = await editSuggestionAction(suggestion.id, score)
       if (!res.ok && res.error) setError(res.error)
-      else setEditOpen(false)
+      else {
+        setEditOpen(false)
+        refresh()
+      }
     })
   }
 
@@ -112,42 +132,53 @@ export function SuggestionRow({ suggestion }: SuggestionRowProps) {
     startTransition(async () => {
       const res = await revertSuggestionAction(suggestion.id)
       if (!res.ok && res.error) setError(res.error)
+      else refresh()
     })
   }
 
   return (
     <div className="rounded-lg border bg-card/40 p-3 transition hover:bg-card/70">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <Link
-              href={`/titles/${titleToSlug(suggestion.work_title)}`}
-              className="line-clamp-1 text-sm font-medium hover:underline"
-            >
-              {suggestion.work_title}
-            </Link>
-            <Badge variant="outline" className={cn("text-[11px]", statusColor(suggestion.status))}>
-              {statusLabel(suggestion.status)}
-            </Badge>
-          </div>
-          <div className="mt-1.5 flex items-center gap-2 text-sm">
-            <span className="font-medium text-foreground">
-              {info?.emoji} {info?.name ?? suggestion.criterion_slug}
-            </span>
-            <span className="text-muted-foreground tabular-nums">
-              {suggestion.previous_score.toFixed(1)}
-            </span>
-            <span className="text-muted-foreground">→</span>
-            <span className="font-semibold tabular-nums">
-              {(suggestion.applied_score ?? suggestion.suggested_score).toFixed(1)}
-            </span>
-            <Badge variant="outline" className={cn("text-[11px] tabular-nums", deltaColor(suggestion.delta))}>
-              Δ {suggestion.delta > 0 ? "+" : ""}
-              {suggestion.delta.toFixed(1)}
-            </Badge>
-            <span className="text-[11px] text-muted-foreground">
-              conf {(suggestion.confidence * 100).toFixed(0)}%
-            </span>
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          {selectable && (
+            <Checkbox
+              className="mt-1"
+              checked={selected}
+              onCheckedChange={(c) => onSelectChange?.(c === true)}
+              aria-label={`Selecionar sugestão de ${suggestion.work_title}`}
+            />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/titles/${titleToSlug(suggestion.work_title)}`}
+                className="line-clamp-1 text-sm font-medium hover:underline"
+              >
+                {suggestion.work_title}
+              </Link>
+              <Badge variant="outline" className={cn("text-[11px]", statusColor(suggestion.status))}>
+                {statusLabel(suggestion.status)}
+              </Badge>
+            </div>
+            <div className="mt-1.5 flex items-center gap-2 text-sm">
+              <span className="font-medium text-foreground">
+                {info?.emoji} {info?.name ?? suggestion.criterion_slug}
+              </span>
+              <span className="text-muted-foreground tabular-nums">
+                {suggestion.previous_score.toFixed(1)}
+              </span>
+              <span className="text-muted-foreground">→</span>
+              <span className="font-semibold tabular-nums">
+                {(suggestion.applied_score ?? suggestion.suggested_score).toFixed(1)}
+              </span>
+              <Badge variant="outline" className={cn("text-[11px] tabular-nums", deltaColor(suggestion.delta))}>
+                Δ {suggestion.delta > 0 ? "+" : ""}
+                {suggestion.delta.toFixed(1)}
+              </Badge>
+              <span className="text-[11px] text-muted-foreground">
+                conf {(suggestion.confidence * 100).toFixed(0)}%
+              </span>
+            </div>
           </div>
         </div>
 

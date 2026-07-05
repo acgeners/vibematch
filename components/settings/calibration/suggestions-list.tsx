@@ -1,9 +1,10 @@
 "use client"
 
 import { useCallback, useMemo, useState, useTransition } from "react"
-import { Loader2 } from "lucide-react"
+import { Check, Loader2, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -14,8 +15,13 @@ import {
 } from "@/components/ui/select"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
+import { useRefresh } from "@/lib/use-refresh"
 import { SuggestionRow } from "./suggestion-row"
-import { bulkAcceptAction } from "@/server/actions/calibration"
+import {
+  bulkAcceptAction,
+  bulkAcceptByIdsAction,
+  bulkRejectByIdsAction,
+} from "@/server/actions/calibration"
 import type { SuggestionWithWork } from "@/lib/ai-calibration/types"
 
 // Teto de cards renderizados (a lista carrega TODAS as pendentes pra filtro/ordem
@@ -57,6 +63,10 @@ export function SuggestionsList({ suggestions, totalAvailable }: SuggestionsList
   const [sort, setSort] = useState<SortKey>("conf_desc")
   const [bulkPending, startBulk] = useTransition()
   const [bulkMsg, setBulkMsg] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [selPending, startSel] = useTransition()
+  const [selMsg, setSelMsg] = useState<string | null>(null)
+  const refresh = useRefresh()
 
   const hasPending = useMemo(() => suggestions.some((s) => s.status === "pending"), [suggestions])
 
@@ -106,11 +116,76 @@ export function SuggestionsList({ suggestions, totalAvailable }: SuggestionsList
       })
       const errPart = res.errors.length ? ` Erros: ${res.errors.slice(0, 2).join("; ")}` : ""
       setBulkMsg(`${res.accepted} aceita(s), ${res.failed} falha(s).${errPart}`)
+      refresh()
     })
   }
 
   const visible = filtered.slice(0, RENDER_CAP)
   const truncatedLoad = totalAvailable != null && suggestions.length < totalAvailable
+
+  // --- Multi-select (checkbox) ---
+  // Selecionáveis: só as linhas PENDENTES atualmente visíveis.
+  const visiblePendingIds = useMemo(
+    () => visible.filter((s) => s.status === "pending").map((s) => s.id),
+    [visible],
+  )
+  const selectedVisibleCount = visiblePendingIds.filter((id) => selected.has(id)).length
+  const allVisibleSelected = visiblePendingIds.length > 0 && selectedVisibleCount === visiblePendingIds.length
+  const headerCheckState = allVisibleSelected
+    ? true
+    : selectedVisibleCount > 0
+      ? "indeterminate"
+      : false
+
+  const toggleOne = (id: string, checked: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
+    })
+
+  const toggleAllVisible = (checked: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      for (const id of visiblePendingIds) {
+        if (checked) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
+
+  const clearSelection = () => {
+    setSelected(new Set())
+    setSelMsg(null)
+  }
+
+  const handleAcceptSelected = () => {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    setSelMsg(null)
+    startSel(async () => {
+      const res = await bulkAcceptByIdsAction(ids)
+      const errPart = res.errors.length ? ` Erros: ${res.errors.slice(0, 2).join("; ")}` : ""
+      setSelMsg(`${res.accepted} aceita(s), ${res.failed} falha(s).${errPart}`)
+      setSelected(new Set())
+      refresh()
+    })
+  }
+
+  const handleRejectSelected = () => {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    setSelMsg(null)
+    startSel(async () => {
+      const res = await bulkRejectByIdsAction(ids)
+      setSelMsg(res.error ? `Erro: ${res.error}` : `${res.rejected} rejeitada(s).`)
+      setSelected(new Set())
+      refresh()
+    })
+  }
+
+  const busy = bulkPending || selPending
 
   return (
     <div className="space-y-3">
@@ -162,11 +237,44 @@ export function SuggestionsList({ suggestions, totalAvailable }: SuggestionsList
             Aceitar em massa as pendentes que batem os filtros acima:
           </div>
           <Badge variant="outline">{eligible.length} elegível(eis)</Badge>
-          <Button size="sm" onClick={handleBulk} disabled={bulkPending || eligible.length === 0}>
+          <Button size="sm" onClick={handleBulk} disabled={busy || eligible.length === 0}>
             {bulkPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
             Aplicar em massa
           </Button>
           {bulkMsg && <p className="ml-2 text-xs text-foreground/80">{bulkMsg}</p>}
+        </div>
+      )}
+
+      {visiblePendingIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-2">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <Checkbox
+              checked={headerCheckState}
+              onCheckedChange={(c) => toggleAllVisible(c === true)}
+            />
+            Selecionar visíveis ({visiblePendingIds.length})
+          </label>
+          {selected.size > 0 && (
+            <>
+              <Badge variant="outline">{selected.size} selecionada(s)</Badge>
+              <Button size="sm" variant="outline" onClick={handleAcceptSelected} disabled={busy}>
+                {selPending ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Check className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Aceitar selecionadas
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleRejectSelected} disabled={busy}>
+                <X className="mr-1.5 h-3.5 w-3.5" />
+                Rejeitar selecionadas
+              </Button>
+              <Button size="sm" variant="ghost" onClick={clearSelection} disabled={busy}>
+                Limpar
+              </Button>
+              {selMsg && <p className="ml-1 text-xs text-foreground/80">{selMsg}</p>}
+            </>
+          )}
         </div>
       )}
 
@@ -179,7 +287,13 @@ export function SuggestionsList({ suggestions, totalAvailable }: SuggestionsList
 
       <div className="space-y-2">
         {visible.map((s) => (
-          <SuggestionRow key={s.id} suggestion={s} />
+          <SuggestionRow
+            key={s.id}
+            suggestion={s}
+            selectable={s.status === "pending"}
+            selected={selected.has(s.id)}
+            onSelectChange={(checked) => toggleOne(s.id, checked)}
+          />
         ))}
       </div>
     </div>

@@ -9,6 +9,9 @@ export type SuggestionStatus =
   | "rejected"
   | "edited"
   | "reverted"
+  // Pendente antiga substituída por uma run de audit mais recente do mesmo
+  // (obra, atributo). Arquivada: não aparece em Pendentes nem no Histórico.
+  | "superseded"
 
 export interface AuditWorkInput {
   workId: string
