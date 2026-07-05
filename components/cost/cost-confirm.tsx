@@ -13,6 +13,7 @@ import {
   AlertDialogMedia,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
 import { CostSummary } from "./cost-summary"
 import type { CostStep } from "./cost-summary"
 import {
@@ -87,9 +88,21 @@ export interface CostConfirmRequest {
   cancelLabel?: string
   /** Passos de cascata a itemizar. */
   steps?: CostStep[]
+  /**
+   * Caminho ALTERNATIVO (ex.: uma versão mais barata da mesma ação). Vira um 2º
+   * botão no rodapé. Ao ser escolhido, o modal fecha, `onSelect` roda e a
+   * promise resolve `false` (o fluxo primário NÃO segue — quem trata o caminho
+   * barato é o `onSelect`). Mantém a decisão de custo 100% no modal central.
+   */
+  secondaryAction?: {
+    label: string
+    /** Custo do caminho alternativo — anexado ao rótulo quando presente. */
+    likelyUsd?: number
+    onSelect: () => void
+  }
 }
 
-type ConfirmFn = (req: CostConfirmRequest) => Promise<boolean>
+export type ConfirmFn = (req: CostConfirmRequest) => Promise<boolean>
 
 const CostConfirmContext = createContext<ConfirmFn | null>(null)
 
@@ -176,6 +189,17 @@ export function CostConfirmProvider({ children }: { children: React.ReactNode })
     [suppressChecked],
   )
 
+  // Caminho alternativo: resolve `false` (não segue o primário), fecha o modal e
+  // então dispara o `onSelect`. Resolver ANTES de fechar garante que o
+  // onOpenChange(false) subsequente vire no-op (resolverRef já nulo).
+  const settleSecondary = useCallback(() => {
+    const onSelect = resolverRef.current ? pending?.req.secondaryAction?.onSelect : undefined
+    resolverRef.current?.(false)
+    resolverRef.current = null
+    setPending(null)
+    onSelect?.()
+  }, [pending])
+
   const preview = pending?.preview ?? null
   const req = pending?.req ?? null
   const canSuppress =
@@ -219,14 +243,38 @@ export function CostConfirmProvider({ children }: { children: React.ReactNode })
               </label>
             )}
 
-            <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => settle(false)}>
-                {req.cancelLabel ?? "Cancelar"}
-              </AlertDialogCancel>
-              <AlertDialogAction onClick={() => settle(true)}>
-                {req.confirmLabel ?? "Confirmar"} · {formatUsd(preview.likelyUsd)}
-              </AlertDialogAction>
-            </AlertDialogFooter>
+            {req.secondaryAction ? (
+              // Decisão de 2 caminhos (ex.: cascata do "Prever"): pilha vertical
+              // — primário, alternativo (mais barato), cancelar. Botões simples
+              // (não Radix Action/Cancel) pra controlar o fechamento via settle*.
+              <div className="flex flex-col gap-2">
+                <Button onClick={() => settle(true)} className="w-full">
+                  {req.confirmLabel ?? "Confirmar"} · {formatUsd(preview.likelyUsd)}
+                </Button>
+                <Button variant="outline" onClick={() => settleSecondary()} className="w-full">
+                  {req.secondaryAction.label}
+                  {req.secondaryAction.likelyUsd != null
+                    ? ` · ${formatUsd(req.secondaryAction.likelyUsd)}`
+                    : ""}
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => settle(false)}
+                  className="w-full text-muted-foreground"
+                >
+                  {req.cancelLabel ?? "Cancelar"}
+                </Button>
+              </div>
+            ) : (
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => settle(false)}>
+                  {req.cancelLabel ?? "Cancelar"}
+                </AlertDialogCancel>
+                <AlertDialogAction onClick={() => settle(true)}>
+                  {req.confirmLabel ?? "Confirmar"} · {formatUsd(preview.likelyUsd)}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            )}
           </AlertDialogContent>
         )}
       </AlertDialog>
