@@ -154,7 +154,7 @@ export const getSettingsItemPending = cache(
           .catch(() => 0),
       ])
     return {
-      "ai-calibration": suggestions,
+      "ai-audit": suggestions,
       embeddings,
       "synopsis-canonical": canonicalSynopsis,
       "review-synthesis": reviewSummary,

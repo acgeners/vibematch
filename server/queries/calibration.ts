@@ -378,13 +378,25 @@ export interface SuggestionFilters {
   limit?: number
 }
 
+/** Colapsa o array `work_covers` na URL da capa primária (ou a de menor posição). */
+function pickPrimaryCoverUrl(
+  covers?: Array<{ url?: string | null; is_primary?: boolean | null; position?: number | null }> | null,
+): string | null {
+  if (!covers || covers.length === 0) return null
+  const withUrl = covers.filter((c) => !!c.url)
+  if (withUrl.length === 0) return null
+  const primary = withUrl.find((c) => c.is_primary)
+  if (primary) return primary.url ?? null
+  return [...withUrl].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0]?.url ?? null
+}
+
 export async function loadSuggestions(filters: SuggestionFilters = {}): Promise<SuggestionWithWork[]> {
   const supabase = createAdminClient()
   let query = supabase
     .from("score_calibration_suggestions")
     .select(`
       *,
-      works(title)
+      works(title, user_score, is_favorite, year, total_chapters, publication_status_id, work_covers(url, is_primary, position))
     `)
     .order("created_at", { ascending: false })
     .limit(filters.limit ?? 200)
@@ -408,7 +420,19 @@ export async function loadSuggestions(filters: SuggestionFilters = {}): Promise<
     return []
   }
 
-  const rows = (data ?? []) as unknown as Array<SuggestionRow & { works?: { title?: string | null } | null }>
+  const rows = (data ?? []) as unknown as Array<
+    SuggestionRow & {
+      works?: {
+        title?: string | null
+        user_score?: number | null
+        is_favorite?: boolean | null
+        year?: number | null
+        total_chapters?: number | null
+        publication_status_id?: number | null
+        work_covers?: Array<{ url?: string | null; is_primary?: boolean | null; position?: number | null }> | null
+      } | null
+    }
+  >
   const filtered = filters.minAbsDelta != null
     ? rows.filter((r) => Math.abs(Number(r.delta)) >= filters.minAbsDelta!)
     : rows
@@ -420,6 +444,12 @@ export async function loadSuggestions(filters: SuggestionFilters = {}): Promise<
     confidence: Number(row.confidence),
     applied_score: row.applied_score != null ? Number(row.applied_score) : null,
     work_title: row.works?.title ?? "(obra removida)",
+    work_cover_url: pickPrimaryCoverUrl(row.works?.work_covers),
+    work_user_score: row.works?.user_score != null ? Number(row.works.user_score) : null,
+    work_is_favorite: row.works?.is_favorite ?? false,
+    work_year: row.works?.year ?? null,
+    work_total_chapters: row.works?.total_chapters ?? null,
+    work_publication_status_id: row.works?.publication_status_id ?? null,
   }))
 }
 

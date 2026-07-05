@@ -10,7 +10,10 @@ import { SettingsCard } from "@/components/settings/settings-card"
 import { ConsoleSectionNote } from "@/components/console/console-section"
 import { ACCENT_STYLES } from "@/components/console/console-registry"
 import { CalibrationPanel } from "@/components/settings/calibration-panel"
-import { CalibrationCriteriaTool } from "@/components/settings/calibration/calibration-criteria-tool"
+import {
+  CalibrationAuditTool,
+  CalibrationBiasTool,
+} from "@/components/settings/calibration/calibration-criteria-tool"
 import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
@@ -39,7 +42,6 @@ import {
   getTagInferenceOnCreate,
   getInterestShadowOnCreate,
 } from "@/server/queries/current-user"
-import { countPendingSuggestions } from "@/server/queries/calibration"
 import {
   countMissingEmbeddings,
   countPendingCanonicalSynopses,
@@ -145,26 +147,37 @@ export default async function SettingsPage({
       </header>
 
       <div className="space-y-4">
-        {group.sections.map((section) => (
-          <SettingsCard
-            key={section.id}
-            section={section}
-            accent={accent}
-            collapsible={collapsible}
-            forceOpen={openId === section.id}
-            storageKeyPrefix="settings-card"
-            pending={itemPending[section.id] ?? 0}
-          >
-            <Suspense fallback={<BodySkeleton />}>
-              <ItemBody
-                section={section}
-                accent={accent}
-                open={openId === section.id}
-                tagParams={tagParams}
-              />
-            </Suspense>
-          </SettingsCard>
-        ))}
+        {group.sections.map((section) => {
+          const isOpen = openId === section.id
+          // Ferramentas pesadas de calibração: colapso ÚNICO pelo servidor — a
+          // seta do header abre/recolhe via `?open=` e o corpo só renderiza quando
+          // aberto (adia o load), sem o botão "Abrir auditoria" redundante.
+          const usesServerCollapse = section.id === "ai-audit" || section.id === "ai-bias"
+          const serverCollapse = usesServerCollapse
+            ? {
+                open: isOpen,
+                href: isOpen
+                  ? `/settings?g=${group.id}#card-${section.id}`
+                  : `/settings?g=${group.id}&open=${section.id}#card-${section.id}`,
+              }
+            : undefined
+          return (
+            <SettingsCard
+              key={section.id}
+              section={section}
+              accent={accent}
+              collapsible={serverCollapse ? false : collapsible}
+              forceOpen={isOpen}
+              serverCollapse={serverCollapse}
+              storageKeyPrefix="settings-card"
+              pending={itemPending[section.id] ?? 0}
+            >
+              <Suspense fallback={<BodySkeleton />}>
+                <ItemBody section={section} accent={accent} open={isOpen} tagParams={tagParams} />
+              </Suspense>
+            </SettingsCard>
+          )
+        })}
       </div>
 
       <ScrollToTop />
@@ -245,38 +258,13 @@ async function ItemBody({
       )
     }
 
-    case "ai-calibration": {
-      const pending = await countPendingSuggestions()
-      return (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-muted-foreground">
-              {pending > 0 ? (
-                <>
-                  <span className="font-semibold text-foreground">{pending}</span> sugestões pendentes
-                  de revisão.
-                </>
-              ) : (
-                "Sem sugestões pendentes no momento."
-              )}
-            </p>
-            <ExpandControl
-              groupId="notas"
-              sectionId="ai-calibration"
-              open={open}
-              openLabel="Abrir auditoria"
-            />
-          </div>
-          {open && (
-            <div className="border-t border-border/60 pt-4">
-              <Suspense fallback={<BodySkeleton />}>
-                <CalibrationCriteriaTool />
-              </Suspense>
-            </div>
-          )}
-        </div>
-      )
-    }
+    // Colapso pelo SettingsCard (serverCollapse): o corpo só chega aqui quando o
+    // card está aberto, então renderizamos a ferramenta direto — sem "Abrir".
+    case "ai-audit":
+      return <CalibrationAuditTool />
+
+    case "ai-bias":
+      return <CalibrationBiasTool />
 
     case "embeddings": {
       const supabase = createAdminClient()

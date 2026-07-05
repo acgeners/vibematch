@@ -1,4 +1,6 @@
 import type { ReactNode } from "react"
+import Link from "next/link"
+import { ChevronDown } from "lucide-react"
 import {
   ACCENT_STYLES,
   COST_TIER_STYLES,
@@ -24,6 +26,7 @@ export function SettingsCard({
   accent,
   collapsible = false,
   forceOpen = false,
+  serverCollapse,
   storageKeyPrefix = "settings-card",
   pending = 0,
   children,
@@ -33,6 +36,13 @@ export function SettingsCard({
   collapsible?: boolean
   /** Deep-link `?open=` — mantém este card aberto mesmo se estava recolhido. */
   forceOpen?: boolean
+  /**
+   * Colapso pelo SERVIDOR (`?open=`) para ferramentas pesadas: a seta do header
+   * vira um link que abre/recolhe e o corpo só é renderizado quando `open` — ou
+   * seja, um único controle que também adia o carregamento (sem o botão "Abrir"
+   * redundante). Tem precedência sobre `collapsible` (a setinha client).
+   */
+  serverCollapse?: { open: boolean; href: string }
   /** Prefixo da chave do localStorage — separa /settings de /preferencias. */
   storageKeyPrefix?: string
   /** Pendências deste item — mostra uma pílula no cabeçalho quando > 0. */
@@ -91,7 +101,25 @@ export function SettingsCard({
       className="relative scroll-mt-6 overflow-hidden rounded-2xl border border-border/70 bg-card/55 shadow-sm shadow-black/5"
     >
       <div aria-hidden className={cn("absolute inset-y-0 left-0 w-1", s.rail)} />
-      {collapsible ? (
+      {serverCollapse ? (
+        <div className="px-5 py-5 pl-6">
+          <div className="flex items-start gap-3.5">
+            {headerInner}
+            <Link
+              href={serverCollapse.href}
+              aria-expanded={serverCollapse.open}
+              scroll={false}
+              className="grid size-8 shrink-0 place-items-center rounded-lg border border-border/60 bg-card/60 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              <ChevronDown
+                className={cn("size-4 transition-transform", serverCollapse.open ? "" : "-rotate-90")}
+              />
+              <span className="sr-only">{serverCollapse.open ? "Recolher item" : "Expandir item"}</span>
+            </Link>
+          </div>
+          {serverCollapse.open && <div className="mt-4 border-t border-border/60 pt-4">{children}</div>}
+        </div>
+      ) : collapsible ? (
         <div className="px-5 py-5 pl-6">
           <CollapsibleCardInner
             storageKey={`${storageKeyPrefix}:${section.id}`}
