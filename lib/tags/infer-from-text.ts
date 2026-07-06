@@ -1,5 +1,6 @@
 import "server-only"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
+import { SONNET_MODEL } from "@/lib/ai/models"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>
@@ -202,7 +203,7 @@ export async function inferTagsFromText(opts: {
 
 // ---- Verificação (2º olhar, modelo mais forte e estrito) --------------------
 
-const VERIFY_MODEL = "claude-sonnet-4-6"
+const VERIFY_MODEL = SONNET_MODEL
 
 const VERIFY_TOOL = {
   name: "verify_tags",

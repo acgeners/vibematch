@@ -6,6 +6,7 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
+import { SONNET_MODEL } from "@/lib/ai/models"
 import { fetchCoverForModelWithStatus, isImageRelatedModelError } from "@/lib/server/covers/fetch-cover-for-model"
 import { recordCacheEventAsync } from "@/server/queries/ai-cache"
 import { buildCacheKey } from "@/lib/ai-cache"
@@ -111,7 +112,7 @@ export interface AiEvaluationResponse {
   fromCache?: "memory" | "db"
 }
 
-export const MODEL = "claude-sonnet-4-6"
+export const MODEL = SONNET_MODEL
 
 // ── Reversível (1 linha) ────────────────────────────────────────────────────
 // Output enxuto do Sonnet: justificativas curtas (≤2 frases) + remoção do campo

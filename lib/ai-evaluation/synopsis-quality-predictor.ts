@@ -9,8 +9,9 @@ import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
 import { BASE_INTEREST_PROMPT_VERSION } from "./compiled-preferences"
 import type { CompiledPreferences } from "./compiled-preferences"
+import { SONNET_MODEL } from "@/lib/ai/models"
 
-export const MODEL = "claude-sonnet-4-6"
+export const MODEL = SONNET_MODEL
 // v3 (Frente 3): contrato e1 — quando há digest de reviews, o system ganha o
 // adendo neutro e o user recebe o bloco CONTEXTO DE LEITORES. Sinopse segue
 // dominante. Bump invalida as previsões v2 (re-prevê com digest sob demanda).
@@ -241,7 +242,10 @@ export async function predictSynopsisQuality(
       client,
       {
         model: MODEL,
-        max_tokens: 400,
+        // 600 (era 400): o tokenizer do Sonnet 5 conta ~34% mais tokens, então o
+        // teto antigo arriscava truncar a saída estruturada. Só um teto — não
+        // custa nada a mais no 4.6 (paga-se pelo output real, não pelo cap).
+        max_tokens: 600,
         temperature: 0,
         system,
         tools: [SYNOPSIS_QUALITY_TOOL],

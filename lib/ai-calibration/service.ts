@@ -18,8 +18,9 @@ import type {
   BiasStatsByCriterion,
 } from "./types"
 import type { CriterionSlug } from "@/types/domain"
+import { SONNET_MODEL } from "@/lib/ai/models"
 
-export const MODEL = "claude-sonnet-4-6"
+export const MODEL = SONNET_MODEL
 export const PROMPT_VERSION = "v1"
 
 const CRITERION_SLUG_ENUM = [...CRITERION_SLUGS]

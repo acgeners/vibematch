@@ -17,9 +17,10 @@ import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import type { AiEvaluation } from "@/types/domain"
 import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
+import { SONNET_MODEL } from "@/lib/ai/models"
 
 const OPUS_MODEL_ID = "claude-opus-4-7"
-const SONNET_MODEL_ID = "claude-sonnet-4-6"
+const SONNET_MODEL_ID = SONNET_MODEL
 const HAIKU_MODEL_ID = "claude-haiku-4-5-20251001"
 
 type ReevalModel = "sonnet" | "opus" | "haiku"
