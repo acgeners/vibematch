@@ -5,6 +5,8 @@ import { buildResolveVariants, expandAlias } from "./mangago-variants"
 import type { MangagoResolveInput, ResolveVariants } from "./mangago-variants"
 import { decideMangagoResolveBand, readBandConfigFromEnv } from "./mangago-band"
 import type { MangagoBand, MangagoBandConfig } from "./mangago-band"
+import { buildMangagoResolveCacheKey } from "./mangago-cache"
+import type { MangagoResolveCache } from "./mangago-cache"
 
 export type { MangagoBand } from "./mangago-band"
 
@@ -84,6 +86,8 @@ export interface MangagoResolveEvent {
   elapsedMs: number
   yearConfirmation?: MangagoYearConfirmation
   errorKind?: string
+  /** hit = servido do cache · miss = consultou e não achou · skip = cache ausente/sem chave. */
+  cache?: "hit" | "miss" | "skip"
 }
 
 export interface ResolveMangagoOptions {
@@ -96,6 +100,8 @@ export interface ResolveMangagoOptions {
   confirmYear?: boolean
   /** E6 — busca o ano de um candidato (injetável; produção reusa o detalhe). fail-soft. */
   fetchYear?: (slug: string) => Promise<number | null>
+  /** E8 — cache LRU do resolvedor (DI explícito). Sem ele, comportamento = E7. */
+  cache?: MangagoResolveCache
   now?: () => number
   onResult?: (event: MangagoResolveEvent) => void
 }
@@ -117,16 +123,60 @@ function kindRank(kind: MangagoMatchKind | null): number {
   return 2
 }
 
+/** Reconstrói o evento a partir do valor cacheado (sem re-buscar). */
+function buildCacheHitEvent(cached: MangagoResolved | null): Omit<MangagoResolveEvent, "elapsedMs"> {
+  if (cached === null) {
+    // Negative hit: a distinção original reject/no_candidates NÃO é preservada
+    // (guardamos só o mínimo) — reportamos como "reject", o negativo canônico.
+    return { event: "result", result: "reject", band: "reject", queriesRun: 0, candidates: 0, cache: "hit" }
+  }
+  return {
+    event: "result",
+    result: cached.method === "year_confirmed" ? "year_confirmed" : cached.band,
+    band: cached.band,
+    method: cached.method,
+    slug: cached.slug,
+    url: cached.url,
+    topScore: cached.score,
+    margin: cached.margin,
+    matchedKind: cached.matchedKind,
+    matchedTarget: cached.matchedTarget,
+    matchedCandidateTitle: cached.matchedCandidateTitle,
+    queryUsed: cached.queryUsed,
+    queriesRun: 0,
+    candidates: 0,
+    cache: "hit",
+  }
+}
+
 export async function resolveMangagoUrl(
   input: MangagoResolveInput,
   opts: ResolveMangagoOptions
 ): Promise<MangagoResolved | null> {
   const now = opts.now ?? Date.now
   const started = now()
-  const emit = (e: Omit<MangagoResolveEvent, "elapsedMs">) =>
+  const emitRaw = (e: Omit<MangagoResolveEvent, "elapsedMs">) =>
     opts.onResult?.({ ...e, elapsedMs: now() - started })
 
+  // E8 — cache por identidade do input (não pelas variantes). `started` é o relógio
+  // do TTL (evita chamadas extras de now() → elapsedMs segue determinístico).
+  const cacheKey = buildMangagoResolveCacheKey(input)
+  const cacheEnabled = !!opts.cache && !!cacheKey
+  const cacheStatus: "hit" | "miss" | "skip" = cacheEnabled ? "miss" : "skip"
+  const putCache = (value: MangagoResolved | null) => {
+    if (opts.cache && cacheKey) opts.cache.set(cacheKey, value, started)
+  }
+  const emit = (e: Omit<MangagoResolveEvent, "elapsedMs" | "cache">) => emitRaw({ ...e, cache: cacheStatus })
+
   try {
+    if (opts.cache && cacheKey) {
+      const cached = opts.cache.get(cacheKey, started)
+      if (cached !== undefined) {
+        emitRaw(buildCacheHitEvent(cached))
+        return cached
+      }
+    }
+
     const build = opts.buildVariants ?? ((i: MangagoResolveInput) => buildResolveVariants(i))
     const variants = await build(input)
     const queriesRun = variants.queries.length
@@ -163,6 +213,7 @@ export async function resolveMangagoUrl(
     if (bySlug.size === 0) {
       // Distingue "todas as queries falharam" de "buscas OK mas sem resultado".
       const allFailed = queriesRun > 0 && searchErrors === queriesRun
+      if (!allFailed) putCache(null) // cacheia no_candidates; NÃO cacheia search_failed
       emit({
         event: "result",
         result: allFailed ? "search_failed" : "no_candidates",
@@ -194,6 +245,7 @@ export async function resolveMangagoUrl(
     let band: MangagoBand = decision.band
 
     if (band === "reject" || top.score.matchedKind === null) {
+      putCache(null)
       emit({
         event: "result",
         result: "reject",
@@ -256,6 +308,7 @@ export async function resolveMangagoUrl(
     const matchedKind = chosen.score.matchedKind
     if (matchedKind === null) {
       // Inalcançável (top guardado acima; promotable exige matchedKind != null), mas fecha o tipo.
+      putCache(null)
       emit({
         event: "result",
         result: "reject",
@@ -282,6 +335,7 @@ export async function resolveMangagoUrl(
       matchedCandidateTitle: chosen.score.matchedCandidateTitle ?? "",
       queryUsed: chosen.candidate.queryUsed,
     }
+    putCache(resolved)
     emit({
       event: "result",
       result: yearConfirmation.promoted ? "year_confirmed" : band,
