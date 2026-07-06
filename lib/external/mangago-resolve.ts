@@ -61,9 +61,16 @@ export interface ResolveMangagoOptions {
   buildVariants?: (input: MangagoResolveInput) => Promise<ResolveVariants>
   /** Config de banding; default = lida de env (MANGAGO_RESOLVE_*) no carregamento. */
   bandConfig?: MangagoBandConfig
+  /** E6 — liga a corroboração por ano para desempatar reviews com margem baixa. Default: desligado. */
+  confirmYear?: boolean
+  /** E6 — busca o ano de um candidato (injetável; produção reusa o detalhe). fail-soft. */
+  fetchYear?: (slug: string) => Promise<number | null>
   now?: () => number
   onResult?: (event: MangagoResolveEvent) => void
 }
+
+// E6 — tolerância na comparação de ano (variants.year vs ano do candidato).
+const YEAR_TOLERANCE = 1
 
 // Config de banding lida de env 1x (defaults = comportamento anterior). Injetável
 // por `opts.bandConfig` nos testes/callers.
@@ -134,11 +141,12 @@ export async function resolveMangagoUrl(
   const top = scored[0]
   const second = scored[1]
   const margin = top.score.score - (second?.score.score ?? 0)
-  const band: MangagoBand = decideMangagoResolveBand({
+  const bandCfg = opts.bandConfig ?? envBandConfig
+  let band: MangagoBand = decideMangagoResolveBand({
     score: top.score.score,
     margin,
     isReverseSubstringRisk: top.score.isReverseSubstringRisk,
-    config: opts.bandConfig ?? envBandConfig,
+    config: bandCfg,
   }).band
 
   if (band === "reject" || top.score.matchedKind === null) {
@@ -146,17 +154,65 @@ export async function resolveMangagoUrl(
     return null
   }
 
+  // E6 — Corroboração por ano: só na faixa REVIEW por margem baixa/empate, com a
+  // flag ligada, fetchYear disponível e variants.year presente. Consulta o ano de
+  // no MÁX 2 candidatos (top 1 + top 2) e promove a AUTO se EXATAMENTE UM tiver ano
+  // compatível (±1). fail-soft: qualquer falha mantém REVIEW.
+  let chosen = top
+  let method: string = top.score.reason
+  if (
+    band === "review" &&
+    opts.confirmYear === true &&
+    opts.fetchYear &&
+    variants.year != null &&
+    margin < bandCfg.autoMinMargin
+  ) {
+    const fetchYear = opts.fetchYear
+    const targetYear = variants.year
+    const consulted = [top, second].filter((c): c is typeof top => !!c) // no máx 2
+    const years = await Promise.all(
+      consulted.map(async (c) => {
+        try {
+          return await fetchYear(c.candidate.slug)
+        } catch {
+          return null
+        }
+      })
+    )
+    // Só candidatos que seriam AUTO se não fosse a margem, com ano compatível.
+    const promotable = consulted.filter(
+      (c, i) =>
+        c.score.matchedKind !== null &&
+        c.score.score >= bandCfg.autoMinScore &&
+        !c.score.isReverseSubstringRisk &&
+        years[i] != null &&
+        Math.abs(years[i]! - targetYear) <= YEAR_TOLERANCE
+    )
+    if (promotable.length === 1) {
+      chosen = promotable[0]
+      band = "auto"
+      method = "year_confirmed"
+    }
+  }
+
+  const matchedKind = chosen.score.matchedKind
+  if (matchedKind === null) {
+    // Inalcançável (top guardado acima; promotable exige matchedKind != null), mas fecha o tipo.
+    emit({ band: "reject", result: "no_match", slug: chosen.candidate.slug, score: chosen.score.score, margin, candidates: bySlug.size, reason: chosen.score.reason })
+    return null
+  }
+
   const resolved: MangagoResolved = {
-    slug: top.candidate.slug,
-    url: mangagoWorkUrl(top.candidate.slug),
-    score: top.score.score,
+    slug: chosen.candidate.slug,
+    url: mangagoWorkUrl(chosen.candidate.slug),
+    score: chosen.score.score,
     margin,
-    method: top.score.reason,
+    method,
     band,
-    matchedKind: top.score.matchedKind,
-    matchedTarget: top.score.matchedTarget ?? "",
-    matchedCandidateTitle: top.score.matchedCandidateTitle ?? "",
-    queryUsed: top.candidate.queryUsed,
+    matchedKind,
+    matchedTarget: chosen.score.matchedTarget ?? "",
+    matchedCandidateTitle: chosen.score.matchedCandidateTitle ?? "",
+    queryUsed: chosen.candidate.queryUsed,
   }
   emit({
     band,
@@ -165,7 +221,7 @@ export async function resolveMangagoUrl(
     score: resolved.score,
     margin,
     candidates: bySlug.size,
-    reason: top.score.reason,
+    reason: chosen.score.reason,
   })
   return resolved
 }
