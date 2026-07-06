@@ -25,7 +25,7 @@ const { createClient } = require("@supabase/supabase-js")
 const Anthropic = require("@anthropic-ai/sdk").default
 const { loggedCreate } = require("./lib/ai-log.js")
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://djbreiyzwoevbmoscqiq.supabase.co"
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://obwlwukwovetgjqdpizd.supabase.co"
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
 

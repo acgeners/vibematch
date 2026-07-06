@@ -3,6 +3,7 @@ import { searchAnimePlanet, fetchAnimePlanetByTitle, fetchAnimePlanetReviews, fe
 import type { AnimePlanetDetail } from "./animeplanet"
 import { searchComicK, fetchComicKByHid, fetchComicKReviews } from "./comick"
 import { searchComix, fetchComixById, fetchComixReviews } from "./comix"
+import { searchMangago, fetchMangagoById } from "./mangago"
 import { isBlockedCoverUrl } from "./blocked-covers"
 import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews, fetchJikanMangaRecommendations } from "./jikan"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
@@ -606,6 +607,7 @@ function mergeSearchResults(query: string, results: ExternalSearchResult[]): Mer
       comickHid: bySource.get("comick")?.id.split(":")[1],
       comixHid: bySource.get("comix")?.id.split(":")[1],
       animePlanetSlug: bySource.get("animeplanet")?.id.split(":")[1],
+      mangagoSlug: bySource.get("mangago")?.id.split(":")[1],
       matchScore,
       sources: [...new Set(results.map((result) => result.source))],
       sourceResults: results,
@@ -689,6 +691,7 @@ export const SEARCH_CONNECTORS = [
   },
   { source: "animeplanet", search: searchAnimePlanet },
   { source: "comix", search: searchComix },
+  { source: "mangago", search: searchMangago },
 ] satisfies SearchConnector[]
 
 export interface SearchAllSourcesResult {
@@ -756,6 +759,7 @@ const SUPPORTED_SOURCES: ReadonlySet<ExternalSourceId> = new Set([
   "comick",
   "comix",
   "animeplanet",
+  "mangago",
 ])
 
 export function buildCandidateFromExternalIds(
@@ -811,6 +815,9 @@ export function buildCandidateFromExternalIds(
         break
       case "animeplanet":
         candidate.animePlanetSlug = id
+        break
+      case "mangago":
+        candidate.mangagoSlug = id
         break
     }
   }
@@ -942,6 +949,9 @@ function fillCandidateIdFromResult(candidate: MergedCandidate, result: ExternalS
       break
     case "animeplanet":
       if (!candidate.animePlanetSlug && idPart) candidate.animePlanetSlug = idPart
+      break
+    case "mangago":
+      if (!candidate.mangagoSlug && idPart) candidate.mangagoSlug = idPart
       break
   }
 }
@@ -1132,7 +1142,8 @@ const REVIEW_SOURCE_PRIORITY: Record<ExternalSourceId, number> = {
   comick: 5,
   mangadex: 6,
   comix: 7,
-  outros: 8, // catch-all sem fetcher próprio → menor prioridade
+  mangago: 8, // metadados-only (sem reviews); prioridade baixa na ordenação
+  outros: 9, // catch-all sem fetcher próprio → menor prioridade
 }
 
 /**
@@ -1437,6 +1448,7 @@ function restrictCandidateToSources(candidate: MergedCandidate, sources: Readonl
     comickHid: sources.has("comick") ? candidate.comickHid : undefined,
     comixHid: sources.has("comix") ? candidate.comixHid : undefined,
     animePlanetSlug: sources.has("animeplanet") ? candidate.animePlanetSlug : undefined,
+    mangagoSlug: sources.has("mangago") ? candidate.mangagoSlug : undefined,
   }
 }
 
@@ -1559,6 +1571,7 @@ export async function fetchExternalEvaluationContextForCandidate(
     animePlanetSlug: candidate.animePlanetSlug ?? null,
     comickHid: candidate.comickHid ?? null,
     comixHid: candidate.comixHid ?? null,
+    mangagoSlug: candidate.mangagoSlug ?? null,
     rejectedSources: [...(opts.rejectedSources ?? [])].sort(),
     total: opts.total ?? 30,
     maxPerSource: opts.maxPerSource ?? 12,
@@ -1743,9 +1756,10 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
     candidate.comickHid ? withTimeout(fetchComicKByHid(candidate.comickHid), TIMEOUT_HYDRATE_MS, "hydrate:comick") : null,
     candidate.comixHid ? withTimeout(fetchComixById(candidate.comixHid), TIMEOUT_HYDRATE_MS, "hydrate:comix") : null,
     candidate.animePlanetSlug ? withTimeout(fetchAnimePlanetByTitle(candidate.title, candidate.animePlanetSlug), TIMEOUT_HYDRATE_MS, "hydrate:animeplanet") : null,
+    candidate.mangagoSlug ? withTimeout(fetchMangagoById(candidate.mangagoSlug), TIMEOUT_HYDRATE_MS, "hydrate:mangago") : null,
   ])
 
-  const HYDRATE_SOURCES = ["anilist", "mangaupdates", "kitsu", "myanimelist", "mangadex", "comick", "comix", "animeplanet"] as const
+  const HYDRATE_SOURCES = ["anilist", "mangaupdates", "kitsu", "myanimelist", "mangadex", "comick", "comix", "animeplanet", "mangago"] as const
   settled.forEach((entry, i) => {
     if (entry.status === "rejected") {
       console.error(
@@ -1755,7 +1769,7 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
     }
   })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [ani, mu, kitsu, mal, md, cmx, cmix, ap] = settled.map((entry) => entry.status === "fulfilled" ? entry.value : null) as Array<Record<string, any> | null>
+  const [ani, mu, kitsu, mal, md, cmx, cmix, ap, mg] = settled.map((entry) => entry.status === "fulfilled" ? entry.value : null) as Array<Record<string, any> | null>
   const hydrated: ExternalSearchResult[] = [...base]
   if (ani) hydrated.push({ id: `anilist:${candidate.anilistId}`, source: "anilist", title: ani.title, originalTitle: ani.originalTitle, alternativeTitles: ani.alternativeTitles, synopsis: ani.synopsis, coverUrl: ani.coverUrl, year: ani.year, yearEnd: ani.yearEnd, publicationStatus: ani.status, chapters: ani.chapters, score: ani.score, votes: ani.votes, genres: ani.genres })
   if (mu) hydrated.push({ id: `mu:${candidate.muId}`, source: "mangaupdates", title: mu.title, alternativeTitles: mu.alternativeTitles, synopsis: mu.synopsis, coverUrl: mu.coverUrl, year: mu.year, publicationStatus: mu.publicationStatus, chapters: mu.chapters, score: mu.rating, votes: mu.votes, genres: uniqueStrings([...(mu.genres ?? []), ...(mu.categories ?? [])]) })
@@ -1764,6 +1778,7 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
   if (md) hydrated.push({ id: `mangadex:${candidate.mangadexId}`, source: "mangadex", title: md.title, alternativeTitles: md.alternativeTitles, synopsis: md.synopsis, coverUrl: md.coverUrl, year: md.year, publicationStatus: md.publicationStatus, chapters: md.chapters, score: md.rating, votes: md.votes, genres: md.genres, contentRating: md.contentRating })
   if (cmx) hydrated.push({ id: `comick:${candidate.comickHid}`, source: "comick", title: cmx.title, alternativeTitles: cmx.alternativeTitles, synopsis: cmx.synopsis, coverUrl: cmx.coverUrl, publicationStatus: cmx.publicationStatus, chapters: cmx.lastChapter, score: cmx.rating, votes: cmx.votes, genres: cmx.tags, contentRating: cmx.contentRating })
   if (cmix) hydrated.push({ id: `comix:${candidate.comixHid}`, source: "comix", title: cmix.title, alternativeTitles: cmix.alternativeTitles, synopsis: cmix.synopsis, coverUrl: cmix.coverUrl, year: cmix.year, publicationStatus: cmix.publicationStatus, chapters: cmix.chapters, score: cmix.rating, votes: cmix.votes, genres: cmix.tags })
+  if (mg) hydrated.push({ id: `mangago:${candidate.mangagoSlug}`, source: "mangago", title: mg.title, alternativeTitles: mg.alternativeTitles, synopsis: mg.synopsis, coverUrl: mg.coverUrl, year: mg.year, publicationStatus: mg.publicationStatus, genres: mg.genres })
   const muStatusText = typeof mu?.statusText === "string" ? mu.statusText : undefined
   return { hydrated, apDetail: ap as AnimePlanetDetail | null, muStatusText }
 }
@@ -1785,7 +1800,8 @@ const METADATA_SOURCE_PRIORITY: Record<ExternalSourceId, number> = {
   animeplanet: 5,
   mangadex: 6,
   comix: 7,
-  outros: 8, // catch-all sem fetcher próprio → menor prioridade
+  mangago: 8,
+  outros: 9, // catch-all sem fetcher próprio → menor prioridade
 }
 
 function bySourcePriority<T extends { source: ExternalSourceId }>(items: T[]): T[] {
@@ -1925,6 +1941,7 @@ export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promi
     comick: candidate.comickHid,
     comix: candidate.comixHid,
     animeplanet: candidate.animePlanetSlug,
+    mangago: candidate.mangagoSlug,
   }
   const acceptedSources = new Set(uniqueAccepted.map((r) => r.source))
   const trustedSources = new Set(candidate.trustedSources ?? [])

@@ -40,6 +40,7 @@ const IMPLEMENTED_CONNECTOR_SLUGS = [
   "mangadex",
   "animeplanet",
   "comix",
+  "mangago",
 ]
 
 const CODE_ONLY_SOURCES = [
@@ -50,6 +51,7 @@ const CODE_ONLY_SOURCES = [
   { slug: "mangadex", name: "MangaDex" },
   { slug: "comick", name: "ComicK" },
   { slug: "animeplanet", name: "Anime Planet" },
+  { slug: "mangago", name: "Mangago" },
 ]
 
 function write(relPath, content) {

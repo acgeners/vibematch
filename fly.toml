@@ -1,11 +1,11 @@
 app = "satoria"
-primary_region = "iad"
+primary_region = "gru"
 
 [build]
   dockerfile = "Dockerfile"
   [build.args]
-    NEXT_PUBLIC_SUPABASE_URL = "https://djbreiyzwoevbmoscqiq.supabase.co"
-    NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_hhw8ddfqYWYFH6StEnJj_g_e_Ox4yVw"  # publishable/anon, ok no toml
+    NEXT_PUBLIC_SUPABASE_URL = "https://obwlwukwovetgjqdpizd.supabase.co"
+    NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_U7-TZWz9sq89uj8i3uYE0A_sDzi-c1s"  # publishable/anon, ok no toml
 
 [env]
   NODE_ENV = "production"

@@ -128,7 +128,7 @@ primary_region = "gru"
 [build]
   dockerfile = "Dockerfile"
   [build.args]
-    NEXT_PUBLIC_SUPABASE_URL = "https://djbreiyzwoevbmoscqiq.supabase.co"
+    NEXT_PUBLIC_SUPABASE_URL = "https://obwlwukwovetgjqdpizd.supabase.co"
     NEXT_PUBLIC_SUPABASE_ANON_KEY = "<anon-key>"   # público, ok no toml
 
 [env]
