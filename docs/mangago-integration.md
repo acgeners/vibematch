@@ -103,10 +103,14 @@ Wired em `collectReviewsFromCandidate` (timeout 35s, minLength 40).
 | **Prompt de avaliação** (`selectReviewsForEvaluation`/`AI_EVAL_REVIEW_CAPS`) | 30 / **12 por fonte** | seleção capada |
 | **Resumo** (`review_summary`/`consolidateReviewsDetailed`) | **40 total, SEM cap por fonte** (40 mais longas) | pool completo `work_reviews` |
 
-**Cap de fetch do mangago = 20:** cobre prompt(12)+digest(8) com folga e alimenta
-o **resumo** em títulos onde o mangago domina (nicho/BL). Buscar os 40 cheios
-seriam ~44 calls FlareSolverr (caro, rejeitado). Um título popular tem ~100
-páginas × 11 = ~1100 tópicos — buscar tudo é inútil (os consumidores descartam).
+**Cap de fetch do mangago = 40 (o TETO ÚTIL):** o maior consumidor é o **resumo**
+(40 total, sem cap/fonte), então 40 satura todos (prompt 12, digest 8, resumo 40)
+e deixa os seletores por comprimento escolherem as melhores. Buscar **>40 é
+desperdício** (nenhum consumidor usa mais) **e falharia**: cada corpo é 1 fetch
+FlareSolverr (~1s), então 100 reviews ≈ ~110 calls ≈ ~110s → estoura o timeout →
+0 reviews. 40 ≈ ~44 calls, ~35s quente / ~55s frio (timeout 60s). mangago vira o
+gargalo da fase de reviews. Um título popular tem ~100 páginas × 11 = ~1100
+tópicos — buscar tudo é inútil.
 
 ### Nota por review (sentiment diversity)
 

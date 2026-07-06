@@ -384,8 +384,8 @@ function isSiteBoilerplate(text: string): boolean {
 }
 
 // Páginas da lista de discussão a varrer (11 tópicos/página). Um título popular
-// tem dezenas de páginas; 3 páginas dão ~33 tópicos, suficiente pro cap de 20.
-const MANGAGO_REVIEW_LIST_PAGES = 3
+// tem dezenas de páginas; 5 páginas dão ~55 tópicos, suficiente pro cap de 40.
+const MANGAGO_REVIEW_LIST_PAGES = 5
 
 /** Extrai (id, título) dos tópicos de uma página de discussão, na ordem exibida. */
 function extractTopics(html: string, seen: Set<string>, out: Array<{ id: string; title: string }>, cap: number): number {
@@ -412,14 +412,15 @@ function extractTopics(html: string, seen: Set<string>, out: Array<{ id: string;
  *      (id + título; 11/página). Varre até juntar `limit` ids ou acabar.
  *   2. `/home/mangatopic/{id}/` → o texto completo do 1º post vem no
  *      `<meta name="description">` (não há corpo inline confiável na página).
- * Cap em `limit` tópicos (20): cobre o prompt de avaliação (12/fonte) e o digest
- * (8/fonte) com folga, e alimenta o "resumo" (review_summary: 40 no total, SEM
- * cap por fonte) em títulos onde o mangago é a fonte dominante de reviews — o
- * caso BL/nicho, o forte dele. Cada corpo é 1 fetch FlareSolverr, então não vale
- * buscar as centenas de páginas existentes. Fail-soft: [] em qualquer erro; para
- * no meio se o circuito do FlareSolverr abrir.
+ * Cap em `limit` tópicos (40): é o TETO ÚTIL — o maior consumidor de reviews é o
+ * "resumo" (review_summary: 40 no total, SEM cap por fonte), então buscar >40 de
+ * uma fonte é desperdício (o prompt usa 12/fonte, o digest 8/fonte). 40 satura
+ * todos e deixa os seletores (por comprimento) escolherem as melhores — máxima
+ * qualidade que o pipeline absorve. Cada corpo é 1 fetch FlareSolverr (~1s
+ * quente), então 40 ≈ ~45s; não vale ir além (só custo, zero sinal novo).
+ * Fail-soft: [] em qualquer erro; para no meio se o circuito do FlareSolverr abrir.
  */
-export async function fetchMangagoReviews(slug: string, limit = 20): Promise<string[]> {
+export async function fetchMangagoReviews(slug: string, limit = 40): Promise<string[]> {
   if (isFlareSolverrCircuitOpen()) return []
   try {
     // 1) Junta ids de tópico paginando a lista até ter `limit` (ou esgotar páginas).
