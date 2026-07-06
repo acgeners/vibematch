@@ -42,6 +42,7 @@ export type CostActionId =
   | "ai_evaluation"
   | "taste_profile"
   | "chat_message"
+  | "suggest_groups"
 
 interface CostSpec {
   /** Rótulo curto da ação (título default do popup). */
@@ -181,6 +182,16 @@ const CATALOG: Record<CostActionId, CostSpec> = {
     model: SONNET,
     base: tokens(5000, 800),
     etaSeconds: 12,
+    background: false,
+  },
+  suggest_groups: {
+    label: "Sugerir grupos com IA",
+    // Lê os favoritos (título+gêneros+tags) e propõe grupos coesos num único
+    // passo. Input escala com o nº de favoritos; ~2k in / ~1.5k out p/ dezenas
+    // de obras. Abaixo do limiar de supressão ($0,02).
+    model: HAIKU,
+    base: tokens(2000, 1500),
+    etaSeconds: 8,
     background: false,
   },
 }

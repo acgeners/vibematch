@@ -15,6 +15,7 @@ import { deleteWorkList } from "@/server/actions/lists"
 import type { FavoritesSummary } from "@/server/queries/favorites"
 import type { WorkListSummary, WorkLiteForPicker } from "@/server/queries/lists"
 import { GroupFormDialog, type GroupFormData } from "./group-form-dialog"
+import { SuggestGroupsDialog } from "./suggest-groups-dialog"
 
 interface GroupsIndexProps {
   lists: WorkListSummary[]
@@ -114,6 +115,7 @@ function CardFoot({ summary, commentCount }: { summary: FavoritesSummary; commen
 export function GroupsIndex({ lists, allSummary, catalog }: GroupsIndexProps) {
   const router = useRouter()
   const [createOpen, setCreateOpen] = useState(false)
+  const [suggestOpen, setSuggestOpen] = useState(false)
   const [editing, setEditing] = useState<WorkListSummary | null>(null)
   const [deleting, setDeleting] = useState<WorkListSummary | null>(null)
   const [, startDelete] = useTransition()
@@ -157,9 +159,14 @@ export function GroupsIndex({ lists, allSummary, catalog }: GroupsIndexProps) {
         <p className="text-sm text-muted-foreground">
           {lists.length} grupo{lists.length !== 1 ? "s" : ""} · organize seus favoritos em recortes.
         </p>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus /> Novo grupo
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setSuggestOpen(true)}>
+            <Sparkles /> Sugerir grupos com IA
+          </Button>
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus /> Novo grupo
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -251,6 +258,7 @@ export function GroupsIndex({ lists, allSummary, catalog }: GroupsIndexProps) {
       </div>
 
       <GroupFormDialog open={createOpen} onOpenChange={setCreateOpen} mode="create" />
+      <SuggestGroupsDialog open={suggestOpen} onOpenChange={setSuggestOpen} catalog={catalog} />
       <GroupFormDialog
         open={editing != null}
         onOpenChange={(o) => !o && setEditing(null)}
