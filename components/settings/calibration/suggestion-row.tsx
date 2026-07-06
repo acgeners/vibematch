@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import Link from "next/link"
 import { Check, Loader2, MoreHorizontal, Pencil, X, RotateCcw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -21,6 +20,7 @@ import {
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { cn, titleToSlug } from "@/lib/utils"
 import { useRefresh } from "@/lib/use-refresh"
+import { WorkTitleHover } from "./work-title-hover"
 import {
   acceptSuggestionAction,
   editSuggestionAction,
@@ -150,12 +150,16 @@ export function SuggestionRow({
           )}
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <Link
+              <WorkTitleHover
+                title={suggestion.work_title}
                 href={`/titles/${titleToSlug(suggestion.work_title)}`}
-                className="line-clamp-1 text-sm font-medium hover:underline"
-              >
-                {suggestion.work_title}
-              </Link>
+                coverUrl={suggestion.work_cover_url}
+                userScore={suggestion.work_user_score}
+                isFavorite={suggestion.work_is_favorite}
+                year={suggestion.work_year}
+                totalChapters={suggestion.work_total_chapters}
+                publicationStatusId={suggestion.work_publication_status_id}
+              />
               <Badge variant="outline" className={cn("text-[11px]", statusColor(suggestion.status))}>
                 {statusLabel(suggestion.status)}
               </Badge>

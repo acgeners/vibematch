@@ -116,4 +116,15 @@ export interface SuggestionRow {
 
 export interface SuggestionWithWork extends SuggestionRow {
   work_title: string
+  /**
+   * Metadados leves da obra pra tooltip no hover do título — join escalar em
+   * `loadSuggestions` (sem blobs de sinopse/scores, pra não inflar o payload).
+   */
+  /** URL da capa primária (colapsada no server a partir de `work_covers` — 1 string por linha, não o array). */
+  work_cover_url?: string | null
+  work_user_score?: number | null
+  work_is_favorite?: boolean
+  work_year?: number | null
+  work_total_chapters?: number | null
+  work_publication_status_id?: number | null
 }

@@ -1,10 +1,8 @@
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
-import { CalibrationTriggerCards } from "@/components/settings/calibration/calibration-trigger-cards"
+  AuditTriggerZone,
+  BiasTriggerZone,
+} from "@/components/settings/calibration/calibration-trigger-cards"
 import { SuggestionsList } from "@/components/settings/calibration/suggestions-list"
 import { BiasReportView } from "@/components/settings/calibration/bias-report-view"
 import { RunHistoryTable } from "@/components/settings/calibration/run-history-table"
@@ -20,6 +18,7 @@ import {
 } from "@/server/queries/calibration"
 import { getAttributeBiasOverview } from "@/server/queries/attribute-bias"
 import { createAdminClient } from "@/lib/supabase/admin"
+import type { ReactNode } from "react"
 
 async function countRatedWorks(): Promise<number> {
   const supabase = createAdminClient()
@@ -32,53 +31,57 @@ async function countRatedWorks(): Promise<number> {
   return count ?? 0
 }
 
+// Abas em estilo "linha" (sublinhado do item ativo) — legíveis como abas de
+// verdade, ao contrário do segmentado apagado anterior. A barra ganha um trilho
+// (`border-b`) e o item ativo, um sublinhado que encosta nele (`-mb-px`). O
+// `after:hidden` mata o sublinhado embutido do variant pra não duplicar.
+const TABS_LIST_CLASS =
+  "h-auto w-full justify-start gap-1 rounded-none border-b border-border bg-transparent p-0"
+const TAB_TRIGGER_CLASS =
+  "-mb-px flex-none rounded-none border-0 border-b-2 border-transparent px-3.5 pb-2.5 pt-1.5 text-sm font-medium after:hidden data-[state=active]:border-primary data-[state=active]:text-foreground"
+
+function TabCount({ children }: { children: ReactNode }) {
+  return (
+    <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground tabular-nums">
+      {children}
+    </span>
+  )
+}
+
 /**
- * Ferramenta de "Calibração de critérios IA" (auditoria por obra + viés global).
- * Extraída da página `/settings/calibration` pra ser reusada tanto lá quanto
- * inline (expandida) na pilha do tópico "Calibração das notas" em `/settings`.
- * As abas usam estado local (não URL), então rende inline sem conflito de params.
+ * Card "Auditoria de critérios IA" — o caminho que ESCREVE notas. A IA revê cada
+ * obra e sugere ajustes; aqui você revisa/aceita as sugestões. Carrega só o que a
+ * auditoria precisa (o card de viés carrega o resto).
  */
-export async function CalibrationCriteriaTool() {
-  const [
-    lastAudit,
-    lastBias,
-    ratedWorksCount,
-    pendingSuggestions,
-    historySuggestions,
-    pendingCount,
-    runHistory,
-    attributeBias,
-    predictionHealth,
-  ] = await Promise.all([
-    loadLastRun("audit"),
-    loadLastRun("bias"),
-    countRatedWorks(),
-    loadSuggestions({ status: "pending", limit: 1000 }),
-    loadSuggestions({
-      status: ["auto_applied", "accepted", "edited", "rejected", "reverted"],
-      limit: 300,
-    }),
-    countPendingSuggestions(),
-    loadRunHistory(20),
-    getAttributeBiasOverview(),
-    getPredictionHealth(),
-  ])
+export async function CalibrationAuditTool() {
+  const [lastAudit, ratedWorksCount, pendingSuggestions, historySuggestions, pendingCount, runHistory] =
+    await Promise.all([
+      loadLastRun("audit"),
+      countRatedWorks(),
+      loadSuggestions({ status: "pending", limit: 1000 }),
+      loadSuggestions({
+        status: ["auto_applied", "accepted", "edited", "rejected", "reverted"],
+        limit: 300,
+      }),
+      countPendingSuggestions(),
+      loadRunHistory(20),
+    ])
 
   return (
     <div className="space-y-4">
-      <CalibrationTriggerCards
-        lastAudit={lastAudit}
-        lastBias={lastBias}
-        ratedWorksCount={ratedWorksCount}
-      />
+      <AuditTriggerZone lastAudit={lastAudit} ratedWorksCount={ratedWorksCount} />
 
       <Tabs defaultValue="pending" className="w-full">
-        <TabsList>
-          <TabsTrigger value="pending">Pendentes ({pendingCount})</TabsTrigger>
-          <TabsTrigger value="history">Histórico de sugestões</TabsTrigger>
-          <TabsTrigger value="bias">Relatório de viés</TabsTrigger>
-          <TabsTrigger value="attribute-bias">Calibração de atributos</TabsTrigger>
-          <TabsTrigger value="runs">Runs</TabsTrigger>
+        <TabsList variant="line" className={TABS_LIST_CLASS}>
+          <TabsTrigger value="pending" className={TAB_TRIGGER_CLASS}>
+            Pendentes <TabCount>{pendingCount}</TabCount>
+          </TabsTrigger>
+          <TabsTrigger value="history" className={TAB_TRIGGER_CLASS}>
+            Histórico de sugestões
+          </TabsTrigger>
+          <TabsTrigger value="runs" className={TAB_TRIGGER_CLASS}>
+            Runs
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="pending" className="mt-4">
           <SuggestionsList suggestions={pendingSuggestions} totalAvailable={pendingCount} />
@@ -86,6 +89,40 @@ export async function CalibrationCriteriaTool() {
         <TabsContent value="history" className="mt-4">
           <SuggestionsList suggestions={historySuggestions} />
         </TabsContent>
+        <TabsContent value="runs" className="mt-4">
+          <RunHistoryTable runs={runHistory} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+/**
+ * Card "Viés & atributos" — só LEITURA. Relatórios agregados que revelam
+ * deslocamentos sistemáticos do catálogo e a saúde da Nota Prevista. Nenhum score
+ * é alterado aqui (a única ação de escrita é regenerar artefatos calibrados).
+ */
+export async function CalibrationBiasTool() {
+  const [lastBias, ratedWorksCount, attributeBias, predictionHealth] = await Promise.all([
+    loadLastRun("bias"),
+    countRatedWorks(),
+    getAttributeBiasOverview(),
+    getPredictionHealth(),
+  ])
+
+  return (
+    <div className="space-y-4">
+      <BiasTriggerZone lastBias={lastBias} ratedWorksCount={ratedWorksCount} />
+
+      <Tabs defaultValue="bias" className="w-full">
+        <TabsList variant="line" className={TABS_LIST_CLASS}>
+          <TabsTrigger value="bias" className={TAB_TRIGGER_CLASS}>
+            Relatório de viés
+          </TabsTrigger>
+          <TabsTrigger value="attribute-bias" className={TAB_TRIGGER_CLASS}>
+            Calibração de atributos
+          </TabsTrigger>
+        </TabsList>
         <TabsContent value="bias" className="mt-4">
           {lastBias?.bias_report ? (
             <BiasReportView
@@ -108,9 +145,6 @@ export async function CalibrationCriteriaTool() {
             <RegenerateCalibratedArtifactsButton />
           </div>
           <AttributeBiasTable overview={attributeBias} />
-        </TabsContent>
-        <TabsContent value="runs" className="mt-4">
-          <RunHistoryTable runs={runHistory} />
         </TabsContent>
       </Tabs>
     </div>
