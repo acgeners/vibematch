@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { runRecommendationAction } from "./recommendations"
+import { proposeFavoriteGroups as proposeFavoriteGroupsLLM } from "@/lib/lists/propose-groups"
+import type { FavoriteWork, ProposedGroup } from "@/lib/lists/propose-groups"
 import type { ListComment } from "@/server/queries/lists"
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -242,4 +244,78 @@ export async function recommendGroup(
 
   revalidateLists(listId)
   return { data: { slug: res.data.runSlug } }
+}
+
+// ── Curadoria por IA: propor grupos a partir dos favoritos (Haiku) ────────────
+// Fluxo de CRIAÇÃO: lê o balde plano de favoritos e devolve até N grupos coesos
+// (nome + descrição + obras). NÃO persiste — o usuário revisa e cria os que
+// quiser (via createWorkList + addWorksToList). Ver lib/lists/propose-groups.ts.
+
+/** Extrai nomes de uma relação aninhada `rel(name)` (Supabase devolve objeto,
+ *  array ou null conforme a cardinalidade). */
+function flattenNames(rel: unknown): string[] {
+  const list = Array.isArray(rel) ? rel : rel ? [rel] : []
+  return list
+    .map((r) => (r as { name?: unknown })?.name)
+    .filter((n): n is string => typeof n === "string" && n.trim().length > 0)
+}
+
+export async function proposeFavoriteGroups(
+  n: number,
+): Promise<ActionResult<{ groups: ProposedGroup[] }>> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("works")
+    .select("id, title, work_genres(genres(name)), work_tags(tags(name))")
+    .eq("is_favorite", true)
+    .eq("is_archived", false)
+    .order("title", { ascending: true })
+    .limit(200)
+  if (error) return { error: error.message }
+
+  const works: FavoriteWork[] = (data ?? []).map((w) => {
+    const row = w as { id: string; title?: string; work_genres?: Array<{ genres: unknown }>; work_tags?: Array<{ tags: unknown }> }
+    return {
+      id: row.id,
+      title: row.title ?? "(sem título)",
+      genres: Array.from(new Set((row.work_genres ?? []).flatMap((g) => flattenNames(g.genres)))).slice(0, 6),
+      tags: Array.from(new Set((row.work_tags ?? []).flatMap((t) => flattenNames(t.tags)))).slice(0, 10),
+    }
+  })
+
+  if (works.length < 2) {
+    return { error: "Você precisa de ao menos 2 favoritos pra IA sugerir grupos." }
+  }
+
+  try {
+    const groups = await proposeFavoriteGroupsLLM(works, n)
+    if (groups.length === 0) {
+      return { error: "A IA não encontrou grupos coesos nos favoritos. Tente com mais obras." }
+    }
+    return { data: { groups } }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Falha ao sugerir grupos." }
+  }
+}
+
+/** Cria um grupo a partir de uma proposta da IA (nome + descrição + obras). */
+export async function createGroupFromProposal(input: {
+  name: string
+  description?: string | null
+  color?: string | null
+  workIds: string[]
+}): Promise<ActionResult<{ id: string }>> {
+  const created = await createWorkList({
+    name: input.name,
+    description: input.description ?? null,
+    color: input.color ?? null,
+  })
+  if ("error" in created) return created
+
+  const ids = Array.from(new Set((input.workIds ?? []).filter(Boolean)))
+  if (ids.length > 0) {
+    const added = await addWorksToList(created.data.id, ids)
+    if ("error" in added) return { error: added.error }
+  }
+  return { data: { id: created.data.id } }
 }
