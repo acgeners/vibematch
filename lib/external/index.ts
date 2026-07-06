@@ -4,6 +4,7 @@ import type { AnimePlanetDetail } from "./animeplanet"
 import { searchComicK, fetchComicKByHid, fetchComicKReviews } from "./comick"
 import { searchComix, fetchComixById, fetchComixReviews } from "./comix"
 import { searchMangago, fetchMangagoById, fetchMangagoReviews } from "./mangago"
+import { extractInlineRating } from "./inline-rating"
 import { isBlockedCoverUrl } from "./blocked-covers"
 import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews, fetchJikanMangaRecommendations } from "./jikan"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
@@ -1155,19 +1156,23 @@ const REVIEW_SOURCE_PRIORITY: Record<ExternalSourceId, number> = {
 }
 
 /**
- * Extrai a nota numérica embutida pelos fetchers de MangaUpdates e MAL/Jikan,
- * que prefixam o texto com "Nota do usuário: X/10\n". Devolve o rating e o
- * texto sem esse prefixo (para não duplicar no prompt). Quando o prefixo não
- * existe, devolve `{ cleanText: text }` sem rating.
+ * Extrai a nota numérica de uma review em duas frentes, nesta ordem:
+ *   1. Prefixo "Nota do usuário: X/10\n" — injetado pelos fetchers de plataforma
+ *      (MangaUpdates, AniList, MAL/Jikan, ComicK, AnimePlanet). Autoritativo;
+ *      REMOVE o prefixo do texto (`cleanText`) pra não duplicar no prompt.
+ *   2. Nota embutida no corpo (`extractInlineRating`) — fallback pras fontes de
+ *      fórum sem nota de plataforma. NÃO altera o texto.
+ * Sem nota em nenhuma frente, devolve `{ cleanText: text }` sem rating.
  */
 export function extractUserRating(text: string): { rating?: number; cleanText: string } {
   const match = text.match(/^\s*Nota do usu[áa]rio:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*10)?\s*\n+/i)
-  if (!match) return { cleanText: text }
-  const raw = Number(match[1])
-  if (!Number.isFinite(raw) || raw < 0 || raw > 10) {
-    return { cleanText: text.slice(match[0].length) }
+  if (match) {
+    const cleanText = text.slice(match[0].length)
+    const raw = Number(match[1])
+    if (!Number.isFinite(raw) || raw < 0 || raw > 10) return { cleanText }
+    return { rating: raw, cleanText }
   }
-  return { rating: raw, cleanText: text.slice(match[0].length) }
+  return { rating: extractInlineRating(text), cleanText: text }
 }
 
 /**

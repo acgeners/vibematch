@@ -108,6 +108,19 @@ o **resumo** em títulos onde o mangago domina (nicho/BL). Buscar os 40 cheios
 seriam ~44 calls FlareSolverr (caro, rejeitado). Um título popular tem ~100
 páginas × 11 = ~1100 tópicos — buscar tudo é inútil (os consumidores descartam).
 
+### Nota por review (sentiment diversity)
+
+O prompt de avaliação diversifica reviews por **nota do usuário** (buckets
+alta ≥7 / baixa ≤4 / média / sem-nota). Fontes de plataforma (MU, AniList, MAL,
+ComicK, AnimePlanet) trazem essa nota; **o mangago (e outras fontes de fórum) não
+têm nota por review**. Pra recuperar isso, `extractInlineRating`
+([`lib/external/inline-rating.ts`](../lib/external/inline-rating.ts)) raspa a nota
+que o autor escreve no TEXTO ("I'd say 8/10", "80/100", "4/5", "8 out of 10"),
+normaliza pra 0-10 e é usada como fallback no `extractUserRating` (só quando não há
+o prefixo oficial "Nota do usuário:"). Anti-falso-positivo: rejeita datas
+("8/10/2024") e "X/10 chapters". `work_reviews.user_rating` persiste o resultado.
+Testes em [`tests/unit/inline-rating.test.ts`](../tests/unit/inline-rating.test.ts).
+
 ---
 
 ## 5. Correções de confiabilidade (achadas só no E2E concorrente)
