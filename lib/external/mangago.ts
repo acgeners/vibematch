@@ -383,37 +383,61 @@ function isSiteBoilerplate(text: string): boolean {
   return /free yaoi manga|read .{0,40}manga online|all manga.*copyright/i.test(text)
 }
 
+// Páginas da lista de discussão a varrer (11 tópicos/página). Um título popular
+// tem dezenas de páginas, mas o prompt da IA usa no máximo `maxPerSource` (12)
+// reviews por fonte — buscar mais só engorda o pool salvo e cada corpo custa 1
+// fetch FlareSolverr. Então varremos só o suficiente pra encher o teto.
+const MANGAGO_REVIEW_LIST_PAGES = 3
+
+/** Extrai (id, título) dos tópicos de uma página de discussão, na ordem exibida. */
+function extractTopics(html: string, seen: Set<string>, out: Array<{ id: string; title: string }>, cap: number): number {
+  const re = /\/home\/mangatopic\/(\d+)\/"[^>]*>([^<]{1,160})</gi
+  let m: RegExpExecArray | null
+  let added = 0
+  while ((m = re.exec(html)) !== null && out.length < cap) {
+    const id = m[1]
+    if (seen.has(id)) continue
+    const title = cleanHtml(m[2])
+    if (!title) continue
+    seen.add(id)
+    out.push({ id, title })
+    added++
+  }
+  return added
+}
+
 /**
  * Reviews do Mangago = posts de opinião dos usuários ("topics"), que na prática
  * funcionam como mini-reviews ("great beginning, bad ending", "the fight scenes
  * still get me hype"). Multi-hop pela sessão FlareSolverr quente:
- *   1. `/home/manga/discussion/{slug}/` → lista de tópicos (id + título)
+ *   1. `/home/manga/discussion/{slug}/?page=N` → lista paginada de tópicos
+ *      (id + título; 11/página). Varre até juntar `limit` ids ou acabar.
  *   2. `/home/mangatopic/{id}/` → o texto completo do 1º post vem no
  *      `<meta name="description">` (não há corpo inline confiável na página).
- * Cap em `limit` tópicos pra limitar latência/carga (cada fetch ~1s quente).
- * Ordem da lista = default do Mangago (última resposta primeiro). Fail-soft: []
- * em qualquer erro; para no meio se o circuito do FlareSolverr abrir.
+ * Cap em `limit` tópicos: alinhado ao teto do prompt (12/fonte) — cada corpo é
+ * 1 fetch, então não vale buscar as centenas de páginas existentes. Fail-soft:
+ * [] em qualquer erro; para no meio se o circuito do FlareSolverr abrir.
  */
-export async function fetchMangagoReviews(slug: string, limit = 8): Promise<string[]> {
+export async function fetchMangagoReviews(slug: string, limit = 12): Promise<string[]> {
   if (isFlareSolverrCircuitOpen()) return []
   try {
-    const list = await fetchHtmlWithCfFallback(`${BASE}/home/manga/discussion/${slug}/`, HEADERS, CF_ABORT_MS, FS_SESSION)
-    if (!list) return []
-
+    // 1) Junta ids de tópico paginando a lista até ter `limit` (ou esgotar páginas).
     const topics: Array<{ id: string; title: string }> = []
     const seen = new Set<string>()
-    const re = /\/home\/mangatopic\/(\d+)\/"[^>]*>([^<]{1,160})</gi
-    let m: RegExpExecArray | null
-    while ((m = re.exec(list.html)) !== null && topics.length < limit) {
-      const id = m[1]
-      if (seen.has(id)) continue
-      const title = cleanHtml(m[2])
-      if (!title) continue
-      seen.add(id)
-      topics.push({ id, title })
+    for (let page = 1; page <= MANGAGO_REVIEW_LIST_PAGES && topics.length < limit; page++) {
+      if (isFlareSolverrCircuitOpen()) break
+      const url =
+        page === 1
+          ? `${BASE}/home/manga/discussion/${slug}/`
+          : `${BASE}/home/manga/discussion/${slug}/?page=${page}&sort=date`
+      const list = await fetchHtmlWithCfFallback(url, HEADERS, CF_ABORT_MS, FS_SESSION)
+      if (!list) break
+      const added = extractTopics(list.html, seen, topics, limit)
+      if (added === 0) break // página sem tópicos novos → acabou
     }
     if (topics.length === 0) return []
 
+    // 2) Busca o corpo de cada tópico (parte cara: 1 fetch por review).
     const reviews: string[] = []
     for (const { id, title } of topics) {
       if (isFlareSolverrCircuitOpen()) break
