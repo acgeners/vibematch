@@ -98,6 +98,12 @@ export function resolveReadiness(s: WorkReadinessSnapshot): Record<DataKey, Data
       s.categoryScoresAiCount >= 9 ? "fresh" : s.categoryScoresAiCount > 0 ? "partial" : "absent",
     calculated_scores: fromPresentStale(s.scores),
     interest_prediction: fromPresentStale(s.interest),
+    // Data keys usados só pela cascata IMPERATIVA generate_all (não são input de
+    // nenhuma ação, então o planner nunca consome estes valores) — entradas de
+    // exaustividade. O gate real do hid do Comix é hasComixHid (generate-all.ts).
+    work_embedding: "absent",
+    alignment_score: "absent",
+    comix_hid: s.externalIdsAcceptedCount > 0 ? "fresh" : "absent",
   }
 }
 

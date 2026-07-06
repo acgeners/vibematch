@@ -1,0 +1,69 @@
+import "server-only"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { consolidateSynopsis, hashSynopsisInputs } from "@/lib/ai-recommendation/synopsis-consolidator"
+import { splitSynopsesFromText } from "@/lib/work-derived"
+import { markWorkSynopsisPredictionStale } from "@/server/queries/synopsis-quality"
+
+export type ConsolidateForWorkResult =
+  | { status: "done" }
+  | { status: "fresh" } // hash igual — fontes não mudaram, no-op
+  | { status: "no_synopsis" } // sem sinopse bruta pra consolidar
+  | { status: "failed"; error: string }
+
+/**
+ * Consolida a sinopse canônica de UMA obra (Haiku), de forma AGUARDÁVEL. É o
+ * núcleo extraído do corpo de `scheduleSynopsisConsolidation` (que fica só como
+ * wrapper `after()` fire-and-forget). Gate por `canonical_synopsis_inputs_hash`:
+ * no-op barato quando as fontes não mudaram.
+ *
+ * NÃO dispara a previsão de Interesse — o caller decide (a cascata roda o passo
+ * de Interesse explicitamente; o `scheduleSynopsisConsolidation` mantém o eager
+ * da 1ª previsão por fora). Marca a previsão como stale ao consolidar.
+ */
+export async function consolidateSynopsisForWork(
+  workId: string,
+): Promise<ConsolidateForWorkResult> {
+  try {
+    const supabase = createAdminClient()
+    const { data: existingWork } = await supabase
+      .from("works")
+      .select("canonical_synopsis_inputs_hash")
+      .eq("id", workId)
+      .maybeSingle()
+    const { data: synopsisRows } = await supabase
+      .from("work_synopses")
+      .select("text")
+      .eq("work_id", workId)
+
+    const rawBlocks = (synopsisRows ?? [])
+      .map((r) => (r.text as string | null) ?? "")
+      .filter((t) => t.trim().length > 0)
+    if (rawBlocks.length === 0) return { status: "no_synopsis" }
+
+    // Fontes reais costumam vir concatenadas com `---` (importer legado) — expande
+    // pra blocos antes de hashear (idêntico ao scheduleSynopsisConsolidation).
+    const expanded = rawBlocks.flatMap((t) => {
+      const blocks = splitSynopsesFromText(t)
+      return blocks.length > 0 ? blocks : [t]
+    })
+    const hash = hashSynopsisInputs(expanded)
+    if (existingWork?.canonical_synopsis_inputs_hash === hash) return { status: "fresh" }
+
+    const result = await consolidateSynopsis(expanded, { workId })
+    if (!result) return { status: "failed", error: "consolidateSynopsis retornou vazio" }
+
+    await supabase
+      .from("works")
+      .update({
+        canonical_synopsis: result.canonical,
+        canonical_synopsis_at: new Date().toISOString(),
+        canonical_synopsis_inputs_hash: hash,
+      })
+      .eq("id", workId)
+
+    await markWorkSynopsisPredictionStale(workId)
+    return { status: "done" }
+  } catch (err) {
+    return { status: "failed", error: err instanceof Error ? err.message : String(err) }
+  }
+}

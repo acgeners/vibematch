@@ -29,7 +29,7 @@ import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
-import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate } from "@/server/queries/current-user"
+import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate } from "@/server/queries/current-user"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
 import { titleToSlug } from "@/lib/utils"
@@ -44,53 +44,19 @@ type SupabaseAdminClient = ReturnType<typeof createAdminClient>
 function scheduleSynopsisConsolidation(workId: string) {
   after(async () => {
     try {
-      const { consolidateSynopsis, hashSynopsisInputs } = await import(
-        "@/lib/ai-recommendation/synopsis-consolidator"
+      // Consolidação canônica (Haiku) via o helper aguardável compartilhado — o
+      // mesmo usado pela cascata generate_all. Gate por hash lá dentro.
+      const { consolidateSynopsisForWork } = await import(
+        "@/lib/ai-recommendation/consolidate-for-work"
       )
-      const supabase = createAdminClient()
-      const { data: existingWork } = await supabase
-        .from("works")
-        .select("canonical_synopsis_inputs_hash")
-        .eq("id", workId)
-        .maybeSingle()
-      const { data: synopsisRows } = await supabase
-        .from("work_synopses")
-        .select("text")
-        .eq("work_id", workId)
-      const rawBlocks = (synopsisRows ?? [])
-        .map((r) => (r.text as string | null) ?? "")
-        .filter((t) => t.trim().length > 0)
-      if (rawBlocks.length === 0) return
-      // As "fontes" reais geralmente estão concatenadas com `---` por importer
-      // legado. Expande pra blocos individuais antes de hashear.
-      const { splitSynopsesFromText } = await import("@/lib/work-derived")
-      const expanded = rawBlocks.flatMap((t) => {
-        const blocks = splitSynopsesFromText(t)
-        return blocks.length > 0 ? blocks : [t]
-      })
-      const hash = hashSynopsisInputs(expanded)
-      if (existingWork?.canonical_synopsis_inputs_hash === hash) return
-      const result = await consolidateSynopsis(expanded, { workId })
-      if (!result) return
-      await supabase
-        .from("works")
-        .update({
-          canonical_synopsis: result.canonical,
-          canonical_synopsis_at: new Date().toISOString(),
-          canonical_synopsis_inputs_hash: hash,
-        })
-        .eq("id", workId)
+      const result = await consolidateSynopsisForWork(workId)
+      if (result.status !== "done") return
 
-      // A sinopse canônica mudou ⇒ qualquer previsão de Interesse Sinopse ficou
-      // desatualizada. DEFERIR (2a): só marcamos `stale` — a recomputação LLM fica
-      // sob gatilho (botão "Prever interesse" / backfill), NÃO eager por-edição.
-      // Assim editar N obras não dispara N previsões; a UI mostra o último valor com
-      // selo "desatualizado" até você acionar. Exceção: 1ª vez (obra sem nenhuma
-      // previsão) ainda prevê eager, pra a obra nova nascer com ♥.
-      const { markWorkSynopsisPredictionStale } = await import(
-        "@/server/queries/synopsis-quality"
-      )
-      await markWorkSynopsisPredictionStale(workId)
+      // DEFERIR (2a): o helper já marcou a previsão como stale. A recomputação LLM
+      // fica sob gatilho (botão "Prever interesse" / backfill / cascata), NÃO eager
+      // por-edição. Exceção: 1ª vez (obra sem nenhuma previsão) ainda prevê eager,
+      // pra a obra nova nascer com ♥.
+      const supabase = createAdminClient()
       const { count: predCount } = await supabase
         .from("synopsis_quality_predictions")
         .select("id", { count: "exact", head: true })
@@ -1081,6 +1047,12 @@ export async function createWork(
     if (added > 0) await markRecalcPending("ai_inferred_tags_on_create")
   }
 
+  // Cascata "gerar todos os dados" (toggle /settings, default off). Quando ligada,
+  // a cascata (server/actions/generate-all.ts) faz a aquisição de reviews + tags +
+  // resto em ordem — então pulamos aqui o fluxo leve de reviews/tags pra não
+  // duplicar. Fica só o saveWorkReviews do Path B (persiste as reviews do eval).
+  const generateAll = !skipAi && (await getGenerateAllOnCreate())
+
   if (externalReviews && externalReviews.length > 0) {
     // A avaliação (Path B) já buscou as reviews pra montar o prompt — reusa o
     // pool em vez de re-buscar na borda. Tag-inference roda depois (usa o que
@@ -1089,8 +1061,8 @@ export async function createWork(
     // fromFreshEval: a obra acabou de ser avaliada com estas reviews ⇒ não marca
     // a avaliação como desatualizada (só atualiza o fingerprint do pool).
     await saveWorkReviews(result.workId, externalReviews, { fromFreshEval: true, skipPaidEnrichment: skipAi })
-    after(() => inferTagsForNewWork(result.workId))
-  } else {
+    if (!generateAll) after(() => inferTagsForNewWork(result.workId))
+  } else if (!generateAll) {
     // Criada SEM avaliar: extrai + persiste reviews na borda, desacoplado da
     // avaliação, em background (`after()`). A obra passa a exibir reviews na
     // própria página sem esperar uma avaliação. No-op se não há IDs aceitos.
@@ -1105,11 +1077,17 @@ export async function createWork(
   // Resolve o hid da Comix na criação: a Comix não entra na busca multi-fonte
   // (precisa de browser real pro token), então a obra nasce sem hid e o app
   // nunca pegaria reviews de lá. Dispara a resolução escopada em background;
-  // achado o hid, as reviews da Comix passam a fluir na próxima aquisição. O
-  // script pula a obra se ela já tiver hid.
+  // achado o hid, as reviews da Comix passam a fluir na próxima aquisição. Quando
+  // a cascata está ligada, roda o resolve ANTES dela (na MESMA task) pra o hid já
+  // estar presente no gate de fontes; a cascata termina em needs_authorization
+  // (banner acionável na página da obra).
   after(async () => {
     const { resolveComixHidForWork } = await import("@/server/actions/comix-resolver")
     await resolveComixHidForWork(result.workId)
+    if (generateAll) {
+      const { generateAllWorkData } = await import("@/server/actions/generate-all")
+      await generateAllWorkData(result.workId)
+    }
   })
 
   const slug = titleToSlug(values.title)
