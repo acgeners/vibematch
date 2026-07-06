@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
-import { BarChart3, Ban, ChevronDown, Heart, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
+import { BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-watcher"
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
@@ -33,6 +33,8 @@ import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
 import { ScoreBadge, getCriterionColorClass, getScoreTextColor } from "@/components/ui/score-badge"
+import { ForceMeters } from "@/components/ranking/force-meters"
+import { computeWorkForces } from "@/lib/calculations/forces"
 import {
   PublicationStatusBadge,
   PersonalStatusBadge,
@@ -912,6 +914,27 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         externalEditorEnabled={externalEditorEnabled}
         externalReviews={externalManualReviews}
       />
+      {/* Bússola de leitura — 3 forças de decisão (ver PLANO-BUSSOLA-3-FORCAS.md) */}
+      <Card className="max-w-3xl">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <Compass className="h-4.5 w-4.5 text-muted-foreground" />
+            <CardTitle className="text-base font-bold text-foreground">Bússola de leitura</CardTitle>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Três forças pra decidir: o quanto você tende a gostar, quão bem avaliada é, e quão popular.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <ForceMeters
+            forces={computeWorkForces({
+              chanceScore: work.calculated_scores?.chance_score ?? null,
+              platformAvg: work.calculated_scores?.platform_avg ?? null,
+              totalVotes: work.calculated_scores?.total_votes ?? null,
+            })}
+          />
+        </CardContent>
+      </Card>
       {/* Notas e Avaliações Externas side-by-side */}
       <div className={cn(platformRatings.length > 0 && "grid grid-cols-1 lg:grid-cols-2 gap-5")}>
         {/* Notas */}
