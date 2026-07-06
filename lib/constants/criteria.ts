@@ -196,5 +196,6 @@ export const PLATFORM_LABELS: Record<string, string> = {
   "mangadex": "MangaDex",
   "kitsu": "Kitsu",
   "anilist": "AniList",
+  "mangago": "Mangago",
   "outros": "Outros",
 }

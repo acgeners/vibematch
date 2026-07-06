@@ -3,7 +3,7 @@ import type { ExternalSearchResult } from "./types"
 import { fetchHtmlWithCfFallback, isFlareSolverrCircuitOpen } from "./flaresolverr"
 
 // ============================================================================
-// Mangago (www.mangago.me) — fonte de METADADOS (escopo v1: sem rating/reviews)
+// Mangago (www.mangago.me) — fonte externa: metadados + rating + reviews
 // ============================================================================
 // Mangago NÃO tem API JSON e fica atrás de um Cloudflare *challenge*
 // (headers reais: `cf-mitigated: challenge`, `server: cloudflare`). Um fetch
@@ -62,6 +62,10 @@ export interface MangagoDetail {
   year?: number
   publicationStatus?: PublicationStatus
   genres?: string[]
+  /** Nota 0-10 do widget `rating_num` (Mangago já usa escala 0-10). */
+  rating?: number
+  /** Nº de votos ("#### voted" ao lado do rating). */
+  votes?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +93,10 @@ function cleanHtml(text: string | undefined): string | undefined {
 function decodeAttr(text: string | undefined): string | undefined {
   if (!text) return undefined
   return text
+    // O meta description dos tópicos vem com aspas escapadas ao estilo JS
+    // (\" e \&quot;). Desfaz o backslash antes de decodificar as entidades.
+    .replace(/\\(&[a-zA-Z]+;|&#\d+;)/g, "$1")
+    .replace(/\\(["'\\/])/g, "$1")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
@@ -135,13 +143,18 @@ function extractYear(text: string | undefined): number | undefined {
 /** Lê `content` de uma meta tag por property/name, tolerante à ordem dos atributos. */
 function metaContent(html: string, key: string): string | undefined {
   const k = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  // content pode ter aspas escapadas (\") no meta description dos tópicos → captura
+  // tolerante a escape (\x), senão [^"] cortaria a review na 1ª aspa embutida.
+  const dq = String.raw`"((?:[^"\\]|\\.)*)"`
+  const sq = String.raw`'((?:[^'\\]|\\.)*)'`
   const patterns = [
-    new RegExp(`<meta[^>]+(?:property|name)=["']${k}["'][^>]*\\scontent=["']([^"']*)["']`, "i"),
-    new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*(?:property|name)=["']${k}["']`, "i"),
+    new RegExp(`<meta[^>]+(?:property|name)=["']${k}["'][^>]*\\scontent=(?:${dq}|${sq})`, "i"),
+    new RegExp(`<meta[^>]+content=(?:${dq}|${sq})[^>]*(?:property|name)=["']${k}["']`, "i"),
   ]
   for (const re of patterns) {
     const m = html.match(re)
-    if (m?.[1]) return m[1]
+    const val = m?.[1] ?? m?.[2]
+    if (val) return val
   }
   return undefined
 }
@@ -290,6 +303,21 @@ function extractAlternativeTitles(html: string): string[] {
     .slice(0, 12)
 }
 
+/**
+ * Rating do Mangago: `<span class="rating_num">9.8</span>` (escala 0-10, já
+ * compatível com as outras fontes) + o link "#### voted" com o nº de votos.
+ */
+function extractRating(html: string): { rating?: number; votes?: number } {
+  const ratingRaw = html.match(/class=["'][^"']*rating_num[^"']*["'][^>]*>\s*(?:&nbsp;)?\s*([\d.]+)/i)?.[1]
+  const rating = ratingRaw != null ? Number(ratingRaw) : undefined
+  const votesRaw = html.match(/([\d,]+)\s*voted/i)?.[1]
+  const votes = votesRaw ? Number(votesRaw.replace(/,/g, "")) : undefined
+  return {
+    rating: rating != null && Number.isFinite(rating) && rating > 0 ? rating : undefined,
+    votes: votes != null && Number.isFinite(votes) ? votes : undefined,
+  }
+}
+
 export function parseMangagoDetailHtml(html: string): MangagoDetail | null {
   const rawTitle =
     metaContent(html, "og:title") ??
@@ -318,9 +346,10 @@ export function parseMangagoDetailHtml(html: string): MangagoDetail | null {
   const alternativeTitles = extractAlternativeTitles(html)
   const publicationStatus = extractStatus(html)
   const year = extractYear(labeledValue(html, "(?:released|year|release date)"))
+  const { rating, votes } = extractRating(html)
 
   // Só devolve quando há algum sinal aproveitável além do título.
-  if (!synopsis && !coverUrl && genres.length === 0) {
+  if (!synopsis && !coverUrl && genres.length === 0 && rating == null) {
     return { title }
   }
 
@@ -332,6 +361,8 @@ export function parseMangagoDetailHtml(html: string): MangagoDetail | null {
     alternativeTitles: alternativeTitles.length > 0 ? alternativeTitles : undefined,
     publicationStatus,
     year,
+    rating,
+    votes,
   }
 }
 
@@ -344,5 +375,85 @@ export async function fetchMangagoById(slug: string): Promise<MangagoDetail | nu
     return parseMangagoDetailHtml(result.html)
   } catch {
     return null
+  }
+}
+
+// Descrição genérica do rodapé do site (aparece no meta de tópicos vazios) — não é opinião.
+function isSiteBoilerplate(text: string): boolean {
+  return /free yaoi manga|read .{0,40}manga online|all manga.*copyright/i.test(text)
+}
+
+// Páginas da lista de discussão a varrer (11 tópicos/página). Um título popular
+// tem dezenas de páginas; 5 páginas dão ~55 tópicos, suficiente pro cap de 40.
+const MANGAGO_REVIEW_LIST_PAGES = 5
+
+/** Extrai (id, título) dos tópicos de uma página de discussão, na ordem exibida. */
+function extractTopics(html: string, seen: Set<string>, out: Array<{ id: string; title: string }>, cap: number): number {
+  const re = /\/home\/mangatopic\/(\d+)\/"[^>]*>([^<]{1,160})</gi
+  let m: RegExpExecArray | null
+  let added = 0
+  while ((m = re.exec(html)) !== null && out.length < cap) {
+    const id = m[1]
+    if (seen.has(id)) continue
+    const title = cleanHtml(m[2])
+    if (!title) continue
+    seen.add(id)
+    out.push({ id, title })
+    added++
+  }
+  return added
+}
+
+/**
+ * Reviews do Mangago = posts de opinião dos usuários ("topics"), que na prática
+ * funcionam como mini-reviews ("great beginning, bad ending", "the fight scenes
+ * still get me hype"). Multi-hop pela sessão FlareSolverr quente:
+ *   1. `/home/manga/discussion/{slug}/?page=N` → lista paginada de tópicos
+ *      (id + título; 11/página). Varre até juntar `limit` ids ou acabar.
+ *   2. `/home/mangatopic/{id}/` → o texto completo do 1º post vem no
+ *      `<meta name="description">` (não há corpo inline confiável na página).
+ * Cap em `limit` tópicos (40): é o TETO ÚTIL — o maior consumidor de reviews é o
+ * "resumo" (review_summary: 40 no total, SEM cap por fonte), então buscar >40 de
+ * uma fonte é desperdício (o prompt usa 12/fonte, o digest 8/fonte). 40 satura
+ * todos e deixa os seletores (por comprimento) escolherem as melhores — máxima
+ * qualidade que o pipeline absorve. Cada corpo é 1 fetch FlareSolverr (~1s
+ * quente), então 40 ≈ ~45s; não vale ir além (só custo, zero sinal novo).
+ * Fail-soft: [] em qualquer erro; para no meio se o circuito do FlareSolverr abrir.
+ */
+export async function fetchMangagoReviews(slug: string, limit = 40): Promise<string[]> {
+  if (isFlareSolverrCircuitOpen()) return []
+  try {
+    // 1) Junta ids de tópico paginando a lista até ter `limit` (ou esgotar páginas).
+    const topics: Array<{ id: string; title: string }> = []
+    const seen = new Set<string>()
+    for (let page = 1; page <= MANGAGO_REVIEW_LIST_PAGES && topics.length < limit; page++) {
+      if (isFlareSolverrCircuitOpen()) break
+      const url =
+        page === 1
+          ? `${BASE}/home/manga/discussion/${slug}/`
+          : `${BASE}/home/manga/discussion/${slug}/?page=${page}&sort=date`
+      const list = await fetchHtmlWithCfFallback(url, HEADERS, CF_ABORT_MS, FS_SESSION)
+      if (!list) break
+      const added = extractTopics(list.html, seen, topics, limit)
+      if (added === 0) break // página sem tópicos novos → acabou
+    }
+    if (topics.length === 0) return []
+
+    // 2) Busca o corpo de cada tópico (parte cara: 1 fetch por review).
+    const reviews: string[] = []
+    for (const { id, title } of topics) {
+      if (isFlareSolverrCircuitOpen()) break
+      const topic = await fetchHtmlWithCfFallback(`${BASE}/home/mangatopic/${id}/`, HEADERS, CF_ABORT_MS, FS_SESSION)
+      if (!topic) continue
+      const body = cleanHtml(decodeAttr(metaContent(topic.html, "description")))
+      // Corpo do post é a opinião plena; cai pro título quando o tópico não tem corpo.
+      const text = body && !isSiteBoilerplate(body) ? body : title
+      if (!text || text.length < 8) continue
+      if (/^\s*https?:\/\/\S+\s*$/i.test(text)) continue // link solto, não é opinião
+      reviews.push(text.length > 900 ? `${text.slice(0, 900)}…` : text)
+    }
+    return reviews
+  } catch {
+    return []
   }
 }

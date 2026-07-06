@@ -17,6 +17,14 @@ const FLARESOLVERR_TIMEOUT_MS = 5000
 // timeout em CADA chamada (enriquecimento em lote chama comix dezenas de vezes).
 // Reabre sozinho depois do TTL (se o container voltar, volta a usar).
 const CIRCUIT_TTL_MS = 60_000
+// O circuito só abre num ERRO DE CONEXÃO (container caído → ECONNREFUSED, que é
+// imediato). Um TIMEOUT do nosso abort NÃO abre: quase sempre é só um solve de
+// Cloudflare em andamento (container vivo, porém lento) e, num fluxo com várias
+// fontes de scraping em paralelo (+ re-consultas por título alternativo),
+// timeouts legítimos são comuns — abrir 60s por causa de um solve lento
+// bloqueava rating+reviews do mangago/comix na MESMA avaliação. Só o caso raro
+// de container "pendurado" (aceita conexão e nunca responde) fica sem o atalho;
+// cada call ali paga o próprio abortMs (limitado + raro).
 let circuitOpenUntil = 0
 
 /** True when FlareSolverr is configured (env var present). */
@@ -151,6 +159,14 @@ export async function flareSolverrFetch(
     circuitOpenUntil = 0 // sucesso → fecha o circuito
     return { html, finalUrl }
   } catch (err) {
+    // Timeout do NOSSO abort (AbortSignal.timeout) = container vivo mas lento
+    // (solve de CF em andamento), não caído → NÃO abre o circuito, só este call
+    // falha; as outras fontes/sessões seguem tentando.
+    const isTimeout =
+      err instanceof Error &&
+      (err.name === "TimeoutError" || err.name === "AbortError" || /aborted due to timeout/i.test(err.message))
+    if (isTimeout) return null
+    // Erro de conexão (ECONNREFUSED etc.) = container caído → abre o circuito na hora.
     logFlareSolverrFailure(`falha de rede (${err instanceof Error ? err.message : err}) — container provavelmente não está rodando`)
     circuitOpenUntil = Date.now() + CIRCUIT_TTL_MS
     return null

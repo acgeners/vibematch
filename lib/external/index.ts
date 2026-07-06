@@ -3,7 +3,8 @@ import { searchAnimePlanet, fetchAnimePlanetByTitle, fetchAnimePlanetReviews, fe
 import type { AnimePlanetDetail } from "./animeplanet"
 import { searchComicK, fetchComicKByHid, fetchComicKReviews } from "./comick"
 import { searchComix, fetchComixById, fetchComixReviews } from "./comix"
-import { searchMangago, fetchMangagoById } from "./mangago"
+import { searchMangago, fetchMangagoById, fetchMangagoReviews } from "./mangago"
+import { extractInlineRating } from "./inline-rating"
 import { isBlockedCoverUrl } from "./blocked-covers"
 import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews, fetchJikanMangaRecommendations } from "./jikan"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
@@ -45,6 +46,15 @@ const TIMEOUT_REVIEWS_COMICK_MS = 18000
 // fria), ~2-4s quando já quente de uma call anterior. 25s dá folga sobre o solve frio
 // (era 15s, que estourava porque cada call solava ~11s isolada).
 const TIMEOUT_REVIEWS_COMIX_MS = 25000
+// Mangago faz multi-hop pela sessão FlareSolverr (lista paginada + até 40
+// tópicos, 1 fetch cada); com solve frio na 1ª call, ~40 corpos cabem em ~60s.
+// mangago vira o gargalo da fase de reviews (roda em paralelo com as outras).
+const TIMEOUT_REVIEWS_MANGAGO_MS = 60000
+// O hydrate do mangago é um scrape via FlareSolverr (não uma API), e a MESMA
+// página de detalhe traz rating + sinopse + gêneros. Com o default de 8s um
+// solve frio de CF (~11s) estourava e a obra perdia TODO o metadado do mangago
+// (sobrava só título/capa da busca). 15s cobre o solve frio com folga.
+const TIMEOUT_HYDRATE_MANGAGO_MS = 15000
 const TIMEOUT_SIMILAR_MS = 8000
 
 // ============================================================================
@@ -1147,19 +1157,23 @@ const REVIEW_SOURCE_PRIORITY: Record<ExternalSourceId, number> = {
 }
 
 /**
- * Extrai a nota numérica embutida pelos fetchers de MangaUpdates e MAL/Jikan,
- * que prefixam o texto com "Nota do usuário: X/10\n". Devolve o rating e o
- * texto sem esse prefixo (para não duplicar no prompt). Quando o prefixo não
- * existe, devolve `{ cleanText: text }` sem rating.
+ * Extrai a nota numérica de uma review em duas frentes, nesta ordem:
+ *   1. Prefixo "Nota do usuário: X/10\n" — injetado pelos fetchers de plataforma
+ *      (MangaUpdates, AniList, MAL/Jikan, ComicK, AnimePlanet). Autoritativo;
+ *      REMOVE o prefixo do texto (`cleanText`) pra não duplicar no prompt.
+ *   2. Nota embutida no corpo (`extractInlineRating`) — fallback pras fontes de
+ *      fórum sem nota de plataforma. NÃO altera o texto.
+ * Sem nota em nenhuma frente, devolve `{ cleanText: text }` sem rating.
  */
 export function extractUserRating(text: string): { rating?: number; cleanText: string } {
   const match = text.match(/^\s*Nota do usu[áa]rio:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*10)?\s*\n+/i)
-  if (!match) return { cleanText: text }
-  const raw = Number(match[1])
-  if (!Number.isFinite(raw) || raw < 0 || raw > 10) {
-    return { cleanText: text.slice(match[0].length) }
+  if (match) {
+    const cleanText = text.slice(match[0].length)
+    const raw = Number(match[1])
+    if (!Number.isFinite(raw) || raw < 0 || raw > 10) return { cleanText }
+    return { rating: raw, cleanText }
   }
-  return { rating: raw, cleanText: text.slice(match[0].length) }
+  return { rating: extractInlineRating(text), cleanText: text }
 }
 
 /**
@@ -1194,13 +1208,16 @@ async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<
     candidate.comixHid
       ? withTimeout(fetchComixReviews(candidate.comixHid).then((reviews) => ({ source: "comix" as const, reviews })), TIMEOUT_REVIEWS_COMIX_MS, "reviews:comix")
       : Promise.resolve(null),
+    candidate.mangagoSlug
+      ? withTimeout(fetchMangagoReviews(candidate.mangagoSlug).then((reviews) => ({ source: "mangago" as const, reviews })), TIMEOUT_REVIEWS_MANGAGO_MS, "reviews:mangago")
+      : Promise.resolve(null),
   ]
 
   const settled = await Promise.allSettled(fetchers)
 
   // DEBUG: contar reviews raw por fonte antes de filtrar
   const rawCounts = settled.map((entry, i) => {
-    const src = ["mangaupdates", "anilist", "myanimelist", "kitsu", "animeplanet", "mangadex", "comick", "comix"][i]
+    const src = ["mangaupdates", "anilist", "myanimelist", "kitsu", "animeplanet", "mangadex", "comick", "comix", "mangago"][i]
     if (entry.status === "rejected") return `${src}=REJECTED(${entry.reason})`
     if (!entry.value) return `${src}=skipped(no_id)`
     const reviews = entry.value.reviews
@@ -1225,6 +1242,9 @@ async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<
     // comix são comentários de nível-obra (mini-reviews); 80 corta one-liners
     // de baixo sinal ("totally recomended") mas mantém opiniões concisas.
     comix: 80,
+    // mangago são posts de opinião (topics); 40 mantém takes concisos
+    // ("great beginning, bad ending") mas corta títulos-só de 1 palavra.
+    mangago: 40,
   }
   return settled
     .flatMap((entry) => (entry.status === "fulfilled" && entry.value ? [entry.value] : []))
@@ -1534,7 +1554,13 @@ async function hydrateAndFilterCandidate(candidate: MergedCandidate): Promise<{
   for (const result of hydrated) {
     const { titleScore, synScore, composite, reason } = compositeAcceptScore(candidate, result)
     const passes = titleScore >= 0.72 && synScore >= 0.18 && composite >= 0.62
-    const acceptedBySource = passes || trustedSet.has(result.source)
+    // Scraping do mangago: a sinopse tem fraseado próprio e diverge (synScore
+    // baixo) mesmo sendo a MESMA obra (título casa exato + as reviews, buscadas
+    // pelo slug, confirmam). Sem isso, o detalhe enriquecido (rating/sinopse/
+    // gêneros) é barrado por "sinopse divergente" e sobra só o resultado de busca
+    // pobre (sem rating). Restrito a título quase-exato pra não afrouxar o filtro.
+    const titleExactScrape = result.source === "mangago" && titleScore >= 0.9
+    const acceptedBySource = passes || titleExactScrape || trustedSet.has(result.source)
     console.info(
       `[hydrateAccept] candidate="${candidate.title}" source=${result.source} title=${titleScore.toFixed(2)} syn=${synScore.toFixed(2)} composite=${composite.toFixed(2)} trusted=${trustedSet.has(result.source)} accept=${acceptedBySource}${reason ? ` reason="${reason}"` : ""}`
     )
@@ -1756,7 +1782,7 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
     candidate.comickHid ? withTimeout(fetchComicKByHid(candidate.comickHid), TIMEOUT_HYDRATE_MS, "hydrate:comick") : null,
     candidate.comixHid ? withTimeout(fetchComixById(candidate.comixHid), TIMEOUT_HYDRATE_MS, "hydrate:comix") : null,
     candidate.animePlanetSlug ? withTimeout(fetchAnimePlanetByTitle(candidate.title, candidate.animePlanetSlug), TIMEOUT_HYDRATE_MS, "hydrate:animeplanet") : null,
-    candidate.mangagoSlug ? withTimeout(fetchMangagoById(candidate.mangagoSlug), TIMEOUT_HYDRATE_MS, "hydrate:mangago") : null,
+    candidate.mangagoSlug ? withTimeout(fetchMangagoById(candidate.mangagoSlug), TIMEOUT_HYDRATE_MANGAGO_MS, "hydrate:mangago") : null,
   ])
 
   const HYDRATE_SOURCES = ["anilist", "mangaupdates", "kitsu", "myanimelist", "mangadex", "comick", "comix", "animeplanet", "mangago"] as const
@@ -1778,7 +1804,7 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
   if (md) hydrated.push({ id: `mangadex:${candidate.mangadexId}`, source: "mangadex", title: md.title, alternativeTitles: md.alternativeTitles, synopsis: md.synopsis, coverUrl: md.coverUrl, year: md.year, publicationStatus: md.publicationStatus, chapters: md.chapters, score: md.rating, votes: md.votes, genres: md.genres, contentRating: md.contentRating })
   if (cmx) hydrated.push({ id: `comick:${candidate.comickHid}`, source: "comick", title: cmx.title, alternativeTitles: cmx.alternativeTitles, synopsis: cmx.synopsis, coverUrl: cmx.coverUrl, publicationStatus: cmx.publicationStatus, chapters: cmx.lastChapter, score: cmx.rating, votes: cmx.votes, genres: cmx.tags, contentRating: cmx.contentRating })
   if (cmix) hydrated.push({ id: `comix:${candidate.comixHid}`, source: "comix", title: cmix.title, alternativeTitles: cmix.alternativeTitles, synopsis: cmix.synopsis, coverUrl: cmix.coverUrl, year: cmix.year, publicationStatus: cmix.publicationStatus, chapters: cmix.chapters, score: cmix.rating, votes: cmix.votes, genres: cmix.tags })
-  if (mg) hydrated.push({ id: `mangago:${candidate.mangagoSlug}`, source: "mangago", title: mg.title, alternativeTitles: mg.alternativeTitles, synopsis: mg.synopsis, coverUrl: mg.coverUrl, year: mg.year, publicationStatus: mg.publicationStatus, genres: mg.genres })
+  if (mg) hydrated.push({ id: `mangago:${candidate.mangagoSlug}`, source: "mangago", title: mg.title, alternativeTitles: mg.alternativeTitles, synopsis: mg.synopsis, coverUrl: mg.coverUrl, year: mg.year, publicationStatus: mg.publicationStatus, genres: mg.genres, score: mg.rating, votes: mg.votes })
   const muStatusText = typeof mu?.statusText === "string" ? mu.statusText : undefined
   return { hydrated, apDetail: ap as AnimePlanetDetail | null, muStatusText }
 }
