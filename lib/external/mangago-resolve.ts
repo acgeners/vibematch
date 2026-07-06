@@ -5,7 +5,6 @@ import { buildResolveVariants, expandAlias } from "./mangago-variants"
 import type { MangagoResolveInput, ResolveVariants } from "./mangago-variants"
 import { decideMangagoResolveBand, readBandConfigFromEnv } from "./mangago-band"
 import type { MangagoBand, MangagoBandConfig } from "./mangago-band"
-import type { TitleSimReason } from "./title-match"
 
 export type { MangagoBand } from "./mangago-band"
 
@@ -44,15 +43,47 @@ export interface MangagoResolved {
   queryUsed?: string
 }
 
+export type MangagoResolveResult =
+  | "auto"
+  | "review"
+  | "reject"
+  | "no_variants"
+  | "no_candidates"
+  | "search_failed"
+  | "year_confirmed"
+  | "error"
+
+export interface MangagoYearConfirmation {
+  attempted: boolean
+  promoted: boolean
+  candidatesChecked: number
+}
+
+/**
+ * E7 — Evento estruturado de observabilidade. EXATAMENTE 1 por chamada de
+ * `resolveMangagoUrl`, em todos os caminhos de saída. Pronto para métricas
+ * futuras sem infra nova (sem Prometheus/logger global/agregador).
+ */
 export interface MangagoResolveEvent {
-  band: MangagoBand
-  result: "resolved" | "review" | "no_match" | "no_variants"
-  slug: string | null
-  score: number
-  margin: number
+  event: "result" | "skipped"
+  result: MangagoResolveResult
+  band?: MangagoBand
+  /** Motivo do banding (`decideMangagoResolveBand`): "auto" | "below_accept" | "margin_below_auto+…". */
+  bandReason?: string
+  method?: string
+  slug?: string
+  url?: string
+  topScore?: number
+  margin?: number
+  matchedKind?: MangagoMatchKind
+  matchedTarget?: string
+  matchedCandidateTitle?: string
+  queryUsed?: string
+  queriesRun: number
   candidates: number
   elapsedMs: number
-  reason: TitleSimReason | null
+  yearConfirmation?: MangagoYearConfirmation
+  errorKind?: string
 }
 
 export interface ResolveMangagoOptions {
@@ -92,136 +123,193 @@ export async function resolveMangagoUrl(
 ): Promise<MangagoResolved | null> {
   const now = opts.now ?? Date.now
   const started = now()
-  const build = opts.buildVariants ?? ((i: MangagoResolveInput) => buildResolveVariants(i))
   const emit = (e: Omit<MangagoResolveEvent, "elapsedMs">) =>
     opts.onResult?.({ ...e, elapsedMs: now() - started })
 
-  const variants = await build(input)
-  if (variants.queries.length === 0 || variants.targets.length === 0) {
-    emit({ band: "reject", result: "no_variants", slug: null, score: 0, margin: 0, candidates: 0, reason: null })
-    return null
-  }
+  try {
+    const build = opts.buildVariants ?? ((i: MangagoResolveInput) => buildResolveVariants(i))
+    const variants = await build(input)
+    const queriesRun = variants.queries.length
 
-  // 1 fetch por query; falha de uma query NÃO derruba as outras. Dedupe por slug,
-  // unindo otherTitles entre queries. Guarda a 1ª query que trouxe cada slug.
-  const bySlug = new Map<string, MangagoSearchCandidate & { queryUsed: string }>()
-  for (const query of variants.queries) {
-    let results: MangagoSearchCandidate[] = []
-    try {
-      results = await opts.search(query)
-    } catch {
-      results = []
+    if (queriesRun === 0 || variants.targets.length === 0) {
+      emit({ event: "skipped", result: "no_variants", queriesRun: 0, candidates: 0 })
+      return null
     }
-    for (const raw of results ?? []) {
-      const slug = extractMangagoSlug(raw.slug)
-      if (!slug || !raw.title) continue
-      const existing = bySlug.get(slug)
-      if (!existing) {
-        bySlug.set(slug, { slug, title: raw.title, otherTitles: raw.otherTitles ?? [], queryUsed: query })
-      } else {
-        existing.otherTitles = Array.from(new Set([...(existing.otherTitles ?? []), ...(raw.otherTitles ?? [])]))
+
+    // 1 fetch por query; falha de uma query NÃO derruba as outras. Dedupe por slug,
+    // unindo otherTitles entre queries. Guarda a 1ª query que trouxe cada slug.
+    const bySlug = new Map<string, MangagoSearchCandidate & { queryUsed: string }>()
+    let searchErrors = 0
+    for (const query of variants.queries) {
+      let results: MangagoSearchCandidate[] = []
+      try {
+        results = await opts.search(query)
+      } catch {
+        searchErrors++
+        results = []
+      }
+      for (const raw of results ?? []) {
+        const slug = extractMangagoSlug(raw.slug)
+        if (!slug || !raw.title) continue
+        const existing = bySlug.get(slug)
+        if (!existing) {
+          bySlug.set(slug, { slug, title: raw.title, otherTitles: raw.otherTitles ?? [], queryUsed: query })
+        } else {
+          existing.otherTitles = Array.from(new Set([...(existing.otherTitles ?? []), ...(raw.otherTitles ?? [])]))
+        }
       }
     }
-  }
 
-  if (bySlug.size === 0) {
-    emit({ band: "reject", result: "no_match", slug: null, score: 0, margin: 0, candidates: 0, reason: null })
-    return null
-  }
-
-  // Pontua cada candidato (argmax global). Expande otherTitles por subtítulo/alias
-  // para não sub-pontuar obras com subtítulo grudado ("~Tensai-tachi~").
-  const scored = [...bySlug.values()].map((c) => {
-    const otherTitles = Array.from(new Set((c.otherTitles ?? []).flatMap(expandAlias)))
-    const s = scoreMangagoCandidate(variants.targets, { title: c.title, otherTitles })
-    return { candidate: c, score: s }
-  })
-  scored.sort((a, b) => b.score.score - a.score.score || kindRank(a.score.matchedKind) - kindRank(b.score.matchedKind))
-
-  const top = scored[0]
-  const second = scored[1]
-  const margin = top.score.score - (second?.score.score ?? 0)
-  const bandCfg = opts.bandConfig ?? envBandConfig
-  let band: MangagoBand = decideMangagoResolveBand({
-    score: top.score.score,
-    margin,
-    isReverseSubstringRisk: top.score.isReverseSubstringRisk,
-    config: bandCfg,
-  }).band
-
-  if (band === "reject" || top.score.matchedKind === null) {
-    emit({ band: "reject", result: "no_match", slug: top.candidate.slug, score: top.score.score, margin, candidates: bySlug.size, reason: top.score.reason })
-    return null
-  }
-
-  // E6 — Corroboração por ano: só na faixa REVIEW por margem baixa/empate, com a
-  // flag ligada, fetchYear disponível e variants.year presente. Consulta o ano de
-  // no MÁX 2 candidatos (top 1 + top 2) e promove a AUTO se EXATAMENTE UM tiver ano
-  // compatível (±1). fail-soft: qualquer falha mantém REVIEW.
-  let chosen = top
-  let method: string = top.score.reason
-  if (
-    band === "review" &&
-    opts.confirmYear === true &&
-    opts.fetchYear &&
-    variants.year != null &&
-    margin < bandCfg.autoMinMargin
-  ) {
-    const fetchYear = opts.fetchYear
-    const targetYear = variants.year
-    const consulted = [top, second].filter((c): c is typeof top => !!c) // no máx 2
-    const years = await Promise.all(
-      consulted.map(async (c) => {
-        try {
-          return await fetchYear(c.candidate.slug)
-        } catch {
-          return null
-        }
+    if (bySlug.size === 0) {
+      // Distingue "todas as queries falharam" de "buscas OK mas sem resultado".
+      const allFailed = queriesRun > 0 && searchErrors === queriesRun
+      emit({
+        event: "result",
+        result: allFailed ? "search_failed" : "no_candidates",
+        queriesRun,
+        candidates: 0,
       })
-    )
-    // Só candidatos que seriam AUTO se não fosse a margem, com ano compatível.
-    const promotable = consulted.filter(
-      (c, i) =>
-        c.score.matchedKind !== null &&
-        c.score.score >= bandCfg.autoMinScore &&
-        !c.score.isReverseSubstringRisk &&
-        years[i] != null &&
-        Math.abs(years[i]! - targetYear) <= YEAR_TOLERANCE
-    )
-    if (promotable.length === 1) {
-      chosen = promotable[0]
-      band = "auto"
-      method = "year_confirmed"
+      return null
     }
-  }
 
-  const matchedKind = chosen.score.matchedKind
-  if (matchedKind === null) {
-    // Inalcançável (top guardado acima; promotable exige matchedKind != null), mas fecha o tipo.
-    emit({ band: "reject", result: "no_match", slug: chosen.candidate.slug, score: chosen.score.score, margin, candidates: bySlug.size, reason: chosen.score.reason })
+    // Pontua cada candidato (argmax global). Expande otherTitles por subtítulo/alias
+    // para não sub-pontuar obras com subtítulo grudado ("~Tensai-tachi~").
+    const scored = [...bySlug.values()].map((c) => {
+      const otherTitles = Array.from(new Set((c.otherTitles ?? []).flatMap(expandAlias)))
+      const s = scoreMangagoCandidate(variants.targets, { title: c.title, otherTitles })
+      return { candidate: c, score: s }
+    })
+    scored.sort((a, b) => b.score.score - a.score.score || kindRank(a.score.matchedKind) - kindRank(b.score.matchedKind))
+
+    const top = scored[0]
+    const second = scored[1]
+    const margin = top.score.score - (second?.score.score ?? 0)
+    const bandCfg = opts.bandConfig ?? envBandConfig
+    const decision = decideMangagoResolveBand({
+      score: top.score.score,
+      margin,
+      isReverseSubstringRisk: top.score.isReverseSubstringRisk,
+      config: bandCfg,
+    })
+    let band: MangagoBand = decision.band
+
+    if (band === "reject" || top.score.matchedKind === null) {
+      emit({
+        event: "result",
+        result: "reject",
+        band: "reject",
+        bandReason: decision.reason,
+        slug: top.candidate.slug,
+        topScore: top.score.score,
+        margin,
+        queriesRun,
+        candidates: bySlug.size,
+      })
+      return null
+    }
+
+    // E6 — Corroboração por ano: só na faixa REVIEW por margem baixa/empate, com a
+    // flag ligada, fetchYear disponível e variants.year presente. Consulta o ano de
+    // no MÁX 2 candidatos (top 1 + top 2) e promove a AUTO se EXATAMENTE UM tiver ano
+    // compatível (±1). fail-soft: qualquer falha mantém REVIEW.
+    let chosen = top
+    let method: string = top.score.reason
+    const yearConfirmation: MangagoYearConfirmation = { attempted: false, promoted: false, candidatesChecked: 0 }
+    if (
+      band === "review" &&
+      opts.confirmYear === true &&
+      opts.fetchYear &&
+      variants.year != null &&
+      margin < bandCfg.autoMinMargin
+    ) {
+      const fetchYear = opts.fetchYear
+      const targetYear = variants.year
+      const consulted = [top, second].filter((c): c is typeof top => !!c) // no máx 2
+      const years = await Promise.all(
+        consulted.map(async (c) => {
+          try {
+            return await fetchYear(c.candidate.slug)
+          } catch {
+            return null
+          }
+        })
+      )
+      yearConfirmation.attempted = true
+      yearConfirmation.candidatesChecked = consulted.length
+      // Só candidatos que seriam AUTO se não fosse a margem, com ano compatível.
+      const promotable = consulted.filter(
+        (c, i) =>
+          c.score.matchedKind !== null &&
+          c.score.score >= bandCfg.autoMinScore &&
+          !c.score.isReverseSubstringRisk &&
+          years[i] != null &&
+          Math.abs(years[i]! - targetYear) <= YEAR_TOLERANCE
+      )
+      if (promotable.length === 1) {
+        chosen = promotable[0]
+        band = "auto"
+        method = "year_confirmed"
+        yearConfirmation.promoted = true
+      }
+    }
+
+    const matchedKind = chosen.score.matchedKind
+    if (matchedKind === null) {
+      // Inalcançável (top guardado acima; promotable exige matchedKind != null), mas fecha o tipo.
+      emit({
+        event: "result",
+        result: "reject",
+        band: "reject",
+        bandReason: "below_accept",
+        slug: chosen.candidate.slug,
+        topScore: chosen.score.score,
+        margin,
+        queriesRun,
+        candidates: bySlug.size,
+      })
+      return null
+    }
+
+    const resolved: MangagoResolved = {
+      slug: chosen.candidate.slug,
+      url: mangagoWorkUrl(chosen.candidate.slug),
+      score: chosen.score.score,
+      margin,
+      method,
+      band,
+      matchedKind,
+      matchedTarget: chosen.score.matchedTarget ?? "",
+      matchedCandidateTitle: chosen.score.matchedCandidateTitle ?? "",
+      queryUsed: chosen.candidate.queryUsed,
+    }
+    emit({
+      event: "result",
+      result: yearConfirmation.promoted ? "year_confirmed" : band,
+      band,
+      bandReason: decision.reason,
+      method,
+      slug: resolved.slug,
+      url: resolved.url,
+      topScore: resolved.score,
+      margin,
+      matchedKind,
+      matchedTarget: resolved.matchedTarget,
+      matchedCandidateTitle: resolved.matchedCandidateTitle,
+      queryUsed: resolved.queryUsed,
+      queriesRun,
+      candidates: bySlug.size,
+      yearConfirmation,
+    })
+    return resolved
+  } catch (err) {
+    // Fail-soft total: erro inesperado (ex.: buildVariants lançou) não propaga.
+    emit({
+      event: "result",
+      result: "error",
+      queriesRun: 0,
+      candidates: 0,
+      errorKind: err instanceof Error ? err.name : "unknown",
+    })
     return null
   }
-
-  const resolved: MangagoResolved = {
-    slug: chosen.candidate.slug,
-    url: mangagoWorkUrl(chosen.candidate.slug),
-    score: chosen.score.score,
-    margin,
-    method,
-    band,
-    matchedKind,
-    matchedTarget: chosen.score.matchedTarget ?? "",
-    matchedCandidateTitle: chosen.score.matchedCandidateTitle ?? "",
-    queryUsed: chosen.candidate.queryUsed,
-  }
-  emit({
-    band,
-    result: band === "auto" ? "resolved" : "review",
-    slug: resolved.slug,
-    score: resolved.score,
-    margin,
-    candidates: bySlug.size,
-    reason: chosen.score.reason,
-  })
-  return resolved
 }

@@ -171,7 +171,7 @@ describe("resolveMangagoUrl — robustez", () => {
       })
     )
     expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({ band: "auto", result: "resolved", slug: "solo_leveling" })
+    expect(events[0]).toMatchObject({ event: "result", result: "auto", band: "auto", slug: "solo_leveling" })
   })
 
   it("slug não entra no score (candidato com slug=alvo mas título alheio → null)", async () => {
