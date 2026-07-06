@@ -3,7 +3,7 @@ import { searchAnimePlanet, fetchAnimePlanetByTitle, fetchAnimePlanetReviews, fe
 import type { AnimePlanetDetail } from "./animeplanet"
 import { searchComicK, fetchComicKByHid, fetchComicKReviews } from "./comick"
 import { searchComix, fetchComixById, fetchComixReviews } from "./comix"
-import { searchMangago, fetchMangagoById } from "./mangago"
+import { searchMangago, fetchMangagoById, fetchMangagoReviews } from "./mangago"
 import { isBlockedCoverUrl } from "./blocked-covers"
 import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews, fetchJikanMangaRecommendations } from "./jikan"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
@@ -45,6 +45,9 @@ const TIMEOUT_REVIEWS_COMICK_MS = 18000
 // fria), ~2-4s quando já quente de uma call anterior. 25s dá folga sobre o solve frio
 // (era 15s, que estourava porque cada call solava ~11s isolada).
 const TIMEOUT_REVIEWS_COMIX_MS = 25000
+// Mangago faz multi-hop pela sessão FlareSolverr (discussão + até 8 tópicos);
+// mesmo perfil do Comix — teto folgado sobre um solve frio + fetches quentes.
+const TIMEOUT_REVIEWS_MANGAGO_MS = 25000
 const TIMEOUT_SIMILAR_MS = 8000
 
 // ============================================================================
@@ -1194,13 +1197,16 @@ async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<
     candidate.comixHid
       ? withTimeout(fetchComixReviews(candidate.comixHid).then((reviews) => ({ source: "comix" as const, reviews })), TIMEOUT_REVIEWS_COMIX_MS, "reviews:comix")
       : Promise.resolve(null),
+    candidate.mangagoSlug
+      ? withTimeout(fetchMangagoReviews(candidate.mangagoSlug).then((reviews) => ({ source: "mangago" as const, reviews })), TIMEOUT_REVIEWS_MANGAGO_MS, "reviews:mangago")
+      : Promise.resolve(null),
   ]
 
   const settled = await Promise.allSettled(fetchers)
 
   // DEBUG: contar reviews raw por fonte antes de filtrar
   const rawCounts = settled.map((entry, i) => {
-    const src = ["mangaupdates", "anilist", "myanimelist", "kitsu", "animeplanet", "mangadex", "comick", "comix"][i]
+    const src = ["mangaupdates", "anilist", "myanimelist", "kitsu", "animeplanet", "mangadex", "comick", "comix", "mangago"][i]
     if (entry.status === "rejected") return `${src}=REJECTED(${entry.reason})`
     if (!entry.value) return `${src}=skipped(no_id)`
     const reviews = entry.value.reviews
@@ -1225,6 +1231,9 @@ async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<
     // comix são comentários de nível-obra (mini-reviews); 80 corta one-liners
     // de baixo sinal ("totally recomended") mas mantém opiniões concisas.
     comix: 80,
+    // mangago são posts de opinião (topics); 40 mantém takes concisos
+    // ("great beginning, bad ending") mas corta títulos-só de 1 palavra.
+    mangago: 40,
   }
   return settled
     .flatMap((entry) => (entry.status === "fulfilled" && entry.value ? [entry.value] : []))
@@ -1778,7 +1787,7 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
   if (md) hydrated.push({ id: `mangadex:${candidate.mangadexId}`, source: "mangadex", title: md.title, alternativeTitles: md.alternativeTitles, synopsis: md.synopsis, coverUrl: md.coverUrl, year: md.year, publicationStatus: md.publicationStatus, chapters: md.chapters, score: md.rating, votes: md.votes, genres: md.genres, contentRating: md.contentRating })
   if (cmx) hydrated.push({ id: `comick:${candidate.comickHid}`, source: "comick", title: cmx.title, alternativeTitles: cmx.alternativeTitles, synopsis: cmx.synopsis, coverUrl: cmx.coverUrl, publicationStatus: cmx.publicationStatus, chapters: cmx.lastChapter, score: cmx.rating, votes: cmx.votes, genres: cmx.tags, contentRating: cmx.contentRating })
   if (cmix) hydrated.push({ id: `comix:${candidate.comixHid}`, source: "comix", title: cmix.title, alternativeTitles: cmix.alternativeTitles, synopsis: cmix.synopsis, coverUrl: cmix.coverUrl, year: cmix.year, publicationStatus: cmix.publicationStatus, chapters: cmix.chapters, score: cmix.rating, votes: cmix.votes, genres: cmix.tags })
-  if (mg) hydrated.push({ id: `mangago:${candidate.mangagoSlug}`, source: "mangago", title: mg.title, alternativeTitles: mg.alternativeTitles, synopsis: mg.synopsis, coverUrl: mg.coverUrl, year: mg.year, publicationStatus: mg.publicationStatus, genres: mg.genres })
+  if (mg) hydrated.push({ id: `mangago:${candidate.mangagoSlug}`, source: "mangago", title: mg.title, alternativeTitles: mg.alternativeTitles, synopsis: mg.synopsis, coverUrl: mg.coverUrl, year: mg.year, publicationStatus: mg.publicationStatus, genres: mg.genres, score: mg.rating, votes: mg.votes })
   const muStatusText = typeof mu?.statusText === "string" ? mu.statusText : undefined
   return { hydrated, apDetail: ap as AnimePlanetDetail | null, muStatusText }
 }
