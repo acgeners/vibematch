@@ -384,9 +384,7 @@ function isSiteBoilerplate(text: string): boolean {
 }
 
 // Páginas da lista de discussão a varrer (11 tópicos/página). Um título popular
-// tem dezenas de páginas, mas o prompt da IA usa no máximo `maxPerSource` (12)
-// reviews por fonte — buscar mais só engorda o pool salvo e cada corpo custa 1
-// fetch FlareSolverr. Então varremos só o suficiente pra encher o teto.
+// tem dezenas de páginas; 3 páginas dão ~33 tópicos, suficiente pro cap de 20.
 const MANGAGO_REVIEW_LIST_PAGES = 3
 
 /** Extrai (id, título) dos tópicos de uma página de discussão, na ordem exibida. */
@@ -414,11 +412,14 @@ function extractTopics(html: string, seen: Set<string>, out: Array<{ id: string;
  *      (id + título; 11/página). Varre até juntar `limit` ids ou acabar.
  *   2. `/home/mangatopic/{id}/` → o texto completo do 1º post vem no
  *      `<meta name="description">` (não há corpo inline confiável na página).
- * Cap em `limit` tópicos: alinhado ao teto do prompt (12/fonte) — cada corpo é
- * 1 fetch, então não vale buscar as centenas de páginas existentes. Fail-soft:
- * [] em qualquer erro; para no meio se o circuito do FlareSolverr abrir.
+ * Cap em `limit` tópicos (20): cobre o prompt de avaliação (12/fonte) e o digest
+ * (8/fonte) com folga, e alimenta o "resumo" (review_summary: 40 no total, SEM
+ * cap por fonte) em títulos onde o mangago é a fonte dominante de reviews — o
+ * caso BL/nicho, o forte dele. Cada corpo é 1 fetch FlareSolverr, então não vale
+ * buscar as centenas de páginas existentes. Fail-soft: [] em qualquer erro; para
+ * no meio se o circuito do FlareSolverr abrir.
  */
-export async function fetchMangagoReviews(slug: string, limit = 12): Promise<string[]> {
+export async function fetchMangagoReviews(slug: string, limit = 20): Promise<string[]> {
   if (isFlareSolverrCircuitOpen()) return []
   try {
     // 1) Junta ids de tópico paginando a lista até ter `limit` (ou esgotar páginas).

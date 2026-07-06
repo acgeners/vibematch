@@ -45,9 +45,9 @@ const TIMEOUT_REVIEWS_COMICK_MS = 18000
 // fria), ~2-4s quando já quente de uma call anterior. 25s dá folga sobre o solve frio
 // (era 15s, que estourava porque cada call solava ~11s isolada).
 const TIMEOUT_REVIEWS_COMIX_MS = 25000
-// Mangago faz multi-hop pela sessão FlareSolverr (lista paginada + até 12
-// tópicos, 1 fetch cada); com solve frio na 1ª call, ~12 corpos cabem em ~30s.
-const TIMEOUT_REVIEWS_MANGAGO_MS = 30000
+// Mangago faz multi-hop pela sessão FlareSolverr (lista paginada + até 20
+// tópicos, 1 fetch cada); com solve frio na 1ª call, ~20 corpos cabem em ~35s.
+const TIMEOUT_REVIEWS_MANGAGO_MS = 35000
 // O hydrate do mangago é um scrape via FlareSolverr (não uma API), e a MESMA
 // página de detalhe traz rating + sinopse + gêneros. Com o default de 8s um
 // solve frio de CF (~11s) estourava e a obra perdia TODO o metadado do mangago
