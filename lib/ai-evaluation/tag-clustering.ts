@@ -5,8 +5,9 @@
 import type Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
+import { SONNET_MODEL } from "@/lib/ai/models"
 
-const MODEL = "claude-sonnet-4-6"
+const MODEL = SONNET_MODEL
 
 const SYSTEM_PROMPT = `You receive an alphabetically-sorted list of tag names that all belong to the same tag group (e.g. "characters", "cast", "elements"). Your task is to propose semantic clusters: groups of names that describe the same concept or highly overlapping tropes, so the database can collapse them into a single canonical tag.
 

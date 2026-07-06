@@ -2,6 +2,7 @@ import "server-only"
 import type Anthropic from "@anthropic-ai/sdk"
 import { createHash } from "node:crypto"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
+import { SONNET_MODEL } from "@/lib/ai/models"
 import type { ReviewDigest, ReviewDigestTrait } from "./types"
 
 export const REVIEW_SUMMARIZER_MODEL = "claude-haiku-4-5-20251001"
@@ -191,7 +192,7 @@ export function isMaterialReviewChange(prevN: number | null, nowN: number): bool
 // `review_summary` (texto Haiku da UI). Custo único por obra, amortizado:
 // re-roda só com mudança material (gate em review_digest_n/version no caller).
 // ============================================================
-export const REVIEW_DIGEST_MODEL = "claude-sonnet-4-6"
+export const REVIEW_DIGEST_MODEL = SONNET_MODEL
 export const REVIEW_DIGEST_VERSION = "digest-v1"
 
 // Amostragem ESTRATIFICADA por fonte (não "as 40 mais longas" — isso reintroduz

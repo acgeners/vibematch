@@ -16,8 +16,9 @@ import type {
   RecommendationMode,
   TasteProfilePayload,
 } from "./types"
+import { SONNET_MODEL } from "@/lib/ai/models"
 
-export const MODEL = "claude-sonnet-4-6"
+export const MODEL = SONNET_MODEL
 // v2: Smart Shortlist enriquecido (sub-fase 2.3.A) — adicionados campos
 // opcionais ao tool submit_ranking: confidence, risks, similar_loved/avoided,
 // review_quotes, mood_fit. Sistema prompt instrui sobre cada um.

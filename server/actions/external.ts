@@ -9,6 +9,7 @@ import type { SearchAllSourcesResult } from "@/lib/external/index"
 import { fetchMangaUpdatesAlternativeTitles } from "@/lib/external/mangaupdates"
 import { fetchComixById } from "@/lib/external/comix"
 import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
+import { SONNET_MODEL } from "@/lib/ai/models"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import type { ExternalSourceId, MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField, SourcedReview, ExternalSearchResult } from "@/lib/external/types"
 import type { CriterionSlug } from "@/types/domain"
@@ -273,7 +274,7 @@ export interface CandidateAiNeedsReviewConfirmation {
  * The caller is responsible for deciding whether to continue without scores.
  */
 const CREATE_FLOW_OPUS_ID = "claude-opus-4-7"
-const CREATE_FLOW_SONNET_ID = "claude-sonnet-4-6"
+const CREATE_FLOW_SONNET_ID = SONNET_MODEL
 
 export async function evaluateCandidateForCreate(input: {
   title: string

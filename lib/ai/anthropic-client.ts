@@ -2,6 +2,7 @@ import "server-only"
 import Anthropic from "@anthropic-ai/sdk"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { deepStripLoneSurrogates } from "@/lib/ai/sanitize"
+import { modelRejectsSampling } from "./models"
 import { computeCostUsd } from "./pricing"
 import type { UsageTokens } from "./pricing"
 import { classifyAiError } from "@/lib/ai-observability/classify-error"
@@ -149,6 +150,28 @@ function httpStatusFromError(err: unknown): number | null {
   return null
 }
 
+/**
+ * Compat de parâmetros por família de modelo (backstop central). Modelos como
+ * Sonnet 5 / Opus 4.7+ REJEITAM `temperature`/`top_p`/`top_k` (HTTP 400) e ligam
+ * thinking por default quando ele é omitido. Como TODA chamada Claude passa por
+ * `createLoggedMessage`, sanitizar aqui cobre todos os call sites sem tocar em
+ * cada um — e reverter o `SONNET_MODEL` pro 4.6 volta a aceitar tudo (o 4.6 não
+ * casa em `modelRejectsSampling`, então os params passam intactos).
+ */
+function sanitizeParamsForModel(
+  params: Anthropic.Messages.MessageCreateParamsNonStreaming,
+): Anthropic.Messages.MessageCreateParamsNonStreaming {
+  const model = typeof params.model === "string" ? params.model : String(params.model)
+  if (!modelRejectsSampling(model)) return params
+  const { temperature: _t, top_p: _p, top_k: _k, ...rest } = params
+  void _t
+  void _p
+  void _k
+  // Preserva o determinismo atual (o 4.6 rodava sem thinking): fixa disabled
+  // quando o caller não especificou (todas essas famílias aceitam `disabled`).
+  return { ...rest, thinking: rest.thinking ?? { type: "disabled" } }
+}
+
 export async function createLoggedMessage(
   client: Anthropic,
   params: Anthropic.Messages.MessageCreateParamsNonStreaming,
@@ -161,7 +184,7 @@ export async function createLoggedMessage(
   // serializar. Sem isso, qualquer texto raspado truncado no meio de um emoji
   // (vários `.slice(0, N)` em lib/external/*) faz a Anthropic responder 400
   // "no low surrogate in string". Vale pra todas as chamadas que passam por aqui.
-  const safeParams = deepStripLoneSurrogates(params)
+  const safeParams = deepStripLoneSurrogates(sanitizeParamsForModel(params))
 
   try {
     // Usa streaming internamente (.stream().finalMessage()) em vez de
