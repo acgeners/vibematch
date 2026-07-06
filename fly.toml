@@ -1,5 +1,5 @@
 app = "satoria"
-primary_region = "iad"
+primary_region = "gru"
 
 [build]
   dockerfile = "Dockerfile"
