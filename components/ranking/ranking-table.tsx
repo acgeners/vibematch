@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { ReactNode } from "react"
-import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, ImageOff, Layers, LayoutGrid, List, Sparkles, Star, Target, Users, X } from "lucide-react"
+import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, Compass, ImageOff, Layers, LayoutGrid, List, X } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -16,7 +16,6 @@ import { DEFAULT_TIER_BAND_WIDTH } from "@/lib/ranking/tier-config"
 import type { CriterionSlug } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
-import { LABELS } from "@/lib/constants/ui-labels"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { formatPercentile } from "@/lib/calculations/percentile"
@@ -27,6 +26,9 @@ import { PublicationStatusBadge, PersonalStatusBadge, AiStatusBadge } from "@/co
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
 import { AlignmentCell, AlignmentScoreCell, DecisionCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
+import { ForceMeters } from "@/components/ranking/force-meters"
+import { BussolaPlane } from "@/components/ranking/bussola-plane"
+import { computeWorkForces } from "@/lib/calculations/forces"
 import { TierDividerRow } from "@/components/ranking/tie-break-band"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
@@ -148,14 +150,14 @@ function reorderTiersByFit(entries: RankingEntry[], tiers: Tier[]): RankingEntry
   return out
 }
 
-type ViewMode = "list" | "cards"
+type ViewMode = "list" | "cards" | "bussola"
 const VIEW_STORAGE_KEY = "ranking_view_mode_v1"
 const VIEW_EVENT = "ranking-view-mode-change"
 
 function readViewMode(): ViewMode {
   if (typeof window === "undefined") return "list"
   const stored = window.localStorage.getItem(VIEW_STORAGE_KEY)
-  return stored === "cards" ? "cards" : "list"
+  return stored === "cards" || stored === "bussola" ? stored : "list"
 }
 
 function subscribeViewMode(onChange: () => void) {
@@ -724,6 +726,22 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
     )
   }
 
+  if (viewMode === "bussola") {
+    return (
+      <div className="space-y-3">
+        <ViewModeToolbar
+          count={entries.length}
+          viewMode={viewMode}
+          onChange={writeViewMode}
+          tiersEnabled={tiersEnabled}
+          tiersAvailable={tierSortEligible}
+          onTiersChange={writeTiersEnabled}
+        />
+        <BussolaPlane entries={entries} />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3">
       <ViewModeToolbar
@@ -1093,6 +1111,21 @@ function ViewModeToolbar({
             <LayoutGrid className="h-3.5 w-3.5" />
             Cards
           </button>
+          <button
+            type="button"
+            onClick={() => onChange("bussola")}
+            aria-label="Visualizar na Bússola"
+            aria-pressed={viewMode === "bussola"}
+            className={cn(
+              "inline-flex h-7 items-center gap-1.5 rounded px-2 text-xs font-medium transition-colors",
+              viewMode === "bussola"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Compass className="h-3.5 w-3.5" />
+            Bússola
+          </button>
         </div>
       </div>
     </div>
@@ -1134,15 +1167,6 @@ function RankingCardsView({
       ))}
     </div>
   )
-}
-
-/** Cor por faixa (0–100) — verde alto / âmbar médio / vermelho baixo. Usada em Veredito e Alinhamento. */
-function bandText(pct: number): string {
-  return pct >= 75
-    ? "text-emerald-500 dark:text-emerald-400"
-    : pct >= 50
-      ? "text-amber-500 dark:text-amber-400"
-      : "text-rose-500 dark:text-rose-400"
 }
 
 /** Renderiza a escala de 4 corações a partir da string ♥ (preenchidos = valor, resto esmaecido). */
@@ -1194,18 +1218,6 @@ function InterestHearts({
   )
 }
 
-/** Célula da tira de notas 2×2: label pequeno + ícone/valor centralizados. */
-function MetricCell({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-1 py-1.5">
-      <span className="whitespace-nowrap text-[8px] font-bold uppercase text-muted-foreground/70">{label}</span>
-      <span className="inline-flex items-center gap-1 text-[13px] font-bold leading-none tabular-nums">{children}</span>
-    </div>
-  )
-}
-
-const EMPTY_METRIC = <span className="text-muted-foreground">—</span>
-
 function RankingCard({
   entry,
   scoreThresholds,
@@ -1215,8 +1227,6 @@ function RankingCard({
 }) {
   const slug = titleToSlug(entry.title)
   const isTop3 = entry.rank <= 3
-  const alignPct =
-    entry.personalFitPercentile ?? (entry.personalFit != null ? entry.personalFit * 100 : null)
 
   return (
     <div
@@ -1297,53 +1307,16 @@ function RankingCard({
           </div>
         </div>
 
-        {/* Notas 2×2: Externa · Votos / Veredito · Alinhamento — fixadas na base */}
-        <div className="mt-auto grid grid-cols-2 overflow-hidden rounded-lg border border-border/60 bg-background/30 [&>*:nth-child(2n)]:border-l [&>*:nth-child(2n)]:border-border/60 [&>*:nth-child(n+3)]:border-t [&>*:nth-child(n+3)]:border-border/60">
-          <MetricCell label={LABELS.platform_avg.short}>
-            {entry.platformAvg != null ? (
-              <>
-                <Star className="size-3 fill-amber-500 text-amber-500" />
-                {entry.platformAvg.toFixed(1)}
-              </>
-            ) : (
-              EMPTY_METRIC
-            )}
-          </MetricCell>
-          <MetricCell label={LABELS.total_votes.short}>
-            {entry.totalVotes > 0 ? (
-              <>
-                <Users className="size-3 text-muted-foreground/70" />
-                {formatVotes(entry.totalVotes)}
-              </>
-            ) : (
-              EMPTY_METRIC
-            )}
-          </MetricCell>
-          <MetricCell label={LABELS.alignment_score.short}>
-            {entry.alignmentScore != null ? (
-              <>
-                <Sparkles className="size-3 text-sky-400" />
-                <span className={cn(bandText(entry.alignmentScore), entry.alignmentStale && "opacity-60")}>
-                  {Math.round(entry.alignmentScore)}
-                </span>
-              </>
-            ) : (
-              EMPTY_METRIC
-            )}
-          </MetricCell>
-          <MetricCell label={LABELS.personal_fit.abbrev}>
-            {alignPct != null ? (
-              <>
-                <Target className="size-3 text-violet-400" />
-                <span className={bandText(alignPct)}>
-                  {Math.round(alignPct)}
-                  <span className="ml-0.5 text-[9px] font-semibold text-muted-foreground">%</span>
-                </span>
-              </>
-            ) : (
-              EMPTY_METRIC
-            )}
-          </MetricCell>
+        {/* 3 forças da Bússola — fixadas na base (ver PLANO-BUSSOLA-3-FORCAS.md) */}
+        <div className="mt-auto rounded-lg border border-border/60 bg-background/30 p-2">
+          <ForceMeters
+            size="sm"
+            forces={computeWorkForces({
+              chanceScore: entry.chanceScore,
+              platformAvg: entry.platformAvg,
+              totalVotes: entry.totalVotes,
+            })}
+          />
         </div>
       </div>
     </div>

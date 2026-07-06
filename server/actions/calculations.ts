@@ -31,6 +31,11 @@ import {
   type ExpectedScoreInput,
 } from "@/lib/calculations/expected"
 import {
+  trainChancePredictor,
+  CHANCE_LIKED_THRESHOLD,
+  type ChanceInput,
+} from "@/lib/calculations/chance"
+import {
   inferScoreWeights,
   type WeightInferenceInput,
   type CurrentWeight,
@@ -164,6 +169,9 @@ interface WorkComputed {
   /** Overlap líquido por NOME (amado − 1.5×evitado) — base do Alinhamento e do
    * desempate intra-tier (substitui o net por group::name a partir de 2026-06-27). */
   netName: number | null
+  /** Chance de gostar 0–100 (Força 1 da Bússola). NULL quando o modelo é stub. */
+  chanceScore: number | null
+  chanceIsStub: boolean
 }
 
 const CURRENT_YEAR = new Date().getFullYear()
@@ -270,6 +278,8 @@ export function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed
     personalFit: null,
     personalFitPercentile: null,
     netName: null,
+    chanceScore: null,
+    chanceIsStub: false,
   }
 }
 
@@ -546,12 +556,41 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
     return { recalculated: 0, calibration: null }
   }
 
+  // Interesse efetivo (manual ⊕ previsto mais recente) por obra — feature do
+  // Chance de gostar (Força 1 da Bússola). Chunk pra não estourar o limite do .in().
+  const effectiveInterestByWork = new Map<string, string | null>()
+  {
+    const bestPred = new Map<string, { ver: number; q: string | null }>()
+    const workIds = works.map((w) => w.id)
+    const chunks: string[][] = []
+    for (let i = 0; i < workIds.length; i += 150) chunks.push(workIds.slice(i, i + 150))
+    const predResults = await Promise.all(
+      chunks.map((chunk) =>
+        supabase
+          .from("synopsis_quality_predictions")
+          .select("work_id, predicted_quality, prompt_version")
+          .in("work_id", chunk),
+      ),
+    )
+    for (const res of predResults) {
+      for (const r of (res.data ?? []) as Array<{ work_id: string; predicted_quality: string | null; prompt_version: string | null }>) {
+        const m = (r.prompt_version ?? "").match(/(\d+)/)
+        const ver = m ? parseInt(m[1], 10) : -1
+        const prev = bestPred.get(r.work_id)
+        if (!prev || ver > prev.ver) bestPred.set(r.work_id, { ver, q: r.predicted_quality ?? null })
+      }
+    }
+    for (const w of works) {
+      effectiveInterestByWork.set(w.id, w.synopsisQuality ?? bestPred.get(w.id)?.q ?? null)
+    }
+  }
+
   const {
     rows, pseudoVotesNotaM, pseudoVotesBlend, gptMean, gptClampHits, gptClampHitRate,
     gptNegativeActivations, negativeActivationRate, inferenceSnapshot, newMaeCalc, newRmseCalc,
     maeExpected, rmseExpected, maeExpectedBaseline, cvMaeExpected, calcBlendWeight, expectedPredictor,
     cvSig,
-  } = computeRecalc({ works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork })
+  } = computeRecalc({ works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork, effectiveInterestByWork })
 
   const { error: upsertErr } = await supabase
     .from("calculated_scores")
@@ -763,6 +802,8 @@ export interface RecalcComputeInput {
   declaredTagPrefs: DeclaredTagPref[]
   includeQuality: boolean
   aiQualityByWork: Map<string, Record<string, number>>
+  /** Interesse efetivo (manual ⊕ previsto) por obra — feature do Chance (Força 1). */
+  effectiveInterestByWork?: Map<string, string | null>
   /** Pula a nested-CV honesta (cara). Usado no diagnóstico leave-one-out. */
   fast?: boolean
 }
@@ -774,7 +815,7 @@ export interface RecalcComputeInput {
  * diagnóstico de blast radius (recomputar com 1 obra perturbada, em memória).
  */
 export function computeRecalc(input: RecalcComputeInput) {
-  const { works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork, fast = false } = input
+  const { works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork, effectiveInterestByWork = new Map<string, string | null>(), fast = false } = input
 
   // ---------- 1) Percentis de votos -> pseudo_votes_* ----------
   // Calculamos cedo pra usar nas demais etapas
@@ -1141,6 +1182,52 @@ export function computeRecalc(input: RecalcComputeInput) {
     }
   }
 
+  // ---------- 5c) Chance de gostar (Força 1 da Bússola) ----------
+  // P(user_score ≥ τ) calibrada, sobre features de fit. Treina nas obras
+  // rotuladas, prevê pra todas. As prefs livres (texto) NÃO entram aqui — só
+  // chegam via `interesseOrdinal` (o LLM Interesse-na-obra já as ingere).
+  // Ver lib/calculations/chance.ts + PLANO-BUSSOLA-3-FORCAS.md.
+  const declaredLoveNames = new Set<string>()
+  const declaredAvoidNames = new Set<string>()
+  for (const p of declaredTagPrefs) {
+    const nm = p.name?.toLowerCase()
+    if (!nm) continue
+    if (p.stance === "love") declaredLoveNames.add(nm)
+    else if (p.stance === "avoid") declaredAvoidNames.add(nm)
+  }
+  const INTEREST_ORDINAL: Record<string, number> = { "♥": 1, "♥♥": 2, "♥♥♥": 3, "♥♥♥♥": 4 }
+  const buildChanceInput = (w: WorkComputed): ChanceInput => {
+    const nTags = Math.max(w.tags.length, 1)
+    let love = 0
+    let avoid = 0
+    for (const t of w.tags) {
+      const nm = t.name.toLowerCase()
+      if (declaredLoveNames.has(nm)) love += 1
+      else if (declaredAvoidNames.has(nm)) avoid += 1
+    }
+    const band = effectiveInterestByWork.get(w.id) ?? w.synopsisQuality ?? null
+    return {
+      categoryScores: w.categoryScores,
+      declaredLovedFrac: love / nTags,
+      declaredAvoidedFrac: avoid / nTags,
+      personalFit: w.personalFit,
+      interesseOrdinal: band ? INTEREST_ORDINAL[band] ?? null : null,
+    }
+  }
+  const chanceTrainInputs: ChanceInput[] = []
+  const chanceTrainLabels: number[] = []
+  for (const w of works) {
+    if (w.userScore == null) continue
+    chanceTrainInputs.push(buildChanceInput(w))
+    chanceTrainLabels.push(w.userScore >= CHANCE_LIKED_THRESHOLD ? 1 : 0)
+  }
+  const chancePredictor = trainChancePredictor(chanceTrainInputs, chanceTrainLabels)
+  const chanceScores = chancePredictor.predictScore(works.map(buildChanceInput))
+  works.forEach((w, i) => {
+    w.chanceIsStub = chancePredictor.isStub
+    w.chanceScore = chancePredictor.isStub ? null : Math.round(chanceScores[i] * 100) / 100
+  })
+
   // ---------- 6) Bulk upsert calculated_scores ----------
   const rows = works.map((w) => ({
     work_id: w.id,
@@ -1158,6 +1245,8 @@ export function computeRecalc(input: RecalcComputeInput) {
     rmse_calc: newRmseCalc,
     personal_fit: w.personalFit,
     personal_fit_percentile: w.personalFitPercentile,
+    chance_score: w.chanceScore,
+    chance_is_stub: w.chanceIsStub,
     // Desempate dentro do tier (migration 116). Desde 2026-06-27: overlap líquido
     // por NOME (amado − 1.5×evitado, `netName`) — valida melhor que o net por
     // group::name no bootstrap. NULL quando o perfil não tem loved/avoided.
