@@ -48,6 +48,11 @@ const TIMEOUT_REVIEWS_COMIX_MS = 25000
 // Mangago faz multi-hop pela sessão FlareSolverr (discussão + até 8 tópicos);
 // mesmo perfil do Comix — teto folgado sobre um solve frio + fetches quentes.
 const TIMEOUT_REVIEWS_MANGAGO_MS = 25000
+// O hydrate do mangago é um scrape via FlareSolverr (não uma API), e a MESMA
+// página de detalhe traz rating + sinopse + gêneros. Com o default de 8s um
+// solve frio de CF (~11s) estourava e a obra perdia TODO o metadado do mangago
+// (sobrava só título/capa da busca). 15s cobre o solve frio com folga.
+const TIMEOUT_HYDRATE_MANGAGO_MS = 15000
 const TIMEOUT_SIMILAR_MS = 8000
 
 // ============================================================================
@@ -1543,7 +1548,13 @@ async function hydrateAndFilterCandidate(candidate: MergedCandidate): Promise<{
   for (const result of hydrated) {
     const { titleScore, synScore, composite, reason } = compositeAcceptScore(candidate, result)
     const passes = titleScore >= 0.72 && synScore >= 0.18 && composite >= 0.62
-    const acceptedBySource = passes || trustedSet.has(result.source)
+    // Scraping do mangago: a sinopse tem fraseado próprio e diverge (synScore
+    // baixo) mesmo sendo a MESMA obra (título casa exato + as reviews, buscadas
+    // pelo slug, confirmam). Sem isso, o detalhe enriquecido (rating/sinopse/
+    // gêneros) é barrado por "sinopse divergente" e sobra só o resultado de busca
+    // pobre (sem rating). Restrito a título quase-exato pra não afrouxar o filtro.
+    const titleExactScrape = result.source === "mangago" && titleScore >= 0.9
+    const acceptedBySource = passes || titleExactScrape || trustedSet.has(result.source)
     console.info(
       `[hydrateAccept] candidate="${candidate.title}" source=${result.source} title=${titleScore.toFixed(2)} syn=${synScore.toFixed(2)} composite=${composite.toFixed(2)} trusted=${trustedSet.has(result.source)} accept=${acceptedBySource}${reason ? ` reason="${reason}"` : ""}`
     )
@@ -1765,7 +1776,7 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
     candidate.comickHid ? withTimeout(fetchComicKByHid(candidate.comickHid), TIMEOUT_HYDRATE_MS, "hydrate:comick") : null,
     candidate.comixHid ? withTimeout(fetchComixById(candidate.comixHid), TIMEOUT_HYDRATE_MS, "hydrate:comix") : null,
     candidate.animePlanetSlug ? withTimeout(fetchAnimePlanetByTitle(candidate.title, candidate.animePlanetSlug), TIMEOUT_HYDRATE_MS, "hydrate:animeplanet") : null,
-    candidate.mangagoSlug ? withTimeout(fetchMangagoById(candidate.mangagoSlug), TIMEOUT_HYDRATE_MS, "hydrate:mangago") : null,
+    candidate.mangagoSlug ? withTimeout(fetchMangagoById(candidate.mangagoSlug), TIMEOUT_HYDRATE_MANGAGO_MS, "hydrate:mangago") : null,
   ])
 
   const HYDRATE_SOURCES = ["anilist", "mangaupdates", "kitsu", "myanimelist", "mangadex", "comick", "comix", "animeplanet", "mangago"] as const
