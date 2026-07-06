@@ -17,8 +17,14 @@ describe("extractInlineRating", () => {
     ["nota 7 de 10", 7],
     ["10/10 would recommend", 10],
     ["11/10 masterpiece", 10], // hipérbole → clamp em 10
-    // Múltiplas notas → pega a última (o veredito do autor)
-    ["some say 9/10 but i'd give 6/10", 6],
+    // Nota como manchete no INÍCIO (nota única → sempre pega, posição não importa)
+    ["8/10. The art carries an otherwise mid story.", 8],
+    // Várias notas: o marcador de veredito do autor vence, onde quer que esteja
+    ["some say 9/10 but i'd give 6/10", 6], // marcador antes do 6
+    ["I'd rate it 9/10. Some say 6/10 but they're wrong.", 9], // marcador antes do 9 (início)
+    ["overall 8/10, though the pacing dips to a 5/10 midway", 8],
+    // Várias notas SEM marcador → a primeira (manchete)
+    ["8/10 for me. reminds me of a 5/10 series i dropped", 8],
     // Falsos-positivos rejeitados
     ["read 8/10 chapters so far", undefined],
     ["dropped at 3/10 episodes", undefined],

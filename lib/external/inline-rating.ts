@@ -1,17 +1,23 @@
 /**
  * Nota embutida NO CORPO da review ("I'd say 8/10", "80/100", "4/5", "8 out of
  * 10"). Fontes de fórum/comentário (mangago, comix, mangadex, kitsu) não têm nota
- * por review, mas muitos usuários põem a nota no texto. Normaliza pra 0-10 e pega
- * a ÚLTIMA ocorrência (o veredito costuma vir no fim). NÃO altera o texto.
+ * por review, mas muitos usuários põem a nota no texto. Normaliza pra 0-10.
  *
  * Escalas aceitas: `X/10`, `X.Y/10`, `X,Y/10`, `XX/100`, `X/5`, e as variantes
  * "X out of 10" / "X de 10". Anti-falso-positivo: rejeita datas ("8/10/2024") e
  * "X/10 chapters/episodes/pages/volumes".
+ *
+ * Escolha quando há VÁRIAS notas no texto (a nota pode abrir OU fechar a review):
+ *   1. Prefere a nota com um marcador de veredito do AUTOR logo antes
+ *      ("I'd give/rate/say 8/10", "my rating: 8/10", "overall 8/10"). Entre as
+ *      com marcador, a última (o veredito conclui).
+ *   2. Sem marcador, a PRIMEIRA (a nota costuma abrir a review como manchete).
+ * Com uma nota só, devolve ela (posição não importa).
  */
 export function extractInlineRating(text: string): number | undefined {
   const re = /\b(\d{1,3})(?:[.,](\d+))?\s*(?:\/|\s+(?:out\s+of|de)\s+)\s*(100|10|5)\b(?!\s*[/.]?\d)(?!\s*(?:chapters?|episodes?|eps?|pages?|volumes?|ch\b|vol\b))/gi
+  const found: Array<{ value: number; index: number }> = []
   let m: RegExpExecArray | null
-  let last: number | undefined
   while ((m = re.exec(text)) !== null) {
     const denom = Number(m[3])
     const intPart = Number(m[1])
@@ -22,7 +28,16 @@ export function extractInlineRating(text: string): number | undefined {
     const raw = intPart + (m[2] ? Number(`0.${m[2]}`) : 0)
     const value = denom === 100 ? raw / 10 : denom === 5 ? raw * 2 : raw
     if (value < 0) continue
-    last = Math.min(10, Math.round(value * 10) / 10)
+    found.push({ value: Math.min(10, Math.round(value * 10) / 10), index: m.index })
   }
-  return last
+
+  if (found.length === 0) return undefined
+  if (found.length === 1) return found[0].value
+
+  // Marcador de veredito do autor imediatamente antes da nota (janela ~24 chars,
+  // permitindo curto preenchimento tipo "it"/"this"/":" entre o marcador e a nota).
+  const CUE = /\b(i\s*['’]?\s*d\s+(?:give|rate|say|score)|i\s+(?:give|rate|score)|my\s+(?:final\s+)?(?:rating|score)|rating|score|verdict|overall)\b[^0-9]{0,8}$/i
+  const cued = found.filter((f) => CUE.test(text.slice(Math.max(0, f.index - 24), f.index)))
+  if (cued.length) return cued[cued.length - 1].value
+  return found[0].value
 }
