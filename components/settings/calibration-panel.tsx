@@ -1,15 +1,16 @@
 "use client"
 
 import { useEffect, useState, useTransition } from "react"
+import Link from "next/link"
 import { toast } from "sonner"
-import { ChevronDown, Info, Layers } from "lucide-react"
+import { ArrowDown, ArrowRight, ChevronDown, Info, Layers } from "lucide-react"
 import { MaeHistoryChart } from "@/components/settings/calibration/mae-history-chart"
 import { Button } from "@/components/ui/button"
 import { AiPendingGuardDialog } from "@/components/settings/ai-pending-guard-dialog"
 import type { AiPendingItem } from "@/components/settings/ai-pending-guard-dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
-import { recalculateNow, setScoreWeightsAuto } from "@/server/actions/settings"
+import { recalculateNow } from "@/server/actions/settings"
 import type { CalibrationHistoryEntry } from "@/server/actions/settings"
 import { cn } from "@/lib/utils"
 import type { FormulaConfig } from "@/types/domain"
@@ -85,7 +86,6 @@ function maeColor(value: number | null | undefined): string {
 
 export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot }: CalibrationPanelProps) {
   const [isPending, startTransition] = useTransition()
-  const [isTogglingAutoWeights, startAutoWeightsToggle] = useTransition()
   const [lastRun, setLastRun] = useState<string | null>(null)
   const [showDetails, setShowDetails] = useState(false)
   const [showPendingGuard, setShowPendingGuard] = useState(false)
@@ -135,21 +135,6 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
     })
   }
 
-  const handleToggleAutoWeights = (next: boolean) => {
-    startAutoWeightsToggle(async () => {
-      try {
-        await setScoreWeightsAuto(next)
-        toast.success(
-          next
-            ? "Pesos automáticos ativados — IA(n) usa pesos inferidos do seu histórico."
-            : "Pesos automáticos desativados — IA(n) usa pesos manuais de /preferencias.",
-        )
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao alternar pesos automáticos")
-      }
-    })
-  }
-
   const hasMismatch = (
     live: number | null,
     stored: number | null,
@@ -176,6 +161,11 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
       : null
   const skillGainPct = reduction != null ? reduction * 100 : null
 
+  // Faixas fora do padrão + confiança do público: movidas pra Diagnósticos (dev).
+  const bucketOutliers = findOutliers(snapshot.maeExpected, snapshot.buckets)
+  const pseudoVotesLive = snapshot.pseudoVotesNotaM ?? config.pseudo_votes_nota_m
+  const pseudoVotesStale = hasMismatch(snapshot.pseudoVotesNotaM, config.pseudo_votes_nota_m, 0.1)
+
   return (
     <TooltipProvider delayDuration={150}>
       <div className="space-y-6">
@@ -187,48 +177,29 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
             {/* Precisão da PREVISÃO (nota esperada / L1) em destaque */}
             <div className="flex-1 space-y-1">
               <p className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Precisão da previsão</span>
+                <span>Quão certeira está a Nota Prevista</span>
                 <InfoTooltip label={metricCopy.title} text={metricCopy.tooltip} />
               </p>
-              <div className="flex items-baseline gap-3">
-                <p className={cn("font-mono text-3xl font-semibold tabular-nums", maeColor(primaryMae))}>
+              <div className="flex items-baseline gap-2">
+                <p className={cn("font-mono text-4xl font-semibold tabular-nums", maeColor(primaryMae))}>
                   {fmt(primaryMae, 2)}
                 </p>
+                <span className="text-xs text-muted-foreground">ponto de erro</span>
               </div>
-              <p className="text-xs text-muted-foreground">
-                {metricCopy.title}
-                {primaryMetric.source === "prospective"
-                  ? ` · ${primaryMetric.sampleSize ?? 0} previsões resolvidas`
-                  : ` · Treino: ${snapshot.trainSize} / ${snapshot.totalWorks} obras`}
+              <p className="max-w-[44ch] text-[13px] text-foreground/80">
+                As notas previstas erram, em média,{" "}
+                <span className="font-medium text-foreground">
+                  {primaryMae != null && primaryMae < 1
+                    ? "menos de um ponto"
+                    : `cerca de ${fmt(primaryMae, 1)} ponto`}
+                </span>{" "}
+                numa escala de 0 a 10.
               </p>
-              {baselineMae != null && (
-                <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <span>
-                    vs. baseline (chutar a média):{" "}
-                    <span className="font-mono">{fmt(baselineMae, 2)}</span>
-                  </span>
-                  {skillGainPct != null && (
-                    <span
-                      className={cn(
-                        "rounded px-1.5 py-0.5 font-medium",
-                        skillGainPct >= 15
-                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                          : skillGainPct >= 5
-                            ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                            : "bg-rose-500/15 text-rose-600 dark:text-rose-400",
-                      )}
-                    >
-                      {skillGainPct >= 0
-                        ? `${skillGainPct.toFixed(0)}% menos erro que o baseline`
-                        : `${Math.abs(skillGainPct).toFixed(0)}% mais erro que o baseline`}
-                    </span>
-                  )}
-                  <InfoTooltip
-                    label="Baseline trivial"
-                    text="MAE de simplesmente prever a média das suas notas pra toda obra. É o piso: se a Nota Prevista não reduz o erro disso com folga, ela quase não agrega — e a alavanca passa a ser mais obras com nota pessoal, não mexer no modelo. (Redução de erro vs baseline — não é acurácia.)"
-                  />
-                </p>
-              )}
+              <p className="text-[11px] text-muted-foreground">
+                {primaryMetric.source === "prospective"
+                  ? `${metricCopy.title} · ${primaryMetric.sampleSize ?? 0} previsões resolvidas`
+                  : `Aprendido com ${snapshot.trainSize} de ${snapshot.totalWorks} obras que já têm sua nota pessoal.`}
+              </p>
             </div>
 
             {/* Ação */}
@@ -242,10 +213,14 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
                 </span>
               )}
               <span className="text-[11px] text-muted-foreground" suppressHydrationWarning>
-                Último: {relativeTime}
+                Último recálculo: {relativeTime}
               </span>
-              <span className="text-[11px] text-muted-foreground">
-                Versão: <span className="font-mono">{config.formula_version}</span>
+              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                Modelo <span className="font-mono">{config.formula_version}</span>
+                <InfoTooltip
+                  label="Versão da fórmula"
+                  text="Versão da fórmula de cálculo. Muda quando você altera pesos, critérios ou o pipeline — serve pra saber qual receita gerou as notas atuais. (Interno: formula_config.formula_version.)"
+                />
               </span>
             </div>
 
@@ -260,73 +235,42 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
             />
           </div>
 
-          {/* Origem do sinal na Nota Prevista (o modelo do headline) */}
-          {config.expected_ridge_coefficients && (
-            <div className="space-y-1">
-              <RidgeFeatureImportance
-                ridge={config.expected_ridge_coefficients}
-                label="Origem do sinal na Nota Prevista"
-              />
-              <p className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
-                O <span className="font-medium">ajuste de observação</span> que você define por obra é
-                aplicado por fora deste modelo, como soma determinística (±0,30) sobre a Nota Prevista —
-                por isso não aparece entre os pesos aprendidos acima.
-              </p>
-            </div>
-          )}
-
-          {/* Toggle stacker + Pseudo Nota.M + alerta de stub */}
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex flex-wrap items-center gap-3 text-muted-foreground">
-              <span className="inline-flex items-center gap-1">
-                Pseudo Nota.M:{" "}
-                <span className="font-mono text-foreground">
-                  {fmt(snapshot.pseudoVotesNotaM ?? config.pseudo_votes_nota_m, 0)}
-                </span>
-                <InfoTooltip
-                  label="Pseudo Nota.M"
-                  text="Quantos votos uma obra precisa pra a opinião da plataforma valer realmente. Ex.: 1600 → uma obra precisa de ~1600 votos pra a média global ter peso 50% contra sua nota."
-                />
-              </span>
-              {snapshot.expectedPredictorIsStub && (
-                <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-500">
-                  Modelo em fallback (precisa de ≥ 20 títulos com nota pessoal)
-                </span>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-4">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <span className="text-muted-foreground">
-                  Pesos auto:{" "}
-                  <span className="font-medium text-foreground">
-                    {config.score_weights_auto ? "ativo" : "manual"}
-                  </span>
-                  <InfoTooltip
-                    label="Pesos automáticos"
-                    text="Quando ativo, o IA(n) usa pesos inferidos do seu histórico (weight-inference por Ridge) — menos input manual em /preferencias. Quando desativa, usa os pesos que você configurou manualmente. Cai pra manual automaticamente se houver < 20 obras com nota pessoal."
-                  />
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={config.score_weights_auto}
-                  disabled={isTogglingAutoWeights}
-                  onClick={() => handleToggleAutoWeights(!config.score_weights_auto)}
-                  className={cn(
-                    "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
-                    config.score_weights_auto ? "bg-emerald-500" : "bg-muted",
-                    isTogglingAutoWeights && "opacity-50 cursor-not-allowed",
-                  )}
-                >
+          {/* Medidor visual + comparação com o palpite ingênuo */}
+          <div className="space-y-2">
+            <MaeGauge primary={primaryMae} baseline={baselineMae} />
+            {baselineMae != null && (
+              <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                {skillGainPct != null && (
                   <span
                     className={cn(
-                      "inline-block size-4 transform rounded-full bg-white transition-transform",
-                      config.score_weights_auto ? "translate-x-4" : "translate-x-0.5",
+                      "rounded px-1.5 py-0.5 font-medium",
+                      skillGainPct >= 15
+                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                        : skillGainPct >= 5
+                          ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                          : "bg-rose-500/15 text-rose-600 dark:text-rose-400",
                     )}
-                  />
-                </button>
-              </label>
-            </div>
+                  >
+                    {skillGainPct >= 0
+                      ? `↓ ${skillGainPct.toFixed(0)}% menos erro`
+                      : `↑ ${Math.abs(skillGainPct).toFixed(0)}% mais erro`}
+                  </span>
+                )}
+                <span>
+                  que um <span className="font-medium text-foreground/80">palpite ingênuo</span> (sempre a
+                  média das suas notas, <span className="font-mono">{fmt(baselineMae, 2)}</span>).
+                </span>
+                <InfoTooltip
+                  label="Palpite ingênuo"
+                  text="É o piso: se a Nota Prevista não ganhasse desse palpite com folga, ela quase não agregaria — e a alavanca passaria a ser ter mais obras com nota pessoal, não mexer no modelo. (Redução relativa de erro vs baseline — não é acurácia.)"
+                />
+              </p>
+            )}
+            {snapshot.expectedPredictorIsStub && (
+              <span className="inline-block rounded-md bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-500">
+                Modelo em fallback — precisa de ≥ 20 títulos com nota pessoal
+              </span>
+            )}
           </div>
         </div>
 
@@ -341,23 +285,60 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
         {/* ============================================================ */}
         <div className="rounded-lg border border-border bg-card/50 p-4 space-y-3">
           <div>
-            <h3 className="text-sm font-semibold">Histórico de precisão</h3>
+            <h3 className="flex items-center gap-1 text-sm font-semibold">
+              <span>Precisão ao longo do tempo</span>
+              <InfoTooltip
+                label="Histórico"
+                text="O mesmo erro médio da headline, um ponto por dia (último recálculo de cada dia). A linha começa quando há medição fora da amostra (CV) gravada; snapshots anteriores não aparecem."
+              />
+            </h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              MAE CV da Nota Prevista por dia (último snapshot de cada dia) — o mesmo número honesto
-              da headline ao longo do tempo. A linha começa quando há CV gravado; snapshots
-              anteriores a essa mudança não aparecem.
+              Quanto mais baixa a linha, melhor — a mesma MAE honesta da headline, dia a dia.
             </p>
           </div>
           <MaeHistoryChart history={snapshot.history} />
         </div>
 
         {/* ============================================================ */}
-        {/* DIAGNÓSTICO — onde o sistema acerta mais e menos             */}
+        {/* COMO A NOTA PREVISTA É MONTADA (pipeline didático)           */}
         {/* ============================================================ */}
-        <BucketDiagnostic overallMae={snapshot.maeExpected} buckets={snapshot.buckets} />
+        <ScorePipeline />
 
         {/* ============================================================ */}
-        {/* DETALHES TÉCNICOS (colapsável)                                */}
+        {/* DE ONDE VEM A NOTA (feature importance do Ridge)            */}
+        {/* ============================================================ */}
+        {config.expected_ridge_coefficients && (
+          <div className="rounded-lg border border-border bg-card/50 p-4 space-y-2">
+            <RidgeFeatureImportance
+              ridge={config.expected_ridge_coefficients}
+              label="De onde vem a nota"
+            />
+            <p className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
+              O <span className="font-medium">ajuste de observação</span> que você define por obra é
+              aplicado por fora deste modelo, como soma determinística (±0,30) sobre a Nota Prevista —
+              por isso não aparece entre os pesos aprendidos acima.
+            </p>
+          </div>
+        )}
+
+        {/* Ponteiro: "Pesos automáticos" migrou pra Comportamento na criação */}
+        <p className="flex items-start gap-1.5 px-1 text-[11px] text-muted-foreground/80">
+          <ArrowRight className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>
+            O ajuste <span className="font-medium text-muted-foreground">Pesos automáticos</span> agora
+            fica em{" "}
+            <Link
+              href="/settings?g=avancado#card-on-create"
+              className="font-medium text-foreground underline-offset-2 hover:underline"
+            >
+              Comportamento na criação
+            </Link>
+            , junto dos outros gatilhos de custo de IA.
+          </span>
+        </p>
+
+        {/* ============================================================ */}
+        {/* DIAGNÓSTICOS DO PIPELINE (dev) — colapsável                  */}
         {/* ============================================================ */}
         <div className="rounded-lg border border-border/60 bg-card/30">
           <button
@@ -366,85 +347,146 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
             className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
             aria-expanded={showDetails}
           >
-            <span>Detalhes técnicos</span>
+            <span>Diagnósticos do pipeline (dev)</span>
             <ChevronDown
               className={cn("h-4 w-4 transition-transform", showDetails && "rotate-180")}
             />
           </button>
 
           {showDetails && (
-            <div className="space-y-6 border-t border-border/60 px-4 py-4">
-              {/* Pseudo-votos */}
-              <div>
-                <h4 className="mb-1 text-sm font-medium">Pseudo-votos (suavização Bayesiana)</h4>
-                <p className="mb-3 text-xs text-muted-foreground">
-                  Votos fictícios somados pra estabilizar a média da plataforma quando há poucos dados.
-                  É o que molda a feature <span className="font-mono">Nota.M</span> que entra na Nota
-                  Prevista. Recalculado sozinho — não precisa monitorar com frequência.
-                </p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <MetricCard
-                    label="Pseudo Nota.M (mediana × 2.0)"
-                    tooltip="Quantos votos uma obra precisa pra a opinião da plataforma valer realmente. Ex.: 1620 → ~1620 votos pra a média global ter peso 50%. Mais alto = mais conservador com obras pouco populares. Molda a feature Nota.M do modelo."
-                    live={snapshot.pseudoVotesNotaM}
-                    stored={config.pseudo_votes_nota_m}
-                    digits={0}
-                    mismatch={hasMismatch(snapshot.pseudoVotesNotaM, config.pseudo_votes_nota_m, 0.10)}
-                  />
+            <div className="space-y-4 border-t border-border/60 px-4 py-4">
+              <p className="text-xs text-muted-foreground">
+                Sinais de saúde dos cálculos internos e valores auto-recalculados. Úteis pra detectar
+                regressões silenciosas — não precisa monitorar com frequência.
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {/* Notas que estouraram a escala (ex-"Clamp GPT") */}
+                <div className="rounded-md border border-border p-3">
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <span>Notas que estouraram a escala 0–10</span>
+                    <InfoTooltip
+                      label="Escala estourada"
+                      text="% de obras cujo agregado da IA passou de [0,10] antes de ser cortado. Esse agregado, amplificado, vira o sinal 'Nota da IA (combinada)'. Alto (>20%) = a amplificação está empurrando obras pra fora da escala. (Interno: gpt_clamp_hit_rate.)"
+                    />
+                  </p>
+                  <p className="mt-1 font-mono text-base">
+                    {config.gpt_clamp_hit_rate != null
+                      ? `${(config.gpt_clamp_hit_rate * 100).toFixed(1)}%`
+                      : "—"}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {config.gpt_clamp_hit_rate != null && config.gpt_clamp_hit_rate > 0.2
+                      ? "Alto — a amplificação pode estar empurrando obras pra fora da escala"
+                      : "Abaixo de 20% = saudável"}
+                  </p>
+                </div>
+
+                {/* Critérios negativos */}
+                <div className="rounded-md border border-border p-3">
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <span>Critérios negativos que penalizaram</span>
+                    <InfoTooltip
+                      label="Critérios negativos"
+                      text="% de obras em que drama/tragédia ultrapassaram o limiar e penalizaram a nota. Se ficar 0%, o critério virou decorativo. (Interno: negative_activation_rate.)"
+                    />
+                  </p>
+                  <div className="mt-1 space-y-1">
+                    {config.negative_activation_rate && Object.keys(config.negative_activation_rate).length > 0 ? (
+                      Object.entries(config.negative_activation_rate)
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([slug, rate]) => (
+                          <p key={slug} className="text-xs">
+                            {CRITERIA_INFO[slug as keyof typeof CRITERIA_INFO]?.name ??
+                              CRITERIA_LABEL[slug] ??
+                              slug}
+                            :{" "}
+                            <span className="font-mono text-foreground">{(rate * 100).toFixed(1)}%</span>
+                          </p>
+                        ))
+                    ) : (
+                      <p className="text-xs text-muted-foreground">—</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Confiança mínima do público (ex-"Pseudo Nota.M") */}
+                <div
+                  className={cn(
+                    "rounded-md border p-3",
+                    pseudoVotesStale ? "border-amber-500/40 bg-amber-500/5" : "border-border",
+                  )}
+                >
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <span>Confiança mínima do público</span>
+                    <InfoTooltip
+                      label="Confiança mínima do público"
+                      text="Quantos votos uma obra precisa pra a opinião do público valer de fato. Ex.: 1620 → a média global pesa 50% contra a nota da IA. Ajusta-se sozinho — molda o passo 'Mistura com o público'. (Interno: pseudo_votes_nota_m, prior bayesiano ≈ mediana × 2,0.)"
+                    />
+                  </p>
+                  <p className="mt-1 font-mono text-base">
+                    {fmt(pseudoVotesLive, 0)}{" "}
+                    <span className="font-sans text-[11px] text-muted-foreground">votos</span>
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {pseudoVotesStale ? (
+                      <span className="text-amber-500">Desatualizado — recalibre pra atualizar</span>
+                    ) : (
+                      "Recalculado automaticamente"
+                    )}
+                  </p>
+                </div>
+
+                {/* Faixas onde erra mais (ex-card "Faixas fora do padrão") */}
+                <div className="rounded-md border border-border p-3">
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <span>Faixas onde a previsão erra mais</span>
+                    <InfoTooltip
+                      label="Faixas fora do padrão"
+                      text={`Procura perfis de obra (por quão típica é a obra ou por nº de votos) onde o modelo erra bem mais que a média — só sinaliza com ≥ ${OUTLIER_MIN_N} obras na faixa e MAE ≥ média + ${OUTLIER_DELTA.toFixed(2)}. MAE por faixa é in-sample (otimista), serve só pra comparação relativa.`}
+                    />
+                  </p>
+                  {bucketOutliers.length === 0 ? (
+                    <>
+                      <p className="mt-1 text-base font-medium text-emerald-500">Uniforme ✓</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Nenhuma faixa fora do padrão — erro parelho no catálogo.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-1 text-base font-medium text-amber-500">
+                        {bucketOutliers.length} faixa(s) fora do padrão
+                      </p>
+                      <div className="mt-0.5 space-y-0.5">
+                        {bucketOutliers.map((o) => (
+                          <p
+                            key={`${o.group}-${o.label}`}
+                            className="text-[11px] text-amber-600 dark:text-amber-400"
+                          >
+                            <span className="font-mono">{o.label}</span> ({o.group}) · +
+                            {o.delta.toFixed(2)}
+                          </p>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Diagnósticos */}
-              <div>
-                <h4 className="mb-1 text-sm font-medium">Diagnósticos do pipeline</h4>
-                <p className="mb-3 text-xs text-muted-foreground">
-                  Sinais de saúde dos cálculos internos. Útil pra detectar regressões silenciosas.
-                </p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="rounded-md border border-border p-3">
-                    <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <span>Clamp 0–10 no agregado IA (GPT)</span>
-                      <InfoTooltip
-                        label="Clamp GPT"
-                        text="% de obras cujo agregado GPT estourou [0,10] antes do clamp. Esse agregado, amplificado, vira a feature IA(n) da Nota Prevista. ↓ menor = melhor. Alto (>20%) significa que a amplificação está empurrando obras pra fora da escala."
-                      />
-                    </p>
-                    <p className="mt-1 font-mono text-base">
-                      {config.gpt_clamp_hit_rate != null
-                        ? `${(config.gpt_clamp_hit_rate * 100).toFixed(1)}%`
-                        : "—"}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {config.gpt_clamp_hit_rate != null && config.gpt_clamp_hit_rate > 0.2
-                        ? "Alto — bônus pode estar empurrando obras pra fora da escala"
-                        : "Abaixo de 20% = saudável"}
-                    </p>
-                  </div>
-                  <div className="rounded-md border border-border p-3">
-                    <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <span>Atributos negativos ativados</span>
-                      <InfoTooltip
-                        label="Atributos negativos"
-                        text="% de obras em que drama/tragédia ultrapassaram o threshold e penalizaram. Se ficar 0%, o atributo virou decorativo."
-                      />
-                    </p>
-                    <div className="mt-1 space-y-1">
-                      {config.negative_activation_rate && Object.keys(config.negative_activation_rate).length > 0 ? (
-                        Object.entries(config.negative_activation_rate)
-                          .sort(([a], [b]) => a.localeCompare(b))
-                          .map(([slug, rate]) => (
-                            <p key={slug} className="font-mono text-xs">
-                              {CRITERIA_LABEL[slug] ?? slug}:{" "}
-                              <span className="text-foreground">{(rate * 100).toFixed(1)}%</span>
-                            </p>
-                          ))
-                      ) : (
-                        <p className="text-xs text-muted-foreground">—</p>
-                      )}
-                    </div>
-                  </div>
+              {/* MAE por faixa (detalhado, in-sample) */}
+              <details className="group">
+                <summary className="cursor-pointer list-none text-[11px] text-muted-foreground transition-colors hover:text-foreground">
+                  <ChevronDown className="mr-1 inline h-3 w-3 transition-transform group-open:rotate-180" />
+                  Ver MAE por faixa (in-sample, aproximado)
+                </summary>
+                <div className="mt-3 space-y-3">
+                  <BucketBars
+                    title="Por quão típica é a obra (distância ao centróide do treino)"
+                    buckets={snapshot.buckets.byDistance}
+                  />
+                  <BucketBars title="Por número de votos na plataforma" buckets={snapshot.buckets.byVotes} />
                 </div>
-              </div>
+              </details>
             </div>
           )}
         </div>
@@ -474,6 +516,114 @@ function InfoTooltip({ text, label }: { text: string; label?: string }) {
   )
 }
 
+/**
+ * Medidor visual do erro: onde a Nota Prevista cai numa régua 0 → "ruim", com o
+ * palpite ingênuo (baseline) marcado como referência. Escala dinâmica pra caber
+ * ambos com folga. Verde (bom) → âmbar → vermelho (ruim).
+ */
+function MaeGauge({ primary, baseline }: { primary: number | null; baseline: number | null }) {
+  if (primary == null) return null
+  const max = Math.max(baseline ?? 0, primary, 1) * 1.18
+  const youPct = Math.min(100, (primary / max) * 100)
+  const basePct = baseline != null ? Math.min(100, (baseline / max) * 100) : null
+  return (
+    <div className="pt-1">
+      <div className="relative h-2 rounded-full bg-gradient-to-r from-emerald-500 via-amber-500 to-rose-500 opacity-90">
+        {basePct != null && (
+          <div
+            className="absolute top-1/2 h-3.5 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded bg-muted-foreground"
+            style={{ left: `${basePct}%` }}
+          />
+        )}
+        <div
+          className="absolute top-1/2 h-[18px] w-0.5 -translate-x-1/2 -translate-y-1/2 rounded bg-foreground"
+          style={{ left: `${youPct}%`, boxShadow: "0 0 0 3px hsl(var(--card))" }}
+        />
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-2.5 w-0.5 rounded bg-foreground" />
+          você <span className="font-mono">{fmt(primary, 2)}</span>
+        </span>
+        {baseline != null && (
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block h-2.5 w-0.5 rounded bg-muted-foreground" />
+            palpite ingênuo <span className="font-mono">{fmt(baseline, 2)}</span>
+          </span>
+        )}
+        <span className="ml-auto text-muted-foreground/60">← menor é melhor</span>
+      </div>
+    </div>
+  )
+}
+
+// Pipeline didático da nota: nome claro na tela, nome interno no tooltip.
+const PIPELINE_STEPS: Array<{ n: number; title: string; body: string; tip: string; final?: boolean }> = [
+  {
+    n: 1,
+    title: "Notas da IA",
+    body: "9 atributos viram uma nota de conteúdo.",
+    tip: "A IA dá 9 notas por obra (romance, ação, humor…). Elas viram uma nota única, ponderada e amplificada. (Interno: agregado IA(n) — soma ponderada dos category_scores.)",
+  },
+  {
+    n: 2,
+    title: "Mistura com o público",
+    body: "Pondera com a nota do público conforme os votos.",
+    tip: "A nota da IA é ponderada com a média das plataformas. Quanto mais votos a obra tem, mais o público pesa. (Interno: Nota.Calc — pooling bayesiano de pseudo-votos + penalidades.)",
+  },
+  {
+    n: 3,
+    title: "Ajuste ao seu gosto",
+    body: "Personaliza pela sua afinidade de tags e critérios.",
+    tip: "Um modelo aprende, do seu histórico, como afinidade de tags e critérios mexem na sua nota — e ajusta o resultado. (Interno: regressão Ridge, expected_score, misturada com a Nota.Calc.)",
+  },
+  {
+    n: 4,
+    title: "Nota Prevista",
+    body: "A nota que você provavelmente daria.",
+    tip: "O resultado final mostrado no app — a nota que o sistema estima que você daria. (Interno: expected_score.)",
+    final: true,
+  },
+]
+
+/** Faixa de 4 passos que torna o cálculo da Nota Prevista legível de uma olhada. */
+function ScorePipeline() {
+  return (
+    <div className="rounded-lg border border-border bg-card/50 p-4 space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold">Como a Nota Prevista é montada</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Do conteúdo avaliado até a nota final, em quatro passos. Cada passo tem um nome técnico —
+          passe o mouse pra vê-lo.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-x-2 gap-y-3 sm:grid-cols-4">
+        {PIPELINE_STEPS.map((s) => (
+          <div key={s.n} className="pr-2">
+            <span
+              className={cn(
+                "mb-2 inline-flex size-5 items-center justify-center rounded-md text-[11px] font-bold",
+                s.final ? "bg-amber-500/15 text-amber-500" : "bg-primary/15 text-primary",
+              )}
+            >
+              {s.n}
+            </span>
+            <h4 className="flex items-center gap-0.5 text-[12.5px] font-semibold">
+              <span>{s.title}</span>
+              <InfoTooltip label={s.title} text={s.tip} />
+            </h4>
+            <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{s.body}</p>
+          </div>
+        ))}
+      </div>
+      <p className="border-t border-border/60 pt-3 text-[11px] text-muted-foreground">
+        Seu <span className="font-medium text-foreground/80">ajuste de observação</span> por obra (±0,30)
+        é somado por fora, depois do passo 4 — por isso não aparece entre os pesos aprendidos.
+      </p>
+    </div>
+  )
+}
+
 // Grupos semânticos pra agregar a importância das features da Nota Prevista.
 // Como as features são padronizadas antes do fit, |coef| mede importância
 // relativa direta. A "fatia" de cada grupo é a soma dos |coef| dividida pelo
@@ -487,26 +637,26 @@ const RIDGE_FEATURE_GROUPS: Array<{
 }> = [
   {
     key: "ia",
-    label: "IA (9 atributos + agregado)",
+    label: "Conteúdo avaliado pela IA",
     tone: "primary",
     description:
-      "As 9 notas por critério atribuídas pela IA (romance, ação, humor…) mais o agregado não-linear IA(n). É o quanto a previsão se apoia no conteúdo avaliado pela IA.",
+      "As 9 notas por critério atribuídas pela IA (romance, ação, humor…) mais a nota combinada. É o quanto a previsão se apoia no conteúdo que a IA avaliou. (Internos: os 9 critérios + IA(n).)",
     belongs: (n) => (CRITERION_SLUGS as readonly string[]).includes(n) || n === "IA(n)",
   },
   {
     key: "platform",
-    label: "Plataforma (Nota.M, votos)",
+    label: "Opinião do público",
     tone: "neutral",
     description:
-      "Sinal social externo: a nota média das plataformas (Nota.M) e o volume de votos (LogVotos). Quanto a previsão se apoia na opinião agregada do público.",
+      "A nota média das plataformas e o volume de votos. Quanto a previsão se apoia na opinião agregada do público. (Internos: Nota.M, LogVotos.)",
     belongs: (n) => n === "Nota.M" || n === "LogVotos",
   },
   {
     key: "personal",
-    label: "Pessoal (afinidade de tags + critérios)",
+    label: "Seu gosto pessoal",
     tone: "personal",
     description:
-      "Seu gosto: sobreposição de tags com obras que você amou/evitou (LovedTagOverlap, AvoidedTagOverlap) e alinhamento de critérios (CriterionFitScore). Quanto a previsão é personalizada pra você. (As notas pós-leitura granulares só entram no modelo no plano Pago; em Free elas não contam aqui.)",
+      "Afinidade de tags com obras que você amou/evitou e alinhamento de critérios. Quanto a previsão é personalizada pra você. As notas pós-leitura granulares só entram no plano Pago. (Internos: LovedTagOverlap, AvoidedTagOverlap, CriterionFitScore.)",
     belongs: (n) =>
       n === "MeanPostScore" ||
       n === "LovedTagOverlap" ||
@@ -518,10 +668,10 @@ const RIDGE_FEATURE_GROUPS: Array<{
   },
   {
     key: "other",
-    label: "Outros (capítulos, sinopse, status, ano, origem)",
+    label: "Contexto da obra",
     tone: "muted",
     description:
-      "Metadados estruturais: capítulos (Cps.N), qualidade da sinopse (SinopseScore), status de publicação, idade/duração da obra (ReleaseAge, RunLength) e origem (manhwa/mangá/manhua). Sinal de contexto que não cai nos grupos acima.",
+      "Metadados estruturais: capítulos, qualidade da sinopse, status de publicação, idade/duração e origem (manhwa/mangá/manhua). Sinal de contexto que não cai nos grupos acima. (Internos: Cps.N, SinopseScore, Status_*, ReleaseAge, RunLength, Origin_*.)",
     belongs: () => true, // catch-all (último — não-IA, não-plataforma, não-pessoal)
   },
 ]
@@ -543,16 +693,16 @@ function toneClasses(tone: "primary" | "muted" | "personal" | "neutral"): string
 // Os 9 critérios IA reusam CRITERIA_INFO e os post-scores reusam os labels
 // pós-leitura; o restante é mapeado aqui.
 const FEATURE_LABELS: Record<string, string> = {
-  "IA(n)": "Agregado IA (não-linear)",
+  "IA(n)": "Nota da IA (combinada)",
   "Nota.M": "Média das plataformas",
-  LogVotos: "Volume de votos (log)",
-  "Cps.N": "Capítulos (normalizado)",
+  LogVotos: "Volume de votos",
+  "Cps.N": "Capítulos",
   SinopseScore: "Qualidade da sinopse",
-  LovedTagOverlap: "Afinidade c/ tags que você amou",
-  AvoidedTagOverlap: "Sobreposição c/ tags que você evita",
+  LovedTagOverlap: "Tags que você amou",
+  AvoidedTagOverlap: "Tags que você evita",
   CriterionFitScore: "Alinhamento de critérios",
-  ReleaseAge: "Idade da obra (anos)",
-  RunLength: "Duração (anos)",
+  ReleaseAge: "Idade da obra",
+  RunLength: "Duração",
   ObsAdjustment: "Ajuste de observação",
   MeanPostScore: "Nota pós-leitura (média)",
 }
@@ -600,6 +750,8 @@ function RidgeFeatureImportance({
 }) {
   const [showLegend, setShowLegend] = useState(false)
   const { featureNames, coefficients } = ridge
+  // Maior |peso|: escala das barras de magnitude na lista avançada.
+  const maxAbs = Math.max(...coefficients.map((c) => Math.abs(c)), 1e-9)
 
   // Soma |coef| por grupo. Catch-all "other" só conta features que ainda não
   // foram capturadas pelos grupos anteriores.
@@ -639,16 +791,15 @@ function RidgeFeatureImportance({
         <Layers className="h-3 w-3" />
         <span>{label}</span>
         <InfoTooltip
-          label="Feature importance"
-          text="Soma dos |coeficientes| do Ridge por grupo de feature, normalizada. Como as features são padronizadas antes do fit, isso mede importância relativa direta. Não é exatamente 'variância explicada', mas é a aproximação prática mais comum."
+          label="Peso de cada sinal"
+          text="Quanto cada família de sinais pesa na previsão. Como os sinais são padronizados antes do ajuste, o tamanho do peso mede a importância relativa direta. (Interno: soma dos |coeficientes| do Ridge por grupo, normalizada.)"
         />
       </p>
 
       <p className="text-[11px] leading-relaxed text-muted-foreground/80">
-        A Nota Prevista é prevista por um modelo (Ridge) que combina vários sinais. As fatias abaixo
-        mostram <span className="font-medium text-foreground">de onde vem o peso</span> dessa previsão —
-        quanto cada família de sinais contribui pro resultado. Passe o mouse em cada grupo pra ver o que
-        ele inclui.
+        A Nota Prevista combina quatro famílias de sinais. As fatias abaixo mostram{" "}
+        <span className="font-medium text-foreground">quanto cada uma influencia</span> o resultado.
+        Passe o mouse em cada grupo pra ver o que ele inclui.
       </p>
 
       {/* Barra empilhada */}
@@ -690,25 +841,56 @@ function RidgeFeatureImportance({
         <ChevronDown
           className={cn("h-3 w-3 transition-transform", showLegend && "rotate-180")}
         />
-        {showLegend ? "Ocultar pesos individuais" : "Ver pesos por feature"}
+        {showLegend ? "Ocultar pesos" : "Ver todos os pesos, sinal a sinal (avançado)"}
       </button>
 
       {showLegend && (
-        <ul className="space-y-0.5 border-t border-border/40 pt-2 text-[11px]">
-          {featureNames
-            .map((name, i) => ({ name, coef: coefficients[i] ?? 0 }))
-            .sort((a, b) => Math.abs(b.coef) - Math.abs(a.coef))
-            .map(({ name, coef }) => (
-              <li key={name} className="flex items-baseline gap-2">
-                <span className="w-16 shrink-0 font-mono text-foreground">
-                  {coef >= 0 ? "+" : ""}
-                  {coef.toFixed(3)}
-                </span>
-                <span className="text-muted-foreground">{featureLabel(name)}</span>
-                <span className="font-mono text-[11px] text-muted-foreground/50">{name}</span>
-              </li>
-            ))}
-        </ul>
+        <div className="space-y-2 border-t border-border/40 pt-2">
+          {/* Legenda logo abaixo do controle de expandir: ordem + sinal +/− */}
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground/70">
+            <span className="inline-flex items-center gap-1">
+              <ArrowDown className="h-3 w-3" />
+              do maior pro menor peso
+            </span>
+            <span className="flex gap-3">
+              <span className="inline-flex items-center gap-1">
+                <span className="font-semibold text-emerald-500">+</span> pra cima
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="font-semibold text-rose-500">−</span> pra baixo
+              </span>
+            </span>
+          </div>
+          <ul className="columns-1 gap-x-6 text-[11px] sm:columns-2">
+            {featureNames
+              .map((name, i) => ({ name, coef: coefficients[i] ?? 0 }))
+              .sort((a, b) => Math.abs(b.coef) - Math.abs(a.coef))
+              .map(({ name, coef }) => {
+                const pos = coef >= 0
+                const barPct = Math.max(4, (Math.abs(coef) / maxAbs) * 100)
+                return (
+                  <li key={name} className="flex break-inside-avoid items-center gap-2 py-0.5">
+                    <span
+                      className={cn(
+                        "w-12 shrink-0 text-right font-mono tabular-nums",
+                        pos ? "text-emerald-500" : "text-rose-500",
+                      )}
+                    >
+                      {pos ? "+" : "−"}
+                      {Math.abs(coef).toFixed(3)}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-foreground/80">{featureLabel(name)}</span>
+                    <span className="h-1 w-10 shrink-0 overflow-hidden rounded-full bg-muted/50">
+                      <span
+                        className={cn("block h-full rounded-full", pos ? "bg-emerald-500" : "bg-rose-500")}
+                        style={{ width: `${barPct}%` }}
+                      />
+                    </span>
+                  </li>
+                )
+              })}
+          </ul>
+        </div>
       )}
     </div>
   )
@@ -742,73 +924,6 @@ function findOutliers(overallMae: number | null, buckets: BucketBreakdown): Flag
     ...scan("distância ao centróide", buckets.byDistance),
     ...scan("nº de votos", buckets.byVotes),
   ]
-}
-
-function BucketDiagnostic({
-  overallMae,
-  buckets,
-}: {
-  overallMae: number | null
-  buckets: BucketBreakdown
-}) {
-  const outliers = findOutliers(overallMae, buckets)
-  const uniform = outliers.length === 0
-
-  return (
-    <div className="rounded-lg border border-border bg-card/50 p-4 space-y-3">
-      <div>
-        <h3 className="flex items-center gap-1 text-sm font-semibold">
-          <span>Faixas fora do padrão</span>
-          <InfoTooltip
-            label="Faixas fora do padrão"
-            text={`Procura faixas (por distância ao centróide ou nº de votos) onde o modelo erra notavelmente mais que a média — só sinaliza com ≥ ${OUTLIER_MIN_N} obras na faixa e MAE ≥ média + ${OUTLIER_DELTA.toFixed(2)}. Sem isso, a diferença é ruído amostral. MAE por faixa é in-sample (otimista) — serve só pra comparação relativa entre faixas, não como precisão absoluta.`}
-          />
-        </h3>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Detecta perfis de obra onde a Nota Prevista é especialmente fraca e justificaria
-          tratamento (ex.: peso menor por confiança). A precisão honesta global é a MAE CV da headline.
-        </p>
-      </div>
-
-      {uniform ? (
-        <p className="flex items-start gap-2 rounded-md bg-emerald-500/5 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400">
-          <span>✓</span>
-          <span>
-            Nenhuma faixa fora do padrão. O modelo erra de forma uniforme nas faixas com amostra
-            suficiente — não há região que justifique tratamento especial. Pra baixar o erro global, a
-            alavanca é mais obras com nota pessoal, não ajuste por faixa.
-          </span>
-        </p>
-      ) : (
-        <ul className="space-y-1">
-          {outliers.map((o) => (
-            <li
-              key={`${o.group}-${o.label}`}
-              className="flex items-center gap-2 rounded-md bg-amber-500/5 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400"
-            >
-              <span>⚠</span>
-              <span>
-                <span className="font-mono">{o.label}</span> ({o.group}) erra{" "}
-                <span className="font-mono">+{o.delta.toFixed(2)}</span> acima da média — MAE{" "}
-                <span className="font-mono">{o.mae.toFixed(2)}</span> em {o.count} obras.
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <details className="group">
-        <summary className="cursor-pointer list-none text-[11px] text-muted-foreground transition-colors hover:text-foreground">
-          <ChevronDown className="mr-1 inline h-3 w-3 transition-transform group-open:rotate-180" />
-          Ver MAE por faixa (in-sample, aproximado)
-        </summary>
-        <div className="mt-3 space-y-3">
-          <BucketBars title="Por distância ao centróide do treino" buckets={buckets.byDistance} />
-          <BucketBars title="Por número de votos na plataforma" buckets={buckets.byVotes} />
-        </div>
-      </details>
-    </div>
-  )
 }
 
 function BucketBars({
@@ -853,51 +968,3 @@ function BucketBars({
   )
 }
 
-interface MetricCardProps {
-  label: string
-  live: number | null
-  stored: number | null
-  mismatch: boolean
-  digits?: number
-  note?: string
-  tooltip?: string
-  extra?: {
-    label: string
-    value: number | null | undefined
-    digits?: number
-    tooltip?: string
-  }
-}
-
-function MetricCard({ label, live, stored, mismatch, digits = 4, note, tooltip, extra }: MetricCardProps) {
-  return (
-    <div
-      className={`rounded-md border p-3 ${
-        mismatch ? "border-amber-500/40 bg-amber-500/5" : "border-border"
-      }`}
-    >
-      <p className="flex items-center gap-1 text-xs text-muted-foreground">
-        <span>{label}</span>
-        {tooltip && <InfoTooltip text={tooltip} label={label} />}
-        {note && <span className="ml-1 text-[11px] opacity-70">{note}</span>}
-      </p>
-      <p className="mt-1 font-mono text-base">{fmt(live, digits)}</p>
-      {stored != null && (
-        <p className="text-[11px] text-muted-foreground">
-          Salvo: <span className="font-mono">{fmt(stored, digits)}</span>
-          {mismatch && (
-            <span className="ml-1 text-amber-500">• desatualizado</span>
-          )}
-        </p>
-      )}
-      {extra && (
-        <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
-          <span>
-            {extra.label}: <span className="font-mono">{fmt(extra.value ?? null, extra.digits ?? 4)}</span>
-          </span>
-          {extra.tooltip && <InfoTooltip text={extra.tooltip} label={`${label} ${extra.label}`} />}
-        </p>
-      )}
-    </div>
-  )
-}
