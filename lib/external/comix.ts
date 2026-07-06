@@ -498,6 +498,37 @@ function stripHtmlToText(value: string): string {
  *  3. GET /threads/{threadId}/comments (paginado por cursor) → items[].contentHtml
  * Threads via `fetchComixThreadJson` (plain fetch token-free, FlareSolverr só fallback CF).
  */
+/**
+ * Achata os textos de uma lista de comentários do Comix + suas RESPOSTAS, que
+ * vêm ANINHADAS inline no mesmo payload (`item.replies[]`, recursivo — sem fetch
+ * extra). Muitas vezes o comentário de topo é fraco mas uma resposta traz o
+ * insight. Aplica os mesmos filtros (visível, não banido) e trunca em 900 chars.
+ * Limita profundidade e total pra não estourar em threads virais (respostas
+ * profundas ficam de fora do payload de qualquer forma — vêm por cursor próprio).
+ */
+function collectComixCommentTexts(
+  items: unknown[],
+  out: string[],
+  opts: { maxDepth: number; cap: number },
+  depth = 0,
+): void {
+  for (const item of items) {
+    if (out.length >= opts.cap) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const it = item as any
+    if (it?.isBanned || it?.isShadowBanned) continue
+    if (typeof it?.status === "string" && it.status !== "visible") continue
+    if (typeof it?.contentHtml === "string") {
+      // Trunca em 900 chars como as outras fontes pra não inflar tokens.
+      const text = stripHtmlToText(it.contentHtml).slice(0, 900)
+      if (text) out.push(text)
+    }
+    if (depth < opts.maxDepth && Array.isArray(it?.replies) && it.replies.length > 0) {
+      collectComixCommentTexts(it.replies, out, opts, depth + 1)
+    }
+  }
+}
+
 export async function fetchComixReviews(hid: string): Promise<string[]> {
   // Token-free: o id interno vem do SSR da página; os endpoints /threads/* não exigem
   // o token de assinatura `_=` (só /manga* exige).
@@ -514,29 +545,18 @@ export async function fetchComixReviews(hid: string): Promise<string[]> {
   if (typeof threadId !== "number" || threadId <= 0) return []
 
   const texts: string[] = []
+  const CAP = 60 // topo + respostas aninhadas; o seletor a jusante corta por fonte
   let cursor: string | undefined
-  // 2 páginas (~44 comentários de topo) bastam: o seletor a jusante
-  // (`selectReviewsForEvaluation`) corta por fonte de qualquer forma.
+  // 2 páginas (~44 comentários de topo) + as respostas aninhadas de cada um.
   for (let page = 0; page < 2; page++) {
     const path = `/threads/${threadId}/comments${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
     const data = await fetchComixThreadJson(path)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = (data as any)?.result
     const items: unknown[] = Array.isArray(result?.items) ? result.items : []
-    for (const item of items) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const it = item as any
-      if (it?.isBanned || it?.isShadowBanned) continue
-      if (typeof it?.status === "string" && it.status !== "visible") continue
-      if (typeof it?.contentHtml === "string") {
-        // Trunca em 900 chars como as outras fontes (mangaupdates/comick/…) pra
-        // não inflar tokens nem enviesar o ranking por textLength a jusante.
-        const text = stripHtmlToText(it.contentHtml).slice(0, 900)
-        if (text) texts.push(text)
-      }
-    }
+    collectComixCommentTexts(items, texts, { maxDepth: 3, cap: CAP })
     cursor = typeof result?.cursor === "string" && result.cursor ? result.cursor : undefined
-    if (!cursor || items.length === 0) break
+    if (!cursor || items.length === 0 || texts.length >= CAP) break
   }
   return texts
 }
