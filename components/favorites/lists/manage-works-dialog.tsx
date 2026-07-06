@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Heart, Search } from "lucide-react"
+import { Check, Heart, Search } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Checkbox } from "@/components/ui/checkbox"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn } from "@/lib/utils"
 import { addWorksToList, removeWorksFromList } from "@/server/actions/lists"
@@ -135,7 +134,17 @@ export function ManageWorksDialog({
                         checked && "bg-accent/40",
                       )}
                     >
-                      <Checkbox checked={checked} className="pointer-events-none" />
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "grid size-4 shrink-0 place-items-center rounded-[4px] border transition-colors",
+                          checked
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-input",
+                        )}
+                      >
+                        {checked && <Check className="size-3" />}
+                      </span>
                       <CoverImage
                         url={w.coverUrl}
                         alt={w.title}
