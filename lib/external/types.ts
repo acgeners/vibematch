@@ -15,6 +15,7 @@ export type ExternalSourceId =
   | "mangadex"
   | "kitsu"
   | "anilist"
+  | "mangago"
   | "outros"
 
 export interface ExternalSearchResult {
@@ -75,6 +76,7 @@ export interface MergedCandidate {
   matchScore?: number
   comickHid?: string
   comixHid?: string
+  mangagoSlug?: string
   sourceResults?: ExternalSearchResult[]
   sourceCandidates?: ExternalSourceCandidateOption[]
   /** Sources whose IDs came from another source's canonical cross-link (e.g. MangaDex `attributes.links`). At hydrate time we skip the title/synopsis acceptance filter for these — the cross-link is the trust signal. */
