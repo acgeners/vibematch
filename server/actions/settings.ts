@@ -11,6 +11,7 @@ import {
   type BucketBreakdown,
   type CalibrationDiff,
 } from "@/lib/calculations/calibration"
+import type { CriterionScorePresets } from "@/types/domain"
 
 const execFileAsync = promisify(execFile)
 
@@ -120,6 +121,8 @@ export interface RankingPreferencesUpdate {
   min_calc_score: number | null
   min_predicted_score: number | null
   min_final_score: number | null
+  /** Atalhos ≥ da aba Notas do ranking (migration 132). Ver CriterionScorePresets. */
+  criterion_score_presets: CriterionScorePresets
 }
 
 export interface AiEvalPreferencesUpdate {
@@ -480,6 +483,7 @@ export async function updateRankingPreferences(update: RankingPreferencesUpdate)
       min_calc_score: update.min_calc_score,
       min_predicted_score: update.min_predicted_score,
       min_final_score: update.min_final_score,
+      criterion_score_presets: update.criterion_score_presets,
       updated_at: new Date().toISOString(),
     })
     .eq("id", existing.id)
@@ -487,6 +491,7 @@ export async function updateRankingPreferences(update: RankingPreferencesUpdate)
   if (error) return { error: error.message }
 
   revalidatePath("/settings")
+  revalidatePath("/preferencias")
   revalidatePath("/ranking")
   // getPreferences (app/ranking/page.tsx) é um unstable_cache que revalidatePath
   // NÃO derruba (entradas de unstable_cache só caem por TTL ou tag). Sem isto a

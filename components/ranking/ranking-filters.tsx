@@ -18,7 +18,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { LABELS } from "@/lib/constants/ui-labels"
-import { CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
+import { CRITERION_SLUGS, SYNOPSIS_QUALITIES, DEFAULT_CRITERION_SCORE_PRESETS } from "@/types/domain"
+import type { CriterionScorePresets } from "@/types/domain"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { saveFilterPreset, renameFilterPreset, deleteFilterPreset } from "@/server/actions/filter-presets"
 
@@ -224,6 +225,8 @@ interface RankingFiltersProps {
   savedPresets?: SavedFilterPreset[]
   /** Largura de tier padrão (formula_config.tier_band_width) — controle movido pra dentro do filtro. */
   defaultBand?: number
+  /** Atalhos ≥ configuráveis da aba Notas (migration 132). Ausente = default [5,6,7,8]. */
+  criterionPresets?: CriterionScorePresets
 }
 
 interface FilterSectionProps {
@@ -388,17 +391,21 @@ type ScoreDef = {
   fullWidth?: boolean
 }
 
-const CRITERION_SCORE_DEFS: ScoreDef[] = CRITERION_SLUGS.map((slug) => ({
-  key: slug,
-  emoji: CRITERIA_INFO[slug]?.emoji ?? "",
-  label: CRITERION_LABELS[slug] ?? slug,
-  minKey: `min_${slug}`,
-  maxKey: `max_${slug}`,
-  min: 0,
-  max: 10,
-  step: 1,
-  presets: [5, 6, 7, 8],
-}))
+// Presets ≥ configuráveis (migration 132): overrides[slug] ?? default. As demais
+// páginas (ex: /favorites) omitem a prop → cai no default hardcoded [5,6,7,8].
+function buildCriterionScoreDefs(presets: CriterionScorePresets): ScoreDef[] {
+  return CRITERION_SLUGS.map((slug) => ({
+    key: slug,
+    emoji: CRITERIA_INFO[slug]?.emoji ?? "",
+    label: CRITERION_LABELS[slug] ?? slug,
+    minKey: `min_${slug}`,
+    maxKey: `max_${slug}`,
+    min: 0,
+    max: 10,
+    step: 1,
+    presets: presets.overrides[slug] ?? presets.default,
+  }))
+}
 
 const GENERAL_SCORE_DEFS: ScoreDef[] = [
   { key: "expected", emoji: "🎯", label: LABELS.expected_score.full, minKey: "min_expected", maxKey: "max_expected", min: 0, max: 10, step: 0.5, presets: [6, 7, 7.5, 8] },
@@ -1590,8 +1597,13 @@ export function RankingFilters({
   defaultSort,
   savedPresets = [],
   defaultBand = 0.5,
+  criterionPresets,
 }: RankingFiltersProps) {
   const router = useRouter()
+  const criterionScoreDefs = useMemo(
+    () => buildCriterionScoreDefs(criterionPresets ?? DEFAULT_CRITERION_SCORE_PRESETS),
+    [criterionPresets]
+  )
   const appliedSearchParams = useSearchParams()
   const appliedSearchString = appliedSearchParams.toString()
   const [draftSearch, setDraftSearch] = useState(appliedSearchString)
@@ -2247,7 +2259,7 @@ export function RankingFilters({
           <div className="grid gap-3 xl:grid-cols-2">
             <ScorePillGroup
               title="Notas por critério"
-              defs={CRITERION_SCORE_DEFS}
+              defs={criterionScoreDefs}
               cols={2}
               searchParams={searchParams}
               updateParams={updateParams}
