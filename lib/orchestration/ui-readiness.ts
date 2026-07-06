@@ -70,6 +70,9 @@ const DATA_KEY_LABEL: Record<DataKey, string> = {
   category_scores_ai: "avaliação IA (9 atributos)",
   calculated_scores: "nota prevista",
   interest_prediction: "previsão de interesse",
+  work_embedding: "embedding",
+  alignment_score: "veredito IA",
+  comix_hid: "hid do Comix",
 }
 
 function labelFor(dk: DataKey | null): string {

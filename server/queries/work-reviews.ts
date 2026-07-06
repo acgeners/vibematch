@@ -42,6 +42,24 @@ export interface WorkReviewsSnapshot {
   digestVersion: string | null
 }
 
+/**
+ * Contagem barata (head+exact) de reviews externas scrapadas de uma obra, sem
+ * puxar as linhas. Usada no checkpoint da cascata generate_all pra o gate de
+ * "sem review". Não inclui reviews manuais (work_external_reviews_manual).
+ */
+export async function countWorkReviews(workId: string): Promise<number> {
+  const supabase = createAdminClient()
+  const { count, error } = await supabase
+    .from("work_reviews")
+    .select("work_id", { count: "exact", head: true })
+    .eq("work_id", workId)
+  if (error) {
+    console.warn(`[countWorkReviews] fallback 0: ${error.message}`)
+    return 0
+  }
+  return count ?? 0
+}
+
 export async function getWorkReviews(workId: string): Promise<WorkReviewsSnapshot> {
   const supabase = createAdminClient()
 

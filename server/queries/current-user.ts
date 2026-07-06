@@ -134,6 +134,25 @@ export async function getInterestShadowOnCreate(admin?: AdminClient): Promise<bo
   return (data?.interest_shadow_on_create as boolean | undefined) ?? false
 }
 
+// Toggle "gerar TODOS os dados na criação" — agenda a cascata generate_all_work_data
+// (migration 130). NÃO cacheado. Tolerante: coluna ausente ⇒ default `false`
+// (opt-in: a cascata é ~$0,13/obra + gate de fontes lento).
+export async function getGenerateAllOnCreate(admin?: AdminClient): Promise<boolean> {
+  const supabase = admin ?? createAdminClient()
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("generate_all_on_create")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.warn(`[getGenerateAllOnCreate] fallback false (coluna indisponível): ${error.message}`)
+    return false
+  }
+  return (data?.generate_all_on_create as boolean | undefined) ?? false
+}
+
 export interface ReviewSynthesisToggles {
   summaryEnabled: boolean
   digestEnabled: boolean

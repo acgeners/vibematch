@@ -7,6 +7,8 @@ import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-wat
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { SynopsisQualitySuggestion } from "@/components/titles/synopsis-quality-suggestion"
+import { GenerateAllBanner } from "@/components/titles/generate-all-banner"
+import type { CascadeStatus } from "@/lib/generate-all/types"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
 import { TagsExpandAll } from "@/components/titles/tags-expand-all"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug } from "@/server/queries/works"
@@ -896,6 +898,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           "Calibração de atributos" (PredictionHealthCard). */}
       {/* "Atualizar avaliação IA" sozinho numa linha. O Consultor IA (Deep Dive)
           fica logo abaixo das notas calculadas/externas, antes das "Notas por critério". */}
+      <GenerateAllBanner
+        workId={work.id}
+        workTitle={work.title}
+        initialStatus={(work as { cascade_status?: CascadeStatus }).cascade_status ?? "idle"}
+      />
       <AiEvaluationButton
         workId={work.id}
         workTitle={work.title}

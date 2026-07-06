@@ -29,6 +29,8 @@ export type ActionName =
   | "recalculate_scores"
   | "run_alignment"
   | "run_deep_dive"
+  | "generate_embedding"
+  | "generate_all_work_data"
 
 /** Custo da ação. Governa se ela pode ser encadeada sem confirmação (ver cost.ts). */
 export type CostTier = "free" | "micro" | "metered" | "manual"
@@ -56,6 +58,9 @@ export type DataKey =
   | "category_scores_ai"
   | "calculated_scores"
   | "interest_prediction"
+  | "work_embedding"
+  | "alignment_score"
+  | "comix_hid"
 
 // ---- Contrato --------------------------------------------------------------
 
@@ -250,8 +255,10 @@ export const ACTION_CONTRACTS: Record<ActionName, ActionContract> = {
     action: "run_alignment",
     costTier: "metered",
     manual: true,
-    produces: null,
+    produces: "alignment_score",
     inputs: [],
+    // Sonnet, re-rank de 1 obra. max_tokens ~800.
+    estimate: { model: SONNET, base: tokens(3000, 800) },
     manualInstruction: "O Veredito IA (re-rank) é acionado manualmente no ranking.",
   },
   run_deep_dive: {
@@ -263,6 +270,31 @@ export const ACTION_CONTRACTS: Record<ActionName, ActionContract> = {
       { dataKey: "review_digest", requirement: "optional_with_fallback", fallback: "usa review_summary ou nada" },
     ],
     manualInstruction: "O Deep Dive é acionado manualmente na página da obra.",
+  },
+  generate_embedding: {
+    action: "generate_embedding",
+    // OpenAI text-embedding-3-small (~$0,00003/obra). Não é Claude ⇒ sem
+    // `estimate` (custo 0 no gate). Depende de sinopse+tags+scores+digest, então
+    // roda por ÚLTIMO na cascata (o hash reflete o que estiver presente).
+    costTier: "free",
+    manual: false,
+    produces: "work_embedding",
+    inputs: [
+      { dataKey: "canonical_synopsis", requirement: "optional_with_fallback", fallback: "usa sinopse bruta" },
+      { dataKey: "tags", requirement: "optional_with_fallback", fallback: "embedding sem tags" },
+      { dataKey: "category_scores_ai", requirement: "optional_with_fallback", fallback: "sem critérios no texto" },
+      { dataKey: "review_digest", requirement: "optional_with_fallback", fallback: "sem contexto de review" },
+    ],
+  },
+  generate_all_work_data: {
+    // Entry-point da cascata IMPERATIVA (server/actions/generate-all.ts). NÃO é
+    // encadeada por buildPlan — existe só como rótulo/dedup do job guarda-chuva.
+    // A ordem dos passos vive no laço imperativo, não aqui.
+    action: "generate_all_work_data",
+    costTier: "metered",
+    manual: false,
+    produces: null,
+    inputs: [],
   },
 }
 
@@ -286,6 +318,9 @@ export const DATA_KEY_PRODUCER: Record<DataKey, ActionName | null> = {
   category_scores_ai: "run_ai_evaluation",
   calculated_scores: "recalculate_scores",
   interest_prediction: "predict_interest_potential",
+  work_embedding: "generate_embedding",
+  alignment_score: "run_alignment",
+  comix_hid: null,
 }
 
 /** Instruções de bloqueio manual por data key (quando não há `manualInstruction` na ação). */
@@ -295,6 +330,7 @@ export const MANUAL_DATA_INSTRUCTIONS: Partial<Record<DataKey, string>> = {
   external_ids_accepted: "Atribua fontes externas aceitas (Revalidar fontes / Buscar dados).",
   category_scores_ai:
     "Rode a Avaliação IA completa (manual) em /ai-evaluation ou no botão da página da obra.",
+  comix_hid: "Cole o hid do Comix na página da obra (Revalidar fontes).",
 }
 
 export function getContract(action: ActionName): ActionContract {

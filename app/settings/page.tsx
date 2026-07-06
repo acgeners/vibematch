@@ -25,6 +25,7 @@ import { ReviewDigestEnabledToggle } from "@/components/settings/review-digest-e
 import { ScoreWeightsAutoToggle } from "@/components/settings/score-weights-auto-toggle"
 import { TagInferenceOnCreateToggle } from "@/components/settings/tag-inference-on-create-toggle"
 import { InterestShadowOnCreateToggle } from "@/components/settings/interest-shadow-on-create-toggle"
+import { GenerateAllOnCreateToggle } from "@/components/settings/generate-all-on-create-toggle"
 import {
   TagConsolidationTool,
   type TagConsolidationParams,
@@ -38,6 +39,7 @@ import {
   getReviewSynthesisToggles,
   getTagInferenceOnCreate,
   getInterestShadowOnCreate,
+  getGenerateAllOnCreate,
 } from "@/server/queries/current-user"
 import { countPendingSuggestions } from "@/server/queries/calibration"
 import {
@@ -380,6 +382,7 @@ async function ItemBody({
         tagInferenceOnCreate,
         reviewToggles,
         interestShadowOnCreate,
+        generateAllOnCreate,
         weightsConfigRes,
       ] = await Promise.all([
         getAiEvalOnCreate(),
@@ -387,6 +390,7 @@ async function ItemBody({
         getTagInferenceOnCreate(supabase),
         getReviewSynthesisToggles(supabase),
         getInterestShadowOnCreate(supabase),
+        getGenerateAllOnCreate(supabase),
         supabase
           .from("formula_config")
           .select("score_weights_auto")
@@ -399,6 +403,13 @@ async function ItemBody({
       return (
         <div className="divide-y divide-border/60">
           <div className="pb-4">
+            <p className="mb-1.5 text-sm font-semibold text-foreground">
+              Gerar todos os dados na criação{" "}
+              <span className="text-xs font-normal text-muted-foreground">(cascata · gate de fontes · ~$0,13)</span>
+            </p>
+            <GenerateAllOnCreateToggle initialEnabled={generateAllOnCreate} />
+          </div>
+          <div className="py-4">
             <p className="mb-1.5 text-sm font-semibold text-foreground">Avaliação IA</p>
             <AiEvalOnCreateToggle initialEnabled={aiEvalOnCreate} />
           </div>

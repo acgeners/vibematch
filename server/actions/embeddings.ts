@@ -88,27 +88,29 @@ function buildWorkFromRow(row: Record<string, unknown>): WorkForEmbedding {
 
 type Candidate = WorkForEmbedding & { hash: string; text: string }
 
-async function loadEmbeddingCandidates(): Promise<{
+async function loadEmbeddingCandidates(workId?: string): Promise<{
   totalWorks: number
   skipped: number
   candidates: Candidate[]
 }> {
   const supabase = createAdminClient()
 
+  const worksBase = supabase
+    .from("works")
+    .select(
+      `id, title, review_digest, review_summary,
+       category_scores(criterion_slug, score),
+       work_tags(tags(name, tag_group_id)),
+       work_synopses(text, is_primary, position)`,
+    )
+    .eq("is_archived", false)
+  const existingBase = supabase
+    .from("work_embeddings")
+    .select("work_id, input_hash, model_name")
+
   const [worksRes, existingRes] = await Promise.all([
-    supabase
-      .from("works")
-      .select(
-        `id, title, review_digest, review_summary,
-         category_scores(criterion_slug, score),
-         work_tags(tags(name, tag_group_id)),
-         work_synopses(text, is_primary, position)`,
-      )
-      .eq("is_archived", false)
-      .limit(QUERY_LIMIT),
-    supabase
-      .from("work_embeddings")
-      .select("work_id, input_hash, model_name"),
+    workId ? worksBase.eq("id", workId) : worksBase.limit(QUERY_LIMIT),
+    workId ? existingBase.eq("work_id", workId) : existingBase,
   ])
 
   if (worksRes.error) throw new Error(worksRes.error.message)
@@ -175,11 +177,31 @@ export async function refreshEmbeddings(): Promise<RefreshEmbeddingsResult> {
     }
   }
 
+  const { refreshed, failed, totalTokens } = await embedAndUpsert(supabase, candidates)
+
+  return {
+    totalWorks,
+    skipped,
+    refreshed,
+    tokensUsed: totalTokens,
+    estimatedCostUsd: (totalTokens / 1_000_000) * 0.02,
+    failed,
+  }
+}
+
+/**
+ * Núcleo compartilhado: embeda os candidatos em chunks (alinhados ao batch da
+ * API pra erros granulares) e faz upsert em work_embeddings (onConflict work_id).
+ * Usado por refreshEmbeddings (catálogo) e refreshEmbeddingForWork (1 obra).
+ */
+async function embedAndUpsert(
+  supabase: ReturnType<typeof createAdminClient>,
+  candidates: Candidate[],
+): Promise<{ refreshed: number; failed: number; totalTokens: number }> {
   let refreshed = 0
   let failed = 0
   let totalTokens = 0
 
-  // Processa em chunks alinhados com o batch da API pra erros mais granulares
   for (let i = 0; i < candidates.length; i += MAX_BATCH_SIZE) {
     const chunk = candidates.slice(i, i + MAX_BATCH_SIZE)
     try {
@@ -213,12 +235,35 @@ export async function refreshEmbeddings(): Promise<RefreshEmbeddingsResult> {
     }
   }
 
+  return { refreshed, failed, totalTokens }
+}
+
+export interface RefreshEmbeddingForWorkResult {
+  /** true se re-embedou; false se o input_hash não mudou (no-op). */
+  refreshed: boolean
+  tokensUsed: number
+  estimatedCostUsd: number
+  failed: boolean
+}
+
+/**
+ * Escopa o refresh de embedding a UMA obra (passo final da cascata generate_all).
+ * Reusa loadEmbeddingCandidates(workId): se o input_hash não mudou, é no-op barato
+ * (o embedding depende de sinopse+tags+scores+digest, então roda por último).
+ */
+export async function refreshEmbeddingForWork(
+  workId: string,
+): Promise<RefreshEmbeddingForWorkResult> {
+  const supabase = createAdminClient()
+  const { candidates } = await loadEmbeddingCandidates(workId)
+  if (candidates.length === 0) {
+    return { refreshed: false, tokensUsed: 0, estimatedCostUsd: 0, failed: false }
+  }
+  const { refreshed, failed, totalTokens } = await embedAndUpsert(supabase, candidates)
   return {
-    totalWorks,
-    skipped,
-    refreshed,
+    refreshed: refreshed > 0,
     tokensUsed: totalTokens,
     estimatedCostUsd: (totalTokens / 1_000_000) * 0.02,
-    failed,
+    failed: failed > 0,
   }
 }
