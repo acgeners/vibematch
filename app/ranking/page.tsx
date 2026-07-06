@@ -21,9 +21,9 @@ import { SurpriseMeButton } from "@/components/ranking/surprise-me-button"
 import { MOOD_PRESETS_BY_ID } from "@/lib/constants/mood-presets"
 import { RankingAiMenu } from "@/components/ranking/ranking-ai-menu"
 import { FavoritesIconLink } from "@/components/ranking/favorites-icon-link"
-import { CRITERION_SLUGS } from "@/types/domain"
+import { CRITERION_SLUGS, DEFAULT_CRITERION_SCORE_PRESETS } from "@/types/domain"
 import { createAdminClient } from "@/lib/supabase/admin"
-import type { FormulaConfig } from "@/types/domain"
+import type { FormulaConfig, CriterionScorePresets } from "@/types/domain"
 import { unstable_cache } from "next/cache"
 
 interface RankingPageProps {
@@ -35,14 +35,21 @@ const getPreferences = unstable_cache(async (): Promise<{
   minFit: number | null
   minAlign: number | null
   minFinal: number | null
+  criterionPresets: CriterionScorePresets
 }> => {
   const supabase = createAdminClient()
+  // select("*") (não lista de colunas) pra tolerar a coluna criterion_score_presets
+  // ainda não existir antes da migration 132 — evita quebrar topN/min-scores nesse
+  // intervalo; a coluna ausente só cai no default.
   const { data } = await supabase
     .from("formula_config")
-    .select("top_n, min_calc_score, min_predicted_score, min_final_score")
+    .select("*")
     .limit(1)
     .single()
-  const cfg = data as Pick<FormulaConfig, "top_n" | "min_calc_score" | "min_predicted_score" | "min_final_score"> | null
+  const cfg = data as Pick<
+    FormulaConfig,
+    "top_n" | "min_calc_score" | "min_predicted_score" | "min_final_score" | "criterion_score_presets"
+  > | null
   return {
     topN: cfg?.top_n ?? null,
     // Colunas legadas repurposadas como filtros padrão (ver ranking-preferences-form):
@@ -50,6 +57,8 @@ const getPreferences = unstable_cache(async (): Promise<{
     minFit: cfg?.min_calc_score ?? null,
     minAlign: cfg?.min_predicted_score ?? null,
     minFinal: cfg?.min_final_score ?? null,
+    // Atalhos ≥ da aba Notas (migration 132). Null/ausente → default hardcoded.
+    criterionPresets: cfg?.criterion_score_presets ?? DEFAULT_CRITERION_SCORE_PRESETS,
   }
 }, ["ranking-preferences"], { revalidate: 300, tags: ["ranking-preferences"] })
 
@@ -306,6 +315,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         defaultSort={defaultSort}
         savedPresets={savedPresets}
         defaultBand={tierBandWidth}
+        criterionPresets={prefs.criterionPresets}
       />
 
       <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} />

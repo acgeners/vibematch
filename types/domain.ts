@@ -259,6 +259,21 @@ export interface Import {
   completed_at: string | null
 }
 
+/**
+ * Atalhos "≥" configuráveis da aba Notas do ranking (migration 132).
+ * `default` vale pros 9 atributos; `overrides` são exceções por slug de
+ * critério (eval_type=IA). Consumo: `overrides[slug] ?? default`.
+ */
+export interface CriterionScorePresets {
+  default: number[]
+  overrides: Record<string, number[]>
+}
+
+export const DEFAULT_CRITERION_SCORE_PRESETS: CriterionScorePresets = {
+  default: [5, 6, 7, 8],
+  overrides: {},
+}
+
 export interface FormulaConfig {
   id: string
   formula_version: string
@@ -314,6 +329,11 @@ export interface FormulaConfig {
    * Slugs ausentes herdam os percentis globais acima. Default `{}`. Opcional no
    * tipo pra compat com leituras antes da migration 082. */
   criterion_color_pcts?: Record<string, { top: number; high: number; mid: number; low: number }> | null
+  /**
+   * Atalhos ≥ configuráveis da aba Notas do ranking (migration 132).
+   * Opcional no tipo pra compat com leituras antes da migration. Null/ausente
+   * → cai no DEFAULT_CRITERION_SCORE_PRESETS. Ver CriterionScorePresets. */
+  criterion_score_presets?: CriterionScorePresets | null
   /**
    * Coeficientes do Ridge segundo-nível (stacker) que combina Calc + Pr (+ kNN futuramente).
    * NULL quando treino < 30 ou stacker desabilitado.
