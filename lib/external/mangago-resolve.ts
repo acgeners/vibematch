@@ -3,7 +3,11 @@ import { scoreMangagoCandidate } from "./mangago-match"
 import type { MangagoMatchKind } from "./mangago-match"
 import { buildResolveVariants, expandAlias } from "./mangago-variants"
 import type { MangagoResolveInput, ResolveVariants } from "./mangago-variants"
+import { decideMangagoResolveBand, readBandConfigFromEnv } from "./mangago-band"
+import type { MangagoBand, MangagoBandConfig } from "./mangago-band"
 import type { TitleSimReason } from "./title-match"
+
+export type { MangagoBand } from "./mangago-band"
 
 /**
  * E4 — Resolvedor de URL do Mangago (in-process, fail-soft). Descobre a obra a
@@ -26,8 +30,6 @@ export interface MangagoSearchCandidate {
 }
 
 export type MangagoSearch = (query: string) => Promise<MangagoSearchCandidate[]>
-
-export type MangagoBand = "auto" | "review" | "reject"
 
 export interface MangagoResolved {
   slug: string
@@ -57,23 +59,18 @@ export interface ResolveMangagoOptions {
   search: MangagoSearch
   /** Default: variantes só do título direto (wire-in de produção injeta os fetchers). */
   buildVariants?: (input: MangagoResolveInput) => Promise<ResolveVariants>
+  /** Config de banding; default = lida de env (MANGAGO_RESOLVE_*) no carregamento. */
+  bandConfig?: MangagoBandConfig
   now?: () => number
   onResult?: (event: MangagoResolveEvent) => void
 }
 
-// Regras FIXAS desta etapa (E5 tornará configurável por env).
-const AUTO_MIN_SCORE = 0.9
-const AUTO_MIN_MARGIN = 0.08
-const ACCEPT_MIN_SCORE = 0.72
+// Config de banding lida de env 1x (defaults = comportamento anterior). Injetável
+// por `opts.bandConfig` nos testes/callers.
+const envBandConfig = readBandConfigFromEnv()
 
 export function mangagoWorkUrl(slug: string): string {
   return `https://www.mangago.me/read-manga/${slug}/`
-}
-
-function decideBand(score: number, margin: number, isReverseSubstringRisk: boolean): MangagoBand {
-  if (score < ACCEPT_MIN_SCORE) return "reject"
-  if (score >= AUTO_MIN_SCORE && margin >= AUTO_MIN_MARGIN && !isReverseSubstringRisk) return "auto"
-  return "review"
 }
 
 function kindRank(kind: MangagoMatchKind | null): number {
@@ -137,7 +134,12 @@ export async function resolveMangagoUrl(
   const top = scored[0]
   const second = scored[1]
   const margin = top.score.score - (second?.score.score ?? 0)
-  const band = decideBand(top.score.score, margin, top.score.isReverseSubstringRisk)
+  const band: MangagoBand = decideMangagoResolveBand({
+    score: top.score.score,
+    margin,
+    isReverseSubstringRisk: top.score.isReverseSubstringRisk,
+    config: opts.bandConfig ?? envBandConfig,
+  }).band
 
   if (band === "reject" || top.score.matchedKind === null) {
     emit({ band: "reject", result: "no_match", slug: top.candidate.slug, score: top.score.score, margin, candidates: bySlug.size, reason: top.score.reason })
