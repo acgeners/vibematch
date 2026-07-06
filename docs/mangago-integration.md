@@ -3,6 +3,10 @@
 > Documento de referência da adição do **mangago.me** como fonte externa
 > (metadados + rating + reviews) no fluxo de criar/atualizar obras.
 > Branch `feat/mangago` · PR #61 · implementado 2026-07-05/06.
+>
+> O PR cresceu além do mangago e inclui melhorias **cross-fonte** de reviews:
+> extração de nota embutida no texto (§4) e respostas dos comentários do Comix
+> (§12). Veja também a faxina do Supabase (§10).
 
 ---
 
@@ -112,18 +116,45 @@ FlareSolverr (~1s), então 100 reviews ≈ ~110 calls ≈ ~110s → estoura o ti
 gargalo da fase de reviews. Um título popular tem ~100 páginas × 11 = ~1100
 tópicos — buscar tudo é inútil.
 
+### Seleção de reviews (critérios) — 3 seletores diferentes
+
+**Pré-filtro de comprimento** (`minLengthBySource` em index.ts, ANTES da seleção;
+abaixo do piso a review é descartada):
+
+| Fonte | Piso | Fonte | Piso |
+|---|---|---|---|
+| kitsu | 30 | comix | 80 |
+| mangago / comick | 40 | mangadex | 150 |
+| MU · AniList · MAL · AnimePlanet | **100** (default) | | |
+
+**Os seletores** (cada consumidor tem o seu):
+
+| Seletor | Critérios | Cap |
+|---|---|---|
+| **Prompt de avaliação** (`selectReviewsForEvaluation`) | comprimento desc · **diversidade de nota** (buckets) · round-robin por fonte (prioridade `REVIEW_SOURCE_PRIORITY`) | 30 / 12 fonte |
+| **Digest** (`sampleStratifiedBySource`) | comprimento desc · round-robin por fonte | 40 / 8 fonte |
+| **Resumo** (`consolidateReviewsDetailed`) | só comprimento (as 40 mais longas) | 40, sem cap/fonte |
+
+Não usa: qualidade semântica do texto, recência, votos de utilidade. O proxy de
+qualidade é **comprimento + piso mínimo**.
+
 ### Nota por review (sentiment diversity)
 
-O prompt de avaliação diversifica reviews por **nota do usuário** (buckets
-alta ≥7 / baixa ≤4 / média / sem-nota). Fontes de plataforma (MU, AniList, MAL,
-ComicK, AnimePlanet) trazem essa nota; **o mangago (e outras fontes de fórum) não
-têm nota por review**. Pra recuperar isso, `extractInlineRating`
+O prompt diversifica por **nota do usuário** (buckets alta ≥7 / baixa ≤4 / média /
+sem-nota) — a nota é **literalmente o número que o autor deu**, não NLP. Fontes de
+plataforma (MU, AniList, MAL, ComicK, AnimePlanet) trazem via prefixo "Nota do
+usuário: X/10"; **fontes de fórum (mangago, comix, mangadex, kitsu) não**.
+
+Pra recuperar, `extractInlineRating`
 ([`lib/external/inline-rating.ts`](../lib/external/inline-rating.ts)) raspa a nota
 que o autor escreve no TEXTO ("I'd say 8/10", "80/100", "4/5", "8 out of 10"),
-normaliza pra 0-10 e é usada como fallback no `extractUserRating` (só quando não há
-o prefixo oficial "Nota do usuário:"). Anti-falso-positivo: rejeita datas
-("8/10/2024") e "X/10 chapters". `work_reviews.user_rating` persiste o resultado.
-Testes em [`tests/unit/inline-rating.test.ts`](../tests/unit/inline-rating.test.ts).
+normaliza pra 0-10, usada como fallback no `extractUserRating` (só sem o prefixo
+oficial). **Com várias notas no texto** (a nota pode abrir OU fechar a review):
+prefere a com **marcador de veredito do autor** perto ("I'd give/rate/say", "my
+rating", "overall"), onde quer que esteja; sem marcador, a primeira; nota única →
+sempre ela. Anti-falso-positivo: rejeita datas ("8/10/2024") e "X/10 chapters".
+`work_reviews.user_rating` persiste. Testes em
+[`tests/unit/inline-rating.test.ts`](../tests/unit/inline-rating.test.ts).
 
 ---
 
@@ -265,7 +296,27 @@ projeto **antigo (Ohio, morto)** `djbreiyzwoevbmoscqiq` — o certo é
 
 ---
 
-## 11. Commits (PR #61 → main)
+## 11. Comix: respostas dos comentários (cross-fonte)
+
+Melhoria feita no mesmo PR. O comentário de topo do Comix às vezes é fraco, mas
+uma **resposta** traz o insight. A API `/threads/{id}/comments` já devolve as
+respostas **ANINHADAS inline** (`item.replies[]`, recursivo) — o
+`fetchComixReviews` só lia o texto de topo e ignorava esse campo.
+
+`collectComixCommentTexts` ([`lib/external/comix.ts`](../lib/external/comix.ts))
+agora achata **topo + respostas** (recursivo, `maxDepth 3`, `cap 60`, mesmos
+filtros visível/não-banido) — **sem fetch extra** (já vêm no payload). Respostas
+curtas seguem cortadas pelo piso de 80 chars do Comix a jusante.
+
+⚠️ **Acesso do Comix degradado (achado colateral 2026-07-06):** a **busca**
+(`/api/v1/manga?keyword=`) agora exige **login/token** → o circuito de auth abre
+30min e o Comix nem entra no candidato. O caminho de reviews (`/threads/*`
+token-free + hid do DB) ainda funciona, mas hids antigos podem estar stale (o
+canário `71gMd0vF` retorna 404). Investigar a busca do Comix separadamente.
+
+---
+
+## 12. Commits (PR #61 → main)
 
 | Commit | |
 |---|---|
@@ -276,4 +327,10 @@ projeto **antigo (Ohio, morto)** `djbreiyzwoevbmoscqiq` — o certo é
 | `1dc97f2` | feat: rating + reviews (Fase 2) |
 | `32e5712` | fix: confiabilidade rating/reviews no fluxo real (circuito/hydrate/aceitação) |
 | `b02ec11` | feat: pagina reviews (8→12) |
-| `a1e7eb0` | feat: cap de reviews 12→20 (alimenta o resumo) |
+| `a1e7eb0` | feat: cap de reviews 12→20 |
+| `68ba60d` | docs: referência da integração |
+| `91fdaa5` | feat: extrai nota embutida no texto da review (cross-fonte) |
+| `e37b779` | fix: nota inline por marcador de veredito, não posição |
+| `9f49abf` | feat: cap de reviews 20→40 (teto útil) |
+| `0883c96` | feat: respostas dos comentários do Comix (cross-fonte) |
+| _este_ | docs: atualiza referência (seleção, nota inline, Comix) |
