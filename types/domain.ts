@@ -99,6 +99,10 @@ export interface CalculatedScore {
   expected_quality_adj: number | null
   mae_calc: number | null
   rmse_calc: number | null
+  /** Chance de gostar 0–100 (Força 1 da Bússola) — logística calibrada. NULL até recalc / stub. Migration 132. */
+  chance_score: number | null
+  /** true quando o modelo de Chance caiu no fallback (< 20 rótulos). Migration 132. */
+  chance_is_stub: boolean | null
   /** Alinhamento determinístico (0–1) com o TasteProfile atual. NULL quando perfil é stub. */
   personal_fit: number | null
   /**

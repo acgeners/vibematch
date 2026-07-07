@@ -68,6 +68,8 @@ export interface RankingEntry {
    * não há Prevista.
    */
   decisionScore: number | null
+  /** Chance de gostar (0–100) — Força 1 da Bússola (chance_score calibrado). NULL quando stub/arquivada. */
+  chanceScore: number | null
   platformAvg: number | null
   totalVotes: number
   personalFit: number | null
@@ -407,7 +409,7 @@ export async function getRanking(
       id, title, publication_status_id, personal_status_id, ai_eval_status,
       total_chapters, chapters_read, user_score, is_archived, is_favorite,
       synopsis_quality, canonical_synopsis, observations, year, updated_at, last_read_at,
-      calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
+      calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
       category_scores(criterion_slug, score),
       work_covers(url, is_primary, position)
     `)
@@ -523,6 +525,7 @@ export async function getRanking(
           (w.calculated_scores?.alignment_payload as { confidence?: number } | null)?.confidence ??
           null,
       }),
+      chanceScore: w.calculated_scores?.chance_score ?? null,
       platformAvg: w.calculated_scores?.platform_avg ?? null,
       totalVotes: w.calculated_scores?.total_votes ?? 0,
       personalFit: w.calculated_scores?.personal_fit ?? null,
