@@ -370,7 +370,7 @@ function extractIdFromUrl(value: unknown, regex: RegExp): string | undefined {
   return m?.[1]
 }
 
-function linksFromItem(links: unknown): ComixDetail["links"] {
+export function linksFromItem(links: unknown): ComixDetail["links"] {
   if (!links || typeof links !== "object") return undefined
   const l = links as Record<string, unknown>
   // comix.to surfaces full URLs (e.g. "https://anilist.co/manga/121439/"). Extract just the ID.

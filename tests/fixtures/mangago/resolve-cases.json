@@ -1,0 +1,54 @@
+{
+  "_note": "Candidatos REAIS capturados ao vivo de www.mangago.me (2026-07-06) via FlareSolverr. otherTitles = campo 'Other Title' já separado por ; e / (N/A descartado). Slug incluído só como identidade; não influencia score.",
+  "candidates": {
+    "solo_leveling": {
+      "slug": "solo_leveling",
+      "title": "Solo Leveling",
+      "otherTitles": ["나 혼자만 레벨업"]
+    },
+    "solo_leveling_ko_spaced": {
+      "slug": "solo_leveling",
+      "title": "Solo Leveling",
+      "otherTitles": ["나 혼 자 만 레 벨 업"]
+    },
+    "solo_leveling_ragnarok": {
+      "slug": "solo_leveling_ragnarok",
+      "title": "Solo Leveling : Ragnarok",
+      "otherTitles": ["나 혼자만 레벨업 : 라그나로크"]
+    },
+    "one_piece": {
+      "slug": "one_piece",
+      "title": "One Piece",
+      "otherTitles": ["One Piece"]
+    },
+    "one_piece_colored": {
+      "slug": "one_piece_colored",
+      "title": "One Piece - Colored",
+      "otherTitles": ["ワンピース", "ONE PIECE"]
+    },
+    "dr_stone": {
+      "slug": "dr_stone",
+      "title": "Dr . Stone",
+      "otherTitles": []
+    },
+    "stone": {
+      "slug": "stone",
+      "title": "STONe",
+      "otherTitles": ["Stone", "ストーン"]
+    },
+    "kaguya_main": {
+      "slug": "kaguya_sama_wants_to_be_confessed_to_the_geniuses_war_of_love_and_brains",
+      "title": "Kaguya - sama Wants to be Confessed To: The Geniuses' War of Love and Brains",
+      "otherTitles": [
+        "かぐや様は告らせたい ～天才たちの恋愛頭脳戦～",
+        "辉夜大小姐想让我告白 ~天才们的恋爱头脑战~",
+        "Kaguya - sama wa Kokurasetai ~Tensai-tachi no Ren'ai Zunou Sen~"
+      ]
+    },
+    "jujutsu_kaisen": {
+      "slug": "jujutsu_kaisen",
+      "title": "Jujutsu Kaisen",
+      "otherTitles": ["Sorcery Fight", "呪 術 廻 戦"]
+    }
+  }
+}

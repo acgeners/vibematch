@@ -10,6 +10,9 @@ const eslintConfig = defineConfig([
     // Cache gerado (browser do FlareSolverr/Comix) — gitignored (.gitignore: `.cache/`),
     // NÃO é código-fonte do projeto. Excluído p/ o lint refletir só o código versionado.
     ".cache/**",
+    // Sidecar comix-render: subprojeto isolado com toolchain própria (module
+    // NodeNext, tsconfig próprio). Não é lintado pela config do app.
+    "services/**",
     // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",

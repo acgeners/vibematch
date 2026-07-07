@@ -1,0 +1,22 @@
+{
+  "name": "comix-render",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Sidecar Playwright que resolve a URL de uma obra no comix.to a partir do título. Serve o contrato /resolve consumido pelo app (lib/external/comix-render-client.ts).",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "smoke": "tsx test/smoke.ts"
+  },
+  "dependencies": {
+    "playwright": "1.61.1",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

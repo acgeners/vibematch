@@ -169,15 +169,50 @@ function looksLikeChapterRef(text: string | undefined): boolean {
 }
 
 /**
+ * Aliases ("Other Title") por slug na página de busca. Cada resultado é um `<li>`
+ * com `<span class="blue">Other Title: </span>…</div>`, separados por ";" (ou "；").
+ * Escopamos ao `<li>` do resultado pra associar ao slug certo (o 1º `/read-manga/`
+ * do bloco é a âncora da capa). FIEL: só extrai texto do HTML — nada de
+ * normalização/expansão/matching (isso é responsabilidade do resolvedor).
+ */
+function extractSearchOtherTitles(html: string): Map<string, string[]> {
+  const bySlug = new Map<string, string[]>()
+  const liRegex = /<li\b[^>]*>([\s\S]*?)<\/li>/gi
+  let li: RegExpExecArray | null
+  while ((li = liRegex.exec(html)) !== null) {
+    const block = li[1]
+    const slug = block.match(/\/read-manga\/([^"/?#]+)/i)?.[1]
+    if (!slug || bySlug.has(slug)) continue
+    const raw = block.match(/Other Title\s*:\s*(?:<\/span>)?([\s\S]*?)<\/(?:div|td|li)>/i)?.[1]
+    const text = cleanHtml(raw)
+    if (!text) continue
+    const aliases = text
+      .split(/[;；]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (aliases.length) bySlug.set(slug, aliases)
+  }
+  return bySlug
+}
+
+// Igualdade "solta" (minúsculas + espaços colapsados) só p/ dedupe local do alias
+// contra o título principal — sem depender do módulo de matching.
+function looseTitleEqual(a: string, b: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim()
+  return norm(a) === norm(b)
+}
+
+/**
  * Extrai candidatos da página de busca. O Mangago linka cada obra por VÁRIAS
  * âncoras `/read-manga/{slug}/…`: a da capa (`class="thm-effect"`, URL ABSOLUTA
  * + `title=`) e as de "Latest Chapters" (URL relativa com caminho de capítulo).
  * O slug canônico é sempre o 1º segmento depois de `/read-manga/`. Acumula por
  * slug preferindo o `title=` da âncora de capa; ignora textos "Ch.N/Vol.N".
  */
-function parseSearchResults(html: string): ExternalSearchResult[] {
+export function parseSearchResults(html: string): ExternalSearchResult[] {
   const order: string[] = []
   const bySlug = new Map<string, { titleAttr?: string; text?: string; cover?: string }>()
+  const otherBySlug = extractSearchOtherTitles(html)
 
   // Aceita host absoluto opcional; captura o slug (1º segmento) e ignora o resto
   // do path (caminho de capítulo). Casa tanto a âncora de capa quanto as de cap.
@@ -214,11 +249,22 @@ function parseSearchResults(html: string): ExternalSearchResult[] {
     const entry = bySlug.get(slug)!
     const title = cleanTitle(entry.titleAttr ?? entry.text)
     if (!title) continue
+    // Aliases ("Other Title") do bloco — dedupe interno e contra o título principal.
+    const seen = new Set<string>()
+    const alternativeTitles: string[] = []
+    for (const alias of otherBySlug.get(slug) ?? []) {
+      if (looseTitleEqual(alias, title)) continue
+      const key = alias.toLowerCase().replace(/\s+/g, " ").trim()
+      if (seen.has(key)) continue
+      seen.add(key)
+      alternativeTitles.push(alias)
+    }
     results.push({
       id: `mangago:${slug}`,
       source: "mangago",
       title,
       coverUrl: entry.cover,
+      alternativeTitles: alternativeTitles.length ? alternativeTitles : undefined,
     })
   }
   return results

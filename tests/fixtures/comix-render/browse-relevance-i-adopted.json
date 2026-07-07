@@ -1,0 +1,60 @@
+{
+  "ok": true,
+  "items": [
+    {
+      "hid": "3ezr0",
+      "url": "/title/3ezr0-i-adopted-the-protagonist-and-the-genre-changed",
+      "title": "I Adopted the Protagonist, and the Genre Changed",
+      "altTitles": ["악역의 육아는 로맨스 판타지"],
+      "links": {
+        "al": "https://anilist.co/manga/200573/",
+        "mal": "https://myanimelist.net/manga/191605/",
+        "mu": "https://www.mangaupdates.com/series/iwqx86g/",
+        "md": null,
+        "mb": "https://mangabaka.org/87128/"
+      }
+    },
+    {
+      "hid": "390yn",
+      "url": "/title/390yn-the-villainess-flips-the-script",
+      "title": "The Villainess Flips the Script!",
+      "altTitles": [],
+      "links": {
+        "al": "https://anilist.co/manga/133038/",
+        "mal": "https://myanimelist.net/manga/149161/",
+        "mu": null,
+        "md": null
+      }
+    },
+    {
+      "hid": "ye96n",
+      "url": "/title/ye96n-thought-it-was-the-end-only-to-return-to-a-changed-genre",
+      "title": "Thought It Was 'The End', Only to Return to a Changed Genre",
+      "altTitles": [],
+      "links": {
+        "al": "https://anilist.co/manga/208532/",
+        "mal": null,
+        "mu": null,
+        "md": null
+      }
+    },
+    {
+      "hid": "ged23",
+      "url": "/title/ged23-i-adopted-the-male-lead",
+      "title": "I Adopted the Male Lead",
+      "altTitles": [],
+      "links": {
+        "al": "https://anilist.co/manga/143210/",
+        "mal": null,
+        "mu": "https://www.mangaupdates.com/series/abc1234/",
+        "md": null
+      }
+    }
+  ],
+  "meta": {
+    "query": "i adopted the protagonist and the genre changed",
+    "elapsedMs": 1882,
+    "totalCandidates": 28,
+    "source": "comix:browse-relevance"
+  }
+}
