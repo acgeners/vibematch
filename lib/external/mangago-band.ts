@@ -65,7 +65,7 @@ function numEnv(raw: string | undefined, fallback: number): number {
 }
 
 /** Booleano tolerante; valores fora de true/false/1/0/yes/no → fallback. */
-function boolEnv(raw: string | undefined, fallback: boolean): boolean {
+export function boolEnv(raw: string | undefined, fallback: boolean): boolean {
   if (raw == null) return fallback
   const v = raw.trim().toLowerCase()
   if (v === "true" || v === "1" || v === "yes") return true
