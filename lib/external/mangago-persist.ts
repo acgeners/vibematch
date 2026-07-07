@@ -97,6 +97,13 @@ export interface EnsureMangagoSlugParams {
   enabled: boolean
   /** URL/slug colado manualmente pelo usuário (override explícito). */
   manualSlugOrUrl?: string
+  /**
+   * E10B.3 — estado do DB fornecido pelo caller (que já leu `work_external_ids`).
+   * Quando `rejected` ou `alreadyKnownSlug` são passados, ensureMangagoSlug NÃO
+   * consulta o DB (evita 2ª query). Ausentes ambos → lê o DB como no E9.
+   */
+  alreadyKnownSlug?: string | null
+  rejected?: boolean
 }
 
 function ok(slug: string | null, reason: EnsureMangagoReason, persisted: boolean, resolved: MangagoResolved | null = null): EnsureMangagoResult {
@@ -139,30 +146,49 @@ export async function ensureMangagoSlug(p: EnsureMangagoSlugParams): Promise<Ens
     log("skipped", p.workId, { reason: "invalid_manual_slug", fallthrough: true })
   }
 
-  // ---- Reuso do persistido ----
-  try {
-    const { data, error } = await p.supabase
-      .from("work_external_ids")
-      .select("external_id, is_rejected")
-      .eq("work_id", p.workId)
-      .eq("source", "mangago")
-      .maybeSingle()
-    if (error) throw new Error(error.message)
-    if (data) {
-      if (data.is_rejected) {
-        log("skipped", p.workId, { reason: "rejected" })
-        return ok(null, "rejected", false)
-      }
-      const known = extractMangagoSlug(String(data.external_id ?? ""))
+  // ---- Estado do DB fornecido pelo caller (E10B.3) ou leitura própria (E9) ----
+  // Se o caller passou `rejected`/`alreadyKnownSlug`, confiamos e NÃO lemos o DB.
+  // Precedência: rejected > alreadyKnownSlug (fonte rejeitada bloqueia o conhecido).
+  const callerSuppliedState = p.rejected !== undefined || p.alreadyKnownSlug !== undefined
+  if (callerSuppliedState) {
+    if (p.rejected === true) {
+      log("skipped", p.workId, { reason: "rejected", supplied: true })
+      return ok(null, "rejected", false)
+    }
+    if (p.alreadyKnownSlug) {
+      const known = extractMangagoSlug(p.alreadyKnownSlug)
       if (known) {
-        log("skipped", p.workId, { reason: "already_persisted", slug: known })
+        log("skipped", p.workId, { reason: "already_persisted", slug: known, supplied: true })
         return ok(known, "already_persisted", true)
       }
-      // slug persistido inválido → ignora e re-resolve.
+      // alreadyKnownSlug inválido → ignora e cai pro resolve (sem ler o DB).
     }
-  } catch (err) {
-    // Fail-soft: falha na leitura NÃO bloqueia — degrada pro resolvedor.
-    log("result", p.workId, { reason: "db_error", detail: String(err).slice(0, 160) })
+  } else {
+    // ---- E9: leitura própria do persistido ----
+    try {
+      const { data, error } = await p.supabase
+        .from("work_external_ids")
+        .select("external_id, is_rejected")
+        .eq("work_id", p.workId)
+        .eq("source", "mangago")
+        .maybeSingle()
+      if (error) throw new Error(error.message)
+      if (data) {
+        if (data.is_rejected) {
+          log("skipped", p.workId, { reason: "rejected" })
+          return ok(null, "rejected", false)
+        }
+        const known = extractMangagoSlug(String(data.external_id ?? ""))
+        if (known) {
+          log("skipped", p.workId, { reason: "already_persisted", slug: known })
+          return ok(known, "already_persisted", true)
+        }
+        // slug persistido inválido → ignora e re-resolve.
+      }
+    } catch (err) {
+      // Fail-soft: falha na leitura NÃO bloqueia — degrada pro resolvedor.
+      log("result", p.workId, { reason: "db_error", detail: String(err).slice(0, 160) })
+    }
   }
 
   // ---- Resolução automática ----

@@ -224,3 +224,108 @@ describe("ensureMangagoSlug", () => {
     expect(r.persisted).toBe(false)
   })
 })
+
+// ============================================================================
+// E10B.3 — estado do DB fornecido pelo caller (sem 2ª leitura)
+// ============================================================================
+describe("ensureMangagoSlug — alreadyKnownSlug / rejected (E10B.3)", () => {
+  it("1. rejected:true → reason rejected, sem select/resolve/upsert", async () => {
+    const { supabase, select, upsert } = fakeSupabase()
+    const resolve = vi.fn(async () => resolvedAuto())
+    const r = await ensureMangagoSlug(base({ supabase, resolve, rejected: true }))
+    expect(r).toMatchObject({ reason: "rejected", slug: null, persisted: false })
+    expect(select).not.toHaveBeenCalled()
+    expect(resolve).not.toHaveBeenCalled()
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it("2. alreadyKnownSlug válido → already_persisted, sem select/resolve/upsert", async () => {
+    const { supabase, select, upsert } = fakeSupabase()
+    const resolve = vi.fn(async () => resolvedAuto())
+    const r = await ensureMangagoSlug(base({ supabase, resolve, alreadyKnownSlug: "solo_leveling" }))
+    expect(r).toMatchObject({
+      reason: "already_persisted",
+      slug: "solo_leveling",
+      url: "https://www.mangago.me/read-manga/solo_leveling/",
+      persisted: true,
+    })
+    expect(select).not.toHaveBeenCalled()
+    expect(resolve).not.toHaveBeenCalled()
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it("3. alreadyKnownSlug como URL do Mangago → extrai slug + URL canônica", async () => {
+    const { supabase } = fakeSupabase()
+    const r = await ensureMangagoSlug(
+      base({ supabase, alreadyKnownSlug: "https://www.mangago.me/read-manga/one_piece/?x=1" })
+    )
+    expect(r.slug).toBe("one_piece")
+    expect(r.url).toBe("https://www.mangago.me/read-manga/one_piece/")
+    expect(r.reason).toBe("already_persisted")
+  })
+
+  it("4. alreadyKnownSlug inválido → ignora e resolve (sem ler DB)", async () => {
+    const { supabase, select } = fakeSupabase()
+    const resolve = vi.fn(async () => resolvedAuto())
+    const r = await ensureMangagoSlug(base({ supabase, resolve, alreadyKnownSlug: "!!!bad!!!" }))
+    expect(select).not.toHaveBeenCalled() // estado fornecido → não lê DB
+    expect(resolve).toHaveBeenCalled()
+    expect(r.reason).toBe("resolved_auto")
+  })
+
+  it("5. alreadyKnownSlug de outro domínio → ignora, não persiste diretamente", async () => {
+    const { supabase, upsert } = fakeSupabase()
+    const resolve = vi.fn(async () => null) // sem match → no_match
+    const r = await ensureMangagoSlug(
+      base({ supabase, resolve, alreadyKnownSlug: "https://evil.com/read-manga/solo_leveling/" })
+    )
+    expect(resolve).toHaveBeenCalled()
+    expect(r.reason).toBe("no_match")
+    expect(upsert).not.toHaveBeenCalled() // slug de outro domínio não é persistido
+  })
+
+  it("6. sem alreadyKnownSlug nem rejected → E9 preservado (consulta DB)", async () => {
+    const { supabase, select, maybeSingle } = fakeSupabase({ row: null })
+    const resolve = vi.fn(async () => resolvedAuto())
+    await ensureMangagoSlug(base({ supabase, resolve }))
+    expect(select).toHaveBeenCalled()
+    expect(maybeSingle).toHaveBeenCalled()
+  })
+
+  it("7. manualSlugOrUrl válido tem precedência sobre rejected:true", async () => {
+    const { supabase, select, upsert } = fakeSupabase()
+    const resolve = vi.fn(async () => resolvedAuto())
+    const r = await ensureMangagoSlug(
+      base({
+        supabase,
+        resolve,
+        rejected: true,
+        manualSlugOrUrl: "https://www.mangago.me/read-manga/solo_leveling/",
+      })
+    )
+    expect(r).toMatchObject({ reason: "manual_slug", slug: "solo_leveling", persisted: true })
+    expect(upsert).toHaveBeenCalled()
+    expect(select).not.toHaveBeenCalled()
+    expect(resolve).not.toHaveBeenCalled()
+  })
+
+  it("8. rejected:true tem precedência sobre alreadyKnownSlug", async () => {
+    const { supabase } = fakeSupabase()
+    const resolve = vi.fn(async () => resolvedAuto())
+    const r = await ensureMangagoSlug(
+      base({ supabase, resolve, rejected: true, alreadyKnownSlug: "solo_leveling" })
+    )
+    expect(r.reason).toBe("rejected")
+    expect(r.slug).toBeNull()
+    expect(resolve).not.toHaveBeenCalled()
+  })
+
+  it("rejected:false explícito (sem known) → pula DB e resolve", async () => {
+    const { supabase, select } = fakeSupabase()
+    const resolve = vi.fn(async () => resolvedAuto())
+    const r = await ensureMangagoSlug(base({ supabase, resolve, rejected: false }))
+    expect(select).not.toHaveBeenCalled() // estado fornecido (rejected definido)
+    expect(resolve).toHaveBeenCalled()
+    expect(r.reason).toBe("resolved_auto")
+  })
+})
