@@ -78,7 +78,7 @@ export function scoreMangagoCandidate(targets: string[], candidate: MangagoCandi
   const inputs = (targets ?? []).map((t) => (t ?? "").trim()).filter(Boolean)
 
   const names: Array<{ name: string; kind: MangagoMatchKind }> = [
-    { name: candidate.title, kind: "title" },
+    { name: candidate.title, kind: "title" as const },
     ...(candidate.otherTitles ?? []).map((name) => ({ name, kind: "otherTitle" as const })),
   ].filter((c) => c.name && c.name.trim())
 

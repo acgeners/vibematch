@@ -56,7 +56,7 @@ function posIntEnv(raw: string | undefined, fallback: number): number {
   return Number.isInteger(n) && n > 0 ? n : fallback
 }
 
-export function readCacheConfigFromEnv(env: NodeJS.ProcessEnv = process.env): MangagoCacheConfig {
+export function readCacheConfigFromEnv(env: Record<string, string | undefined> = process.env): MangagoCacheConfig {
   return {
     hitTtlMs: posNumEnv(env.MANGAGO_RESOLVE_TTL_HIT_MS, DEFAULT_CACHE_CONFIG.hitTtlMs),
     missTtlMs: posNumEnv(env.MANGAGO_RESOLVE_TTL_MISS_MS, DEFAULT_CACHE_CONFIG.missTtlMs),

@@ -47,7 +47,7 @@ export function toMangagoCandidates(rows: ExternalSearchResult[]): MangagoSearch
 export const mangagoSearchAdapter: MangagoSearch = async (query) => toMangagoCandidates(await searchMangago(query))
 
 /** Lê `MANGAGO_RESOLVE_CONFIRM_YEAR` (true/1/yes) com fallback false. */
-export function readConfirmYearFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+export function readConfirmYearFromEnv(env: Record<string, string | undefined> = process.env): boolean {
   return boolEnv(env.MANGAGO_RESOLVE_CONFIRM_YEAR, false)
 }
 

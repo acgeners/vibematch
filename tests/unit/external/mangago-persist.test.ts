@@ -31,7 +31,8 @@ const resolvedAuto = (slug = "solo_leveling", method = "exact"): MangagoResolved
 })
 const resolvedReview = (slug = "one_piece"): MangagoResolved => ({ ...resolvedAuto(slug), band: "review", margin: 0 })
 
-const base = (over: Partial<Parameters<typeof ensureMangagoSlug>[0]> = {}) => ({
+type EnsureParams = Parameters<typeof ensureMangagoSlug>[0]
+const base = (over: Partial<EnsureParams> & Pick<EnsureParams, "supabase">): EnsureParams => ({
   workId: "w1",
   input: { title: "Solo Leveling" },
   resolve: vi.fn(async () => null as MangagoResolved | null),

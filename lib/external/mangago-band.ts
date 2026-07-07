@@ -73,7 +73,7 @@ export function boolEnv(raw: string | undefined, fallback: boolean): boolean {
   return fallback
 }
 
-export function readBandConfigFromEnv(env: NodeJS.ProcessEnv = process.env): MangagoBandConfig {
+export function readBandConfigFromEnv(env: Record<string, string | undefined> = process.env): MangagoBandConfig {
   return {
     autoMinScore: numEnv(env.MANGAGO_RESOLVE_AUTO_MIN_SCORE, DEFAULT_BAND_CONFIG.autoMinScore),
     autoMinMargin: numEnv(env.MANGAGO_RESOLVE_AUTO_MIN_MARGIN, DEFAULT_BAND_CONFIG.autoMinMargin),
