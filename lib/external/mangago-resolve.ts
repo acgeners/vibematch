@@ -227,7 +227,8 @@ export async function resolveMangagoUrl(
     // para não sub-pontuar obras com subtítulo grudado ("~Tensai-tachi~").
     const scored = [...bySlug.values()].map((c) => {
       const otherTitles = Array.from(new Set((c.otherTitles ?? []).flatMap(expandAlias)))
-      const s = scoreMangagoCandidate(variants.targets, { title: c.title, otherTitles })
+      // slug entra p/ o derivative-risk (E10B.6) — nunca influencia o score.
+      const s = scoreMangagoCandidate(variants.targets, { title: c.title, otherTitles, slug: c.slug })
       return { candidate: c, score: s }
     })
     scored.sort((a, b) => b.score.score - a.score.score || kindRank(a.score.matchedKind) - kindRank(b.score.matchedKind))
@@ -240,6 +241,7 @@ export async function resolveMangagoUrl(
       score: top.score.score,
       margin,
       isReverseSubstringRisk: top.score.isReverseSubstringRisk,
+      isDerivativeRisk: top.score.isDerivativeRisk,
       config: bandCfg,
     })
     let band: MangagoBand = decision.band
@@ -294,6 +296,7 @@ export async function resolveMangagoUrl(
           c.score.matchedKind !== null &&
           c.score.score >= bandCfg.autoMinScore &&
           !c.score.isReverseSubstringRisk &&
+          !c.score.isDerivativeRisk &&
           years[i] != null &&
           Math.abs(years[i]! - targetYear) <= YEAR_TOLERANCE
       )

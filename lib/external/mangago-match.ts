@@ -17,6 +17,11 @@ import type { TitleSimReason } from "./title-match"
  *  3. Sinalizamos `isReverseSubstringRisk`: quando o candidato é um substring
  *     curto/genérico do input (ex.: input "Dr. Stone" casa a obra "Stone" com
  *     0.9). O resolvedor NÃO deve auto-aceitar esses sem corroboração.
+ *  4. Sinalizamos `isDerivativeRisk`: quando o candidato tem sinal FORTE de
+ *     doujinshi/derivado (token "dj", "doujin"/"doujinshi"/"dōjinshi") em title,
+ *     otherTitles ou slug. Ex.: "Mating Season – Jujutsu Kaisen dj" casa o input
+ *     "Jujutsu Kaisen" por forward-substring a 0.9 quando a canônica não aparece
+ *     na busca. O resolvedor NÃO deve auto-aceitar um derivado (E10B.6).
  *
  * PURO e determinístico — sem I/O. O `slug` do candidato NUNCA entra no score
  * (é só identidade), ele fica aqui apenas por conveniência de quem chama.
@@ -43,6 +48,9 @@ export interface MangagoScore {
   matchedCandidateTitle: string | null
   /** true quando o candidato é substring curto do input (falso-positivo em potencial). */
   isReverseSubstringRisk: boolean
+  /** true quando o candidato tem sinal forte de doujinshi/derivado (dj/doujin) em
+   *  title, otherTitles ou slug — não deve virar AUTO sozinho (E10B.6). */
+  isDerivativeRisk: boolean
 }
 
 // Faixas Unicode CJK + Hangul + kana (incl. jamo e katakana halfwidth).
@@ -55,6 +63,30 @@ const CJK_JOIN = new RegExp(`([${CJK}])\\s+(?=[${CJK}])`, "g")
 /** Colapsa espaços ENTRE caracteres CJK; não toca espaços latinos ("Solo Leveling"). */
 export function collapseCjkSpaces(value: string): string {
   return value.replace(CJK_JOIN, "$1")
+}
+
+// Macrons de romanização Hepburn → vogal simples ("dōjinshi" → "dojinshi"),
+// para casar as duas grafias comuns ("doujinshi"/"dōjinshi") com um só padrão.
+const MACRONS: Record<string, string> = { "ā": "a", "ē": "e", "ī": "i", "ō": "o", "ū": "u" }
+// Token que denuncia doujinshi/derivado: "dj" isolado, ou doujin/doujinshi em
+// qualquer romanização (dou-/do-/dō- já normalizada acima).
+const DERIVATIVE_TOKEN = /^(?:dj|d(?:o|ou)jin(?:shi)?)$/
+
+function hasDerivativeToken(raw: string): boolean {
+  const norm = raw.toLowerCase().replace(/[āēīōū]/g, (m) => MACRONS[m] ?? m)
+  // Split em qualquer não-alfanumérico latino (espaço, _, -, (), [], –, etc.), então
+  // "dj" só casa como TOKEN — nunca substring dentro de palavra ("adjust", "banjo").
+  return norm.split(/[^a-z0-9]+/).some((t) => DERIVATIVE_TOKEN.test(t))
+}
+
+/**
+ * Risco derivativo (E10B.6): sinal FORTE de doujinshi/derivado em QUALQUER campo
+ * do candidato (title, otherTitles, slug). Token-based e PURO — o slug entra só
+ * aqui (nunca no score). Conservador: preferimos REVIEW a auto-aceitar um derivado.
+ */
+export function hasDerivativeRisk(candidate: { title?: string; otherTitles?: string[]; slug?: string }): boolean {
+  const fields = [candidate.title, ...(candidate.otherTitles ?? []), candidate.slug]
+  return fields.some((f) => hasDerivativeToken(f ?? ""))
 }
 
 const REVERSE_REASONS = new Set<TitleSimReason>([
@@ -71,6 +103,7 @@ function emptyScore(): MangagoScore {
     matchedTarget: null,
     matchedCandidateTitle: null,
     isReverseSubstringRisk: false,
+    isDerivativeRisk: false,
   }
 }
 
@@ -82,6 +115,8 @@ export function scoreMangagoCandidate(targets: string[], candidate: MangagoCandi
     ...(candidate.otherTitles ?? []).map((name) => ({ name, kind: "otherTitle" as const })),
   ].filter((c) => c.name && c.name.trim())
 
+  // Propriedade do candidato (independe de qual variante casou); calculada 1x.
+  const derivativeRisk = hasDerivativeRisk(candidate)
   let best = emptyScore()
 
   for (const target of inputs) {
@@ -101,6 +136,7 @@ export function scoreMangagoCandidate(targets: string[], candidate: MangagoCandi
           matchedTarget: target,
           matchedCandidateTitle: name,
           isReverseSubstringRisk: REVERSE_REASONS.has(sim.reason),
+          isDerivativeRisk: derivativeRisk,
         }
       }
     }

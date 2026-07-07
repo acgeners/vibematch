@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { scoreMangagoCandidate, collapseCjkSpaces } from "@/lib/external/mangago-match"
+import { scoreMangagoCandidate, collapseCjkSpaces, hasDerivativeRisk } from "@/lib/external/mangago-match"
 import type { MangagoCandidate } from "@/lib/external/mangago-match"
 import fixture from "@/tests/fixtures/mangago/resolve-cases.json"
 
@@ -99,5 +99,45 @@ describe("scoreMangagoCandidate — invariantes", () => {
     expect(scoreMangagoCandidate([], C.one_piece).score).toBe(0)
     expect(scoreMangagoCandidate(["One Piece"], { title: "" }).score).toBe(0)
     expect(scoreMangagoCandidate([""], { title: "One Piece" }).score).toBe(0)
+  })
+})
+
+describe("hasDerivativeRisk — doujinshi/derivado (E10B.6)", () => {
+  it("marca 'dj' como TOKEN em slug, title e otherTitle", () => {
+    // caso exato observado na E10B.5 (Jujutsu Kaisen title-only → doujinshi)
+    expect(hasDerivativeRisk({ title: "Mating Season – Jujutsu Kaisen dj", otherTitles: ["Jujutsu Kaisen dj"], slug: "mating_season_jujutsu_kaisen_dj" })).toBe(true)
+    expect(hasDerivativeRisk({ title: "Jujutsu Kaisen DJ" })).toBe(true) // case-insensitive
+    expect(hasDerivativeRisk({ title: "Mating Season (Jujutsu Kaisen dj)" })).toBe(true) // parênteses
+    expect(hasDerivativeRisk({ title: "Some Fanwork [DJ]" })).toBe(true) // colchetes
+    expect(hasDerivativeRisk({ title: "Some Fanwork - dj" })).toBe(true) // hífen
+    expect(hasDerivativeRisk({ title: "Clean", slug: "something_dj" })).toBe(true) // só no slug
+  })
+
+  it("marca doujin/doujinshi/dōjinshi em qualquer romanização", () => {
+    expect(hasDerivativeRisk({ title: "Foo Doujinshi" })).toBe(true)
+    expect(hasDerivativeRisk({ title: "Foo doujin" })).toBe(true)
+    expect(hasDerivativeRisk({ otherTitles: ["Foo (Dōjinshi)"] })).toBe(true) // macron ō
+    expect(hasDerivativeRisk({ title: "Foo dōjin" })).toBe(true)
+  })
+
+  it("NÃO marca 'dj' dentro de outra palavra (substring)", () => {
+    expect(hasDerivativeRisk({ title: "Adjust the Sails" })).toBe(false) // "adjust"
+    expect(hasDerivativeRisk({ title: "Banjo Kingdom" })).toBe(false) // "banjo"
+    expect(hasDerivativeRisk({ title: "Kingdom Hearts II", slug: "kingdom_hearts_ii" })).toBe(false)
+  })
+
+  it("obras canônicas legítimas NÃO são marcadas", () => {
+    expect(hasDerivativeRisk({ title: "Solo Leveling", slug: "solo_leveling" })).toBe(false)
+    expect(hasDerivativeRisk({ title: "Miss Not-So Sidekick", slug: "miss_not_so_sidekick" })).toBe(false)
+    expect(hasDerivativeRisk({ title: "One Piece", otherTitles: ["ONE PIECE"], slug: "one_piece" })).toBe(false)
+  })
+
+  it("scoreMangagoCandidate expõe isDerivativeRisk (candidato-level)", () => {
+    const dj = scoreMangagoCandidate(["Jujutsu Kaisen"], { title: "Mating Season – Jujutsu Kaisen dj", otherTitles: ["Jujutsu Kaisen dj"], slug: "mating_season_jujutsu_kaisen_dj" })
+    expect(dj.isDerivativeRisk).toBe(true)
+    expect(dj.score).toBeGreaterThanOrEqual(0.72) // casa por forward-substring (seria auto sem o guard)
+    // canônicas mantêm isDerivativeRisk=false
+    expect(scoreMangagoCandidate(["Solo Leveling"], C.solo_leveling).isDerivativeRisk).toBe(false)
+    expect(scoreMangagoCandidate(["One Piece"], C.one_piece).isDerivativeRisk).toBe(false)
   })
 })

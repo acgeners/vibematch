@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { resolveMangagoUrl } from "@/lib/external/mangago-resolve"
-import type { MangagoSearch, MangagoSearchCandidate, ResolveMangagoOptions } from "@/lib/external/mangago-resolve"
+import type { MangagoResolveEvent, MangagoSearch, MangagoSearchCandidate, ResolveMangagoOptions } from "@/lib/external/mangago-resolve"
 import type { ResolveVariants } from "@/lib/external/mangago-variants"
 import searchSets from "@/tests/fixtures/mangago/search-sets.json"
 
@@ -68,6 +68,29 @@ describe("resolveMangagoUrl — casos documentados", () => {
     expect(r?.slug).toBe("stone")
     expect(r?.score).toBeCloseTo(0.9, 5)
     expect(r?.band).toBe("review") // 0.9 mas reverse-risk → nunca auto
+  })
+
+  it("derivative risk (doujinshi) NUNCA vira AUTO — regressão E10B.5 (Jujutsu title-only)", async () => {
+    // Reproduz o falso positivo live: a canônica não aparece na busca e um
+    // doujinshi "Jujutsu Kaisen dj" casa por forward-substring a 0.9 com margem
+    // alta → seria AUTO. Com o guard vira REVIEW e o evento explica o motivo.
+    const dj: MangagoSearchCandidate[] = [
+      { slug: "mating_season_jujutsu_kaisen_dj", title: "Mating Season – Jujutsu Kaisen dj", otherTitles: ["Jujutsu Kaisen dj"] },
+    ]
+    const events: MangagoResolveEvent[] = []
+    const r = await resolveMangagoUrl(
+      {},
+      opts({
+        search: searchFrom({ "Jujutsu Kaisen": dj }),
+        buildVariants: fixedVariants(["Jujutsu Kaisen"], ["Jujutsu Kaisen"]),
+        onResult: (e) => events.push(e),
+      })
+    )
+    expect(r?.slug).toBe("mating_season_jujutsu_kaisen_dj")
+    expect(r?.score).toBeGreaterThanOrEqual(0.72)
+    expect(r?.band).toBe("review") // nunca AUTO
+    expect(r?.band).not.toBe("auto")
+    expect(events[0]?.bandReason).toContain("derivative_risk")
   })
 
   it("Kaguya: split de subtítulo eleva o score p/ 1.0 (casa a linha romaji)", async () => {

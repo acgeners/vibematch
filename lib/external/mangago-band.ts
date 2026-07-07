@@ -20,6 +20,8 @@ export interface MangagoBandConfig {
   acceptMinScore: number
   /** Se true, um match com reverse-substring risk pode virar AUTO. */
   allowReverseSubstringAuto: boolean
+  /** Se true, um match com derivative risk (doujinshi/derivado) pode virar AUTO. */
+  allowDerivativeAuto: boolean
 }
 
 export const DEFAULT_BAND_CONFIG: MangagoBandConfig = {
@@ -27,6 +29,7 @@ export const DEFAULT_BAND_CONFIG: MangagoBandConfig = {
   autoMinMargin: 0.08,
   acceptMinScore: 0.72,
   allowReverseSubstringAuto: false,
+  allowDerivativeAuto: false,
 }
 
 export interface BandDecision {
@@ -39,6 +42,8 @@ export function decideMangagoResolveBand(args: {
   score: number
   margin: number
   isReverseSubstringRisk: boolean
+  /** E10B.6 — sinal de doujinshi/derivado; bloqueia AUTO por padrão. */
+  isDerivativeRisk?: boolean
   config?: MangagoBandConfig
 }): BandDecision {
   const cfg = args.config ?? DEFAULT_BAND_CONFIG
@@ -50,6 +55,7 @@ export function decideMangagoResolveBand(args: {
   if (score < cfg.autoMinScore) reasons.push("score_below_auto")
   if (margin < cfg.autoMinMargin) reasons.push("margin_below_auto")
   if (isReverseSubstringRisk && !cfg.allowReverseSubstringAuto) reasons.push("reverse_substring_risk")
+  if (args.isDerivativeRisk && !cfg.allowDerivativeAuto) reasons.push("derivative_risk")
 
   if (reasons.length === 0) return { band: "auto", reason: "auto" }
   return { band: "review", reason: reasons.join("+") }
@@ -81,6 +87,10 @@ export function readBandConfigFromEnv(env: Record<string, string | undefined> = 
     allowReverseSubstringAuto: boolEnv(
       env.MANGAGO_RESOLVE_ALLOW_REVERSE_SUBSTRING_AUTO,
       DEFAULT_BAND_CONFIG.allowReverseSubstringAuto
+    ),
+    allowDerivativeAuto: boolEnv(
+      env.MANGAGO_RESOLVE_ALLOW_DERIVATIVE_AUTO,
+      DEFAULT_BAND_CONFIG.allowDerivativeAuto
     ),
   }
 }
