@@ -7,6 +7,7 @@ import { comixWorkUrl } from "@/lib/external/comix"
 import { fetchMangaDexChapterDates } from "@/lib/external/mangadex"
 import { withTimeout } from "@/lib/external/with-timeout"
 import { markRecalcPending } from "@/server/actions/recalc-queue"
+import { persistComixHid } from "@/server/actions/comix-hid"
 
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean }
 
@@ -193,16 +194,3 @@ async function persistReadingDates(
 }
 
 /** Persiste o hid do comix em work_external_ids (idempotente; não sobrescreve is_rejected). */
-async function persistComixHid(
-  supabase: ReturnType<typeof createAdminClient>,
-  workId: string,
-  hid: string,
-): Promise<void> {
-  const { error } = await supabase
-    .from("work_external_ids")
-    .upsert(
-      { work_id: workId, source: "comix", external_id: hid },
-      { onConflict: "work_id,source" },
-    )
-  if (error) console.error("[persistComixHid] failed:", error.message)
-}

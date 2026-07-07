@@ -13,6 +13,7 @@ import { saveWorkReviews, loadWorkReviewsAsSourced } from "@/lib/external/persis
 import type { ExternalSourceId, SourcedReview } from "@/lib/external/types"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { markRecalcPending } from "./recalc-queue"
+import { ensureComixHid } from "./comix-hid"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import type { AiEvaluation } from "@/types/domain"
 import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
@@ -29,6 +30,13 @@ function resolveModelOverride(model: ReevalModel | undefined): string | undefine
   if (model === "sonnet") return SONNET_MODEL_ID
   if (model === "haiku") return HAIKU_MODEL_ID
   return undefined
+}
+
+/** External IDs vêm como string de `work_external_ids`; o resolver da Comix quer
+ *  AniList/MAL como inteiro positivo. Converte, ou `undefined` se inválido. */
+function toPositiveInt(value: string | undefined): number | undefined {
+  const n = Number(value)
+  return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
 /**
@@ -61,6 +69,25 @@ async function resolveEvaluationContext(
       .map((row) => [row.source, String(row.external_id)]),
   ) as Partial<Record<ExternalSourceId, string>>
   const hasAnyExternalIds = (extIds ?? []).length > 0
+
+  // Descoberta do hid da Comix (Peça 3): obra sem comix aceito mas com cross-ID →
+  // resolve via sidecar e persiste (idempotente; reusa o persistido depois).
+  // Injeta em `acceptedExternalIds` pra o caminho candidate já hidratar/coletar
+  // reviews da Comix nesta execução. Fail-soft: nunca bloqueia a avaliação.
+  const resolvedComixHid = await ensureComixHid({
+    supabase,
+    workId: identity.workId,
+    title: identity.title,
+    alreadyKnownHid: acceptedExternalIds.comix ?? null,
+    comixRejected: rejectedSources.includes("comix"),
+    crossIds: {
+      anilistId: toPositiveInt(acceptedExternalIds.anilist),
+      malId: toPositiveInt(acceptedExternalIds.myanimelist),
+      mangaUpdatesId: acceptedExternalIds.mangaupdates,
+    },
+  })
+  if (resolvedComixHid) acceptedExternalIds.comix = resolvedComixHid
+
   const hasAcceptedExternalIds = Object.keys(acceptedExternalIds).length > 0
 
   const context = hasAcceptedExternalIds
