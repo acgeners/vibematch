@@ -14,6 +14,8 @@ import type { ExternalSourceId, SourcedReview } from "@/lib/external/types"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { markRecalcPending } from "./recalc-queue"
 import { ensureComixHid } from "./comix-hid"
+import { resolveMangagoForEvalContext } from "@/lib/external/mangago-eval-context"
+import { boolEnv } from "@/lib/external/mangago-band"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import type { AiEvaluation } from "@/types/domain"
 import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
@@ -87,6 +89,19 @@ async function resolveEvaluationContext(
     },
   })
   if (resolvedComixHid) acceptedExternalIds.comix = resolvedComixHid
+
+  // Descoberta do slug do Mangago (E10B.4) — MESMO ponto do Comix, atrás da flag
+  // MANGAGO_RESOLVE_ENABLED, fail-soft. Injeta `acceptedExternalIds.mangago` só em
+  // resultado seguro (auto/year_confirmed/already/manual) → o candidate path hidrata
+  // metadados/reviews nesta execução. Sequencial (Comix intacto); flag off = no-op.
+  await resolveMangagoForEvalContext({
+    supabase,
+    workId: identity.workId,
+    identity: { title: identity.title },
+    acceptedExternalIds,
+    rejectedSources,
+    enabled: boolEnv(process.env.MANGAGO_RESOLVE_ENABLED, false),
+  })
 
   const hasAcceptedExternalIds = Object.keys(acceptedExternalIds).length > 0
 
