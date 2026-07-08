@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { ReactNode } from "react"
-import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, Compass, ImageOff, Layers, LayoutGrid, List, X } from "lucide-react"
+import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, Compass, ImageOff, Layers, LayoutGrid, List, Sparkles, Star, X } from "lucide-react"
 import type { RankingEntry } from "@/server/queries/ranking"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -19,16 +19,16 @@ import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { formatPercentile } from "@/lib/calculations/percentile"
-import { ScoreBadge, criterionCellTextClass } from "@/components/ui/score-badge"
+import { ScoreBadge, criterionCellTextClass, getSoftScoreColor } from "@/components/ui/score-badge"
 import type { ColumnThresholds, CriterionRange, AttrColorMode } from "@/components/ui/score-badge"
 import { readAttrColorMode, subscribeAttrColorMode } from "@/lib/ui/attr-color-mode"
 import { PublicationStatusBadge, PersonalStatusBadge, AiStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
 import { AlignmentCell, AlignmentScoreCell, DecisionCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
-import { ForceMeters } from "@/components/ranking/force-meters"
 import { BussolaPlane } from "@/components/ranking/bussola-plane"
 import { computeWorkForces } from "@/lib/calculations/forces"
+import { LABELS } from "@/lib/constants/ui-labels"
 import { TierDividerRow } from "@/components/ranking/tie-break-band"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
@@ -1266,17 +1266,6 @@ function RankingCard({
         >
           {entry.rank}
         </div>
-
-        {entry.expectedScore != null && (
-          <div className="absolute right-1.5 top-1.5">
-            <ScoreBadge
-              score={entry.expectedScore}
-              size="md"
-              showStub={entry.expectedIsStub}
-              thresholds={scoreThresholds?.expected}
-            />
-          </div>
-        )}
       </div>
 
       {/* Corpo */}
@@ -1307,16 +1296,105 @@ function RankingCard({
           </div>
         </div>
 
-        {/* 3 forças da Bússola — fixadas na base (ver PLANO-BUSSOLA-3-FORCAS.md) */}
-        <div className="mt-auto rounded-lg border border-border/60 bg-background/30 p-2">
-          <ForceMeters
-            size="sm"
-            forces={computeWorkForces({
-              chanceScore: entry.chanceScore,
-              platformAvg: entry.platformAvg,
-              totalVotes: entry.totalVotes,
-            })}
-          />
+        {/* Notas de decisão (Prevista + Chance) + stats externos — fixados na base.
+            Substituem as barras da Bússola: Avaliação/Alcance eram só reescala de
+            Externa (nota×10) e Votos (log), então voltam como números crus. */}
+        <CardScores entry={entry} scoreThresholds={scoreThresholds} />
+      </div>
+    </div>
+  )
+}
+
+/** Rótulo minúsculo em caixa alta pros stats do card (trunca em vez de vazar).
+ *  Sem tracking pra caber nas 4 colunas estreitas do card. */
+function CardStatLabel({ children }: { children: ReactNode }) {
+  return (
+    <span className="truncate text-[8px] font-bold uppercase text-muted-foreground">{children}</span>
+  )
+}
+
+/**
+ * Rodapé do card do ranking (visualização Cards): Prevista + Chance de gostar
+ * lado a lado (os dois números de decisão) e, abaixo, a fileira de stats
+ * externos que existia na lista — Externa, Votos, Alinhamento, Veredito IA.
+ */
+function CardScores({
+  entry,
+  scoreThresholds,
+}: {
+  entry: RankingEntry
+  scoreThresholds: ColumnThresholds | null
+}) {
+  const chance = computeWorkForces({
+    chanceScore: entry.chanceScore,
+    platformAvg: entry.platformAvg,
+    totalVotes: entry.totalVotes,
+  }).chance
+  const veredito = entry.alignmentScore != null ? Math.round(entry.alignmentScore) : null
+  const alinhamento =
+    entry.personalFitPercentile ?? (entry.personalFit != null ? Math.round(entry.personalFit * 100) : null)
+  // Chip da Prevista tinge pela faixa (verde/âmbar/vermelho), igual ao ScoreBadge.
+  const prevChipClass =
+    entry.expectedScore != null
+      ? getSoftScoreColor(entry.expectedScore, scoreThresholds?.expected)
+      : "border border-border/60 bg-background/40 text-muted-foreground"
+
+  return (
+    <div className="mt-auto flex flex-col gap-1.5">
+      {/* As 2 notas de decisão em chips tintados (estilo da proposta A): número
+          grande em cima, rótulo embaixo. Prevista tinge pela faixa; Chance em
+          violeta. Rótulo centralizado no chip cabe mesmo no card estreito. */}
+      <div className="grid grid-cols-2 gap-2">
+        <div
+          className={cn("flex flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-center", prevChipClass)}
+          title={LABELS.expected_score.tooltip_short}
+        >
+          <span className="font-mono text-base font-extrabold leading-none tabular-nums">
+            {entry.expectedScore != null ? entry.expectedScore.toFixed(1) : "—"}
+            {entry.expectedIsStub && <span className="ml-0.5 text-[10px] font-normal opacity-60">~</span>}
+          </span>
+          <span className="text-[8.5px] font-bold uppercase tracking-wide text-muted-foreground">
+            {LABELS.expected_score.short}
+          </span>
+        </div>
+        <div
+          className="flex flex-col items-center gap-0.5 rounded-lg border border-violet-500/25 bg-violet-500/[0.12] px-1 py-1.5 text-center text-violet-700 dark:text-violet-300"
+          title="Chance de gostar (0–100)"
+        >
+          <span className="font-mono text-base font-extrabold leading-none tabular-nums">
+            {chance == null ? "—" : `${chance}%`}
+          </span>
+          <span className="text-[8.5px] font-bold uppercase tracking-wide text-muted-foreground">Chance</span>
+        </div>
+      </div>
+
+      {/* Stats externos (ex-lista) numa linha só: Externa · Votos · Alinhamento
+          · Veredito IA. Rótulos curtos + truncate: no card estreito degradam sem
+          colidir (min-w-0 evita o overflow que sobrepunha os vizinhos). */}
+      <div className="grid grid-cols-4 gap-x-1.5">
+        <div className="flex min-w-0 flex-col gap-0.5" title={LABELS.platform_avg.tooltip_short}>
+          <CardStatLabel>Externa</CardStatLabel>
+          <span className="inline-flex items-center gap-0.5 text-xs font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+            {entry.platformAvg != null && <Star className="size-3 shrink-0 fill-current" />}
+            {entry.platformAvg != null ? entry.platformAvg.toFixed(1) : "—"}
+          </span>
+        </div>
+        <div className="flex min-w-0 flex-col gap-0.5" title={LABELS.total_votes.tooltip_short}>
+          <CardStatLabel>{LABELS.total_votes.short}</CardStatLabel>
+          <span className="truncate text-xs font-semibold tabular-nums text-foreground">{formatVotes(entry.totalVotes)}</span>
+        </div>
+        <div className="flex min-w-0 flex-col gap-0.5" title={LABELS.personal_fit.tooltip_short}>
+          <CardStatLabel>{LABELS.personal_fit.abbrev}</CardStatLabel>
+          <span className="text-xs font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+            {alinhamento != null ? `${Math.round(alinhamento)}%` : "—"}
+          </span>
+        </div>
+        <div className="flex min-w-0 flex-col gap-0.5" title={LABELS.alignment_score.tooltip_short}>
+          <CardStatLabel>{LABELS.alignment_score.short}</CardStatLabel>
+          <span className="inline-flex items-center gap-0.5 text-xs font-semibold tabular-nums text-violet-600 dark:text-violet-400">
+            {veredito != null && <Sparkles className="size-3 shrink-0" />}
+            {veredito ?? "—"}
+          </span>
         </div>
       </div>
     </div>

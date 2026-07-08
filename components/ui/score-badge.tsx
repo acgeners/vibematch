@@ -73,7 +73,7 @@ function getScoreColor(score: number, thresholds: ScoreColorThresholds | null | 
   }
 }
 
-function getSoftScoreColor(score: number, thresholds: ScoreColorThresholds | null | undefined): string {
+export function getSoftScoreColor(score: number, thresholds: ScoreColorThresholds | null | undefined): string {
   switch (pickTier(score, thresholds)) {
     case "top": return "bg-green-500/15 text-green-700 border border-green-500/25 dark:text-green-400 dark:border-green-500/30"
     case "high": return "bg-emerald-500/15 text-emerald-700 border border-emerald-500/25 dark:text-emerald-400 dark:border-emerald-500/30"
