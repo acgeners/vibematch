@@ -29,6 +29,7 @@ export function SettingsCard({
   serverCollapse,
   storageKeyPrefix = "settings-card",
   pending = 0,
+  readControl,
   children,
 }: {
   section: SettingsSection
@@ -47,6 +48,8 @@ export function SettingsCard({
   storageKeyPrefix?: string
   /** Pendências deste item — mostra uma pílula no cabeçalho quando > 0. */
   pending?: number
+  /** Controle de "lido" no cabeçalho (botão/selo), ao lado da pílula. */
+  readControl?: ReactNode
   children: ReactNode
 }) {
   const s = ACCENT_STYLES[accent]
@@ -92,6 +95,7 @@ export function SettingsCard({
           </span>
         </span>
       )}
+      {readControl}
     </>
   )
 

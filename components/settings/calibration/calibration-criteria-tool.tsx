@@ -17,6 +17,7 @@ import {
   loadSuggestions,
 } from "@/server/queries/calibration"
 import { getAttributeBiasOverview } from "@/server/queries/attribute-bias"
+import { getSuggestionReadAckIds } from "@/server/queries/settings-read"
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { ReactNode } from "react"
 
@@ -54,18 +55,26 @@ function TabCount({ children }: { children: ReactNode }) {
  * auditoria precisa (o card de viés carrega o resto).
  */
 export async function CalibrationAuditTool() {
-  const [lastAudit, ratedWorksCount, pendingSuggestions, historySuggestions, pendingCount, runHistory] =
-    await Promise.all([
-      loadLastRun("audit"),
-      countRatedWorks(),
-      loadSuggestions({ status: "pending", limit: 1000 }),
-      loadSuggestions({
-        status: ["auto_applied", "accepted", "edited", "rejected", "reverted"],
-        limit: 300,
-      }),
-      countPendingSuggestions(),
-      loadRunHistory(20),
-    ])
+  const [
+    lastAudit,
+    ratedWorksCount,
+    pendingSuggestions,
+    historySuggestions,
+    pendingCount,
+    runHistory,
+    readIds,
+  ] = await Promise.all([
+    loadLastRun("audit"),
+    countRatedWorks(),
+    loadSuggestions({ status: "pending", limit: 1000 }),
+    loadSuggestions({
+      status: ["auto_applied", "accepted", "edited", "rejected", "reverted"],
+      limit: 300,
+    }),
+    countPendingSuggestions(),
+    loadRunHistory(20),
+    getSuggestionReadAckIds(),
+  ])
 
   return (
     <div className="space-y-4">
@@ -84,7 +93,11 @@ export async function CalibrationAuditTool() {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="pending" className="mt-4">
-          <SuggestionsList suggestions={pendingSuggestions} totalAvailable={pendingCount} />
+          <SuggestionsList
+            suggestions={pendingSuggestions}
+            totalAvailable={pendingCount}
+            readIds={readIds}
+          />
         </TabsContent>
         <TabsContent value="history" className="mt-4">
           <SuggestionsList suggestions={historySuggestions} />

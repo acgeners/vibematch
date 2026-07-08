@@ -6,17 +6,17 @@ import {
   SettingsSubnav,
 } from "@/components/settings/settings-nav"
 import type { SubnavGroup } from "@/components/settings/settings-nav"
-import { getSettingsItemPending } from "@/server/queries/settings-pending"
+import { getSettingsItemUnread } from "@/server/queries/settings-read"
 
-// Pendências por GRUPO (badge na sub-nav) = soma das pendências dos itens do
-// grupo. Fonte única `getSettingsItemPending` (memoizada por request, compartilhada
-// com a page e o badge da sidebar). "Avançado" não tem item com pendência → 0.
+// NÃO-LIDO por GRUPO (badge na sub-nav) = soma do não-lido dos itens do grupo.
+// Fonte única `getSettingsItemUnread` (mesmas contagens da page e do badge da
+// sidebar, já descontando os "lidos"). "Avançado" não tem item com pendência → 0.
 async function loadGroupPending(): Promise<Record<string, number>> {
-  const itemPending = await getSettingsItemPending()
+  const itemUnread = await getSettingsItemUnread()
   return Object.fromEntries(
     SETTINGS_GROUPS.map((g) => [
       g.id,
-      g.sections.reduce((sum, s) => sum + (itemPending[s.id] ?? 0), 0),
+      g.sections.reduce((sum, s) => sum + (itemUnread[s.id] ?? 0), 0),
     ]),
   )
 }

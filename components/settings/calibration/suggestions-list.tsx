@@ -17,6 +17,7 @@ import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { useRefresh } from "@/lib/use-refresh"
 import { SuggestionRow } from "./suggestion-row"
+import { useToggleSuggestionRead } from "./use-toggle-suggestion-read"
 import {
   bulkAcceptAction,
   bulkAcceptByIdsAction,
@@ -41,6 +42,10 @@ const SORT_LABELS: Record<SortKey, string> = {
 
 const criterionName = (slug: string) => CRITERIA_INFO[slug]?.name ?? slug
 
+// Array vazio estável — evita re-memoizar o Set de lidos a cada render na aba
+// de histórico (que não passa `readIds`).
+const NO_READ_IDS: string[] = []
+
 const SORT_CMP: Record<SortKey, (a: SuggestionWithWork, b: SuggestionWithWork) => number> = {
   conf_desc: (a, b) => b.confidence - a.confidence,
   conf_asc: (a, b) => a.confidence - b.confidence,
@@ -54,9 +59,11 @@ interface SuggestionsListProps {
   suggestions: SuggestionWithWork[]
   /** Total desse status no banco — pode ser > que as carregadas (mostra no rodapé). */
   totalAvailable?: number
+  /** IDs de sugestões já marcadas como "lidas" (só na aba de pendentes). */
+  readIds?: string[]
 }
 
-export function SuggestionsList({ suggestions, totalAvailable }: SuggestionsListProps) {
+export function SuggestionsList({ suggestions, totalAvailable, readIds }: SuggestionsListProps) {
   const [criterion, setCriterion] = useState<string>("all")
   const [minDelta, setMinDelta] = useState("0.5")
   const [minConf, setMinConf] = useState("90")
@@ -67,6 +74,9 @@ export function SuggestionsList({ suggestions, totalAvailable }: SuggestionsList
   const [selPending, startSel] = useTransition()
   const [selMsg, setSelMsg] = useState<string | null>(null)
   const refresh = useRefresh()
+  // Toggle de "lida" por sugestão — só ativo na aba de pendentes (readIds definido).
+  const readEnabled = readIds != null
+  const { isRead, toggle: toggleRead } = useToggleSuggestionRead(readIds ?? NO_READ_IDS)
 
   const hasPending = useMemo(() => suggestions.some((s) => s.status === "pending"), [suggestions])
 
@@ -293,6 +303,8 @@ export function SuggestionsList({ suggestions, totalAvailable }: SuggestionsList
             selectable={s.status === "pending"}
             selected={selected.has(s.id)}
             onSelectChange={(checked) => toggleOne(s.id, checked)}
+            isRead={readEnabled && isRead(s.id)}
+            onToggleRead={readEnabled ? () => toggleRead(s.id) : undefined}
           />
         ))}
       </div>
