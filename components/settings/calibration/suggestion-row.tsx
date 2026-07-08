@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { Check, Loader2, MoreHorizontal, Pencil, X, RotateCcw } from "lucide-react"
+import { BellOff, Check, Loader2, MoreHorizontal, Pencil, X, RotateCcw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -35,6 +35,10 @@ interface SuggestionRowProps {
   selectable?: boolean
   selected?: boolean
   onSelectChange?: (checked: boolean) => void
+  /** Sugestão marcada como "lida" (silenciada no badge, sem resolver). */
+  isRead?: boolean
+  /** Alterna o estado de "lida" (só nas linhas pendentes). */
+  onToggleRead?: () => void
 }
 
 function deltaColor(delta: number): string {
@@ -85,6 +89,8 @@ export function SuggestionRow({
   selectable = false,
   selected = false,
   onSelectChange,
+  isRead = false,
+  onToggleRead,
 }: SuggestionRowProps) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -137,7 +143,12 @@ export function SuggestionRow({
   }
 
   return (
-    <div className="rounded-lg border bg-card/40 p-3 transition hover:bg-card/70">
+    <div
+      className={cn(
+        "rounded-lg border bg-card/40 p-3 transition hover:bg-card/70",
+        isRead && "opacity-60",
+      )}
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 flex-1 items-start gap-2">
           {selectable && (
@@ -187,6 +198,24 @@ export function SuggestionRow({
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          {isPending && onToggleRead && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onToggleRead}
+              title={
+                isRead
+                  ? "Lida — clique para desmarcar (volta a contar no badge)"
+                  : "Marcar como lida — silencia no badge sem aceitar/rejeitar"
+              }
+              className={cn(
+                isRead && "text-emerald-700 hover:text-emerald-700 dark:text-emerald-300",
+              )}
+            >
+              {isRead ? <Check className="h-3.5 w-3.5" /> : <BellOff className="h-3.5 w-3.5" />}
+              <span className="ml-1.5">{isRead ? "Lida" : "Marcar lida"}</span>
+            </Button>
+          )}
           {isPending && (
             <>
               <Button size="sm" variant="outline" onClick={handleAccept} disabled={pending}>

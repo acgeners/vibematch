@@ -50,6 +50,14 @@ import {
   countPendingReviewSummaries,
   getSettingsItemPending,
 } from "@/server/queries/settings-pending"
+import {
+  BATCH_READ_SECTIONS,
+  getSettingsItemUnread,
+  getSettingsReadAcks,
+  getSuggestionReadAckIds,
+} from "@/server/queries/settings-read"
+import { MarkAllReadButton } from "@/components/settings/mark-all-read-button"
+import { CardMarkRead } from "@/components/settings/card-mark-read"
 import { parseModelEvaluationMetrics } from "@/lib/metrics/model-evaluation"
 import type { FormulaConfig } from "@/types/domain"
 import type { SettingsAccent } from "@/lib/settings-accent"
@@ -122,9 +130,24 @@ export default async function SettingsPage({
   const GroupIcon = group.icon
   // Itens do tópico ganham seta de colapso — exceto quando o tópico tem 1 só.
   const collapsible = group.sections.length > 1
-  // Pendências por item (badge no card). Memoizado por request → mesma computação
-  // que o layout já fez pra sub-nav (não recontabiliza).
-  const itemPending = await getSettingsItemPending()
+  // Pendência REAL por item (`itemPending`) + NÃO-LIDO por item (`itemUnread`, o
+  // que vira a pílula do card e o badge). Os acks dizem quais seções batch já têm
+  // snapshot (selo "Lida") e quantas sugestões foram silenciadas. O
+  // getSettingsItemPending é memoizado por request → compartilha a computação com
+  // o layout (sub-nav) e com getSettingsItemUnread.
+  const [itemPending, itemUnread, batchAcks, suggestionAckIds] = await Promise.all([
+    getSettingsItemPending(),
+    getSettingsItemUnread(),
+    getSettingsReadAcks(),
+    getSuggestionReadAckIds(),
+  ])
+  const batchReadSet = new Set<string>(BATCH_READ_SECTIONS as readonly string[])
+  const totalUnread = Object.values(itemUnread).reduce((sum, n) => sum + n, 0)
+  const hasAnyRead = batchAcks.size > 0 || suggestionAckIds.length > 0
+  // Botão global: aparece quando há algo a marcar OU algo já lido; vira "Desmarcar
+  // tudo" quando tudo está lido (algo lido e nenhuma pendência não-lida).
+  const showMarkAll = totalUnread > 0 || hasAnyRead
+  const allRead = hasAnyRead && totalUnread === 0
 
   return (
     <div className="w-full max-w-5xl">
@@ -143,9 +166,12 @@ export default async function SettingsPage({
           <h1 className="text-2xl font-bold tracking-tight text-foreground">{group.label}</h1>
           <p className="text-sm text-muted-foreground first-letter:uppercase">{group.hint}</p>
         </div>
-        <span className="ml-auto shrink-0 rounded-full border border-border/60 bg-card/60 px-3 py-1 text-xs font-medium text-muted-foreground">
-          {group.sections.length} {group.sections.length === 1 ? "item" : "itens"}
-        </span>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {showMarkAll && <MarkAllReadButton allRead={allRead} />}
+          <span className="rounded-full border border-border/60 bg-card/60 px-3 py-1 text-xs font-medium text-muted-foreground">
+            {group.sections.length} {group.sections.length === 1 ? "item" : "itens"}
+          </span>
+        </div>
       </header>
 
       <div className="space-y-4">
@@ -163,6 +189,11 @@ export default async function SettingsPage({
                   : `/settings?g=${group.id}&open=${section.id}#card-${section.id}`,
               }
             : undefined
+          // Cards agregados (batch) ganham o botão/selo "Marcar como lido" no
+          // header. O 'ai-audit' NÃO — sua pendência é silenciada 1-a-1 (selo por
+          // sugestão dentro do card). Cards sem pendência acionável: sem controle.
+          const isBatch = batchReadSet.has(section.id)
+          const unread = itemUnread[section.id] ?? 0
           return (
             <SettingsCard
               key={section.id}
@@ -172,7 +203,17 @@ export default async function SettingsPage({
               forceOpen={isOpen}
               serverCollapse={serverCollapse}
               storageKeyPrefix="settings-card"
-              pending={itemPending[section.id] ?? 0}
+              pending={unread}
+              readControl={
+                isBatch ? (
+                  <CardMarkRead
+                    section={section.id}
+                    pending={itemPending[section.id] ?? 0}
+                    unread={unread}
+                    isRead={batchAcks.has(section.id)}
+                  />
+                ) : undefined
+              }
             >
               <Suspense fallback={<BodySkeleton />}>
                 <ItemBody section={section} accent={accent} open={isOpen} tagParams={tagParams} />

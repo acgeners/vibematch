@@ -1,7 +1,7 @@
 "use server"
 
 import { getEvalBadgeUnreadCount } from "@/server/queries/ai-eval-read"
-import { getSettingsItemPending } from "@/server/queries/settings-pending"
+import { getSettingsItemUnread } from "@/server/queries/settings-read"
 import { maybeTriggerStaleRecalc } from "@/server/actions/recalc-queue"
 import { getComixStatus } from "@/lib/external/comix-gate"
 import type { ComixHealthState } from "@/lib/external/comix-gate"
@@ -25,11 +25,11 @@ export interface SidebarBadgeCounts {
  *   /ai-evaluation silencia pendências sem resolvê-las, então o antigo problema
  *   de inflar o badge (regen de perfil) é neutralizado pelo próprio usuário. Ver
  *   `getEvalBadgeUnreadCount`. A sidebar oculta o badge quando isto é 0.
- * - settings: soma de TODAS as pendências acionáveis de /settings (sugestões de
- *   critérios + embeddings + sinopse + resumo + comix), via `getSettingsItemPending`
+ * - settings: soma do NÃO-LIDO de todas as pendências de /settings (sugestões de
+ *   critérios + embeddings + sinopse + resumo + comix), via `getSettingsItemUnread`
  *   — as MESMAS contagens por-item que a página e a sub-nav usam, então sidebar →
- *   tópico → card batem. Antes somava só o grupo "Gerado por IA"
- *   (embeddings+sinopse+resumo), ignorando o 99+ de critérios e o comix.
+ *   tópico → card batem. "Marcar como lido" em /settings silencia sem resolver
+ *   (migration 134), igual ao /ai-evaluation. A sidebar oculta o badge no 0.
  *
  * Cada parcela falha silenciosa em 0 pra nunca derrubar o layout.
  */
@@ -61,14 +61,14 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
 }
 
 /**
- * Total de pendências de /settings (badge "Configurações") = soma dos itens de
- * `getSettingsItemPending` (as MESMAS contagens por-item da página/sub-nav).
- * Falha → 0 (nunca derruba o layout).
+ * Total NÃO-LIDO de /settings (badge "Configurações") = soma dos itens de
+ * `getSettingsItemUnread` (as MESMAS contagens por-item da página/sub-nav, já
+ * descontando os "lidos"). Falha → 0 (nunca derruba o layout).
  */
 async function getSettingsBadgeTotal(): Promise<number> {
   try {
-    const itemPending = await getSettingsItemPending()
-    return Object.values(itemPending).reduce((sum, n) => sum + n, 0)
+    const itemUnread = await getSettingsItemUnread()
+    return Object.values(itemUnread).reduce((sum, n) => sum + n, 0)
   } catch (err) {
     console.error("[getSidebarBadgeCounts] contagem de settings falhou:", err)
     return 0
