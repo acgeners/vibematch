@@ -113,9 +113,27 @@ export function splitSynopsesFromText(text: string | null | undefined): string[]
 /** Capa "primária" para list/detail. Prefere is_primary=true; senão menor position. */
 export function pickPrimaryCover(rows: WorkCoverRow[] | null | undefined): string | null {
   if (!rows?.length) return null
+  return pickCoverUrls(rows)[0] ?? null
+}
+
+/**
+ * Todas as capas em ordem de preferência (is_primary primeiro, depois position),
+ * deduplicadas. Serve como lista de candidatas pro `<CoverImage urls>`: se a
+ * primária for link morto/hotlink bloqueado, ele cai pra próxima.
+ */
+export function pickCoverUrls(rows: WorkCoverRow[] | null | undefined): string[] {
+  if (!rows?.length) return []
   const sorted = [...rows].sort((a, b) => {
     if (a.is_primary === b.is_primary) return (a.position ?? 0) - (b.position ?? 0)
     return a.is_primary ? -1 : 1
   })
-  return sorted[0]?.url ?? null
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const r of sorted) {
+    if (r.url && !seen.has(r.url)) {
+      seen.add(r.url)
+      out.push(r.url)
+    }
+  }
+  return out
 }

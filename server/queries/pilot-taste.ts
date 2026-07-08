@@ -1,7 +1,7 @@
 import "server-only"
 
 import { createAdminClient } from "@/lib/supabase/admin"
-import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
+import { pickCoverUrls, pickPrimarySynopsis } from "@/lib/work-derived"
 
 /** Os 7 campos de gosto (6 eixos + gostei geral), na ordem do banco. */
 export const TASTE_SCORE_KEYS = [
@@ -31,7 +31,8 @@ export interface PilotWork {
   id: string
   title: string
   userScore: number
-  cover: string | null
+  /** Capas em ordem de preferência (primária primeiro); vazio quando não há capa. */
+  coverUrls: string[]
   synopsis: string | null
   tags: string[]
   scores: Record<TasteScoreKey, number | null>
@@ -100,7 +101,7 @@ export async function getPilotWorks(): Promise<PilotWork[]> {
       id: w.id as string,
       title: w.title as string,
       userScore: Number(w.user_score),
-      cover: pickPrimaryCover(w.work_covers as never),
+      coverUrls: pickCoverUrls(w.work_covers as never),
       synopsis:
         (w.canonical_synopsis as string | null)?.trim() ||
         pickPrimarySynopsis(w.work_synopses as never),
