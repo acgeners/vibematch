@@ -22,6 +22,14 @@ export type PersonalStatus = (typeof PERSONAL_STATUSES)[number]
 export const SYNOPSIS_QUALITIES = ["♥", "♥♥", "♥♥♥", "♥♥♥♥"] as const
 export type SynopsisQuality = (typeof SYNOPSIS_QUALITIES)[number]
 
+/**
+ * Proveniência do Interesse na Obra manual (`works.synopsis_quality_source`).
+ * `human_manual` = você definiu à mão; `prediction_applied` = copiado da
+ * previsão da IA (ainda não confirmado à mão); `legacy_unknown` = legado/limpo.
+ */
+export const SYNOPSIS_QUALITY_SOURCES = ["human_manual", "prediction_applied", "legacy_unknown"] as const
+export type SynopsisQualitySource = (typeof SYNOPSIS_QUALITY_SOURCES)[number]
+
 export const AI_EVAL_STATUSES = ["pending", "review_pending", "done", "skipped"] as const
 export type AiEvalStatus = (typeof AI_EVAL_STATUSES)[number]
 
@@ -155,6 +163,7 @@ export interface Work {
   total_chapters: number | null
   chapters_read: number | null
   synopsis_quality: SynopsisQuality | null
+  synopsis_quality_source: SynopsisQualitySource | null
   observation_adjustment: number
   user_score: number | null
   post_story_score: number | null

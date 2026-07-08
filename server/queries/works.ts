@@ -37,6 +37,7 @@ const WORK_LIST_SELECT = `
   is_favorite,
   year,
   synopsis_quality,
+  synopsis_quality_source,
   created_at,
   updated_at,
   last_read_at,

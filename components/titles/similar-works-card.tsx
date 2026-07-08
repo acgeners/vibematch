@@ -14,6 +14,7 @@ import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { cn, titleToSlug } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
+import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import type { SimilarWork } from "@/server/queries/similar-works"
 
 interface SimilarWorksCardProps {
@@ -75,10 +76,13 @@ function Hearts({ quality, variant }: { quality: string; variant: "manual" | "pr
 /** Interesse: manual (vermelho) + previsto pela IA (laranja + selo IA). */
 function InterestHearts({
   manual,
+  manualFromPrediction = false,
   predicted,
   predictedStale,
 }: {
   manual: string | null
+  /** Manual foi aplicado da previsão (não definido à mão) → selo ✨. */
+  manualFromPrediction?: boolean
   predicted: string | null
   predictedStale: boolean
 }) {
@@ -86,6 +90,7 @@ function InterestHearts({
   return (
     <span className="inline-flex items-center gap-2 whitespace-nowrap" aria-label="Interesse na obra">
       {manual && <Hearts quality={manual} variant="manual" />}
+      {manual && manualFromPrediction && <InterestAppliedMark size={12} />}
       {manual && predicted && <span className="h-3 w-px bg-border/70" aria-hidden />}
       {predicted && (
         <span className="inline-flex items-center gap-1">
@@ -350,6 +355,7 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
 
                   <InterestHearts
                     manual={w.synopsisQuality}
+                    manualFromPrediction={w.synopsisFromPrediction}
                     predicted={w.predictedSynopsisQuality}
                     predictedStale={w.predictedSynopsisStale}
                   />

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
+import { ResponsiveHeaderLabel, headerFormsFor } from "@/components/titles/responsive-header-label"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
 import { AlignmentCell, AlignmentScoreCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { pickCriterionTierByRange } from "@/components/ui/score-badge"
@@ -390,6 +391,9 @@ export function WorkHeatmapView({
               </th>
               {visibleScoreColumns.map((col) => {
                 const hasSeparator = columnSeparators.has(col.key)
+                // Colunas de nota (LABELS) usam o cabeçalho responsivo compartilhado;
+                // colunas de critério (emoji) seguem no SortableHeader.
+                const forms = headerFormsFor(col)
                 return (
                   <th
                     key={col.key}
@@ -398,13 +402,25 @@ export function WorkHeatmapView({
                       hasSeparator && "border-l-2 border-l-primary/30"
                     )}
                   >
-                    <SortableHeader
-                      label={getHeaderLabel(col)}
-                      active={effectiveSortKey === col.key}
-                      asc={sortDir === "asc"}
-                      onClick={() => handleSort(col.key)}
-                      titleAttr={getTooltipLabel(col)}
-                    />
+                    {forms ? (
+                      <ResponsiveHeaderLabel
+                        forms={forms}
+                        description={NON_CRITERION_TOOLTIPS[col.key] ?? col.description ?? null}
+                        align="center"
+                        sortable
+                        isActive={effectiveSortKey === col.key}
+                        sortDir={sortDir === "asc" ? "asc" : "desc"}
+                        onSort={() => handleSort(col.key)}
+                      />
+                    ) : (
+                      <SortableHeader
+                        label={getHeaderLabel(col)}
+                        active={effectiveSortKey === col.key}
+                        asc={sortDir === "asc"}
+                        onClick={() => handleSort(col.key)}
+                        titleAttr={getTooltipLabel(col)}
+                      />
+                    )}
                     <ResizeHandle
                       columnKey={col.key}
                       onResize={setWidth}

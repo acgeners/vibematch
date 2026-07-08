@@ -7,6 +7,8 @@ import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { QualityHearts } from "@/components/ui/quality-hearts"
+import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 import { AlignmentTooltipContent, VerdictTooltipContent } from "@/components/ranking/score-tooltip-content"
@@ -233,9 +235,9 @@ export function AlignmentScoreCell({
 
 /**
  * Cell pra a PREVISÃO de Interesse Sinopse (♥..♥♥♥♥) gerada pela IA — distinta
- * da coluna "Sinopse" (valor manual). Badge rosa com ✨ pra deixar claro que é
- * uma estimativa. NULL vira "—" (obra ainda não prevista). Stale = a obra/perfil
- * mudaram desde a previsão; fica esmaecida com aviso na tooltip.
+ * da coluna "Sinopse" (valor manual). Corações LARANJA + selo "IA" (mesma paleta
+ * dos cards/chips; o manual fica vermelho). NULL vira "—" (obra ainda não
+ * prevista). Stale = a obra/perfil mudaram desde a previsão; esmaece com aviso.
  */
 export function SynopsisPredictionCell({
   quality,
@@ -254,14 +256,11 @@ export function SynopsisPredictionCell({
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span
-            className={cn(
-              "inline-flex items-center gap-1 rounded-full border border-rose-400/30 bg-rose-500/10 px-2 py-0.5 text-xs font-semibold text-rose-600 cursor-help dark:text-rose-300",
-              stale && "opacity-60",
-            )}
-          >
-            <Sparkles className="h-3 w-3" />
-            <span>{quality}</span>
+          <span className={cn("inline-flex cursor-help items-center gap-1 whitespace-nowrap", stale && "opacity-60")}>
+            <QualityHearts quality={quality} variant="pred" showEmpty={false} className="text-[15px]" />
+            <span className="rounded border border-orange-500/40 px-[3px] text-[8px] font-extrabold leading-[1.4] tracking-wide text-orange-500 dark:text-orange-400">
+              IA
+            </span>
           </span>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[260px] space-y-1">
@@ -281,6 +280,29 @@ export function SynopsisPredictionCell({
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  )
+}
+
+/**
+ * Interesse na Obra MANUAL (coluna "Sinopse") — corações VERMELHOS (mesma paleta
+ * dos cards e dos chips de filtro; a previsão fica laranja). Quando o valor foi
+ * APLICADO da previsão (`synopsis_quality_source = prediction_applied`) ganha o ✨
+ * (rosa) + tooltip, sinalizando origem na IA. Valor definido à mão fica sem ✨.
+ * NULL vira "—".
+ */
+export function ManualInterestCell({
+  quality,
+  fromPrediction = false,
+}: {
+  quality: string | null
+  fromPrediction?: boolean
+}) {
+  if (!quality) return <span className="font-mono text-sm text-muted-foreground">—</span>
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap">
+      <QualityHearts quality={quality} variant="manual" showEmpty={false} className="text-[15px]" />
+      {fromPrediction && <InterestAppliedMark size={11} />}
+    </span>
   )
 }
 
