@@ -172,6 +172,12 @@ export interface RankingFilters {
   synopsisQualities?: string[]
   /** Previsão IA de Interesse Sinopse (♥..♥♥♥♥) — filtra pelas obras cuja previsão casa. */
   predictedSynopsisQualities?: string[]
+  /**
+   * Como combinar o filtro de Interesse manual com o de previsão IA quando os
+   * DOIS estão ativos: "or" (default — casa qualquer um) ou "and" (casa os dois).
+   * Ignorado quando só um dos filtros tem seleção.
+   */
+  interestMode?: "and" | "or"
   minTotalChapters?: number
   maxTotalChapters?: number
   minYear?: number
@@ -445,10 +451,13 @@ export async function getRanking(
   if (filters.aiEvalStatus?.length) {
     worksQuery = worksQuery.in("ai_eval_status", filters.aiEvalStatus)
   }
-  // Só pré-filtra no SQL quando NÃO há filtro de previsão IA ativo. Com a
-  // previsão ativa os dois filtros viram OR (em memória, abaixo), e este
-  // pré-filtro excluiria do fetch as obras que casam só pela previsão.
-  if (filters.synopsisQualities?.length && !filters.predictedSynopsisQualities?.length) {
+  // Pré-filtra o Interesse manual no SQL sempre que for seguro. Só NÃO é seguro
+  // no modo OR com a previsão IA também ativa: aí os dois viram OR (em memória,
+  // abaixo) e este pré-filtro excluiria do fetch as obras que casam só pela
+  // previsão. No modo AND (ambos precisam casar) pré-filtrar por manual é válido.
+  const orWithPredActive =
+    (filters.interestMode ?? "or") === "or" && !!filters.predictedSynopsisQualities?.length
+  if (filters.synopsisQualities?.length && !orWithPredActive) {
     worksQuery = worksQuery.in("synopsis_quality", filters.synopsisQualities)
   }
   if (filters.minTotalChapters != null) {
@@ -601,10 +610,11 @@ export async function getRanking(
   // Filtros de gênero/tag (genreAll/Any/Exclude, tagSlugsAll/Any/Exclude) já são
   // aplicados em SQL via allowedIds/excludeIds (pre-resolução por pivot, acima).
   // O re-filtro em memória era redundante e exigia carregar tags/genres no payload.
-  // Interesse na sinopse (manual) e previsão IA são combinados em OR entre si: a
-  // obra entra se casar QUALQUER um dos dois (não precisa casar os dois). Quando
-  // só um está ativo, equivale ao filtro simples daquele campo. Os demais
-  // filtros seguem AND.
+  // Interesse na sinopse (manual) e previsão IA são combinados conforme
+  // `interestMode`: "or" (default — a obra entra se casar QUALQUER um dos dois)
+  // ou "and" (precisa casar os dois). O modo só importa quando os DOIS estão
+  // ativos; com apenas um ativo, equivale ao filtro simples daquele campo em
+  // ambos os modos. Os demais filtros seguem AND.
   const wantedSynopsis = filters.synopsisQualities?.length
     ? new Set(filters.synopsisQualities)
     : null
@@ -612,6 +622,7 @@ export async function getRanking(
     ? new Set(filters.predictedSynopsisQualities)
     : null
   if (wantedSynopsis || wantedSynopsisPred) {
+    const andMode = (filters.interestMode ?? "or") === "and" && wantedSynopsis != null && wantedSynopsisPred != null
     entries = entries.filter((e) => {
       const manualMatch =
         wantedSynopsis != null && e.synopsisQuality != null && wantedSynopsis.has(e.synopsisQuality)
@@ -619,7 +630,7 @@ export async function getRanking(
         wantedSynopsisPred != null &&
         e.predictedSynopsisQuality != null &&
         wantedSynopsisPred.has(e.predictedSynopsisQuality)
-      return manualMatch || predMatch
+      return andMode ? manualMatch && predMatch : manualMatch || predMatch
     })
   }
   if (filters.minTotalChapters != null) {

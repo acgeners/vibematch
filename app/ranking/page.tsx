@@ -218,6 +218,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     })(),
     synopsisQualities: multi("synopsis_q"),
     predictedSynopsisQualities: multi("synopsis_pred"),
+    interestMode: str("synopsis_mode") === "and" ? "and" : "or",
     minTotalChapters: num("min_chapters"),
     maxTotalChapters: num("max_chapters"),
     minYear: num("min_year"),
