@@ -1,8 +1,9 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { ArrowUpRight } from "lucide-react"
 import { CoverImage } from "@/components/ui/cover-image"
-import { cn } from "@/lib/utils"
+import { cn, titleToSlug } from "@/lib/utils"
 import { TasteStars } from "@/components/pilot/taste-stars"
 import { fmtLastRead } from "@/components/pilot/pilot-shared"
 import type { WorkState } from "@/components/pilot/pilot-shared"
@@ -157,7 +158,18 @@ export function ByWorkView({
           <div className="text-[11px] uppercase tracking-wider tabular-nums text-muted-foreground">
             Obra {idx + 1} de {works.length}
           </div>
-          <h1 className="text-xl font-bold leading-tight tracking-tight text-balance">{w.title}</h1>
+          <a
+            href={`/titles/${titleToSlug(w.title)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Abrir a página da obra (nova aba)"
+            className="group inline-flex items-start gap-1.5 self-start"
+          >
+            <h1 className="text-xl font-bold leading-tight tracking-tight text-balance underline-offset-4 group-hover:underline group-hover:decoration-violet-500">
+              {w.title}
+            </h1>
+            <ArrowUpRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-violet-500" />
+          </a>
           <div className="flex flex-wrap gap-1.5">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-0.5 text-[11px] text-muted-foreground">
               Tua nota <b className="tabular-nums text-foreground">{w.userScore.toFixed(1)}</b>

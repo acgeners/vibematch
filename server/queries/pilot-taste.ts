@@ -63,9 +63,29 @@ export async function getTasteCriteria(): Promise<TasteCriterion[]> {
 }
 
 /**
- * Obras já lidas (com user_score, não arquivadas), com capa/sinopse/tags e as
- * notas de gosto já dadas. Ordenadas pela ÚLTIMA LEITURA (desc): obra recém-lida
- * = recall melhor = nota de gosto mais precisa. Sem data vai pro fim.
+ * Colunas dos 8 critérios pós-leitura (User) em `works`. Quando ≥1 está
+ * preenchido, a nota pessoal foi CALCULADA a partir deles (mesma regra do
+ * work-status-form: weightSum>0); quando nenhum, o `user_score` veio de outro
+ * lugar (ex.: import) — a obra não foi "avaliada diretamente".
+ */
+const POST_READING_SCORE_COLUMNS = [
+  "post_story_score",
+  "post_fl_score",
+  "post_ml_score",
+  "post_character_development_score",
+  "post_pacing_score",
+  "post_art_visual_score",
+  "post_impact_immersion_score",
+  "post_originality_score",
+] as const
+
+/**
+ * Obras que EU avaliei diretamente para o piloto: têm `user_score` e pelo menos
+ * um critério pós-leitura preenchido (a nota pessoal saiu dos critérios, não de
+ * import). Ficam de fora obras com user_score importado mas sem avaliação própria.
+ * Com capa/sinopse/tags e as notas de gosto já dadas. Ordenadas pela ÚLTIMA
+ * LEITURA (desc): obra recém-lida = recall melhor = nota de gosto mais precisa.
+ * Sem data vai pro fim.
  */
 export async function getPilotWorks(): Promise<PilotWork[]> {
   const sb = createAdminClient()
@@ -74,18 +94,26 @@ export async function getPilotWorks(): Promise<PilotWork[]> {
     const { data, error } = await sb
       .from("works")
       .select(
-        "id, title, user_score, last_read_at, canonical_synopsis, work_covers(url,is_primary,position), work_synopses(text,is_primary,position), work_tags(tags(name)), pilot_taste_scores(*)",
+        `id, title, user_score, last_read_at, canonical_synopsis, ${POST_READING_SCORE_COLUMNS.join(", ")}, work_covers(url,is_primary,position), work_synopses(text,is_primary,position), work_tags(tags(name)), pilot_taste_scores(*)`,
       )
       .not("user_score", "is", null)
       .eq("is_archived", false)
       .range(from, from + 999)
     if (error) throw new Error(`getPilotWorks: ${error.message}`)
-    const batch = (data ?? []) as Record<string, unknown>[]
+    // cast via unknown: select montado por template string vira ParserError no
+    // tipo do supabase-js, mas a string é válida em runtime.
+    const batch = (data ?? []) as unknown as Record<string, unknown>[]
     rows.push(...batch)
     if (batch.length < 1000) break
   }
 
-  const works: PilotWork[] = rows.map((w) => {
+  // Só obras avaliadas diretamente: user_score derivado dos critérios pós-leitura
+  // (≥1 preenchido). Exclui user_score de import sem avaliação própria.
+  const evaluated = rows.filter((w) =>
+    POST_READING_SCORE_COLUMNS.some((c) => w[c] != null),
+  )
+
+  const works: PilotWork[] = evaluated.map((w) => {
     const ptsRaw = w.pilot_taste_scores
     const pts = (Array.isArray(ptsRaw) ? ptsRaw[0] : ptsRaw) as Record<string, unknown> | undefined
     const scores = {} as Record<TasteScoreKey, number | null>

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { CoverImage } from "@/components/ui/cover-image"
-import { cn } from "@/lib/utils"
+import { cn, titleToSlug } from "@/lib/utils"
 import { TasteStars } from "@/components/pilot/taste-stars"
 import { CRITERION_BATCH, fmtLastRead, isAnswered } from "@/components/pilot/pilot-shared"
 import type { WorkState } from "@/components/pilot/pilot-shared"
@@ -250,7 +250,15 @@ export function ByCriterionView({
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold tracking-tight">{w.title}</div>
+                  <a
+                    href={`/titles/${titleToSlug(w.title)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Abrir a página da obra (nova aba)"
+                    className="block truncate text-sm font-semibold tracking-tight underline-offset-2 hover:underline hover:decoration-violet-500"
+                  >
+                    {w.title}
+                  </a>
                   <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
                     <span className="whitespace-nowrap rounded-full border border-border px-2 py-0.5">
                       tua nota{" "}
