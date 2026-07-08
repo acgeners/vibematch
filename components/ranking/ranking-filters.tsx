@@ -327,6 +327,51 @@ function QualityToggles({
   )
 }
 
+/**
+ * Alterna como o Interesse Manual e a Previsão IA se combinam: "OU" (a obra
+ * casa se bater qualquer um dos dois) ou "E" (precisa bater os dois). Só tem
+ * efeito quando os DOIS têm seleção — fora disso fica esmaecido.
+ */
+function InterestModeToggle({
+  mode,
+  onChange,
+  active,
+}: {
+  mode: "and" | "or"
+  onChange: (mode: "and" | "or") => void
+  active: boolean
+}) {
+  const seg = (on: boolean) =>
+    `inline-flex h-7 items-center rounded px-3 text-xs font-semibold transition-colors ${
+      on ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
+    }`
+  return (
+    <div
+      className={`inline-flex rounded-md border border-border/70 bg-background/60 p-0.5 transition-opacity ${active ? "" : "opacity-50"}`}
+      title={active ? undefined : "Só se aplica quando Manual e Prev. IA têm seleção"}
+    >
+      <button
+        type="button"
+        onClick={() => onChange("or")}
+        aria-pressed={mode === "or"}
+        className={seg(mode === "or")}
+        title="Casa se bater o Interesse manual OU a previsão IA"
+      >
+        OU
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("and")}
+        aria-pressed={mode === "and"}
+        className={seg(mode === "and")}
+        title="Casa só se bater o Interesse manual E a previsão IA"
+      >
+        E
+      </button>
+    </div>
+  )
+}
+
 /** Largura dos tiers — movido pra dentro do filtro (draft; aplica com "Aplicar filtros"). */
 function TierBandSection({
   searchParams,
@@ -1709,6 +1754,7 @@ export function RankingFilters({
 
   const selectedSynopsisQ = csvSet("synopsis_q")
   const selectedSynopsisPred = csvSet("synopsis_pred")
+  const interestMode: "and" | "or" = searchParams.get("synopsis_mode") === "and" ? "and" : "or"
 
   const DEFAULT_PUB_STATUS = "Completed"
   const DEFAULT_PER_STATUSES = ["Want to Read", "Untracked"]
@@ -2115,6 +2161,16 @@ export function RankingFilters({
                       selected={selectedSynopsisPred}
                       onToggle={(q) => toggleCsv("synopsis_pred", q)}
                       tone="salmon"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="w-16 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Combinar
+                    </Label>
+                    <InterestModeToggle
+                      mode={interestMode}
+                      onChange={(m) => updateParams({ synopsis_mode: m === "and" ? "and" : null })}
+                      active={selectedSynopsisQ.size > 0 && selectedSynopsisPred.size > 0}
                     />
                   </div>
                 </div>
