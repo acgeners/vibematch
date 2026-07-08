@@ -73,7 +73,7 @@ import { archiveWork, setFavoriteMany, toggleFavorite, unarchiveWork } from "@/s
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
-import { AlignmentCell, AlignmentScoreCell, DecisionCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
+import { AlignmentCell, AlignmentScoreCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
 import { MoodRefineDialog } from "@/components/ranking/mood-refine-dialog"
@@ -81,6 +81,7 @@ import { sortByMoodAdjusted, isMoodActive } from "@/lib/calculations/mood-refine
 import type { MoodRefine, MoodWork } from "@/lib/calculations/mood-refine"
 import { WorkHeatmapView } from "@/components/titles/work-heatmap-view"
 import { WorkColumnPicker } from "@/components/titles/work-column-picker"
+import { ResponsiveHeaderLabel, headerFormsFor } from "@/components/titles/responsive-header-label"
 import {
   DEFAULT_COLUMN_WIDTHS,
   getConfiguredWorkColumns,
@@ -869,16 +870,14 @@ function WorkListView({
         <span className="text-muted-foreground">—</span>
       )
     },
-    synopsis_q: (work) => {
-      const sq = (work as { synopsis_quality?: string | null }).synopsis_quality
-      return sq ? (
-        <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 text-xs font-semibold text-rose-700">
-          {sq}
-        </span>
-      ) : (
-        <span className="text-muted-foreground">—</span>
-      )
-    },
+    synopsis_q: (work) => (
+      <ManualInterestCell
+        quality={(work as { synopsis_quality?: string | null }).synopsis_quality ?? null}
+        fromPrediction={
+          (work as { synopsis_quality_source?: string | null }).synopsis_quality_source === "prediction_applied"
+        }
+      />
+    ),
     synopsis_pred: (work) => (
       <SynopsisPredictionCell
         quality={work.predicted_synopsis_quality ?? null}
@@ -1146,6 +1145,26 @@ function WorkListView({
     const criterion = slug ? CRITERIA_INFO[slug] : null
     const fullName = criterion?.name ?? col?.configLabel ?? null
     const description = criterion?.description ?? col?.description ?? null
+
+    // Colunas com rótulo no LABELS trocam full → short → abbrev conforme a
+    // largura (compartilhado com /ranking). Estruturais/critérios seguem abaixo.
+    const forms = col ? headerFormsFor(col) : null
+    if (forms) {
+      return (
+        <ResponsiveHeaderLabel
+          forms={forms}
+          description={description}
+          align={isCenterAligned(columnId) ? "center" : "left"}
+          sortable={!!sortable}
+          isActive={!!sortable && activeSortField === sortable.field}
+          sortDir={activeSortDirection === "asc" ? "asc" : "desc"}
+          onSort={() => {
+            if (sortable) updateSort(sortable.field)
+          }}
+        />
+      )
+    }
+
     const displayLabel = col?.label ?? sortable?.label ?? ""
 
     if (!sortable) return fallback

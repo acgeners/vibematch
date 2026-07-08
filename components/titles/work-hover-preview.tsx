@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react"
 import { BookOpen, MessageSquare, Star, StickyNote, Tag, Users } from "lucide-react"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { CoverImage } from "@/components/ui/cover-image"
+import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import { cn } from "@/lib/utils"
 import { getWorkHoverCounts, type WorkPreview } from "@/server/actions/works"
 
@@ -49,10 +50,13 @@ function Hearts({ quality, variant }: { quality: string; variant: "manual" | "pr
 /** Interesse: manual (rosa) + previsto (salmão + selo IA), mesma paleta do filtro. */
 function InterestHearts({
   manual,
+  manualFromPrediction = false,
   predicted,
   predictedStale,
 }: {
   manual: string | null
+  /** Manual foi aplicado da previsão (não definido à mão) → selo ✨. */
+  manualFromPrediction?: boolean
   predicted: string | null
   predictedStale: boolean
 }) {
@@ -60,6 +64,7 @@ function InterestHearts({
   return (
     <span className="inline-flex items-center gap-2 whitespace-nowrap" aria-label="Interesse na obra">
       {manual && <Hearts quality={manual} variant="manual" />}
+      {manual && manualFromPrediction && <InterestAppliedMark size={12} />}
       {manual && predicted && <span className="h-3 w-px bg-border/70" aria-hidden />}
       {predicted && (
         <span className="inline-flex items-center gap-1">
@@ -188,6 +193,7 @@ export function WorkHoverPreview({ preview, anchorRect }: WorkHoverPreviewProps)
               {hasInterest && (
                 <InterestHearts
                   manual={preview.synopsisQuality}
+                  manualFromPrediction={preview.synopsisFromPrediction}
                   predicted={preview.predictedSynopsisQuality}
                   predictedStale={preview.predictedSynopsisStale}
                 />

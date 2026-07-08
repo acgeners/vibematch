@@ -25,6 +25,8 @@ export interface SimilarWork {
   alignmentStale: boolean
   /** Interesse manual (♥..♥♥♥♥) e previsto pela IA (synopsis_quality_predictions). */
   synopsisQuality: string | null
+  /** True quando o Interesse manual foi APLICADO da previsão da IA (synopsis_quality_source = prediction_applied). */
+  synopsisFromPrediction: boolean
   predictedSynopsisQuality: string | null
   predictedSynopsisStale: boolean
 }
@@ -47,6 +49,7 @@ interface WorkMetaRow {
   publication_status_id: number | null
   personal_status_id: number | null
   synopsis_quality: string | null
+  synopsis_quality_source: string | null
   canonical_synopsis: string | null
 }
 
@@ -98,7 +101,7 @@ export async function getSimilarWorks(
   const [metaResult, genresResult, ratingsResult, calcResult, predictions] = await Promise.all([
     supabase
       .from("works")
-      .select("id, year, total_chapters, publication_status_id, personal_status_id, synopsis_quality, canonical_synopsis")
+      .select("id, year, total_chapters, publication_status_id, personal_status_id, synopsis_quality, synopsis_quality_source, canonical_synopsis")
       .in("id", ids),
     supabase
       .from("work_genres")
@@ -193,6 +196,7 @@ export async function getSimilarWorks(
       alignmentScore: calc?.alignment_score == null ? null : Number(calc.alignment_score),
       alignmentStale: Boolean(calc?.alignment_stale),
       synopsisQuality: meta?.synopsis_quality ?? null,
+      synopsisFromPrediction: meta?.synopsis_quality_source === "prediction_applied",
       predictedSynopsisQuality: pred?.predictedQuality ?? null,
       predictedSynopsisStale: pred?.stale ?? false,
     }
