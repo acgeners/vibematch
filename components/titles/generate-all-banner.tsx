@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { runTask } from "@/lib/tasks-store"
+import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { generateAllWorkData } from "@/server/actions/generate-all"
 import type { CascadeStatus, GenerateAllResult, GenerateAllOpts } from "@/lib/generate-all/types"
@@ -25,10 +26,13 @@ export function GenerateAllBanner({
   workId,
   workTitle,
   initialStatus,
+  compact = false,
 }: {
   workId: string
   workTitle: string
   initialStatus: CascadeStatus
+  /** Modo botão inline (linha de ações da aba Geral) em vez do banner cheio. */
+  compact?: boolean
 }) {
   const [status, setStatus] = useState<CascadeStatus>(initialStatus)
   const [dialog, setDialog] = useState<Dialog>(null)
@@ -80,6 +84,79 @@ export function GenerateAllBanner({
 
   const running = status === "verifying_sources" || status === "generating"
 
+  const dialogs = (
+    <>
+      {/* Checkpoint de custo + sem-review (mesmo padrão do ai-eval) */}
+      <ConfirmDialog
+        open={dialog?.kind === "cost"}
+        onOpenChange={(o) => !o && setDialog(null)}
+        title="Gerar todos os dados"
+        description={
+          dialog?.kind === "cost"
+            ? `Vai gerar tudo em ordem (~$${dialog.estimatedUsd.toFixed(2)}).` +
+              (dialog.noReviewsReason
+                ? ` ⚠️ Sem reviews: ${NO_REVIEWS_HINT[dialog.noReviewsReason] ?? "a obra não tem reviews"}. Os atributos ficam mais fracos.`
+                : "")
+            : undefined
+        }
+        confirmText="Autorizar e gerar"
+        cancelText="Cancelar"
+        onConfirm={() =>
+          kickoff(
+            {
+              proceed: true,
+              proceedWithoutReviews: true,
+              allowPaidUsd: dialog?.kind === "cost" ? dialog.estimatedUsd : undefined,
+            },
+            `Gerando dados: ${workTitle}`,
+            "generating",
+          )
+        }
+      />
+
+      {/* Fontes não confirmadas (FlareSolverr/Comix/ComicK) */}
+      <ConfirmDialog
+        open={dialog?.kind === "sources"}
+        onOpenChange={(o) => !o && setDialog(null)}
+        title="Fontes não confirmadas"
+        description="Não consegui confirmar Comix/ComicK (pode ser o FlareSolverr fora). Pode ser infra ou a obra realmente não existe nessas fontes. Seguir mesmo assim gera com o que as outras fontes derem."
+        confirmText="Seguir mesmo assim"
+        cancelText="Cancelar"
+        onConfirm={() => kickoff({ ignoreSourceGate: true }, `Verificando fontes: ${workTitle}`, "verifying_sources")}
+      />
+    </>
+  )
+
+  if (compact) {
+    return (
+      <>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={running}
+          onClick={() => kickoff({}, `Verificando fontes: ${workTitle}`, "verifying_sources")}
+          title="Gera todos os dados da obra em ordem (fontes → sinopse → tags → atributos IA → notas → embedding)."
+        >
+          <Sparkles className="size-4 text-emerald-500" />
+          {ctaLabel(status)}
+        </Button>
+        {status === "blocked_manual" && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => kickoff({ proceedWithoutComix: true }, "Verificando fontes", "verifying_sources")}
+          >
+            Seguir sem Comix
+          </Button>
+        )}
+        <StatusPill status={status} />
+        {dialogs}
+      </>
+    )
+  }
+
   return (
     <div className="rounded-lg border border-border/60 bg-muted/30 px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -120,44 +197,7 @@ export function GenerateAllBanner({
         </p>
       )}
 
-      {/* Checkpoint de custo + sem-review (mesmo padrão do ai-eval) */}
-      <ConfirmDialog
-        open={dialog?.kind === "cost"}
-        onOpenChange={(o) => !o && setDialog(null)}
-        title="Gerar todos os dados"
-        description={
-          dialog?.kind === "cost"
-            ? `Vai gerar tudo em ordem (~$${dialog.estimatedUsd.toFixed(2)}).` +
-              (dialog.noReviewsReason
-                ? ` ⚠️ Sem reviews: ${NO_REVIEWS_HINT[dialog.noReviewsReason] ?? "a obra não tem reviews"}. Os atributos ficam mais fracos.`
-                : "")
-            : undefined
-        }
-        confirmText="Autorizar e gerar"
-        cancelText="Cancelar"
-        onConfirm={() =>
-          kickoff(
-            {
-              proceed: true,
-              proceedWithoutReviews: true,
-              allowPaidUsd: dialog?.kind === "cost" ? dialog.estimatedUsd : undefined,
-            },
-            `Gerando dados: ${workTitle}`,
-            "generating",
-          )
-        }
-      />
-
-      {/* Fontes não confirmadas (FlareSolverr/Comix/ComicK) */}
-      <ConfirmDialog
-        open={dialog?.kind === "sources"}
-        onOpenChange={(o) => !o && setDialog(null)}
-        title="Fontes não confirmadas"
-        description="Não consegui confirmar Comix/ComicK (pode ser o FlareSolverr fora). Pode ser infra ou a obra realmente não existe nessas fontes. Seguir mesmo assim gera com o que as outras fontes derem."
-        confirmText="Seguir mesmo assim"
-        cancelText="Cancelar"
-        onConfirm={() => kickoff({ ignoreSourceGate: true }, `Verificando fontes: ${workTitle}`, "verifying_sources")}
-      />
+      {dialogs}
     </div>
   )
 }
