@@ -4,6 +4,7 @@ import {
   cacheKey,
   ComixResolveCache,
   resolveComixUrl,
+  comixCreateResolveInput,
 } from "@/lib/external/comix-resolve"
 import type {
   ComixSidecarItem,
@@ -228,5 +229,41 @@ describe("resolveComixUrl — orquestração", () => {
     )
     await resolveComixUrl(input, { client, cache, now: () => 0, onResult })
     expect(onResult).toHaveBeenLastCalledWith(expect.objectContaining({ cache: "hit", resolved: true, outcome: "cache_hit" }))
+  })
+})
+
+describe("comixCreateResolveInput — gate injeta-antes-de-buscar (create)", () => {
+  it("já tem hid do comix → null (nada a resolver)", () => {
+    expect(comixCreateResolveInput("T", { comix: "3ezr0", anilist: "200573" })).toBeNull()
+  })
+
+  it("sem nenhum cross-ID → null (não arrisca match por título no create)", () => {
+    expect(comixCreateResolveInput("T", {})).toBeNull()
+    expect(comixCreateResolveInput("T", { kitsu: "abc", mangadex: "xyz" })).toBeNull()
+  })
+
+  it("com AniList ID → input com anilistId e allowTitleFallback:false", () => {
+    expect(comixCreateResolveInput("Título", { anilist: "200573" })).toEqual({
+      title: "Título",
+      anilistId: 200573,
+      malId: undefined,
+      mangaUpdatesId: undefined,
+      allowTitleFallback: false,
+    })
+  })
+
+  it("mistura os cross-IDs presentes (mal numérico, mangaupdates slug)", () => {
+    expect(comixCreateResolveInput("T", { myanimelist: "157823", mangaupdates: "0bvjowf" })).toEqual({
+      title: "T",
+      anilistId: undefined,
+      malId: 157823,
+      mangaUpdatesId: "0bvjowf",
+      allowTitleFallback: false,
+    })
+  })
+
+  it("id numérico inválido (0/negativo/vazio) é ignorado", () => {
+    expect(comixCreateResolveInput("T", { anilist: "0", myanimelist: "-3" })).toBeNull()
+    expect(comixCreateResolveInput("T", { anilist: "", mangaupdates: "" })).toBeNull()
   })
 })

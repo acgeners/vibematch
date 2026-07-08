@@ -181,6 +181,31 @@ export interface ResolveComixUrlInput extends ComixResolveInput {
   allowTitleFallback?: boolean
 }
 
+/**
+ * Monta o input de resolução da Comix para o fluxo de CRIAÇÃO a partir dos
+ * `work_external_ids` aceitos (chaves do ExternalSourceId: anilist/myanimelist/
+ * mangaupdates/comix). Encoda o gate "injeta-antes-de-buscar":
+ *  - já há `comix` → null (nada a resolver);
+ *  - nenhum cross-ID → null (não arrisca resolução por título no create);
+ *  - senão → input com os cross-IDs presentes e `allowTitleFallback:false`.
+ * Pura (testável): a chamada de rede/cache fica no caller (`resolveComixUrl`).
+ */
+export function comixCreateResolveInput(
+  title: string,
+  externalIds: Partial<Record<string, string | undefined>>,
+): ResolveComixUrlInput | null {
+  if (externalIds.comix) return null
+  const posInt = (v: string | undefined): number | undefined => {
+    const n = Number(v)
+    return Number.isInteger(n) && n > 0 ? n : undefined
+  }
+  const anilistId = posInt(externalIds.anilist)
+  const malId = posInt(externalIds.myanimelist)
+  const mangaUpdatesId = externalIds.mangaupdates || undefined
+  if (!anilistId && !malId && !mangaUpdatesId) return null
+  return { title, anilistId, malId, mangaUpdatesId, allowTitleFallback: false }
+}
+
 /** Desfecho da resolução — pra observabilidade (logs/métricas na camada de cima). */
 export type ComixResolveOutcome = "cache_hit" | "resolved" | "no_match" | "sidecar_error"
 

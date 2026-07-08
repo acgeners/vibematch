@@ -8,6 +8,11 @@ import { searchAllSourcesWithStatus, fetchMultiSourceDetails, fetchExternalEvalu
 import type { SearchAllSourcesResult } from "@/lib/external/index"
 import { fetchMangaUpdatesAlternativeTitles } from "@/lib/external/mangaupdates"
 import { fetchComixById } from "@/lib/external/comix"
+import { fetchMangagoById } from "@/lib/external/mangago"
+import { resolveComixUrl, comixCreateResolveInput } from "@/lib/external/comix-resolve"
+import { isComixRenderConfigured } from "@/lib/external/comix-render-client"
+import { resolveMangagoUrlProd } from "@/lib/external/mangago-resolve-prod"
+import { boolEnv } from "@/lib/external/mangago-band"
 import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
 import { SONNET_MODEL } from "@/lib/ai/models"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
@@ -251,6 +256,9 @@ export interface CandidateAiResult {
   externalReviews: SourcedReview[]
   /** Diagnóstico de por que não há reviews externas no prompt. null quando ao menos 1 review foi enviada. */
   noReviewsReason: "no_external_ids" | "all_rejected" | "search_miss" | "sources_returned_empty" | null
+  /** true quando o hid da Comix foi descoberto automaticamente por cross-ID nesta
+   *  avaliação (sidecar). O client usa pra dar feedback de sucesso ao usuário. */
+  comixAutoResolved: boolean
 }
 
 /** Retorno do gate pré-análise quando a obra não tem reviews externas e o
@@ -276,6 +284,29 @@ export interface CandidateAiNeedsReviewConfirmation {
 const CREATE_FLOW_OPUS_ID = "claude-opus-4-7"
 const CREATE_FLOW_SONNET_ID = SONNET_MODEL
 
+/**
+ * Resolve o hid da Comix por cross-ID via sidecar, pra usar JÁ na avaliação de
+ * criação (a Comix não aparece na busca multi-fonte porque é token-gated). Cache-
+ * first e fail-soft: sem `COMIX_RENDER_URL` ou sem cross-ID → null (no-op) e a
+ * Comix segue ausente; nunca lança. Só cross-ID exato (não arrisca match por
+ * título). A persistência do hid roda depois, no `after()` do `createWork`.
+ */
+async function resolveComixHidForCreate(
+  title: string,
+  externalIds: Partial<Record<ExternalSourceId, string>>,
+): Promise<string | null> {
+  if (!isComixRenderConfigured()) return null
+  const request = comixCreateResolveInput(title, externalIds)
+  if (!request) return null
+  try {
+    const resolved = await resolveComixUrl(request)
+    return resolved?.hid ?? null
+  } catch (err) {
+    console.error("[resolveComixHidForCreate] falha:", err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 export async function evaluateCandidateForCreate(input: {
   title: string
   originalTitle?: string | null
@@ -295,7 +326,15 @@ export async function evaluateCandidateForCreate(input: {
    */
   proceedWithoutReviews?: boolean
 }): Promise<CandidateAiResult | CandidateAiNeedsReviewConfirmation> {
-  const externalIdEntries = Object.entries(input.externalIds ?? {}).filter(([, id]) => Boolean(id))
+  // Descoberta do hid da Comix no create (sidecar): a Comix não entra na busca
+  // multi-fonte (token-gated), então sem isto a avaliação de criação NUNCA usa
+  // reviews da Comix. Resolve por cross-ID e injeta o hid pra o caminho candidate
+  // coletar as reviews da Comix já nesta avaliação. No-op sem sidecar/cross-ID.
+  const externalIds: Partial<Record<ExternalSourceId, string>> = { ...(input.externalIds ?? {}) }
+  const resolvedComixHid = await resolveComixHidForCreate(input.title, externalIds)
+  if (resolvedComixHid) externalIds.comix = resolvedComixHid
+
+  const externalIdEntries = Object.entries(externalIds).filter(([, id]) => Boolean(id))
   const hasExternalIds = externalIdEntries.length > 0
   const contextResult = hasExternalIds
     ? await fetchExternalEvaluationContextForCandidate(
@@ -303,7 +342,7 @@ export async function evaluateCandidateForCreate(input: {
           title: input.title,
           originalTitle: input.originalTitle ?? null,
           alternativeTitles: input.alternativeTitles ?? null,
-        }, input.externalIds ?? {}),
+        }, externalIds),
         { ...AI_EVAL_REVIEW_CAPS }
       )
     : await fetchExternalEvaluationContextForWork({
@@ -374,6 +413,7 @@ export async function evaluateCandidateForCreate(input: {
     inputHash: response.inputHash,
     externalReviews: contextResult.allReviews ?? [],
     noReviewsReason,
+    comixAutoResolved: Boolean(resolvedComixHid),
   }
 }
 
@@ -743,33 +783,70 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
     isRejected: Boolean(row.is_rejected),
   }))
 
-  // Comix: a busca é gateada (token), então nunca aparece em candidatesPerSource.
-  // Se há um hid salvo (não rejeitado) e ele não está entre os candidatos, hidrata
-  // um candidato via SSR token-free pra UI conseguir mostrar a fonte vinculada
-  // (senão a seleção salva fica invisível no dialog).
-  const comixHid = currentSelections.find((s) => s.source === "comix" && !s.isRejected && s.externalId)?.externalId
-  if (comixHid && !(candidatesPerSource.comix ?? []).some((c) => c.externalId === comixHid)) {
-    try {
-      const detail = await fetchComixById(comixHid)
-      if (detail?.title) {
-        const coverUrl = detail.coverUrl && !isBlockedCoverUrl(detail.coverUrl) ? detail.coverUrl : null
-        candidatesPerSource.comix = [
-          {
-            externalId: detail.hid,
-            title: detail.title,
-            coverUrl,
-            matchScore: 1,
-            synopsis: detail.synopsis ?? null,
-            year: detail.year ?? null,
-            chapters: detail.chapters ?? null,
-          },
-          ...(candidatesPerSource.comix ?? []),
-        ]
-      }
-    } catch (err) {
-      console.warn(`[revalidateWorkSources] hidratação comix falhou (${comixHid}):`, err)
-    }
+  // Comix + Mangago: a busca deles é gateada (token / flag), então não vêm em
+  // candidatesPerSource. Garante um candidato: usa o id salvo (não-rejeitado) ou,
+  // se não houver, resolve por cross-ID (sidecar Comix / resolver Mangago, cada um
+  // atrás do seu gate). Sem isso a fonte vinculada fica invisível no dialog e não há
+  // como trazê-la sem hid manual. Fail-soft: qualquer erro → fonte fica ausente.
+  const acceptedIds: Partial<Record<string, string>> = {}
+  for (const s of currentSelections) {
+    if (!s.isRejected && s.externalId) acceptedIds[s.source] = s.externalId
   }
+  const posInt = (v?: string) => {
+    const n = Number(v)
+    return Number.isInteger(n) && n > 0 ? n : undefined
+  }
+  const crossInput = {
+    title: primaryQuery,
+    anilistId: posInt(acceptedIds.anilist),
+    malId: posInt(acceptedIds.myanimelist),
+    mangaUpdatesId: acceptedIds.mangaupdates || undefined,
+  }
+  const hasCrossId = Boolean(crossInput.anilistId || crossInput.malId || crossInput.mangaUpdatesId)
+
+  const ensureGatedCandidate = async (opts: {
+    source: ExternalSourceId
+    resolveEnabled: boolean
+    resolve: () => Promise<string | null>
+    fetchDetail: (id: string) => Promise<{ title?: string; coverUrl?: string; synopsis?: string; year?: number; chapters?: number } | null>
+  }): Promise<void> => {
+    if (currentSelections.some((s) => s.source === opts.source && s.isRejected)) return
+    let id = acceptedIds[opts.source] ?? null
+    if (!id && opts.resolveEnabled) id = await opts.resolve().catch(() => null)
+    if (!id) return
+    const existing = candidatesPerSource[opts.source] ?? []
+    if (existing.some((c) => c.externalId === id)) return
+    const detail = await opts.fetchDetail(id).catch(() => null)
+    if (!detail?.title) return
+    const coverUrl = detail.coverUrl && !isBlockedCoverUrl(detail.coverUrl) ? detail.coverUrl : null
+    candidatesPerSource[opts.source] = [
+      {
+        externalId: id,
+        title: detail.title,
+        coverUrl,
+        matchScore: 1,
+        synopsis: detail.synopsis ?? null,
+        year: detail.year ?? null,
+        chapters: detail.chapters ?? null,
+      },
+      ...existing,
+    ]
+  }
+
+  await Promise.all([
+    ensureGatedCandidate({
+      source: "comix",
+      resolveEnabled: hasCrossId && isComixRenderConfigured(),
+      resolve: async () => (await resolveComixUrl({ ...crossInput, allowTitleFallback: false }))?.hid ?? null,
+      fetchDetail: (id) => fetchComixById(id),
+    }),
+    ensureGatedCandidate({
+      source: "mangago",
+      resolveEnabled: hasCrossId && boolEnv(process.env.MANGAGO_RESOLVE_ENABLED, false),
+      resolve: async () => (await resolveMangagoUrlProd(crossInput))?.slug ?? null,
+      fetchDetail: (id) => fetchMangagoById(id),
+    }),
+  ])
 
   return {
     data: {

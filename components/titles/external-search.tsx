@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, type Ref } from "react"
+import { useEffect, useRef, useState, type Ref } from "react"
 import Image from "next/image"
 import { toast } from "sonner"
 import { Search, Loader2, Sparkles, Trash2, Plus, AlertTriangle } from "lucide-react"
@@ -18,7 +18,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
 import { searchExternalTitles, fetchExternalData, upsertExternalTags, checkExistingWorkInDb, evaluateCandidateForCreate, type ExistingWorkMatch } from "@/server/actions/external"
-import { validateComixHid } from "@/server/actions/comix-resolver"
+import { validateComixHid, isComixAutoResolveAvailable } from "@/server/actions/comix-resolver"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
@@ -410,6 +410,15 @@ export function ExternalSearch({
   const [sourceSelection, setSourceSelection] = useState<Partial<Record<ExternalSourceId, SourceSelectionValue>>>({})
   const [manualComixHid, setManualComixHid] = useState("")
   const [validatingComix, setValidatingComix] = useState(false)
+  // Descoberta automática do hid da Comix disponível (sidecar COMIX_RENDER_URL)?
+  // Com ela ligada, escondemos o campo de hid manual — a Comix é resolvida por
+  // cross-ID sozinha. Sem ela (ex.: prod sem o sidecar), o manual segue visível.
+  const [comixAutoResolve, setComixAutoResolve] = useState(false)
+  useEffect(() => {
+    isComixAutoResolveAvailable()
+      .then(setComixAutoResolve)
+      .catch(() => setComixAutoResolve(false))
+  }, [])
   // Etapa de falha do ComicK (FlareSolverr/Cloudflare): guarda o que já foi
   // mesclado pra continuar após um retry ou ao seguir sem a fonte.
   const [comickManualHid, setComickManualHid] = useState("")
@@ -607,6 +616,9 @@ export function ExternalSearch({
             noReviewsReason: aiResult.noReviewsReason,
           }
           merged.externalReviews = aiResult.externalReviews
+          if (aiResult.comixAutoResolved) {
+            toast.success("Comix encontrada e vinculada automaticamente pelos IDs.")
+          }
         }
       } catch (error) {
         console.error("[ExternalSearch] evaluateCandidateForCreate failed", error)
@@ -752,6 +764,18 @@ export function ExternalSearch({
       }
       if (candidate.animePlanetSlug) {
         merged.externalIds = { ...merged.externalIds, animeplanet: candidate.animePlanetSlug }
+      }
+
+      // Feedback: Comix/Mangago são descobertas por cross-ID no servidor (busca
+      // gateada) — se vieram nos externalIds, avisa que foram vinculadas sozinhas.
+      const autoLinked = [
+        merged.externalIds?.comix ? "Comix" : null,
+        merged.externalIds?.mangago ? "Mangago" : null,
+      ].filter(Boolean)
+      if (autoLinked.length > 0) {
+        toast.success(
+          `${autoLinked.join(" e ")} ${autoLinked.length > 1 ? "vinculadas" : "vinculada"} automaticamente pelos IDs.`,
+        )
       }
 
       const allConflicts = result.conflicts.filter(c => c.field !== "totalChapters" || cmx?.chapters == null)
@@ -1033,11 +1057,15 @@ export function ExternalSearch({
   }
 
   const sourceMatchGroups = pendingCandidate ? getSourceMatchGroups(pendingCandidate) : []
-  // Comix sempre presente na confirmação: a busca dela é gateada (token), então
-  // nunca vem em sourceCandidates — mas queremos o bloco de preenchimento manual.
-  const displayGroups = sourceMatchGroups.some((g) => g.source === "comix")
-    ? sourceMatchGroups
-    : [...sourceMatchGroups, { source: "comix" as ExternalSourceId, options: [] as ExternalSourceCandidateOption[] }]
+  // Comix na confirmação: a busca dela é gateada (token) e nunca vem em
+  // sourceCandidates. Com o auto-resolve LIGADO (sidecar), a Comix é descoberta
+  // por cross-ID sozinha → escondemos o group (e o bloco de hid manual). Sem o
+  // sidecar (ex.: prod), injetamos o group sintético pra manter o preenchimento manual.
+  const displayGroups = comixAutoResolve
+    ? sourceMatchGroups.filter((g) => g.source !== "comix")
+    : sourceMatchGroups.some((g) => g.source === "comix")
+      ? sourceMatchGroups
+      : [...sourceMatchGroups, { source: "comix" as ExternalSourceId, options: [] as ExternalSourceCandidateOption[] }]
   const hasSelectedSource = sourceMatchGroups.some((group) => {
     const value = sourceSelection[group.source]
     return Boolean(value && value !== "rejected" && value !== "none")

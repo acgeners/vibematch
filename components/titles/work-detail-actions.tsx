@@ -11,13 +11,11 @@ import {
   Heart,
   MoreHorizontal,
   RefreshCw,
-  ShieldCheck,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
 import { archiveWork, deleteWork, toggleFavorite, unarchiveWork } from "@/server/actions/works"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
-import { RevalidateSourcesDialog } from "@/components/titles/revalidate-sources-dialog"
 import { StatusEditDialog } from "@/components/titles/status-edit-dialog"
 import type { PostAttributeAssessmentFormProps } from "@/components/titles/post-attribute-assessment-form"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
@@ -171,20 +169,8 @@ export function UpdateDataActionButton({
         open={open}
         onOpenChange={setOpen}
         hideTrigger
+        withSourceStep
       />
-    </>
-  )
-}
-
-export function RevalidateSourcesActionButton({ workId }: { workId: string }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <ShieldCheck className="h-4 w-4" />
-        Revalidar fontes
-      </Button>
-      <RevalidateSourcesDialog workId={workId} open={open} onOpenChange={setOpen} hideTrigger />
     </>
   )
 }

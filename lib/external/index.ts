@@ -4,6 +4,10 @@ import type { AnimePlanetDetail } from "./animeplanet"
 import { searchComicK, fetchComicKByHid, fetchComicKReviews } from "./comick"
 import { searchComix, fetchComixById, fetchComixReviews } from "./comix"
 import { searchMangago, fetchMangagoById, fetchMangagoReviews } from "./mangago"
+import { resolveComixUrl } from "./comix-resolve"
+import { isComixRenderConfigured } from "./comix-render-client"
+import { resolveMangagoUrlProd } from "./mangago-resolve-prod"
+import { boolEnv } from "./mangago-band"
 import { extractInlineRating } from "./inline-rating"
 import { isBlockedCoverUrl } from "./blocked-covers"
 import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews, fetchJikanMangaRecommendations } from "./jikan"
@@ -57,8 +61,18 @@ const TIMEOUT_REVIEWS_MANGAGO_MS = 60000
 // O hydrate do mangago é um scrape via FlareSolverr (não uma API), e a MESMA
 // página de detalhe traz rating + sinopse + gêneros. Com o default de 8s um
 // solve frio de CF (~11s) estourava e a obra perdia TODO o metadado do mangago
-// (sobrava só título/capa da busca). 15s cobre o solve frio com folga.
-const TIMEOUT_HYDRATE_MANGAGO_MS = 15000
+// (sobrava só título/capa da busca — SEM rating/votos).
+//
+// 15s NÃO bastava: o hydrate roda TODAS as fontes em paralelo (Promise.allSettled),
+// e as 3 fontes CF (comix, animeplanet, mangago) dividem UM único Chrome do
+// FlareSolverr, que serializa. Como o mangago é o ÚLTIMO do array, sua request
+// fica na fila atrás do solve frio das outras (~11s cada) e o teto de 15s —
+// medido do t=0 — estourava só na espera. Resultado: `hydrate:mangago excedeu
+// 15000ms`, `mg` vira null, e o rating/votos nunca chegavam ao platform_ratings
+// (confirmado: 0 linhas mangago no banco). 30s dá folga pra esperar um solve frio
+// à frente na fila e ainda completar o próprio. Ver TIMEOUT_REVIEWS_COMIX_MS (25s),
+// que subiu pela mesma razão de "solve frio + sessão FlareSolverr compartilhada".
+const TIMEOUT_HYDRATE_MANGAGO_MS = 30000
 const TIMEOUT_SIMILAR_MS = 8000
 
 // ============================================================================
@@ -1141,11 +1155,27 @@ async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<
     // ("great beginning, bad ending") mas corta títulos-só de 1 palavra.
     mangago: 40,
   }
+  // Threshold ADAPTATIVO por fonte: preferimos as reviews acima do `minLengthBySource`
+  // (sinal alto), mas se uma fonte tiver MENOS que `FALLBACK_TARGET` acima do limiar,
+  // completamos com as MAIORES dentre as menores (≥ `FALLBACK_FLOOR`) — "só pega as
+  // menores quando não tem maiores". Evita zerar/subrepresentar uma fonte que só tem
+  // comentários concisos (ex.: obra nicho na Comix com 1 review longa + várias curtas).
+  // Fontes com bastante review longa seguem inalteradas (retornam todas as fortes).
+  const FALLBACK_TARGET = 3
+  const FALLBACK_FLOOR = 15
+  const selectByAdaptiveLength = (reviews: string[], source: ExternalSourceId): string[] => {
+    const preferred = minLengthBySource[source] ?? 100
+    const cleaned = reviews.map((t) => t.trim()).filter((t) => t.length >= FALLBACK_FLOOR)
+    const strong = cleaned.filter((t) => t.length >= preferred)
+    if (strong.length >= FALLBACK_TARGET) return strong
+    // Não há "maiores" suficientes → completa com as maiores dentre as menores.
+    return [...cleaned].sort((a, b) => b.length - a.length).slice(0, FALLBACK_TARGET)
+  }
+
   return settled
     .flatMap((entry) => (entry.status === "fulfilled" && entry.value ? [entry.value] : []))
     .flatMap((group) =>
-      group.reviews
-        .filter((text) => text.trim().length >= (minLengthBySource[group.source] ?? 100))
+      selectByAdaptiveLength(group.reviews, group.source)
         .map((text): SourcedReview => {
           const { rating, cleanText } = extractUserRating(text)
           return {
@@ -1846,7 +1876,54 @@ function detectConflict<K extends keyof ExternalSearchResult>(
 // Public: full multi-source detail fetch
 // ============================================================================
 
+/** Marca uma fonte recém-resolvida como presente + CONFIÁVEL no candidato. Trusted
+ *  faz bypass do filtro de aceitação da hidratação (o match foi por cross-ID EXATO,
+ *  não por similaridade de título/sinopse), então o rating/capa/sinopse dela entram
+ *  no resultado mesmo quando o fraseado da sinopse diverge. */
+function markResolvedSource(candidate: MergedCandidate, source: ExternalSourceId): void {
+  if (!candidate.sources.includes(source)) candidate.sources.push(source)
+  candidate.trustedSources = candidate.trustedSources ?? []
+  if (!candidate.trustedSources.includes(source)) candidate.trustedSources.push(source)
+}
+
+/**
+ * Descobre os IDs das fontes cuja BUSCA é gateada (Comix: token anti-bot; Mangago:
+ * atrás de flag) a partir dos cross-IDs do candidato, ANTES da hidratação. Assim o
+ * rating/capa/sinopse dessas fontes entram no resultado — e no form de criação —
+ * sem depender de um "Atualizar dados" posterior. Cada fonte tem seu próprio gate
+ * (`COMIX_RENDER_URL` / `MANGAGO_RESOLVE_ENABLED`) e só resolve por cross-ID EXATO
+ * (sem fallback por título). Fail-soft e cache-first; muta o candidato in-place.
+ */
+async function resolveGatedSourceIds(candidate: MergedCandidate): Promise<void> {
+  const anilistId = candidate.anilistId
+  const malId = candidate.malId
+  const mangaUpdatesId = candidate.muId != null ? String(candidate.muId) : undefined
+  if (!anilistId && !malId && !mangaUpdatesId) return
+  const crossIds = { title: candidate.title, anilistId, malId, mangaUpdatesId }
+
+  const wantComix = !candidate.comixHid && isComixRenderConfigured()
+  const wantMangago = !candidate.mangagoSlug && boolEnv(process.env.MANGAGO_RESOLVE_ENABLED, false)
+  if (!wantComix && !wantMangago) return
+
+  const [comix, mangago] = await Promise.all([
+    wantComix ? resolveComixUrl({ ...crossIds, allowTitleFallback: false }).catch(() => null) : Promise.resolve(null),
+    wantMangago ? resolveMangagoUrlProd(crossIds).catch(() => null) : Promise.resolve(null),
+  ])
+
+  if (comix?.hid) {
+    candidate.comixHid = comix.hid
+    markResolvedSource(candidate, "comix")
+  }
+  if (mangago?.slug) {
+    candidate.mangagoSlug = mangago.slug
+    markResolvedSource(candidate, "mangago")
+  }
+}
+
 export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promise<MultiSourceResult> {
+  // Comix/Mangago: descobre os IDs por cross-ID ANTES de hidratar, pra o rating/
+  // capa/sinopse dessas fontes entrarem já na criação (sem "Atualizar dados" depois).
+  await resolveGatedSourceIds(candidate)
   const { apDetail, uniqueAccepted, rejected, muStatusText } = await hydrateAndFilterCandidate(candidate)
   const data = mergeData(candidate, uniqueAccepted, apDetail, muStatusText)
 
