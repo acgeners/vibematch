@@ -17,6 +17,7 @@ import type { CriterionSlug } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CoverImage } from "@/components/ui/cover-image"
+import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import { cn, titleToSlug, readingProgressPercent } from "@/lib/utils"
 import { formatPercentile } from "@/lib/calculations/percentile"
 import { ScoreBadge, criterionCellTextClass, getSoftScoreColor } from "@/components/ui/score-badge"
@@ -25,7 +26,7 @@ import { readAttrColorMode, subscribeAttrColorMode } from "@/lib/ui/attr-color-m
 import { PublicationStatusBadge, PersonalStatusBadge, AiStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
-import { AlignmentCell, AlignmentScoreCell, DecisionCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
+import { AlignmentCell, AlignmentScoreCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { BussolaPlane } from "@/components/ranking/bussola-plane"
 import { computeWorkForces } from "@/lib/calculations/forces"
 import { LABELS } from "@/lib/constants/ui-labels"
@@ -42,6 +43,7 @@ import {
 } from "@/components/titles/work-table-config"
 import type { WorkColumnDef } from "@/components/titles/work-table-config"
 import { WorkColumnPicker } from "@/components/titles/work-column-picker"
+import { ResponsiveHeaderLabel, headerFormsFor } from "@/components/titles/responsive-header-label"
 
 // Coluna "#" (posição). É estrutural do /ranking — não existe no vocabulário
 // compartilhado (work-table-config) nem no picker. O RankingTable a prepende
@@ -308,6 +310,7 @@ function entryToPreview(entry: RankingEntry): WorkPreview {
     coverUrl: entry.coverUrl,
     synopsis: entry.synopsis,
     synopsisQuality: entry.synopsisQuality,
+    synopsisFromPrediction: entry.synopsisFromPrediction,
     predictedSynopsisQuality: entry.predictedSynopsisQuality,
     predictedSynopsisStale: entry.predictedSynopsisStale,
     publicationStatusId: entry.publicationStatusId,
@@ -407,7 +410,8 @@ function renderCell(
     const pct = readingProgressPercent(entry.chaptersRead, entry.totalChapters)
     return <span className="font-mono text-sm">{pct != null ? `${pct}%` : "—"}</span>
   }
-  if (col.key === "synopsis_q") return <span className="text-xs text-muted-foreground">{entry.synopsisQuality ?? "—"}</span>
+  if (col.key === "synopsis_q")
+    return <ManualInterestCell quality={entry.synopsisQuality} fromPrediction={entry.synopsisFromPrediction} />
   if (col.key === "synopsis_pred")
     return (
       <SynopsisPredictionCell
@@ -776,49 +780,67 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                 const isActive = isSortable && activeSortField === sortField
                 const slug = col.key.startsWith("crit_") ? col.key.slice(5) : null
                 const criterion = slug ? CRITERIA_INFO[slug] : null
-                const fullName = criterion?.name ?? col.configLabel ?? null
                 const description = criterion?.description ?? col.description ?? null
-                const showFullName = fullName && fullName !== col.label
                 const align = col.align ?? "left"
-                const justify =
-                  align === "center" ? "justify-center" : align === "right" ? "justify-end" : "justify-start"
+                const forms = headerFormsFor(col)
 
-                const labelNode = isSortable ? (
-                  <button
-                    type="button"
-                    onClick={() => updateSort(sortField!)}
-                    className={cn(
-                      "inline-flex max-w-full items-center gap-0.5 rounded px-0.5 py-0.5 transition-colors hover:bg-background/60 hover:text-foreground",
-                      isActive && "text-foreground"
-                    )}
-                    aria-label={`Ordenar por ${fullName ?? col.label}`}
-                  >
-                    <span className="truncate">{col.label}</span>
-                    {isActive ? (
-                      activeSortDir === "asc"
-                        ? <ChevronUp className="h-3 w-3 shrink-0" />
-                        : <ChevronDown className="h-3 w-3 shrink-0" />
-                    ) : (
-                      <ChevronDown className="hidden h-3 w-3 shrink-0 opacity-40 group-hover/header:inline-block" />
-                    )}
-                  </button>
-                ) : (
-                  <span className="block truncate">{col.label}</span>
-                )
-
-                const wrapped = (showFullName || description) ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>{labelNode}</TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-xs whitespace-pre-line text-left">
-                      {showFullName && <span className="font-semibold">{fullName}</span>}
-                      {description && (
-                        <span className={cn("block text-xs text-muted-foreground", showFullName && "mt-1")}>
-                          {description}
-                        </span>
+                let cellContent: ReactNode
+                if (forms) {
+                  // Cabeçalho responsivo (full → short → abbrev conforme a largura).
+                  cellContent = (
+                    <ResponsiveHeaderLabel
+                      forms={forms}
+                      description={description}
+                      align={align}
+                      sortable={isSortable}
+                      isActive={isActive}
+                      sortDir={activeSortDir}
+                      onSort={() => sortField && updateSort(sortField)}
+                    />
+                  )
+                } else {
+                  // Estruturais (#) e critérios (emoji): rótulo único, sem troca.
+                  const fullName = criterion?.name ?? col.configLabel ?? null
+                  const showFullName = fullName && fullName !== col.label
+                  const justify =
+                    align === "center" ? "justify-center" : align === "right" ? "justify-end" : "justify-start"
+                  const labelNode = isSortable ? (
+                    <button
+                      type="button"
+                      onClick={() => updateSort(sortField!)}
+                      className={cn(
+                        "inline-flex max-w-full items-center gap-0.5 rounded px-0.5 py-0.5 transition-colors hover:bg-background/60 hover:text-foreground",
+                        isActive && "text-foreground"
                       )}
-                    </TooltipContent>
-                  </Tooltip>
-                ) : labelNode
+                      aria-label={`Ordenar por ${fullName ?? col.label}`}
+                    >
+                      <span className="truncate">{col.label}</span>
+                      {isActive ? (
+                        activeSortDir === "asc"
+                          ? <ChevronUp className="h-3 w-3 shrink-0" />
+                          : <ChevronDown className="h-3 w-3 shrink-0" />
+                      ) : (
+                        <ChevronDown className="hidden h-3 w-3 shrink-0 opacity-40 group-hover/header:inline-block" />
+                      )}
+                    </button>
+                  ) : (
+                    <span className="block truncate">{col.label}</span>
+                  )
+                  const wrapped = (showFullName || description) ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>{labelNode}</TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs whitespace-pre-line text-left">
+                        {showFullName && <span className="font-semibold">{fullName}</span>}
+                        {description && (
+                          <span className={cn("block text-xs text-muted-foreground", showFullName && "mt-1")}>
+                            {description}
+                          </span>
+                        )}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : labelNode
+                  cellContent = <div className={cn("flex items-center pr-3", justify)}>{wrapped}</div>
+                }
 
                 return (
                 <th
@@ -829,7 +851,7 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
                   )}
                   style={{ textAlign: align }}
                 >
-                  <div className={cn("flex items-center pr-3", justify)}>{wrapped}</div>
+                  {cellContent}
                   <ResizeHandle
                     columnKey={col.key}
                     onResize={setWidth}
@@ -1189,10 +1211,13 @@ function heartSet(quality: string, variant: "manual" | "pred"): ReactNode {
 /** Interesse na obra: manual (♥ sólido) + previsto (♥ esmaecido + selo IA), sem label. */
 function InterestHearts({
   manual,
+  manualFromPrediction = false,
   predicted,
   predictedStale,
 }: {
   manual: string | null
+  /** Manual foi aplicado da previsão (não definido à mão) → selo ✨. */
+  manualFromPrediction?: boolean
   predicted: string | null
   predictedStale: boolean
 }) {
@@ -1200,6 +1225,7 @@ function InterestHearts({
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap" aria-label="Interesse na obra">
       {manual && heartSet(manual, "manual")}
+      {manual && manualFromPrediction && <InterestAppliedMark size={13} />}
       {manual && predicted && <span className="h-3.5 w-px bg-border/70" aria-hidden />}
       {predicted && (
         <span className="inline-flex items-center gap-1">
@@ -1285,6 +1311,7 @@ function RankingCard({
               )}
               <InterestHearts
                 manual={entry.synopsisQuality}
+                manualFromPrediction={entry.synopsisFromPrediction}
                 predicted={entry.predictedSynopsisQuality}
                 predictedStale={entry.predictedSynopsisStale}
               />

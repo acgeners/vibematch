@@ -663,6 +663,8 @@ export interface WorkPreview {
   coverUrl: string | null
   synopsis: string | null
   synopsisQuality: string | null
+  /** True quando o Interesse manual foi APLICADO da previsão da IA (synopsis_quality_source = prediction_applied), não definido à mão. */
+  synopsisFromPrediction: boolean
   /** Previsão IA de Interesse (♥..♥♥♥♥) — synopsis_quality_predictions. NULL se nunca prevista. */
   predictedSynopsisQuality: string | null
   /** True quando a previsão de Interesse ficou desatualizada (perfil/sinopse mudou). */
@@ -682,7 +684,7 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
     supabase
       .from("works")
       .select(`
-        id, title, synopsis_quality, canonical_synopsis,
+        id, title, synopsis_quality, synopsis_quality_source, canonical_synopsis,
         publication_status_id, total_chapters, observations, year,
         work_covers(url, is_primary, position),
         work_synopses(source, text, is_primary, position),
@@ -708,6 +710,7 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
     coverUrl: pickPrimaryCover(covers),
     synopsis: canonicalSynopsis || pickPrimarySynopsis(synopses),
     synopsisQuality: (data.synopsis_quality as string | null) ?? null,
+    synopsisFromPrediction: (data.synopsis_quality_source as string | null) === "prediction_applied",
     predictedSynopsisQuality: prediction?.predictedQuality ?? null,
     predictedSynopsisStale: prediction?.stale ?? false,
     publicationStatusId: (data.publication_status_id as number | null) ?? null,

@@ -715,14 +715,17 @@ export function ExternalSearch({
         wantsAnimePlanet ? fetchAnimePlanetClient(candidate.title, candidate.animePlanetSlug) : Promise.resolve(null),
       ])
 
+      // warn (não error): falhas de fonte externa aqui são esperadas e retryáveis
+      // (Cloudflare/FlareSolverr fora). `allSettled` já tratou; `console.error`
+      // faria o dev overlay do Next escalar como "Issue" — barulho, não crash.
       if (serverResult.status === "rejected") {
-        console.error("[ExternalSearch] fetchExternalData failed", serverResult.reason)
+        console.warn("[ExternalSearch] fetchExternalData failed", serverResult.reason)
       }
       if (cmxResult.status === "rejected") {
-        console.error("[ExternalSearch] fetchComicKClient failed", cmxResult.reason)
+        console.warn("[ExternalSearch] fetchComicKClient failed", cmxResult.reason)
       }
       if (apResult.status === "rejected") {
-        console.error("[ExternalSearch] fetchAnimePlanetClient failed", apResult.reason)
+        console.warn("[ExternalSearch] fetchAnimePlanetClient failed", apResult.reason)
       }
 
       // #4: marca falha do ComicK (FlareSolverr/Cloudflare) — quando o fetch lançou

@@ -7,6 +7,7 @@ import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-wat
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { SynopsisQualitySuggestion } from "@/components/titles/synopsis-quality-suggestion"
+import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import { GenerateAllBanner } from "@/components/titles/generate-all-banner"
 import type { CascadeStatus } from "@/lib/generate-all/types"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
@@ -474,6 +475,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // Interesse na sinopse (♥ a ♥♥♥♥), preenchido manualmente. Quando vazio,
   // mostramos "—" em vez de inventar uma nota — null sinaliza "sem dado ainda".
   const synopsisInterest = work.synopsis_quality?.trim() || null
+  // Interesse manual que veio da aplicação da previsão (não definido à mão) → selo ✨.
+  const synopsisFromPrediction = work.synopsis_quality_source === "prediction_applied"
 
   const statusInitial: WorkStatusValues = {
     personal_status:
@@ -637,8 +640,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 Interesse
               </span>
               {synopsisInterest ? (
-                <span className="inline-flex items-center rounded-full border border-rose-400/30 bg-rose-500/10 px-2.5 py-0.5 text-xs font-semibold text-rose-600 dark:text-rose-300">
+                <span className="inline-flex items-center gap-1 rounded-full border border-rose-400/30 bg-rose-500/10 px-2.5 py-0.5 text-xs font-semibold text-rose-600 dark:text-rose-300">
                   {synopsisInterest}
+                  {synopsisFromPrediction && <InterestAppliedMark size={12} />}
                 </span>
               ) : (
                 <span
@@ -757,6 +761,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           <div className="min-w-0">
             <TabsContent value="overview" className="mt-0 space-y-4">
               <div className="flex flex-wrap items-center gap-2">
+                <GenerateAllBanner
+                  compact
+                  workId={work.id}
+                  workTitle={work.title}
+                  initialStatus={(work as { cascade_status?: CascadeStatus }).cascade_status ?? "idle"}
+                />
                 <UpdateDataActionButton
                   workId={work.id}
                   currentWork={{
@@ -897,12 +907,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           biblioteca — não desta obra. Vive em /settings/calibração →
           "Calibração de atributos" (PredictionHealthCard). */}
       {/* "Atualizar avaliação IA" sozinho numa linha. O Consultor IA (Deep Dive)
-          fica logo abaixo das notas calculadas/externas, antes das "Notas por critério". */}
-      <GenerateAllBanner
-        workId={work.id}
-        workTitle={work.title}
-        initialStatus={(work as { cascade_status?: CascadeStatus }).cascade_status ?? "idle"}
-      />
+          fica logo abaixo das notas calculadas/externas, antes das "Notas por critério".
+          O "Gerar tudo" mudou pra linha de ações da aba Geral (ao lado de Revalidar/Atualizar). */}
       <AiEvaluationButton
         workId={work.id}
         workTitle={work.title}
@@ -913,7 +919,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         externalReviews={externalManualReviews}
       />
       {/* Bússola de leitura — 3 forças de decisão (ver PLANO-BUSSOLA-3-FORCAS.md) */}
-      <Card className="max-w-3xl">
+      <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center gap-2">
             <Compass className="h-4.5 w-4.5 text-muted-foreground" />
