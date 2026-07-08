@@ -46,7 +46,6 @@ import {
   EditLinkButton,
   FavoriteToggleButton,
   MoreActionsMenu,
-  RevalidateSourcesActionButton,
   StatusActionButton,
   UpdateDataActionButton,
 } from "@/components/titles/work-detail-actions"
@@ -758,7 +757,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           <div className="min-w-0">
             <TabsContent value="overview" className="mt-0 space-y-4">
               <div className="flex flex-wrap items-center gap-2">
-                <RevalidateSourcesActionButton workId={work.id} />
                 <UpdateDataActionButton
                   workId={work.id}
                   currentWork={{

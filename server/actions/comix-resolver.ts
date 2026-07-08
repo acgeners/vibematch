@@ -10,6 +10,8 @@ import { extractComixHid } from "@/lib/external/comix-hid"
 import { isBlockedCoverUrl, recordCoverUrlResult } from "@/lib/external/blocked-covers"
 import { flareSolverrHealth, isFlareSolverrCircuitOpen } from "@/lib/external/flaresolverr"
 import { getComixStatus } from "@/lib/external/comix-gate"
+import { ensureComixHid } from "@/server/actions/comix-hid"
+import { isComixRenderConfigured } from "@/lib/external/comix-render-client"
 
 const CACHE_DIR = path.join(process.cwd(), ".cache")
 const LOG_PATH = path.join(CACHE_DIR, "resolve-comix.log")
@@ -156,6 +158,16 @@ export async function getComixHealthStatus() {
 }
 
 /**
+ * True quando a descoberta automática do hid da Comix está disponível (sidecar
+ * `COMIX_RENDER_URL` configurado). O fluxo de criação usa isto pra ESCONDER o
+ * campo de hid manual: com o auto ligado, a Comix é resolvida por cross-ID sozinha;
+ * sem ele (ex.: prod ainda sem deploy do sidecar), o campo manual continua visível.
+ */
+export async function isComixAutoResolveAvailable(): Promise<boolean> {
+  return isComixRenderConfigured()
+}
+
+/**
  * Status leve da resolução do Comix de uma obra (pro watcher da página atualizar
  * sozinha quando o resolver de background termina). `resolved` = a obra já tem um
  * hid do Comix aceito.
@@ -286,12 +298,80 @@ async function enrichComixDataForWork(workId: string): Promise<boolean> {
   return ratingChanged
 }
 
+/** Parse pra inteiro positivo (ids numéricos: anilist/mal). `undefined` se inválido. */
+function toPositiveInt(value: string | undefined | null): number | undefined {
+  const n = Number(value)
+  return Number.isInteger(n) && n > 0 ? n : undefined
+}
+
+/** Grava rating/sinopse/capa do Comix e recalcula só se o rating mudou. Reusado
+ *  pelo caminho sidecar e pelo Puppeteer (idempotente, não-destrutivo). */
+async function enrichAndRecalcComix(workId: string): Promise<void> {
+  const wrote = await enrichComixDataForWork(workId)
+  if (wrote) {
+    const { recalculateScoresNow } = await import("@/server/actions/recalc-queue")
+    await recalculateScoresNow()
+  }
+}
+
+/**
+ * Tenta resolver+persistir o hid da Comix via sidecar (rápido, sem spawnar Chrome).
+ * Lê título + cross-IDs aceitos da obra e delega a `ensureComixHid` (gate ≥1 cross-ID
+ * + persistência). Só quando `COMIX_RENDER_URL` está setado; senão `false` → o caller
+ * cai no batch Puppeteer. Reusa o cache do resolve feito na avaliação de criação
+ * (mesmos cross-IDs → cache hit). Fail-soft: qualquer erro → `false`.
+ */
+async function tryResolveComixViaSidecar(workId: string): Promise<boolean> {
+  if (!isComixRenderConfigured()) return false
+  try {
+    const supabase = createAdminClient()
+    const { data: work } = await supabase.from("works").select("title").eq("id", workId).single()
+    if (!work?.title) return false
+    const { data: extRows } = await supabase
+      .from("work_external_ids")
+      .select("source, external_id, is_rejected")
+      .eq("work_id", workId)
+    const accepted = Object.fromEntries(
+      (extRows ?? [])
+        .filter((r) => r.is_rejected !== true && r.external_id)
+        .map((r) => [r.source as string, String(r.external_id)]),
+    ) as Partial<Record<string, string>>
+    const comixRejected = (extRows ?? []).some((r) => r.source === "comix" && r.is_rejected === true)
+    const hid = await ensureComixHid({
+      supabase,
+      workId,
+      title: work.title,
+      alreadyKnownHid: accepted.comix ?? null,
+      comixRejected,
+      crossIds: {
+        anilistId: toPositiveInt(accepted.anilist),
+        malId: toPositiveInt(accepted.myanimelist),
+        mangaUpdatesId: accepted.mangaupdates,
+      },
+    })
+    return Boolean(hid)
+  } catch (err) {
+    console.error("[tryResolveComixViaSidecar] falha:", err instanceof Error ? err.message : err)
+    return false
+  }
+}
+
 export async function resolveComixHidForWork(workId: string): Promise<void> {
   if (!workId) return
   // Já tem hid do Comix (ex.: vínculo manual)? Pula a descoberta (Puppeteer/Chrome)
   // e vai direto pro enrich resiliente (reaquece o FlareSolverr + retry).
   if ((await getComixResolutionStatus(workId)).resolved) {
     await resolveComixDataResilient(workId)
+    return
+  }
+  // Sidecar-first: com COMIX_RENDER_URL setado, resolve+persiste o hid via sidecar
+  // (rápido, sem Chrome; reusa o cache do resolve da avaliação de criação). Só cai
+  // no batch Puppeteer abaixo se o sidecar não está configurado ou não casou (ex.:
+  // obra sem cross-ID — o batch ainda tenta por título/alt-titles). Prod sem sidecar
+  // preserva 100% o comportamento atual.
+  if (await tryResolveComixViaSidecar(workId)) {
+    await ensureComixReady()
+    await enrichAndRecalcComix(workId)
     return
   }
   console.log(`[resolveComixHidForWork] disparado para work ${workId}`)
@@ -304,11 +384,7 @@ export async function resolveComixHidForWork(workId: string): Promise<void> {
     // Achou o hid → grava rating/sinopse/capa do Comix; recalcula só se o rating mudou
     // (pra a bayesiana e a Nota Prevista refletirem a fonte). A sinopse/capa entram como
     // fonte secundária e aparecem no próximo refresh da página (watcher).
-    const wrote = await enrichComixDataForWork(workId)
-    if (wrote) {
-      const { recalculateScoresNow } = await import("@/server/actions/recalc-queue")
-      await recalculateScoresNow()
-    }
+    await enrichAndRecalcComix(workId)
   } catch (err) {
     console.error("[resolveComixHidForWork] falha:", err instanceof Error ? err.message : err)
   }

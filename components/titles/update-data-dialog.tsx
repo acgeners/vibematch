@@ -19,6 +19,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 import { ExternalSearch } from "@/components/titles/external-search"
+import { SourceSelectionStep } from "@/components/titles/source-selection-step"
+import { fetchComicKClient, fetchAnimePlanetClient } from "@/lib/external/client-fetches"
 import { updateWorkExternalData, refreshWorkExternalData } from "@/server/actions/works"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
@@ -48,6 +50,11 @@ interface UpdateDataDialogProps {
   // padrão (router.push/refresh) — o caller decide o que fazer (ex.: abrir a
   // obra em outra aba na revisão de importadas).
   onSaved?: (workId: string) => void
+  // Quando true, o fluxo começa por um passo de CONFIRMAÇÃO DE FONTES (revalidação
+  // com Comix/Mangago resolvidos por cross-ID) antes de rehidratar os dados — o
+  // merge de "Revalidar fontes" + "Atualizar dados" numa ação só. Default false
+  // (ex.: revisão de importadas segue direto pro refresh).
+  withSourceStep?: boolean
 }
 
 interface FieldConflict {
@@ -169,6 +176,7 @@ export function UpdateDataDialog({
   onOpenChange,
   hideTrigger = false,
   onSaved,
+  withSourceStep = false,
 }: UpdateDataDialogProps) {
   const router = useRouter()
   const refresh = useRefresh()
@@ -184,7 +192,9 @@ export function UpdateDataDialog({
     if (!isControlled) setUncontrolledOpen(v)
     onOpenChange?.(v)
   }
-  const [phase, setPhase] = useState<"refreshing" | "search" | "synopses-pick" | "covers-pick" | "conflicts" | "saving">("refreshing")
+  const [phase, setPhase] = useState<"sources" | "refreshing" | "search" | "synopses-pick" | "covers-pick" | "conflicts" | "saving">(
+    withSourceStep ? "sources" : "refreshing"
+  )
   const [pendingData, setPendingData] = useState<ExternalWorkData | null>(null)
   const [conflicts, setConflicts] = useState<FieldConflict[]>([])
   const [resolutions, setResolutions] = useState<Record<string, "current" | "external">>({})
@@ -441,7 +451,12 @@ export function UpdateDataDialog({
       const result = await refreshWorkExternalData(workId)
       if (!shouldApply()) return
       if (result.ok) {
-        handleSelect(result.data)
+        // ComicK e AnimePlanet têm rating buscado NO CLIENTE (o server-side é
+        // bloqueado por Cloudflare, sobretudo o AnimePlanet). O refresh server-side
+        // não os pega → busca aqui e mescla, pra ficar igual ao fluxo de criação.
+        const enriched = await enrichWithClientRatings(result.data)
+        if (!shouldApply()) return
+        handleSelect(enriched)
         return
       }
       if (result.reason === "ALL_404") {
@@ -459,15 +474,26 @@ export function UpdateDataDialog({
 
   const handleOpen = async () => {
     setOpen(true)
+    // Com o passo de fontes, o SourceSelectionStep carrega sozinho ao montar; o
+    // refresh dos dados só roda depois da confirmação das fontes.
+    if (withSourceStep) {
+      setPhase("sources")
+      return
+    }
     await runRefresh()
   }
 
-  // Quando controlado externamente, dispara o refresh ao abrir. O cleanup
-  // cancela a aplicação do resultado se o efeito re-rodar (StrictMode / deps).
+  // Quando controlado externamente, dispara o passo inicial ao abrir. Com o passo
+  // de fontes, só entra em "sources"; senão faz o refresh (cujo cleanup cancela a
+  // aplicação de um resultado obsoleto se o efeito re-rodar — StrictMode / deps).
   useEffect(() => {
     if (!(isControlled && open)) return
+    if (withSourceStep) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPhase("sources")
+      return
+    }
     let active = true
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void runRefresh(() => active)
     return () => {
       active = false
@@ -580,7 +606,7 @@ export function UpdateDataDialog({
 
     toast.success("Dados atualizados com sucesso.")
     setOpen(false)
-    setPhase("refreshing")
+    setPhase(withSourceStep ? "sources" : "refreshing")
     // Quando o caller trata o pós-save (ex.: abrir a obra em outra aba), não
     // navegamos a aba atual.
     if (onSaved) {
@@ -610,7 +636,7 @@ export function UpdateDataDialog({
 
   const handleClose = () => {
     setOpen(false)
-    setPhase("refreshing")
+    setPhase(withSourceStep ? "sources" : "refreshing")
     setPendingData(null)
     setConflicts([])
     setSynopsisChoices([])
@@ -636,9 +662,22 @@ export function UpdateDataDialog({
           <DialogHeader>
             <DialogTitle>Atualizar dados externos</DialogTitle>
             <DialogDescription>
-              Rehidrata sinopse, capa, capítulos, avaliações e tags a partir das fontes já vinculadas.
+              {withSourceStep
+                ? "Confirme as fontes (Comix/Mangago resolvidos por cross-ID) e rehidrate sinopse, capa, capítulos, avaliações, reviews e tags — deixa a obra igual a uma criada agora."
+                : "Rehidrata sinopse, capa, capítulos, avaliações e tags a partir das fontes já vinculadas."}
             </DialogDescription>
           </DialogHeader>
+
+          {phase === "sources" && (
+            <SourceSelectionStep
+              workId={workId}
+              confirmLabel="Continuar"
+              onConfirm={() => {
+                void runRefresh()
+              }}
+              onCancel={handleClose}
+            />
+          )}
 
           {phase === "refreshing" && (
             <div className="flex flex-col items-center justify-center py-10 gap-3 text-sm text-muted-foreground">
@@ -705,9 +744,16 @@ export function UpdateDataDialog({
               </section>
 
               <Separator />
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={handleClose}>Cancelar</Button>
-                <Button onClick={handleConfirmSynopses}>Continuar</Button>
+              <div className="flex gap-2 justify-between">
+                {withSourceStep ? (
+                  <Button variant="ghost" onClick={() => setPhase("sources")}>Voltar</Button>
+                ) : (
+                  <span />
+                )}
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={handleClose}>Cancelar</Button>
+                  <Button onClick={handleConfirmSynopses}>Continuar</Button>
+                </div>
               </div>
             </div>
           )}
@@ -870,6 +916,8 @@ export function UpdateDataDialog({
                 <div className="flex gap-2 justify-between">
                   {canGoBackToSynopses ? (
                     <Button variant="ghost" onClick={() => setPhase("synopses-pick")}>Voltar</Button>
+                  ) : withSourceStep ? (
+                    <Button variant="ghost" onClick={() => setPhase("sources")}>Voltar</Button>
                   ) : (
                     <span />
                   )}
@@ -918,9 +966,25 @@ export function UpdateDataDialog({
                 </div>
               ))}
               <Separator />
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={handleClose}>Cancelar</Button>
-                <Button onClick={handleConfirm}>Confirmar e salvar</Button>
+              <div className="flex gap-2 justify-between">
+                {coversNeedPick || synopsisChoices.length > 1 || withSourceStep ? (
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      if (coversNeedPick) setPhase("covers-pick")
+                      else if (synopsisChoices.length > 1) setPhase("synopses-pick")
+                      else setPhase("sources")
+                    }}
+                  >
+                    Voltar
+                  </Button>
+                ) : (
+                  <span />
+                )}
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={handleClose}>Cancelar</Button>
+                  <Button onClick={handleConfirm}>Confirmar e salvar</Button>
+                </div>
               </div>
             </div>
           )}
@@ -954,6 +1018,29 @@ export function UpdateDataDialog({
       </Dialog>
     </>
   )
+}
+
+/**
+ * Enriquece os dados do refresh com os ratings de ComicK e AnimePlanet buscados
+ * NO CLIENTE (`client-fetches.ts`). Necessário porque o refresh server-side não os
+ * pega — o AnimePlanet é bloqueado por Cloudflare no servidor e o ComicK é instável
+ * server-side. É o mesmo que o fluxo de criação faz em `proceedWithCandidate`, então
+ * uma obra atualizada passa a ter as MESMAS notas de uma criada agora. Fail-soft.
+ */
+async function enrichWithClientRatings(data: ExternalWorkData): Promise<ExternalWorkData> {
+  const comickHid = data.externalIds?.comick
+  const apSlug = data.externalIds?.animeplanet
+  if (!comickHid && !apSlug) return data
+  const [cmx, ap] = await Promise.all([
+    comickHid ? fetchComicKClient(data.title, comickHid).catch(() => null) : Promise.resolve(null),
+    apSlug ? fetchAnimePlanetClient(data.title, apSlug).catch(() => null) : Promise.resolve(null),
+  ])
+  const next: ExternalWorkData = { ...data }
+  if (cmx?.rating != null) next.cmxRating = cmx.rating
+  if (cmx?.votes != null) next.cmxVotes = cmx.votes
+  if (ap?.rating != null) next.apRating = ap.rating
+  if (ap?.votes != null) next.apVotes = ap.votes
+  return next
 }
 
 function buildPlatformRatings(data: ExternalWorkData) {
