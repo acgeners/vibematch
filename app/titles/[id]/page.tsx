@@ -759,6 +759,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             <TabsContent value="overview" className="mt-0 space-y-4">
               <div className="flex flex-wrap items-center gap-2">
                 <RevalidateSourcesActionButton workId={work.id} />
+                <GenerateAllBanner
+                  compact
+                  workId={work.id}
+                  workTitle={work.title}
+                  initialStatus={(work as { cascade_status?: CascadeStatus }).cascade_status ?? "idle"}
+                />
                 <UpdateDataActionButton
                   workId={work.id}
                   currentWork={{
@@ -899,12 +905,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           biblioteca — não desta obra. Vive em /settings/calibração →
           "Calibração de atributos" (PredictionHealthCard). */}
       {/* "Atualizar avaliação IA" sozinho numa linha. O Consultor IA (Deep Dive)
-          fica logo abaixo das notas calculadas/externas, antes das "Notas por critério". */}
-      <GenerateAllBanner
-        workId={work.id}
-        workTitle={work.title}
-        initialStatus={(work as { cascade_status?: CascadeStatus }).cascade_status ?? "idle"}
-      />
+          fica logo abaixo das notas calculadas/externas, antes das "Notas por critério".
+          O "Gerar tudo" mudou pra linha de ações da aba Geral (ao lado de Revalidar/Atualizar). */}
       <AiEvaluationButton
         workId={work.id}
         workTitle={work.title}
@@ -915,7 +917,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         externalReviews={externalManualReviews}
       />
       {/* Bússola de leitura — 3 forças de decisão (ver PLANO-BUSSOLA-3-FORCAS.md) */}
-      <Card className="max-w-3xl">
+      <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center gap-2">
             <Compass className="h-4.5 w-4.5 text-muted-foreground" />

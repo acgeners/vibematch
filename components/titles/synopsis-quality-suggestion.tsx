@@ -12,6 +12,7 @@ import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import type { SynopsisQuality } from "@/types/domain"
 import type { UiReadiness } from "@/lib/orchestration/ui-readiness"
 import { GenerationGate } from "@/components/generation/generation-gate"
+import { InputConfidenceSeal } from "@/components/generation/input-confidence-seal"
 
 export interface SynopsisQualitySuggestionProps {
   workId: string
@@ -64,7 +65,7 @@ export function SynopsisQualitySuggestion({
         toast.error(res.error)
         return
       }
-      toast.success("Aplicado ao Interesse sinopse.")
+      toast.success("Aplicado ao Interesse na Obra.")
       refresh()
     })
   }
@@ -73,7 +74,7 @@ export function SynopsisQualitySuggestion({
     return (
       <div className="mt-3 flex items-center gap-2 border-t border-border/40 pt-3 text-xs text-muted-foreground">
         <Sparkles className="h-3.5 w-3.5" />
-        Estimar Interesse Sinopse por IA é uma feature do plano Pago.
+        Estimar Interesse na Obra por IA é uma feature do plano Pago.
       </div>
     )
   }
@@ -110,9 +111,18 @@ export function SynopsisQualitySuggestion({
   return (
     <div className="mt-3 space-y-2 border-t border-border/40 pt-3">
       <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        <Sparkles className="h-3.5 w-3.5" /> Interesse sinopse (sugestão IA)
+        <Sparkles className="h-3.5 w-3.5" /> Interesse na Obra (sugestão IA)
       </span>
-      {gate ? <GenerationGate readiness={gate}>{predictButton}</GenerationGate> : predictButton}
+      <div className="flex items-center gap-2">
+        {gate ? (
+          <GenerationGate readiness={gate} showSeal={false} className="min-w-0 flex-1">
+            {predictButton}
+          </GenerationGate>
+        ) : (
+          <div className="flex-1">{predictButton}</div>
+        )}
+        {gate?.ready && <InputConfidenceSeal readiness={gate} className="shrink-0" />}
+      </div>
 
       {prediction ? (
         <div className="space-y-1.5">

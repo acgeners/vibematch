@@ -1,6 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { WorkForces } from "@/lib/calculations/forces"
 
 /**
@@ -89,26 +90,37 @@ export function ForceMeters({
   }
 
   return (
-    <div className={cn("flex flex-col gap-2.5", className)}>
-      {FORCES.map((f) => {
-        const v = forces[f.key]
-        return (
-          <div key={f.key} className="flex items-center gap-2" title={f.tooltip}>
-            <span className="w-28 shrink-0 text-xs text-muted-foreground">{f.label}</span>
-            <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-              <div className={cn("h-full rounded-full transition-all", f.fill)} style={{ width: `${v ?? 0}%` }} />
-            </div>
-            <span
-              className={cn(
-                "w-11 shrink-0 text-right font-mono text-xs tabular-nums",
-                v == null ? "text-muted-foreground" : f.text,
-              )}
-            >
-              {v == null ? "—" : `${v}${f.suffix}`}
-            </span>
-          </div>
-        )
-      })}
-    </div>
+    <TooltipProvider delayDuration={150}>
+      <div className={cn("flex flex-col gap-2.5", className)}>
+        {FORCES.map((f) => {
+          const v = forces[f.key]
+          return (
+            <Tooltip key={f.key}>
+              <TooltipTrigger asChild>
+                <div className="flex cursor-help items-center gap-2">
+                  <span className="w-28 shrink-0 text-xs text-muted-foreground underline decoration-dotted decoration-muted-foreground/40 underline-offset-4">
+                    {f.label}
+                  </span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                    <div className={cn("h-full rounded-full transition-all", f.fill)} style={{ width: `${v ?? 0}%` }} />
+                  </div>
+                  <span
+                    className={cn(
+                      "w-11 shrink-0 text-right font-mono text-xs tabular-nums",
+                      v == null ? "text-muted-foreground" : f.text,
+                    )}
+                  >
+                    {v == null ? "—" : `${v}${f.suffix}`}
+                  </span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs text-left leading-relaxed">
+                {f.tooltip}
+              </TooltipContent>
+            </Tooltip>
+          )
+        })}
+      </div>
+    </TooltipProvider>
   )
 }
