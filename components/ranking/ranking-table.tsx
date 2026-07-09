@@ -28,6 +28,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { formatRelativeDate, formatFullDateTime } from "@/lib/date-utils"
 import { AlignmentCell, AlignmentScoreCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { BussolaPlane } from "@/components/ranking/bussola-plane"
+import { RankingBandsView } from "@/components/ranking/ranking-bands-view"
+import type { ActiveFilterChip } from "@/components/ranking/active-filters-bar"
 import { computeWorkForces } from "@/lib/calculations/forces"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { TierDividerRow } from "@/components/ranking/tie-break-band"
@@ -152,14 +154,14 @@ function reorderTiersByFit(entries: RankingEntry[], tiers: Tier[]): RankingEntry
   return out
 }
 
-type ViewMode = "list" | "cards" | "bussola"
+type ViewMode = "list" | "cards" | "bussola" | "faixas"
 const VIEW_STORAGE_KEY = "ranking_view_mode_v1"
 const VIEW_EVENT = "ranking-view-mode-change"
 
 function readViewMode(): ViewMode {
   if (typeof window === "undefined") return "list"
   const stored = window.localStorage.getItem(VIEW_STORAGE_KEY)
-  return stored === "cards" || stored === "bussola" ? stored : "list"
+  return stored === "cards" || stored === "bussola" || stored === "faixas" ? stored : "list"
 }
 
 function subscribeViewMode(onChange: () => void) {
@@ -217,6 +219,10 @@ interface RankingTableProps {
   tierBandWidth?: number
   /** Faixas ideais por critério (perfil) — repassadas ao drawer de comparação. */
   criterionPrefs?: Record<string, CriterionRange>
+  /** Chips de filtros ativos (só usados pela view "Faixas"). Montados no server. */
+  activeFilters?: ActiveFilterChip[]
+  /** URL "ver tudo / limpar padrões" (só usada pela view "Faixas"). */
+  clearFiltersHref?: string
 }
 
 const KEY_CRITERIA = ["romance", "fantasy_nobility", "protagonist", "drama", "tragedy"]
@@ -511,7 +517,7 @@ function renderCell(
   return null
 }
 
-export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs }: RankingTableProps) {
+export function RankingTable({ entries, scoreThresholds = null, defaultSort = "expected_score:desc", isPaid = true, tierBandWidth = DEFAULT_TIER_BAND_WIDTH, criterionPrefs, activeFilters, clearFiltersHref }: RankingTableProps) {
   const { widths, setWidth } = useColumnWidths()
   // Colunas do /ranking vêm do vocabulário COMPARTILHADO (work-table-config,
   // namespace "ranking"). Prependa a coluna "#" estrutural e descarta as colunas
@@ -742,6 +748,28 @@ export function RankingTable({ entries, scoreThresholds = null, defaultSort = "e
           onTiersChange={writeTiersEnabled}
         />
         <BussolaPlane entries={entries} />
+      </div>
+    )
+  }
+
+  if (viewMode === "faixas") {
+    return (
+      <div className="space-y-3">
+        <ViewModeToolbar
+          count={entries.length}
+          viewMode={viewMode}
+          onChange={writeViewMode}
+          tiersEnabled={tiersEnabled}
+          tiersAvailable={tierSortEligible}
+          onTiersChange={writeTiersEnabled}
+        />
+        <RankingBandsView
+          entries={entries}
+          scoreThresholds={scoreThresholds}
+          tierBandWidth={tierBandWidth}
+          activeFilters={activeFilters}
+          clearFiltersHref={clearFiltersHref}
+        />
       </div>
     )
   }
@@ -1147,6 +1175,21 @@ function ViewModeToolbar({
           >
             <Compass className="h-3.5 w-3.5" />
             Bússola
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange("faixas")}
+            aria-label="Visualizar em faixas de prioridade"
+            aria-pressed={viewMode === "faixas"}
+            className={cn(
+              "inline-flex h-7 items-center gap-1.5 rounded px-2 text-xs font-medium transition-colors",
+              viewMode === "faixas"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            Faixas
           </button>
         </div>
       </div>

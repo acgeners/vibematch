@@ -9,6 +9,7 @@
  * Ver migration 105 e AUDIT_REPORT P1.
  */
 
+import { createHash } from "node:crypto"
 import { z } from "zod"
 
 /** Eventos que justificam registrar um snapshot prospectivo (ver Etapa 4). */
@@ -49,6 +50,19 @@ export const predictionSnapshotSchema = z.object({
   moodKey: z.string().min(1).nullable(),
   predictionContext: z.enum(PREDICTION_CONTEXTS),
   rankingSnapshotId: z.string().uuid().nullable(),
+  /**
+   * Posição 1-based na lista EXIBIDA (1 = topo). Opcional/nullable: eventos
+   * avulsos e o path de recomendação (que não passa posição) omitem → null.
+   * Persistido em prediction_snapshots.rank_position (migration 135).
+   */
+  rankPosition: z.number().int().positive().nullable().optional(),
+  /**
+   * Descritor LEGÍVEL dos filtros da run de ranking (JSON.stringify(filters)).
+   * Puramente descritivo (debug/segmentação) — NÃO entra no dedup_key nem no
+   * ranking_snapshot_id. Opcional/nullable: contextos sem filtros omitem → null.
+   * Persistido em prediction_snapshots.filters_key (migration 136).
+   */
+  filtersKey: z.string().nullable().optional(),
 })
 
 export type PredictionSnapshotInput = z.infer<typeof predictionSnapshotSchema>
@@ -111,6 +125,56 @@ export function buildDedupKey(parts: {
     parts.moodKey ?? "none",
     dayBucket,
   ].join("::")
+}
+
+/**
+ * Namespace fixo (RFC 4122 URL namespace) pros UUIDv5 determinísticos de ranking.
+ * NÃO mudar — mudar quebra a estabilidade dos ids já gravados.
+ */
+const RANKING_ID_NAMESPACE = "6ba7b811-9dad-11d1-80b4-00c04fd430c8"
+
+/**
+ * UUIDv5 determinístico (SHA-1 sobre namespace + name). Saída é um UUID VÁLIDO
+ * (aceito pela coluna `uuid` do Postgres e pelo `.uuid()` do Zod) e ESTÁVEL: o
+ * mesmo `name` sempre gera o mesmo id. Puro/testável.
+ */
+export function deterministicUuidV5(name: string, namespace = RANKING_ID_NAMESPACE): string {
+  const nsBytes = Buffer.from(namespace.replace(/-/g, ""), "hex")
+  const hash = createHash("sha1").update(nsBytes).update(name, "utf8").digest()
+  const b = Buffer.from(hash.subarray(0, 16))
+  b[6] = (b[6] & 0x0f) | 0x50 // versão 5
+  b[8] = (b[8] & 0x3f) | 0x80 // variante RFC 4122
+  const h = b.toString("hex")
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`
+}
+
+/**
+ * Id determinístico de UMA execução do ranking free, por
+ * (usuário, dia local, versão da fórmula, conjunto de filtros, mood).
+ *
+ * Consequência do determinismo: re-renderizar o /ranking no MESMO dia com os
+ * MESMOS filtros/mood produz o MESMO `ranking_snapshot_id` → o `dedup_key`
+ * `ranking::{id}::work::{workId}` colide e o insert (ignoreDuplicates) vira
+ * no-op. Assim acumulamos no máximo 1 snapshot-set por (dia, filtros, mood),
+ * sem explosão de escrita, e ainda agrupamos as obras de uma run pra métricas
+ * de ordenação (NDCG/regret/Spearman por ranking).
+ */
+export function rankingSnapshotIdFor(parts: {
+  userId: string
+  dayBucket: string
+  formulaVersion: string
+  filtersKey: string
+  moodKey: string | null
+}): string {
+  const name = [
+    "ranking",
+    parts.userId,
+    parts.dayBucket,
+    parts.formulaVersion,
+    parts.filtersKey,
+    parts.moodKey ?? "none",
+  ].join("::")
+  return deterministicUuidV5(name)
 }
 
 export interface DerivedErrors {
