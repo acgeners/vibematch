@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Activity, ShieldCheck, ArrowRight } from "lucide-react"
+import { ShieldCheck, ArrowRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { PredictionHealth } from "@/server/queries/calibration-guards"
 
@@ -9,13 +9,7 @@ const HEALTH_META: Record<PredictionHealth["overall"], { label: string; dot: str
   alert: { label: "Alerta", dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
 }
 
-export function HealthStrip({
-  health,
-  cost7d,
-}: {
-  health: PredictionHealth
-  cost7d: number
-}) {
+export function HealthStrip({ health }: { health: PredictionHealth }) {
   const meta = HEALTH_META[health.overall]
 
   return (
@@ -27,15 +21,6 @@ export function HealthStrip({
           <span className={cn("size-2 rounded-full", meta.dot)} aria-hidden />
           <span className={meta.text}>{meta.label}</span>
         </span>
-        <ArrowRight className="size-3.5 text-muted-foreground/40 transition-colors group-hover:text-foreground" />
-      </Link>
-
-      <span aria-hidden className="hidden h-4 w-px bg-border sm:block" />
-
-      <Link href="/ai-usage" className="group flex items-center gap-2 text-muted-foreground hover:text-foreground">
-        <Activity className="size-4" />
-        <span>Custo IA (7d)</span>
-        <span className="font-semibold tabular-nums text-foreground">${cost7d.toFixed(2)}</span>
         <ArrowRight className="size-3.5 text-muted-foreground/40 transition-colors group-hover:text-foreground" />
       </Link>
     </div>

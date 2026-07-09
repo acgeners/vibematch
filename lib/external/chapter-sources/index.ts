@@ -1,4 +1,5 @@
 import { withTimeout } from "@/lib/external/with-timeout"
+import type { PublicationStatus } from "@/types/domain"
 import { getComixLatestChapter } from "./comix"
 import { getCoffeemangaLatestChapter } from "./coffeemanga"
 import type { ChapterCheckInput, ChapterLookup, ChapterSourceId } from "./types"
@@ -36,6 +37,8 @@ export interface LatestChapterResult {
   chapterNumbers?: number[] | null
   /** URL da fonte autoritativa do capítulo (coffeemanga quando achou; senão comix). `null` se nenhuma deu URL. */
   latestUrl?: string | null
+  /** Status de publicação declarado pela comix (só ela fornece). `null` se indisponível. */
+  status?: PublicationStatus | null
 }
 
 /**
@@ -78,6 +81,10 @@ export async function getLatestChapter(
       undefined,
     )
 
+  // Status vem SEMPRE da comix (coffeemanga não fornece), independente de quem
+  // venceu como fonte autoritativa do capítulo.
+  const comixLookup = fulfilled.find((v) => v.source === "comix")
+
   return {
     latest: primary?.chapter ?? null,
     bySource,
@@ -87,5 +94,6 @@ export async function getLatestChapter(
     cadenceDates: primary?.cadenceDates ?? [],
     chapterNumbers: primary?.chapterNumbers ?? null,
     latestUrl: primary?.sourceUrl ?? null,
+    status: comixLookup?.status ?? null,
   }
 }

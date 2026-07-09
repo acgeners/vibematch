@@ -24,6 +24,13 @@ type Variant = "reading" | "hiatus"
 // checagem achou um cap novo além do que tínhamos registrado).
 const RESUMED_WINDOW_DAYS = 35
 
+// Rótulo PT curto pros status que a checagem pode APLICAR (transições de fim/hiato).
+const APPLIED_STATUS_LABEL: Record<string, string> = {
+  Completed: "Completo",
+  Hiatus: "Hiato",
+  Cancelled: "Cancelado",
+}
+
 const VARIANT: Record<
   Variant,
   {
@@ -216,11 +223,18 @@ export function ReadingList({
         setJustCheckedAt(new Date().toISOString())
         const news = res.filter((r) => r.hasNew).length
         const failed = res.filter((r) => r.failed).length
+        const statusChanges = res.filter((r) => r.statusApplied).length
+        const descParts = [
+          statusChanges > 0
+            ? `${statusChanges} mudança(s) de status`
+            : null,
+          failed > 0 ? `${failed} fonte(s) não responderam` : null,
+        ].filter(Boolean)
         toast.success(
           news > 0
             ? `${news} obra${news !== 1 ? "s" : ""} com capítulo novo`
             : "Nenhuma novidade encontrada",
-          failed > 0 ? { description: `${failed} fonte(s) não responderam` } : undefined,
+          descParts.length > 0 ? { description: descParts.join(" · ") } : undefined,
         )
         refresh() // traz hids recém-persistidos pra próxima carga
       } catch (err) {
@@ -403,8 +417,18 @@ export function ReadingList({
                       <span className="flex items-center gap-1">
                         <AlertCircle className="size-3" /> não verificado
                       </span>
+                    ) : result?.skipped ? (
+                      <span className="flex items-center gap-1">
+                        <Check className="size-3 shrink-0 text-emerald-500" /> Concluída — sem capítulos novos
+                      </span>
                     ) : (
                       <>
+                        {result?.statusApplied && (
+                          <span className="flex items-center gap-1 font-medium text-amber-600 dark:text-amber-400">
+                            <RotateCw className="size-3 shrink-0" /> Status atualizado →{" "}
+                            {APPLIED_STATUS_LABEL[result.statusApplied] ?? result.statusApplied}
+                          </span>
+                        )}
                         {releasedAge && (
                           <span className="flex items-center gap-1">
                             <Clock className="size-3 shrink-0" /> Último cap lançado {releasedAge}

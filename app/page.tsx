@@ -1,20 +1,21 @@
 import Link from "next/link"
 import {
-  BookOpen,
+  BookMarked,
+  Bookmark,
   Star,
-  TrendingUp,
+  BellRing,
+  Coins,
   Plus,
   Upload,
   Sparkles,
   LayoutDashboard,
-  Trophy,
   ArrowRight,
 } from "lucide-react"
 import {
   getDashboardStats,
   getContinueReading,
-  getRecentActivity,
   getAiQueueCounts,
+  getTopUnratedByExpected,
 } from "@/server/queries/dashboard"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getTasteProfileStatusAction } from "@/server/actions/recommendations"
@@ -25,13 +26,11 @@ import { StatCard } from "@/components/dashboard/stat-card"
 import { AiQueueCard } from "@/components/dashboard/ai-queue-card"
 import { StatusDistribution } from "@/components/dashboard/status-distribution"
 import { ContinueReading } from "@/components/dashboard/continue-reading"
-import { RecentActivity } from "@/components/dashboard/recent-activity"
 import { ProfileSummary } from "@/components/dashboard/profile-summary"
 import { HealthStrip } from "@/components/dashboard/health-strip"
 import { TopWorkCard } from "@/components/dashboard/top-work-card"
 import { DashboardGreeting } from "@/components/dashboard/dashboard-greeting"
 import { Header } from "@/components/layout/header"
-import { ScoreBadge } from "@/components/ui/score-badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 
@@ -40,7 +39,7 @@ export default async function DashboardPage() {
     stats,
     scoreThresholds,
     continueReading,
-    recentActivity,
+    topPicks,
     queueCounts,
     profileStatus,
     health,
@@ -50,7 +49,7 @@ export default async function DashboardPage() {
     getDashboardStats(),
     getScoreColorThresholds(),
     getContinueReading(),
-    getRecentActivity(),
+    getTopUnratedByExpected(5),
     getAiQueueCounts(),
     getTasteProfileStatusAction(),
     getPredictionHealth(),
@@ -59,13 +58,14 @@ export default async function DashboardPage() {
   ])
 
   const firstName = profile.displayName?.trim().split(/\s+/)[0]
+  const wantToRead = stats.byPersonalStatus["Want to Read"] ?? 0
 
   return (
     <div className="space-y-6">
       <Header
         kicker="Dashboard"
         title={<DashboardGreeting firstName={firstName} />}
-        description="Visão geral do seu catálogo"
+        description={`${stats.totalWorks} obras no catálogo · ${stats.rated} avaliadas por você`}
         icon={
           profile.avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- avatar do usuário (URL própria/colada); next/image não cabe (sem images config).
@@ -75,108 +75,95 @@ export default async function DashboardPage() {
           )
         }
         actions={
-          <Button asChild size="sm">
-            <Link href="/titles/new">
-              <Plus className="size-4" />
-              Novo título
-            </Link>
-          </Button>
+          <>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/import">
+                <Upload className="size-4" />
+                <span className="hidden sm:inline">Importar</span>
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/ai-evaluation">
+                <Sparkles className="size-4" />
+                <span className="hidden sm:inline">Avaliar</span>
+              </Link>
+            </Button>
+            <Button asChild size="sm">
+              <Link href="/titles/new">
+                <Plus className="size-4" />
+                Novo título
+              </Link>
+            </Button>
+          </>
         }
       />
 
-      {/* Total de obras + ações rápidas (cards baixos) */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <div className="lg:col-span-4">
-          <StatCard
-            title="Total de obras"
-            value={stats.totalWorks}
-            icon={<BookOpen />}
-            href="/titles"
-            description="Obras ativas no catálogo"
-            accent="primary"
-          />
-        </div>
-
-        <Card className="lg:col-span-8">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Ações rápidas
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <QuickAction href="/titles/new" icon={<Plus />} label="Novo título" />
-            <QuickAction href="/import" icon={<Upload />} label="Importar" />
-            <QuickAction href="/ai-evaluation" icon={<Sparkles />} label="Avaliação IA" />
-            <QuickAction href="/ranking" icon={<Trophy />} label="Ranking" />
-          </CardContent>
-        </Card>
+      {/* Faixa de KPIs acionáveis */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <StatCard
+          title="Acompanhando"
+          value={stats.following}
+          icon={<BookMarked />}
+          href="/leitura"
+          description="em leitura ativa"
+          accent="emerald"
+        />
+        <StatCard
+          title="Na fila"
+          value={wantToRead}
+          icon={<Bookmark />}
+          href="/titles"
+          description="quero ler"
+          accent="primary"
+        />
+        <StatCard
+          title="Avaliadas por você"
+          value={stats.rated}
+          icon={<Star />}
+          href="/titles"
+          description="alimentam seu perfil"
+          accent="violet"
+        />
+        <StatCard
+          title="Com pendências"
+          value={stats.followingWithPending}
+          icon={<BellRing />}
+          href="/leitura"
+          description="capítulos a ler"
+          accent="amber"
+        />
+        <StatCard
+          title="Custo IA (30d)"
+          value={`$${usage.last30d.totalCostUsd.toFixed(2)}`}
+          icon={<Coins />}
+          href="/ai-usage"
+          description={`$${usage.last7d.totalCostUsd.toFixed(2)} nos últimos 7 dias`}
+          accent="slate"
+        />
       </div>
 
-      {/* Pendentes IA + média prevista (cards médios) */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <div className="lg:col-span-8">
-          <AiQueueCard
-            attributes={stats.pendingAi}
-            iaRk={queueCounts.iaRk}
-            synopsis={queueCounts.synopsis}
-          />
-        </div>
-
-        <Card className="relative overflow-hidden lg:col-span-4">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/12 via-primary/4 to-transparent"
-          />
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -right-12 -top-12 size-48 rounded-full bg-primary/15 blur-3xl"
-          />
-          <CardHeader className="relative pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              <TrendingUp className="size-4 text-primary" />
-              Média Nota Prevista
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="relative">
-            {stats.avgExpectedScore != null ? (
-              <div className="flex items-end gap-4">
-                <ScoreBadge score={stats.avgExpectedScore} size="lg" className="text-2xl px-4 py-2" />
-                <div className="flex flex-col">
-                  <span className="text-3xl font-bold tabular-nums tracking-tight">
-                    {stats.avgExpectedScore.toFixed(2)}
-                  </span>
-                  <span className="text-xs text-muted-foreground">de 10 pontos possíveis</span>
-                </div>
-              </div>
-            ) : (
-              <span className="text-sm text-muted-foreground">Nenhuma nota calculada ainda</span>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Distribuição por status */}
-      <StatusDistribution
-        byPersonalStatus={stats.byPersonalStatus}
-        byPublicationStatus={stats.byPublicationStatus}
-      />
-
-      {/* Continuar lendo + atividade recente */}
+      {/* Acompanhando (metade) + Perfil de gosto (metade) */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ContinueReading items={continueReading} />
-        <RecentActivity items={recentActivity} />
+        <ContinueReading
+          items={continueReading}
+          following={stats.following}
+          followingWithPending={stats.followingWithPending}
+        />
+        <ProfileSummary status={profileStatus} />
       </div>
 
-      {/* Resumo do perfil */}
-      <ProfileSummary status={profileStatus} />
-
-      {/* Top 5 obras */}
-      {stats.topWorks.length > 0 && (
+      {/* Melhores notas previstas — só obras que você ainda não avaliou */}
+      {topPicks.length > 0 && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-4">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Star className="size-4 text-amber-500" />
-              Top 5 obras por Nota Prevista
+            <CardTitle className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-base">
+              <span className="inline-flex items-center gap-2">
+                <Star className="size-4 self-center text-amber-500" />
+                Pra ler agora
+              </span>
+              <span className="text-xs font-normal text-muted-foreground">
+                · melhores notas que você ainda não avaliou
+              </span>
             </CardTitle>
             <Button asChild variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
               <Link href="/ranking">
@@ -187,7 +174,7 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-5">
-              {stats.topWorks.map((work, index) => (
+              {topPicks.map((work, index) => (
                 <TopWorkCard
                   key={work.id}
                   rank={index + 1}
@@ -200,30 +187,21 @@ export default async function DashboardPage() {
         </Card>
       )}
 
-      {/* Faixa de saúde do sistema */}
-      <HealthStrip health={health} cost7d={usage.last7d.totalCostUsd} />
-    </div>
-  )
-}
+      {/* Sua biblioteca — distribuição por status (largura total) */}
+      <StatusDistribution
+        byPersonalStatus={stats.byPersonalStatus}
+        byPublicationStatus={stats.byPublicationStatus}
+      />
 
-function QuickAction({
-  href,
-  icon,
-  label,
-}: {
-  href: string
-  icon: React.ReactNode
-  label: string
-}) {
-  return (
-    <Link
-      href={href}
-      className="group flex items-center gap-2.5 rounded-lg border border-border/65 bg-background/40 px-3 py-2.5 text-sm font-medium text-foreground transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-card hover:shadow-sm hover:shadow-primary/10"
-    >
-      <span className="grid size-7 shrink-0 place-items-center rounded-md bg-primary/12 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground [&_svg]:size-3.5">
-        {icon}
-      </span>
-      <span className="truncate">{label}</span>
-    </Link>
+      {/* Pendências de IA (manutenção) */}
+      <AiQueueCard
+        attributes={stats.pendingAi}
+        iaRk={queueCounts.iaRk}
+        synopsis={queueCounts.synopsis}
+      />
+
+      {/* Faixa de saúde do sistema (telemetria de dev) */}
+      <HealthStrip health={health} />
+    </div>
   )
 }

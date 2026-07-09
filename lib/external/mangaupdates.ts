@@ -272,3 +272,22 @@ export async function fetchMangaUpdatesById(id: number): Promise<MangaUpdatesDet
     return null
   }
 }
+
+/**
+ * Status de publicação por ID — chamada de API LEVE (sem o scrape de rating do
+ * `fetchMangaUpdatesById`). MangaUpdates é a fonte mais confiável pra status, então
+ * é a preferida na checagem de capítulos. Retorna `null` em falha ou status
+ * desconhecido (pra o chamador cair na próxima fonte).
+ */
+export async function fetchMangaUpdatesStatus(id: number): Promise<PublicationStatus | null> {
+  try {
+    const res = await fetch(`${MU_BASE}/series/${id}`, { cache: "no-store" })
+    if (!res.ok) return null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = await res.json()
+    const status = mapStatus(data.status)
+    return status === "Unknown" ? null : status
+  } catch {
+    return null
+  }
+}
