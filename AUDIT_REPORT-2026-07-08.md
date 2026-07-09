@@ -7,6 +7,23 @@
 
 ---
 
+## Status de execução (atualizado 2026-07-09) · PR [#85](https://github.com/acgeners/vibematch/pull/85) (branch `work`)
+
+> **O que a auditoria destravou até agora — tudo aditivo, sem tocar fórmula/score/ordenação.** Ver detalhe por item no §19.
+
+**✅ Shipado (PR #85):**
+- **P1.1 (instrumentação) — parcial:** `/ranking` grava `prediction_snapshots` prospectivos (via `after()`, `ranking_snapshot_id` UUIDv5 determinístico → dedup dia+filtros; só obras sem nota → leak-free). Migrations **135** (`rank_position`) e **136** (`filters_key`) **aplicadas em produção**. Scripts read-only `npm run baselines:ranking` (in-sample) e `npm run prospective:ranking` (prospectivo por contexto `ranking_snapshot`: cobertura + MAE/pairwise/NDCG/regret + bootstrap IC + segmentação por `filters_key`). *Falta: harness offline pairwise para crescer rótulos.*
+- **P1.4 (filtros visíveis) — feito na view Faixas:** chips de filtros default (selo PADRÃO, removíveis via URL).
+- **P1.5 (bandas) — parcial:** exibição em faixas de prioridade na nova view **Faixas** (4ª visualização, **não** substitui Lista/Cards/Bússola); nota secundária (`~x,x estim.`). *Falta: validar a largura da banda empiricamente (depende de dados resolvidos).*
+
+**⏳ Pendente:**
+- **Medição prospectiva ACUMULANDO** — hoje **0 obras resolvidas** (esperado: obras "Quero ler"/"Sem status" só resolvem quando lidas+avaliadas). Rodar `npm run prospective:ranking` periodicamente. **A decisão sobre Ridge/chance/Bússola (P3) e a deduplicação de sinais dependem de ≥30 resolvidas + IC.**
+- **P0.1** (auth/rate-limit) e **P0.2** (migrations reproduzíveis) — **não iniciados**.
+- **P1.2** (deduplicar `personal_fit`/`chance`), **P1.3** (unificar mood), **P2.\*** — pendentes.
+- **Backlog:** tooltip `~0,6` da Faixas → `cv_mae` real; Opção B (helpers puros + aba "Ranking" em `/admin/model-metrics`) quando houver dados.
+
+---
+
 ## 0. Conclusão objetiva (classificação)
 
 > ### 🟨 **O sistema apresenta uma boa base, mas o ranking ainda não é confiável.**
@@ -389,11 +406,11 @@ user_score: n=206  média 7,83  σ 0,949
 - **P0.2** Reproduzibilidade do banco: versionar `CREATE TABLE` de `criteria`/`publication_status`/`personal_status`/`tag_group`/`genres` numa migration idempotente. (D1)
 
 ### P1 — Alta prioridade (qualidade das recomendações)
-- **P1.1** **Instrumentar antes de mexer:** ligar log de snapshot de ranking + desfecho (`prediction_snapshots`) e um harness offline pairwise ("qual dessas duas você prefere?") para **crescer rótulos** e **medir lift vs baselines** (calc, popularidade, tags+qualidade). (§17.2)
+- 🔄 **P1.1** **Instrumentar antes de mexer:** ligar log de snapshot de ranking + desfecho (`prediction_snapshots`) e um harness offline pairwise ("qual dessas duas você prefere?") para **crescer rótulos** e **medir lift vs baselines** (calc, popularidade, tags+qualidade). (§17.2) → **PARCIAL (PR #85, 2026-07-09):** snapshots de ranking + resolução + scripts `baselines:ranking`/`prospective:ranking` **shipados** (migs 135/136 aplicadas); **harness pairwise offline pendente**. Acumulando (0 resolvidos hoje).
 - **P1.2** Deduplicar sinais: dropar/renomear `personal_fit` (=`tag_overlap_net` percentil), remover `computePersonalFit`, decidir se `chance_score` fica como *probabilidade* (não eixo). (C3/C4)
 - **P1.3** Unificar mood num só mecanismo, **visível e reversível** (chips), com efeito explicável. (C6)
-- **P1.4** Tornar filtros default visíveis. (C8)
-- **P1.5** Validar a banda de tier empiricamente (curva acurácia pairwise × Δ) em vez de 0,5 decretado; colapsar a exibição em 3–4 bandas. (C1)
+- ✅ **P1.4** Tornar filtros default visíveis. (C8) → **FEITO (PR #85):** chips de filtros default (selo PADRÃO, removíveis via URL) na view **Faixas**. *(Falta replicar na Lista.)*
+- 🔄 **P1.5** Validar a banda de tier empiricamente (curva acurácia pairwise × Δ) em vez de 0,5 decretado; colapsar a exibição em 3–4 bandas. (C1) → **PARCIAL (PR #85):** exibição em bandas feita (view **Faixas**); **validação empírica da largura depende dos snapshots resolvidos** (0 hoje).
 
 ### P2 — Melhoria importante (arquitetura/custo/testes)
 - **P2.1** Cache de resultado nos Sonnet recorrentes + `synopsis_quality`→Haiku. (I1/I2/I3)
