@@ -548,14 +548,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           {comixReadUrl && (
             <Button
               asChild
+              variant="outline"
               size="sm"
-              className="bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-emerald-950 dark:hover:bg-emerald-400"
+              className="border-emerald-500/45 bg-emerald-500/10 text-emerald-700 hover:border-emerald-500/60 hover:bg-emerald-500/20 hover:text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/12 dark:text-emerald-300 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-200"
             >
               <a href={comixReadUrl} target="_blank" rel="noopener noreferrer" title="Abre no Comix em nova aba">
                 <ExternalLink className="h-4 w-4" />
                 Ler no Comix
                 {comixPending != null && comixPending > 0 && (
-                  <span className="ml-1 rounded-full bg-black/15 px-1.5 py-0.5 text-[11px] font-bold tabular-nums dark:bg-black/25">
+                  <span className="ml-1 rounded-full bg-emerald-500/90 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-emerald-950">
                     {comixPending} pend.
                   </span>
                 )}
