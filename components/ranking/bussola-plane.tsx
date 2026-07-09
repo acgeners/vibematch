@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { Compass } from "lucide-react"
 import { cn, titleToSlug } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
 import { ForceMeters } from "@/components/ranking/force-meters"
@@ -121,6 +122,18 @@ const CORNER_ARCH: Record<"tr" | "tl" | "br" | "bl", ForceArchetype> = { tr: "sa
 
 type RiskMode = "all" | "segura" | "potencial"
 
+/** Opções do filtro "Foco" (por arquétipo de risco) + explicação do selecionado. */
+const RISK_OPTIONS: { v: RiskMode; label: string; swatch?: string }[] = [
+  { v: "all", label: "Tudo" },
+  { v: "segura", label: "Aposta segura", swatch: "bg-emerald-500" },
+  { v: "potencial", label: "Alto potencial", swatch: "bg-rose-500" },
+]
+const RISK_DESC: Record<RiskMode, string> = {
+  all: "Mostra todas as obras do ranking, sem filtrar por tipo de aposta.",
+  segura: "Só o que você tende a gostar e a crítica confirma.",
+  potencial: "Só apostas arriscadas: aclamadas, mas incertas pro teu perfil.",
+}
+
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 const sizePx = (v: number | null) => 10 + ((v ?? 0) / 100) * 18
 
@@ -137,30 +150,6 @@ const absPos = (v: number | null, thr: number) => {
   if (v == null) return 50
   const c = clamp(v, 0, 100)
   return c <= thr ? (c / thr) * 50 : 50 + ((c - thr) / (100 - thr)) * 50
-}
-
-function Seg<T extends string>({
-  value, onChange, options,
-}: { value: T; onChange: (v: T) => void; options: { v: T; label: string; swatch?: string }[] }) {
-  return (
-    <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
-      {options.map((o) => (
-        <button
-          key={o.v}
-          type="button"
-          onClick={() => onChange(o.v)}
-          aria-pressed={value === o.v}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-            value === o.v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {o.swatch && <span className={cn("size-2 rounded-full", o.swatch)} />}
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
 }
 
 /** Legenda de canto — fora do plano, pra nunca cobrir (nem ser coberta por) um ponto. */
@@ -292,66 +281,158 @@ export function BussolaPlane({ entries, mode = "percentile" }: { entries: Bussol
 
   return (
     <div className="flex flex-col gap-3">
-      {/* lede + codificação */}
-      <div className="flex flex-col gap-2">
-        <p className="max-w-[64ch] text-sm text-muted-foreground">
-          Cada obra é um ponto. A <span className="font-medium text-foreground">posição</span> cruza duas das três forças,
-          o <span className="font-medium text-foreground">tamanho</span> mostra a terceira e a{" "}
-          <span className="font-medium text-foreground">cor</span> diz que tipo de aposta ela é pra você. Passe o mouse pra ver a capa.
-        </p>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 font-mono text-[11px] text-muted-foreground">
-          <span>posição = 2 forças</span>
-          <span>
-            tamanho = <span className={cn("font-semibold", FORCE_TEXT[preset.size])}>{FORCE_SHORT[preset.size]}</span>
-          </span>
-          <span>cor = tipo de aposta</span>
-        </div>
-      </div>
-
-      {/* painel */}
+      {/* painel — como ler, controles e plano num card só */}
       <div className="overflow-hidden rounded-2xl border border-border bg-card/60 shadow-sm">
-        {/* cabeçalho: controles empilhados + card explicativo */}
-        <div className="flex flex-wrap items-stretch gap-x-5 gap-y-3 border-b border-border bg-muted/30 p-4">
-          <div className="flex flex-col justify-center gap-2.5">
-            <div className="flex items-center gap-2.5">
-              <span className="w-11 shrink-0 font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground">Eixos</span>
-              <Seg value={presetKey} onChange={setPresetKey} options={PRESETS.map((p) => ({ v: p.key, label: p.label }))} />
-            </div>
-            <div className="flex items-center gap-2.5">
-              <span className="w-11 shrink-0 font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground">Foco</span>
-              <Seg
-                value={risk}
-                onChange={setRisk}
-                options={[
-                  { v: "all", label: "Tudo" },
-                  { v: "segura", label: "Aposta segura", swatch: "bg-emerald-500" },
-                  { v: "potencial", label: "Alto potencial", swatch: "bg-rose-500" },
-                ]}
-              />
+        {/* como ler + chave de codificação */}
+        <div className="flex flex-wrap items-stretch gap-4 border-b border-border bg-muted/30 p-4">
+          <div className="flex max-w-[460px] flex-none gap-3">
+            <span className="flex size-[30px] flex-none items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Compass className="size-[17px]" />
+            </span>
+            <div>
+              <p className="mb-1 font-mono text-[9.5px] font-bold uppercase tracking-[0.12em] text-muted-foreground">Como ler o mapa</p>
+              <p className="max-w-[44ch] text-[13px] leading-normal text-muted-foreground">
+                Cada obra é um ponto. A <b className="font-semibold text-foreground">posição</b> cruza duas das três forças,
+                o <b className="font-semibold text-foreground">tamanho</b> mostra a terceira e a{" "}
+                <b className="font-semibold text-foreground">cor</b> diz o tipo de aposta pra você. Passe o mouse num ponto pra ver a capa.
+              </p>
             </div>
           </div>
+          <div className="grid flex-1 grid-cols-3 items-center border-l border-border pl-4 font-mono">
+            <div className="flex flex-col gap-1 px-4">
+              <div className="flex items-center gap-2">
+                <span className="grid w-6 place-items-center">
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                    <path d="M9 1.5v15M1.5 9h15" className="stroke-muted-foreground" strokeWidth="1.3" />
+                    <circle cx="9" cy="9" r="2.4" className="fill-foreground" />
+                  </svg>
+                </span>
+                <span className="text-[12px] font-bold uppercase tracking-wide text-foreground">Posição</span>
+              </div>
+              <span className="text-[11px] text-muted-foreground">Cruza <b className="font-bold">2 forças</b></span>
+            </div>
+            <div className="flex flex-col gap-1 border-l border-border px-4">
+              <div className="flex items-center gap-2">
+                <span className="grid w-6 place-items-center">
+                  <svg width="24" height="14" viewBox="0 0 24 14" className={cn("fill-current", FORCE_TEXT[preset.size])}>
+                    <circle cx="5" cy="7" r="2.4" />
+                    <circle cx="16" cy="7" r="5" />
+                  </svg>
+                </span>
+                <span className="text-[12px] font-bold uppercase tracking-wide text-foreground">Tamanho</span>
+              </div>
+              <span className="text-[11px] text-muted-foreground">A 3ª força · <b className={cn("font-bold", FORCE_TEXT[preset.size])}>{FORCE_SHORT[preset.size]}</b></span>
+            </div>
+            <div className="flex flex-col gap-1 border-l border-border px-4">
+              <div className="flex items-center gap-2">
+                <span className="grid w-6 place-items-center">
+                  <svg width="22" height="14" viewBox="0 0 22 14">
+                    <circle cx="4" cy="7" r="3" className="fill-emerald-500" />
+                    <circle cx="12" cy="7" r="3" className="fill-violet-500" />
+                    <circle cx="20" cy="7" r="3" className="fill-rose-500" />
+                  </svg>
+                </span>
+                <span className="text-[12px] font-bold uppercase tracking-wide text-foreground">Cor</span>
+              </div>
+              <span className="text-[11px] text-muted-foreground">O <b className="font-bold">tipo de aposta</b></span>
+            </div>
+          </div>
+        </div>
 
-          {/* explicação do preset selecionado */}
-          <div className="flex min-w-[300px] flex-1 flex-col gap-2 rounded-xl border border-border bg-card p-3.5 shadow-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-md bg-violet-500/10 px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide text-violet-600 dark:text-violet-400">
-                {preset.tag}
-              </span>
-              <span className="text-sm font-bold tracking-tight">{preset.label}</span>
+        {/* eixos (abas) + mapa + foco */}
+        <div className="border-b border-border bg-muted/30 p-4">
+          <div className="flex flex-wrap gap-[18px]">
+            <div className="flex min-w-[300px] flex-1 flex-col gap-3">
+              {/* Eixos → abas */}
+              <div className="flex flex-col gap-2">
+                <span className="font-mono text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground">Eixos</span>
+                <div className="flex flex-wrap gap-1 border-b border-border">
+                  {PRESETS.map((p) => {
+                    const on = presetKey === p.key
+                    return (
+                      <button
+                        key={p.key}
+                        type="button"
+                        onClick={() => setPresetKey(p.key)}
+                        aria-pressed={on}
+                        className={cn(
+                          "-mb-px cursor-pointer rounded-t-lg px-3 py-2 text-sm font-semibold transition-colors",
+                          on
+                            ? "bg-card text-foreground shadow-[inset_0_-2px_0_hsl(var(--primary))]"
+                            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                        )}
+                      >
+                        {p.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Mapa: propósito + subtítulo, forças em linhas, nota */}
+              <div className="flex flex-col gap-2.5">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="rounded-md bg-violet-500/10 px-1.5 py-1 font-mono text-[9px] font-bold uppercase tracking-[0.08em] text-violet-600 dark:text-violet-400">
+                    {preset.tag}
+                  </span>
+                  <p className="text-[13px] text-muted-foreground">{preset.lede}</p>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {([["→ horizontal", preset.x], ["↑ vertical", preset.y], ["● tamanho", preset.size]] as const).map(
+                    ([role, key]) => (
+                      <div
+                        key={role}
+                        className={cn(
+                          "grid grid-cols-[96px_88px_minmax(0,1fr)] items-center gap-3 rounded-r-lg border-l-[2.5px] bg-muted/40 py-2 pl-3 pr-2",
+                          FORCE_BORDER[key],
+                        )}
+                      >
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">{role}</span>
+                        <span className={cn("text-[13px] font-bold", FORCE_TEXT[key])}>{FORCE_SHORT[key]}</span>
+                        <span className="text-[11px] leading-tight text-muted-foreground">{FORCE_DESC[key]}</span>
+                      </div>
+                    ),
+                  )}
+                </div>
+                <p className="text-[11px] leading-relaxed text-muted-foreground">{preset.note}</p>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">{preset.lede}</p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {([["→ horizontal", preset.x], ["↑ vertical", preset.y], ["● tamanho", preset.size]] as const).map(
-                ([role, key]) => (
-                  <div key={role} className={cn("border-l-[2.5px] pl-2.5", FORCE_BORDER[key])}>
-                    <span className="block font-mono text-[8.5px] uppercase tracking-wide text-muted-foreground">{role}</span>
-                    <span className={cn("block text-xs font-semibold", FORCE_TEXT[key])}>{FORCE_SHORT[key]}</span>
-                    <span className="block text-[11px] leading-tight text-muted-foreground">{FORCE_DESC[key]}</span>
-                  </div>
-                ),
-              )}
+
+            {/* Foco: coluna à direita do conteúdo dos eixos */}
+            <div className="flex w-[172px] flex-none flex-col gap-2 border-l border-border pl-[18px]">
+              <span className="font-mono text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground">Foco</span>
+              <div className="flex flex-col gap-0.5">
+                {RISK_OPTIONS.map((o) => {
+                  const on = risk === o.v
+                  return (
+                    <button
+                      key={o.v}
+                      type="button"
+                      onClick={() => setRisk(o.v)}
+                      aria-pressed={on}
+                      className={cn(
+                        "flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[12.5px] transition-colors",
+                        on ? "font-semibold text-foreground" : "font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "grid size-[15px] flex-none place-items-center rounded-full ring-[1.5px] ring-inset",
+                          on ? "ring-primary" : "ring-muted-foreground/50",
+                        )}
+                      >
+                        {on && <span className="size-[7px] rounded-full bg-primary" />}
+                      </span>
+                      {o.label}
+                      {o.swatch && <span className={cn("ml-auto size-2 flex-none rounded-full", o.swatch)} />}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="mt-1 border-t border-border pt-2 text-[11px] leading-relaxed text-muted-foreground">
+                {RISK_DESC[risk]}
+              </p>
             </div>
-            <p className="mt-0.5 border-t border-border pt-2 text-[11.5px] leading-relaxed text-muted-foreground">{preset.note}</p>
           </div>
         </div>
 
