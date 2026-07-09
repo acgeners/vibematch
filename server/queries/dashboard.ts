@@ -61,15 +61,6 @@ export interface ContinueReadingItem {
   nextChapterPredictedAt: string | null
 }
 
-export interface RecentActivityItem {
-  id: string
-  title: string
-  coverUrl: string | null
-  createdAt: string
-  updatedAt: string
-  kind: "added" | "updated"
-}
-
 export interface AiQueueCounts {
   iaRk: number
   synopsis: number
@@ -256,43 +247,6 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
 
   // Só as com capítulos pendentes (total > lidos); corta em `limit` depois do filtro.
   return items.filter((i) => i.pending != null && i.pending > 0).slice(0, limit)
-}
-
-/**
- * Obras tocadas mais recentemente (criadas ou atualizadas). `kind` distingue
- * inclusões recentes de edições, comparando created_at e updated_at.
- */
-export async function getRecentActivity(limit = 6): Promise<RecentActivityItem[]> {
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("works")
-    .select("id, title, created_at, updated_at, work_covers(url, is_primary, position)")
-    .eq("is_archived", false)
-    .order("updated_at", { ascending: false })
-    .limit(limit)
-
-  if (error) throw new Error(error.message)
-
-  return ((data ?? []) as Array<{
-    id: string
-    title: string
-    created_at: string
-    updated_at: string
-    work_covers?: CoverRow[] | null
-  }>).map((w) => {
-    const created = new Date(w.created_at).getTime()
-    const updated = new Date(w.updated_at).getTime()
-    // Margem de 60s absorve o tempo de processamento do import/criação inicial.
-    const kind: "added" | "updated" = updated - created < 60_000 ? "added" : "updated"
-    return {
-      id: w.id,
-      title: w.title,
-      coverUrl: pickPrimaryCover(w.work_covers),
-      createdAt: w.created_at,
-      updatedAt: w.updated_at,
-      kind,
-    }
-  })
 }
 
 /**
