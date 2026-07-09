@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
-import { BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
+import { BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash, ExternalLink } from "lucide-react"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-watcher"
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
@@ -12,7 +12,8 @@ import { GenerateAllBanner } from "@/components/titles/generate-all-banner"
 import type { CascadeStatus } from "@/lib/generate-all/types"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
 import { TagsExpandAll } from "@/components/titles/tags-expand-all"
-import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug } from "@/server/queries/works"
+import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug, getWorkExternalIds } from "@/server/queries/works"
+import { comixWorkUrl } from "@/lib/external/comix"
 import { getAllTags } from "@/server/queries/tags"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
@@ -261,7 +262,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -273,7 +274,19 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getSynopsisPredictionForWork(work.id as string),
     getDeclaredTagPreferences(configClient),
     loadCurrentTasteProfile(),
+    getWorkExternalIds(work.id as string),
   ])
+  // "Ler no Comix": só pra obras que você acompanha (Reading/Started) e que têm
+  // hid aceito. `pending` = capítulos não lidos (total − lidos), sinal persistido
+  // e refrescado pela checagem manual do /leitura.
+  const personalStatusName = getPersonalStatusNameById(work.personal_status_id)
+  const isFollowing = personalStatusName === "Reading" || personalStatusName === "Started"
+  const comixHid = externalIdMap.comix ?? null
+  const comixReadUrl = isFollowing && comixHid ? comixWorkUrl(comixHid) : null
+  const comixPending =
+    work.total_chapters != null
+      ? Math.max(0, Number(work.total_chapters) - Number(work.chapters_read ?? 0))
+      : null
   const subGroupBySlug = new Map<string, string>()
   for (const t of allTagsCatalog) {
     if (t.subGroupName) subGroupBySlug.set(t.slug, t.subGroupName)
@@ -532,6 +545,23 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       <div className="flex items-center justify-between gap-3">
         <BackButton />
         <div className="flex flex-wrap items-center gap-2">
+          {comixReadUrl && (
+            <Button
+              asChild
+              size="sm"
+              className="bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-emerald-950 dark:hover:bg-emerald-400"
+            >
+              <a href={comixReadUrl} target="_blank" rel="noopener noreferrer" title="Abre no Comix em nova aba">
+                <ExternalLink className="h-4 w-4" />
+                Ler no Comix
+                {comixPending != null && comixPending > 0 && (
+                  <span className="ml-1 rounded-full bg-black/15 px-1.5 py-0.5 text-[11px] font-bold tabular-nums dark:bg-black/25">
+                    {comixPending} pend.
+                  </span>
+                )}
+              </a>
+            </Button>
+          )}
           <FavoriteToggleButton workId={work.id} isFavorite={work.is_favorite} />
           <EditLinkButton workSlug={id} workId={work.id} />
           <StatusActionButton
