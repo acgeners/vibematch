@@ -5,14 +5,19 @@ import Link from "next/link"
 import { cn, titleToSlug } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
 import { ForceMeters } from "@/components/ranking/force-meters"
-import { computeWorkForces, classifyArchetypeByPercentile, type ForceArchetype } from "@/lib/calculations/forces"
-import type { RankingEntry } from "@/server/queries/ranking"
+import { computeWorkForces, classifyArchetype, classifyArchetypeByPercentile, type ForceArchetype } from "@/lib/calculations/forces"
 
 /**
  * Bússola 2D — o plano de decisão da feature (ver PLANO-BUSSOLA-3-FORCAS.md).
  * Cada obra é um ponto: posição = 2 das 3 forças (face escolhida), tamanho = a
- * 3ª, cor = arquétipo (Chance × Avaliação, estável entre as faces). Reusa os
- * mesmos RankingEntry do ranking (filtros/sort já aplicados a montante).
+ * 3ª, cor = arquétipo (Chance × Avaliação, estável entre as faces).
+ *
+ * Serve dois contextos, controlados por `mode`:
+ *   - "percentile" (/ranking): posição = percentil no acervo exibido (centenas
+ *     de obras) — espalha o catálogo comprimido; mediana no centro.
+ *   - "absolute" (comparação de 2–10 obras): posição = magnitude real, com o
+ *     limiar de cada eixo ancorado no centro — fiel, sem exagerar diferenças
+ *     mínimas num punhado de obras.
  *
  * Redesign 2026-07-08: legendas de canto FORA do plano (nunca cobrem/são
  * cobertas por um ponto), card explicativo ao lado dos seletores e tooltip
@@ -20,6 +25,25 @@ import type { RankingEntry } from "@/server/queries/ranking"
  */
 
 type ForceKey = "chance" | "avaliacao" | "alcance"
+type PositionMode = "percentile" | "absolute"
+
+/**
+ * Dado mínimo que a Bússola consome. `RankingEntry` (do /ranking) satisfaz esta
+ * forma estruturalmente; o WorkCompareDrawer mapeia CompareWork pra cá.
+ */
+export interface BussolaDatum {
+  workId: string
+  title: string
+  coverUrl: string | null
+  year: number | null
+  publicationStatus?: string | null
+  publicationStatusShort?: string | null
+  publicationStatusColor?: string | null
+  chanceScore: number | null
+  platformAvg: number | null
+  totalVotes: number
+  expectedScore: number | null
+}
 
 const AXIS_LABEL: Record<ForceKey, string> = {
   chance: "Chance de você gostar",
@@ -100,6 +124,21 @@ type RiskMode = "all" | "segura" | "potencial"
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 const sizePx = (v: number | null) => 10 + ((v ?? 0) / 100) * 18
 
+/** Limiar absoluto (0–100) de cada força — a linha do meio no modo "absolute". */
+const FORCE_THRESHOLD: Record<ForceKey, number> = { chance: 50, avaliacao: 65, alcance: 50 }
+
+/**
+ * Mapeia a magnitude crua (0–100) pra posição no plano ancorando o limiar da
+ * força em 50% (piecewise). Mantém a cruz/tints/cantos idênticos ao modo
+ * percentil, mudando só onde os pontos caem — e preservando a fidelidade
+ * (diferença mínima entre obras → distância mínima).
+ */
+const absPos = (v: number | null, thr: number) => {
+  if (v == null) return 50
+  const c = clamp(v, 0, 100)
+  return c <= thr ? (c / thr) * 50 : 50 + ((c - thr) / (100 - thr)) * 50
+}
+
 function Seg<T extends string>({
   value, onChange, options,
 }: { value: T; onChange: (v: T) => void; options: { v: T; label: string; swatch?: string }[] }) {
@@ -140,7 +179,7 @@ function QuadCap({ arch, name, hint, align }: { arch: ForceArchetype; name: stri
   )
 }
 
-export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
+export function BussolaPlane({ entries, mode = "percentile" }: { entries: BussolaDatum[]; mode?: PositionMode }) {
   const [presetKey, setPresetKey] = useState("ca")
   const [risk, setRisk] = useState<RiskMode>("all")
   const [hovered, setHovered] = useState<string | null>(null)
@@ -157,6 +196,20 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
         forces: computeWorkForces({ chanceScore: e.chanceScore, platformAvg: e.platformAvg, totalVotes: e.totalVotes }),
       }))
       .filter((d) => d.forces[preset.x] != null && d.forces[preset.y] != null)
+
+    // Modo absoluto (comparação de poucas obras): posição = magnitude real, com
+    // o limiar de cada eixo ancorado no centro. Fiel — diferença mínima entre
+    // obras vira distância mínima; percentil (relativo a 2–3 obras) exageraria
+    // os cantos. Arquétipo por limiar FIXO (chance≥50, crítica≥6,5) — a cruz
+    // vira o mesmo limiar em qualquer conjunto comparado.
+    if (mode === "absolute") {
+      return base.map((d) => ({
+        ...d,
+        xPct: absPos(d.forces[preset.x], FORCE_THRESHOLD[preset.x]),
+        yPct: absPos(d.forces[preset.y], FORCE_THRESHOLD[preset.y]),
+        arch: classifyArchetype(d.forces.chance, d.forces.avaliacao),
+      }))
+    }
 
     // Posição = PERCENTIL dentro do acervo exibido. Sem isso, o catálogo
     // comprimido (Avaliação toda em 70–95) empilha tudo numa faixa e metade do
@@ -190,7 +243,7 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
       // quadrantes visuais (linha do meio = mediana) com a cor.
       arch: classifyArchetypeByPercentile(pctChance(d.forces.chance), pctAval(d.forces.avaliacao)),
     }))
-  }, [entries, preset.x, preset.y])
+  }, [entries, preset.x, preset.y, mode])
 
   const isActive = (arch: ForceArchetype) =>
     risk === "all" || (risk === "segura" && arch === "safe") || (risk === "potencial" && arch === "upside")
@@ -322,7 +375,7 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
             <div className="mb-2.5 flex items-start justify-between gap-3">
               <QuadCap arch={CORNER_ARCH.tl} name={preset.quad.tl} hint={`↖ ${cornerHint(false, true)}`} align="left" />
               <span className="self-center whitespace-nowrap font-mono text-[9px] uppercase tracking-wider text-muted-foreground/70">
-                ↓ mediana do acervo
+                {mode === "absolute" ? "↓ limiar" : "↓ mediana do acervo"}
               </span>
               <QuadCap arch={CORNER_ARCH.tr} name={preset.quad.tr} hint={`↗ ${cornerHint(true, true)}`} align="right" />
             </div>
@@ -392,14 +445,17 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
                       <div className="text-[13.5px] font-semibold leading-tight">{hoveredDot.e.title}</div>
                       <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10.5px] text-muted-foreground">
                         {hoveredDot.e.year != null && <span>{hoveredDot.e.year}</span>}
-                        {hoveredDot.e.year != null && <span>·</span>}
-                        <span className="inline-flex items-center gap-1">
-                          <span
-                            className="size-1.5 rounded-full"
-                            style={{ background: hoveredDot.e.publicationStatusColor ?? "currentColor" }}
-                          />
-                          {hoveredDot.e.publicationStatusShort ?? hoveredDot.e.publicationStatus}
-                        </span>
+                        {hoveredDot.e.year != null &&
+                          (hoveredDot.e.publicationStatusShort ?? hoveredDot.e.publicationStatus) && <span>·</span>}
+                        {(hoveredDot.e.publicationStatusShort ?? hoveredDot.e.publicationStatus) && (
+                          <span className="inline-flex items-center gap-1">
+                            <span
+                              className="size-1.5 rounded-full"
+                              style={{ background: hoveredDot.e.publicationStatusColor ?? "currentColor" }}
+                            />
+                            {hoveredDot.e.publicationStatusShort ?? hoveredDot.e.publicationStatus}
+                          </span>
+                        )}
                       </div>
                       <span
                         className={cn(
@@ -461,7 +517,7 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
               </span>
             ))}
             <span className="ml-auto font-mono text-[11px] text-muted-foreground">
-              posição = percentil no acervo · tamanho = {FORCE_SHORT[preset.size]} · {dots.length} obras
+              posição = {mode === "absolute" ? "magnitude (limiar no centro)" : "percentil no acervo"} · tamanho = {FORCE_SHORT[preset.size]} · {dots.length} obras
             </span>
           </div>
 
@@ -488,9 +544,15 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
               </div>
               <div className="text-xs text-muted-foreground">
                 <h4 className="mb-1.5 mt-2 text-xs font-semibold text-foreground">Como posicionamos</h4>
-                <p>
-                  A posição usa o <span className="font-medium text-foreground">percentil dentro do acervo exibido</span>, não a nota crua — assim as obras se espalham em vez de empilhar numa faixa. A cruz central é a <span className="font-medium text-foreground">mediana</span>: metade das obras de cada lado.
-                </p>
+                {mode === "absolute" ? (
+                  <p>
+                    A posição usa a <span className="font-medium text-foreground">magnitude real de cada força</span> (0–100), com o limiar de cada eixo ancorado no centro. Diferenças pequenas entre as obras aparecem pequenas — ideal pra comparar poucas obras. A cruz central marca os <span className="font-medium text-foreground">limiares</span> (chance 50%, crítica boa).
+                  </p>
+                ) : (
+                  <p>
+                    A posição usa o <span className="font-medium text-foreground">percentil dentro do acervo exibido</span>, não a nota crua — assim as obras se espalham em vez de empilhar numa faixa. A cruz central é a <span className="font-medium text-foreground">mediana</span>: metade das obras de cada lado.
+                  </p>
+                )}
                 <h4 className="mb-1.5 mt-3 text-xs font-semibold text-foreground">Por que a cor é fixa</h4>
                 <p>
                   A cor é sempre o arquétipo <span className="font-medium text-foreground">Chance × Avaliação</span> — ela viaja com a obra mesmo quando você troca os eixos, pra reconhecer a mesma aposta em qualquer face.

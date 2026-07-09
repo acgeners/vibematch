@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Compass,
   ExternalLink,
   GripVertical,
   Heart,
@@ -52,7 +53,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { CRITERIA_INFO } from "@/lib/constants/criteria"
+import { CRITERIA_INFO, PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug } from "@/types/domain"
 import { computeMoodAdjusted, isMoodActive, type MoodRefine, type MoodWork } from "@/lib/calculations/mood-refine"
@@ -61,6 +62,8 @@ import { cn } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
 import { fetchCompareWorks, type CompareWork } from "@/server/actions/compare"
 import { rerankClusterAction } from "@/server/actions/recommendations"
+import { BussolaPlane } from "@/components/ranking/bussola-plane"
+import type { BussolaDatum } from "@/components/ranking/bussola-plane"
 import {
   ColumnPicker,
   type ColumnPickerColumnDef,
@@ -71,6 +74,9 @@ const HIDDEN_ROWS_STORAGE_KEY = "compare_hidden_rows_v1"
 // v3 → v4: adiciona as linhas "Prioridade" (decision) e "Alinhamento"
 // (personal_fit) ao grupo Notas, posicionadas na ordem canônica.
 const ROWS_CONFIG_STORAGE_KEY = "compare_rows_config_v4"
+// Tabela (grid) ⇄ Bússola (plano 2D das 3 forças). Persistido entre aberturas.
+const COMPARE_VIEW_STORAGE_KEY = "compare_view_v1"
+type CompareView = "table" | "bussola"
 
 interface CompareRowDef {
   key: string
@@ -184,6 +190,15 @@ function writeRowsConfig(config: ColumnPickerConfig) {
   }
 }
 
+function readCompareView(): CompareView {
+  if (typeof window === "undefined") return "table"
+  try {
+    return window.localStorage.getItem(COMPARE_VIEW_STORAGE_KEY) === "bussola" ? "bussola" : "table"
+  } catch {
+    return "table"
+  }
+}
+
 interface VerdictItem {
   workId: string
   title: string
@@ -238,7 +253,44 @@ export function WorkCompareDrawer({
   const [verdict, setVerdict] = useState<VerdictItem[] | null>(null)
   const [rowsConfig, setRowsConfig] = useState<ColumnPickerConfig>(() => readRowsConfig())
   const hiddenRows = useMemo(() => new Set(rowsConfig.hidden), [rowsConfig.hidden])
-  
+
+  // Tabela ⇄ Bússola. Lazy-init do localStorage — o SheetContent só monta ao
+  // abrir (client-side), então não há mismatch de hidratação.
+  const [compareView, setCompareView] = useState<CompareView>(() => readCompareView())
+  const changeCompareView = (v: CompareView) => {
+    setCompareView(v)
+    try {
+      window.localStorage.setItem(COMPARE_VIEW_STORAGE_KEY, v)
+    } catch {
+      // ignore
+    }
+  }
+
+  // Obras no formato mínimo da Bússola. Resolve short/cor do status por ID
+  // (CompareWork guarda só o publication_status_id) pro tooltip do plano.
+  const bussolaData: BussolaDatum[] = useMemo(
+    () =>
+      works.map((w) => {
+        const st = w.publicationStatusId != null ? PUBLICATION_STATUSES_BY_ID[w.publicationStatusId] : null
+        return {
+          workId: w.id,
+          title: w.title,
+          coverUrl: w.coverUrl,
+          year: w.year,
+          publicationStatus: st?.status ?? null,
+          publicationStatusShort: st?.short ?? null,
+          publicationStatusColor: st?.color || null,
+          chanceScore: w.chanceScore,
+          platformAvg: w.platformAvg,
+          totalVotes: w.totalVotes,
+          expectedScore: w.expectedScore,
+        }
+      }),
+    [works],
+  )
+  // A Bússola precisa de ≥2 obras; abaixo disso caímos na tabela.
+  const showBussola = compareView === "bussola" && works.length >= 2
+
   const [orderedIds, setOrderedIds] = useState<string[]>([])
   const parentIdsSortedKey = useMemo(() => [...ids].sort().join(","), [ids])
 
@@ -415,22 +467,56 @@ export function WorkCompareDrawer({
               </span>
             )}
           </SheetTitle>
-          {!loading && works.length >= 2 && (
+          {!loading && works.length >= 2 && !showBussola && (
             <div className="hidden min-w-0 flex-1 items-center justify-center overflow-x-auto px-2 lg:flex">
               <DifferentialsSummary works={works} compact />
             </div>
           )}
           <div className="flex shrink-0 items-center gap-2">
-            <ColumnPicker
-              columns={COMPARE_ROW_COLUMN_DEFS}
-              groupLabels={COMPARE_ROW_GROUP_LABELS}
-              config={rowsConfig}
-              onChange={updateRowsConfig}
-              onReset={resetRows}
-              triggerLabel="Linhas"
-              triggerIcon={<Rows3 className="h-3.5 w-3.5" />}
-            />
             {works.length >= 2 && (
+              <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => changeCompareView("table")}
+                  aria-pressed={compareView === "table"}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors",
+                    compareView === "table"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Rows3 className="h-3.5 w-3.5" />
+                  Tabela
+                </button>
+                <button
+                  type="button"
+                  onClick={() => changeCompareView("bussola")}
+                  aria-pressed={compareView === "bussola"}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors",
+                    compareView === "bussola"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Compass className="h-3.5 w-3.5" />
+                  Bússola
+                </button>
+              </div>
+            )}
+            {!showBussola && (
+              <ColumnPicker
+                columns={COMPARE_ROW_COLUMN_DEFS}
+                groupLabels={COMPARE_ROW_GROUP_LABELS}
+                config={rowsConfig}
+                onChange={updateRowsConfig}
+                onReset={resetRows}
+                triggerLabel="Linhas"
+                triggerIcon={<Rows3 className="h-3.5 w-3.5" />}
+              />
+            )}
+            {works.length >= 2 && !showBussola && (
               <Button
                 variant={diffOnly ? "default" : "outline"}
                 size="sm"
@@ -440,7 +526,7 @@ export function WorkCompareDrawer({
                 Só diferenças
               </Button>
             )}
-            {works.length >= 2 && (
+            {works.length >= 2 && !showBussola && (
               <Button
                 variant={showBestWorst ? "default" : "outline"}
                 size="sm"
@@ -516,6 +602,10 @@ export function WorkCompareDrawer({
           ) : works.length === 0 ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               Nenhuma obra selecionada.
+            </div>
+          ) : showBussola ? (
+            <div className="mx-auto w-full max-w-5xl px-4 py-5 sm:px-6">
+              <BussolaPlane entries={bussolaData} mode="absolute" />
             </div>
           ) : (
             <CompareGrid
