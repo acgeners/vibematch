@@ -791,12 +791,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           <div className="min-w-0">
             <TabsContent value="overview" className="mt-0 space-y-4">
               <div className="flex flex-wrap items-center gap-2">
-                <GenerateAllBanner
-                  compact
-                  workId={work.id}
-                  workTitle={work.title}
-                  initialStatus={(work as { cascade_status?: CascadeStatus }).cascade_status ?? "idle"}
-                />
                 <UpdateDataActionButton
                   workId={work.id}
                   currentWork={{
@@ -815,6 +809,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       isPrimary: c.is_primary,
                     })
                   )}
+                />
+                <GenerateAllBanner
+                  compact
+                  workId={work.id}
+                  workTitle={work.title}
+                  initialStatus={(work as { cascade_status?: CascadeStatus }).cascade_status ?? "idle"}
                 />
               </div>
               {(() => {
