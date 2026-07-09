@@ -1,17 +1,34 @@
 import "server-only"
+import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { planAllows, paidOnlyMessage, type UserPlan, type Capability } from "@/lib/plans/capabilities"
+import { createClient } from "@/lib/supabase/server"
+import { planAllows, paidOnlyMessage } from "@/lib/plans/capabilities"
+import type { UserPlan, Capability } from "@/lib/plans/capabilities"
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
-// Single-user: o UUID vive em user_settings (singleton). Cacheado em
-// memória porque é imutável durante o processo — evita uma query por
-// chamada de pipeline. Quando multi-user chegar, troca a fonte aqui
-// (sessão de auth) sem tocar nos callers.
-let cachedUserId: string | null = null
+// Id do usuário autenticado, lido da sessão Supabase (cookies). Memoizado por
+// request (React cache) — várias queries no mesmo request não repetem a chamada.
+// Retorna null quando não há sessão: anon, ou contexto sem request (scripts,
+// tarefas em background) onde cookies() lança — daí o try/catch.
+export const getSessionUserId = cache(async (): Promise<string | null> => {
+  try {
+    const supabase = await createClient()
+    const { data, error } = await supabase.auth.getUser()
+    if (error) return null
+    return data.user?.id ?? null
+  } catch {
+    return null
+  }
+})
 
-export async function getCurrentUserId(admin?: AdminClient): Promise<string> {
-  if (cachedUserId) return cachedUserId
+// Fallback pré-auth: o current_user_id da linha singleton (migration 074). É um
+// UUID fixo, então cachear em módulo é seguro (não é por-usuário). Só alcançado
+// quando NÃO há sessão — um usuário logado sempre resolve via getSessionUserId.
+let cachedSingletonId: string | null = null
+
+async function getSingletonUserId(admin?: AdminClient): Promise<string> {
+  if (cachedSingletonId) return cachedSingletonId
 
   const supabase = admin ?? createAdminClient()
   const { data, error } = await supabase
@@ -26,8 +43,17 @@ export async function getCurrentUserId(admin?: AdminClient): Promise<string> {
     throw new Error("user_settings sem linha singleton — rode a migration 074.")
   }
 
-  cachedUserId = data.current_user_id as string
-  return cachedUserId
+  cachedSingletonId = data.current_user_id as string
+  return cachedSingletonId
+}
+
+// Id do usuário atual. Prefere a sessão de auth; cai no singleton legado enquanto
+// a auth não está ligada (dev / transição multi-user). Assinatura preservada —
+// nenhum caller muda. É aqui a costura single-user → multi-user.
+export async function getCurrentUserId(admin?: AdminClient): Promise<string> {
+  const sessionId = await getSessionUserId()
+  if (sessionId) return sessionId
+  return getSingletonUserId(admin)
 }
 
 // Plano do usuário atual. NÃO cacheado (pode mudar em runtime via upgrade).

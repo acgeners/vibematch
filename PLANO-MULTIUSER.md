@@ -1,0 +1,69 @@
+# PLANO-MULTIUSER — Fundação multi-user + separação free/pago
+
+> Status: **EM ANDAMENTO** (branch `feat/multiuser-foundation`, iniciado 2026-07-09).
+> Contexto: app hoje single-user; alvo = subir no Fly.io multi-user com separação clara free/pago.
+
+## 0. Decisões de produto (travadas)
+
+- **Catálogo COMPARTILHADO**: obras + avaliação intrínseca (os 9 critérios) são um ativo **global curado pelo dono**. Cada usuário personaliza por cima. O maior custo por obra (Avaliação IA) **não escala com usuários free** — é amortizado.
+- **Avaliação IA no free = manual/import** (preencher os 9 critérios à mão); pago = auto-avaliação de obra nova.
+- **Gating de 3 níveis**: `anon → free → pago → ADMIN/operador` (o tier admin é novo; nasce da decisão do catálogo compartilhado).
+
+### Decisões de arquitetura (confirmadas)
+
+| # | Decisão | Escolha |
+|---|---|---|
+| **D1** | Provedor de auth | **Supabase Auth** (já usamos Supabase; `auth.uid()` integra com RLS; email/senha + magic link) |
+| **D2** | Isolamento | **RLS com client autenticado** para dados per-user; `service role` só pro catálogo global e jobs de curadoria. (Alternativa filtros app-level rejeitada: 1 filtro esquecido = vazamento.) |
+| **D3** | Escopo do scoring/calibração | **Per-user com fallback ao modelo global do dono** enquanto o usuário tem <20 rótulos. `taste_profile`/`formula_config` viram per-user; `score_weights` inferidos per-user sobre base global. |
+
+## 1. Classificação free/pago das ações de IA (a spec)
+
+- 🔵 **Free→Pago** (free tem alternativa determinística): perfil de gosto LLM (free=heurística) · recomendar/re-rank Veredito IA (free=ranking determinístico) · prever Interesse ♥ (free=Nota Prevista) · auto-avaliar obra nova (free=manual/import) · sugerir grupos.
+- 🟣 **Só Pago**: Deep Dive · Chat de recomendação.
+- 🟢 **Admin/operador** (curadoria do catálogo, NÃO eixo de plano): avaliação IA do catálogo · consolidar sinopse · resumo/digest de reviews · inferir/classificar/enriquecer tags · embeddings · calibração · viés · cascade `generate_all` · toggles on-create.
+- ⚫ **Interno** (desligar em prod): shadow A/B interesse · `tag_verify` (só script) · `tag_clustering` (órfã).
+
+Já gated hoje (`lib/plans/capabilities.ts`, `ensureCapability`): `llm_taste_profile`, `smart_shortlist` (rec/rerank/interesse), `deep_dive`, `chat_recommend`. **Faltam gates**: auto-avaliar obra nova, sugerir grupos, papel admin p/ curadoria.
+
+## 2. O problema central
+
+~19 colunas **pessoais** moram na linha compartilhada de `works` (favorito, nota do usuário, status/progresso de leitura, notas pós-leitura, interesse, observações). Todas as notas **derivadas do gosto** (`expected_score`, `personal_fit`, `chance_score`, `alignment_*`) vivem em `calculated_scores` com `unique(work_id)` — 1 linha por obra, sem `user_id`. `taste_profile` e `formula_config` são **singletons globais cujo conteúdo é a calibração de UM usuário**. Extrair o pessoal do global é o pré-requisito duro — maior que a auth.
+
+### Tabela de partição (o que move)
+
+**GLOBAL (fica em `works`/tabelas de obra, sem `user_id`):** title, original_title, alternative_titles, canonical_synopsis*, year/year_end, publication_status_id, total_chapters, ai_eval_status, is_archived, review_summary*, review_digest*, reviews_hash, ai_eval_reviews_stale, tags_inferred_at, cascade_status, data_refreshed_at, last_chapter_released_at/next_chapter_predicted_at/chapters_checked_at. Tabelas: `category_scores` (9 critérios), `platform_ratings`, `ai_evaluations`, `ai_evaluation_scores`, `work_covers`, `work_synopses`, `work_external_ids`, `work_reviews`.
+
+**PER-USER (extrair de `works` → nova `user_work_state(user_id, work_id, …)`):** personal_status_id, chapters_read, last_read_at, is_favorite, user_score, observation_adjustment, synopsis_quality, synopsis_quality_source, synopsis_quality_prediction_id, synopsis_interest_skipped, post_story_score, post_fl_score, post_ml_score, post_character_development_score, post_pacing_score, post_art_visual_score, post_impact_immersion_score, post_originality_score, observations.
+
+**PER-USER (adicionar `user_id`):** `calculated_scores` (→ PK `(user_id, work_id)`; conteúdo é derivado do gosto), `taste_profile`, `formula_config` (calibração per-user), `work_lists`, `recommendation_runs`, `deep_dive_results`, `recommendation_chats`, `pilot_taste_scores`, `preference_rules` (hoje jsonb no singleton). `score_weights` inferidos = per-user.
+
+**JÁ per-user (prontos):** `user_tag_preferences`, `ranking_filter_presets`, `prediction_snapshots`, `prediction_ledger`, `user_attribute_assessment`, `attribute_bias`.
+
+## 3. Fases
+
+| Fase | O quê | Tamanho | Dep |
+|---|---|---|---|
+| **1. Auth + identidade** | Supabase Auth; `middleware.ts` (refresh de sessão); `getCurrentUserId()` da sessão (remove cache singleton global); login/signup/logout; signup cria linha `user_settings` per-user (free) | Médio | — |
+| **2. Partição de dados** ⚠️ | `user_work_state` extrai ~19 colunas de `works`; `calculated_scores` +user_id (PK `(user_id,work_id)`); `taste_profile`/`formula_config` per-user; +user_id nas tabelas da §2; backfill tudo → owner; reescrever queries | **Grande (risco)** | 1 |
+| **3. Papéis + gates** | `+is_admin`/role em `user_settings`; `ensureAdmin`; 2 gates faltando; curadoria + on-create → admin-only | Peq-Méd | 1 |
+| **4. Scoring per-user** | `computeRecalc`/`recalculateAll` por-usuário → `(user_id,work_id)`; recalc **lazy/on-demand**; novo user = stub (barato) | Médio | 2 |
+| **5. Isolamento + contabilidade** | RLS por-usuário (client autenticado) nos dados per-user; popular `ai_api_calls.user_id`; rate limits por-usuário | Méd-Grande | 1,2 |
+| **6. Deploy Fly.io** | `DEPLOY-FLY.md` (app+FlareSolverr `iad`) + env de auth | Pequeno | 1–5 |
+
+**Atalho que reduz risco da Fase 4:** usuário novo cai em *stub* (sem rótulos → média de treino), então o scoring per-user "só funciona" barato até ele acumular ≥20 ratings.
+
+## 4. Princípios de execução
+
+- **Não-quebrante durante a migração**: cada passo preserva o app single-user rodando. `getCurrentUserId` prefere sessão e **cai no singleton legado** quando não há sessão.
+- **Migrations à mão no SQL editor** (CLI dessincronizado — ver memória `project_migration_apply_mechanism`). Numerar seguindo a última (>136).
+- Verificar `tsc`/lint + app rodando a cada incremento.
+
+## 5. Log de progresso
+
+- 2026-07-09: branch `feat/multiuser-foundation` criada; plano registrado.
+- 2026-07-09: **Fase 1a ✅** (costura de identidade, não-quebrante):
+  - `middleware.ts` + `lib/supabase/middleware.ts` — refresh de sessão Supabase em toda request (padrão @supabase/ssr; sem proteção de rota ainda).
+  - `server/queries/current-user.ts` — novo `getSessionUserId()` (memoizado por request via React `cache`, lê `auth.getUser()`, null quando anon/sem-request); `getCurrentUserId()` prefere a sessão e **cai no singleton legado** quando não há sessão. Removido o cache global de módulo (landmine multi-user); mantido só o cache do singleton legado.
+  - Verificado: `tsc --noEmit` limpo; dev na :3009 → `/`, `/ranking`, `/titles` = 200, zero erro/warn no log.
+- **Próximo: Fase 1b** — páginas login/signup/logout + `user_settings` vira 1 linha por auth user (hoje singleton). Isso muda a semântica dos ~10 getters de `user_settings` (que hoje pegam a linha mais antiga) → passam a filtrar por `getCurrentUserId()`.
