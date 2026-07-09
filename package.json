@@ -12,6 +12,8 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "sync-constants": "node scripts/sync-constants.js",
+    "baselines:ranking": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/ranking-baselines.ts",
+    "prospective:ranking": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/ranking-prospective.ts",
     "resolve-comix-hids": "node scripts/resolve-comix-hids.mjs",
     "comick:canary": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/resolve-comick-canary.ts",
     "backfill:interest": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-work-data.ts",
