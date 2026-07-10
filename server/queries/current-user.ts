@@ -181,14 +181,26 @@ export async function ensureCapability(
   return planAllows(plan, cap) ? { ok: true } : { ok: false, error: paidOnlyMessage(cap) }
 }
 
-// Admin = o DONO do catálogo (usuário da linha singleton legada). Stopgap pré-Fase 3:
-// só o admin muta o catálogo COMPARTILHADO (obras/notas/status/etc.); usuários
-// logados são read-only, o que evita corromper os dados do dono enquanto a
-// partição per-obra (Fase 2) não existe. Memoizado por request.
-// (Fase 3 troca isto por uma flag is_admin em user_settings — sobrevive ao claim.)
+// Admin = o DONO/operador do catálogo. Só o admin muta o catálogo COMPARTILHADO
+// (obras/notas/status/etc.); usuários logados são read-only, o que evita corromper
+// os dados do dono enquanto a partição per-obra (Fase 2) não existe. Memoizado por request.
+//
+// Fase 3 (migration 139): a admin-ness vem da FLAG `user_settings.is_admin`, que
+// sobrevive ao claim da conta do dono. Retrocompatível e fallback-safe:
+//  - Sem sessão (dono deslogado) → admin (comportamento legado, intocado).
+//  - Logado com linha própria + coluna is_admin presente → usa a flag.
+//  - Coluna ausente (pré-mig 139) ou sem linha própria → critério legado
+//    (=== singleton), então o app se comporta IGUAL antes de aplicar a migration.
 export const isCurrentUserAdmin = cache(async (): Promise<boolean> => {
   const sessionId = await getSessionUserId()
-  if (!sessionId) return true // sem sessão = dono (singleton)
+  if (!sessionId) return true // sem sessão = dono deslogado (legado)
+
+  const row = await getCurrentUserSettingsRow()
+  if (row && "is_admin" in row && typeof row.is_admin === "boolean") {
+    return row.is_admin
+  }
+
+  // Fallback pré-mig 139 (coluna ausente) ou logado-sem-linha-própria.
   return sessionId === (await getSingletonUserId())
 })
 
