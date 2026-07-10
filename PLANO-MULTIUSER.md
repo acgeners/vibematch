@@ -113,8 +113,36 @@ Verificar cada return shape (varia: `{error:string}` vs `{error:{_root:[msg]}}` 
 - Controles de edição: toggle de favorito (`work-table.tsx`, titles), form de status (`work-status-form.tsx`), link "editar" (`/titles/[id]`), "adicionar obra" (`/titles/new`), botões de curadoria/IA.
 
 **PRÓXIMO (stopgap concluído):**
-1. **Validar o path não-admin de verdade** — criar/logar um usuário free em aba anônima e conferir: (a) mutações retornam o erro do `ensureAdmin`/toast; (b) UI sem GERENCIAR/Saldo/controles de edição. Hoje só o path admin (deslogado) foi runtime-tested; o hide de não-admin é client-side e não foi exercido com sessão real.
-2. **Fase 3 propriamente** — flag `is_admin` em `user_settings` (sobrevive ao claim da conta do dono); trocar o `isCurrentUserAdmin()` code-based (dono=deslogado) por leitura da flag.
-3. **Partição completa per-user** (Fase 2 adiada) quando houver apetite — aí o stopgap (admin-only) relaxa pra per-user real.
+1. ✅ **Path não-admin validado** (2026-07-10, usuário: "Testes ok") — mutações retornam o erro do `ensureAdmin`/toast; UI sem GERENCIAR/Saldo/controles de edição.
+2. ✅ **Fase 3** — flag `is_admin` em `user_settings` (`f33fbe8`, mig 139 APLICADA). `isCurrentUserAdmin()` lê a flag (fallback legado). Sobrevive ao claim.
+3. **Partição completa per-user (Fase 2) — ADIADA por decisão de produto** (2026-07-10). Esboço + racional na §7 abaixo.
 
 **Princípios (mantidos):** aditivo, verificar `tsc` + smoke a cada passo; DONO usa DESLOGADO; NÃO misturar com o trabalho de pilot que vive sem-commit na árvore (`components/pilot/*`, `PLANO-ARQUITETURA-NOTAS.md`, etc.) — stage explícito.
+
+## 7. Fase 2 (partição per-user) — esboço + decisão de ADIAR (2026-07-10)
+
+**Decisão:** ADIADA. O stopgap (A+B+C) já impede corrupção (não-admin é read-only). O único efeito que a Fase 2 corrige é cosmético/vitrine: hoje um usuário logado vê os favoritos/notas/Nota Prevista do DONO (compartilhados) em vez do próprio estado (vazio). **Gatilho pra retomar:** quando o produto exigir que cada usuário tenha BIBLIOTECA PRÓPRIA (favoritos/notas/recomendações dele). Enquanto o lançamento for "catálogo curado read-only", o stopgap basta.
+
+**Dimensionamento (mapa de call-sites, 2026-07-10):** ~130 arquivos citam os nomes das colunas; **~60-70 fazem op real de DB.** Refactor de semanas, multi-incremento, teste exige 2 sessões (dono + user free).
+
+| Superfície | Arquivos c/ op DB | Escritores | Migração |
+|---|---|---|---|
+| `works.<19 pessoais>` → `user_work_state` | ~62 | 8 (works.ts, synopsis-quality.ts, external-list-import.ts, post-reading-weight-suggestions.ts, lists.ts, import/processor.ts, +seeds) | mig 138 ✅ pronta+backfill |
+| `calculated_scores` +user_id (PK user,work) | ~30 | 6 (calculations, recommendations, alignment, calibration, import/processor) | nova |
+| `taste_profile` per-user | ~24 (`loadCurrentTasteProfile` ×20 sites) | 1 | nova |
+| `formula_config` per-user | ~18 | 2 (settings, calculations) | nova |
+| `score_weights` per-user | ~9 | 2 (settings, weight-suggestions) | nova |
+
+**RPCs (menos risco que o mapa antigo):** só `find_similar_works` precisa de `user_id` (2 callers: similar-works.ts, deep-dive.ts). `find_knn_with_user_score` MORTA (dropada na mig 099). `get_sidebar_badge_counts` ÓRFÃ (0 callers) + só lê colunas globais → NÃO mexer.
+
+**Pontos de MAIOR risco:** (1) 8 upserts de `calculated_scores` com `onConflict:"work_id"` → `"user_id,work_id"`; (2) `find_similar_works` faz `LEFT JOIN calculated_scores ON work_id` — com PK (user,work) explode em N linhas/obra; (3) PostgREST nested `!inner` + filtro em coluna embutida (`recommendations.ts:371-375` e `:1332-1335`: `.eq("calculated_scores.alignment_stale")` etc.) — não aceita predicado de user_id sem reescrever o relacionamento; (4) `loadCurrentTasteProfile` em ~20 sites com `.eq("is_current",true).limit(1)`; (5) leituras `formula_config .order(updated_at).limit(1)` / `score_weights (is_active)` globais.
+
+**Estratégia não-quebrante (quando for) — acessores + dual-write, virar leitura por feature:**
+- **Inc 0** (baixo, ~½ dia): helpers `getUserWorkState/upsertUserWorkState`; os 8 escritores gravam TAMBÉM em `user_work_state` (works.* segue fonte). Zero mudança visível.
+- **Inc 1** (ALTO, vários dias): virar LEITURA do estado pessoal feature-por-feature (detalhe→lista/ranking→filas ai-eval→dashboard→recs). Filtros PostgREST → embedded `user_work_state!inner` c/ user_id, ou filtrar/ordenar em memória (já é padrão de vários readers).
+- **Inc 2** (médio): parar de escrever em `works.*` (só user_work_state), após todas leituras virarem.
+- **Inc 3** (alto, entrelaçado c/ Fase 4): `calculated_scores` +user_id + `find_similar_works` +param user_id.
+- **Inc 4** (médio-alto): `taste_profile`/`formula_config`/`score_weights` per-user; propagar userId nos 20 sites; fallback ao modelo do dono quando user <20 rótulos (D3).
+- **Inc 5** (baixo): drop das colunas legadas de `works` — só quando tudo verde.
+
+Durante toda a transição, como só o DONO tem linhas, ele vê tudo igual; usuário novo passa a ver o próprio estado (vazio) nas features já viradas. Fase 4 (scoring per-user lazy: user novo = stub barato) vem depois/junto do Inc 3.
