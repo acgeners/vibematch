@@ -182,18 +182,20 @@ export async function ensureCapability(
 }
 
 // Admin = o DONO/operador do catálogo. Só o admin muta o catálogo COMPARTILHADO
-// (obras/notas/status/etc.); usuários logados são read-only, o que evita corromper
+// (obras/notas/status/etc.); demais usuários são read-only, o que evita corromper
 // os dados do dono enquanto a partição per-obra (Fase 2) não existe. Memoizado por request.
 //
-// Fase 3 (migration 139): a admin-ness vem da FLAG `user_settings.is_admin`, que
-// sobrevive ao claim da conta do dono. Retrocompatível e fallback-safe:
-//  - Sem sessão (dono deslogado) → admin (comportamento legado, intocado).
-//  - Logado com linha própria + coluna is_admin presente → usa a flag.
-//  - Coluna ausente (pré-mig 139) ou sem linha própria → critério legado
-//    (=== singleton), então o app se comporta IGUAL antes de aplicar a migration.
+// A admin-ness vem da FLAG `user_settings.is_admin` (migration 139), lida da linha
+// do usuário logado. A conta do dono já foi reivindicada (claim) e loga normalmente,
+// então NÃO tratamos mais "deslogado" como admin:
+//  - Sem sessão (anônimo/deslogado) → NÃO admin (visitante read-only). Fecha o buraco
+//    de produção em que qualquer anônimo seria admin. O dono agora usa o app LOGADO.
+//  - Logado com linha própria + coluna is_admin → usa a flag.
+//  - Fallback (coluna ausente pré-mig 139, ou logado sem linha própria) → critério
+//    legado (=== singleton).
 export const isCurrentUserAdmin = cache(async (): Promise<boolean> => {
   const sessionId = await getSessionUserId()
-  if (!sessionId) return true // sem sessão = dono deslogado (legado)
+  if (!sessionId) return false // anônimo/deslogado = read-only
 
   const row = await getCurrentUserSettingsRow()
   if (row && "is_admin" in row && typeof row.is_admin === "boolean") {

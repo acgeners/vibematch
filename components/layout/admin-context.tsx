@@ -10,10 +10,11 @@ import { useChromeData } from "@/lib/use-refresh"
 // (favoritar/editar/status/add/curadoria) e a seção GERENCIAR. O bloqueio REAL é
 // server-side (`ensureAdmin` nas actions); isto é só a camada de UI.
 //
-// Default `true` = otimista pro DONO (usuário primário hoje, que usa deslogado):
-// ele nunca vê os controles piscarem. Um não-admin vê um flash mínimo até o fetch
-// confirmar `false`. Re-sincroniza no `app:chrome-refresh` (login/logout mutam o chrome).
-const AdminContext = createContext<boolean>(true)
+// Default `false` = fail-closed: não mostra controle de admin até o fetch CONFIRMAR
+// que o usuário é admin. Assim o visitante anônimo (o comum em produção) não vê os
+// controles de mutação piscarem; o dono logado tem um flash mínimo até confirmar.
+// Re-sincroniza no `app:chrome-refresh` (login/logout mutam o chrome).
+const AdminContext = createContext<boolean>(false)
 
 /** True quando o usuário atual é o admin/dono do catálogo (pode mutar). */
 export function useIsAdmin(): boolean {
@@ -26,7 +27,7 @@ export function useIsAdmin(): boolean {
 const ADMIN_TTL_MS = 300_000
 
 export function AdminProvider({ children }: { children: ReactNode }) {
-  const [isAdmin, setIsAdmin] = useState(true)
+  const [isAdmin, setIsAdmin] = useState(false)
   useChromeData(getCurrentUserIsAdmin, setIsAdmin, ADMIN_TTL_MS)
   return <AdminContext.Provider value={isAdmin}>{children}</AdminContext.Provider>
 }
