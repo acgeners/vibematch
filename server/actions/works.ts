@@ -1120,6 +1120,8 @@ export async function createWork(
  * Use quando for adicionar vários títulos em sequência.
  */
 export async function createWorkPending(values: WorkFormValues) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: { _root: [gate.error] } }
   const result = await persistNewWork(values)
   if (!result.ok) return { error: result.error }
 
@@ -1139,6 +1141,8 @@ export interface CreateWorkBatchItem {
 export async function createWorksBatch(
   items: Array<CreateWorkBatchItem | WorkFormValues>,
 ) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: { _root: [gate.error] } }
   if (items.length === 0) {
     return { error: { _root: ["Nenhuma obra para criar"] } }
   }
@@ -1735,6 +1739,8 @@ export async function updateWorkExternalData(
   updates: ExternalWorkUpdate,
   opts: { acquireReviews?: boolean } = {},
 ) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   try {
     const supabase = createAdminClient()
     const { data: existingWork } = await supabase

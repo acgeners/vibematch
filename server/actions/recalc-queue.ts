@@ -2,6 +2,7 @@
 
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensureAdmin } from "@/server/queries/current-user"
 import { recalculateAll, type RecalculateExecutionContext } from "@/server/actions/calculations"
 import { ensureRecalculateScores } from "@/lib/orchestration/integrations/recalculate-scores"
 import {
@@ -184,5 +185,9 @@ export async function maybeTriggerStaleRecalc(): Promise<RecalcPendingState> {
  * já revalida /ranking, /titles, /settings e / por dentro. Devolve estado tipado.
  */
 export async function triggerRecalcNow() {
+  // "Recalcular agora" reescreve calculated_scores (compartilhado) → gate de admin.
+  // Sinaliza via throw; o caller (recalc-pending-control) já trata em try/catch → toast.
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   return recalculateScoresNow()
 }

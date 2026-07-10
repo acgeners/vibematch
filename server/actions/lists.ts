@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensureAdmin } from "@/server/queries/current-user"
 import { runRecommendationAction } from "./recommendations"
 import { proposeFavoriteGroups as proposeFavoriteGroupsLLM } from "@/lib/lists/propose-groups"
 import type { FavoriteWork, ProposedGroup } from "@/lib/lists/propose-groups"
@@ -100,6 +101,9 @@ export async function addWorksToList(
   listId: string,
   workIds: string[],
 ): Promise<ActionResult<{ count: number }>> {
+  // Marca is_favorite=TRUE em works (coluna compartilhada) → gate de admin (stopgap).
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const ids = Array.from(new Set(workIds.filter(Boolean)))
   if (ids.length === 0) return { data: { count: 0 } }
 

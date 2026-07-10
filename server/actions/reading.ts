@@ -8,6 +8,7 @@ import { fetchMangaDexChapterDates } from "@/lib/external/mangadex"
 import { fetchMangaUpdatesStatus } from "@/lib/external/mangaupdates"
 import { withTimeout } from "@/lib/external/with-timeout"
 import { markRecalcPending } from "@/server/actions/recalc-queue"
+import { ensureAdmin } from "@/server/queries/current-user"
 import { persistComixHid } from "@/server/actions/comix-hid"
 import {
   getPublicationStatusIdByName,
@@ -73,6 +74,11 @@ export async function checkReadingUpdates(
   workIds: string[],
 ): Promise<ReadingUpdateResult[]> {
   if (workIds.length === 0) return []
+  // Sincroniza total_chapters/publication_status (metadados compartilhados de works)
+  // como efeito colateral → só o admin (dono). Sem canal de erro nesta shape:
+  // não-admin recebe [] (nenhuma atualização); a UI que dispara isto some na parte C.
+  const gate = await ensureAdmin()
+  if (!gate.ok) return []
 
   const supabase = createAdminClient()
   const { data, error } = await supabase

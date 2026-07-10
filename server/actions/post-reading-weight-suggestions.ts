@@ -1,6 +1,7 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensureAdmin } from "@/server/queries/current-user"
 import type { PostReadingScoreField } from "@/lib/constants/post-reading-criteria"
 import {
   inferPostReadingWeights,
@@ -76,6 +77,10 @@ export async function suggestPostReadingWeights(
 export async function applyPostReadingWeights(
   weights: Record<PostReadingScoreField, number>,
 ): Promise<{ recalculated: number; updatedManualScores: number }> {
+  // Reescreve works.user_score em lote (coluna compartilhada) → gate de admin.
+  // Esta action sinaliza erro via throw; o caller (painel) já trata em try/catch → toast.
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   const supabase = createAdminClient()
 
   const selectColumns = ["id", "user_score", ...POST_READING_FIELDS].join(", ")
