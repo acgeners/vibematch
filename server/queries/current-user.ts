@@ -57,32 +57,24 @@ export async function getCurrentUserId(admin?: AdminClient): Promise<string> {
 }
 
 // Linha de user_settings do usuário ATUAL (select *), memoizada por request.
-// - Prefere a linha do usuário (current_user_id = getCurrentUserId()).
-// - Logado SEM linha própria → null (usa defaults; NUNCA herda a linha de outro).
-// - Anon/sem sessão → cai na singleton legada, então o dono deslogado fica intocado.
+// - Anônimo (sem sessão) → NULL: NÃO herda a linha do dono. Fecha os buracos de
+//   (a) anon herdar o plano PAID do dono (custo — dispararia features pagas no saldo
+//   dele) e (b) anon ver o perfil/email do dono. Pós-claim da conta, o dono usa o
+//   app LOGADO — não existe mais "dono deslogado" pra esta função servir.
+// - Logado: a linha própria (current_user_id = sessão). Sem linha própria → null
+//   (usa defaults; NUNCA herda a de outro).
 const getCurrentUserSettingsRow = cache(async (): Promise<Record<string, unknown> | null> => {
-  const supabase = createAdminClient()
-  const uid = await getCurrentUserId(supabase)
+  const sessionId = await getSessionUserId()
+  if (!sessionId) return null
 
+  const supabase = createAdminClient()
   const own = await supabase
     .from("user_settings")
     .select("*")
-    .eq("current_user_id", uid)
+    .eq("current_user_id", sessionId)
     .limit(1)
     .maybeSingle()
-  if (!own.error && own.data) return own.data as Record<string, unknown>
-
-  // Logado mas sem linha própria: não vaza a de ninguém.
-  if (await getSessionUserId()) return null
-
-  // Anon/legado: singleton (a mais antiga).
-  const fb = await supabase
-    .from("user_settings")
-    .select("*")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-  return (fb.data as Record<string, unknown> | null) ?? null
+  return !own.error && own.data ? (own.data as Record<string, unknown>) : null
 })
 
 // id da linha de settings do usuário atual — pros writers (setPlan, toggles,
