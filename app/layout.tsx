@@ -4,6 +4,7 @@ import "./globals.css"
 import { Sidebar } from "@/components/layout/sidebar"
 import { MobileNav } from "@/components/layout/mobile-nav"
 import { AppShell } from "@/components/layout/app-shell"
+import { AdminProvider } from "@/components/layout/admin-context"
 import { Toaster } from "@/components/ui/sonner"
 import { ThemeProvider } from "@/components/theme-provider"
 import { ActiveChatFab } from "@/components/recommendations/active-chat-fab"
@@ -37,18 +38,20 @@ export default function RootLayout({
       <body className="h-dvh overflow-hidden flex bg-background text-foreground">
         <ThemeProvider>
           <CostConfirmProvider>
-            <AppShell
-              sidebar={<Sidebar />}
-              overlays={
-                <>
-                  <MobileNav />
-                  <ActiveChatFab />
-                  <TasksFab />
-                </>
-              }
-            >
-              {children}
-            </AppShell>
+            <AdminProvider>
+              <AppShell
+                sidebar={<Sidebar />}
+                overlays={
+                  <>
+                    <MobileNav />
+                    <ActiveChatFab />
+                    <TasksFab />
+                  </>
+                }
+              >
+                {children}
+              </AppShell>
+            </AdminProvider>
             <Toaster />
           </CostConfirmProvider>
         </ThemeProvider>
