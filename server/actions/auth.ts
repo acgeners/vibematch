@@ -30,13 +30,19 @@ export async function signInAction(_prev: AuthState, formData: FormData): Promis
  * desligada, já vem sessão → home; senão, instrui a confirmar pelo email.
  */
 export async function signUpAction(_prev: AuthState, formData: FormData): Promise<AuthState> {
+  const name = String(formData.get("name") ?? "").trim()
   const email = String(formData.get("email") ?? "").trim()
   const password = String(formData.get("password") ?? "")
-  if (!email || !password) return { error: "Informe email e senha." }
+  if (!name || !email || !password) return { error: "Preencha nome, email e senha." }
   if (password.length < 8) return { error: "A senha precisa de ao menos 8 caracteres." }
 
   const supabase = await createClient()
-  const { data, error } = await supabase.auth.signUp({ email, password })
+  // name vai em user_metadata → o trigger handle_new_user (mig 137) grava em display_name.
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { name } },
+  })
   if (error) return { error: error.message }
 
   if (data.session) redirect("/")

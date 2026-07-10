@@ -171,3 +171,57 @@ body::after {
   border-radius: inherit;
   animation: task-indeterminate 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
+
+/* ============================================================
+   Auth hero (login/signup) — cascata de capas + perfil de gosto.
+   Só o que é difícil em utilitário (máscara, keyframes, badges);
+   o resto do layout vai em classes Tailwind nos componentes.
+   ============================================================ */
+@keyframes authhero-flow {
+  to { transform: translateY(-50%); }
+}
+.authhero-wall {
+  position: absolute;
+  inset: -12% -5%;
+  display: flex;
+  gap: 14px;
+  transform: rotate(-9deg) scale(1.12);
+  filter: saturate(0.92);
+  -webkit-mask-image: radial-gradient(135% 120% at 32% 34%, #000 30%, transparent 82%);
+          mask-image: radial-gradient(135% 120% at 32% 34%, #000 30%, transparent 82%);
+}
+.authhero-col { flex: 1; min-width: 0; }
+.authhero-track {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  will-change: transform;
+}
+.authhero-col:nth-child(1) .authhero-track { animation: authhero-flow 44s linear infinite; }
+.authhero-col:nth-child(2) .authhero-track { animation: authhero-flow 54s linear infinite reverse; }
+.authhero-col:nth-child(3) .authhero-track { animation: authhero-flow 48s linear infinite; }
+.authhero-col:nth-child(4) .authhero-track { animation: authhero-flow 58s linear infinite reverse; }
+@media (prefers-reduced-motion: reduce) {
+  .authhero-track { animation: none; }
+}
+.authhero-cover {
+  position: relative;
+  aspect-ratio: 3 / 4.3;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 12px 26px -14px rgba(6, 12, 24, 0.55);
+}
+.authhero-veil {
+  position: absolute;
+  inset: 0;
+  /* Scrim forte na METADE ESQUERDA (leitura do texto/perfil) que desaparece à
+     direita revelando a cascata de capas. */
+  background:
+    radial-gradient(70% 55% at 16% 12%, hsl(var(--primary) / 0.20), transparent 55%),
+    linear-gradient(100deg,
+      hsl(var(--muted) / 0.97) 0%,
+      hsl(var(--muted) / 0.94) 44%,
+      hsl(var(--muted) / 0.66) 57%,
+      hsl(var(--muted) / 0.22) 71%,
+      transparent 85%);
+}

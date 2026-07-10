@@ -23,6 +23,8 @@ create unique index if not exists user_settings_auth_user_id_key
 --    current_user_id = id do usuário de auth → getCurrentUserId (via sessão)
 --    encontra a linha certa. Idempotente (guard NOT EXISTS). SECURITY DEFINER
 --    pra o trigger poder inserir em public.user_settings a partir de auth.users.
+--    display_name/avatar vêm do user_metadata: 'name' (signup por email) ou
+--    'full_name'/'avatar_url' (Google OAuth).
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -31,8 +33,12 @@ set search_path = public
 as $$
 begin
   if not exists (select 1 from public.user_settings where auth_user_id = new.id) then
-    insert into public.user_settings (current_user_id, auth_user_id, user_plan, email)
-    values (new.id, new.id, 'free', new.email);
+    insert into public.user_settings (current_user_id, auth_user_id, user_plan, email, display_name, avatar_url)
+    values (
+      new.id, new.id, 'free', new.email,
+      coalesce(new.raw_user_meta_data->>'name', new.raw_user_meta_data->>'full_name'),
+      new.raw_user_meta_data->>'avatar_url'
+    );
   end if;
   return new;
 end;
