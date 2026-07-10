@@ -1233,6 +1233,8 @@ export async function getPendingBatchCount(): Promise<number> {
  * Finaliza o batch: dispara o recálculo orquestrado uma única vez (deduplicado).
  */
 export async function finalizePendingBatch() {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("works")
@@ -1502,6 +1504,8 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
 }
 
 export async function archiveWork(id: string) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("works")
@@ -1518,6 +1522,8 @@ export async function archiveWork(id: string) {
 }
 
 export async function unarchiveWork(id: string) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("works")
@@ -1674,6 +1680,8 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
  * notas/observações/capítulos. 1 update em lote + 1 recalc deferido.
  */
 export async function setReadingStatusForWorks(ids: string[], status: string) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const cleanIds = [...new Set((ids ?? []).filter(Boolean))]
   if (cleanIds.length === 0) return { error: "Nenhuma obra selecionada." }
   const statusId = getPersonalStatusIdByName(status)
@@ -1699,6 +1707,8 @@ export async function setReadingStatusForWorks(ids: string[], status: string) {
 }
 
 export async function deleteWork(id: string) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase.from("works").delete().eq("id", id)
 
