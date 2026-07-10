@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getCurrentUserId, getCurrentUserProfile } from "@/server/queries/current-user"
+import { getCurrentUserId, getCurrentUserProfile, getCurrentUserSettingsId } from "@/server/queries/current-user"
 import { getAnthropicBalanceStatus } from "@/server/queries/ai-usage"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 import { accountProfileSchema } from "@/lib/validations/account.schema"
@@ -21,20 +21,14 @@ const AVATAR_MIME_EXT: Record<string, string> = {
 }
 
 /**
- * id da linha singleton de user_settings — a MESMA que as queries leem
- * (primeira por created_at). Todos os updates de conta passam por aqui pra
- * não atualizar uma linha diferente da lida.
+ * id da linha de user_settings do USUÁRIO ATUAL — a MESMA que as queries leem
+ * (resolver session-aware, com fallback singleton p/ anon). Todos os updates de
+ * conta passam por aqui pra não atualizar a linha de outro usuário.
  */
-async function getSingletonId(supabase: AdminClient): Promise<string> {
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-  if (error) throw new Error(`Falha lendo user_settings: ${error.message}`)
-  if (!data?.id) throw new Error("user_settings sem linha singleton — rode a migration 074.")
-  return data.id as string
+async function getSingletonId(_supabase: AdminClient): Promise<string> {
+  const id = await getCurrentUserSettingsId()
+  if (!id) throw new Error("user_settings sem linha pro usuário atual — rode a migration 074.")
+  return id
 }
 
 /** Salva nome/email/avatar (URL) do perfil. */
