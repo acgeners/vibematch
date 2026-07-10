@@ -76,4 +76,30 @@ Já gated hoje (`lib/plans/capabilities.ts`, `ensureCapability`): `llm_taste_pro
 - 2026-07-10: **Rewire per-user de `user_settings` ✅ (adiantado da Fase 2)** — corrige "logou e apareceu o mesmo user (dono)". `current-user.ts`: novo `getCurrentUserSettingsRow` (cached, select* WHERE current_user_id=getCurrentUserId; logado-sem-linha→null NÃO vaza; anon→fallback singleton) + `getCurrentUserSettingsId`; getters (plano/perfil/toggles) leem dele. `account.ts` (getSingletonId) + `settings.ts` (7 toggle-setters) escrevem na linha do usuário atual. Aditivo (deslogado=singleton intacto, verificado: /conta ainda mostra Ana/dono). Mudança: getCurrentPlan fail-**closed** p/ 'free' (antes 'paid'). FALTA per-user ainda: `preference_rules` (ai-usage=saldo é owner-global, fica).
 - **PENDENTE do usuário:** mig 137 APLICADA + Supabase Auth (email/senha + Google) HABILITADO ✅. Testar signup em aba anônima.
 - **AVISOS:** (a) DONO deve seguir DESLOGADO até o claim (Fase 2) — logar como si mesmo mostra vazio (dados no UUID singleton antigo). (b) Dados NO NÍVEL DA OBRA (favoritos/notas/Nota Prevista/status leitura em `works`/`calculated_scores`) ainda são COMPARTILHADOS → usuário novo vê os do dono até a partição da Fase 2.
-- **Próximo: Fase 2** — re-chaveamento do dono (claim) + partição `works`→`user_work_state` + `calculated_scores`/`taste_profile`/`formula_config` per-user + `preference_rules` per-user.
+- 2026-07-10: **`user_work_state` (migration 138) ✅ APLICADA pelo user** — nova tabela per-usuário-por-obra com as 19 colunas pessoais + backfill do dono. **DORMENTE**: nada lê dela ainda (a partição completa foi ADIADA — ver decisão abaixo). Aditiva, não toca `works`.
+- 2026-07-10: **DECISÃO — stopgap anti-corrupção em vez da partição completa.** O mapa de call-sites mostrou que a partição per-user é ~30 arquivos + 3 RPCs (`find_similar_works`, `find_knn_with_user_score`, `get_sidebar_badge_counts`) + PostgREST nested filter/sort — multi-incremento, alto custo, teste exige 2 sessões. Risco REAL não é o usuário novo VER dados do dono (read-only, vitrine), é as MUTAÇÕES corromperem dados compartilhados (2º user favoritando/avaliando sobrescreve o dono). Stopgap = gate as mutações pro admin (=dono) + esconder UI de operador. Partição completa vira projeto planejado depois.
+- 2026-07-10: **Stopgap parte A ✅ (NÃO commitado quando escrito; commit no handoff)** — `current-user.ts`: `isCurrentUserAdmin()` (admin = dono singleton; `getSessionUserId()===null` ∨ `===getSingletonUserId()`; memoizado) + `ensureAdmin()`. `works.ts`: guard `ensureAdmin` em 5 mutações (`toggleFavorite`, `setFavoriteMany`, `updateWorkStatus`, `createWork`, `updateWork`). Verificado: tsc 0; deslogado (admin) rotas 200 + /conta mostra o dono. NOTA: admin é code-based (dono deslogado); Fase 3 troca por flag `is_admin` em user_settings (sobrevive ao claim).
+
+## 6. HANDOFF — retomar o stopgap (B + C)
+
+Contexto: só o admin (=dono, deslogado) muta o catálogo compartilhado; usuário logado é read-only. Parte A (works) feita. Falta:
+
+**B — guards de servidor faltando** (mesmo padrão: `const gate = await ensureAdmin(); if (!gate.ok) return <erro no shape da action>`; importar de `@/server/queries/current-user`):
+- `server/actions/works.ts`: `createWorkPending`, `createWorksBatch`, `updateWorkExternalData` (faltaram na parte A).
+- `server/actions/synopsis-quality.ts`: as ações que ESCREVEM synopsis_quality* (apply predição, apply-all, override manual, skip toggle). (as `predict*` já têm gate de plano.)
+- `server/actions/lists.ts`: add-to-group (marca `is_favorite=true`) + qualquer setter que escreva favorito.
+- `server/actions/post-reading-weight-suggestions.ts`: `applyPostReadingWeights` (escreve `works.user_score` em lote); idem `weight-suggestions.ts` `applyWeightSuggestions` (score_weights global).
+- `server/actions/external-list-import.ts` + `server/actions/imports.ts`: import escreve works.
+- `server/actions/reading.ts`: atualiza total_chapters/publication_status (metadado global).
+- `server/actions/calculations.ts` / `recalc-queue.ts`: recalc user-facing (escreve calculated_scores global).
+- (recomendações/alignment e AI de curadoria já são plano-gated `smart_shortlist`/paid — verificar, mas provavelmente ok.)
+Verificar cada return shape (varia: `{error:string}` vs `{error:{_root:[msg]}}` vs `{error:fieldErrors}`).
+
+**C — esconder UI de não-admin** (passar `isCurrentUserAdmin()` do server → componente, render condicional):
+- Chip de **saldo** (`components/layout/balance-chip.tsx`) — esconder p/ não-admin.
+- Seção "GERENCIAR" da sidebar (Preferências, Configurações, Avaliação IA, Uso da API IA, Importar) — esconder/gate.
+- Controles de edição: toggle de favorito (`work-table.tsx`, titles), form de status (`work-status-form.tsx`), link "editar" (`/titles/[id]`), "adicionar obra" (`/titles/new`), botões de curadoria/IA.
+
+**Depois do stopgap:** Fase 3 propriamente (flag `is_admin` em user_settings, sobrevive ao claim) e então a partição completa per-user (Fase 2 adiada) quando houver apetite.
+
+**Princípios:** aditivo, verificar `tsc` + smoke a cada passo; DONO usa DESLOGADO; NÃO misturar com o trabalho de pilot que vive sem-commit na árvore (`components/pilot/*`, `PLANO-ARQUITETURA-NOTAS.md`, etc.) — stage explícito.

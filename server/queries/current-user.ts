@@ -180,3 +180,21 @@ export async function ensureCapability(
   const plan = await getCurrentPlan(admin)
   return planAllows(plan, cap) ? { ok: true } : { ok: false, error: paidOnlyMessage(cap) }
 }
+
+// Admin = o DONO do catálogo (usuário da linha singleton legada). Stopgap pré-Fase 3:
+// só o admin muta o catálogo COMPARTILHADO (obras/notas/status/etc.); usuários
+// logados são read-only, o que evita corromper os dados do dono enquanto a
+// partição per-obra (Fase 2) não existe. Memoizado por request.
+// (Fase 3 troca isto por uma flag is_admin em user_settings — sobrevive ao claim.)
+export const isCurrentUserAdmin = cache(async (): Promise<boolean> => {
+  const sessionId = await getSessionUserId()
+  if (!sessionId) return true // sem sessão = dono (singleton)
+  return sessionId === (await getSingletonUserId())
+})
+
+// Gate de admin pra server actions que mutam o catálogo compartilhado.
+export async function ensureAdmin(): Promise<{ ok: true } | { ok: false; error: string }> {
+  return (await isCurrentUserAdmin())
+    ? { ok: true }
+    : { ok: false, error: "Só o administrador do catálogo pode editar por enquanto." }
+}

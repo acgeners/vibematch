@@ -29,7 +29,7 @@ import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
-import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate } from "@/server/queries/current-user"
+import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin } from "@/server/queries/current-user"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
 import { titleToSlug } from "@/lib/utils"
@@ -1029,6 +1029,8 @@ export async function createWork(
   externalReviews?: SourcedReview[],
   opts: { skipAiEnrichment?: boolean } = {},
 ) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const result = await persistNewWork(values, aiMeta)
   if (!result.ok) return { error: result.error }
   // `skipAiEnrichment`: o usuário optou por salvar SEM o enriquecimento pago
@@ -1250,6 +1252,8 @@ export async function finalizePendingBatch() {
 }
 
 export async function updateWork(id: string, values: WorkFormValues, aiMeta?: CreateWorkAiMeta) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: { _root: [gate.error] } }
   const parsed = workFormSchema.safeParse(values)
   if (!parsed.success) {
     return { error: parsed.error.flatten().fieldErrors }
@@ -1526,6 +1530,8 @@ export async function unarchiveWork(id: string) {
 }
 
 export async function toggleFavorite(id: string, isFavorite: boolean) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("works")
@@ -1543,6 +1549,8 @@ export async function toggleFavorite(id: string, isFavorite: boolean) {
 }
 
 export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const filtered = Array.from(new Set(ids.filter(Boolean)))
   if (filtered.length === 0) return { data: { count: 0 } }
   const supabase = createAdminClient()
@@ -1561,6 +1569,8 @@ export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
 }
 
 export async function updateWorkStatus(id: string, values: WorkStatusValues) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: { _root: [gate.error] } }
   const parsed = workStatusSchema.safeParse(values)
   if (!parsed.success) {
     return { error: parsed.error.flatten().fieldErrors }
