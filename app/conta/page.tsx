@@ -1,15 +1,21 @@
-import { getCurrentUserProfile } from "@/server/queries/current-user"
+import { getCurrentUserProfile, getSessionUserId } from "@/server/queries/current-user"
 import { IdentityCard } from "@/components/conta/identity-card"
 import { PlanCard } from "@/components/conta/plan-card"
+import { LogoutButton } from "@/components/auth/logout-button"
 
 // Plano e perfil podem mudar em runtime — limita a staleness do snapshot.
 export const revalidate = 60
 
 export default async function ContaPage() {
-  const profile = await getCurrentUserProfile()
+  const [profile, sessionUserId] = await Promise.all([getCurrentUserProfile(), getSessionUserId()])
 
   return (
     <div className="space-y-4">
+      {sessionUserId ? (
+        <div className="flex justify-end">
+          <LogoutButton />
+        </div>
+      ) : null}
       <IdentityCard
         userId={profile.userId}
         displayName={profile.displayName}
