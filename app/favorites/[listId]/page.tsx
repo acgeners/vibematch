@@ -17,7 +17,7 @@ import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getFavoritesSummary } from "@/server/queries/favorites"
-import { getListDetail, getWorksLiteForPicker, getListRecommendations } from "@/server/queries/lists"
+import { getListDetail, getWorksLiteForPicker, getListRecommendations, getListsForPicker } from "@/server/queries/lists"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
@@ -140,7 +140,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     sortLevels,
   }
 
-  const [entries, allGenres, allTags, statusOptions, favSummary, scoreThresholds, savedPresets, criterionPrefs, plan, catalog, recentRecs] =
+  const [entries, allGenres, allTags, statusOptions, favSummary, scoreThresholds, savedPresets, criterionPrefs, plan, catalog, recentRecs, allGroups] =
     await Promise.all([
       getRanking(filters),
       getAllGenres(),
@@ -153,7 +153,11 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
       getCurrentPlan(),
       isAll ? Promise.resolve([]) : getWorksLiteForPicker(),
       isAll ? Promise.resolve([]) : getListRecommendations(listId),
+      getListsForPicker(),
     ])
+
+  // Destinos do "Adicionar a grupo": todos os grupos, menos o atual (numa página de grupo).
+  const groupOptions = isAll ? allGroups : allGroups.filter((g) => g.id !== listId)
 
   const orderedIds = entries.map((e) => e.workId)
   const works = await getWorksByIds(orderedIds)
@@ -266,6 +270,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         basePath={basePath}
         enableSelectAll
         isPaid={isPaid}
+        groups={groupOptions}
       />
     </div>
   )

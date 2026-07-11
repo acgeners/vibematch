@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { CoverImage } from "@/components/ui/cover-image"
+import { PersonalStatusBadge } from "@/components/ui/status-badge"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { cn, titleToSlug } from "@/lib/utils"
 import { TasteStars } from "@/components/pilot/taste-stars"
 import { CRITERION_BATCH, fmtLastRead, isAnswered } from "@/components/pilot/pilot-shared"
@@ -19,12 +21,15 @@ export function ByCriterionView({
   works,
   criteria,
   state,
+  visibleIndices,
   onRate,
   onNa,
 }: {
   works: PilotWork[]
   criteria: TasteCriterion[]
   state: WorkState[]
+  /** Índices (originais em `works`/`state`) visíveis sob o filtro de status. */
+  visibleIndices: number[]
   onRate: (workIndex: number, crit: TasteCriterion, stars: number) => void
   onNa: (workIndex: number, crit: TasteCriterion) => void
 }) {
@@ -38,19 +43,27 @@ export function ByCriterionView({
     [criteria, critSlug],
   )
 
-  // quantas obras já responderam cada critério (pros contadores dos chips)
+  // Filtro de status mudou → volta pro primeiro lote (senão fica numa página
+  // vazia). Ajuste em render (padrão do React), não em efeito.
+  const [prevVisible, setPrevVisible] = useState(visibleIndices)
+  if (prevVisible !== visibleIndices) {
+    setPrevVisible(visibleIndices)
+    setPage(0)
+  }
+
+  // quantas obras VISÍVEIS já responderam cada critério (pros contadores dos chips)
   const answeredByCrit = useMemo(() => {
     const m: Record<string, number> = {}
-    for (const c of criteria) m[c.slug] = state.filter((ws) => isAnswered(ws, c)).length
+    for (const c of criteria) m[c.slug] = visibleIndices.filter((i) => isAnswered(state[i], c)).length
     return m
-  }, [criteria, state])
+  }, [criteria, state, visibleIndices])
 
-  // obras (com índice original) filtradas pelo eixo ativo; ordem = leitura recente (query)
+  // obras visíveis (com índice original) filtradas pelo eixo ativo; ordem = leitura recente (query)
   const filtered = useMemo(() => {
-    const all = works.map((w, i) => ({ w, i }))
+    const all = visibleIndices.map((i) => ({ w: works[i], i }))
     if (filter === "missing") return all.filter(({ i }) => !isAnswered(state[i], crit))
     return all
-  }, [works, state, crit, filter])
+  }, [works, state, crit, filter, visibleIndices])
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / CRITERION_BATCH))
   const safePage = Math.min(page, pageCount - 1)
@@ -86,7 +99,8 @@ export function ByCriterionView({
   }, [crit, hoverIdx, criteria])
 
   const answered = answeredByCrit[crit.slug] ?? 0
-  const answeredPct = Math.round((answered / works.length) * 100)
+  const visibleTotal = visibleIndices.length
+  const answeredPct = visibleTotal === 0 ? 0 : Math.round((answered / visibleTotal) * 100)
   const rangeA = filtered.length === 0 ? 0 : start + 1
   const rangeB = Math.min(filtered.length, start + pageItems.length)
 
@@ -137,7 +151,7 @@ export function ByCriterionView({
             </span>
           )}
           <span className="ml-auto whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-            <b className="text-foreground">{answered}</b> / {works.length} avaliadas
+            <b className="text-foreground">{answered}</b> / {visibleTotal} avaliadas
           </span>
         </div>
         {crit.description && (
@@ -212,14 +226,14 @@ export function ByCriterionView({
         </div>
       </div>
 
-      {/* lista de obras */}
+      {/* grade de obras: 2 colunas de cards */}
       {pageItems.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
           Tudo avaliado neste eixo. 🎉
         </div>
       ) : (
-        <div className="flex flex-col rounded-2xl border border-border bg-card p-1.5 shadow-sm">
-          {pageItems.map(({ w, i }, j) => {
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {pageItems.map(({ w, i }) => {
             const val = state[i].scores[crit.key]
             const na = crit.allowsNa && state[i].endingNa && val == null
             return (
@@ -228,28 +242,12 @@ export function ByCriterionView({
                 onMouseEnter={() => setHoverIdx(i)}
                 onMouseLeave={() => setHoverIdx((h) => (h === i ? null : h))}
                 className={cn(
-                  "flex items-center gap-3 rounded-xl border border-transparent px-3 py-2 transition-colors",
-                  hoverIdx === i ? "border-violet-500/40 bg-muted/50" : "hover:bg-muted/40",
-                  "[&+&]:border-t [&+&]:border-t-border/50 [&+&]:rounded-t-none",
+                  "flex gap-3.5 rounded-2xl border bg-card p-3 shadow-sm transition-colors",
+                  hoverIdx === i ? "border-violet-500/45" : "border-border hover:border-violet-500/30",
                 )}
               >
-                <span className="w-6 shrink-0 text-right text-xs tabular-nums text-muted-foreground/70">
-                  {start + j + 1}
-                </span>
-                {w.coverUrls.length > 0 ? (
-                  <CoverImage
-                    key={w.id}
-                    urls={w.coverUrls}
-                    alt=""
-                    loading="eager"
-                    className="h-[59px] w-[42px] shrink-0 rounded-md object-cover ring-1 ring-black/10"
-                  />
-                ) : (
-                  <div className="flex h-[59px] w-[42px] shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-rose-500 text-base font-extrabold text-white">
-                    {w.title.charAt(0)}
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
+                <WorkCoverHover w={w} />
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
                   <a
                     href={`/titles/${titleToSlug(w.title)}`}
                     target="_blank"
@@ -259,23 +257,28 @@ export function ByCriterionView({
                   >
                     {w.title}
                   </a>
-                  <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                     <span className="whitespace-nowrap rounded-full border border-border px-2 py-0.5">
                       tua nota{" "}
                       <b className="tabular-nums text-foreground">{w.userScore.toFixed(1)}</b>
                     </span>
-                    <span className="whitespace-nowrap">{fmtLastRead(w.lastReadAt)}</span>
+                    {w.personalStatusId != null && (
+                      <PersonalStatusBadge
+                        statusId={w.personalStatusId}
+                        className="px-2 py-0 text-[10.5px]"
+                      />
+                    )}
                   </div>
-                </div>
-                <div className="shrink-0">
-                  <TasteStars
-                    crit={crit}
-                    value={val}
-                    na={na}
-                    starClass="h-[21px] w-[21px]"
-                    onStar={(s) => onRate(i, crit, s)}
-                    onNa={crit.allowsNa ? () => onNa(i, crit) : undefined}
-                  />
+                  <div className="mt-auto pt-1">
+                    <TasteStars
+                      crit={crit}
+                      value={val}
+                      na={na}
+                      starClass="h-[22px] w-[22px]"
+                      onStar={(s) => onRate(i, crit, s)}
+                      onNa={crit.allowsNa ? () => onNa(i, crit) : undefined}
+                    />
+                  </div>
                 </div>
               </div>
             )
@@ -303,5 +306,73 @@ export function ByCriterionView({
         </span>
       </div>
     </div>
+  )
+}
+
+/**
+ * Capa do card + tooltip com a ficha da obra ao passar o mouse (portalado, escapa
+ * do overflow do card). Mostra o que o card compacto não cabe: sinopse, tags,
+ * status e última leitura. O clique nas estrelas de avaliação fica no corpo do
+ * card, fora daqui — este trigger só abre a prévia.
+ */
+function WorkCoverHover({ w }: { w: PilotWork }) {
+  return (
+    <HoverCard openDelay={140} closeDelay={80}>
+      <HoverCardTrigger asChild>
+        <div className="shrink-0 cursor-help">
+          {w.coverUrls.length > 0 ? (
+            <CoverImage
+              key={w.id}
+              urls={w.coverUrls}
+              alt=""
+              loading="eager"
+              className="h-[135px] w-[96px] rounded-lg object-cover ring-1 ring-black/10"
+            />
+          ) : (
+            <div className="flex h-[135px] w-[96px] items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-rose-500 text-4xl font-extrabold text-white">
+              {w.title.charAt(0)}
+            </div>
+          )}
+        </div>
+      </HoverCardTrigger>
+      <HoverCardContent side="right" align="start" className="w-80">
+        <div className="flex flex-col gap-2">
+          <a
+            href={`/titles/${titleToSlug(w.title)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-bold leading-snug underline-offset-2 hover:underline hover:decoration-violet-500"
+          >
+            {w.title}
+          </a>
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+            <span className="rounded-full border border-border bg-muted/60 px-2 py-0.5">
+              tua nota <b className="tabular-nums text-foreground">{w.userScore.toFixed(1)}</b>
+            </span>
+            {w.personalStatusId != null && (
+              <PersonalStatusBadge statusId={w.personalStatusId} className="px-2 py-0 text-[10.5px]" />
+            )}
+            <span>{fmtLastRead(w.lastReadAt)}</span>
+          </div>
+          {w.synopsis && (
+            <p className="line-clamp-6 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">
+              {w.synopsis}
+            </p>
+          )}
+          {w.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {w.tags.map((t) => (
+                <span
+                  key={t}
+                  className="rounded-md bg-muted/60 px-2 py-0.5 text-[10.5px] text-muted-foreground"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </HoverCardContent>
+    </HoverCard>
   )
 }
