@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  FolderPlus,
   Heart,
   HeartOff,
   ImageOff,
@@ -74,6 +75,8 @@ import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
 import { useIsAdmin } from "@/components/layout/admin-context"
+import { AddToGroupDialog } from "@/components/favorites/lists/add-to-group-dialog"
+import type { ListPickerOption } from "@/server/queries/lists"
 import { AlignmentCell, AlignmentScoreCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
@@ -157,6 +160,9 @@ interface WorkTableProps {
   isPaid?: boolean
   /** Faixas ideais por critério (perfil). Habilita o toggle de cor "Minha faixa". */
   criterionPrefs?: Record<string, CriterionRange>
+  /** Grupos de destino pro "Adicionar a grupo" na barra de seleção (só /favorites).
+   *  Quando presente, a barra ganha o botão de mover as obras selecionadas. */
+  groups?: ListPickerOption[]
 }
 
 function scoreFor(work: WorkWithRelations, slug: string): number | null {
@@ -217,6 +223,7 @@ export function WorkTable({
   enableSelectAll = false,
   isPaid = true,
   criterionPrefs,
+  groups,
 }: WorkTableProps) {
   const router = useRouter()
   const refresh = useRefresh()
@@ -243,6 +250,7 @@ export function WorkTable({
   // define o moodRefine passado ao drawer. Mesmo fluxo do /ranking.
   const [moodDialogOpen, setMoodDialogOpen] = useState(false)
   const [moodRefine, setMoodRefine] = useState<MoodRefine | null>(null)
+  const [addGroupOpen, setAddGroupOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
   const updateCompareIds = useCallback(
@@ -345,6 +353,11 @@ export function WorkTable({
     refresh()
   }, [favoriteSelectedIds, updateCompareIds, refresh])
 
+  const handleAddedToGroup = useCallback(() => {
+    updateCompareIds([])
+    refresh()
+  }, [updateCompareIds, refresh])
+
   const totalPages = Math.ceil(total / pageSize)
 
   return (
@@ -423,7 +436,18 @@ export function WorkTable({
             onOpen={() => setMoodDialogOpen(true)}
             onClear={clearCompare}
             onUnfavorite={handleBatchUnfavorite}
+            onAddToGroup={groups ? () => setAddGroupOpen(true) : undefined}
           />
+
+          {groups && (
+            <AddToGroupDialog
+              open={addGroupOpen}
+              onOpenChange={setAddGroupOpen}
+              workIds={compareIds}
+              groups={groups}
+              onDone={handleAddedToGroup}
+            />
+          )}
 
           <MoodRefineDialog
             open={moodDialogOpen}
@@ -467,14 +491,16 @@ function CompareSelectionBar({
   onOpen,
   onClear,
   onUnfavorite,
+  onAddToGroup,
 }: {
   count: number
   favoriteCount: number
   onOpen: () => void
   onClear: () => void
   onUnfavorite: () => void
+  onAddToGroup?: () => void
 }) {
-  // Stopgap multi-user: desfavoritar em lote muta o catálogo → só o dono.
+  // Stopgap multi-user: desfavoritar/agrupar em lote muta o catálogo → só o dono.
   const isAdmin = useIsAdmin()
   if (count === 0) return null
   const compareDisabled = count > MAX_COMPARE_WORKS
@@ -496,6 +522,17 @@ function CompareSelectionBar({
         >
           Comparar
         </Button>
+        {onAddToGroup && isAdmin && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onAddToGroup}
+            className="h-7 gap-1.5 text-xs"
+          >
+            <FolderPlus className="h-3.5 w-3.5" />
+            Adicionar a grupo
+          </Button>
+        )}
         {favoriteCount > 0 && isAdmin && (
           <Button
             size="sm"
