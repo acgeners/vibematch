@@ -4,6 +4,7 @@ import Link from "next/link"
 import { BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash, ExternalLink } from "lucide-react"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-watcher"
+import { UpdateProgressWatcher } from "@/components/titles/update-progress-watcher"
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { SynopsisQualitySuggestion } from "@/components/titles/synopsis-quality-suggestion"
@@ -596,6 +597,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       </header>
 
       <ComixResolutionWatcher workId={work.id} createdAt={work.created_at} />
+      <UpdateProgressWatcher workId={work.id} />
 
       <Tabs defaultValue="overview" className="w-full">
         {/* Tabs navbar (full width, 5 abas com wrap responsivo) */}
