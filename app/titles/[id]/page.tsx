@@ -822,6 +822,22 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   workId={work.id}
                   workTitle={work.title}
                   initialStatus={(work as { cascade_status?: CascadeStatus }).cascade_status ?? "idle"}
+                  currentWork={{
+                    title: work.title,
+                    originalTitle: work.original_title,
+                    synopsis: primarySynopsis,
+                    coverUrl: primaryCover,
+                    publicationStatus: getPublicationStatusNameById(work.publication_status_id) ?? "Unknown",
+                    totalChapters: work.total_chapters != null ? Number(work.total_chapters) : null,
+                    observations: work.observations,
+                  }}
+                  currentCovers={(work.work_covers ?? []).map(
+                    (c: { url: string; source?: string | null; is_primary?: boolean }) => ({
+                      url: c.url,
+                      source: c.source,
+                      isPrimary: c.is_primary,
+                    })
+                  )}
                 />
               </div>
               {(() => {

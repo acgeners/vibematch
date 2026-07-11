@@ -1,14 +1,20 @@
 "use client"
 
 import { useState } from "react"
+import type { ComponentProps } from "react"
 import { toast } from "sonner"
 import { Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { runTask } from "@/lib/tasks-store"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import { generateAllWorkData } from "@/server/actions/generate-all"
 import type { CascadeStatus, GenerateAllResult, GenerateAllOpts } from "@/lib/generate-all/types"
+
+// Reaproveita os tipos do dialog de "Atualizar dados" (interfaces internas não
+// exportadas) — o passo de escolha de fontes+capas do "Gerar tudo" é o mesmo dialog.
+type UpdateDataProps = ComponentProps<typeof UpdateDataDialog>
 
 const NO_REVIEWS_HINT: Record<string, string> = {
   no_external_ids: "A obra não tem fontes externas aceitas.",
@@ -26,16 +32,24 @@ export function GenerateAllBanner({
   workId,
   workTitle,
   initialStatus,
+  currentWork,
+  currentCovers,
   compact = false,
 }: {
   workId: string
   workTitle: string
   initialStatus: CascadeStatus
+  /** Dados atuais da obra — alimentam o passo de escolha de fontes/capas (mesmo
+   *  do "Atualizar dados") que abre ANTES da cascata. */
+  currentWork: UpdateDataProps["currentWork"]
+  currentCovers?: UpdateDataProps["currentCovers"]
   /** Modo botão inline (linha de ações da aba Geral) em vez do banner cheio. */
   compact?: boolean
 }) {
   const [status, setStatus] = useState<CascadeStatus>(initialStatus)
   const [dialog, setDialog] = useState<Dialog>(null)
+  // Passo de escolha de fontes+capas (UpdateDataDialog) que precede a cascata.
+  const [selectOpen, setSelectOpen] = useState(false)
 
   const handleResult = (r: GenerateAllResult) => {
     switch (r.status) {
@@ -84,8 +98,25 @@ export function GenerateAllBanner({
 
   const running = status === "verifying_sources" || status === "generating"
 
+  // Abre o passo de escolha (fontes → sinopse → capas → conflitos). Ao salvar,
+  // `onSaved` emenda a cascata (Fase 0). Cancelar/fechar não gera nada.
+  const startFlow = () => setSelectOpen(true)
+
   const dialogs = (
     <>
+      {/* Passo de escolha de fontes+capas — mesmo dialog do "Atualizar dados".
+          Ao salvar, emenda a cascata do Gerar tudo. */}
+      <UpdateDataDialog
+        workId={workId}
+        currentWork={currentWork}
+        currentCovers={currentCovers}
+        open={selectOpen}
+        onOpenChange={setSelectOpen}
+        hideTrigger
+        withSourceStep
+        onSaved={() => kickoff({}, `Verificando fontes: ${workTitle}`, "verifying_sources")}
+      />
+
       {/* Checkpoint de custo + sem-review (mesmo padrão do ai-eval) */}
       <ConfirmDialog
         open={dialog?.kind === "cost"}
@@ -135,8 +166,8 @@ export function GenerateAllBanner({
           variant="outline"
           size="sm"
           disabled={running}
-          onClick={() => kickoff({}, `Verificando fontes: ${workTitle}`, "verifying_sources")}
-          title="Gera todos os dados da obra em ordem (fontes → sinopse → tags → atributos IA → notas → embedding)."
+          onClick={startFlow}
+          title="Escolha fontes e capas; depois gera todos os dados da obra em ordem (fontes → sinopse → tags → atributos IA → notas → embedding)."
         >
           <Sparkles className="size-4 text-emerald-500" />
           {ctaLabel(status)}
@@ -179,7 +210,7 @@ export function GenerateAllBanner({
           <button
             type="button"
             disabled={running}
-            onClick={() => kickoff({}, `Verificando fontes: ${workTitle}`, "verifying_sources")}
+            onClick={startFlow}
             className={cn(
               "rounded-md bg-emerald-500 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-600",
               running && "opacity-50 cursor-not-allowed",
