@@ -20,6 +20,7 @@ import { StatusEditDialog } from "@/components/titles/status-edit-dialog"
 import { useIsAdmin } from "@/components/layout/admin-context"
 import type { PostAttributeAssessmentFormProps } from "@/components/titles/post-attribute-assessment-form"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
+import type { TasteCriterion, TasteScoreKey } from "@/server/queries/pilot-taste"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -109,6 +110,9 @@ export function StatusActionButton({
   totalChapters,
   latestAiEvaluation,
   existingAssessment,
+  tasteCriteria,
+  tasteScores,
+  tasteEndingNa,
   label = "Alterar Status",
   variant = "outline",
   size = "sm",
@@ -119,6 +123,10 @@ export function StatusActionButton({
   totalChapters?: number | null
   latestAiEvaluation: PostAttributeAssessmentFormProps["latestAiEvaluation"]
   existingAssessment: PostAttributeAssessmentFormProps["existingAssessment"]
+  /** Critérios/notas de gosto ("Como foi pra você") — repassados ao dialog. */
+  tasteCriteria?: TasteCriterion[]
+  tasteScores?: Record<TasteScoreKey, number | null>
+  tasteEndingNa?: boolean
   label?: string
   variant?: "outline" | "default" | "ghost"
   size?: "sm" | "default" | "lg"
@@ -141,6 +149,9 @@ export function StatusActionButton({
         initialValues={statusInitialValues}
         latestAiEvaluation={latestAiEvaluation}
         existingAssessment={existingAssessment}
+        tasteCriteria={tasteCriteria}
+        tasteScores={tasteScores}
+        tasteEndingNa={tasteEndingNa}
       />
     </>
   )

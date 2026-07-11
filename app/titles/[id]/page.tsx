@@ -574,6 +574,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
             latestAiEvaluation={postAttrAi}
             existingAssessment={postAttrExisting}
+            tasteCriteria={tasteCriteria}
+            tasteScores={tasteScoresData.scores}
+            tasteEndingNa={tasteScoresData.endingNa}
           />
           <MoreActionsMenu workId={work.id} isArchived={work.is_archived} />
           <Button asChild size="sm">
