@@ -2,6 +2,7 @@
 
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensureAdmin } from "@/server/queries/current-user"
 import { markRecalcPending } from "@/server/actions/recalc-queue"
 import {
   getPersonalStatusIdByName,
@@ -220,6 +221,8 @@ export async function commitExternalListImport(
   decisions: ExternalListDecisions
 ): Promise<{ error?: string; data?: CommitExternalListResult }> {
   try {
+    const gate = await ensureAdmin()
+    if (!gate.ok) return { error: gate.error }
     const { source, entries } = resolveEntries(input)
     const supabase = createAdminClient()
     const ctx = await buildMatchContext(supabase)

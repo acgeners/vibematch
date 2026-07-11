@@ -17,6 +17,7 @@ import { toast } from "sonner"
 import { archiveWork, deleteWork, toggleFavorite, unarchiveWork } from "@/server/actions/works"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import { StatusEditDialog } from "@/components/titles/status-edit-dialog"
+import { useIsAdmin } from "@/components/layout/admin-context"
 import type { PostAttributeAssessmentFormProps } from "@/components/titles/post-attribute-assessment-form"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
 import { Button } from "@/components/ui/button"
@@ -48,6 +49,7 @@ export function FavoriteToggleButton({
   isFavorite: boolean
   iconOnly?: boolean
 }) {
+  const isAdmin = useIsAdmin()
   const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
   const handleClick = () => {
@@ -62,6 +64,8 @@ export function FavoriteToggleButton({
       refresh()
     })
   }
+  // Stopgap multi-user: controles de mutação do catálogo só pro dono (admin).
+  if (!isAdmin) return null
   return (
     <Button
       variant={isFavorite ? "default" : "outline"}
@@ -87,6 +91,8 @@ export function EditLinkButton({
   workId: string
   iconOnly?: boolean
 }) {
+  const isAdmin = useIsAdmin()
+  if (!isAdmin) return null
   return (
     <Button asChild variant="outline" size={iconOnly ? "icon" : "sm"} aria-label="Editar">
       <Link href={`/titles/${workSlug ?? workId}/edit`}>
@@ -118,7 +124,9 @@ export function StatusActionButton({
   size?: "sm" | "default" | "lg"
   className?: string
 }) {
+  const isAdmin = useIsAdmin()
   const [open, setOpen] = useState(false)
+  if (!isAdmin) return null
   return (
     <>
       <Button variant={variant} size={size} onClick={() => setOpen(true)} className={className}>
@@ -155,7 +163,9 @@ export function UpdateDataActionButton({
   }
   currentCovers?: Array<{ url: string; source?: string | null; isPrimary?: boolean }>
 }) {
+  const isAdmin = useIsAdmin()
   const [open, setOpen] = useState(false)
+  if (!isAdmin) return null
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
@@ -184,6 +194,7 @@ export function MoreActionsMenu({
   isArchived: boolean
   iconOnly?: boolean
 }) {
+  const isAdmin = useIsAdmin()
   const router = useRouter()
   const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
@@ -212,6 +223,9 @@ export function MoreActionsMenu({
       router.push("/titles")
     })
   }
+
+  // Stopgap multi-user: arquivar/deletar mutam o catálogo compartilhado → só o dono.
+  if (!isAdmin) return null
 
   return (
     <>

@@ -4,6 +4,7 @@ import { useEffect, useState, type MouseEvent } from "react"
 import { Heart } from "lucide-react"
 import { toast } from "sonner"
 import { toggleFavorite } from "@/server/actions/works"
+import { useIsAdmin } from "@/components/layout/admin-context"
 import { cn } from "@/lib/utils"
 
 export function FavoriteCell({
@@ -15,6 +16,7 @@ export function FavoriteCell({
   workTitle: string
   isFavorite: boolean
 }) {
+  const isAdmin = useIsAdmin()
   const [isFavorite, setIsFavorite] = useState(initialIsFavorite)
   const [pending, setPending] = useState(false)
 
@@ -44,6 +46,10 @@ export function FavoriteCell({
     // estado otimista acima mantém o coração instantâneo; em /favorites a linha
     // sai pelo revalidate.
   }
+
+  // Stopgap multi-user: favoritar muta o catálogo compartilhado → só o dono.
+  // Usuário logado (não-admin) não vê o controle.
+  if (!isAdmin) return null
 
   return (
     <button

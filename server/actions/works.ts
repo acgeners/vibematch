@@ -29,7 +29,7 @@ import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
-import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate } from "@/server/queries/current-user"
+import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin } from "@/server/queries/current-user"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
 import { titleToSlug } from "@/lib/utils"
@@ -1029,6 +1029,8 @@ export async function createWork(
   externalReviews?: SourcedReview[],
   opts: { skipAiEnrichment?: boolean } = {},
 ) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const result = await persistNewWork(values, aiMeta)
   if (!result.ok) return { error: result.error }
   // `skipAiEnrichment`: o usuário optou por salvar SEM o enriquecimento pago
@@ -1118,6 +1120,8 @@ export async function createWork(
  * Use quando for adicionar vários títulos em sequência.
  */
 export async function createWorkPending(values: WorkFormValues) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: { _root: [gate.error] } }
   const result = await persistNewWork(values)
   if (!result.ok) return { error: result.error }
 
@@ -1137,6 +1141,8 @@ export interface CreateWorkBatchItem {
 export async function createWorksBatch(
   items: Array<CreateWorkBatchItem | WorkFormValues>,
 ) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: { _root: [gate.error] } }
   if (items.length === 0) {
     return { error: { _root: ["Nenhuma obra para criar"] } }
   }
@@ -1227,6 +1233,8 @@ export async function getPendingBatchCount(): Promise<number> {
  * Finaliza o batch: dispara o recálculo orquestrado uma única vez (deduplicado).
  */
 export async function finalizePendingBatch() {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("works")
@@ -1250,6 +1258,8 @@ export async function finalizePendingBatch() {
 }
 
 export async function updateWork(id: string, values: WorkFormValues, aiMeta?: CreateWorkAiMeta) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: { _root: [gate.error] } }
   const parsed = workFormSchema.safeParse(values)
   if (!parsed.success) {
     return { error: parsed.error.flatten().fieldErrors }
@@ -1494,6 +1504,8 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
 }
 
 export async function archiveWork(id: string) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("works")
@@ -1510,6 +1522,8 @@ export async function archiveWork(id: string) {
 }
 
 export async function unarchiveWork(id: string) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("works")
@@ -1526,6 +1540,8 @@ export async function unarchiveWork(id: string) {
 }
 
 export async function toggleFavorite(id: string, isFavorite: boolean) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("works")
@@ -1543,6 +1559,8 @@ export async function toggleFavorite(id: string, isFavorite: boolean) {
 }
 
 export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const filtered = Array.from(new Set(ids.filter(Boolean)))
   if (filtered.length === 0) return { data: { count: 0 } }
   const supabase = createAdminClient()
@@ -1561,6 +1579,8 @@ export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
 }
 
 export async function updateWorkStatus(id: string, values: WorkStatusValues) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: { _root: [gate.error] } }
   const parsed = workStatusSchema.safeParse(values)
   if (!parsed.success) {
     return { error: parsed.error.flatten().fieldErrors }
@@ -1660,6 +1680,8 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
  * notas/observações/capítulos. 1 update em lote + 1 recalc deferido.
  */
 export async function setReadingStatusForWorks(ids: string[], status: string) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const cleanIds = [...new Set((ids ?? []).filter(Boolean))]
   if (cleanIds.length === 0) return { error: "Nenhuma obra selecionada." }
   const statusId = getPersonalStatusIdByName(status)
@@ -1685,6 +1707,8 @@ export async function setReadingStatusForWorks(ids: string[], status: string) {
 }
 
 export async function deleteWork(id: string) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase.from("works").delete().eq("id", id)
 
@@ -1725,6 +1749,8 @@ export async function updateWorkExternalData(
   updates: ExternalWorkUpdate,
   opts: { acquireReviews?: boolean } = {},
 ) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   try {
     const supabase = createAdminClient()
     const { data: existingWork } = await supabase

@@ -3,7 +3,7 @@
 import { revalidatePath, revalidateTag } from "next/cache"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensureCapability } from "@/server/queries/current-user"
+import { ensureCapability, ensureAdmin } from "@/server/queries/current-user"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getSynopsisPredictionForWork, getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
 import { markRecalcPending } from "@/server/actions/recalc-queue"
@@ -113,6 +113,8 @@ export async function applySynopsisPredictionAction(
   workId: string,
 ): Promise<{ data?: { applied: SynopsisQuality }; error?: string }> {
   try {
+    const gate = await ensureAdmin()
+    if (!gate.ok) return { error: gate.error }
     const prediction = await getSynopsisPredictionForWork(workId)
     if (!prediction) return { error: "Não há previsão para esta obra." }
 
@@ -168,6 +170,10 @@ const APPLY_BATCH_CAP = 150
 export async function applySynopsisPredictionForWorks(
   workIds: string[],
 ): Promise<ApplySynopsisBatchResult> {
+  // Stopgap: só o admin (dono) muta o catálogo compartilhado. Sem canal de erro
+  // nesta shape → no-op silencioso (a UI que dispara isto some pra não-admin na parte C).
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { processed: 0, applied: 0, skipped: 0, failed: 0, capped: false }
   const ids = [...new Set((workIds ?? []).filter(Boolean))].slice(0, APPLY_BATCH_CAP)
   if (ids.length === 0) return { processed: 0, applied: 0, skipped: 0, failed: 0, capped: false }
 
@@ -235,6 +241,8 @@ export async function skipSynopsisInterestAction(
   skipped = true,
 ): Promise<{ data?: { skipped: boolean }; error?: string }> {
   try {
+    const gate = await ensureAdmin()
+    if (!gate.ok) return { error: gate.error }
     const supabase = createAdminClient()
     const { error } = await supabase
       .from("works")
@@ -266,6 +274,8 @@ export async function setSynopsisQualityAction(
   quality: SynopsisQuality | null,
 ): Promise<{ data?: { synopsisQuality: SynopsisQuality | null }; error?: string }> {
   try {
+    const gate = await ensureAdmin()
+    if (!gate.ok) return { error: gate.error }
     if (quality !== null && !(SYNOPSIS_QUALITIES as readonly string[]).includes(quality)) {
       return { error: "Valor de Interesse inválido." }
     }

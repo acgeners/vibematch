@@ -7,6 +7,7 @@ import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
+import { isCurrentUserAdmin } from "@/server/queries/current-user"
 import { Header } from "@/components/layout/header"
 import { TitleFilters } from "@/components/titles/title-filters"
 import { WorkTable } from "@/components/titles/work-table"
@@ -120,13 +121,14 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   const pageSize = 50
   const page = Math.max(1, parseInt(str("page") ?? "1", 10))
 
-  const [entries, allGenres, allTags, statusOptions, scoreThresholds, criterionPrefs] = await Promise.all([
+  const [entries, allGenres, allTags, statusOptions, scoreThresholds, criterionPrefs, isAdmin] = await Promise.all([
     getRanking(filters),
     getAllGenres(),
     getAllTags(),
     getStatusOptions(),
     getScoreColorThresholds(),
     getCriterionColorRanges(),
+    isCurrentUserAdmin(),
   ])
 
   const total = entries.length
@@ -142,12 +144,15 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
         title="Títulos"
         description={`${total} obra${total !== 1 ? "s" : ""} no catálogo`}
         actions={
-          <Button asChild size="sm">
-            <Link href="/titles/new">
-              <Plus className="h-4 w-4 mr-1" />
-              Novo título
-            </Link>
-          </Button>
+          // Stopgap multi-user: criar obra é do dono do catálogo → some pra não-admin.
+          isAdmin ? (
+            <Button asChild size="sm">
+              <Link href="/titles/new">
+                <Plus className="h-4 w-4 mr-1" />
+                Novo título
+              </Link>
+            </Button>
+          ) : undefined
         }
       />
 

@@ -1,6 +1,7 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensureAdmin } from "@/server/queries/current-user"
 import { CRITERION_SLUGS, type CategoryScoreMap, type CriterionSlug } from "@/types/domain"
 import {
   inferScoreWeights,
@@ -71,6 +72,10 @@ export interface WeightSuggestionApply {
 export async function applyWeightSuggestions(
   applies: WeightSuggestionApply[],
 ): Promise<{ recalculated: number; appliedCount: number }> {
+  // Reescreve score_weights global + recalcula → gate de admin (stopgap).
+  // Sinaliza erro via throw; o caller (painel) já trata em try/catch → toast.
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   if (applies.length === 0) {
     return { recalculated: 0, appliedCount: 0 }
   }
