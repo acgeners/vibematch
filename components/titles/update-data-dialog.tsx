@@ -668,15 +668,23 @@ export function UpdateDataDialog({
             </DialogDescription>
           </DialogHeader>
 
-          {phase === "sources" && (
-            <SourceSelectionStep
-              workId={workId}
-              confirmLabel="Continuar"
-              onConfirm={() => {
-                void runRefresh()
-              }}
-              onCancel={handleClose}
-            />
+          {/* Montado enquanto o diálogo está aberto (NÃO desmonta ao avançar pra
+              sinopses/capas): assim o "Voltar" reexibe as MESMAS fontes já
+              resolvidas e preserva as seleções, sem refazer a busca — o
+              revalidateWorkSources roda uma vez só, no mount. Escondido nas outras
+              fases. Fechar o diálogo → Radix desmonta o content → a próxima
+              abertura busca de novo (comportamento atual preservado). */}
+          {withSourceStep && (
+            <div className={phase === "sources" ? undefined : "hidden"}>
+              <SourceSelectionStep
+                workId={workId}
+                confirmLabel="Continuar"
+                onConfirm={() => {
+                  void runRefresh()
+                }}
+                onCancel={handleClose}
+              />
+            </div>
           )}
 
           {phase === "refreshing" && (
