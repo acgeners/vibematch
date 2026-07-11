@@ -39,6 +39,22 @@ export interface PilotWork {
   endingNa: boolean
   /** Data (YYYY-MM-DD) da última leitura; null quando não registrada. */
   lastReadAt: string | null
+  /** Status de leitura (`personal_status_id`); null quando não definido. */
+  personalStatusId: number | null
+}
+
+/** Notas de gosto já dadas a UMA obra (pra a avaliação embutida na página). */
+export async function getTasteScoresForWork(
+  workId: string,
+): Promise<{ scores: Record<TasteScoreKey, number | null>; endingNa: boolean }> {
+  const sb = createAdminClient()
+  const { data } = await sb.from("pilot_taste_scores").select("*").eq("work_id", workId).maybeSingle()
+  const scores = {} as Record<TasteScoreKey, number | null>
+  for (const k of TASTE_SCORE_KEYS) {
+    const v = (data as Record<string, unknown> | null)?.[k]
+    scores[k] = v == null ? null : Number(v)
+  }
+  return { scores, endingNa: Boolean((data as Record<string, unknown> | null)?.ending_na) }
 }
 
 /** Critérios de gosto (criteria eval_type='Gosto'), na ordem de inserção. */
@@ -94,7 +110,7 @@ export async function getPilotWorks(): Promise<PilotWork[]> {
     const { data, error } = await sb
       .from("works")
       .select(
-        `id, title, user_score, last_read_at, canonical_synopsis, ${POST_READING_SCORE_COLUMNS.join(", ")}, work_covers(url,is_primary,position), work_synopses(text,is_primary,position), work_tags(tags(name)), pilot_taste_scores(*)`,
+        `id, title, user_score, last_read_at, personal_status_id, canonical_synopsis, ${POST_READING_SCORE_COLUMNS.join(", ")}, work_covers(url,is_primary,position), work_synopses(text,is_primary,position), work_tags(tags(name)), pilot_taste_scores(*)`,
       )
       .not("user_score", "is", null)
       .eq("is_archived", false)
@@ -137,6 +153,7 @@ export async function getPilotWorks(): Promise<PilotWork[]> {
       scores,
       endingNa: Boolean(pts?.ending_na),
       lastReadAt: (w.last_read_at as string | null) ?? null,
+      personalStatusId: (w.personal_status_id as number | null) ?? null,
     }
   })
 

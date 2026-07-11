@@ -311,3 +311,69 @@ re-avaliação completa numa aposta **justificada**, não cega.
 4. **Um modelo pooled** com proxies de aspecto; rótulos validam a ponte e de-contaminam o alvo.
 5. **Consolidar exibição já** (baixo risco); **decidir modelo com a régua** (empírico).
 6. Não perder o sinal da **divergência** entre notas — é textura de decisão, não ruído.
+
+---
+
+# PARTE II — Resultados do piloto e decisão (2026-07-07)
+
+> A Parte I foi escrita ANTES de rodar. Isto é o que o piloto de fato mostrou e o que decidimos.
+
+## 15. O que foi feito
+
+- **Fase 3 (coleta):** página `/pilot-taste` construída (PR #69, branch `feat/pilot-notas-gosto`), **193/206 obras avaliadas** pelo user nos 6 eixos + Gostei geral.
+- **Fase 4 (análise):** `scripts/pilot-taste-analysis.ts` + 2 análises exploratórias (avg6, atributos, resíduo).
+
+## 16. Go/no-go — PRÉ-REGISTRADO, e disparou
+
+Regra travada ANTES: `corr(Gostei geral, craft) ≳ 0.85 → parar`.
+
+| Achado | Número |
+|---|---|
+| **corr(Gostei geral, craft `user_score`)** | **Pearson 0.89 [0.85, 0.92]** · Spearman 0.88 |
+
+→ **Gosto ≈ craft. A premissa "gosto é sinal limpo/diferente" foi REFUTADA como jogada de acurácia.** Retargetar o preditor pro gosto NÃO melhora previsão. Isso é o piloto funcionando: um "não" barato (193 cliques) antes de reavaliar tudo + refazer modelos.
+
+**Sub-achados:**
+- **Spread:** gosto direto dp **1.71** > craft **0.93** → a nota direta discrimina mais (usa o "não gostei"). Provável sinal, não ruído (divergências assimétricas nas pontas). Fio solto = test-retest.
+- **avg6 (média dos 6 aspectos, esquema do craft) RE-COMPRIME** (dp 1.28) e achata os extremos (não chega no "amei"=10 nem no "detestei"≤4). ⇒ **a nota final tem que ser a DIRETA, nunca a média** — média mata os extremos, que é onde mora a discriminação.
+
+## 17. Resíduo — regras POR-ASPECTO sobrevivem ao halo
+
+Há um **halo forte** (gostou da obra → nota tudo alto). Mas residualizando cada aspecto na média dos outros (halo fora), **regras específicas genuínas aparecem** (`R²halo` 0.26–0.61; art é o mais independente):
+
+| Aspecto | Regra específica (resíduo) |
+|---|---|
+| **setting** | `fantasy_nobility` **+0.69**, European Ambience +0.53 |
+| **art** | Full Color/Webtoon +0.37, anti-fanservice (Nudity/Big Breasts −) |
+| **tone** | **humor +0.29 / tragedy −0.27, drama −0.21** (o dial COM SINAL que a média (−0.07) e o halo escondiam) |
+| pacing | `fantasy_nobility` −0.25 (slow-burn = ponto fraco relativo das amadas) |
+| leads | fraco (61% halo) |
+
+Modestos (0.2–0.5), exploratório, e **NÃO mudam o teto do geral (≈craft)**. Valor = **explicação** + **enriquecer o perfil** com preferências *com sinal por aspecto*. Valida a tese magnitude≠alinhamento.
+
+## 18. Decisão (do user, produto)
+
+**Implementar a avaliação por gosto — por COERÊNCIA DE PRODUTO, não por acurácia.** O site casa gosto/preferência, não execução técnica; avaliar por preferência é mais fiel à alma do produto, mesmo que no agregado gosto≈craft.
+
+- **Nota final = "Gostei geral" DIRETO** (não a média dos aspectos).
+- **Craft NÃO removido — colapsado por padrão** ("primeiro momento").
+- **Store = reusar `pilot_taste_scores`** (preserva os 193 rótulos; zero migração agora).
+
+## 19. Fase 5 — implementação (em andamento)
+
+Integra a avaliação por gosto na aba de leitura da página da obra:
+- **novo** `components/pilot/post-taste-assessment.tsx` (card de gosto de 1 obra: 6 aspectos + Gostei geral, ★, N/A no Final, autosave → `pilot_taste_scores`)
+- `post-reading-flow.tsx` — card de gosto primário (expandido) + craft colapsado
+- `work-status-form.tsx` — prop `criteriaDefaultOpen` (colapsa o bloco de critérios; default aberto)
+- `post-attribute-assessment-form.tsx` — prop `defaultOpen` (fecha por padrão no fluxo)
+- `app/titles/[id]/page.tsx` — carrega critérios + notas de gosto da obra
+- `server/queries/pilot-taste.ts` — `+ getTasteScoresForWork`
+
+## 20. Pendências (registro 2026-07-07)
+
+- **2º MOMENTO — migrar `pilot_taste_scores` → colunas `works.like_*_score`** (nome limpo, junto de `post_*_score`; migration + copiar os 193 rótulos + trocar leituras/escritas). Adiado de propósito: no 1º momento reusa a tabela do piloto pra não perder dado nem gastar esforço.
+- **sync-constants** → gerar `lib/constants/taste-criteria.ts` de `eval_type='Gosto'`.
+- **Wirar as 3 pontes fortes** (setting→fantasia/nobreza, art→cor/anti-fanservice, tone→humor/−tragédia) no **perfil** + na **explicação** das previsões.
+- **test-retest** (~15 obras) pra separar "gosto direto discrimina melhor" de "ruído".
+- **Seed dos critérios** `eval_type='Gosto'` só em DML (não há migration) — adicionar migration de seed se quiser reprodutibilidade.
+- Decidir se o Gostei geral vira escala mais fina (0–10) na produção ou fica em 5 níveis.

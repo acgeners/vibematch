@@ -1,13 +1,19 @@
 "use client"
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { cn } from "@/lib/utils"
 import { savePilotTaste } from "@/server/actions/pilot-taste"
 import { starsToPostReadingScore } from "@/lib/constants/post-reading-criteria"
 import { ByWorkView } from "@/components/pilot/by-work-view"
 import { ByCriterionView } from "@/components/pilot/by-criterion-view"
-import { readViewMode, subscribeViewMode, writeViewMode } from "@/components/pilot/pilot-shared"
-import type { SaveState, ViewMode, WorkState } from "@/components/pilot/pilot-shared"
+import {
+  buildStatusFacets,
+  matchesStatus,
+  readViewMode,
+  subscribeViewMode,
+  writeViewMode,
+} from "@/components/pilot/pilot-shared"
+import type { SaveState, StatusFilter, ViewMode, WorkState } from "@/components/pilot/pilot-shared"
 import type { PilotWork, TasteCriterion } from "@/server/queries/pilot-taste"
 
 interface Props {
@@ -27,7 +33,16 @@ export function PilotTasteWizard({ criteria, works }: Props) {
     works.map((w) => ({ scores: { ...w.scores }, endingNa: w.endingNa })),
   )
   const [save, setSave] = useState<SaveState>("idle")
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const view = useSyncExternalStore(subscribeViewMode, readViewMode, () => "work" as const)
+
+  // Facetas de status (só as presentes) e os índices visíveis sob o filtro ativo.
+  // Índice = posição original em `works`/`state`, pra manter o autosave por-obra.
+  const statusFacets = useMemo(() => buildStatusFacets(works), [works])
+  const visibleIndices = useMemo(
+    () => works.map((_, i) => i).filter((i) => matchesStatus(works[i], statusFilter)),
+    [works, statusFilter],
+  )
 
   const stateRef = useRef(state)
   useEffect(() => {
@@ -90,7 +105,7 @@ export function PilotTasteWizard({ criteria, works }: Props) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-5 pb-24">
+    <div className="mx-auto max-w-[1120px] px-5 pb-24">
       {/* topbar: título · alternância de visão · status de save */}
       <div className="sticky top-0 z-20 -mx-5 mb-6 flex items-center gap-4 border-b border-border bg-background/85 px-5 py-3 backdrop-blur">
         <div className="flex min-w-0 flex-col">
@@ -134,11 +149,61 @@ export function PilotTasteWizard({ criteria, works }: Props) {
         </span>
       </div>
 
+      {/* filtro por status de leitura (só aparece quando há mais de um status) */}
+      {statusFacets.length > 1 && (
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <span className="mr-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Status
+          </span>
+          <button
+            type="button"
+            onClick={() => setStatusFilter("all")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11.5px] font-semibold transition-colors",
+              statusFilter === "all"
+                ? "border-violet-500/55 bg-violet-500/12 text-foreground"
+                : "border-border text-muted-foreground hover:border-muted-foreground",
+            )}
+          >
+            Todos
+            <span className="tabular-nums opacity-70">{works.length}</span>
+          </button>
+          {statusFacets.map((f) => {
+            const on = statusFilter === f.key
+            return (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setStatusFilter(f.key)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11.5px] font-semibold transition-colors",
+                  on
+                    ? "border-current"
+                    : "border-border text-muted-foreground hover:border-muted-foreground",
+                )}
+                style={
+                  f.color
+                    ? on
+                      ? { color: f.color, backgroundColor: `${f.color}1f` }
+                      : { color: f.color }
+                    : undefined
+                }
+              >
+                <span aria-hidden>{f.symbol}</span>
+                {f.label}
+                <span className="tabular-nums opacity-70">{f.count}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {view === "work" ? (
         <ByWorkView
           works={works}
           criteria={criteria}
           state={state}
+          visibleIndices={visibleIndices}
           onRate={rate}
           onNa={markNa}
           onFlush={flushAll}
@@ -148,6 +213,7 @@ export function PilotTasteWizard({ criteria, works }: Props) {
           works={works}
           criteria={criteria}
           state={state}
+          visibleIndices={visibleIndices}
           onRate={rate}
           onNa={markNa}
         />
