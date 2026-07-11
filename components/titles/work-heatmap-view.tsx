@@ -255,6 +255,15 @@ function getTooltipLabel(col: WorkColumnDef): string {
   return NON_CRITERION_TOOLTIPS[col.key] ?? col.configLabel ?? col.label
 }
 
+/** Nome curto e legível da coluna pro aviso de ordenação do heatmap. */
+function getSortLabel(col: WorkColumnDef): string {
+  if (col.key.startsWith("crit_")) {
+    const slug = col.key.slice("crit_".length)
+    return CRITERIA_INFO[slug]?.name ?? slug
+  }
+  return NON_CRITERION_LABELS[col.key] ?? col.configLabel ?? col.label
+}
+
 export function WorkHeatmapView({
   works,
   selectedIds,
@@ -297,16 +306,21 @@ export function WorkHeatmapView({
   const widthPercent = (px: number): string =>
     `${((px / naturalTotal) * 100).toFixed(4)}%`
 
-  const [sortKey, setSortKey] = useState<string>("expected_score")
+  // Ordenação do heatmap. `null` = segue a ordem que o servidor mandou (a
+  // Ordenação aplicada na página). Antes o heatmap sobrescrevia sempre com
+  // expected_score↓, ignorando a Ordenação — agora só reordena quando o usuário
+  // clica num cabeçalho. Ciclo por coluna: desc → asc → volta pra ordem da página.
+  const [sortKey, setSortKey] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
 
-  // If the user hides the currently-sorted column, fall back to the first visible score column.
+  // Coluna sumiu (usuário ocultou) → deixa de ser sort ativo, volta pra ordem da página.
   const effectiveSortKey = useMemo(() => {
-    if (visibleScoreColumns.find((c) => c.key === sortKey)) return sortKey
-    return visibleScoreColumns[0]?.key ?? "expected_score"
+    if (sortKey && visibleScoreColumns.find((c) => c.key === sortKey)) return sortKey
+    return null
   }, [sortKey, visibleScoreColumns])
 
   const sortedWorks = useMemo(() => {
+    if (!effectiveSortKey) return works // ordem do servidor (Ordenação da página)
     const arr = [...works]
     arr.sort((a, b) => {
       const valA = getValueForKey(a, effectiveSortKey)
@@ -320,12 +334,18 @@ export function WorkHeatmapView({
 
   const handleSort = (key: string) => {
     if (sortKey === key) {
-      setSortDir((d) => (d === "desc" ? "asc" : "desc"))
+      // desc → asc → limpa (volta pra ordenação da página).
+      if (sortDir === "desc") setSortDir("asc")
+      else setSortKey(null)
     } else {
       setSortKey(key)
       setSortDir("desc")
     }
   }
+
+  const activeSortCol = effectiveSortKey
+    ? visibleScoreColumns.find((c) => c.key === effectiveSortKey) ?? null
+    : null
 
   // Mark column transitions between groups for visual separator
   const columnSeparators = useMemo(() => {
@@ -352,7 +372,18 @@ export function WorkHeatmapView({
     <TooltipProvider delayDuration={200}>
       <div className="rounded-lg border border-border/70 bg-card/80 shadow-sm">
         <p className="border-b bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
-          Heatmap ordena apenas as obras visíveis nesta página · use <span className="font-medium text-foreground">Colunas</span> para escolher as notas.
+          {activeSortCol ? (
+            <>
+              Reordenado por{" "}
+              <span className="font-medium text-foreground">{getSortLabel(activeSortCol)}</span>{" "}
+              ({sortDir === "asc" ? "crescente" : "decrescente"}) · clique na coluna de novo para voltar à ordenação da página.
+            </>
+          ) : (
+            <>
+              Segue a ordenação da página · clique numa coluna para reordenar aqui · use{" "}
+              <span className="font-medium text-foreground">Colunas</span> para escolher as notas.
+            </>
+          )}
         </p>
         <table
           className="border-collapse text-sm"
