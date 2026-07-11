@@ -11,6 +11,7 @@ import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import { GenerateAllBanner } from "@/components/titles/generate-all-banner"
 import type { CascadeStatus } from "@/lib/generate-all/types"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
+import { getTasteCriteria, getTasteScoresForWork } from "@/server/queries/pilot-taste"
 import { TagsExpandAll } from "@/components/titles/tags-expand-all"
 import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug, getWorkExternalIds } from "@/server/queries/works"
 import { comixWorkUrl } from "@/lib/external/comix"
@@ -262,7 +263,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -275,6 +276,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getDeclaredTagPreferences(configClient),
     loadCurrentTasteProfile(),
     getWorkExternalIds(work.id as string),
+    getTasteCriteria(),
+    getTasteScoresForWork(work.id as string),
   ])
   // "Ler no Comix": só pra obras que você acompanha (Reading/Started) e que têm
   // hid aceito. `pending` = capítulos não lidos (total − lidos), sinal persistido
@@ -571,6 +574,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
             latestAiEvaluation={postAttrAi}
             existingAssessment={postAttrExisting}
+            tasteCriteria={tasteCriteria}
+            tasteScores={tasteScoresData.scores}
+            tasteEndingNa={tasteScoresData.endingNa}
           />
           <MoreActionsMenu workId={work.id} isArchived={work.is_archived} />
           <Button asChild size="sm">
@@ -816,6 +822,22 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   workId={work.id}
                   workTitle={work.title}
                   initialStatus={(work as { cascade_status?: CascadeStatus }).cascade_status ?? "idle"}
+                  currentWork={{
+                    title: work.title,
+                    originalTitle: work.original_title,
+                    synopsis: primarySynopsis,
+                    coverUrl: primaryCover,
+                    publicationStatus: getPublicationStatusNameById(work.publication_status_id) ?? "Unknown",
+                    totalChapters: work.total_chapters != null ? Number(work.total_chapters) : null,
+                    observations: work.observations,
+                  }}
+                  currentCovers={(work.work_covers ?? []).map(
+                    (c: { url: string; source?: string | null; is_primary?: boolean }) => ({
+                      url: c.url,
+                      source: c.source,
+                      isPrimary: c.is_primary,
+                    })
+                  )}
                 />
               </div>
               {(() => {
@@ -926,6 +948,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 statusInitial={statusInitial}
                 latestAiEvaluation={postAttrAi}
                 existingAssessment={postAttrExisting}
+                tasteCriteria={tasteCriteria}
+                tasteScores={tasteScoresData.scores}
+                tasteEndingNa={tasteScoresData.endingNa}
               />
             </TabsContent>
 

@@ -9,6 +9,8 @@ import type { WorkStatusValues } from "@/lib/validations/work.schema"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { PersonalStatus, CriterionSlug } from "@/types/domain"
 import { submitPostReadingAttributes } from "@/server/actions/post-reading-attributes"
+import { PostTasteAssessment } from "@/components/pilot/post-taste-assessment"
+import type { TasteCriterion, TasteScoreKey } from "@/server/queries/pilot-taste"
 
 // Atributos pós-leitura aparecem quando a obra já tem leitura suficiente:
 // status terminal (Completed/Dropped) OU mais de 20% lido.
@@ -21,6 +23,12 @@ interface PostReadingFlowProps {
   statusInitial: WorkStatusValues
   latestAiEvaluation: PostAttributeAssessmentFormProps["latestAiEvaluation"]
   existingAssessment: PostAttributeAssessmentFormProps["existingAssessment"]
+  /** Critérios de gosto (criteria eval_type='Gosto') + notas já dadas à obra.
+   *  Opcionais: quando ausentes (ex.: dialog de status rápido), o card de gosto
+   *  não é renderizado. */
+  tasteCriteria?: TasteCriterion[]
+  tasteScores?: Record<TasteScoreKey, number | null>
+  tasteEndingNa?: boolean
   /** Id do `<form>` do status (default "work-status-form"). Use um id distinto
    *  quando houver outra instância montada ao mesmo tempo (ex.: aba + dialog). */
   formId?: string
@@ -42,6 +50,9 @@ export function PostReadingFlow({
   statusInitial,
   latestAiEvaluation,
   existingAssessment,
+  tasteCriteria = [],
+  tasteScores = {} as Record<TasteScoreKey, number | null>,
+  tasteEndingNa = false,
   formId = "work-status-form",
   onSaved,
 }: PostReadingFlowProps) {
@@ -107,10 +118,19 @@ export function PostReadingFlow({
         }
         extraDirty={attrDirty}
         showEvaluationCriteria={isVisible}
+        criteriaDefaultOpen={false}
         formId={formId}
         onSaved={onSaved}
         onStateChange={setFormState}
       />
+      {isVisible && tasteCriteria.length > 0 && (
+        <PostTasteAssessment
+          workId={workId}
+          criteria={tasteCriteria}
+          initialScores={tasteScores}
+          initialEndingNa={tasteEndingNa}
+        />
+      )}
       {isVisible && (
         <PostAttributeAssessmentForm
           workId={workId}
@@ -119,6 +139,7 @@ export function PostReadingFlow({
           value={hasEval ? attrValues : undefined}
           onChange={hasEval ? setAttrValues : undefined}
           hideOwnSave={hasEval}
+          defaultOpen={false}
         />
       )}
       {/* Botão Salvar no fim de tudo — submete o WorkStatusForm via form={formId}. */}

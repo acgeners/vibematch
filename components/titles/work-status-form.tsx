@@ -173,6 +173,10 @@ export interface WorkStatusFormProps {
    *  antiga (status != "Want to Read"). O PostReadingFlow passa a MESMA regra dos atributos
    *  pós-leitura (status terminal OU > 20% lido) pra alinhar as duas seções. */
   showEvaluationCriteria?: boolean
+  /** Estado inicial (aberto/fechado) da seção de critérios craft. Default aberto;
+   *  o PostReadingFlow passa `false` pra colapsar o craft por padrão (avaliação por
+   *  gosto virou a primária). */
+  criteriaDefaultOpen?: boolean
   /** Rótulo do botão de submit (default "Salvar"). */
   submitLabel?: string
   /** Quando definido, o `<form>` recebe esse id e o footer interno é omitido —
@@ -196,6 +200,7 @@ export function WorkStatusForm({
   extraSave,
   extraDirty = false,
   showEvaluationCriteria,
+  criteriaDefaultOpen,
   submitLabel,
   formId,
   onStateChange,
@@ -203,7 +208,7 @@ export function WorkStatusForm({
   const refresh = useRefresh()
   const [saving, setSaving] = useState(false)
   const [notesOpen, setNotesOpen] = useState(true)
-  const [criteriaOpen, setCriteriaOpen] = useState(true)
+  const [criteriaOpen, setCriteriaOpen] = useState(criteriaDefaultOpen ?? true)
   const [hoveredSynopsis, setHoveredSynopsis] = useState<string | null>(null)
   const [hoveredStatus, setHoveredStatus] = useState<string | null>(null)
 

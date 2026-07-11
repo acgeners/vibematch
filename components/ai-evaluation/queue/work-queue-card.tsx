@@ -56,6 +56,9 @@ export interface WorkQueueCardProps {
   headline?: ReactNode
   /** 1 chip de estado (linha 2, direita). */
   state?: WorkQueueState | null
+  /** Controle de rating do usuário (ex.: picker de Interesse) — na coluna de
+   *  info, logo abaixo do destaque da IA, pareando "IA sugere" com "seu ♥". */
+  rating?: ReactNode
 
   // Tier 3 (sob demanda).
   /** Conteúdo do "⋯ detalhes" (expandível). */
@@ -100,6 +103,7 @@ export function WorkQueueCard({
   showCounts = true,
   headline,
   state,
+  rating,
   details,
   showDetailsDirectly = false,
   actions,
@@ -235,6 +239,14 @@ export function WorkQueueCard({
               </div>
             )}
 
+            {/* Rating do usuário (ex.: picker de Interesse) — pareado com a
+                sugestão da IA acima, na coluna de info. */}
+            {rating && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                {rating}
+              </div>
+            )}
+
             {/* Tier 3: detalhes sob demanda */}
             {details && (
               <div className="mt-auto">
@@ -252,9 +264,11 @@ export function WorkQueueCard({
             )}
           </div>
 
-          {/* Trilho direito — ações agrupadas verticalmente no centro */}
+          {/* Trilho direito — ações centradas verticalmente. `pt-9` reserva a
+              faixa da pílula de nota (absoluta no canto sup-dir) pra os botões
+              nunca passarem por baixo dela. */}
           {actions && (
-            <div className="flex shrink-0 flex-col items-center justify-center gap-3 self-stretch min-h-[144px]">
+            <div className="flex shrink-0 flex-col items-center justify-center gap-3 self-stretch min-h-[144px] pt-9">
               <div className={cn("flex flex-col items-stretch gap-2", wideActions ? "w-36" : "w-28")}>{actions}</div>
             </div>
           )}
