@@ -25,6 +25,7 @@ import {
   markPredictionLabelChanged,
 } from "@/lib/server/predictions/resolve-prediction"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
+import { startUpdateJob, finishUpdateJob } from "@/lib/background/update-jobs"
 import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
@@ -1854,23 +1855,37 @@ export async function updateWorkExternalData(
 
     // Aquisição na BORDA: colhe + persiste reviews das fontes confirmadas agora
     // (opt-in — só o fluxo de "atualizar dados" pede; o enrich em massa NÃO, pra
-    // não scrapar N obras). Roda em background (`after()`) com os IDs já gravados
-    // acima, sem bloquear a resposta. A obra passa a exibir reviews na própria
-    // página no próximo load, sem esperar uma avaliação. Best-effort.
-    if (opts.acquireReviews) {
+    // não scrapar N obras) + enrich do Comix (capa/sinopse/rating) se um hid foi
+    // (re)vinculado. Roda em background (`after()`), sem bloquear a resposta. Como o
+    // Mangago é lento (~60s), registramos um JOB running→done (`update-jobs`, em
+    // memória) pra a página da obra dar feedback visual de que terminou
+    // (`UpdateProgressWatcher`) em vez de o usuário recarregar às cegas. Best-effort.
+    const needsComixEnrich = Boolean(updates.externalIds?.comix?.trim())
+    if (opts.acquireReviews || needsComixEnrich) {
+      startUpdateJob(id)
       after(async () => {
-        const { acquireAndPersistWorkReviews } = await import("@/lib/external/acquire-reviews")
-        await acquireAndPersistWorkReviews(id)
-      })
-    }
-
-    // Se um hid do Comix foi (re)vinculado, resolve os dados da Comix (capa/sinopse/
-    // rating) em background, reaquecendo o FlareSolverr se preciso e re-tentando —
-    // o "salva já + resolve depois" (dispensa o retry manual via /settings "Testar").
-    if (updates.externalIds?.comix?.trim()) {
-      after(async () => {
-        const { resolveComixDataResilient } = await import("@/server/actions/comix-resolver")
-        await resolveComixDataResilient(id)
+        let reviewsAdded: number | undefined
+        try {
+          const countReviews = async (): Promise<number> =>
+            (await supabase
+              .from("work_reviews")
+              .select("id", { count: "exact", head: true })
+              .eq("work_id", id)).count ?? 0
+          const before = opts.acquireReviews ? await countReviews() : 0
+          const tasks: Array<Promise<unknown>> = []
+          if (opts.acquireReviews) {
+            const { acquireAndPersistWorkReviews } = await import("@/lib/external/acquire-reviews")
+            tasks.push(acquireAndPersistWorkReviews(id))
+          }
+          if (needsComixEnrich) {
+            const { resolveComixDataResilient } = await import("@/server/actions/comix-resolver")
+            tasks.push(resolveComixDataResilient(id))
+          }
+          await Promise.allSettled(tasks)
+          if (opts.acquireReviews) reviewsAdded = Math.max(0, (await countReviews()) - before)
+        } finally {
+          finishUpdateJob(id, { reviewsAdded })
+        }
       })
     }
 
