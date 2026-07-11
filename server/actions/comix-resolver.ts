@@ -12,6 +12,7 @@ import { flareSolverrHealth, isFlareSolverrCircuitOpen } from "@/lib/external/fl
 import { getComixStatus } from "@/lib/external/comix-gate"
 import { ensureComixHid } from "@/server/actions/comix-hid"
 import { isComixRenderConfigured } from "@/lib/external/comix-render-client"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 const CACHE_DIR = path.join(process.cwd(), ".cache")
 const LOG_PATH = path.join(CACHE_DIR, "resolve-comix.log")
@@ -86,6 +87,8 @@ export async function getComixResolverStatus(): Promise<ResolverStatus & { logTa
  * (Mac) usa o Chrome do sistema; em prod precisa instalar o Chromium.
  */
 export async function startComixResolver(): Promise<{ ok: boolean; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
   const current = await readStatus()
   if (current.state === "running" && !isStaleRunning(current)) {
     return { ok: false, error: "O resolver já está em execução." }
@@ -632,6 +635,8 @@ export async function setComixHidManually(input: {
   workId: string
   hidOrUrl: string
 }): Promise<ComixManualResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
   const validated = await validateComixHid(input.hidOrUrl)
   if (!validated.ok || !validated.hid) return validated
 

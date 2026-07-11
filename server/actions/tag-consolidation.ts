@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { mergeIntoCanonical } from "@/lib/tag-consolidation/merge"
 import { slugifyTagName } from "@/lib/utils"
 import { TAG_GROUP_IDS, type TagGroupSlug } from "@/lib/constants/tag-groups"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 export type ProposalStatus = "pending" | "approved" | "rejected" | "applied"
 
@@ -76,6 +77,8 @@ export async function listProposals(
 }
 
 export async function approveProposal(id: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("tag_cluster_proposal")
@@ -91,6 +94,8 @@ export async function bulkSetProposalStatus(
   ids: string[],
   status: "approved" | "rejected" | "pending",
 ): Promise<{ updated: number; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { updated: 0, error: gate.error }
   if (ids.length === 0) return { updated: 0 }
   const supabase = createAdminClient()
   const fromStatuses =
@@ -117,6 +122,8 @@ export async function bulkSetProposalStatus(
 export async function bulkDeleteClusterProposals(
   ids: string[],
 ): Promise<{ deleted: number; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { deleted: 0, error: gate.error }
   if (ids.length === 0) return { deleted: 0 }
   const supabase = createAdminClient()
   const { data, error } = await supabase
@@ -134,6 +141,8 @@ export async function bulkDeleteClusterProposals(
 }
 
 export async function rejectProposal(id: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("tag_cluster_proposal")
@@ -146,6 +155,8 @@ export async function rejectProposal(id: string): Promise<{ error?: string }> {
 }
 
 export async function reopenProposal(id: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("tag_cluster_proposal")
@@ -161,6 +172,8 @@ export async function editProposal(
   id: string,
   patch: { canonical_name?: string; member_tag_ids?: string[] },
 ): Promise<{ error?: string; autoRejected?: boolean }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const updates: Record<string, unknown> = {}
   if (patch.canonical_name !== undefined) {
@@ -210,6 +223,8 @@ export interface ApplyResult {
 }
 
 export async function applyApprovedProposals(groupSlug?: string): Promise<ApplyResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { applied: 0, failed: 0, autoRejected: 0, errors: [gate.error], tagsRemoved: 0, workTagsRedirected: 0 }
   const supabase = createAdminClient()
   let query = supabase
     .from("tag_cluster_proposal")
@@ -350,6 +365,8 @@ export async function createManualCluster(input: {
   canonical_name: string
   member_tag_ids: string[]
 }): Promise<{ id?: string; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const groupId = (TAG_GROUP_IDS as Record<string, string>)[input.group_slug]
   if (!groupId) return { error: `grupo "${input.group_slug}" não encontrado` }
   const canonicalName = input.canonical_name.trim()
@@ -388,6 +405,8 @@ export async function moveTagBetweenProposals(
   fromProposalId: string,
   toProposalId: string,
 ): Promise<{ error?: string; sourceAutoRejected?: boolean }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   if (fromProposalId === toProposalId) return {}
   const supabase = createAdminClient()
 
@@ -465,6 +484,8 @@ export async function addTagToProposal(
   tagId: string,
   proposalId: string,
 ): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { data: prop, error: pErr } = await supabase
     .from("tag_cluster_proposal")
@@ -511,6 +532,8 @@ export async function moveTagToGroup(
   tagId: string,
   targetGroupSlug: string,
 ): Promise<{ error?: string; removedFromProposals?: number; autoRejectedProposals?: number }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
 
   const { data: group, error: groupErr } = await supabase
@@ -723,6 +746,8 @@ export async function listGroupMoveProposals(
 }
 
 export async function approveGroupMove(id: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("tag_group_move_proposal")
@@ -738,6 +763,8 @@ export async function bulkSetGroupMoveStatus(
   ids: string[],
   status: "approved" | "rejected" | "pending",
 ): Promise<{ updated: number; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { updated: 0, error: gate.error }
   if (ids.length === 0) return { updated: 0 }
   const supabase = createAdminClient()
   const fromStatuses =
@@ -764,6 +791,8 @@ export async function bulkSetGroupMoveStatus(
 export async function bulkDeleteGroupMoves(
   ids: string[],
 ): Promise<{ deleted: number; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { deleted: 0, error: gate.error }
   if (ids.length === 0) return { deleted: 0 }
   const supabase = createAdminClient()
   const { data, error } = await supabase
@@ -781,6 +810,8 @@ export async function bulkDeleteGroupMoves(
 }
 
 export async function rejectGroupMove(id: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("tag_group_move_proposal")
@@ -793,6 +824,8 @@ export async function rejectGroupMove(id: string): Promise<{ error?: string }> {
 }
 
 export async function reopenGroupMove(id: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("tag_group_move_proposal")
@@ -808,6 +841,8 @@ export async function editGroupMove(
   id: string,
   patch: { suggested_group_slug?: string },
 ): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   if (!patch.suggested_group_slug) return {}
   if (!(TAG_GROUP_IDS as Record<string, string>)[patch.suggested_group_slug]) {
     return { error: `Grupo "${patch.suggested_group_slug}" não existe.` }
@@ -830,6 +865,8 @@ export interface ApplyGroupMovesResult {
 }
 
 export async function applyApprovedGroupMoves(): Promise<ApplyGroupMovesResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { applied: 0, failed: 0, errors: [gate.error] }
   const supabase = createAdminClient()
   const { data: approved, error } = await supabase
     .from("tag_group_move_proposal")
@@ -871,6 +908,8 @@ export async function applyApprovedGroupMoves(): Promise<ApplyGroupMovesResult> 
 export async function deleteClusterProposal(
   id: string,
 ): Promise<{ ok?: true; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
 
   const { data: proposal, error: fetchErr } = await supabase

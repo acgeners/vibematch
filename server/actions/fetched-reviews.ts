@@ -11,6 +11,7 @@ import {
   ownershipError,
   type ExternalManualReviewActionResult,
 } from "@/lib/validations/external-review-action-result"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 /**
  * Server Action do EDITOR LOCAL para reviews BUSCADAS de fontes externas (`work_reviews`).
@@ -43,6 +44,9 @@ export async function deleteFetchedReview(
   reviewId: string,
   workId: string,
 ): Promise<ExternalManualReviewActionResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: "blocked", message: gate.error }
+
   const blocked = await runGate()
   if (blocked) return blocked
 

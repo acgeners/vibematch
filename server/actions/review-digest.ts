@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { ensureReviewDigest } from "@/lib/orchestration/integrations/reviews"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 export interface GenerateDigestResult {
   ok: boolean
@@ -22,6 +23,8 @@ export async function generateWorkReviewDigest(
   workId: string,
   opts: { force?: boolean } = {},
 ): Promise<GenerateDigestResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, status: "error", message: gate.error }
   if (!workId) return { ok: false, status: "error", message: "Obra inválida." }
 
   const outcome = await ensureReviewDigest(workId, { allowPaid: true, force: opts.force })

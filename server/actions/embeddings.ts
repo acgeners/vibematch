@@ -14,6 +14,7 @@ import {
 } from "@/lib/ml/embeddings"
 import { pickPrimarySynopsis } from "@/lib/work-derived"
 import { buildReviewContext } from "@/lib/tags/infer-from-text"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 const QUERY_LIMIT = 2000
 
@@ -163,6 +164,8 @@ export async function countStaleEmbeddings(): Promise<EmbeddingsPendingCount> {
  * OU `model_name` mudou.
  */
 export async function refreshEmbeddings(): Promise<RefreshEmbeddingsResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   const supabase = createAdminClient()
   const { totalWorks, skipped, candidates } = await loadEmbeddingCandidates()
 

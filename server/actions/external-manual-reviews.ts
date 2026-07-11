@@ -15,6 +15,7 @@ import {
   ownershipError,
   type ExternalManualReviewActionResult,
 } from "@/lib/validations/external-review-action-result"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 /**
  * Server Actions do EDITOR LOCAL de reviews externas manuais (Plano 3 B2.2M §4).
@@ -81,6 +82,9 @@ export async function createExternalManualReview(
   workId: string,
   rawInput: unknown,
 ): Promise<ExternalManualReviewActionResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: "blocked", message: gate.error }
+
   const blocked = await runGate()
   if (blocked) return blocked
 
@@ -109,6 +113,9 @@ export async function updateExternalManualReview(
   workId: string,
   rawInput: unknown,
 ): Promise<ExternalManualReviewActionResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: "blocked", message: gate.error }
+
   const blocked = await runGate()
   if (blocked) return blocked
 
@@ -152,6 +159,9 @@ export async function deleteExternalManualReview(
   reviewId: string,
   workId: string,
 ): Promise<ExternalManualReviewActionResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: "blocked", message: gate.error }
+
   const blocked = await runGate()
   if (blocked) return blocked
 

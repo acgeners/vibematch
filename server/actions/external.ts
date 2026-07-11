@@ -21,6 +21,7 @@ import type { CriterionSlug } from "@/types/domain"
 import { revalidatePath } from "next/cache"
 import { pickPrimaryCover } from "@/lib/work-derived"
 import { isBlockedCoverUrl } from "@/lib/external/blocked-covers"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 export interface TagCatalogItem {
   id: string
@@ -326,6 +327,8 @@ export async function evaluateCandidateForCreate(input: {
    */
   proceedWithoutReviews?: boolean
 }): Promise<CandidateAiResult | CandidateAiNeedsReviewConfirmation> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   // Descoberta do hid da Comix no create (sidecar): a Comix não entra na busca
   // multi-fonte (token-gated), então sem isto a avaliação de criação NUNCA usa
   // reviews da Comix. Resolve por cross-ID e injeta o hid pra o caminho candidate
@@ -556,6 +559,8 @@ function borrowCover(key: string, index: CoverBorrowIndex): string | null {
  * as seleções atuais via work_external_ids.
  */
 export async function revalidateWorkSources(workId: string): Promise<{ data?: RevalidateSourcesResult; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
 
   const { data: work, error: workError } = await supabase
@@ -869,6 +874,8 @@ export async function saveWorkSourceSelections(
   workId: string,
   selections: SourceSelectionInput[]
 ): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
 
   const rowsToUpsert = selections.map((s) => ({

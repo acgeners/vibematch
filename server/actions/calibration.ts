@@ -24,6 +24,7 @@ import type {
   SuggestionRow,
 } from "@/lib/ai-calibration/types"
 import type { ScoreSource } from "@/types/domain"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 // 10 obras/chunk: o modelo emite um objeto audits[] por inconsistência (com
 // justification em PT), e 40 obras estouravam o teto de max_tokens da saída —
@@ -83,6 +84,8 @@ export async function runCalibrationAuditAction(): Promise<{
   data?: RunAuditResult
   error?: string
 }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const tasteProfile = await loadCurrentTasteProfile()
 
@@ -273,6 +276,8 @@ export async function runBiasReportAction(): Promise<{
   data?: CalibrationRunRow
   error?: string
 }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const tasteProfile = await loadCurrentTasteProfile()
 
@@ -406,6 +411,8 @@ async function applySuggestionWithConflictCheck(
 }
 
 export async function acceptSuggestionAction(id: string): Promise<{ ok: boolean; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
   const supabase = createAdminClient()
   const { data: sug, error } = await supabase
     .from("score_calibration_suggestions")
@@ -425,6 +432,8 @@ export async function editSuggestionAction(
   id: string,
   score: number,
 ): Promise<{ ok: boolean; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
   if (!Number.isFinite(score) || score < 0 || score > 10) {
     return { ok: false, error: "Score precisa estar entre 0 e 10." }
   }
@@ -436,6 +445,8 @@ export async function editSuggestionAction(
 }
 
 export async function rejectSuggestionAction(id: string): Promise<{ ok: boolean; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("score_calibration_suggestions")
@@ -451,6 +462,8 @@ export async function rejectSuggestionAction(id: string): Promise<{ ok: boolean;
 }
 
 export async function revertSuggestionAction(id: string): Promise<{ ok: boolean; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
   const supabase = createAdminClient()
   const { data: sug, error } = await supabase
     .from("score_calibration_suggestions")
@@ -493,6 +506,8 @@ export async function bulkAcceptAction(args: {
   /** Restringe a um critério (espelha o filtro "Critério" da UI). */
   criterionSlug?: string
 }): Promise<{ accepted: number; failed: number; errors: string[] }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { accepted: 0, failed: 0, errors: [gate.error] }
   const supabase = createAdminClient()
   let query = supabase
     .from("score_calibration_suggestions")
@@ -548,6 +563,8 @@ export async function bulkAcceptAction(args: {
 export async function bulkAcceptByIdsAction(
   ids: string[],
 ): Promise<{ accepted: number; failed: number; errors: string[] }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { accepted: 0, failed: 0, errors: [gate.error] }
   if (ids.length === 0) return { accepted: 0, failed: 0, errors: [] }
   const supabase = createAdminClient()
   const { data, error } = await supabase
@@ -591,6 +608,8 @@ export async function bulkAcceptByIdsAction(
 export async function bulkRejectByIdsAction(
   ids: string[],
 ): Promise<{ rejected: number; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { rejected: 0, error: gate.error }
   if (ids.length === 0) return { rejected: 0 }
   const supabase = createAdminClient()
   const { data, error } = await supabase

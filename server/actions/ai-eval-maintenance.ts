@@ -5,6 +5,7 @@ import { acquireAndPersistWorkReviews } from "@/lib/external/acquire-reviews"
 import { inferAndPersistTagsForWork } from "@/lib/tags/auto-infer"
 import { generateWorkReviewDigest } from "@/server/actions/review-digest"
 import { markRecalcPending } from "@/server/actions/recalc-queue"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 // Tetos por execução (re-rode pra processar mais). Reviews é caro/lento
 // (scraping + digest Sonnet por obra) → teto menor; tags é Haiku rápido.
@@ -25,6 +26,8 @@ export interface AcquireReviewsResult {
  * aceitos. Clique deliberado ⇒ custo pré-autorizado (digest Sonnet ~$0,02–0,05).
  */
 export async function acquireReviewsForWork(workId: string): Promise<AcquireReviewsResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, reviews: 0, digest: "error", message: gate.error }
   if (!workId) return { ok: false, reviews: 0, digest: "error", message: "Obra inválida." }
   const reviews = await acquireAndPersistWorkReviews(workId)
   // O save já dispara o digest (fire-and-forget); chamamos aqui pra AGUARDAR e
@@ -45,6 +48,8 @@ export interface AcquireReviewsBatchResult {
 
 /** Lote de aquisição de reviews + digest (sequencial, teto REVIEWS_BATCH_CAP). */
 export async function acquireReviewsForWorks(workIds: string[]): Promise<AcquireReviewsBatchResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   const ids = (workIds ?? []).slice(0, REVIEWS_BATCH_CAP)
   let processed = 0
   let reviews = 0
@@ -78,6 +83,8 @@ export interface InferTagsResult {
  * adicionou — as features de tag entram nas notas no próximo recalc.
  */
 export async function inferTagsForWork(workId: string): Promise<InferTagsResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, added: 0, message: gate.error }
   if (!workId) return { ok: false, added: 0, message: "Obra inválida." }
   const added = await inferAndPersistTagsForWork(workId)
   if (added > 0) await markRecalcPending("infer_tags_ai_eval")
@@ -95,6 +102,8 @@ export interface InferTagsBatchResult {
 
 /** Lote de inferência de tags (sequencial, teto TAGS_BATCH_CAP). */
 export async function inferTagsForWorks(workIds: string[]): Promise<InferTagsBatchResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   const ids = (workIds ?? []).slice(0, TAGS_BATCH_CAP)
   let processed = 0
   let added = 0

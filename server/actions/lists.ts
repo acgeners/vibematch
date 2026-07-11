@@ -44,6 +44,8 @@ function cleanCoverIds(ids: string[] | undefined | null): string[] {
 }
 
 export async function createWorkList(input: WorkListInput): Promise<ActionResult<{ id: string }>> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const name = cleanName(input.name ?? "")
   if (!name) return { error: "Dê um nome ao grupo." }
 
@@ -68,6 +70,8 @@ export async function updateWorkList(
   id: string,
   input: WorkListInput,
 ): Promise<ActionResult<null>> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const name = cleanName(input.name ?? "")
   if (!name) return { error: "Dê um nome ao grupo." }
 
@@ -131,6 +135,8 @@ export async function removeWorksFromList(
   listId: string,
   workIds: string[],
 ): Promise<ActionResult<{ count: number }>> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const ids = Array.from(new Set(workIds.filter(Boolean)))
   if (ids.length === 0) return { data: { count: 0 } }
 
@@ -166,6 +172,8 @@ export async function addListComment(
   listId: string,
   text: string,
 ): Promise<ActionResult<{ id: string }>> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const trimmed = text.trim()
   if (!trimmed) return { error: "Escreva algo no comentário." }
 
@@ -192,6 +200,8 @@ export async function deleteListComment(
   listId: string,
   commentId: string,
 ): Promise<ActionResult<null>> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const comments = await readComments(supabase, listId)
   if (comments == null) return { error: "Grupo não encontrado." }
@@ -216,6 +226,8 @@ export async function recommendGroup(
   listId: string,
   opts?: { userContext?: string | null; n?: number },
 ): Promise<ActionResult<{ slug: string }>> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { data: items, error: itemsErr } = await supabase
     .from("work_list_items")
@@ -267,6 +279,8 @@ function flattenNames(rel: unknown): string[] {
 export async function proposeFavoriteGroups(
   n: number,
 ): Promise<ActionResult<{ groups: ProposedGroup[] }>> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("works")
@@ -309,6 +323,8 @@ export async function createGroupFromProposal(input: {
   color?: string | null
   workIds: string[]
 }): Promise<ActionResult<{ id: string }>> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const created = await createWorkList({
     name: input.name,
     description: input.description ?? null,

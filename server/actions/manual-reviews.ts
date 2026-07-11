@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { pickPrimarySynopsis } from "@/lib/work-derived"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 /**
  * Carrega a sinopse primária editável da avaliação IA (a que a IA lê via
@@ -30,6 +31,8 @@ export async function updatePrimarySynopsis(
   workId: string,
   rawText: string,
 ): Promise<{ error: string | null }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   if (!workId) return { error: "Obra inválida" }
   const supabase = createAdminClient()
   const text = (rawText ?? "").trim()

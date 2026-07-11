@@ -25,6 +25,7 @@ import type {
   GenerateAllResult,
   GenerateAllOpts,
 } from "@/lib/generate-all/types"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 // ---- Estado por-obra (works.cascade_status) --------------------------------
 
@@ -115,6 +116,8 @@ export async function generateAllWorkData(
   workId: string,
   opts: GenerateAllOpts = {},
 ): Promise<GenerateAllResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { status: "failed", failed: "input", error: gate.error }
   if (!workId) return { status: "failed", failed: "input", error: "workId ausente" }
 
   // ---------------- FASE 0 (grátis) — checkpoint antes de gastar ----------------
