@@ -1226,11 +1226,13 @@ function RankingCardsView({
   scoreThresholds: ColumnThresholds | null
 }) {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-      {entries.map((entry) => (
-        <RankingCard key={entry.workId} entry={entry} scoreThresholds={scoreThresholds} />
-      ))}
-    </div>
+    <TooltipProvider delayDuration={300}>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {entries.map((entry) => (
+          <RankingCard key={entry.workId} entry={entry} scoreThresholds={scoreThresholds} />
+        ))}
+      </div>
+    </TooltipProvider>
   )
 }
 
@@ -1296,8 +1298,9 @@ function RankingCard({
 }) {
   const slug = titleToSlug(entry.title)
   const isTop3 = entry.rank <= 3
+  const synopsis = entry.synopsis?.trim()
 
-  return (
+  const card = (
     <div
       className={cn(
         "group relative flex overflow-hidden rounded-xl border bg-card shadow-sm transition-all",
@@ -1372,6 +1375,22 @@ function RankingCard({
         <CardScores entry={entry} scoreThresholds={scoreThresholds} />
       </div>
     </div>
+  )
+
+  // Sem sinopse → card puro (sem trigger de tooltip vazia).
+  if (!synopsis) return card
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{card}</TooltipTrigger>
+      <TooltipContent
+        side="top"
+        align="start"
+        className="max-w-sm whitespace-normal text-left text-[12.5px] leading-snug [text-wrap:normal]"
+      >
+        <p className="line-clamp-[12]">{synopsis}</p>
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
