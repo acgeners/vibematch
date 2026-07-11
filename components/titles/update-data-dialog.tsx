@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog"
 import { ExternalSearch } from "@/components/titles/external-search"
 import { SourceSelectionStep } from "@/components/titles/source-selection-step"
+import { WORK_UPDATED_EVENT } from "@/components/titles/update-progress-watcher"
 import { fetchComicKClient, fetchAnimePlanetClient } from "@/lib/external/client-fetches"
 import { updateWorkExternalData, refreshWorkExternalData } from "@/server/actions/works"
 import { getCoverImageSrc } from "@/lib/image-proxy"
@@ -605,6 +606,15 @@ export function UpdateDataDialog({
     }
 
     toast.success("Dados atualizados com sucesso.")
+    // Sinaliza pro UpdateProgressWatcher (na página da obra) que a aquisição de
+    // reviews + enrich do Comix vai rodar em background — ele mostra o progresso e
+    // avisa quando terminar. O flag (escopado por workId) cobre o caso de re-mount
+    // (navegar pro slug novo); o evento acorda o watcher já montado quando o pós-save
+    // é só refresh() na mesma página (que não re-monta o componente).
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem(`vibematch:updating:${workId}`, String(Date.now()))
+      window.dispatchEvent(new CustomEvent(WORK_UPDATED_EVENT, { detail: { workId } }))
+    }
     setOpen(false)
     setPhase(withSourceStep ? "sources" : "refreshing")
     // Quando o caller trata o pós-save (ex.: abrir a obra em outra aba), não
