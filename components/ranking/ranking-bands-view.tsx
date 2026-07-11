@@ -34,10 +34,26 @@ function priorityLabel(tier: number): string {
   return PRIORITY_LABELS[Math.min(Math.max(tier - 1, 0), PRIORITY_LABELS.length - 1)]
 }
 
-/** personal_fit_percentile (0–100, maior = mais afinidade) → "Top X%". */
+/** personal_fit_percentile (0–100, maior = mais afinidade) → "Top X%" (menor = elite).
+ *  Usado só no tooltip; o rótulo visível é a faixa qualitativa (não inverte a leitura). */
 function topPct(percentile: number | null): number | null {
   if (percentile == null) return null
   return Math.min(100, Math.max(1, Math.round(100 - percentile)))
+}
+
+/** personal_fit_percentile (0–100) → faixa qualitativa. Cresce no MESMO sentido da
+ *  barra (maior percentil = mais afinidade = faixa mais alta), evitando o conflito
+ *  do "Top X%" (onde menor = melhor) com a barra (onde maior = mais cheia). */
+const AFFINITY_TIERS = [
+  { min: 80, label: "Muito alta" },
+  { min: 60, label: "Alta" },
+  { min: 40, label: "Média" },
+  { min: 20, label: "Baixa" },
+  { min: 0, label: "Muito baixa" },
+] as const
+function affinityTier(percentile: number | null): string | null {
+  if (percentile == null) return null
+  return (AFFINITY_TIERS.find((t) => percentile >= t.min) ?? AFFINITY_TIERS[AFFINITY_TIERS.length - 1]).label
 }
 
 interface BandGroup {
@@ -119,6 +135,7 @@ export function RankingBandsView({
               {/* linhas da faixa */}
               {g.items.map(({ entry }) => {
                 const tx = topPct(entry.personalFitPercentile)
+                const tierLabel = affinityTier(entry.personalFitPercentile)
                 const barWidth =
                   entry.personalFitPercentile != null
                     ? Math.max(3, Math.min(100, Math.round(entry.personalFitPercentile)))
@@ -156,14 +173,16 @@ export function RankingBandsView({
                       </span>
                     </Link>
 
-                    {/* afinidade por tags (percentil relativo) */}
+                    {/* afinidade por tags (faixa qualitativa; percentil no tooltip) */}
                     <span className="w-36 shrink-0 sm:w-44">
-                      {tx != null ? (
+                      {tierLabel != null ? (
                         <span
                           className="inline-flex items-center gap-2"
-                          title="Percentil de afinidade por tags no acervo exibido (relativo — não é qualidade da obra)."
+                          title={`Afinidade por tags: ${tierLabel} — percentil ${Math.round(
+                            entry.personalFitPercentile ?? 0,
+                          )} no acervo exibido (top ${tx}%). Relativo ao seu perfil de gosto, não é qualidade da obra.`}
                         >
-                          <span className="text-xs font-semibold tabular-nums">Top {tx}%</span>
+                          <span className="w-20 shrink-0 text-xs font-semibold text-foreground">{tierLabel}</span>
                           <span className="h-1.5 w-12 overflow-hidden rounded-full bg-foreground/10">
                             <span
                               className="block h-full rounded-full bg-primary"
