@@ -264,20 +264,26 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
             </>
           )
 
-          const actions = (
+          // Rating manual do usuário — pareado com a sugestão da IA na coluna de
+          // info (slot `rating` do card), fora do trilho de ações.
+          const rating = (
             <>
-              <div className="flex flex-col items-end gap-0.5">
-                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Interesse</span>
-                <SynopsisQualityPicker workId={w.id} value={w.manualSynopsisQuality} />
-              </div>
-              <PredictSynopsisRowActions
-                workId={w.id}
-                hasPrediction={w.predictedQuality != null}
-                alreadyApplied={alreadyApplied}
-                readiness={w.readiness}
-                isPaid={isPaid}
-              />
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Seu interesse
+              </span>
+              <SynopsisQualityPicker workId={w.id} value={w.manualSynopsisQuality} />
             </>
+          )
+
+          // Trilho direito — só ações (Prever/Aplicar/Pular + gate).
+          const actions = (
+            <PredictSynopsisRowActions
+              workId={w.id}
+              hasPrediction={w.predictedQuality != null}
+              alreadyApplied={alreadyApplied}
+              readiness={w.readiness}
+              isPaid={isPaid}
+            />
           )
 
           return (
@@ -293,6 +299,7 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
               reviewCount={w.reviewCount}
               headline={headline}
               state={state}
+              rating={rating}
               details={details}
               showDetailsDirectly
               actions={actions}
