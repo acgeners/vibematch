@@ -221,3 +221,15 @@ export interface ExternalMergeDebug {
   rejectedSources: ExternalSourceDebug[]
   mergedSynopses: Array<{ source: ExternalSourceId; text: string }>
 }
+
+/**
+ * Saúde observada de uma fonte externa (`external_source_health`), como a UI lê.
+ * Mora AQUI, e não no `source-health-store`, porque aquele módulo é `server-only`
+ * — um componente cliente que importasse o tipo de lá arrastaria o guard pro
+ * bundle do browser.
+ */
+export interface SourceHealthRow {
+  status: string
+  failReason: string | null
+  lastOkAt: string | null
+}

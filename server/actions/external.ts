@@ -16,7 +16,8 @@ import { boolEnv } from "@/lib/external/mangago-band"
 import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
 import { SONNET_MODEL } from "@/lib/ai/models"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
-import type { ExternalSourceId, MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField, SourcedReview, ExternalSearchResult } from "@/lib/external/types"
+import { getSourcesHealth } from "@/lib/external/source-health-store"
+import type { ExternalSourceId, MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField, SourcedReview, ExternalSearchResult, SourceHealthRow } from "@/lib/external/types"
 import type { CriterionSlug } from "@/types/domain"
 import { revalidatePath } from "next/cache"
 import { pickPrimaryCover } from "@/lib/work-derived"
@@ -444,6 +445,12 @@ export interface RevalidateSourcesResult {
   query: string
   candidatesPerSource: Partial<Record<ExternalSourceId, SourceCandidateOption[]>>
   currentSelections: CurrentSourceSelection[]
+  /**
+   * Saúde observada por fonte (`external_source_health`). Sem isto, "a fonte está
+   * fora" e "a obra não existe nessa fonte" chegam na UI como a MESMA coisa — zero
+   * candidato — e o usuário rejeita a fonte por causa de uma queda passageira.
+   */
+  sourceHealth: Record<string, SourceHealthRow>
 }
 
 export interface SourceSelectionInput {
@@ -879,6 +886,7 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
       query: primaryQuery,
       candidatesPerSource,
       currentSelections,
+      sourceHealth: await getSourcesHealth(),
     },
   }
 }

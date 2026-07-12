@@ -11,6 +11,7 @@ import {
   type SourceSelectionInput,
 } from "@/server/actions/external"
 import { setComixHidManually, isComixAutoResolveAvailable } from "@/server/actions/comix-resolver"
+import type { SourceHealthRow } from "@/lib/external/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getCoverImageSrc } from "@/lib/image-proxy"
@@ -55,6 +56,8 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
     Partial<Record<ExternalSourceId, SourceCandidateOption[]>>
   >({})
   const [selection, setSelection] = useState<Partial<Record<ExternalSourceId, SelectionValue>>>({})
+  // Saúde por fonte (`external_source_health`) — distingue "fonte fora" de "sem match".
+  const [sourceHealth, setSourceHealth] = useState<Record<string, SourceHealthRow>>({})
   const [brokenCovers, setBrokenCovers] = useState<Set<string>>(new Set())
   const [manualHid, setManualHid] = useState("")
   const [savingManual, setSavingManual] = useState(false)
@@ -82,6 +85,7 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
         }
         setQuery(result.data.query)
         setCandidatesPerSource(result.data.candidatesPerSource)
+        setSourceHealth(result.data.sourceHealth ?? {})
         const initialSelection: Partial<Record<ExternalSourceId, SelectionValue>> = {}
         const allSourceIds = new Set<ExternalSourceId>([
           ...(Object.keys(result.data.candidatesPerSource) as ExternalSourceId[]),
@@ -201,9 +205,32 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
       {allSourceIds.map((source) => {
         const candidates = candidatesPerSource[source] ?? []
         const value = selection[source] ?? "none"
+        // Fonte FORA ≠ obra sem match. Sem esta distinção, zero candidato por queda
+        // de infra parece "a obra não existe aqui" e o usuário rejeita a fonte — uma
+        // rejeição gravada por causa de um 504. Sem candidato E sem ação possível:
+        // mostramos só o aviso, sem opções (não há o que decidir enquanto está fora).
+        const health = sourceHealth[source]
+        const isDown = candidates.length === 0 && health?.status === "down"
         return (
           <div key={source} className="rounded-md border p-3 space-y-2">
             <p className="text-sm font-medium">{SOURCE_LABEL[source] ?? source}</p>
+            {isDown ? (
+              <div className="space-y-0.5 rounded-md bg-amber-500/10 p-2.5 ring-1 ring-amber-500/40">
+                <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                  A fonte não respondeu — não é ausência de match.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {health?.failReason ? `A fonte devolveu ${health.failReason}. ` : ""}
+                  Não dá pra concluir nada sobre esta obra enquanto ela estiver fora.
+                </p>
+                {health?.lastOkAt && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Último sucesso: {new Date(health.lastOkAt).toLocaleString("pt-BR")}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <>
             {candidates.length === 0 ? (
               <p className="text-xs italic text-muted-foreground">Nenhum match encontrado nessa fonte.</p>
             ) : (
@@ -288,6 +315,8 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
               />
               <span className="text-xs">Não decidir agora</span>
             </label>
+              </>
+            )}
 
             {source === "comix" && !comixAutoResolve && (
               <div className="mt-1 space-y-1.5 rounded-md border border-dashed border-border p-2">
