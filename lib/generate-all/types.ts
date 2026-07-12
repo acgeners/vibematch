@@ -16,7 +16,6 @@ export type CascadeStatus =
   | "failed"
 
 export interface SourcesHealth {
-  flaresolverr: boolean
   comix: boolean
   comick: boolean
   confirmed: boolean

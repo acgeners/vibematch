@@ -8,7 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchComixById, fetchComixReviews } from "@/lib/external/comix"
 import { extractComixHid } from "@/lib/external/comix-hid"
 import { isBlockedCoverUrl, recordCoverUrlResult } from "@/lib/external/blocked-covers"
-import { flareSolverrHealth, isFlareSolverrCircuitOpen } from "@/lib/external/flaresolverr"
+import { flareSolverrHealth } from "@/lib/external/flaresolverr"
 import { getComixStatus } from "@/lib/external/comix-gate"
 import { ensureComixHid } from "@/server/actions/comix-hid"
 import { isComixRenderConfigured } from "@/lib/external/comix-render-client"
@@ -438,7 +438,7 @@ export async function ensureComixReady(
   const max = Math.max(1, opts?.maxAttempts ?? 6)
   for (let attempt = 1; attempt <= max; attempt++) {
     if (getComixStatus().state === "ok") return { ok: true, attempts: attempt }
-    await checkComixHealth().catch(() => {}) // reaquece FlareSolverr + sessão "comix"
+    await checkComixHealth().catch(() => {}) // canário move o gate (recordComixOk/Failure)
     if (getComixStatus().state === "ok") return { ok: true, attempts: attempt }
     if (attempt < max) {
       await sleep(COMIX_WARM_BACKOFF_MS[Math.min(attempt - 1, COMIX_WARM_BACKOFF_MS.length - 1)])
@@ -503,12 +503,12 @@ export async function validateComixHid(hidOrUrl: string): Promise<ComixManualRes
 
   const detail = await fetchComixById(hid)
   if (!detail || !detail.title) {
-    // Não resolveu. É hid errado ou a infra da Comix (FlareSolverr) está fora?
-    // Se a infra está fora, aceita OTIMISTA (formato do hid é válido) — os dados
-    // vêm no enrich resiliente em background. Se a infra está OK, é hid errado.
-    const fsHealthy = !isFlareSolverrCircuitOpen() && (await flareSolverrHealth()).ok
-    const infraDown = !fsHealthy || getComixStatus().state === "down"
-    if (infraDown) {
+    // Não resolveu. É hid errado ou a Comix está fora?
+    // O sinal é o da PRÓPRIA Comix (`comix-gate`), não o do FlareSolverr — que é
+    // fallback legado. Enquanto `infraDown` também olhava o FS, com o FS parado
+    // (a configuração normal hoje) ele era SEMPRE true: todo hid errado voltava
+    // como "pending" e o usuário nunca via o erro. O ramo de erro estava morto.
+    if (getComixStatus().state === "down") {
       return { ok: true, hid, pending: true }
     }
     return { ok: false, error: `O hid "${hid}" não resolve na Comix. Confira o hid/URL.` }
@@ -552,35 +552,32 @@ interface ComixHealthResult {
 
 /**
  * Diagnóstico da Comix SEM precisar testar numa obra: roda um canário (hid fixo) por
- * todas as superfícies que a app usa — FlareSolverr (dependência), detalhe (SSR solve),
- * reviews (cadeia de threads) e imagem (CDN static.comix.to). A 1ª chamada paga o solve
- * frio do Cloudflare (~11s) e aquece a sessão `comix`; as seguintes ficam rápidas.
- * Se o FlareSolverr estiver fora, pula detalhe/reviews (falhariam) e retorna rápido.
+ * todas as superfícies que a app usa — detalhe (SSR), reviews (cadeia de threads) e
+ * imagem (CDN static.comix.to).
+ *
+ * O FlareSolverr entra só como linha INFORMATIVA: a Comix responde em texto puro
+ * (o detector de Cloudflare dava falso positivo em `challenge-platform`, que é script
+ * passivo), então ele é fallback legado, NÃO dependência. Antes, um FS fora
+ * curto-circuitava o diagnóstico inteiro e reprovava detalhe/reviews sem testá-los —
+ * o que dava "Comix fora" com a Comix funcionando, e travava `ensureComixReady`
+ * (que usa este probe pra mover o gate) e, por tabela, a cascata do "Gerar tudo".
  */
 export async function checkComixHealth(): Promise<ComixHealthResult> {
   const checks: ComixHealthCheck[] = []
   const checkedAt = new Date().toISOString()
 
-  // 1. FlareSolverr — dependência de tudo (toda call da Comix passa por ele agora).
+  // 1. FlareSolverr — informativo. `ok: true` sempre: nesta tela a pergunta é "a Comix
+  //    está de pé?", e a resposta não depende dele. Um FS fora não reprova o canário.
   const fs = await flareSolverrHealth()
   checks.push({
-    ok: fs.ok,
+    ok: true,
     label: "FlareSolverr",
     detail: fs.ok
-      ? `v${fs.version ?? "?"} · sessões: ${fs.sessions?.length ? fs.sessions.join(", ") : "nenhuma"}`
-      : (fs.error ?? "indisponível"),
+      ? `fallback ativo · v${fs.version ?? "?"} · sessões: ${fs.sessions?.length ? fs.sessions.join(", ") : "nenhuma"}`
+      : `fallback fora — não é dependência da Comix (${fs.error ?? "indisponível"})`,
   })
 
-  // FlareSolverr fora → detalhe/reviews falhariam (e demorariam ~25s cada no abort).
-  // Pula pra dar um diagnóstico rápido e claro.
-  if (!fs.ok) {
-    checks.push({ ok: false, label: "Detalhe (SSR)", detail: "pulado — FlareSolverr fora" })
-    checks.push({ ok: false, label: "Reviews (threads)", detail: "pulado — FlareSolverr fora" })
-    checks.push({ ok: false, label: "Imagem (CDN)", detail: "não testado — depende do detalhe" })
-    return { checks, checkedAt }
-  }
-
-  // 2. Detalhe (SSR solve) — porta de entrada de tudo (reviews também começam por aqui).
+  // 2. Detalhe (SSR) — porta de entrada de tudo (reviews também começam por aqui).
   const t1 = Date.now()
   const detail = await fetchComixById(COMIX_CANARY_HID)
   checks.push({

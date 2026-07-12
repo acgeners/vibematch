@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureComixReady, resolveComixDataResilient } from "@/server/actions/comix-resolver"
 import { ensureComicKReady } from "@/lib/external/comick-health"
-import { flareSolverrHealth } from "@/lib/external/flaresolverr"
 import { acquireAndPersistWorkReviews } from "@/lib/external/acquire-reviews"
 import { countWorkReviews } from "@/server/queries/work-reviews"
 import { consolidateSynopsisForWork } from "@/lib/ai-recommendation/consolidate-for-work"
@@ -41,19 +40,19 @@ async function setCascadeStatus(workId: string, status: CascadeStatus): Promise<
 
 /**
  * Gate de fontes de review: garante Comix E ComicK saudáveis via canário ativo
- * (bounded, ~3 min cada, em paralelo). Ambos dependem do FlareSolverr; o ComicK
- * engole falha de infra em vazio, então o canário é o único jeito de pegar a
- * queda silenciosa. `confirmed = comix && comick`.
+ * (bounded, ~3 min cada, em paralelo). O ComicK engole falha de infra em vazio,
+ * então o canário é o único jeito de pegar a queda silenciosa.
+ * `confirmed = comix && comick`.
+ *
+ * A saúde do FlareSolverr NÃO entra aqui: ele é fallback legado (a Comix responde
+ * em texto puro) e o campo `flaresolverr` do `SourcesHealth` não era lido por
+ * ninguém — era uma chamada de rede paga a cada cascata pra alimentar um campo morto.
  */
 async function ensureReviewSourcesReady(): Promise<SourcesHealth> {
-  const [comixReady, comickReady, fs] = await Promise.all([
-    ensureComixReady(),
-    ensureComicKReady(),
-    flareSolverrHealth().catch(() => ({ ok: false })),
-  ])
+  const [comixReady, comickReady] = await Promise.all([ensureComixReady(), ensureComicKReady()])
   const comix = comixReady.ok
   const comick = comickReady.ok
-  return { flaresolverr: !!fs.ok, comix, comick, confirmed: comix && comick }
+  return { comix, comick, confirmed: comix && comick }
 }
 
 async function hasComixHid(workId: string): Promise<boolean> {

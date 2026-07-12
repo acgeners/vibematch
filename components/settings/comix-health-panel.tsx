@@ -45,9 +45,9 @@ export function ComixHealthPanel({ accent }: { accent: SettingsAccent }) {
     <div className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <p className="text-sm text-muted-foreground">
-          Roda um canário (hid fixo) por todas as superfícies da Comix — FlareSolverr, detalhe
-          (SSR), reviews (threads) e imagem (CDN) — sem precisar abrir uma obra. A 1ª chamada paga o
-          solve frio do Cloudflare (~11s) e aquece a sessão; depois fica rápido.
+          Roda um canário (hid fixo) por todas as superfícies da Comix — detalhe (SSR), reviews
+          (threads) e imagem (CDN) — sem precisar abrir uma obra. O FlareSolverr aparece só como
+          informação: ele é fallback legado, e a Comix não depende dele.
         </p>
         <div className="flex flex-col items-end gap-1">
           <Button type="button" onClick={run} disabled={pending} className={ACCENT_BUTTON[accent]}>
