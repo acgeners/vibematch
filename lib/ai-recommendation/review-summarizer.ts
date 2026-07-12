@@ -3,6 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk"
 import { createHash } from "node:crypto"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { SONNET_MODEL } from "@/lib/ai/models"
+import { hasLeakedMarkup, sanitizeReviewText } from "./digest-integrity"
 import type { ReviewDigest, ReviewDigestTrait } from "./types"
 
 export const REVIEW_SUMMARIZER_MODEL = "claude-haiku-4-5-20251001"
@@ -201,6 +202,10 @@ export const REVIEW_DIGEST_VERSION = "digest-v1"
 const DIGEST_TOTAL_CAP = 40
 const DIGEST_PER_SOURCE_CAP = 8
 const DIGEST_MAX_CHARS_PER_REVIEW = 1200
+// 2000 era exatamente o orçamento estimado em contracts.ts — truncar era rotina, e
+// resposta truncada = tool-call meio-serializado (a origem do texto vazado).
+const DIGEST_MAX_TOKENS = 3000
+const DIGEST_MAX_ATTEMPTS = 2
 
 export interface ReviewDigestInput {
   text: string
@@ -293,8 +298,25 @@ function sampleStratifiedBySource(reviews: ReviewDigestInput[]): ReviewDigestInp
   return out
 }
 
-function coerceDigest(input: unknown): ReviewDigest | null {
-  if (!input || typeof input !== "object") return null
+export type DigestRejection = "not_an_object" | "no_consensus" | "no_traits" | "leaked_markup"
+
+export const DIGEST_REJECTION_MSG: Record<DigestRejection, string> = {
+  not_an_object: "input da tool não é um objeto",
+  no_consensus: "campo `consensus` vazio",
+  no_traits: "nenhum `salient_traits` válido",
+  leaked_markup: "markup de tool-call vazou pra dentro de um campo de texto",
+}
+
+export type DigestValidation =
+  | { ok: true; digest: ReviewDigest }
+  // `digest` vem preenchido nas rejeições BRANDAS (no_traits): o texto é utilizável,
+  // só faltam os traços. Deixa o caller decidir entre re-pedir e aproveitar.
+  | { ok: false; reason: DigestRejection; digest?: ReviewDigest }
+
+/** Coage + VALIDA o input da tool. Rejeita (em vez de persistir) quando o
+ *  tool-call veio mal-serializado. */
+export function validateDigest(input: unknown): DigestValidation {
+  if (!input || typeof input !== "object") return { ok: false, reason: "not_an_object" }
   const o = input as Record<string, unknown>
   const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "")
   const traits: ReviewDigestTrait[] = Array.isArray(o.salient_traits)
@@ -314,14 +336,24 @@ function coerceDigest(input: unknown): ReviewDigest | null {
     ? (o.content_warnings as unknown[]).map(str).filter((s) => s.length > 0)
     : []
   const consensus = str(o.consensus)
-  if (!consensus && traits.length === 0) return null // nada útil
-  return {
-    consensus,
-    divergence: str(o.divergence),
-    salient_traits: traits,
-    content_warnings: warnings,
-    execution: str(o.execution),
+  const divergence = str(o.divergence)
+  const execution = str(o.execution)
+
+  if (hasLeakedMarkup(consensus, divergence, execution, ...traits.map((t) => t.trait), ...warnings)) {
+    return { ok: false, reason: "leaked_markup" }
   }
+  if (!consensus) return { ok: false, reason: "no_consensus" }
+
+  const digest: ReviewDigest = { consensus, divergence, salient_traits: traits, content_warnings: warnings, execution }
+
+  // Rejeição BRANDA: `salient_traits` é obrigatório na tool, então vazio quase sempre
+  // significa que o bloco se perdeu na serialização. MAS não sempre — uma obra com 1
+  // review vaga legitimamente não rende traço nenhum ("não há informação suficiente
+  // nas reviews"). Devolvemos o digest junto pra o caller re-pedir uma vez e, se vier
+  // vazio de novo, aproveitar o texto em vez de deixar a obra sem digest.
+  if (traits.length === 0) return { ok: false, reason: "no_traits", digest }
+
+  return { ok: true, digest }
 }
 
 export async function consolidateReviewsDigestDetailed(
@@ -339,50 +371,87 @@ export async function consolidateReviewsDigestDetailed(
   const numbered = sampled
     .map((r, i) => {
       const rating = r.userRating != null ? ` (nota ${r.userRating}/10)` : ""
-      return `[${r.source} #${i + 1}]${rating}\n${r.text.slice(0, DIGEST_MAX_CHARS_PER_REVIEW)}`
+      return `[${r.source} #${i + 1}]${rating}\n${sanitizeReviewText(r.text).slice(0, DIGEST_MAX_CHARS_PER_REVIEW)}`
     })
     .join("\n\n---\n\n")
 
-  const userPrompt = `Destile o digest estruturado das ${sampled.length} review(s) abaixo (de ${new Set(sampled.map((r) => r.source)).size} fonte(s)). Use a tool \`submit_review_digest\`.\n\n${numbered}`
+  const nSources = new Set(sampled.map((r) => r.source)).size
+  const userPrompt = `Destile o digest estruturado das ${sampled.length} review(s) abaixo (de ${nSources} fonte(s)). Use a tool \`submit_review_digest\`.\n\n${numbered}`
 
   try {
     const client = getAnthropicClient({ maxRetries: 3 })
-    const { message } = await createLoggedMessage(
-      client,
-      {
-        model: REVIEW_DIGEST_MODEL,
-        max_tokens: 2000,
-        temperature: 0.2,
-        system: DIGEST_SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userPrompt }],
-        tools: [REVIEW_DIGEST_TOOL],
-        tool_choice: { type: "tool", name: REVIEW_DIGEST_TOOL.name },
-      },
-      {
-        operation: "review_digest",
-        promptVersion: REVIEW_DIGEST_VERSION,
-        workId: opts.workId ?? null,
-        metadata: { nReviews: sampled.length, nSources: new Set(sampled.map((r) => r.source)).size },
-      },
-    )
+    let lastReason = "motivo desconhecido"
 
-    const toolUse = message.content.find(
-      (block): block is Extract<typeof block, { type: "tool_use" }> =>
-        block.type === "tool_use" && block.name === REVIEW_DIGEST_TOOL.name,
-    )
-    const digest = toolUse ? coerceDigest(toolUse.input) : null
-    if (!digest) return { kind: "skipped", reason: "no_content" }
+    // Uma resposta truncada ou com tool-call mal-serializado é DESCARTADA e
+    // re-pedida (temperatura 0 na 2ª). Persistir o lixo é pior que falhar: ele
+    // vira texto técnico na página da obra e alimenta o preditor de Interesse.
+    for (let attempt = 1; attempt <= DIGEST_MAX_ATTEMPTS; attempt++) {
+      const { message } = await createLoggedMessage(
+        client,
+        {
+          model: REVIEW_DIGEST_MODEL,
+          max_tokens: DIGEST_MAX_TOKENS,
+          temperature: attempt === 1 ? 0.2 : 0,
+          system: DIGEST_SYSTEM_PROMPT,
+          messages: [{ role: "user", content: userPrompt }],
+          tools: [REVIEW_DIGEST_TOOL],
+          tool_choice: { type: "tool", name: REVIEW_DIGEST_TOOL.name },
+        },
+        {
+          operation: "review_digest",
+          promptVersion: REVIEW_DIGEST_VERSION,
+          workId: opts.workId ?? null,
+          metadata: { nReviews: sampled.length, nSources, attempt },
+        },
+      )
 
-    return {
-      kind: "ok",
-      result: {
-        digest,
-        model: REVIEW_DIGEST_MODEL,
-        promptVersion: REVIEW_DIGEST_VERSION,
-        tokensIn: message.usage.input_tokens,
-        tokensOut: message.usage.output_tokens,
-      },
+      if (message.stop_reason === "max_tokens") {
+        lastReason = `resposta truncada em ${DIGEST_MAX_TOKENS} tokens`
+        console.warn(`[review-digest] tentativa ${attempt}: ${lastReason}`)
+        continue
+      }
+
+      const toolUse = message.content.find(
+        (block): block is Extract<typeof block, { type: "tool_use" }> =>
+          block.type === "tool_use" && block.name === REVIEW_DIGEST_TOOL.name,
+      )
+      if (!toolUse) {
+        lastReason = "modelo não chamou a tool"
+        console.warn(`[review-digest] tentativa ${attempt}: ${lastReason}`)
+        continue
+      }
+
+      const validation = validateDigest(toolUse.input)
+      const isLastAttempt = attempt === DIGEST_MAX_ATTEMPTS
+
+      let digest: ReviewDigest
+      if (validation.ok) {
+        digest = validation.digest
+      } else if (validation.reason === "no_traits" && isLastAttempt && validation.digest) {
+        // Já re-pedimos uma vez e voltou sem traços: é obra de review escassa, não
+        // serialização quebrada. Aproveita o texto — melhor que ficar sem digest.
+        console.warn("[review-digest] sem salient_traits após retry — aproveitando o texto (reviews escassas)")
+        digest = validation.digest
+      } else {
+        lastReason = DIGEST_REJECTION_MSG[validation.reason]
+        console.warn(`[review-digest] tentativa ${attempt}: digest rejeitado — ${lastReason}`)
+        continue
+      }
+
+      return {
+        kind: "ok",
+        result: {
+          digest,
+          model: REVIEW_DIGEST_MODEL,
+          promptVersion: REVIEW_DIGEST_VERSION,
+          tokensIn: message.usage.input_tokens,
+          tokensOut: message.usage.output_tokens,
+        },
+      }
     }
+
+    // Falha explícita (o caller NÃO persiste e mantém o digest anterior).
+    return { kind: "api_failed", error: `digest inválido após ${DIGEST_MAX_ATTEMPTS} tentativas: ${lastReason}` }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error("[review-digest] falhou:", msg)

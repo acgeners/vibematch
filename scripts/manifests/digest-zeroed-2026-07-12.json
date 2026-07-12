@@ -1,0 +1,25 @@
+{
+  "zeradoEm": "2026-07-12",
+  "motivo": "tool-call mal-serializado: `divergence` engoliu o bloco `salient_traits` em JSON cru (ver lib/ai-recommendation/digest-integrity.ts)",
+  "comoRegerar": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/regen-review-digest.ts --from scripts/manifests/digest-zeroed-2026-07-12.json",
+  "custoMedidoPorObra": 0.0141,
+  "aviso": "Regere só com a blindagem de review-summarizer.ts ativa (PR #103), senão o mesmo lixo pode ser regravado.",
+  "works": [
+    { "id": "adad2b0d-73dd-46e9-b9d7-d891b13649b4", "title": "The Night Without Shadows", "regeneratedAt": "2026-07-12" },
+    { "id": "45215766-fd9b-4c6c-a09e-5e2bceec4cc8", "title": "Yard for Two" },
+    { "id": "8aa6ff67-6944-49e4-881c-4318414588d8", "title": "Red Rain" },
+    { "id": "e14f0f0a-7268-40bb-99d2-fe070dc292fb", "title": "The Villainess Is Everyone's Favorite" },
+    { "id": "0c3d74a0-4587-4f05-89d3-dfb482cc81e2", "title": "The Bloodstained Margrave's Confession" },
+    { "id": "4a30ea85-90b8-4e06-a959-7924379b779d", "title": "The Devout Priest's Blasphemous Indulgences" },
+    { "id": "8e513b64-9031-412e-9671-875a5e199c8e", "title": "From Misery to Majesty" },
+    { "id": "6bf06f67-11b1-4f20-bb3c-99679fc43f38", "title": "Nullitas ~The Counterfeit Bride~" },
+    { "id": "a80762b7-b539-494d-9051-0c9b6c8ea1a5", "title": "Night of the Hundred Demons" },
+    { "id": "1ff8571b-a95c-42f3-8a95-da5b076dfc7b", "title": "Stained Scarlet" },
+    { "id": "192ba8b7-d131-47cf-8a54-5741ae94ff8f", "title": "The Liberation of the Countess's Desires" },
+    { "id": "00cc5da6-cb7b-44b5-9268-0e6874f162c0", "title": "I Swapped My Husband at the Wedding" },
+    { "id": "04d30ade-6087-404e-a51f-c06f5bf419dd", "title": "The Majesty Makeover" },
+    { "id": "698ae1fa-8209-4a6b-8e07-085fb4e2912f", "title": "The S-Class Dungeon Owner" },
+    { "id": "6bce625f-1fbb-4c17-9eec-8c96ec1b0a70", "title": "How is This Hot Duke Just a Background Character?!" },
+    { "id": "f0591a1b-6577-4655-aea2-34617019b1d6", "title": "My Dead Lover Returned as a Tyrant" }
+  ]
+}

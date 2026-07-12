@@ -38,6 +38,8 @@ interface SourceSelectionStepProps {
   onCancel: () => void
   /** Rótulo do botão de confirmar (ex.: "Continuar" no fluxo unificado, "Salvar seleção" avulso). */
   confirmLabel?: string
+  /** Sobe pro caller os nomes usados na busca (o dialog os exibe no cabeçalho). */
+  onQueriesResolved?: (queries: string[]) => void
 }
 
 /**
@@ -47,10 +49,9 @@ interface SourceSelectionStepProps {
  * cross-ID), deixa o usuário confirmar/trocar/rejeitar cada match e persiste em
  * `work_external_ids`. Com o auto-resolve da Comix ligado, esconde o campo de hid manual.
  */
-export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel = "Continuar" }: SourceSelectionStepProps) {
+export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel = "Continuar", onQueriesResolved }: SourceSelectionStepProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [query, setQuery] = useState("")
   const [candidatesPerSource, setCandidatesPerSource] = useState<
     Partial<Record<ExternalSourceId, SourceCandidateOption[]>>
   >({})
@@ -80,7 +81,7 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
           onCancel()
           return
         }
-        setQuery(result.data.query)
+        onQueriesResolved?.(result.data.queriesUsed)
         setCandidatesPerSource(result.data.candidatesPerSource)
         const initialSelection: Partial<Record<ExternalSourceId, SelectionValue>> = {}
         const allSourceIds = new Set<ExternalSourceId>([
@@ -188,14 +189,10 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
 
   return (
     <div className="space-y-4">
+      {/* Os nomes usados na busca subiram pro cabeçalho do dialog (onQueriesResolved). */}
       <p className="text-sm text-muted-foreground">
         Confirme ou troque os matches por fonte. Fontes marcadas como &quot;nenhum&quot; ou
         &quot;rejeitada&quot; não entram na atualização.
-        {query && (
-          <span className="block mt-1 text-xs">
-            Busca usada: <span className="font-mono">{query}</span>
-          </span>
-        )}
       </p>
 
       {allSourceIds.map((source) => {

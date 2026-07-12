@@ -442,6 +442,10 @@ export interface CurrentSourceSelection {
 
 export interface RevalidateSourcesResult {
   query: string
+  /** TODOS os nomes efetivamente usados na busca: a query primária + as variantes
+   *  do retry (original_title, alt titles, `associated[]` do MangaUpdates). É o que
+   *  a UI mostra pro usuário entender por que uma fonte casou (ou não). */
+  queriesUsed: string[]
   candidatesPerSource: Partial<Record<ExternalSourceId, SourceCandidateOption[]>>
   currentSelections: CurrentSourceSelection[]
 }
@@ -877,6 +881,7 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
   return {
     data: {
       query: primaryQuery,
+      queriesUsed: allVariants,
       candidatesPerSource,
       currentSelections,
     },

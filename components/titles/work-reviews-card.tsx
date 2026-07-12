@@ -13,6 +13,7 @@ import { formatRelativeDateTime } from "@/lib/date-utils"
 import { useRefresh } from "@/lib/use-refresh"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { generateWorkReviewDigest } from "@/server/actions/review-digest"
+import { isDigestCorrupted } from "@/lib/ai-recommendation/digest-integrity"
 import type { ReviewDigest } from "@/lib/ai-recommendation/types"
 import type { WorkReviewsSnapshot } from "@/server/queries/work-reviews"
 
@@ -31,6 +32,21 @@ function digestPolarityClass(p: string): string {
 
 /** Corpo estruturado do digest: consenso, divergência, execução, traços (chips por polaridade), avisos. */
 function DigestBody({ digest }: { digest: ReviewDigest }) {
+  // Digest gravado antes da blindagem: o tool-call veio mal-serializado e os campos
+  // de texto carregam markup cru (e os traços se perderam). Renderizar isso engana
+  // mais do que informa — é lixo, não análise.
+  if (isDigestCorrupted(digest)) {
+    return (
+      <div className="flex items-start gap-2 rounded-md bg-amber-500/10 p-3 text-sm text-muted-foreground">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+        <span>
+          Este digest foi gerado com uma resposta corrompida do modelo e não pode ser exibido.
+          Use <span className="font-medium text-foreground">Regerar</span> para refazê-lo.
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-2 text-sm leading-relaxed text-foreground/90">
       {digest.consensus?.trim() && (

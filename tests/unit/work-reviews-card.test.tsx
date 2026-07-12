@@ -5,6 +5,9 @@ vi.mock("server-only", () => ({}))
 vi.mock("@/server/actions/review-digest", () => ({ generateWorkReviewDigest: vi.fn() }))
 vi.mock("@/lib/use-refresh", () => ({ useRefresh: () => vi.fn() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
+// O card chama useCostConfirm(), que exige o <CostConfirmProvider> acima na árvore.
+// Aqui só interessa o render, então o confirm sempre aprova.
+vi.mock("@/components/cost/cost-confirm", () => ({ useCostConfirm: () => vi.fn(async () => true) }))
 
 import { render, screen } from "@testing-library/react"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
@@ -54,5 +57,22 @@ describe("WorkReviewsCard — digest na aba Notas & Avaliações", () => {
     render(<WorkReviewsCard workId="w1" snapshot={{ ...base, total: 0, manual: [], digest: null, summary: null }} />)
     expect(screen.queryByText("Gerar digest")).toBeNull()
     expect(screen.queryByText("Regerar")).toBeNull()
+  })
+
+  // Linhas gravadas antes da blindagem carregam o tool-call mal-serializado no
+  // texto. Renderizar isso mostrava JSON cru na página da obra.
+  it("não renderiza o markup vazado de um digest corrompido — oferece regerar", () => {
+    const corrupted: ReviewDigest = {
+      ...DIGEST,
+      divergence:
+        'uns acham a FL ingenua </divergence> <parameter name="salient_traits">[{"trait": "protagonista passiva", "polarity": "negative", "axis": "moralidade"}]',
+      salient_traits: [],
+    }
+    render(<WorkReviewsCard workId="w1" snapshot={{ ...base, digest: corrupted, digestN: 42, digestAt: ISO }} />)
+    expect(screen.queryByText(/parameter name/)).toBeNull()
+    expect(screen.queryByText(/salient_traits/)).toBeNull()
+    expect(screen.getByText(/resposta corrompida/i)).toBeTruthy()
+    // o botão continua disponível (o texto "Regerar" também aparece no aviso)
+    expect(screen.getByRole("button", { name: /Regerar/ })).toBeTruthy()
   })
 })
