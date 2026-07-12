@@ -21,6 +21,7 @@ import { ReviewSummaryPanel } from "@/components/settings/review-summary-panel"
 import { ReviewDigestPanel } from "@/components/settings/review-digest-panel"
 import { ResolveComixPanel } from "@/components/settings/resolve-comix-panel"
 import { ComixHealthPanel } from "@/components/settings/comix-health-panel"
+import { ProtectedSourcesHealthPanel } from "@/components/settings/protected-sources-health-panel"
 import { AiEvalOnCreateToggle } from "@/components/settings/ai-eval-on-create-toggle"
 import { SynopsisCanonicalOnCreateToggle } from "@/components/settings/synopsis-canonical-on-create-toggle"
 import { ReviewSummaryEnabledToggle } from "@/components/settings/review-summary-enabled-toggle"
@@ -362,6 +363,23 @@ async function ItemBody({
               Digest estruturado · consumido pela IA
             </p>
             <ReviewDigestPanel accent={accent} />
+          </div>
+        </div>
+      )
+    }
+
+    case "cloudflare-sources": {
+      return (
+        <div className="space-y-5">
+          <div>
+            <p className="mb-2 text-sm font-semibold text-foreground">Diagnóstico</p>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Mangago e AnimePlanet devolvem 403 (challenge do Cloudflare) num fetch direto, então
+              só respondem via bypass. O canário puxa um detalhe real de cada uma pra dizer se elas
+              estão puxando dados <em>agora</em> — um bypass vivo mas com o solve falhando derruba as
+              duas do mesmo jeito.
+            </p>
+            <ProtectedSourcesHealthPanel accent="amber" />
           </div>
         </div>
       )

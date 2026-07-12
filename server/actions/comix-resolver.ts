@@ -557,7 +557,10 @@ interface ComixHealthResult {
  *
  * O FlareSolverr entra só como linha INFORMATIVA: a Comix responde em texto puro
  * (o detector de Cloudflare dava falso positivo em `challenge-platform`, que é script
- * passivo), então ele é fallback legado, NÃO dependência. Antes, um FS fora
+ * passivo), então ela NÃO depende dele. Cuidado com a generalização: isso vale pra Comix,
+ * não pro resto — Mangago e AnimePlanet devolvem 403 `cf-mitigated` num fetch direto e
+ * dependem do bypass. Quem responde por elas é `checkProtectedSourcesHealth`
+ * (server/actions/source-health.ts), onde o FlareSolverr REPROVA. Antes, um FS fora
  * curto-circuitava o diagnóstico inteiro e reprovava detalhe/reviews sem testá-los —
  * o que dava "Comix fora" com a Comix funcionando, e travava `ensureComixReady`
  * (que usa este probe pra mover o gate) e, por tabela, a cascata do "Gerar tudo".
@@ -573,8 +576,8 @@ export async function checkComixHealth(): Promise<ComixHealthResult> {
     ok: true,
     label: "FlareSolverr",
     detail: fs.ok
-      ? `fallback ativo · v${fs.version ?? "?"} · sessões: ${fs.sessions?.length ? fs.sessions.join(", ") : "nenhuma"}`
-      : `fallback fora — não é dependência da Comix (${fs.error ?? "indisponível"})`,
+      ? `ativo · v${fs.version ?? "?"} · sessões: ${fs.sessions?.length ? fs.sessions.join(", ") : "nenhuma"}`
+      : `fora — a Comix não depende dele, mas Mangago/AnimePlanet sim (${fs.error ?? "indisponível"})`,
   })
 
   // 2. Detalhe (SSR) — porta de entrada de tudo (reviews também começam por aqui).
