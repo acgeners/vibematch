@@ -10,6 +10,7 @@ import { resolveMangagoUrlProd } from "./mangago-resolve-prod"
 import { boolEnv } from "./mangago-band"
 import { extractInlineRating } from "./inline-rating"
 import { isBlockedCoverUrl } from "./blocked-covers"
+import { measureCover, scoreCover } from "@/lib/server/covers/measure-cover"
 // Metadados pela API OFICIAL do MAL; reviews por scraping do próprio myanimelist.net
 // (a v2 não tem endpoint nem campo de reviews). O Jikan — scraper de terceiros que
 // ficava em 504 e zerava a fonte — saiu de cena.
@@ -1948,12 +1949,50 @@ async function resolveGatedSourceIds(candidate: MergedCandidate): Promise<void> 
   }
 }
 
+/**
+ * Reordena `multiCovers` por QUALIDADE MEDIDA da imagem, em vez da prioridade de
+ * fonte hardcoded. A UI (criação e enriquecimento em lote) marca o PRIMEIRO item
+ * como capa principal, então ordenar aqui é o que faz a auto-seleção acontecer.
+ *
+ * Por que trocar: a ordem antiga estava praticamente invertida. Medindo as 2.307
+ * capas do catálogo, a fonte que ela punha em 1º (MangaUpdates) entrega miniatura em
+ * 100% dos casos (mediana 275px de largura), enquanto a melhor fonte real (ComicK,
+ * 720px, 12% de miniatura) estava em 5º. A regra por fonte escolhia a melhor capa
+ * disponível em só 32% das obras com 2+ capas.
+ *
+ * Fail-soft: capa que não pôde ser medida (host fora da allowlist, 404, formato
+ * exótico) vai pro fim da fila, mas NÃO é descartada — e se nenhuma for medida, a
+ * ordem por prioridade de fonte é preservada como estava.
+ */
+async function rankCoversByMeasuredQuality(data: ExternalWorkData): Promise<void> {
+  const covers = data.multiCovers
+  if (!covers || covers.length < 2) return
+
+  const measurements = await Promise.all(covers.map((cover) => measureCover(cover.url)))
+
+  const scored = covers.map((cover, i) => {
+    const m = measurements[i]
+    return {
+      cover: m ? { ...cover, width: m.width, height: m.height, bytes: m.bytes } : cover,
+      // não medida → -1, atrás de qualquer capa medida (score real é sempre ≥ 0)
+      score: m ? scoreCover(m) : -1,
+      fallback: i, // desempate: preserva a ordem por prioridade de fonte
+    }
+  })
+  if (scored.every((s) => s.score < 0)) return // nada medido: não mexe em nada
+
+  scored.sort((a, b) => b.score - a.score || a.fallback - b.fallback)
+  data.multiCovers = scored.map((s) => s.cover)
+  data.coverUrl = data.multiCovers[0]?.url ?? data.coverUrl
+}
+
 export async function fetchMultiSourceDetails(candidate: MergedCandidate): Promise<MultiSourceResult> {
   // Comix/Mangago: descobre os IDs por cross-ID ANTES de hidratar, pra o rating/
   // capa/sinopse dessas fontes entrarem já na criação (sem "Atualizar dados" depois).
   await resolveGatedSourceIds(candidate)
   const { apDetail, uniqueAccepted, rejected, muStatusText } = await hydrateAndFilterCandidate(candidate)
   const data = mergeData(candidate, uniqueAccepted, apDetail, muStatusText)
+  await rankCoversByMeasuredQuality(data)
 
   // Persist external IDs for accepted sources. Cross-linked/trusted IDs are also
   // safe to keep even when a scraper is temporarily blocked (AnimePlanet/CF),

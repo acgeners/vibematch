@@ -25,7 +25,7 @@ import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import { fetchComicKClient, fetchAnimePlanetClient } from "@/lib/external/client-fetches"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { getCoverImageSrc } from "@/lib/image-proxy"
-import { titleToSlug } from "@/lib/utils"
+import { cn, titleToSlug } from "@/lib/utils"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
 import type {
   MergedCandidate,
@@ -75,7 +75,19 @@ interface ExternalSearchProps {
 
 type Phase = "idle" | "searching" | "results" | "sourcepick" | "duplicate" | "loading" | "evaluating" | "multipick-synopses" | "multipick-covers" | "conflicts" | "comick-failed"
 
-interface CoverChoice { url: string; source: string; included: boolean; isPrimary: boolean }
+interface CoverChoice {
+  url: string
+  source: string
+  included: boolean
+  isPrimary: boolean
+  /** Medidas do servidor (`measureCover`). Ausentes quando a medição falhou. */
+  width?: number
+  height?: number
+}
+
+/** Abaixo disso a capa aparece serrilhada na página da obra. Metade das capas do
+ *  catálogo cai aqui (1.206 de 2.307), então vale sinalizar em vez de só ordenar. */
+const SMALL_COVER_WIDTH = 500
 interface SynopsisChoice { source: string; text: string; included: boolean; isPrimary: boolean }
 type SourceSelectionValue = string | "rejected" | "none"
 
@@ -664,8 +676,17 @@ export function ExternalSearch({
     const hasMultiSynopsis = synopses.length > 1
 
     if (hasMultiCover || hasMultiSynopsis) {
+      // `covers` já vem ordenado por qualidade medida do servidor, então o primeiro
+      // é a melhor capa — e é ele que sai pré-marcado como principal.
       setCoverChoices(
-        covers.map((c, i) => ({ url: c.url, source: c.source, included: true, isPrimary: i === 0 }))
+        covers.map((c, i) => ({
+          url: c.url,
+          source: c.source,
+          included: true,
+          isPrimary: i === 0,
+          width: c.width,
+          height: c.height,
+        }))
       )
       setSynopsisChoices(
         synopses.map((s, i) => ({ source: s.source, text: s.text, included: true, isPrimary: i === 0 }))
@@ -892,7 +913,12 @@ export function ExternalSearch({
     const next: ExternalWorkData = {
       ...pendingData,
       coverUrl: primaryCover?.url ?? pendingData.coverUrl,
-      multiCovers: includedCovers.map((c) => ({ url: c.url, source: c.source as ExternalSourceId })),
+      multiCovers: includedCovers.map((c) => ({
+        url: c.url,
+        source: c.source as ExternalSourceId,
+        width: c.width,
+        height: c.height,
+      })),
       synopsis: selectedSynopses.find((s) => s.isPrimary)?.text ?? selectedSynopses[0]?.text ?? pendingData.synopsis,
       multiSynopses: selectedSynopses.map((s) => ({ source: s.source as ExternalSourceId, text: s.text })),
       synopsisIsMerged: false,
@@ -1545,6 +1571,11 @@ export function ExternalSearch({
             const activeCover =
               coverChoices.find((c) => c.url === activeRefineUrl) ?? coverChoices[0] ?? null
             const canGoBackToSynopses = synopsisChoices.length > 1
+            // A lista chega ordenada por qualidade medida, então a 1ª É a escolha da
+            // medição — e continua sendo a melhor restante se você excluir alguma.
+            // Marcar a 1ª (em vez de recalcular "a maior" aqui) garante que o selo
+            // nunca aponte pra uma capa diferente da que o sistema pré-selecionou.
+            const autoPickedUrl = coverChoices[0]?.width ? coverChoices[0].url : undefined
             return (
               <div className="space-y-4">
                 <div className="flex items-center justify-between gap-3">
@@ -1577,7 +1608,24 @@ export function ExternalSearch({
                       />
                     </div>
                     <div className="flex items-center justify-between gap-3">
-                      <Badge variant="outline" className="text-[11px]">{getSourceLabel(activeCover.source)}</Badge>
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <Badge variant="outline" className="text-[11px]">{getSourceLabel(activeCover.source)}</Badge>
+                        {activeCover.width && activeCover.height ? (
+                          <span className="text-[11px] tabular-nums text-muted-foreground">
+                            {activeCover.width} × {activeCover.height}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground/60">tamanho não medido</span>
+                        )}
+                        {activeCover.url === autoPickedUrl && (
+                          <Badge
+                            variant="secondary"
+                            className="bg-primary/10 text-[10px] font-semibold text-primary"
+                          >
+                            escolha automática
+                          </Badge>
+                        )}
+                      </div>
                       <div className="flex items-center gap-3 text-xs">
                         <label className="flex items-center gap-1.5 cursor-pointer">
                           <Checkbox
@@ -1612,51 +1660,93 @@ export function ExternalSearch({
                   </div>
                 )}
 
-                <div className="flex flex-wrap gap-1.5 justify-center">
+                <div className="flex flex-wrap justify-center gap-2">
                   {coverChoices.map((c) => {
                     const isActive = c.url === activeCover?.url
+                    const isAutoPicked = c.url === autoPickedUrl
+                    const isSmall = c.width != null && c.width < SMALL_COVER_WIDTH
                     return (
-                      <div key={c.url} className="group/cover relative h-20 w-14">
-                        <button
-                          type="button"
-                          onClick={() => setActiveRefineUrl(c.url)}
-                          className={`absolute inset-0 overflow-hidden rounded border transition-all ${
-                            isActive
-                              ? "border-primary ring-2 ring-primary/40"
-                              : c.included
-                                ? "border-primary/40"
-                                : "border-muted opacity-60 hover:opacity-100"
-                          }`}
-                          title={getSourceLabel(c.source)}
-                        >
-                          <Image
-                            src={getCoverImageSrc(c.url)}
-                            alt=""
-                            fill
-                            sizes="56px"
-                            unoptimized
-                            className="object-cover"
-                          />
-                          {c.included && (
-                            <span className="absolute top-0.5 left-0.5 rounded bg-emerald-500 px-1 text-[8px] font-semibold text-white">
-                              ✓
+                      <div key={c.url} className="w-16">
+                        <div className="group/cover relative h-[88px] w-16">
+                          <button
+                            type="button"
+                            onClick={() => setActiveRefineUrl(c.url)}
+                            className={`absolute inset-0 overflow-hidden rounded border transition-all ${
+                              isActive
+                                ? "border-primary ring-2 ring-primary/40"
+                                : c.included
+                                  ? "border-primary/40"
+                                  : "border-muted opacity-60 hover:opacity-100"
+                            }`}
+                            title={
+                              c.width && c.height
+                                ? `${getSourceLabel(c.source)} — ${c.width} × ${c.height}`
+                                : getSourceLabel(c.source)
+                            }
+                          >
+                            <Image
+                              src={getCoverImageSrc(c.url)}
+                              alt=""
+                              fill
+                              sizes="64px"
+                              unoptimized
+                              // capa pequena demais: some do caminho visualmente, mas
+                              // continua clicável — a medição sugere, não decide sozinha
+                              className={cn("object-cover", isSmall && "opacity-50 saturate-50")}
+                            />
+                            {c.included && (
+                              <span className="absolute top-0.5 left-0.5 rounded bg-emerald-500 px-1 text-[8px] font-semibold text-white">
+                                ✓
+                              </span>
+                            )}
+                            {c.isPrimary && (
+                              <span className="absolute top-0.5 right-0.5 rounded bg-primary px-1 text-[8px] font-semibold text-primary-foreground">
+                                P
+                              </span>
+                            )}
+                            {isAutoPicked && (
+                              <span
+                                className="absolute bottom-0.5 left-0.5 rounded bg-primary px-1 text-[8px] font-semibold text-primary-foreground"
+                                title="Maior resolução medida"
+                              >
+                                ★
+                              </span>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteCover(c.url)}
+                            aria-label="Excluir esta capa"
+                            title="Excluir"
+                            className="absolute bottom-0.5 right-0.5 z-10 rounded bg-black/60 p-0.5 text-white opacity-0 transition-all group-hover/cover:opacity-100 hover:bg-destructive focus:opacity-100"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                        <div className="mt-1 text-center leading-tight">
+                          <span className="block truncate text-[9px] tracking-wide text-muted-foreground/70 uppercase">
+                            {getSourceLabel(c.source)}
+                          </span>
+                          {c.width && c.height ? (
+                            <span
+                              className={cn(
+                                "text-[10px] tabular-nums",
+                                isAutoPicked
+                                  ? "font-bold text-primary"
+                                  : isSmall
+                                    ? "text-destructive"
+                                    : "text-muted-foreground"
+                              )}
+                            >
+                              {c.width}×{c.height}
+                            </span>
+                          ) : (
+                            // sem medida (host fora da allowlist, 404): não invento número
+                            <span className="text-[10px] text-muted-foreground/50" title="Não foi possível medir">
+                              —
                             </span>
                           )}
-                          {c.isPrimary && (
-                            <span className="absolute top-0.5 right-0.5 rounded bg-primary px-1 text-[8px] font-semibold text-primary-foreground">
-                              P
-                            </span>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteCover(c.url)}
-                          aria-label="Excluir esta capa"
-                          title="Excluir"
-                          className="absolute bottom-0.5 right-0.5 z-10 rounded bg-black/60 p-0.5 text-white opacity-0 transition-all group-hover/cover:opacity-100 hover:bg-destructive focus:opacity-100"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
+                        </div>
                       </div>
                     )
                   })}

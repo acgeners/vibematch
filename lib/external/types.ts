@@ -126,8 +126,16 @@ export interface ExternalWorkData {
   }>
   /** Indicates that synopsis was concatenated from multiple sources (used by UI for hint) */
   synopsisIsMerged?: boolean
-  /** Per-source cover URLs collected during fetch (post-acceptance). Empty when only one accepted source. */
-  multiCovers?: Array<{ url: string; source: ExternalSourceId }>
+  /** Per-source cover URLs collected during fetch (post-acceptance). Empty when only one accepted source.
+   *  Ordenado por QUALIDADE MEDIDA (resolução/compressão), não por prioridade de fonte — a UI marca
+   *  o primeiro como principal. `width`/`height`/`bytes` ficam ausentes quando a medição falhou. */
+  multiCovers?: Array<{
+    url: string
+    source: ExternalSourceId
+    width?: number
+    height?: number
+    bytes?: number | null
+  }>
   /** Per-source synopsis blocks collected during fetch (cleaned + deduped). Empty when only one accepted source. */
   multiSynopses?: Array<{ source: ExternalSourceId; text: string }>
   /** Per-source external IDs from accepted sources, persisted to `work_external_ids` so future refreshes skip title search. */
