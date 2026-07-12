@@ -197,6 +197,8 @@ export function UpdateDataDialog({
     withSourceStep ? "sources" : "refreshing"
   )
   const [pendingData, setPendingData] = useState<ExternalWorkData | null>(null)
+  /** Nomes que a busca de fato usou nas fontes (título + variantes do retry). */
+  const [searchQueries, setSearchQueries] = useState<string[]>([])
   const [conflicts, setConflicts] = useState<FieldConflict[]>([])
   const [resolutions, setResolutions] = useState<Record<string, "current" | "external">>({})
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
@@ -669,13 +671,25 @@ export function UpdateDataDialog({
 
       <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose() }}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
-          <DialogHeader>
+          <DialogHeader className="gap-1.5">
             <DialogTitle>Atualizar dados externos</DialogTitle>
+            <p className="text-base font-semibold text-foreground">{currentWork.title}</p>
             <DialogDescription>
               {withSourceStep
-                ? "Confirme as fontes (Comix/Mangago resolvidos por cross-ID) e rehidrate sinopse, capa, capítulos, avaliações, reviews e tags — deixa a obra igual a uma criada agora."
-                : "Rehidrata sinopse, capa, capítulos, avaliações e tags a partir das fontes já vinculadas."}
+                ? "Confirme as fontes e rebusque sinopse, capa, capítulos, avaliações, reviews e tags."
+                : "Rebusca os dados nas fontes já vinculadas."}
             </DialogDescription>
+            {searchQueries.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Buscado nas fontes como:{" "}
+                {searchQueries.map((q, i) => (
+                  <span key={q}>
+                    {i > 0 && <span className="opacity-50"> · </span>}
+                    <span className="font-mono text-foreground/80">{q}</span>
+                  </span>
+                ))}
+              </p>
+            )}
           </DialogHeader>
 
           {/* Montado enquanto o diálogo está aberto (NÃO desmonta ao avançar pra
@@ -688,6 +702,7 @@ export function UpdateDataDialog({
             <div className={phase === "sources" ? undefined : "hidden"}>
               <SourceSelectionStep
                 workId={workId}
+                onQueriesResolved={setSearchQueries}
                 confirmLabel="Continuar"
                 onConfirm={() => {
                   void runRefresh()
@@ -783,12 +798,11 @@ export function UpdateDataDialog({
             return (
               <div className="space-y-4">
                 <div className="flex items-center justify-between gap-3">
+                  {/* As instruções de capa saíram: a UI já mostra o que está marcado. */}
                   <p className="text-sm text-muted-foreground">
                     {coverChoices.length === 0
                       ? "Nenhuma capa restante. Você pode continuar sem alterar a capa atual."
-                      : savedCovers.length > 0
-                        ? "Suas capas atuais já vêm marcadas e serão mantidas. Marque capas novas pra incluir ou desmarque atuais pra remover."
-                        : "Clique numa miniatura pra ver maior. Marque quais capas incluir."}
+                      : ""}
                   </p>
                   {coverChoices.length > 0 && (
                     <label className="flex items-center gap-1.5 cursor-pointer text-xs shrink-0">
