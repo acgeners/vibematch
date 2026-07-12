@@ -307,7 +307,11 @@ export const DIGEST_REJECTION_MSG: Record<DigestRejection, string> = {
   leaked_markup: "markup de tool-call vazou pra dentro de um campo de texto",
 }
 
-export type DigestValidation = { ok: true; digest: ReviewDigest } | { ok: false; reason: DigestRejection }
+export type DigestValidation =
+  | { ok: true; digest: ReviewDigest }
+  // `digest` vem preenchido nas rejeições BRANDAS (no_traits): o texto é utilizável,
+  // só faltam os traços. Deixa o caller decidir entre re-pedir e aproveitar.
+  | { ok: false; reason: DigestRejection; digest?: ReviewDigest }
 
 /** Coage + VALIDA o input da tool. Rejeita (em vez de persistir) quando o
  *  tool-call veio mal-serializado. */
@@ -339,14 +343,17 @@ export function validateDigest(input: unknown): DigestValidation {
     return { ok: false, reason: "leaked_markup" }
   }
   if (!consensus) return { ok: false, reason: "no_consensus" }
-  // A tool declara salient_traits como obrigatório: chegar vazio significa que o
-  // bloco se perdeu na serialização, não que a obra não tem traços.
-  if (traits.length === 0) return { ok: false, reason: "no_traits" }
 
-  return {
-    ok: true,
-    digest: { consensus, divergence, salient_traits: traits, content_warnings: warnings, execution },
-  }
+  const digest: ReviewDigest = { consensus, divergence, salient_traits: traits, content_warnings: warnings, execution }
+
+  // Rejeição BRANDA: `salient_traits` é obrigatório na tool, então vazio quase sempre
+  // significa que o bloco se perdeu na serialização. MAS não sempre — uma obra com 1
+  // review vaga legitimamente não rende traço nenhum ("não há informação suficiente
+  // nas reviews"). Devolvemos o digest junto pra o caller re-pedir uma vez e, se vier
+  // vazio de novo, aproveitar o texto em vez de deixar a obra sem digest.
+  if (traits.length === 0) return { ok: false, reason: "no_traits", digest }
+
+  return { ok: true, digest }
 }
 
 export async function consolidateReviewsDigestDetailed(
@@ -415,7 +422,17 @@ export async function consolidateReviewsDigestDetailed(
       }
 
       const validation = validateDigest(toolUse.input)
-      if (!validation.ok) {
+      const isLastAttempt = attempt === DIGEST_MAX_ATTEMPTS
+
+      let digest: ReviewDigest
+      if (validation.ok) {
+        digest = validation.digest
+      } else if (validation.reason === "no_traits" && isLastAttempt && validation.digest) {
+        // Já re-pedimos uma vez e voltou sem traços: é obra de review escassa, não
+        // serialização quebrada. Aproveita o texto — melhor que ficar sem digest.
+        console.warn("[review-digest] sem salient_traits após retry — aproveitando o texto (reviews escassas)")
+        digest = validation.digest
+      } else {
         lastReason = DIGEST_REJECTION_MSG[validation.reason]
         console.warn(`[review-digest] tentativa ${attempt}: digest rejeitado — ${lastReason}`)
         continue
@@ -424,7 +441,7 @@ export async function consolidateReviewsDigestDetailed(
       return {
         kind: "ok",
         result: {
-          digest: validation.digest,
+          digest,
           model: REVIEW_DIGEST_MODEL,
           promptVersion: REVIEW_DIGEST_VERSION,
           tokensIn: message.usage.input_tokens,

@@ -9,13 +9,23 @@
  * O resultado ia direto pro JSONB works.review_digest sem validação e era
  * renderizado como "texto técnico" na página da obra, sem os chips de traço.
  *
- * Uso:
- *   node scripts/audit-review-digests.js          # só LISTA (read-only)
- *   node scripts/audit-review-digests.js --fix    # zera os corrompidos p/ regerar
+ * Duas categorias, e elas NÃO são equivalentes:
+ *   [markup]  texto com tool-call vazado → lixo, não dá pra exibir. Zerar é ganho puro.
+ *   [s/traço] sem salient_traits, mas o TEXTO costuma estar legível. Zerar aqui
+ *             joga fora conteúdo bom e obriga a pagar uma regeração. Só entra no
+ *             --fix se você pedir explicitamente com --include-empty.
  *
- * O --fix apaga review_digest/_at/_n/_version das linhas corrompidas. Ele NÃO
+ * Uso:
+ *   node scripts/audit-review-digests.js                    # só LISTA (read-only)
+ *   node scripts/audit-review-digests.js --fix              # zera SÓ os [markup]
+ *   node scripts/audit-review-digests.js --fix --include-empty   # zera também os [s/traço]
+ *
+ * O --fix apaga review_digest/_at/_n/_version das linhas escolhidas. Ele NÃO
  * chama a IA: o digest volta a ser gerado sob demanda (botão "Regerar" na obra
  * ou a cascata de geração), então nada é cobrado aqui.
+ *
+ * ⚠️ Regere só com a blindagem de review-summarizer.ts ativa — senão o mesmo
+ * tool-call mal-serializado pode voltar a ser gravado.
  */
 
 const { createClient } = require("@supabase/supabase-js")
@@ -32,6 +42,7 @@ const LEAKED_MARKUP_RE =
   /<\/?(?:parameter|antml:[a-z_]+|invoke|function_calls|function_results|consensus|divergence|salient_traits|content_warnings|execution)\b/i
 
 const FIX = process.argv.includes("--fix")
+const INCLUDE_EMPTY = process.argv.includes("--include-empty")
 
 async function main() {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -69,15 +80,18 @@ async function main() {
   for (const w of leaked) console.log(`  [markup]  ${w.id}  ${w.title}`)
   for (const w of noTraits) console.log(`  [s/traço] ${w.id}  ${w.title}`)
 
-  const bad = [...leaked, ...noTraits]
+  const bad = INCLUDE_EMPTY ? [...leaked, ...noTraits] : leaked
   if (bad.length === 0) {
     console.log("\nNada a curar.")
     return
   }
 
   if (!FIX) {
-    console.log(`\nRead-only. Rode com --fix para zerar os ${bad.length} digest(s) e permitir a regeração.`)
+    console.log(`\nRead-only. --fix zera os ${leaked.length} [markup]; some --include-empty pra incluir os ${noTraits.length} [s/traço].`)
     return
+  }
+  if (!INCLUDE_EMPTY && noTraits.length > 0) {
+    console.log(`\n(${noTraits.length} [s/traço] PRESERVADOS — o texto deles pode estar bom. Use --include-empty pra zerá-los também.)`)
   }
 
   // .in() com centenas de ids devolve 400 no PostgREST — vai em lotes.

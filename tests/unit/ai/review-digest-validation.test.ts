@@ -41,10 +41,23 @@ describe("validateDigest", () => {
     if (!r.ok) expect(r.reason).toBe("leaked_markup")
   })
 
-  it("rejeita quando salient_traits chega vazio (o bloco se perdeu na serialização)", () => {
+  // Rejeição BRANDA: quase sempre é o bloco perdido na serialização, mas uma obra com
+  // 1 review vaga legitimamente não rende traço. Por isso o digest volta junto — o
+  // caller re-pede uma vez e, se insistir em vir vazio, aproveita o texto.
+  it("rejeita salient_traits vazio, MAS devolve o texto pra ser aproveitado", () => {
     const r = validateDigest({ ...VALID_INPUT, salient_traits: [] })
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.reason).toBe("no_traits")
+    if (!r.ok) {
+      expect(r.reason).toBe("no_traits")
+      expect(r.digest?.consensus).toContain("Consenso")
+      expect(r.digest?.salient_traits).toEqual([])
+    }
+  })
+
+  it("NÃO devolve texto aproveitável quando o markup vazou (aí é lixo mesmo)", () => {
+    const r = validateDigest(LEAKED_INPUT)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.digest).toBeUndefined()
   })
 
   it("rejeita quando não há consensus", () => {
