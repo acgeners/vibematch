@@ -38,9 +38,24 @@ export function isFlareSolverrCircuitOpen(): boolean {
   return Date.now() < circuitOpenUntil
 }
 
-/** Heuristic: is this response HTML a Cloudflare challenge page? */
+/**
+ * O HTML é uma página de DESAFIO do Cloudflare (bloqueio), ou só uma página
+ * protegida por ele?
+ *
+ * NÃO casar com `challenge-platform` solto: o Cloudflare injeta o script de
+ * bot-management PASSIVO (`/cdn-cgi/challenge-platform/scripts/jsd/main.js`) em
+ * páginas servidas NORMALMENTE — com conteúdo, status 200 e sem mitigação. Casar
+ * com ele classificava HTML bom como desafio, então TODA chamada do comix
+ * descartava a resposta que já tinha em mãos (~350ms) e ia pro FlareSolverr;
+ * com o container fora, detalhe e reviews do comix simplesmente sumiam.
+ *
+ * O bloqueio de verdade é inequívoco (medido em anime-planet/mangago/comick):
+ * 403 + header `cf-mitigated: challenge`, e o interstitial traz "Just a moment",
+ * `_cf_chl_opt` e o script de `orchestrate` (≠ do `jsd` passivo).
+ * Fixtures reais dos dois lados: tests/fixtures/cloudflare/.
+ */
 export function isCloudflareChallenge(html: string): boolean {
-  return /cf-mitigated|challenge-platform|Just a moment|cf-chl-bypass/i.test(html)
+  return /cf-mitigated|Just a moment|cf-chl-bypass|_cf_chl_opt|challenge-platform\/h\/[a-z]+\/orchestrate/i.test(html)
 }
 
 /**

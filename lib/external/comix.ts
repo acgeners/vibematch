@@ -181,13 +181,18 @@ async function fetchComixJson(path: string): Promise<unknown | null> {
  * Busca o HTML SSR de uma página do comix (TOKEN-FREE). `/title/{hid}` responde ao
  * plain fetch com um <script> de hidratação contendo o objeto completo da obra (incl.
  * o `id` interno usado pelos threads). Cai pro FlareSolverr só se o Cloudflare desafiar.
+ *
+ * `isValid` é o sinal POSITIVO: só aceitamos o plain fetch quando o conteúdo esperado
+ * está mesmo lá. Um 200 sem o payload (desafio silencioso, página remodelada) cai pro
+ * fallback em vez de virar um `null` mudo — não confiamos só na ausência de marcador
+ * de challenge pra dizer que a resposta presta.
  */
-async function fetchComixHtml(url: string): Promise<string | null> {
+async function fetchComixHtml(url: string, isValid?: (html: string) => boolean): Promise<string | null> {
   try {
     const res = await fetch(url, { headers: HTML_HEADERS, cache: "no-store" })
     const body = await res.text()
     if (res.ok) {
-      if (!isCloudflareChallenge(body)) {
+      if (!isCloudflareChallenge(body) && (isValid?.(body) ?? true)) {
         recordComixOk()
         return body
       }
@@ -208,6 +213,19 @@ async function fetchComixHtml(url: string): Promise<string | null> {
   }
   recordComixOk()
   return fallback.html
+}
+
+/**
+ * Detalhe cru da obra (objeto do <script> de hidratação). Fonte única do SSR: o
+ * `fetchComixById` monta o `ComixDetail` daqui e o `fetchComixReviews` tira daqui o
+ * `id` interno numérico exigido pelo `threads/lookup`. A extração é o próprio
+ * validador do plain fetch (ver `fetchComixHtml`).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchComixDetailRaw(hid: string): Promise<any | null> {
+  const html = await fetchComixHtml(comixWorkUrl(hid), (body) => extractComixDetailFromHtml(body, hid) !== null)
+  if (!html) return null
+  return extractComixDetailFromHtml(html, hid)
 }
 
 /**
@@ -432,9 +450,7 @@ export async function searchComix(query: string): Promise<ExternalSearchResult[]
 export async function fetchComixById(hid: string): Promise<ComixDetail | null> {
   // Token-free: o objeto completo da obra vem no <script> de hidratação SSR da página
   // /title/{hid}. O antigo endpoint /manga/{hid} passou a exigir token de assinatura.
-  const html = await fetchComixHtml(comixWorkUrl(hid))
-  if (!html) return null
-  const r = extractComixDetailFromHtml(html, hid)
+  const r = await fetchComixDetailRaw(hid)
   if (!r || typeof r !== "object") return null
 
   return {
@@ -532,10 +548,7 @@ function collectComixCommentTexts(
 export async function fetchComixReviews(hid: string): Promise<string[]> {
   // Token-free: o id interno vem do SSR da página; os endpoints /threads/* não exigem
   // o token de assinatura `_=` (só /manga* exige).
-  const html = await fetchComixHtml(comixWorkUrl(hid))
-  if (!html) return []
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const internalId = (extractComixDetailFromHtml(html, hid) as any)?.id
+  const internalId = (await fetchComixDetailRaw(hid))?.id
   if (typeof internalId !== "number") return []
 
   const lookupPath = `/threads/lookup?page_identifier=manga${internalId}&page_url=${encodeURIComponent(`/title/${hid}`)}`
