@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Image from "next/image"
-import { ImageOff, Loader2 } from "lucide-react"
+import { AlertTriangle, ImageOff, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import {
   revalidateWorkSources,
@@ -11,6 +11,7 @@ import {
   type SourceSelectionInput,
 } from "@/server/actions/external"
 import { setComixHidManually, isComixAutoResolveAvailable } from "@/server/actions/comix-resolver"
+import type { SourceHealthRow } from "@/lib/external/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getCoverImageSrc } from "@/lib/image-proxy"
@@ -56,6 +57,8 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
     Partial<Record<ExternalSourceId, SourceCandidateOption[]>>
   >({})
   const [selection, setSelection] = useState<Partial<Record<ExternalSourceId, SelectionValue>>>({})
+  // Saúde por fonte (`external_source_health`) — distingue "fonte fora" de "sem match".
+  const [sourceHealth, setSourceHealth] = useState<Record<string, SourceHealthRow>>({})
   const [brokenCovers, setBrokenCovers] = useState<Set<string>>(new Set())
   const [manualHid, setManualHid] = useState("")
   const [savingManual, setSavingManual] = useState(false)
@@ -83,6 +86,7 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
         }
         onQueriesResolved?.(result.data.queriesUsed)
         setCandidatesPerSource(result.data.candidatesPerSource)
+        setSourceHealth(result.data.sourceHealth ?? {})
         const initialSelection: Partial<Record<ExternalSourceId, SelectionValue>> = {}
         const allSourceIds = new Set<ExternalSourceId>([
           ...(Object.keys(result.data.candidatesPerSource) as ExternalSourceId[]),
@@ -198,14 +202,43 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
       {allSourceIds.map((source) => {
         const candidates = candidatesPerSource[source] ?? []
         const value = selection[source] ?? "none"
+        // Fonte FORA ≠ obra sem match. Sem esta distinção, zero candidato por queda
+        // de infra parece "a obra não existe aqui" e o usuário rejeita a fonte — uma
+        // rejeição gravada por causa de um 504. Sem candidato E sem ação possível:
+        // mostramos só o aviso, sem opções (não há o que decidir enquanto está fora).
+        const health = sourceHealth[source]
+        const isDown = candidates.length === 0 && health?.status === "down"
         return (
           <div key={source} className="rounded-md border p-3 space-y-2">
             <p className="text-sm font-medium">{SOURCE_LABEL[source] ?? source}</p>
+            {isDown ? (
+              <div className="space-y-0.5 rounded-md bg-amber-500/10 p-2.5 ring-1 ring-amber-500/40">
+                <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                  A fonte não respondeu — não é ausência de match.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {health?.failReason ? `A fonte devolveu ${health.failReason}. ` : ""}
+                  Não dá pra concluir nada sobre esta obra enquanto ela estiver fora.
+                </p>
+                {health?.lastOkAt && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Último sucesso: {new Date(health.lastOkAt).toLocaleString("pt-BR")}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <>
             {candidates.length === 0 ? (
               <p className="text-xs italic text-muted-foreground">Nenhum match encontrado nessa fonte.</p>
             ) : (
               candidates.map((c) => {
                 const checked = value === c.externalId
+                // Candidato NÃO confirmado contra a fonte: título e capa são da própria
+                // obra e o matchScore é um número fixo do servidor, não um match medido.
+                // Antes os dois casos chegavam aqui com cara de match real ("match 95%"
+                // ou "100%", com capa) — uma queda de infra e um palpite de slug ficavam
+                // indistinguíveis de uma fonte que realmente casou com a obra.
+                const degraded = c.unconfirmed != null
                 return (
                   <label
                     key={c.externalId}
@@ -222,21 +255,28 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
                     />
                     <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded border bg-muted">
                       {c.coverUrl && !brokenCovers.has(c.coverUrl) ? (
-                        <Image
-                          src={getCoverImageSrc(c.coverUrl)}
-                          alt=""
-                          fill
-                          sizes="48px"
-                          unoptimized
-                          className="object-cover"
-                          onError={() =>
-                            setBrokenCovers((prev) => {
-                              const next = new Set(prev)
-                              next.add(c.coverUrl!)
-                              return next
-                            })
-                          }
-                        />
+                        <>
+                          <Image
+                            src={getCoverImageSrc(c.coverUrl)}
+                            alt=""
+                            fill
+                            sizes="48px"
+                            unoptimized
+                            className={`object-cover ${degraded ? "saturate-50 brightness-90" : ""}`}
+                            onError={() =>
+                              setBrokenCovers((prev) => {
+                                const next = new Set(prev)
+                                next.add(c.coverUrl!)
+                                return next
+                              })
+                            }
+                          />
+                          {degraded && (
+                            <span className="absolute inset-x-0 bottom-0 bg-black/75 py-px text-center text-[7px] font-semibold leading-tight text-white">
+                              da obra
+                            </span>
+                          )}
+                        </>
                       ) : (
                         <div className="flex h-full w-full items-center justify-center text-muted-foreground">
                           <ImageOff className="h-4 w-4" />
@@ -245,11 +285,27 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium line-clamp-2">{c.title}</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                        match {Math.round(c.matchScore * 100)}%
-                        {c.year ? ` · ${c.year}` : ""}
-                        {c.chapters ? ` · ${c.chapters} cap.` : ""}
-                      </p>
+                      {degraded ? (
+                        <>
+                          <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-500/40 dark:text-amber-200">
+                            <AlertTriangle className="h-3 w-3 shrink-0" />
+                            {c.unconfirmed === "source-down"
+                              ? "detalhes indisponíveis — fonte fora do ar"
+                              : "palpite pelo título — não confirmado nesta fonte"}
+                          </span>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            {c.unconfirmed === "source-down"
+                              ? "Vínculo salvo mantido. Capa e título vêm da sua obra, não da fonte."
+                              : "A busca não achou nada aqui. Capa e título vêm da sua obra; confira antes de aceitar."}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          match {Math.round(c.matchScore * 100)}%
+                          {c.year ? ` · ${c.year}` : ""}
+                          {c.chapters ? ` · ${c.chapters} cap.` : ""}
+                        </p>
+                      )}
                     </div>
                   </label>
                 )
@@ -285,6 +341,8 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
               />
               <span className="text-xs">Não decidir agora</span>
             </label>
+              </>
+            )}
 
             {source === "comix" && !comixAutoResolve && (
               <div className="mt-1 space-y-1.5 rounded-md border border-dashed border-border p-2">

@@ -1,5 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import type { SourceHealthRow } from "./types"
 
 /** Snapshot a persistir em `external_source_health` (timestamps em ms epoch). */
 export interface SourceHealthSnapshot {
@@ -11,6 +12,33 @@ export interface SourceHealthSnapshot {
 }
 
 const iso = (ms: number | null): string | null => (ms != null ? new Date(ms).toISOString() : null)
+
+/**
+ * Lê a saúde persistida das fontes. Best-effort igual ao upsert: qualquer erro
+ * (inclusive tabela ausente) vira `{}` — a seleção de fontes NUNCA pode quebrar
+ * porque a telemetria falhou. Sem linha = fonte sem histórico = tratada como ok.
+ */
+export async function getSourcesHealth(): Promise<Record<string, SourceHealthRow>> {
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from("external_source_health")
+      .select("source, status, fail_reason, last_ok_at")
+    if (error || !data) return {}
+    return Object.fromEntries(
+      data.map((row) => [
+        row.source as string,
+        {
+          status: (row.status as string) ?? "unknown",
+          failReason: (row.fail_reason as string | null) ?? null,
+          lastOkAt: (row.last_ok_at as string | null) ?? null,
+        },
+      ]),
+    )
+  } catch {
+    return {}
+  }
+}
 
 /**
  * Upsert best-effort do snapshot de saúde de uma fonte externa (migration 098).

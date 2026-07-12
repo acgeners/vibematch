@@ -16,7 +16,8 @@ import { boolEnv } from "@/lib/external/mangago-band"
 import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
 import { SONNET_MODEL } from "@/lib/ai/models"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
-import type { ExternalSourceId, MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField, SourcedReview, ExternalSearchResult } from "@/lib/external/types"
+import { getSourcesHealth } from "@/lib/external/source-health-store"
+import type { ExternalSourceId, MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField, SourcedReview, ExternalSearchResult, SourceHealthRow } from "@/lib/external/types"
 import type { CriterionSlug } from "@/types/domain"
 import { revalidatePath } from "next/cache"
 import { pickPrimaryCover } from "@/lib/work-derived"
@@ -424,6 +425,21 @@ export async function evaluateCandidateForCreate(input: {
 // Revalidação de fontes externas (fix de match errado em obras já criadas)
 // ============================================================================
 
+/**
+ * Por que um candidato NÃO foi confirmado contra a fonte. Em ambos os casos o
+ * candidato descreve a OBRA, não a fonte: título e capa vêm de `works`/`work_covers`
+ * e o `matchScore` é um número fixo do código, não um match de título medido.
+ *
+ * - `source-down`: há vínculo salvo, mas o detalhe não pôde ser lido agora (ex.:
+ *   FlareSolverr fora / circuito aberto) — ver o branch de falha de `ensureGatedCandidate`.
+ * - `slug-guess`: a busca não devolveu nada e o candidato é um slug DERIVADO DO TÍTULO,
+ *   nunca verificado na fonte — ver `addAnimePlanetFallbackCandidate`.
+ *
+ * A UI precisa distinguir os dois de um match real: sem isso, uma queda de infra e um
+ * palpite de slug chegam na tela com a mesma cara de "match 95–100% com capa".
+ */
+export type UnconfirmedReason = "source-down" | "slug-guess"
+
 export interface SourceCandidateOption {
   externalId: string
   title: string
@@ -432,6 +448,8 @@ export interface SourceCandidateOption {
   synopsis: string | null
   year: number | null
   chapters: number | null
+  /** Preenchido só quando o candidato NÃO é um match confirmado da fonte. */
+  unconfirmed?: UnconfirmedReason
 }
 
 export interface CurrentSourceSelection {
@@ -448,6 +466,12 @@ export interface RevalidateSourcesResult {
   queriesUsed: string[]
   candidatesPerSource: Partial<Record<ExternalSourceId, SourceCandidateOption[]>>
   currentSelections: CurrentSourceSelection[]
+  /**
+   * Saúde observada por fonte (`external_source_health`). Sem isto, "a fonte está
+   * fora" e "a obra não existe nessa fonte" chegam na UI como a MESMA coisa — zero
+   * candidato — e o usuário rejeita a fonte por causa de uma queda passageira.
+   */
+  sourceHealth: Record<string, SourceHealthRow>
 }
 
 export interface SourceSelectionInput {
@@ -482,6 +506,12 @@ function addAnimePlanetFallbackCandidate(
   const slug = animePlanetSlugFromTitle(title)
   if (!slug) return
 
+  // Este candidato é um PALPITE: o slug sai do título da obra e a capa é a da própria
+  // obra — nada aqui foi confirmado contra o AnimePlanet (a busca não devolveu nada,
+  // seja por bloqueio do Cloudflare, seja porque a obra não existe lá). Sem o
+  // `unconfirmed`, ele chegava na tela como "match 95%" COM capa, ou seja, com a mesma
+  // cara de um match real — a mesma mentira que o card do Mangago contava quando a
+  // fonte caía. O matchScore fica só como ordenação; a UI não o exibe pra não-confirmados.
   candidatesPerSource.animeplanet = [{
     externalId: slug,
     title,
@@ -490,6 +520,7 @@ function addAnimePlanetFallbackCandidate(
     synopsis: null,
     year: null,
     chapters: null,
+    unconfirmed: "slug-guess",
   }]
 }
 
@@ -829,19 +860,26 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
     const detail = await opts.fetchDetail(id).catch(() => null)
     if (!detail?.title) {
       // Detalhe falhou (ex.: FlareSolverr fora). Se o id JÁ está vinculado (veio do
-      // salvo/aceito), NÃO some com ele: mostra um candidato mínimo PRÉ-MARCADO pra o
+      // salvo/aceito), NÃO some com ele: mostra um candidato PRÉ-MARCADO pra o
       // vínculo sobreviver ao "Atualizar dados" mesmo com a fonte fora do ar. Só quando
       // o id foi resolvido agora (ainda não vinculado) é que descarta — nada a perder.
+      //
+      // O candidato empresta título e capa DA PRÓPRIA OBRA e vai marcado com
+      // `unconfirmed`. Antes ele saía com `coverUrl: null`, e o card virava um
+      // placeholder quebrado, sem ano, com um "match 100%" de aparência confiável —
+      // ou seja, uma queda passageira de infra era VISUALMENTE IDÊNTICA a "essa fonte
+      // não tem capa". A flag é o que deixa a UI dizer que o dado não veio da fonte.
       if (id === savedId) {
         candidatesPerSource[opts.source] = [
           {
             externalId: id,
             title: work.title,
-            coverUrl: null,
+            coverUrl: pickPrimaryCover(work.work_covers),
             matchScore: 1,
             synopsis: null,
             year: null,
             chapters: null,
+            unconfirmed: "source-down",
           },
           ...existing,
         ]
@@ -874,7 +912,9 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
       source: "mangago",
       resolveEnabled: hasCrossId && boolEnv(process.env.MANGAGO_RESOLVE_ENABLED, false),
       resolve: async () => (await resolveMangagoUrlProd(crossInput))?.slug ?? null,
-      fetchDetail: (id) => fetchMangagoById(id),
+      // Caminho interativo: o usuário está parado na seleção de fontes, então vale uma
+      // 2ª tentativa curta antes de degradar o card (ver `fetchMangagoById`).
+      fetchDetail: (id) => fetchMangagoById(id, { retry: true }),
     }),
   ])
 
@@ -884,6 +924,7 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
       queriesUsed: allVariants,
       candidatesPerSource,
       currentSelections,
+      sourceHealth: await getSourcesHealth(),
     },
   }
 }
