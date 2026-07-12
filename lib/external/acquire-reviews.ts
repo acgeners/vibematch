@@ -66,10 +66,22 @@ export async function acquireAndPersistWorkReviews(
 
     const { allReviews } = await fetchExternalEvaluationContextForCandidate(candidate, {
       rejectedSources,
+      // INCREMENTAL + ACUMULATIVO: cada fonte grava assim que resolve
+      // (skipPaidEnrichment=true → só as linhas; resumo/digest pagos rodam UMA vez no
+      // save final abaixo). `accumulate` = um re-fetch NUNCA remove reviews boas por
+      // trazer menos numa rodada (queda transitória). Se a task for interrompida no
+      // meio (~35s pro Mangago), as fontes já concluídas ficam salvas.
+      onSourceReviews: (reviews) =>
+        saveWorkReviews(workId, reviews, { skipPaidEnrichment: true, accumulate: true }),
     })
 
-    // Persiste o pool COMPLETO (merge não-destrutivo). Conjunto vazio = no-op.
-    await saveWorkReviews(workId, allReviews ?? [], { skipPaidEnrichment: opts.skipPaidEnrichment })
+    // Save final do pool COMPLETO (acumulativo, idempotente com o incremental): dispara
+    // o enriquecimento pago (resumo/digest) UMA vez e cobre o caso de cache-hit (onde o
+    // callback incremental não roda). Vazio = no-op.
+    await saveWorkReviews(workId, allReviews ?? [], {
+      skipPaidEnrichment: opts.skipPaidEnrichment,
+      accumulate: true,
+    })
     return allReviews?.length ?? 0
   } catch (err) {
     console.error(

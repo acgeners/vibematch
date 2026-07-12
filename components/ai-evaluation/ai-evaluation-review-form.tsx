@@ -354,7 +354,7 @@ export function AiEvaluationReviewForm({
               {evaluation.confidence != null && (
                 <span
                   className={`rounded-full border px-2 py-0.5 text-xs font-medium ${confidenceBadgeClass(evaluation.confidence)}`}
-                  title="Confiança declarada pela IA: 0 = sem certeza, 1 = alta certeza"
+                  title="Confiança da IA nas NOTAS (0–100%). Reflete a consistência da evidência, NÃO a quantidade de reviews: obras com opiniões divididas ou sinais ambíguos (ex.: enemies-to-lovers) recebem confiança baixa mesmo com muitas reviews — isso é o modelo sendo honesto, não uma falha."
                 >
                   Confiança: {Math.round(evaluation.confidence * 100)}%
                 </span>

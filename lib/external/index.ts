@@ -1091,50 +1091,10 @@ export function extractUserRating(text: string): { rating?: number; cleanText: s
  * `selectReviewsForEvaluation()`. ComicK contribui reviews curadas (com nota /10)
  * + comentários da obra (opinião livre dos usuários), unificados como "review".
  */
-async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<SourcedReview[]> {
-  const fetchers: Array<Promise<{ source: ExternalSourceId; reviews: string[] } | null>> = [
-    candidate.muId
-      ? withTimeout(fetchMangaUpdatesReviews(candidate.muId).then((reviews) => ({ source: "mangaupdates" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:mangaupdates")
-      : Promise.resolve(null),
-    candidate.anilistId
-      ? withTimeout(fetchAniListReviews(candidate.anilistId).then((reviews) => ({ source: "anilist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:anilist")
-      : Promise.resolve(null),
-    candidate.malId
-      ? withTimeout(fetchJikanMangaReviews(candidate.malId).then((reviews) => ({ source: "myanimelist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:myanimelist")
-      : Promise.resolve(null),
-    candidate.kitsuId
-      ? withTimeout(fetchKitsuReactions(candidate.kitsuId).then((reviews) => ({ source: "kitsu" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:kitsu")
-      : Promise.resolve(null),
-    candidate.animePlanetSlug
-      ? withTimeout(fetchAnimePlanetReviews(candidate.animePlanetSlug).then((reviews) => ({ source: "animeplanet" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:animeplanet")
-      : Promise.resolve(null),
-    candidate.mangadexId
-      ? withTimeout(fetchMangaDexForumComments(candidate.mangadexId).then((reviews) => ({ source: "mangadex" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:mangadex")
-      : Promise.resolve(null),
-    candidate.comickHid
-      ? withTimeout(fetchComicKReviews(candidate.comickHid).then((reviews) => ({ source: "comick" as const, reviews })), TIMEOUT_REVIEWS_COMICK_MS, "reviews:comick")
-      : Promise.resolve(null),
-    candidate.comixHid
-      ? withTimeout(fetchComixReviews(candidate.comixHid).then((reviews) => ({ source: "comix" as const, reviews })), TIMEOUT_REVIEWS_COMIX_MS, "reviews:comix")
-      : Promise.resolve(null),
-    candidate.mangagoSlug
-      ? withTimeout(fetchMangagoReviews(candidate.mangagoSlug).then((reviews) => ({ source: "mangago" as const, reviews })), TIMEOUT_REVIEWS_MANGAGO_MS, "reviews:mangago")
-      : Promise.resolve(null),
-  ]
-
-  const settled = await Promise.allSettled(fetchers)
-
-  // DEBUG: contar reviews raw por fonte antes de filtrar
-  const rawCounts = settled.map((entry, i) => {
-    const src = ["mangaupdates", "anilist", "myanimelist", "kitsu", "animeplanet", "mangadex", "comick", "comix", "mangago"][i]
-    if (entry.status === "rejected") return `${src}=REJECTED(${entry.reason})`
-    if (!entry.value) return `${src}=skipped(no_id)`
-    const reviews = entry.value.reviews
-    const lens = reviews.map((r) => r.length).sort((a, b) => b - a).slice(0, 3)
-    return `${src}=${reviews.length}(top3lens=${lens.join(",")})`
-  })
-  console.log(`[collectReviews] candidate="${candidate.title}" ids={mu:${candidate.muId},ani:${candidate.anilistId},mal:${candidate.malId},kitsu:${candidate.kitsuId},ap:${candidate.animePlanetSlug},md:${candidate.mangadexId},cmk:${candidate.comickHid}} raw=${rawCounts.join(" ")}`)
-
+async function collectReviewsFromCandidate(
+  candidate: MergedCandidate,
+  onSourceReviews?: (reviews: SourcedReview[]) => void | Promise<void>,
+): Promise<SourcedReview[]> {
   // Kitsu expõe "reactions" (não reviews completos), tipicamente 40-90 chars.
   // Pra outras fontes mantemos o threshold em 100 (reviews curtos demais
   // adicionam ruído). Pra Kitsu baixamos pra 30 — uma frase como "great FL,
@@ -1171,23 +1131,83 @@ async function collectReviewsFromCandidate(candidate: MergedCandidate): Promise<
     // Não há "maiores" suficientes → completa com as maiores dentre as menores.
     return [...cleaned].sort((a, b) => b.length - a.length).slice(0, FALLBACK_TARGET)
   }
+  // Seleção + formatação de UMA fonte → SourcedReview[]. Usada tanto na persistência
+  // incremental (por fonte, assim que resolve) quanto no retorno agregado.
+  const mapGroup = (group: { source: ExternalSourceId; reviews: string[] }): SourcedReview[] =>
+    selectByAdaptiveLength(group.reviews, group.source).map((text): SourcedReview => {
+      const { rating, cleanText } = extractUserRating(text)
+      return {
+        source: group.source,
+        sourceTitle: candidate.title,
+        matchScore: candidate.matchScore ?? 1,
+        text: cleanText,
+        userRating: rating,
+        textLength: cleanText.length,
+      }
+    })
+
+  const fetchers: Array<Promise<{ source: ExternalSourceId; reviews: string[] } | null>> = [
+    candidate.muId
+      ? withTimeout(fetchMangaUpdatesReviews(candidate.muId).then((reviews) => ({ source: "mangaupdates" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:mangaupdates")
+      : Promise.resolve(null),
+    candidate.anilistId
+      ? withTimeout(fetchAniListReviews(candidate.anilistId).then((reviews) => ({ source: "anilist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:anilist")
+      : Promise.resolve(null),
+    candidate.malId
+      ? withTimeout(fetchJikanMangaReviews(candidate.malId).then((reviews) => ({ source: "myanimelist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:myanimelist")
+      : Promise.resolve(null),
+    candidate.kitsuId
+      ? withTimeout(fetchKitsuReactions(candidate.kitsuId).then((reviews) => ({ source: "kitsu" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:kitsu")
+      : Promise.resolve(null),
+    candidate.animePlanetSlug
+      ? withTimeout(fetchAnimePlanetReviews(candidate.animePlanetSlug).then((reviews) => ({ source: "animeplanet" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:animeplanet")
+      : Promise.resolve(null),
+    candidate.mangadexId
+      ? withTimeout(fetchMangaDexForumComments(candidate.mangadexId).then((reviews) => ({ source: "mangadex" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:mangadex")
+      : Promise.resolve(null),
+    candidate.comickHid
+      ? withTimeout(fetchComicKReviews(candidate.comickHid).then((reviews) => ({ source: "comick" as const, reviews })), TIMEOUT_REVIEWS_COMICK_MS, "reviews:comick")
+      : Promise.resolve(null),
+    candidate.comixHid
+      ? withTimeout(fetchComixReviews(candidate.comixHid).then((reviews) => ({ source: "comix" as const, reviews })), TIMEOUT_REVIEWS_COMIX_MS, "reviews:comix")
+      : Promise.resolve(null),
+    candidate.mangagoSlug
+      ? withTimeout(fetchMangagoReviews(candidate.mangagoSlug).then((reviews) => ({ source: "mangago" as const, reviews })), TIMEOUT_REVIEWS_MANGAGO_MS, "reviews:mangago")
+      : Promise.resolve(null),
+  ]
+
+  // Persistência INCREMENTAL: entrega cada fonte ao `onSourceReviews` assim que ELA
+  // resolve — não no fim, junto com todas. Assim uma interrupção no meio da coleta
+  // (~35s por causa do Mangago via FlareSolverr; HMR/restart/deploy) NÃO perde o que
+  // as fontes rápidas já trouxeram: cada uma grava sozinha.
+  const observed = onSourceReviews
+    ? fetchers.map((f) =>
+        f.then(async (r) => {
+          if (r) {
+            const sourced = mapGroup(r)
+            if (sourced.length > 0) await onSourceReviews(sourced)
+          }
+          return r
+        }),
+      )
+    : fetchers
+
+  const settled = await Promise.allSettled(observed)
+
+  // DEBUG: contar reviews raw por fonte antes de filtrar
+  const rawCounts = settled.map((entry, i) => {
+    const src = ["mangaupdates", "anilist", "myanimelist", "kitsu", "animeplanet", "mangadex", "comick", "comix", "mangago"][i]
+    if (entry.status === "rejected") return `${src}=REJECTED(${entry.reason})`
+    if (!entry.value) return `${src}=skipped(no_id)`
+    const reviews = entry.value.reviews
+    const lens = reviews.map((r) => r.length).sort((a, b) => b - a).slice(0, 3)
+    return `${src}=${reviews.length}(top3lens=${lens.join(",")})`
+  })
+  console.log(`[collectReviews] candidate="${candidate.title}" ids={mu:${candidate.muId},ani:${candidate.anilistId},mal:${candidate.malId},kitsu:${candidate.kitsuId},ap:${candidate.animePlanetSlug},md:${candidate.mangadexId},cmk:${candidate.comickHid}} raw=${rawCounts.join(" ")}`)
 
   return settled
     .flatMap((entry) => (entry.status === "fulfilled" && entry.value ? [entry.value] : []))
-    .flatMap((group) =>
-      selectByAdaptiveLength(group.reviews, group.source)
-        .map((text): SourcedReview => {
-          const { rating, cleanText } = extractUserRating(text)
-          return {
-            source: group.source,
-            sourceTitle: candidate.title,
-            matchScore: candidate.matchScore ?? 1,
-            text: cleanText,
-            userRating: rating,
-            textLength: cleanText.length,
-          }
-        })
-    )
+    .flatMap((group) => mapGroup(group))
 }
 
 /**
@@ -1509,6 +1529,9 @@ export async function fetchExternalEvaluationContextForCandidate(
     rejectedSources?: ReadonlyArray<string>
     total?: number
     maxPerSource?: number
+    /** Persistência incremental: chamado por fonte, assim que ela resolve (não é
+     *  parte da chave de cache; num cache-hit não dispara — o caller re-persiste). */
+    onSourceReviews?: (reviews: SourcedReview[]) => void | Promise<void>
   } = {}
 ): Promise<ReviewContextResult> {
   const cacheKey = reviewContextCacheKey({
@@ -1546,6 +1569,7 @@ async function fetchExternalEvaluationContextForCandidateUncached(
     rejectedSources?: ReadonlyArray<string>
     total?: number
     maxPerSource?: number
+    onSourceReviews?: (reviews: SourcedReview[]) => void | Promise<void>
   } = {}
 ): Promise<ReviewContextResult> {
   const { uniqueAccepted } = await hydrateAndFilterCandidate(candidate)
@@ -1566,7 +1590,7 @@ async function fetchExternalEvaluationContextForCandidateUncached(
   ])
   const reviewCandidate = restrictCandidateToSources(candidate, reviewSources)
   const [allReviews, similarWorks] = await Promise.all([
-    collectReviewsFromCandidate(reviewCandidate),
+    collectReviewsFromCandidate(reviewCandidate, opts.onSourceReviews),
     collectSimilarFromCandidate(reviewCandidate),
   ])
 
