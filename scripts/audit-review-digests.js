@@ -29,6 +29,7 @@
  */
 
 const { createClient } = require("@supabase/supabase-js")
+const fs = require("fs")
 const path = require("path")
 
 require("dotenv").config({ path: path.resolve(__dirname, "..", ".env.local") })
@@ -107,7 +108,27 @@ async function main() {
       process.exit(1)
     }
   }
+  // Zerar apaga as 4 colunas → sem manifesto, NÃO HÁ como saber depois quais obras
+  // foram afetadas (obras "sem digest" incluem centenas que nunca tiveram um).
+  const stamp = new Date().toISOString().slice(0, 10)
+  const manifestPath = path.resolve(__dirname, "manifests", `digest-zeroed-${stamp}.json`)
+  fs.mkdirSync(path.dirname(manifestPath), { recursive: true })
+  fs.writeFileSync(
+    manifestPath,
+    JSON.stringify(
+      {
+        zeradoEm: stamp,
+        motivo: "digest corrompido (markup de tool-call vazado)" + (INCLUDE_EMPTY ? " + sem salient_traits" : ""),
+        comoRegerar: `npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/regen-review-digest.ts --from scripts/manifests/digest-zeroed-${stamp}.json`,
+        works: bad.map((w) => ({ id: w.id, title: w.title })),
+      },
+      null,
+      2,
+    ) + "\n",
+  )
+
   console.log(`\n${bad.length} digest(s) zerado(s). Serão regerados sob demanda (nenhuma chamada de IA feita aqui).`)
+  console.log(`Manifesto: ${manifestPath}`)
 }
 
 main().catch((err) => {
