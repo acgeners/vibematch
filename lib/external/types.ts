@@ -190,7 +190,7 @@ export interface SimilarWork {
   tags?: string[]
   /** Fontes que recomendaram esta obra (uma obra pode aparecer em múltiplas listas). */
   sources: ExternalSourceId[]
-  /** Soma dos pesos das recomendações (rating AniList ou nº de votos Jikan). Quanto maior, mais consenso. */
+  /** Soma dos pesos das recomendações (rating do AniList ou `num_recommendations` do MAL). Quanto maior, mais consenso. */
   weight?: number
 }
 
