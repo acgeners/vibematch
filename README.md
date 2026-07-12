@@ -25,6 +25,20 @@ npm run dev                  # http://localhost:3001  (porta 3001, não 3000)
 As variáveis necessárias estão em [`.env.example`](.env.example) — destaque para
 `SUPABASE_SERVICE_ROLE_KEY` e `ANTHROPIC_API_KEY`.
 
+### `MAL_CLIENT_ID` — MyAnimeList
+
+Os metadados do MAL (nota, votos, capítulos, status, sinopse) vêm da **API oficial v2**,
+que exige um Client ID no header `X-MAL-CLIENT-ID`. Registre um app em
+[myanimelist.net/apiconfig](https://myanimelist.net/apiconfig) (grátis; tipo `other`) e
+ponha o **Client ID** — só ele — em `MAL_CLIENT_ID`.
+
+O **Client Secret não vai no `.env`**: ele só serve pro fluxo OAuth (dados de usuário
+logado), que o app não usa. Um segredo guardado sem uso é só mais uma coisa pra vazar.
+
+Sem a variável, o MAL degrada em silêncio: some da busca e não entra na média de
+plataforma — e ele costuma ser a fonte com **mais votos** de todas (em "Solo Leveling",
+371 mil, contra 121 mil do AniList), então a nota prevista sente a falta.
+
 ## Comandos
 
 ```bash
