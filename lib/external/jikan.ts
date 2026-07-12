@@ -1,194 +1,43 @@
-import type { PublicationStatus } from "@/types/domain"
+// ============================================================================
+// Jikan — APENAS reviews do MyAnimeList
+// ============================================================================
+// O Jikan é um scraper NÃO-OFICIAL do MAL. Ele era a única porta de entrada da
+// fonte inteira e, quando o MAL o recusa, devolve
+//   504 {"message":"Jikan failed to connect to MyAnimeList..."}
+// derrubando o MyAnimeList do app — mesmo com o myanimelist.net no ar (medido em
+// 2026-07-12: jikan em 504, MAL em 200). A queda era do INTERMEDIÁRIO, não da fonte.
+//
+// Os METADADOS migraram pra API oficial (`myanimelist.ts`, header X-MAL-CLIENT-ID),
+// que responde em ~250ms e não depende de scraping. Sobrou aqui só o que a API
+// oficial NÃO tem: **reviews** — não existe endpoint nem campo pra elas, e é
+// justamente essa lacuna que faz o Jikan existir.
+//
+// A saúde da fonte "myanimelist" (external_source_health) é gravada por
+// `myanimelist.ts`, NÃO aqui: quem responde "dá pra obter dados do MAL?" é a API
+// oficial. Dois gravadores na mesma linha ficariam se sobrescrevendo — o Jikan em
+// 504 marcando `down` enquanto a API oficial, funcionando, marca `ok`.
+//
+// O circuito abaixo continua, mas com um propósito mais modesto: só CUSTO. Sem ele,
+// cada obra pagaria 3 tentativas × 2 páginas com backoff pra sempre falhar, dentro
+// de um orçamento de tempo compartilhado com as outras fontes de review.
 
 const JIKAN_BASE = "https://api.jikan.moe/v4"
 
-export interface JikanMangaResult {
-  id: number
-  title: string
-  alternativeTitles: string[]
-  synopsis?: string
-  coverUrl?: string
-  year?: number
-  chapters?: number
-  score?: number
-  scoredBy?: number
-}
-
-export interface JikanMangaDetail {
-  id: number
-  title: string
-  alternativeTitles: string[]
-  synopsis?: string
-  coverUrl?: string
-  year?: number
-  yearEnd?: number
-  chapters?: number
-  publicationStatus?: PublicationStatus
-  /** MAL score 0-10 */
-  rating?: number
-  /** scored_by — number of users who scored */
-  votes?: number
-  genres: string[]
-}
-
-function cleanText(text: unknown): string {
-  return String(text ?? "")
-    .replace(/\s+/g, " ")
-    .trim()
-}
-
-function titleCandidates(item: Record<string, unknown>): string[] {
-  const titles = Array.isArray(item.titles) ? item.titles : []
-  return [
-    item.title,
-    item.title_english,
-    ...(Array.isArray(item.title_synonyms) ? item.title_synonyms : []),
-    ...titles.map((entry) => (
-      typeof entry === "object" && entry !== null
-        ? (entry as Record<string, unknown>).title
-        : null
-    )),
-  ].map(cleanText).filter(Boolean)
-}
-
-function normalizeTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\([^)]*\)/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-}
-
-function titleMatchScore(a: string, b: string): number {
-  const na = normalizeTitle(a)
-  const nb = normalizeTitle(b)
-  if (!na || !nb) return 0
-  if (na === nb) return 1
-  const shorter = na.length <= nb.length ? na : nb
-  const shorterWordCount = shorter.split(/\s+/).filter(Boolean).length
-  if ((na.includes(nb) || nb.includes(na)) && (shorterWordCount >= 3 || shorter.length >= 18)) {
-    return 0.92
-  }
-
-  const tok = (s: string) => new Set(s.split(/\s+/).filter((w) => w.length > 2))
-  const wa = tok(na)
-  const wb = tok(nb)
-  if (wa.size === 0 || wb.size === 0) return 0
-  const inter = [...wa].filter((w) => wb.has(w)).length
-  return inter / new Set([...wa, ...wb]).size
-}
-
-function bestRecordForTitle(records: Record<string, unknown>[], query: string, threshold = 0.7) {
-  const ranked = records
-    .map((record) => ({
-      record,
-      score: Math.max(...titleCandidates(record).map((title) => titleMatchScore(title, query)), 0),
-    }))
-    .filter((item) => item.score >= threshold)
-    .sort((a, b) => b.score - a.score)
-
-  return ranked[0]?.record ?? null
-}
-
-function statusFromJikan(raw: unknown): PublicationStatus | undefined {
-  if (typeof raw !== "string") return undefined
-  switch (raw.toLowerCase()) {
-    case "finished": return "Completed"
-    case "publishing": return "Ongoing"
-    case "on hiatus": return "Hiatus"
-    case "discontinued": return "Cancelled"
-    case "not yet published": return "Unknown"
-    default: return "Unknown"
-  }
-}
-
-function yearFromIso(date: unknown): number | undefined {
-  if (typeof date !== "string" || date.length < 4) return undefined
-  const n = parseInt(date.slice(0, 4), 10)
-  return Number.isFinite(n) ? n : undefined
-}
-
-function coverFromImages(images: unknown): string | undefined {
-  if (!images || typeof images !== "object") return undefined
-  const jpg = (images as Record<string, unknown>).jpg as Record<string, string> | undefined
-  return jpg?.large_image_url ?? jpg?.image_url ?? undefined
-}
-
-function genresFromRecord(record: Record<string, unknown>): string[] {
-  const out: string[] = []
-  for (const key of ["genres", "themes", "demographics"]) {
-    const arr = record[key]
-    if (Array.isArray(arr)) {
-      for (const entry of arr) {
-        const name = (entry as Record<string, unknown>)?.name
-        if (typeof name === "string") out.push(name)
-      }
-    }
-  }
-  return Array.from(new Set(out))
-}
-
-const DEBUG_SEARCH = process.env.DEBUG_EXTERNAL_SEARCH === "1"
-
-// Jikan é mais tolerante que ComicK, mas títulos longos com hífen às vezes
-// caem fora do top 5. Mesma estratégia de fallback: se a query tem pontuação,
-// dispara também variante stripada em paralelo e funde por mal_id.
-function stripPunctForQuery(s: string): string {
-  return s.replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim()
-}
-
-// Jikan retorna 504 ("Jikan failed to connect to MyAnimeList") e 429 (rate-limit)
-// com frequência. Antes o código engolia silenciosamente e a fonte aparecia como
-// "Nenhum match" sem distinguir API caída de obra inexistente. Agora loga e
-// tenta de novo com backoff curto pra status transientes.
 const TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504])
-
-// --- Circuito do Jikan ------------------------------------------------------
-//
-// O Jikan é um PROXY do MyAnimeList — quando o MAL recusa conexão, ele devolve
-// 504 {"message":"Jikan failed to connect to MyAnimeList..."} em tudo que exige
-// buscar no MAL ao vivo. MEDIDO (2026-07-12): busca e reviews em 504 consistente;
-// só o que o Jikan tem em cache responde 200 (`/manga/2/full` ok, `/manga/13/full`
-// 504). Isso é indisponibilidade externa, não bug nosso.
-//
-// Sem circuito, cada busca ainda paga 3 tentativas × 2 variações de query com
-// backoff (~3s) pra sempre falhar — e isso come o orçamento de 8s da busca, que é
-// COMPARTILHADO com as outras fontes. O circuito para de tentar depois de N falhas
-// seguidas e reabre sozinho: um MAL fora deixa de atrasar AniList/MU/Kitsu.
 const CIRCUIT_FAIL_THRESHOLD = 3
 const CIRCUIT_TTL_MS = 5 * 60_000
+
 let consecutiveFails = 0
 let circuitOpenUntil = 0
-let lastPersistedStatus: string | null = null
 
 export function isJikanCircuitOpen(): boolean {
   return Date.now() < circuitOpenUntil
 }
 
-/** Telemetria best-effort (mesmo padrão do comix-gate): só em MUDANÇA de estado. */
-function persistJikanHealth(status: "ok" | "down", reason: string | null): void {
-  if (status === lastPersistedStatus) return
-  lastPersistedStatus = status
-  void import("./source-health-store")
-    .then((m) =>
-      m.upsertSourceHealth("myanimelist", {
-        status,
-        lastOkAt: status === "ok" ? Date.now() : null,
-        lastFailAt: status === "ok" ? null : Date.now(),
-        failReason: reason,
-        consecutiveFails,
-      }),
-    )
-    .catch(() => {})
-}
-
-/** Um sucesso PROVA que o MAL voltou — fecha o circuito na hora. */
+/** Um sucesso prova que o Jikan voltou — fecha o circuito na hora. */
 function recordJikanOk(): void {
   consecutiveFails = 0
   circuitOpenUntil = 0
-  persistJikanHealth("ok", null)
 }
 
 function recordJikanFailure(status: number | undefined): void {
@@ -197,214 +46,16 @@ function recordJikanFailure(status: number | undefined): void {
     circuitOpenUntil = Date.now() + CIRCUIT_TTL_MS
     console.error(
       `[jikan] circuito ABERTO por ${CIRCUIT_TTL_MS / 60_000}min — ${consecutiveFails} falhas seguidas ` +
-        `(último HTTP ${status ?? "?"}). O MyAnimeList está indisponível via Jikan; as outras fontes seguem normais.`,
+        `(último HTTP ${status ?? "?"}). Só as REVIEWS do MyAnimeList são afetadas; ` +
+        `os metadados vêm da API oficial e seguem normais.`
     )
   }
-  persistJikanHealth("down", `HTTP ${status ?? "network"}`)
 }
 
-async function fetchJikanSearchRows(query: string, maxAttempts = 3): Promise<unknown[]> {
-  if (isJikanCircuitOpen()) return []
-  const url = new URL(`${JIKAN_BASE}/manga`)
-  url.searchParams.set("q", query)
-  url.searchParams.set("limit", "5")
-
-  let lastStatus: number | undefined
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    let res: Response
-    try {
-      res = await fetch(url, { cache: "no-store" })
-    } catch (err) {
-      console.error(`[searchJikanManga] network error attempt ${attempt}/${maxAttempts} q="${query}":`, err instanceof Error ? err.message : err)
-      if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, 400 * attempt))
-      continue
-    }
-    if (res.ok) {
-      recordJikanOk()
-      const json = await res.json()
-      return Array.isArray(json?.data) ? json.data : []
-    }
-    lastStatus = res.status
-    if (!TRANSIENT_STATUSES.has(res.status)) {
-      console.error(`[searchJikanManga] non-retryable HTTP ${res.status} q="${query}"`)
-      return []
-    }
-    if (attempt < maxAttempts) {
-      const delay = res.status === 429 ? 1200 * attempt : 500 * attempt
-      await new Promise((r) => setTimeout(r, delay))
-    }
-  }
-  recordJikanFailure(lastStatus)
-  console.error(`[searchJikanManga] gave up after ${maxAttempts} attempts (last HTTP ${lastStatus}) q="${query}"`)
-  return []
-}
-
-export async function searchJikanManga(title: string): Promise<JikanMangaResult[]> {
-  try {
-    const stripped = stripPunctForQuery(title)
-    const queries = stripped && stripped.toLowerCase() !== title.toLowerCase()
-      ? [title, stripped]
-      : [title]
-
-    // Importante: NÃO usar queries.map(fetchJikanSearchRows) — Array.map passa
-    // (element, index, array), e o index sobrescreveria o param maxAttempts default.
-    const settled = await Promise.allSettled(queries.map((q) => fetchJikanSearchRows(q)))
-    const seenIds = new Set<number>()
-    const mergedRows: unknown[] = []
-    let rawCount = 0
-    let strippedRawCount = 0
-    settled.forEach((entry, i) => {
-      if (entry.status !== "fulfilled") return
-      if (i === 0) rawCount = entry.value.length
-      else strippedRawCount = entry.value.length
-      for (const item of entry.value) {
-        const malId = (item as Record<string, unknown>)?.mal_id
-        if (typeof malId !== "number" || seenIds.has(malId)) continue
-        seenIds.add(malId)
-        mergedRows.push(item)
-      }
-    })
-
-    if (DEBUG_SEARCH && queries.length > 1) {
-      console.log(
-        `[searchJikanManga][debug] q="${title}" stripped="${stripped}" ` +
-        `raw=${rawCount} stripped_raw=${strippedRawCount} merged=${mergedRows.length}`
-      )
-    }
-
-    return mergedRows
-      .map((item): JikanMangaResult | null => {
-        const record = item as Record<string, unknown>
-        const id = typeof record.mal_id === "number" ? record.mal_id : null
-        const titles = titleCandidates(record)
-        const title = titles[0]
-        if (!id || !title) return null
-        const published = record.published as Record<string, unknown> | undefined
-        return {
-          id,
-          title,
-          alternativeTitles: Array.from(new Set(titles.slice(1).filter((item) => item !== title))),
-          synopsis: typeof record.synopsis === "string" ? cleanText(record.synopsis) : undefined,
-          coverUrl: coverFromImages(record.images),
-          year: typeof record.year === "number" ? record.year : yearFromIso(published?.from),
-          chapters: typeof record.chapters === "number" ? record.chapters : undefined,
-          score: typeof record.score === "number" ? record.score : undefined,
-          scoredBy: typeof record.scored_by === "number" ? record.scored_by : undefined,
-        }
-      })
-      .filter((item): item is JikanMangaResult => item !== null)
-  } catch {
-    return []
-  }
-}
-
-function recordToDetail(record: Record<string, unknown>, malId: number): JikanMangaDetail {
-  const titles = titleCandidates(record)
-  const primary = titles[0] ?? ""
-  const published = record.published as Record<string, unknown> | undefined
-  return {
-    id: malId,
-    title: primary,
-    alternativeTitles: Array.from(new Set(titles.slice(1).filter((item) => item !== primary))),
-    synopsis: typeof record.synopsis === "string" ? cleanText(record.synopsis) : undefined,
-    coverUrl: coverFromImages(record.images),
-    year: typeof record.year === "number" ? record.year : yearFromIso(published?.from),
-    yearEnd: yearFromIso(published?.to),
-    chapters: typeof record.chapters === "number" ? record.chapters : undefined,
-    publicationStatus: statusFromJikan(record.status),
-    rating: typeof record.score === "number" ? record.score : undefined,
-    votes: typeof record.scored_by === "number" ? record.scored_by : undefined,
-    genres: genresFromRecord(record),
-  }
-}
-
-/**
- * Fetches MAL metadata via the search endpoint, which is cached by Jikan and
- * does not require scraping MAL directly (unlike /manga/{id} which often fails).
- */
-export async function fetchJikanMangaByTitle(title: string, threshold = 0.7): Promise<JikanMangaDetail | null> {
-  if (isJikanCircuitOpen()) return null
-  try {
-    const url = new URL(`${JIKAN_BASE}/manga`)
-    url.searchParams.set("q", title)
-    url.searchParams.set("limit", "10")
-
-    const res = await fetch(url, { cache: "no-store" })
-    if (!res.ok) {
-      if (TRANSIENT_STATUSES.has(res.status)) recordJikanFailure(res.status)
-      return null
-    }
-    recordJikanOk()
-
-    const json = await res.json()
-    const data: unknown[] = Array.isArray(json?.data) ? json.data : []
-    const record = bestRecordForTitle(data as Record<string, unknown>[], title, threshold)
-    if (!record) return null
-
-    const id = typeof record.mal_id === "number" ? record.mal_id : null
-    if (!id) return null
-
-    return recordToDetail(record, id)
-  } catch {
-    return null
-  }
-}
-
-/** @deprecated MAL blocks Jikan's scraping intermittently — prefer fetchJikanMangaByTitle */
-export async function fetchJikanMangaById(malId: number): Promise<JikanMangaDetail | null> {
-  if (isJikanCircuitOpen()) return null
-  try {
-    const res = await fetch(`${JIKAN_BASE}/manga/${malId}/full`, { cache: "no-store" })
-    if (!res.ok) {
-      if (TRANSIENT_STATUSES.has(res.status)) recordJikanFailure(res.status)
-      return null
-    }
-    recordJikanOk()
-
-    const json = await res.json()
-    const record = json?.data as Record<string, unknown> | undefined
-    if (!record) return null
-
-    return recordToDetail(record, malId)
-  } catch {
-    return null
-  }
-}
-
-export interface JikanRecommendation {
-  title: string
-  /** Número de usuários que sugeriram esta recomendação. Sinal de consenso. */
-  votes: number
-}
-
-export async function fetchJikanMangaRecommendations(malId: number): Promise<JikanRecommendation[]> {
-  if (isJikanCircuitOpen()) return []
-  try {
-    const res = await fetch(`${JIKAN_BASE}/manga/${malId}/recommendations`, { cache: "no-store" })
-    if (!res.ok) {
-      if (TRANSIENT_STATUSES.has(res.status)) recordJikanFailure(res.status)
-      return []
-    }
-    recordJikanOk()
-
-    const json = await res.json()
-    const data: unknown[] = Array.isArray(json?.data) ? json.data : []
-
-    return data
-      .map((item): JikanRecommendation | null => {
-        const record = item as Record<string, unknown>
-        const entry = record.entry as Record<string, unknown> | undefined
-        const title = typeof entry?.title === "string" ? entry.title : null
-        if (!title) return null
-        const votes = typeof record.votes === "number" ? record.votes : 0
-        return { title, votes }
-      })
-      .filter((entry): entry is JikanRecommendation => entry !== null)
-      .filter((entry) => entry.votes > 0)
-      .slice(0, 10)
-  } catch {
-    return []
-  }
+function cleanText(text: unknown): string {
+  return String(text ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
 }
 
 export async function fetchJikanMangaReviews(malId: number): Promise<string[]> {
