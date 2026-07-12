@@ -145,7 +145,66 @@ function stripPunctForQuery(s: string): string {
 // tenta de novo com backoff curto pra status transientes.
 const TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504])
 
+// --- Circuito do Jikan ------------------------------------------------------
+//
+// O Jikan é um PROXY do MyAnimeList — quando o MAL recusa conexão, ele devolve
+// 504 {"message":"Jikan failed to connect to MyAnimeList..."} em tudo que exige
+// buscar no MAL ao vivo. MEDIDO (2026-07-12): busca e reviews em 504 consistente;
+// só o que o Jikan tem em cache responde 200 (`/manga/2/full` ok, `/manga/13/full`
+// 504). Isso é indisponibilidade externa, não bug nosso.
+//
+// Sem circuito, cada busca ainda paga 3 tentativas × 2 variações de query com
+// backoff (~3s) pra sempre falhar — e isso come o orçamento de 8s da busca, que é
+// COMPARTILHADO com as outras fontes. O circuito para de tentar depois de N falhas
+// seguidas e reabre sozinho: um MAL fora deixa de atrasar AniList/MU/Kitsu.
+const CIRCUIT_FAIL_THRESHOLD = 3
+const CIRCUIT_TTL_MS = 5 * 60_000
+let consecutiveFails = 0
+let circuitOpenUntil = 0
+let lastPersistedStatus: string | null = null
+
+export function isJikanCircuitOpen(): boolean {
+  return Date.now() < circuitOpenUntil
+}
+
+/** Telemetria best-effort (mesmo padrão do comix-gate): só em MUDANÇA de estado. */
+function persistJikanHealth(status: "ok" | "down", reason: string | null): void {
+  if (status === lastPersistedStatus) return
+  lastPersistedStatus = status
+  void import("./source-health-store")
+    .then((m) =>
+      m.upsertSourceHealth("myanimelist", {
+        status,
+        lastOkAt: status === "ok" ? Date.now() : null,
+        lastFailAt: status === "ok" ? null : Date.now(),
+        failReason: reason,
+        consecutiveFails,
+      }),
+    )
+    .catch(() => {})
+}
+
+/** Um sucesso PROVA que o MAL voltou — fecha o circuito na hora. */
+function recordJikanOk(): void {
+  consecutiveFails = 0
+  circuitOpenUntil = 0
+  persistJikanHealth("ok", null)
+}
+
+function recordJikanFailure(status: number | undefined): void {
+  consecutiveFails += 1
+  if (consecutiveFails >= CIRCUIT_FAIL_THRESHOLD && !isJikanCircuitOpen()) {
+    circuitOpenUntil = Date.now() + CIRCUIT_TTL_MS
+    console.error(
+      `[jikan] circuito ABERTO por ${CIRCUIT_TTL_MS / 60_000}min — ${consecutiveFails} falhas seguidas ` +
+        `(último HTTP ${status ?? "?"}). O MyAnimeList está indisponível via Jikan; as outras fontes seguem normais.`,
+    )
+  }
+  persistJikanHealth("down", `HTTP ${status ?? "network"}`)
+}
+
 async function fetchJikanSearchRows(query: string, maxAttempts = 3): Promise<unknown[]> {
+  if (isJikanCircuitOpen()) return []
   const url = new URL(`${JIKAN_BASE}/manga`)
   url.searchParams.set("q", query)
   url.searchParams.set("limit", "5")
@@ -161,6 +220,7 @@ async function fetchJikanSearchRows(query: string, maxAttempts = 3): Promise<unk
       continue
     }
     if (res.ok) {
+      recordJikanOk()
       const json = await res.json()
       return Array.isArray(json?.data) ? json.data : []
     }
@@ -174,6 +234,7 @@ async function fetchJikanSearchRows(query: string, maxAttempts = 3): Promise<unk
       await new Promise((r) => setTimeout(r, delay))
     }
   }
+  recordJikanFailure(lastStatus)
   console.error(`[searchJikanManga] gave up after ${maxAttempts} attempts (last HTTP ${lastStatus}) q="${query}"`)
   return []
 }
@@ -262,13 +323,18 @@ function recordToDetail(record: Record<string, unknown>, malId: number): JikanMa
  * does not require scraping MAL directly (unlike /manga/{id} which often fails).
  */
 export async function fetchJikanMangaByTitle(title: string, threshold = 0.7): Promise<JikanMangaDetail | null> {
+  if (isJikanCircuitOpen()) return null
   try {
     const url = new URL(`${JIKAN_BASE}/manga`)
     url.searchParams.set("q", title)
     url.searchParams.set("limit", "10")
 
     const res = await fetch(url, { cache: "no-store" })
-    if (!res.ok) return null
+    if (!res.ok) {
+      if (TRANSIENT_STATUSES.has(res.status)) recordJikanFailure(res.status)
+      return null
+    }
+    recordJikanOk()
 
     const json = await res.json()
     const data: unknown[] = Array.isArray(json?.data) ? json.data : []
@@ -286,9 +352,14 @@ export async function fetchJikanMangaByTitle(title: string, threshold = 0.7): Pr
 
 /** @deprecated MAL blocks Jikan's scraping intermittently — prefer fetchJikanMangaByTitle */
 export async function fetchJikanMangaById(malId: number): Promise<JikanMangaDetail | null> {
+  if (isJikanCircuitOpen()) return null
   try {
     const res = await fetch(`${JIKAN_BASE}/manga/${malId}/full`, { cache: "no-store" })
-    if (!res.ok) return null
+    if (!res.ok) {
+      if (TRANSIENT_STATUSES.has(res.status)) recordJikanFailure(res.status)
+      return null
+    }
+    recordJikanOk()
 
     const json = await res.json()
     const record = json?.data as Record<string, unknown> | undefined
@@ -307,9 +378,14 @@ export interface JikanRecommendation {
 }
 
 export async function fetchJikanMangaRecommendations(malId: number): Promise<JikanRecommendation[]> {
+  if (isJikanCircuitOpen()) return []
   try {
     const res = await fetch(`${JIKAN_BASE}/manga/${malId}/recommendations`, { cache: "no-store" })
-    if (!res.ok) return []
+    if (!res.ok) {
+      if (TRANSIENT_STATUSES.has(res.status)) recordJikanFailure(res.status)
+      return []
+    }
+    recordJikanOk()
 
     const json = await res.json()
     const data: unknown[] = Array.isArray(json?.data) ? json.data : []
@@ -337,6 +413,7 @@ export async function fetchJikanMangaReviews(malId: number): Promise<string[]> {
   // reviews fica marcada como preliminary no MAL e seria filtrada por padrão.
   // `spoiler=true` inclui reviews com spoiler (sinal valioso pra avaliação IA).
   async function fetchPage(page: number, maxAttempts = 3): Promise<unknown[]> {
+    if (isJikanCircuitOpen()) return []
     const url = new URL(`${JIKAN_BASE}/manga/${malId}/reviews`)
     url.searchParams.set("page", String(page))
     url.searchParams.set("preliminary", "true")
@@ -351,6 +428,7 @@ export async function fetchJikanMangaReviews(malId: number): Promise<string[]> {
         continue
       }
       if (res.ok) {
+        recordJikanOk()
         const json = await res.json()
         return Array.isArray(json?.data) ? json.data : []
       }
@@ -364,6 +442,7 @@ export async function fetchJikanMangaReviews(malId: number): Promise<string[]> {
         const delay = res.status === 429 ? 1200 * attempt : 500 * attempt
         await new Promise((r) => setTimeout(r, delay))
       } else {
+        recordJikanFailure(res.status)
         console.warn(`[fetchJikanMangaReviews] MAL id=${malId} page=${page}: desistiu após ${maxAttempts} tentativas (último HTTP ${res.status})`)
       }
     }

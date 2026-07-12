@@ -51,18 +51,25 @@ export async function upsertSourceHealth(
 ): Promise<void> {
   try {
     const supabase = createAdminClient()
-    await supabase.from("external_source_health").upsert(
-      {
-        source,
-        status: snapshot.status,
-        last_ok_at: iso(snapshot.lastOkAt),
-        last_fail_at: iso(snapshot.lastFailAt),
-        fail_reason: snapshot.failReason,
-        consecutive_fails: snapshot.consecutiveFails,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "source" },
-    )
+    // `last_ok_at`/`last_fail_at` só entram no payload quando TÊM valor. No upsert do
+    // PostgREST, coluna ausente fica fora do `DO UPDATE SET` — ou seja, é PRESERVADA.
+    //
+    // Sem isso, uma queda gravava `last_ok_at = null` e APAGAVA o último sucesso. O
+    // efeito era perverso: o aviso "A fonte não respondeu" mostra "Último sucesso: X"
+    // só quando a fonte está fora — exatamente o instante em que o campo acabava de
+    // ser zerado. Resultado: a linha nunca aparecia, e o banco esquecia que a fonte
+    // um dia funcionou (a linha do myanimelist está assim, com last_ok_at nulo).
+    const row: Record<string, unknown> = {
+      source,
+      status: snapshot.status,
+      fail_reason: snapshot.failReason,
+      consecutive_fails: snapshot.consecutiveFails,
+      updated_at: new Date().toISOString(),
+    }
+    if (snapshot.lastOkAt != null) row.last_ok_at = iso(snapshot.lastOkAt)
+    if (snapshot.lastFailAt != null) row.last_fail_at = iso(snapshot.lastFailAt)
+
+    await supabase.from("external_source_health").upsert(row, { onConflict: "source" })
   } catch {
     // Telemetria é best-effort; silêncio total (tabela pode nem existir ainda).
   }
