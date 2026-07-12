@@ -1081,16 +1081,28 @@ function enforceNeutralCoupleDynamicsWhenNoRomance(
 
 const SYNOPSIS_MIN_CHARS = 50
 const LOW_EVIDENCE_CONFIDENCE_CAP = 0.55
+// Reviews TAMBÉM são evidência: um punhado de reviews substantivas dá base pra o
+// modelo pontuar com confiança acima do teto mesmo sem sinopse. Sem contar reviews,
+// uma obra de sinopse fraca mas bem-comentada era rebaixada a 0.55 à toa.
+const SUBSTANTIVE_REVIEW_MIN_CHARS = 80
+const MIN_SUBSTANTIVE_REVIEWS = 3
 
-function enforceConfidenceCapWhenSynopsisAbsent(
+function enforceConfidenceCapWhenLowEvidence(
   response: AiEvaluationResponse,
   req: AiEvaluationRequest
 ): AiEvaluationResponse {
   const synopsisLength = (req.synopsis ?? "").trim().length
   const hasExternalContext = (req.externalContext?.length ?? 0) > 0
-  const synopsisIsAbsent = synopsisLength < SYNOPSIS_MIN_CHARS && !hasExternalContext
+  const substantiveReviews = (req.sourcedReviews ?? []).filter(
+    (r) => (r.text?.trim().length ?? 0) >= SUBSTANTIVE_REVIEW_MIN_CHARS,
+  ).length
+  const hasReviewEvidence = substantiveReviews >= MIN_SUBSTANTIVE_REVIEWS
+  // "Baixa evidência" = sinopse curta E sem contexto externo E sem reviews
+  // substantivas. Só então o teto de confiança se aplica.
+  const lowEvidence =
+    synopsisLength < SYNOPSIS_MIN_CHARS && !hasExternalContext && !hasReviewEvidence
 
-  if (!synopsisIsAbsent) return response
+  if (!lowEvidence) return response
   if (response.confidence <= LOW_EVIDENCE_CONFIDENCE_CAP) return response
 
   return {
@@ -1098,7 +1110,7 @@ function enforceConfidenceCapWhenSynopsisAbsent(
     confidence: LOW_EVIDENCE_CONFIDENCE_CAP,
     rawResponse: {
       ...rawObject(response.rawResponse),
-      confidenceCapWhenSynopsisAbsentApplied: true,
+      confidenceCapWhenLowEvidenceApplied: true,
       confidenceBeforeCap: response.confidence,
     },
   }
@@ -1207,7 +1219,7 @@ function postProcessEvaluation(
 ): AiEvaluationResponse {
   return attachEvaluationContext(
     enforceAuditableReviewUsage(
-      enforceConfidenceCapWhenSynopsisAbsent(
+      enforceConfidenceCapWhenLowEvidence(
         enforceNeutralCoupleDynamicsWhenNoRomance(
           enforceExternalContentRatingRule(
             enforceR15FromR19AdultContentRule(enforceR19AdultContentRule(response, req), req),
