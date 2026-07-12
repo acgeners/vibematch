@@ -10,10 +10,11 @@ import { resolveMangagoUrlProd } from "./mangago-resolve-prod"
 import { boolEnv } from "./mangago-band"
 import { extractInlineRating } from "./inline-rating"
 import { isBlockedCoverUrl } from "./blocked-covers"
-// Metadados vêm da API OFICIAL do MAL (myanimelist.ts). As REVIEWS seguem no Jikan:
-// a v2 não tem endpoint nem campo de reviews — é a lacuna que faz o Jikan existir.
+// Metadados pela API OFICIAL do MAL; reviews por scraping do próprio myanimelist.net
+// (a v2 não tem endpoint nem campo de reviews). O Jikan — scraper de terceiros que
+// ficava em 504 e zerava a fonte — saiu de cena.
 import { searchMalManga, fetchMalMangaById, fetchMalRecommendations } from "./myanimelist"
-import { fetchJikanMangaReviews } from "./jikan"
+import { fetchMalReviews } from "./myanimelist-reviews"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
 import { searchMangaDex, fetchMangaDexById, fetchMangaDexForumComments } from "./mangadex"
 import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews, fetchMangaUpdatesAlternativeTitles } from "./mangaupdates"
@@ -838,7 +839,7 @@ function hoistCrossSourceIds(candidates: MergedCandidate[]): void {
  * Second-pass search: for each top candidate, re-query the platforms that
  * didn't return a result on the original query, this time using the candidate's
  * own alternative titles (mostly discovered via MangaUpdates `associated`,
- * Kitsu `titles/abbreviatedTitles`, MangaDex altTitles, Jikan). This makes the
+ * Kitsu `titles/abbreviatedTitles`, MangaDex altTitles, MyAnimeList). This makes the
  * final source list independent of which title variant the user typed in.
  *
  * Acceptance uses the same `compositeAcceptScore` thresholds as the hydrate
@@ -1071,7 +1072,7 @@ const REVIEW_SOURCE_PRIORITY: Record<ExternalSourceId, number> = {
 /**
  * Extrai a nota numérica de uma review em duas frentes, nesta ordem:
  *   1. Prefixo "Nota do usuário: X/10\n" — injetado pelos fetchers de plataforma
- *      (MangaUpdates, AniList, MAL/Jikan, ComicK, AnimePlanet). Autoritativo;
+ *      (MangaUpdates, AniList, MyAnimeList, ComicK, AnimePlanet). Autoritativo;
  *      REMOVE o prefixo do texto (`cleanText`) pra não duplicar no prompt.
  *   2. Nota embutida no corpo (`extractInlineRating`) — fallback pras fontes de
  *      fórum sem nota de plataforma. NÃO altera o texto.
@@ -1157,7 +1158,7 @@ async function collectReviewsFromCandidate(
       ? withTimeout(fetchAniListReviews(candidate.anilistId).then((reviews) => ({ source: "anilist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:anilist")
       : Promise.resolve(null),
     candidate.malId
-      ? withTimeout(fetchJikanMangaReviews(candidate.malId).then((reviews) => ({ source: "myanimelist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:myanimelist")
+      ? withTimeout(fetchMalReviews(candidate.malId).then((reviews) => ({ source: "myanimelist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:myanimelist")
       : Promise.resolve(null),
     candidate.kitsuId
       ? withTimeout(fetchKitsuReactions(candidate.kitsuId).then((reviews) => ({ source: "kitsu" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:kitsu")
@@ -1228,7 +1229,7 @@ function normalizeSimilarTitle(title: string): string {
 
 /**
  * Coleta obras similares ("if you liked X, try Y") em paralelo das fontes que
- * expõem recomendações curadas pela comunidade: AniList (rating + tags), Jikan/MAL
+ * expõem recomendações curadas pela comunidade: AniList (rating + tags), MyAnimeList
  * (votos), AnimePlanet (apenas títulos via scrape).
  *
  * Faz merge por título normalizado: quando a mesma obra aparece em ≥2 fontes,

@@ -1,6 +1,6 @@
 import { searchAniList, fetchAniListById, fetchAniListReviews } from "./anilist"
 import { searchMalManga, fetchMalMangaByTitle } from "./myanimelist"
-import { fetchJikanMangaReviews } from "./jikan"
+import { fetchMalReviews } from "./myanimelist-reviews"
 import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews } from "./mangaupdates"
 import type { ExternalSearchResult, SourcedReview } from "./types"
 
@@ -65,7 +65,7 @@ async function reviewsFromResult(workTitles: string[], result: ExternalSearchRes
       : result.source === "anilist" && Number.isFinite(numericId)
         ? await fetchAniListReviews(numericId)
         : result.source === "myanimelist" && Number.isFinite(numericId)
-          ? await fetchJikanMangaReviews(numericId)
+          ? await fetchMalReviews(numericId)
           : []
 
   return reviews

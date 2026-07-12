@@ -15,9 +15,9 @@ import { upsertSourceHealth } from "./source-health-store"
 // é exigido apenas pra dados de usuário logado (listas pessoais), que não usamos.
 // Registre em https://myanimelist.net/apiconfig → `MAL_CLIENT_ID` no .env.
 //
-// O QUE ELA NÃO TEM: reviews. Não existe endpoint nem campo — é justamente a
-// lacuna que fez o Jikan existir. Por isso `fetchJikanMangaReviews` continua vivo
-// (em jikan.ts) até a Fase B trocá-lo por scraping direto do myanimelist.net.
+// O QUE ELA NÃO TEM: reviews. Não existe endpoint nem campo — é justamente a lacuna
+// que fazia o Jikan existir. Elas vêm de `myanimelist-reviews.ts`, que raspa a página
+// de reviews do próprio myanimelist.net (200, sem Cloudflare, permitido pelo robots.txt).
 
 const MAL_BASE = "https://api.myanimelist.net/v2"
 
@@ -186,7 +186,8 @@ function cleanText(text: unknown): string {
   return String(text ?? "").replace(/\s+/g, " ").trim()
 }
 
-/** Status da v2 vem em snake_case (o Jikan usava outras strings — ver jikan.ts). */
+/** A v2 usa snake_case ("currently_publishing"); o Jikan usava outra grafia
+ *  ("publishing"). Manter o mapa antigo faria TODA obra cair no default → "Unknown". */
 function statusFromMal(raw: unknown): PublicationStatus | undefined {
   if (typeof raw !== "string") return undefined
   switch (raw.toLowerCase()) {
@@ -294,8 +295,9 @@ export async function fetchMalMangaById(malId: number): Promise<MalMangaDetail |
 
 /**
  * Detalhe por título: a v2 tem busca de verdade, então basta pegar o 1º resultado
- * cujo título case acima do limiar. (No Jikan isso era um contorno — o `/manga/{id}`
- * dele falhava com frequência porque exigia raspar o MAL ao vivo.)
+ * cujo título case acima do limiar. (No Jikan isso era um CONTORNO: o `/manga/{id}` dele
+ * falhava com frequência porque exigia raspar o MAL ao vivo. Na API oficial é só a via
+ * natural.)
  */
 export async function fetchMalMangaByTitle(title: string, threshold = 0.7): Promise<MalMangaDetail | null> {
   const results = await searchMalManga(title)
