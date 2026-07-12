@@ -46,7 +46,24 @@ export const comixSidecarResponseSchema = z.discriminatedUnion("ok", [
   }),
 ])
 
+/** Resposta de `POST /render` — HTML buscado por browser real (lugar do FlareSolverr). */
+export const renderResponseSchema = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    html: z.string(),
+    finalUrl: z.string(),
+    status: z.number(),
+    meta: z.object({ elapsedMs: z.number(), source: z.string() }),
+  }),
+  z.object({
+    ok: z.literal(false),
+    error: z.string(),
+    meta: z.object({ elapsedMs: z.number(), source: z.string() }),
+  }),
+])
+
 export type ComixResolveInput = z.infer<typeof comixResolveInputSchema>
 export type ComixSidecarItem = z.infer<typeof comixSidecarItemSchema>
 export type ComixSidecarMeta = z.infer<typeof comixSidecarMetaSchema>
 export type ComixSidecarResponse = z.infer<typeof comixSidecarResponseSchema>
+export type RenderResponse = z.infer<typeof renderResponseSchema>

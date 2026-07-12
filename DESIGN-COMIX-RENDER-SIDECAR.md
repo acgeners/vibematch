@@ -359,6 +359,51 @@ resposta — sem infra nova além dos contadores.
 | `RESULT_LIMIT_DEFAULT` / `RESULT_LIMIT_MAX` | 12 / 28 | slice de `items` |
 | `CACHE_TTL_HIT_MS` / `CACHE_TTL_MISS_MS` | 24h / 6h | cache (b) no app |
 | `SIM_ACCEPT_THRESHOLD` | 0.72 | fallback de título |
+| `RENDER_TIMEOUT_MS` / `RENDER_NAV_TIMEOUT_MS` | 25000 / 20000 | teto de `POST /render` |
+| `RENDER_SETTLE_MAX_MS` | 4000 | espera o DOM parar de crescer (conteúdo lazy de SPA) |
+| `RENDER_CHALLENGE_WAIT_MS` | 12000 | espera o browser vencer o interstitial do CF |
+| `RENDER_ALLOWED_HOSTS` | (fontes) | allowlist anti-SSRF do `/render` |
+
+---
+
+# `POST /render` — o substituto do FlareSolverr (2026-07-12)
+
+**Por quê.** As fontes atrás de Cloudflare (anime-planet, mangago, comick, comix)
+respondem **403 `cf-mitigated: challenge`** ao `fetch()` do Node: o bloqueio é por
+**fingerprint TLS/browser**, não por conteúdo. O Chromium do Playwright — o mesmo que já
+roda aqui pro `/resolve` — atravessa as quatro. Medido ao vivo (2026-07-12):
+
+| fonte | `fetch()` do Node | `POST /render` |
+|---|---|---|
+| anime-planet | 403 | ✅ 200 (~0,9s) |
+| mangago | 403 | ✅ 200 (~0,9s) |
+| comick (api + web) | 403 | ✅ 200 (~0,2–3,4s) |
+| comix | 403 no SSR¹ | ✅ 200 (~0,3s) |
+
+¹ o Comix hoje passa por plain fetch (ver o falso positivo do detector de challenge);
+o sidecar é o **fallback** dele.
+
+**Request:** `{ url, headers?, timeoutMs? }` → `{ ok:true, html, finalUrl, status, meta }`
+ou `{ ok:false, error, meta }`. O sidecar continua **agnóstico**: devolve HTML, e parsing/
+matching/persistência seguem no app.
+
+**Ordem no app** (`fetchHtmlWithCfFallback`, o choke point ÚNICO de todas as fontes):
+`plain fetch → sidecar /render → FlareSolverr (legado)`. Sem `COMIX_RENDER_URL`, a camada
+do sidecar é um no-op barato (circuito de 60s) e o comportamento é o de antes — por isso
+dá pra mergear antes do deploy.
+
+**Três decisões que custaram sangue:**
+1. **`context.request` (APIRequestContext) NÃO serve** — leva 403. Ele não usa o
+   fingerprint do Chrome. Só a **navegação real** (`page.goto`) passa o CF. JSON de API
+   volta dentro de `<pre>` (o Chrome renderiza JSON assim) — mesmo formato que o
+   FlareSolverr entregava, então os parsers do app não mudam.
+2. **Esperar o DOM estabilizar** (`waitForDomSettle`), não `domcontentloaded` puro: os
+   comentários do ComicK só existem no DOM ~2s depois. Devolver cedo entregava **13 de 33**
+   reviews — perda silenciosa. `networkidle` daria o mesmo resultado custando 5,1s contra
+   2,4s.
+3. **Allowlist de hosts é obrigatória**: o sidecar vive na rede interna; sem ela, `/render`
+   é um proxy aberto (SSRF). Ela precisa cobrir TODOS os domínios reais — o ComicK rotaciona
+   `.dev`/`.io`/`.app`, e um host de fora da lista some como se a fonte estivesse bloqueada.
 
 ---
 
