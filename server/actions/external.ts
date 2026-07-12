@@ -425,6 +425,21 @@ export async function evaluateCandidateForCreate(input: {
 // Revalidação de fontes externas (fix de match errado em obras já criadas)
 // ============================================================================
 
+/**
+ * Por que um candidato NÃO foi confirmado contra a fonte. Em ambos os casos o
+ * candidato descreve a OBRA, não a fonte: título e capa vêm de `works`/`work_covers`
+ * e o `matchScore` é um número fixo do código, não um match de título medido.
+ *
+ * - `source-down`: há vínculo salvo, mas o detalhe não pôde ser lido agora (ex.:
+ *   FlareSolverr fora / circuito aberto) — ver o branch de falha de `ensureGatedCandidate`.
+ * - `slug-guess`: a busca não devolveu nada e o candidato é um slug DERIVADO DO TÍTULO,
+ *   nunca verificado na fonte — ver `addAnimePlanetFallbackCandidate`.
+ *
+ * A UI precisa distinguir os dois de um match real: sem isso, uma queda de infra e um
+ * palpite de slug chegam na tela com a mesma cara de "match 95–100% com capa".
+ */
+export type UnconfirmedReason = "source-down" | "slug-guess"
+
 export interface SourceCandidateOption {
   externalId: string
   title: string
@@ -433,14 +448,8 @@ export interface SourceCandidateOption {
   synopsis: string | null
   year: number | null
   chapters: number | null
-  /**
-   * A fonte tem vínculo salvo, mas o detalhe dela não pôde ser lido agora (ex.:
-   * FlareSolverr fora / circuito aberto). Neste caso o candidato NÃO descreve a
-   * fonte: título e capa vêm da própria obra e `matchScore` não é um match de
-   * título. A UI precisa da flag pra não vender uma queda de infra como
-   * "match 100%" — ver o branch de falha em `ensureGatedCandidate`.
-   */
-  detailUnavailable?: boolean
+  /** Preenchido só quando o candidato NÃO é um match confirmado da fonte. */
+  unconfirmed?: UnconfirmedReason
 }
 
 export interface CurrentSourceSelection {
@@ -493,6 +502,12 @@ function addAnimePlanetFallbackCandidate(
   const slug = animePlanetSlugFromTitle(title)
   if (!slug) return
 
+  // Este candidato é um PALPITE: o slug sai do título da obra e a capa é a da própria
+  // obra — nada aqui foi confirmado contra o AnimePlanet (a busca não devolveu nada,
+  // seja por bloqueio do Cloudflare, seja porque a obra não existe lá). Sem o
+  // `unconfirmed`, ele chegava na tela como "match 95%" COM capa, ou seja, com a mesma
+  // cara de um match real — a mesma mentira que o card do Mangago contava quando a
+  // fonte caía. O matchScore fica só como ordenação; a UI não o exibe pra não-confirmados.
   candidatesPerSource.animeplanet = [{
     externalId: slug,
     title,
@@ -501,6 +516,7 @@ function addAnimePlanetFallbackCandidate(
     synopsis: null,
     year: null,
     chapters: null,
+    unconfirmed: "slug-guess",
   }]
 }
 
@@ -845,7 +861,7 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
       // o id foi resolvido agora (ainda não vinculado) é que descarta — nada a perder.
       //
       // O candidato empresta título e capa DA PRÓPRIA OBRA e vai marcado com
-      // `detailUnavailable`. Antes ele saía com `coverUrl: null`, e o card virava um
+      // `unconfirmed`. Antes ele saía com `coverUrl: null`, e o card virava um
       // placeholder quebrado, sem ano, com um "match 100%" de aparência confiável —
       // ou seja, uma queda passageira de infra era VISUALMENTE IDÊNTICA a "essa fonte
       // não tem capa". A flag é o que deixa a UI dizer que o dado não veio da fonte.
@@ -859,7 +875,7 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
             synopsis: null,
             year: null,
             chapters: null,
-            detailUnavailable: true,
+            unconfirmed: "source-down",
           },
           ...existing,
         ]

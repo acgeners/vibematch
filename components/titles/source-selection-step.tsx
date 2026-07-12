@@ -236,12 +236,12 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
             ) : (
               candidates.map((c) => {
                 const checked = value === c.externalId
-                // Vínculo salvo, mas a fonte não respondeu: o candidato NÃO descreve a
-                // fonte — título e capa são da própria obra e o matchScore não é match
-                // de título. Sem dizer isso, o card saía mudo (capa quebrada, sem ano) e
-                // com um "match 100%" que parecia confiável: uma queda passageira do
-                // FlareSolverr ficava idêntica a "essa fonte não tem capa".
-                const degraded = c.detailUnavailable === true
+                // Candidato NÃO confirmado contra a fonte: título e capa são da própria
+                // obra e o matchScore é um número fixo do servidor, não um match medido.
+                // Antes os dois casos chegavam aqui com cara de match real ("match 95%"
+                // ou "100%", com capa) — uma queda de infra e um palpite de slug ficavam
+                // indistinguíveis de uma fonte que realmente casou com a obra.
+                const degraded = c.unconfirmed != null
                 return (
                   <label
                     key={c.externalId}
@@ -292,10 +292,14 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
                         <>
                           <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-500/40 dark:text-amber-200">
                             <AlertTriangle className="h-3 w-3 shrink-0" />
-                            detalhes indisponíveis — fonte fora do ar
+                            {c.unconfirmed === "source-down"
+                              ? "detalhes indisponíveis — fonte fora do ar"
+                              : "palpite pelo título — não confirmado nesta fonte"}
                           </span>
                           <p className="mt-1 text-[11px] text-muted-foreground">
-                            Vínculo salvo mantido. Capa e título vêm da sua obra, não da fonte.
+                            {c.unconfirmed === "source-down"
+                              ? "Vínculo salvo mantido. Capa e título vêm da sua obra, não da fonte."
+                              : "A busca não achou nada aqui. Capa e título vêm da sua obra; confira antes de aceitar."}
                           </p>
                         </>
                       ) : (
