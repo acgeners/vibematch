@@ -49,6 +49,14 @@ export interface WorkLiteForPicker {
   isFavorite: boolean
 }
 
+/** Grupo "lite" pro seletor de destino (mover obras selecionadas pra um grupo). */
+export interface ListPickerOption {
+  id: string
+  name: string
+  color: string | null
+  count: number
+}
+
 type WorkRow = {
   id: string
   title?: string
@@ -266,6 +274,31 @@ export async function getListRecommendations(listId: string): Promise<ListRecomm
     const row = r as { slug: string; created_at: string; n_candidates: number | null }
     return { slug: row.slug, createdAt: row.created_at, nCandidates: row.n_candidates ?? null }
   })
+}
+
+/** Grupos "lite" pro seletor de destino (barra de seleção → "Adicionar a grupo").
+ *  Só id/nome/cor + contagem de obras — sem os agregados de resumo do índice. */
+export async function getListsForPicker(): Promise<ListPickerOption[]> {
+  const supabase = createAdminClient()
+  const [listsRes, itemsRes] = await Promise.all([
+    supabase
+      .from("work_lists")
+      .select("id, name, color, position, created_at")
+      .order("position", { ascending: true })
+      .order("created_at", { ascending: false }),
+    supabase.from("work_list_items").select("list_id"),
+  ])
+  if (listsRes.error) {
+    console.error("[lists] erro lendo grupos (picker):", listsRes.error.message)
+    return []
+  }
+  const counts = new Map<string, number>()
+  for (const it of (itemsRes.data ?? []) as Array<{ list_id: string }>) {
+    counts.set(it.list_id, (counts.get(it.list_id) ?? 0) + 1)
+  }
+  return ((listsRes.data ?? []) as Array<{ id: string; name: string; color: string | null }>).map(
+    (l) => ({ id: l.id, name: l.name, color: l.color, count: counts.get(l.id) ?? 0 }),
+  )
 }
 
 /** Catálogo "lite" pro picker de obras (adicionar/remover do grupo) e pra

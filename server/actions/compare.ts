@@ -42,6 +42,8 @@ export interface CompareWork {
   userScore: number | null
   platformAvg: number | null
   totalVotes: number
+  /** Chance de gostar (0–100) — Força 1 da Bússola (chance_score calibrado). NULL quando stub/arquivada. */
+  chanceScore: number | null
   alignmentScore: number | null
   alignmentJustification: string | null
   alignmentAt: string | null
@@ -172,6 +174,7 @@ function mapWorkToCompare(
     userScore: (work as { user_score?: number | null }).user_score ?? null,
     platformAvg: work.calculated_scores?.platform_avg ?? null,
     totalVotes: work.calculated_scores?.total_votes ?? 0,
+    chanceScore: work.calculated_scores?.chance_score ?? null,
     alignmentScore: work.calculated_scores?.alignment_score ?? null,
     alignmentJustification: work.calculated_scores?.alignment_justification ?? null,
     alignmentAt: work.calculated_scores?.alignment_at ?? null,

@@ -1,5 +1,7 @@
 import { z } from "zod"
 import { CRITERION_SLUGS } from "@/types/domain"
+import type { CriterionSlug } from "@/types/domain"
+import type { ProfileCriterionPreference } from "./types"
 
 const criterionSlugSchema = z.enum([...CRITERION_SLUGS] as [string, ...string[]])
 
@@ -39,12 +41,29 @@ const tolerantStringArray = z
       .filter((item): item is string => Boolean(item) && (item ?? "").length > 0),
   )
 
+// O perfil é PARCIAL por contrato: o prompt manda omitir critério sem evidência,
+// o JSONSchema da tool não exige nenhum slug e o tipo é Partial<Record<…>>. Não
+// use `z.record(enum, …)` aqui — no Zod 4 ele virou EXAUSTIVO (exige os 9 slugs)
+// e descartava o perfil inteiro por um critério ausente. Slug fora do catálogo é
+// dropado sozinho, sem custar o resto do perfil.
+const tolerantCriterionPreferences = z
+  .record(z.string(), criterionPreferenceSchema.nullish())
+  .transform((rec) => {
+    const out: Partial<Record<CriterionSlug, ProfileCriterionPreference>> = {}
+    for (const [slug, pref] of Object.entries(rec)) {
+      if (pref && criterionSlugSchema.safeParse(slug).success) {
+        out[slug as CriterionSlug] = pref
+      }
+    }
+    return out
+  })
+
 export const tasteProfileToolPayloadSchema = z.object({
   loved_tags: z.array(profileTagSchema),
   avoided_tags: z.array(profileTagSchema),
   loved_themes: tolerantStringArray,
   avoided_themes: tolerantStringArray,
-  criterion_preferences: z.record(criterionSlugSchema, criterionPreferenceSchema),
+  criterion_preferences: tolerantCriterionPreferences,
   narrative_patterns: tolerantStringArray,
   summary: tolerantSummary,
 })

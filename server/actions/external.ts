@@ -21,6 +21,7 @@ import type { CriterionSlug } from "@/types/domain"
 import { revalidatePath } from "next/cache"
 import { pickPrimaryCover } from "@/lib/work-derived"
 import { isBlockedCoverUrl } from "@/lib/external/blocked-covers"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 export interface TagCatalogItem {
   id: string
@@ -326,6 +327,8 @@ export async function evaluateCandidateForCreate(input: {
    */
   proceedWithoutReviews?: boolean
 }): Promise<CandidateAiResult | CandidateAiNeedsReviewConfirmation> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   // Descoberta do hid da Comix no create (sidecar): a Comix não entra na busca
   // multi-fonte (token-gated), então sem isto a avaliação de criação NUNCA usa
   // reviews da Comix. Resolve por cross-ID e injeta o hid pra o caminho candidate
@@ -556,6 +559,8 @@ function borrowCover(key: string, index: CoverBorrowIndex): string | null {
  * as seleções atuais via work_external_ids.
  */
 export async function revalidateWorkSources(workId: string): Promise<{ data?: RevalidateSourcesResult; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
 
   const { data: work, error: workError } = await supabase
@@ -811,13 +816,34 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
     fetchDetail: (id: string) => Promise<{ title?: string; coverUrl?: string; synopsis?: string; year?: number; chapters?: number } | null>
   }): Promise<void> => {
     if (currentSelections.some((s) => s.source === opts.source && s.isRejected)) return
-    let id = acceptedIds[opts.source] ?? null
+    const savedId = acceptedIds[opts.source] ?? null
+    let id = savedId
     if (!id && opts.resolveEnabled) id = await opts.resolve().catch(() => null)
     if (!id) return
     const existing = candidatesPerSource[opts.source] ?? []
     if (existing.some((c) => c.externalId === id)) return
     const detail = await opts.fetchDetail(id).catch(() => null)
-    if (!detail?.title) return
+    if (!detail?.title) {
+      // Detalhe falhou (ex.: FlareSolverr fora). Se o id JÁ está vinculado (veio do
+      // salvo/aceito), NÃO some com ele: mostra um candidato mínimo PRÉ-MARCADO pra o
+      // vínculo sobreviver ao "Atualizar dados" mesmo com a fonte fora do ar. Só quando
+      // o id foi resolvido agora (ainda não vinculado) é que descarta — nada a perder.
+      if (id === savedId) {
+        candidatesPerSource[opts.source] = [
+          {
+            externalId: id,
+            title: work.title,
+            coverUrl: null,
+            matchScore: 1,
+            synopsis: null,
+            year: null,
+            chapters: null,
+          },
+          ...existing,
+        ]
+      }
+      return
+    }
     const coverUrl = detail.coverUrl && !isBlockedCoverUrl(detail.coverUrl) ? detail.coverUrl : null
     candidatesPerSource[opts.source] = [
       {
@@ -869,6 +895,8 @@ export async function saveWorkSourceSelections(
   workId: string,
   selections: SourceSelectionInput[]
 ): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
 
   const rowsToUpsert = selections.map((s) => ({
@@ -878,15 +906,20 @@ export async function saveWorkSourceSelections(
     is_rejected: s.isRejected,
   }))
 
-  // Sources presentes no payload → upsert. Sources ausentes → delete (volta a "não avaliada").
+  // Sources presentes no payload → upsert. Sources AUSENTES ("Não decidir agora"):
+  // só apaga se NÃO for um vínculo aceito válido. Um id já aceito ausente do payload
+  // significa "deixa como está", NUNCA "apaga" — senão um tropeço transiente da fonte
+  // (ex.: FlareSolverr fora, que fez o card nem aparecer no diálogo) destruiria um hid
+  // válido. Pra remover de fato, o usuário marca "ignorar" (rejeitado) — que é explícito.
   const presentSources = new Set(selections.map((s) => s.source))
   const { data: existing } = await supabase
     .from("work_external_ids")
-    .select("source")
+    .select("source, external_id, is_rejected")
     .eq("work_id", workId)
   const toDelete = (existing ?? [])
+    .filter((r) => !presentSources.has(r.source as ExternalSourceId))
+    .filter((r) => !(r.external_id && r.is_rejected !== true)) // preserva vínculo aceito
     .map((r) => r.source as ExternalSourceId)
-    .filter((s) => !presentSources.has(s))
 
   if (toDelete.length > 0) {
     const { error: delError } = await supabase

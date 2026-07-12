@@ -1,17 +1,34 @@
 import "server-only"
+import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { planAllows, paidOnlyMessage, type UserPlan, type Capability } from "@/lib/plans/capabilities"
+import { createClient } from "@/lib/supabase/server"
+import { planAllows, paidOnlyMessage } from "@/lib/plans/capabilities"
+import type { UserPlan, Capability } from "@/lib/plans/capabilities"
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
-// Single-user: o UUID vive em user_settings (singleton). Cacheado em
-// memória porque é imutável durante o processo — evita uma query por
-// chamada de pipeline. Quando multi-user chegar, troca a fonte aqui
-// (sessão de auth) sem tocar nos callers.
-let cachedUserId: string | null = null
+// Id do usuário autenticado, lido da sessão Supabase (cookies). Memoizado por
+// request (React cache) — várias queries no mesmo request não repetem a chamada.
+// Retorna null quando não há sessão: anon, ou contexto sem request (scripts,
+// tarefas em background) onde cookies() lança — daí o try/catch.
+export const getSessionUserId = cache(async (): Promise<string | null> => {
+  try {
+    const supabase = await createClient()
+    const { data, error } = await supabase.auth.getUser()
+    if (error) return null
+    return data.user?.id ?? null
+  } catch {
+    return null
+  }
+})
 
-export async function getCurrentUserId(admin?: AdminClient): Promise<string> {
-  if (cachedUserId) return cachedUserId
+// Fallback pré-auth: o current_user_id da linha singleton (migration 074). É um
+// UUID fixo, então cachear em módulo é seguro (não é por-usuário). Só alcançado
+// quando NÃO há sessão — um usuário logado sempre resolve via getSessionUserId.
+let cachedSingletonId: string | null = null
+
+async function getSingletonUserId(admin?: AdminClient): Promise<string> {
+  if (cachedSingletonId) return cachedSingletonId
 
   const supabase = admin ?? createAdminClient()
   const { data, error } = await supabase
@@ -26,131 +43,82 @@ export async function getCurrentUserId(admin?: AdminClient): Promise<string> {
     throw new Error("user_settings sem linha singleton — rode a migration 074.")
   }
 
-  cachedUserId = data.current_user_id as string
-  return cachedUserId
+  cachedSingletonId = data.current_user_id as string
+  return cachedSingletonId
 }
 
-// Plano do usuário atual. NÃO cacheado (pode mudar em runtime via upgrade).
-// Tolerante: se a coluna user_plan ainda não existe (migration 078 não aplicada),
-// assume 'paid' pra preservar o comportamento atual (tudo aberto) sem quebrar.
-export async function getCurrentPlan(admin?: AdminClient): Promise<UserPlan> {
-  const supabase = admin ?? createAdminClient()
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select("user_plan")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (error) {
-    console.warn(`[getCurrentPlan] fallback 'paid' (user_plan indisponível): ${error.message}`)
-    return "paid"
-  }
-  return (data?.user_plan as UserPlan | undefined) ?? "free"
+// Id do usuário atual. Prefere a sessão de auth; cai no singleton legado enquanto
+// a auth não está ligada (dev / transição multi-user). Assinatura preservada —
+// nenhum caller muda. É aqui a costura single-user → multi-user.
+export async function getCurrentUserId(admin?: AdminClient): Promise<string> {
+  const sessionId = await getSessionUserId()
+  if (sessionId) return sessionId
+  return getSingletonUserId(admin)
 }
 
-// Toggle "avaliação IA na criação de obras" (migration 097). NÃO cacheado
-// (muda em runtime via /settings). Tolerante: se a coluna ainda não existe,
-// cai pro default seguro `false` (não dispara IA na criação sem querer).
-export async function getAiEvalOnCreate(admin?: AdminClient): Promise<boolean> {
-  const supabase = admin ?? createAdminClient()
-  const { data, error } = await supabase
+// Linha de user_settings do usuário ATUAL (select *), memoizada por request.
+// - Anônimo (sem sessão) → NULL: NÃO herda a linha do dono. Fecha os buracos de
+//   (a) anon herdar o plano PAID do dono (custo — dispararia features pagas no saldo
+//   dele) e (b) anon ver o perfil/email do dono. Pós-claim da conta, o dono usa o
+//   app LOGADO — não existe mais "dono deslogado" pra esta função servir.
+// - Logado: a linha própria (current_user_id = sessão). Sem linha própria → null
+//   (usa defaults; NUNCA herda a de outro).
+const getCurrentUserSettingsRow = cache(async (): Promise<Record<string, unknown> | null> => {
+  const sessionId = await getSessionUserId()
+  if (!sessionId) return null
+
+  const supabase = createAdminClient()
+  const own = await supabase
     .from("user_settings")
-    .select("ai_eval_on_create")
-    .order("created_at", { ascending: true })
+    .select("*")
+    .eq("current_user_id", sessionId)
     .limit(1)
     .maybeSingle()
+  return !own.error && own.data ? (own.data as Record<string, unknown>) : null
+})
 
-  if (error) {
-    console.warn(`[getAiEvalOnCreate] fallback false (coluna indisponível): ${error.message}`)
-    return false
-  }
-  return (data?.ai_eval_on_create as boolean | undefined) ?? false
+// id da linha de settings do usuário atual — pros writers (setPlan, toggles,
+// perfil) atualizarem a linha certa. null quando não há linha própria/legada.
+export async function getCurrentUserSettingsId(): Promise<string | null> {
+  const row = await getCurrentUserSettingsRow()
+  return (row?.id as string | undefined) ?? null
 }
 
-// Toggle "gerar sinopse canônica na criação de obras" (migration 119). NÃO
-// cacheado (muda em runtime via /settings). Tolerante: se a coluna ainda não
-// existe, cai pro default `true` — preserva o comportamento histórico (gerava a
-// canônica na criação) até a migration ser aplicada.
-export async function getSynopsisCanonicalOnCreate(admin?: AdminClient): Promise<boolean> {
-  const supabase = admin ?? createAdminClient()
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select("synopsis_canonical_on_create")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (error) {
-    console.warn(
-      `[getSynopsisCanonicalOnCreate] fallback true (coluna indisponível): ${error.message}`,
-    )
-    return true
-  }
-  return (data?.synopsis_canonical_on_create as boolean | undefined) ?? true
+// Plano do usuário atual. Default seguro 'free' quando não há linha/coluna
+// (fail-closed: erro transitório ou usuário sem linha NÃO libera features pagas).
+export async function getCurrentPlan(_admin?: AdminClient): Promise<UserPlan> {
+  const row = await getCurrentUserSettingsRow()
+  return (row?.user_plan as UserPlan | undefined) ?? "free"
 }
 
-// Toggles "gerar Resumo / Digest de reviews" (migration 127). NÃO cacheados
-// (mudam em runtime via /settings). Lidos numa query só (mesma linha singleton)
-// porque saveWorkReviews consulta os dois juntos. Tolerante: se as colunas ainda
-// não existem, cai pro default `true` — preserva o comportamento histórico
-// (ambos rodavam sempre no save) até a migration ser aplicada.
-// Toggle "inferir tags por IA (Haiku) na criação" (migration 128). NÃO cacheado
-// (muda em runtime via /settings). Tolerante: se a coluna ainda não existe, cai
-// pro default `true` — preserva o comportamento histórico (inferia sempre na
-// criação) até a migration ser aplicada.
-export async function getTagInferenceOnCreate(admin?: AdminClient): Promise<boolean> {
-  const supabase = admin ?? createAdminClient()
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select("tag_inference_on_create")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (error) {
-    console.warn(`[getTagInferenceOnCreate] fallback true (coluna indisponível): ${error.message}`)
-    return true
-  }
-  return (data?.tag_inference_on_create as boolean | undefined) ?? true
+// Toggle "avaliação IA na criação de obras" (migration 097). Default false.
+export async function getAiEvalOnCreate(_admin?: AdminClient): Promise<boolean> {
+  const row = await getCurrentUserSettingsRow()
+  return (row?.ai_eval_on_create as boolean | undefined) ?? false
 }
 
-// Toggle "shadow A/B da Previsão de Interesse na criação" (migration 128). NÃO
-// cacheado. Tolerante: se a coluna ainda não existe, cai pro default `false` —
-// preserva o comportamento atual (shadow só liga via env INTEREST_SHADOW).
-export async function getInterestShadowOnCreate(admin?: AdminClient): Promise<boolean> {
-  const supabase = admin ?? createAdminClient()
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select("interest_shadow_on_create")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (error) {
-    console.warn(`[getInterestShadowOnCreate] fallback false (coluna indisponível): ${error.message}`)
-    return false
-  }
-  return (data?.interest_shadow_on_create as boolean | undefined) ?? false
+// Toggle "gerar sinopse canônica na criação" (migration 119). Default true.
+export async function getSynopsisCanonicalOnCreate(_admin?: AdminClient): Promise<boolean> {
+  const row = await getCurrentUserSettingsRow()
+  return (row?.synopsis_canonical_on_create as boolean | undefined) ?? true
 }
 
-// Toggle "gerar TODOS os dados na criação" — agenda a cascata generate_all_work_data
-// (migration 130). NÃO cacheado. Tolerante: coluna ausente ⇒ default `false`
-// (opt-in: a cascata é ~$0,13/obra + gate de fontes lento).
-export async function getGenerateAllOnCreate(admin?: AdminClient): Promise<boolean> {
-  const supabase = admin ?? createAdminClient()
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select("generate_all_on_create")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
+// Toggle "inferir tags por IA na criação" (migration 128). Default true.
+export async function getTagInferenceOnCreate(_admin?: AdminClient): Promise<boolean> {
+  const row = await getCurrentUserSettingsRow()
+  return (row?.tag_inference_on_create as boolean | undefined) ?? true
+}
 
-  if (error) {
-    console.warn(`[getGenerateAllOnCreate] fallback false (coluna indisponível): ${error.message}`)
-    return false
-  }
-  return (data?.generate_all_on_create as boolean | undefined) ?? false
+// Toggle "shadow A/B da Previsão de Interesse na criação" (migration 128). Default false.
+export async function getInterestShadowOnCreate(_admin?: AdminClient): Promise<boolean> {
+  const row = await getCurrentUserSettingsRow()
+  return (row?.interest_shadow_on_create as boolean | undefined) ?? false
+}
+
+// Toggle "gerar TODOS os dados na criação" (migration 130). Default false (opt-in).
+export async function getGenerateAllOnCreate(_admin?: AdminClient): Promise<boolean> {
+  const row = await getCurrentUserSettingsRow()
+  return (row?.generate_all_on_create as boolean | undefined) ?? false
 }
 
 export interface ReviewSynthesisToggles {
@@ -158,24 +126,14 @@ export interface ReviewSynthesisToggles {
   digestEnabled: boolean
 }
 
+// Toggles "gerar Resumo / Digest de reviews" (migration 127). Default true/true.
 export async function getReviewSynthesisToggles(
-  admin?: AdminClient,
+  _admin?: AdminClient,
 ): Promise<ReviewSynthesisToggles> {
-  const supabase = admin ?? createAdminClient()
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select("review_summary_enabled, review_digest_enabled")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (error) {
-    console.warn(`[getReviewSynthesisToggles] fallback true (colunas indisponíveis): ${error.message}`)
-    return { summaryEnabled: true, digestEnabled: true }
-  }
+  const row = await getCurrentUserSettingsRow()
   return {
-    summaryEnabled: (data?.review_summary_enabled as boolean | undefined) ?? true,
-    digestEnabled: (data?.review_digest_enabled as boolean | undefined) ?? true,
+    summaryEnabled: (row?.review_summary_enabled as boolean | undefined) ?? true,
+    digestEnabled: (row?.review_digest_enabled as boolean | undefined) ?? true,
   }
 }
 
@@ -188,32 +146,18 @@ export interface CurrentUserProfile {
 }
 
 /**
- * Perfil completo do usuário atual (singleton). NÃO cacheado — display_name,
- * email, avatar_url e user_plan mudam em runtime via /conta. Tolerante a
- * colunas ausentes (migration 090 não aplicada): cai pro id + plano e zera
- * o resto, mantendo o /conta funcional. Mesmo espírito de getCurrentPlan.
+ * Perfil completo do usuário atual. Lê a linha do usuário (via resolver, com
+ * fallback singleton só p/ anon). O userId vem da identidade (sessão/singleton),
+ * não da linha, pra ser sempre o id real do usuário atual.
  */
 export async function getCurrentUserProfile(admin?: AdminClient): Promise<CurrentUserProfile> {
-  const supabase = admin ?? createAdminClient()
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select("current_user_id, display_name, email, avatar_url, user_plan")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (error) {
-    console.warn(`[getCurrentUserProfile] fallback (colunas indisponíveis): ${error.message}`)
-    const [userId, plan] = await Promise.all([getCurrentUserId(supabase), getCurrentPlan(supabase)])
-    return { userId, displayName: null, email: null, avatarUrl: null, plan }
-  }
-
+  const [row, userId] = await Promise.all([getCurrentUserSettingsRow(), getCurrentUserId(admin)])
   return {
-    userId: (data?.current_user_id as string | undefined) ?? (await getCurrentUserId(supabase)),
-    displayName: (data?.display_name as string | null | undefined) ?? null,
-    email: (data?.email as string | null | undefined) ?? null,
-    avatarUrl: (data?.avatar_url as string | null | undefined) ?? null,
-    plan: (data?.user_plan as UserPlan | undefined) ?? "free",
+    userId,
+    displayName: (row?.display_name as string | null | undefined) ?? null,
+    email: (row?.email as string | null | undefined) ?? null,
+    avatarUrl: (row?.avatar_url as string | null | undefined) ?? null,
+    plan: (row?.user_plan as UserPlan | undefined) ?? "free",
   }
 }
 
@@ -227,4 +171,36 @@ export async function ensureCapability(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const plan = await getCurrentPlan(admin)
   return planAllows(plan, cap) ? { ok: true } : { ok: false, error: paidOnlyMessage(cap) }
+}
+
+// Admin = o DONO/operador do catálogo. Só o admin muta o catálogo COMPARTILHADO
+// (obras/notas/status/etc.); demais usuários são read-only, o que evita corromper
+// os dados do dono enquanto a partição per-obra (Fase 2) não existe. Memoizado por request.
+//
+// A admin-ness vem da FLAG `user_settings.is_admin` (migration 139), lida da linha
+// do usuário logado. A conta do dono já foi reivindicada (claim) e loga normalmente,
+// então NÃO tratamos mais "deslogado" como admin:
+//  - Sem sessão (anônimo/deslogado) → NÃO admin (visitante read-only). Fecha o buraco
+//    de produção em que qualquer anônimo seria admin. O dono agora usa o app LOGADO.
+//  - Logado com linha própria + coluna is_admin → usa a flag.
+//  - Fallback (coluna ausente pré-mig 139, ou logado sem linha própria) → critério
+//    legado (=== singleton).
+export const isCurrentUserAdmin = cache(async (): Promise<boolean> => {
+  const sessionId = await getSessionUserId()
+  if (!sessionId) return false // anônimo/deslogado = read-only
+
+  const row = await getCurrentUserSettingsRow()
+  if (row && "is_admin" in row && typeof row.is_admin === "boolean") {
+    return row.is_admin
+  }
+
+  // Fallback pré-mig 139 (coluna ausente) ou logado-sem-linha-própria.
+  return sessionId === (await getSingletonUserId())
+})
+
+// Gate de admin pra server actions que mutam o catálogo compartilhado.
+export async function ensureAdmin(): Promise<{ ok: true } | { ok: false; error: string }> {
+  return (await isCurrentUserAdmin())
+    ? { ok: true }
+    : { ok: false, error: "Só o administrador do catálogo pode editar por enquanto." }
 }

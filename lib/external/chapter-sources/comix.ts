@@ -2,6 +2,7 @@ import { searchComix, fetchComixById, comixWorkUrl } from "@/lib/external/comix"
 import { fetchAniListById } from "@/lib/external/anilist"
 import { bestTitleMatch } from "@/lib/external/index"
 import type { ExternalSearchResult } from "@/lib/external/types"
+import type { PublicationStatus } from "@/types/domain"
 import type { ChapterCheckInput, ChapterLookup, ChapterCrossIds } from "./types"
 
 // Acima desse score consideramos o resultado da busca por título como a obra
@@ -57,6 +58,8 @@ interface ComixMatch {
   confident: boolean
   /** Data relativa do último capítulo (string pré-formatada da comix). */
   releasedLabel: string | null
+  /** Status de publicação declarado pela comix (mapeado), quando disponível. */
+  status: PublicationStatus | null
 }
 
 /**
@@ -70,7 +73,9 @@ async function resolveBySearch(
   names: string[],
   crossIds: ChapterCrossIds | undefined,
 ): Promise<ComixMatch | null> {
-  let titleFallback: { hid: string; chapter: number; score: number; releasedLabel: string | null } | null = null
+  let titleFallback:
+    | { hid: string; chapter: number; score: number; releasedLabel: string | null; status: PublicationStatus | null }
+    | null = null
 
   for (const q of queries.slice(0, MAX_SEARCH_QUERIES)) {
     const results = await searchComix(q)
@@ -82,7 +87,13 @@ async function resolveBySearch(
         const detail = comixChapter(res) == null ? await fetchComixById(hid) : null
         const ch = comixChapter(res) ?? detail?.chapters ?? null
         if (ch != null && ch > 0) {
-          return { hid, chapter: ch, confident: true, releasedLabel: res.lastChapterAt ?? detail?.lastChapterAt ?? null }
+          return {
+            hid,
+            chapter: ch,
+            confident: true,
+            releasedLabel: res.lastChapterAt ?? detail?.lastChapterAt ?? null,
+            status: res.publicationStatus ?? detail?.publicationStatus ?? null,
+          }
         }
         continue // cross-id bateu mas sem capítulo confiável — ignora
       }
@@ -91,13 +102,19 @@ async function resolveBySearch(
       if (ch == null) continue
       const score = nameScore(res, names)
       if (score >= TITLE_MATCH_THRESHOLD && (!titleFallback || score > titleFallback.score)) {
-        titleFallback = { hid, chapter: ch, score, releasedLabel: res.lastChapterAt ?? null }
+        titleFallback = { hid, chapter: ch, score, releasedLabel: res.lastChapterAt ?? null, status: res.publicationStatus ?? null }
       }
     }
   }
 
   return titleFallback
-    ? { hid: titleFallback.hid, chapter: titleFallback.chapter, confident: false, releasedLabel: titleFallback.releasedLabel }
+    ? {
+        hid: titleFallback.hid,
+        chapter: titleFallback.chapter,
+        confident: false,
+        releasedLabel: titleFallback.releasedLabel,
+        status: titleFallback.status,
+      }
     : null
 }
 
@@ -126,6 +143,7 @@ export async function getComixLatestChapter(
         source: "comix",
         sourceUrl: comixWorkUrl(input.comixHid),
         releasedLabel: detail?.lastChapterAt ?? null,
+        status: detail?.publicationStatus ?? null,
       }
     }
     // Detalhe sem capítulos válidos → cai pra busca.
@@ -154,5 +172,6 @@ export async function getComixLatestChapter(
     // Só persiste hid confirmado por cross-ID; match só-por-título re-busca a cada checagem.
     resolvedHid: match.confident ? match.hid : null,
     releasedLabel: match.releasedLabel,
+    status: match.status,
   }
 }

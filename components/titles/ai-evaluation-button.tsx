@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { useRefresh } from "@/lib/use-refresh"
+import { useIsAdmin } from "@/components/layout/admin-context"
 import { Loader2, Pencil, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 import { triggerAiEvaluation } from "@/server/actions/ai"
@@ -63,6 +64,9 @@ export function AiEvaluationButton({
   externalEditorEnabled = false,
   externalReviews = [],
 }: AiEvaluationButtonProps) {
+  // Stopgap multi-user: avaliação IA é CURADORIA do catálogo (admin/operador) →
+  // some pro usuário logado. O bloqueio real é server-side.
+  const isAdmin = useIsAdmin()
   const refresh = useRefresh()
   const confirmCost = useCostConfirm()
   // Lê o store global pra refletir, no próprio botão, uma avaliação desta obra
@@ -249,6 +253,8 @@ export function AiEvaluationButton({
     : hasCriteriaScores
     ? "Reavaliar com IA"
     : "Avaliar com IA"
+
+  if (!isAdmin) return null
 
   return (
     <>

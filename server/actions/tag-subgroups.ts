@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { slugifyTagName } from "@/lib/utils"
 import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
 import { moveTagToGroup } from "@/server/actions/tag-consolidation"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 const PATH = "/settings/tag-consolidation"
 
@@ -67,6 +68,8 @@ export async function listSubgroups(
 }
 
 export async function approveSubgroup(id: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("tag_subgroup")
@@ -79,6 +82,8 @@ export async function approveSubgroup(id: string): Promise<{ error?: string }> {
 }
 
 export async function rejectSubgroup(id: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("tag_subgroup")
@@ -91,6 +96,8 @@ export async function rejectSubgroup(id: string): Promise<{ error?: string }> {
 }
 
 export async function reopenSubgroup(id: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("tag_subgroup")
@@ -106,6 +113,8 @@ export async function editSubgroup(
   id: string,
   patch: { name?: string; description?: string | null },
 ): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const update: Record<string, unknown> = {}
   if (patch.name !== undefined) {
     const name = patch.name.trim()
@@ -130,6 +139,8 @@ export async function createSubgroup(input: {
   name: string
   description?: string | null
 }): Promise<{ error?: string; id?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const name = input.name.trim()
   if (!name) return { error: "Nome é obrigatório" }
   const tagGroupId = (TAG_GROUP_IDS as Record<string, string>)[input.group_slug]
@@ -160,6 +171,8 @@ export async function createSubgroup(input: {
 }
 
 export async function deleteSubgroup(id: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   // FK ON DELETE CASCADE drops pending assignments; ON DELETE SET NULL on
   // tags.tag_subgroup_id clears any applied assignment for the bucket.
@@ -173,6 +186,8 @@ export async function bulkSetSubgroupStatus(
   ids: string[],
   status: SubgroupStatus,
 ): Promise<{ updated: number; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { updated: 0, error: gate.error }
   if (ids.length === 0) return { updated: 0 }
   const supabase = createAdminClient()
   const fromStatuses: SubgroupStatus[] =
@@ -285,6 +300,8 @@ export async function moveTagToSubgroup(
   subgroupId: string,
   groupSlug: string,
 ): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("tag_subgroup_assignment")
@@ -306,6 +323,8 @@ export async function moveTagToSubgroup(
 // Remove a tag from its sub-group entirely (deletes the assignment row and
 // clears the applied link on the tag).
 export async function unassignTag(tagId: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const [delRes, tagRes] = await Promise.all([
     supabase.from("tag_subgroup_assignment").delete().eq("tag_id", tagId),
@@ -325,6 +344,8 @@ export async function moveTagToOtherGroup(
   tagId: string,
   targetGroupSlug: string,
 ): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error: delErr } = await supabase
     .from("tag_subgroup_assignment")
@@ -349,6 +370,8 @@ export async function moveTagsToSubgroup(
   subgroupId: string,
   groupSlug: string,
 ): Promise<{ moved: number; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { moved: 0, error: gate.error }
   if (tagIds.length === 0) return { moved: 0 }
   const supabase = createAdminClient()
   const now = new Date().toISOString()
@@ -374,6 +397,8 @@ export async function moveTagsToOtherGroup(
   tagIds: string[],
   targetGroupSlug: string,
 ): Promise<{ moved: number; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { moved: 0, error: gate.error }
   let moved = 0
   for (const id of tagIds) {
     const { error } = await moveTagToOtherGroup(id, targetGroupSlug)
@@ -385,6 +410,8 @@ export async function moveTagsToOtherGroup(
 }
 
 export async function approveAssignment(id: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("tag_subgroup_assignment")
@@ -397,6 +424,8 @@ export async function approveAssignment(id: string): Promise<{ error?: string }>
 }
 
 export async function rejectAssignment(id: string): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase
     .from("tag_subgroup_assignment")
@@ -412,6 +441,8 @@ export async function bulkSetAssignmentStatus(
   ids: string[],
   status: "approved" | "rejected" | "pending",
 ): Promise<{ updated: number; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { updated: 0, error: gate.error }
   if (ids.length === 0) return { updated: 0 }
   const supabase = createAdminClient()
   const fromStatuses =
@@ -446,6 +477,8 @@ export interface ApplyAssignmentsResult {
 export async function applyApprovedAssignments(
   groupSlug?: string,
 ): Promise<ApplyAssignmentsResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { applied: 0, failed: 0, errors: [gate.error] }
   const supabase = createAdminClient()
   let query = supabase
     .from("tag_subgroup_assignment")

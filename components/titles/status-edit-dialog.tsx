@@ -10,6 +10,7 @@ import {
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
 import type { PostAttributeAssessmentFormProps } from "@/components/titles/post-attribute-assessment-form"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
+import type { TasteCriterion, TasteScoreKey } from "@/server/queries/pilot-taste"
 
 export interface StatusEditDialogProps {
   open: boolean
@@ -19,6 +20,10 @@ export interface StatusEditDialogProps {
   initialValues: WorkStatusValues
   latestAiEvaluation: PostAttributeAssessmentFormProps["latestAiEvaluation"]
   existingAssessment: PostAttributeAssessmentFormProps["existingAssessment"]
+  /** Critérios/notas de gosto ("Como foi pra você"). Sem eles a seção não aparece. */
+  tasteCriteria?: TasteCriterion[]
+  tasteScores?: Record<TasteScoreKey, number | null>
+  tasteEndingNa?: boolean
 }
 
 export function StatusEditDialog({
@@ -29,6 +34,9 @@ export function StatusEditDialog({
   initialValues,
   latestAiEvaluation,
   existingAssessment,
+  tasteCriteria,
+  tasteScores,
+  tasteEndingNa,
 }: StatusEditDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -48,6 +56,9 @@ export function StatusEditDialog({
           statusInitial={initialValues}
           latestAiEvaluation={latestAiEvaluation}
           existingAssessment={existingAssessment}
+          tasteCriteria={tasteCriteria}
+          tasteScores={tasteScores}
+          tasteEndingNa={tasteEndingNa}
           formId="work-status-form-dialog"
           onSaved={() => onOpenChange(false)}
         />

@@ -1,9 +1,11 @@
 import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
-import { BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash } from "lucide-react"
+import { Archive, BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash, ExternalLink } from "lucide-react"
+import { ArchivedBanner } from "@/components/titles/archived-banner"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-watcher"
+import { UpdateProgressWatcher } from "@/components/titles/update-progress-watcher"
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { SynopsisQualitySuggestion } from "@/components/titles/synopsis-quality-suggestion"
@@ -11,8 +13,10 @@ import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import { GenerateAllBanner } from "@/components/titles/generate-all-banner"
 import type { CascadeStatus } from "@/lib/generate-all/types"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
+import { getTasteCriteria, getTasteScoresForWork } from "@/server/queries/pilot-taste"
 import { TagsExpandAll } from "@/components/titles/tags-expand-all"
-import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug } from "@/server/queries/works"
+import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug, getWorkExternalIds } from "@/server/queries/works"
+import { comixWorkUrl } from "@/lib/external/comix"
 import { getAllTags } from "@/server/queries/tags"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
@@ -31,6 +35,7 @@ import { getLastDeepDive } from "@/server/queries/deep-dive"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getGenerationReadinessMany } from "@/server/queries/generation-readiness"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
+import { RefetchReviewsButton } from "@/components/titles/refetch-reviews-button"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
 import { ScoreBadge, getCriterionColorClass, getScoreTextColor } from "@/components/ui/score-badge"
@@ -261,7 +266,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -273,7 +278,21 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getSynopsisPredictionForWork(work.id as string),
     getDeclaredTagPreferences(configClient),
     loadCurrentTasteProfile(),
+    getWorkExternalIds(work.id as string),
+    getTasteCriteria(),
+    getTasteScoresForWork(work.id as string),
   ])
+  // "Ler no Comix": só pra obras que você acompanha (Reading/Started) e que têm
+  // hid aceito. `pending` = capítulos não lidos (total − lidos), sinal persistido
+  // e refrescado pela checagem manual do /leitura.
+  const personalStatusName = getPersonalStatusNameById(work.personal_status_id)
+  const isFollowing = personalStatusName === "Reading" || personalStatusName === "Started"
+  const comixHid = externalIdMap.comix ?? null
+  const comixReadUrl = isFollowing && comixHid ? comixWorkUrl(comixHid) : null
+  const comixPending =
+    work.total_chapters != null
+      ? Math.max(0, Number(work.total_chapters) - Number(work.chapters_read ?? 0))
+      : null
   const subGroupBySlug = new Map<string, string>()
   for (const t of allTagsCatalog) {
     if (t.subGroupName) subGroupBySlug.set(t.slug, t.subGroupName)
@@ -532,6 +551,24 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       <div className="flex items-center justify-between gap-3">
         <BackButton />
         <div className="flex flex-wrap items-center gap-2">
+          {comixReadUrl && (
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="border-emerald-500/45 bg-emerald-500/10 text-emerald-700 hover:border-emerald-500/60 hover:bg-emerald-500/20 hover:text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/12 dark:text-emerald-300 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-200"
+            >
+              <a href={comixReadUrl} target="_blank" rel="noopener noreferrer" title="Abre no Comix em nova aba">
+                <ExternalLink className="h-4 w-4" />
+                Ler no Comix
+                {comixPending != null && comixPending > 0 && (
+                  <span className="ml-1 rounded-full bg-emerald-500/90 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-emerald-950">
+                    {comixPending} pend.
+                  </span>
+                )}
+              </a>
+            </Button>
+          )}
           <FavoriteToggleButton workId={work.id} isFavorite={work.is_favorite} />
           <EditLinkButton workSlug={id} workId={work.id} />
           <StatusActionButton
@@ -540,6 +577,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
             latestAiEvaluation={postAttrAi}
             existingAssessment={postAttrExisting}
+            tasteCriteria={tasteCriteria}
+            tasteScores={tasteScoresData.scores}
+            tasteEndingNa={tasteScoresData.endingNa}
           />
           <MoreActionsMenu workId={work.id} isArchived={work.is_archived} />
           <Button asChild size="sm">
@@ -553,12 +593,23 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
       {/* Título (alt titles ficam na aba Visão Geral) */}
       <header className="space-y-1">
-        <h1 className="text-3xl font-bold leading-tight tracking-tight text-foreground md:text-4xl">
-          {work.title}
-        </h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-3xl font-bold leading-tight tracking-tight text-foreground md:text-4xl">
+            {work.title}
+          </h1>
+          {work.is_archived && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border bg-red-50 px-2.5 py-1 text-xs font-bold text-red-900 dark:bg-red-950/40 dark:text-red-200">
+              <Archive className="h-3.5 w-3.5" />
+              Arquivada
+            </span>
+          )}
+        </div>
       </header>
 
+      {work.is_archived && <ArchivedBanner workId={work.id} />}
+
       <ComixResolutionWatcher workId={work.id} createdAt={work.created_at} />
+      <UpdateProgressWatcher workId={work.id} />
 
       <Tabs defaultValue="overview" className="w-full">
         {/* Tabs navbar (full width, 5 abas com wrap responsivo) */}
@@ -710,7 +761,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               />
             </div>
 
-            {(dataRefreshedDate || lastAiEvalDate || work.is_archived || work.last_read_at) && (
+            {(dataRefreshedDate || lastAiEvalDate || work.last_read_at) && (
               <div className="flex flex-col gap-1.5 rounded-md border bg-card/40 p-3 text-xs text-muted-foreground">
                 {work.last_read_at && (
                   <div>
@@ -748,11 +799,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </span>
                   </div>
                 )}
-                {work.is_archived && (
-                  <span className="inline-flex w-fit items-center rounded-full border border-gray-200 bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                    Arquivada
-                  </span>
-                )}
               </div>
             )}
           </aside>
@@ -761,14 +807,30 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           <div className="min-w-0">
             <TabsContent value="overview" className="mt-0 space-y-4">
               <div className="flex flex-wrap items-center gap-2">
+                <UpdateDataActionButton
+                  workId={work.id}
+                  currentWork={{
+                    title: work.title,
+                    originalTitle: work.original_title,
+                    synopsis: primarySynopsis,
+                    coverUrl: primaryCover,
+                    publicationStatus: getPublicationStatusNameById(work.publication_status_id) ?? "Unknown",
+                    totalChapters: work.total_chapters != null ? Number(work.total_chapters) : null,
+                    observations: work.observations,
+                  }}
+                  currentCovers={(work.work_covers ?? []).map(
+                    (c: { url: string; source?: string | null; is_primary?: boolean }) => ({
+                      url: c.url,
+                      source: c.source,
+                      isPrimary: c.is_primary,
+                    })
+                  )}
+                />
                 <GenerateAllBanner
                   compact
                   workId={work.id}
                   workTitle={work.title}
                   initialStatus={(work as { cascade_status?: CascadeStatus }).cascade_status ?? "idle"}
-                />
-                <UpdateDataActionButton
-                  workId={work.id}
                   currentWork={{
                     title: work.title,
                     originalTitle: work.original_title,
@@ -895,6 +957,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 statusInitial={statusInitial}
                 latestAiEvaluation={postAttrAi}
                 existingAssessment={postAttrExisting}
+                tasteCriteria={tasteCriteria}
+                tasteScores={tasteScoresData.scores}
+                tasteEndingNa={tasteScoresData.endingNa}
               />
             </TabsContent>
 
@@ -1356,6 +1421,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       </Card>
 
       {/* Reviews externas — apoiam visualmente os scores da IA */}
+      <div className="flex justify-end">
+        <RefetchReviewsButton workId={work.id as string} />
+      </div>
       <WorkReviewsCard snapshot={reviewsSnapshot} workId={work.id as string} />
         </TabsContent>
 

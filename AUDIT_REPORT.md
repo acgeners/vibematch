@@ -6,6 +6,8 @@
 > **Limite de potência estatística:** com **n=190–191 rótulos** (e n=103 no subconjunto re-rankeado), os ICs95% são largos (~±0,06 em MAE, ~±0,10 em Spearman). Diferenças pequenas entre modelos são **inconclusivas** — isto é tratado explicitamente abaixo.
 >
 > **Nota (2026-06-19):** as ações derivadas (orquestração, backfill, Plano 3 / Interesse na Sinopse) estão reconciliadas em [PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md](PLANO-MESTRE-TRANSICAO-AUDITORIA-PLANO3.md). Conteúdo abaixo preservado como histórico.
+>
+> **⏭️ AUDITORIA MAIS RECENTE (2026-07-09):** este relatório (2026-06-17) foi **superseded** por [AUDIT_REPORT-2026-07-08.md](AUDIT_REPORT-2026-07-08.md) — nova auditoria completa (878 obras, 207 rótulos) com instrumentação prospectiva de ranking + view Faixas já shipadas (PR #85). Consulte o novo para o estado atual; este permanece como histórico.
 
 ## Conclusão objetiva (classificação)
 

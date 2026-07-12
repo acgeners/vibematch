@@ -15,6 +15,7 @@ import { getRecalcPendingState } from "@/server/actions/recalc-queue"
 import { Header } from "@/components/layout/header"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
 import { RankingTable } from "@/components/ranking/ranking-table"
+import type { ActiveFilterChip } from "@/components/ranking/active-filters-bar"
 import { RankingFilters as RankingFiltersComponent } from "@/components/ranking/ranking-filters"
 import { tierBandWidthSchema } from "@/lib/ranking/tier-config"
 import { SurpriseMeButton } from "@/components/ranking/surprise-me-button"
@@ -25,6 +26,8 @@ import { CRITERION_SLUGS, DEFAULT_CRITERION_SCORE_PRESETS } from "@/types/domain
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { FormulaConfig, CriterionScorePresets } from "@/types/domain"
 import { unstable_cache } from "next/cache"
+import { after } from "next/server"
+import { recordRankingSnapshots } from "@/lib/server/predictions/record-prediction"
 
 interface RankingPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -251,6 +254,21 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // Marca obras não-lidas com baixa cobertura de gênero (badge ⚠ na Nota esperada).
   const entries = rawEntries.map((e) => ({ ...e, lowCoverage: lowCoverageIds.has(e.workId) }))
 
+  // ── Instrumentação prospectiva (AUDIT_REPORT-2026-07-08, P1) ──
+  // Registra um snapshot IMUTÁVEL da ordem exibida (só obras prospectivas, sem
+  // user_score) pra medir o ranking contra baselines quando as notas chegarem.
+  // Best-effort via `after()`: roda DEPOIS da resposta, nunca bloqueia o render,
+  // e é no-op silencioso enquanto a migration 105/135 não estiver aplicada. O
+  // ranking_snapshot_id é determinístico por (dia, filtros, mood) → dedup evita
+  // escrita repetida. NÃO altera nenhum score.
+  after(() =>
+    recordRankingSnapshots({
+      orderedWorkIds: entries.map((e) => e.workId),
+      filtersKey: JSON.stringify(filters),
+      moodKey: moodId ?? null,
+    }),
+  )
+
   // Override de TESTE da largura das bandas via ?band= (não persiste). Inválido →
   // cai no valor salvo em formula_config.tier_band_width.
   const bandParam = num("band")
@@ -284,6 +302,70 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     strongUrl: buildHideUrl("strong"),
     allUrl: buildHideUrl("all"),
   }
+
+  // ── Chips de filtros ativos (só a view "Faixas" consome) ──
+  // Puramente descritivo + navegação por URL usando os parâmetros JÁ suportados
+  // (pub_status/per_status/min_expected/top_n). NÃO altera getRanking, ordenação,
+  // score ou dados — apenas torna visíveis os filtros aplicados por padrão.
+  const baseFilterParams = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    const v = Array.isArray(value) ? value[0] : value
+    if (v != null) baseFilterParams.set(key, v)
+  }
+  const filterHref = (mutate: (p: URLSearchParams) => void): string => {
+    const p = new URLSearchParams(baseFilterParams.toString())
+    mutate(p)
+    const s = p.toString()
+    return `/ranking${s ? `?${s}` : ""}`
+  }
+  const PERSONAL_STATUS_LABELS: Record<string, string> = {
+    "Want to Read": "Lista: Quero ler",
+    Untracked: "Inclui: Sem status",
+  }
+  const activeFilterChips: ActiveFilterChip[] = []
+  if (publicationStatus?.length) {
+    activeFilterChips.push({
+      key: "pub",
+      label: `Publicação: ${publicationStatus.join(", ")}`,
+      isDefault: pubStatusParam == null,
+      removeHref: filterHref((p) => p.set("pub_status", "all")),
+    })
+  }
+  if (personalStatus?.length) {
+    for (const st of personalStatus) {
+      const others = personalStatus.filter((s) => s !== st)
+      activeFilterChips.push({
+        key: `per-${st}`,
+        label: PERSONAL_STATUS_LABELS[st] ?? `Lista: ${st}`,
+        isDefault: perStatusParam == null,
+        removeHref: filterHref((p) =>
+          others.length ? p.set("per_status", others.join(",")) : p.set("per_status", "all"),
+        ),
+      })
+    }
+  }
+  if (filters.minExpectedScore != null && filters.minExpectedScore > 0) {
+    activeFilterChips.push({
+      key: "min-expected",
+      label: `Nota estimada ≥ ${String(filters.minExpectedScore).replace(".", ",")}`,
+      isDefault: overrideMinExpected == null,
+      removeHref: filterHref((p) => p.set("min_expected", "0")),
+    })
+  }
+  if (filters.topN != null) {
+    activeFilterChips.push({
+      key: "top-n",
+      label: `Top ${filters.topN} resultados`,
+      isDefault: overrideTopN == null,
+      removeHref: filterHref((p) => p.set("top_n", "9999")),
+    })
+  }
+  const clearFiltersHref = filterHref((p) => {
+    p.set("pub_status", "all")
+    p.set("per_status", "all")
+    p.set("min_expected", "0")
+    p.set("top_n", "9999")
+  })
 
   return (
     <div className="space-y-4">
@@ -319,7 +401,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         criterionPresets={prefs.criterionPresets}
       />
 
-      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} />
+      <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} activeFilters={activeFilterChips} clearFiltersHref={clearFiltersHref} />
     </div>
   )
 }

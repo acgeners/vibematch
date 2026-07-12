@@ -24,6 +24,7 @@ import { getSidebarBadgeCounts } from "@/server/actions/badges"
 import { useChromeData } from "@/lib/use-refresh"
 import { AccountChip } from "@/components/layout/account-chip"
 import { BalanceChip } from "@/components/layout/balance-chip"
+import { useIsAdmin } from "@/components/layout/admin-context"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
 import { SidebarTasks } from "@/components/tasks/sidebar-tasks"
 
@@ -149,6 +150,13 @@ function useClientSearchParams(): URLSearchParams {
 export function Sidebar() {
   const pathname = usePathname()
   const searchParams = useClientSearchParams()
+  // Stopgap multi-user: usuário logado (não-dono) é read-only. Esconde a seção
+  // GERENCIAR (curadoria/config/import), o saldo Anthropic e o recalc — controles
+  // do dono do catálogo. Vê só a navegação de leitura (Principal).
+  const isAdmin = useIsAdmin()
+  const sections = isAdmin
+    ? NAV_SECTIONS
+    : NAV_SECTIONS.filter((s) => s.title !== "Gerenciar")
 
   // Trilho ↔ expandido. Inicial = derivado da rota (determinístico p/ SSR, sem
   // localStorage). Sincroniza durante o render a cada troca de rota (padrão
@@ -296,7 +304,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex flex-1 flex-col gap-5 overflow-y-auto p-3">
-        {NAV_SECTIONS.map((section) => {
+        {sections.map((section) => {
           const accent = SIDEBAR_ACCENTS[section.accent]
           return (
             <div key={section.title} className="space-y-1">
@@ -396,7 +404,7 @@ export function Sidebar() {
         </Link>
       )}
 
-      {recalcPending &&
+      {recalcPending && isAdmin &&
         (collapsed ? (
           // No trilho: indicador abreviado (ícone + ponto). Clicar expande pra
           // revelar o controle completo de recálculo.
@@ -430,7 +438,7 @@ export function Sidebar() {
       >
         {collapsed ? (
           <>
-            <BalanceChip compact />
+            {isAdmin && <BalanceChip compact />}
             <AccountChip compact />
           </>
         ) : (
@@ -438,7 +446,7 @@ export function Sidebar() {
             <div className="min-w-0 flex-1">
               <AccountChip />
             </div>
-            <BalanceChip />
+            {isAdmin && <BalanceChip />}
           </>
         )}
       </div>

@@ -53,10 +53,10 @@ export function ProfileSummary({ status }: { status: ProfileStatus }) {
   const chips = Array.from(new Set([...lovedThemes, ...lovedTags])).slice(0, 6)
 
   return (
-    <Card>
+    <Card className="flex flex-col">
       {header}
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>{ratedWorksCount} obra(s) avaliada(s)</span>
           {isStale && (
             <Badge
@@ -69,12 +69,20 @@ export function ProfileSummary({ status }: { status: ProfileStatus }) {
           )}
         </div>
         {profile.profile.summary && (
-          <p className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">
-            {profile.profile.summary}
-          </p>
+          <div
+            className="min-h-0 flex-1 overflow-hidden"
+            style={{
+              maskImage: "linear-gradient(to bottom, black 82%, transparent)",
+              WebkitMaskImage: "linear-gradient(to bottom, black 82%, transparent)",
+            }}
+          >
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {profile.profile.summary}
+            </p>
+          </div>
         )}
         {chips.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex shrink-0 flex-wrap gap-1.5">
             {chips.map((chip) => (
               <Badge key={chip} variant="secondary" className="font-normal">
                 {chip}

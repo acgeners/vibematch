@@ -1,3 +1,5 @@
+import type { PublicationStatus } from "@/types/domain"
+
 // As fontes de capítulo são um registro próprio (checadoras de release),
 // desacoplado do `ExternalSourceId` (gerado por DB pro pipeline de metadata/IA).
 export type ChapterSourceId = "comix" | "coffeemanga"
@@ -36,4 +38,6 @@ export type ChapterLookup = {
   cadenceDates?: string[]
   /** Lista completa de números de capítulo (desc) — pra CONTAR caps de verdade (só coffeemanga fornece). */
   chapterNumbers?: number[]
+  /** Status de publicação declarado pela fonte (só o comix fornece). */
+  status?: PublicationStatus | null
 } | null

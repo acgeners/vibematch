@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  FolderPlus,
   Heart,
   HeartOff,
   ImageOff,
@@ -73,6 +74,9 @@ import { archiveWork, setFavoriteMany, toggleFavorite, unarchiveWork } from "@/s
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
+import { useIsAdmin } from "@/components/layout/admin-context"
+import { AddToGroupDialog } from "@/components/favorites/lists/add-to-group-dialog"
+import type { ListPickerOption } from "@/server/queries/lists"
 import { AlignmentCell, AlignmentScoreCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { WorkCompareDrawer } from "@/components/titles/work-compare-drawer"
@@ -156,6 +160,9 @@ interface WorkTableProps {
   isPaid?: boolean
   /** Faixas ideais por critério (perfil). Habilita o toggle de cor "Minha faixa". */
   criterionPrefs?: Record<string, CriterionRange>
+  /** Grupos de destino pro "Adicionar a grupo" na barra de seleção (só /favorites).
+   *  Quando presente, a barra ganha o botão de mover as obras selecionadas. */
+  groups?: ListPickerOption[]
 }
 
 function scoreFor(work: WorkWithRelations, slug: string): number | null {
@@ -216,6 +223,7 @@ export function WorkTable({
   enableSelectAll = false,
   isPaid = true,
   criterionPrefs,
+  groups,
 }: WorkTableProps) {
   const router = useRouter()
   const refresh = useRefresh()
@@ -242,6 +250,7 @@ export function WorkTable({
   // define o moodRefine passado ao drawer. Mesmo fluxo do /ranking.
   const [moodDialogOpen, setMoodDialogOpen] = useState(false)
   const [moodRefine, setMoodRefine] = useState<MoodRefine | null>(null)
+  const [addGroupOpen, setAddGroupOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
   const updateCompareIds = useCallback(
@@ -344,6 +353,11 @@ export function WorkTable({
     refresh()
   }, [favoriteSelectedIds, updateCompareIds, refresh])
 
+  const handleAddedToGroup = useCallback(() => {
+    updateCompareIds([])
+    refresh()
+  }, [updateCompareIds, refresh])
+
   const totalPages = Math.ceil(total / pageSize)
 
   return (
@@ -422,7 +436,18 @@ export function WorkTable({
             onOpen={() => setMoodDialogOpen(true)}
             onClear={clearCompare}
             onUnfavorite={handleBatchUnfavorite}
+            onAddToGroup={groups ? () => setAddGroupOpen(true) : undefined}
           />
+
+          {groups && (
+            <AddToGroupDialog
+              open={addGroupOpen}
+              onOpenChange={setAddGroupOpen}
+              workIds={compareIds}
+              groups={groups}
+              onDone={handleAddedToGroup}
+            />
+          )}
 
           <MoodRefineDialog
             open={moodDialogOpen}
@@ -466,13 +491,17 @@ function CompareSelectionBar({
   onOpen,
   onClear,
   onUnfavorite,
+  onAddToGroup,
 }: {
   count: number
   favoriteCount: number
   onOpen: () => void
   onClear: () => void
   onUnfavorite: () => void
+  onAddToGroup?: () => void
 }) {
+  // Stopgap multi-user: desfavoritar/agrupar em lote muta o catálogo → só o dono.
+  const isAdmin = useIsAdmin()
   if (count === 0) return null
   const compareDisabled = count > MAX_COMPARE_WORKS
   return (
@@ -493,7 +522,18 @@ function CompareSelectionBar({
         >
           Comparar
         </Button>
-        {favoriteCount > 0 && (
+        {onAddToGroup && isAdmin && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onAddToGroup}
+            className="h-7 gap-1.5 text-xs"
+          >
+            <FolderPlus className="h-3.5 w-3.5" />
+            Adicionar a grupo
+          </Button>
+        )}
+        {favoriteCount > 0 && isAdmin && (
           <Button
             size="sm"
             variant="outline"
@@ -588,6 +628,8 @@ function ViewButton({
 
 function EmptyState({ searchQuery }: { searchQuery?: string }) {
   const searchedTitle = searchQuery?.trim()
+  // Stopgap multi-user: adicionar obra é do dono do catálogo → some pra não-admin.
+  const isAdmin = useIsAdmin()
 
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-border/70 bg-card/80 px-4 py-16 text-center text-sm text-muted-foreground shadow-sm">
@@ -601,7 +643,7 @@ function EmptyState({ searchQuery }: { searchQuery?: string }) {
           <p className="mt-1">Ajuste os filtros ou adicione uma nova obra.</p>
         )}
       </div>
-      {searchedTitle && (
+      {searchedTitle && isAdmin && (
         <Button asChild size="sm">
           <Link href={`/titles/new?title=${encodeURIComponent(searchedTitle)}`}>
             <Plus className="h-4 w-4" />
@@ -755,6 +797,9 @@ function WorkListView({
   criterionPrefs?: Record<string, CriterionRange>
 }) {
   const refresh = useRefresh()
+  // Stopgap multi-user: o menu "Gerenciar obra" (editar/favoritar/arquivar) muta o
+  // catálogo compartilhado → só o dono. Usuário logado não vê a coluna de ações.
+  const isAdmin = useIsAdmin()
   const colorMode = useSyncExternalStore(subscribeAttrColorMode, readAttrColorMode, () => "catalog" as const)
   const columnConfig = useSyncExternalStore(
     (onChange) => subscribeWorkColumnConfig(onChange, namespace),
@@ -973,6 +1018,7 @@ function WorkListView({
       )
     },
     actions: (work) => {
+      if (!isAdmin) return null
       const slug = titleToSlug(work.title)
       return (
         <DropdownMenu>

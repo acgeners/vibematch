@@ -54,6 +54,9 @@ class Summary {
 
 const resolveTotal = new Counter("resolve_total", "Total de requests /resolve concluídos")
 const resolveErrors = new Counter("resolve_errors_total", "Erros de /resolve por código", "code")
+const renderTotal = new Counter("render_total", "Total de requests /render concluídos")
+const renderErrors = new Counter("render_errors_total", "Erros de /render por código", "code")
+const renderDurationMs = new Summary("render_duration_ms", "Duração total de /render")
 const browserRestarts = new Counter("browser_restarts_total", "Reinícios do browser")
 const contextCreated = new Counter("browser_context_created_total", "BrowserContexts criados")
 const contextClosed = new Counter("browser_context_closed_total", "BrowserContexts fechados")
@@ -70,6 +73,9 @@ let gaugeSource: () => { inflight: number; queue: number; ready: number } = () =
 export const metrics = {
   resolveTotal,
   resolveErrors,
+  renderTotal,
+  renderErrors,
+  renderDurationMs,
   browserRestarts,
   contextCreated,
   contextClosed,
@@ -92,6 +98,12 @@ export const metrics = {
     candidatesReturned.observe(o.candidates)
   },
 
+  /** Registra um render bem-sucedido. */
+  observeRender(elapsedMs: number): void {
+    renderTotal.inc()
+    renderDurationMs.observe(elapsedMs)
+  },
+
   render(): string {
     const g = gaugeSource()
     const gauges = [
@@ -108,6 +120,9 @@ export const metrics = {
     return [
       resolveTotal.render(),
       resolveErrors.render(),
+      renderTotal.render(),
+      renderErrors.render(),
+      renderDurationMs.render(),
       browserRestarts.render(),
       contextCreated.render(),
       contextClosed.render(),

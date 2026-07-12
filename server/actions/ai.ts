@@ -21,6 +21,7 @@ import type { AiEvaluation } from "@/types/domain"
 import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { SONNET_MODEL } from "@/lib/ai/models"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 const OPUS_MODEL_ID = "claude-opus-4-7"
 const SONNET_MODEL_ID = SONNET_MODEL
@@ -147,6 +148,8 @@ interface TriggerAiEvaluationOpts {
 }
 
 export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluationOpts = {}) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
 
   const { data: work, error: workError } = await supabase
@@ -408,6 +411,8 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
  * mesma chave de cache; erros são engolidos (é só otimização).
  */
 export async function prewarmEvaluationContext(workId: string): Promise<{ ok: boolean }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false }
   try {
     const supabase = createAdminClient()
     const { data: work, error } = await supabase
@@ -443,6 +448,8 @@ export interface AiReviewSubmission {
 }
 
 export async function submitAiReview(submission: AiReviewSubmission) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { data: null, error: gate.error }
   const supabase = createAdminClient()
 
   if (submission.scores.length === 0) {
@@ -503,6 +510,8 @@ export async function submitAiReview(submission: AiReviewSubmission) {
 }
 
 export async function skipAiEvaluation(workId: string) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { data: null, error: gate.error }
   const supabase = createAdminClient()
   await supabase
     .from("works")

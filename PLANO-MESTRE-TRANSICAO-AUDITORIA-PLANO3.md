@@ -10,6 +10,8 @@
 > dependências entre `review_digest`, Potencial de Interesse e Plano 3, congelar o
 > contrato da previsão antes de qualquer novo gasto, e definir **uma** sequência de
 > trabalho. **Nenhuma implementação funcional aqui.**
+>
+> **🔄 Atualização 2026-07-09 — Auditoria 2 + medição prospectiva de ranking:** nova auditoria completa em `AUDIT_REPORT-2026-07-08.md` (878 obras, 207 rótulos) — ranking tem sinal no grosso mas **não sustenta ordenação fina** (σ(Prevista)≈MAE 0,55; expected×calc **r=0,96**; personal_fit≡tag_overlap_net **r=1,0**). **Shipado (PR [#85](https://github.com/acgeners/vibematch/pull/85), branch `work`, aditivo — sem tocar fórmula/score/ordenação):** instrumentação de `prediction_snapshots` no /ranking (migs **135 rank_position**/**136 filters_key** aplicadas em prod), view **Faixas** (4ª visualização, não substitui as demais), scripts read-only `baselines:ranking`/`prospective:ranking`. **Pendente:** medição **acumulando** — hoje **0 resolvidos** (esperado); a decisão sobre manter/simplificar Ridge/chance/Bússola aguarda ≥30 obras resolvidas + IC. Ver "Status de execução" no AUDIT_REPORT-2026-07-08.md.
 
 > **🟢 ESTADO AUTORITATIVO 2026-06-28 — ler ANTES de tudo (inclusive do banner 06-23 abaixo).**
 > Duas viradas posteriores ao corpo deste doc invalidam decisões registradas como fechadas:

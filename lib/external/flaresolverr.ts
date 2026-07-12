@@ -7,6 +7,8 @@
 //
 // When the env var is unset, helpers fall back to a plain fetch (no CF bypass).
 
+import { renderHtmlViaSidecar } from "./comix-render-client"
+
 const ENDPOINT = process.env.FLARESOLVERR_URL?.trim() || ""
 
 // Timeout de conexão curto: a porta às vezes aceita a conexão mas não responde
@@ -38,9 +40,24 @@ export function isFlareSolverrCircuitOpen(): boolean {
   return Date.now() < circuitOpenUntil
 }
 
-/** Heuristic: is this response HTML a Cloudflare challenge page? */
+/**
+ * O HTML é uma página de DESAFIO do Cloudflare (bloqueio), ou só uma página
+ * protegida por ele?
+ *
+ * NÃO casar com `challenge-platform` solto: o Cloudflare injeta o script de
+ * bot-management PASSIVO (`/cdn-cgi/challenge-platform/scripts/jsd/main.js`) em
+ * páginas servidas NORMALMENTE — com conteúdo, status 200 e sem mitigação. Casar
+ * com ele classificava HTML bom como desafio, então TODA chamada do comix
+ * descartava a resposta que já tinha em mãos (~350ms) e ia pro FlareSolverr;
+ * com o container fora, detalhe e reviews do comix simplesmente sumiam.
+ *
+ * O bloqueio de verdade é inequívoco (medido em anime-planet/mangago/comick):
+ * 403 + header `cf-mitigated: challenge`, e o interstitial traz "Just a moment",
+ * `_cf_chl_opt` e o script de `orchestrate` (≠ do `jsd` passivo).
+ * Fixtures reais dos dois lados: tests/fixtures/cloudflare/.
+ */
 export function isCloudflareChallenge(html: string): boolean {
-  return /cf-mitigated|challenge-platform|Just a moment|cf-chl-bypass/i.test(html)
+  return /cf-mitigated|Just a moment|cf-chl-bypass|_cf_chl_opt|challenge-platform\/h\/[a-z]+\/orchestrate/i.test(html)
 }
 
 /**
@@ -201,8 +218,24 @@ export async function fetchHtmlWithCfFallback(
       }
     }
   } catch {
-    // fall through to FlareSolverr
+    // cai pro bypass
   }
+
+  // Bypass em 2 camadas, nesta ordem:
+  //
+  // 1) SIDECAR (browser real, Playwright). Preferido: medido passando o Cloudflare de
+  //    anime-planet, mangago, comick e comix — as mesmas URLs que dão 403 `cf-mitigated`
+  //    ao fetch do Node (o bloqueio é por fingerprint TLS/browser, não por conteúdo).
+  //    É o mesmo processo que já resolve o hid do Comix; não há infra nova.
+  // 2) FLARESOLVERR (legado). Rede de segurança enquanto o sidecar não está deployado em
+  //    todo lugar — e para o caso de um desafio que o Playwright puro não vença. Some
+  //    quando o sidecar provar o valor em produção.
+  //
+  // Sem `COMIX_RENDER_URL` (ou com o sidecar fora), a camada 1 é um no-op barato
+  // (circuito) e o comportamento é exatamente o de antes.
+  const rendered = await renderHtmlViaSidecar(url, headers, abortMs)
+  if (rendered) return rendered
+
   if (!ENDPOINT) return null
   return flareSolverrFetch(url, 60000, abortMs, session)
 }

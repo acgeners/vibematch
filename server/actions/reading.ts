@@ -5,9 +5,15 @@ import { getLatestChapter, type ChapterCheckInput } from "@/lib/external/chapter
 import { predictNextFromAnchor, parseRelativeAgeToDate } from "@/lib/external/chapter-sources/cadence"
 import { comixWorkUrl } from "@/lib/external/comix"
 import { fetchMangaDexChapterDates } from "@/lib/external/mangadex"
+import { fetchMangaUpdatesStatus } from "@/lib/external/mangaupdates"
 import { withTimeout } from "@/lib/external/with-timeout"
 import { markRecalcPending } from "@/server/actions/recalc-queue"
+import { ensureAdmin } from "@/server/queries/current-user"
 import { persistComixHid } from "@/server/actions/comix-hid"
+import {
+  getPublicationStatusIdByName,
+  getPublicationStatusNameById,
+} from "@/lib/constants/status-lookups"
 
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean }
 
@@ -51,6 +57,12 @@ export interface ReadingUpdateResult {
   latestUrl: string | null
   /** Próxima data de lançamento prevista (ISO) = último cap + cadência; `null` se indisponível. */
   nextPredictedAt: string | null
+  /** Status de publicação das fontes nesta checagem (MangaUpdates preferido, senão comix). `null` se indisponível. */
+  statusExternal: string | null
+  /** Novo status GRAVADO nesta checagem (Completed/Hiatus/Cancelled), ou `null` se nada mudou. */
+  statusApplied: string | null
+  /** `true` quando a obra foi PULADA (publicação já concluída → sem capítulos novos). */
+  skipped: boolean
 }
 
 /**
@@ -62,12 +74,17 @@ export async function checkReadingUpdates(
   workIds: string[],
 ): Promise<ReadingUpdateResult[]> {
   if (workIds.length === 0) return []
+  // Sincroniza total_chapters/publication_status (metadados compartilhados de works)
+  // como efeito colateral → só o admin (dono). Sem canal de erro nesta shape:
+  // não-admin recebe [] (nenhuma atualização); a UI que dispara isto some na parte C.
+  const gate = await ensureAdmin()
+  if (!gate.ok) return []
 
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("works")
     .select(
-      "id, title, original_title, alternative_titles, total_chapters, chapters_read, work_external_ids(source, external_id, is_rejected)",
+      "id, title, original_title, alternative_titles, total_chapters, chapters_read, publication_status_id, work_external_ids(source, external_id, is_rejected)",
     )
     .in("id", workIds)
 
@@ -80,26 +97,43 @@ export async function checkReadingUpdates(
     alternative_titles: string[] | null
     total_chapters: number | null
     chapters_read: number | null
+    publication_status_id: number | null
     work_external_ids?: ExternalIdRow[] | null
   }>
 
   return Promise.all(
     works.map(async (w): Promise<ReadingUpdateResult> => {
       try {
+        // Obra com publicação já CONCLUÍDA não terá capítulos novos → pula o fetch
+        // externo (o mais caro, via FlareSolverr). O contador de pendentes continua
+        // vindo do total_chapters/chapters_read salvos (sem checagem).
+        if (getPublicationStatusNameById(w.publication_status_id) === "Completed") {
+          return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: false, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: "Completed", statusApplied: null, skipped: true }
+        }
+
         const { comixHid, comixRejected, crossIds } = readExternalIds(w.work_external_ids)
         // Respeita rejeição explícita do comix: não busca nem persiste.
         if (comixRejected && !comixHid) {
-          return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null }
+          return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, skipped: false }
         }
 
-        const { latest, resolvedComixHid, releasedLabel, releasedAt, cadenceDates, chapterNumbers, latestUrl: winnerUrl } =
-          await getLatestChapter({
+        const [chapterResult, muStatus] = await Promise.all([
+          getLatestChapter({
             title: w.title,
             originalTitle: w.original_title,
             alternativeTitles: w.alternative_titles ?? [],
             comixHid,
             crossIds,
-          })
+          }),
+          fetchMuStatus(crossIds.mangaupdates),
+        ])
+        const { latest, resolvedComixHid, releasedLabel, releasedAt, cadenceDates, chapterNumbers, latestUrl: winnerUrl } =
+          chapterResult
+        // Status de publicação: MangaUpdates é a fonte mais confiável → tem
+        // precedência; a comix é fallback quando o MU não tem ID/dado.
+        const comixStatus =
+          chapterResult.status && chapterResult.status !== "Unknown" ? chapterResult.status : null
+        const statusExternal = muStatus ?? comixStatus
 
         // Self-healing: hid resolvido via busca e ainda não salvo → persiste pra
         // próximas checagens virem exatas (e backfill implícito de todas as obras).
@@ -149,6 +183,17 @@ export async function checkReadingUpdates(
           await markRecalcPending("reading-chapter-sync").catch(() => {})
         }
 
+        // Sincroniza status de publicação da comix. Política: só aplica transições de
+        // FIM/HIATO (Completed/Hiatus/Cancelled) que diferem do atual; nunca escreve
+        // "Ongoing" (não reverte); e não mexe em obra já terminal (Completed/Cancelled)
+        // pra não "des-terminar". Status é feature do Ridge → marca recálculo pendente.
+        const statusApplied = await maybeApplyPublicationStatus(
+          supabase,
+          w.id,
+          w.publication_status_id,
+          statusExternal ?? null,
+        )
+
         return {
           workId: w.id,
           latestExternal: latest,
@@ -162,12 +207,62 @@ export async function checkReadingUpdates(
           // na fonte que achou (coffeemanga) quando a obra não está no comix.
           latestUrl: hid ? comixWorkUrl(hid) : (winnerUrl ?? null),
           nextPredictedAt,
+          statusExternal: statusExternal ?? null,
+          statusApplied,
+          skipped: false,
         }
       } catch {
-        return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null }
+        return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, skipped: false }
       }
     }),
   )
+}
+
+/** Status de publicação do MangaUpdates por ID (fail-soft, com timeout). `null` se sem ID/dado. */
+async function fetchMuStatus(muId: string | null | undefined): Promise<string | null> {
+  const n = muId != null ? Number(muId) : NaN
+  if (!Number.isFinite(n)) return null
+  return withTimeout(fetchMangaUpdatesStatus(n), 8000, "status:mangaupdates").catch(() => null)
+}
+
+/**
+ * Aplica o status de publicação resolvido das fontes (MangaUpdates preferido,
+ * senão comix), com política conservadora: só grava transições de FIM/HIATO
+ * (Completed/Hiatus/Cancelled) que diferem do atual; nunca escreve "Ongoing"
+ * (não reverte); e não mexe em obra já terminal (Completed/Cancelled), pra não
+ * "des-terminar". Status é feature categórica do Ridge → dispara markRecalcPending.
+ * Retorna o status gravado (pra UI) ou `null`.
+ */
+async function maybeApplyPublicationStatus(
+  supabase: ReturnType<typeof createAdminClient>,
+  workId: string,
+  currentStatusId: number | null,
+  externalStatus: string | null,
+): Promise<string | null> {
+  if (
+    externalStatus !== "Completed" &&
+    externalStatus !== "Hiatus" &&
+    externalStatus !== "Cancelled"
+  ) {
+    return null
+  }
+  const currentName = getPublicationStatusNameById(currentStatusId)
+  if (currentName === "Completed" || currentName === "Cancelled" || currentName === externalStatus) {
+    return null
+  }
+  const newId = getPublicationStatusIdByName(externalStatus)
+  if (newId == null) return null
+
+  const { error } = await supabase
+    .from("works")
+    .update({ publication_status_id: newId })
+    .eq("id", workId)
+  if (error) {
+    console.error("[maybeApplyPublicationStatus] failed:", error.message)
+    return null
+  }
+  await markRecalcPending("reading-status-sync").catch(() => {})
+  return externalStatus
 }
 
 /**

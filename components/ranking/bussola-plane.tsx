@@ -2,17 +2,23 @@
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { Compass } from "lucide-react"
 import { cn, titleToSlug } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
 import { ForceMeters } from "@/components/ranking/force-meters"
-import { computeWorkForces, classifyArchetypeByPercentile, type ForceArchetype } from "@/lib/calculations/forces"
-import type { RankingEntry } from "@/server/queries/ranking"
+import { computeWorkForces, classifyArchetype, classifyArchetypeByPercentile, type ForceArchetype } from "@/lib/calculations/forces"
 
 /**
  * Bússola 2D — o plano de decisão da feature (ver PLANO-BUSSOLA-3-FORCAS.md).
  * Cada obra é um ponto: posição = 2 das 3 forças (face escolhida), tamanho = a
- * 3ª, cor = arquétipo (Chance × Avaliação, estável entre as faces). Reusa os
- * mesmos RankingEntry do ranking (filtros/sort já aplicados a montante).
+ * 3ª, cor = arquétipo (Chance × Avaliação, estável entre as faces).
+ *
+ * Serve dois contextos, controlados por `mode`:
+ *   - "percentile" (/ranking): posição = percentil no acervo exibido (centenas
+ *     de obras) — espalha o catálogo comprimido; mediana no centro.
+ *   - "absolute" (comparação de 2–10 obras): posição = magnitude real, com o
+ *     limiar de cada eixo ancorado no centro — fiel, sem exagerar diferenças
+ *     mínimas num punhado de obras.
  *
  * Redesign 2026-07-08: legendas de canto FORA do plano (nunca cobrem/são
  * cobertas por um ponto), card explicativo ao lado dos seletores e tooltip
@@ -20,6 +26,25 @@ import type { RankingEntry } from "@/server/queries/ranking"
  */
 
 type ForceKey = "chance" | "avaliacao" | "alcance"
+type PositionMode = "percentile" | "absolute"
+
+/**
+ * Dado mínimo que a Bússola consome. `RankingEntry` (do /ranking) satisfaz esta
+ * forma estruturalmente; o WorkCompareDrawer mapeia CompareWork pra cá.
+ */
+export interface BussolaDatum {
+  workId: string
+  title: string
+  coverUrl: string | null
+  year: number | null
+  publicationStatus?: string | null
+  publicationStatusShort?: string | null
+  publicationStatusColor?: string | null
+  chanceScore: number | null
+  platformAvg: number | null
+  totalVotes: number
+  expectedScore: number | null
+}
 
 const AXIS_LABEL: Record<ForceKey, string> = {
   chance: "Chance de você gostar",
@@ -97,31 +122,34 @@ const CORNER_ARCH: Record<"tr" | "tl" | "br" | "bl", ForceArchetype> = { tr: "sa
 
 type RiskMode = "all" | "segura" | "potencial"
 
+/** Opções do filtro "Foco" (por arquétipo de risco) + explicação do selecionado. */
+const RISK_OPTIONS: { v: RiskMode; label: string; swatch?: string }[] = [
+  { v: "all", label: "Tudo" },
+  { v: "segura", label: "Aposta segura", swatch: "bg-emerald-500" },
+  { v: "potencial", label: "Alto potencial", swatch: "bg-rose-500" },
+]
+const RISK_DESC: Record<RiskMode, string> = {
+  all: "Mostra todas as obras do ranking, sem filtrar por tipo de aposta.",
+  segura: "Só o que você tende a gostar e a crítica confirma.",
+  potencial: "Só apostas arriscadas: aclamadas, mas incertas pro teu perfil.",
+}
+
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 const sizePx = (v: number | null) => 10 + ((v ?? 0) / 100) * 18
 
-function Seg<T extends string>({
-  value, onChange, options,
-}: { value: T; onChange: (v: T) => void; options: { v: T; label: string; swatch?: string }[] }) {
-  return (
-    <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
-      {options.map((o) => (
-        <button
-          key={o.v}
-          type="button"
-          onClick={() => onChange(o.v)}
-          aria-pressed={value === o.v}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-            value === o.v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {o.swatch && <span className={cn("size-2 rounded-full", o.swatch)} />}
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
+/** Limiar absoluto (0–100) de cada força — a linha do meio no modo "absolute". */
+const FORCE_THRESHOLD: Record<ForceKey, number> = { chance: 50, avaliacao: 65, alcance: 50 }
+
+/**
+ * Mapeia a magnitude crua (0–100) pra posição no plano ancorando o limiar da
+ * força em 50% (piecewise). Mantém a cruz/tints/cantos idênticos ao modo
+ * percentil, mudando só onde os pontos caem — e preservando a fidelidade
+ * (diferença mínima entre obras → distância mínima).
+ */
+const absPos = (v: number | null, thr: number) => {
+  if (v == null) return 50
+  const c = clamp(v, 0, 100)
+  return c <= thr ? (c / thr) * 50 : 50 + ((c - thr) / (100 - thr)) * 50
 }
 
 /** Legenda de canto — fora do plano, pra nunca cobrir (nem ser coberta por) um ponto. */
@@ -140,7 +168,7 @@ function QuadCap({ arch, name, hint, align }: { arch: ForceArchetype; name: stri
   )
 }
 
-export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
+export function BussolaPlane({ entries, mode = "percentile" }: { entries: BussolaDatum[]; mode?: PositionMode }) {
   const [presetKey, setPresetKey] = useState("ca")
   const [risk, setRisk] = useState<RiskMode>("all")
   const [hovered, setHovered] = useState<string | null>(null)
@@ -157,6 +185,20 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
         forces: computeWorkForces({ chanceScore: e.chanceScore, platformAvg: e.platformAvg, totalVotes: e.totalVotes }),
       }))
       .filter((d) => d.forces[preset.x] != null && d.forces[preset.y] != null)
+
+    // Modo absoluto (comparação de poucas obras): posição = magnitude real, com
+    // o limiar de cada eixo ancorado no centro. Fiel — diferença mínima entre
+    // obras vira distância mínima; percentil (relativo a 2–3 obras) exageraria
+    // os cantos. Arquétipo por limiar FIXO (chance≥50, crítica≥6,5) — a cruz
+    // vira o mesmo limiar em qualquer conjunto comparado.
+    if (mode === "absolute") {
+      return base.map((d) => ({
+        ...d,
+        xPct: absPos(d.forces[preset.x], FORCE_THRESHOLD[preset.x]),
+        yPct: absPos(d.forces[preset.y], FORCE_THRESHOLD[preset.y]),
+        arch: classifyArchetype(d.forces.chance, d.forces.avaliacao),
+      }))
+    }
 
     // Posição = PERCENTIL dentro do acervo exibido. Sem isso, o catálogo
     // comprimido (Avaliação toda em 70–95) empilha tudo numa faixa e metade do
@@ -190,7 +232,7 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
       // quadrantes visuais (linha do meio = mediana) com a cor.
       arch: classifyArchetypeByPercentile(pctChance(d.forces.chance), pctAval(d.forces.avaliacao)),
     }))
-  }, [entries, preset.x, preset.y])
+  }, [entries, preset.x, preset.y, mode])
 
   const isActive = (arch: ForceArchetype) =>
     risk === "all" || (risk === "segura" && arch === "safe") || (risk === "potencial" && arch === "upside")
@@ -239,66 +281,158 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* lede + codificação */}
-      <div className="flex flex-col gap-2">
-        <p className="max-w-[64ch] text-sm text-muted-foreground">
-          Cada obra é um ponto. A <span className="font-medium text-foreground">posição</span> cruza duas das três forças,
-          o <span className="font-medium text-foreground">tamanho</span> mostra a terceira e a{" "}
-          <span className="font-medium text-foreground">cor</span> diz que tipo de aposta ela é pra você. Passe o mouse pra ver a capa.
-        </p>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 font-mono text-[11px] text-muted-foreground">
-          <span>posição = 2 forças</span>
-          <span>
-            tamanho = <span className={cn("font-semibold", FORCE_TEXT[preset.size])}>{FORCE_SHORT[preset.size]}</span>
-          </span>
-          <span>cor = tipo de aposta</span>
-        </div>
-      </div>
-
-      {/* painel */}
+      {/* painel — como ler, controles e plano num card só */}
       <div className="overflow-hidden rounded-2xl border border-border bg-card/60 shadow-sm">
-        {/* cabeçalho: controles empilhados + card explicativo */}
-        <div className="flex flex-wrap items-stretch gap-x-5 gap-y-3 border-b border-border bg-muted/30 p-4">
-          <div className="flex flex-col justify-center gap-2.5">
-            <div className="flex items-center gap-2.5">
-              <span className="w-11 shrink-0 font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground">Eixos</span>
-              <Seg value={presetKey} onChange={setPresetKey} options={PRESETS.map((p) => ({ v: p.key, label: p.label }))} />
-            </div>
-            <div className="flex items-center gap-2.5">
-              <span className="w-11 shrink-0 font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground">Foco</span>
-              <Seg
-                value={risk}
-                onChange={setRisk}
-                options={[
-                  { v: "all", label: "Tudo" },
-                  { v: "segura", label: "Aposta segura", swatch: "bg-emerald-500" },
-                  { v: "potencial", label: "Alto potencial", swatch: "bg-rose-500" },
-                ]}
-              />
+        {/* como ler + chave de codificação */}
+        <div className="flex flex-wrap items-stretch gap-4 border-b border-border bg-muted/30 p-4">
+          <div className="flex max-w-[460px] flex-none gap-3">
+            <span className="flex size-[30px] flex-none items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Compass className="size-[17px]" />
+            </span>
+            <div>
+              <p className="mb-1 font-mono text-[9.5px] font-bold uppercase tracking-[0.12em] text-muted-foreground">Como ler o mapa</p>
+              <p className="max-w-[44ch] text-[13px] leading-normal text-muted-foreground">
+                Cada obra é um ponto. A <b className="font-semibold text-foreground">posição</b> cruza duas das três forças,
+                o <b className="font-semibold text-foreground">tamanho</b> mostra a terceira e a{" "}
+                <b className="font-semibold text-foreground">cor</b> diz o tipo de aposta pra você. Passe o mouse num ponto pra ver a capa.
+              </p>
             </div>
           </div>
+          <div className="grid flex-1 grid-cols-3 items-center border-l border-border pl-4 font-mono">
+            <div className="flex flex-col gap-1 px-4">
+              <div className="flex items-center gap-2">
+                <span className="grid w-6 place-items-center">
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                    <path d="M9 1.5v15M1.5 9h15" className="stroke-muted-foreground" strokeWidth="1.3" />
+                    <circle cx="9" cy="9" r="2.4" className="fill-foreground" />
+                  </svg>
+                </span>
+                <span className="text-[12px] font-bold uppercase tracking-wide text-foreground">Posição</span>
+              </div>
+              <span className="text-[11px] text-muted-foreground">Cruza <b className="font-bold">2 forças</b></span>
+            </div>
+            <div className="flex flex-col gap-1 border-l border-border px-4">
+              <div className="flex items-center gap-2">
+                <span className="grid w-6 place-items-center">
+                  <svg width="24" height="14" viewBox="0 0 24 14" className={cn("fill-current", FORCE_TEXT[preset.size])}>
+                    <circle cx="5" cy="7" r="2.4" />
+                    <circle cx="16" cy="7" r="5" />
+                  </svg>
+                </span>
+                <span className="text-[12px] font-bold uppercase tracking-wide text-foreground">Tamanho</span>
+              </div>
+              <span className="text-[11px] text-muted-foreground">A 3ª força · <b className={cn("font-bold", FORCE_TEXT[preset.size])}>{FORCE_SHORT[preset.size]}</b></span>
+            </div>
+            <div className="flex flex-col gap-1 border-l border-border px-4">
+              <div className="flex items-center gap-2">
+                <span className="grid w-6 place-items-center">
+                  <svg width="22" height="14" viewBox="0 0 22 14">
+                    <circle cx="4" cy="7" r="3" className="fill-emerald-500" />
+                    <circle cx="12" cy="7" r="3" className="fill-violet-500" />
+                    <circle cx="20" cy="7" r="3" className="fill-rose-500" />
+                  </svg>
+                </span>
+                <span className="text-[12px] font-bold uppercase tracking-wide text-foreground">Cor</span>
+              </div>
+              <span className="text-[11px] text-muted-foreground">O <b className="font-bold">tipo de aposta</b></span>
+            </div>
+          </div>
+        </div>
 
-          {/* explicação do preset selecionado */}
-          <div className="flex min-w-[300px] flex-1 flex-col gap-2 rounded-xl border border-border bg-card p-3.5 shadow-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-md bg-violet-500/10 px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide text-violet-600 dark:text-violet-400">
-                {preset.tag}
-              </span>
-              <span className="text-sm font-bold tracking-tight">{preset.label}</span>
+        {/* eixos (abas) + mapa + foco */}
+        <div className="border-b border-border bg-muted/30 p-4">
+          <div className="flex flex-wrap gap-[18px]">
+            <div className="flex min-w-[300px] flex-1 flex-col gap-3">
+              {/* Eixos → abas */}
+              <div className="flex flex-col gap-2">
+                <span className="font-mono text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground">Eixos</span>
+                <div className="flex flex-wrap gap-1 border-b border-border">
+                  {PRESETS.map((p) => {
+                    const on = presetKey === p.key
+                    return (
+                      <button
+                        key={p.key}
+                        type="button"
+                        onClick={() => setPresetKey(p.key)}
+                        aria-pressed={on}
+                        className={cn(
+                          "-mb-px cursor-pointer rounded-t-lg px-3 py-2 text-sm font-semibold transition-colors",
+                          on
+                            ? "bg-card text-foreground shadow-[inset_0_-2px_0_hsl(var(--primary))]"
+                            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                        )}
+                      >
+                        {p.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Mapa: propósito + subtítulo, forças em linhas, nota */}
+              <div className="flex flex-col gap-2.5">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="rounded-md bg-violet-500/10 px-1.5 py-1 font-mono text-[9px] font-bold uppercase tracking-[0.08em] text-violet-600 dark:text-violet-400">
+                    {preset.tag}
+                  </span>
+                  <p className="text-[13px] text-muted-foreground">{preset.lede}</p>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {([["→ horizontal", preset.x], ["↑ vertical", preset.y], ["● tamanho", preset.size]] as const).map(
+                    ([role, key]) => (
+                      <div
+                        key={role}
+                        className={cn(
+                          "grid grid-cols-[96px_88px_minmax(0,1fr)] items-center gap-3 rounded-r-lg border-l-[2.5px] bg-muted/40 py-2 pl-3 pr-2",
+                          FORCE_BORDER[key],
+                        )}
+                      >
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">{role}</span>
+                        <span className={cn("text-[13px] font-bold", FORCE_TEXT[key])}>{FORCE_SHORT[key]}</span>
+                        <span className="text-[11px] leading-tight text-muted-foreground">{FORCE_DESC[key]}</span>
+                      </div>
+                    ),
+                  )}
+                </div>
+                <p className="text-[11px] leading-relaxed text-muted-foreground">{preset.note}</p>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">{preset.lede}</p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {([["→ horizontal", preset.x], ["↑ vertical", preset.y], ["● tamanho", preset.size]] as const).map(
-                ([role, key]) => (
-                  <div key={role} className={cn("border-l-[2.5px] pl-2.5", FORCE_BORDER[key])}>
-                    <span className="block font-mono text-[8.5px] uppercase tracking-wide text-muted-foreground">{role}</span>
-                    <span className={cn("block text-xs font-semibold", FORCE_TEXT[key])}>{FORCE_SHORT[key]}</span>
-                    <span className="block text-[11px] leading-tight text-muted-foreground">{FORCE_DESC[key]}</span>
-                  </div>
-                ),
-              )}
+
+            {/* Foco: coluna à direita do conteúdo dos eixos */}
+            <div className="flex w-[172px] flex-none flex-col gap-2 border-l border-border pl-[18px]">
+              <span className="font-mono text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground">Foco</span>
+              <div className="flex flex-col gap-0.5">
+                {RISK_OPTIONS.map((o) => {
+                  const on = risk === o.v
+                  return (
+                    <button
+                      key={o.v}
+                      type="button"
+                      onClick={() => setRisk(o.v)}
+                      aria-pressed={on}
+                      className={cn(
+                        "flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[12.5px] transition-colors",
+                        on ? "font-semibold text-foreground" : "font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "grid size-[15px] flex-none place-items-center rounded-full ring-[1.5px] ring-inset",
+                          on ? "ring-primary" : "ring-muted-foreground/50",
+                        )}
+                      >
+                        {on && <span className="size-[7px] rounded-full bg-primary" />}
+                      </span>
+                      {o.label}
+                      {o.swatch && <span className={cn("ml-auto size-2 flex-none rounded-full", o.swatch)} />}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="mt-1 border-t border-border pt-2 text-[11px] leading-relaxed text-muted-foreground">
+                {RISK_DESC[risk]}
+              </p>
             </div>
-            <p className="mt-0.5 border-t border-border pt-2 text-[11.5px] leading-relaxed text-muted-foreground">{preset.note}</p>
           </div>
         </div>
 
@@ -322,7 +456,7 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
             <div className="mb-2.5 flex items-start justify-between gap-3">
               <QuadCap arch={CORNER_ARCH.tl} name={preset.quad.tl} hint={`↖ ${cornerHint(false, true)}`} align="left" />
               <span className="self-center whitespace-nowrap font-mono text-[9px] uppercase tracking-wider text-muted-foreground/70">
-                ↓ mediana do acervo
+                {mode === "absolute" ? "↓ limiar" : "↓ mediana do acervo"}
               </span>
               <QuadCap arch={CORNER_ARCH.tr} name={preset.quad.tr} hint={`↗ ${cornerHint(true, true)}`} align="right" />
             </div>
@@ -392,14 +526,17 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
                       <div className="text-[13.5px] font-semibold leading-tight">{hoveredDot.e.title}</div>
                       <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10.5px] text-muted-foreground">
                         {hoveredDot.e.year != null && <span>{hoveredDot.e.year}</span>}
-                        {hoveredDot.e.year != null && <span>·</span>}
-                        <span className="inline-flex items-center gap-1">
-                          <span
-                            className="size-1.5 rounded-full"
-                            style={{ background: hoveredDot.e.publicationStatusColor ?? "currentColor" }}
-                          />
-                          {hoveredDot.e.publicationStatusShort ?? hoveredDot.e.publicationStatus}
-                        </span>
+                        {hoveredDot.e.year != null &&
+                          (hoveredDot.e.publicationStatusShort ?? hoveredDot.e.publicationStatus) && <span>·</span>}
+                        {(hoveredDot.e.publicationStatusShort ?? hoveredDot.e.publicationStatus) && (
+                          <span className="inline-flex items-center gap-1">
+                            <span
+                              className="size-1.5 rounded-full"
+                              style={{ background: hoveredDot.e.publicationStatusColor ?? "currentColor" }}
+                            />
+                            {hoveredDot.e.publicationStatusShort ?? hoveredDot.e.publicationStatus}
+                          </span>
+                        )}
                       </div>
                       <span
                         className={cn(
@@ -461,7 +598,7 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
               </span>
             ))}
             <span className="ml-auto font-mono text-[11px] text-muted-foreground">
-              posição = percentil no acervo · tamanho = {FORCE_SHORT[preset.size]} · {dots.length} obras
+              posição = {mode === "absolute" ? "magnitude (limiar no centro)" : "percentil no acervo"} · tamanho = {FORCE_SHORT[preset.size]} · {dots.length} obras
             </span>
           </div>
 
@@ -488,9 +625,15 @@ export function BussolaPlane({ entries }: { entries: RankingEntry[] }) {
               </div>
               <div className="text-xs text-muted-foreground">
                 <h4 className="mb-1.5 mt-2 text-xs font-semibold text-foreground">Como posicionamos</h4>
-                <p>
-                  A posição usa o <span className="font-medium text-foreground">percentil dentro do acervo exibido</span>, não a nota crua — assim as obras se espalham em vez de empilhar numa faixa. A cruz central é a <span className="font-medium text-foreground">mediana</span>: metade das obras de cada lado.
-                </p>
+                {mode === "absolute" ? (
+                  <p>
+                    A posição usa a <span className="font-medium text-foreground">magnitude real de cada força</span> (0–100), com o limiar de cada eixo ancorado no centro. Diferenças pequenas entre as obras aparecem pequenas — ideal pra comparar poucas obras. A cruz central marca os <span className="font-medium text-foreground">limiares</span> (chance 50%, crítica boa).
+                  </p>
+                ) : (
+                  <p>
+                    A posição usa o <span className="font-medium text-foreground">percentil dentro do acervo exibido</span>, não a nota crua — assim as obras se espalham em vez de empilhar numa faixa. A cruz central é a <span className="font-medium text-foreground">mediana</span>: metade das obras de cada lado.
+                  </p>
+                )}
                 <h4 className="mb-1.5 mt-3 text-xs font-semibold text-foreground">Por que a cor é fixa</h4>
                 <p>
                   A cor é sempre o arquétipo <span className="font-medium text-foreground">Chance × Avaliação</span> — ela viaja com a obra mesmo quando você troca os eixos, pra reconhecer a mesma aposta em qualquer face.

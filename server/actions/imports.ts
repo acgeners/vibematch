@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensureAdmin } from "@/server/queries/current-user"
 import { detectColumnMappings, applyMapping } from "@/lib/import/mapper"
 import { validateRows } from "@/lib/import/validator"
 import { processRows } from "@/lib/import/processor"
@@ -19,6 +20,8 @@ export interface StartImportArgs {
 }
 
 export async function startImport(args: StartImportArgs) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
 
   const effectiveMappings = args.mappings ?? detectColumnMappings(args.columns)

@@ -23,6 +23,50 @@ export type SidecarResponse =
   | { ok: false; error: string; meta: { elapsedMs: number; source: string } }
 
 export const SOURCE = "comix:browse-relevance"
+export const SOURCE_RENDER = "render:browser"
+
+// ---------------------------------------------------------------------------
+// POST /render — busca HTML por BROWSER REAL (substitui o FlareSolverr).
+// Genérico de propósito: recebe uma URL e devolve o HTML já renderizado. Quem
+// sabe o que fazer com o HTML é o app; o sidecar continua agnóstico.
+// ---------------------------------------------------------------------------
+
+export interface RenderInput {
+  url: string
+  headers?: Record<string, string>
+  /** Teto por request (ms). O server clampa ao máximo da config. */
+  timeoutMs?: number
+}
+
+export type RenderResponse =
+  | { ok: true; html: string; finalUrl: string; status: number; meta: { elapsedMs: number; source: string } }
+  | { ok: false; error: string; meta: { elapsedMs: number; source: string } }
+
+/**
+ * Interstitial de DESAFIO do Cloudflare (bloqueio), não a página protegida.
+ *
+ * Espelha `isCloudflareChallenge` do app (lib/external/flaresolverr.ts) — os dois
+ * precisam concordar. NÃO casar com `challenge-platform` solto: o script passivo
+ * (`/cdn-cgi/challenge-platform/scripts/jsd/main.js`) vem em páginas BOAS, e tratá-lo
+ * como bloqueio faz descartar HTML válido.
+ */
+export function isChallengeHtml(html: string): boolean {
+  return /cf-mitigated|Just a moment|cf-chl-bypass|_cf_chl_opt|challenge-platform\/h\/[a-z]+\/orchestrate/i.test(html)
+}
+
+/** Host permitido? O sidecar roda na rede interna: sem allowlist, `POST /render`
+ *  viraria um proxy aberto (SSRF) pra qualquer endereço alcançável daqui. */
+export function isAllowedUrl(raw: string, allowed: readonly string[]): boolean {
+  let u: URL
+  try {
+    u = new URL(raw)
+  } catch {
+    return false
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return false
+  const host = u.hostname.toLowerCase()
+  return allowed.some((a) => host === a || host.endsWith(`.${a}`))
+}
 
 /** Códigos de erro do contrato → status HTTP (§1). Um corpo de contrato VÁLIDO
  *  sempre acompanha o status; o app parseia o corpo (não confia só no status). */

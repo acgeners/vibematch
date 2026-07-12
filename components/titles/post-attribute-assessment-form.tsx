@@ -29,6 +29,8 @@ export interface PostAttributeAssessmentFormProps {
   onChange?: (next: Record<CriterionSlug, number>) => void
   /** Esconde o botão "Salvar avaliação" (o parent salva via fluxo unificado). */
   hideOwnSave?: boolean
+  /** Estado inicial do colapso (default aberto; o fluxo de gosto passa false). */
+  defaultOpen?: boolean
 }
 
 function clamp(v: number): number {
@@ -42,10 +44,11 @@ export function PostAttributeAssessmentForm({
   value,
   onChange,
   hideOwnSave = false,
+  defaultOpen = true,
 }: PostAttributeAssessmentFormProps) {
   const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(defaultOpen)
   const isControlled = value !== undefined && onChange !== undefined
 
   // Só os atributos que a IA avaliou entram no questionário — sem nota da

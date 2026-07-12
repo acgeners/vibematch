@@ -2,6 +2,7 @@
 
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensureAdmin } from "@/server/queries/current-user"
 import { recalculateAll, type RecalculateExecutionContext } from "@/server/actions/calculations"
 import { ensureRecalculateScores } from "@/lib/orchestration/integrations/recalculate-scores"
 import {
@@ -85,17 +86,6 @@ const recalcDeps = (force: boolean, ctx: RecalculateExecutionContext = "next-run
  */
 export async function recalculateScoresNow() {
   return ensureRecalculateScores(recalcDeps(true))
-}
-
-/**
- * Recálculo orquestrado AGUARDADO que só roda se houver pendência (force=false).
- * Usado pelo backfill após uma regeneração REAL do perfil: `insertNewTasteProfile`
- * marca `recalc_pending`, então este recalc coalescido/global zera a pendência ao
- * concluir — sem `force` (que mascararia a ausência de pendência para os demais
- * consumidores do recalc). Job global free, deduplicado/coalescido.
- */
-export async function recalculateScoresIfPending() {
-  return ensureRecalculateScores(recalcDeps(false))
 }
 
 /**
@@ -184,5 +174,9 @@ export async function maybeTriggerStaleRecalc(): Promise<RecalcPendingState> {
  * já revalida /ranking, /titles, /settings e / por dentro. Devolve estado tipado.
  */
 export async function triggerRecalcNow() {
+  // "Recalcular agora" reescreve calculated_scores (compartilhado) → gate de admin.
+  // Sinaliza via throw; o caller (recalc-pending-control) já trata em try/catch → toast.
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   return recalculateScoresNow()
 }

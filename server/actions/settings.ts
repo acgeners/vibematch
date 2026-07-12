@@ -4,6 +4,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getCurrentUserSettingsId } from "@/server/queries/current-user"
 import { recalculateScoresNowResult } from "./recalc-queue"
 import {
   computeCalibration,
@@ -166,19 +167,13 @@ export async function updateAiEvalPreferences(update: AiEvalPreferencesUpdate) {
  */
 export async function setAiEvalOnCreate(enabled: boolean) {
   const supabase = createAdminClient()
-  const { data: row } = await supabase
-    .from("user_settings")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (!row?.id) return { error: "user_settings sem linha singleton (rode a migration 074)" }
+  const settingsId = await getCurrentUserSettingsId()
+  if (!settingsId) return { error: "user_settings sem linha pro usuário atual (rode a migration 074)" }
 
   const { error } = await supabase
     .from("user_settings")
     .update({ ai_eval_on_create: enabled })
-    .eq("id", row.id as string)
+    .eq("id", settingsId)
 
   if (error) return { error: error.message }
 
@@ -189,19 +184,13 @@ export async function setAiEvalOnCreate(enabled: boolean) {
 
 export async function setSynopsisCanonicalOnCreate(enabled: boolean) {
   const supabase = createAdminClient()
-  const { data: row } = await supabase
-    .from("user_settings")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (!row?.id) return { error: "user_settings sem linha singleton (rode a migration 074)" }
+  const settingsId = await getCurrentUserSettingsId()
+  if (!settingsId) return { error: "user_settings sem linha pro usuário atual (rode a migration 074)" }
 
   const { error } = await supabase
     .from("user_settings")
     .update({ synopsis_canonical_on_create: enabled })
-    .eq("id", row.id as string)
+    .eq("id", settingsId)
 
   if (error) return { error: error.message }
 
@@ -217,19 +206,13 @@ export async function setSynopsisCanonicalOnCreate(enabled: boolean) {
  */
 export async function setReviewSummaryEnabled(enabled: boolean) {
   const supabase = createAdminClient()
-  const { data: row } = await supabase
-    .from("user_settings")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (!row?.id) return { error: "user_settings sem linha singleton (rode a migration 074)" }
+  const settingsId = await getCurrentUserSettingsId()
+  if (!settingsId) return { error: "user_settings sem linha pro usuário atual (rode a migration 074)" }
 
   const { error } = await supabase
     .from("user_settings")
     .update({ review_summary_enabled: enabled })
-    .eq("id", row.id as string)
+    .eq("id", settingsId)
 
   if (error) return { error: error.message }
 
@@ -244,19 +227,13 @@ export async function setReviewSummaryEnabled(enabled: boolean) {
  */
 export async function setReviewDigestEnabled(enabled: boolean) {
   const supabase = createAdminClient()
-  const { data: row } = await supabase
-    .from("user_settings")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (!row?.id) return { error: "user_settings sem linha singleton (rode a migration 074)" }
+  const settingsId = await getCurrentUserSettingsId()
+  if (!settingsId) return { error: "user_settings sem linha pro usuário atual (rode a migration 074)" }
 
   const { error } = await supabase
     .from("user_settings")
     .update({ review_digest_enabled: enabled })
-    .eq("id", row.id as string)
+    .eq("id", settingsId)
 
   if (error) return { error: error.message }
 
@@ -271,19 +248,13 @@ export async function setReviewDigestEnabled(enabled: boolean) {
  */
 export async function setTagInferenceOnCreate(enabled: boolean) {
   const supabase = createAdminClient()
-  const { data: row } = await supabase
-    .from("user_settings")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (!row?.id) return { error: "user_settings sem linha singleton (rode a migration 074)" }
+  const settingsId = await getCurrentUserSettingsId()
+  if (!settingsId) return { error: "user_settings sem linha pro usuário atual (rode a migration 074)" }
 
   const { error } = await supabase
     .from("user_settings")
     .update({ tag_inference_on_create: enabled })
-    .eq("id", row.id as string)
+    .eq("id", settingsId)
 
   if (error) return { error: error.message }
 
@@ -300,19 +271,13 @@ export async function setTagInferenceOnCreate(enabled: boolean) {
  */
 export async function setInterestShadowOnCreate(enabled: boolean) {
   const supabase = createAdminClient()
-  const { data: row } = await supabase
-    .from("user_settings")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (!row?.id) return { error: "user_settings sem linha singleton (rode a migration 074)" }
+  const settingsId = await getCurrentUserSettingsId()
+  if (!settingsId) return { error: "user_settings sem linha pro usuário atual (rode a migration 074)" }
 
   const { error } = await supabase
     .from("user_settings")
     .update({ interest_shadow_on_create: enabled })
-    .eq("id", row.id as string)
+    .eq("id", settingsId)
 
   if (error) return { error: error.message }
 
@@ -327,19 +292,13 @@ export async function setInterestShadowOnCreate(enabled: boolean) {
  */
 export async function setGenerateAllOnCreate(enabled: boolean) {
   const supabase = createAdminClient()
-  const { data: row } = await supabase
-    .from("user_settings")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (!row?.id) return { error: "user_settings sem linha singleton (rode a migration 074)" }
+  const settingsId = await getCurrentUserSettingsId()
+  if (!settingsId) return { error: "user_settings sem linha pro usuário atual (rode a migration 074)" }
 
   const { error } = await supabase
     .from("user_settings")
     .update({ generate_all_on_create: enabled })
-    .eq("id", row.id as string)
+    .eq("id", settingsId)
 
   if (error) return { error: error.message }
 
