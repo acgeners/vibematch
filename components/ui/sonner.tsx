@@ -19,6 +19,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
       className="toaster group"
       richColors
       duration={6000}
+      // Sem `expand`, o sonner COLAPSA a pilha: os toasts ficam sobrepostos (um
+      // tapando o outro) e só se abrem no hover. Com ele, cada aviso ocupa sua
+      // própria linha desde que aparece.
+      expand
+      visibleToasts={5}
+      gap={10}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,
