@@ -123,7 +123,44 @@ async function flareSolverrCreateSession(session: string, abortMs: number): Prom
   }
 }
 
-export async function flareSolverrFetch(
+// Uma sessão nomeada do FlareSolverr é UM Chrome — uma aba só. Duas chamadas
+// concorrentes na MESMA sessão navegam essa mesma aba, e uma acaba lendo a página
+// da outra. MEDIDO: duas buscas paralelas no mangago ("The Majesty Makeover" e
+// "Growing the Seed of Evil") devolveram AMBAS o mesmo resultado — em série, cada
+// uma trazia a obra certa. Na prática isso vinculava a obra errada à fonte.
+//
+// Serializa por sessão: a vantagem da sessão nomeada (não repagar o solve frio do
+// Cloudflare, ~11s) só é válida com uso exclusivo. Troca corrupção silenciosa por
+// fila. Chamadas SEM sessão não entram na fila — o FlareSolverr cria uma sessão
+// efêmera por request, que já é isolada.
+//
+// (O sidecar `comix-render` usa um BrowserContext por request e é imune por
+// construção — quando ele substituir o FS de vez, esta fila sai junto.)
+const sessionLocks = new Map<string, Promise<unknown>>()
+
+function withSessionLock<T>(session: string | undefined, run: () => Promise<T>): Promise<T> {
+  if (!session) return run()
+  const prev = sessionLocks.get(session) ?? Promise.resolve()
+  // `then(run, run)` — uma falha da chamada anterior não pode envenenar a fila.
+  const next = prev.then(run, run)
+  sessionLocks.set(
+    session,
+    next.catch(() => {}),
+  )
+  return next
+}
+
+export function flareSolverrFetch(
+  url: string,
+  timeoutMs = 60000,
+  abortMs = FLARESOLVERR_TIMEOUT_MS,
+  session?: string,
+): Promise<{ html: string; finalUrl: string } | null> {
+  return withSessionLock(session, () => flareSolverrFetchExclusive(url, timeoutMs, abortMs, session))
+}
+
+/** Corpo real. Só roda com a sessão travada (ver `withSessionLock`). */
+async function flareSolverrFetchExclusive(
   url: string,
   timeoutMs = 60000,
   // Teto de espera da NOSSA conexão com o FlareSolverr. Default curto (5s) detecta
