@@ -10,7 +10,10 @@ import { resolveMangagoUrlProd } from "./mangago-resolve-prod"
 import { boolEnv } from "./mangago-band"
 import { extractInlineRating } from "./inline-rating"
 import { isBlockedCoverUrl } from "./blocked-covers"
-import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews, fetchJikanMangaRecommendations } from "./jikan"
+// Metadados vêm da API OFICIAL do MAL (myanimelist.ts). As REVIEWS seguem no Jikan:
+// a v2 não tem endpoint nem campo de reviews — é a lacuna que faz o Jikan existir.
+import { searchMalManga, fetchMalMangaById, fetchMalRecommendations } from "./myanimelist"
+import { fetchJikanMangaReviews } from "./jikan"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
 import { searchMangaDex, fetchMangaDexById, fetchMangaDexForumComments } from "./mangadex"
 import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews, fetchMangaUpdatesAlternativeTitles } from "./mangaupdates"
@@ -567,7 +570,7 @@ export const SEARCH_CONNECTORS = [
   {
     source: "myanimelist",
     search: async (query: string) => {
-      const results = await searchJikanManga(query)
+      const results = await searchMalManga(query)
       return results.map((item): ExternalSearchResult => ({
         id: `mal:${item.id}`,
         source: "myanimelist",
@@ -1238,7 +1241,7 @@ async function collectSimilarFromCandidate(candidate: MergedCandidate, limit = 6
       ? withTimeout(fetchAniListRecommendations(candidate.anilistId).then((recs) => ({ source: "anilist" as const, recs })), TIMEOUT_SIMILAR_MS, "similar:anilist")
       : Promise.resolve(null),
     candidate.malId
-      ? withTimeout(fetchJikanMangaRecommendations(candidate.malId).then((recs) => ({ source: "myanimelist" as const, recs })), TIMEOUT_SIMILAR_MS, "similar:myanimelist")
+      ? withTimeout(fetchMalRecommendations(candidate.malId).then((recs) => ({ source: "myanimelist" as const, recs })), TIMEOUT_SIMILAR_MS, "similar:myanimelist")
       : Promise.resolve(null),
     candidate.animePlanetSlug
       ? withTimeout(fetchAnimePlanetRecommendations(candidate.animePlanetSlug).then((titles) => ({ source: "animeplanet" as const, titles })), TIMEOUT_SIMILAR_MS, "similar:animeplanet")
@@ -1276,7 +1279,7 @@ async function collectSimilarFromCandidate(candidate: MergedCandidate, limit = 6
     if (entry.status !== "fulfilled" || !entry.value) continue
     const value = entry.value as
       | { source: "anilist"; recs: Awaited<ReturnType<typeof fetchAniListRecommendations>> }
-      | { source: "myanimelist"; recs: Awaited<ReturnType<typeof fetchJikanMangaRecommendations>> }
+      | { source: "myanimelist"; recs: Awaited<ReturnType<typeof fetchMalRecommendations>> }
       | { source: "animeplanet"; titles: string[] }
 
     if (value.source === "anilist") {
@@ -1726,7 +1729,7 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
     candidate.anilistId ? withTimeout(fetchAniListById(candidate.anilistId), TIMEOUT_HYDRATE_MS, "hydrate:anilist") : null,
     candidate.muId ? withTimeout(fetchMangaUpdatesById(candidate.muId), TIMEOUT_HYDRATE_MS, "hydrate:mangaupdates") : null,
     candidate.kitsuId ? withTimeout(fetchKitsuMangaById(candidate.kitsuId), TIMEOUT_HYDRATE_MS, "hydrate:kitsu") : null,
-    candidate.malId ? withTimeout(fetchJikanMangaById(candidate.malId), TIMEOUT_HYDRATE_MS, "hydrate:myanimelist") : null,
+    candidate.malId ? withTimeout(fetchMalMangaById(candidate.malId), TIMEOUT_HYDRATE_MS, "hydrate:myanimelist") : null,
     candidate.mangadexId ? withTimeout(fetchMangaDexById(candidate.mangadexId), TIMEOUT_HYDRATE_MS, "hydrate:mangadex") : null,
     candidate.comickHid ? withTimeout(fetchComicKByHid(candidate.comickHid), TIMEOUT_HYDRATE_MS, "hydrate:comick") : null,
     candidate.comixHid ? withTimeout(fetchComixById(candidate.comixHid), TIMEOUT_HYDRATE_MS, "hydrate:comix") : null,

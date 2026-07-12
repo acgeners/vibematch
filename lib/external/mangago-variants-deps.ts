@@ -1,5 +1,5 @@
 import { fetchAniListById } from "./anilist"
-import { fetchJikanMangaById } from "./jikan"
+import { fetchMalMangaById } from "./myanimelist"
 import { fetchMangaUpdatesById } from "./mangaupdates"
 import type { MangagoVariantDeps, SourceTitles } from "./mangago-variants"
 
@@ -24,7 +24,7 @@ export const defaultVariantDeps: MangagoVariantDeps = {
     }
   },
   mal: async (id: number): Promise<SourceTitles | null> => {
-    const m = await fetchJikanMangaById(id)
+    const m = await fetchMalMangaById(id)
     if (!m) return null
     return { primary: m.title || undefined, aliases: m.alternativeTitles, year: m.year }
   },
