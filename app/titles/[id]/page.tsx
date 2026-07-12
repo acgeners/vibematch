@@ -1075,11 +1075,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             <div className={cn("grid grid-cols-1 gap-4", calcCardCount >= 3 && "sm:grid-cols-2")}>
               {work.calculated_scores?.personal_fit != null && (
                 <div className={cn(
-                  "flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
+                  // min-w-0: sem isso o item do grid tem min-width:auto e transborda a
+                  // trilha em vez de encolher. gap-3: o badge encostava no texto.
+                  "flex min-w-0 items-center justify-between gap-3 p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
                   // Última célula de veredito numa contagem ímpar → ocupa a linha toda.
                   spanLastVerdict && lastVerdict === "fit" && "sm:col-span-2",
                 )}>
-                  <div className="flex flex-col items-start gap-1">
+                  <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                     <span className="text-xs font-medium text-muted-foreground">Alinhamento</span>
                     <span className="text-[11px] text-muted-foreground">Posição no catálogo pelo seu perfil (percentil)</span>
                   </div>
@@ -1124,13 +1126,16 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
                 return (
                   <div className={cn(
-                    "flex items-center justify-between p-4 rounded-xl border bg-card/30 hover:bg-card/50 transition-all duration-200 shadow-sm",
+                    // flex-wrap + min-w-0: com o botão "Recalcular" (nowrap) ao lado da nota,
+                    // o min-content desta linha passava da trilha do grid e vazava pra fora do
+                    // card. Agora as ações quebram pra linha de baixo em vez de transbordar.
+                    "flex min-w-0 flex-wrap items-center justify-between gap-3 p-4 rounded-xl border bg-card/30 hover:bg-card/50 transition-all duration-200 shadow-sm",
                     stale
                       ? "border-amber-500/55 hover:border-amber-500/70"
                       : "border-border/80 hover:border-border",
                     spanLastVerdict && lastVerdict === "align" && "sm:col-span-2",
                   )}>
-                    <div className="flex flex-col items-start gap-1">
+                    <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                       <span className="text-xs font-medium text-muted-foreground">{LABELS.alignment_score.full}</span>
                       {stale ? (
                         <span className="inline-flex items-center rounded-full border border-amber-500/55 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
@@ -1144,7 +1149,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                       {/* Recalcular aparece SÓ quando desatualizado, atrelado ao Veredito, antes da nota. */}
                       {stale && <RerankAiRkButton workId={work.id} hasScore isPaid={isPaidPlan} icon="rotate" readiness={alignmentReadiness} />}
                       <TooltipProvider delayDuration={150}>
@@ -1176,10 +1181,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
               {deepDivePresent && (
                 <div className={cn(
-                  "flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
+                  "flex min-w-0 items-center justify-between gap-3 p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
                   spanLastVerdict && lastVerdict === "deep" && "sm:col-span-2",
                 )}>
-                  <div className="flex flex-col items-start gap-1">
+                  <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                     <span className="text-xs font-medium text-muted-foreground">Deep Dive</span>
                     <span className="text-[11px] text-muted-foreground">
                       {new Date(lastDeepDive!.created_at).toLocaleDateString("pt-BR")}
@@ -1216,8 +1221,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               {work.user_score != null && (
                 hasPostReadingScores ? (
                   <details className="group rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm overflow-hidden sm:col-span-2">
-                    <summary className="flex cursor-pointer list-none items-center justify-between p-4 [&::-webkit-details-marker]:hidden">
-                      <div className="flex flex-col items-start gap-1">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
+                      <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs font-medium text-muted-foreground">Pessoal</span>
                           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />

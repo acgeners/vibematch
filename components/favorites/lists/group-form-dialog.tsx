@@ -98,7 +98,9 @@ export function GroupFormDialog({ open, onOpenChange, mode, list, coverCandidate
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      {/* flex + max-h: mesmo padrão dos outros dialogs de favoritos (manage-works,
+          add-to-group) — header e footer fixos, só o miolo rola. */}
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Novo grupo" : "Editar grupo"}</DialogTitle>
           <DialogDescription>
@@ -106,7 +108,9 @@ export function GroupFormDialog({ open, onOpenChange, mode, list, coverCandidate
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4">
+        {/* min-w-0: sem isso o min-content da fileira de capas (N × 42px) infla a
+            coluna do dialog e o conteúdo sangra pra fora do painel. */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="group-name">Nome</Label>
             <Input
@@ -169,7 +173,10 @@ export function GroupFormDialog({ open, onOpenChange, mode, list, coverCandidate
                 <p className="text-xs text-muted-foreground">
                   Escolha até 3 obras. Sem escolha, usamos as de maior Nota Prevista.
                 </p>
-                <div className="flex gap-2 overflow-x-auto pb-2">
+                {/* Quebra em linhas (em vez de fileira única): um grupo com 50 obras
+                    gerava 50 miniaturas numa linha só. O pt/pr dá folga pro selo de
+                    posição, que é absolute e sai da caixa da miniatura. */}
+                <div className="flex max-h-[136px] flex-wrap gap-2 overflow-y-auto pb-1 pr-1.5 pt-1.5">
                   {coverCandidates.map((w) => {
                     const idx = coverIds.indexOf(w.id)
                     const selected = idx >= 0
