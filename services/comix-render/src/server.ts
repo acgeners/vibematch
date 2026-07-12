@@ -7,8 +7,9 @@ import { Semaphore, BusyError } from "./pool.js"
 import { initBrowser, isReady, closeBrowser, recycleIfNeeded } from "./browser.js"
 import { resolveWork } from "./resolve.js"
 import type { ResolveInput } from "./resolve.js"
-import { ERROR_STATUS, SOURCE } from "./contract.js"
-import type { SidecarResponse } from "./contract.js"
+import { renderPage } from "./render.js"
+import { ERROR_STATUS, SOURCE, SOURCE_RENDER, isAllowedUrl } from "./contract.js"
+import type { RenderInput, SidecarResponse } from "./contract.js"
 
 const sem = new Semaphore(config.maxConcurrency, config.maxQueue, config.maxQueueWaitMs)
 metrics.setGaugeSource(() => ({ inflight: sem.inFlight, queue: sem.queueLength, ready: isReady() ? 1 : 0 }))
@@ -110,6 +111,71 @@ async function handleResolve(req: http.IncomingMessage, res: http.ServerResponse
   }
 }
 
+function parseRenderInput(raw: string): RenderInput | null {
+  let body: unknown
+  try {
+    body = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!body || typeof body !== "object") return null
+  const b = body as Record<string, unknown>
+  const url = typeof b.url === "string" ? b.url.trim() : ""
+  if (!url) return null
+  const headers =
+    b.headers && typeof b.headers === "object" && !Array.isArray(b.headers)
+      ? Object.fromEntries(
+          Object.entries(b.headers as Record<string, unknown>).filter(
+            (e): e is [string, string] => typeof e[1] === "string",
+          ),
+        )
+      : undefined
+  return { url, headers, timeoutMs: typeof b.timeoutMs === "number" ? b.timeoutMs : undefined }
+}
+
+async function handleRender(req: http.IncomingMessage, res: http.ServerResponse, reqId: string): Promise<void> {
+  const bad = (error: string, status: number) =>
+    sendJson(res, status, { ok: false, error, meta: { elapsedMs: 0, source: SOURCE_RENDER } })
+
+  let raw: string
+  try {
+    raw = await readBody(req)
+  } catch {
+    return bad("bad_request", 400)
+  }
+  const input = parseRenderInput(raw)
+  if (!input) return bad("bad_request", 400)
+  // Allowlist: o sidecar vive na rede interna; sem isso, /render seria um proxy aberto.
+  if (!isAllowedUrl(input.url, config.renderAllowedHosts)) {
+    log("warn", "render_host_denied", { reqId, url: input.url })
+    return bad("host_not_allowed", 403)
+  }
+
+  let queueWaitMs: number
+  try {
+    queueWaitMs = await sem.acquire()
+    metrics.queueWaitMs.observe(queueWaitMs)
+  } catch (err) {
+    if (err instanceof BusyError) {
+      metrics.renderErrors.inc("busy")
+      log("warn", "render_busy", { reqId, url: input.url, queueLength: sem.queueLength })
+      return bad("busy", 503)
+    }
+    throw err
+  }
+
+  try {
+    const result = await renderPage(input, reqId)
+    sendJson(res, result.ok ? 200 : (ERROR_STATUS[result.error] ?? 500), result)
+  } catch (err) {
+    log("error", "render_unhandled", { reqId, detail: String(err) })
+    sendJson(res, 500, { ok: false, error: "internal", meta: { elapsedMs: 0, source: SOURCE_RENDER } })
+  } finally {
+    sem.release()
+    await recycleIfNeeded(sem.inFlight === 0)
+  }
+}
+
 const server = http.createServer((req, res) => {
   const incoming = req.headers["x-correlation-id"] ?? req.headers["x-request-id"]
   const reqId = (Array.isArray(incoming) ? incoming[0] : incoming) || crypto.randomUUID()
@@ -136,6 +202,10 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "POST" && path === "/resolve") {
     void handleResolve(req, res, reqId)
+    return
+  }
+  if (req.method === "POST" && path === "/render") {
+    void handleRender(req, res, reqId)
     return
   }
   sendJson(res, 404, { ok: false, error: "not_found" })

@@ -1,4 +1,4 @@
-import { comixSidecarResponseSchema } from "@/lib/validations/comix-render.schema"
+import { comixSidecarResponseSchema, renderResponseSchema } from "@/lib/validations/comix-render.schema"
 import type { ComixResolveInput, ComixSidecarResponse } from "@/lib/validations/comix-render.schema"
 
 // ============================================================================
@@ -23,6 +23,14 @@ export interface ComixRenderClient {
 
 // Detalhes da API — concentrados aqui. v2 mexe só nesta seção.
 const RESOLVE_PATH = "/resolve"
+const RENDER_PATH = "/render"
+
+// Circuito do /render: quando o sidecar está fora (não deployado, container caído), o
+// fetch falha na hora (ECONNREFUSED). Sem circuito, TODA busca de página pagaria essa
+// tentativa antes de cair no FlareSolverr — e o scraping chama isso dezenas de vezes.
+// Reabre sozinho após o TTL (se o sidecar voltar, volta a ser usado).
+const RENDER_CIRCUIT_TTL_MS = 60_000
+let renderCircuitOpenUntil = 0
 
 const num = (env: string | undefined, fallback: number) => {
   const n = Number(env)
@@ -46,6 +54,55 @@ function errorResponse(error: string): ComixSidecarResponse {
 
 function isTimeoutError(err: unknown): boolean {
   return err instanceof Error && (err.name === "TimeoutError" || /timeout|aborted/i.test(err.message))
+}
+
+/**
+ * Busca o HTML de uma URL pelo sidecar (browser REAL). É o substituto do FlareSolverr:
+ * o Chromium do Playwright atravessa o Cloudflare das fontes que respondem 403
+ * `cf-mitigated` ao fetch do Node (anime-planet, mangago, comick), porque o bloqueio é
+ * por fingerprint TLS/browser.
+ *
+ * Fail-soft por definição: sem `COMIX_RENDER_URL`, sidecar fora ou payload fora do
+ * contrato → `null`, e quem chamou cai no FlareSolverr (ver `fetchHtmlWithCfFallback`).
+ * SEM retry: um render custa segundos e o FlareSolverr já é a segunda tentativa.
+ */
+export async function renderHtmlViaSidecar(
+  url: string,
+  headers?: Record<string, string>,
+  timeoutMs?: number,
+): Promise<{ html: string; finalUrl: string } | null> {
+  const baseUrl = sidecarUrl()
+  if (!baseUrl) return null
+  if (Date.now() < renderCircuitOpenUntil) return null
+
+  try {
+    const res = await fetch(`${baseUrl}${RENDER_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, headers, timeoutMs }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(timeoutMs ?? sidecarTimeoutMs()),
+    })
+    const raw: unknown = await res.json().catch(() => null)
+    const parsed = renderResponseSchema.safeParse(raw)
+    if (!parsed.success) {
+      console.error("[comix-render] /render: resposta fora do contrato", parsed.error.issues?.[0])
+      return null
+    }
+    renderCircuitOpenUntil = 0 // o sidecar respondeu (mesmo que ok:false) → está vivo
+    if (!parsed.data.ok) {
+      // upstream_blocked = nem o browser real passou → o FlareSolverr é a última chance.
+      console.error(`[comix-render] /render falhou: ${parsed.data.error} url=${url}`)
+      return null
+    }
+    return { html: parsed.data.html, finalUrl: parsed.data.finalUrl }
+  } catch (err) {
+    // Erro de conexão/timeout = sidecar indisponível → abre o circuito e deixa o
+    // FlareSolverr assumir sem que cada chamada pague a tentativa.
+    renderCircuitOpenUntil = Date.now() + RENDER_CIRCUIT_TTL_MS
+    console.error(`[comix-render] /render indisponível (${err instanceof Error ? err.message : err})`)
+    return null
+  }
 }
 
 /**
