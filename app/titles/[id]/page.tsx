@@ -1,7 +1,8 @@
 import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
-import { BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash, ExternalLink } from "lucide-react"
+import { Archive, BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash, ExternalLink } from "lucide-react"
+import { ArchivedBanner } from "@/components/titles/archived-banner"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-watcher"
 import { UpdateProgressWatcher } from "@/components/titles/update-progress-watcher"
@@ -592,10 +593,20 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
       {/* Título (alt titles ficam na aba Visão Geral) */}
       <header className="space-y-1">
-        <h1 className="text-3xl font-bold leading-tight tracking-tight text-foreground md:text-4xl">
-          {work.title}
-        </h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-3xl font-bold leading-tight tracking-tight text-foreground md:text-4xl">
+            {work.title}
+          </h1>
+          {work.is_archived && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border bg-red-50 px-2.5 py-1 text-xs font-bold text-red-900 dark:bg-red-950/40 dark:text-red-200">
+              <Archive className="h-3.5 w-3.5" />
+              Arquivada
+            </span>
+          )}
+        </div>
       </header>
+
+      {work.is_archived && <ArchivedBanner workId={work.id} />}
 
       <ComixResolutionWatcher workId={work.id} createdAt={work.created_at} />
       <UpdateProgressWatcher workId={work.id} />
@@ -750,7 +761,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               />
             </div>
 
-            {(dataRefreshedDate || lastAiEvalDate || work.is_archived || work.last_read_at) && (
+            {(dataRefreshedDate || lastAiEvalDate || work.last_read_at) && (
               <div className="flex flex-col gap-1.5 rounded-md border bg-card/40 p-3 text-xs text-muted-foreground">
                 {work.last_read_at && (
                   <div>
@@ -787,11 +798,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       })}
                     </span>
                   </div>
-                )}
-                {work.is_archived && (
-                  <span className="inline-flex w-fit items-center rounded-full border border-gray-200 bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                    Arquivada
-                  </span>
                 )}
               </div>
             )}
