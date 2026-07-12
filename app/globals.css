@@ -225,3 +225,37 @@ body::after {
       hsl(var(--muted) / 0.22) 71%,
       transparent 85%);
 }
+
+/* ----------------------------------------------------------------------------
+   Toasts (sonner) — avisos do canto inferior direito.
+   `richColors` está ligado no <Toaster>; aqui sobrescrevemos as cores semânticas
+   com tintas suaves alinhadas à paleta do app + uma sombra forte, para o aviso
+   se destacar do conteúdo em vez de se confundir com os cards.
+   Especificidade elevada de propósito (classe .toaster + 2 atributos) porque o
+   sonner injeta o CSS dele em runtime, depois do globals — precisamos vencer.
+--------------------------------------------------------------------------- */
+[data-sonner-toaster].toaster[data-sonner-theme="dark"] {
+  --success-bg: hsl(152 32% 12%);  --success-border: hsl(150 30% 26%);  --success-text: hsl(148 50% 74%);
+  --info-bg:    hsl(208 34% 13%);  --info-border:    hsl(206 40% 30%);  --info-text:    hsl(202 72% 80%);
+  --warning-bg: hsl(34 34% 13%);   --warning-border: hsl(36 40% 28%);   --warning-text: hsl(42 70% 74%);
+  --error-bg:   hsl(2 34% 14%);    --error-border:   hsl(2 42% 32%);    --error-text:   hsl(4 66% 82%);
+}
+
+[data-sonner-toaster].toaster[data-sonner-theme="light"] {
+  --success-bg: hsl(146 46% 95%);  --success-border: hsl(146 34% 76%);  --success-text: hsl(148 55% 27%);
+  --info-bg:    hsl(205 62% 96%);  --info-border:    hsl(206 46% 80%);  --info-text:    hsl(208 60% 40%);
+  --warning-bg: hsl(42 74% 93%);   --warning-border: hsl(40 54% 74%);   --warning-text: hsl(30 66% 36%);
+  --error-bg:   hsl(4 64% 96%);    --error-border:   hsl(4 52% 84%);    --error-text:   hsl(2 60% 45%);
+}
+
+/* Sombra forte: o aviso flutua acima da página (a sombra padrão do sonner some no fundo escuro). */
+.toaster [data-sonner-toast][data-styled="true"] {
+  box-shadow:
+    0 10px 30px -8px hsl(0 0% 0% / 0.55),
+    0 2px 8px hsl(0 0% 0% / 0.35);
+}
+.toaster[data-sonner-theme="light"] [data-sonner-toast][data-styled="true"] {
+  box-shadow:
+    0 12px 32px -10px hsl(220 40% 30% / 0.28),
+    0 2px 6px hsl(220 40% 30% / 0.12);
+}
