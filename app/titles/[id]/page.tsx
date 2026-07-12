@@ -59,6 +59,7 @@ import { BatchCreatedNavigator } from "@/components/titles/batch-created-navigat
 import { WorkCoverGallery } from "@/components/titles/work-cover-gallery"
 import { SynopsesViewer } from "@/components/titles/synopses-viewer"
 import { BackButton } from "@/components/titles/back-button"
+import { AltTitlesChips } from "@/components/titles/alt-titles-chips"
 import { CriterionTitleTooltip } from "@/components/titles/criterion-title-tooltip"
 import { AlignmentTooltipContent, VerdictTooltipContent } from "@/components/ranking/score-tooltip-content"
 import { Badge } from "@/components/ui/badge"
@@ -873,23 +874,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   )}
                 />
               </div>
-              {(() => {
-                const alts = [
-                  work.original_title,
-                  ...(work.alternative_titles ?? []),
-                ]
-                  .map((t: string | null | undefined) => t?.trim())
-                  .filter((t): t is string => Boolean(t) && t !== work.title)
-                const unique = Array.from(new Set(alts))
-                if (unique.length === 0) return null
-                return (
-                  <ExpandableText
-                    text={`Títulos alternativos: ${unique.join(" / ")}`}
-                    limit={220}
-                    className="text-xs leading-snug text-muted-foreground/70"
-                  />
-                )
-              })()}
+              <AltTitlesChips
+                title={work.title}
+                originalTitle={work.original_title}
+                alternativeTitles={work.alternative_titles}
+              />
               {latestAiEval?.summary && (
                 <Card className="gap-2 py-4 bg-card/50">
                   <CardHeader className="px-4">
