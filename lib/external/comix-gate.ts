@@ -11,9 +11,14 @@ import { isFlareSolverrCircuitOpen } from "./flaresolverr"
  *
  * Este módulo é PASSIVO: não faz nenhuma chamada de rede. Ele só OBSERVA os
  * desfechos reais do tráfego (`recordComixOk`/`recordComixFailure`, fiados no
- * choke point de log do comix.ts) e os combina com o estado do circuito do
- * FlareSolverr pra derivar um status coerente em `getComixStatus()`. Alimenta a
- * telemetria persistente (fase 2) e a notificação no chrome (fase 3).
+ * choke point de log do comix.ts) pra derivar o status em `getComixStatus()`.
+ * Alimenta a telemetria persistente (fase 2) e a notificação no chrome (fase 3).
+ *
+ * O circuito do FlareSolverr NÃO entra mais na derivação do estado: a Comix
+ * responde em texto puro e não depende dele (medido — com o circuito ABERTO,
+ * detalhe e reviews vêm normais). Enquanto entrava, um FlareSolverr fora
+ * rebaixava a Comix a `degraded` mesmo com ela 100% de pé, o que travava o
+ * `ensureComixReady` (exige `ok`) e, com ele, a cascata do "Gerar tudo".
  *
  * Complementa — não substitui — o `checkComixHealth` ativo (probe por canário
  * sob demanda): aqui é o que o tráfego real já revelou, sem custo.
@@ -33,8 +38,9 @@ export type ComixHealthState = "ok" | "degraded" | "down" | "unknown"
 export interface ComixStatus {
   /**
    * - `ok`: último desfecho recente foi sucesso, sem breakers ativos.
-   * - `degraded`: FlareSolverr fora (circuito aberto) ou falhas seguidas — algumas
-   *   chamadas devem estar voltando vazias, mas pode se recuperar sozinho.
+   * - `degraded`: falhas seguidas do PRÓPRIO tráfego da Comix — algumas chamadas
+   *   devem estar voltando vazias, mas pode se recuperar sozinho. (Um FlareSolverr
+   *   fora NÃO rebaixa mais: ele não é dependência da Comix.)
    * - `down`: muro de token da API (`api_auth_required`) ativo — Comix inutilizável
    *   até o TTL reabrir / a API voltar a ser pública.
    * - `unknown`: nenhum tráfego de Comix neste processo ainda.
@@ -126,7 +132,7 @@ export function getComixStatus(): ComixStatus {
 
   const state: ComixHealthState = authGated
     ? "down"
-    : flaresolverrCircuitOpen || consecutiveFails >= DEGRADED_FAIL_THRESHOLD
+    : consecutiveFails >= DEGRADED_FAIL_THRESHOLD
       ? "degraded"
       : lastOkAt != null
         ? "ok"
