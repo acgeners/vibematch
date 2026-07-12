@@ -196,6 +196,12 @@ function TagBadge({ tag, stance }: { tag: DetailTag; stance?: "love" | "avoid" }
  * citou (reviewAudit.usedReviewIds); `provided` = reviews fornecidas no prompt
  * após dedup (evaluationContext). Retorna null quando nenhuma review foi
  * incluída no prompt (obras sem fonte externa).
+ *
+ * `used` só é preenchido em avaliações antigas: do v21 em diante o prompt trata
+ * as reviews como CONSENSO e PROÍBE citar IDs (R1/R2), e o campo `review_usage`
+ * saiu da tool. Por isso `used` é sempre 0 nas avaliações novas — ver
+ * `reviewUsageLabel`, que nesse caso mostra "N no contexto" em vez de um
+ * "0 de N" que sugeriria, falsamente, que a IA ignorou as reviews.
  */
 function extractReviewUsage(rawResponse: unknown): { used: number; provided: number } | null {
   if (!rawResponse || typeof rawResponse !== "object") return null
@@ -219,6 +225,24 @@ function extractReviewUsage(rawResponse: unknown): { used: number; provided: num
 
   if (provided === 0 && used === 0) return null
   return { used, provided }
+}
+
+/** Rótulo + tooltip da pill "Reviews" do card de avaliação IA. */
+function reviewUsageLabel(usage: { used: number; provided: number }): {
+  text: string
+  title: string
+} {
+  if (usage.used > 0) {
+    return {
+      text: `${usage.used} de ${usage.provided}`,
+      title: "Reviews externas citadas pela IA / fornecidas no prompt",
+    }
+  }
+  return {
+    text: `${usage.provided} no contexto`,
+    title:
+      "Reviews externas fornecidas no prompt. A IA as lê como consenso e não cita reviews individuais.",
+  }
 }
 
 const getSourceRows = unstable_cache(
@@ -891,10 +915,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                           </span>
                         </span>
                         {reviewUsage && (
-                          <span title="Reviews externas citadas pela IA / fornecidas no prompt">
+                          <span title={reviewUsageLabel(reviewUsage).title}>
                             Reviews:{" "}
                             <span className="font-medium text-foreground">
-                              {reviewUsage.used} de {reviewUsage.provided}
+                              {reviewUsageLabel(reviewUsage).text}
                             </span>
                           </span>
                         )}
@@ -1336,10 +1360,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </span>
                   </span>
                   {reviewUsage && (
-                    <span title="Reviews externas citadas pela IA / fornecidas no prompt">
+                    <span title={reviewUsageLabel(reviewUsage).title}>
                       Reviews:{" "}
                       <span className="font-medium text-foreground">
-                        {reviewUsage.used} de {reviewUsage.provided}
+                        {reviewUsageLabel(reviewUsage).text}
                       </span>
                     </span>
                   )}
