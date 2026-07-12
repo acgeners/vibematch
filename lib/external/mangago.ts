@@ -412,16 +412,45 @@ export function parseMangagoDetailHtml(html: string): MangagoDetail | null {
   }
 }
 
-export async function fetchMangagoById(slug: string): Promise<MangagoDetail | null> {
-  if (isFlareSolverrCircuitOpen()) return null
-  try {
-    const url = `${BASE}/read-manga/${slug}/`
-    const result = await fetchHtmlWithCfFallback(url, HEADERS, CF_ABORT_MS, FS_SESSION)
-    if (!result) return null
-    return parseMangagoDetailHtml(result.html)
-  } catch {
-    return null
+// Teto da tentativa EXTRA (ver `fetchMangagoById`). Curto de propósito: ela só existe
+// pro caso em que a 1ª pagou o solve frio de Cloudflare e estourou o CF_ABORT_MS — aí a
+// sessão do FlareSolverr já ficou quente e a 2ª responde em <1s. Se nem assim vier,
+// insistir com outros 25s só faria o usuário esperar pra receber o mesmo `null`.
+const RETRY_ABORT_MS = 6000
+const RETRY_BACKOFF_MS = 600
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Detalhe da obra no Mangago (título, sinopse, capa, rating…).
+ *
+ * `retry` liga UMA tentativa extra e é opt-in de propósito. A falha aqui costuma ser
+ * transitória: o circuito do FlareSolverr só abre em ECONNREFUSED (container fora), então
+ * um solve de Cloudflare que estourou o abort chega como `null` sem segunda chance — e é
+ * justo o caso que a 2ª tentativa resolve, com a sessão já quente. Só o caminho INTERATIVO
+ * (seleção de fontes, com o usuário parado na tela) pede o retry; o hydrate em lote roda
+ * sob um `withTimeout` de 30s e um retry embutido ali apenas queimaria o orçamento dele
+ * antes de devolver o mesmo `null`.
+ */
+export async function fetchMangagoById(
+  slug: string,
+  opts?: { retry?: boolean }
+): Promise<MangagoDetail | null> {
+  const url = `${BASE}/read-manga/${slug}/`
+  const budgets = opts?.retry ? [CF_ABORT_MS, RETRY_ABORT_MS] : [CF_ABORT_MS]
+  for (let i = 0; i < budgets.length; i++) {
+    // Circuito aberto = container fora (ECONNREFUSED). Retentar só pagaria latência.
+    if (isFlareSolverrCircuitOpen()) return null
+    try {
+      const result = await fetchHtmlWithCfFallback(url, HEADERS, budgets[i], FS_SESSION)
+      const detail = result ? parseMangagoDetailHtml(result.html) : null
+      if (detail) return detail
+    } catch {
+      // tentativa perdida; o loop decide se ainda há outra
+    }
+    if (i < budgets.length - 1) await sleep(RETRY_BACKOFF_MS)
   }
+  return null
 }
 
 // Descrição genérica do rodapé do site (aparece no meta de tópicos vazios) — não é opinião.

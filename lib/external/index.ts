@@ -11,7 +11,11 @@ import { boolEnv } from "./mangago-band"
 import { extractInlineRating } from "./inline-rating"
 import { isBlockedCoverUrl } from "./blocked-covers"
 import { measureCover, scoreCover } from "@/lib/server/covers/measure-cover"
-import { searchJikanManga, fetchJikanMangaById, fetchJikanMangaReviews, fetchJikanMangaRecommendations } from "./jikan"
+// Metadados pela API OFICIAL do MAL; reviews por scraping do próprio myanimelist.net
+// (a v2 não tem endpoint nem campo de reviews). O Jikan — scraper de terceiros que
+// ficava em 504 e zerava a fonte — saiu de cena.
+import { searchMalManga, fetchMalMangaById, fetchMalRecommendations } from "./myanimelist"
+import { fetchMalReviews } from "./myanimelist-reviews"
 import { searchKitsuManga, fetchKitsuMangaById, fetchKitsuReactions } from "./kitsu"
 import { searchMangaDex, fetchMangaDexById, fetchMangaDexForumComments } from "./mangadex"
 import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews, fetchMangaUpdatesAlternativeTitles } from "./mangaupdates"
@@ -568,7 +572,7 @@ export const SEARCH_CONNECTORS = [
   {
     source: "myanimelist",
     search: async (query: string) => {
-      const results = await searchJikanManga(query)
+      const results = await searchMalManga(query)
       return results.map((item): ExternalSearchResult => ({
         id: `mal:${item.id}`,
         source: "myanimelist",
@@ -836,7 +840,7 @@ function hoistCrossSourceIds(candidates: MergedCandidate[]): void {
  * Second-pass search: for each top candidate, re-query the platforms that
  * didn't return a result on the original query, this time using the candidate's
  * own alternative titles (mostly discovered via MangaUpdates `associated`,
- * Kitsu `titles/abbreviatedTitles`, MangaDex altTitles, Jikan). This makes the
+ * Kitsu `titles/abbreviatedTitles`, MangaDex altTitles, MyAnimeList). This makes the
  * final source list independent of which title variant the user typed in.
  *
  * Acceptance uses the same `compositeAcceptScore` thresholds as the hydrate
@@ -1069,7 +1073,7 @@ const REVIEW_SOURCE_PRIORITY: Record<ExternalSourceId, number> = {
 /**
  * Extrai a nota numérica de uma review em duas frentes, nesta ordem:
  *   1. Prefixo "Nota do usuário: X/10\n" — injetado pelos fetchers de plataforma
- *      (MangaUpdates, AniList, MAL/Jikan, ComicK, AnimePlanet). Autoritativo;
+ *      (MangaUpdates, AniList, MyAnimeList, ComicK, AnimePlanet). Autoritativo;
  *      REMOVE o prefixo do texto (`cleanText`) pra não duplicar no prompt.
  *   2. Nota embutida no corpo (`extractInlineRating`) — fallback pras fontes de
  *      fórum sem nota de plataforma. NÃO altera o texto.
@@ -1155,7 +1159,7 @@ async function collectReviewsFromCandidate(
       ? withTimeout(fetchAniListReviews(candidate.anilistId).then((reviews) => ({ source: "anilist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:anilist")
       : Promise.resolve(null),
     candidate.malId
-      ? withTimeout(fetchJikanMangaReviews(candidate.malId).then((reviews) => ({ source: "myanimelist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:myanimelist")
+      ? withTimeout(fetchMalReviews(candidate.malId).then((reviews) => ({ source: "myanimelist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:myanimelist")
       : Promise.resolve(null),
     candidate.kitsuId
       ? withTimeout(fetchKitsuReactions(candidate.kitsuId).then((reviews) => ({ source: "kitsu" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:kitsu")
@@ -1226,7 +1230,7 @@ function normalizeSimilarTitle(title: string): string {
 
 /**
  * Coleta obras similares ("if you liked X, try Y") em paralelo das fontes que
- * expõem recomendações curadas pela comunidade: AniList (rating + tags), Jikan/MAL
+ * expõem recomendações curadas pela comunidade: AniList (rating + tags), MyAnimeList
  * (votos), AnimePlanet (apenas títulos via scrape).
  *
  * Faz merge por título normalizado: quando a mesma obra aparece em ≥2 fontes,
@@ -1239,7 +1243,7 @@ async function collectSimilarFromCandidate(candidate: MergedCandidate, limit = 6
       ? withTimeout(fetchAniListRecommendations(candidate.anilistId).then((recs) => ({ source: "anilist" as const, recs })), TIMEOUT_SIMILAR_MS, "similar:anilist")
       : Promise.resolve(null),
     candidate.malId
-      ? withTimeout(fetchJikanMangaRecommendations(candidate.malId).then((recs) => ({ source: "myanimelist" as const, recs })), TIMEOUT_SIMILAR_MS, "similar:myanimelist")
+      ? withTimeout(fetchMalRecommendations(candidate.malId).then((recs) => ({ source: "myanimelist" as const, recs })), TIMEOUT_SIMILAR_MS, "similar:myanimelist")
       : Promise.resolve(null),
     candidate.animePlanetSlug
       ? withTimeout(fetchAnimePlanetRecommendations(candidate.animePlanetSlug).then((titles) => ({ source: "animeplanet" as const, titles })), TIMEOUT_SIMILAR_MS, "similar:animeplanet")
@@ -1277,7 +1281,7 @@ async function collectSimilarFromCandidate(candidate: MergedCandidate, limit = 6
     if (entry.status !== "fulfilled" || !entry.value) continue
     const value = entry.value as
       | { source: "anilist"; recs: Awaited<ReturnType<typeof fetchAniListRecommendations>> }
-      | { source: "myanimelist"; recs: Awaited<ReturnType<typeof fetchJikanMangaRecommendations>> }
+      | { source: "myanimelist"; recs: Awaited<ReturnType<typeof fetchMalRecommendations>> }
       | { source: "animeplanet"; titles: string[] }
 
     if (value.source === "anilist") {
@@ -1727,7 +1731,7 @@ async function hydrateCandidate(candidate: MergedCandidate): Promise<{ hydrated:
     candidate.anilistId ? withTimeout(fetchAniListById(candidate.anilistId), TIMEOUT_HYDRATE_MS, "hydrate:anilist") : null,
     candidate.muId ? withTimeout(fetchMangaUpdatesById(candidate.muId), TIMEOUT_HYDRATE_MS, "hydrate:mangaupdates") : null,
     candidate.kitsuId ? withTimeout(fetchKitsuMangaById(candidate.kitsuId), TIMEOUT_HYDRATE_MS, "hydrate:kitsu") : null,
-    candidate.malId ? withTimeout(fetchJikanMangaById(candidate.malId), TIMEOUT_HYDRATE_MS, "hydrate:myanimelist") : null,
+    candidate.malId ? withTimeout(fetchMalMangaById(candidate.malId), TIMEOUT_HYDRATE_MS, "hydrate:myanimelist") : null,
     candidate.mangadexId ? withTimeout(fetchMangaDexById(candidate.mangadexId), TIMEOUT_HYDRATE_MS, "hydrate:mangadex") : null,
     candidate.comickHid ? withTimeout(fetchComicKByHid(candidate.comickHid), TIMEOUT_HYDRATE_MS, "hydrate:comick") : null,
     candidate.comixHid ? withTimeout(fetchComixById(candidate.comixHid), TIMEOUT_HYDRATE_MS, "hydrate:comix") : null,

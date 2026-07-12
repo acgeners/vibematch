@@ -34,6 +34,11 @@ const EXTRA_MEASURABLE_HOSTS = new Set([
   "s4.anilist.co",
   "cdn.myanimelist.net",
   "myanimelist.net",
+  // A API OFICIAL do MAL (que substituiu o Jikan) serve `main_picture` por este
+  // host. Sem ele, toda capa do MAL entraria no ranking SEM nota e cairia pro fim
+  // da fila sem ter sido avaliada. Não deu pra confirmar chamando a API (o
+  // MAL_CLIENT_ID não está no ambiente local), então cobrimos os dois hosts.
+  "api-cdn.myanimelist.net",
 ])
 
 function isMeasurableHost(host: string): boolean {

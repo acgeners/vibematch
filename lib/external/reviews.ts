@@ -1,5 +1,6 @@
 import { searchAniList, fetchAniListById, fetchAniListReviews } from "./anilist"
-import { searchJikanManga, fetchJikanMangaByTitle, fetchJikanMangaReviews } from "./jikan"
+import { searchMalManga, fetchMalMangaByTitle } from "./myanimelist"
+import { fetchMalReviews } from "./myanimelist-reviews"
 import { searchMangaUpdates, fetchMangaUpdatesById, fetchMangaUpdatesReviews } from "./mangaupdates"
 import type { ExternalSearchResult, SourcedReview } from "./types"
 
@@ -64,7 +65,7 @@ async function reviewsFromResult(workTitles: string[], result: ExternalSearchRes
       : result.source === "anilist" && Number.isFinite(numericId)
         ? await fetchAniListReviews(numericId)
         : result.source === "myanimelist" && Number.isFinite(numericId)
-          ? await fetchJikanMangaReviews(numericId)
+          ? await fetchMalReviews(numericId)
           : []
 
   return reviews
@@ -87,7 +88,7 @@ async function contextFromResult(result: ExternalSearchResult): Promise<string[]
       : result.source === "anilist" && Number.isFinite(numericId)
         ? await fetchAniListById(numericId)
         : result.source === "myanimelist"
-          ? await fetchJikanMangaByTitle(result.title)
+          ? await fetchMalMangaByTitle(result.title)
           : null
 
   const detailSynopsis = detail && "synopsis" in detail ? detail.synopsis : undefined
@@ -112,7 +113,7 @@ async function findReviewCandidates(input: {
     const settled = await Promise.allSettled([
       searchMangaUpdates(query),
       searchAniList(query),
-      searchJikanManga(query).then((items): ExternalSearchResult[] =>
+      searchMalManga(query).then((items): ExternalSearchResult[] =>
         items.map((item) => ({
           id: `mal:${item.id}`,
           source: "myanimelist",

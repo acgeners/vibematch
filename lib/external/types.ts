@@ -198,7 +198,7 @@ export interface SimilarWork {
   tags?: string[]
   /** Fontes que recomendaram esta obra (uma obra pode aparecer em múltiplas listas). */
   sources: ExternalSourceId[]
-  /** Soma dos pesos das recomendações (rating AniList ou nº de votos Jikan). Quanto maior, mais consenso. */
+  /** Soma dos pesos das recomendações (rating do AniList ou `num_recommendations` do MAL). Quanto maior, mais consenso. */
   weight?: number
 }
 
@@ -228,4 +228,16 @@ export interface ExternalMergeDebug {
   acceptedSources: ExternalSourceDebug[]
   rejectedSources: ExternalSourceDebug[]
   mergedSynopses: Array<{ source: ExternalSourceId; text: string }>
+}
+
+/**
+ * Saúde observada de uma fonte externa (`external_source_health`), como a UI lê.
+ * Mora AQUI, e não no `source-health-store`, porque aquele módulo é `server-only`
+ * — um componente cliente que importasse o tipo de lá arrastaria o guard pro
+ * bundle do browser.
+ */
+export interface SourceHealthRow {
+  status: string
+  failReason: string | null
+  lastOkAt: string | null
 }
