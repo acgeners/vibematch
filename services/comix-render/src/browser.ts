@@ -15,8 +15,24 @@ let jobsOnCurrent = 0
 async function launch(): Promise<Browser> {
   const b = await chromium.launch({
     headless: true,
-    // Flags padrão pra Chromium em container.
-    args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+    // ⚠️ SEM ISTO O SERVIÇO NÃO FUNCIONA — e falha em silêncio.
+    //
+    // O Playwright liga `--enable-automation` por padrão, o que expõe
+    // `navigator.webdriver = true`. O app da Comix detecta isso e NÃO BOOTA: a página
+    // responde 200, com ~394KB de HTML, e renderiza VAZIO — zero XHR, zero resultado.
+    // Ou seja, a falha se disfarça de "site fora do ar" / "obra não encontrada".
+    //
+    // Medido (2026-07-12): Chromium headless com as flags → 0 obras; sem elas → 56 obras
+    // e `webdriver=false`. Até um Chrome REAL, em modo visível, falha se anunciar
+    // automação — não é headless que a Comix rejeita, é o sinal de automação.
+    ignoreDefaultArgs: ["--enable-automation"],
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      // Flags padrão pra Chromium em container.
+      "--no-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+    ],
   })
   b.on("disconnected", () => {
     if (browser === b) {

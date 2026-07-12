@@ -6,6 +6,10 @@ import { getBrowser, noteJob } from "./browser.js"
 import { shapeItem, classifyError, SOURCE } from "./contract.js"
 import type { SidecarResponse } from "./contract.js"
 
+// Todos os ratings da Comix. Ver a nota em `target`, abaixo: sem isto, metade do catálogo
+// (BL/adulto) é invisível pra busca e o sidecar devolve a obra errada com cara de acerto.
+const CONTENT_RATINGS = "safe,suggestive,erotica,pornographic"
+
 export interface ResolveInput {
   title: string
   anilistId?: number
@@ -74,7 +78,19 @@ async function resolveOnce(input: ResolveInput, limit: number, reqId: string, at
 
     phase = "nav"
     const nav0 = Date.now()
-    const target = `${config.origin}/browse?q=${encodeURIComponent(input.title)}&sort=relevance:desc`
+    // `content_rating` NÃO é opcional pra este catálogo. O default da Comix é
+    // [safe, suggestive], então obra adulta simplesmente NÃO APARECE na busca — e o
+    // resultado nº 1 vira uma obra homônima ERRADA. É um erro que PRODUZ resultado, o
+    // pior tipo: medido, "Painter of the Night" sumia e o topo virava "The Skin Painter".
+    //
+    // O formato é traiçoeiro e não dá erro quando está errado:
+    //   content_rating=a,b,c        → funciona (singular, vírgula)
+    //   content_rating[]=a&…        → IGNORADO (apesar de ser o formato da própria API)
+    //   contentRating=a,b,c         → IGNORADO
+    //   semear localStorage         → IGNORADO (o app o sobrescreve a partir da URL)
+    const target =
+      `${config.origin}/browse?q=${encodeURIComponent(input.title)}` +
+      `&sort=relevance:desc&content_rating=${CONTENT_RATINGS}`
     await page.goto(target, { waitUntil: "domcontentloaded", timeout: config.navTimeoutMs })
     navMs = Date.now() - nav0
 
