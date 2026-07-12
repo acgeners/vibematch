@@ -433,6 +433,14 @@ export interface SourceCandidateOption {
   synopsis: string | null
   year: number | null
   chapters: number | null
+  /**
+   * A fonte tem vínculo salvo, mas o detalhe dela não pôde ser lido agora (ex.:
+   * FlareSolverr fora / circuito aberto). Neste caso o candidato NÃO descreve a
+   * fonte: título e capa vêm da própria obra e `matchScore` não é um match de
+   * título. A UI precisa da flag pra não vender uma queda de infra como
+   * "match 100%" — ver o branch de falha em `ensureGatedCandidate`.
+   */
+  detailUnavailable?: boolean
 }
 
 export interface CurrentSourceSelection {
@@ -832,19 +840,26 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
     const detail = await opts.fetchDetail(id).catch(() => null)
     if (!detail?.title) {
       // Detalhe falhou (ex.: FlareSolverr fora). Se o id JÁ está vinculado (veio do
-      // salvo/aceito), NÃO some com ele: mostra um candidato mínimo PRÉ-MARCADO pra o
+      // salvo/aceito), NÃO some com ele: mostra um candidato PRÉ-MARCADO pra o
       // vínculo sobreviver ao "Atualizar dados" mesmo com a fonte fora do ar. Só quando
       // o id foi resolvido agora (ainda não vinculado) é que descarta — nada a perder.
+      //
+      // O candidato empresta título e capa DA PRÓPRIA OBRA e vai marcado com
+      // `detailUnavailable`. Antes ele saía com `coverUrl: null`, e o card virava um
+      // placeholder quebrado, sem ano, com um "match 100%" de aparência confiável —
+      // ou seja, uma queda passageira de infra era VISUALMENTE IDÊNTICA a "essa fonte
+      // não tem capa". A flag é o que deixa a UI dizer que o dado não veio da fonte.
       if (id === savedId) {
         candidatesPerSource[opts.source] = [
           {
             externalId: id,
             title: work.title,
-            coverUrl: null,
+            coverUrl: pickPrimaryCover(work.work_covers),
             matchScore: 1,
             synopsis: null,
             year: null,
             chapters: null,
+            detailUnavailable: true,
           },
           ...existing,
         ]
@@ -877,7 +892,9 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
       source: "mangago",
       resolveEnabled: hasCrossId && boolEnv(process.env.MANGAGO_RESOLVE_ENABLED, false),
       resolve: async () => (await resolveMangagoUrlProd(crossInput))?.slug ?? null,
-      fetchDetail: (id) => fetchMangagoById(id),
+      // Caminho interativo: o usuário está parado na seleção de fontes, então vale uma
+      // 2ª tentativa curta antes de degradar o card (ver `fetchMangagoById`).
+      fetchDetail: (id) => fetchMangagoById(id, { retry: true }),
     }),
   ])
 

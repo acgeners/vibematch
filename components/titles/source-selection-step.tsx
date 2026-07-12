@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Image from "next/image"
-import { ImageOff, Loader2 } from "lucide-react"
+import { AlertTriangle, ImageOff, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import {
   revalidateWorkSources,
@@ -236,6 +236,12 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
             ) : (
               candidates.map((c) => {
                 const checked = value === c.externalId
+                // Vínculo salvo, mas a fonte não respondeu: o candidato NÃO descreve a
+                // fonte — título e capa são da própria obra e o matchScore não é match
+                // de título. Sem dizer isso, o card saía mudo (capa quebrada, sem ano) e
+                // com um "match 100%" que parecia confiável: uma queda passageira do
+                // FlareSolverr ficava idêntica a "essa fonte não tem capa".
+                const degraded = c.detailUnavailable === true
                 return (
                   <label
                     key={c.externalId}
@@ -252,21 +258,28 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
                     />
                     <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded border bg-muted">
                       {c.coverUrl && !brokenCovers.has(c.coverUrl) ? (
-                        <Image
-                          src={getCoverImageSrc(c.coverUrl)}
-                          alt=""
-                          fill
-                          sizes="48px"
-                          unoptimized
-                          className="object-cover"
-                          onError={() =>
-                            setBrokenCovers((prev) => {
-                              const next = new Set(prev)
-                              next.add(c.coverUrl!)
-                              return next
-                            })
-                          }
-                        />
+                        <>
+                          <Image
+                            src={getCoverImageSrc(c.coverUrl)}
+                            alt=""
+                            fill
+                            sizes="48px"
+                            unoptimized
+                            className={`object-cover ${degraded ? "saturate-50 brightness-90" : ""}`}
+                            onError={() =>
+                              setBrokenCovers((prev) => {
+                                const next = new Set(prev)
+                                next.add(c.coverUrl!)
+                                return next
+                              })
+                            }
+                          />
+                          {degraded && (
+                            <span className="absolute inset-x-0 bottom-0 bg-black/75 py-px text-center text-[7px] font-semibold leading-tight text-white">
+                              da obra
+                            </span>
+                          )}
+                        </>
                       ) : (
                         <div className="flex h-full w-full items-center justify-center text-muted-foreground">
                           <ImageOff className="h-4 w-4" />
@@ -275,11 +288,23 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium line-clamp-2">{c.title}</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                        match {Math.round(c.matchScore * 100)}%
-                        {c.year ? ` · ${c.year}` : ""}
-                        {c.chapters ? ` · ${c.chapters} cap.` : ""}
-                      </p>
+                      {degraded ? (
+                        <>
+                          <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-500/40 dark:text-amber-200">
+                            <AlertTriangle className="h-3 w-3 shrink-0" />
+                            detalhes indisponíveis — fonte fora do ar
+                          </span>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Vínculo salvo mantido. Capa e título vêm da sua obra, não da fonte.
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          match {Math.round(c.matchScore * 100)}%
+                          {c.year ? ` · ${c.year}` : ""}
+                          {c.chapters ? ` · ${c.chapters} cap.` : ""}
+                        </p>
+                      )}
                     </div>
                   </label>
                 )
