@@ -52,6 +52,35 @@ function webpVp8x(w: number, h: number): Buffer {
   return b
 }
 
+/** WebP lossy — é o chunk mais comum nas capas reais (18 de 25 amostradas; o
+ *  AnimePlanet serve assim). Estrutura: RIFF|size|WEBP|"VP8 "|size|frame tag(3)|
+ *  start code 9d 01 2a|width(14 bits LE)|height(14 bits LE). */
+function webpVp8(w: number, h: number): Buffer {
+  const b = Buffer.alloc(30)
+  b.write("RIFF", 0, "ascii")
+  b.writeUInt32LE(22, 4)
+  b.write("WEBP", 8, "ascii")
+  b.write("VP8 ", 12, "ascii")
+  b.writeUInt32LE(10, 16)
+  Buffer.from([0x9d, 0x01, 0x2a]).copy(b, 23) // start code, após o frame tag
+  b.writeUInt16LE(w, 26)
+  b.writeUInt16LE(h, 28)
+  return b
+}
+
+/** WebP lossless: signature 0x2f, depois (w-1) e (h-1) em 14 bits cada. */
+function webpVp8l(w: number, h: number): Buffer {
+  const b = Buffer.alloc(30)
+  b.write("RIFF", 0, "ascii")
+  b.writeUInt32LE(22, 4)
+  b.write("WEBP", 8, "ascii")
+  b.write("VP8L", 12, "ascii")
+  b.writeUInt32LE(10, 16)
+  b[20] = 0x2f
+  b.writeUInt32LE((w - 1) | ((h - 1) << 14), 21)
+  return b
+}
+
 function gif(w: number, h: number): Buffer {
   const b = Buffer.alloc(10)
   b.write("GIF89a", 0, "ascii")
@@ -75,7 +104,23 @@ describe("parseImageHeader", () => {
   })
 
   it("lê WebP (VP8X)", () => {
-    expect(parseImageHeader(webpVp8x(800, 1200))).toMatchObject({ width: 800, height: 1200 })
+    expect(parseImageHeader(webpVp8x(800, 1200))).toMatchObject({
+      width: 800, height: 1200, format: "webp",
+    })
+  })
+
+  // 18 das 25 capas WebP reais do catálogo usam ESTE chunk — é o caminho quente,
+  // e era o único ramo do parser sem fixture.
+  it("lê WebP lossy (VP8), o chunk mais comum nas capas reais", () => {
+    expect(parseImageHeader(webpVp8(771, 1080))).toMatchObject({
+      width: 771, height: 1080, format: "webp",
+    })
+  })
+
+  it("lê WebP lossless (VP8L)", () => {
+    expect(parseImageHeader(webpVp8l(640, 960))).toMatchObject({
+      width: 640, height: 960, format: "webp",
+    })
   })
 
   it("lê GIF", () => {
