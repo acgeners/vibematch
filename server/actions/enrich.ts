@@ -8,6 +8,7 @@ import type { ExternalWorkUpdate } from "@/server/actions/works"
 import { getWorksByIds } from "@/server/queries/works"
 import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
+import { ensureAdmin } from "@/server/queries/current-user"
 import type { ExternalWorkData } from "@/lib/external/types"
 
 // Confiança mínima do título (busca por nome) para auto-aceitar sem revisão.
@@ -181,6 +182,8 @@ export async function getPendingReviewWorks(limit = 300): Promise<ReviewWork[]> 
 }
 
 export async function enrichWorkExternal(workId: string): Promise<EnrichResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { workId, status: "error", message: gate.error }
   try {
     const supabase = createAdminClient()
     const { data: work, error } = await supabase

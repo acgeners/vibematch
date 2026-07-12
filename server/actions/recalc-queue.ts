@@ -89,17 +89,6 @@ export async function recalculateScoresNow() {
 }
 
 /**
- * Recálculo orquestrado AGUARDADO que só roda se houver pendência (force=false).
- * Usado pelo backfill após uma regeneração REAL do perfil: `insertNewTasteProfile`
- * marca `recalc_pending`, então este recalc coalescido/global zera a pendência ao
- * concluir — sem `force` (que mascararia a ausência de pendência para os demais
- * consumidores do recalc). Job global free, deduplicado/coalescido.
- */
-export async function recalculateScoresIfPending() {
-  return ensureRecalculateScores(recalcDeps(false))
-}
-
-/**
  * Recálculo orquestrado HEADLESS-SAFE (CLI/workers): mesmo contrato global/free/
  * coalescido, mas com `recalculateAll("headless")` (leituras uncached, sem
  * `revalidate*`). Só roda se houver pendência (force=false) — usado pelo backfill

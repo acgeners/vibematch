@@ -1,6 +1,7 @@
 "use server"
 
 import { consolidateSynopsisDetailed } from "@/lib/ai-recommendation/synopsis-consolidator"
+import { ensureAdmin } from "@/server/queries/current-user"
 
 export interface CanonicalSynopsisPreviewResult {
   canonical?: string
@@ -10,6 +11,8 @@ export interface CanonicalSynopsisPreviewResult {
 export async function previewCanonicalSynopsis(
   blocks: string[],
 ): Promise<CanonicalSynopsisPreviewResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const status = await consolidateSynopsisDetailed(blocks, {})
   if (status.kind === "ok") return { canonical: status.result.canonical }
   if (status.kind === "skipped") {

@@ -23,7 +23,16 @@ export function RefetchReviewsButton({ workId }: { workId: string }) {
   const [loading, setLoading] = useState(false)
   const refresh = useRefresh()
   const mounted = useRef(true)
-  useEffect(() => () => { mounted.current = false }, [])
+  // Reafirmar `true` no mount é obrigatório: em dev o StrictMode monta → roda o
+  // cleanup → remonta. Sem esta linha o cleanup zerava a flag e ela NUNCA voltava,
+  // então `setLoading(false)` no finally nunca rodava e o botão ficava travado em
+  // "Buscando reviews…" pra sempre (em dev, em toda e qualquer busca).
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   const onClick = async () => {
     if (loading) return
@@ -36,9 +45,15 @@ export function RefetchReviewsButton({ workId }: { workId: string }) {
         return
       }
       // Espera o job terminar (o after() do servidor, ~35s pelo Mangago).
+      //
+      // NÃO abortar o loop se o componente desmontar: o `UpdateProgressWatcher` faz poll
+      // do MESMO job e, ao ver "done", dá refresh na página — o que REMONTA este botão.
+      // Se saíssemos aqui, o toast (que é global, do sonner, e não pertence a este
+      // componente) ficaria girando "Buscando…" pra sempre, porque `toast.loading` não
+      // expira sozinho. O loop tem teto (MAX_POLLS), então ele sempre termina e resolve
+      // o toast; só o setState é que precisa respeitar o unmount.
       for (let i = 0; i < MAX_POLLS; i++) {
         await sleep(POLL_MS)
-        if (!mounted.current) return
         let status: Awaited<ReturnType<typeof getWorkUpdateStatus>>
         try {
           status = await getWorkUpdateStatus(workId)
