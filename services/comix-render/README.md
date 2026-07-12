@@ -63,3 +63,27 @@ COMIX_RENDER_URL=http://comix-render.flycast:8790
 ```
 
 O Fly usa `/ready` como healthcheck → só roteia quando o browser subiu.
+
+## Subir sozinho (dev, macOS)
+
+O sidecar é um processo comum: se ele cair, cai calado — e o app volta a não achar a Comix,
+sem erro visível. Por isso ele roda sob o `launchd`:
+
+`~/Library/LaunchAgents/com.geners.comix-render.plist` → `RunAtLoad` + `KeepAlive`, apontando
+pro `npm start` deste diretório. Sobe no login e reergue o processo se ele morrer (medido:
+`kill -9` → de volta em ~4s, com PID novo).
+
+```bash
+launchctl load   ~/Library/LaunchAgents/com.geners.comix-render.plist   # ligar
+launchctl unload ~/Library/LaunchAgents/com.geners.comix-render.plist   # desligar
+launchctl list | grep comix-render                                      # PID + último exit
+tail -f ~/Library/Logs/comix-render.log                                 # logs
+```
+
+Diferente do watchdog do FlareSolverr — que **polla** um endpoint a cada 60s, porque o Docker
+não enxerga um container "Up mas pendurado" —, aqui o `launchd` supervisiona o processo Node
+direto. Menos peças. A ressalva honesta: um processo **vivo porém travado** (browser em
+deadlock) o `KeepAlive` não pega. Não é crítico — o app tem circuito no cliente do sidecar e
+cai pro FlareSolverr sozinho.
+
+> Numa máquina nova: `npm install && npx playwright install chromium` antes de carregar o agente.
