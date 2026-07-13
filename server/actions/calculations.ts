@@ -18,7 +18,7 @@ import {
 } from "@/lib/calculations"
 import { calculateGPTWithDiagnostics, calculateGPT } from "@/lib/calculations/gpt"
 import { getCurrentUserId, ensurePermission } from "@/server/queries/current-user"
-import { loadOwnerLabels, withOwnerLabels } from "@/server/queries/owner-labels"
+import { loadOwnerLabels, withOwnerLabels, mirrorOwnerScores } from "@/server/queries/owner-labels"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import {
   applyBiasToCategoryScores,
@@ -614,6 +614,15 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
     .from("calculated_scores")
     .upsert(rows, { onConflict: "work_id" })
   if (upsertErr) throw new Error(upsertErr.message)
+
+  // FATIA 2b — os scores DERIVADOS ganham dono. `calculated_scores` não tem `user_id`, então a
+  // Nota Prevista que está lá é a do DONO — e hoje ela aparece pra Leitora como se fosse dela
+  // ("você vai gostar 8,6 disso" é a previsão do gosto DELE).
+  //
+  // Mesmo dual-write das Fatias 1 e 2a: escreve nas duas. `calculated_scores` segue sendo a
+  // fonte do dono durante a transição (ele é imune); `user_calculated_scores` serve os outros.
+  const scoreMirror = await mirrorOwnerScores(ownerLabels.ownerId, rows)
+  if (scoreMirror.error) throw new Error(scoreMirror.error)
 
   // Atualiza calculated_scores.confidence como pass-through da
   // ai_evaluations.confidence mais recente. Função criada na migration 022.

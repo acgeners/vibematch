@@ -116,3 +116,71 @@ export function withOwnerLabels<T extends { id: string }>(
     return { ...row, ...personal }
   })
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// Os SCORES do dono — FATIA 2b
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+/** Colunas de `calculated_scores` que são de QUEM OLHA, não da obra. */
+const PERSONAL_SCORE_COLUMNS = [
+  "expected_score",
+  "expected_is_stub",
+  "expected_baseline",
+  "expected_quality_adj",
+  "calc_score",
+  "chance_score",
+  "chance_is_stub",
+  "personal_fit",
+  "personal_fit_percentile",
+  "tag_overlap_net",
+  "alignment_score",
+  "alignment_run_id",
+  "alignment_justification",
+  "alignment_at",
+  "alignment_payload",
+  "alignment_stale",
+  "mae_calc",
+  "rmse_calc",
+  "confidence",
+] as const
+
+/**
+ * Espelha os scores derivados do dono em `user_calculated_scores`.
+ *
+ * O que NÃO vem junto (e é de propósito): `platform_avg`, `total_votes`, `ia_eval`,
+ * `chapters_normalized`. Esses são FATO DA OBRA — a nota da comunidade e a soma dos 9 atributos
+ * com os pesos globais são iguais para todo mundo, e é isso que o Leitor free vê quando ainda
+ * não tem modelo. Duplicá-los por usuário seria criar 882 × N cópias de um número só.
+ *
+ * Service role + `user_id` explícito: o recalc roda em background, sem sessão.
+ */
+export async function mirrorOwnerScores(
+  ownerId: string,
+  rows: Array<Record<string, unknown>>,
+): Promise<{ error: string | null }> {
+  if (rows.length === 0) return { error: null }
+
+  const supabase = createAdminClient()
+  const now = new Date().toISOString()
+
+  const mirrored = rows.map((row) => {
+    const out: Record<string, unknown> = {
+      user_id: ownerId,
+      work_id: row.work_id,
+      updated_at: now,
+    }
+    for (const col of PERSONAL_SCORE_COLUMNS) {
+      if (row[col] !== undefined) out[col] = row[col]
+    }
+    return out
+  })
+
+  for (let i = 0; i < mirrored.length; i += 500) {
+    const { error } = await supabase
+      .from("user_calculated_scores")
+      .upsert(mirrored.slice(i, i + 500), { onConflict: "user_id,work_id" })
+    if (error) return { error: `[owner-scores] falha espelhando: ${error.message}` }
+  }
+
+  return { error: null }
+}
