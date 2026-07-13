@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto"
 import { revalidatePath } from "next/cache"
-import { createAdminClient } from "@/lib/supabase/admin"
+import { createUserClient } from "@/lib/supabase/user"
 import { ensureSignedIn, getCurrentUserSettingsId } from "@/server/queries/current-user"
 import {
   MAX_PREFERENCE_RULES,
@@ -52,7 +52,9 @@ export async function savePreferenceRules(
   const settingsId = await getCurrentUserSettingsId()
   if (!settingsId) return { ok: false, error: "Sua conta ainda não tem preferências." }
 
-  const supabase = createAdminClient()
+  // Cliente do USUÁRIO: a política user_settings_own_update (mig 142) só deixa mexer na linha
+  // cuja auth_user_id é a sua — e um trigger impede que `role` ou saldo mudem por aqui.
+  const supabase = await createUserClient()
   const { error } = await supabase
     .from("user_settings")
     .update({ preference_rules: normalized })

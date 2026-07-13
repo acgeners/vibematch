@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { createAdminClient } from "@/lib/supabase/admin"
+import { createUserClient } from "@/lib/supabase/user"
 import { ensureSignedIn } from "@/server/queries/current-user"
 import { markRecalcPending } from "@/server/recalc/queue"
 import type { TagPrefLevel, TagStance } from "@/server/queries/tag-preferences"
@@ -43,10 +43,15 @@ export async function saveTagPreferences(items: TagStanceItem[]): Promise<SaveTa
   if (!Array.isArray(items)) return { ok: false, error: "Payload inválido." }
   const valid = items.filter(isValid)
 
-  const supabase = createAdminClient()
   const auth = await ensureSignedIn()
   if (!auth.ok) return { ok: false, error: auth.error }
   const userId = auth.userId
+
+  // Cliente do USUÁRIO: a RLS (migration 142) garante no BANCO que estas linhas são as dele.
+  // `ensureSignedIn` já impede o anônimo; isto impede o resto — um `.eq("user_id")` esquecido,
+  // um id trocado. Com a service role, qualquer um dos dois viraria dado de outra pessoa em
+  // silêncio.
+  const supabase = await createUserClient()
 
   const del = await supabase.from("user_tag_preferences").delete().eq("user_id", userId)
   if (del.error) return { ok: false, error: del.error.message }
