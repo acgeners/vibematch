@@ -1,60 +1,91 @@
-# PLANO — Mapa canônico Free / Pago / Admin
+# PLANO — Acesso: papéis, permissões e o que falta pro deploy
 
-> **Criado:** 2026-07-11 · **Revisado contra o código:** 2026-07-12 (PR #115)
-> **Objetivo:** fonte única do que separa **free × pago** e **usuário × admin/curadoria**, com a opção de cada lado definida e o **estado do gate** (feito / falta / onde). Pré-requisito do deploy multi-user.
-> **Marcação:** ✅ verificado no código hoje · ⚠️ inconsistência · 🔴 buraco de segurança/custo.
-> Substitui a spec parcial de `PLANO-MULTIUSER.md §1` e reconcilia `lib/plans/capabilities.ts`.
+> **Criado:** 2026-07-11 (como mapa free/pago) · **Reescrito:** 2026-07-13 — o eixo "plano" virou
+> **PAPEL** (migration 140). O nome do arquivo ficou por histórico; o assunto é o modelo de acesso.
+> **Marcação:** ✅ verificado no código · ⚠️ inconsistência · 🔴 buraco de segurança/custo.
 
 > ### ⚠️ Aviso de manutenção — leia antes de agir sobre este doc
-> A revisão de 2026-07-12 encontrou este documento **apontando para o lado errado**: o §4 listava
-> ~40 buracos, dos quais a maioria já estava fechada, e o §3 declarava `account.ts` e `settings.ts`
-> como *"corretamente sem gate"* quando eram justamente **os dois piores buracos** (self-upgrade de
-> plano + escrita na fórmula global). Um doc de segurança desatualizado não é neutro — ele autoriza
-> o erro. **Se for mexer em gate, RECONTE no código primeiro** (o comando está no §9), não confie
-> nesta lista.
+> Este documento já esteve **ativamente errado** uma vez: declarava `account.ts` e `settings.ts`
+> como *"corretamente sem gate"* quando eram os **dois piores buracos** (self-upgrade de plano +
+> escrita na fórmula global). Um doc de segurança desatualizado não é neutro — ele **autoriza o
+> erro**. **Se for mexer em gate, RECONTE no código primeiro** (§9); não confie nesta lista.
 
 ---
 
-## 0. TL;DR — estado em 2026-07-12
+## 0. TL;DR — estado em 2026-07-13
 
-1. **O eixo free/pago está fechado.** 6 capabilities declaradas, **4 gateiam de verdade**
-   (`llm_taste_profile`, `smart_shortlist`, `deep_dive`, `chat_recommend`). 2 são chaves mortas (§5).
-   **Não há mais decisão de plano pendente.**
-2. **O eixo ADMIN era o bloqueador — e foi fechado no PR #115.** Todas as mutações de catálogo e
-   gastos de LLM passam por `ensureAdmin()`. Sobrou um resíduo pequeno e nomeado no §4.
-3. **A classe de buraco que este doc não enxergava: `"use server"` = endpoint HTTP público.** Toda
-   função exportada de um arquivo com essa diretiva é chamável por POST, tenha ou não botão na tela.
-   Corrigido estruturalmente no PR #115 (§7).
-4. **O que falta pro deploy é rate-limit por usuário** (§6) — hoje o único limite é **global** e um
-   usuário esgota a cota de todos.
-5. **Quota/limite de produto** (nº de obras, listas, export) só faz sentido depois da **Fase 2
-   (partição per-user)**, adiada. Até lá o free é "vitrine de leitura do catálogo do dono".
-
----
-
-## 1. Modelo de acesso — 3 eixos ortogonais
-
-| Eixo | Coluna DB | Gate (server) | Gate (UI) | Pergunta que responde |
-|------|-----------|---------------|-----------|------------------------|
-| **Plano** free/pago | `user_settings.user_plan` (default `free`, fail-closed) | `ensureCapability(cap)` / `planAllows` | `isPaid` esconde botões IA | "Esse usuário paga pela versão rica?" |
-| **Admin/curadoria** | `user_settings.is_admin` (mig 139) | `ensureAdmin()` | `useIsAdmin()` esconde "Gerenciar" | "Pode editar o catálogo COMPARTILHADO?" |
-| **Anon/deslogado** | sem sessão | `isCurrentUserAdmin→false` | só nav "Principal" | "Visitante — só leitura da vitrine" |
-
-**Regra de ouro:** curadoria do catálogo = **admin**, nunca plano (um pago **não** edita o catálogo
-compartilhado). Valor de IA por-usuário = **plano**. São eixos independentes.
-
-**Corolário que este doc já errou uma vez:** "mora em `user_settings`" **não** quer dizer "é
-pessoal". `formula_config` e `score_weights` são **globais** — e metade da tela `/preferencias`
-escreve neles. Antes de classificar uma action como pessoal, olhe **a tabela que ela grava**, não o
-nome dela.
+1. **O acesso agora é uma ESCADA de papéis** (§1): **Curador ⊃ Assinante ⊃ Leitor**, em
+   `user_settings.role` (mig 140, aplicada). Substituiu as duas flags ortogonais
+   (`user_plan` × `is_admin`), que eram a fonte estrutural dos buracos.
+2. **Todos os gates estão fechados** — mutação de catálogo, gasto de LLM e config global exigem
+   Curador (PRs #115/#117). Nenhum buraco conhecido no eixo de escrita.
+3. **`"use server"` publica TODA função exportada como endpoint HTTP** (§7). Foi a classe de buraco
+   que este doc não enxergava; corrigida estruturalmente no #116.
+4. 🔴 **O ÚNICO item entre o app e o deploy é o rate-limit por usuário** (§6). Hoje o limite é
+   **global**: um usuário esgota a cota de todos, e ninguém é limitado individualmente.
+5. **Não existe billing.** Papel se atribui no banco. Quando houver cobrança, o caminho é uma action
+   gated chamada pelo **webhook do provedor** — nunca um botão de auto-serviço (foi exatamente esse
+   botão que dava plano pago de graça).
 
 ---
 
-## 2. Mapa canônico A — Eixo PLANO (free × pago)
+## 1. Modelo de acesso — a ESCADA (migration 140)
 
-Fonte: `lib/plans/capabilities.ts`. Regra: **capability não-listada = Free**; só o que custa LLM é restrito.
+| Papel | Coluna | Pode | Não pode |
+|---|---|---|---|
+| **Curador** | `role='curador'` | Tudo: cria/edita/apaga obra, escolhe capa/sinopse, IA de curadoria, config global | — |
+| **Assinante** | `role='assinante'` | IA de consumo (recomendar/chat/deep dive) + **atualiza** obras (automático) | Criar, editar, apagar, config global |
+| **Leitor** | `role='leitor'` (default) | Lê o catálogo inteiro | Qualquer escrita; LLM (virá por crédito) |
+| **Anônimo** | sem sessão | Lê a vitrine | Tudo o mais (`getCurrentRole` → `leitor`, fail-closed) |
 
-| Feature | Free (determinístico) | Pago (IA) | Gate | Onde é aplicado |
+Fonte: `lib/plans/roles.ts` · gates em `server/queries/current-user.ts`
+(`ensurePermission(verbo)` ← **preferir** · `ensureRole(min)` · `ensureAdmin()` = alias de curador,
+mantido pelos ~130 call sites). Client: `useCan(verbo)` / `useRole()` / `useIsAdmin()`.
+
+> **Por que escada, e não as duas flags de antes.** Modelar uma escada com flags ortogonais produz
+> estados sem sentido — e não é teoria: foi essa modelagem que deixou `reactivatePlan()` virar
+> self-upgrade de plano pago e fez este doc classificar a fórmula GLOBAL como "dado pessoal".
+
+### As permissões são VERBOS, não papéis
+
+`refresh_work` · `consume_ai` · `curate_work` · `curate_ai` · `global_config`.
+
+A distinção que não existia no código, e que sustenta o Assinante:
+
+- **atualizar** → re-hidrata a obra das fontes **sem escolha humana** (merge automático). É o que o
+  Assinante paga: dado fresco.
+- **editar** → decide o conteúdo (capa, sinopse, conflito). E como `works` é **compartilhada** (sem
+  `user_id`), decidir é **decidir pelos outros**, sem reversão por usuário.
+
+Sem separar os verbos, "deixar o Assinante atualizar" significaria deixá-lo trocar a capa boa por
+uma ruim na obra que o Curador curou.
+
+**Como o Assinante escreve sem poder forjar conteúdo:** `autoRefreshWorkData(workId)` — o cliente
+manda **só o workId**; quem busca, funde e grava é o **servidor**. `updateWorkExternalData` (que
+recebe o payload **escolhido pelo cliente**) segue exclusiva do Curador. O que o automático grava
+está em `buildAutoRefreshPlan` (pura, testada): só o que **envelhece**; **nunca** título, sinopse ou
+capa; e **campo em conflito é pulado**.
+
+### Regras de ouro
+
+1. **Curadoria do catálogo = Curador, nunca plano.** Um Assinante **não** edita o catálogo.
+2. **"Mora em `user_settings`" NÃO quer dizer "é pessoal".** `formula_config` e `score_weights` são
+   **globais** — e metade de `/preferencias` escreve neles. Antes de classificar uma action como
+   pessoal, olhe **a tabela que ela grava**, não o nome dela.
+3. **Sem billing, ninguém troca o próprio papel.** `setPlan`/`cancelPlan`/`reactivatePlan` foram
+   **removidas** (pós-mig 140 viraram no-op: gravavam `user_plan`, que ninguém mais lê).
+   Hoje: `update user_settings set role='assinante' where email='...';`
+
+---
+
+## 2. Mapa das capabilities de IA (Leitor × Assinante)
+
+Fonte: `lib/plans/capabilities.ts`. Regra: **capability não-listada é livre**; só o que custa LLM é
+restrito. `getCurrentPlan()` hoje **DERIVA do papel** (curador/assinante → `paid`; leitor → `free`)
+— `user_plan` virou legado e **ninguém mais lê**. As capabilities ainda falam "plano"; migrá-las
+pra `ensurePermission("consume_ai")` é limpeza pendente (§5).
+
+| Feature | Leitor (determinístico) | Assinante (IA) | Gate | Onde é aplicado |
 |---|---|---|---|---|
 | **Perfil de gosto** | heurística `buildTasteProfileHeuristic` | `generateTasteProfile()` LLM | ✅ | `llm_taste_profile` @ `recommendations.ts:220` |
 | **Ordenação do ranking** | `expected × personal_fit` | `expected × alignment` (Veredito IA) | ✅ | `smart_shortlist` @ `ranking/page.tsx`, `ranking.ts` |
@@ -65,7 +96,10 @@ Fonte: `lib/plans/capabilities.ts`. Regra: **capability não-listada = Free**; s
 | **Chat de recomendação** | Free usa o `/ranking` determinístico | chat conversacional | ✅ | `chat_recommend` @ `recommendation-chat.ts:244` |
 | **Previsão rica (8 critérios qualidade)** | — | — | ⚫ **morto** (`L0_QUALITY_ENABLED=false`) | `l0_quality_eval` @ `calculations.ts:482` |
 
-**Decisões de plano: TRAVADAS.** As 5 features vivas têm as duas opções definidas e gateiam.
+**Decisões travadas.** As 5 features vivas têm as duas opções definidas e gateiam.
+
+> O **Leitor** destravará essas capabilities **comprando crédito** — mas crédito e **débito**
+> nascem juntos: sem débito, "saldo > 0" viraria LLM infinito de graça. Ver §6.
 
 > ⚠️ `includeQuality` é **sempre false, inclusive no Pago** — `L0_QUALITY_ENABLED` é uma const local
 > hardcoded `false` (o estimador media ruído: MAE CV 0.63 vs 0.54). O `CLAUDE.md` descreve a
@@ -146,6 +180,15 @@ E as ações que o PR #115 gateou (avaliar, digest, consolidar) **não têm limi
 **Decisão de produto pendente:** cota por plano (ex.: free 0/dia, pago 20/dia?) e se o teto passa a
 ser por usuário. **Sem isso, não expor o app.**
 
+### Crédito do Leitor — só COM débito
+
+O Leitor compra crédito pra usar IA de consumo. **Crédito e débito nascem juntos**: enquanto não
+houver mecanismo de débito, "saldo > 0" liberaria **LLM infinito de graça**. Por isso a coluna de
+saldo ainda **não existe** — criá-la dormente só convidaria alguém a ligá-la sozinha.
+
+IA de **curadoria** (avaliar obra, digest, consolidar sinopse) **nunca** entra em crédito: ela
+ESCREVE no catálogo compartilhado, e escrita é papel, não saldo.
+
 Limites existentes hoje, todos **universais** (plano-agnósticos): `MAX_RUNS_PER_DAY = 20` ·
 `MAX_COMPARE_WORKS = 10` (`lib/compare-config.ts`) · `MAX_CANDIDATES_HARD_LIMIT`
 (`lib/ai-recommendation/limits.ts`). **Não existe primitiva de quota** (0 hits de
@@ -182,18 +225,20 @@ público**. Foi assim que se confirmou que as 10 funções de background sumiram
 
 ## 8. Sequência pro deploy
 
-| # | Passo | Eixo | Estado |
-|---|-------|------|--------|
-| 1 | `ensureAdmin` nas mutações de catálogo / gastos de IA / config global | Admin | ✅ **PR #115** |
-| 2 | Tirar do `"use server"` o que a UI não chama | Infra | ✅ **PR #115** |
-| 3 | Esconder na UI o que o não-admin não pode salvar (`/preferencias`) | Admin | ✅ **PR #115** |
-| 4 | Fechar o resíduo do §4 (scraping externo, histórico compartilhado) | Admin | ✅ **feito** |
-| 5 | **Rate-limit por usuário/IP** (§6) — precisa da decisão de cotas | Infra/Produto | 🔴 **P0 — o ÚNICO que falta pro deploy** |
-| 6 | Limpar `capabilities.ts` (§5: chaves mortas) | Plano | P2 |
-| 7 | (Deploy) — só depois do 5 | — | — |
-| 8 | Quotas de produto (nº de obras/listas/export) | Produto | P3 — **depende da Fase 2** |
-
----
+| # | Passo | Estado |
+|---|-------|--------|
+| 1 | `ensureAdmin` nas mutações de catálogo / gastos de IA / config global | ✅ #115 |
+| 2 | Tirar do `"use server"` o que a UI não chama | ✅ #116 |
+| 3 | Esconder na UI o que o não-curador não pode salvar (`/preferencias`) | ✅ #115 |
+| 4 | Fechar o resíduo (scraping externo, histórico compartilhado) | ✅ #117 |
+| 5 | **Papéis** — escada `role` + permissões por verbo (mig 140) | ✅ #118 |
+| 6 | Assinante atualiza obras (automático, sem escolher conteúdo) | ✅ #119 |
+| 7 | Badge do papel + card da escada no `/conta` | ✅ #121 |
+| 8 | 🔴 **Rate-limit por usuário/IP** (§6) — precisa da decisão de cotas | **P0 — o ÚNICO que falta** |
+| 9 | Crédito + débito (Leitor consome IA pagando por uso) | falta |
+| 10 | Limpar `capabilities.ts` (§5: chaves mortas) + migrar pra `consume_ai` | P2 |
+| 11 | (Deploy) — só depois do 8 | — |
+| 12 | Quotas de produto (nº de obras/listas/export) | P3 — **depende da Fase 2** |
 
 ## 9. Como recontar (não confie nesta lista sem rodar)
 
