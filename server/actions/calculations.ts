@@ -17,7 +17,7 @@ import {
   calculateNotaCalc,
 } from "@/lib/calculations"
 import { calculateGPTWithDiagnostics, calculateGPT } from "@/lib/calculations/gpt"
-import { getCurrentUserId, ensurePermission } from "@/server/queries/current-user"
+import { getCurrentUserId, ensurePermission, getOwnerUserId } from "@/server/queries/current-user"
 import { loadOwnerLabels, withOwnerLabels, mirrorOwnerScores } from "@/server/queries/owner-labels"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import {
@@ -514,7 +514,11 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
         .limit(2000),
       supabase.from("score_weights").select("*").eq("is_active", true),
       supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
-      loadCurrentTasteProfile(),
+      // 🔴 EXPLÍCITO, não "o corrente". O recalc roda em background, sem sessão — e até a
+      // migration 147 havia UM perfil corrente no banco inteiro: um Assinante gerando o dele
+      // derrubava o do dono, e este recalc treinaria o Ridge DELE com as loved_tags DELA.
+      // Sem erro, sem log, 878 notas mudadas. Ver lib/ai-recommendation/taste-profile.ts.
+      getOwnerUserId().then((id) => loadCurrentTasteProfile(id)),
       getDeclaredTagPreferences(supabase, { headless }),
       loadOwnerLabels(),
     ])

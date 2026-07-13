@@ -5,7 +5,7 @@
  * Se a troca estiver certa, os números têm que sair IDÊNTICOS — mesma matemática, mesmos
  * rótulos, outra tabela.
  *
- * ⚠️ Compara contra `calc_control_main` — a saída de um `recalculateAll()` rodado NA MAIN, sem
+ * ⚠️ Compara contra `calc_control_147` — a saída de um `recalculateAll()` rodado NA MAIN, sem
  * o rewire. NÃO contra o snapshot da mig 144.
  *
  * Por quê: o snapshot congelou os valores que estavam GUARDADOS no banco, e eles já estavam
@@ -52,7 +52,7 @@ async function main() {
   const cols = "work_id, expected_score, calc_score, chance_score, personal_fit"
   const [now, snap] = await Promise.all([
     fetchAll("calculated_scores", cols, "work_id"),
-    fetchAll("calc_control_main", cols, "work_id"),
+    fetchAll("calc_control_147", cols, "work_id"),
   ])
   const snapById = new Map(snap.map((r) => [r.work_id as string, r]))
 
