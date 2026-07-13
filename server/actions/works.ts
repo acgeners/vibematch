@@ -30,7 +30,8 @@ import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
-import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin } from "@/server/queries/current-user"
+import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin, ensurePermission } from "@/server/queries/current-user"
+import { buildAutoRefreshPlan } from "@/lib/external/auto-refresh"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
 import { titleToSlug } from "@/lib/utils"
@@ -1750,8 +1751,20 @@ export async function updateWorkExternalData(
   updates: ExternalWorkUpdate,
   opts: { acquireReviews?: boolean } = {},
 ) {
+  // `updates` vem ESCOLHIDO PELO CLIENTE (capa, sinopse, resolução de conflito) — é
+  // curadoria pura. Só o Curador. O Assinante entra por `autoRefreshWorkData`, onde
+  // quem monta o payload é o servidor.
   const gate = await ensureAdmin()
   if (!gate.ok) return { error: gate.error }
+  return doUpdateWorkExternalData(id, updates, opts)
+}
+
+/** Núcleo da gravação, SEM gate. Não exportado (ver nota em doRefreshWorkExternalData). */
+async function doUpdateWorkExternalData(
+  id: string,
+  updates: ExternalWorkUpdate,
+  opts: { acquireReviews?: boolean } = {},
+) {
   try {
     const supabase = createAdminClient()
     const { data: existingWork } = await supabase
@@ -1942,6 +1955,15 @@ export async function refreshWorkExternalData(workId: string): Promise<RefreshWo
   // (sobrescreve capa/sinopse/notas de plataforma) → curadoria, não leitura.
   const gate = await ensureAdmin()
   if (!gate.ok) return { ok: false, reason: "FORBIDDEN", message: gate.error }
+  return doRefreshWorkExternalData(workId)
+}
+
+/**
+ * Núcleo do refresh, SEM gate. NÃO é exportado de propósito: num arquivo "use server",
+ * export = endpoint HTTP público. Os dois chamadores (o fluxo do Curador e o
+ * automático do Assinante) põem o gate ANTES de chegar aqui.
+ */
+async function doRefreshWorkExternalData(workId: string): Promise<RefreshWorkExternalDataResult> {
   const supabase = createAdminClient()
 
   const { data: work, error: workError } = await supabase
@@ -1979,5 +2001,56 @@ export async function refreshWorkExternalData(workId: string): Promise<RefreshWo
     const message = err instanceof Error ? err.message : String(err)
     console.error("[refreshWorkExternalData] fetch failed:", message)
     return { ok: false, reason: "ALL_404", message }
+  }
+}
+
+export type AutoRefreshWorkResult =
+  | { ok: true; updatedFields: string[]; skippedConflicts: string[]; sources: ExternalSourceId[] }
+  | { ok: false; error: string }
+
+/**
+ * Atualização AUTOMÁTICA de uma obra — o caminho do ASSINANTE.
+ *
+ * Segurança está na ASSINATURA: o cliente manda só o `workId`. Quem busca nas fontes,
+ * funde e grava é o servidor. Não existe payload de conteúdo pra ele forjar — é a
+ * diferença essencial pra `updateWorkExternalData`, que recebe o que o cliente
+ * escolheu e por isso continua exclusiva do Curador.
+ *
+ * O que grava está em `buildAutoRefreshPlan` (função pura, testada): só o que
+ * ENVELHECE (status, capítulos, notas de plataforma, tags, IDs), nunca o que é
+ * ESCOLHA (título, sinopse e capa primárias). Campo em conflito com o que está salvo
+ * é PULADO — sem humano pra decidir, preservar o que o Curador deixou é o certo.
+ *
+ * `acquireReviews: false` de propósito: colher reviews dispara o digest (Sonnet) na
+ * chave do dono. Enquanto não houver rate-limit por usuário (o P0 do PLANO-FREE-PAGO
+ * §6), um clique do Assinante NÃO pode custar LLM. Reviews seguem só com o Curador.
+ */
+export async function autoRefreshWorkData(workId: string): Promise<AutoRefreshWorkResult> {
+  const gate = await ensurePermission("refresh_work")
+  if (!gate.ok) return { ok: false, error: gate.error }
+  if (!workId) return { ok: false, error: "Obra não informada." }
+
+  const refreshed = await doRefreshWorkExternalData(workId)
+  if (!refreshed.ok) {
+    const message =
+      refreshed.reason === "NO_IDS"
+        ? "Esta obra ainda não tem fontes externas vinculadas — só o Curador consegue vinculá-las."
+        : (refreshed.message ?? "As fontes externas não responderam. Tente de novo mais tarde.")
+    return { ok: false, error: message }
+  }
+
+  const plan = buildAutoRefreshPlan(refreshed.data, refreshed.conflicts)
+  if (Object.keys(plan.updates).length === 0) {
+    return { ok: true, updatedFields: [], skippedConflicts: plan.skippedConflicts, sources: refreshed.sources }
+  }
+
+  const result = await doUpdateWorkExternalData(workId, plan.updates, { acquireReviews: false })
+  if (result?.error) return { ok: false, error: result.error }
+
+  return {
+    ok: true,
+    updatedFields: Object.keys(plan.updates),
+    skippedConflicts: plan.skippedConflicts,
+    sources: refreshed.sources,
   }
 }

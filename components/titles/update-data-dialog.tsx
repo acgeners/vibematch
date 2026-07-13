@@ -23,6 +23,7 @@ import { SourceSelectionStep } from "@/components/titles/source-selection-step"
 import { WORK_UPDATED_EVENT } from "@/components/titles/update-progress-watcher"
 import { fetchComicKClient, fetchAnimePlanetClient } from "@/lib/external/client-fetches"
 import { updateWorkExternalData, refreshWorkExternalData } from "@/server/actions/works"
+import { buildPlatformRatings } from "@/lib/external/auto-refresh"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
 import { titleToSlug } from "@/lib/utils"
@@ -1082,18 +1083,3 @@ async function enrichWithClientRatings(data: ExternalWorkData): Promise<External
   return next
 }
 
-function buildPlatformRatings(data: ExternalWorkData) {
-  const ratings: Array<{ platform: string; rating?: number | null; votes?: number | null }> = []
-  const add = (platform: string, rating: number | null | undefined, votes: number | null | undefined) => {
-    if (rating != null || (votes ?? 0) > 0) {
-      ratings.push({ platform, rating: rating ?? null, votes: votes ?? null })
-    }
-  }
-  if (data.externalPlatformRatings?.length) {
-    for (const r of data.externalPlatformRatings) add(r.platform, r.rating, r.votes)
-  }
-  add("mangaupdates", data.muRating, data.muVotes)
-  add("comick", data.cmxRating, data.cmxVotes)
-  add("animeplanet", data.apRating, data.apVotes)
-  return ratings
-}

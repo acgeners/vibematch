@@ -1,6 +1,7 @@
 "use server"
 
-import { isCurrentUserAdmin } from "@/server/queries/current-user"
+import { getCurrentRole, isCurrentUserAdmin } from "@/server/queries/current-user"
+import type { Role } from "@/lib/plans/roles"
 
 /**
  * Expõe `isCurrentUserAdmin()` pro client (stopgap multi-user). Admin = o DONO do
@@ -11,4 +12,13 @@ import { isCurrentUserAdmin } from "@/server/queries/current-user"
  */
 export async function getCurrentUserIsAdmin(): Promise<boolean> {
   return isCurrentUserAdmin()
+}
+
+/**
+ * Papel do usuário atual pro client (migration 140). Substitui o booleano `isAdmin`
+ * como sinal de UI: agora existem TRÊS níveis, e o Assinante precisa ver controles
+ * que o Leitor não vê. O bloqueio real segue server-side (`ensurePermission`).
+ */
+export async function getCurrentUserRole(): Promise<Role> {
+  return getCurrentRole()
 }
