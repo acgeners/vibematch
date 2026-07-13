@@ -102,18 +102,21 @@ resolver da Comix · **`setPlan`** · **`setAnthropicBalance`** · **as 12 confi
 
 ---
 
-## 4. Resíduo aberto (verificado 2026-07-12)
+## 4. Resíduo — ✅ FECHADO (2026-07-13)
 
-Pequeno e nomeado. Nenhum destes corrompe nota/obra; são custo e higiene.
+O eixo admin não tem mais buraco conhecido. Os 3 que restavam foram gateados:
 
-| Ação | arquivo | O que dá pra fazer sem gate | Gravidade |
-|---|---|---|---|
-| `searchExternalTitles` · `fetchExternalData` | `external.ts:88,193` | Scraping das 9 fontes (FlareSolverr/sidecar) na infra do dono. Sem LLM, mas é custo de rede e risco de bloqueio das fontes | média |
-| `deleteRecommendationRunAction` | `recommendations.ts:447` | Apagar histórico de recomendação. `recommendation_runs` **não tem `user_id`** ⇒ é histórico de todos | baixa |
-| `analyzeExternalListImport` | `external-list-import.ts:80` | Analisar um import (o *commit* é gated). Só leitura + matching | baixa |
+| Ação | arquivo | Por quê |
+|---|---|---|
+| `searchExternalTitles` · `fetchExternalData` | `external.ts` | Scraping das 9 fontes na infra do dono — sem gate, é um **proxy de scraping grátis**, e o tráfego extra derruba as fontes pra todo mundo |
+| `deleteRecommendationRunAction` | `recommendations.ts` | `recommendation_runs` **não tem `user_id`** ⇒ o histórico é compartilhado; sem gate um usuário apaga a execução de outro. Vira gate de plano quando a Fase 2 particionar a tabela |
+| `analyzeExternalListImport` | `external-list-import.ts` | O *commit* já era gated; deixar a análise aberta era inconsistência |
 
 Coberto transitivamente (não precisa de gate próprio): `rerunRecommendationFromExistingAction`
 delega pra `runRecommendationAction`, que tem `ensureCapability("smart_shortlist")`.
+
+> As demais actions sem `ensureAdmin` são **leitura** ou **dado pessoal** (§3) — rode o §9 e aplique
+> os três critérios: muta o catálogo? gasta LLM/rede? escreve config global?
 
 ---
 
@@ -184,10 +187,10 @@ público**. Foi assim que se confirmou que as 10 funções de background sumiram
 | 1 | `ensureAdmin` nas mutações de catálogo / gastos de IA / config global | Admin | ✅ **PR #115** |
 | 2 | Tirar do `"use server"` o que a UI não chama | Infra | ✅ **PR #115** |
 | 3 | Esconder na UI o que o não-admin não pode salvar (`/preferencias`) | Admin | ✅ **PR #115** |
-| 4 | **Rate-limit por usuário/IP** (§6) — precisa da decisão de cotas | Infra/Produto | 🔴 **P0 — falta** |
-| 5 | Fechar o resíduo do §4 (scraping externo sem gate) | Admin | P1 |
+| 4 | Fechar o resíduo do §4 (scraping externo, histórico compartilhado) | Admin | ✅ **feito** |
+| 5 | **Rate-limit por usuário/IP** (§6) — precisa da decisão de cotas | Infra/Produto | 🔴 **P0 — o ÚNICO que falta pro deploy** |
 | 6 | Limpar `capabilities.ts` (§5: chaves mortas) | Plano | P2 |
-| 7 | (Deploy) — só depois do 4 | — | — |
+| 7 | (Deploy) — só depois do 5 | — | — |
 | 8 | Quotas de produto (nº de obras/listas/export) | Produto | P3 — **depende da Fase 2** |
 
 ---
