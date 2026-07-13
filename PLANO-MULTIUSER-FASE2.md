@@ -260,9 +260,11 @@ qualquer crescimento e um backfill "bem-sucedido" processaria um recorte). Pagin
 
 ---
 
-## 6. RLS: onde ela protege de verdade
+## 6. ✅ RLS: onde ela protege de verdade — FEITO (PR #129, mig 142)
 
-⚠️ **Hoje a RLS não protege nada — e isso é intencional.** Todo acesso usa a **service role key**,
+✅ **FEITO em 2026-07-13** (migration 142 + PR #129): as 9 tabelas com dono têm política; as ESCRITAS per-user passam pelo cliente de sessão, e é o Postgres que garante o isolamento. As LEITURAS de background seguem na service role de propósito (o recalc roda sem sessão). Contexto de antes:
+
+⚠️ ~~**Hoje a RLS não protege nada — e isso é intencional.**~~ Todo acesso usa a **service role key**,
 que **ignora RLS** por definição (`createAdminClient()`). As policies existem "sem policy permissiva"
 só para bloquear o cliente anônimo, que o app não usa.
 

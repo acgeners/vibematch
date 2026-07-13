@@ -18,7 +18,23 @@ npm run lint
 
 ## Architecture
 
-Next.js 16 App Router (Turbopack). All DB access is server-only via `createAdminClient()` (service role key).
+Next.js 16 App Router (Turbopack). Todo acesso ao banco é server-only, e há **dois clientes** — escolher o
+errado não dá erro, dá dado errado:
+
+| Cliente | Use para | RLS |
+|---|---|---|
+| `createAdminClient()` (service role) | **catálogo** (works, tags, reviews, category_scores…), curadoria, e tudo que roda **sem sessão**: fila de recalc, `after()`, cascatas, scripts | **ignorada** — o `user_id` tem que vir explícito no argumento, nunca implícito no "usuário corrente" |
+| `createUserClient()` (sessão, `lib/supabase/user.ts`) | **escrita de dado per-usuário** vinda de uma requisição | **vale** (migration 142): o Postgres filtra por `user_id = auth.uid()` |
+
+As duas trocas erradas, e o que cada uma faz **em silêncio**:
+- **Cliente de usuário numa leitura de catálogo** → 0 linhas. `submitPostReadingAttributes` responderia
+  "obra sem avaliação IA" — uma mentira plausível, sem erro nenhum.
+- **Service role numa escrita per-usuário** → volta a depender de o código lembrar do `.eq("user_id")`.
+  Esquecer não dá erro: escreve na linha de outra pessoa (foi exatamente o buraco do PR #127).
+
+**As leituras de background continuam na service role de propósito.** O recalc lê `attribute_bias` e
+`user_tag_preferences` do dono **sem sessão**; com o cliente de usuário ele veria zero linhas e
+recalcularia as notas dele **sem a calibração dele** — sem erro, sem log, só notas erradas.
 
 **Auth existe** (esta linha já disse o contrário — não confie na memória, confira): Supabase Auth com
 `/login`, `/signup` e **logout no menu do chip da sidebar** (`components/layout/account-chip.tsx` →
@@ -231,7 +247,21 @@ Core tables: `works`, `category_scores`, `calculated_scores`, `platform_ratings`
 
 AI recommendation tables: `taste_profile`, `recommendation_runs`, `deep_dive_results`, and `recommendation_chats` (conversational recommendation chat — paid-only; 1 row per conversation, messages in a JSONB array with a compact per-turn recommendation snapshot). The chat is a thin layer over `runRecommendationAction` (it reuses the ranker; each recommend turn still creates a `recommendation_runs` row). All Claude calls log to `ai_api_calls`.
 
-All DB access uses the service role key (`createAdminClient()`). RLS is enabled on all tables with no permissive policies — anon access is intentionally blocked.
+RLS está ligada em todas as tabelas e o cliente **anônimo** não lê nada (nem o catálogo) — é intencional:
+o catálogo é servido pelo servidor, não pelo browser.
+
+Desde a **migration 142**, as 9 tabelas com dono (`user_tag_preferences`, `attribute_bias`,
+`user_attribute_assessment`, `ranking_filter_presets`, `prediction_ledger`, `prediction_snapshots`,
+`recommendation_runs`, `user_work_state`, `user_settings`) têm políticas: o usuário **autenticado** só
+enxerga e só escreve as **próprias linhas** (`user_id = auth.uid()`). O `with check` é o que impede
+escrever uma linha com o `user_id` de outra pessoa.
+
+⚠️ **`user_settings.role` mora numa tabela que o próprio usuário pode atualizar** → um trigger
+(`guard_role_self_escalation`) impede que ele mude `role`, saldo ou os ids de identidade. Sem esse
+trigger, a política de update seria um caminho de **auto-promoção a Curador**. `auth.uid()` é NULL na
+service role, que passa direto.
+
+O catálogo **não tem política**: é lido/escrito pela service role, que ignora RLS.
 
 `works.ai_eval_status`: `"pending"` (never evaluated / needs AI run) | `"review_pending"` (AI completed / needs review) | `"done"` (accepted/saved) | `"skipped"`.
 `ai_evaluations.status`: `"processing"` | `"completed"` | `"failed"` (separate from the work status).
