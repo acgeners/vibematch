@@ -19,6 +19,7 @@ import {
   splitSynopsesFromText,
 } from "@/lib/work-derived"
 import { markRecalcPending, recalculateScoresNow } from "@/server/recalc/queue"
+import { recalculateForUser } from "@/server/recalc/user-recalc"
 import { capturePredictionForFirstRating } from "./prediction-ledger"
 import {
   resolvePredictionsForWork,
@@ -1832,8 +1833,20 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
     const write = await writeReadingState(gate.userId, [id], personalState)
     if (write.error) return { error: { _root: [write.error] } }
 
-    // Sem recalc e sem prediction ledger: nada em `works` mudou, e o modelo é o do dono. A Nota
-    // Prevista dela é a Fatia 2b (precisa de ≥20 rótulos e de um `calculated_scores` com dono).
+    // O MODELO DELA (Fatia 2b). Sem prediction ledger e sem `formula_config`: aquilo mede e
+    // calibra o modelo do DONO. Aqui só recalculamos os scores DELA, em `user_calculated_scores`.
+    //
+    // Vai em `after()`: é Ridge em TS puro (zero IA, zero dinheiro), mas são ~880 obras — não é
+    // trabalho pra segurar a resposta do clique. Best-effort: se falhar, o pior que acontece é
+    // a Nota Prevista dela ficar uma avaliação atrasada, e o próximo save conserta.
+    after(async () => {
+      try {
+        await recalculateForUser(gate.userId)
+      } catch (err) {
+        console.error("[updateWorkStatus] recalc do usuário falhou:", err)
+      }
+    })
+
     revalidatePath("/titles/[id]", "page")
     revalidatePath("/titles")
     revalidatePath("/ranking")

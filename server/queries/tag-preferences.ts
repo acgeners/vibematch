@@ -57,9 +57,15 @@ function rawToRow(r: RawRow): TagPreferenceRow | null {
  */
 export async function getTagPreferenceRows(
   admin?: ReturnType<typeof createAdminClient>,
+  /**
+   * DONO das preferências. Explícito quando o recalc roda para OUTRA pessoa (Fatia 2b): sem
+   * ele, `getCurrentUserId()` cai no singleton em background — ou seja, o modelo dela seria
+   * treinado com as tags amadas DELE.
+   */
+  userIdOverride?: string,
 ): Promise<TagPreferenceRow[]> {
   const supabase = admin ?? createAdminClient()
-  const userId = await getCurrentUserId(supabase)
+  const userId = userIdOverride ?? (await getCurrentUserId(supabase))
   const { data, error } = await supabase
     .from("user_tag_preferences")
     .select("id, tag_id, tag_subgroup_id, tag_group_id, stance, weight")
@@ -82,13 +88,13 @@ export async function getTagPreferenceRows(
  */
 export async function getDeclaredTagPreferences(
   admin?: ReturnType<typeof createAdminClient>,
-  opts?: { headless?: boolean },
+  opts?: { headless?: boolean; userId?: string },
 ): Promise<DeclaredTagPref[]> {
   const supabase = admin ?? createAdminClient()
   // Headless (CLI/worker): catálogo de tags via leitura UNCACHED (sem request
   // scope). Runtime Next: wrapper cacheado. Mesma lógica/resultado.
   const loadTags = opts?.headless ? getAllTagsUncached : getAllTags
-  const [rows, tags] = await Promise.all([getTagPreferenceRows(supabase), loadTags()])
+  const [rows, tags] = await Promise.all([getTagPreferenceRows(supabase, opts?.userId), loadTags()])
   if (rows.length === 0) return []
 
   // Índices do catálogo

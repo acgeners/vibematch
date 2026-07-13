@@ -47,6 +47,26 @@ export async function loadOwnerLabels(userIdOverride?: string): Promise<OwnerLab
   // O override existe pra TESTAR o guarda (apontando pra um usuário sem rótulos e exigindo que
   // ele exploda). Em produção ninguém passa nada: o dono vem do singleton.
   const ownerId = userIdOverride ?? (await getOwnerUserId())
+  return loadLabelsFor(ownerId, { minLabels: MIN_EXPECTED_LABELS })
+}
+
+/**
+ * Rótulos de QUALQUER usuário (Fatia 2b — recalc por pessoa).
+ *
+ * ⚠️ SEM o guarda de piso, e é de propósito: um usuário novo com 3 rótulos é NORMAL, não é uma
+ * falha. O guarda do `loadOwnerLabels` existe porque, para o DONO, "0 rótulos" só pode ser bug
+ * (ele tem 208) — e um Ridge sem rótulos devolve a média do treino em silêncio.
+ *
+ * A honestidade, aqui, é outra: quem tem POUCOS rótulos não ganha uma Nota Prevista ruim. Ganha
+ * NENHUMA. Quem decide isso é `recalculateForUser`, anulando o `expected_score` quando o modelo
+ * sai stub (< MIN_TRAIN = 20).
+ */
+export async function loadLabelsFor(
+  userId: string,
+  opts?: { minLabels?: number },
+): Promise<OwnerLabels> {
+  const ownerId = userId
+  const minLabels = opts?.minLabels ?? 0
   const supabase = createAdminClient()
   const byWorkId = new Map<string, WorkReadingColumns>()
 
@@ -81,9 +101,11 @@ export async function loadOwnerLabels(userIdOverride?: string): Promise<OwnerLab
   // vazia —, o Ridge treinaria com nada e devolveria a média do treino em 878 obras, calado.
   // Falhar aqui, alto, é a única forma de esse erro ser NOTADO. Um recalc que não roda é um
   // problema visível; um recalc que roda errado, não.
-  if (labelledCount < MIN_EXPECTED_LABELS) {
+  // (Só vale quando há um piso — o recalc de um usuário QUALQUER passa `minLabels: 0`, porque
+  // ter 3 rótulos é normal para quem acabou de chegar, não é falha.)
+  if (minLabels > 0 && labelledCount < minLabels) {
     throw new Error(
-      `[owner-labels] só ${labelledCount} rótulos do dono em user_work_state (esperado ≥ ${MIN_EXPECTED_LABELS}). ` +
+      `[owner-labels] só ${labelledCount} rótulos do dono em user_work_state (esperado ≥ ${minLabels}). ` +
         `O scoring NÃO vai rodar com isso: sem rótulos, o Ridge cai na média do treino e devolve ` +
         `notas plausíveis e erradas para o catálogo inteiro. Confira o user_id do dono ` +
         `(${ownerId}) e o backfill (scripts/rebackfill-user-work-state.mjs).`,
