@@ -13,6 +13,7 @@ import {
 import { titleToSlug } from "@/lib/utils"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import type { WorkReadingColumns } from "@/server/queries/user-work-state"
+import { getScoresReader } from "@/server/queries/user-scores"
 
 const WORK_WITH_RELATIONS_SELECT = `
   *,
@@ -416,11 +417,15 @@ export async function getWorks(
  * Ver server/queries/user-work-state.ts.
  */
 async function withPersonalState(works: WorkWithRelations[]): Promise<WorkWithRelations[]> {
-  const personal = await getPersonalStateReader()
+  const [personal, scores] = await Promise.all([getPersonalStateReader(), getScoresReader()])
   return works.map((work) => {
     const state = personal.get(work.id, work as WorkReadingColumns)
     return {
       ...work,
+      // Fatia 2b: a Nota Prevista, a Chance e o Alinhamento são de QUEM OLHA. Os campos de
+      // catálogo da mesma linha (platform_avg = nota da comunidade, total_votes) passam
+      // intactos — é o que sobra, e basta, para quem ainda não tem modelo.
+      calculated_scores: scores.overlay(work.id, work.calculated_scores ?? null),
       is_favorite: state.isFavorite,
       personal_status_id: state.personalStatusId,
       chapters_read: state.chaptersRead,

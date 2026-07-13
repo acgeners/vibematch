@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { getPersonalStatusIdByName } from "@/lib/constants/status-lookups"
 import { pickPrimaryCover } from "@/lib/covers"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
+import { getScoresReader } from "@/server/queries/user-scores"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean }
@@ -54,6 +55,9 @@ export async function getReadingWorks(
   // `works.personal_status_id` devolveria a lista de leitura DELE, com os capítulos DELE, na
   // página dela. `[]` = ela não está lendo nada → página vazia (e não o catálogo inteiro).
   const personal = await getPersonalStateReader()
+  // Fatia 2b: a Nota Prevista é de QUEM OLHA. Sem esta troca, ela vinha de `calculated_scores`
+  // — a linha do DONO — e a Leitora via a previsão do gosto dele como se fosse a dela.
+  const scoresReader = await getScoresReader()
   const ownIds = await resolvePersonalFilterIds({ personalStatusIds: statusIds })
   if (ownIds && ownIds.length === 0) return []
 
@@ -107,7 +111,7 @@ export async function getReadingWorks(
       chaptersRead: state.chaptersRead,
       totalChapters: w.total_chapters ?? null,
       lastReadAt: state.lastReadAt,
-      expectedScore: w.calculated_scores?.expected_score ?? null,
+      expectedScore: scoresReader.overlay(w.id, w.calculated_scores)?.expected_score ?? null,
       comixHid: comix?.external_id ?? null,
       lastChapterReleasedAt: w.last_chapter_released_at ?? null,
       nextChapterPredictedAt: w.next_chapter_predicted_at ?? null,
