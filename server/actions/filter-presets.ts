@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getCurrentUserId } from "@/server/queries/current-user"
+import { ensureSignedIn } from "@/server/queries/current-user"
 
 export interface SaveFilterPresetInput {
   basePath: string
@@ -29,7 +29,9 @@ export async function saveFilterPreset(
   if (name.length > 60) return { error: "O nome deve ter no máximo 60 caracteres" }
 
   const supabase = createAdminClient()
-  const userId = await getCurrentUserId(supabase)
+  const auth = await ensureSignedIn()
+  if (!auth.ok) return { error: auth.error }
+  const userId = auth.userId
 
   const { data, error } = await supabase
     .from("ranking_filter_presets")
@@ -69,7 +71,9 @@ export async function renameFilterPreset(input: {
   if (name.length > 60) return { error: "O nome deve ter no máximo 60 caracteres" }
 
   const supabase = createAdminClient()
-  const userId = await getCurrentUserId(supabase)
+  const auth = await ensureSignedIn()
+  if (!auth.ok) return { error: auth.error }
+  const userId = auth.userId
 
   const { data, error } = await supabase
     .from("ranking_filter_presets")
@@ -96,7 +100,9 @@ export async function deleteFilterPreset(input: {
   basePath: string
 }): Promise<{ error: string | null }> {
   const supabase = createAdminClient()
-  const userId = await getCurrentUserId(supabase)
+  const auth = await ensureSignedIn()
+  if (!auth.ok) return { error: auth.error }
+  const userId = auth.userId
 
   const { error } = await supabase
     .from("ranking_filter_presets")

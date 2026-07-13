@@ -56,6 +56,19 @@ export async function getCurrentUserId(admin?: AdminClient): Promise<string> {
   return getSingletonUserId(admin)
 }
 
+// ⚠️⚠️ NUNCA use `getCurrentUserId()` para ESCREVER.
+//
+// Sem sessão ele cai no SINGLETON — o dono. Um visitante anônimo que faça POST numa
+// action que grave por `getCurrentUserId()` escreve NAS LINHAS DO DONO (e toda função
+// exportada de um arquivo "use server" É um endpoint HTTP público: esconder o botão
+// não protege nada). Para escrita per-usuário, use `ensureSignedIn()` — sem sessão,
+// sem escrita.
+//
+// O fallback FICA porque a LEITURA depende dele: o recalc roda em background (fila,
+// `after()`, cascatas) SEM sessão e precisa do `biasMap` do dono — sem o singleton ele
+// recalcularia as notas do dono sem a calibração dele, em silêncio. E o catálogo é
+// compartilhado por design: o anônimo vê o app pelos olhos do dono.
+
 // Linha de user_settings do usuário ATUAL (select *), memoizada por request.
 // - Anônimo (sem sessão) → NULL: NÃO herda a linha do dono. Fecha os buracos de
 //   (a) anon herdar o plano PAID do dono (custo — dispararia features pagas no saldo

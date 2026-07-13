@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getCurrentUserId } from "@/server/queries/current-user"
+import { ensureSignedIn } from "@/server/queries/current-user"
 import { markRecalcPending } from "@/server/recalc/queue"
 import type { TagPrefLevel, TagStance } from "@/server/queries/tag-preferences"
 
@@ -44,7 +44,9 @@ export async function saveTagPreferences(items: TagStanceItem[]): Promise<SaveTa
   const valid = items.filter(isValid)
 
   const supabase = createAdminClient()
-  const userId = await getCurrentUserId(supabase)
+  const auth = await ensureSignedIn()
+  if (!auth.ok) return { ok: false, error: auth.error }
+  const userId = auth.userId
 
   const del = await supabase.from("user_tag_preferences").delete().eq("user_id", userId)
   if (del.error) return { ok: false, error: del.error.message }

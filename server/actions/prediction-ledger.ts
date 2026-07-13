@@ -9,7 +9,7 @@
 // Esta tabela NÃO é apagada nem migrada nesta etapa.
 
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getCurrentUserId } from "@/server/queries/current-user"
+import { ensureSignedIn } from "@/server/queries/current-user"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 
 /**
@@ -33,7 +33,9 @@ export async function capturePredictionForFirstRating(
   if (!workId || userScore == null || Number.isNaN(Number(userScore))) return
   try {
     const supabase = createAdminClient()
-    const userId = await getCurrentUserId(supabase)
+    const auth = await ensureSignedIn()
+    if (!auth.ok) return // sem sessão não há ledger de quem — no-op (isto é telemetria)
+    const userId = auth.userId
 
     const [csRes, histRes] = await Promise.all([
       supabase

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug } from "@/types/domain"
-import { getCurrentUserId } from "@/server/queries/current-user"
+import { ensureSignedIn } from "@/server/queries/current-user"
 import { getLatestAiEvaluationAttributes } from "@/server/queries/post-attribute-assessment"
 import { recomputeAttributeBias } from "@/lib/calculations/attribute-bias"
 import { markRecalcPending } from "@/server/recalc/queue"
@@ -32,7 +32,9 @@ export async function submitPostReadingAttributes(
     return { ok: false, error: "Obra sem avaliação IA — rode a avaliação antes de calibrar." }
   }
 
-  const userId = await getCurrentUserId(supabase)
+  const auth = await ensureSignedIn()
+  if (!auth.ok) return { ok: false, error: auth.error }
+  const userId = auth.userId
   const now = new Date().toISOString()
 
   const rows: Array<Record<string, unknown>> = []

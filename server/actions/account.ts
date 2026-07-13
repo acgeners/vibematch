@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import {
   ensureAdmin,
-  getCurrentUserId,
+  ensureSignedIn,
   getCurrentUserProfile,
   getCurrentUserSettingsId,
   getSessionUserId,
@@ -89,9 +89,14 @@ export async function uploadAvatar(
     return { error: "Formato não suportado (use PNG, JPG, WEBP ou GIF)." }
   }
 
+  // Sem sessão, `getCurrentUserId` cairia no singleton e o upload iria para a pasta do
+  // DONO no storage.
+  const auth = await ensureSignedIn()
+  if (!auth.ok) return { error: auth.error }
+
   const supabase = createAdminClient()
   try {
-    const userId = await getCurrentUserId(supabase)
+    const userId = auth.userId
     const path = `${userId}/${Date.now()}.${ext}`
     const buffer = Buffer.from(await file.arrayBuffer())
 
