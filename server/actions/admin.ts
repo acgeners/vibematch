@@ -1,6 +1,6 @@
 "use server"
 
-import { getCurrentRole, isCurrentUserAdmin } from "@/server/queries/current-user"
+import { getCurrentRole, isCurrentUserAdmin, getSessionUserId } from "@/server/queries/current-user"
 import type { Role } from "@/lib/plans/roles"
 
 /**
@@ -21,4 +21,25 @@ export async function getCurrentUserIsAdmin(): Promise<boolean> {
  */
 export async function getCurrentUserRole(): Promise<Role> {
   return getCurrentRole()
+}
+
+/** Papel + se HÁ SESSÃO. Ver `getCurrentUserChrome`. */
+export interface CurrentUserChrome {
+  role: Role
+  signedIn: boolean
+}
+
+/**
+ * O que a UI precisa saber sobre quem está olhando — papel E sessão.
+ *
+ * ⚠️ O papel sozinho NÃO distingue um visitante anônimo de uma Leitora logada: `getCurrentRole()`
+ * é fail-closed em `leitor`, então os dois chegam como "leitor". Isso bastava enquanto o Leitor
+ * era espectador (nada pra mostrar aos dois). Com a Fatia 1 ele deixa de ser: a Leitora LOGADA
+ * pode favoritar e marcar capítulo (`own_state`), e o anônimo não pode — ele não tem `user_id`
+ * pra escrever. Sem o `signedIn`, a UI ou esconderia o coração dela, ou mostraria ao anônimo um
+ * botão que só dá erro.
+ */
+export async function getCurrentUserChrome(): Promise<CurrentUserChrome> {
+  const [role, sessionUserId] = await Promise.all([getCurrentRole(), getSessionUserId()])
+  return { role, signedIn: sessionUserId != null }
 }

@@ -3,7 +3,8 @@
 import { randomUUID } from "node:crypto"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensureAdmin } from "@/server/queries/current-user"
+import { ensureAdmin, getOwnerUserId } from "@/server/queries/current-user"
+import { writeReadingState } from "@/server/queries/user-work-state"
 import { runRecommendationAction } from "./recommendations"
 import { proposeFavoriteGroups as proposeFavoriteGroupsLLM } from "@/lib/lists/propose-groups"
 import type { FavoriteWork, ProposedGroup } from "@/lib/lists/propose-groups"
@@ -128,6 +129,20 @@ export async function addWorksToList(
     .update({ is_favorite: true })
     .in("id", ids)
   if (favError) return { error: favError.message }
+
+  // Espelha no estado per-usuário (Fatia 1). Este é o 5º writer de `works.is_favorite` — e
+  // sem esta linha ele seria o que apodrece o espelho: o dono põe a obra num grupo, `works`
+  // marca favorito, `user_work_state` não fica sabendo, e no dia em que a leitura de favoritos
+  // sair do espelho (Fatia 2 / DROP), a obra some dos favoritos dele.
+  //
+  // O espelho é o do DONO porque a coluna que acabamos de escrever é a dele (`works` é a linha
+  // compartilhada). Grupos ainda não têm dono (`work_lists` não tem `user_id`) — é uma feature
+  // do Curador, e hoje o único Curador é o dono. Se um SEGUNDO curador aparecer, a RLS (mig
+  // 142) recusa esta escrita e a action falha alto — que é o certo: significa que os grupos
+  // precisam de dono (Fatia 2), não que o espelho pode apodrecer em silêncio.
+  const owner = await getOwnerUserId()
+  const mirror = await writeReadingState(owner, ids, { is_favorite: true })
+  if (mirror.error) return { error: mirror.error }
 
   revalidateLists(listId)
   return { data: { count: ids.length } }

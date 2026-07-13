@@ -7,6 +7,7 @@ import {
 } from "@/lib/constants/status-lookups"
 import { pickPrimaryCover } from "@/lib/covers"
 import { comixWorkUrl } from "@/lib/external/comix"
+import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean | null }
@@ -111,18 +112,26 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       ? scoresWithValue.reduce((a, b) => a + b, 0) / scoresWithValue.length
       : null
 
+  // KPIs de LEITURA ("acompanhando", distribuição por status, capítulos pendentes) são de
+  // quem está olhando — não do dono. `personal.get()` é identidade pro dono e a linha dela
+  // pros demais; sem isso, a home da Leitora abriria anunciando as 14 obras que ELE está
+  // lendo. Os KPIs de CATÁLOGO (total, pendências de IA, arquivadas, nota média) seguem
+  // globais de propósito: o catálogo é compartilhado.
+  const personal = await getPersonalStateReader()
+
   const byPublicationStatus: Record<string, number> = {}
   const byPersonalStatus: Record<string, number> = {}
   let following = 0
   let followingWithPending = 0
   for (const w of active) {
+    const state = personal.get(w.id, w)
     const pubName = getPublicationStatusNameById(w.publication_status_id) ?? "Unknown"
-    const persName = getPersonalStatusNameById(w.personal_status_id) ?? "Want to Read"
+    const persName = getPersonalStatusNameById(state.personalStatusId) ?? "Want to Read"
     byPublicationStatus[pubName] = (byPublicationStatus[pubName] ?? 0) + 1
     byPersonalStatus[persName] = (byPersonalStatus[persName] ?? 0) + 1
     if (persName === "Reading" || persName === "Started") {
       following++
-      if (w.total_chapters != null && w.total_chapters - (w.chapters_read ?? 0) > 0) {
+      if (w.total_chapters != null && w.total_chapters - (state.chaptersRead ?? 0) > 0) {
         followingWithPending++
       }
     }
@@ -198,7 +207,14 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
   if (statusIds.length === 0) return []
 
   const supabase = createAdminClient()
-  const { data, error } = await supabase
+
+  // "Continue lendo" é, por definição, o que EU estou lendo. Pro dono sai de `works`; pros
+  // demais, de `user_work_state` — senão o widget da home dela oferece os capítulos DELE.
+  const personal = await getPersonalStateReader()
+  const ownIds = await resolvePersonalFilterIds({ personalStatusIds: statusIds })
+  if (ownIds && ownIds.length === 0) return []
+
+  let query = supabase
     .from("works")
     .select(`
       id, title, personal_status_id, total_chapters, chapters_read, last_read_at,
@@ -208,8 +224,12 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
       work_external_ids(source, external_id, is_rejected)
     `)
     .eq("is_archived", false)
-    .in("personal_status_id", statusIds)
-    .order("last_read_at", { ascending: false, nullsFirst: false })
+  query = ownIds ? query.in("id", ownIds) : query.in("personal_status_id", statusIds)
+
+  const { data, error } = await query.order("last_read_at", {
+    ascending: false,
+    nullsFirst: false,
+  })
 
   if (error) throw new Error(error.message)
 
@@ -227,23 +247,29 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
     work_external_ids?: ExternalIdRow[] | null
   }>).map((w) => {
     const comixHid = pickComixHid(w.work_external_ids)
+    const state = personal.get(w.id, w)
     const pending =
-      w.total_chapters != null ? Math.max(0, w.total_chapters - (w.chapters_read ?? 0)) : null
+      w.total_chapters != null ? Math.max(0, w.total_chapters - (state.chaptersRead ?? 0)) : null
     return {
       id: w.id,
       title: w.title,
       coverUrl: pickPrimaryCover(w.work_covers),
-      personalStatusId: w.personal_status_id ?? null,
-      chaptersRead: w.chapters_read ?? null,
+      personalStatusId: state.personalStatusId,
+      chaptersRead: state.chaptersRead,
       totalChapters: w.total_chapters ?? null,
       pending,
       comixUrl: comixHid ? comixWorkUrl(comixHid) : null,
-      lastReadAt: w.last_read_at ?? null,
+      lastReadAt: state.lastReadAt,
       expectedScore: w.calculated_scores?.expected_score ?? null,
       lastChapterReleasedAt: w.last_chapter_released_at ?? null,
       nextChapterPredictedAt: w.next_chapter_predicted_at ?? null,
     }
   })
+
+  // O `.order()` é por `works.last_read_at` (a data DELE) — reordena pela dela.
+  if (!personal.isOwner) {
+    items.sort((a, b) => (b.lastReadAt ?? "").localeCompare(a.lastReadAt ?? ""))
+  }
 
   // Só as com capítulos pendentes (total > lidos); corta em `limit` depois do filtro.
   return items.filter((i) => i.pending != null && i.pending > 0).slice(0, limit)

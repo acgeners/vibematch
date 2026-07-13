@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getPersonalStatusIdByName } from "@/lib/constants/status-lookups"
 import { pickPrimaryCover } from "@/lib/covers"
+import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean }
@@ -48,19 +49,27 @@ export async function getReadingWorks(
 
   const supabase = createAdminClient()
 
+  // ⚠️ Aqui o filtro É o estado pessoal — "o que EU estou lendo". Pro dono, isso continua
+  // sendo a coluna de `works`. Pra Leitora, tem que sair de `user_work_state`: filtrar por
+  // `works.personal_status_id` devolveria a lista de leitura DELE, com os capítulos DELE, na
+  // página dela. `[]` = ela não está lendo nada → página vazia (e não o catálogo inteiro).
+  const personal = await getPersonalStateReader()
+  const ownIds = await resolvePersonalFilterIds({ personalStatusIds: statusIds })
+  if (ownIds && ownIds.length === 0) return []
+
   const baseSelect = `
     id, title, personal_status_id, publication_status_id, total_chapters, chapters_read, last_read_at,
     calculated_scores(expected_score),
     work_covers(url, is_primary, position),
     work_external_ids(source, external_id, is_rejected)`
 
-  const runQuery = (select: string) =>
-    supabase
-      .from("works")
-      .select(select)
-      .eq("is_archived", false)
-      .in("personal_status_id", statusIds)
-      .order("last_read_at", { ascending: false, nullsFirst: false })
+  const runQuery = (select: string) => {
+    let query = supabase.from("works").select(select).eq("is_archived", false)
+    query = ownIds
+      ? query.in("id", ownIds)
+      : query.in("personal_status_id", statusIds)
+    return query.order("last_read_at", { ascending: false, nullsFirst: false })
+  }
 
   // Tenta com as colunas de data (migration 087); cai pro select-base se ainda
   // não existirem, sem quebrar a página.
@@ -70,7 +79,7 @@ export async function getReadingWorks(
   }
   if (error) throw new Error(error.message)
 
-  return ((data ?? []) as unknown as Array<{
+  const works = ((data ?? []) as unknown as Array<{
     id: string
     title: string
     personal_status_id: number | null
@@ -88,15 +97,16 @@ export async function getReadingWorks(
     const comix = (w.work_external_ids ?? []).find(
       (e) => e.source === "comix" && !e.is_rejected && e.external_id,
     )
+    const state = personal.get(w.id, w)
     return {
       id: w.id,
       title: w.title,
       coverUrl: pickPrimaryCover(w.work_covers),
-      personalStatusId: w.personal_status_id ?? null,
+      personalStatusId: state.personalStatusId,
       publicationStatusId: w.publication_status_id ?? null,
-      chaptersRead: w.chapters_read ?? null,
+      chaptersRead: state.chaptersRead,
       totalChapters: w.total_chapters ?? null,
-      lastReadAt: w.last_read_at ?? null,
+      lastReadAt: state.lastReadAt,
       expectedScore: w.calculated_scores?.expected_score ?? null,
       comixHid: comix?.external_id ?? null,
       lastChapterReleasedAt: w.last_chapter_released_at ?? null,
@@ -104,4 +114,12 @@ export async function getReadingWorks(
       chaptersCheckedAt: w.chapters_checked_at ?? null,
     }
   })
+
+  // O `.order()` acima ordena por `works.last_read_at` — a data DELE. Pra quem lê do espelho,
+  // reordena pela própria: sem isto a lista dela sairia na ordem de leitura do dono.
+  if (!personal.isOwner) {
+    works.sort((a, b) => (b.lastReadAt ?? "").localeCompare(a.lastReadAt ?? ""))
+  }
+
+  return works
 }
