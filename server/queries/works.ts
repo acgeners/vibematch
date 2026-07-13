@@ -403,10 +403,15 @@ export async function getWorks(
 }
 
 /**
- * Sobrepõe o estado de LEITURA de quem está olhando nas 4 colunas pessoais que vêm de `works`
- * (Fatia 1). Pro dono é identidade — aquelas colunas SÃO o estado dele. Pra qualquer outro
- * usuário, elas são o estado do DONO: sem esta troca, a Leitora abriria a obra e veria o
- * coração dele preenchido e "capítulo 137 de 200" como se fosse a leitura dela.
+ * Sobrepõe o estado PESSOAL de quem está olhando nas colunas pessoais que vêm de `works`:
+ * acompanhamento (Fatia 1) + gosto (Fatia 2a: nota, anotações, interesse ♥, pós-leitura).
+ *
+ * Pro dono é identidade — aquelas colunas SÃO o estado dele. Pra qualquer outro usuário, elas
+ * são o estado do DONO: sem esta troca, a Leitora abriria a obra e veria o coração dele
+ * preenchido, "capítulo 137 de 200" e a NOTA 8,5 dele como se fossem dela.
+ *
+ * ⚠️ Isto é a camada de UI. O SCORING não passa por aqui: ele lê `works` direto, de propósito
+ * (são os rótulos do dono, com os quais o modelo dele foi treinado).
  *
  * Ver server/queries/user-work-state.ts.
  */
@@ -420,6 +425,14 @@ async function withPersonalState(works: WorkWithRelations[]): Promise<WorkWithRe
       personal_status_id: state.personalStatusId,
       chapters_read: state.chaptersRead,
       last_read_at: state.lastReadAt,
+      user_score: state.userScore,
+      observations: state.observations,
+      observation_adjustment: state.observationAdjustment,
+      synopsis_quality: state.synopsisQuality,
+      synopsis_quality_source: state.synopsisQualitySource,
+      synopsis_quality_prediction_id: state.synopsisQualityPredictionId,
+      synopsis_interest_skipped: state.synopsisInterestSkipped,
+      ...state.postScores,
     }
   })
 }
@@ -581,8 +594,15 @@ export async function getWorkWithAiEvaluations(id: string) {
   if (!data) return null
   if (evaluationResult.error) throw new Error(evaluationResult.error.message)
 
+  // ⚠️ Este é o caminho da PÁGINA DA OBRA (`getWorkBySlug` → aqui) — um caminho SEPARADO do
+  // `getWorkById`. Sem o overlay, ele entregava as colunas pessoais cruas de `works`: a página
+  // da Leitora abria o formulário de status já preenchido com o capítulo 49 DELE e a nota 7,9
+  // DELE. Passou batido na Fatia 1 porque o teste da página da obra só conferia o CATÁLOGO
+  // (título, capa, tags, notas da IA) — o estado pessoal ali nunca tinha sido checado.
+  const [work] = await withPersonalState([normalizeWorkRelations(data)])
+
   return {
-    ...normalizeWorkRelations(data),
+    ...work,
     ai_evaluations: evaluationResult.data ? [evaluationResult.data] : [],
   }
 }

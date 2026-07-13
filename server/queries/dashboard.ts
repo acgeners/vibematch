@@ -70,18 +70,38 @@ export interface AiQueueCounts {
 export async function getDashboardStats(): Promise<DashboardStats> {
   const supabase = createAdminClient()
 
-  const [worksRes, calcRes, ratedRes] = await Promise.all([
+  // "Avaliadas" é o número de obras que EU notei — não as que o dono notou (Fatia 2a). Pro
+  // dono, a conta continua sendo em `works`; pros demais, nas linhas dela.
+  //
+  // Em duas funções, e não num ternário dentro do `Promise.all`: os dois query builders têm
+  // tipos diferentes, e o union deles faz o TS estourar em "type instantiation is excessively
+  // deep" (TS2589).
+  const personal = await getPersonalStateReader()
+  const countRatedByOwner = async () => {
+    const { count } = await supabase
+      .from("works")
+      .select("id", { count: "exact", head: true })
+      .eq("is_archived", false)
+      .not("user_score", "is", null)
+    return count ?? 0
+  }
+  const countRatedByUser = async () => {
+    const { count } = await supabase
+      .from("user_work_state")
+      .select("work_id", { count: "exact", head: true })
+      .eq("user_id", personal.userId)
+      .not("user_score", "is", null)
+    return count ?? 0
+  }
+
+  const [worksRes, calcRes, rated] = await Promise.all([
     supabase
       .from("works")
       .select("id, ai_eval_status, is_archived, publication_status_id, personal_status_id, total_chapters, chapters_read"),
     supabase
       .from("calculated_scores")
       .select("work_id, expected_score"),
-    supabase
-      .from("works")
-      .select("id", { count: "exact", head: true })
-      .eq("is_archived", false)
-      .not("user_score", "is", null),
+    personal.isOwner ? countRatedByOwner() : countRatedByUser(),
   ])
 
   if (worksRes.error) throw new Error(worksRes.error.message)
@@ -89,7 +109,6 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 
   const works = worksRes.data ?? []
   const calcs = calcRes.data ?? []
-  const rated = ratedRes.count ?? 0
 
   const active = works.filter((w) => !w.is_archived)
   const totalWorks = active.length
@@ -117,7 +136,8 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   // pros demais; sem isso, a home da Leitora abriria anunciando as 14 obras que ELE está
   // lendo. Os KPIs de CATÁLOGO (total, pendências de IA, arquivadas, nota média) seguem
   // globais de propósito: o catálogo é compartilhado.
-  const personal = await getPersonalStateReader()
+  // (`personal` já foi lido acima, pro contador de avaliadas — o reader é memoizado por
+  // request, então reusar não custa query nova.)
 
   const byPublicationStatus: Record<string, number> = {}
   const byPersonalStatus: Record<string, number> = {}

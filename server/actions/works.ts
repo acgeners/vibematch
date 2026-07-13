@@ -31,8 +31,18 @@ import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin, ensurePermission, ensureSignedIn } from "@/server/queries/current-user"
-import { writeReadingState, canWriteSharedWorkRow, toDay } from "@/server/queries/user-work-state"
-import type { ReadingStatePatch } from "@/server/queries/user-work-state"
+import {
+  writeReadingState,
+  canWriteSharedWorkRow,
+  toDay,
+  getPersonalStateReader,
+} from "@/server/queries/user-work-state"
+import type {
+  ReadingStatePatch,
+  TasteStatePatch,
+  PersonalStatePatch,
+  WorkReadingColumns,
+} from "@/server/queries/user-work-state"
 import { buildAutoRefreshPlan } from "@/lib/external/auto-refresh"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
@@ -708,18 +718,23 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
   // primária das fontes enquanto a obra não passou pela consolidação.
   const canonicalSynopsis = ((data.canonical_synopsis as string | null) ?? "").trim()
 
+  // Interesse ♥ e observações são PESSOAIS (Fatia 2a): no hover de quem não é o dono, as
+  // colunas de `works` são as dele.
+  const personal = await getPersonalStateReader()
+  const state = personal.get(data.id as string, data as WorkReadingColumns)
+
   return {
     workId: data.id as string,
     title: data.title as string,
     coverUrl: pickPrimaryCover(covers),
     synopsis: canonicalSynopsis || pickPrimarySynopsis(synopses),
-    synopsisQuality: (data.synopsis_quality as string | null) ?? null,
-    synopsisFromPrediction: (data.synopsis_quality_source as string | null) === "prediction_applied",
+    synopsisQuality: state.synopsisQuality,
+    synopsisFromPrediction: state.synopsisQualitySource === "prediction_applied",
     predictedSynopsisQuality: prediction?.predictedQuality ?? null,
     predictedSynopsisStale: prediction?.stale ?? false,
     publicationStatusId: (data.publication_status_id as number | null) ?? null,
     totalChapters: (data.total_chapters as number | null) ?? null,
-    observations: (data.observations as string | null) ?? null,
+    observations: state.observations,
     year: (data.year as number | null) ?? null,
     platformAvg: calc?.platform_avg ?? null,
     totalVotes: calc?.total_votes ?? 0,
@@ -1636,54 +1651,35 @@ export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
 }
 
 /**
- * Campos que o form manda mas que NÃO são desta fatia: nota, observações, interesse e os 8
- * pós-leitura. Eles alimentam o **scoring** (Ridge, `calculated_scores`, `formula_config`), e
- * movê-los arrasta tudo isso junto — é a Fatia 2 (§13.1). Continuam morando em `works`, ou
- * seja: continuam sendo do DONO.
+ * O estado de GOSTO (FATIA 2a): nota, anotações, interesse ♥ e as 8 pós-leitura.
  *
- * Existe porque `work-status-form` submete o form INTEIRO a cada save — inclusive os campos
- * que ninguém tocou, ecoando de volta os valores carregados da obra. Para o dono isso é
- * inócuo (reescreve o mesmo valor). Para qualquer outro usuário, seria escrever a nota DELE
- * na linha compartilhada: um eco vira uma reescrita. Daí a comparação abaixo — a Leitora que
- * só marcou um capítulo não é punida por ecoar a nota do dono sem querer, mas se ela de fato
- * MUDAR uma dessas notas, o pedido é recusado em vez de aceito-e-descartado em silêncio.
+ * Até a Fatia 1 estes campos eram RECUSADOS para quem não é o dono — moravam só na linha
+ * compartilhada de `works`, e aceitá-los teria sobrescrito a nota dele. Agora eles têm casa
+ * própria em `user_work_state` e qualquer usuário logado pode avaliar.
+ *
+ * ⚠️ O que NÃO mudou, e é o coração da fatia: o **scoring continua lendo `works`**. O Ridge, a
+ * chance, o viés de atributo, o ledger e o perfil de gosto treinam com os RÓTULOS DO DONO — e
+ * `works` é onde eles moram. Por isso `works` só é escrita quando quem avalia é ele: se a nota
+ * da Leitora entrasse ali, o modelo DELE passaria a aprender o gosto DELA, e a Nota Prevista de
+ * 878 obras mudaria sem que ninguém tivesse pedido nada.
  */
-const FATIA2_FIELDS = [
-  "user_score",
-  "observation_adjustment",
-  "observations",
-  "synopsis_quality",
-  "post_story_score",
-  "post_fl_score",
-  "post_ml_score",
-  "post_character_development_score",
-  "post_pacing_score",
-  "post_art_visual_score",
-  "post_impact_immersion_score",
-  "post_originality_score",
-] as const
-
-function fatia2FieldsChanged(
-  raw: WorkStatusValues,
-  data: WorkStatusValues,
-  stored: Record<string, unknown> | null | undefined,
-): string[] {
-  if (!stored) return []
-  return FATIA2_FIELDS.filter((field) => {
-    // ⚠️ OMITIR um campo não é MUDÁ-LO. O form manda o payload inteiro, mas um chamador
-    // direto (script, app) manda só o que quer mudar — e no schema esses campos são
-    // `.optional()` (e `observation_adjustment` tem `.default(0)`), então o zod transforma
-    // "ausente" em `undefined`/`0`. Comparar o valor JÁ PARSEADO acusaria "você apagou as
-    // observações do Curador" em quem só mandou `chapters_read`. Quem decide é a presença no
-    // payload CRU: campo ausente = intenção ausente — e ele não é escrito de qualquer forma.
-    if (!(field in raw)) return false
-
-    const submitted = (data as Record<string, unknown>)[field] ?? null
-    const current = stored[field] ?? null
-    // `observation_adjustment` é `not null default 0` — 0 e null são a mesma coisa aqui.
-    if (field === "observation_adjustment") return Number(submitted ?? 0) !== Number(current ?? 0)
-    return submitted !== current
-  })
+function tastePatchFrom(data: WorkStatusValues): TasteStatePatch {
+  return {
+    user_score: data.user_score ?? null,
+    observations: data.observations ?? null,
+    observation_adjustment: data.observation_adjustment,
+    synopsis_quality: data.synopsis_quality ?? null,
+    // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
+    synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
+    post_story_score: data.post_story_score ?? null,
+    post_fl_score: data.post_fl_score ?? null,
+    post_ml_score: data.post_ml_score ?? null,
+    post_character_development_score: data.post_character_development_score ?? null,
+    post_pacing_score: data.post_pacing_score ?? null,
+    post_art_visual_score: data.post_art_visual_score ?? null,
+    post_impact_immersion_score: data.post_impact_immersion_score ?? null,
+    post_originality_score: data.post_originality_score ?? null,
+  }
 }
 
 export async function updateWorkStatus(id: string, values: WorkStatusValues) {
@@ -1697,10 +1693,9 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   const data = parsed.data
   const supabase = createAdminClient()
 
-  // A linha de `works` traz (a) o estado do DONO e (b) os campos da Fatia 2 pra comparação.
-  // Literal de propósito: o client do Supabase tipa o retorno a partir da STRING do select —
-  // montá-la com template/`join()` devolve `ParserError` em vez das colunas. Se mexer em
-  // FATIA2_FIELDS, mexa aqui também.
+  // A linha de `works` = o estado do DONO (e, pra ele, a `user_score` anterior que o ledger de
+  // previsões usa). Literal de propósito: o client do Supabase tipa o retorno a partir da
+  // STRING do select — montá-la com template/`join()` devolve `ParserError`.
   const { data: sharedRow } = await supabase
     .from("works")
     .select(
@@ -1747,6 +1742,7 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
       : null
   }
 
+  // Só do DONO: é a nota DELE que o ledger de previsões resolve e que o Ridge treina.
   const prevUserScore = (sharedRow?.user_score as number | null | undefined) ?? null
 
   const currentStatusName = current
@@ -1779,25 +1775,17 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
     chapters_read: data.chapters_read ?? null,
     last_read_at: nextLastReadAt,
   }
+  const personalState: PersonalStatePatch = { ...readingState, ...tastePatchFrom(data) }
 
-  // ── Não-dono: só o estado de leitura, e só em `user_work_state`. `works` NÃO é tocada.
+  // ── Não-dono: TUDO dela (acompanhamento + gosto) vai pra `user_work_state`. `works` NÃO é
+  // tocada — nem a nota, nem as observações. É o que impede a nota dela de virar o rótulo que
+  // treina o modelo DELE.
   if (!gate.isOwner) {
-    const changed = fatia2FieldsChanged(values, data, sharedRow)
-    if (changed.length > 0) {
-      return {
-        error: {
-          _root: [
-            "Nota, observações e pós-leitura ainda não são per-usuário (Fatia 2) — hoje elas " +
-              "são do Curador. Salve status, capítulos e data de leitura; o resto não foi gravado.",
-          ],
-        },
-      }
-    }
-
-    const write = await writeReadingState(gate.userId, [id], readingState)
+    const write = await writeReadingState(gate.userId, [id], personalState)
     if (write.error) return { error: { _root: [write.error] } }
 
-    // Sem recalc e sem prediction ledger: nada em `works` mudou, e o modelo é o do dono.
+    // Sem recalc e sem prediction ledger: nada em `works` mudou, e o modelo é o do dono. A Nota
+    // Prevista dela é a Fatia 2b (precisa de ≥20 rótulos e de um `calculated_scores` com dono).
     revalidatePath("/titles/[id]", "page")
     revalidatePath("/titles")
     revalidatePath("/ranking")
@@ -1807,31 +1795,14 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
     return { data: { id } }
   }
 
-  // ── Dono: exatamente o que sempre foi (`works` inteira), + o espelho per-usuário.
-  const { error } = await supabase
-    .from("works")
-    .update({
-      ...readingState,
-      synopsis_quality: data.synopsis_quality ?? null,
-      // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
-      synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
-      observation_adjustment: data.observation_adjustment,
-      observations: data.observations ?? null,
-      user_score: data.user_score ?? null,
-      post_story_score: data.post_story_score ?? null,
-      post_fl_score: data.post_fl_score ?? null,
-      post_ml_score: data.post_ml_score ?? null,
-      post_character_development_score: data.post_character_development_score ?? null,
-      post_pacing_score: data.post_pacing_score ?? null,
-      post_art_visual_score: data.post_art_visual_score ?? null,
-      post_impact_immersion_score: data.post_impact_immersion_score ?? null,
-      post_originality_score: data.post_originality_score ?? null,
-    })
-    .eq("id", id)
+  // ── Dono: exatamente o que sempre foi (`works` inteira, inclusive a nota que treina o
+  // Ridge), + o espelho per-usuário. O `personalState` é o MESMO objeto que a Leitora grava —
+  // o que muda não é o conteúdo, é o DESTINO.
+  const { error } = await supabase.from("works").update(personalState).eq("id", id)
 
   if (error) return { error: { _root: [error.message] } }
 
-  const mirror = await writeReadingState(gate.userId, [id], readingState)
+  const mirror = await writeReadingState(gate.userId, [id], personalState)
   if (mirror.error) return { error: { _root: [mirror.error] } }
 
   // Validação prospectiva: primeira nota (null → valor) → congela a previsão

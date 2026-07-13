@@ -3,6 +3,7 @@ import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createUserClient } from "@/lib/supabase/user"
 import { getCurrentUserId, getOwnerUserId } from "./current-user"
+import type { SynopsisQuality, SynopsisQualitySource } from "@/types/domain"
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // Estado de LEITURA per-usuário — FATIA 1 (PLANO-MULTIUSER-FASE2.md §13)
@@ -41,28 +42,106 @@ import { getCurrentUserId, getOwnerUserId } from "./current-user"
 // estado já vem na linha de `works` que a página buscou de qualquer jeito.
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
+/** As 8 notas pós-leitura ("Como foi pra você"). */
+export const POST_READING_COLUMNS = [
+  "post_story_score",
+  "post_fl_score",
+  "post_ml_score",
+  "post_character_development_score",
+  "post_pacing_score",
+  "post_art_visual_score",
+  "post_impact_immersion_score",
+  "post_originality_score",
+] as const
+
+export type PostReadingColumn = (typeof POST_READING_COLUMNS)[number]
+
 export interface PersonalWorkState {
+  // ── Acompanhamento (Fatia 1)
   isFavorite: boolean
   personalStatusId: number | null
   chaptersRead: number | null
   /** Dia (YYYY-MM-DD) — normalizado. Ver `toDay()`. */
   lastReadAt: string | null
+
+  // ── Gosto (Fatia 2a): a nota, as anotações, o interesse e a pós-leitura.
+  //
+  // ⚠️ O SCORING NÃO LÊ DAQUI. O Ridge, a chance, o viés de atributo, o ledger e o perfil de
+  // gosto continuam lendo `works` — porque lá moram os RÓTULOS DO DONO, que é com o que o
+  // modelo dele foi treinado. Trocar aquelas leituras por estas faria o modelo treinar com o
+  // dado de quem abriu a página: notas erradas, sem erro e sem log. Ver §13.3 do plano.
+  userScore: number | null
+  observations: string | null
+  observationAdjustment: number
+  synopsisQuality: SynopsisQuality | null
+  synopsisQualitySource: SynopsisQualitySource | null
+  synopsisQualityPredictionId: string | null
+  synopsisInterestSkipped: boolean
+  postScores: Record<PostReadingColumn, number | null>
 }
+
+const EMPTY_POST_SCORES = Object.fromEntries(
+  POST_READING_COLUMNS.map((c) => [c, null]),
+) as Record<PostReadingColumn, number | null>
 
 export const EMPTY_PERSONAL_STATE: PersonalWorkState = {
   isFavorite: false,
   personalStatusId: null,
   chaptersRead: null,
   lastReadAt: null,
+  userScore: null,
+  observations: null,
+  observationAdjustment: 0,
+  synopsisQuality: null,
+  synopsisQualitySource: null,
+  synopsisQualityPredictionId: null,
+  synopsisInterestSkipped: false,
+  postScores: EMPTY_POST_SCORES,
 }
 
-/** As 4 colunas, como vêm de uma linha de `works`. */
+/** As colunas pessoais, como vêm de uma linha de `works` (ou do espelho — os nomes batem). */
 export interface WorkReadingColumns {
   is_favorite?: boolean | null
   personal_status_id?: number | null
   chapters_read?: number | null
   last_read_at?: string | null
+  user_score?: number | null
+  observations?: string | null
+  observation_adjustment?: number | null
+  synopsis_quality?: SynopsisQuality | string | null
+  synopsis_quality_source?: SynopsisQualitySource | string | null
+  synopsis_quality_prediction_id?: string | null
+  synopsis_interest_skipped?: boolean | null
+  post_story_score?: number | null
+  post_fl_score?: number | null
+  post_ml_score?: number | null
+  post_character_development_score?: number | null
+  post_pacing_score?: number | null
+  post_art_visual_score?: number | null
+  post_impact_immersion_score?: number | null
+  post_originality_score?: number | null
 }
+
+/** As 12 colunas de gosto, para os `select` (a Fatia 2a). */
+export const TASTE_COLUMNS = [
+  "user_score",
+  "observations",
+  "observation_adjustment",
+  "synopsis_quality",
+  "synopsis_quality_source",
+  "synopsis_quality_prediction_id",
+  "synopsis_interest_skipped",
+  ...POST_READING_COLUMNS,
+] as const
+
+/** As 4 de acompanhamento (Fatia 1) + as 12 de gosto (Fatia 2a). */
+export const PERSONAL_COLUMNS = [
+  "is_favorite",
+  "personal_status_id",
+  "chapters_read",
+  "last_read_at",
+  ...TASTE_COLUMNS,
+] as const
 
 /**
  * ⚠️ Os dois lados têm TIPOS diferentes: `works.last_read_at` é **date** ("2025-02-03") e
@@ -79,11 +158,23 @@ export function toDay(value: string | null | undefined): string | null {
 }
 
 function stateFromMirrorRow(row: WorkReadingColumns): PersonalWorkState {
+  const postScores = Object.fromEntries(
+    POST_READING_COLUMNS.map((c) => [c, (row[c] as number | null | undefined) ?? null]),
+  ) as Record<PostReadingColumn, number | null>
+
   return {
     isFavorite: Boolean(row.is_favorite ?? false),
     personalStatusId: row.personal_status_id ?? null,
     chaptersRead: row.chapters_read ?? null,
     lastReadAt: toDay(row.last_read_at),
+    userScore: row.user_score ?? null,
+    observations: row.observations ?? null,
+    observationAdjustment: Number(row.observation_adjustment ?? 0),
+    synopsisQuality: (row.synopsis_quality as SynopsisQuality | null) ?? null,
+    synopsisQualitySource: (row.synopsis_quality_source as SynopsisQualitySource | null) ?? null,
+    synopsisQualityPredictionId: row.synopsis_quality_prediction_id ?? null,
+    synopsisInterestSkipped: Boolean(row.synopsis_interest_skipped ?? false),
+    postScores,
   }
 }
 
@@ -145,10 +236,21 @@ async function loadUserWorkState(userId: string): Promise<Map<string, PersonalWo
   // ⚠️ Paginado: o `select` corta em 1000 linhas SEM AVISAR. São 882 obras hoje — abaixo do
   // teto, mas o dia em que passarem, um select cru devolveria um recorte e a página diria,
   // convicta, que as obras 1001+ não têm estado nenhum.
+  // Literal de propósito: o client do Supabase tipa o retorno a partir da STRING do select —
+  // montá-la com `join()` devolve `ParserError` em vez das colunas. Se mexer em
+  // PERSONAL_COLUMNS, mexa aqui também.
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from("user_work_state")
-      .select("work_id, is_favorite, personal_status_id, chapters_read, last_read_at")
+      .select(
+        `work_id, is_favorite, personal_status_id, chapters_read, last_read_at,
+         user_score, observations, observation_adjustment,
+         synopsis_quality, synopsis_quality_source, synopsis_quality_prediction_id,
+         synopsis_interest_skipped,
+         post_story_score, post_fl_score, post_ml_score, post_character_development_score,
+         post_pacing_score, post_art_visual_score, post_impact_immersion_score,
+         post_originality_score`,
+      )
       .eq("user_id", userId)
       .order("work_id", { ascending: true })
       .range(from, from + PAGE - 1)
@@ -176,10 +278,13 @@ async function loadUserWorkState(userId: string): Promise<Map<string, PersonalWo
 export async function resolvePersonalFilterIds(filter: {
   personalStatusIds?: number[] | null
   onlyFavorites?: boolean
+  /** Interesse ♥ manual (`synopsis_quality`) — Fatia 2a. */
+  synopsisQualities?: string[] | null
 }): Promise<string[] | null> {
-  const { personalStatusIds, onlyFavorites } = filter
+  const { personalStatusIds, onlyFavorites, synopsisQualities } = filter
   const wantsStatus = personalStatusIds != null && personalStatusIds.length > 0
-  if (!wantsStatus && !onlyFavorites) return null
+  const wantsInterest = synopsisQualities != null && synopsisQualities.length > 0
+  if (!wantsStatus && !onlyFavorites && !wantsInterest) return null
 
   const reader = await getPersonalStateReader()
   if (reader.isOwner) return null
@@ -197,6 +302,7 @@ export async function resolvePersonalFilterIds(filter: {
 
     if (wantsStatus) query = query.in("personal_status_id", personalStatusIds)
     if (onlyFavorites) query = query.eq("is_favorite", true)
+    if (wantsInterest) query = query.in("synopsis_quality", synopsisQualities)
 
     const { data, error } = await query
     if (error) throw new Error(`user_work_state: ${error.message}`)
@@ -217,6 +323,7 @@ export async function resolvePersonalFilterIds(filter: {
 // você quiser". O `userId` aqui vem sempre de `ensureSignedIn()`, no call site.
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
+/** Acompanhamento (Fatia 1). */
 export type ReadingStatePatch = Partial<{
   is_favorite: boolean
   personal_status_id: number | null
@@ -224,8 +331,29 @@ export type ReadingStatePatch = Partial<{
   last_read_at: string | null
 }>
 
+/** Gosto (Fatia 2a): nota, anotações, interesse ♥ e as 8 pós-leitura. */
+export type TasteStatePatch = Partial<{
+  user_score: number | null
+  observations: string | null
+  observation_adjustment: number
+  synopsis_quality: string | null
+  synopsis_quality_source: string | null
+  synopsis_quality_prediction_id: string | null
+  synopsis_interest_skipped: boolean
+  post_story_score: number | null
+  post_fl_score: number | null
+  post_ml_score: number | null
+  post_character_development_score: number | null
+  post_pacing_score: number | null
+  post_art_visual_score: number | null
+  post_impact_immersion_score: number | null
+  post_originality_score: number | null
+}>
+
+export type PersonalStatePatch = ReadingStatePatch & TasteStatePatch
+
 /**
- * Grava o estado de leitura de UM usuário em N obras. Upsert idempotente.
+ * Grava o estado pessoal de UM usuário em N obras. Upsert idempotente.
  *
  * Vai no cliente de SESSÃO (`createUserClient`) de propósito: a RLS da mig 142 exige
  * `user_id = auth.uid()` no `with check`, então uma tentativa de escrever na linha de outra
@@ -235,7 +363,7 @@ export type ReadingStatePatch = Partial<{
 export async function writeReadingState(
   userId: string,
   workIds: string[],
-  patch: ReadingStatePatch,
+  patch: PersonalStatePatch,
 ): Promise<{ error: string | null }> {
   const ids = Array.from(new Set(workIds.filter(Boolean)))
   if (ids.length === 0) return { error: null }
@@ -253,18 +381,19 @@ export async function writeReadingState(
     .from("user_work_state")
     .upsert(rows, { onConflict: "user_id,work_id" })
 
-  if (error) return { error: `Falha salvando seu estado de leitura: ${error.message}` }
+  if (error) return { error: `Falha salvando o seu estado: ${error.message}` }
   return { error: null }
 }
 
 /**
  * Quem escreve o quê, em UMA decisão.
  *
- * 🔴 A armadilha que esta função existe pra fechar: `works` é a linha compartilhada, e as 4
- * colunas de leitura que moram nela são as do DONO. Um dual-write incondicional faria a
- * Leitora favoritar uma obra e sobrescrever o `is_favorite` DELE; marcar o capítulo 12 e o
- * `chapters_read` dele virar 12. Sem erro, sem log. Por isso `works` só é tocada quando quem
- * escreve É o dono.
+ * 🔴 A armadilha que esta função existe pra fechar: `works` é a linha compartilhada, e as
+ * colunas pessoais que moram nela são as do DONO. Um dual-write incondicional faria a Leitora
+ * favoritar uma obra e sobrescrever o `is_favorite` DELE; marcar o capítulo 12 e o
+ * `chapters_read` dele virar 12; dar 9 numa obra e a NOTA DELE virar 9 — e a nota do dono é o
+ * rótulo que treina o Ridge, ou seja, o modelo dele passaria a aprender o gosto dela. Sem
+ * erro, sem log. Por isso `works` só é tocada quando quem escreve É o dono.
  */
 export async function canWriteSharedWorkRow(userId: string): Promise<boolean> {
   return userId === (await getOwnerUserId())
