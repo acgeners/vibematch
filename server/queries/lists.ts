@@ -4,6 +4,7 @@ import { pickPrimaryCover } from "@/lib/covers"
 import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
 import type { FavoritesSummary } from "@/server/queries/favorites"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
+import { getCurrentUserId } from "@/server/queries/current-user"
 import { getScoresReader } from "@/server/queries/user-scores"
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -143,11 +144,15 @@ const WORK_SUMMARY_SELECT =
 /** Índice de grupos com resumo agregado. Uma varredura de itens + uma de obras. */
 export async function getListsWithSummary(): Promise<WorkListSummary[]> {
   const supabase = createAdminClient()
+  // Fatia 2b (mig 149): os grupos têm DONO. Sem este filtro, a Leitora abriria /favoritos e
+  // veria os grupos DELE ("Comfort reads", "Pra maratonar") como se fossem dela.
+  const viewerId = await getCurrentUserId()
 
   const [listsRes, itemsRes] = await Promise.all([
     supabase
       .from("work_lists")
       .select("id, name, description, color, cover_work_ids, comments, position, created_at")
+      .eq("user_id", viewerId)
       .order("position", { ascending: true })
       .order("created_at", { ascending: false }),
     supabase
@@ -213,10 +218,13 @@ export async function getListsWithSummary(): Promise<WorkListSummary[]> {
 export async function getListDetail(id: string): Promise<WorkListDetail | null> {
   const supabase = createAdminClient()
 
+  // Escopado ao dono: sem isso, bastaria a URL /favorites/<id-de-um-grupo-dele> pra ela abrir
+  // o grupo dele. Um id não é um segredo.
   const { data: list, error } = await supabase
     .from("work_lists")
     .select("id, name, description, color, cover_work_ids, comments")
     .eq("id", id)
+    .eq("user_id", await getCurrentUserId())
     .maybeSingle()
 
   if (error || !list) {
@@ -286,6 +294,7 @@ export async function getListsForPicker(): Promise<ListPickerOption[]> {
     supabase
       .from("work_lists")
       .select("id, name, color, position, created_at")
+      .eq("user_id", await getCurrentUserId())
       .order("position", { ascending: true })
       .order("created_at", { ascending: false }),
     supabase.from("work_list_items").select("list_id"),
