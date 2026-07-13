@@ -25,8 +25,7 @@ import type { AlignmentQueueWork, SynopsisQueueWork, UntrackedWork } from "@/ser
 import { UntrackedStatusPanel } from "@/components/ai-evaluation/untracked-status-panel"
 import { getSynopsisPredictionAccuracy, getSynopsisVersionComparison } from "@/server/queries/synopsis-quality"
 import type { SynopsisPredictionAccuracy, SynopsisVersionComparison } from "@/server/queries/synopsis-quality"
-import { getCurrentPlan } from "@/server/queries/current-user"
-import { planAllows } from "@/lib/plans/capabilities"
+import { canConsumeAi } from "@/server/queries/current-user"
 import { TagsReviewsTab } from "@/components/ai-evaluation/tags-reviews-tab"
 import type { TagsReviewsWork } from "@/components/ai-evaluation/tags-reviews-tab"
 import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
@@ -1028,7 +1027,7 @@ export default async function AiEvaluationPage({
   // paralelo com a query da aba (dentro do Promise.all do branch) pra não somar um
   // round-trip serial ao DB de Ohio no caminho crítico do conteúdo.
   const needsPlan = activeTab === "sinopse" || activeTab === "ia-rk"
-  const planPromise = needsPlan ? getCurrentPlan() : null
+  const canAiPromise = needsPlan ? canConsumeAi() : null
 
   // Obras marcadas como "lidas" por fila (silenciadas). Os cards exibem o selo
   // "Lida" e o activeCount abaixo desconta as lidas (bate com o contador da aba).
@@ -1051,14 +1050,14 @@ export default async function AiEvaluationPage({
     const sinopseUsesDefaultPersonal = personalStatusNames.length === 0
     const sinopsePersonalNames = sinopseUsesDefaultPersonal ? INTEREST_DEFAULT_PERSONAL_NAMES : personalStatusNames
     const sinopsePersonalIds = sinopseUsesDefaultPersonal ? INTEREST_DEFAULT_PERSONAL_IDS : personalStatusIds
-    const [synopsisQueue, predictionVersionOptions, synopsisAccuracy, synopsisComparison, plan] = await Promise.all([
+    const [synopsisQueue, predictionVersionOptions, synopsisAccuracy, synopsisComparison, canAi] = await Promise.all([
       getSynopsisQueueWorks({ states: synopsisStates, pubStatusIds, personalStatusIds: sinopsePersonalIds, synopsisQualities, predictionVersions, predictionQualities, predictionDeltas, missingManual: synopsisQualities.includes("none") }),
       getSynopsisPredictionVersions(),
       getSynopsisPredictionAccuracy(),
       getSynopsisVersionComparison(),
-      planPromise ?? getCurrentPlan(),
+      canAiPromise ?? canConsumeAi(),
     ])
-    const isPaidPlan = planAllows(plan, "smart_shortlist")
+    const isPaidPlan = canAi
     // Só as contagens 🏷/💬 (badge + filtro de faixa) entram no crítico. Os inputs
     // pesados do popover (sinopse/tags/digest) carregam sob demanda ao abrir.
     const idsToHydrate = synopsisQueue.map((w) => w.id)
@@ -1161,11 +1160,11 @@ export default async function AiEvaluationPage({
       />
     )
   } else if (activeTab === "ia-rk") {
-    const [iaRkQueue, plan] = await Promise.all([
+    const [iaRkQueue, canAi] = await Promise.all([
       getAlignmentQueueWorks({ states: iaRkStates, pubStatusIds, personalStatusIds }),
-      planPromise ?? getCurrentPlan(),
+      canAiPromise ?? canConsumeAi(),
     ])
-    const isPaidPlan = planAllows(plan, "smart_shortlist")
+    const isPaidPlan = canAi
     const keep = await filterWorkIdsByInterest(iaRkQueue.map((w) => w.id), synopsisQualities, predictionQualities)
     const members = iaRkQueue.filter((w) => keep.has(w.id))
     const counts = await getWorkTagReviewCounts(members.map((w) => w.id))

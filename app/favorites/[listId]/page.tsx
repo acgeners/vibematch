@@ -10,8 +10,7 @@ import { RecommendDialog } from "@/components/recommendations/recommend-dialog"
 import { ViewRecommendationsButton } from "@/components/recommendations/view-recommendations-button"
 import { GroupDetailActions } from "@/components/favorites/lists/group-detail-actions"
 import { GroupRecommendButton } from "@/components/favorites/lists/group-recommend-button"
-import { getCurrentPlan } from "@/server/queries/current-user"
-import { planAllows } from "@/lib/plans/capabilities"
+import { canConsumeAi } from "@/server/queries/current-user"
 import { getRanking, type RankingFilters, type SortLevel } from "@/server/queries/ranking"
 import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
@@ -140,7 +139,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     sortLevels,
   }
 
-  const [entries, allGenres, allTags, statusOptions, favSummary, scoreThresholds, savedPresets, criterionPrefs, plan, catalog, recentRecs, allGroups] =
+  const [entries, allGenres, allTags, statusOptions, favSummary, scoreThresholds, savedPresets, criterionPrefs, canAi, catalog, recentRecs, allGroups] =
     await Promise.all([
       getRanking(filters),
       getAllGenres(),
@@ -150,7 +149,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
       getScoreColorThresholds(),
       getFilterPresets(basePath),
       getCriterionColorRanges(),
-      getCurrentPlan(),
+      canConsumeAi(),
       isAll ? Promise.resolve([]) : getWorksLiteForPicker(),
       isAll ? Promise.resolve([]) : getListRecommendations(listId),
       getListsForPicker(),
@@ -161,7 +160,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
 
   const orderedIds = entries.map((e) => e.workId)
   const works = await getWorksByIds(orderedIds)
-  const isPaid = planAllows(plan, "smart_shortlist")
+  const isPaid = canAi
 
   const entryById = new Map(entries.map((e) => [e.workId, e]))
   const worksWithPred = works.map((w) => {

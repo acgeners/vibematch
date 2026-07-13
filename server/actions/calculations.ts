@@ -17,8 +17,7 @@ import {
   calculateNotaCalc,
 } from "@/lib/calculations"
 import { calculateGPTWithDiagnostics, calculateGPT } from "@/lib/calculations/gpt"
-import { getCurrentUserId, getCurrentPlan } from "@/server/queries/current-user"
-import { planAllows } from "@/lib/plans/capabilities"
+import { getCurrentUserId, ensurePermission } from "@/server/queries/current-user"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import {
   applyBiasToCategoryScores,
@@ -480,8 +479,9 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   // estimador, backfill) mantida parada; reativar SÓ com um estimador
   // reviews-based (L0+ v2), flipando o flag abaixo.
   const L0_QUALITY_ENABLED = false
-  const plan = await getCurrentPlan(supabase)
-  const includeQuality = L0_QUALITY_ENABLED && planAllows(plan, "l0_quality_eval")
+  // && curto-circuita: com o flag desligado, nem consulta o papel (isto roda em
+  // contexto de fila, onde não há sessão).
+  const includeQuality = L0_QUALITY_ENABLED && (await ensurePermission("consume_ai")).ok
 
   const [worksRes, weightsRes, configRes, tasteProfile, declaredTagPrefs] = await Promise.all([
     supabase

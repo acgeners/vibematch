@@ -4,8 +4,7 @@ import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { generateTasteProfile, rankFavorites, MODEL, PROMPT_VERSION } from "@/lib/ai-recommendation/service"
 import { type RankingFilters } from "@/server/queries/ranking"
-import { ensureAdmin, ensureCapability, getCurrentPlan } from "@/server/queries/current-user"
-import { planAllows } from "@/lib/plans/capabilities"
+import { ensureAdmin, ensurePermission } from "@/server/queries/current-user"
 import { buildTasteProfileHeuristic } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import { classifyProfileStaleness, computeHeuristicFingerprint } from "@/lib/ai-recommendation/profile-drift"
 import { loadOrEnsureProfile } from "@/lib/ai-recommendation/ensure-profile"
@@ -215,9 +214,8 @@ export async function generateTasteProfileAction(): Promise<{
       return { data: saved }
     }
 
-    // Free: perfil heurístico (zero LLM). Pago: perfil LLM rico.
-    const plan = await getCurrentPlan()
-    if (!planAllows(plan, "llm_taste_profile")) {
+    // Leitor: perfil heurístico (zero LLM). Assinante+: perfil LLM rico.
+    if (!(await ensurePermission("consume_ai")).ok) {
       const profile = buildTasteProfileHeuristic(ratedWorks)
       const saved = await insertNewTasteProfile({
         profile,
@@ -276,7 +274,7 @@ export async function runRecommendationAction(
 ): Promise<{ data?: RunRecommendationResult; error?: string }> {
   try {
     // Gate: Smart Shortlist (re-rank por IA + mood) é exclusivo do Pago.
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensurePermission("consume_ai")
     if (!gate.ok) return { error: gate.error }
 
     const runsToday = await getRunsToday()
@@ -500,7 +498,7 @@ export async function rerankSingleWorkAction(
 ): Promise<{ data?: RerankSingleWorkResult; error?: string }> {
   try {
     // Gate: re-rank por IA é exclusivo do Pago.
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensurePermission("consume_ai")
     if (!gate.ok) return { error: gate.error }
 
     const runsToday = await getRunsToday()
@@ -595,7 +593,7 @@ export async function rerankStaleBatchAction(
   n?: number,
 ): Promise<{ data?: RerankStaleBatchResult; error?: string }> {
   try {
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensurePermission("consume_ai")
     if (!gate.ok) return { error: gate.error }
 
     const runsToday = await getRunsToday()
@@ -696,7 +694,7 @@ export async function rerankWorksBatchAction(
   workIds: string[],
 ): Promise<{ data?: RerankWorksBatchResult; error?: string }> {
   try {
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensurePermission("consume_ai")
     if (!gate.ok) return { error: gate.error }
 
     const runsToday = await getRunsToday()
@@ -807,7 +805,7 @@ export async function rerankClusterAction(
   opts: { persist?: boolean } = {},
 ): Promise<{ data?: RerankClusterResult; error?: string }> {
   try {
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensurePermission("consume_ai")
     if (!gate.ok) return { error: gate.error }
 
     const ids = Array.from(new Set(workIds)).filter(Boolean)
@@ -945,7 +943,7 @@ export async function rankSpecificWorksForChat(args: {
   userContext?: string | null
 }): Promise<{ data?: RankSpecificWorksResult; error?: string }> {
   try {
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensurePermission("consume_ai")
     if (!gate.ok) return { error: gate.error }
 
     const ids = Array.from(new Set(args.workIds)).filter(Boolean)

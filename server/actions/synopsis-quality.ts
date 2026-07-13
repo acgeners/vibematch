@@ -3,7 +3,7 @@
 import { revalidatePath, revalidateTag } from "next/cache"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensureCapability, ensureAdmin } from "@/server/queries/current-user"
+import { ensurePermission, ensureAdmin } from "@/server/queries/current-user"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getSynopsisPredictionForWork, getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
 import { markRecalcPending } from "@/server/recalc/queue"
@@ -40,7 +40,7 @@ export async function predictSynopsisQualityForWorkAction(
   opts: PredictWorkOpts = {},
 ): Promise<WorkPredictResult> {
   try {
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensurePermission("consume_ai")
     if (!gate.ok) return { status: "blocked_manual", message: gate.error }
 
     const { ensurePredictInterest, SupabaseInterestGateway } = await import(
@@ -326,7 +326,7 @@ export type BatchRunResult =
  */
 export async function planSynopsisInterestBatchAction(workIds: string[]): Promise<BatchPlanResult> {
   try {
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensurePermission("consume_ai")
     if (!gate.ok) return { status: "blocked_manual", message: gate.error }
     const ids = (workIds ?? []).slice(0, SYNOPSIS_BATCH_MAX)
     if (ids.length === 0) return { status: "failed", error: "Nenhuma obra para o lote." }
@@ -384,7 +384,7 @@ export async function runSynopsisInterestBatchAction(
   opts: { maxCostUsd: number },
 ): Promise<BatchRunResult> {
   try {
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensurePermission("consume_ai")
     if (!gate.ok) return { status: "blocked_manual", message: gate.error }
     const ids = (workIds ?? []).slice(0, SYNOPSIS_BATCH_MAX)
     if (ids.length === 0) return { status: "failed", error: "Nenhuma obra para o lote." }
@@ -440,7 +440,7 @@ export async function planInterestBackfillForIds(
   workIds: string[],
 ): Promise<InterestBackfillPlan | { status: "blocked_manual"; message: string } | { status: "failed"; error: string }> {
   try {
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensurePermission("consume_ai")
     if (!gate.ok) return { status: "blocked_manual", message: gate.error }
     const ids = [...new Set((workIds ?? []).filter(Boolean))]
     if (ids.length === 0) return { status: "ok", targetIds: [], total: 0, fresh: 0, needCalls: 0, likelyUsd: 0, upperBoundUsd: 0 }

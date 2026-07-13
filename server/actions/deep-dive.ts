@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { runDeepDive } from "@/lib/ai-recommendation/deep-dive"
 import { MAX_DEEP_DIVES_PER_DAY } from "@/lib/ai-recommendation/deep-dive-limits"
-import { ensureCapability } from "@/server/queries/current-user"
+import { ensurePermission } from "@/server/queries/current-user"
 import {
   getDeepDiveContext,
   getDeepDiveHistory,
@@ -28,7 +28,7 @@ export async function deepDiveWorkAction(
 ): Promise<DeepDiveActionResult> {
   try {
     // Gate: Deep Dive é exclusivo do Pago.
-    const gate = await ensureCapability("deep_dive")
+    const gate = await ensurePermission("consume_ai")
     if (!gate.ok) return { error: gate.error }
 
     const runsToday = await getDeepDivesToday()
