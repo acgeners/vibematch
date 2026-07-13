@@ -2,6 +2,7 @@ import { unstable_cache } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
+import { getScoresReader } from "@/server/queries/user-scores"
 
 export interface FavoritesSummary {
   total: number
@@ -48,12 +49,15 @@ async function _getFavoritesSummary(favoriteIds: string[] | null): Promise<Favor
     category_scores: Array<{ criterion_slug: string; score: number | null }> | null
   }>
 
+  // Fatia 2b: a média de Nota Prevista dos favoritos DELA tem que sair dos scores DELA.
+  const scoresReader = await getScoresReader()
+
   let expectedSum = 0
   let expectedCount = 0
   const critSum = new Map<string, number>()
   const critCount = new Map<string, number>()
   for (const w of rows) {
-    const f = w.calculated_scores?.expected_score
+    const f = scoresReader.overlay(w.id, w.calculated_scores)?.expected_score
     if (f != null) {
       expectedSum += Number(f)
       expectedCount += 1

@@ -4,6 +4,7 @@ import { pickPrimaryCover } from "@/lib/covers"
 import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
 import type { FavoritesSummary } from "@/server/queries/favorites"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
+import { getScoresReader } from "@/server/queries/user-scores"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Grupos de favoritos (work_lists). Ver migration 123 e o topic file
@@ -331,13 +332,15 @@ export async function getWorksLiteForPicker(): Promise<WorkLiteForPicker[]> {
   // os favoritos": sem esta troca, a Leitora abre /favoritos e vê as capas dos favoritos DELE
   // como se fossem dela. Foi exatamente o que o teste de dois usuários pegou.
   const personal = await getPersonalStateReader()
+  // Fatia 2b: idem — a Nota Prevista no picker é a DELA (ou nenhuma).
+  const scoresReader = await getScoresReader()
 
   return rows
     .map((w) => ({
       id: w.id,
       title: w.title,
       coverUrl: pickPrimaryCover(w.work_covers),
-      expectedScore: w.calculated_scores?.expected_score ?? null,
+      expectedScore: scoresReader.overlay(w.id, w.calculated_scores)?.expected_score ?? null,
       isFavorite: personal.get(w.id, w).isFavorite,
     }))
     .sort((a, b) => {

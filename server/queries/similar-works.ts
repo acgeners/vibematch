@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
 import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
+import { getScoresReader } from "@/server/queries/user-scores"
 
 export interface SimilarWork {
   id: string
@@ -164,10 +165,21 @@ export async function getSimilarWorks(
   // linha de `works` — a nota do DONO. Sem esta troca, o card "Similares" da Leitora mostraria
   // as notas dele nas obras parecidas.
   const personal = await getPersonalStateReader()
+  // Fatia 2b: o card de Similares mostra expectedScore/personalFit/alignment de CADA obra
+  // parecida — e eles vinham de `calculated_scores`, ou seja, do DONO. Era o vazamento que o
+  // teste pegou na página da obra: a Nota Prevista dele nas obras similares, para ela.
+  const scoresReader = await getScoresReader()
 
   return rows.map((r) => {
     const meta = metaById.get(r.id)
-    const calc = calcById.get(r.id)
+    // ⚠️ `expected_score` e `personal_fit` vêm da RPC (que junta `calculated_scores`), não do
+    // select de `calc` — os dois lados precisam passar pelo overlay, senão a Nota Prevista DELE
+    // volta pela porta dos fundos.
+    const calc = scoresReader.overlay(r.id, {
+      ...(calcById.get(r.id) ?? {}),
+      expected_score: r.expected_score,
+      personal_fit: r.personal_fit,
+    })
     const pred = predictions.get(r.id)
     const ratings = ratingsByWorkId.get(r.id) ?? []
     const state = personal.get(r.id, { ...(meta ?? {}), user_score: r.user_score })
@@ -188,8 +200,8 @@ export async function getSimilarWorks(
       similarity: Number(r.similarity),
       coverUrl: r.cover_url,
       synopsis: canonical || r.synopsis,
-      expectedScore: r.expected_score == null ? null : Number(r.expected_score),
-      personalFit: r.personal_fit == null ? null : Number(r.personal_fit),
+      expectedScore: calc?.expected_score == null ? null : Number(calc.expected_score),
+      personalFit: calc?.personal_fit == null ? null : Number(calc.personal_fit),
       personalFitPercentile:
         calc?.personal_fit_percentile == null ? null : Number(calc.personal_fit_percentile),
       userScore: state.userScore,

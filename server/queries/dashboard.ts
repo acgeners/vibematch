@@ -8,6 +8,7 @@ import {
 import { pickPrimaryCover } from "@/lib/covers"
 import { comixWorkUrl } from "@/lib/external/comix"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
+import { getScoresReader } from "@/server/queries/user-scores"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean | null }
@@ -231,6 +232,8 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
   // "Continue lendo" é, por definição, o que EU estou lendo. Pro dono sai de `works`; pros
   // demais, de `user_work_state` — senão o widget da home dela oferece os capítulos DELE.
   const personal = await getPersonalStateReader()
+  // Fatia 2b: a Nota Prevista mostrada no card é de QUEM OLHA — não a do dono.
+  const scoresReader = await getScoresReader()
   const ownIds = await resolvePersonalFilterIds({ personalStatusIds: statusIds })
   if (ownIds && ownIds.length === 0) return []
 
@@ -280,7 +283,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
       pending,
       comixUrl: comixHid ? comixWorkUrl(comixHid) : null,
       lastReadAt: state.lastReadAt,
-      expectedScore: w.calculated_scores?.expected_score ?? null,
+      expectedScore: scoresReader.overlay(w.id, w.calculated_scores)?.expected_score ?? null,
       lastChapterReleasedAt: w.last_chapter_released_at ?? null,
       nextChapterPredictedAt: w.next_chapter_predicted_at ?? null,
     }

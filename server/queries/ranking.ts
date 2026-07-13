@@ -11,6 +11,7 @@ import { pickPrimaryCover } from "@/lib/work-derived"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quality"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
+import { getScoresReader } from "@/server/queries/user-scores"
 
 // Tokeniza a busca igual ao filtro antigo do ranking: separa por espaços e
 // pontuação para que o padrão "a depois b depois c" atravesse vírgulas/`?`/etc.
@@ -288,12 +289,31 @@ export async function getRanking(
   // dela. Ver server/queries/user-work-state.ts.
   const personal = await getPersonalStateReader()
 
+  // Os scores DERIVADOS também são de quem olha (Fatia 2b). Pro dono, `calculated_scores` já é
+  // a linha dele (custo zero). Pros demais, a Nota Prevista/Chance/Alinhamento saem das linhas
+  // DELES — e, sem modelo, saem NULL: o que sobra é a nota da comunidade, que é um fato.
+  const scoresReader = await getScoresReader()
+
   // Os filtros pessoais (status de leitura, "só favoritos") não podem sair das colunas de
   // `works` quando quem filtra não é o dono — seriam os favoritos DELE. `null` = dono, filtra
   // no SQL como sempre; array = ids dela (vazio = nenhuma obra casa, e aí o resultado tem que
   // ser vazio de verdade, não "sem filtro").
+  // 🔴 O filtro por STATUS não pode sair por id para quem não é o dono.
+  //
+  // Uma obra SEM linha em `user_work_state` é "Want to Read" — é esse o default que o próprio
+  // mapeamento das entries usa (`getPersonalStatusNameById(null) ?? "Want to Read"`). Mas um
+  // filtro por LISTA DE IDS não consegue dizer "e também todas as que não têm linha": ele
+  // devolve só as que têm. E o /ranking filtra por ["Want to Read", "Untracked"] POR PADRÃO.
+  //
+  // Consequência (bug que veio da Fatia 1 e só apareceu agora): a Leitora, que não tem nenhuma
+  // linha de estado, abria o /ranking de um catálogo com 882 obras e lia "Nenhuma obra
+  // encontrada com os filtros aplicados". Não deu erro — deu vazio, que é pior.
+  //
+  // Por isso o status dela é filtrado EM MEMÓRIA, sobre `entry.personalStatus` (que já carrega
+  // o default). Favorito continua por id: sem linha = não é favorito, e aí a lista de ids diz
+  // a verdade inteira.
   const personalFilterIds = await resolvePersonalFilterIds({
-    personalStatusIds: personalStatusIdFilter,
+    personalStatusIds: personal.isOwner ? personalStatusIdFilter : null,
     onlyFavorites: filters.onlyFavorites,
   })
 
@@ -557,6 +577,10 @@ export async function getRanking(
     }
     const synopsisPred = synopsisPredictions.get(w.id) ?? null
 
+    // A linha de scores de QUEM OLHA. Os campos de catálogo (platform_avg, total_votes) passam
+    // intactos; os pessoais (Nota Prevista, Chance, Alinhamento) viram os dela — ou null.
+    w.calculated_scores = scoresReader.overlay(w.id, w.calculated_scores)
+
     return {
       rank: 0,
       percentile: 0,
@@ -692,34 +716,45 @@ export async function getRanking(
   }
 
   // Filtros de notas mínimas (vindos das preferências de ranking)
-  if (filters.minExpectedScore != null) {
-    const min = filters.minExpectedScore
-    entries = entries.filter((e) => e.expectedScore != null && e.expectedScore >= min)
-  }
-  if (filters.maxExpectedScore != null) {
-    const max = filters.maxExpectedScore
-    entries = entries.filter((e) => e.expectedScore != null && e.expectedScore <= max)
-  }
-  // Alinhamento filtrado pelo percentil exibido (fallback: raw × 100, como na célula).
+  //
+  // 🔴 SÓ para quem TEM modelo. Sem modelo, `expectedScore` e `personalFit` são null em TODAS
+  // as linhas — e estes filtros, que reprovam null, apagam o catálogo inteiro. O sintoma não é
+  // um erro: é a Leitora abrindo o /ranking e lendo "Nenhuma obra encontrada com os filtros
+  // aplicados" num app com 882 obras. (Foi exatamente o que o teste de dois usuários pegou.)
+  //
+  // E não dá pra "só tratar null como aprovado" aqui: um mínimo de nota que aprova quem não
+  // tem nota não é um filtro, é um enfeite. Para quem não tem eixo pessoal, o filtro pessoal
+  // simplesmente NÃO SE APLICA — do mesmo jeito que a ordenação cai na comunidade.
   const fitPct = (e: RankingEntry) =>
     e.personalFitPercentile != null
       ? e.personalFitPercentile
       : e.personalFit != null
         ? e.personalFit * 100
         : null
-  if (filters.minPersonalFitPct != null) {
-    const min = filters.minPersonalFitPct
-    entries = entries.filter((e) => {
-      const p = fitPct(e)
-      return p != null && p >= min
-    })
-  }
-  if (filters.maxPersonalFitPct != null) {
-    const max = filters.maxPersonalFitPct
-    entries = entries.filter((e) => {
-      const p = fitPct(e)
-      return p != null && p <= max
-    })
+
+  if (scoresReader.hasModel) {
+    if (filters.minExpectedScore != null) {
+      const min = filters.minExpectedScore
+      entries = entries.filter((e) => e.expectedScore != null && e.expectedScore >= min)
+    }
+    if (filters.maxExpectedScore != null) {
+      const max = filters.maxExpectedScore
+      entries = entries.filter((e) => e.expectedScore != null && e.expectedScore <= max)
+    }
+    if (filters.minPersonalFitPct != null) {
+      const min = filters.minPersonalFitPct
+      entries = entries.filter((e) => {
+        const p = fitPct(e)
+        return p != null && p >= min
+      })
+    }
+    if (filters.maxPersonalFitPct != null) {
+      const max = filters.maxPersonalFitPct
+      entries = entries.filter((e) => {
+        const p = fitPct(e)
+        return p != null && p <= max
+      })
+    }
   }
   // Veredito IA (alignment) é calculado sob demanda/pago — a maioria das obras tem
   // alignment_score NULL. Um mínimo/máximo NÃO deve reprovar quem nunca teve o
@@ -757,6 +792,28 @@ export async function getRanking(
   const levels: SortLevel[] = filters.sortLevels?.length
     ? filters.sortLevels
     : [{ field: filters.sortBy ?? "expected_score", dir: filters.sortDir ?? "desc" }]
+
+  // ⚠️ Sem modelo, não há EIXO PESSOAL — e ordenar por um campo que é null em todas as linhas
+  // não devolve "nada": devolve o catálogo em ordem arbitrária, com cara de ranking. Quem não
+  // tem os 20 rótulos cai na NOTA DA COMUNIDADE, que é o que o MAL faz e é um fato da obra.
+  //
+  // Não é degradação: é a única ordenação honesta que existe para essa pessoa. Assim que ela
+  // avalia 20 obras, o eixo dela acende e o ranking volta a ser ordenado pela previsão DELA.
+  const PERSONAL_SORT_FIELDS = new Set([
+    "expected_score",
+    "recommended",
+    "decision",
+    "personal_fit",
+    "alignment_score",
+    "chance_score",
+  ])
+  const effectiveLevels: SortLevel[] = scoresReader.hasModel
+    ? levels
+    : levels.map((lvl) =>
+        PERSONAL_SORT_FIELDS.has(lvl.field)
+          ? ({ ...lvl, field: "platform_avg" } as SortLevel)
+          : lvl,
+      )
 
   function compareByField(a: RankingEntry, b: RankingEntry, field: string, dir: "asc" | "desc"): number {
     const m = dir === "asc" ? 1 : -1
@@ -814,7 +871,7 @@ export async function getRanking(
   }
 
   entries.sort((a, b) => {
-    for (const level of levels) {
+    for (const level of effectiveLevels) {
       const cmp = compareByField(a, b, level.field, level.dir)
       if (cmp !== 0) return cmp
     }
