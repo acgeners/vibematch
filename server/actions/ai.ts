@@ -12,7 +12,7 @@ import {
 import { saveWorkReviews, loadWorkReviewsAsSourced } from "@/lib/external/persist-reviews"
 import type { ExternalSourceId, SourcedReview } from "@/lib/external/types"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
-import { markRecalcPending } from "./recalc-queue"
+import { markRecalcPending } from "@/server/recalc/queue"
 import { ensureComixHid } from "./comix-hid"
 import { resolveMangagoForEvalContext } from "@/lib/external/mangago-eval-context"
 import { boolEnv } from "@/lib/external/mangago-band"

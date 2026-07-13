@@ -226,7 +226,7 @@ export async function insertNewTasteProfile(
   // aqui (apenas marca; reusa o mecanismo existente). Marcado SÓ após o insert
   // bem-sucedido: geração/persistência que falham nunca chegam aqui (caem no throw
   // acima). Cobre TODOS os caminhos de persistência (este é o único sink).
-  const { markRecalcPending } = await import("@/server/actions/recalc-queue")
+  const { markRecalcPending } = await import("@/server/recalc/queue")
   await markRecalcPending("taste_profile_new_version")
 
   // Grava o fingerprint na linha (best-effort; reusa o já computado). Se a coluna

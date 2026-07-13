@@ -7,7 +7,7 @@ import type { CriterionSlug } from "@/types/domain"
 import { getCurrentUserId } from "@/server/queries/current-user"
 import { getLatestAiEvaluationAttributes } from "@/server/queries/post-attribute-assessment"
 import { recomputeAttributeBias } from "@/lib/calculations/attribute-bias"
-import { markRecalcPending } from "@/server/actions/recalc-queue"
+import { markRecalcPending } from "@/server/recalc/queue"
 
 export type PostReadingResult = { ok: true } | { ok: false; error: string }
 

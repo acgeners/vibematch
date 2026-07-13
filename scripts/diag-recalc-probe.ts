@@ -4,7 +4,7 @@
  * e a dispersão atual dos scores em calculated_scores. Nada é computado/escrito.
  */
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getRecalcPendingState } from "@/server/actions/recalc-queue"
+import { getRecalcPendingState } from "@/server/recalc/queue"
 
 function std(xs: number[]): number {
   if (xs.length === 0) return 0

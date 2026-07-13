@@ -743,7 +743,7 @@ export async function runInterestBackfill(deps: RunInterestBackfillDeps): Promis
     const recalcFn: RecalcRunner =
       deps.recalc ??
       (async () => {
-        const { recalculateScoresHeadless } = await import("@/server/actions/recalc-queue")
+        const { recalculateScoresHeadless } = await import("@/server/recalc/queue")
         return recalculateScoresHeadless()
       })
     const r = await recalcFn(false)

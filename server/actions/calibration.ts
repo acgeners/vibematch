@@ -14,7 +14,7 @@ import {
   loadLastRun,
   loadWorksForAudit,
 } from "@/server/queries/calibration"
-import { markRecalcPending, recalculateScoresNowResult } from "@/server/actions/recalc-queue"
+import { markRecalcPending, recalculateScoresNowResult } from "@/server/recalc/queue"
 import { generateTasteProfileAction } from "@/server/actions/recommendations"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import type {

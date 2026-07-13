@@ -19,10 +19,12 @@ function walk(dir: string): string[] {
   return out
 }
 
-// calculations.ts DEFINE recalculateAll (não importa). recalc-queue.ts é o ÚNICO
-// runner autorizado a importá-la.
+// calculations.ts DEFINE recalculateAll (não importa). server/recalc/queue.ts é o
+// ÚNICO runner autorizado a importá-la. (Ficava em server/actions/; saiu de lá porque
+// num arquivo "use server" toda export vira endpoint HTTP público — ver a nota no topo
+// do módulo. O que restou em server/actions/recalc-queue.ts é só a fachada da UI.)
 const DEFINER = "server/actions/calculations.ts"
-const RUNNER = "server/actions/recalc-queue.ts"
+const RUNNER = "server/recalc/queue.ts"
 
 describe("arquitetura: recalculateAll só pelo runner da integração", () => {
   it("nenhum arquivo de produção importa recalculateAll/recalculateWork de calculations (exceto o runner)", () => {

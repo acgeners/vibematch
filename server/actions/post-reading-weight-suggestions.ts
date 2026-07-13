@@ -10,7 +10,7 @@ import {
   type PostReadingWeightInferenceInput,
   type PostReadingWeightInferenceResult,
 } from "@/lib/ml/post-reading-weight-inference"
-import { recalculateScoresNowResult } from "@/server/actions/recalc-queue"
+import { recalculateScoresNowResult } from "@/server/recalc/queue"
 
 /**
  * Calcula sugestões de pesos pós-leitura a partir do histórico.

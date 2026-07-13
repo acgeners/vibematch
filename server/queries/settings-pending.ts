@@ -1,6 +1,6 @@
 import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { countStaleEmbeddings } from "@/server/actions/embeddings"
+import { countStaleEmbeddings } from "@/server/embeddings/refresh"
 import { countPendingSuggestions } from "@/server/queries/calibration"
 import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
 import { hasConsolidatableBlocks } from "@/lib/ai-recommendation/synopsis-consolidator"
