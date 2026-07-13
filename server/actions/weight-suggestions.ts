@@ -16,6 +16,10 @@ import { updateScoreWeights, type ScoreWeightUpdate } from "./settings"
  * Não aplica nada — só retorna o diagnóstico pra exibir no UI.
  */
 export async function suggestScoreWeights(): Promise<WeightInferenceResult> {
+  // O apply já era gated; o suggest não era — e é ele que roda o Ridge sobre o
+  // catálogo inteiro. Sem gate, é CPU grátis pra qualquer um.
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   const supabase = createAdminClient()
 
   const [worksRes, weightsRes] = await Promise.all([
@@ -101,7 +105,11 @@ export async function applyWeightSuggestions(
     threshold: thresholdBySlug.get(a.slug) ?? null,
   }))
 
+  // updateScoreWeights tem o próprio gate de admin, então pode devolver {error}.
+  // Aqui é inalcançável (esta action já passou pelo mesmo gate), mas o caller
+  // espera `recalculated` — propaga como throw, que o painel já catcheia.
   const result = await updateScoreWeights(updates)
+  if ("error" in result) throw new Error(result.error)
   return {
     recalculated: result.recalculated,
     appliedCount: applies.length,

@@ -93,6 +93,8 @@ export async function updateWorkList(
 }
 
 export async function deleteWorkList(id: string): Promise<ActionResult<null>> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   // work_list_items cai por ON DELETE CASCADE (migration 123). Obras intactas.
   const { error } = await supabase.from("work_lists").delete().eq("id", id)

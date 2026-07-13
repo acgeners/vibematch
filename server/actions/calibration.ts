@@ -648,6 +648,8 @@ export async function regenerateCalibratedArtifacts(): Promise<
     }
   | { ok: false; error: string }
 > {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
   const supabase = createAdminClient()
 
   // 1. TasteProfile (LLM, sobre rated works calibrados).

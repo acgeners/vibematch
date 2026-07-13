@@ -1924,7 +1924,7 @@ export async function updateWorkExternalData(
 
 export type RefreshWorkExternalDataResult =
   | { ok: true; data: ExternalWorkData; conflicts: ConflictField[]; sources: ExternalSourceId[] }
-  | { ok: false; reason: "NO_IDS" | "ALL_404"; message?: string }
+  | { ok: false; reason: "NO_IDS" | "ALL_404" | "FORBIDDEN"; message?: string }
 
 function buildCandidateFromStoredIds(
   work: { title: string; original_title: string | null; alternative_titles: string[] | null },
@@ -1938,6 +1938,10 @@ function buildCandidateFromStoredIds(
 }
 
 export async function refreshWorkExternalData(workId: string): Promise<RefreshWorkExternalDataResult> {
+  // Re-hidrata a obra do catálogo compartilhado a partir das fontes externas
+  // (sobrescreve capa/sinopse/notas de plataforma) → curadoria, não leitura.
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, reason: "FORBIDDEN", message: gate.error }
   const supabase = createAdminClient()
 
   const { data: work, error: workError } = await supabase

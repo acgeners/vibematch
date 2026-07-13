@@ -229,6 +229,11 @@ export async function fetchExternalData(
 // aliases/existing, creates missing (catalog group fast-path) and schedules
 // background classification (group via AI when needed + sub-group + cluster).
 export async function upsertExternalTags(tagNames: string[]): Promise<void> {
+  // Cria tags no catálogo compartilhado (+ classificação por IA em background).
+  // Sem canal de erro (retorna void) — o não-admin simplesmente não escreve; ele
+  // também não consegue criar a obra que consumiria essas tags.
+  const gate = await ensureAdmin()
+  if (!gate.ok) return
   if (!tagNames.length) return
   const supabase = createAdminClient()
   const { createdIds } = await resolveOrCreateTags(supabase, tagNames)

@@ -22,6 +22,8 @@ import { recalculateScoresNowResult } from "@/server/actions/recalc-queue"
 export async function suggestPostReadingWeights(
   currentWeights: Record<PostReadingScoreField, number>,
 ): Promise<PostReadingWeightInferenceResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   const supabase = createAdminClient()
 
   const selectColumns = [

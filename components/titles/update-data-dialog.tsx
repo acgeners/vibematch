@@ -462,6 +462,13 @@ export function UpdateDataDialog({
         handleSelect(enriched)
         return
       }
+      if (result.reason === "FORBIDDEN") {
+        // Não cai no fallback de busca por título: o bloqueio é de permissão, e
+        // buscar de novo só levaria ao mesmo "não pode gravar" lá na frente.
+        toast.error(result.message ?? "Sem permissão para atualizar esta obra.")
+        setPhase("sources")
+        return
+      }
       if (result.reason === "ALL_404") {
         toast.warning("Fontes externas indisponíveis para esta obra. Buscando por título...")
       }
