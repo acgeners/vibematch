@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensurePermission } from "@/server/queries/current-user"
+import { ensureAiConsumption } from "@/server/queries/ai-quota"
 import { loadOrEnsureProfile } from "@/lib/ai-recommendation/ensure-profile"
 import {
   runChatTurn,
@@ -241,7 +241,7 @@ export async function sendChatMessageAction(
   args: SendChatMessageArgs,
 ): Promise<{ data?: SendChatMessageResult; error?: string }> {
   try {
-    const gate = await ensurePermission("consume_ai")
+    const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
 
     const forceRecommend = args.forceRecommend === true

@@ -5,6 +5,7 @@ import { deepStripLoneSurrogates } from "@/lib/ai/sanitize"
 import { modelRejectsSampling } from "./models"
 import { computeCostUsd } from "./pricing"
 import type { UsageTokens } from "./pricing"
+import { getSessionUserId } from "@/server/queries/current-user"
 import { classifyAiError } from "@/lib/ai-observability/classify-error"
 import { AI_OPERATIONS } from "@/lib/ai-observability/types"
 import type {
@@ -124,7 +125,12 @@ async function persistLog(args: {
         error_message: args.errorMessage ?? null,
         stop_reason: args.stopReason ?? null,
         request_id: args.requestId ?? null,
-        user_id: args.meta.userId ?? null,
+        // Atribuição de custo. A coluna existia desde sempre e NENHUM call site preenchia
+        // `meta.userId` — 100% das linhas nasciam NULL, o que tornava impossível saber
+        // quanto cada usuário gastou (e, portanto, impossível cotar ou cobrar). Resolver
+        // AQUI, no ponto único por onde toda chamada passa, em vez de confiar em ~30 call
+        // sites lembrarem. Sem sessão (fila/cascata) segue NULL: é gasto do sistema.
+        user_id: args.meta.userId ?? (await getSessionUserId()),
         metadata: buildMetadataBag(args.meta, { errorCategory: args.errorCategory }),
       })
       .select("id")
