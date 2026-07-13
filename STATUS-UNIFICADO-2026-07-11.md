@@ -1,11 +1,60 @@
 # STATUS UNIFICADO — SatorIA / VibeMatch
 
-> **Data:** 2026-07-11 · **Atualizado:** 2026-07-13 (ver **§0-A** — sessão/chrome) · 2026-07-12 (**§0** — fontes externas; tema **G** reescrito)
+> **Data:** 2026-07-11 · **Atualizado:** 2026-07-13 (ver **§0-B** — P0 de acesso e custo · **§0-A** — sessão/chrome) · 2026-07-12 (**§0** — fontes externas; tema **G** reescrito)
 > **Escopo:** consolidação de TODAS as pendências dos registros da última semana (2026-07-01 → 07-10).
 > **Fontes:** PLANO-MULTIUSER, PLANO-ARQUITETURA-NOTAS, AUDIT_REPORT-2026-07-08 (canônico), PLANO-MESTRE (§24m–o + banner 07-09), STATUS-2026-06-28, PLANO-BUSSOLA-3-FORCAS, PLANO-INTERESSE-PREFS-CONFIANCA, PLANO-LABELS, PLANO-AI-EVALUATION-REDESIGN, STALENESS-MATERIALIDADE, DEPLOY-FLY, COMIX-ARCHITECTURE, DESIGN-MANGAGO-RESOLVE.
 > **Marcação:** ✅ verificado no código/git hoje · 📄 vem do doc/memória (não re-verificado) · ⚠️ contradição/erro detectado.
 >
 > Este arquivo é um **snapshot de reconciliação**, não substitui os planos temáticos. Prioridades: **P0** bloqueia deploy ou arrisca corromper dados · **P1** destrava valor/decisão · **P2** dívida/melhoria · **P3** deferido.
+
+---
+
+## 0-B. Atualização — 2026-07-13: os P0 de acesso e custo caíram
+
+> **Escopo:** PRs #126 (plano da Fase 2) e #127 (etapas 1–4), mergeados · **migration 141 aplicada**.
+> Reescreve os temas **A** (segurança) e **B** (multi-user). Marcação: ✅ verificado no app rodando · 📊 medido.
+
+**O fio condutor:** o P0 que os dois audits apontavam era o **rate-limit**. Ele era real — mas **não era
+o maior**. O maior ninguém tinha visto: **um visitante anônimo escrevia nas linhas do dono**.
+
+### O que foi feito
+
+| # | O quê | PR |
+|---|-------|-----|
+| 1 | **Escrita sem sessão fechada.** `"use server"` = endpoint HTTP, e `getCurrentUserId()` sem sessão caía no **singleton** (a linha do dono). 7 actions escreviam per-user com esse id: regras de preferência, calibração pós-leitura, tags amadas/evitadas, presets, ledger, avatar (na pasta dele no storage) e pilot-taste. Todas exigem **sessão** agora. | #127 |
+| 2 | **Cota de IA por usuário, em US$.** Leitor $0 · Assinante $2 · Curador ∞ em 24h. `ensureAiConsumption()` = permissão + cota num gate só. | #127 |
+| 3 | **LOOCV** (`n<50 → folds=n`) → k fixo. | #127 |
+| 4 | **`lib/plans/capabilities.ts` apagado** — era um 2º sistema de permissão em paralelo a `roles.ts`. Novo verbo `own_state`. | #127 |
+| 5 | **Plano da Fase 2** (partição per-user) escrito e revisado. | #126 |
+
+### 📊 O que a verificação empírica mostrou (e a leitura de código não mostrava)
+
+- **O buraco de escrita anônima era real e destrutivo.** Reproduzido contra a `main`: uma chamada sem
+  sessão em `savePreferenceRules` **apagou as 7 regras do dono** e as substituiu pela do chamador.
+  HTTP 200, `ok:true`, nenhum log. (Restauradas: 7/7.)
+- **A UI dava falso verde.** O botão "Salvar" já vinha **desabilitado** para o anônimo — quem
+  verificasse clicando na tela concluiria que estava tudo certo. O buraco era o **endpoint**.
+- **A cota barra ANTES do modelo:** assinante com US$99 injetados → servidor nega e **zero** chamadas
+  de LLM são cobradas.
+- **O fix do LOOCV não move nenhuma nota hoje:** o dono tem **208 rótulos** (n ≥ 50), então o ramo já
+  estava morto. Ele protege o usuário futuro (a faixa 30–49 era o caso **mais caro** do sistema).
+
+### ⚠️ Duas afirmações do próprio plano que a implementação derrubou
+
+1. **`recalculateAll` NÃO é endpoint** — `server/actions/calculations.ts` **não é** `"use server"`. E
+   gateá-lo com `ensureAdmin()` seria um **erro**: o recalc roda em background, sem sessão.
+2. **Os 7 toggles de custo já estavam seguros** — escrevem na linha própria (`getCurrentUserSettingsId`).
+
+> A auditoria foi feita por agentes de exploração; **os dois erros só apareceram porque fui conferir
+> antes de mexer**. Plano é hipótese, não fato.
+
+### Pendências abertas
+
+| Pendência | Nota | Pri. |
+|---|---|---|
+| **RLS de verdade** | Hoje **tudo** usa service role, que **ignora RLS**. Partir os dados (Fase 2) sem isso = isolamento dependendo de lembrar `.eq("user_id")` — e esquecer **não dá erro**: devolve o dado de outra pessoa. | P1 |
+| **Fase 2 (partição per-user)** | Etapas 5–9 do `PLANO-MULTIUSER-FASE2.md`. **Sem ela, um Leitor não consegue nem marcar um capítulo como lido.** A decisão é de PRODUTO ("vai mesmo entrar gente?"), não de engenharia. | P1 |
+| 2 testes falhando em `work-reviews-card.test.tsx` | **Pré-existentes na main** (confirmado com checkout) — não vêm dos PRs desta leva. | P2 |
 
 ---
 
@@ -56,7 +105,7 @@ escondido".
 | Pendência | Nota | Pri. |
 |---|---|---|
 | **"208 avaliadas por você" aparece pra visitante anônimo** | Copy mentindo, não dado errado — o catálogo é compartilhado, mas o *"por você"* não se aplica a quem nunca entrou. Decisão de produto: mudar o texto sem sessão ou esconder o KPI. | P2 |
-| **Rate-limit é GLOBAL, não por usuário** | Continua sendo o P0 da área de acesso — inalterado por esta sessão. Ver tema **A**. | P0 |
+| ~~Rate-limit é GLOBAL, não por usuário~~ | ✅ **RESOLVIDO em 2026-07-13** (PR #127 + mig 141). Ver **§0-B**. | — |
 | "Preferências" aparece no menu **e** na sidebar | Duplicação deliberada (conveniência). Cortar se incomodar. | P3 |
 
 ---
@@ -118,7 +167,7 @@ HTML válido, um resultado plausível, e está errado. Nenhum log dispara. Só s
 1. **Frente ativa hoje** = branch `feat/multiuser-foundation`, que virou o tronco e acumulou 3 assuntos (multi-user + gosto Fase 5 + ranking Faixas). ✅
 2. **Ciência/scoring** está saudável no grosso (MAE ~0,55 vs baseline 0,73) mas é **ruído no fino** (σ ≈ MAE) — consenso dos dois audits. Nenhuma mudança de fórmula se justifica antes de acumular rótulos.
 3. **A alavanca nº 1 é dado, não código:** a medição prospectiva tem **0 obras resolvidas** — ela trava as decisões de manter/matar Ridge/Chance/Bússola.
-4. **Segurança está pela metade:** ✅ auth (middleware + `ensureAdmin`) feito na branch multiuser; ❌ **rate-limit (denial-of-wallet) NÃO existe**.
+4. ~~**Segurança está pela metade:** ✅ auth feito; ❌ rate-limit (denial-of-wallet) NÃO existe.~~ → **DESATUALIZADO (2026-07-13):** o rate-limit passou a existir — **cota de IA em US$ por papel** (PR #127). E o buraco maior não era o rate-limit: era **escrita anônima nas linhas do dono**, que também foi fechada. Ver **§0-B**.
 5. **Dívida de migrations é real e verificada:** existe **colisão de número na 132** (dois arquivos). Vários docs apontam a colisão errada (122).
 6. **Working tree tem WIP não commitado** de 2 features distintas misturadas (piloto de gosto + grupos de favoritos).
 
@@ -128,7 +177,7 @@ HTML válido, um resultado plausível, e está errado. Nenhum log dispara. Só s
 
 | # | Tema | Status | Pendência dominante | Pri. máx |
 |---|------|--------|---------------------|----------|
-| A | Segurança & exposição | 🟡 metade feita | rate-limit inexistente | **P0** |
+| A | Segurança & exposição | 🟢 P0s fechados (2026-07-13) | RLS real (hoje service role a ignora) — entra na Fase 2 | P1 |
 | B | Multi-user (partição per-user) | 🟡 fundação ok, Fase 2+ adiada | biblioteca própria por usuário | P1 |
 | C | Migrations & reprodutibilidade | 🔴 dívida verificada | colisão 132 + migrations não auto-suficientes | **P0** |
 | D | Medição prospectiva & decisão de modelo | 🟠 instrumentado, sem dado | 0 obras resolvidas | P1 |
@@ -145,7 +194,8 @@ HTML válido, um resultado plausível, e está errado. Nenhum log dispara. Só s
 | Item | Estado | Abordagem sugerida | Pri. |
 |------|--------|--------------------|------|
 | Auth nas ~39 server actions service-role | ✅ feito (`ensureAdmin` ×35, `middleware.ts`) | — (já cobre S1/F1) | — |
-| **Rate-limit / denial-of-wallet (S2)** | ❌ inexistente ✅ | Middleware simples por IP+rota nas ações que gastam IA (`triggerAiEvaluation`, `generateAllWorkData`). Não precisa ser sofisticado; precisa existir antes de qualquer URL pública. | **P0** |
+| **Rate-limit / denial-of-wallet (S2)** | ✅ **FEITO 2026-07-13** (PR #127) | Cota **em US$/24h por papel** (Leitor $0 · Assinante $2 · Curador ∞), em `server/queries/ai-quota.ts`. Não é por IP+rota: é por **usuário e por custo**, lida de `ai_api_calls` — cobre re-rank, deep dive e chat de uma vez, sem depender de cada feature nova lembrar de se registrar. | — |
+| **Escrita anônima nas linhas do dono (S4 — não estava mapeado)** | ✅ **FEITO 2026-07-13** (PR #127) | Era **maior que o rate-limit** e ninguém tinha visto: 7 server actions escreviam dados per-user usando o id do **singleton** quando não havia sessão. Reproduzido: uma chamada sem sessão trocou as 7 regras de preferência do dono pelas do chamador. | — |
 | Sanitização de reviews externos no prompt (S3) | 📄 aberto | Envelope/escape de bloco de review; baixo esforço, faz junto do próximo mexer em `service.ts`. | P2 |
 
 ### B. Multi-user

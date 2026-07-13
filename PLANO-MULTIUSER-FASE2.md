@@ -159,9 +159,8 @@ unidade do risco e cobre tudo de uma vez, porque **toda** chamada de LLM passa p
 Assinante com US$99 de gasto injetado → o servidor **nega** ("Cota diária de IA do plano Assinante
 atingida (US$ 2.00 em 24h)") e **zero** chamadas de LLM são cobradas — o gate barra **antes** do modelo.
 
-⚠️ **Migration 141 ainda precisa ser aplicada à mão** (SQL editor). O código é fallback-safe: sem a
-coluna, a contagem de runs degrada e avisa no log, mas a trava em US$ segue valendo (ela lê
-`ai_api_calls`, que já tem a coluna).
+✅ **Migration 141 APLICADA** (2026-07-13). Conferido no banco: a coluna existe e as 20 runs do
+histórico foram backfilladas para o dono (20/20). A contagem de runs passou a ser de fato por usuário.
 
 > Este é o item que separa "multi-user" de **denial-of-wallet**: sem ele, um estranho gasta o **seu**
 > saldo da Anthropic.
@@ -245,7 +244,7 @@ verde. Aplicar à mão no SQL editor (o CLI está dessincronizado — ver memór
 
 | # | O quê | Nota |
 |---|---|---|
-| **141** | `+user_id` em `recommendation_runs`, `work_lists`, `pilot_taste_scores`, `synopsis_quality_predictions` + backfill → dono | destrava o P0 do rate-limit |
+| ✅ **141** | `+user_id` em `recommendation_runs` + backfill → dono | **APLICADA** (2026-07-13; 20/20 runs backfilladas). Ficou focada só nesta tabela — `work_lists`, `pilot_taste_scores` e `synopsis_quality_predictions` **seguem sem `user_id`** e entram numa migration da partição (elas não bloqueavam o P0 da cota) |
 | **142** | `+user_id` em `taste_profile`; **dropar** `taste_profile_current_unique`; recriar como `UNIQUE (user_id, is_current) WHERE is_current` | ⚠️ hoje existe **um** perfil "current" no banco inteiro |
 | **143** | `user_model_config` (per-user) + `catalog_config` (global); backfill do `formula_config` atual → dono | `formula_config` fica de pé até o rewire terminar |
 | **144** | `work_catalog_scores` + `user_work_scores`; backfill de `calculated_scores` → dono | `calculated_scores` fica de pé (aditivo) |
@@ -378,7 +377,7 @@ A opção **A** é a que respeita o que os números dizem: o Leitor não olha 20
 | Etapa | O quê | Bloqueia? | Tamanho |
 |---|---|---|---|
 | ✅ **1. P0 — segurança** (§3.1) | escrita per-user exige sessão; 7 actions fechadas | — | **FEITO** (PR #127) |
-| ✅ **2. P0 — custo** (§3.2) | cota de IA **em US$** por papel; `ai_api_calls.user_id`; mig 141 | — | **FEITO** (PR #127) · ⚠️ falta aplicar a mig 141 |
+| ✅ **2. P0 — custo** (§3.2) | cota de IA **em US$** por papel; `ai_api_calls.user_id`; mig 141 | — | **FEITO** (PR #127, mig 141 aplicada) |
 | ✅ **3. Fix do LOOCV** (§8.2) | k-fold fixo (`Math.min(5, n)`) | — | **FEITO** (PR #127) |
 | ✅ **4. Unificar permissões** (§2) | `capabilities.ts` apagado; verbo `own_state` criado | — | **FEITO** (PR #127) |
 | **5. Migrations 141–147** (§5) | aditivas, nada quebra | — | M |
