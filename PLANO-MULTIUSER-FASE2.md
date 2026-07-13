@@ -420,3 +420,100 @@ A opção **A** é a que respeita o que os números dizem: o Leitor não olha 20
 **A recomendação:** fatiar. Fazer **1–4 agora** (valem sozinhas, protegem o que existe), e só então
 decidir se a partição inteira se justifica — que é uma pergunta de **produto** ("vai mesmo entrar
 gente?"), não de engenharia.
+
+---
+
+## 12. A pergunta de produto já foi respondida — pelo banco
+
+> **Atualização 2026-07-13.** Etapas 1–4 ✅ (PR #127) · RLS ✅ (PR #129, mig 142).
+
+📊 **Já existe um segundo usuário real:** `ana.generoso22@gmail.com`, papel **Leitor** (encontrado no
+`user_settings` durante o trabalho de RLS). E ela **não consegue fazer nada**: não marca capítulo
+lido, não favorita, não dá nota — porque todos esses writers são `ensureAdmin()`, e têm que ser (§0).
+
+Ou seja: existem três papéis, uma cota de IA por papel e RLS no banco — e a única usuária além do
+dono é **uma espectadora**. Todo o trabalho das etapas 1–4 e da RLS **só vira produto** quando o
+estado pessoal sair de dentro da obra.
+
+---
+
+## 13. FATIA 1 — o estado de leitura per-usuário
+
+A menor fatia que transforma a Leitora de espectadora em usuária. **Não** é a Fase 2 inteira: não
+mexe em notas, nem em scoring, nem nos 8 `post_*`.
+
+### 13.0 ⚠️ ANTES DE COMEÇAR: backup
+
+O projeto **não tem backup nenhum** (`pitr_enabled: false`, zero backups — conferido na Management
+API). Rode e **confira o manifest**:
+
+```bash
+node scripts/backup-db.mjs     # → .backups/<timestamp>/  (~24 MB, ~120k linhas)
+```
+
+### 13.1 Escopo — só o estado de LEITURA
+
+| Coluna de `works` | Vai para `user_work_state` |
+|---|---|
+| `is_favorite` | ✓ |
+| `personal_status_id` | ✓ |
+| `chapters_read` | ✓ |
+| `last_read_at` | ✓ |
+
+**Fora desta fatia** (ficam em `works` por enquanto): `user_score`, `observation_adjustment`,
+`observations`, os 8 `post_*_score`, `synopsis_quality*`. Elas alimentam o **scoring**, e mexer nelas
+arrasta o Ridge, o `calculated_scores` e o `formula_config` junto — é a Fatia 2.
+
+### 13.2 Passos
+
+1. **Migration 143 — re-backfill de `user_work_state`.** As 878 linhas de hoje são de agosto (mig
+   138) e **estão velhas**: nada escreve nelas desde então. Refazer a partir de `works`, **no momento
+   do corte**. ⚠️ Paginar (o `select` corta em 1000 linhas sem avisar; são 882 obras).
+2. **Dual-write.** `toggleFavorite`, `setFavoriteMany`, `updateWorkStatus`, `setReadingStatusForWorks`
+   passam a escrever em `works` **E** em `user_work_state`. Isso **para a hemorragia** sem quebrar
+   nada, porque as leituras continuam vindo de `works`. Reversível a qualquer momento.
+3. **Trocar o gate** desses 4 writers: `ensureAdmin()` → `ensurePermission("own_state")` + o
+   `user_id` da **sessão**. É o passo que destrava a Leitora. O verbo já existe (PR #127).
+   ⚠️ O writer passa a precisar do `userId` — e ele vem de `ensureSignedIn()`, **nunca** de
+   `getCurrentUserId()` (que cai no singleton sem sessão → escreveria como o dono).
+4. **Rewire das leituras de acompanhamento:** `/leitura`, `/favorites`, o card e a página da obra
+   passam a ler o estado de `user_work_state` (com fallback para `works` durante a transição).
+5. **Verificação com DOIS usuários:** cada um marca o próprio capítulo; nenhum vê o do outro; o
+   catálogo (título, capa, tags, notas da IA) é o mesmo para os dois.
+6. **Drop das 4 colunas** de `works` — só quando nenhum grep achar mais `works.is_favorite` & cia.
+
+### 13.3 O que NÃO fazer nesta fatia
+
+- **Não mexer no scoring.** `calculated_scores` continua global. A Leitora **não terá Nota Prevista
+  própria** — e está certo: ela não tem rótulos. (É a Fatia 2.)
+- **Não mover as leituras de background.** O recalc lê `works` pela service role, sem sessão. Ver §6.
+- **Não dropar coluna nenhuma** antes do passo 6.
+
+---
+
+## 14. Prompt para a próxima sessão
+
+> Vamos fazer a **Fatia 1 da Fase 2** (`PLANO-MULTIUSER-FASE2.md` §13): tirar o estado de **leitura**
+> (`is_favorite`, `personal_status_id`, `chapters_read`, `last_read_at`) de dentro de `works` e passá-lo
+> para `user_work_state`, para que um Leitor consiga marcar capítulo e favoritar — hoje ele não
+> consegue, porque esses writers são todos `ensureAdmin()` (e têm que ser, já que a coluna é
+> compartilhada).
+>
+> Antes de tocar em qualquer coisa: rode `node scripts/backup-db.mjs` e confira o manifest — **o
+> projeto não tem backup nenhum** (`pitr_enabled: false`).
+>
+> Ordem: (1) migration 143 re-backfillando `user_work_state` a partir de `works` (PAGINADO — o `select`
+> corta em 1000 linhas sem avisar); (2) **dual-write** nos 4 writers (`toggleFavorite`,
+> `setFavoriteMany`, `updateWorkStatus`, `setReadingStatusForWorks`), que passam a escrever nos dois
+> lugares; (3) trocar o gate desses writers de `ensureAdmin()` para `ensurePermission("own_state")` +
+> `user_id` vindo de `ensureSignedIn()` (**nunca** de `getCurrentUserId()`, que cai no singleton do
+> dono sem sessão); (4) rewire das leituras de `/leitura` e `/favorites` para `user_work_state`, com
+> fallback para `works`; (5) drop das 4 colunas **só no fim**.
+>
+> Escopo fechado: **não** mexer em `user_score`, nos 8 `post_*` nem no scoring — isso arrasta o Ridge e
+> o `formula_config` junto, e é a Fatia 2.
+>
+> Verifique com **dois usuários de verdade** (um curador, um leitor): cada um marca o próprio capítulo,
+> nenhum enxerga o do outro, e o catálogo é o mesmo para os dois. Lembre que escritas per-user vão no
+> `createUserClient()` (RLS vale) e o catálogo/background na service role — trocar errado **não dá
+> erro**, dá dado errado.

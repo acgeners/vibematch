@@ -74,3 +74,6 @@ lib/synopsis-interest/labeling-sheet.*
 # Estado temporário do Supabase CLI — não versionar
 supabase/.temp/
 infer-tags-proposals.csv
+
+# Backups lógicos do banco (scripts/backup-db.mjs) — nunca no git: contêm dados e são grandes.
+.backups/
