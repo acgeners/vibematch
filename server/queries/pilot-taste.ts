@@ -108,7 +108,7 @@ export async function getPilotWorks(): Promise<PilotWork[]> {
   const rows: Record<string, unknown>[] = []
   for (let from = 0; ; from += 1000) {
     const { data, error } = await sb
-      .from("works")
+      .from("works_owner")
       .select(
         `id, title, user_score, last_read_at, personal_status_id, canonical_synopsis, ${POST_READING_SCORE_COLUMNS.join(", ")}, work_covers(url,is_primary,position), work_synopses(text,is_primary,position), work_tags(tags(name)), pilot_taste_scores(*)`,
       )

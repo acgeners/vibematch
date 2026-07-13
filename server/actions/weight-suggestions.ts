@@ -24,7 +24,7 @@ export async function suggestScoreWeights(): Promise<WeightInferenceResult> {
 
   const [worksRes, weightsRes] = await Promise.all([
     supabase
-      .from("works")
+      .from("works_owner")
       .select(
         `id, user_score, category_scores(criterion_slug, score)`
       )

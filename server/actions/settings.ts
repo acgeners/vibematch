@@ -520,7 +520,7 @@ export async function getCalibrationSnapshot() {
 
   const [worksRes, historyRes] = await Promise.all([
     supabase
-      .from("works")
+      .from("works_owner")
       .select(
         `id, title, user_score,
          calculated_scores(calc_score, total_votes, expected_score, expected_is_stub)`

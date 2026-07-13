@@ -45,7 +45,7 @@ export async function loadWorkReadinessSnapshot(
     sb.from("work_synopses").select("id", { count: "exact", head: true }).eq("work_id", workId),
     sb.from("work_tags").select("id", { count: "exact", head: true }).eq("work_id", workId),
     sb.from("category_scores").select("id", { count: "exact", head: true }).eq("work_id", workId),
-    sb.from("works").select("id", { count: "exact", head: true }).eq("is_archived", false).not("user_score", "is", null),
+    sb.from("works_owner").select("id", { count: "exact", head: true }).eq("is_archived", false).not("user_score", "is", null),
     loadCurrentTasteProfile(),
   ])
 
@@ -121,7 +121,7 @@ export async function loadWorkReadinessSnapshots(
 
   const [profile, ratedRes] = await Promise.all([
     loadCurrentTasteProfile(),
-    sb.from("works").select("id", { count: "exact", head: true }).eq("is_archived", false).not("user_score", "is", null),
+    sb.from("works_owner").select("id", { count: "exact", head: true }).eq("is_archived", false).not("user_score", "is", null),
     presence("canonical_synopsis", hasCanonical),
     presence("review_digest", hasDigest),
     presence("review_summary", hasSummary),

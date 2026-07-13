@@ -147,7 +147,7 @@ async function fetchWorkBundle(workId: string): Promise<{
 } | null> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
-    .from("works")
+    .from("works_owner")
     .select(`
       id,
       title,
@@ -276,7 +276,7 @@ async function fetchRecentActivity(excludeWorkId: string): Promise<
 > {
   const supabase = createAdminClient()
   const { data, error } = await supabase
-    .from("works")
+    .from("works_owner")
     .select("id, title, user_score, updated_at")
     .not("user_score", "is", null)
     .eq("is_archived", false)

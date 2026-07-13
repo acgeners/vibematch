@@ -90,7 +90,7 @@ function buildTags(rows: RawTagRow[] | null | undefined): Array<{ name: string; 
 export async function loadWorksForAudit(limit = 1000): Promise<AuditWorkInput[]> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
-    .from("works")
+    .from("works_owner")
     .select(AUDIT_WORK_SELECT)
     .not("user_score", "is", null)
     .eq("is_archived", false)
@@ -173,7 +173,7 @@ export interface BiasInputs {
 export async function loadInputsForBias(): Promise<BiasInputs> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
-    .from("works")
+    .from("works_owner")
     .select(BIAS_WORK_SELECT)
     .not("user_score", "is", null)
     .eq("is_archived", false)

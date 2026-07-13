@@ -114,7 +114,7 @@ async function computeLowCoverage(
   supabase: ReturnType<typeof createAdminClient>,
 ): Promise<{ unreadIds: string[]; lowCoverageIds: Set<string> }> {
   const { data: works } = await supabase
-    .from("works")
+    .from("works_owner")
     .select("id, user_score, genres")
     .eq("is_archived", false)
 

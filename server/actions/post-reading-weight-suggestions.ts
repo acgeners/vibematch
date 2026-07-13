@@ -88,7 +88,7 @@ export async function applyPostReadingWeights(
 
   const selectColumns = ["id", "user_score", ...POST_READING_FIELDS].join(", ")
   const { data, error } = await supabase
-    .from("works")
+    .from("works_owner")
     .select(selectColumns)
     .eq("is_archived", false)
     .limit(2000)
@@ -125,7 +125,7 @@ export async function applyPostReadingWeights(
     // Pra ~100-200 obras é instantâneo.
     const results = await Promise.all(
       updates.map((u) =>
-        supabase.from("works").update({ user_score: u.user_score }).eq("id", u.id),
+        supabase.from("works_owner").update({ user_score: u.user_score }).eq("id", u.id),
       ),
     )
     const firstError = results.find((r) => r.error)
