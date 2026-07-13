@@ -3,7 +3,8 @@
 import { randomUUID } from "node:crypto"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensureAdmin, getOwnerUserId } from "@/server/queries/current-user"
+import { ensureAdmin, getOwnerUserId, ensureSignedIn, ensurePermission } from "@/server/queries/current-user"
+import { createUserClient } from "@/lib/supabase/user"
 import { writeReadingState } from "@/server/queries/user-work-state"
 import { runRecommendationAction } from "./recommendations"
 import { proposeFavoriteGroups as proposeFavoriteGroupsLLM } from "@/lib/lists/propose-groups"
@@ -44,16 +45,42 @@ function cleanCoverIds(ids: string[] | undefined | null): string[] {
   return Array.from(new Set(ids.filter(Boolean))).slice(0, 3)
 }
 
+
+/**
+ * Gate dos GRUPOS de favoritos (Fatia 2b — mig 149: `work_lists` ganhou dono).
+ *
+ * Era `ensureAdmin()`, e tinha que ser: sem `user_id` na tabela, "criar um grupo" significava
+ * criar um grupo no espaço de TODO MUNDO. Com dono, o verbo certo é `own_state` — o mesmo de
+ * favoritar e marcar capítulo. O Leitor free cria os grupos DELE.
+ *
+ * ⚠️ IDENTIDADE antes de PERMISSÃO: o papel de um anônimo é `leitor` (fail-closed) e `own_state`
+ * é liberado pro leitor — o gate de papel PASSA. O que falta ao anônimo é `user_id`.
+ */
+async function ensureListWriter(): Promise<
+  { ok: true; userId: string } | { ok: false; error: string }
+> {
+  const session = await ensureSignedIn()
+  if (!session.ok) return { ok: false, error: session.error }
+  const gate = await ensurePermission("own_state")
+  if (!gate.ok) return { ok: false, error: gate.error }
+  return { ok: true, userId: session.userId }
+}
+
 export async function createWorkList(input: WorkListInput): Promise<ActionResult<{ id: string }>> {
-  const gate = await ensureAdmin()
+  const gate = await ensureListWriter()
   if (!gate.ok) return { error: gate.error }
   const name = cleanName(input.name ?? "")
   if (!name) return { error: "Dê um nome ao grupo." }
 
-  const supabase = createAdminClient()
+  // 🔴 Cliente de SESSÃO, não service role. A service role IGNORA a RLS: com ela, bastaria um
+  // `id` de grupo alheio no POST pra editar/apagar o grupo de outra pessoa — e toda função
+  // exportada de um "use server" é um endpoint HTTP público. Com o cliente de sessão, o
+  // Postgres filtra por `user_id = auth.uid()` e a tentativa é NEGADA, não obedecida.
+  const supabase = await createUserClient()
   const { data, error } = await supabase
     .from("work_lists")
     .insert({
+      user_id: gate.userId,
       name,
       description: input.description?.trim() || null,
       color: input.color || null,
@@ -71,12 +98,12 @@ export async function updateWorkList(
   id: string,
   input: WorkListInput,
 ): Promise<ActionResult<null>> {
-  const gate = await ensureAdmin()
+  const gate = await ensureListWriter()
   if (!gate.ok) return { error: gate.error }
   const name = cleanName(input.name ?? "")
   if (!name) return { error: "Dê um nome ao grupo." }
 
-  const supabase = createAdminClient()
+  const supabase = await createUserClient()
   const { error } = await supabase
     .from("work_lists")
     .update({
@@ -94,10 +121,11 @@ export async function updateWorkList(
 }
 
 export async function deleteWorkList(id: string): Promise<ActionResult<null>> {
-  const gate = await ensureAdmin()
+  const gate = await ensureListWriter()
   if (!gate.ok) return { error: gate.error }
-  const supabase = createAdminClient()
+  const supabase = await createUserClient()
   // work_list_items cai por ON DELETE CASCADE (migration 123). Obras intactas.
+  // A RLS garante que o `id` tem que ser de um grupo DELE — apagar o de outro é negado.
   const { error } = await supabase.from("work_lists").delete().eq("id", id)
   if (error) return { error: error.message }
   revalidateLists()
@@ -108,13 +136,14 @@ export async function addWorksToList(
   listId: string,
   workIds: string[],
 ): Promise<ActionResult<{ count: number }>> {
-  // Marca is_favorite=TRUE em works (coluna compartilhada) → gate de admin (stopgap).
-  const gate = await ensureAdmin()
+  const gate = await ensureListWriter()
   if (!gate.ok) return { error: gate.error }
   const ids = Array.from(new Set(workIds.filter(Boolean)))
   if (ids.length === 0) return { data: { count: 0 } }
 
-  const supabase = createAdminClient()
+  // Cliente de sessão: a política de `work_list_items` pergunta ao GRUPO quem é o dono. Pôr
+  // uma obra no grupo de outra pessoa é negado pelo Postgres.
+  const supabase = await createUserClient()
   const { error: insertError } = await supabase
     .from("work_list_items")
     .upsert(
@@ -123,26 +152,24 @@ export async function addWorksToList(
     )
   if (insertError) return { error: insertError.message }
 
-  // Grupo ⊂ favoritos: garante que todo item aparece no universo de favoritos.
-  const { error: favError } = await supabase
-    .from("works")
-    .update({ is_favorite: true })
-    .in("id", ids)
-  if (favError) return { error: favError.message }
-
-  // Espelha no estado per-usuário (Fatia 1). Este é o 5º writer de `works.is_favorite` — e
-  // sem esta linha ele seria o que apodrece o espelho: o dono põe a obra num grupo, `works`
-  // marca favorito, `user_work_state` não fica sabendo, e no dia em que a leitura de favoritos
-  // sair do espelho (Fatia 2 / DROP), a obra some dos favoritos dele.
+  // Grupo ⊂ favoritos: todo item do grupo aparece no universo de favoritos DE QUEM O CRIOU.
   //
-  // O espelho é o do DONO porque a coluna que acabamos de escrever é a dele (`works` é a linha
-  // compartilhada). Grupos ainda não têm dono (`work_lists` não tem `user_id`) — é uma feature
-  // do Curador, e hoje o único Curador é o dono. Se um SEGUNDO curador aparecer, a RLS (mig
-  // 142) recusa esta escrita e a action falha alto — que é o certo: significa que os grupos
-  // precisam de dono (Fatia 2), não que o espelho pode apodrecer em silêncio.
-  const owner = await getOwnerUserId()
-  const mirror = await writeReadingState(owner, ids, { is_favorite: true })
+  // Mudou na Fatia 2b: o favorito vai pra linha de QUEM AGIU, não mais pra do dono. Antes, com
+  // os grupos sem dono, era o dono por definição — agora a Leitora tem os grupos dela, e o
+  // favorito que nasce daqui é o dela.
+  const mirror = await writeReadingState(gate.userId, ids, { is_favorite: true })
   if (mirror.error) return { error: mirror.error }
+
+  // `works.is_favorite` é o espelho compartilhado — só o DONO o escreve (mesma regra da Fatia 1;
+  // ver server/queries/user-work-state.ts). Para os demais, essa coluna nem é consultada.
+  if (gate.userId === (await getOwnerUserId())) {
+    const admin = createAdminClient()
+    const { error: favError } = await admin
+      .from("works")
+      .update({ is_favorite: true })
+      .in("id", ids)
+    if (favError) return { error: favError.message }
+  }
 
   revalidateLists(listId)
   return { data: { count: ids.length } }
@@ -152,12 +179,12 @@ export async function removeWorksFromList(
   listId: string,
   workIds: string[],
 ): Promise<ActionResult<{ count: number }>> {
-  const gate = await ensureAdmin()
+  const gate = await ensureListWriter()
   if (!gate.ok) return { error: gate.error }
   const ids = Array.from(new Set(workIds.filter(Boolean)))
   if (ids.length === 0) return { data: { count: 0 } }
 
-  const supabase = createAdminClient()
+  const supabase = await createUserClient()
   // Remover do grupo NÃO desmarca is_favorite (pode estar em outros grupos).
   const { error } = await supabase
     .from("work_list_items")

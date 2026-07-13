@@ -880,7 +880,17 @@ function personalPatchFromForm(data: WorkFormValues): PersonalStatePatch {
 
 async function persistNewWork(
   values: WorkFormValues,
-  aiMeta?: CreateWorkAiMeta
+  aiMeta?: CreateWorkAiMeta,
+  /**
+   * `skipAiCascade` — nada que queime token. É o caminho do Leitor FREE (Fatia 2b): ele pode
+   * cadastrar uma obra que falta no catálogo, mas SÓ com o que a busca externa trouxe
+   * (scraping das 8 fontes: título, capa, sinopse, capítulos — zero LLM). A sinopse canônica,
+   * a inferência de tags e as 9 notas de atributo ficam PENDENTES pro Curador rodar.
+   *
+   * Sem esta opção, `createWorkPending` disparava a consolidação de sinopse por LLM (abaixo) —
+   * ou seja, "pending" não era livre de IA. O nome mentia.
+   */
+  opts?: { skipAiCascade?: boolean },
 ): Promise<
   | { ok: true; workId: string }
   | { ok: false; error: Record<string, string[]> }
@@ -1061,7 +1071,7 @@ async function persistNewWork(
   // Gate por configuração: gerar a canônica na criação é opcional (toggle em
   // /settings). Desligado, adia pra depois do save (painel/edição). Tolerante:
   // default true preserva o comportamento histórico.
-  if (await getSynopsisCanonicalOnCreate(supabase)) {
+  if (!opts?.skipAiCascade && (await getSynopsisCanonicalOnCreate(supabase))) {
     scheduleSynopsisConsolidation(workId)
   }
   await upsertWorkExternalIds(supabase, workId, data.external_ids)
@@ -1091,15 +1101,40 @@ export async function createWork(
   externalReviews?: SourcedReview[],
   opts: { skipAiEnrichment?: boolean } = {},
 ) {
-  const gate = await ensureAdmin()
-  if (!gate.ok) return { error: gate.error }
-  const result = await persistNewWork(values, aiMeta)
+  // FATIA 2b — o Leitor free pode cadastrar uma obra que falta no catálogo, mas SEM QUEIMAR UM
+  // TOKEN. A busca externa é scraping (grátis); a IA fica pendente pro Curador.
+  const session = await ensureSignedIn()
+  if (!session.ok) return { error: session.error }
+  const perm = await ensurePermission("own_state")
+  if (!perm.ok) return { error: perm.error }
+
+  // Curador = quem pode curar o catálogo (rodar a IA, digitar notas). Todo o resto cria a obra
+  // no modo pendente.
+  const isCurator = (await ensurePermission("curate_ai")).ok
+
+  // 🔴 O buraco que isto fecha: o form carrega as 9 NOTAS DE ATRIBUTO e as justificativas da
+  // IA — e toda função exportada de um "use server" é um endpoint HTTP público. Sem esta
+  // limpeza, um Leitor free postaria as notas que quisesse direto no CATÁLOGO, sem passar pela
+  // IA e sem passar por você. Elas não são opinião dele: são fato da obra, e custam dinheiro.
+  const safeValues: WorkFormValues = isCurator
+    ? values
+    : {
+        ...values,
+        ...Object.fromEntries(CRITERION_SLUGS.map((slug) => [slug, null])),
+        ai_justifications: {},
+      }
+
+  const result = await persistNewWork(safeValues, isCurator ? aiMeta : undefined, {
+    skipAiCascade: !isCurator,
+  })
   if (!result.ok) return { error: result.error }
   // `skipAiEnrichment`: o usuário optou por salvar SEM o enriquecimento pago
   // (Flow B do popup de custo). Pula a inferência de tags (Haiku) e o resumo/
   // digest de reviews (Haiku/Sonnet). As reviews ainda são persistidas (exibição);
   // resumo/digest/tags podem ser gerados sob demanda depois. O scraping é grátis.
-  const skipAi = opts.skipAiEnrichment === true
+  //
+  // Pro não-curador é FORÇADO: ele não escolhe gastar o saldo da Anthropic de outra pessoa.
+  const skipAi = opts.skipAiEnrichment === true || !isCurator
   // Inferência de tags (Haiku) em background, SEQUENCIADA após as reviews —
   // usa o contexto de leitores (digest → resumo) quando disponível, que puxa
   // tags que a sinopse omite (passada `--with-reviews` validada). Grava tags de
@@ -1181,10 +1216,27 @@ export async function createWork(
  * Versão "batch": insere a obra mas adia o recálculo para finalizePendingBatch().
  * Use quando for adicionar vários títulos em sequência.
  */
+/**
+ * Cadastra uma obra SEM gastar um token — o caminho do Leitor free (Fatia 2b).
+ *
+ * A regra que você definiu: o free pode criar obra nova, mas só com a BUSCA DE DADOS externa
+ * (scraping das 8 fontes — não passa por `ensureAiConsumption`, não custa nada). O resto —
+ * as 9 notas de atributo, a sinopse canônica, a inferência de tags — fica PENDENTE pro Curador
+ * acionar. A obra nasce `ai_eval_status = "pending"` e cai na fila de /ai-evaluation.
+ *
+ * ⚠️ O gate saiu de `ensureAdmin` para `own_state` + sessão. E o `skipAiCascade` não é
+ * decoração: sem ele, esta função disparava a consolidação de sinopse por LLM em `after()` —
+ * "pending" não era livre de IA, e o Leitor free estaria gastando o seu saldo da Anthropic
+ * a cada obra cadastrada. Sem erro, sem log, direto na fatura.
+ */
 export async function createWorkPending(values: WorkFormValues) {
-  const gate = await ensureAdmin()
+  const session = await ensureSignedIn()
+  if (!session.ok) return { error: { _root: [session.error] } }
+  const gate = await ensurePermission("own_state")
   if (!gate.ok) return { error: { _root: [gate.error] } }
-  const result = await persistNewWork(values)
+
+  const isOwner = await canWriteSharedWorkRow(session.userId)
+  const result = await persistNewWork(values, undefined, { skipAiCascade: !isOwner })
   if (!result.ok) return { error: result.error }
 
   revalidatePath("/titles")
