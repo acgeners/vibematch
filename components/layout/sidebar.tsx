@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -20,6 +20,11 @@ import {
   Calculator,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  SIDEBAR_COLLAPSED_LEGACY_KEY,
+  readCollapsedCookie,
+  writeCollapsedCookie,
+} from "@/lib/sidebar-preference"
 import { getSidebarBadgeCounts } from "@/server/actions/badges"
 import { useChromeData } from "@/lib/use-refresh"
 import { AccountChip } from "@/components/layout/account-chip"
@@ -39,8 +44,8 @@ const BADGES_TTL_MS = 30_000
 
 // Colapso do menu do site. As consoles de duas camadas (/settings, /preferencias)
 // já têm a própria sub-nav, então o menu recolhe pra trilho ao entrar nelas
-// (evita "duas barras"). Fora delas, a escolha manual persiste no navegador.
-const SIDEBAR_COLLAPSED_KEY = "sidebar:collapsed"
+// (evita "duas barras"). Fora delas, a escolha manual persiste em cookie
+// (lib/sidebar-preference.ts) — o servidor precisa lê-la pra hidratar sem divergir.
 const CONSOLE_ROUTE_PREFIXES = ["/settings", "/preferencias"]
 function isConsoleRoute(pathname: string): boolean {
   return CONSOLE_ROUTE_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"))
@@ -147,7 +152,7 @@ function useClientSearchParams(): URLSearchParams {
   return params
 }
 
-export function Sidebar() {
+export function Sidebar({ defaultCollapsed = false }: { defaultCollapsed?: boolean }) {
   const pathname = usePathname()
   const searchParams = useClientSearchParams()
   // Stopgap multi-user: usuário logado (não-dono) é read-only. Esconde a seção
@@ -158,27 +163,42 @@ export function Sidebar() {
     ? NAV_SECTIONS
     : NAV_SECTIONS.filter((s) => s.title !== "Gerenciar")
 
-  // Trilho ↔ expandido. Inicial = derivado da rota (determinístico p/ SSR, sem
-  // localStorage). Sincroniza durante o render a cada troca de rota (padrão
-  // "adjust-during-render", igual ao useClientSearchParams acima — evita o
-  // cascading render do useEffect): nas consoles recolhe; fora delas aplica a
-  // preferência salva no navegador.
-  const [collapsed, setCollapsed] = useState<boolean>(() => isConsoleRoute(pathname))
-  const [collapseSyncedPath, setCollapseSyncedPath] = useState<string | null>(null)
+  // Trilho ↔ expandido. O inicial precisa ser IDÊNTICO no servidor e no cliente, senão
+  // a hidratação quebra: por isso a preferência vem do cookie (`defaultCollapsed`, lido
+  // no layout) e não de localStorage, que o servidor não enxerga. Nas consoles recolhe
+  // sempre — derivado do pathname, que o SSR também conhece.
+  const [collapsed, setCollapsed] = useState<boolean>(
+    () => isConsoleRoute(pathname) || defaultCollapsed,
+  )
+  // Semeado com o pathname INICIAL. Começando em null, o ajuste-durante-render abaixo
+  // disparava já na renderização de hidratação e divergia do HTML do servidor — era
+  // exatamente esse o bug (`Hydration failed`). Agora só roda em troca de rota, que é
+  // sempre pós-hidratação.
+  const [collapseSyncedPath, setCollapseSyncedPath] = useState<string>(() => pathname)
   if (typeof window !== "undefined" && pathname !== collapseSyncedPath) {
     setCollapseSyncedPath(pathname)
-    setCollapsed(
-      isConsoleRoute(pathname)
-        ? true
-        : window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1",
-    )
+    setCollapsed(isConsoleRoute(pathname) ? true : readCollapsedCookie())
   }
+
+  // Migração de quem já tinha a preferência em localStorage: transporta pro cookie uma
+  // única vez e apaga a chave antiga. Sem isto, o primeiro load pós-deploy esqueceria a
+  // sidebar recolhida de quem a recolheu.
+  useEffect(() => {
+    const legacy = window.localStorage.getItem(SIDEBAR_COLLAPSED_LEGACY_KEY)
+    if (legacy === null) return
+    window.localStorage.removeItem(SIDEBAR_COLLAPSED_LEGACY_KEY)
+    if (legacy === "1" && !readCollapsedCookie()) {
+      writeCollapsedCookie(true)
+      setCollapsed(true)
+    }
+  }, [])
+
   const toggleCollapsed = () =>
     setCollapsed((prev) => {
       const next = !prev
       // Só persiste fora das consoles — nelas o padrão é recolher ao entrar.
       if (!isConsoleRoute(pathname)) {
-        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0")
+        writeCollapsedCookie(next)
       }
       return next
     })
