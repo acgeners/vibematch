@@ -297,6 +297,17 @@ export async function getRanking(
     onlyFavorites: filters.onlyFavorites,
   })
 
+  // Interesse ♥ manual (Fatia 2a) — mesma história do status: pra quem não é o dono, `♥♥♥`
+  // filtrado na coluna de `works` devolveria as obras que ELE marcou. Vai num set separado
+  // (e não junto do de cima) porque este filtro só vale no SQL quando não está no modo OR com
+  // a previsão da IA — a condição abaixo é a mesma que já existia.
+  const orWithPredActive =
+    (filters.interestMode ?? "or") === "or" && !!filters.predictedSynopsisQualities?.length
+  const interestFilterIds =
+    filters.synopsisQualities?.length && !orWithPredActive
+      ? await resolvePersonalFilterIds({ synopsisQualities: filters.synopsisQualities })
+      : null
+
   // Pre-resolve genre/tag id filters in parallel via pivot tables. Pushing this
   // into Supabase narrows the heavy joined fetch below instead of loading 2000
   // rows just to drop most in memory.
@@ -415,6 +426,7 @@ export async function getRanking(
   // (ou nenhuma favorita) → interseção vazia → resultado vazio. Ignorar a lista vazia aqui
   // devolveria o catálogo inteiro como se fosse tudo dela.
   if (personalFilterIds) includeSets.push(personalFilterIds)
+  if (interestFilterIds) includeSets.push(interestFilterIds)
   const excludeIds = new Set<string>([
     ...(genreExcludeIds ?? []),
     ...(tagExcludeIds ?? []),
@@ -479,9 +491,9 @@ export async function getRanking(
   // no modo OR com a previsão IA também ativa: aí os dois viram OR (em memória,
   // abaixo) e este pré-filtro excluiria do fetch as obras que casam só pela
   // previsão. No modo AND (ambos precisam casar) pré-filtrar por manual é válido.
-  const orWithPredActive =
-    (filters.interestMode ?? "or") === "or" && !!filters.predictedSynopsisQualities?.length
-  if (filters.synopsisQualities?.length && !orWithPredActive) {
+  // Só o DONO filtra pela coluna de `works` — pros demais o recorte já veio por id em
+  // `interestFilterIds` (acima).
+  if (personal.isOwner && filters.synopsisQualities?.length && !orWithPredActive) {
     worksQuery = worksQuery.in("synopsis_quality", filters.synopsisQualities)
   }
   if (filters.minTotalChapters != null) {
@@ -573,7 +585,7 @@ export async function getRanking(
       alignmentAt: w.calculated_scores?.alignment_at ?? null,
       alignmentStale: Boolean(w.calculated_scores?.alignment_stale),
       alignmentPayload: w.calculated_scores?.alignment_payload ?? null,
-      userScore: w.user_score,
+      userScore: state.userScore,
       isFavorite: state.isFavorite,
       publicationStatus: getPublicationStatusNameById(publicationStatusId) ?? "Unknown",
       publicationStatusId,
@@ -594,12 +606,12 @@ export async function getRanking(
         typeof w.canonical_synopsis === "string" && w.canonical_synopsis.trim()
           ? w.canonical_synopsis.trim()
           : primarySynopses.get(w.id) ?? null,
-      synopsisQuality: w.synopsis_quality ?? null,
-      synopsisFromPrediction: w.synopsis_quality_source === "prediction_applied",
+      synopsisQuality: state.synopsisQuality,
+      synopsisFromPrediction: state.synopsisQualitySource === "prediction_applied",
       predictedSynopsisQuality: synopsisPred?.predictedQuality ?? null,
       predictedSynopsisStale: synopsisPred?.stale ?? false,
       predictedSynopsisConfidence: synopsisPred?.confidence ?? null,
-      observations: w.observations ?? null,
+      observations: state.observations,
       year: w.year ?? null,
       updatedAt: w.updated_at ?? null,
       lastReadAt: state.lastReadAt,

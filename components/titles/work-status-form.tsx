@@ -21,7 +21,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { workStatusSchema } from "@/lib/validations/work.schema"
 import type { WorkStatusInput, WorkStatusValues } from "@/lib/validations/work.schema"
 import { updateWorkStatus } from "@/server/actions/works"
-import { useIsAdmin } from "@/components/layout/admin-context"
 import { PERSONAL_STATUSES, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { PERSONAL_STATUS_LABELS, PERSONAL_STATUSES_BY_ID, SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import {
@@ -207,12 +206,6 @@ export function WorkStatusForm({
   onStateChange,
 }: WorkStatusFormProps) {
   const refresh = useRefresh()
-  // Fatia 1: o estado de LEITURA (status, capítulos, data) é de quem está logado — inclusive
-  // da Leitora. A NOTA, as observações, o interesse e os 8 pós-leitura NÃO são: eles moram na
-  // linha compartilhada de `works`, alimentam o scoring, e seguem sendo do Curador (Fatia 2).
-  // O servidor recusa esses campos de quem não é o dono; aqui só evitamos oferecer o que vai
-  // ser negado.
-  const isCurator = useIsAdmin()
   const [saving, setSaving] = useState(false)
   const [notesOpen, setNotesOpen] = useState(true)
   const [criteriaOpen, setCriteriaOpen] = useState(criteriaDefaultOpen ?? true)
@@ -260,8 +253,9 @@ export function WorkStatusForm({
 
   // Gate da seção "Critérios de avaliação": usa a regra passada pelo parent
   // (mesma dos atributos pós-leitura) ou cai na regra antiga (status != "Want to Read").
-  const criteriaVisible =
-    isCurator && (showEvaluationCriteria ?? personalStatus !== "Want to Read")
+  // Fatia 2a: a nota e a pós-leitura deixaram de ser do Curador — são de quem está logado, e
+  // vão pra `user_work_state`. Voltou a valer a regra original, sem gate de papel.
+  const criteriaVisible = showEvaluationCriteria ?? personalStatus !== "Want to Read"
 
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
@@ -312,24 +306,6 @@ export function WorkStatusForm({
       normalized[field] = normalizePostReadingScore(normalized[field])
     }
 
-    // ⚠️ Quem não é o Curador devolve os campos da Fatia 2 EXATAMENTE como vieram.
-    //
-    // Não é paranoia: o form submete o estado inteiro a cada save, e o efeito de
-    // `computedManualScore` RECALCULA `user_score` a partir dos pós-leitura carregados —
-    // que, pra Leitora, são os do dono. Um `user_score` recomputado (arredondamento, peso
-    // que mudou desde que ele salvou) chega ao servidor como "ela mudou a nota do Curador",
-    // e o servidor recusa — o capítulo dela não salvaria, por um campo que ela nem viu.
-    // Ecoando o valor original, o servidor vê "nada mudou" e grava só o que é dela.
-    if (!isCurator) {
-      normalized.user_score = initialValues.user_score
-      normalized.observations = initialValues.observations
-      normalized.observation_adjustment = initialValues.observation_adjustment
-      normalized.synopsis_quality = initialValues.synopsis_quality
-      for (const field of POST_FIELDS) {
-        normalized[field] = initialValues[field]
-      }
-    }
-
     const result = await updateWorkStatus(workId, normalized)
 
     if ("error" in result && result.error) {
@@ -367,10 +343,9 @@ export function WorkStatusForm({
 
   return (
     <form id={formId} onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-6">
-      {/* Anotações pessoais (interesse, ajuste, observações) — colapsável, acima do progresso.
-          Só o Curador: estes 3 campos moram na linha compartilhada de `works` e alimentam o
-          scoring. Viram per-usuário na Fatia 2. */}
-      {isCurator && (
+      {/* Anotações pessoais (interesse ♥, ajuste, observações) — colapsável, acima do
+          progresso. Fatia 2a: são de QUEM ESTÁ LOGADO (vão pra `user_work_state`), não mais do
+          Curador. O ajuste de observação só mexe no scoring de quem tem modelo — hoje, o dono. */}
       <div className="rounded-lg border border-border/40">
         <button
           type="button"
@@ -476,7 +451,6 @@ export function WorkStatusForm({
           </div>
         )}
       </div>
-      )}
 
       <div className="space-y-4 border-t border-border/40 pt-6">
         <div className="flex items-center gap-2">

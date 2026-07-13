@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { selectByIdsInChunks } from "@/lib/supabase/paginate"
 import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
+import { getPersonalStateReader } from "@/server/queries/user-work-state"
 
 /**
  * Filtro de Interesse na obra (manual + previsão da IA) aplicado como PÓS-FETCH
@@ -41,12 +42,17 @@ export async function filterWorkIdsByInterest(
       sb.from("works").select("id, synopsis_quality, synopsis_quality_source").in("id", chunk),
     )
     if (error) throw new Error(`Falha filtrando por Interesse manual: ${error.message}`)
+
+    // O ♥ é PESSOAL (Fatia 2a): as colunas de `works` são as do dono. Sem esta troca, a
+    // Leitora filtrando por "♥♥♥" receberia as obras que ELE marcou.
+    const personal = await getPersonalStateReader()
     const passing = new Set<string>()
     for (const r of data) {
-      const q = r.synopsis_quality
+      const state = personal.get(r.id, r)
+      const q = state.synopsisQuality
       if (q != null && realHearts.has(q)) passing.add(r.id)
       else if (wantNone && q == null) passing.add(r.id)
-      else if (wantUnknown && r.synopsis_quality_source === "legacy_unknown") passing.add(r.id)
+      else if (wantUnknown && state.synopsisQualitySource === "legacy_unknown") passing.add(r.id)
     }
     keep = new Set([...keep].filter((id) => passing.has(id)))
   }

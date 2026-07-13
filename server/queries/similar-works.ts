@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
 import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
+import { getPersonalStateReader } from "@/server/queries/user-work-state"
 
 export interface SimilarWork {
   id: string
@@ -159,11 +160,17 @@ export async function getSimilarWorks(
     genresByWorkId.set(row.work_id, existing)
   }
 
+  // Nota, ♥ e status são PESSOAIS (Fatias 1 e 2a). A RPC de similares devolve `user_score` da
+  // linha de `works` — a nota do DONO. Sem esta troca, o card "Similares" da Leitora mostraria
+  // as notas dele nas obras parecidas.
+  const personal = await getPersonalStateReader()
+
   return rows.map((r) => {
     const meta = metaById.get(r.id)
     const calc = calcById.get(r.id)
     const pred = predictions.get(r.id)
     const ratings = ratingsByWorkId.get(r.id) ?? []
+    const state = personal.get(r.id, { ...(meta ?? {}), user_score: r.user_score })
 
     const rated = ratings.filter((pr) => pr.rating != null && pr.vote_count > 0)
     const totalVotes = ratings.reduce((sum, pr) => sum + pr.vote_count, 0)
@@ -185,18 +192,18 @@ export async function getSimilarWorks(
       personalFit: r.personal_fit == null ? null : Number(r.personal_fit),
       personalFitPercentile:
         calc?.personal_fit_percentile == null ? null : Number(calc.personal_fit_percentile),
-      userScore: r.user_score == null ? null : Number(r.user_score),
+      userScore: state.userScore,
       genres: genresByWorkId.get(r.id) ?? [],
       year: meta?.year ?? null,
       totalChapters: meta?.total_chapters ?? null,
       publicationStatusId: meta?.publication_status_id ?? null,
-      personalStatusId: meta?.personal_status_id ?? null,
+      personalStatusId: state.personalStatusId,
       platformAvg,
       totalVotes: totalVotes > 0 ? totalVotes : null,
       alignmentScore: calc?.alignment_score == null ? null : Number(calc.alignment_score),
       alignmentStale: Boolean(calc?.alignment_stale),
-      synopsisQuality: meta?.synopsis_quality ?? null,
-      synopsisFromPrediction: meta?.synopsis_quality_source === "prediction_applied",
+      synopsisQuality: state.synopsisQuality,
+      synopsisFromPrediction: state.synopsisQualitySource === "prediction_applied",
       predictedSynopsisQuality: pred?.predictedQuality ?? null,
       predictedSynopsisStale: pred?.stale ?? false,
     }
