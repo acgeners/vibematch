@@ -18,6 +18,7 @@ import {
 } from "@/lib/calculations"
 import { calculateGPTWithDiagnostics, calculateGPT } from "@/lib/calculations/gpt"
 import { getCurrentUserId, ensurePermission } from "@/server/queries/current-user"
+import { loadOwnerLabels, withOwnerLabels } from "@/server/queries/owner-labels"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import {
   applyBiasToCategoryScores,
@@ -485,11 +486,20 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   // contexto de fila, onde não há sessão).
   const includeQuality = L0_QUALITY_ENABLED && (await ensurePermission("consume_ai")).ok
 
-  const [worksRes, weightsRes, configRes, tasteProfile, declaredTagPrefs] = await Promise.all([
-    supabase
-      .from("works")
-      .select(
-        `id, publication_status_id, total_chapters, synopsis_quality,
+  // 🔴 Os RÓTULOS que treinam o Ridge saem de `user_work_state`, não das colunas de `works`
+  // (Fase B do desatrelamento). O select abaixo AINDA traz as colunas pessoais de `works` —
+  // mas elas são descartadas: `withOwnerLabels` as sobrescreve com as do dono, vindas do
+  // espelho. Mantê-las no select é de propósito, pra que o dia do `DROP COLUMN` seja um erro
+  // ALTO ("column does not exist") em vez de um silêncio.
+  //
+  // `loadOwnerLabels` falha alto se os rótulos sumirem — porque um Ridge sem rótulos não
+  // reclama: ele cai na média do treino e devolve 878 notas plausíveis e erradas.
+  const [worksRes, weightsRes, configRes, tasteProfile, declaredTagPrefs, ownerLabels] =
+    await Promise.all([
+      supabase
+        .from("works")
+        .select(
+          `id, publication_status_id, total_chapters, synopsis_quality,
          observation_adjustment, user_score, is_archived,
          year, year_end, original_title,
          post_story_score, post_fl_score, post_ml_score,
@@ -499,20 +509,26 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
          category_scores(criterion_slug, score, source),
          platform_ratings(id, platform, rating, vote_count),
          work_tags(tags(name, tag_group_id))`
-      )
-      .eq("is_archived", false)
-      .limit(2000),
-    supabase.from("score_weights").select("*").eq("is_active", true),
-    supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
-    loadCurrentTasteProfile(),
-    getDeclaredTagPreferences(supabase, { headless }),
-  ])
+        )
+        .eq("is_archived", false)
+        .limit(2000),
+      supabase.from("score_weights").select("*").eq("is_active", true),
+      supabase.from("formula_config").select("*").order("updated_at", { ascending: false }).limit(1),
+      loadCurrentTasteProfile(),
+      getDeclaredTagPreferences(supabase, { headless }),
+      loadOwnerLabels(),
+    ])
 
   if (worksRes.error) throw new Error(worksRes.error.message)
   if (weightsRes.error) throw new Error(weightsRes.error.message)
   if (configRes.error) throw new Error(configRes.error.message)
 
-  const works = (worksRes.data as RawWork[]).map((raw) => buildWork(raw, biasMap))
+  // A troca da fonte acontece AQUI, num lugar só: as colunas pessoais que vieram de `works`
+  // são substituídas pelas do dono, lidas do espelho. Daqui pra baixo, o pipeline inteiro
+  // (features, Ridge, chance, viés) continua vendo exatamente a mesma forma de sempre — é o
+  // que permite exigir que as 882 `expected_score` saiam IDÊNTICAS.
+  const rawWorks = withOwnerLabels(worksRes.data as RawWork[], ownerLabels)
+  const works = rawWorks.map((raw) => buildWork(raw, biasMap))
 
   // L0+ (Pago): pra obras SEM pós-leitura do user (não-lidas), preenche
   // postScores com a estimativa de qualidade da IA (ai_quality_predictions).
