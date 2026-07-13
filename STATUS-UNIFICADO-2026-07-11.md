@@ -1,11 +1,63 @@
 # STATUS UNIFICADO — SatorIA / VibeMatch
 
-> **Data:** 2026-07-11 · **Atualizado:** 2026-07-12 (ver **§0** — fontes externas; tema **G** reescrito)
+> **Data:** 2026-07-11 · **Atualizado:** 2026-07-13 (ver **§0-A** — sessão/chrome) · 2026-07-12 (**§0** — fontes externas; tema **G** reescrito)
 > **Escopo:** consolidação de TODAS as pendências dos registros da última semana (2026-07-01 → 07-10).
 > **Fontes:** PLANO-MULTIUSER, PLANO-ARQUITETURA-NOTAS, AUDIT_REPORT-2026-07-08 (canônico), PLANO-MESTRE (§24m–o + banner 07-09), STATUS-2026-06-28, PLANO-BUSSOLA-3-FORCAS, PLANO-INTERESSE-PREFS-CONFIANCA, PLANO-LABELS, PLANO-AI-EVALUATION-REDESIGN, STALENESS-MATERIALIDADE, DEPLOY-FLY, COMIX-ARCHITECTURE, DESIGN-MANGAGO-RESOLVE.
 > **Marcação:** ✅ verificado no código/git hoje · 📄 vem do doc/memória (não re-verificado) · ⚠️ contradição/erro detectado.
 >
 > Este arquivo é um **snapshot de reconciliação**, não substitui os planos temáticos. Prioridades: **P0** bloqueia deploy ou arrisca corromper dados · **P1** destrava valor/decisão · **P2** dívida/melhoria · **P3** deferido.
+
+---
+
+## 0-A. Atualização — 2026-07-13: a sessão do usuário ficou visível
+
+> **Escopo:** PRs #123 e #124 (ambos mergeados). Não invalida nada abaixo; §0 e os temas seguem
+> válidos. Marcação: ✅ verificado no app rodando (Playwright) · 📊 medido.
+
+**O fio condutor:** o app tinha auth há semanas e **não tinha porta de saída**. O único "Sair" morava
+dentro de `/conta`, uma página que ninguém abre sem motivo. A pergunta que abriu a sessão foi
+literalmente *"existe botão de deslogar em algum lugar?"* — e a resposta honesta era "existe, mas
+escondido".
+
+### O que foi feito
+
+| # | O quê | PR |
+|---|-------|-----|
+| 1 | **Menu de conta no chip da sidebar.** O chip virou gatilho de um `DropdownMenu`: cabeçalho (nome + email + papel), **Minha conta** / **Perfil de gosto** / **Preferências** / **Sair**. Anônimo vê **Entrar / Criar conta** em vez de um "Sair" que não sai. `getAccountSummary` passou a devolver `email` e `signedIn`. `logout-button.tsx` foi apagado. | #123 |
+| 2 | **Hidratação da sidebar.** Com o menu recolhido, **toda navegação** quebrava a hidratação e o menu piscava. A preferência saiu de `localStorage` (que o servidor não enxerga) e virou o cookie `sidebar_collapsed`, lido no layout. | #124 |
+
+### ⚠️ Armadilhas registradas
+
+1. **`localStorage` no estado inicial = hidratação quebrada.** O servidor não o enxerga: o SSR sai
+   com um valor, o cliente com outro, o React descarta a árvore. Sobreviveu meses porque *parece*
+   ruído de dev. Preferência de UI que o servidor renderiza vai em **cookie**. (Registrado no
+   CLAUDE.md.)
+2. **`adjust-during-render` dispara na hidratação** se o "último valor sincronizado" começar em
+   `null` — foi o gatilho exato do bug acima. Semear com o valor inicial.
+3. **O dado do chrome tem um terceiro estado, e ele é clicável.** `useChromeData` busca no cliente;
+   na janela em que o resumo é `null`, a 1ª versão do menu abria **sem o "Sair"** — exatamente o
+   problema que o PR existia pra resolver. Tratar `null` como "carregando", nunca como "não logado".
+4. **Erro de hidratação parece ser do SEU diff.** Ele aparece justamente quando você colapsa a
+   sidebar pra testar. `git stash` + reproduzir na `main` antes de acusar o próprio código.
+
+### 📊 Medições que mudam decisões
+
+- **`cookies()` no layout raiz tornou TODAS as rotas dinâmicas (`ƒ`).** Conferido no build **antes**
+  de escolher o caminho: só **7** rotas ainda prerenderizavam (`/login`, `/signup`, dois redirects,
+  `/_not-found`, `/ranking/desatualizados`, `/settings/calibration`) e **nenhuma faz trabalho de
+  banco**. Custo aceito em troca de matar o mismatch **e** o pulo visual. Se um dia houver landing
+  pública, é este `cookies()` que estará no caminho.
+- **A Fase 1 do PLANO-MULTIUSER (auth + identidade) está fechada** com o logout. O que **não** existe
+  é proteção de rota: o middleware só refresca sessão, e anônimo lê o catálogo (compartilhado por
+  design). Autorização é por **papel**, dentro das actions.
+
+### Pendências abertas
+
+| Pendência | Nota | Pri. |
+|---|---|---|
+| **"208 avaliadas por você" aparece pra visitante anônimo** | Copy mentindo, não dado errado — o catálogo é compartilhado, mas o *"por você"* não se aplica a quem nunca entrou. Decisão de produto: mudar o texto sem sessão ou esconder o KPI. | P2 |
+| **Rate-limit é GLOBAL, não por usuário** | Continua sendo o P0 da área de acesso — inalterado por esta sessão. Ver tema **A**. | P0 |
+| "Preferências" aparece no menu **e** na sidebar | Duplicação deliberada (conveniência). Cortar se incomodar. | P3 |
 
 ---
 
