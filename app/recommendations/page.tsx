@@ -10,22 +10,22 @@ import { RecommendationChat } from "@/components/recommendations/recommendation-
 import { getTasteProfileStatusAction } from "@/server/actions/recommendations"
 import { listRecommendationRuns } from "@/server/queries/recommendations"
 import { listChatsAction } from "@/server/actions/recommendation-chat"
-import { getCurrentPlan } from "@/server/queries/current-user"
-import { planAllows, paidOnlyMessage } from "@/lib/plans/capabilities"
+import { canConsumeAi } from "@/server/queries/current-user"
+import { deniedMessage } from "@/lib/plans/roles"
 import { formatRelativeDateTime } from "@/lib/date-utils"
 
 export const revalidate = 60
 
 export default async function RecommendationsPage() {
-  const [status, runs, plan, chats] = await Promise.all([
+  const [status, runs, canAi, chats] = await Promise.all([
     getTasteProfileStatusAction(),
     listRecommendationRuns(50),
-    getCurrentPlan(),
+    canConsumeAi(),
     listChatsAction(8),
   ])
 
-  const canChat = planAllows(plan, "chat_recommend")
-  const canShortlist = planAllows(plan, "smart_shortlist")
+  const canChat = canAi
+  const canShortlist = canAi
   const insufficient = status.ratedWorksCount < 5
   const stubBlocks = status.profile?.is_stub ?? false
 
@@ -105,7 +105,7 @@ export default async function RecommendationsPage() {
                 <div className="min-w-0">
                   <CardTitle className="text-base">Conversar com a IA</CardTitle>
                   <CardDescription className="text-xs">
-                    {paidOnlyMessage("chat_recommend")}
+                    {deniedMessage("consume_ai")}
                   </CardDescription>
                 </div>
               </div>

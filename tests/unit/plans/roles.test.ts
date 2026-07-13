@@ -41,8 +41,15 @@ describe("permissões por papel", () => {
     }
   })
 
-  it("o LEITOR não pode NADA (só leitura, que não passa por permissão)", () => {
+  it("o LEITOR só pode escrever o PRÓPRIO estado — nada do catálogo, nada de IA", () => {
+    // `own_state` é o único verbo do leitor: favoritar, status, capítulo lido, nota. É o
+    // que o faz deixar de ser um espectador. (Enquanto a Fase 2 não parte `works`, esse
+    // estado mora na linha COMPARTILHADA e os writers seguem em `curate_work` — o verbo
+    // existe, mas ainda não tem onde escrever. Ver PLANO-MULTIUSER-FASE2.md §2.)
+    expect(roleAllows("leitor", "own_state")).toBe(true)
+
     for (const p of Object.keys(PERMISSIONS) as Permission[]) {
+      if (p === "own_state") continue
       expect(roleAllows("leitor", p)).toBe(false)
     }
   })

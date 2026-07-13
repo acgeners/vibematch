@@ -1,6 +1,7 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensureAdmin } from "@/server/queries/current-user"
 import { TASTE_SCORE_KEYS } from "@/server/queries/pilot-taste"
 import type { TasteScoreKey } from "@/server/queries/pilot-taste"
 
@@ -15,6 +16,11 @@ export async function savePilotTaste(
   scores: Partial<Record<TasteScoreKey, number | null>>,
   endingNa: boolean,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  // `pilot_taste_scores` NÃO tem user_id: a tabela é GLOBAL. Enquanto for, escrever nela
+  // é escrever no experimento do dono — logo, é curadoria, não dado pessoal.
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
+
   if (!workId) return { ok: false, error: "workId ausente" }
 
   const row: Record<string, unknown> = {

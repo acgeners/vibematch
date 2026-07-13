@@ -25,9 +25,8 @@ import {
   getLatestAiEvaluationAttributes,
   getExistingPostReadingAssessment,
 } from "@/server/queries/post-attribute-assessment"
-import { getCurrentUserId, getCurrentPlan } from "@/server/queries/current-user"
+import { getCurrentUserId, canConsumeAi } from "@/server/queries/current-user"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
-import { planAllows } from "@/lib/plans/capabilities"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
@@ -291,14 +290,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, plan, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
     getLastDeepDive(work.id as string),
     getSourceRows(),
     getBiasMap(await getCurrentUserId(configClient), configClient),
-    getCurrentPlan(configClient),
+    canConsumeAi(),
     getAllTags(),
     getSynopsisPredictionForWork(work.id as string),
     getDeclaredTagPreferences(configClient),
@@ -329,7 +328,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     tasteProfileRow?.profile.loved_tags ?? [],
     tasteProfileRow?.profile.avoided_tags ?? [],
   )
-  const isPaidPlan = planAllows(plan, "deep_dive")
+  const isPaidPlan = canAi
 
   // Prontidão dos geradores (motor de orquestração → UI). Só no plano Pago, que é
   // quando as ações IA aparecem. UM snapshot pra os dois (Interesse + Veredito).

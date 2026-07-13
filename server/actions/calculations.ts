@@ -17,8 +17,7 @@ import {
   calculateNotaCalc,
 } from "@/lib/calculations"
 import { calculateGPTWithDiagnostics, calculateGPT } from "@/lib/calculations/gpt"
-import { getCurrentUserId, getCurrentPlan } from "@/server/queries/current-user"
-import { planAllows } from "@/lib/plans/capabilities"
+import { getCurrentUserId, ensurePermission } from "@/server/queries/current-user"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import {
   applyBiasToCategoryScores,
@@ -351,8 +350,10 @@ function computeHonestExpectedCvMae(
     const j = Math.floor(rand() * (i + 1))
     ;[idx[i], idx[j]] = [idx[j], idx[i]]
   }
-  // Mesmo critério de folds do trainExpectedPredictor: LOOCV abaixo de 50.
-  const effK = n < 50 ? n : k
+  // Mesmo critério de folds do trainExpectedPredictor: k FIXO (era LOOCV abaixo de 50).
+  // Este é o laço EXTERNO da CV aninhada — cada fold re-infere pesos, reconstrói o perfil
+  // e re-treina o Ridge. Com LOOCV e 40 rótulos isso era 40 dessas cascatas por recalc.
+  const effK = Math.max(2, Math.min(k, n))
   const folds: number[][] = Array.from({ length: effK }, () => [])
   idx.forEach((v, i) => folds[i % effK].push(v))
 
@@ -480,8 +481,9 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   // estimador, backfill) mantida parada; reativar SÓ com um estimador
   // reviews-based (L0+ v2), flipando o flag abaixo.
   const L0_QUALITY_ENABLED = false
-  const plan = await getCurrentPlan(supabase)
-  const includeQuality = L0_QUALITY_ENABLED && planAllows(plan, "l0_quality_eval")
+  // && curto-circuita: com o flag desligado, nem consulta o papel (isto roda em
+  // contexto de fila, onde não há sessão).
+  const includeQuality = L0_QUALITY_ENABLED && (await ensurePermission("consume_ai")).ok
 
   const [worksRes, weightsRes, configRes, tasteProfile, declaredTagPrefs] = await Promise.all([
     supabase

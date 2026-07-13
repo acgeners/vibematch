@@ -2,10 +2,8 @@ import "server-only"
 import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
-import { planAllows, paidOnlyMessage } from "@/lib/plans/capabilities"
-import type { UserPlan, Capability } from "@/lib/plans/capabilities"
-import { isRole, roleAllows, roleAtLeast, deniedMessage } from "@/lib/plans/roles"
-import type { Role, Permission } from "@/lib/plans/roles"
+import { isRole, planFromRole, roleAllows, roleAtLeast, deniedMessage } from "@/lib/plans/roles"
+import type { Role, Permission, UserPlan } from "@/lib/plans/roles"
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -58,6 +56,19 @@ export async function getCurrentUserId(admin?: AdminClient): Promise<string> {
   return getSingletonUserId(admin)
 }
 
+// ⚠️⚠️ NUNCA use `getCurrentUserId()` para ESCREVER.
+//
+// Sem sessão ele cai no SINGLETON — o dono. Um visitante anônimo que faça POST numa
+// action que grave por `getCurrentUserId()` escreve NAS LINHAS DO DONO (e toda função
+// exportada de um arquivo "use server" É um endpoint HTTP público: esconder o botão
+// não protege nada). Para escrita per-usuário, use `ensureSignedIn()` — sem sessão,
+// sem escrita.
+//
+// O fallback FICA porque a LEITURA depende dele: o recalc roda em background (fila,
+// `after()`, cascatas) SEM sessão e precisa do `biasMap` do dono — sem o singleton ele
+// recalcularia as notas do dono sem a calibração dele, em silêncio. E o catálogo é
+// compartilhado por design: o anônimo vê o app pelos olhos do dono.
+
 // Linha de user_settings do usuário ATUAL (select *), memoizada por request.
 // - Anônimo (sem sessão) → NULL: NÃO herda a linha do dono. Fecha os buracos de
 //   (a) anon herdar o plano PAID do dono (custo — dispararia features pagas no saldo
@@ -108,13 +119,22 @@ export const getCurrentRole = cache(async (): Promise<Role> => {
 })
 
 /**
- * Plano do usuário atual. Derivado do papel: curador e assinante = `paid`; leitor =
- * `free`. Mantido porque `capabilities.ts` e a UI ainda falam "plano" — some quando
- * as capabilities passarem a falar de papel/permissão direto.
+ * Plano do usuário atual — VISTA derivada do papel (curador/assinante = `paid`;
+ * leitor = `free`), para a UI que fala "plano". Não gateia nada: quem autoriza é
+ * `ensurePermission(verbo)`.
  */
 export async function getCurrentPlan(_admin?: AdminClient): Promise<UserPlan> {
-  return (await getCurrentRole()) === "leitor" ? "free" : "paid"
+  return planFromRole(await getCurrentRole())
 }
+
+/**
+ * "Pode consumir IA?" como booleano — pra UI (esconder botão, mostrar selo "Pago").
+ * O gate de verdade é `ensurePermission("consume_ai")` na action; isto só evita
+ * oferecer o que vai ser negado. Memoizado por request.
+ */
+export const canConsumeAi = cache(async (): Promise<boolean> =>
+  roleAllows(await getCurrentRole(), "consume_ai"),
+)
 
 /** Gate por PAPEL: exige `min` ou acima na escada (leitor < assinante < curador). */
 export async function ensureRole(
@@ -227,12 +247,21 @@ export async function getCurrentUserProfile(admin?: AdminClient): Promise<Curren
  * Gate de capability pra server actions. Retorna erro estruturado quando o
  * plano atual não libera a feature — o caller propaga pro client.
  */
-export async function ensureCapability(
-  cap: Capability,
-  admin?: AdminClient,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const plan = await getCurrentPlan(admin)
-  return planAllows(plan, cap) ? { ok: true } : { ok: false, error: paidOnlyMessage(cap) }
+/**
+ * Exige uma SESSÃO. Use antes de escrever qualquer dado per-usuário.
+ *
+ * ⚠️ Não dá pra substituir por `ensurePermission("own_state")`: o papel de um anônimo
+ * é `leitor` (fail-closed), e `own_state` é liberado pro leitor — ou seja, o gate de
+ * papel passa. O que falta ao anônimo não é permissão, é IDENTIDADE: sem `user_id`
+ * próprio, `getCurrentUserId()` cai no singleton e ele escreve nas linhas do DONO.
+ */
+export async function ensureSignedIn(): Promise<
+  { ok: true; userId: string } | { ok: false; error: string }
+> {
+  const userId = await getSessionUserId()
+  return userId
+    ? { ok: true, userId }
+    : { ok: false, error: "Entre na sua conta para fazer isso." }
 }
 
 // Admin = o DONO/operador do catálogo. Só o admin muta o catálogo COMPARTILHADO

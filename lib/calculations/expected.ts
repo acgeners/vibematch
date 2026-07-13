@@ -276,7 +276,13 @@ export function trainExpectedPredictor(
   const catEncoded = catEncoder.transform(catImputed)
 
   const Xtrain = hstack(numScaled, catEncoded)
-  const cvFolds = trainInputs.length < 50 ? trainInputs.length : 5
+  // k FIXO. Antes: `n < 50 ? n : 5` — ou seja, LOOCV (n folds) abaixo de 50 rótulos.
+  // A intenção era boa (com poucos rótulos, LOOCV estima melhor), mas o custo é O(n²):
+  // `fitRidgeCV` roda 9 alphas × n folds, e isto ainda é chamado DENTRO da CV aninhada
+  // da MAE honesta. Como a MAE honesta exige n ≥ 30, a faixa 30–49 virava o caso MAIS
+  // caro do sistema — exatamente onde todo usuário novo vai viver. Ver
+  // PLANO-MULTIUSER-FASE2.md §8.2.
+  const cvFolds = Math.min(5, trainInputs.length)
   const model = fitRidgeCV(Xtrain, trainTargets, undefined, cvFolds)
 
   // Índices do feature vector:
@@ -415,7 +421,9 @@ export function expectedOutOfFoldPredictions(
   }
   const n = inputs.length
   if (n < 20) return null
-  const useFolds = n < 50 ? n : Math.max(2, Math.min(kFolds, n))
+  // k FIXO (ver `trainExpectedPredictor`): sem isto, 30–49 rótulos = LOOCV, e cada fold
+  // re-treina o preditor inteiro.
+  const useFolds = Math.max(2, Math.min(kFolds, n))
 
   const order = Array.from({ length: n }, (_, i) => i)
   let state = 42

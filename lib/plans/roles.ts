@@ -52,9 +52,28 @@ export function roleAtLeast(role: Role, min: Role): boolean {
 // usuário enquanto a Fase 2 (partição per-user) não existir.
 
 export const PERMISSIONS = {
+  /**
+   * Escrever o SEU estado sobre uma obra: favoritar, status, capítulo lido, nota,
+   * pós-leitura, interesse (♥).
+   *
+   * ⚠️ Hoje este verbo NÃO é utilizável: esse estado mora em colunas da linha
+   * COMPARTILHADA de `works`, então escrevê-lo é escrever no catálogo de todo mundo —
+   * por isso `toggleFavorite`/`updateWorkStatus` & cia. seguem em `curate_work`. O
+   * verbo existe pra nomear o que a Fase 2 (partição per-user, `user_work_state`)
+   * destrava: é o que faz o Leitor deixar de ser um espectador. Ver
+   * PLANO-MULTIUSER-FASE2.md §2.
+   */
+  own_state: "leitor",
   /** Re-hidratar obra das fontes externas (merge automático, sem escolha). */
   refresh_work: "assinante",
-  /** IA de consumo: recomendar, chat, deep dive, perfil de gosto. */
+  /**
+   * IA de CONSUMO (custa dinheiro, não muda o catálogo): recomendar, re-rank, chat,
+   * deep dive, perfil de gosto por LLM, previsão de interesse.
+   *
+   * Substituiu o mapa `PAID_CAPABILITIES` (free/paid), que era um segundo sistema de
+   * permissão em paralelo a este — todas as suas 6 capabilities eram "pago", ou seja,
+   * ele codificava exatamente esta linha, com outro vocabulário.
+   */
   consume_ai: "assinante",
   /** Criar/editar/apagar obra, escolher capa/sinopse/conflito. */
   curate_work: "curador",
@@ -84,4 +103,17 @@ export function deniedMessage(permission: Permission): string {
     return "Só o Curador do catálogo pode fazer isso."
   }
   return `Recurso do plano ${ROLE_LABELS[needed]}.`
+}
+
+// ── Plano (free/pago) — VISTA derivada do papel, não uma segunda verdade ─────
+//
+// Sobrevive só porque a UI e o /conta falam "plano". NÃO gateia nada: quem decide é
+// `roleAllows(role, verbo)`. Antes disto, `lib/plans/capabilities.ts` era um segundo
+// sistema de permissão em paralelo — dois lugares para responder "quem pode o quê",
+// que é uma pergunta que aceita exatamente uma resposta.
+
+export type UserPlan = "free" | "paid"
+
+export function planFromRole(role: Role): UserPlan {
+  return role === "leitor" ? "free" : "paid"
 }

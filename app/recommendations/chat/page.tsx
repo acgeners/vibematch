@@ -4,15 +4,15 @@ import { Header } from "@/components/layout/header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { RecommendationChat } from "@/components/recommendations/recommendation-chat"
 import { listChatsAction } from "@/server/actions/recommendation-chat"
-import { getCurrentPlan } from "@/server/queries/current-user"
-import { planAllows, paidOnlyMessage } from "@/lib/plans/capabilities"
+import { canConsumeAi } from "@/server/queries/current-user"
+import { deniedMessage } from "@/lib/plans/roles"
 import { formatRelativeDateTime } from "@/lib/date-utils"
 
 export const dynamic = "force-dynamic"
 
 export default async function RecommendationChatPage() {
-  const plan = await getCurrentPlan()
-  const isPaid = planAllows(plan, "chat_recommend")
+  const canAi = await canConsumeAi()
+  const isPaid = canAi
 
   return (
     <div className="w-full space-y-4">
@@ -38,7 +38,7 @@ export default async function RecommendationChatPage() {
             <CardTitle className="text-sm">Recurso do plano Pago</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-muted-foreground">
-            <p>{paidOnlyMessage("chat_recommend")}</p>
+            <p>{deniedMessage("consume_ai")}</p>
             <p>
               No plano Free você ainda pode usar o formulário{" "}
               <Link href="/recommendations" className="underline hover:text-foreground">

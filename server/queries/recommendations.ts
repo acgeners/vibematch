@@ -3,7 +3,7 @@ import { fetchAllRows, fetchAllRowsParallel } from "@/lib/supabase/paginate"
 import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
-import { getCurrentUserId } from "@/server/queries/current-user"
+import { getCurrentUserId, getSessionUserId } from "@/server/queries/current-user"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import {
   applyBiasToCategoryScores,
@@ -1055,15 +1055,30 @@ export async function getCandidatesByIds(ids: string[]): Promise<FavoriteCandida
   return ids.map((id) => byId.get(id)).filter((c): c is FavoriteCandidate => Boolean(c))
 }
 
+/**
+ * Runs do USUÁRIO nas últimas 24h. Sem sessão → 0 (anônimo não consome IA; o gate de
+ * permissão já o barrou antes de chegar aqui).
+ *
+ * ⚠️ Antes da migration 141 esta contagem não tinha `.eq("user_id", …)` — a tabela nem
+ * tinha a coluna. O teto de 20/dia era GLOBAL: um usuário esgotava a cota de todos.
+ */
 export async function getRunsToday(): Promise<number> {
+  const userId = await getSessionUserId()
+  if (!userId) return 0
+
   const supabase = createAdminClient()
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
   const { count, error } = await supabase
     .from("recommendation_runs")
     .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
     .gte("created_at", since)
   if (error) {
-    console.error("[recommendations] erro contando runs:", error)
+    // FALLBACK-SAFE (migration 141 aplicada à mão): sem a coluna, não dá pra contar por
+    // usuário. Devolver 0 mantém o app funcionando — e a trava de custo em US$
+    // (`ensureAiBudget`, que lê ai_api_calls) continua valendo, porque ela não depende
+    // desta coluna.
+    console.error("[recommendations] erro contando runs (a coluna user_id existe? migration 141):", error.message)
     return 0
   }
   return count ?? 0

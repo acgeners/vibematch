@@ -4,8 +4,8 @@ import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { generateTasteProfile, rankFavorites, MODEL, PROMPT_VERSION } from "@/lib/ai-recommendation/service"
 import { type RankingFilters } from "@/server/queries/ranking"
-import { ensureAdmin, ensureCapability, getCurrentPlan } from "@/server/queries/current-user"
-import { planAllows } from "@/lib/plans/capabilities"
+import { ensureAdmin, getSessionUserId } from "@/server/queries/current-user"
+import { ensureAiConsumption } from "@/server/queries/ai-quota"
 import { buildTasteProfileHeuristic } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import { classifyProfileStaleness, computeHeuristicFingerprint } from "@/lib/ai-recommendation/profile-drift"
 import { loadOrEnsureProfile } from "@/lib/ai-recommendation/ensure-profile"
@@ -88,14 +88,30 @@ async function insertRecommendationRun(
   supabase: ReturnType<typeof createAdminClient>,
   baseInsert: Record<string, unknown>,
 ): Promise<{ id: string; slug: string } | null> {
+  // Dono da run (migration 141). Sem isto a run nasce órfã e a cota diária — que conta
+  // por user_id — nunca enxergaria o gasto de ninguém.
+  const userId = await getSessionUserId()
+
+  // FALLBACK-SAFE: a migration 141 é aplicada à mão, então a coluna `user_id` pode ainda
+  // não existir. Sem isto, o código mergeado antes da migration derrubaria a persistência
+  // de TODA recomendação (42703 = coluna inexistente).
+  let withUserId = true
+
   for (let attempt = 0; attempt < 5; attempt++) {
     const slug = await generateRunSlug(supabase)
+    const row = withUserId ? { ...baseInsert, user_id: userId, slug } : { ...baseInsert, slug }
     const { data, error } = await supabase
       .from("recommendation_runs")
-      .insert({ ...baseInsert, slug })
+      .insert(row)
       .select("id, slug")
       .single()
     if (!error && data) return { id: data.id as string, slug: data.slug as string }
+
+    if (error?.code === "42703" && withUserId) {
+      console.warn("[recommendations] recommendation_runs.user_id não existe — aplique a migration 141. A cota diária segue GLOBAL até lá.")
+      withUserId = false
+      continue
+    }
     if (error?.code !== "23505") {
       console.error("[recommendations] falha persistindo run:", error)
       return null
@@ -215,9 +231,10 @@ export async function generateTasteProfileAction(): Promise<{
       return { data: saved }
     }
 
-    // Free: perfil heurístico (zero LLM). Pago: perfil LLM rico.
-    const plan = await getCurrentPlan()
-    if (!planAllows(plan, "llm_taste_profile")) {
+    // Leitor (ou quem estourou a cota do dia): perfil heurístico, zero LLM. Assinante+
+    // dentro da cota: perfil LLM rico. Degradar é melhor que negar — o perfil heurístico
+    // é um produto legítimo, não um erro.
+    if (!(await ensureAiConsumption()).ok) {
       const profile = buildTasteProfileHeuristic(ratedWorks)
       const saved = await insertNewTasteProfile({
         profile,
@@ -276,7 +293,7 @@ export async function runRecommendationAction(
 ): Promise<{ data?: RunRecommendationResult; error?: string }> {
   try {
     // Gate: Smart Shortlist (re-rank por IA + mood) é exclusivo do Pago.
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
 
     const runsToday = await getRunsToday()
@@ -500,7 +517,7 @@ export async function rerankSingleWorkAction(
 ): Promise<{ data?: RerankSingleWorkResult; error?: string }> {
   try {
     // Gate: re-rank por IA é exclusivo do Pago.
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
 
     const runsToday = await getRunsToday()
@@ -595,7 +612,7 @@ export async function rerankStaleBatchAction(
   n?: number,
 ): Promise<{ data?: RerankStaleBatchResult; error?: string }> {
   try {
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
 
     const runsToday = await getRunsToday()
@@ -696,7 +713,7 @@ export async function rerankWorksBatchAction(
   workIds: string[],
 ): Promise<{ data?: RerankWorksBatchResult; error?: string }> {
   try {
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
 
     const runsToday = await getRunsToday()
@@ -807,7 +824,7 @@ export async function rerankClusterAction(
   opts: { persist?: boolean } = {},
 ): Promise<{ data?: RerankClusterResult; error?: string }> {
   try {
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
 
     const ids = Array.from(new Set(workIds)).filter(Boolean)
@@ -945,7 +962,7 @@ export async function rankSpecificWorksForChat(args: {
   userContext?: string | null
 }): Promise<{ data?: RankSpecificWorksResult; error?: string }> {
   try {
-    const gate = await ensureCapability("smart_shortlist")
+    const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
 
     const ids = Array.from(new Set(args.workIds)).filter(Boolean)

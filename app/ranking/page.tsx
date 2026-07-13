@@ -1,6 +1,5 @@
 import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } from "@/server/queries/ranking"
-import { getCurrentPlan } from "@/server/queries/current-user"
-import { planAllows } from "@/lib/plans/capabilities"
+import { canConsumeAi } from "@/server/queries/current-user"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getTierBandWidth } from "@/server/queries/tier-band-width"
@@ -141,8 +140,8 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // do evito (deprioriza via personal_fit) vale sempre, sem este toggle.
   const hideMode = str("hide_avoided") // "strong" | "all" | undefined
   const hideActive = hideMode === "strong" || hideMode === "all"
-  const [plan, prefs, allGenres, genreCatTypes, allTags, statusOptions, savedPresets, declaredPrefs] = await Promise.all([
-    getCurrentPlan(),
+  const [canAi, prefs, allGenres, genreCatTypes, allTags, statusOptions, savedPresets, declaredPrefs] = await Promise.all([
+    canConsumeAi(),
     getPreferences(),
     getAllGenres(),
     getGenreCatTypes(),
@@ -158,7 +157,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
       : hideMode === "strong"
         ? avoided.filter((p) => p.weight >= 2).map((p) => p.slug)
         : []
-  const isPaid = planAllows(plan, "smart_shortlist")
+  const isPaid = canAi
   const defaultSort = isPaid
     ? "expected_score:desc,alignment_score:desc"
     : "expected_score:desc,personal_fit:desc"

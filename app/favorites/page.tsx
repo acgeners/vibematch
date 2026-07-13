@@ -4,8 +4,7 @@ import { FavoritesStatsHeader } from "@/components/favorites/favorites-stats-hea
 import { GroupsIndex } from "@/components/favorites/lists/groups-index"
 import { RecommendDialog } from "@/components/recommendations/recommend-dialog"
 import { ViewRecommendationsButton } from "@/components/recommendations/view-recommendations-button"
-import { getCurrentPlan } from "@/server/queries/current-user"
-import { planAllows } from "@/lib/plans/capabilities"
+import { canConsumeAi } from "@/server/queries/current-user"
 import { getFavoritesSummary } from "@/server/queries/favorites"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getListsWithSummary, getWorksLiteForPicker } from "@/server/queries/lists"
@@ -13,14 +12,14 @@ import { getListsWithSummary, getWorksLiteForPicker } from "@/server/queries/lis
 // Índice de /favorites: grupos (recortes) + card fixo "Todos os favoritos".
 // O detalhe (tabela/filtros clássicos) vive em /favorites/[listId].
 export default async function FavoritesPage() {
-  const [lists, summary, catalog, scoreThresholds, plan] = await Promise.all([
+  const [lists, summary, catalog, scoreThresholds, canAi] = await Promise.all([
     getListsWithSummary(),
     getFavoritesSummary(),
     getWorksLiteForPicker(),
     getScoreColorThresholds(),
-    getCurrentPlan(),
+    canConsumeAi(),
   ])
-  const isPaid = planAllows(plan, "smart_shortlist")
+  const isPaid = canAi
 
   return (
     <div className="space-y-4">

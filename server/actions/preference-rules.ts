@@ -3,13 +3,12 @@
 import { randomUUID } from "node:crypto"
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensureSignedIn, getCurrentUserSettingsId } from "@/server/queries/current-user"
 import {
   MAX_PREFERENCE_RULES,
   MAX_PREFERENCE_RULE_LEN,
   type PreferenceRule,
 } from "@/server/queries/preference-rules"
-
-type AdminClient = ReturnType<typeof createAdminClient>
 
 export interface PreferenceRuleInput {
   id?: string
@@ -18,19 +17,6 @@ export interface PreferenceRuleInput {
 }
 
 export type SavePreferenceRulesResult = { ok: true } | { ok: false; error: string }
-
-/** id da linha singleton de user_settings — a MESMA que as queries leem. */
-async function getSingletonId(supabase: AdminClient): Promise<string> {
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle()
-  if (error) throw new Error(`Falha lendo user_settings: ${error.message}`)
-  if (!data?.id) throw new Error("user_settings sem linha singleton — rode a migration 074.")
-  return data.id as string
-}
 
 /**
  * Salva o conjunto COMPLETO de regras/preferências livres (batch replace) na
@@ -58,17 +44,20 @@ export async function savePreferenceRules(
     if (normalized.length >= MAX_PREFERENCE_RULES) break
   }
 
+  // Escreve na linha do PRÓPRIO usuário. Antes, um `getSingletonId()` local mirava na
+  // linha mais antiga de user_settings — a do dono — então qualquer POST anônimo neste
+  // endpoint sobrescrevia as regras de recomendação DELE.
+  const auth = await ensureSignedIn()
+  if (!auth.ok) return { ok: false, error: auth.error }
+  const settingsId = await getCurrentUserSettingsId()
+  if (!settingsId) return { ok: false, error: "Sua conta ainda não tem preferências." }
+
   const supabase = createAdminClient()
-  try {
-    const id = await getSingletonId(supabase)
-    const { error } = await supabase
-      .from("user_settings")
-      .update({ preference_rules: normalized })
-      .eq("id", id)
-    if (error) return { ok: false, error: error.message }
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Erro ao salvar." }
-  }
+  const { error } = await supabase
+    .from("user_settings")
+    .update({ preference_rules: normalized })
+    .eq("id", settingsId)
+  if (error) return { ok: false, error: error.message }
 
   revalidatePath("/preferencias")
   return { ok: true }

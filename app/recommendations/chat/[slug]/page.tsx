@@ -5,8 +5,8 @@ import { Header } from "@/components/layout/header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { RecommendationChat } from "@/components/recommendations/recommendation-chat"
 import { getChatAction } from "@/server/actions/recommendation-chat"
-import { getCurrentPlan } from "@/server/queries/current-user"
-import { planAllows, paidOnlyMessage } from "@/lib/plans/capabilities"
+import { canConsumeAi } from "@/server/queries/current-user"
+import { deniedMessage } from "@/lib/plans/roles"
 
 export const dynamic = "force-dynamic"
 
@@ -16,8 +16,8 @@ interface PageProps {
 
 export default async function RecommendationChatDetailPage({ params }: PageProps) {
   const { slug } = await params
-  const [plan, chat] = await Promise.all([getCurrentPlan(), getChatAction(slug)])
-  const isPaid = planAllows(plan, "chat_recommend")
+  const [canAi, chat] = await Promise.all([canConsumeAi(), getChatAction(slug)])
+  const isPaid = canAi
 
   if (isPaid && !chat) notFound()
 
@@ -45,7 +45,7 @@ export default async function RecommendationChatDetailPage({ params }: PageProps
             <CardTitle className="text-sm">Recurso do plano Pago</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            {paidOnlyMessage("chat_recommend")}
+            {deniedMessage("consume_ai")}
           </CardContent>
         </Card>
       ) : (

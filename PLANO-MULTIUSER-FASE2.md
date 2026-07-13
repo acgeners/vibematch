@@ -98,14 +98,31 @@ anônimo grava nas **suas** linhas:
 | `saveTagPreferences` (`tag-preferences.ts:42`) | apaga e reescreve **suas** tags amadas/evitadas |
 | `saveFilterPreset` / `rename` / `delete` (`filter-presets.ts`) | mexe nos **seus** presets |
 | `capturePredictionForFirstRating` (`prediction-ledger.ts:29`) | escreve no **seu** ledger |
+| `uploadAvatar` (`account.ts`) | sobe a imagem na **sua pasta** no storage |
 | `savePilotTaste` (`pilot-taste.ts:13`) | `pilot_taste_scores` **não tem `user_id`** — é global |
-| 7 toggles de custo (`settings.ts:183-308`) | ligam gasto de LLM na criação de obra, **sem `ensureAdmin`** |
-| `recalculateAll` (`calculations.ts:467`) | regrava `calculated_scores` do catálogo inteiro, **sem gate** |
 
-**Correção (P0):** `getCurrentUserId()` **para de cair no singleton**. Sem sessão → sem `user_id` →
-as actions per-user recusam com "entre para continuar". Toda action da tabela acima ganha
-`ensurePermission("own_state")` ou `ensureAdmin()`, conforme o caso. Lembre que `"use server"` = **endpoint
-HTTP público**: esconder o botão não protege nada.
+✅ **FEITO** (PR #127). Todas exigem **sessão** (`ensureSignedIn()`) e usam o `user_id` **da sessão**.
+Gate de papel não resolveria: o papel do anônimo é `leitor`, e leitor tem `own_state` — o que lhe
+falta não é permissão, é **identidade**. `savePilotTaste` é a exceção (tabela global → `ensureAdmin`).
+
+📊 **Confirmado na prática, não só na leitura do código.** Um POST anônimo em `savePreferenceRules`
+(sem cookie, sem browser, sem botão — o id da action sai do bundle do cliente) **apagou as 7 regras de
+preferência do dono e as substituiu pela regra do atacante**, na `main`. Com o fix: HTTP 200 com
+`"Entre na sua conta para fazer isso."` e as 7 regras intactas.
+
+⚠️ **Duas correções à auditoria original deste plano** (ambas verificadas):
+- **`recalculateAll` NÃO é um endpoint.** `server/actions/calculations.ts` **não é** `"use server"` (o
+  arquivo o diz na 1ª linha: exporta funções puras síncronas, o que Server Actions proíbem). Não há
+  buraco aqui. E gatear com `ensureAdmin()` seria um **erro**: o recalc roda em background (fila,
+  `after()`, cascatas) **sem sessão** — o gate daria `false` e quebraria o app do dono.
+- **Os 7 toggles de custo (`settings.ts`) já estavam seguros.** Escrevem via
+  `getCurrentUserSettingsId()` — a linha **própria** —, então anônimo recebe erro e um Leitor só muda
+  os toggles dele (que só têm efeito na criação de obra, que ele não pode fazer). O código já
+  raciocina sobre isso em `settings.ts:21-24`.
+
+**O que NÃO mudou, de propósito:** `getCurrentUserId()` **mantém** o fallback singleton na **leitura**.
+O recalc precisa do `biasMap` do dono em background; sem o fallback ele recalcularia as notas dele
+**sem a calibração dele**, em silêncio. O que mudou é que nenhuma **escrita** passa mais por ele.
 
 ### 3.2 O rate-limit é global — e furado
 
@@ -121,9 +138,30 @@ HTTP público**: esconder o botão não protege nada.
 4. ✅ **`ai_api_calls.user_id` é sempre `NULL`** — a coluna existe, nenhum call site preenche. **Hoje é
    impossível saber quanto cada usuário gastou** — e, portanto, impossível cobrar ou cotar.
 
-**Correção (P0):** `+user_id` em `recommendation_runs`; contar por usuário; **todo** consumo de LLM
-(re-rank, deep dive, chat) grava run; preencher `ai_api_calls.user_id` em todos os call sites; cota
-diária **por papel** (ex.: Leitor 0 · Assinante N · Curador ∞).
+✅ **FEITO** (PR #127) — e o desenho mudou durante a implementação, para melhor:
+
+**A cota é em DÓLARES, não em "runs".** Contar runs obrigaria cada feature nova a lembrar de se
+registrar — foi exatamente assim que os 5 re-ranks, o deep dive e o chat ficaram de fora. Dólar é a
+unidade do risco e cobre tudo de uma vez, porque **toda** chamada de LLM passa por `ai_api_calls`.
+
+- `server/queries/ai-quota.ts`: teto de gasto em 24h por papel — **Leitor US$0 · Assinante US$2 ·
+  Curador ∞** (o curador é o dono do saldo e roda backfills em lote; um teto quebraria trabalho
+  legítimo).
+- `ensureAiConsumption()` = permissão **+** cota, num gate único, nos 12 call sites. Não há como
+  passar num e esquecer o outro.
+- `ai_api_calls.user_id` é resolvido no **ponto único** por onde toda chamada passa
+  (`anthropic-client`), não em ~30 call sites.
+- Gerar perfil de gosto acima da cota **degrada pro heurístico** (zero LLM) em vez de dar erro.
+- A soma do gasto é **paginada** — o `select` corta em 1000 linhas sem avisar, e truncar aqui daria
+  um gasto **subestimado**: a trava falharia em silêncio justamente quando mais importa.
+
+📊 **Verificado no app rodando:** Leitor → botão de IA desabilitado. Assinante dentro da cota → passa.
+Assinante com US$99 de gasto injetado → o servidor **nega** ("Cota diária de IA do plano Assinante
+atingida (US$ 2.00 em 24h)") e **zero** chamadas de LLM são cobradas — o gate barra **antes** do modelo.
+
+⚠️ **Migration 141 ainda precisa ser aplicada à mão** (SQL editor). O código é fallback-safe: sem a
+coluna, a contagem de runs degrada e avisa no log, mas a trava em US$ segue valendo (ela lê
+`ai_api_calls`, que já tem a coluna).
 
 > Este é o item que separa "multi-user" de **denial-of-wallet**: sem ele, um estranho gasta o **seu**
 > saldo da Anthropic.
@@ -298,7 +336,7 @@ caminho incremental. Multiplicado por N usuários: **recalc full do catálogo ×
 📊 Custos medidos hoje (por execução): nested-CV honesta ~550ms · UPDATE do `formula_config` ~450ms ·
 upsert de ~2000 linhas · **custo de LLM: zero** (é tudo CPU/DB).
 
-### 8.2 ⚠️ A faixa 30–49 rótulos é a MAIS cara — e é onde todo usuário novo vai morar
+### 8.2 ✅ A faixa 30–49 rótulos era a MAIS cara — e é onde todo usuário novo vai morar
 
 Três lugares caem em **LOOCV** (`folds = n`) quando `n < 50`: `expected.ts:279`, `expected.ts:418`,
 `calculations.ts:355`. Como a CV honesta exige `n ≥ 30`, o usuário com **30–49 rótulos** cai em
@@ -306,8 +344,11 @@ Três lugares caem em **LOOCV** (`folds = n`) quando `n < 50`: `expected.ts:279`
 Ridge (que roda `fitRidgeCV` com 9 alphas). Ordem de **~n² × 9** solves.
 
 O "atalho" do `PLANO-MULTIUSER.md` ("usuário novo cai em stub → é barato") **está certo só até 29
-rótulos**. Depois disso, estoura — exatamente na fase de adoção. **Corrigir o regime LOOCV para k-fold
-fixo é pré-requisito de multiplicar por N.**
+rótulos**. Depois disso, estoura — exatamente na fase de adoção.
+
+✅ **FEITO** (PR #127): passou a `Math.min(5, n)` nos três lugares. **Não muda nenhuma nota hoje** — o
+dono tem **208 rótulos** (conferido no banco), então `n ≥ 50` e o ramo LOOCV já estava morto para os
+dados atuais. A correção protege o usuário futuro, **antes** de multiplicar por N.
 
 ### 8.3 O desenho que derruba o custo
 
@@ -336,10 +377,10 @@ A opção **A** é a que respeita o que os números dizem: o Leitor não olha 20
 
 | Etapa | O quê | Bloqueia? | Tamanho |
 |---|---|---|---|
-| **1. P0 — segurança** (§3.1) | matar o fallback singleton para anônimo; gatear as 8+ actions ungated | **sim — antes de qualquer usuário real** | P |
-| **2. P0 — custo** (§3.2) | `+user_id` em `recommendation_runs`; cota por papel; todo consumo de LLM grava run; `ai_api_calls.user_id` | **sim — denial-of-wallet** | P–M |
-| **3. Fix do LOOCV** (§8.2) | k-fold fixo na faixa 30–49 | antes de multiplicar por N | P |
-| **4. Unificar permissões** (§2) | matar `capabilities.ts`; tudo vira verbo em `roles.ts`; criar `own_state` | antes do rewire | P–M |
+| ✅ **1. P0 — segurança** (§3.1) | escrita per-user exige sessão; 7 actions fechadas | — | **FEITO** (PR #127) |
+| ✅ **2. P0 — custo** (§3.2) | cota de IA **em US$** por papel; `ai_api_calls.user_id`; mig 141 | — | **FEITO** (PR #127) · ⚠️ falta aplicar a mig 141 |
+| ✅ **3. Fix do LOOCV** (§8.2) | k-fold fixo (`Math.min(5, n)`) | — | **FEITO** (PR #127) |
+| ✅ **4. Unificar permissões** (§2) | `capabilities.ts` apagado; verbo `own_state` criado | — | **FEITO** (PR #127) |
 | **5. Migrations 141–147** (§5) | aditivas, nada quebra | — | M |
 | **6. Dual-write** (§7, passo 2) | writers escrevem em `works` **e** `user_work_state` | — | M |
 | **7. Rewire dos leitores** | por área, atrás de flag | — | **G** |

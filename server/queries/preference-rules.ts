@@ -1,6 +1,7 @@
 import "server-only"
 import { randomUUID } from "node:crypto"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getCurrentUserSettingsId } from "@/server/queries/current-user"
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -36,11 +37,18 @@ function coerceRules(raw: unknown): PreferenceRule[] {
 
 async function readRaw(admin?: AdminClient): Promise<unknown> {
   const supabase = admin ?? createAdminClient()
+
+  // Linha do PRÓPRIO usuário — não a mais antiga (a do dono). Isto acompanha a escrita:
+  // `savePreferenceRules` grava na linha da sessão, então ler o singleton faria o
+  // Assinante salvar num lugar e ler de outro (e via as regras do dono). Sem sessão,
+  // sem regras.
+  const settingsId = await getCurrentUserSettingsId()
+  if (!settingsId) return []
+
   const { data, error } = await supabase
     .from("user_settings")
     .select("preference_rules")
-    .order("created_at", { ascending: true })
-    .limit(1)
+    .eq("id", settingsId)
     .maybeSingle()
   if (error) {
     // Tolerante: a coluna pode não existir até a migration 102 ser aplicada.
