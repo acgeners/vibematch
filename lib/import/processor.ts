@@ -7,6 +7,9 @@ import {
   getPublicationStatusIdByName,
   getPersonalStatusIdByName,
 } from "@/lib/constants/status-lookups"
+import { mirrorOwnerState } from "@/server/queries/user-work-state"
+import type { PersonalStatePatch } from "@/server/queries/user-work-state"
+import { getOwnerUserId } from "@/server/queries/current-user"
 
 export type DuplicateMode = "skip" | "update" | "create_new"
 
@@ -148,6 +151,26 @@ async function hasCompletedAiEvaluation(
   return Boolean(data)
 }
 
+/**
+ * O estado PESSOAL que uma linha de planilha carrega (status, capítulos lidos, nota, ♥,
+ * ajuste). O resto da linha — título, status de publicação, capítulos totais — é catálogo.
+ *
+ * 🔴 O import é o writer que mais rápido envelheceria o espelho: uma planilha atualiza
+ * centenas de obras de uma vez. Sem espelhar, o dono importaria a lista dele do MAL e a Fase 2
+ * treinaria o Ridge com as notas ANTIGAS — sem erro, sem log, notas erradas.
+ */
+function personalPatchFromImportRow(row: MappedImportRow): PersonalStatePatch {
+  const patch: PersonalStatePatch = {}
+  if (row.personal_status) {
+    patch.personal_status_id = getPersonalStatusIdByName(row.personal_status)
+  }
+  if (row.chapters_read != null) patch.chapters_read = row.chapters_read
+  if (row.synopsis_quality) patch.synopsis_quality = row.synopsis_quality
+  if (row.observation_adjustment != null) patch.observation_adjustment = row.observation_adjustment
+  if (row.user_score != null) patch.user_score = row.user_score
+  return patch
+}
+
 async function createWork(
   supabase: AnySupabaseClient,
   row: MappedImportRow
@@ -171,6 +194,16 @@ async function createWork(
     .single()
 
   if (error) throw new Error(error.message)
+
+  const mirror = await mirrorOwnerState(await getOwnerUserId(), [data.id], {
+    personal_status_id: getPersonalStatusIdByName(personalStatus),
+    chapters_read: row.chapters_read ?? null,
+    synopsis_quality: row.synopsis_quality ?? null,
+    observation_adjustment: row.observation_adjustment ?? 0,
+    user_score: row.user_score ?? null,
+  })
+  if (mirror.error) throw new Error(mirror.error)
+
   return data.id
 }
 
@@ -194,6 +227,12 @@ async function updateWork(
 
   if (Object.keys(update).length > 0) {
     await supabase.from("works").update(update).eq("id", workId)
+
+    const patch = personalPatchFromImportRow(row)
+    if (Object.keys(patch).length > 0) {
+      const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], patch)
+      if (mirror.error) throw new Error(mirror.error)
+    }
   }
 }
 

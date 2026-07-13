@@ -3,7 +3,8 @@
 import { revalidatePath, revalidateTag } from "next/cache"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensureAdmin } from "@/server/queries/current-user"
+import { ensureAdmin, getOwnerUserId } from "@/server/queries/current-user"
+import { mirrorOwnerState } from "@/server/queries/user-work-state"
 import { ensureAiConsumption } from "@/server/queries/ai-quota"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getSynopsisPredictionForWork, getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
@@ -120,16 +121,19 @@ export async function applySynopsisPredictionAction(
     if (!prediction) return { error: "Não há previsão para esta obra." }
 
     const supabase = createAdminClient()
-    const { error } = await supabase
-      .from("works")
-      .update({
-        synopsis_quality: prediction.predictedQuality,
-        // Proveniência (Plano 3): cópia da previsão IA. NÃO muda o valor copiado.
-        synopsis_quality_source: "prediction_applied",
-        synopsis_quality_prediction_id: prediction.id,
-      })
-      .eq("id", workId)
+    const applied = {
+      synopsis_quality: prediction.predictedQuality,
+      // Proveniência (Plano 3): cópia da previsão IA. NÃO muda o valor copiado.
+      synopsis_quality_source: "prediction_applied" as const,
+      synopsis_quality_prediction_id: prediction.id,
+    }
+    const { error } = await supabase.from("works").update(applied).eq("id", workId)
     if (error) return { error: `Falha aplicando previsão: ${error.message}` }
+
+    // O ♥ é estado pessoal (Fatia 2a) — espelha, senão o espelho do dono envelhece a cada
+    // previsão aplicada e a Fase 2 não pode confiar nele.
+    const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], applied)
+    if (mirror.error) return { error: mirror.error }
 
     // synopsis_quality é feature do Ridge global → marca recálculo pendente em
     // vez de recalcular na hora. A resposta volta assim que synopsis_quality está
@@ -192,6 +196,9 @@ export async function applySynopsisPredictionForWorks(
   let applied = 0
   let skipped = 0
   let failed = 0
+  // Espelha só o que REALMENTE foi aplicado (não o que foi pulado ou falhou) — um espelho que
+  // registra o que não aconteceu é pior que um espelho velho.
+  const appliedRows: Array<{ id: string; quality: SynopsisQuality; predictionId: string }> = []
   for (const id of ids) {
     const prediction = predictions.get(id)
     if (!prediction) {
@@ -215,6 +222,22 @@ export async function applySynopsisPredictionForWorks(
       continue
     }
     applied++
+    appliedRows.push({ id, quality: prediction.predictedQuality, predictionId: prediction.id })
+  }
+
+  // Uma linha por previsão (cada obra tem a SUA), em blocos — não dá pra fazer um upsert só,
+  // porque o valor difere por obra.
+  const ownerId = await getOwnerUserId()
+  for (const row of appliedRows) {
+    const mirror = await mirrorOwnerState(ownerId, [row.id], {
+      synopsis_quality: row.quality,
+      synopsis_quality_source: "prediction_applied",
+      synopsis_quality_prediction_id: row.predictionId,
+    })
+    if (mirror.error) {
+      failed++
+      applied--
+    }
   }
 
   if (applied > 0) await markRecalcPending("applySynopsisPredictionBatch")
@@ -249,6 +272,12 @@ export async function skipSynopsisInterestAction(
       .from("works")
       .update({ synopsis_interest_skipped: skipped })
       .eq("id", workId)
+    if (!error) {
+      const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], {
+        synopsis_interest_skipped: skipped,
+      })
+      if (mirror.error) return { error: mirror.error }
+    }
     if (error) {
       if (/synopsis_interest_skipped|column|schema cache/i.test(error.message)) {
         return { error: "Aplique a migration 121 (synopsis_interest_skipped) pra usar o 'Pular'." }
@@ -281,16 +310,19 @@ export async function setSynopsisQualityAction(
       return { error: "Valor de Interesse inválido." }
     }
     const supabase = createAdminClient()
-    const { error } = await supabase
-      .from("works")
-      .update({
-        synopsis_quality: quality,
-        // Proveniência (Plano 3): triagem manual direta. Limpar (null) zera a origem.
-        synopsis_quality_source: quality === null ? "legacy_unknown" : "human_manual",
-        synopsis_quality_prediction_id: null,
-      })
-      .eq("id", workId)
+    const triaged = {
+      synopsis_quality: quality,
+      // Proveniência (Plano 3): triagem manual direta. Limpar (null) zera a origem.
+      synopsis_quality_source: (quality === null ? "legacy_unknown" : "human_manual") as
+        | "legacy_unknown"
+        | "human_manual",
+      synopsis_quality_prediction_id: null,
+    }
+    const { error } = await supabase.from("works").update(triaged).eq("id", workId)
     if (error) return { error: `Falha gravando Interesse: ${error.message}` }
+
+    const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], triaged)
+    if (mirror.error) return { error: mirror.error }
 
     await markRecalcPending("setSynopsisQuality")
 

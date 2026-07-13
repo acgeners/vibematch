@@ -30,9 +30,10 @@ import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
-import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin, ensurePermission, ensureSignedIn } from "@/server/queries/current-user"
+import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin, ensurePermission, ensureSignedIn, getOwnerUserId } from "@/server/queries/current-user"
 import {
   writeReadingState,
+  mirrorOwnerState,
   canWriteSharedWorkRow,
   toDay,
   getPersonalStateReader,
@@ -843,6 +844,39 @@ export interface CreateWorkAiMeta {
   summary?: string | null
 }
 
+/**
+ * O estado PESSOAL que o form de obra carrega junto com os dados do catálogo.
+ *
+ * ⚠️ O form de criação/edição mistura duas coisas que não são a mesma: fato da OBRA (título,
+ * ano, capítulos totais, sinopse) e estado de QUEM CADASTROU (status de leitura, capítulos
+ * lidos, nota, ♥, observações, pós-leitura). Os primeiros vivem em `works` por direito; os
+ * segundos só estão lá por herança do tempo em que o app tinha um usuário só.
+ *
+ * `createWork`/`updateWork` seguem gravando os dois em `works` (é a linha do dono), mas agora
+ * espelham a parte pessoal em `user_work_state` — senão o espelho dele apodrece a cada obra
+ * criada ou editada, e a Fase 2 não pode confiar nele como fonte.
+ */
+function personalPatchFromForm(data: WorkFormValues): PersonalStatePatch {
+  return {
+    personal_status_id:
+      data.personal_status_id ?? getPersonalStatusIdByName(data.personal_status) ?? null,
+    chapters_read: data.chapters_read ?? null,
+    synopsis_quality: data.synopsis_quality ?? null,
+    synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
+    observation_adjustment: data.observation_adjustment,
+    observations: data.observations ?? null,
+    user_score: data.user_score ?? null,
+    post_story_score: data.post_story_score ?? null,
+    post_fl_score: data.post_fl_score ?? null,
+    post_ml_score: data.post_ml_score ?? null,
+    post_character_development_score: data.post_character_development_score ?? null,
+    post_pacing_score: data.post_pacing_score ?? null,
+    post_art_visual_score: data.post_art_visual_score ?? null,
+    post_impact_immersion_score: data.post_impact_immersion_score ?? null,
+    post_originality_score: data.post_originality_score ?? null,
+  }
+}
+
 async function persistNewWork(
   values: WorkFormValues,
   aiMeta?: CreateWorkAiMeta
@@ -922,6 +956,14 @@ async function persistNewWork(
   if (error) return { ok: false, error: { _root: [error.message] } }
 
   const workId = work.id
+
+  // Espelha o estado pessoal que acabou de nascer junto com a obra. O form de criação traz
+  // status, capítulos, nota, ♥ e pós-leitura — e eles são do CURADOR, não da obra. Sem esta
+  // linha, uma obra criada com "Reading, cap. 12, nota 8" ficaria com esse estado só em
+  // `works` e o espelho do dono nasceria vazio: a /leitura dele não mostraria a obra que ele
+  // acabou de cadastrar como "lendo".
+  const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], personalPatchFromForm(data))
+  if (mirror.error) return { ok: false, error: { _root: [mirror.error] } }
 
   // Create the AI evaluation row FIRST when AI justifications exist, so the
   // category_scores rows below can reference it with source="ai_accepted" +
@@ -1334,6 +1376,12 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
     .eq("id", id)
 
   if (error) return { error: { _root: [error.message] } }
+
+  // Espelha a parte pessoal do form (ver `personalPatchFromForm`). Sem isto, editar uma obra
+  // pelo form completo reescrevia a nota/♥/capítulos em `works` e deixava o espelho do dono
+  // para trás — e o espelho é o que a Fase 2 passa a usar como fonte.
+  const personalMirror = await mirrorOwnerState(await getOwnerUserId(), [id], personalPatchFromForm(data))
+  if (personalMirror.error) return { error: { _root: [personalMirror.error] } }
 
   // Sincronizar notas por critério: upsert presentes, deletar removidos.
   // Preserva a origem AI quando o score não muda (mantém ai_accepted/ai_edited
@@ -1949,6 +1997,16 @@ async function doUpdateWorkExternalData(
 
     const { error } = await supabase.from("works").update(workFields).eq("id", id)
     if (error) return { error: error.message }
+
+    // `observations` é a única coluna PESSOAL que este caminho escreve (o resto é catálogo:
+    // título, status de publicação, capítulos totais, capas). Espelha só ela — e só quando o
+    // caller de fato mandou o campo, porque `undefined` aqui significa "não mexi", não "apague".
+    if (updates.observations !== undefined) {
+      const mirror = await mirrorOwnerState(await getOwnerUserId(), [id], {
+        observations: updates.observations ?? null,
+      })
+      if (mirror.error) return { error: mirror.error }
+    }
 
     // Capas: se vier o array `covers` (multipick), upserta cada uma preservando
     // capas existentes que não estão na lista (só zera primária delas). Caso

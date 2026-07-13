@@ -2,7 +2,8 @@
 
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensureAdmin } from "@/server/queries/current-user"
+import { ensureAdmin, getOwnerUserId } from "@/server/queries/current-user"
+import { mirrorOwnerState } from "@/server/queries/user-work-state"
 import { markRecalcPending } from "@/server/recalc/queue"
 import {
   getPersonalStatusIdByName,
@@ -167,6 +168,11 @@ async function applyUpdate(
   if (set.chapters_read != null) update.chapters_read = set.chapters_read
   if (Object.keys(update).length === 0) return false
   await supabase.from("works").update(update).eq("id", workId)
+
+  // Importar a lista do MAL/AniList traz NOTA e capítulos — dado pessoal, e em massa. Espelha,
+  // senão o dono importa a lista dele e o espelho fica com as notas de antes.
+  const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], update)
+  if (mirror.error) throw new Error(mirror.error)
   return true
 }
 
@@ -174,19 +180,26 @@ async function createWorkFromEntry(
   supabase: AnySupabaseClient,
   entry: ExternalListEntry
 ): Promise<string> {
+  const personal = {
+    personal_status_id: getPersonalStatusIdByName(entry.personalStatus ?? "Want to Read"),
+    user_score: entry.userScore ?? null,
+    chapters_read: entry.chaptersRead ?? null,
+  }
   const { data, error } = await supabase
     .from("works")
     .insert({
       title: entry.title,
       publication_status_id: getPublicationStatusIdByName("Unknown"),
-      personal_status_id: getPersonalStatusIdByName(entry.personalStatus ?? "Want to Read"),
-      user_score: entry.userScore ?? null,
-      chapters_read: entry.chaptersRead ?? null,
+      ...personal,
       ai_eval_status: "pending",
     })
     .select("id")
     .single()
   if (error) throw new Error(error.message)
+
+  const mirror = await mirrorOwnerState(await getOwnerUserId(), [data.id], personal)
+  if (mirror.error) throw new Error(mirror.error)
+
   return data.id
 }
 
