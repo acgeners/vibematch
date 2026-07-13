@@ -198,6 +198,7 @@ export interface CurrentUserProfile {
   email: string | null
   avatarUrl: string | null
   plan: UserPlan
+  role: Role
 }
 
 /**
@@ -206,13 +207,19 @@ export interface CurrentUserProfile {
  * não da linha, pra ser sempre o id real do usuário atual.
  */
 export async function getCurrentUserProfile(admin?: AdminClient): Promise<CurrentUserProfile> {
-  const [row, userId] = await Promise.all([getCurrentUserSettingsRow(), getCurrentUserId(admin)])
+  const [row, userId, role] = await Promise.all([
+    getCurrentUserSettingsRow(),
+    getCurrentUserId(admin),
+    getCurrentRole(),
+  ])
   return {
     userId,
     displayName: (row?.display_name as string | null | undefined) ?? null,
     email: (row?.email as string | null | undefined) ?? null,
     avatarUrl: (row?.avatar_url as string | null | undefined) ?? null,
-    plan: (row?.user_plan as UserPlan | undefined) ?? "free",
+    // Derivado do papel — NÃO lê `user_plan`, que virou legado (migration 140).
+    plan: role === "leitor" ? "free" : "paid",
+    role,
   }
 }
 
