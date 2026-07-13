@@ -7,7 +7,7 @@ import { comixWorkUrl } from "@/lib/external/comix"
 import { fetchMangaDexChapterDates } from "@/lib/external/mangadex"
 import { fetchMangaUpdatesStatus } from "@/lib/external/mangaupdates"
 import { withTimeout } from "@/lib/external/with-timeout"
-import { markRecalcPending } from "@/server/actions/recalc-queue"
+import { markRecalcPending } from "@/server/recalc/queue"
 import { ensureAdmin } from "@/server/queries/current-user"
 import { persistComixHid } from "@/server/actions/comix-hid"
 import {

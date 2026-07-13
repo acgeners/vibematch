@@ -2,7 +2,7 @@
 
 import { getEvalBadgeUnreadCount } from "@/server/queries/ai-eval-read"
 import { getSettingsItemUnread } from "@/server/queries/settings-read"
-import { maybeTriggerStaleRecalc } from "@/server/actions/recalc-queue"
+import { maybeTriggerStaleRecalc } from "@/server/recalc/queue"
 import { getComixStatus } from "@/lib/external/comix-gate"
 import type { ComixHealthState } from "@/lib/external/comix-gate"
 

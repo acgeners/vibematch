@@ -18,7 +18,7 @@ import {
   pickPrimaryCover,
   splitSynopsesFromText,
 } from "@/lib/work-derived"
-import { markRecalcPending, recalculateScoresNow } from "./recalc-queue"
+import { markRecalcPending, recalculateScoresNow } from "@/server/recalc/queue"
 import { capturePredictionForFirstRating } from "./prediction-ledger"
 import {
   resolvePredictionsForWork,
@@ -1088,7 +1088,7 @@ export async function createWork(
   // estar presente no gate de fontes; a cascata termina em needs_authorization
   // (banner acionável na página da obra).
   after(async () => {
-    const { resolveComixHidForWork } = await import("@/server/actions/comix-resolver")
+    const { resolveComixHidForWork } = await import("@/server/comix/resolver")
     await resolveComixHidForWork(result.workId)
     if (generateAll) {
       const { generateAllWorkData } = await import("@/server/actions/generate-all")
@@ -1186,7 +1186,7 @@ export async function createWorksBatch(
   // run "mop-up" do resolver (sem --work) evita N Chrome concorrentes no mesmo
   // userDataDir. Tudo em background.
   after(async () => {
-    const { resolveComixHidsPending } = await import("@/server/actions/comix-resolver")
+    const { resolveComixHidsPending } = await import("@/server/comix/resolver")
     await resolveComixHidsPending(created.map((c) => c.id))
   })
   if (needEdgeReviews.length > 0) {
@@ -1878,7 +1878,7 @@ export async function updateWorkExternalData(
             tasks.push(acquireAndPersistWorkReviews(id))
           }
           if (needsComixEnrich) {
-            const { resolveComixDataResilient } = await import("@/server/actions/comix-resolver")
+            const { resolveComixDataResilient } = await import("@/server/comix/resolver")
             tasks.push(resolveComixDataResilient(id))
           }
           await Promise.allSettled(tasks)

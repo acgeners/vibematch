@@ -4,7 +4,7 @@ import { revalidatePath, revalidateTag } from "next/cache"
 import { acquireAndPersistWorkReviews } from "@/lib/external/acquire-reviews"
 import { inferAndPersistTagsForWork } from "@/lib/tags/auto-infer"
 import { generateWorkReviewDigest } from "@/server/actions/review-digest"
-import { markRecalcPending } from "@/server/actions/recalc-queue"
+import { markRecalcPending } from "@/server/recalc/queue"
 import { ensureAdmin } from "@/server/queries/current-user"
 
 // Tetos por execução (re-rode pra processar mais). Reviews é caro/lento

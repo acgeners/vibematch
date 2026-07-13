@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getCurrentUserId } from "@/server/queries/current-user"
-import { markRecalcPending } from "@/server/actions/recalc-queue"
+import { markRecalcPending } from "@/server/recalc/queue"
 import type { TagPrefLevel, TagStance } from "@/server/queries/tag-preferences"
 
 const COLUMN_BY_LEVEL: Record<TagPrefLevel, "tag_id" | "tag_subgroup_id" | "tag_group_id"> = {

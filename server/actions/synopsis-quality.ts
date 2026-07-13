@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureCapability, ensureAdmin } from "@/server/queries/current-user"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getSynopsisPredictionForWork, getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
-import { markRecalcPending } from "@/server/actions/recalc-queue"
+import { markRecalcPending } from "@/server/recalc/queue"
 import { fetchAllRows } from "@/lib/supabase/paginate"
 import { estimateStep } from "@/lib/orchestration/cost"
 import {

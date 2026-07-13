@@ -11,7 +11,7 @@
  *  - fresh (recalc_pending=false) ⇒ sai sem job/cálculo (exit 0);
  *  - pending/failed ⇒ retoma e recalcula uma vez (exit 0 no sucesso, !=0 na falha).
  */
-import { getRecalcPendingState, recalculateScoresHeadless } from "@/server/actions/recalc-queue"
+import { getRecalcPendingState, recalculateScoresHeadless } from "@/server/recalc/queue"
 
 async function main() {
   const before = await getRecalcPendingState()

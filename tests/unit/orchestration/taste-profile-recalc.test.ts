@@ -25,7 +25,7 @@ const h = vi.hoisted(() => {
 })
 
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => h.builder }))
-vi.mock("@/server/actions/recalc-queue", () => ({ markRecalcPending: vi.fn(async () => { h.seq.push("recalc_pending") }) }))
+vi.mock("@/server/recalc/queue", () => ({ markRecalcPending: vi.fn(async () => { h.seq.push("recalc_pending") }) }))
 vi.mock("@/server/queries/synopsis-quality", () => ({ markSynopsisPredictionsStale: vi.fn(async () => { h.seq.push("synopsis_stale") }) }))
 
 import { insertNewTasteProfile } from "@/lib/ai-recommendation/taste-profile"

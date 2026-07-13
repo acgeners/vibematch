@@ -5,7 +5,7 @@ import { promisify } from "node:util"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureAdmin, getCurrentUserSettingsId } from "@/server/queries/current-user"
-import { recalculateScoresNowResult } from "./recalc-queue"
+import { recalculateScoresNowResult } from "@/server/recalc/queue"
 import {
   computeCalibration,
   computeBucketBreakdown,
