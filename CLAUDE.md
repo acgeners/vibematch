@@ -18,7 +18,19 @@ npm run lint
 
 ## Architecture
 
-Next.js 16 App Router (Turbopack). All DB access is server-only via `createAdminClient()` (service role key). There is no auth layer — every page is accessible.
+Next.js 16 App Router (Turbopack). All DB access is server-only via `createAdminClient()` (service role key).
+
+**Auth existe** (esta linha já disse o contrário — não confie na memória, confira): Supabase Auth com
+`/login`, `/signup` e **logout no menu do chip da sidebar** (`components/layout/account-chip.tsx` →
+`signOutAction`). O `middleware.ts` só **refresca a sessão**; ele **não protege rota** — visitante
+anônimo carrega qualquer página e vê o catálogo (que é compartilhado por design). Quem autoriza é o
+**papel** (`user_settings.role` → `lib/plans/roles.ts`, `ensureAdmin`/`roleAllows`), verificado
+dentro das actions, não na borda.
+
+**Toda rota é dinâmica (`ƒ`).** `app/layout.tsx` lê `cookies()` pra saber se a sidebar está
+recolhida, e isso desliga o prerender do app inteiro. Foi uma troca consciente (ver a armadilha de
+hidratação abaixo): nenhuma das 7 rotas que ainda prerenderizavam fazia trabalho de banco. Se um dia
+uma página pública precisar de prerender, é este `cookies()` que estará no caminho.
 
 ```
 app/              – Next.js routes (server components by default)
@@ -54,6 +66,42 @@ import type { WorkFormValues } from "@/lib/validations/work.schema"
 ```
 
 Also: files without extensions (e.g. `work-form` alongside `work-form.tsx`) are resolved by Turbopack before the `.tsx` file. Rename any such files to `.bak` or `.unused`.
+
+## Preferência de UI que o servidor renderiza vai em COOKIE, nunca em localStorage
+
+O servidor **não enxerga** `localStorage`. Se o estado inicial de um componente é lido dele, o HTML
+do SSR sai com um valor e o primeiro render do cliente sai com outro — a **hidratação quebra** e o
+React descarta a árvore inteira e re-renderiza.
+
+Isto já custou caro: o colapso da sidebar morava em `localStorage`, e **toda navegação** com o menu
+recolhido jogava `Hydration failed` + `Cannot read properties of null (reading 'parentNode')` no
+console — e o menu **piscava** de expandido pra trilho. Sobreviveu meses porque o sintoma parece
+ruído de dev e "o app funciona".
+
+```ts
+// ❌ o servidor não sabe disto → SSR diverge do cliente
+const [collapsed, setCollapsed] = useState(() => localStorage.getItem("x") === "1")
+
+// ✅ cookie: o layout (servidor) lê e passa como prop → os dois lados começam iguais
+// app/layout.tsx:  const collapsed = (await cookies()).get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1"
+// <Sidebar defaultCollapsed={collapsed} />
+```
+
+Ver `lib/sidebar-preference.ts`. Duas armadilhas vizinhas:
+
+- **`adjust-during-render`** (setState durante o render quando o pathname muda) dispara **na própria
+  renderização de hidratação** se o "último valor sincronizado" começar em `null`. Semeie-o com o
+  valor inicial — senão ele roda antes da hidratação terminar e recria o mesmo bug.
+- **Nome de cookie não aceita `:`** (não é token válido no RFC 6265). Use `sidebar_collapsed`.
+
+## Dados do "chrome" têm TRÊS estados, e o terceiro é clicável
+
+Componentes do chrome (chip da conta, badges, saldo) buscam via `useChromeData` **no cliente** —
+existe uma janela real em que o dado é `null`. Tratar `null` como "vazio/não logado" é um bug: o menu
+da conta, na primeira versão, abria **sem o "Sair"** nessa janela — um app aparentemente sem logout.
+Renderize um estado de carregamento explícito e **nenhuma ação de auth/irreversível** até o dado
+chegar. Pra testar esse ramo, atrase a server action no Playwright (`page.route` + delay quando
+`headers()["next-action"]`) — em dev ela resolve rápido demais e o estado nunca aparece.
 
 ## Supabase: o `select` corta em 1000 linhas, sem avisar
 

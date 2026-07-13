@@ -53,6 +53,22 @@ Já gated hoje (`lib/plans/capabilities.ts`, `ensureCapability`): `llm_taste_pro
 
 **Atalho que reduz risco da Fase 4:** usuário novo cai em *stub* (sem rótulos → média de treino), então o scoring per-user "só funciona" barato até ele acumular ≥20 ratings.
 
+### Estado das fases — 2026-07-13
+
+- **Fase 1 — ✅ FECHADA.** Supabase Auth, `middleware.ts` (refresh de sessão), login/signup, trigger
+  `handle_new_user` (mig 137) criando a linha de `user_settings`, e o **logout** — que era a peça que
+  faltava: até o PR #123 o único "Sair" morava dentro de `/conta`; agora é um item do menu do chip da
+  sidebar, alcançável de qualquer página. Ressalva honesta: `getCurrentUserId()` **ainda tem** o
+  fallback de singleton, usado só quando não há sessão — não foi removido, foi contornado (anônimo
+  não herda mais a linha do dono).
+- **Fase 3 — em grande parte feita** fora deste plano: `user_settings.role` (mig 140) e a escada
+  Curador/Assinante/Leitor substituíram o `is_admin`×`user_plan`; gates de admin fechados no PR #115.
+- **Fase 2 (partição per-user) segue ADIADA** — é a de risco, e nada desta leva a destravou.
+- **Fase 5:** o **rate-limit continua GLOBAL** (não por usuário). É o P0 da área de acesso.
+
+Não há **proteção de rota**: o middleware só refresca a sessão, e visitante anônimo lê o catálogo
+(compartilhado por design). Autorização é por **papel**, dentro das actions — não na borda.
+
 ## 4. Princípios de execução
 
 - **Não-quebrante durante a migração**: cada passo preserva o app single-user rodando. `getCurrentUserId` prefere sessão e **cai no singleton legado** quando não há sessão.
