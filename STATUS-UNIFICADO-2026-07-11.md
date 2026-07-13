@@ -1,11 +1,58 @@
 # STATUS UNIFICADO — SatorIA / VibeMatch
 
-> **Data:** 2026-07-11 · **Atualizado:** 2026-07-13 (ver **§0-B** — P0 de acesso e custo · **§0-A** — sessão/chrome) · 2026-07-12 (**§0** — fontes externas; tema **G** reescrito)
+> **Data:** 2026-07-11 · **Atualizado:** 2026-07-13 (ver **§0-C** — RLS + backup + próximo passo · **§0-B** — P0 de acesso e custo · **§0-A** — sessão/chrome) · 2026-07-12 (**§0** — fontes externas; tema **G** reescrito)
 > **Escopo:** consolidação de TODAS as pendências dos registros da última semana (2026-07-01 → 07-10).
 > **Fontes:** PLANO-MULTIUSER, PLANO-ARQUITETURA-NOTAS, AUDIT_REPORT-2026-07-08 (canônico), PLANO-MESTRE (§24m–o + banner 07-09), STATUS-2026-06-28, PLANO-BUSSOLA-3-FORCAS, PLANO-INTERESSE-PREFS-CONFIANCA, PLANO-LABELS, PLANO-AI-EVALUATION-REDESIGN, STALENESS-MATERIALIDADE, DEPLOY-FLY, COMIX-ARCHITECTURE, DESIGN-MANGAGO-RESOLVE.
 > **Marcação:** ✅ verificado no código/git hoje · 📄 vem do doc/memória (não re-verificado) · ⚠️ contradição/erro detectado.
 >
 > Este arquivo é um **snapshot de reconciliação**, não substitui os planos temáticos. Prioridades: **P0** bloqueia deploy ou arrisca corromper dados · **P1** destrava valor/decisão · **P2** dívida/melhoria · **P3** deferido.
+
+---
+
+## 0-C. Atualização — 2026-07-13: RLS no banco, e três descobertas que mudam a prioridade
+
+> **Escopo:** PR #129 (mergeado) + **migration 142 aplicada**. Fecha o P1 de RLS que sobrou da §0-B.
+
+### O que foi feito
+
+**As escritas per-usuário passaram a ser garantidas pelo Postgres**, não pelo código. As 9 tabelas com
+dono ganharam política (`user_id = auth.uid()`); as escritas usam o **cliente de sessão**
+(`createUserClient()`). Provado com JWT real: um Leitor **não** lê, **não** escreve, **não** apaga as
+linhas do dono — e **não se auto-promove** (um trigger, que não estava no plano, impede: a política de
+update em `user_settings` deixava mexer na coluna `role`).
+
+**Leituras de background ficam na service role DE PROPÓSITO.** O recalc lê a calibração do dono **sem
+sessão**; movê-la para RLS faria ele recalcular as 882 notas **sem essa calibração** — sem erro, sem
+log. Uma "melhoria de segurança" que corrompe dado em silêncio é pior que o problema que resolve.
+
+### 📊 Três descobertas
+
+1. ⚠️ **O banco NÃO TEM BACKUP.** Conferido na Management API: `pitr_enabled: false`, **zero backups
+   disponíveis**. Não existe de onde restaurar — e o dado é caro de refazer: ~2.100 avaliações de IA
+   (**≈US$60 em tokens**) e ~14 mil reviews raspadas. **Mitigado:** `node scripts/backup-db.mjs`
+   (dump lógico de 65 tabelas / ~120k linhas / 24 MB, paginado e **conferido contra `count: exact`** —
+   falha em vez de gravar backup truncado). **Rode antes de qualquer mudança grande.**
+2. 📊 **Já existe um SEGUNDO usuário real** (`ana.generoso22@gmail.com`, Leitor) — e ele **não
+   consegue fazer nada**: não marca capítulo, não favorita, não avalia. A pergunta de produto ("vai
+   mesmo entrar gente?") **já foi respondida**; o que falta é a Fase 2. Ver `PLANO-MULTIUSER-FASE2.md`
+   §12–13.
+3. ⚠️ **As colisões de migration são CINCO, não uma.** Este doc registrava só a 132; há dois arquivos
+   com o mesmo número em **011, 044, 074, 119 e 132**. Nada quebra hoje (o banco é a fonte de verdade),
+   mas a pasta `supabase/migrations/` **não reconstrói o banco** — a ordem entre os pares é ambígua.
+   Bloqueia ter um staging pra testar a partição.
+
+### ⚠️ Armadilha registrada
+
+**DDL de política dá DEADLOCK com o app rodando.** O SQL editor roda tudo numa transação e
+`create/drop policy` seguram `AccessExclusiveLock` até o commit; o dev server lendo as mesmas tabelas
+fecha o abraço (`40P01`). **Pare o app antes de aplicar DDL de política.** E `drop policy if exists`
+"por idempotência" custa o **mesmo lock exclusivo** que criar — consulte `pg_policies` (lock leve).
+
+### Próximo passo
+
+**Fatia 1 da Fase 2** (`PLANO-MULTIUSER-FASE2.md` §13): tirar o estado de **leitura** de dentro de
+`works`. É o que transforma a segunda usuária de espectadora em usuária. Prompt pronto na §14 daquele
+doc.
 
 ---
 

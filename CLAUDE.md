@@ -16,6 +16,22 @@ npm run lint
 
 `sync-constants` needs `SUPABASE_SERVICE_ROLE_KEY` in env. It overwrites the files listed in the **Constants generated from DB** section below — never hand-edit them.
 
+## ⚠️ O banco NÃO tem backup — faça um antes de mudança grande
+
+Conferido na Management API (2026-07-13): **`pitr_enabled: false` e ZERO backups disponíveis**. Não
+existe de onde restaurar. E parte do dado é cara de refazer: ~2.100 avaliações de IA (**≈US$60 em
+tokens**) e ~14 mil reviews raspadas de 8 fontes.
+
+```bash
+node scripts/backup-db.mjs        # → .backups/<timestamp>/ (gitignored)
+```
+
+Dump lógico de todas as tabelas em NDJSON gzipado (24 MB / ~120k linhas hoje). **Pagina e confere
+contra `count: "exact"`**: se faltar uma linha, ele FALHA em vez de gravar um backup truncado — que é
+a pior forma possível do bug das 1000 linhas, porque você só descobre quando precisa restaurar.
+
+Rode antes de: partição per-user (Fase 2), backfill em massa, qualquer migration que dropa coluna.
+
 ## Architecture
 
 Next.js 16 App Router (Turbopack). Todo acesso ao banco é server-only, e há **dois clientes** — escolher o
