@@ -442,14 +442,27 @@ estado pessoal sair de dentro da obra.
 A menor fatia que transforma a Leitora de espectadora em usuária. **Não** é a Fase 2 inteira: não
 mexe em notas, nem em scoring, nem nos 8 `post_*`.
 
-### 13.0 ⚠️ ANTES DE COMEÇAR: backup
+### 13.0 ⚠️ ANTES DE COMEÇAR: backup — e o que ele NÃO cobre
 
-O projeto **não tem backup nenhum** (`pitr_enabled: false`, zero backups — conferido na Management
-API). Rode e **confira o manifest**:
+O projeto está no **plano Free**: **backup nenhum** (`pitr_enabled: false`, zero backups — conferido na
+Management API). O Pro (US$25/mês) daria backup diário com schema; o PITR é add-on de **US$100/mês**
+(não vem no Pro). **Decisão tomada: seguir no Free.** Logo, a rede é esta:
 
 ```bash
 node scripts/backup-db.mjs     # → .backups/<timestamp>/  (~24 MB, ~120k linhas)
 ```
+
+⚠️ **Ele salva DADOS, não a casa onde eles moram.** O que fica de fora:
+
+| Fora do backup | Por que importa |
+|---|---|
+| **Schema** (tabelas, índices, triggers, as políticas de RLS da mig 142, a função `guard_role_self_escalation`) | E a pasta `supabase/migrations/` **não reconstrói o banco** (5 números colididos) |
+| **`auth.users`** | O script lê só o schema `public` — os logins não estão no dump |
+| Objetos do Storage (avatares) | Só os metadados, que ficam no banco |
+
+**Consequência direta no plano:** enquanto não houver dump de schema, **nada de `DROP COLUMN`** — ver
+§13.4. Um `pg_dump --schema-only` resolve de graça, mas exige a senha do banco (Supabase → Project
+Settings → Database → Connection string).
 
 ### 13.1 Escopo — só o estado de LEITURA
 
@@ -480,14 +493,32 @@ arrasta o Ridge, o `calculated_scores` e o `formula_config` junto — é a Fatia
    passam a ler o estado de `user_work_state` (com fallback para `works` durante a transição).
 5. **Verificação com DOIS usuários:** cada um marca o próprio capítulo; nenhum vê o do outro; o
    catálogo (título, capa, tags, notas da IA) é o mesmo para os dois.
-6. **Drop das 4 colunas** de `works` — só quando nenhum grep achar mais `works.is_favorite` & cia.
+
+**A Fatia 1 acaba aqui.** Repare no que isso significa: **cada passo é reversível**. Se algo der
+errado, você reverte o código e os dados seguem em `works`, intactos — porque o dual-write nunca parou
+de escrever lá.
 
 ### 13.3 O que NÃO fazer nesta fatia
 
 - **Não mexer no scoring.** `calculated_scores` continua global. A Leitora **não terá Nota Prevista
   própria** — e está certo: ela não tem rótulos. (É a Fatia 2.)
 - **Não mover as leituras de background.** O recalc lê `works` pela service role, sem sessão. Ver §6.
-- **Não dropar coluna nenhuma** antes do passo 6.
+- **Não dropar coluna nenhuma.** Ver §13.4.
+
+### 13.4 ⚠️ O `DROP COLUMN` sai da Fatia 1 — e vira tarefa com pré-requisito
+
+O plano original terminava dropando as 4 colunas de `works`. **Isso foi tirado daqui**, porque é a
+**única operação irreversível** da fatia — e o projeto está no Free, **sem backup de schema** (§13.0).
+
+O custo de adiar é **zero**: são 4 colunas em 882 linhas que o código deixou de ler. Não se paga um
+risco sem volta por isso.
+
+**Pré-requisitos para dropar, um dia:**
+1. Dump de schema (`pg_dump --schema-only`, precisa da senha do banco) **ou** plano Pro (backup diário
+   com schema).
+2. Nenhum grep encontrando `works.is_favorite`, `works.personal_status_id`, `works.chapters_read`,
+   `works.last_read_at` em `server/`, `lib/`, `app/`, `components/`, `scripts/`.
+3. Dual-write rodando há tempo suficiente para você confiar em `user_work_state` como fonte.
 
 ---
 
@@ -495,25 +526,36 @@ arrasta o Ridge, o `calculated_scores` e o `formula_config` junto — é a Fatia
 
 > Vamos fazer a **Fatia 1 da Fase 2** (`PLANO-MULTIUSER-FASE2.md` §13): tirar o estado de **leitura**
 > (`is_favorite`, `personal_status_id`, `chapters_read`, `last_read_at`) de dentro de `works` e passá-lo
-> para `user_work_state`, para que um Leitor consiga marcar capítulo e favoritar — hoje ele não
-> consegue, porque esses writers são todos `ensureAdmin()` (e têm que ser, já que a coluna é
-> compartilhada).
+> para `user_work_state`, para que um Leitor consiga marcar capítulo e favoritar — hoje ele **não
+> consegue**, porque esses 4 writers são todos `ensureAdmin()` (e têm que ser, já que a coluna mora na
+> linha compartilhada). Já existe uma segunda usuária real, e ela é uma espectadora.
 >
-> Antes de tocar em qualquer coisa: rode `node scripts/backup-db.mjs` e confira o manifest — **o
-> projeto não tem backup nenhum** (`pitr_enabled: false`).
+> **Antes de tocar em qualquer coisa:** rode `node scripts/backup-db.mjs` e confira o manifest. O
+> projeto está no **Free — não há backup nenhum** (`pitr_enabled: false`), e esse script salva **só os
+> dados**: não salva schema, nem `auth.users`. Por isso **NÃO existe `DROP COLUMN` nesta fatia** (§13.4).
 >
-> Ordem: (1) migration 143 re-backfillando `user_work_state` a partir de `works` (PAGINADO — o `select`
-> corta em 1000 linhas sem avisar); (2) **dual-write** nos 4 writers (`toggleFavorite`,
-> `setFavoriteMany`, `updateWorkStatus`, `setReadingStatusForWorks`), que passam a escrever nos dois
-> lugares; (3) trocar o gate desses writers de `ensureAdmin()` para `ensurePermission("own_state")` +
-> `user_id` vindo de `ensureSignedIn()` (**nunca** de `getCurrentUserId()`, que cai no singleton do
-> dono sem sessão); (4) rewire das leituras de `/leitura` e `/favorites` para `user_work_state`, com
-> fallback para `works`; (5) drop das 4 colunas **só no fim**.
+> Ordem:
+> 1. **Migration 143** re-backfillando `user_work_state` a partir de `works` — as 878 linhas de hoje
+>    estão velhas (nada escreve nelas desde a mig 138). **PAGINE**: o `select` do Supabase corta em 1000
+>    linhas sem avisar, e são 882 obras.
+> 2. **Dual-write** nos 4 writers (`toggleFavorite`, `setFavoriteMany`, `updateWorkStatus`,
+>    `setReadingStatusForWorks`): passam a escrever em `works` **e** em `user_work_state`. As leituras
+>    continuam vindo de `works` → nada quebra, e é reversível.
+> 3. **Trocar o gate** desses writers: `ensureAdmin()` → `ensurePermission("own_state")`, com o `user_id`
+>    vindo de `ensureSignedIn()` — **nunca** de `getCurrentUserId()`, que sem sessão cai no singleton do
+>    dono e escreveria como ele. É este passo que destrava a Leitora.
+> 4. **Rewire das leituras** de `/leitura` e `/favorites` para `user_work_state`, com fallback para
+>    `works` durante a transição.
+> 5. **Parar aqui.** O `DROP` das 4 colunas fica para depois, com pré-requisito de dump de schema
+>    (§13.4) — é a única operação sem volta, e não vale o risco por 4 colunas em 882 linhas.
 >
-> Escopo fechado: **não** mexer em `user_score`, nos 8 `post_*` nem no scoring — isso arrasta o Ridge e
-> o `formula_config` junto, e é a Fatia 2.
+> **Escopo fechado:** não mexer em `user_score`, nos 8 `post_*` nem no scoring — arrasta o Ridge, o
+> `calculated_scores` e o `formula_config` junto. É a Fatia 2.
 >
-> Verifique com **dois usuários de verdade** (um curador, um leitor): cada um marca o próprio capítulo,
-> nenhum enxerga o do outro, e o catálogo é o mesmo para os dois. Lembre que escritas per-user vão no
-> `createUserClient()` (RLS vale) e o catálogo/background na service role — trocar errado **não dá
-> erro**, dá dado errado.
+> **Verifique com dois usuários de verdade** (um curador, um leitor): cada um marca o próprio capítulo,
+> nenhum enxerga o do outro, e o catálogo (título, capa, tags, notas da IA) é o mesmo para os dois. Não
+> confie na UI para isso — o botão desabilitado esconde buraco de endpoint; chame as server actions
+> direto (o id sai do bundle do cliente).
+>
+> **Lembre dos dois clientes:** escrita per-user vai no `createUserClient()` (RLS vale); catálogo e
+> background na service role. Trocar errado **não dá erro** — dá dado errado, em silêncio.
