@@ -80,7 +80,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   const personal = await getPersonalStateReader()
   const countRatedByOwner = async () => {
     const { count } = await supabase
-      .from("works")
+      .from("works_owner")
       .select("id", { count: "exact", head: true })
       .eq("is_archived", false)
       .not("user_score", "is", null)
@@ -96,6 +96,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   }
 
   const [worksRes, calcRes, rated] = await Promise.all([
+    // `works` (não a view): serve qualquer usuário e passa pelo overlay abaixo.
     supabase
       .from("works")
       .select("id, ai_eval_status, is_archived, publication_status_id, personal_status_id, total_chapters, chapters_read"),
@@ -180,37 +181,66 @@ export async function getDashboardStats(): Promise<DashboardStats> {
  */
 export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]> {
   const supabase = createAdminClient()
+
+  // 🔴 Este widget é PESSOAL nas duas pontas — e as duas estavam erradas:
+  //   "que VOCÊ ainda não avaliou" filtrava por `works.user_score` (a nota do DONO)
+  //   "melhores por Nota Prevista" ordenava por `calculated_scores` (a previsão DELE)
+  // Ou seja, a home da Leitora recomendava obras pelo gosto dele, chamando de "pra você".
+  // Passou batido na 2b porque eu religei o "Acompanhando" e os KPIs, mas não este.
+  const [personal, scores] = await Promise.all([getPersonalStateReader(), getScoresReader()])
+
   const { data, error } = await supabase
-    .from("calculated_scores")
+    .from("works")
     .select(`
-      expected_score,
-      works!inner(id, title, is_archived, user_score, publication_status_id, personal_status_id,
-        work_covers(url, is_primary, position))
+      id, title, is_archived, publication_status_id, personal_status_id, user_score,
+      calculated_scores(expected_score, platform_avg),
+      work_covers(url, is_primary, position)
     `)
-    .not("expected_score", "is", null)
-    .eq("works.is_archived", false)
-    .is("works.user_score", null)
-    .order("expected_score", { ascending: false })
-    .limit(limit)
+    .eq("is_archived", false)
+    .limit(2000)
 
   if (error) throw new Error(error.message)
 
-  return ((data ?? []) as unknown as Array<{
-    expected_score: number | null
-    works: {
-      id: string
-      title: string
-      publication_status_id: number | null
-      personal_status_id: number | null
-      work_covers?: CoverRow[] | null
-    }
-  }>).map((row) => ({
-    id: row.works.id,
-    title: row.works.title,
-    coverUrl: pickPrimaryCover(row.works.work_covers),
-    expectedScore: row.expected_score ?? null,
-    publicationStatusId: row.works.publication_status_id ?? null,
-    personalStatusId: row.works.personal_status_id ?? null,
+  type Row = {
+    id: string
+    title: string
+    publication_status_id: number | null
+    personal_status_id: number | null
+    user_score: number | null
+    calculated_scores: { expected_score: number | null; platform_avg: number | null } | null
+    work_covers?: CoverRow[] | null
+  }
+
+  const candidatas = ((data ?? []) as unknown as Row[])
+    .map((w) => {
+      const state = personal.get(w.id, w)
+      const calc = scores.overlay(w.id, w.calculated_scores)
+      return {
+        id: w.id,
+        title: w.title,
+        coverUrl: pickPrimaryCover(w.work_covers),
+        expectedScore: calc?.expected_score ?? null,
+        platformAvg: calc?.platform_avg ?? null,
+        publicationStatusId: w.publication_status_id ?? null,
+        personalStatusId: state.personalStatusId,
+        userScore: state.userScore,
+      }
+    })
+    // "ainda não avaliou" = a nota DELA é nula (não a dele).
+    .filter((w) => w.userScore == null)
+
+  // Sem modelo, não há Nota Prevista pra ordenar — cai na nota da COMUNIDADE, como o ranking.
+  const ordenadas = scores.hasModel
+    ? candidatas.filter((w) => w.expectedScore != null).sort((a, b) => (b.expectedScore ?? -1) - (a.expectedScore ?? -1))
+    : candidatas.filter((w) => w.platformAvg != null).sort((a, b) => (b.platformAvg ?? -1) - (a.platformAvg ?? -1))
+
+  return ordenadas.slice(0, limit).map((w) => ({
+    id: w.id,
+    title: w.title,
+    coverUrl: w.coverUrl,
+    expectedScore: w.expectedScore,
+    publicationStatusId: w.publicationStatusId,
+    personalStatusId: w.personalStatusId,
   }))
 }
 
@@ -237,6 +267,9 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
   const ownIds = await resolvePersonalFilterIds({ personalStatusIds: statusIds })
   if (ownIds && ownIds.length === 0) return []
 
+  // ⚠️ `works`, não `works_owner`: esta query serve QUALQUER usuário e passa pelo overlay do
+  // `personal.get()`. A view é a fonte do DONO — usá-la aqui daria os capítulos dele como base
+  // pra ela (e ainda quebra: a view não tem as colunas de data de capítulo).
   let query = supabase
     .from("works")
     .select(`

@@ -152,7 +152,7 @@ export async function recordRecommendationSnapshots(args: {
         .limit(1)
         .maybeSingle(),
       supabase
-        .from("works")
+        .from("works_owner")
         .select(
           "id, user_score, calculated_scores(expected_score, calc_score, personal_fit, alignment_score, alignment_payload, expected_is_stub)",
         )
@@ -321,7 +321,7 @@ export async function recordRankingSnapshots(args: {
     for (let i = 0; i < head.length; i += 150) {
       const chunk = head.slice(i, i + 150)
       const { data, error } = await supabase
-        .from("works")
+        .from("works_owner")
         .select(
           "id, user_score, calculated_scores(expected_score, calc_score, personal_fit, alignment_score, alignment_payload, expected_is_stub)",
         )

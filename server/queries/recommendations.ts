@@ -169,7 +169,7 @@ export async function fetchReviewDigestsBatch(workIds: string[]): Promise<Map<st
 export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInput[]> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
-    .from("works")
+    .from("works_owner")
     .select(RATED_WORK_SELECT)
     .not("user_score", "is", null)
     .eq("is_archived", false)
@@ -265,7 +265,7 @@ export async function getFavoriteCandidates(
 ): Promise<FavoriteCandidate[]> {
   const supabase = createAdminClient()
   let query = supabase
-    .from("works")
+    .from("works_owner")
     .select(CANDIDATE_WORK_SELECT)
     .eq("is_favorite", true)
     .eq("is_archived", false)
@@ -366,7 +366,7 @@ export async function getStaleAlignmentWorks(
 ): Promise<StaleAlignmentWork[]> {
   const supabase = createAdminClient()
   let query = supabase
-    .from("works")
+    .from("works_owner")
     .select(
       "id, title, publication_status_id, personal_status_id, work_covers(url, is_primary, position), calculated_scores!inner(alignment_score, alignment_at, alignment_stale)",
     )
@@ -461,7 +461,7 @@ export async function getAlignmentQueueWorks(opts: {
     ? "id, calculated_scores(alignment_score, alignment_stale)"
     : "id, title, publication_status_id, personal_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score, alignment_score, alignment_stale, alignment_at)"
   let query = supabase
-    .from("works")
+    .from("works_owner")
     .select(selectCols)
     .eq("is_archived", false)
     .neq("ai_eval_status", "skipped")
@@ -542,7 +542,7 @@ export async function getUntrackedWorks(opts: {
 }): Promise<UntrackedWork[]> {
   const supabase = createAdminClient()
   let query = supabase
-    .from("works")
+    .from("works_owner")
     .select(
       "id, title, publication_status_id, personal_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score)",
     )
@@ -686,7 +686,7 @@ const SYNOPSIS_QUEUE_SELECT =
 let synopsisSkippedColumn: boolean | null = null
 async function hasSynopsisInterestSkippedColumn(sb: ReturnType<typeof createAdminClient>): Promise<boolean> {
   if (synopsisSkippedColumn != null) return synopsisSkippedColumn
-  const { error } = await sb.from("works").select("synopsis_interest_skipped").limit(1)
+  const { error } = await sb.from("works_owner").select("synopsis_interest_skipped").limit(1)
   synopsisSkippedColumn = !error
   if (error) console.warn("[synopsis-queue] coluna synopsis_interest_skipped ausente — 'Pular' inativo. Aplique a migration 121.")
   return synopsisSkippedColumn
@@ -914,7 +914,7 @@ export async function getSynopsisQueueWorks(opts: {
   if (opts.missingManual) {
     const baseQ = () => {
       let q = supabase
-        .from("works")
+        .from("works_owner")
         .select(SYNOPSIS_QUEUE_SELECT)
         .eq("is_archived", false)
         .not("canonical_synopsis", "is", null)
@@ -944,7 +944,7 @@ export async function getSynopsisQueueWorks(opts: {
   // DB remoto (era ~chunks(414/100)+scan; agora 1 scan paginado).
   const baseQ = () => {
     let q = supabase
-      .from("works")
+      .from("works_owner")
       .select(SYNOPSIS_QUEUE_SELECT)
       .eq("is_archived", false)
       .not("canonical_synopsis", "is", null)
