@@ -55,6 +55,31 @@ import type { WorkFormValues } from "@/lib/validations/work.schema"
 
 Also: files without extensions (e.g. `work-form` alongside `work-form.tsx`) are resolved by Turbopack before the `.tsx` file. Rename any such files to `.bak` or `.unused`.
 
+## Supabase: o `select` corta em 1000 linhas, sem avisar
+
+`supabase.from(x).select(...)` devolve **no máximo 1000 linhas** por padrão, **sem erro e sem
+aviso** — a query "funciona" e você trabalha com um recorte achando que é o universo.
+
+```ts
+// ❌ silenciosamente truncado (work_reviews tem ~14k linhas)
+const { data } = await sb.from("work_reviews").select("work_id, source")
+
+// ✅ pagine
+for (let from = 0; ; from += 1000) {
+  const { data } = await sb.from("t").select("...").range(from, from + 999)
+  if (!data?.length) break
+  linhas.push(...data)
+  if (data.length < 1000) break
+}
+// ✅ ou, quando só precisa contar
+const { count } = await sb.from("t").select("*", { count: "exact", head: true })
+```
+
+Isto já custou caro: um backfill mirou em **22** obras quando o alvo real eram **339**, e teria
+terminado "com sucesso" tendo processado 6% do trabalho. É o padrão mais perigoso do projeto —
+**um erro que produz resultado**. Ao contar qualquer coisa acima de ~1k linhas, confirme com
+`count: "exact"` antes de confiar no `select`.
+
 ## Constants generated from DB
 
 These files are **fully overwritten** by `npm run sync-constants` and must not be edited by hand:
@@ -122,8 +147,28 @@ The model is `claude-sonnet-4-6`, prompt version `v20` (toggled by `CONCISE_OUTP
 
 ## External data sources
 
+> **Bypass de Cloudflare — leia antes de mexer em fonte externa.** Mangago e AnimePlanet devolvem
+> **403 `cf-mitigated`** a um fetch do Node: elas **dependem** de um bypass. A Comix é pior — a API
+> dela (`/api/v1/*`) responde `403 Missing token`, e o token vai num parâmetro `_` que **assina a
+> query** (não dá pra forjar nem reescrever). Só um browser real resolve.
+>
+> Há duas camadas, nesta ordem (`fetchHtmlWithCfFallback`):
+> 1. **Sidecar `comix-render`** (`services/comix-render/`, Playwright, `COMIX_RENDER_URL`) — `/resolve`
+>    descobre a Comix; `/render` atravessa o Cloudflare das demais. **Sobe sozinho em dev** via launchd
+>    (`com.geners.comix-render`). Ver o README do serviço: duas armadilhas silenciosas moram lá (flags
+>    de automação e `content_rating`).
+> 2. **FlareSolverr** (Docker `:8191`) — rede de segurança. Sem o sidecar, a busca perde ComicK,
+>    AnimePlanet e Mangago quando o container pisca (medido: 5/9 fontes vs 8/9).
+>
+> **MyAnimeList**: metadados vêm da **API oficial v2** (`lib/external/myanimelist.ts`, header
+> `X-MAL-CLIENT-ID` ← `MAL_CLIENT_ID` no env; OAuth só serve pra dados de usuário logado). Reviews
+> vêm de **scraping direto** (`myanimelist-reviews.ts`) porque a v2 **não tem reviews** — não existe
+> endpoint nem campo. O **Jikan** (scraper de terceiros que ficava em 504 e derrubava a fonte inteira)
+> foi **apagado**. Sem `MAL_CLIENT_ID`, o MAL degrada em silêncio: some da busca e da média de
+> plataforma — e ele costuma ser a fonte com **mais votos** de todas.
+
 `lib/external/index.ts` is the multi-source orchestration layer:
-- `searchAllSources(query)` — parallel search across AniList, MangaUpdates, ComicK, Kitsu, MyAnimeList; merges by title similarity (threshold 0.65 for grouping, 0.72 for accepted)
+- `searchAllSources(query)` — parallel search across AniList, MangaUpdates, ComicK, Kitsu, MyAnimeList, MangaDex, AnimePlanet, Mangago (a Comix **não** entra: a busca dela é gateada por token → resolvida por cross-ID via sidecar); merges by title similarity (threshold 0.65 for grouping, 0.72 for accepted)
 - `fetchMultiSourceDetails(candidate)` — hydrates a candidate from all platforms by ID, filters accepted sources (titleScore ≥ 0.72 AND synScore ≥ 0.18 AND composite ≥ 0.62), then calls the AI. Reverse-substring matches ("Fake Lady" inside "The Fake Lady and Her Rabbit Duke") são graduados por proporção pra evitar falsos positivos.
 
 Client-side fetches (ComicK ratings, AnimePlanet ratings) live in `lib/external/client-fetches.ts` and are called directly from `ExternalSearch` component to avoid the server action round-trip.

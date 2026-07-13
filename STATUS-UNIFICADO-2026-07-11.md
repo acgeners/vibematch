@@ -1,11 +1,63 @@
 # STATUS UNIFICADO — SatorIA / VibeMatch
 
-> **Data:** 2026-07-11
+> **Data:** 2026-07-11 · **Atualizado:** 2026-07-12 (ver **§0** — fontes externas; tema **G** reescrito)
 > **Escopo:** consolidação de TODAS as pendências dos registros da última semana (2026-07-01 → 07-10).
 > **Fontes:** PLANO-MULTIUSER, PLANO-ARQUITETURA-NOTAS, AUDIT_REPORT-2026-07-08 (canônico), PLANO-MESTRE (§24m–o + banner 07-09), STATUS-2026-06-28, PLANO-BUSSOLA-3-FORCAS, PLANO-INTERESSE-PREFS-CONFIANCA, PLANO-LABELS, PLANO-AI-EVALUATION-REDESIGN, STALENESS-MATERIALIDADE, DEPLOY-FLY, COMIX-ARCHITECTURE, DESIGN-MANGAGO-RESOLVE.
 > **Marcação:** ✅ verificado no código/git hoje · 📄 vem do doc/memória (não re-verificado) · ⚠️ contradição/erro detectado.
 >
 > Este arquivo é um **snapshot de reconciliação**, não substitui os planos temáticos. Prioridades: **P0** bloqueia deploy ou arrisca corromper dados · **P1** destrava valor/decisão · **P2** dívida/melhoria · **P3** deferido.
+
+---
+
+## 0. Atualização — 2026-07-12: fontes externas honestas
+
+> **Escopo:** PRs #101–#113 (todos mergeados). Tema **G** foi reescrito; o resto do documento
+> segue válido. Marcação: ✅ verificado no app rodando · 📊 medido.
+
+**O fio condutor:** todo bug desta leva tem a mesma assinatura — **não dá erro**. Devolve HTTP 200,
+HTML válido, um resultado plausível, e está errado. Nenhum log dispara. Só se descobre medindo o
+**desfecho**, não a mecânica.
+
+### O que foi feito
+
+| # | O quê | PR |
+|---|-------|-----|
+| 1 | **Fontes param de se disfarçar de match.** Fonte fora do ar e palpite de slug (AnimePlanet) viravam "match 95–100% com capa" — indistinguíveis de um match real. Conceito novo: `SourceCandidateOption.unconfirmed: "source-down" \| "slug-guess"`. | #102 #105 |
+| 2 | **Canário das fontes atrás do Cloudflare** (`/settings`). Pergunta "os dados chegam agora?", não "o container respira?". Mangago e AnimePlanet dão `403 cf-mitigated` no fetch direto — **dependem** do bypass. | #107 |
+| 3 | **MyAnimeList voltou.** A causa nunca foi o MAL: era o **Jikan** (scraper de terceiros) em 504 enquanto `myanimelist.net` respondia 200. Metadados → **API oficial v2** (`MAL_CLIENT_ID`, ~250ms); reviews → **scraping direto** (a v2 não tem reviews). **`jikan.ts` foi apagado.** | #101 #108 #109 |
+| 4 | **Sidecar `comix-render` funciona.** Ele **já existia** (23 testes) e nunca resolveu nada: faltavam 2 linhas. Destrava o hid automático da Comix E **substitui o FlareSolverr**. | #111 #112 |
+| 5 | **Backfill do apagão do Jikan.** 31 notas + 229 reviews recuperadas. Custo de IA: zero. | #113 |
+
+### 📊 Medições que mudam decisões
+
+- **O MAL é a fonte com mais votos do catálogo** (371k em "Solo Leveling" vs 121k do AniList). Com o Jikan em 504, a nota dele **não entrava** em `platform_ratings` — a média de plataforma rodava sem ela.
+- **O impacto do backfill foi PEQUENO:** as 31 obras corrigidas moveram **0,029** em média (máx 0,11). Mediana de 180 votos ⇒ peso baixo no pooling bayesiano. **O susto era maior que o dano** — e só dava pra saber medindo.
+- **O sidecar substitui o FlareSolverr:** com o container **derrubado**, a busca traz **8/9 fontes** (antes: 5/9 — sumiam ComicK, AnimePlanet, Mangago).
+- **A Comix não é alcançável por fetch:** o token `_` **assina a query** (não dá pra forjar nem reescrever), e o FlareSolverr não executa SPA. Só browser real.
+
+### ⚠️ Armadilhas registradas (todas falham em silêncio)
+
+1. **Flags de automação matam o sidecar.** Com `--enable-automation` (default do Playwright), o app da Comix **não boota**: 200, 394KB de HTML, tela **vazia**. Parece "site fora do ar". → `ignoreDefaultArgs`.
+2. **`content_rating` esconde metade do catálogo.** O default da busca da Comix é `[safe, suggestive]`: obra adulta **não aparece** e o nº 1 vira uma obra homônima **errada**. Formato: `content_rating=a,b,c` (singular, vírgula) — `content_rating[]=` (o formato da própria API!) é **ignorado** pelo front.
+3. **O MAL ignora o slug, mas EXIGE o segmento.** `/manga/{id}/reviews` serve a página de **detalhe** (3 reviews de amostra) em vez das reviews. 200, HTML válido, dado errado.
+4. **`preliminary=on` é obrigatório** nas reviews do MAL — review de obra em curso é filtrada por padrão, e o catálogo é majoritariamente manhwa em andamento.
+5. **Supabase corta o `select` em 1000 linhas SEM AVISAR.** Me fez reportar "57 obras têm review" quando são **747**, e um backfill mirar em 22 obras quando o alvo eram **339**. **Sempre paginar** ou confirmar com `count: "exact"`.
+6. **`docker stop flaresolverr` não segura:** o launchd `com.geners.flaresolverr-watchdog` (60s) o religa. Testar queda de fonte exige suspender o watchdog — senão o card "volta a funcionar" no meio da medição.
+
+### Pendências abertas
+
+| Pendência | Nota | Pri. |
+|---|---|---|
+| **Deploy no Fly** (app + sidecar) | O sidecar agora **de fato funciona** — antes seria deployar um serviço quebrado. | P1 |
+| **Re-avaliação** das 91 obras com review nova do MAL | ~US$0,03/obra. **Decisão de produto:** escolher quais, não rodar lote. | P2 |
+| Semântica do `down` da Comix | Cosmético — medido: **não bloqueia** a cascata (qualquer sucesso cura o gate em 295ms). | P3 |
+
+### 🧭 Serviços em dev (macOS)
+
+| Serviço | Como sobe | Papel |
+|---|---|---|
+| `comix-render` (`:8790`) | launchd `com.geners.comix-render` (RunAtLoad + KeepAlive) | Descoberta da Comix + bypass de Cloudflare |
+| FlareSolverr (`:8191`) | Docker + launchd watchdog (polling 60s) | **Rede de segurança** — não é mais o único bypass |
 
 ---
 
@@ -30,7 +82,7 @@
 | D | Medição prospectiva & decisão de modelo | 🟠 instrumentado, sem dado | 0 obras resolvidas | P1 |
 | E | Backfills & batches IA | 🟠 parciais | G2 `runDigestBatch` nunca construído | P2 |
 | F | Arquitetura de notas / gosto | 🟡 Fase 5 em código | migrar `pilot_taste_scores`→colunas | P1 |
-| G | Deploy & fontes externas | 🔴 não executado | Fly + sidecar comix + flag mangago | P1 |
+| G | Deploy & fontes externas | 🟡 **fontes saneadas (07-12)**, deploy não executado | Fly deploy (o sidecar agora funciona — §0) | P1 |
 | H | Higiene de código & working tree | 🟡 resíduos | commits soltos, código morto, testes | P2 |
 
 ---
@@ -91,12 +143,17 @@
 | Decidir "Gostei geral": 0–10 vs 5 níveis em produção | 📄 aberto | Decisão de produto. | P2 |
 
 ### G. Deploy & fontes externas
+> **Reescrita em 2026-07-12** — ver §0. A premissa "código do sidecar pronto (PR #75)" estava
+> **errada**: o serviço existia mas nunca funcionou (faltavam 2 linhas). Corrigido no PR #111.
+
 | Item | Estado | Abordagem sugerida | Pri. |
 |------|--------|--------------------|------|
 | Deploy do app no Fly (`gru`) | 📄 checklist não executado | **Bloqueado por A (rate-limit) e C (migrations).** Fazer P0s primeiro. | P1 |
-| Deploy sidecar `comix-render` + `COMIX_RENDER_URL` | 📄 código pronto (PR #75) | `fly deploy` + secret; fail-soft sem isso. | P1 |
+| Deploy sidecar `comix-render` + `COMIX_RENDER_URL` | ✅ **serviço FUNCIONA** (PR #111); roda em dev sob launchd | `fly deploy` + secret. Agora vale a pena: ele destrava a Comix E substitui o FlareSolverr. | P1 |
 | Flag mangago (`MANGAGO_RESOLVE_ENABLED`) | 📄 código atrás de flag OFF | Manter OFF até validar em prod. | P3 |
 | DEPLOY-FLY não cobre o sidecar comix | ⚠️ doc pré-Comix | Atualizar o checklist antes de executar. | P2 |
+| Re-avaliação das obras com reviews novas do MAL | 🟠 decisão de produto | 91 obras ganharam review do MAL (PR #113). O ganho só aparece re-avaliando (~US$0,03/obra). **Escolher quais**, não rodar lote. | P2 |
+| Semântica do `down` da Comix (`api_auth_required`) | 🟡 cosmético | O gate diz "Comix inutilizável", mas detalhe/reviews funcionam pelo SSR token-free. Medido: qualquer sucesso cura o gate em 295ms — **não bloqueia nada**. | P3 |
 
 ### H. Higiene de código & working tree
 | Item | Estado | Abordagem sugerida | Pri. |
