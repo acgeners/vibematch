@@ -56,6 +56,29 @@ export async function getCurrentUserId(admin?: AdminClient): Promise<string> {
   return getSingletonUserId(admin)
 }
 
+/**
+ * Id do DONO do catálogo — a linha singleton de `user_settings` (a mais antiga).
+ *
+ * É o eixo da Fatia 1 (PLANO-MULTIUSER-FASE2.md §13). As colunas pessoais de `works`
+ * (`is_favorite`, `personal_status_id`, `chapters_read`, `last_read_at`) moram na linha
+ * COMPARTILHADA do catálogo — logo, o estado que está lá é o **dele**. Quem compara contra
+ * este id decide duas coisas:
+ *
+ *   - na ESCRITA: se pode tocar em `works` (só o dono pode; para os demais, a escrita vai
+ *     só pra `user_work_state`). Sem essa comparação, a Leitora favorita uma obra e
+ *     sobrescreve o `is_favorite` do dono — sem erro, sem log.
+ *   - na LEITURA: de onde vem o estado dela (`works` pro dono; `user_work_state` pros
+ *     outros, sem fallback). Sem isso, ela vê os favoritos e os capítulos do dono como se
+ *     fossem dela.
+ *
+ * ⚠️ NÃO é "quem está logado" nem "quem é curador": é o dono do dado legado. Um segundo
+ * curador passa em `ensureAdmin()` e mesmo assim NÃO é o dono — e não pode herdar o estado
+ * pessoal de ninguém.
+ */
+export async function getOwnerUserId(admin?: AdminClient): Promise<string> {
+  return getSingletonUserId(admin)
+}
+
 // ⚠️⚠️ NUNCA use `getCurrentUserId()` para ESCREVER.
 //
 // Sem sessão ele cai no SINGLETON — o dono. Um visitante anônimo que faça POST numa

@@ -10,6 +10,7 @@ import {
 import { pickPrimaryCover } from "@/lib/work-derived"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quality"
+import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 
 // Tokeniza a busca igual ao filtro antigo do ranking: separa por espaços e
 // pontuação para que o padrão "a depois b depois c" atravesse vírgulas/`?`/etc.
@@ -281,6 +282,21 @@ export async function getRanking(
   const publicationStatusIdFilter = resolveStatusIds(filters.publicationStatus, getPublicationStatusIdByName)
   const personalStatusIdFilter = resolveStatusIds(filters.personalStatus, getPersonalStatusIdByName)
 
+  // Estado de leitura de QUEM está olhando (Fatia 1). Pro dono, isto é a própria linha de
+  // `works` que a query já traz (custo zero). Pros demais, vem de `user_work_state` — e é o
+  // que impede a Leitora de ver os favoritos, o status e os capítulos do dono como se fossem
+  // dela. Ver server/queries/user-work-state.ts.
+  const personal = await getPersonalStateReader()
+
+  // Os filtros pessoais (status de leitura, "só favoritos") não podem sair das colunas de
+  // `works` quando quem filtra não é o dono — seriam os favoritos DELE. `null` = dono, filtra
+  // no SQL como sempre; array = ids dela (vazio = nenhuma obra casa, e aí o resultado tem que
+  // ser vazio de verdade, não "sem filtro").
+  const personalFilterIds = await resolvePersonalFilterIds({
+    personalStatusIds: personalStatusIdFilter,
+    onlyFavorites: filters.onlyFavorites,
+  })
+
   // Pre-resolve genre/tag id filters in parallel via pivot tables. Pushing this
   // into Supabase narrows the heavy joined fetch below instead of loading 2000
   // rows just to drop most in memory.
@@ -395,6 +411,10 @@ export async function getRanking(
   // searchIds é null quando não há busca; [] quando a busca não casou nada (a
   // interseção vazia abaixo retorna [] corretamente).
   if (searchIds) includeSets.push(searchIds)
+  // Idem pro filtro pessoal de quem NÃO é o dono: [] = ela não tem nenhuma obra nesse status
+  // (ou nenhuma favorita) → interseção vazia → resultado vazio. Ignorar a lista vazia aqui
+  // devolveria o catálogo inteiro como se fosse tudo dela.
+  if (personalFilterIds) includeSets.push(personalFilterIds)
   const excludeIds = new Set<string>([
     ...(genreExcludeIds ?? []),
     ...(tagExcludeIds ?? []),
@@ -445,7 +465,9 @@ export async function getRanking(
     // Filter pediu status que nenhum nome resolve — força match vazio.
     worksQuery = worksQuery.eq("id", "00000000-0000-0000-0000-000000000000")
   }
-  if (personalStatusIdFilter && personalStatusIdFilter.length > 0) {
+  // Só o DONO filtra pelas colunas de `works` — pros demais o recorte já veio por id, em
+  // `personalFilterIds` (acima). Aplicar este `.in()` pra elas seria filtrar pelo status DELE.
+  if (personal.isOwner && personalStatusIdFilter && personalStatusIdFilter.length > 0) {
     worksQuery = worksQuery.in("personal_status_id", personalStatusIdFilter)
   } else if (personalStatusIdFilter && personalStatusIdFilter.length === 0) {
     worksQuery = worksQuery.eq("id", "00000000-0000-0000-0000-000000000000")
@@ -474,7 +496,9 @@ export async function getRanking(
   if (filters.maxYear != null) {
     worksQuery = worksQuery.lte("year", filters.maxYear)
   }
-  if (filters.onlyFavorites) {
+  // Idem "só favoritos": pro dono, a coluna de `works` É o favorito dele; pros demais o
+  // recorte veio por id em `personalFilterIds`.
+  if (filters.onlyFavorites && personal.isOwner) {
     worksQuery = worksQuery.eq("is_favorite", true)
   }
   // Escopo por grupo de favoritos: AND com o allowedIds/exclude acima. Lista
@@ -511,8 +535,10 @@ export async function getRanking(
     const publicationStatusDisplay = publicationStatusId != null
       ? publicationStatusDisplayById.get(publicationStatusId)
       : undefined
-    const personalStatusId =
-      typeof w.personal_status_id === "number" ? w.personal_status_id : null
+    // Estado de leitura de quem está olhando — NÃO as colunas de `works` (que são as do
+    // dono). Pro dono, `get()` devolve exatamente essas colunas; pros demais, as linhas dela.
+    const state = personal.get(w.id, w)
+    const personalStatusId = state.personalStatusId
     const scores: Record<string, number> = {}
     for (const cs of w.category_scores ?? []) {
       scores[cs.criterion_slug] = cs.score
@@ -548,7 +574,7 @@ export async function getRanking(
       alignmentStale: Boolean(w.calculated_scores?.alignment_stale),
       alignmentPayload: w.calculated_scores?.alignment_payload ?? null,
       userScore: w.user_score,
-      isFavorite: Boolean(w.is_favorite),
+      isFavorite: state.isFavorite,
       publicationStatus: getPublicationStatusNameById(publicationStatusId) ?? "Unknown",
       publicationStatusId,
       publicationStatusShort: publicationStatusDisplay?.short ?? null,
@@ -559,7 +585,7 @@ export async function getRanking(
         personalStatusId != null ? personalStatusSymbolsById.get(personalStatusId) ?? null : null,
       aiEvalStatus: w.ai_eval_status,
       totalChapters: w.total_chapters,
-      chaptersRead: w.chapters_read ?? null,
+      chaptersRead: state.chaptersRead,
       coverUrl: pickPrimaryCover(w.work_covers),
       // Prefere a sinopse CANÔNICA (consolidada via IA) quando existe; cai na
       // primária das fontes enquanto a obra não passou pela consolidação.
@@ -576,7 +602,7 @@ export async function getRanking(
       observations: w.observations ?? null,
       year: w.year ?? null,
       updatedAt: w.updated_at ?? null,
-      lastReadAt: w.last_read_at ?? null,
+      lastReadAt: state.lastReadAt,
       // Não embutidos no payload (ver SELECT): o filtro por gênero/tag é feito em
       // SQL e nenhum consumidor lê estes campos no client.
       genres: [],

@@ -11,6 +11,8 @@ import {
   getPersonalStatusIdByName,
 } from "@/lib/constants/status-lookups"
 import { titleToSlug } from "@/lib/utils"
+import { getPersonalStateReader } from "@/server/queries/user-work-state"
+import type { WorkReadingColumns } from "@/server/queries/user-work-state"
 
 const WORK_WITH_RELATIONS_SELECT = `
   *,
@@ -215,6 +217,13 @@ function applyWorkFilters(
   return query
 }
 
+/**
+ * ⚠️ SEM CALLERS hoje (a listagem inteira passa por `getRanking`). Se você reviver esta
+ * função: os filtros `isFavorite`/`personalStatus` e o sort `is_favorite` abaixo batem nas
+ * colunas de `works`, que são o estado do DONO — para qualquer outro usuário isso devolve os
+ * favoritos DELE. Passe por `getPersonalStateReader()`/`resolvePersonalFilterIds()`, como
+ * `getRanking` faz. Ver server/queries/user-work-state.ts.
+ */
 export async function getWorks(
   filters: WorkFilters = {},
   sort: WorkSort = { field: "expected_score", direction: "desc" },
@@ -393,6 +402,28 @@ export async function getWorks(
   }
 }
 
+/**
+ * Sobrepõe o estado de LEITURA de quem está olhando nas 4 colunas pessoais que vêm de `works`
+ * (Fatia 1). Pro dono é identidade — aquelas colunas SÃO o estado dele. Pra qualquer outro
+ * usuário, elas são o estado do DONO: sem esta troca, a Leitora abriria a obra e veria o
+ * coração dele preenchido e "capítulo 137 de 200" como se fosse a leitura dela.
+ *
+ * Ver server/queries/user-work-state.ts.
+ */
+async function withPersonalState(works: WorkWithRelations[]): Promise<WorkWithRelations[]> {
+  const personal = await getPersonalStateReader()
+  return works.map((work) => {
+    const state = personal.get(work.id, work as WorkReadingColumns)
+    return {
+      ...work,
+      is_favorite: state.isFavorite,
+      personal_status_id: state.personalStatusId,
+      chapters_read: state.chaptersRead,
+      last_read_at: state.lastReadAt,
+    }
+  })
+}
+
 export async function getWorkById(id: string): Promise<WorkWithRelations | null> {
   const supabase = createAdminClient()
 
@@ -405,7 +436,8 @@ export async function getWorkById(id: string): Promise<WorkWithRelations | null>
   if (error) throw new Error(error.message)
   if (!data) return null
 
-  return normalizeWorkRelations(data)
+  const [work] = await withPersonalState([normalizeWorkRelations(data)])
+  return work
 }
 
 // Map of slug -> work id, cached so navigating to a work by slug doesn't refetch
@@ -566,10 +598,12 @@ export async function getWorksByIds(ids: string[]): Promise<WorkWithRelations[]>
   if (error) throw new Error(error.message)
 
   const byId = new Map(((data ?? []) as Array<{ id: string }>).map((row) => [row.id, row]))
-  return ids
-    .map((id) => byId.get(id))
-    .filter((row): row is NonNullable<typeof row> => Boolean(row))
-    .map(normalizeWorkRelations)
+  return withPersonalState(
+    ids
+      .map((id) => byId.get(id))
+      .filter((row): row is NonNullable<typeof row> => Boolean(row))
+      .map(normalizeWorkRelations),
+  )
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

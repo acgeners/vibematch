@@ -4,7 +4,7 @@ import { useEffect, useState, type MouseEvent } from "react"
 import { Heart } from "lucide-react"
 import { toast } from "sonner"
 import { toggleFavorite } from "@/server/actions/works"
-import { useIsAdmin } from "@/components/layout/admin-context"
+import { useCanWriteOwnState } from "@/components/layout/admin-context"
 import { cn } from "@/lib/utils"
 
 export function FavoriteCell({
@@ -16,7 +16,7 @@ export function FavoriteCell({
   workTitle: string
   isFavorite: boolean
 }) {
-  const isAdmin = useIsAdmin()
+  const canFavorite = useCanWriteOwnState()
   const [isFavorite, setIsFavorite] = useState(initialIsFavorite)
   const [pending, setPending] = useState(false)
 
@@ -47,9 +47,11 @@ export function FavoriteCell({
     // sai pelo revalidate.
   }
 
-  // Stopgap multi-user: favoritar muta o catálogo compartilhado → só o dono.
-  // Usuário logado (não-admin) não vê o controle.
-  if (!isAdmin) return null
+  // Favoritar é estado PESSOAL (Fatia 1): qualquer usuário logado tem o verbo `own_state`, e
+  // o favorito dele vai pra `user_work_state` — não mais pra linha compartilhada de `works`.
+  // O anônimo continua sem o controle: sem sessão não há `user_id` pra escrever (a action
+  // recusa com `ensureSignedIn`), então mostrar o coração seria oferecer um clique que falha.
+  if (!canFavorite) return null
 
   return (
     <button

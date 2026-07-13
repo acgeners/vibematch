@@ -3,6 +3,7 @@ import { selectByIdsInChunks } from "@/lib/supabase/paginate"
 import { pickPrimaryCover } from "@/lib/covers"
 import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
 import type { FavoritesSummary } from "@/server/queries/favorites"
+import { getPersonalStateReader } from "@/server/queries/user-work-state"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Grupos de favoritos (work_lists). Ver migration 123 e o topic file
@@ -325,13 +326,19 @@ export async function getWorksLiteForPicker(): Promise<WorkLiteForPicker[]> {
     work_covers: Array<{ url: string; is_primary: boolean; position: number }> | null
   }>
 
+  // ⚠️ `is_favorite` aqui é a coluna de `works` — o favorito do DONO. Este catálogo lite vai
+  // pro /favorites, e o `GroupsIndex` filtra por `isFavorite` pra montar o mosaico de "Todos
+  // os favoritos": sem esta troca, a Leitora abre /favoritos e vê as capas dos favoritos DELE
+  // como se fossem dela. Foi exatamente o que o teste de dois usuários pegou.
+  const personal = await getPersonalStateReader()
+
   return rows
     .map((w) => ({
       id: w.id,
       title: w.title,
       coverUrl: pickPrimaryCover(w.work_covers),
       expectedScore: w.calculated_scores?.expected_score ?? null,
-      isFavorite: Boolean(w.is_favorite),
+      isFavorite: personal.get(w.id, w).isFavorite,
     }))
     .sort((a, b) => {
       const ea = a.expectedScore ?? -Infinity

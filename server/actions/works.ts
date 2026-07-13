@@ -30,7 +30,9 @@ import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
-import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin, ensurePermission } from "@/server/queries/current-user"
+import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin, ensurePermission, ensureSignedIn } from "@/server/queries/current-user"
+import { writeReadingState, canWriteSharedWorkRow, toDay } from "@/server/queries/user-work-state"
+import type { ReadingStatePatch } from "@/server/queries/user-work-state"
 import { buildAutoRefreshPlan } from "@/lib/external/auto-refresh"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
@@ -1541,16 +1543,72 @@ export async function unarchiveWork(id: string) {
   return { data: null }
 }
 
-export async function toggleFavorite(id: string, isFavorite: boolean) {
-  const gate = await ensureAdmin()
-  if (!gate.ok) return { error: gate.error }
-  const supabase = createAdminClient()
-  const { error } = await supabase
-    .from("works")
-    .update({ is_favorite: isFavorite })
-    .eq("id", id)
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// Estado de LEITURA — FATIA 1 (PLANO-MULTIUSER-FASE2.md §13)
+//
+// Estes 4 writers eram `ensureAdmin()`, e TINHAM que ser: as colunas moram na linha
+// compartilhada de `works`, então um Leitor marcando um capítulo estaria escrevendo no
+// catálogo de todo mundo. Era isso que fazia do Leitor um espectador — sem poder favoritar
+// nem marcar um capítulo. Agora o estado tem casa própria (`user_work_state`), e o gate pode
+// ser o verbo certo: `own_state` (que o Leitor tem).
+//
+// A regra, em uma linha: **`user_work_state` sempre; `works` só se for o DONO.**
+// Ver `server/queries/user-work-state.ts` pro porquê inteiro — e pro que acontece se alguém
+// "simplificar" isso para um dual-write incondicional.
+// ═══════════════════════════════════════════════════════════════════════════════════════
 
-  if (error) return { error: error.message }
+/**
+ * Gate dos writers de estado de leitura.
+ *
+ * ⚠️ IDENTIDADE antes de PERMISSÃO, e nesta ordem. `ensurePermission("own_state")` sozinho
+ * NÃO basta: o papel de um anônimo é `leitor` (fail-closed) e `own_state` é liberado pro
+ * leitor — ou seja, o gate de papel PASSA. O que falta ao anônimo não é permissão, é um
+ * `user_id` próprio: sem sessão, `getCurrentUserId()` cai no singleton e ele escreveria
+ * como o DONO. Só `ensureSignedIn()` fecha isso.
+ */
+async function ensureReadingStateWriter(): Promise<
+  { ok: true; userId: string; isOwner: boolean } | { ok: false; error: string }
+> {
+  const session = await ensureSignedIn()
+  if (!session.ok) return { ok: false, error: session.error }
+
+  const gate = await ensurePermission("own_state")
+  if (!gate.ok) return { ok: false, error: gate.error }
+
+  return {
+    ok: true,
+    userId: session.userId,
+    isOwner: await canWriteSharedWorkRow(session.userId),
+  }
+}
+
+/**
+ * Aplica o patch nos DOIS lugares, na ordem certa: primeiro o dado de quem clicou
+ * (`user_work_state`), depois — e só se ele for o dono — o espelho compartilhado (`works`).
+ * Se o espelho falhar, o estado pessoal já está salvo; o inverso perderia o clique.
+ */
+async function applyReadingState(
+  gate: { userId: string; isOwner: boolean },
+  workIds: string[],
+  patch: ReadingStatePatch,
+): Promise<{ error: string | null }> {
+  const write = await writeReadingState(gate.userId, workIds, patch)
+  if (write.error) return { error: write.error }
+
+  if (!gate.isOwner) return { error: null }
+
+  const supabase = createAdminClient()
+  const { error } = await supabase.from("works").update(patch).in("id", workIds)
+  return { error: error ? error.message : null }
+}
+
+export async function toggleFavorite(id: string, isFavorite: boolean) {
+  const gate = await ensureReadingStateWriter()
+  if (!gate.ok) return { error: gate.error }
+
+  const { error } = await applyReadingState(gate, [id], { is_favorite: isFavorite })
+  if (error) return { error }
+
   revalidatePath(`/titles/${id}`)
   revalidatePath("/titles")
   revalidatePath("/ranking")
@@ -1561,17 +1619,14 @@ export async function toggleFavorite(id: string, isFavorite: boolean) {
 }
 
 export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
-  const gate = await ensureAdmin()
+  const gate = await ensureReadingStateWriter()
   if (!gate.ok) return { error: gate.error }
   const filtered = Array.from(new Set(ids.filter(Boolean)))
   if (filtered.length === 0) return { data: { count: 0 } }
-  const supabase = createAdminClient()
-  const { error } = await supabase
-    .from("works")
-    .update({ is_favorite: isFavorite })
-    .in("id", filtered)
 
-  if (error) return { error: error.message }
+  const { error } = await applyReadingState(gate, filtered, { is_favorite: isFavorite })
+  if (error) return { error }
+
   revalidatePath("/titles")
   revalidatePath("/ranking")
   revalidatePath("/favorites")
@@ -1580,8 +1635,59 @@ export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
   return { data: { count: filtered.length } }
 }
 
+/**
+ * Campos que o form manda mas que NÃO são desta fatia: nota, observações, interesse e os 8
+ * pós-leitura. Eles alimentam o **scoring** (Ridge, `calculated_scores`, `formula_config`), e
+ * movê-los arrasta tudo isso junto — é a Fatia 2 (§13.1). Continuam morando em `works`, ou
+ * seja: continuam sendo do DONO.
+ *
+ * Existe porque `work-status-form` submete o form INTEIRO a cada save — inclusive os campos
+ * que ninguém tocou, ecoando de volta os valores carregados da obra. Para o dono isso é
+ * inócuo (reescreve o mesmo valor). Para qualquer outro usuário, seria escrever a nota DELE
+ * na linha compartilhada: um eco vira uma reescrita. Daí a comparação abaixo — a Leitora que
+ * só marcou um capítulo não é punida por ecoar a nota do dono sem querer, mas se ela de fato
+ * MUDAR uma dessas notas, o pedido é recusado em vez de aceito-e-descartado em silêncio.
+ */
+const FATIA2_FIELDS = [
+  "user_score",
+  "observation_adjustment",
+  "observations",
+  "synopsis_quality",
+  "post_story_score",
+  "post_fl_score",
+  "post_ml_score",
+  "post_character_development_score",
+  "post_pacing_score",
+  "post_art_visual_score",
+  "post_impact_immersion_score",
+  "post_originality_score",
+] as const
+
+function fatia2FieldsChanged(
+  raw: WorkStatusValues,
+  data: WorkStatusValues,
+  stored: Record<string, unknown> | null | undefined,
+): string[] {
+  if (!stored) return []
+  return FATIA2_FIELDS.filter((field) => {
+    // ⚠️ OMITIR um campo não é MUDÁ-LO. O form manda o payload inteiro, mas um chamador
+    // direto (script, app) manda só o que quer mudar — e no schema esses campos são
+    // `.optional()` (e `observation_adjustment` tem `.default(0)`), então o zod transforma
+    // "ausente" em `undefined`/`0`. Comparar o valor JÁ PARSEADO acusaria "você apagou as
+    // observações do Curador" em quem só mandou `chapters_read`. Quem decide é a presença no
+    // payload CRU: campo ausente = intenção ausente — e ele não é escrito de qualquer forma.
+    if (!(field in raw)) return false
+
+    const submitted = (data as Record<string, unknown>)[field] ?? null
+    const current = stored[field] ?? null
+    // `observation_adjustment` é `not null default 0` — 0 e null são a mesma coisa aqui.
+    if (field === "observation_adjustment") return Number(submitted ?? 0) !== Number(current ?? 0)
+    return submitted !== current
+  })
+}
+
 export async function updateWorkStatus(id: string, values: WorkStatusValues) {
-  const gate = await ensureAdmin()
+  const gate = await ensureReadingStateWriter()
   if (!gate.ok) return { error: { _root: [gate.error] } }
   const parsed = workStatusSchema.safeParse(values)
   if (!parsed.success) {
@@ -1591,12 +1697,57 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   const data = parsed.data
   const supabase = createAdminClient()
 
-  const { data: current } = await supabase
+  // A linha de `works` traz (a) o estado do DONO e (b) os campos da Fatia 2 pra comparação.
+  // Literal de propósito: o client do Supabase tipa o retorno a partir da STRING do select —
+  // montá-la com template/`join()` devolve `ParserError` em vez das colunas. Se mexer em
+  // FATIA2_FIELDS, mexa aqui também.
+  const { data: sharedRow } = await supabase
     .from("works")
-    .select("personal_status_id, chapters_read, last_read_at, user_score")
+    .select(
+      `personal_status_id, chapters_read, last_read_at,
+       user_score, observation_adjustment, observations, synopsis_quality,
+       post_story_score, post_fl_score, post_ml_score, post_character_development_score,
+       post_pacing_score, post_art_visual_score, post_impact_immersion_score,
+       post_originality_score`,
+    )
     .eq("id", id)
     .single()
-  const prevUserScore = (current?.user_score as number | null | undefined) ?? null
+
+  // ⚠️ O estado ANTERIOR tem que ser o DE QUEM ESTÁ ESCREVENDO. As regras de data abaixo
+  // ("o capítulo cresceu?", "saiu de Want to Read?") dependem dele — com o estado do dono, a
+  // Leitora que marca o capítulo 3 numa obra em que ele está no 200 não teria a data
+  // carimbada, porque "não cresceu". Certo, e sem erro nenhum: só a data errada.
+  let current: {
+    personal_status_id: number | null
+    chapters_read: number | null
+    last_read_at: string | null
+  } | null
+
+  if (gate.isOwner) {
+    current = sharedRow
+      ? {
+          personal_status_id: sharedRow.personal_status_id as number | null,
+          chapters_read: sharedRow.chapters_read as number | null,
+          last_read_at: toDay(sharedRow.last_read_at as string | null),
+        }
+      : null
+  } else {
+    const { data: own } = await supabase
+      .from("user_work_state")
+      .select("personal_status_id, chapters_read, last_read_at")
+      .eq("user_id", gate.userId)
+      .eq("work_id", id)
+      .maybeSingle()
+    current = own
+      ? {
+          personal_status_id: own.personal_status_id as number | null,
+          chapters_read: own.chapters_read as number | null,
+          last_read_at: toDay(own.last_read_at as string | null),
+        }
+      : null
+  }
+
+  const prevUserScore = (sharedRow?.user_score as number | null | undefined) ?? null
 
   const currentStatusName = current
     ? getPersonalStatusNameById(current.personal_status_id)
@@ -1622,18 +1773,50 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
     nextLastReadAt = currentLastRead
   }
 
+  const readingState: ReadingStatePatch = {
+    personal_status_id:
+      getPersonalStatusIdByName(data.personal_status) ?? data.personal_status_id ?? null,
+    chapters_read: data.chapters_read ?? null,
+    last_read_at: nextLastReadAt,
+  }
+
+  // ── Não-dono: só o estado de leitura, e só em `user_work_state`. `works` NÃO é tocada.
+  if (!gate.isOwner) {
+    const changed = fatia2FieldsChanged(values, data, sharedRow)
+    if (changed.length > 0) {
+      return {
+        error: {
+          _root: [
+            "Nota, observações e pós-leitura ainda não são per-usuário (Fatia 2) — hoje elas " +
+              "são do Curador. Salve status, capítulos e data de leitura; o resto não foi gravado.",
+          ],
+        },
+      }
+    }
+
+    const write = await writeReadingState(gate.userId, [id], readingState)
+    if (write.error) return { error: { _root: [write.error] } }
+
+    // Sem recalc e sem prediction ledger: nada em `works` mudou, e o modelo é o do dono.
+    revalidatePath("/titles/[id]", "page")
+    revalidatePath("/titles")
+    revalidatePath("/ranking")
+    revalidatePath("/leitura")
+    revalidatePath("/")
+    revalidateFavorites()
+    return { data: { id } }
+  }
+
+  // ── Dono: exatamente o que sempre foi (`works` inteira), + o espelho per-usuário.
   const { error } = await supabase
     .from("works")
     .update({
-      personal_status_id:
-        getPersonalStatusIdByName(data.personal_status) ?? data.personal_status_id ?? null,
+      ...readingState,
       synopsis_quality: data.synopsis_quality ?? null,
       // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
       synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
       observation_adjustment: data.observation_adjustment,
       observations: data.observations ?? null,
-      chapters_read: data.chapters_read ?? null,
-      last_read_at: nextLastReadAt,
       user_score: data.user_score ?? null,
       post_story_score: data.post_story_score ?? null,
       post_fl_score: data.post_fl_score ?? null,
@@ -1647,6 +1830,9 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
     .eq("id", id)
 
   if (error) return { error: { _root: [error.message] } }
+
+  const mirror = await writeReadingState(gate.userId, [id], readingState)
+  if (mirror.error) return { error: { _root: [mirror.error] } }
 
   // Validação prospectiva: primeira nota (null → valor) → congela a previsão
   // de-registro antes do recalc deferido incluir o rótulo.
@@ -1670,6 +1856,7 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   revalidateTag("works-slug-index", "max")
   revalidatePath("/ranking")
   revalidateTag("tags-catalog", "max")
+  revalidatePath("/leitura")
   revalidatePath("/")
   revalidateFavorites()
   return { data: { id } }
@@ -1682,22 +1869,20 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
  * notas/observações/capítulos. 1 update em lote + 1 recalc deferido.
  */
 export async function setReadingStatusForWorks(ids: string[], status: string) {
-  const gate = await ensureAdmin()
+  const gate = await ensureReadingStateWriter()
   if (!gate.ok) return { error: gate.error }
   const cleanIds = [...new Set((ids ?? []).filter(Boolean))]
   if (cleanIds.length === 0) return { error: "Nenhuma obra selecionada." }
   const statusId = getPersonalStatusIdByName(status)
   if (statusId == null) return { error: `Status de leitura inválido: ${status}` }
 
-  const supabase = createAdminClient()
-  const { error } = await supabase
-    .from("works")
-    .update({ personal_status_id: statusId })
-    .in("id", cleanIds)
-  if (error) return { error: error.message }
+  const { error } = await applyReadingState(gate, cleanIds, { personal_status_id: statusId })
+  if (error) return { error }
 
-  await markRecalcPending("setReadingStatusForWorks")
+  // Recalc só faz sentido pro dono: é a linha de `works` (e o modelo dele) que mudou.
+  if (gate.isOwner) await markRecalcPending("setReadingStatusForWorks")
 
+  revalidatePath("/leitura")
   revalidatePath("/ai-evaluation")
   revalidateTag("ai-eval-tab-counts", "max")
   revalidatePath("/titles")

@@ -17,7 +17,7 @@ import { toast } from "sonner"
 import { archiveWork, autoRefreshWorkData, deleteWork, toggleFavorite, unarchiveWork } from "@/server/actions/works"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import { StatusEditDialog } from "@/components/titles/status-edit-dialog"
-import { useCan, useIsAdmin } from "@/components/layout/admin-context"
+import { useCan, useIsAdmin, useCanWriteOwnState } from "@/components/layout/admin-context"
 import type { PostAttributeAssessmentFormProps } from "@/components/titles/post-attribute-assessment-form"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
 import type { TasteCriterion, TasteScoreKey } from "@/server/queries/pilot-taste"
@@ -50,7 +50,7 @@ export function FavoriteToggleButton({
   isFavorite: boolean
   iconOnly?: boolean
 }) {
-  const isAdmin = useIsAdmin()
+  const canFavorite = useCanWriteOwnState()
   const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
   const handleClick = () => {
@@ -65,8 +65,10 @@ export function FavoriteToggleButton({
       refresh()
     })
   }
-  // Stopgap multi-user: controles de mutação do catálogo só pro dono (admin).
-  if (!isAdmin) return null
+  // Favorito é estado pessoal (Fatia 1) → qualquer usuário LOGADO. Anônimo não: sem sessão
+  // não há linha própria pra escrever. Os outros botões deste arquivo seguem só do Curador —
+  // eles mutam o catálogo compartilhado (editar, arquivar, apagar).
+  if (!canFavorite) return null
   return (
     <Button
       variant={isFavorite ? "default" : "outline"}
@@ -132,9 +134,13 @@ export function StatusActionButton({
   size?: "sm" | "default" | "lg"
   className?: string
 }) {
-  const isAdmin = useIsAdmin()
+  // "Marcar leitura" abre o form de status/capítulos — estado PESSOAL (Fatia 1). Era o botão
+  // que fazia da Leitora uma espectadora: escondido pra ela, e recusado pelo servidor se
+  // chamado assim mesmo. Agora vale pra qualquer usuário logado; o form em si é que decide o
+  // que ela pode editar (nota e pós-leitura seguem do Curador — Fatia 2).
+  const canWriteOwnState = useCanWriteOwnState()
   const [open, setOpen] = useState(false)
-  if (!isAdmin) return null
+  if (!canWriteOwnState) return null
   return (
     <>
       <Button variant={variant} size={size} onClick={() => setOpen(true)} className={className}>

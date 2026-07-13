@@ -74,7 +74,7 @@ import { archiveWork, setFavoriteMany, toggleFavorite, unarchiveWork } from "@/s
 import { rerankSingleWorkAction } from "@/server/actions/recommendations"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
-import { useIsAdmin } from "@/components/layout/admin-context"
+import { useIsAdmin, useCanWriteOwnState } from "@/components/layout/admin-context"
 import { AddToGroupDialog } from "@/components/favorites/lists/add-to-group-dialog"
 import type { ListPickerOption } from "@/server/queries/lists"
 import { AlignmentCell, AlignmentScoreCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
@@ -500,8 +500,10 @@ function CompareSelectionBar({
   onUnfavorite: () => void
   onAddToGroup?: () => void
 }) {
-  // Stopgap multi-user: desfavoritar/agrupar em lote muta o catálogo → só o dono.
+  // Agrupar em lote muta o catálogo (grupos ainda não têm dono) → só o Curador.
+  // Desfavoritar em lote é estado PESSOAL (Fatia 1) → qualquer usuário logado.
   const isAdmin = useIsAdmin()
+  const canWriteOwnState = useCanWriteOwnState()
   if (count === 0) return null
   const compareDisabled = count > MAX_COMPARE_WORKS
   return (
@@ -533,7 +535,7 @@ function CompareSelectionBar({
             Adicionar a grupo
           </Button>
         )}
-        {favoriteCount > 0 && isAdmin && (
+        {favoriteCount > 0 && canWriteOwnState && (
           <Button
             size="sm"
             variant="outline"
