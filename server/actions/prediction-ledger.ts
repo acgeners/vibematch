@@ -9,6 +9,7 @@
 // Esta tabela NÃO é apagada nem migrada nesta etapa.
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { createUserClient } from "@/lib/supabase/user"
 import { ensureSignedIn } from "@/server/queries/current-user"
 import { computeDecisionScore } from "@/lib/calculations/decision"
 
@@ -65,7 +66,9 @@ export async function capturePredictionForFirstRating(
       confidence: cs?.alignment_payload?.confidence ?? null,
     })
 
-    await supabase.from("prediction_ledger").upsert(
+    // O ledger é SEU (as leituras acima são de catálogo e seguem na service role).
+    const userDb = await createUserClient()
+    await userDb.from("prediction_ledger").upsert(
       {
         user_id: userId,
         work_id: workId,

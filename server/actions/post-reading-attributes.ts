@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { createUserClient } from "@/lib/supabase/user"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug } from "@/types/domain"
 import { ensureSignedIn } from "@/server/queries/current-user"
@@ -25,6 +26,11 @@ export async function submitPostReadingAttributes(
   workId: string,
   values: Partial<Record<CriterionSlug, number>>,
 ): Promise<PostReadingResult> {
+  // DOIS clientes, de propósito:
+  //   `supabase` (service role) → CATÁLOGO. A avaliação da IA é fato da obra, não dado seu, e
+  //      não tem política de RLS: lê-la com o cliente do usuário devolveria ZERO linhas — e a
+  //      action responderia "obra sem avaliação IA", que é mentira.
+  //   `userDb` (sessão)         → SEUS dados. A RLS (mig 142) prende as linhas ao seu user_id.
   const supabase = createAdminClient()
 
   const latestAi = await getLatestAiEvaluationAttributes(workId, supabase)
@@ -35,6 +41,7 @@ export async function submitPostReadingAttributes(
   const auth = await ensureSignedIn()
   if (!auth.ok) return { ok: false, error: auth.error }
   const userId = auth.userId
+  const userDb = await createUserClient()
   const now = new Date().toISOString()
 
   const rows: Array<Record<string, unknown>> = []
@@ -68,7 +75,7 @@ export async function submitPostReadingAttributes(
     return { ok: false, error: "Nenhum atributo com nota da IA pra comparar." }
   }
 
-  const { error: upsertError } = await supabase
+  const { error: upsertError } = await userDb
     .from("user_attribute_assessment")
     .upsert(rows, { onConflict: "user_id,work_id,attribute_slug" })
 
@@ -76,7 +83,8 @@ export async function submitPostReadingAttributes(
     return { ok: false, error: `Falha salvando avaliação: ${upsertError.message}` }
   }
 
-  await recomputeAttributeBias(userId, supabase)
+  // Lê user_attribute_assessment e grava attribute_bias — as duas são suas.
+  await recomputeAttributeBias(userId, userDb)
   // A pós-leitura alimenta o Ridge global → marca recálculo pendente em vez de
   // recalcular na hora. A Nota Prevista atualiza no "Recalcular agora" ou no
   // auto-recalc (≥1h sem novas edições). Antes era um recalc-all em background.

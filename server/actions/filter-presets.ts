@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { createAdminClient } from "@/lib/supabase/admin"
+import { createUserClient } from "@/lib/supabase/user"
 import { ensureSignedIn } from "@/server/queries/current-user"
 
 export interface SaveFilterPresetInput {
@@ -28,10 +28,11 @@ export async function saveFilterPreset(
   if (!name) return { error: "Dê um nome ao conjunto de filtros" }
   if (name.length > 60) return { error: "O nome deve ter no máximo 60 caracteres" }
 
-  const supabase = createAdminClient()
   const auth = await ensureSignedIn()
   if (!auth.ok) return { error: auth.error }
   const userId = auth.userId
+  // Cliente do USUÁRIO: a RLS (mig 142) prende estas linhas ao dono no BANCO.
+  const supabase = await createUserClient()
 
   const { data, error } = await supabase
     .from("ranking_filter_presets")
@@ -70,10 +71,11 @@ export async function renameFilterPreset(input: {
   if (!name) return { error: "Dê um nome ao conjunto de filtros" }
   if (name.length > 60) return { error: "O nome deve ter no máximo 60 caracteres" }
 
-  const supabase = createAdminClient()
   const auth = await ensureSignedIn()
   if (!auth.ok) return { error: auth.error }
   const userId = auth.userId
+  // Cliente do USUÁRIO: a RLS (mig 142) prende estas linhas ao dono no BANCO.
+  const supabase = await createUserClient()
 
   const { data, error } = await supabase
     .from("ranking_filter_presets")
@@ -99,10 +101,11 @@ export async function deleteFilterPreset(input: {
   id: string
   basePath: string
 }): Promise<{ error: string | null }> {
-  const supabase = createAdminClient()
   const auth = await ensureSignedIn()
   if (!auth.ok) return { error: auth.error }
   const userId = auth.userId
+  // Cliente do USUÁRIO: a RLS (mig 142) prende estas linhas ao dono no BANCO.
+  const supabase = await createUserClient()
 
   const { error } = await supabase
     .from("ranking_filter_presets")
