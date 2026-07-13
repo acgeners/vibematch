@@ -9,6 +9,7 @@ import { UserCircle } from "lucide-react"
 import { getAccountSummary } from "@/server/actions/account"
 import type { AccountSummary } from "@/server/actions/account"
 import { useChromeData } from "@/lib/use-refresh"
+import { RoleBadge } from "@/components/conta/role-badge"
 import { cn } from "@/lib/utils"
 
 /**
@@ -30,7 +31,6 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
 
   const active = pathname === "/conta" || pathname.startsWith("/conta/")
   const name = summary?.displayName?.trim() || "Minha conta"
-  const isPaid = summary?.plan === "paid"
   const showImg = Boolean(summary?.avatarUrl) && !imgError
 
   return (
@@ -59,13 +59,16 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
       {!compact && (
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-sidebar-foreground">{name}</span>
-          <span
-            className={cn(
-              "block truncate text-[11px] font-medium",
-              summary ? (isPaid ? "text-primary/80" : "text-muted-foreground/70") : "text-muted-foreground/70",
+          {/* O papel é o único lugar SEMPRE visível — sem isto ele fica invisível até
+              alguém abrir /conta. Enquanto o resumo não chega, não chuta um papel. */}
+          <span className="mt-0.5 block">
+            {summary ? (
+              <RoleBadge role={summary.role} size="sm" />
+            ) : (
+              <span className="block truncate text-[11px] font-medium text-muted-foreground/70">
+                v1 · catálogo pessoal
+              </span>
             )}
-          >
-            {summary ? (isPaid ? "Plano Pago" : "Plano Free") : "v1 · catálogo pessoal"}
           </span>
         </span>
       )}

@@ -12,7 +12,7 @@ import { getAnthropicBalanceStatus } from "@/server/queries/ai-usage"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 import { accountProfileSchema } from "@/lib/validations/account.schema"
 import type { AccountProfileValues } from "@/lib/validations/account.schema"
-import type { UserPlan } from "@/lib/plans/capabilities"
+import type { Role } from "@/lib/plans/roles"
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -117,51 +117,23 @@ export async function uploadAvatar(
   }
 }
 
-/**
- * Troca o plano do usuário. Revalida as rotas gateadas por plano pra refletir o
- * acesso na hora.
- *
- * GATE DE ADMIN, e não de "dono da linha": não existe billing. Sem o gate, esta
- * action é um self-service de upgrade — qualquer usuário logado chama
- * `reactivatePlan()` e vira `paid`, passando a gastar a chave Anthropic do dono
- * (as capabilities pagas só olham `user_plan`). Enquanto não houver cobrança, só
- * o admin troca plano — o dele e, via setPlan, o de quem ele liberar.
- */
-export async function setPlan(plan: UserPlan): Promise<{ error?: string }> {
-  const gate = await ensureAdmin()
-  if (!gate.ok) return { error: gate.error }
-  if (plan !== "free" && plan !== "paid") return { error: "Plano inválido." }
-
-  const supabase = createAdminClient()
-  try {
-    const id = await getSingletonId(supabase)
-    const { error } = await supabase
-      .from("user_settings")
-      .update({ user_plan: plan })
-      .eq("id", id)
-    if (error) return { error: error.message }
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Erro ao atualizar plano." }
-  }
-
-  for (const path of ["/conta", "/recommendations", "/ranking", "/titles"]) {
-    revalidatePath(path)
-  }
-  return {}
-}
-
-export async function cancelPlan(): Promise<{ error?: string }> {
-  return setPlan("free")
-}
-
-export async function reactivatePlan(): Promise<{ error?: string }> {
-  return setPlan("paid")
-}
+// `setPlan` / `cancelPlan` / `reactivatePlan` foram REMOVIDAS na migration 140.
+//
+// Elas gravavam `user_settings.user_plan` — coluna que virou LEGADO: o acesso agora sai
+// de `role`, e `getCurrentPlan()` o DERIVA. Ou seja, depois da 140 os botões "Cancelar /
+// Reativar plano" do /conta viraram no-ops silenciosos: mudavam uma coluna que ninguém
+// mais lê. Um botão que finge funcionar é pior que um botão morto.
+//
+// Não há billing. Enquanto não houver, papel se atribui no banco:
+//   update user_settings set role = 'assinante' where email = '...';
+// Quando a cobrança existir, o caminho é uma action `setRole` (gate de curador) chamada
+// pelo webhook do provedor — não um botão de auto-serviço, que foi exatamente o buraco
+// que o PR #115 fechou.
 
 export interface AccountSummary {
   displayName: string | null
   avatarUrl: string | null
-  plan: UserPlan
+  role: Role
 }
 
 /**
@@ -172,9 +144,10 @@ export interface AccountSummary {
 export async function getAccountSummary(): Promise<AccountSummary> {
   try {
     const p = await getCurrentUserProfile()
-    return { displayName: p.displayName, avatarUrl: p.avatarUrl, plan: p.plan }
+    return { displayName: p.displayName, avatarUrl: p.avatarUrl, role: p.role }
   } catch {
-    return { displayName: null, avatarUrl: null, plan: "free" }
+    // Fail-closed: erro transitório NÃO promove ninguém.
+    return { displayName: null, avatarUrl: null, role: "leitor" }
   }
 }
 
