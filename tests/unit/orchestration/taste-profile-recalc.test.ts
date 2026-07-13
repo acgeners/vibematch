@@ -36,7 +36,9 @@ import { __resetSingleFlight } from "@/lib/ai-cache/single-flight"
 import type { RatedWorkInput, TasteProfileRow } from "@/lib/ai-recommendation/types"
 
 const EMPTY = { loved_tags: [], avoided_tags: [], loved_themes: [], avoided_themes: [], criterion_preferences: {}, narrative_patterns: [], summary: "" }
-const ARGS = { profile: EMPTY, nWorks: 12, inputHash: "h", isStub: false, modelName: "m", promptVersion: "v6", rawResponse: null }
+// `userId` explícito (migration 147: o perfil tem DONO). Sem ele, `insertNewTasteProfile` cairia
+// em `getCurrentUserId()` — que vai ao banco procurar o singleton, e aqui o Supabase é mockado.
+const ARGS = { profile: EMPTY, nWorks: 12, inputHash: "h", isStub: false, modelName: "m", promptVersion: "v6", rawResponse: null, userId: "00000000-0000-0000-0000-000000000001" }
 
 beforeEach(() => { h.state.insertError = false; h.state.prevRow = null; h.seq.length = 0 })
 afterEach(() => __resetSingleFlight())

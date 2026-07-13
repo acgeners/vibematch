@@ -1,6 +1,7 @@
 import "server-only"
 import { createHash } from "node:crypto"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getCurrentUserId } from "@/server/queries/current-user"
 import { MODEL, PROMPT_VERSION } from "./service"
 import type { ProfileTag, RatedWorkInput, TasteProfilePayload, TasteProfileRow } from "./types"
 
@@ -117,11 +118,26 @@ function rowToTasteProfile(row: Record<string, unknown>): TasteProfileRow {
   }
 }
 
-export async function loadCurrentTasteProfile(): Promise<TasteProfileRow | null> {
+/**
+ * Perfil de gosto CORRENTE — de UMA pessoa (migration 147).
+ *
+ * 🔴 Antes desta fatia, esta função buscava `is_current = true` sem filtrar por dono: havia UM
+ * perfil corrente no banco inteiro. Um Assinante gerando o perfil dele marcava o dele como
+ * corrente e o do DONO deixava de ser encontrado — e o recalc seguinte treinava o Ridge do dono
+ * com as `loved_tags` de outra pessoa. Sem erro, sem log, 878 notas mudadas.
+ *
+ * ⚠️ Sem `userId` explícito, cai em `getCurrentUserId()` — que sem sessão devolve o SINGLETON
+ * (o dono). É o certo para o recalc, que roda em background; e é o certo para uma requisição,
+ * que devolve o perfil de quem pediu. Mas em código NOVO de background, passe o id na mão: o
+ * fallback é uma conveniência, não uma garantia.
+ */
+export async function loadCurrentTasteProfile(userId?: string): Promise<TasteProfileRow | null> {
   const supabase = createAdminClient()
+  const ownerId = userId ?? (await getCurrentUserId())
   const { data, error } = await supabase
     .from("taste_profile")
     .select("*")
+    .eq("user_id", ownerId)
     .eq("is_current", true)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -146,11 +162,20 @@ async function nextVersion(): Promise<number> {
   return current + 1
 }
 
-async function markAllProfilesAsStale(): Promise<void> {
+/**
+ * Desmarca o perfil corrente — 🔴 DE UMA PESSOA SÓ.
+ *
+ * O nome antigo (`markAllProfilesAsStale`) descrevia o bug com precisão: ele desmarcava o
+ * `is_current` de TODO MUNDO. Um Assinante gerando o perfil dele apagava a corrente do dono, e
+ * o Ridge do dono ficava sem perfil no recalc seguinte. O `.eq("user_id", …)` é a correção
+ * inteira.
+ */
+async function markOwnProfileAsStale(userId: string): Promise<void> {
   const supabase = createAdminClient()
   await supabase
     .from("taste_profile")
     .update({ is_current: false })
+    .eq("user_id", userId)
     .eq("is_current", true)
 }
 
@@ -167,20 +192,31 @@ export interface InsertTasteProfileArgs {
    * heurístico (drift method-free, migration 118). Opcional/best-effort.
    */
   ratedWorks?: RatedWorkInput[]
+  /**
+   * DONO do perfil (migration 147). Explícito de propósito: um perfil que descobre sozinho de
+   * quem ele é depende de haver sessão — e este código também roda em background (orquestração,
+   * backfill), onde não há. Sem `userId`, cai em `getCurrentUserId()`, que sem sessão devolve o
+   * singleton (o dono) — conveniente, mas por acidente, não por decisão.
+   */
+  userId?: string
 }
 
 export async function insertNewTasteProfile(
   args: InsertTasteProfileArgs,
 ): Promise<TasteProfileRow> {
   const supabase = createAdminClient()
-  // Perfil anterior lido ANTES de markAllProfilesAsStale (que zera is_current) —
-  // base pra decidir se o gosto mudou MATERIALMENTE (gate da invalidação abaixo).
-  const prev = await loadCurrentTasteProfile()
-  await markAllProfilesAsStale()
+  // O perfil é de QUEM PEDIU (migration 147). Sem `user_id`, a linha nova viraria "o perfil
+  // corrente" do banco inteiro e derrubaria o do dono.
+  const userId = args.userId ?? (await getCurrentUserId())
+  // Perfil anterior lido ANTES de desmarcar o corrente — base pra decidir se o gosto mudou
+  // MATERIALMENTE (gate da invalidação abaixo).
+  const prev = await loadCurrentTasteProfile(userId)
+  await markOwnProfileAsStale(userId)
   const version = await nextVersion()
   const { data, error } = await supabase
     .from("taste_profile")
     .insert({
+      user_id: userId,
       version,
       is_current: true,
       is_stub: args.isStub,
