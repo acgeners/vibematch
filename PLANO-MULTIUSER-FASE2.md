@@ -482,15 +482,25 @@ arrasta o Ridge, o `calculated_scores` e o `formula_config` junto — é a Fatia
 1. **Migration 143 — re-backfill de `user_work_state`.** As 878 linhas de hoje são de agosto (mig
    138) e **estão velhas**: nada escreve nelas desde então. Refazer a partir de `works`, **no momento
    do corte**. ⚠️ Paginar (o `select` corta em 1000 linhas sem avisar; são 882 obras).
-2. **Dual-write.** `toggleFavorite`, `setFavoriteMany`, `updateWorkStatus`, `setReadingStatusForWorks`
-   passam a escrever em `works` **E** em `user_work_state`. Isso **para a hemorragia** sem quebrar
-   nada, porque as leituras continuam vindo de `works`. Reversível a qualquer momento.
+2. **Dual-write — mas `works` é do DONO, e só dele.** `toggleFavorite`, `setFavoriteMany`,
+   `updateWorkStatus`, `setReadingStatusForWorks` passam a escrever em `user_work_state` **sempre**, e
+   em `works` **somente quando o usuário É o dono** (`userId === ` id do singleton de `user_settings`).
+
+   > 🔴 **A armadilha que mata a Fatia 1 se passar batido.** As colunas de `works` guardam o estado
+   > **do dono** — é a linha compartilhada. Um dual-write incondicional, somado ao passo 3, faz a
+   > Leitora favoritar uma obra e **sobrescrever o `is_favorite` do dono**; marcar o capítulo 12 e o
+   > `chapters_read` **dele** virar 12. Sem erro, sem log. O dual-write existe para manter o espelho
+   > do dono vivo durante a transição — **não** para espalhar o estado de estranhos na linha dele.
+
 3. **Trocar o gate** desses 4 writers: `ensureAdmin()` → `ensurePermission("own_state")` + o
    `user_id` da **sessão**. É o passo que destrava a Leitora. O verbo já existe (PR #127).
    ⚠️ O writer passa a precisar do `userId` — e ele vem de `ensureSignedIn()`, **nunca** de
    `getCurrentUserId()` (que cai no singleton sem sessão → escreveria como o dono).
+   ⚠️ **Só faz sentido depois do passo 2 estar escopado ao dono.** Invertida, a ordem corrompe.
 4. **Rewire das leituras de acompanhamento:** `/leitura`, `/favorites`, o card e a página da obra
-   passam a ler o estado de `user_work_state` (com fallback para `works` durante a transição).
+   passam a ler de `user_work_state`. O **fallback para `works` também é só do dono** — para os
+   demais, sem fallback (estado vazio). Senão a Leitora **vê os favoritos e os capítulos do dono como
+   se fossem dela**: o mesmo bug do passo 2, do lado da leitura.
 5. **Verificação com DOIS usuários:** cada um marca o próprio capítulo; nenhum vê o do outro; o
    catálogo (título, capa, tags, notas da IA) é o mesmo para os dois.
 
@@ -539,13 +549,19 @@ risco sem volta por isso.
 >    estão velhas (nada escreve nelas desde a mig 138). **PAGINE**: o `select` do Supabase corta em 1000
 >    linhas sem avisar, e são 882 obras.
 > 2. **Dual-write** nos 4 writers (`toggleFavorite`, `setFavoriteMany`, `updateWorkStatus`,
->    `setReadingStatusForWorks`): passam a escrever em `works` **e** em `user_work_state`. As leituras
->    continuam vindo de `works` → nada quebra, e é reversível.
+>    `setReadingStatusForWorks`): escrevem em `user_work_state` **sempre**, e em `works` **SOMENTE se o
+>    usuário for o dono** (`userId ===` id do singleton de `user_settings`).
+>    🔴 **Isto não é detalhe — é o que impede corrupção.** As colunas de `works` guardam o estado **do
+>    dono** (é a linha compartilhada). Dual-write incondicional + passo 3 = a Leitora favorita uma obra e
+>    **sobrescreve o `is_favorite` do dono**; marca o capítulo 12 e o `chapters_read` **dele** vira 12.
+>    Sem erro, sem log.
 > 3. **Trocar o gate** desses writers: `ensureAdmin()` → `ensurePermission("own_state")`, com o `user_id`
 >    vindo de `ensureSignedIn()` — **nunca** de `getCurrentUserId()`, que sem sessão cai no singleton do
->    dono e escreveria como ele. É este passo que destrava a Leitora.
-> 4. **Rewire das leituras** de `/leitura` e `/favorites` para `user_work_state`, com fallback para
->    `works` durante a transição.
+>    dono e escreveria como ele. É este passo que destrava a Leitora. **Só depois do passo 2 estar
+>    escopado ao dono** — a ordem invertida corrompe.
+> 4. **Rewire das leituras** de `/leitura` e `/favorites` para `user_work_state`. O **fallback para
+>    `works` também é só do dono**; para os demais, sem fallback (estado vazio). Senão a Leitora vê os
+>    favoritos e os capítulos do dono **como se fossem dela** — o mesmo bug do passo 2, na leitura.
 > 5. **Parar aqui.** O `DROP` das 4 colunas fica para depois, com pré-requisito de dump de schema
 >    (§13.4) — é a única operação sem volta, e não vale o risco por 4 colunas em 882 linhas.
 >
