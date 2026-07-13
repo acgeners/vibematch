@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import { planAllows, paidOnlyMessage } from "@/lib/plans/capabilities"
 import type { UserPlan, Capability } from "@/lib/plans/capabilities"
+import { isRole, roleAllows, roleAtLeast, deniedMessage } from "@/lib/plans/roles"
+import type { Role, Permission } from "@/lib/plans/roles"
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -84,11 +86,64 @@ export async function getCurrentUserSettingsId(): Promise<string | null> {
   return (row?.id as string | undefined) ?? null
 }
 
-// Plano do usuário atual. Default seguro 'free' quando não há linha/coluna
-// (fail-closed: erro transitório ou usuário sem linha NÃO libera features pagas).
-export async function getCurrentPlan(_admin?: AdminClient): Promise<UserPlan> {
+/**
+ * Papel do usuário atual — a FONTE DE VERDADE do acesso (migration 140).
+ *
+ * Fail-closed em `leitor`: anônimo, linha ausente ou erro transitório NÃO liberam
+ * escrita nem IA.
+ *
+ * FALLBACK-SAFE: a migration 140 é aplicada à mão, então a coluna `role` pode ainda
+ * não existir. Nesse caso deriva do par legado (`is_admin` × `user_plan`) — exatamente
+ * o mesmo backfill que a migration faz. O comportamento é IDÊNTICO antes e depois.
+ */
+export const getCurrentRole = cache(async (): Promise<Role> => {
   const row = await getCurrentUserSettingsRow()
-  return (row?.user_plan as UserPlan | undefined) ?? "free"
+  if (!row) return "leitor"
+  if (isRole(row.role)) return row.role
+
+  // Pré-migration 140: deriva do estado antigo.
+  if (row.is_admin === true) return "curador"
+  if (row.user_plan === "paid") return "assinante"
+  return "leitor"
+})
+
+/**
+ * Plano do usuário atual. Derivado do papel: curador e assinante = `paid`; leitor =
+ * `free`. Mantido porque `capabilities.ts` e a UI ainda falam "plano" — some quando
+ * as capabilities passarem a falar de papel/permissão direto.
+ */
+export async function getCurrentPlan(_admin?: AdminClient): Promise<UserPlan> {
+  return (await getCurrentRole()) === "leitor" ? "free" : "paid"
+}
+
+/** Gate por PAPEL: exige `min` ou acima na escada (leitor < assinante < curador). */
+export async function ensureRole(
+  min: Role,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const role = await getCurrentRole()
+  if (roleAtLeast(role, min)) return { ok: true }
+  return {
+    ok: false,
+    error:
+      min === "curador"
+        ? "Só o Curador do catálogo pode fazer isso."
+        : `Recurso do plano ${min === "assinante" ? "Assinante" : "Leitor"}.`,
+  }
+}
+
+/**
+ * Gate por PERMISSÃO (o verbo, não o papel). Preferir este a `ensureRole` nos call
+ * sites novos: `ensurePermission("refresh_work")` diz o que está sendo protegido;
+ * `ensureRole("assinante")` só diz quem passa — e quebra silenciosamente se a escada
+ * mudar. Ver lib/plans/roles.ts.
+ */
+export async function ensurePermission(
+  permission: Permission,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const role = await getCurrentRole()
+  return roleAllows(role, permission)
+    ? { ok: true }
+    : { ok: false, error: deniedMessage(permission) }
 }
 
 // Toggle "avaliação IA na criação de obras" (migration 097). Default false.
@@ -189,18 +244,26 @@ export const isCurrentUserAdmin = cache(async (): Promise<boolean> => {
   const sessionId = await getSessionUserId()
   if (!sessionId) return false // anônimo/deslogado = read-only
 
-  const row = await getCurrentUserSettingsRow()
-  if (row && "is_admin" in row && typeof row.is_admin === "boolean") {
-    return row.is_admin
-  }
+  // Admin = CURADOR (migration 140). `getCurrentRole` já cobre o fallback pré-140
+  // (deriva de is_admin/user_plan), então este caminho não muda de comportamento.
+  if ((await getCurrentRole()) === "curador") return true
 
-  // Fallback pré-mig 139 (coluna ausente) ou logado-sem-linha-própria.
+  // Logado SEM linha própria: nem role nem is_admin existem pra consultar → critério
+  // legado (é o dono do singleton?). Com linha própria, o papel é a palavra final.
+  const row = await getCurrentUserSettingsRow()
+  if (row) return false
   return sessionId === (await getSingletonUserId())
 })
 
-// Gate de admin pra server actions que mutam o catálogo compartilhado.
+/**
+ * Gate de curadoria — muta o catálogo compartilhado ou a config global.
+ *
+ * Alias de `ensureRole("curador")`. Preservado com este nome porque ~130 call sites o
+ * usam; a semântica não mudou (admin sempre foi o curador). Em código NOVO prefira
+ * `ensurePermission(verbo)`, que diz o que está protegido em vez de quem passa.
+ */
 export async function ensureAdmin(): Promise<{ ok: true } | { ok: false; error: string }> {
   return (await isCurrentUserAdmin())
     ? { ok: true }
-    : { ok: false, error: "Só o administrador do catálogo pode editar por enquanto." }
+    : { ok: false, error: "Só o Curador do catálogo pode fazer isso." }
 }
