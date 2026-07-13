@@ -14,10 +14,10 @@ import {
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
-import { archiveWork, deleteWork, toggleFavorite, unarchiveWork } from "@/server/actions/works"
+import { archiveWork, autoRefreshWorkData, deleteWork, toggleFavorite, unarchiveWork } from "@/server/actions/works"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import { StatusEditDialog } from "@/components/titles/status-edit-dialog"
-import { useIsAdmin } from "@/components/layout/admin-context"
+import { useCan, useIsAdmin } from "@/components/layout/admin-context"
 import type { PostAttributeAssessmentFormProps } from "@/components/titles/post-attribute-assessment-form"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
 import type { TasteCriterion, TasteScoreKey } from "@/server/queries/pilot-taste"
@@ -175,8 +175,18 @@ export function UpdateDataActionButton({
   currentCovers?: Array<{ url: string; source?: string | null; isPrimary?: boolean }>
 }) {
   const isAdmin = useIsAdmin()
+  const canRefresh = useCan("refresh_work")
   const [open, setOpen] = useState(false)
-  if (!isAdmin) return null
+
+  // Leitor não atualiza nada.
+  if (!canRefresh) return null
+
+  // ASSINANTE: atualização automática. Sem diálogo — ele não escolhe capa, sinopse
+  // nem resolve conflito (isso é curadoria, e `works` é compartilhada). Um clique,
+  // o servidor funde e grava. Ver autoRefreshWorkData / buildAutoRefreshPlan.
+  if (!isAdmin) return <AutoRefreshButton workId={workId} />
+
+  // CURADOR: fluxo completo, com as telas de escolha.
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
@@ -193,6 +203,46 @@ export function UpdateDataActionButton({
         withSourceStep
       />
     </>
+  )
+}
+
+function AutoRefreshButton({ workId }: { workId: string }) {
+  const [loading, setLoading] = useState(false)
+  const refresh = useRefresh()
+
+  const run = async () => {
+    setLoading(true)
+    try {
+      const r = await autoRefreshWorkData(workId)
+      if (!r.ok) {
+        toast.error(r.error)
+        return
+      }
+      if (r.updatedFields.length === 0) {
+        toast.info("Os dados já estão em dia — nada mudou nas fontes.")
+        return
+      }
+      const skipped = r.skippedConflicts.length
+      toast.success(
+        `Dados atualizados a partir de ${r.sources.length} ${r.sources.length === 1 ? "fonte" : "fontes"}.` +
+          // Diz o que NÃO foi tocado: senão o assinante acha que o app ignorou o campo.
+          (skipped > 0
+            ? ` ${skipped} ${skipped === 1 ? "campo divergente ficou" : "campos divergentes ficaram"} como está — só o Curador resolve divergência.`
+            : ""),
+      )
+      refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao atualizar os dados.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Button variant="outline" size="sm" onClick={run} disabled={loading}>
+      <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+      {loading ? "Atualizando…" : "Atualizar dados"}
+    </Button>
   )
 }
 

@@ -1,33 +1,50 @@
 "use client"
 
 import { createContext, useContext, useState, type ReactNode } from "react"
-import { getCurrentUserIsAdmin } from "@/server/actions/admin"
+import { getCurrentUserRole } from "@/server/actions/admin"
 import { useChromeData } from "@/lib/use-refresh"
+import { roleAllows } from "@/lib/plans/roles"
+import type { Permission, Role } from "@/lib/plans/roles"
 
-// Stopgap multi-user: admin = o DONO do catálogo (deslogado / linha singleton).
-// Usuário logado é read-only sobre o catálogo COMPARTILHADO. Este contexto leva o
-// sinal `isAdmin` do servidor pro client, pra esconder os controles de mutação
-// (favoritar/editar/status/add/curadoria) e a seção GERENCIAR. O bloqueio REAL é
-// server-side (`ensureAdmin` nas actions); isto é só a camada de UI.
+// Leva o PAPEL do usuário (migration 140) do servidor pro client, pra esconder o que
+// ele não pode fazer. Antes era um booleano `isAdmin`; virou papel porque agora há
+// TRÊS níveis — o Assinante vê controles que o Leitor não vê (ex.: "Atualizar dados").
 //
-// Default `false` = fail-closed: não mostra controle de admin até o fetch CONFIRMAR
-// que o usuário é admin. Assim o visitante anônimo (o comum em produção) não vê os
-// controles de mutação piscarem; o dono logado tem um flash mínimo até confirmar.
-// Re-sincroniza no `app:chrome-refresh` (login/logout mutam o chrome).
-const AdminContext = createContext<boolean>(false)
+// Isto é só a camada de UI. O bloqueio REAL é server-side (`ensurePermission` /
+// `ensureAdmin` nas actions) — esconder botão nunca foi proteção: toda server action é
+// um endpoint HTTP, chamável por POST com ou sem botão na tela.
+//
+// Default `leitor` = fail-closed: nenhum controle aparece antes de o fetch CONFIRMAR o
+// papel. O visitante (o caso comum em produção) não vê botão de escrita piscar; quem
+// tem papel maior toma um flash mínimo até confirmar.
+// Re-sincroniza no `app:chrome-refresh` (login/logout mudam o papel).
+const RoleContext = createContext<Role>("leitor")
 
-/** True quando o usuário atual é o admin/dono do catálogo (pode mutar). */
-export function useIsAdmin(): boolean {
-  return useContext(AdminContext)
+/** Papel do usuário atual. */
+export function useRole(): Role {
+  return useContext(RoleContext)
 }
 
-// TTL longo: o status admin só muda em login/logout, que já disparam refresh do
-// chrome (força o re-fetch ignorando o TTL). O TTL só cobre a reconciliação por
-// navegação — 5 min é folgado.
-const ADMIN_TTL_MS = 300_000
+/** True quando o papel atual libera a permissão. Prefira isto a comparar papel na mão. */
+export function useCan(permission: Permission): boolean {
+  return roleAllows(useContext(RoleContext), permission)
+}
+
+/**
+ * True quando o usuário é o Curador (dono do catálogo).
+ * Mantido com este nome porque dezenas de componentes já o usam; hoje é DERIVADO do
+ * papel. Em código NOVO prefira `useCan(verbo)` — ele diz o que está sendo protegido.
+ */
+export function useIsAdmin(): boolean {
+  return useContext(RoleContext) === "curador"
+}
+
+// TTL longo: o papel só muda em login/logout (que já forçam refresh do chrome) ou numa
+// troca de plano. 5 min cobre a reconciliação por navegação.
+const ROLE_TTL_MS = 300_000
 
 export function AdminProvider({ children }: { children: ReactNode }) {
-  const [isAdmin, setIsAdmin] = useState(false)
-  useChromeData(getCurrentUserIsAdmin, setIsAdmin, ADMIN_TTL_MS)
-  return <AdminContext.Provider value={isAdmin}>{children}</AdminContext.Provider>
+  const [role, setRole] = useState<Role>("leitor")
+  useChromeData(getCurrentUserRole, setRole, ROLE_TTL_MS)
+  return <RoleContext.Provider value={role}>{children}</RoleContext.Provider>
 }
