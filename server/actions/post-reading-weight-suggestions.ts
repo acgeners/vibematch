@@ -1,7 +1,8 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensureAdmin } from "@/server/queries/current-user"
+import { ensureAdmin, getOwnerUserId } from "@/server/queries/current-user"
+import { mirrorOwnerState } from "@/server/queries/user-work-state"
 import type { PostReadingScoreField } from "@/lib/constants/post-reading-criteria"
 import {
   inferPostReadingWeights,
@@ -129,6 +130,15 @@ export async function applyPostReadingWeights(
     )
     const firstError = results.find((r) => r.error)
     if (firstError?.error) throw new Error(firstError.error.message)
+
+    // 🔴 Este é o writer em LOTE da nota — ele reescreve `user_score` de dezenas de obras de
+    // uma vez, a partir dos pesos pós-leitura. É o que mais rápido faria o espelho do dono
+    // divergir: dezenas de rótulos velhos, e o Ridge da Fase 2 treinando com eles.
+    const ownerId = await getOwnerUserId()
+    for (const u of updates) {
+      const mirror = await mirrorOwnerState(ownerId, [u.id], { user_score: u.user_score })
+      if (mirror.error) throw new Error(mirror.error)
+    }
   }
 
   const recalc = await recalculateScoresNowResult()

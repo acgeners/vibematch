@@ -386,6 +386,50 @@ export async function writeReadingState(
 }
 
 /**
+ * Espelha o estado pessoal do DONO — para os caminhos de CURADORIA que escrevem essas colunas
+ * em `works` (criação/edição de obra, import de CSV, import de lista externa, aplicar ♥ por
+ * IA, recomputar a nota a partir dos pesos). Sem sessão: vai na service role.
+ *
+ * ⚠️ Por que não `writeReadingState` (cliente de sessão), que é o certo em todo o resto?
+ * Porque esses caminhos rodam em BACKGROUND — `after()`, cascatas, o import que processa em
+ * lote. Sem sessão, `auth.uid()` é NULL, a política da mig 142 nega o `insert`, e o espelho
+ * simplesmente não é escrito. A escrita falharia silenciosa, e o espelho do dono voltaria a
+ * apodrecer — que é exatamente o problema que esta função existe pra fechar.
+ *
+ * ⚠️ A service role IGNORA a RLS. Logo, o `userId` tem que vir EXPLÍCITO e ser o do dono
+ * (`getOwnerUserId()`), nunca "o usuário corrente" — sem sessão, `getCurrentUserId()` cairia
+ * no singleton por acidente e não por decisão. É a diferença entre estar certo e ter sorte.
+ */
+export async function mirrorOwnerState(
+  ownerId: string,
+  workIds: string[],
+  patch: PersonalStatePatch,
+): Promise<{ error: string | null }> {
+  const ids = Array.from(new Set(workIds.filter(Boolean)))
+  if (ids.length === 0) return { error: null }
+  if (Object.keys(patch).length === 0) return { error: null }
+
+  const supabase = createAdminClient()
+  const now = new Date().toISOString()
+
+  // Em blocos: o upsert de 800+ linhas de uma vez estoura o payload do PostgREST.
+  for (let i = 0; i < ids.length; i += 500) {
+    const rows = ids.slice(i, i + 500).map((workId) => ({
+      user_id: ownerId,
+      work_id: workId,
+      ...patch,
+      updated_at: now,
+    }))
+    const { error } = await supabase
+      .from("user_work_state")
+      .upsert(rows, { onConflict: "user_id,work_id" })
+    if (error) return { error: `Falha espelhando o estado do dono: ${error.message}` }
+  }
+
+  return { error: null }
+}
+
+/**
  * Quem escreve o quê, em UMA decisão.
  *
  * 🔴 A armadilha que esta função existe pra fechar: `works` é a linha compartilhada, e as
