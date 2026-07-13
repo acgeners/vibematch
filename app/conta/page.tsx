@@ -1,6 +1,6 @@
 import { getCurrentUserProfile, getSessionUserId } from "@/server/queries/current-user"
 import { IdentityCard } from "@/components/conta/identity-card"
-import { PlanCard } from "@/components/conta/plan-card"
+import { RoleCard } from "@/components/conta/role-card"
 import { LogoutButton } from "@/components/auth/logout-button"
 
 // Plano e perfil podem mudar em runtime — limita a staleness do snapshot.
@@ -22,7 +22,7 @@ export default async function ContaPage() {
         email={profile.email}
         avatarUrl={profile.avatarUrl}
       />
-      <PlanCard plan={profile.plan} />
+      <RoleCard role={profile.role} />
     </div>
   )
 }
