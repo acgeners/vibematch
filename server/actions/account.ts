@@ -7,6 +7,7 @@ import {
   getCurrentUserId,
   getCurrentUserProfile,
   getCurrentUserSettingsId,
+  getSessionUserId,
 } from "@/server/queries/current-user"
 import { getAnthropicBalanceStatus } from "@/server/queries/ai-usage"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
@@ -132,22 +133,29 @@ export async function uploadAvatar(
 
 export interface AccountSummary {
   displayName: string | null
+  email: string | null
   avatarUrl: string | null
   role: Role
+  signedIn: boolean
 }
 
 /**
  * Resumo enxuto do perfil pro "chrome" (chip da sidebar). Action client-callable
- * — a query getCurrentUserProfile é server-only. Omite email/userId pra reduzir
- * o payload. Falha silenciosa: nunca derruba o layout.
+ * — a query getCurrentUserProfile é server-only. Omite o userId pra reduzir o
+ * payload; o email fica porque é o único lugar do chrome que responde "logado em
+ * QUAL conta". Falha silenciosa: nunca derruba o layout.
  */
 export async function getAccountSummary(): Promise<AccountSummary> {
+  // Fora do try: o menu decide entre "Sair" e "Entrar" por este flag, e um erro
+  // ao ler o perfil não é motivo pra oferecer login a quem já tem sessão.
+  const signedIn = (await getSessionUserId()) !== null
+
   try {
     const p = await getCurrentUserProfile()
-    return { displayName: p.displayName, avatarUrl: p.avatarUrl, role: p.role }
+    return { displayName: p.displayName, email: p.email, avatarUrl: p.avatarUrl, role: p.role, signedIn }
   } catch {
     // Fail-closed: erro transitório NÃO promove ninguém.
-    return { displayName: null, avatarUrl: null, role: "leitor" }
+    return { displayName: null, email: null, avatarUrl: null, role: "leitor", signedIn }
   }
 }
 
