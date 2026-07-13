@@ -4,7 +4,7 @@ import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { generateTasteProfile, rankFavorites, MODEL, PROMPT_VERSION } from "@/lib/ai-recommendation/service"
 import { type RankingFilters } from "@/server/queries/ranking"
-import { ensureCapability, getCurrentPlan } from "@/server/queries/current-user"
+import { ensureAdmin, ensureCapability, getCurrentPlan } from "@/server/queries/current-user"
 import { planAllows } from "@/lib/plans/capabilities"
 import { buildTasteProfileHeuristic } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import { classifyProfileStaleness, computeHeuristicFingerprint } from "@/lib/ai-recommendation/profile-drift"
@@ -444,9 +444,18 @@ export async function runRecommendationAction(
   }
 }
 
+/**
+ * Apaga uma execução do histórico.
+ *
+ * Gate de ADMIN, não de plano: `recommendation_runs` **não tem `user_id`** — o
+ * histórico é COMPARTILHADO. Sem o gate, um usuário apagaria a execução de outro (e,
+ * hoje, as do dono). Vira gate de plano/dono quando a Fase 2 particionar a tabela.
+ */
 export async function deleteRecommendationRunAction(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
   const supabase = createAdminClient()
   const { error } = await supabase.from("recommendation_runs").delete().eq("id", id)
   if (error) return { ok: false, error: error.message }

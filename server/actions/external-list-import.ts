@@ -80,6 +80,10 @@ async function classifyEntry(
 export async function analyzeExternalListImport(
   input: ExternalListInput
 ): Promise<{ error?: string; data?: AnalyzeExternalListResult }> {
+  // Só analisa (o commit já era gated), mas o import é fluxo de curadoria de ponta a
+  // ponta — deixar a análise aberta é inconsistência, não recurso.
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   try {
     const { source, entries } = resolveEntries(input)
     const supabase = createAdminClient()

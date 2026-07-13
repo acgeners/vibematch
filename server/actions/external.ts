@@ -85,7 +85,16 @@ export async function listGenreCatalog(): Promise<TagCatalogItem[]> {
     }))
 }
 
+/**
+ * Busca o título nas 9 fontes externas. Gate de admin: não muta nada, mas dispara
+ * scraping (FlareSolverr/sidecar) na infra do dono — sem gate, é um proxy de scraping
+ * grátis, e o excesso de tráfego derruba as fontes pra todo mundo. Só a curadoria
+ * (criar/atualizar obra) precisa disto, e curadoria é admin.
+ * Sinaliza por throw; o caller (ExternalSearch) já trata em try/catch.
+ */
 export async function searchExternalTitles(query: string): Promise<SearchAllSourcesResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   return searchAllSourcesWithStatus(query)
 }
 
@@ -190,9 +199,17 @@ function tagsForAi(tagNames: string[] | undefined): AiEvaluationTag[] {
   return out
 }
 
+/**
+ * Hidrata um candidato em todas as plataformas (mesmo motivo do gate acima: scraping
+ * na infra do dono). Chamada de dentro de fluxos já gateados (refreshWorkExternalData,
+ * enrichWorkExternal) — ali o gate é redundante e passa; o que ele fecha é a chamada
+ * DIRETA ao endpoint. Sinaliza por throw (o caller a envolve em Promise.allSettled).
+ */
 export async function fetchExternalData(
   candidate: MergedCandidate
 ): Promise<{ data: ExternalWorkData; conflicts: ConflictField[] }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   const result = await fetchMultiSourceDetails(candidate)
   const tagCatalogByKey = TAG_NAME_BY_KEY
   const genreCatalogByKey = GENRE_NAME_BY_KEY
