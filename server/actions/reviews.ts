@@ -2,6 +2,7 @@
 
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { ensureAdmin } from "@/server/queries/current-user"
 import { startUpdateJob, finishUpdateJob } from "@/lib/background/update-jobs"
 
 /**
@@ -12,6 +13,10 @@ import { startUpdateJob, finishUpdateJob } from "@/lib/background/update-jobs"
  * é incremental (por fonte), então uma interrupção no meio não perde tudo.
  */
 export async function refetchWorkReviews(workId: string): Promise<{ ok: boolean }> {
+  // Scraping das fontes + persistência em work_reviews (e o digest Sonnet que
+  // pendura nele) → gasta rede/LLM e escreve no catálogo. Admin.
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false }
   if (!workId) return { ok: false }
   startUpdateJob(workId)
   after(async () => {

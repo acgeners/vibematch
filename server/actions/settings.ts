@@ -4,7 +4,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getCurrentUserSettingsId } from "@/server/queries/current-user"
+import { ensureAdmin, getCurrentUserSettingsId } from "@/server/queries/current-user"
 import { recalculateScoresNowResult } from "./recalc-queue"
 import {
   computeCalibration,
@@ -16,12 +16,21 @@ import type { CriterionScorePresets } from "@/types/domain"
 
 const execFileAsync = promisify(execFile)
 
+// Duas famílias de settings convivem neste arquivo, e só UMA leva gate:
+//  - COMPARTILHADAS (formula_config, score_weights) + as que gastam LLM/recalculam
+//    o catálogo → `ensureAdmin()`. São globais: um usuário salvando aqui muda a
+//    fórmula/as cores/o ranking de TODO MUNDO.
+//  - PESSOAIS (os toggles on-create, gravados na linha própria de user_settings via
+//    getCurrentUserSettingsId) → seguem abertas. Não vazam entre usuários.
+
 /**
  * Liga/desliga o stacker. Quando true, `recalculateAll` usa o Ridge segundo-nível
  * pra produzir `final_score`; quando false, mantém inverse-variance legado.
  * Dispara recalc automaticamente pra `final_score` refletir a escolha.
  */
 export async function setStackerEnabled(enabled: boolean) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   const supabase = createAdminClient()
   const { data: config } = await supabase
     .from("formula_config")
@@ -50,6 +59,8 @@ export async function setStackerEnabled(enabled: boolean) {
  * Dispara recálculo automático pra refletir a mudança imediatamente.
  */
 export async function setScoreWeightsAuto(enabled: boolean) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   const supabase = createAdminClient()
   const { data: config } = await supabase
     .from("formula_config")
@@ -79,6 +90,8 @@ export interface ScoreWeightUpdate {
 }
 
 export async function updateScoreWeights(updates: ScoreWeightUpdate[]) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
 
   for (const u of updates) {
@@ -132,6 +145,8 @@ export interface AiEvalPreferencesUpdate {
 }
 
 export async function updateAiEvalPreferences(update: AiEvalPreferencesUpdate) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
   const tolerance = Math.max(0, Math.floor(update.prompt_version_tolerance))
   const threshold = Math.min(1, Math.max(0, update.low_confidence_threshold))
@@ -315,6 +330,8 @@ export interface ScoreColorPercentilesUpdate {
 }
 
 export async function updateScoreColorPercentiles(update: ScoreColorPercentilesUpdate) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const clamp = (v: number) => Math.min(100, Math.max(0, v))
   const top = clamp(update.score_color_pct_top)
   const high = clamp(update.score_color_pct_high)
@@ -372,6 +389,8 @@ export async function updateCriterionColorPcts(
   slug: string,
   pcts: CriterionColorPctsUpdate | null,
 ) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   if (pcts) {
     const clamp = (v: number) => Math.min(100, Math.max(0, v))
     const { top, high, mid, low } = {
@@ -425,6 +444,10 @@ export async function updateCriterionColorPcts(
 }
 
 export async function updateRankingPreferences(update: RankingPreferencesUpdate) {
+  // Mora em formula_config = GLOBAL, apesar do nome "preferences". Vira per-user
+  // na Fase 2; até lá, quem salva muda o ranking de todo mundo → admin.
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
 
   const { data: existing } = await supabase
@@ -606,6 +629,8 @@ export async function getCalibrationSnapshot() {
  * precisa repetir aqui.
  */
 export async function recalculateNow() {
+  const gate = await ensureAdmin()
+  if (!gate.ok) throw new Error(gate.error)
   return recalculateScoresNowResult()
 }
 
@@ -630,6 +655,8 @@ export async function consolidatePendingSynopses(maxWorks = 10): Promise<{
   data?: ConsolidateSynopsesProgress
   error?: string
 }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   try {
     const { consolidateSynopsisDetailed, hashSynopsisInputs } = await import(
       "@/lib/ai-recommendation/synopsis-consolidator"
@@ -734,6 +761,8 @@ export async function consolidatePendingReviewSummaries(maxWorks = 10): Promise<
   data?: ConsolidateReviewSummariesProgress
   error?: string
 }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   try {
     const { consolidateReviewsDetailed, hashReviewInputs, packReviewSummaryMeta } = await import(
       "@/lib/ai-recommendation/review-summarizer"
@@ -857,6 +886,8 @@ export async function consolidatePendingReviewDigests(maxWorks = 10): Promise<{
   data?: ConsolidateReviewDigestsProgress
   error?: string
 }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   try {
     const { consolidateReviewsDigestDetailed, REVIEW_DIGEST_VERSION } = await import(
       "@/lib/ai-recommendation/review-summarizer"
@@ -966,6 +997,10 @@ export async function consolidatePendingReviewDigests(maxWorks = 10): Promise<{
 }
 
 export async function syncConstantsNow() {
+  // Executa `npm run` no host e reescreve arquivos de constantes do repo — o mais
+  // sensível do arquivo. Nunca deve sair do admin.
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error, output: "" }
   try {
     const { stdout, stderr } = await execFileAsync("npm", ["run", "sync-constants"], {
       cwd: process.cwd(),

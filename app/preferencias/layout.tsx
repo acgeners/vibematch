@@ -6,15 +6,15 @@ import {
 } from "@/components/settings/settings-nav"
 import type { SubnavGroup } from "@/components/settings/settings-nav"
 import { buildPreferencesGroups, PREFERENCES_DEFAULT_GROUP_ID } from "@/app/preferencias/sections"
-import { getCurrentPlan } from "@/server/queries/current-user"
+import { getCurrentPlan, isCurrentUserAdmin } from "@/server/queries/current-user"
 
 // Layout de /preferencias: navegação em DUAS CAMADAS (mesmo padrão do /settings).
 // A camada 1 (menu do site) vem do layout raiz; aqui adicionamos a camada 2
 // (sub-nav de tópicos) COLADA na sidebar. Preferências não têm pendências → sem
 // badges. Os `md:-m-7` cancelam o padding do <main> pra a sub-nav encostar na borda.
 export default async function PreferenciasLayout({ children }: { children: ReactNode }) {
-  const plan = await getCurrentPlan()
-  const groups: SubnavGroup[] = buildPreferencesGroups(plan).map((g) => ({
+  const [plan, isAdmin] = await Promise.all([getCurrentPlan(), isCurrentUserAdmin()])
+  const groups: SubnavGroup[] = buildPreferencesGroups(plan, isAdmin).map((g) => ({
     id: g.id,
     label: g.label,
     iconName: g.iconName,

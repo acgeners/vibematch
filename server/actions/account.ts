@@ -2,7 +2,12 @@
 
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getCurrentUserId, getCurrentUserProfile, getCurrentUserSettingsId } from "@/server/queries/current-user"
+import {
+  ensureAdmin,
+  getCurrentUserId,
+  getCurrentUserProfile,
+  getCurrentUserSettingsId,
+} from "@/server/queries/current-user"
 import { getAnthropicBalanceStatus } from "@/server/queries/ai-usage"
 import type { BalanceStatus } from "@/server/queries/ai-usage"
 import { accountProfileSchema } from "@/lib/validations/account.schema"
@@ -113,10 +118,18 @@ export async function uploadAvatar(
 }
 
 /**
- * Troca o plano do usuário. Sem billing: "cancelar" = free, "reativar" = paid.
- * Revalida as rotas gateadas por plano pra refletir o acesso na hora.
+ * Troca o plano do usuário. Revalida as rotas gateadas por plano pra refletir o
+ * acesso na hora.
+ *
+ * GATE DE ADMIN, e não de "dono da linha": não existe billing. Sem o gate, esta
+ * action é um self-service de upgrade — qualquer usuário logado chama
+ * `reactivatePlan()` e vira `paid`, passando a gastar a chave Anthropic do dono
+ * (as capabilities pagas só olham `user_plan`). Enquanto não houver cobrança, só
+ * o admin troca plano — o dele e, via setPlan, o de quem ele liberar.
  */
 export async function setPlan(plan: UserPlan): Promise<{ error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   if (plan !== "free" && plan !== "paid") return { error: "Plano inválido." }
 
   const supabase = createAdminClient()
@@ -171,6 +184,10 @@ export async function getAccountSummary(): Promise<AccountSummary> {
  * instante (ver getAnthropicBalanceStatus). Reinformar zera o desvio.
  */
 export async function setAnthropicBalance(amountUsd: number): Promise<{ error?: string }> {
+  // Saldo do operador: é a conta Anthropic ÚNICA que banca o app inteiro, não um
+  // dado pessoal do usuário. Só o admin informa.
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
   if (!Number.isFinite(amountUsd) || amountUsd < 0) {
     return { error: "Informe um valor válido (≥ 0)." }
   }

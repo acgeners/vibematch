@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { ScrollToTop } from "@/components/layout/scroll-to-top"
 import { SettingsCard } from "@/components/settings/settings-card"
 import { ACCENT_STYLES } from "@/components/console/console-registry"
-import { getCurrentPlan } from "@/server/queries/current-user"
+import { getCurrentPlan, isCurrentUserAdmin } from "@/server/queries/current-user"
 import { getFilterPresets } from "@/server/queries/filter-presets"
 import { getAllTags } from "@/server/queries/tags"
 import { getTagPreferenceRows } from "@/server/queries/tag-preferences"
@@ -51,8 +51,8 @@ export default async function PreferenciasPage({
 }: {
   searchParams: Promise<{ g?: string | string[]; s?: string | string[] }>
 }) {
-  const plan = await getCurrentPlan()
-  const groups = buildPreferencesGroups(plan)
+  const [plan, isAdmin] = await Promise.all([getCurrentPlan(), isCurrentUserAdmin()])
+  const groups = buildPreferencesGroups(plan, isAdmin)
   const sp = await searchParams
 
   // `?g=` é a fonte; `?s=<item>` (deep-link antigo) resolve pro grupo dono.
@@ -99,7 +99,7 @@ export default async function PreferenciasPage({
             storageKeyPrefix="preferencias-card"
           >
             <Suspense fallback={<BodySkeleton />}>
-              <ItemBody section={section} />
+              <ItemBody section={section} isAdmin={isAdmin} />
             </Suspense>
           </SettingsCard>
         ))}
@@ -111,16 +111,18 @@ export default async function PreferenciasPage({
 }
 
 // ── Corpo de cada card (lazy, streamado por <Suspense>) — busca só o próprio dado. ──
-async function ItemBody({ section }: { section: SettingsSection }) {
+async function ItemBody({ section, isAdmin }: { section: SettingsSection; isAdmin: boolean }) {
   switch (section.id) {
     case "ranking": {
+      // Card MISTO: o form (top-N, nota mínima) é global → só admin. Os filtros
+      // salvos são do usuário (ranking_filter_presets tem user_id) → ficam sempre.
       const [config, savedPresets] = await Promise.all([
-        getFormulaConfig(),
+        isAdmin ? getFormulaConfig() : Promise.resolve(null),
         getFilterPresets("/ranking"),
       ])
       return (
         <div className="space-y-4">
-          <RankingPreferencesForm config={config} />
+          {config && <RankingPreferencesForm config={config} />}
           <SavedRankingFilters presets={savedPresets} />
         </div>
       )
