@@ -116,17 +116,22 @@ async function stateOf(userId, workId) {
     .maybeSingle()
   return data ?? null
 }
+// A migration 154 dropou as colunas pessoais de `works`. O "estado da obra" que esta suíte
+// comparava agora só existe no espelho — `workRow` virou a linha do DONO no espelho.
+let OWNER_ID = null // preenchido no main(), pra não mudar os 8 call sites de workRow()
 async function workRow(workId) {
   const { data } = await admin
-    .from("works")
-    .select("title, is_favorite, personal_status_id, chapters_read, last_read_at, user_score")
-    .eq("id", workId)
-    .single()
-  return data
+    .from("user_work_state")
+    .select("is_favorite, personal_status_id, chapters_read, last_read_at, user_score")
+    .eq("user_id", OWNER_ID)
+    .eq("work_id", workId)
+    .maybeSingle()
+  return data ?? {}
 }
 
 async function main() {
   const { owner: OWNER, other: OTHER } = await findTestUsers(admin)
+  OWNER_ID = OWNER.current_user_id
   console.log("── sessões reais (magic link → verifyOtp; nenhuma senha tocada)")
   const owner = await cookieHeaderFor(OWNER.email)
   const reader = await cookieHeaderFor(OTHER.email)
@@ -149,17 +154,21 @@ async function main() {
 
   // Duas obras: uma que o DONO já acompanha (pra provar que ela não o sobrescreve) e
   // outra qualquer. Pega uma com capítulos lidos e não-favorita, pra os deltas serem claros.
-  const { data: candidates } = await admin
-    .from("works")
-    .select("id, title, chapters_read, is_favorite, personal_status_id, user_score")
+  // As cobaias saem do ESPELHO do dono (`works` não tem mais chapters_read/is_favorite).
+  const { data: candRows, error: candErr } = await admin
+    .from("user_work_state")
+    .select("work_id, chapters_read, is_favorite, personal_status_id, user_score, works!inner(id, title, is_archived)")
+    .eq("user_id", OWNER.current_user_id)
     .not("chapters_read", "is", null)
     .gt("chapters_read", 0)
     .eq("is_favorite", false)
-    .eq("is_archived", false)
+    .eq("works.is_archived", false)
     .limit(2)
+  if (candErr) throw new Error(`não achei cobaias no espelho: ${candErr.message}`)
+  const candidates = (candRows ?? []).map((r) => ({ ...r, id: r.works.id, title: r.works.title }))
   const [workA, workB] = candidates
   console.log(`\n── obra A (teste da Leitora): ${workA.title}`)
-  console.log(`   works: chapters_read=${workA.chapters_read} is_favorite=${workA.is_favorite} user_score=${workA.user_score}`)
+  console.log(`   espelho do dono: chapters_read=${workA.chapters_read} is_favorite=${workA.is_favorite} user_score=${workA.user_score}`)
 
   const beforeWorkA = await workRow(workA.id)
   const ownerBeforeA = await stateOf(owner.userId, workA.id)
@@ -171,7 +180,7 @@ async function main() {
   const afterAnon = await workRow(workA.id)
   check(
     afterAnon.is_favorite === beforeWorkA.is_favorite,
-    `works.is_favorite intacto (${afterAnon.is_favorite}) — o anônimo NÃO escreveu como o dono`,
+    `espelho do DONO intacto (is_favorite=${afterAnon.is_favorite}) — o anônimo NÃO escreveu como ele`,
   )
 
   // ═════════════════════════════════════════════════════════════════════════════════
@@ -183,7 +192,7 @@ async function main() {
   const worksAfterFav = await workRow(workA.id)
   check(
     worksAfterFav.is_favorite === false,
-    `🔴 works.is_favorite SEGUE false — ela não sobrescreveu o favorito do dono`,
+    `🔴 o favorito do DONO segue false no espelho dele — ela não o sobrescreveu`,
   )
   const ownerAfterFav = await stateOf(owner.userId, workA.id)
   check(
@@ -204,11 +213,11 @@ async function main() {
   const worksAfterCh = await workRow(workA.id)
   check(
     worksAfterCh.chapters_read === beforeWorkA.chapters_read,
-    `🔴 works.chapters_read SEGUE ${beforeWorkA.chapters_read} — o capítulo do dono não virou 12`,
+    `🔴 o capítulo do DONO segue ${beforeWorkA.chapters_read} no espelho dele — não virou 12`,
   )
   check(
     worksAfterCh.user_score === beforeWorkA.user_score,
-    `works.user_score intacto (${beforeWorkA.user_score}) — a nota do dono não foi tocada`,
+    `a nota do DONO intacta (${beforeWorkA.user_score}) — não foi tocada`,
   )
   const ownerAfterCh = await stateOf(owner.userId, workA.id)
   check(
@@ -232,7 +241,7 @@ async function main() {
   const worksAfterScore = await workRow(workA.id)
   check(
     worksAfterScore.user_score === beforeWorkA.user_score,
-    `🔴 works.user_score SEGUE ${beforeWorkA.user_score} — a nota do dono não virou 9.9`,
+    `🔴 a nota do DONO segue ${beforeWorkA.user_score} no espelho dele — não virou 9.9`,
   )
 
   // ═════════════════════════════════════════════════════════════════════════════════
@@ -244,14 +253,17 @@ async function main() {
     owner.cookie,
   )
   check(!said(ownerSt, "Fatia 2"), "aceita (ele é o dono)")
-  // FASE E inverteu este assert. Ele exigia `works.chapters_read === 77` — o dual-write. Agora
-  // a linha compartilhada NÃO recebe escrita pessoal de ninguém, nem do dono: ela fica parada,
-  // esperando o DROP. Quem tem que receber o 77 é o espelho DELE.
-  const worksB = await workRow(workB.id)
-  check(
-    worksB.chapters_read !== 77,
-    `works.chapters_read NÃO virou 77 (segue ${worksB.chapters_read}) — \`works\` não recebe mais escrita pessoal`,
-  )
+  // Aqui havia um terceiro assert, e ele morreu de vez.
+  //
+  //   Fatia 1:  `works.chapters_read === 77`  (o dual-write: a escrita do dono ia pros dois lados)
+  //   Fase E:   `works.chapters_read !== 77`  (invertido: `works` congelou, esperando o DROP)
+  //   mig 154:  a coluna NÃO EXISTE.
+  //
+  // Não dá pra afirmar nada sobre uma coluna que foi dropada — e não é preciso: "`works` não
+  // recebe escrita pessoal" deixou de ser um comportamento a conferir e virou uma propriedade do
+  // schema. Quem a guarda agora é o check 4 da verify-writers (que fica vermelho se as colunas
+  // ressuscitarem). O que importa aqui é o que segue abaixo: o 77 foi pro espelho DELE, e a
+  // Leitora não herdou.
   const ownerB = await stateOf(owner.userId, workB.id)
   check(ownerB?.chapters_read === 77, "o ESPELHO do dono recebeu o 77 (é a única fonte agora)")
   const readerB = await stateOf(reader.userId, workB.id)

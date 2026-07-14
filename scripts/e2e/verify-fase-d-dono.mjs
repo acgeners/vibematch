@@ -73,33 +73,40 @@ console.log("\n── FASE D: o dono trocou de fonte. Os números dele mudaram?\
 
 const cookie = await session(OWNER.email)
 
-// ── A fonte ANTIGA (as colunas de `works`), que é o que ele via até ontem ──────────────
+// ── O baseline: o espelho CRU (`user_work_state`), lido direto por SQL ─────────────────
+//
+// Até a migration 154 este baseline saía das colunas pessoais de `works`. Elas não existem mais
+// (o DROP), e o espelho é a única fonte.
+//
+// 🔴 E ele PRECISA sair da tabela crua, não da view `works_owner`: a Fase D fez o APP ler essa
+// view. Usá-la aqui faria baseline e app compartilharem a mesma dependência — uma view que
+// juntasse o usuário errado deixaria os dois errados JUNTOS, e a suíte ficaria verde. A tabela
+// é a única fonte independente do caminho que estou testando.
 const statusId = async (name) => {
   const { data } = await admin.from("personal_status").select("id").eq("status", name).single()
   return data.id
 }
 const readingId = await statusId("Reading")
 
-const { data: hisReading } = await admin
-  .from("works")
-  .select("id, title")
-  .eq("personal_status_id", readingId)
-  .eq("is_archived", false)
+// O espelho não tem `title` nem `is_archived` (são do catálogo) — daí o embed em `works`.
+const mirrorWorks = async (narrow) => {
+  const q = admin
+    .from("user_work_state")
+    .select("work_id, works!inner(id, title, is_archived)")
+    .eq("user_id", OWNER.current_user_id)
+    .eq("works.is_archived", false)
+  const { data, error } = await narrow(q)
+  if (error) throw new Error(`baseline do espelho falhou: ${error.message}`)
+  return (data ?? []).map((r) => ({ id: r.works.id, title: r.works.title }))
+}
 
-const { data: hisFavs } = await admin
-  .from("works")
-  .select("id, title")
-  .eq("is_favorite", true)
-  .eq("is_archived", false)
-
-const { count: hisRated } = await admin
-  .from("works")
-  .select("id", { count: "exact", head: true })
-  .not("user_score", "is", null)
-  .eq("is_archived", false)
+const hisReading = await mirrorWorks((q) => q.eq("personal_status_id", readingId))
+const hisFavs = await mirrorWorks((q) => q.eq("is_favorite", true))
+const hisRatedRows = await mirrorWorks((q) => q.not("user_score", "is", null))
+const hisRated = hisRatedRows.length
 
 console.log(
-  `  fonte antiga (works): ${hisReading.length} "Reading" · ${hisFavs.length} favoritas · ${hisRated} avaliadas\n`,
+  `  baseline (espelho cru): ${hisReading.length} "Reading" · ${hisFavs.length} favoritas · ${hisRated} avaliadas\n`,
 )
 
 // ── /leitura — TODAS as obras que ele está lendo têm que aparecer ──────────────────────
@@ -131,11 +138,10 @@ check(
 // computados obra a obra COM `personal.get()`. Com o reader vazio, viram "0 obras" e "0/N".
 const home = norm(await page("/", cookie))
 
-const { data: hisFollowing } = await admin
-  .from("works")
-  .select("id, title, chapters_read, total_chapters, last_read_at, personal_status_id")
-  .in("personal_status_id", [readingId, await statusId("Started")])
-  .eq("is_archived", false)
+const startedId = await statusId("Started")
+const hisFollowing = await mirrorWorks((q) =>
+  q.in("personal_status_id", [readingId, startedId]),
+)
 
 check(
   home.includes(`${hisFollowing.length} obras`),
