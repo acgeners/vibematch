@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto"
 import { revalidatePath, revalidateTag } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensureAdmin, getOwnerUserId, ensureSignedIn, ensurePermission } from "@/server/queries/current-user"
+import { ensureAdmin, ensureSignedIn, ensurePermission } from "@/server/queries/current-user"
 import { createUserClient } from "@/lib/supabase/user"
 import { writeReadingState } from "@/server/queries/user-work-state"
 import { runRecommendationAction } from "./recommendations"
@@ -160,16 +160,8 @@ export async function addWorksToList(
   const mirror = await writeReadingState(gate.userId, ids, { is_favorite: true })
   if (mirror.error) return { error: mirror.error }
 
-  // `works.is_favorite` é o espelho compartilhado — só o DONO o escreve (mesma regra da Fatia 1;
-  // ver server/queries/user-work-state.ts). Para os demais, essa coluna nem é consultada.
-  if (gate.userId === (await getOwnerUserId())) {
-    const admin = createAdminClient()
-    const { error: favError } = await admin
-      .from("works")
-      .update({ is_favorite: true })
-      .in("id", ids)
-    if (favError) return { error: favError.message }
-  }
+  // FASE E: acabou o dual-write. `works.is_favorite` não recebe mais escrita de ninguém — nem
+  // do dono, que desde a Fase D lê o favorito do espelho dele.
 
   revalidateLists(listId)
   return { data: { count: ids.length } }

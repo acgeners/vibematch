@@ -101,6 +101,18 @@ const CAPS_DELA = 12
 
 console.log("\n── A obra que a LEITORA cadastra: de quem é a nota?\n")
 
+// Limpa sobras de uma execução anterior que tenha morrido no meio. `createWork` tem guarda de
+// título duplicado — uma obra `zz-probe-*` esquecida no banco faz a criação ser RECUSADA, e o
+// teste falha por sujeira, não por bug. (Foi o que me deu uma falha intermitente.)
+{
+  const { data: sobras } = await admin.from("works").select("id").like("title", "zz-probe-ownership%")
+  for (const w of sobras ?? []) {
+    await admin.from("user_work_state").delete().eq("work_id", w.id)
+    await admin.from("works").delete().eq("id", w.id)
+  }
+  if (sobras?.length) console.log(`  (limpei ${sobras.length} obra(s) de uma execução anterior)\n`)
+}
+
 const ids = await actionIds(["/titles/new"])
 if (!ids.createWork) {
   console.log("  ❌ não achei o id da action createWork no bundle — o app está de pé?")
@@ -219,9 +231,11 @@ check(
   mirrorDono != null && mirrorDono.chapters_read === CAPS_DELA,
   `o espelho DELE recebeu os capítulos dele (chapters_read = ${mirrorDono?.chapters_read ?? "sem linha"})`,
 )
+// FASE E: a linha compartilhada NÃO recebe estado pessoal — nem do dono. O que prova que a
+// obra dele foi criada certo é o ESPELHO (os dois checks acima), não a cópia morta em `works`.
 check(
-  Number(workDono.user_score) === NOTA_DELA && workDono.chapters_read === CAPS_DELA,
-  `a linha compartilhada de \`works\` seguiu recebendo o estado DELE (dual-write intacto)`,
+  workDono.user_score == null && workDono.chapters_read == null,
+  `\`works\` NÃO recebeu o estado pessoal dele (user_score=${workDono.user_score}, chapters_read=${workDono.chapters_read}) — o dual-write acabou`,
 )
 
 await admin.from("user_work_state").delete().eq("work_id", workDono.id)

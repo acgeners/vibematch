@@ -406,8 +406,10 @@ async function getEligibleWorks(
     total_chapters: number | null
   }
   const worksResult = await chunkedInQuery<WorkRow>(eligibleIds, CHUNK_SIZE, (chunk) => {
+    // `works_owner`: a fila de curadoria mostra o status de leitura e o ♥ DO DONO (é a tela de
+    // trabalho dele). Vêm do espelho dele via a view — `works` vai perder essas colunas.
     let q = supabase
-      .from("works")
+      .from("works_owner")
       .select("id, title, publication_status_id, personal_status_id, synopsis_quality, total_chapters")
       .in("id", chunk)
       .eq("is_archived", false)

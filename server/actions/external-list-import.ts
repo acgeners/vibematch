@@ -167,10 +167,9 @@ async function applyUpdate(
   if (set.user_score != null) update.user_score = set.user_score
   if (set.chapters_read != null) update.chapters_read = set.chapters_read
   if (Object.keys(update).length === 0) return false
-  await supabase.from("works").update(update).eq("id", workId)
 
-  // Importar a lista do MAL/AniList traz NOTA e capítulos — dado pessoal, e em massa. Espelha,
-  // senão o dono importa a lista dele e o espelho fica com as notas de antes.
+  // Importar a lista do MAL/AniList traz NOTA e capítulos — dado pessoal, e em massa. Vai SÓ
+  // pro espelho do dono (Fase E): o `update` em `works` que existia aqui gravava o mesmo objeto.
   const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], update)
   if (mirror.error) throw new Error(mirror.error)
   return true
@@ -185,12 +184,12 @@ async function createWorkFromEntry(
     user_score: entry.userScore ?? null,
     chapters_read: entry.chaptersRead ?? null,
   }
+  // Só CATÁLOGO (Fase E) — o estado pessoal da entrada importada vai pro espelho, abaixo.
   const { data, error } = await supabase
     .from("works")
     .insert({
       title: entry.title,
       publication_status_id: getPublicationStatusIdByName("Unknown"),
-      ...personal,
       ai_eval_status: "pending",
     })
     .select("id")
