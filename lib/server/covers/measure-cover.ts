@@ -227,22 +227,26 @@ export async function measureCover(rawUrl: string): Promise<CoverMeasurement | n
 /** Largura em que a capa já é nítida na página da obra; acima disso não melhora. */
 const TARGET_WIDTH = 700
 /**
- * Bits por pixel abaixo do qual a imagem está estourada (bloco/chuvisco visível).
+ * BYTES por pixel abaixo do qual a imagem está estourada (bloco/chuvisco visível).
+ *
+ * ⚠️ O nome herdado era `BLOWN_BPP` e a doc dizia "bits por pixel", mas a conta sempre
+ * foi `bytes / pixel` (sem o ×8). Como a calibração foi medida com a MESMA fórmula, o
+ * limiar e a medida estão na mesma unidade — não é bug de fator 8. Renomeado pra parar
+ * de mentir.
  *
  * **O limiar é POR FORMATO, e isso não é preciosismo.** Medido nas 2.307 capas do
- * catálogo: JPEG tem bpp mediano 0,355 e WebP 0,158 — o WebP comprime ~2,2× melhor
- * pelo mesmo resultado visual. Um limiar único de 0,15 marcava como "estourada"
- * **45% de TODOS os WebP** (203 capas, 158 delas com 600px+), incluindo uma de
- * 771×1080 do AnimePlanet cujo recorte 1:1 está impecável. Como o AnimePlanet serve
- * tudo em WebP, o limiar único punia a fonte inteira.
+ * catálogo: JPEG tem mediana 0,355 e WebP 0,158 — o WebP comprime ~2,2× melhor pelo
+ * mesmo resultado visual. Um limiar único de 0,15 marcava como "estourada" **45% de
+ * TODOS os WebP** (203 capas, 158 delas com 600px+), incluindo uma de 771×1080 do
+ * AnimePlanet cujo recorte 1:1 está impecável. Como o AnimePlanet serve tudo em WebP,
+ * o limiar único punia a fonte inteira.
  *
- * Os valores abaixo são calibrados pra MESMA taxa de suspeita (~3% das capas) nos
- * dois formatos. PNG é lossless (bpp mediano 1,8) e nunca dispara — não tem limiar.
+ * PNG é lossless (mediana 1,8) e nunca dispara — não tem limiar.
  *
- * NÃO existe limiar de "bem comprimida" acima disso: qualquer bônus por bpp alto
+ * NÃO existe limiar de "bem comprimida" acima disso: qualquer bônus por densidade alta
  * inverte a ordem entre capas sadias (fazia uma de 512px ganhar de uma de 600px).
  */
-const BLOWN_BPP: Partial<Record<CoverFormat, number>> = {
+const BLOWN_BYTES_PER_PX: Partial<Record<CoverFormat, number>> = {
   jpeg: 0.15,
   webp: 0.07,
   gif: 0.15,
@@ -268,10 +272,34 @@ export function scoreCover(m: CoverMeasurement): number {
   // sem limiar, como PNG) assume sadia — não punir por falta de informação. É
   // penalidade binária de propósito: qualquer gradação aqui inverte a ordem entre
   // capas sadias.
-  const px = m.width * m.height
-  const limiar = BLOWN_BPP[m.format]
-  const bpp = m.bytes != null && px > 0 ? m.bytes / px : null
-  const quality = limiar != null && bpp != null && bpp < limiar ? 0.3 : 1
+  //
+  // 🔴 A densidade é medida no tamanho EXIBIDO, não no nativo. Medir no nativo fazia a
+  // penalidade virar, na prática, um IMPOSTO SOBRE TAMANHO — o oposto do que ela existe
+  // pra fazer. Medido nas 2.343 capas do catálogo:
+  //
+  //     largura      % marcada "estourada"
+  //     < 300px               0%
+  //     300–699             0–1%
+  //     1000–1999             8%
+  //     ≥ 2000px             39%   ← as MELHORES capas do catálogo
+  //
+  // Não é acidente: JPEG comprime melhor quanto maior a imagem (mais redundância
+  // espacial), então bytes/pixel CAI com o tamanho pela mesma qualidade visual. Um
+  // limiar fixo sobre o pixel nativo pune exatamente quem devia premiar. Na prática o
+  // score pedia pra trocar uma capa de 2850×4096 por uma de 700×950.
+  //
+  // A capa é exibida a ~TARGET_WIDTH, e o browser REAMOSTRA — o que esconde artefato de
+  // compressão. Então a pergunta certa não é "esta imagem está estourada?", e sim "ela
+  // vai estar estourada NA TELA?". Abaixo de TARGET_WIDTH os dois critérios são idênticos
+  // (não há reamostragem), então a calibração original segue valendo e nenhuma detecção
+  // real se perde: as 8 capas genuinamente estouradas do catálogo continuam pegas.
+  const displayW = Math.min(m.width, TARGET_WIDTH)
+  const displayH = Math.round(m.height * (displayW / m.width))
+  const displayPx = displayW * displayH
+
+  const limiar = BLOWN_BYTES_PER_PX[m.format]
+  const density = m.bytes != null && displayPx > 0 ? m.bytes / displayPx : null
+  const quality = limiar != null && density != null && density < limiar ? 0.3 : 1
 
   // Fora da proporção de capa (~2:3) vai cortar feio no card.
   const ratio = m.height / m.width
