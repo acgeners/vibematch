@@ -168,8 +168,10 @@ export async function getImportReviewWorks(ids: string[]): Promise<ReviewWork[]>
 // houver pendentes; uma obra sai daqui quando é avaliada (vira 'done'/'skipped').
 export async function getPendingReviewWorks(limit = 300): Promise<ReviewWork[]> {
   const supabase = createAdminClient()
+  // Lê o dado PESSOAL do DONO (observations) → vem do espelho via a view `works_owner`,
+  // não da linha compartilhada de `works` (que vai perder essas colunas).
   const { data, error } = await supabase
-    .from("works")
+    .from("works_owner")
     .select(
       "id, title, original_title, total_chapters, observations, publication_status_id, ai_eval_status, work_covers(url, is_primary), work_synopses(text, is_primary)"
     )

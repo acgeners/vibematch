@@ -326,8 +326,10 @@ export async function proposeFavoriteGroups(
   const gate = await ensureAdmin()
   if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
+  // Filtra por dado PESSOAL do DONO (is_favorite) → lê do espelho via a view `works_owner`,
+  // não da linha compartilhada de `works` (que vai perder essas colunas).
   const { data, error } = await supabase
-    .from("works")
+    .from("works_owner")
     .select("id, title, work_genres(genres(name)), work_tags(tags(name))")
     .eq("is_favorite", true)
     .eq("is_archived", false)

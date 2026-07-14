@@ -487,10 +487,10 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
   const includeQuality = L0_QUALITY_ENABLED && (await ensurePermission("consume_ai")).ok
 
   // 🔴 Os RÓTULOS que treinam o Ridge saem de `user_work_state`, não das colunas de `works`
-  // (Fase B do desatrelamento). O select abaixo AINDA traz as colunas pessoais de `works` —
-  // mas elas são descartadas: `withOwnerLabels` as sobrescreve com as do dono, vindas do
-  // espelho. Mantê-las no select é de propósito, pra que o dia do `DROP COLUMN` seja um erro
-  // ALTO ("column does not exist") em vez de um silêncio.
+  // (Fase B do desatrelamento). O select abaixo NÃO pede mais as colunas pessoais: elas eram
+  // DESCARTADAS de qualquer jeito — `withOwnerLabels` sobrescreve TODAS as PERSONAL_COLUMNS
+  // com as do dono, vindas do espelho, tenham vindo no select ou não. Pedi-las a `works` só
+  // atrasaria o `DROP COLUMN`; o catálogo (id, status, capítulos, ano, tags…) continua aqui.
   //
   // `loadOwnerLabels` falha alto se os rótulos sumirem — porque um Ridge sem rótulos não
   // reclama: ele cai na média do treino e devolve 878 notas plausíveis e erradas.
@@ -499,13 +499,8 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
       supabase
         .from("works")
         .select(
-          `id, publication_status_id, total_chapters, synopsis_quality,
-         observation_adjustment, user_score, is_archived,
+          `id, publication_status_id, total_chapters, is_archived,
          year, year_end, original_title,
-         post_story_score, post_fl_score, post_ml_score,
-         post_character_development_score, post_pacing_score,
-         post_art_visual_score, post_impact_immersion_score,
-         post_originality_score,
          category_scores(criterion_slug, score, source),
          platform_ratings(id, platform, rating, vote_count),
          work_tags(tags(name, tag_group_id))`

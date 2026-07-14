@@ -236,9 +236,11 @@ export async function getSynopsisPredictionAccuracy(
   version: string = resolveInterestPromptVersion(),
 ): Promise<SynopsisPredictionAccuracy> {
   const supabase = createAdminClient()
+  // O manual (`synopsis_quality`) é dado PESSOAL do DONO → vem do espelho via a view
+  // `works_owner`, não da linha compartilhada de `works` (que vai perder essa coluna).
   const { data, error } = await supabase
     .from("synopsis_quality_predictions")
-    .select("predicted_quality, works!work_id(synopsis_quality)")
+    .select("predicted_quality, works_owner!work_id(synopsis_quality)")
     .eq("stale", false)
     .eq("prompt_version", version)
   if (error) {
@@ -252,8 +254,8 @@ export async function getSynopsisPredictionAccuracy(
   let exact = 0
   let within1 = 0
   for (const row of data ?? []) {
-    const r = row as { predicted_quality: string | null; works: { synopsis_quality: string | null } | { synopsis_quality: string | null }[] | null }
-    const workRel = Array.isArray(r.works) ? r.works[0] : r.works
+    const r = row as { predicted_quality: string | null; works_owner: { synopsis_quality: string | null } | { synopsis_quality: string | null }[] | null }
+    const workRel = Array.isArray(r.works_owner) ? r.works_owner[0] : r.works_owner
     const manualLevel = synopsisLevel(workRel?.synopsis_quality)
     const predLevel = synopsisLevel(r.predicted_quality)
     if (manualLevel === 0 || predLevel === 0) continue
@@ -328,9 +330,11 @@ export async function getSynopsisVersionComparison(
   currentVersion: string = resolveInterestPromptVersion(),
 ): Promise<SynopsisVersionComparison | null> {
   const supabase = createAdminClient()
+  // O manual (`synopsis_quality`) é dado PESSOAL do DONO → vem do espelho via a view
+  // `works_owner`, não da linha compartilhada de `works` (que vai perder essa coluna).
   const { data, error } = await supabase
     .from("synopsis_quality_predictions")
-    .select("work_id, predicted_quality, prompt_version, works!work_id(synopsis_quality)")
+    .select("work_id, predicted_quality, prompt_version, works_owner!work_id(synopsis_quality)")
   if (error) {
     console.warn("[synopsis-pred] getSynopsisVersionComparison falhou:", error.message)
     return null
@@ -344,11 +348,11 @@ export async function getSynopsisVersionComparison(
       work_id: string
       predicted_quality: string | null
       prompt_version: string | null
-      works: { synopsis_quality: string | null } | { synopsis_quality: string | null }[] | null
+      works_owner: { synopsis_quality: string | null } | { synopsis_quality: string | null }[] | null
     }
     const predLevel = synopsisLevel(r.predicted_quality)
     if (predLevel === 0) continue
-    const workRel = Array.isArray(r.works) ? r.works[0] : r.works
+    const workRel = Array.isArray(r.works_owner) ? r.works_owner[0] : r.works_owner
     const manualLevel = synopsisLevel(workRel?.synopsis_quality)
     if (manualLevel === 0) continue
     const ver = r.prompt_version ?? ""
@@ -447,9 +451,11 @@ export async function getShadowComparisonRows(): Promise<ShadowCompareRow[]> {
   const armBVer = COMPILED_PREFERENCES_V4_SHADOW.promptVersion
   const supabase = createAdminClient()
 
+  // O manual (`synopsis_quality`) é dado PESSOAL do DONO → vem do espelho via a view
+  // `works_owner`, não da linha compartilhada de `works` (que vai perder essa coluna).
   const { data: bRows, error: bErr } = await supabase
     .from("synopsis_quality_predictions")
-    .select("work_id, predicted_quality, confidence, works!work_id(title, synopsis_quality)")
+    .select("work_id, predicted_quality, confidence, works_owner!work_id(title, synopsis_quality)")
     .eq("prompt_version", armBVer)
   if (bErr) {
     console.warn("[shadow] getShadowComparisonRows (arm B) falhou:", bErr.message)
@@ -457,8 +463,8 @@ export async function getShadowComparisonRows(): Promise<ShadowCompareRow[]> {
   }
   const bByWork = new Map<string, { quality: string | null; confidence: number | null; title: string; manual: string | null }>()
   for (const row of bRows ?? []) {
-    const r = row as { work_id: string; predicted_quality: string | null; confidence: number | null; works: { title: string | null; synopsis_quality: string | null } | { title: string | null; synopsis_quality: string | null }[] | null }
-    const w = Array.isArray(r.works) ? r.works[0] : r.works
+    const r = row as { work_id: string; predicted_quality: string | null; confidence: number | null; works_owner: { title: string | null; synopsis_quality: string | null } | { title: string | null; synopsis_quality: string | null }[] | null }
+    const w = Array.isArray(r.works_owner) ? r.works_owner[0] : r.works_owner
     bByWork.set(r.work_id, {
       quality: r.predicted_quality,
       confidence: r.confidence != null ? Number(r.confidence) : null,
