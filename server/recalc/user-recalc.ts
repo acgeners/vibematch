@@ -60,16 +60,14 @@ export async function recalculateForUser(userId: string): Promise<UserRecalcResu
 
   const [worksRes, weightsRes, configRes, labels, biasMap, declaredTagPrefs, tasteProfile] =
     await Promise.all([
+      // Só CATÁLOGO. As colunas pessoais não vêm daqui: `withOwnerLabels` sobrescreve TODAS as
+      // PERSONAL_COLUMNS com as DESTE usuário (`loadLabelsFor(userId)`), tenham vindo no select
+      // ou não — pedi-las a `works` traria o dado do DONO e seria descartado do mesmo jeito.
       supabase
         .from("works")
         .select(
-          `id, publication_status_id, total_chapters, synopsis_quality,
-           observation_adjustment, user_score, is_archived,
+          `id, publication_status_id, total_chapters, is_archived,
            year, year_end, original_title,
-           post_story_score, post_fl_score, post_ml_score,
-           post_character_development_score, post_pacing_score,
-           post_art_visual_score, post_impact_immersion_score,
-           post_originality_score,
            category_scores(criterion_slug, score, source),
            platform_ratings(id, platform, rating, vote_count),
            work_tags(tags(name, tag_group_id))`,

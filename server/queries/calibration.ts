@@ -392,11 +392,13 @@ function pickPrimaryCoverUrl(
 
 export async function loadSuggestions(filters: SuggestionFilters = {}): Promise<SuggestionWithWork[]> {
   const supabase = createAdminClient()
+  // Lê o dado PESSOAL do DONO (user_score, is_favorite) → vem do espelho via a view
+  // `works_owner`, não da linha compartilhada de `works` (que vai perder essas colunas).
   let query = supabase
     .from("score_calibration_suggestions")
     .select(`
       *,
-      works(title, user_score, is_favorite, year, total_chapters, publication_status_id, work_covers(url, is_primary, position))
+      works_owner(title, user_score, is_favorite, year, total_chapters, publication_status_id, work_covers(url, is_primary, position))
     `)
     .order("created_at", { ascending: false })
     .limit(filters.limit ?? 200)
@@ -422,7 +424,7 @@ export async function loadSuggestions(filters: SuggestionFilters = {}): Promise<
 
   const rows = (data ?? []) as unknown as Array<
     SuggestionRow & {
-      works?: {
+      works_owner?: {
         title?: string | null
         user_score?: number | null
         is_favorite?: boolean | null
@@ -443,13 +445,13 @@ export async function loadSuggestions(filters: SuggestionFilters = {}): Promise<
     suggested_score: Number(row.suggested_score),
     confidence: Number(row.confidence),
     applied_score: row.applied_score != null ? Number(row.applied_score) : null,
-    work_title: row.works?.title ?? "(obra removida)",
-    work_cover_url: pickPrimaryCoverUrl(row.works?.work_covers),
-    work_user_score: row.works?.user_score != null ? Number(row.works.user_score) : null,
-    work_is_favorite: row.works?.is_favorite ?? false,
-    work_year: row.works?.year ?? null,
-    work_total_chapters: row.works?.total_chapters ?? null,
-    work_publication_status_id: row.works?.publication_status_id ?? null,
+    work_title: row.works_owner?.title ?? "(obra removida)",
+    work_cover_url: pickPrimaryCoverUrl(row.works_owner?.work_covers),
+    work_user_score: row.works_owner?.user_score != null ? Number(row.works_owner.user_score) : null,
+    work_is_favorite: row.works_owner?.is_favorite ?? false,
+    work_year: row.works_owner?.year ?? null,
+    work_total_chapters: row.works_owner?.total_chapters ?? null,
+    work_publication_status_id: row.works_owner?.publication_status_id ?? null,
   }))
 }
 

@@ -27,8 +27,11 @@ export interface MatchContext {
 }
 
 export async function buildMatchContext(supabase: AnySupabaseClient): Promise<MatchContext> {
+  // Lê o dado PESSOAL do DONO (personal_status_id, user_score, chapters_read) — é o lado
+  // "atual" do diff da importação → vem do espelho via a view `works_owner`, não da linha
+  // compartilhada de `works` (que vai perder essas colunas).
   const { data: works } = await supabase
-    .from("works")
+    .from("works_owner")
     .select("id, title, original_title, alternative_titles, personal_status_id, user_score, chapters_read")
 
   const { data: extIds } = await supabase

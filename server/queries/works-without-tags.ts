@@ -55,8 +55,11 @@ export async function getWorksWithoutTags(
   }
 
   // 2) works ativas (+ pub/personal filter no SQL). Colunas leves; canonical só presença.
+  // Seleciona E FILTRA dado PESSOAL do DONO (personal_status_id, synopsis_quality) → lê do
+  // espelho via a view `works_owner`, não da linha compartilhada de `works` (que vai perder
+  // essas colunas). Os filtros/`.in()` continuam valendo: a view expõe os mesmos nomes.
   let worksQ = sb
-    .from("works")
+    .from("works_owner")
     .select("id, title, ai_eval_status, canonical_synopsis, publication_status_id, personal_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score)")
     .eq("is_archived", false)
   if (filters.pubStatusIds && filters.pubStatusIds.length > 0) worksQ = worksQ.in("publication_status_id", filters.pubStatusIds)
@@ -130,6 +133,8 @@ export async function getWorksWithoutTags(
       }
     })),
     // Contexto de reviews (digest/summary) — presença JSONB-safe (só `.not null`).
+    // Fica em `works` de propósito: digest/summary são de CATÁLOGO (não pessoais) e não
+    // existem na view `works_owner`.
     Promise.all(chunk(ids, 200).map(async (c) => {
       const [d, s] = await Promise.all([
         sb.from("works").select("id").in("id", c).not("review_digest", "is", null),

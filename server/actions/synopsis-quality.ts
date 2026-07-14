@@ -185,7 +185,10 @@ export async function applySynopsisPredictionForWorks(
   const supabase = createAdminClient()
   const [predictions, sourceRows] = await Promise.all([
     getSynopsisPredictionsByWorkIds(ids),
-    supabase.from("works").select("id, synopsis_quality_source").in("id", ids),
+    // Guarda do `human_manual`: lê o dado PESSOAL do DONO (synopsis_quality_source) → vem do
+    // espelho via a view `works_owner`, não da linha compartilhada de `works` (que vai perder
+    // essas colunas).
+    supabase.from("works_owner").select("id, synopsis_quality_source").in("id", ids),
   ])
   const sourceById = new Map(
     ((sourceRows.data ?? []) as Array<{ id: string; synopsis_quality_source: string | null }>).map(

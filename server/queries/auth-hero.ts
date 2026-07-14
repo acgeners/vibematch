@@ -18,13 +18,15 @@ export type HeroWork = {
  */
 export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[]> {
   const supabase = createAdminClient()
+  // Lê o dado PESSOAL do DONO (personal_status_id) → vem do espelho via a view
+  // `works_owner`, não da linha compartilhada de `works` (que vai perder essas colunas).
   const { data, error } = await supabase
     .from("calculated_scores")
     .select(
-      `expected_score, works!inner(title, is_archived, publication_status_id, personal_status_id, work_covers(url, is_primary, position))`,
+      `expected_score, works_owner!inner(title, is_archived, publication_status_id, personal_status_id, work_covers(url, is_primary, position))`,
     )
     .not("expected_score", "is", null)
-    .eq("works.is_archived", false)
+    .eq("works_owner.is_archived", false)
     .order("expected_score", { ascending: false })
     .limit(90)
 
@@ -32,7 +34,7 @@ export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[]> {
 
   const rows = (data ?? []) as unknown as Array<{
     expected_score: number | null
-    works: {
+    works_owner: {
       title: string
       publication_status_id: number | null
       personal_status_id: number | null
@@ -42,14 +44,14 @@ export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[]> {
 
   const out: HeroWork[] = []
   for (const row of rows) {
-    const coverUrl = pickPrimaryCover(row.works.work_covers)
+    const coverUrl = pickPrimaryCover(row.works_owner.work_covers)
     if (!coverUrl) continue
     out.push({
-      title: row.works.title,
+      title: row.works_owner.title,
       coverUrl,
       nota: row.expected_score,
-      publicationStatusId: row.works.publication_status_id,
-      personalStatusId: row.works.personal_status_id,
+      publicationStatusId: row.works_owner.publication_status_id,
+      personalStatusId: row.works_owner.personal_status_id,
     })
     if (out.length >= limit) break
   }

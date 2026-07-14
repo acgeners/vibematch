@@ -81,8 +81,10 @@ export async function checkReadingUpdates(
   if (!gate.ok) return []
 
   const supabase = createAdminClient()
+  // Lê o dado PESSOAL do DONO (chapters_read) → vem do espelho via a view `works_owner`,
+  // não da linha compartilhada de `works` (que vai perder essas colunas).
   const { data, error } = await supabase
-    .from("works")
+    .from("works_owner")
     .select(
       "id, title, original_title, alternative_titles, total_chapters, chapters_read, publication_status_id, work_external_ids(source, external_id, is_rejected)",
     )

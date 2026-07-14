@@ -33,8 +33,10 @@ export async function suggestPostReadingWeights(
     "calculated_scores(expected_score)",
   ].join(", ")
 
+  // Lê o dado PESSOAL do DONO (as 8 notas pós-leitura) → vem do espelho via a view
+  // `works_owner`, não da linha compartilhada de `works` (que vai perder essas colunas).
   const { data, error } = await supabase
-    .from("works")
+    .from("works_owner")
     .select(selectColumns)
     .eq("is_archived", false)
     .limit(2000)
