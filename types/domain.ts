@@ -7,15 +7,16 @@ export type PublicationStatus = (typeof PUBLICATION_STATUSES)[number]
 
 export const PERSONAL_STATUSES = [
   "Want to Read",
-  "Untracked",
-  "Not Now",
-  "Reading",
   "Started",
+  "Reading",
   "Stalled",
   "On-hold",
-  "Completed",
   "Hiatus",
+  "Finished",
+  "Read Again",
   "Dropped",
+  "Not Now",
+  "Untracked",
 ] as const
 export type PersonalStatus = (typeof PERSONAL_STATUSES)[number]
 

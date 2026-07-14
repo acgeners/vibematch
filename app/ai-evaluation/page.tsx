@@ -37,6 +37,7 @@ import { filterWorkIdsByInterest } from "@/server/queries/interest-filter"
 import { MarkReadButton } from "@/components/ai-evaluation/mark-read-button"
 import { AiEvalSettingsDialog } from "@/components/ai-evaluation/ai-eval-settings-dialog"
 import type { FormulaConfig } from "@/types/domain"
+import { INTEREST_HIDDEN_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 
 const ALL_FILTERS = ["pending", "review-pending", "low-confidence", "outdated-model", "outdated-reviews"] as const
 export type EvaluationFilter = (typeof ALL_FILTERS)[number]
@@ -51,12 +52,13 @@ const PERSONAL_STATUS_NAME_TO_ID: Record<string, number> = Object.fromEntries(
   Object.values(PERSONAL_STATUSES_BY_ID).map((info) => [info.status, info.id])
 )
 
-/** Status "de leitura" ocultos por PADRÃO na aba Interesse (obra finalizada/
- *  abandonada/travada não precisa de estimativa de interesse). Escolha explícita
- *  de status no filtro sobrepõe. */
-const INTEREST_HIDDEN_PERSONAL_STATUSES = ["Completed", "Dropped", "Stalled"]
+/** Status ocultos por PADRÃO na aba Interesse (obra finalizada/abandonada/travada/em releitura
+ *  não precisa de estimativa de interesse). A lista vem do banco
+ *  (`personal_status.hide_from_interest`, migration 155) — antes era escrita à mão aqui, e
+ *  "Completed" parou de casar em silêncio quando o status virou "Finished".
+ *  Escolha explícita de status no filtro sobrepõe. */
 const INTEREST_DEFAULT_PERSONAL_NAMES = Object.keys(PERSONAL_STATUS_NAME_TO_ID).filter(
-  (s) => !INTEREST_HIDDEN_PERSONAL_STATUSES.includes(s),
+  (s) => !(INTEREST_HIDDEN_PERSONAL_STATUSES as readonly string[]).includes(s),
 )
 const INTEREST_DEFAULT_PERSONAL_IDS = INTEREST_DEFAULT_PERSONAL_NAMES
   .map((s) => PERSONAL_STATUS_NAME_TO_ID[s])

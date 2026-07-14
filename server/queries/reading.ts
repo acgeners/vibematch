@@ -3,6 +3,7 @@ import { getPersonalStatusIdByName } from "@/lib/constants/status-lookups"
 import { pickPrimaryCover } from "@/lib/covers"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean }
@@ -43,7 +44,7 @@ function isMissingColumnError(message: string): boolean {
 export async function getReadingWorks(
   opts?: { statuses?: string[] },
 ): Promise<ReadingWork[]> {
-  const statusIds = (opts?.statuses ?? ["Reading"])
+  const statusIds = (opts?.statuses ?? [personalStatusNameBySlugOrThrow("reading")])
     .map((s) => getPersonalStatusIdByName(s))
     .filter((id): id is number => id != null)
   if (statusIds.length === 0) return []

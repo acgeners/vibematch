@@ -15,9 +15,10 @@ import {
 import { setReadingStatusForWorks } from "@/server/actions/works"
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { PERSONAL_STATUSES } from "@/types/domain"
+import { UNTRACKED_PERSONAL_STATUS } from "@/lib/constants/status-lookups"
 
 // Destinos: todos os status de leitura menos "Untracked" (mover-se pra Untracked é no-op).
-const STATUS_OPTIONS = (PERSONAL_STATUSES as readonly string[]).filter((s) => s !== "Untracked")
+const STATUS_OPTIONS = (PERSONAL_STATUSES as readonly string[]).filter((s) => s !== UNTRACKED_PERSONAL_STATUS)
 const STATUS_INFO = (s: string) => Object.values(PERSONAL_STATUSES_BY_ID).find((i) => i.status === s)
 
 /**

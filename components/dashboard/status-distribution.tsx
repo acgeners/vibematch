@@ -1,19 +1,17 @@
 import { PieChart, ChevronDown } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
+import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 
-// Cores sólidas por status, alinhadas à paleta dos badges (status-badge.tsx).
-// Mantemos um mapa local porque os badges expõem só name/símbolo, não a cor da barra.
-const PERSONAL_COLORS: Record<string, string> = {
-  Reading: "bg-emerald-500",
-  Started: "bg-violet-500",
-  "Want to Read": "bg-slate-400",
-  Completed: "bg-blue-500",
-  "On-hold": "bg-slate-500",
-  Stalled: "bg-orange-500",
-  Hiatus: "bg-cyan-500",
-  Dropped: "bg-red-500",
-}
+// Cor de cada status pessoal — vem do Supabase (`personal_status.bg_class`, migration 157).
+//
+// Aqui havia um mapa por NOME, e ele estava morto sem ninguém notar: tinha entrada para
+// "Completed", que virou "Finished". As 74 obras terminadas caíam no FALLBACK_COLOR cinza —
+// um bug visível no gráfico do dashboard que nunca foi reportado. E os status "Read Again",
+// "Not Now" e "Untracked" (667 obras!) nunca tiveram cor nenhuma.
+const PERSONAL_COLORS: Record<string, string> = Object.fromEntries(
+  Object.values(PERSONAL_STATUSES_BY_ID).map((info) => [info.status, info.bgClass]),
+)
 
 const PUBLICATION_COLORS: Record<string, string> = {
   Ongoing: "bg-emerald-500",

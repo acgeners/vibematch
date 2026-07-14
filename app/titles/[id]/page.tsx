@@ -68,12 +68,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ExpandableText } from "@/components/ui/expandable-text"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CRITERIA_INFO, PLATFORM_LABELS } from "@/lib/constants/criteria"
-import { getPublicationStatusNameById, getPersonalStatusNameById } from "@/lib/constants/status-lookups"
+import {
+  getPublicationStatusNameById,
+  getPersonalStatusNameById,
+  isTerminalPersonalStatus,
+} from "@/lib/constants/status-lookups"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
 import type { PersonalStatus, SynopsisQuality } from "@/types/domain"
 import { pickPrimarySynopsis, pickPrimaryCover } from "@/lib/work-derived"
 import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 import { CRITERION_SLUGS } from "@/types/domain"
+import { isFollowingPersonalStatus, personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 import {
   DEFAULT_POST_READING_WEIGHTS,
   POST_READING_WEIGHT_LABELS,
@@ -310,7 +315,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // hid aceito. `pending` = capítulos não lidos (total − lidos), sinal persistido
   // e refrescado pela checagem manual do /leitura.
   const personalStatusName = getPersonalStatusNameById(work.personal_status_id)
-  const isFollowing = personalStatusName === "Reading" || personalStatusName === "Started"
+  const isFollowing = isFollowingPersonalStatus(personalStatusName)
   const comixHid = externalIdMap.comix ?? null
   const comixReadUrl = isFollowing && comixHid ? comixWorkUrl(comixHid) : null
   const comixPending =
@@ -523,7 +528,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
   const statusInitial: WorkStatusValues = {
     personal_status:
-      (getPersonalStatusNameById(work.personal_status_id) as PersonalStatus | undefined) ?? "Want to Read",
+      personalStatusNameOrDefault(work.personal_status_id) as PersonalStatus,
     personal_status_id: work.personal_status_id ?? null,
     synopsis_quality: work.synopsis_quality ?? null,
     observation_adjustment: work.observation_adjustment ?? 0,
@@ -1303,11 +1308,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       </div>
 
       {/* Consultor IA — Deep Dive (entre as notas e o detalhamento por critério).
-          Em obras lidas (Completed/Dropped) não cabe rodar NOVA análise, mas se já
-          existe uma salva o card aparece em modo só-leitura ("Ver análise"). */}
+          Em obra de leitura ENCERRADA não cabe rodar NOVA análise, mas se já existe uma
+          salva o card aparece em modo só-leitura ("Ver análise"). Quais status são
+          "terminais" vem do banco (`personal_status.is_terminal`) — antes estava escrito
+          "Completed" aqui, e o rename para "Finished" o deixou sempre falso. */}
       {(() => {
-        const isTerminalStatus =
-          statusInitial.personal_status === "Completed" || statusInitial.personal_status === "Dropped"
+        const isTerminalStatus = isTerminalPersonalStatus(statusInitial.personal_status)
         if (isTerminalStatus && lastDeepDive == null) return null
         return (
           <DeepDiveButton

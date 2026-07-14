@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import { FULLY_READ_STATUS } from "@/lib/constants/status-lookups"
 import {
   READING_STATUS_VALUES,
   PROSPECTIVE_ELIGIBLE,
@@ -140,7 +141,10 @@ describe("reading-status-audit — parser, seed, manifesto, cobertura", () => {
   })
 
   it("suggestReadingStatusFromDb mapeia sinais objetivos (chapters_read é o mais forte)", () => {
-    expect(suggestReadingStatusFromDb({ personalStatus: "Completed", chaptersRead: null })).toBe("fully_read")
+    // O nome do status vem do BANCO (`personal_status`, via sync-constants) — escrever
+    // "Completed" aqui foi o que fez este teste virar vermelho quando o status foi renomeado
+    // para "Finished". Um teste que fixa o rótulo testa o rótulo, não o comportamento.
+    expect(suggestReadingStatusFromDb({ personalStatus: FULLY_READ_STATUS, chaptersRead: null })).toBe("fully_read")
     expect(suggestReadingStatusFromDb({ personalStatus: "Want to Read", chaptersRead: null })).toBe("unread")
     expect(suggestReadingStatusFromDb({ personalStatus: "Untracked", chaptersRead: null })).toBe("unread")
     expect(suggestReadingStatusFromDb({ personalStatus: "Dropped", chaptersRead: 5 })).toBe("partially_read")

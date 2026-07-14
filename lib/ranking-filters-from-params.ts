@@ -1,5 +1,6 @@
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { RankingFilters } from "@/server/queries/ranking"
+import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 
 /**
  * Converte uma URLSearchParams da página /ranking em RankingFilters. Compartilhado
@@ -34,7 +35,7 @@ export function parseFiltersFromSearchParams(sp: URLSearchParams): RankingFilter
       ? undefined
       : perStatusParam
         ? perStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
-        : ["Want to Read", "Untracked"]
+        : [...UNREAD_PERSONAL_STATUSES]
 
   const pubStatusParam = sp.get("pub_status")
   const publicationStatus =

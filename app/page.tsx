@@ -33,6 +33,7 @@ import { DashboardGreeting } from "@/components/dashboard/dashboard-greeting"
 import { Header } from "@/components/layout/header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 
 export default async function DashboardPage() {
   const [
@@ -58,7 +59,7 @@ export default async function DashboardPage() {
   ])
 
   const firstName = profile.displayName?.trim().split(/\s+/)[0]
-  const wantToRead = stats.byPersonalStatus["Want to Read"] ?? 0
+  const wantToRead = stats.byPersonalStatus[DEFAULT_PERSONAL_STATUS] ?? 0
 
   return (
     <div className="space-y-6">

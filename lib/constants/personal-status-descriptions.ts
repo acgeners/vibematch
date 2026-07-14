@@ -1,27 +1,33 @@
-/**
- * Fallback PT para quando a descrição (comment) do Supabase está vazia.
- * A fonte de verdade é o campo `comment` de `personal_status` no Supabase.
- */
-export const PERSONAL_STATUS_DESCRIPTIONS_PT: Record<string, string> = {
-  Completed: "Já li até o final do que está disponível",
-  Reading: "Acompanhando o lançamento dos novos capítulos",
-  Started: "Comecei a leitura recentemente, ainda não terminei",
-  Stalled: "Comecei e pausei por tensão na história — pretendo terminar",
-  Paused: "Comecei e pausei, pretendo terminar depois",
-  Hiatus: "Aguardando nova temporada / retorno do título",
-  "On-hold": "Comecei, planejo retomar, mas preciso reler antes",
-  "Want to Read": "Não comecei — está na lista de leitura",
-  Dropped: "Abandonado, não pretendo continuar",
-}
+import { PERSONAL_STATUSES_BY_ID } from "./criteria"
 
 /**
- * Descrição do status pessoal para tooltip. Prioriza `comment` (vindo do
- * Supabase via getStatusOptions / PERSONAL_STATUSES_BY_ID); cai no dicionário
- * PT local só quando o Supabase não tem descrição.
+ * Descrição em PT de cada status pessoal — vem do Supabase (`personal_status.description_pt`,
+ * migration 157), gerada por `sync-constants`.
+ *
+ * Aqui havia um dicionário escrito à mão, e ele estava morto sem ninguém notar:
+ *   · tinha `Completed` (o status virou "Finished" — a entrada nunca mais casava)
+ *   · tinha `Paused`, um status que NUNCA existiu na tabela
+ *   · não tinha `Finished`, `Read Again`, `Not Now` nem `Untracked`
+ *
+ * E a função priorizava o `comment` do Supabase, que está em INGLÊS ("Finished reading") — então
+ * o tooltip mostrava inglês sempre que o comment existia, e português só quando ele estava vazio.
+ * Agora a descrição voltada ao usuário tem coluna própria (`description_pt`), preenchida para os
+ * 11 status, e o `comment` volta a ser o que sempre foi: nota interna.
+ */
+const DESCRIPTION_BY_STATUS = new Map<string, string>(
+  Object.values(PERSONAL_STATUSES_BY_ID).map((info) => [info.status, info.descriptionPt]),
+)
+
+/**
+ * Descrição do status pessoal para tooltip.
+ *
+ * `comment` continua aceito por compatibilidade com os call sites (que o passam vindo de
+ * `getStatusOptions`), mas só é usado se a tabela não tiver `description_pt` — o que a migration
+ * 157 impede via constraint.
  */
 export function getPersonalStatusDescription(
   status: string,
   comment?: string | null
 ): string {
-  return comment?.trim() || PERSONAL_STATUS_DESCRIPTIONS_PT[status] || ""
+  return DESCRIPTION_BY_STATUS.get(status)?.trim() || comment?.trim() || ""
 }

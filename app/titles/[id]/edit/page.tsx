@@ -15,6 +15,7 @@ import {
   getPersonalStatusNameById,
 } from "@/lib/constants/status-lookups"
 import { dedupeWorkSynopses, joinSynopsesForDisplay, pickPrimaryCover } from "@/lib/work-derived"
+import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -69,7 +70,7 @@ function workToFormValues(work: WorkWithRelations): Partial<WorkFormValues> {
       "Unknown",
     personal_status:
       (getPersonalStatusNameById((work as { personal_status_id?: number | null }).personal_status_id) as WorkFormValues["personal_status"]) ??
-      "Want to Read",
+      DEFAULT_PERSONAL_STATUS,
     publication_status_id: (work as { publication_status_id?: number | null }).publication_status_id ?? null,
     personal_status_id: (work as { personal_status_id?: number | null }).personal_status_id ?? null,
     total_chapters: work.total_chapters ?? undefined,

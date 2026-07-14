@@ -9,6 +9,8 @@
  */
 
 import { z } from "zod"
+import { isFullyReadPersonalStatus, tracksProgressPersonalStatus } from "@/lib/constants/status-lookups"
+import { isUnreadPersonalStatus } from "@/lib/constants/status-lookups"
 
 // ── Vocabulário congelado ────────────────────────────────────────────────────
 
@@ -281,11 +283,11 @@ export type DbReadingSeed = "unread" | "partially_read" | "fully_read" | "uncert
  */
 export function suggestReadingStatusFromDb(input: { personalStatus: string; chaptersRead: number | null }): DbReadingSeed {
   const read = typeof input.chaptersRead === "number" && input.chaptersRead > 0
-  if (input.personalStatus === "Completed") return "fully_read"
-  if (["Reading", "Started", "Stalled", "On-hold", "Hiatus", "Dropped"].includes(input.personalStatus)) {
+  if (isFullyReadPersonalStatus(input.personalStatus)) return "fully_read"
+  if (tracksProgressPersonalStatus(input.personalStatus)) {
     return read ? "partially_read" : "uncertain"
   }
-  if (input.personalStatus === "Want to Read" || input.personalStatus === "Untracked") return "unread"
+  if (isUnreadPersonalStatus(input.personalStatus)) return "unread"
   return "uncertain"
 }
 

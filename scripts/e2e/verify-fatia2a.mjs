@@ -135,12 +135,22 @@ console.log(`  works (do DONO): nota=${before.user_score} post_story=${before.po
 console.log(`  calculated_scores: expected=${beforeCalc.expected_score} (o Ridge DELE)\n`)
 
 console.log("1) LEITORA avalia a obra: nota 9.9, ♥♥♥♥, observação e pós-leitura próprias")
+// O nome do status vem do BANCO — escrever "Completed" aqui é o que fez esta suíte ficar
+// vermelha quando o status foi renomeado para "Finished": o Zod (`z.enum(PERSONAL_STATUSES)`,
+// gerado por sync-constants) rejeitou o payload INTEIRO, e nenhuma escrita dela passou. O Zod
+// fez o trabalho dele; quem estava errado era o teste, fixando um rótulo que mora no Supabase.
+const { data: statusFullyRead } = await admin
+  .from("personal_status")
+  .select("status")
+  .eq("is_fully_read", true)
+  .single()
+
 const res = await call(
   ids.updateWorkStatus,
   [
     cand.id,
     {
-      personal_status: "Completed",
+      personal_status: statusFullyRead.status,
       chapters_read: 5,
       user_score: 9.9,
       observations: "ANOTACAO DA LEITORA",

@@ -75,6 +75,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { BarChart3, ChevronDown, ImageIcon, Info, LayoutDashboard, Loader2, Pencil, Plus, Settings2, Tags, Trash2, User, X } from "lucide-react"
+import { PROGRESS_PERSONAL_STATUSES } from "@/lib/constants/criteria"
+import { isFullyReadPersonalStatus } from "@/lib/constants/status-lookups"
+import { UNTRACKED_PERSONAL_STATUS } from "@/lib/constants/status-lookups"
 
 export interface WorkFormAiEvaluation {
   model_name: string | null
@@ -212,7 +215,9 @@ const SOURCE_OPTIONS = Object.values(PLATFORM_LABELS).map((name, index) => ({
   order: index + 1,
 }))
 
-const READING_STATUSES_WITH_PROGRESS = new Set(["Reading", "Completed", "Paused", "Stalled", "Dropped", "Started", "Hiatus"])
+// Vem do banco (`personal_status.tracks_progress`). A lista à mão tinha "Paused" — um status
+// que NUNCA existiu na tabela — e "Completed", que deixou de existir.
+const READING_STATUSES_WITH_PROGRESS = new Set<string>(PROGRESS_PERSONAL_STATUSES)
 
 const POST_READING_SCORE_FIELDS = [
   {
@@ -572,7 +577,7 @@ const getEmptyCreateValues = (): Partial<WorkFormValues> => ({
   year: null,
   year_end: null,
   publication_status: "Unknown",
-  personal_status: "Untracked",
+  personal_status: UNTRACKED_PERSONAL_STATUS,
   total_chapters: null,
   chapters_read: null,
   synopsis_quality: null,
@@ -895,7 +900,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
 
   // Auto-preencher chapters_read = total_chapters quando status muda para Completed.
   useEffect(() => {
-    if (personalStatus !== "Completed") return
+    if (!isFullyReadPersonalStatus(personalStatus)) return
     if (typeof totalChapters !== "number" || totalChapters <= 0) return
     const current = getValues("chapters_read")
     if (current != null && current >= totalChapters) return

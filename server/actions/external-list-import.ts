@@ -34,6 +34,7 @@ import type {
   MatchPlan,
   ReconciliationBuckets,
 } from "@/lib/import/external-list/types"
+import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabaseClient = any
@@ -180,7 +181,7 @@ async function createWorkFromEntry(
   entry: ExternalListEntry
 ): Promise<string> {
   const personal = {
-    personal_status_id: getPersonalStatusIdByName(entry.personalStatus ?? "Want to Read"),
+    personal_status_id: getPersonalStatusIdByName(entry.personalStatus ?? DEFAULT_PERSONAL_STATUS),
     user_score: entry.userScore ?? null,
     chapters_read: entry.chaptersRead ?? null,
   }

@@ -11,6 +11,8 @@ import { computeDecisionScore } from "@/lib/calculations/decision"
 import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quality"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { isTerminalPersonalStatus } from "@/lib/constants/status-lookups"
+import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 
 // Tokeniza a busca igual ao filtro antigo do ranking: separa por espaços e
 // pontuação para que o padrão "a depois b depois c" atravesse vírgulas/`?`/etc.
@@ -595,7 +597,7 @@ export async function getRanking(
       publicationStatusId,
       publicationStatusShort: publicationStatusDisplay?.short ?? null,
       publicationStatusColor: publicationStatusDisplay?.color ?? null,
-      personalStatus: getPersonalStatusNameById(personalStatusId) ?? "Want to Read",
+      personalStatus: personalStatusNameOrDefault(personalStatusId),
       personalStatusId,
       personalStatusSymbol:
         personalStatusId != null ? personalStatusSymbolsById.get(personalStatusId) ?? null : null,
@@ -638,9 +640,10 @@ export async function getRanking(
   // Hard filter: ranking/recomendações escondem obras já finalizadas/dropadas.
   // Páginas tipo /titles e /favorites passam includeFinishedDropped=true.
   if (!filters.includeFinishedDropped) {
-    entries = entries.filter(
-      (e) => !["Finalizado", "Droppado", "Completed", "Dropped"].includes(e.personalStatus)
-    )
+    // Antes: ["Finalizado", "Droppado", "Completed", "Dropped"] — português E inglês, chutando as
+    // duas grafias porque o conceito "a leitura acabou" não tinha casa. Agora tem: vem do banco
+    // (`personal_status.is_terminal`, migration 155).
+    entries = entries.filter((e) => !isTerminalPersonalStatus(e.personalStatus))
   }
 
   if (filters.publicationStatus?.length) {

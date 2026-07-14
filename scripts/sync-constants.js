@@ -135,7 +135,12 @@ async function main() {
   const [criteriaRes, pubStatusRes, persStatusRes, sourceRes, tagGroupRes, tagsRes, genresRes, tooltipsRes, uiLabelsRes] = await Promise.all([
     supabase.from("criteria").select("eval_type, slug, criteria, emoji, description, weight, key, ranges").order("id"),
     supabase.from("publication_status").select("id, status, slug, short, color, symbol").order("id"),
-    supabase.from("personal_status").select("id, status, slug, color, symbol, comment").order("id"),
+    supabase
+      .from("personal_status")
+      .select(
+        "id, status, slug, color, symbol, comment, bg_class, description_pt, is_terminal, is_fully_read, tracks_progress, hide_from_interest, is_default_unset, is_following, is_unread, sort_order",
+      )
+      .order("sort_order"),
     supabase.from("source").select("slug, name").order("order", { ascending: true, nullsFirst: false }).order("name"),
     supabase.from("tag_group").select("id, slug, group, description, example").order("group"),
     fetchAllPaginated(() => supabase.from("tags").select("name, slug, tag_group_id").order("name")),
@@ -161,22 +166,23 @@ async function main() {
   const tooltipCriteria = tooltipRows.filter((t) => t.type === "criteria")
   const tooltipSynopsis = tooltipRows.filter((t) => t.type === "synopsis")
 
-  const PERSONAL_STATUS_ORDER = [
-    "To read",
-    "Reading",
-    "Started",
-    "Stalled",
-    "On-hold",
-    "Completed",
-    "Hiatus",
-    "Dropped"
-  ]
+  // A ordem vem do BANCO (`personal_status.sort_order`, migration 155).
+  //
+  // Aqui havia uma lista de NOMES escrita à mão (`["To read", "Reading", …, "Completed", …]`).
+  // Dois desses nomes já não existiam na tabela e 3 dos 11 status nem estavam na lista: caíam em
+  // `indexOf === -1` e iam pro começo, em ordem arbitrária. O gerador que existe pra desacoplar o
+  // código do rótulo estava, ele mesmo, acoplado ao rótulo.
+  const persStatuses = [...rawPersStatuses].sort(
+    (a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999),
+  )
 
-  const persStatuses = [...rawPersStatuses].sort((a, b) => {
-    const idxA = PERSONAL_STATUS_ORDER.indexOf(a.status)
-    const idxB = PERSONAL_STATUS_ORDER.indexOf(b.status)
-    return idxA - idxB
-  })
+  const semSortOrder = persStatuses.filter((r) => r.sort_order == null)
+  if (semSortOrder.length) {
+    console.warn(
+      `  ⚠️  ${semSortOrder.length} status sem sort_order (vão pro fim): ` +
+        semSortOrder.map((r) => r.status).join(", "),
+    )
+  }
 
   console.log(`  ${iaCriteria.length} critérios IA, ${userCriteria.length} critérios User`)
   console.log(`  ${pubStatuses.length} pub statuses, ${persStatuses.length} personal statuses, ${sources.length} sources`)
@@ -227,8 +233,14 @@ async function main() {
   ).join("\n")
 
   const persByIdEntries = persStatuses.map(r =>
-    `  ${r.id}: { id: ${r.id}, status: ${JSON.stringify(r.status)}, slug: ${JSON.stringify(r.slug ?? "")}, color: ${JSON.stringify(r.color ?? "")}, symbol: ${JSON.stringify(r.symbol ?? "")}, comment: ${JSON.stringify(r.comment ?? "")} },`
+    `  ${r.id}: { id: ${r.id}, status: ${JSON.stringify(r.status)}, slug: ${JSON.stringify(r.slug ?? "")}, color: ${JSON.stringify(r.color ?? "")}, symbol: ${JSON.stringify(r.symbol ?? "")}, comment: ${JSON.stringify(r.comment ?? "")}, bgClass: ${JSON.stringify(r.bg_class ?? "")}, descriptionPt: ${JSON.stringify(r.description_pt ?? "")}, isTerminal: ${!!r.is_terminal}, isFullyRead: ${!!r.is_fully_read}, tracksProgress: ${!!r.tracks_progress}, hideFromInterest: ${!!r.hide_from_interest}, isDefaultUnset: ${!!r.is_default_unset}, isFollowing: ${!!r.is_following}, isUnread: ${!!r.is_unread} },`
   ).join("\n")
+
+  // Conjuntos SEMÂNTICOS. O código pergunta "a leitura acabou?", nunca "o status se chama X" —
+  // era escrevendo o nome à mão que 10 lugares quebraram quando "Completed" virou "Finished",
+  // e o TypeScript só pegou 6 (os outros eram strings soltas dentro de Set/array).
+  const persByFlag = (flag) =>
+    literalArray(persStatuses.filter((r) => r[flag]).map((r) => r.status))
 
   const platformLabelEntries = sources
     .filter(s => s.slug)
@@ -277,11 +289,56 @@ export interface PersonalStatusInfo {
   color: string
   symbol: string
   comment: string
+  /** Classe Tailwind de fundo (gráfico de distribuição do dashboard). */
+  bgClass: string
+  /** Descrição em PT exibida no seletor de status. */
+  descriptionPt: string
+  /** A leitura encerrou (concluiu ou desistiu). */
+  isTerminal: boolean
+  /** Leu até o fim. */
+  isFullyRead: boolean
+  /** Faz sentido ter capítulo lido neste status. */
+  tracksProgress: boolean
+  /** Não precisa de estimativa de Interesse — sai da fila do Avaliar. */
+  hideFromInterest: boolean
+  /** É o status que a obra APARENTA quando não há linha no espelho. Exatamente um. */
+  isDefaultUnset: boolean
+  /** "Estou acompanhando" — KPI da home, widget de progresso. */
+  isFollowing: boolean
+  /** "Ainda não comecei" — filtro padrão do ranking, seed da auditoria. */
+  isUnread: boolean
 }
 
 export const PERSONAL_STATUSES_BY_ID: Record<number, PersonalStatusInfo> = {
 ${persByIdEntries}
 }
+
+/**
+ * Conjuntos SEMÂNTICOS de status pessoal — gerados da tabela \`personal_status\` (migration 155).
+ *
+ * 🔴 NÃO escreva o nome de um status à mão no código. Renomear "Completed" → "Finished" no
+ * Supabase quebrou 10 lugares, e o TypeScript só pegou 6: os outros eram strings soltas dentro de
+ * \`new Set([...])\` / arrays, que param de casar EM SILÊNCIO. As 74 obras terminadas deixariam de
+ * pedir as 8 notas pós-leitura e de sumir do ranking, sem um único erro.
+ *
+ * Use estes conjuntos (ou os helpers de \`lib/constants/status-lookups.ts\`). Assim um rename vira
+ * operação de banco: roda \`sync-constants\` e o código nem fica sabendo.
+ */
+export const TERMINAL_PERSONAL_STATUSES = ${persByFlag("is_terminal")} as const
+export const FULLY_READ_PERSONAL_STATUSES = ${persByFlag("is_fully_read")} as const
+export const PROGRESS_PERSONAL_STATUSES = ${persByFlag("tracks_progress")} as const
+export const INTEREST_HIDDEN_PERSONAL_STATUSES = ${persByFlag("hide_from_interest")} as const
+export const FOLLOWING_PERSONAL_STATUSES = ${persByFlag("is_following")} as const
+export const UNREAD_PERSONAL_STATUSES = ${persByFlag("is_unread")} as const
+
+/**
+ * O status que a obra APARENTA quando o usuário não tem linha no espelho.
+ *
+ * Não confundir com "Untracked", que é escolha EXPLÍCITA do usuário. Os dois coexistiam sem nome
+ * no código — e por isso pareciam contradição: o Zod tinha default "Untracked" enquanto a exibição
+ * caía em \`?? "Want to Read"\` em 8 lugares.
+ */
+export const DEFAULT_PERSONAL_STATUS = ${JSON.stringify((persStatuses.find((r) => r.is_default_unset) ?? {}).status ?? "")}
 
 export const SYNOPSIS_QUALITY_LABELS: Record<string, string> = {
   "♥": "Fraca",

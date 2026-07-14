@@ -11,10 +11,12 @@ import type { PersonalStatus, CriterionSlug } from "@/types/domain"
 import { submitPostReadingAttributes } from "@/server/actions/post-reading-attributes"
 import { PostTasteAssessment } from "@/components/pilot/post-taste-assessment"
 import type { TasteCriterion, TasteScoreKey } from "@/server/queries/pilot-taste"
+import { isTerminalPersonalStatus } from "@/lib/constants/status-lookups"
 
 // Atributos pós-leitura aparecem quando a obra já tem leitura suficiente:
-// status terminal (Completed/Dropped) OU mais de 20% lido.
-const TERMINAL_STATUSES: PersonalStatus[] = ["Completed", "Dropped"]
+// status terminal OU mais de 20% lido. Quais status são "terminais" vem do banco
+// (`personal_status.is_terminal`, migration 155) — escrever o nome aqui é o que quebrou
+// este fluxo quando "Completed" virou "Finished".
 const MIN_READ_PCT_FOR_POST_ATTR = 20
 
 interface PostReadingFlowProps {
@@ -70,7 +72,7 @@ export function PostReadingFlow({
       ? (liveChaptersRead / totalChapters) * 100
       : null
   const isVisible =
-    TERMINAL_STATUSES.includes(liveStatus as PersonalStatus) ||
+    isTerminalPersonalStatus(liveStatus) ||
     (readPct != null && readPct > MIN_READ_PCT_FOR_POST_ATTR)
 
   // Atributos que a IA avaliou (sem nota da IA não há o que comparar/salvar).
