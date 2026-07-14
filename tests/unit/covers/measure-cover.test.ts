@@ -144,6 +144,53 @@ describe("scoreCover", () => {
     expect(scoreCover(jpg(900, 1350, 0.3))).toBeGreaterThan(scoreCover(jpg(400, 600, 0.3)))
   })
 
+  // ── 🔴 A penalidade de compressão era, na prática, um IMPOSTO SOBRE TAMANHO ──────────
+  //
+  // Medido nas 2.343 capas do catálogo, a % marcada como "estourada" era:
+  //   < 300px → 0%   ·   300–699 → 0–1%   ·   1000–1999 → 8%   ·   ≥ 2000px → 39%
+  //
+  // Ou seja: a penalidade criada pra derrubar imagem feia disparava em 39% das MELHORES
+  // capas e em 0% das piores. JPEG comprime melhor quanto maior a imagem (mais redundância
+  // espacial), então bytes/pixel CAI com o tamanho pela mesma qualidade visual — e o limiar
+  // fixo sobre o pixel nativo punia exatamente quem devia premiar.
+  //
+  // Na prática o score pedia pra trocar 2850×4096 por 700×950, e o backfill teria estragado
+  // as melhores capas do catálogo com plena confiança. Os fixtures abaixo são MEDIDOS, não
+  // inventados: são as capas reais que expuseram o bug.
+  //
+  // O conserto: medir a densidade no tamanho EXIBIDO (~700px). O browser reamostra, e
+  // reamostrar esconde artefato de compressão — a pergunta certa é "vai estar estourada NA
+  // TELA?", não "está estourada no arquivo?".
+  const real = (w: number, h: number, kb: number, format: "jpeg" | "webp" = "jpeg") =>
+    ({ width: w, height: h, bytes: Math.round(kb * 1024), format }) as const
+
+  it("🔴 capa GRANDE e sadia não é marcada como estourada (Savage Castle, ComicK)", () => {
+    // 2160×2871 · 778KB → 0,128 bytes/px NATIVO (abaixo do limiar 0,15 → punida)
+    //                   → 1,224 bytes/px EXIBIDO (sadia)
+    expect(scoreCover(real(2160, 2871, 778))).toBe(1)
+  })
+
+  it("🔴 a capa grande NÃO perde para uma pequena e sadia", () => {
+    const grande = scoreCover(real(2850, 4096, 1257)) // ComicK
+    const pequena = scoreCover(real(700, 950, 369)) // Kitsu
+    // Antes: 0,30 vs 1,00 — o score pedia a troca de 2850px por 700px.
+    expect(grande).toBeGreaterThanOrEqual(pequena)
+  })
+
+  it("uma capa genuinamente estourada AINDA é derrubada (abaixo de 700px nada muda)", () => {
+    // 500×700 com 25KB → 0,073 bytes/px, e como não há reamostragem os dois critérios
+    // são idênticos aqui. A correção não pode ter comprado o conserto perdendo detecção.
+    expect(scoreCover(real(500, 700, 25))).toBeLessThan(scoreCover(real(500, 700, 120)))
+  })
+
+  it("abaixo de TARGET_WIDTH o critério novo é IDÊNTICO ao antigo (sem reamostragem)", () => {
+    for (const [w, h] of [[300, 450], [500, 700], [699, 1000]] as const) {
+      const estourada = scoreCover(real(w, h, (w * h * 0.05) / 1024))
+      const sadia = scoreCover(real(w, h, (w * h * 0.35) / 1024))
+      expect(estourada).toBeLessThan(sadia)
+    }
+  })
+
   // REGRESSÃO: o limiar de "estourada" era único (0,15) e marcava 45% de TODOS os
   // WebP do catálogo como defeituosos — o WebP comprime ~2,2× melhor que JPEG pelo
   // mesmo resultado visual. Isso rebaixava uma capa de 771×1080 do AnimePlanet
