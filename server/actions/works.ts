@@ -43,7 +43,6 @@ import type {
   ReadingStatePatch,
   TasteStatePatch,
   PersonalStatePatch,
-  WorkReadingColumns,
 } from "@/server/queries/user-work-state"
 import { buildAutoRefreshPlan } from "@/lib/external/auto-refresh"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
@@ -700,8 +699,8 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
     supabase
       .from("works")
       .select(`
-        id, title, synopsis_quality, synopsis_quality_source, canonical_synopsis,
-        publication_status_id, total_chapters, observations, year,
+        id, title, canonical_synopsis,
+        publication_status_id, total_chapters, year,
         work_covers(url, is_primary, position),
         work_synopses(source, text, is_primary, position),
         calculated_scores(platform_avg, total_votes)
@@ -720,10 +719,10 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
   // primária das fontes enquanto a obra não passou pela consolidação.
   const canonicalSynopsis = ((data.canonical_synopsis as string | null) ?? "").trim()
 
-  // Interesse ♥ e observações são PESSOAIS (Fatia 2a): no hover de quem não é o dono, as
-  // colunas de `works` são as dele.
+  // Interesse ♥ e observações são PESSOAIS (Fatia 2a) — vêm do espelho de quem olha, não da
+  // linha compartilhada de `works` (que é a do dono).
   const personal = await getPersonalStateReader()
-  const state = personal.get(data.id as string, data as WorkReadingColumns)
+  const state = personal.get(data.id as string)
 
   return {
     workId: data.id as string,

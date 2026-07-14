@@ -13,33 +13,31 @@ import type { SynopsisQuality, SynopsisQualitySource } from "@/types/domain"
 //   2. para onde vai o estado de leitura de quem está clicando? (write)
 // Espalhar essas respostas seria repetir 8 vezes uma decisão que erra em silêncio.
 //
-// ── O modelo ───────────────────────────────────────────────────────────────────────────
+// ── O modelo (FASE D — o dono passou a ler o espelho) ─────────────────────────────────
 //
-// As 4 colunas (`is_favorite`, `personal_status_id`, `chapters_read`, `last_read_at`) moram
-// na linha COMPARTILHADA de `works`. Não existe "obra do fulano" — existe uma obra com lugar
-// para UM leitor. Logo, o estado que está em `works` é o do DONO (o singleton).
+//   LEITURA   TODOS     → `user_work_state`  (as próprias linhas, SEM fallback)
+//   ESCRITA   TODOS     → `user_work_state`  (cliente de SESSÃO, a RLS vale)
 //
-//   LEITURA   dono      → `works`            (fonte de verdade hoje — ver o porquê abaixo)
-//             os demais → `user_work_state`  (as próprias linhas, SEM fallback)
+// Uma fonte, um caminho, sem ramo. É a pré-condição do `DROP COLUMN` das 19 colunas
+// pessoais de `works` (§13.4): enquanto o dono LESSE `works`, dropar era impossível.
 //
-//   ESCRITA   todos     → `user_work_state`  (sempre; cliente de SESSÃO, a RLS vale)
-//             dono      → `works` também     (mantém o espelho compartilhado de pé)
+// ── Por que o ramo do dono existiu, e por que ele caiu ─────────────────────────────────
 //
-// ⚠️ Por que o DONO ainda lê de `works`, e não do espelho. Oito writers escrevem essas
-// colunas, não quatro: além de `toggleFavorite`/`setFavoriteMany`/`updateWorkStatus`/
-// `setReadingStatusForWorks` (que esta fatia converte), também `createWork`, `updateWork`,
-// `addWorksToList` (marca favorito ao pôr num grupo) e o **import de CSV**
-// (`lib/import/processor.ts` grava `personal_status_id`/`chapters_read` em massa). Esses
-// quatro são caminhos de CURADORIA e continuam gravando direto em `works` nesta fatia.
+// Na Fatia 1 o dono continuou lendo `works` por um motivo concreto: OITO writers gravavam
+// aquelas colunas, e quatro deles (`createWork`, `updateWork`, `addWorksToList`, o import de
+// CSV) eram caminhos de CURADORIA que NÃO espelhavam. Se o espelho fosse a fonte do dono
+// naquele momento, um import de planilha atualizaria `works` e a /leitura dele mostraria os
+// capítulos ANTIGOS — sem erro e sem log.
 //
-// Se o espelho fosse a fonte do dono, um import de planilha atualizaria `works` e a /leitura
-// dele mostraria os capítulos ANTIGOS — sem erro e sem log, o modo de falha que este projeto
-// já pagou caro. Lendo `works`, o dono é imune: para ele, nada muda. O espelho existe pra
-// (a) servir os OUTROS usuários e (b) ficar quente para o dia do `DROP COLUMN` (§13.4), que
-// exige rewire dos 8 e um re-backfill antes — `scripts/rebackfill-user-work-state.mjs`.
+// **A Fase A (PR #136) converteu os oito.** A razão caiu junto. E não é fé: com o espelho
+// já em dia, as 19 colunas do dono batem com `works` nas 882 obras (0 divergências, medido
+// contra o banco antes desta troca) — ou seja, trocar a fonte de leitura do dono é, hoje,
+// provadamente um no-op. É o único momento em que essa troca é gratuita; deixar passar seria
+// ter que reprovar tudo de novo depois.
 //
-// Consequência boa: pro dono (o caso comum) a leitura não custa NENHUMA query nova — o
-// estado já vem na linha de `works` que a página buscou de qualquer jeito.
+// ⚠️ O custo: o dono paga UMA query a mais por request (as ~882 linhas do espelho dele), que
+// antes vinha de graça embutida na linha de `works`. É memoizada por request (React `cache`),
+// então uma página com tabela + KPIs + cards paga uma só.
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
 /** As 8 notas pós-leitura ("Como foi pra você"). */
@@ -84,6 +82,16 @@ const EMPTY_POST_SCORES = Object.fromEntries(
   POST_READING_COLUMNS.map((c) => [c, null]),
 ) as Record<PostReadingColumn, number | null>
 
+/**
+ * O estado de uma obra que a pessoa nunca tocou (sem linha no espelho).
+ *
+ * ⚠️ `synopsisQualitySource` é `"legacy_unknown"`, não `null` — e a diferença NÃO é cosmética.
+ * A coluna é `NOT NULL DEFAULT 'legacy_unknown'` nos DOIS lados (`works` e o espelho), ou seja,
+ * `null` nunca foi um valor que o banco pudesse devolver: "nunca triado" sempre se escreveu
+ * `legacy_unknown`. Com `null` aqui, o filtro de Interesse "não avaliado" (que casa exatamente
+ * por essa string) pararia de encontrar as obras sem linha — devolvendo menos obras, sem erro.
+ * A view `works_owner` faz o mesmo `coalesce`, pelo mesmo motivo.
+ */
 export const EMPTY_PERSONAL_STATE: PersonalWorkState = {
   isFavorite: false,
   personalStatusId: null,
@@ -93,7 +101,7 @@ export const EMPTY_PERSONAL_STATE: PersonalWorkState = {
   observations: null,
   observationAdjustment: 0,
   synopsisQuality: null,
-  synopsisQualitySource: null,
+  synopsisQualitySource: "legacy_unknown",
   synopsisQualityPredictionId: null,
   synopsisInterestSkipped: false,
   postScores: EMPTY_POST_SCORES,
@@ -185,17 +193,16 @@ const PAGE = 1000
 
 export interface PersonalStateReader {
   userId: string
-  /** true = as colunas de `works` são o estado DESTE usuário. */
-  isOwner: boolean
   /**
-   * Estado de leitura do usuário atual para uma obra.
+   * Estado pessoal do usuário atual para uma obra. Obra sem linha = estado vazio (é o que
+   * "não acompanho isto" significa) — nunca o estado de outra pessoa.
    *
-   * `workRow` são as colunas de `works` que a página já buscou. Para o DONO elas SÃO o
-   * estado dele (fonte de verdade). Para qualquer outro usuário elas são o estado do DONO
-   * e por isso são **ignoradas** — sem fallback, é o que impede a Leitora de ver os
-   * favoritos e os capítulos dele como se fossem dela.
+   * ⚠️ NÃO recebe mais a linha de `works`. Recebia, e para o dono aquelas colunas ERAM a
+   * resposta. Agora a resposta vem sempre do espelho — e o parâmetro foi REMOVIDO de
+   * propósito: deixá-lo aí, ignorado, seria um convite a alguém "otimizar" de volta pro
+   * caminho antigo e reintroduzir o ramo que esta fase existe pra apagar.
    */
-  get(workId: string, workRow?: WorkReadingColumns | null): PersonalWorkState
+  get(workId: string): PersonalWorkState
 }
 
 /**
@@ -203,27 +210,15 @@ export interface PersonalStateReader {
  * uma página que renderiza tabela + KPIs + cards paga uma query só.
  *
  * Sem sessão (anônimo) → `getCurrentUserId()` cai no singleton, ou seja, o visitante segue
- * vendo o app pelos olhos do dono. É o comportamento de hoje e é intencional (o catálogo é
- * compartilhado por design); esta fatia não o muda. Quem ganha estado próprio é quem LOGA.
+ * vendo o app pelos olhos do dono. É intencional (o catálogo é compartilhado por design), e
+ * agora ele vê o estado do dono pelo ESPELHO do dono — mesmo dado, outra tabela.
  */
 export const getPersonalStateReader = cache(async (): Promise<PersonalStateReader> => {
-  const [userId, ownerId] = await Promise.all([getCurrentUserId(), getOwnerUserId()])
-  const isOwner = userId === ownerId
-
-  if (isOwner) {
-    // Dono: zero queries. O estado dele já está na linha de `works`.
-    return {
-      userId,
-      isOwner: true,
-      get: (_workId, workRow) => (workRow ? stateFromMirrorRow(workRow) : EMPTY_PERSONAL_STATE),
-    }
-  }
-
+  const userId = await getCurrentUserId()
   const byWorkId = await loadUserWorkState(userId)
+
   return {
     userId,
-    isOwner: false,
-    // `workRow` deliberadamente ignorado: é o estado do DONO.
     get: (workId) => byWorkId.get(workId) ?? EMPTY_PERSONAL_STATE,
   }
 })
@@ -269,11 +264,21 @@ async function loadUserWorkState(userId: string): Promise<Map<string, PersonalWo
 /**
  * Ids das obras do usuário atual que casam com um filtro de estado pessoal.
  *
- * `null` = "não filtre por id" — é o que o DONO recebe, porque para ele o filtro continua
- * sendo aplicado nas colunas de `works`, em SQL, como sempre foi (mesma query, mesmo plano,
- * zero regressão). Para os demais, o filtro só pode sair de `user_work_state`; lista vazia
- * significa "nenhuma obra casa" e o caller precisa forçar resultado vazio — NÃO ignorar o
- * filtro (ignorar vazaria o catálogo inteiro como se fosse tudo favorito dela).
+ * `null` = "não há filtro pessoal nenhum" (o caller não pediu). É a ÚNICA razão de um `null`
+ * hoje — o dono também recebe a lista de ids, como todo mundo.
+ *
+ * ⚠️ Lista VAZIA significa "nenhuma obra casa", e o caller tem que devolver resultado vazio —
+ * NÃO ignorar o filtro. Ignorar vazaria o catálogo inteiro como se fosse tudo favorito dela.
+ *
+ * 🔴 Isto NÃO serve pra filtrar por STATUS de leitura, e a diferença é sutil o bastante pra
+ * ter custado caro: uma obra SEM linha em `user_work_state` **é** "Want to Read" (é o default
+ * que o resto do app usa). Mas uma lista de ids só consegue dizer quem TEM linha — ela não
+ * consegue dizer "e também todas as que não têm". Como o /ranking filtra por
+ * ["Want to Read", "Untracked"] POR PADRÃO, filtrar status por id fazia a Leitora (zero
+ * linhas) abrir um catálogo de 882 obras e ler "Nenhuma obra encontrada". Não deu erro — deu
+ * vazio, que é pior. Status se filtra EM MEMÓRIA, sobre o estado já resolvido (que carrega o
+ * default). Favorito e Interesse ♥ podem sair por id: sem linha = não é favorito e não tem ♥,
+ * e aí a lista de ids diz a verdade inteira.
  */
 export async function resolvePersonalFilterIds(filter: {
   personalStatusIds?: number[] | null
@@ -287,8 +292,6 @@ export async function resolvePersonalFilterIds(filter: {
   if (!wantsStatus && !onlyFavorites && !wantsInterest) return null
 
   const reader = await getPersonalStateReader()
-  if (reader.isOwner) return null
-
   const supabase = createAdminClient()
   const ids: string[] = []
 

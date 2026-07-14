@@ -34,25 +34,19 @@ export async function filterWorkIdsByInterest(
     const realHearts = new Set(manualQualities.filter((q) => q !== "none" && q !== "unknown"))
     const wantNone = manualQualities.includes("none")
     const wantUnknown = manualQualities.includes("unknown")
-    const { data, error } = await selectByIdsInChunks<{
-      id: string
-      synopsis_quality: string | null
-      synopsis_quality_source: string | null
-    }>(ids, (chunk) =>
-      sb.from("works").select("id, synopsis_quality, synopsis_quality_source").in("id", chunk),
-    )
-    if (error) throw new Error(`Falha filtrando por Interesse manual: ${error.message}`)
 
-    // O ♥ é PESSOAL (Fatia 2a): as colunas de `works` são as do dono. Sem esta troca, a
-    // Leitora filtrando por "♥♥♥" receberia as obras que ELE marcou.
+    // O ♥ é PESSOAL (Fatia 2a) e vem do espelho de QUEM OLHA — antes havia um `select` em
+    // `works` aqui, e ele só existia pra servir de fallback ao dono. Com o dono lendo o espelho
+    // (Fase D) esse select virou uma ida ao banco que não dizia mais nada: o estado já está no
+    // reader, memoizado por request.
     const personal = await getPersonalStateReader()
     const passing = new Set<string>()
-    for (const r of data) {
-      const state = personal.get(r.id, r)
+    for (const id of ids) {
+      const state = personal.get(id)
       const q = state.synopsisQuality
-      if (q != null && realHearts.has(q)) passing.add(r.id)
-      else if (wantNone && q == null) passing.add(r.id)
-      else if (wantUnknown && state.synopsisQualitySource === "legacy_unknown") passing.add(r.id)
+      if (q != null && realHearts.has(q)) passing.add(id)
+      else if (wantNone && q == null) passing.add(id)
+      else if (wantUnknown && state.synopsisQualitySource === "legacy_unknown") passing.add(id)
     }
     keep = new Set([...keep].filter((id) => passing.has(id)))
   }

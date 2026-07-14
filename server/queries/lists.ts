@@ -318,7 +318,7 @@ export async function getWorksLiteForPicker(): Promise<WorkLiteForPicker[]> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("works")
-    .select("id, title, is_favorite, calculated_scores(expected_score), work_covers(url, is_primary, position)")
+    .select("id, title, calculated_scores(expected_score), work_covers(url, is_primary, position)")
     .eq("is_archived", false)
     .order("title", { ascending: true })
     .limit(3000)
@@ -331,7 +331,6 @@ export async function getWorksLiteForPicker(): Promise<WorkLiteForPicker[]> {
   const rows = (data ?? []) as unknown as Array<{
     id: string
     title: string
-    is_favorite: boolean
     calculated_scores: { expected_score: number | null } | null
     work_covers: Array<{ url: string; is_primary: boolean; position: number }> | null
   }>
@@ -350,7 +349,7 @@ export async function getWorksLiteForPicker(): Promise<WorkLiteForPicker[]> {
       title: w.title,
       coverUrl: pickPrimaryCover(w.work_covers),
       expectedScore: scoresReader.overlay(w.id, w.calculated_scores)?.expected_score ?? null,
-      isFavorite: personal.get(w.id, w).isFavorite,
+      isFavorite: personal.get(w.id).isFavorite,
     }))
     .sort((a, b) => {
       const ea = a.expectedScore ?? -Infinity

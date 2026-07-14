@@ -8,11 +8,10 @@ import type {
 } from "@/types/domain"
 import {
   getPublicationStatusIdByName,
-  getPersonalStatusIdByName,
+  getPersonalStatusNameById,
 } from "@/lib/constants/status-lookups"
 import { titleToSlug } from "@/lib/utils"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
-import type { WorkReadingColumns } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 
 const WORK_WITH_RELATIONS_SELECT = `
@@ -26,24 +25,20 @@ const WORK_WITH_RELATIONS_SELECT = `
   work_synopses(id, source, text, is_primary, position)
 `
 
+// ⚠️ Sem coluna pessoal (Fase D): status, capítulos, ♥, favorito e "última leitura" vêm do
+// espelho de quem olha, via `withPersonalState()` — não da linha compartilhada de `works`.
 const WORK_LIST_SELECT = `
   id,
   title,
   original_title,
   alternative_titles,
   publication_status_id,
-  personal_status_id,
   ai_eval_status,
-  chapters_read,
   total_chapters,
   is_archived,
-  is_favorite,
   year,
-  synopsis_quality,
-  synopsis_quality_source,
   created_at,
   updated_at,
-  last_read_at,
   calculated_scores(calc_score, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, chance_is_stub, personal_fit, personal_fit_percentile, alignment_score, alignment_justification, alignment_payload, alignment_stale, alignment_at, platform_avg, total_votes),
   category_scores(criterion_slug, score),
   work_covers(url, is_primary, position),
@@ -180,12 +175,9 @@ function applyWorkFilters(
       .filter((id): id is number => id != null)
     if (ids.length > 0) query = query.in("publication_status_id", ids)
   }
-  if (filters.personalStatus?.length) {
-    const ids = filters.personalStatus
-      .map(getPersonalStatusIdByName)
-      .filter((id): id is number => id != null)
-    if (ids.length > 0) query = query.in("personal_status_id", ids)
-  }
+  // ⚠️ `personalStatus` e `isFavorite` NÃO são filtrados aqui — são PESSOAIS e saíram de
+  // `works` (Fase D). Quem os aplica é `getWorks`, em memória, sobre o estado de quem olha:
+  // no SQL, a obra sem linha no espelho (que É "Want to Read") sumiria em silêncio.
   if (filters.aiEvalStatus?.length) {
     query = query.in("ai_eval_status", filters.aiEvalStatus)
   }
@@ -209,9 +201,6 @@ function applyWorkFilters(
   } else {
     query = query.eq("is_archived", false)
   }
-  if (filters.isFavorite) {
-    query = query.eq("is_favorite", true)
-  }
   if (searchMatchIds) {
     query = query.in("id", searchMatchIds.length ? searchMatchIds : ["00000000-0000-0000-0000-000000000000"])
   }
@@ -233,9 +222,30 @@ export async function getWorks(
 ): Promise<PaginatedResult<WorkWithRelations>> {
   const supabase = createAdminClient()
   const searchTerm = filters.search?.trim() || undefined
+
+  // O estado pessoal de QUEM OLHA (Fase D) — favorito, status, capítulos, "última leitura".
+  const personal = await getPersonalStateReader()
+
+  // 🔴 Filtrar ou ordenar por estado pessoal NÃO PODE mais acontecer no SQL, e a razão é a
+  // mesma dos outros lugares: o estado saiu de `works` e foi pro espelho, e uma obra SEM linha
+  // no espelho **é** "Want to Read". Um `.in("personal_status_id", ...)` sobre uma lista de ids
+  // só alcança quem TEM linha — as sem linha sumiriam do /titles, em silêncio. E expressar "as
+  // que não têm linha" como um `NOT IN (…)` de centenas de uuids estoura a URL do PostgREST
+  // (o mesmo 400 que os `.in()` gigantes já causaram neste projeto).
+  //
+  // Então: qualquer filtro OU ordenação pessoal força o caminho de duas fases (busca leve →
+  // filtra/ordena em memória → busca pesada só da página). O catálogo tem ~882 obras; a busca
+  // leve é barata, e é a mesma máquina que os filtros de nota já usavam.
+  const hasPersonalFilter = (filters.personalStatus?.length ?? 0) > 0 || filters.isFavorite === true
+  const sortsByPersonal =
+    sort.field === "is_favorite" ||
+    sort.field === "last_read_at" ||
+    sort.field === "personal_status"
+
   const needsClientScoreProcessing =
     sort.field === "expected_score" ||
-    sort.field === "is_favorite" ||
+    sortsByPersonal ||
+    hasPersonalFilter ||
     filters.minExpectedScore != null ||
     filters.maxExpectedScore != null ||
     filters.minPersonalFitPct != null ||
@@ -278,7 +288,7 @@ export async function getWorks(
     // every matching work just to throw most of it away.
     let lightQuery = supabase
       .from("works")
-      .select("id, is_favorite, calculated_scores(expected_score, personal_fit, personal_fit_percentile, total_votes)")
+      .select("id, calculated_scores(expected_score, personal_fit, personal_fit_percentile, total_votes)")
     lightQuery = applyWorkFilters(lightQuery, filters, searchMatchIds, genreMatchIds, tagMatchIds)
 
     const { data: lightData, error: lightError } = await lightQuery
@@ -286,7 +296,10 @@ export async function getWorks(
 
     type LightRow = {
       id: string
-      is_favorite: boolean
+      /** Do ESPELHO de quem olha — não da coluna de `works` (que é o favorito do dono). */
+      isFavorite: boolean
+      personalStatusId: number | null
+      lastReadAt: string | null
       calculated_scores: {
         expected_score: number | null
         personal_fit: number | null
@@ -298,12 +311,29 @@ export async function getWorks(
     let scored = (lightData ?? []).map((row): LightRow => {
       const cs = (row as { calculated_scores: unknown }).calculated_scores
       const flat = Array.isArray(cs) ? (cs[0] ?? null) : (cs ?? null)
+      const id = (row as { id: string }).id
+      const state = personal.get(id)
       return {
-        id: (row as { id: string }).id,
-        is_favorite: Boolean((row as { is_favorite?: boolean }).is_favorite),
+        id,
+        isFavorite: state.isFavorite,
+        personalStatusId: state.personalStatusId,
+        lastReadAt: state.lastReadAt,
         calculated_scores: flat as LightRow["calculated_scores"],
       }
     })
+
+    // Os filtros pessoais, agora sobre o estado de quem olha. `getPersonalStatusNameById(null)`
+    // cai em "Want to Read" — é aqui que a obra sem linha no espelho é corretamente contada,
+    // que é justamente o que o SQL não conseguia dizer.
+    if (filters.personalStatus?.length) {
+      const wanted = new Set<string>(filters.personalStatus)
+      scored = scored.filter((w) =>
+        wanted.has(getPersonalStatusNameById(w.personalStatusId) ?? "Want to Read"),
+      )
+    }
+    if (filters.isFavorite) {
+      scored = scored.filter((w) => w.isFavorite)
+    }
 
     if (filters.minExpectedScore != null) {
       scored = scored.filter((w) => (w.calculated_scores?.expected_score ?? -1) >= filters.minExpectedScore!)
@@ -337,14 +367,31 @@ export async function getWorks(
       scored = scored.filter((w) => (w.calculated_scores?.total_votes ?? 0) <= filters.maxTotalVotes!)
     }
 
+    const dir = sort.direction === "asc" ? -1 : 1
+
     if (sort.field === "is_favorite") {
       // Favoritos primeiro (ou último, se asc); desempate por Nota Prevista desc.
       scored.sort((a, b) => {
-        const favDelta = Number(b.is_favorite) - Number(a.is_favorite)
+        const favDelta = Number(b.isFavorite) - Number(a.isFavorite)
         if (favDelta !== 0) return sort.direction === "asc" ? -favDelta : favDelta
         const aScore = a.calculated_scores?.expected_score ?? -1
         const bScore = b.calculated_scores?.expected_score ?? -1
         return bScore - aScore
+      })
+    } else if (sort.field === "last_read_at") {
+      // Era um `.order("last_read_at")` no SQL — a data que estava em `works`, ou seja, a do
+      // DONO. Agora é a de quem olha. Nulos por último nos dois sentidos (era `nullsFirst: false`).
+      scored.sort((a, b) => {
+        if (a.lastReadAt === b.lastReadAt) return 0
+        if (a.lastReadAt == null) return 1
+        if (b.lastReadAt == null) return -1
+        return dir * b.lastReadAt.localeCompare(a.lastReadAt)
+      })
+    } else if (sort.field === "personal_status") {
+      scored.sort((a, b) => {
+        const an = getPersonalStatusNameById(a.personalStatusId) ?? "Want to Read"
+        const bn = getPersonalStatusNameById(b.personalStatusId) ?? "Want to Read"
+        return dir * -an.localeCompare(bn)
       })
     } else {
       // Único sort de nota restante: Nota Prevista (expected_score).
@@ -404,22 +451,22 @@ export async function getWorks(
 }
 
 /**
- * Sobrepõe o estado PESSOAL de quem está olhando nas colunas pessoais que vêm de `works`:
- * acompanhamento (Fatia 1) + gosto (Fatia 2a: nota, anotações, interesse ♥, pós-leitura).
+ * PREENCHE o estado pessoal de quem está olhando no objeto de obra que a UI consome.
  *
- * Pro dono é identidade — aquelas colunas SÃO o estado dele. Pra qualquer outro usuário, elas
- * são o estado do DONO: sem esta troca, a Leitora abriria a obra e veria o coração dele
- * preenchido, "capítulo 137 de 200" e a NOTA 8,5 dele como se fossem dela.
+ * Antes isto SOBREPUNHA colunas que vinham de `works` (o estado do dono) pelas do usuário. A
+ * partir da Fase D não há o que sobrepor: `works` não traz mais coluna pessoal nenhuma, e estes
+ * campos nascem aqui, do espelho de quem olha. Obra sem linha = estado vazio.
  *
- * ⚠️ Isto é a camada de UI. O SCORING não passa por aqui: ele lê `works` direto, de propósito
- * (são os rótulos do dono, com os quais o modelo dele foi treinado).
+ * ⚠️ Isto é a camada de UI. O SCORING não passa por aqui — ele lê os rótulos DO DONO
+ * (`works_owner` / o espelho dele), que é com o que o modelo dele foi treinado. Trocar um pelo
+ * outro faria o modelo aprender o gosto de quem abriu a página.
  *
  * Ver server/queries/user-work-state.ts.
  */
 async function withPersonalState(works: WorkWithRelations[]): Promise<WorkWithRelations[]> {
   const [personal, scores] = await Promise.all([getPersonalStateReader(), getScoresReader()])
   return works.map((work) => {
-    const state = personal.get(work.id, work as WorkReadingColumns)
+    const state = personal.get(work.id)
     return {
       ...work,
       // Fatia 2b: a Nota Prevista, a Chance e o Alinhamento são de QUEM OLHA. Os campos de

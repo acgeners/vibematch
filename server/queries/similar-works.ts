@@ -33,11 +33,11 @@ export interface SimilarWork {
   predictedSynopsisStale: boolean
 }
 
+/** ⚠️ Sem `user_score`: a migration 151 o removeu da RPC (era a nota do DONO). */
 interface RpcRow {
   id: string
   title: string
   similarity: number
-  user_score: number | null
   expected_score: number | null
   personal_fit: number | null
   cover_url: string | null
@@ -49,9 +49,6 @@ interface WorkMetaRow {
   year: number | null
   total_chapters: number | null
   publication_status_id: number | null
-  personal_status_id: number | null
-  synopsis_quality: string | null
-  synopsis_quality_source: string | null
   canonical_synopsis: string | null
 }
 
@@ -103,7 +100,7 @@ export async function getSimilarWorks(
   const [metaResult, genresResult, ratingsResult, calcResult, predictions] = await Promise.all([
     supabase
       .from("works")
-      .select("id, year, total_chapters, publication_status_id, personal_status_id, synopsis_quality, synopsis_quality_source, canonical_synopsis")
+      .select("id, year, total_chapters, publication_status_id, canonical_synopsis")
       .in("id", ids),
     supabase
       .from("work_genres")
@@ -161,9 +158,9 @@ export async function getSimilarWorks(
     genresByWorkId.set(row.work_id, existing)
   }
 
-  // Nota, ♥ e status são PESSOAIS (Fatias 1 e 2a). A RPC de similares devolve `user_score` da
-  // linha de `works` — a nota do DONO. Sem esta troca, o card "Similares" da Leitora mostraria
-  // as notas dele nas obras parecidas.
+  // Nota, ♥ e status são PESSOAIS (Fatias 1 e 2a) e vêm do espelho de quem olha — pra todo
+  // mundo (Fase D). A RPC não devolve mais `user_score` (mig 151): era a nota do DONO, exibida
+  // no card "Similares" de quem quer que abrisse a página.
   const personal = await getPersonalStateReader()
   // Fatia 2b: o card de Similares mostra expectedScore/personalFit/alignment de CADA obra
   // parecida — e eles vinham de `calculated_scores`, ou seja, do DONO. Era o vazamento que o
@@ -182,7 +179,7 @@ export async function getSimilarWorks(
     })
     const pred = predictions.get(r.id)
     const ratings = ratingsByWorkId.get(r.id) ?? []
-    const state = personal.get(r.id, { ...(meta ?? {}), user_score: r.user_score })
+    const state = personal.get(r.id)
 
     const rated = ratings.filter((pr) => pr.rating != null && pr.vote_count > 0)
     const totalVotes = ratings.reduce((sum, pr) => sum + pr.vote_count, 0)
