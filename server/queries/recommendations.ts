@@ -30,39 +30,86 @@ const POST_SCORE_FIELDS = [
   "post_originality_score",
 ] as const
 
+// ── O estado pessoal vem de `user_work_state`, do usuário DA SESSÃO ────────────────────
+//
+// Desde a mig 154 as colunas pessoais não moram mais em `works` (catálogo compartilhado):
+// moram em `user_work_state`, uma linha por (user_id, work_id). Toda query daqui EMBUTE esse
+// estado e o filtra por `user_work_state.user_id = getCurrentUserId()`.
+//
+// ⚠️ NÃO use a view `works_owner` aqui. Ela resolve o join num usuário FIXO (a linha mais
+// antiga de `user_settings` = o dono), então serviria as notas e as favoritas DELE a qualquer
+// pessoa logada — sem erro, só recomendação errada. Ela existe como ponte de compatibilidade
+// para os call sites ainda não religados, não como jeito certo de ler dado pessoal.
+//
+// Embed sem `!inner` = LEFT JOIN: a obra volta mesmo para quem não tem linha de estado
+// (usuário novo), com o array vazio. Com `!inner`, só voltam as obras que têm estado — é o que
+// os filtros pessoais (favorita, já avaliada) precisam.
+// `!inner`: só as obras já avaliadas pelo usuário entram no perfil de gosto (é o
+// conjunto de treino). O filtro por `user_work_state.user_id` mora em cada query.
 const RATED_WORK_SELECT = `
   id,
   title,
-  user_score,
-  personal_status_id,
-  post_story_score,
-  post_fl_score,
-  post_ml_score,
-  post_character_development_score,
-  post_pacing_score,
-  post_art_visual_score,
-  post_impact_immersion_score,
-  post_originality_score,
   updated_at,
   canonical_synopsis,
+  user_work_state!inner(
+    user_score,
+    personal_status_id,
+    post_story_score,
+    post_fl_score,
+    post_ml_score,
+    post_character_development_score,
+    post_pacing_score,
+    post_art_visual_score,
+    post_impact_immersion_score,
+    post_originality_score
+  ),
   category_scores(criterion_slug, score, source),
   work_tags(tag_id, tags(name, tag_group_id)),
   work_synopses(text, is_primary, position)
 `
 
+// Hidratação de candidato: LEFT embed (sem `!inner`) — a obra volta mesmo se o usuário
+// nunca a tocou (candidato de descoberta), com o estado vazio.
+// ⚠️ `calculated_scores` (expected_score, personal_fit) NÃO tem `user_id` — é uma linha por obra,
+// derivada do modelo treinado nas notas do DONO. Enquanto ela não for particionada por usuário
+// (Fase 3), o candidato de um não-dono sai com o estado pessoal certo e a Nota Prevista do dono.
 const CANDIDATE_WORK_SELECT = `
   id,
   title,
-  user_score,
-  is_favorite,
   canonical_synopsis,
   review_summary,
+  user_work_state(user_score, is_favorite),
   category_scores(criterion_slug, score, source),
   calculated_scores(platform_avg, total_votes, expected_score, personal_fit),
   work_tags(tag_id, tags(name, tag_group_id)),
   work_synopses(text, is_primary, position),
   work_covers(url, is_primary, position)
 `
+
+// `!inner` + filtro `is_favorite`: só as favoritas do usuário. Mesmos campos do candidato.
+const FAVORITE_WORK_SELECT = `
+  id,
+  title,
+  canonical_synopsis,
+  review_summary,
+  user_work_state!inner(user_score, is_favorite),
+  category_scores(criterion_slug, score, source),
+  calculated_scores(platform_avg, total_votes, expected_score, personal_fit),
+  work_tags(tag_id, tags(name, tag_group_id)),
+  work_synopses(text, is_primary, position),
+  work_covers(url, is_primary, position)
+`
+
+/**
+ * O estado pessoal embutido chega como ARRAY (de `works`, a relação com `user_work_state` é
+ * um-para-muitos: uma linha por usuário). Filtrado por `user_id`, o array tem 0 ou 1 item —
+ * 0 quando o usuário nunca tocou na obra.
+ */
+function pickUserState(row: Record<string, unknown>): Record<string, unknown> | null {
+  const rows = row.user_work_state as Record<string, unknown>[] | Record<string, unknown> | null
+  if (!rows) return null
+  return Array.isArray(rows) ? (rows[0] ?? null) : rows
+}
 
 interface RawCategoryScore {
   criterion_slug: string
@@ -168,10 +215,12 @@ export async function fetchReviewDigestsBatch(workIds: string[]): Promise<Map<st
 
 export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInput[]> {
   const supabase = createAdminClient()
+  const userId = await getCurrentUserId(supabase)
   const { data, error } = await supabase
-    .from("works_owner")
+    .from("works")
     .select(RATED_WORK_SELECT)
-    .not("user_score", "is", null)
+    .eq("user_work_state.user_id", userId)
+    .not("user_work_state.user_score", "is", null)
     .eq("is_archived", false)
     .order("updated_at", { ascending: false })
     .limit(limit)
@@ -183,9 +232,10 @@ export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInp
   const biasMap = await loadBiasMapForRecs(supabase)
   return (data ?? []).map((row) => {
     const work = row as unknown as Record<string, unknown>
+    const state = pickUserState(work) ?? {}
     const postScores: Partial<Record<string, number>> = {}
     for (const field of POST_SCORE_FIELDS) {
-      const v = work[field]
+      const v = state[field]
       if (v != null) postScores[field] = Number(v)
     }
     const synopsis = pickRecommendationSynopsis(
@@ -196,7 +246,7 @@ export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInp
         position: s.position ?? null,
       })),
     )
-    const personalStatusId = work.personal_status_id as number | null
+    const personalStatusId = state.personal_status_id as number | null
     const personalStatus = personalStatusId != null
       ? PERSONAL_STATUSES_BY_ID[personalStatusId]?.status ?? null
       : null
@@ -204,7 +254,7 @@ export async function getRatedWorksForProfile(limit = 200): Promise<RatedWorkInp
     return {
       id: work.id as string,
       title: work.title as string,
-      userScore: work.user_score != null ? Number(work.user_score) : null,
+      userScore: state.user_score != null ? Number(state.user_score) : null,
       postScores,
       personalStatus,
       synopsis,
@@ -225,6 +275,7 @@ function mapRowToCandidate(
   reviewDigest: ReviewDigest | null = null,
 ): FavoriteCandidate {
   const work = row as Record<string, unknown>
+  const state = pickUserState(work)
   const calc = (work.calculated_scores as { platform_avg?: number | null; total_votes?: number | null; expected_score?: number | null; personal_fit?: number | null } | null) ?? null
   const synopsis = pickRecommendationSynopsis(
     work.canonical_synopsis as string | null | undefined,
@@ -255,7 +306,7 @@ function mapRowToCandidate(
     reviewSummary: (work.review_summary as string | null) ?? null,
     reviewDigest,
     coverUrl,
-    isAlreadyRated: work.user_score != null,
+    isAlreadyRated: state?.user_score != null,
   } satisfies FavoriteCandidate
 }
 
@@ -264,14 +315,16 @@ export async function getFavoriteCandidates(
   limit = 20,
 ): Promise<FavoriteCandidate[]> {
   const supabase = createAdminClient()
+  const userId = await getCurrentUserId(supabase)
   let query = supabase
-    .from("works_owner")
-    .select(CANDIDATE_WORK_SELECT)
-    .eq("is_favorite", true)
+    .from("works")
+    .select(FAVORITE_WORK_SELECT)
+    .eq("user_work_state.user_id", userId)
+    .eq("user_work_state.is_favorite", true)
     .eq("is_archived", false)
 
   if (mode === "next_read") {
-    query = query.is("user_score", null)
+    query = query.is("user_work_state.user_score", null)
   }
 
   const { data, error } = await query.order("updated_at", { ascending: false }).limit(limit)
@@ -307,9 +360,11 @@ export async function getRankingCandidates(
   const ids = entries.map((e) => e.workId)
 
   const supabase = createAdminClient()
+  const userId = await getCurrentUserId(supabase)
   const { data, error } = await supabase
     .from("works")
     .select(CANDIDATE_WORK_SELECT)
+    .eq("user_work_state.user_id", userId)
     .in("id", ids)
   if (error) throw new Error(`Falha hidratando candidatos do ranking: ${error.message}`)
 
@@ -331,9 +386,11 @@ export async function getRankingCandidates(
  */
 export async function getCandidateById(workId: string): Promise<FavoriteCandidate | null> {
   const supabase = createAdminClient()
+  const userId = await getCurrentUserId(supabase)
   const { data, error } = await supabase
     .from("works")
     .select(CANDIDATE_WORK_SELECT)
+    .eq("user_work_state.user_id", userId)
     .eq("id", workId)
     .eq("is_archived", false)
     .maybeSingle()
@@ -588,9 +645,11 @@ export async function getStaleAlignmentCandidates(limit = 200): Promise<Favorite
   if (ids.length === 0) return []
 
   const supabase = createAdminClient()
+  const userId = await getCurrentUserId(supabase)
   const { data, error } = await supabase
     .from("works")
     .select(CANDIDATE_WORK_SELECT)
+    .eq("user_work_state.user_id", userId)
     .in("id", ids)
     .eq("is_archived", false)
   if (error) throw new Error(`Falha hidratando candidatos stale: ${error.message}`)
@@ -1031,6 +1090,7 @@ export async function getAttributesQueueCount(): Promise<number> {
 export async function getCandidatesByIds(ids: string[]): Promise<FavoriteCandidate[]> {
   if (ids.length === 0) return []
   const supabase = createAdminClient()
+  const userId = await getCurrentUserId(supabase)
   // Chunk de 100 ids por request: `.in("id", [...])` codifica cada UUID na URL
   // (~37 chars); 100 ≈ 3.7KB, abaixo do limite de proxy/PostgREST (~16KB).
   const rows: unknown[] = []
@@ -1039,6 +1099,7 @@ export async function getCandidatesByIds(ids: string[]): Promise<FavoriteCandida
     const { data, error } = await supabase
       .from("works")
       .select(CANDIDATE_WORK_SELECT)
+      .eq("user_work_state.user_id", userId)
       .in("id", chunk)
       .eq("is_archived", false)
     if (error) throw new Error(`Falha hidratando candidatos por ID: ${error.message}`)
@@ -1258,9 +1319,11 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
 
   const worksById = new Map<string, FavoriteCandidate>()
   if (workIds.length > 0) {
+    const userId = await getCurrentUserId(supabase)
     const { data: worksData } = await supabase
       .from("works")
       .select(CANDIDATE_WORK_SELECT)
+      .eq("user_work_state.user_id", userId)
       .in("id", workIds)
     // Exibição da run histórica: a justificativa já está congelada no `results`.
     const biasMap = await loadBiasMapForRecs(supabase)
