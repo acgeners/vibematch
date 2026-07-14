@@ -71,26 +71,21 @@ export interface AiQueueCounts {
 export async function getDashboardStats(): Promise<DashboardStats> {
   const supabase = createAdminClient()
 
-  // "Avaliadas" é o número de obras que EU notei — não as que o dono notou (Fatia 2a). Pro
-  // dono, a conta continua sendo em `works`; pros demais, nas linhas dela.
+  // "Avaliadas" é o número de obras que EU notei — não as que o dono notou (Fatia 2a). Agora
+  // sai de `user_work_state` pra TODO MUNDO (Fase D): eram duas contas, uma em `works_owner`
+  // (dono) e outra no espelho (os demais).
   //
-  // Em duas funções, e não num ternário dentro do `Promise.all`: os dois query builders têm
-  // tipos diferentes, e o union deles faz o TS estourar em "type instantiation is excessively
-  // deep" (TS2589).
+  // ⚠️ E elas não contavam a mesma coisa: a do dono excluía arquivadas (`is_archived = false`),
+  // a dela não. Unificar exigiu escolher — ficou a semântica DELE (arquivada não conta), que é
+  // a que o resto da home usa. O `!inner` é o que permite filtrar por uma coluna de `works` a
+  // partir do espelho; sem ele o filtro de arquivada seria silenciosamente ignorado.
   const personal = await getPersonalStateReader()
-  const countRatedByOwner = async () => {
-    const { count } = await supabase
-      .from("works_owner")
-      .select("id", { count: "exact", head: true })
-      .eq("is_archived", false)
-      .not("user_score", "is", null)
-    return count ?? 0
-  }
-  const countRatedByUser = async () => {
+  const countRated = async () => {
     const { count } = await supabase
       .from("user_work_state")
-      .select("work_id", { count: "exact", head: true })
+      .select("work_id, works!inner(is_archived)", { count: "exact", head: true })
       .eq("user_id", personal.userId)
+      .eq("works.is_archived", false)
       .not("user_score", "is", null)
     return count ?? 0
   }
@@ -99,11 +94,11 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     // `works` (não a view): serve qualquer usuário e passa pelo overlay abaixo.
     supabase
       .from("works")
-      .select("id, ai_eval_status, is_archived, publication_status_id, personal_status_id, total_chapters, chapters_read"),
+      .select("id, ai_eval_status, is_archived, publication_status_id, total_chapters"),
     supabase
       .from("calculated_scores")
       .select("work_id, expected_score"),
-    personal.isOwner ? countRatedByOwner() : countRatedByUser(),
+    countRated(),
   ])
 
   if (worksRes.error) throw new Error(worksRes.error.message)
@@ -146,7 +141,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   let following = 0
   let followingWithPending = 0
   for (const w of active) {
-    const state = personal.get(w.id, w)
+    const state = personal.get(w.id)
     const pubName = getPublicationStatusNameById(w.publication_status_id) ?? "Unknown"
     const persName = getPersonalStatusNameById(state.personalStatusId) ?? "Want to Read"
     byPublicationStatus[pubName] = (byPublicationStatus[pubName] ?? 0) + 1
@@ -192,7 +187,7 @@ export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]>
   const { data, error } = await supabase
     .from("works")
     .select(`
-      id, title, is_archived, publication_status_id, personal_status_id, user_score,
+      id, title, is_archived, publication_status_id,
       calculated_scores(expected_score, platform_avg),
       work_covers(url, is_primary, position)
     `)
@@ -205,15 +200,13 @@ export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]>
     id: string
     title: string
     publication_status_id: number | null
-    personal_status_id: number | null
-    user_score: number | null
     calculated_scores: { expected_score: number | null; platform_avg: number | null } | null
     work_covers?: CoverRow[] | null
   }
 
   const candidatas = ((data ?? []) as unknown as Row[])
     .map((w) => {
-      const state = personal.get(w.id, w)
+      const state = personal.get(w.id)
       const calc = scores.overlay(w.id, w.calculated_scores)
       return {
         id: w.id,
@@ -259,43 +252,37 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
 
   const supabase = createAdminClient()
 
-  // "Continue lendo" é, por definição, o que EU estou lendo. Pro dono sai de `works`; pros
-  // demais, de `user_work_state` — senão o widget da home dela oferece os capítulos DELE.
+  // "Continue lendo" é, por definição, o que EU estou lendo — sai de `user_work_state`, pra
+  // todo mundo (Fase D). "Lendo" é sempre uma linha explícita de estado, então o recorte por id
+  // é exato aqui (diferente do /ranking, onde obra SEM linha é "Want to Read" e um filtro por
+  // id não consegue dizer isso). `[]` = não estou lendo nada → widget vazio.
   const personal = await getPersonalStateReader()
   // Fatia 2b: a Nota Prevista mostrada no card é de QUEM OLHA — não a do dono.
   const scoresReader = await getScoresReader()
   const ownIds = await resolvePersonalFilterIds({ personalStatusIds: statusIds })
-  if (ownIds && ownIds.length === 0) return []
+  if (!ownIds || ownIds.length === 0) return []
 
   // ⚠️ `works`, não `works_owner`: esta query serve QUALQUER usuário e passa pelo overlay do
   // `personal.get()`. A view é a fonte do DONO — usá-la aqui daria os capítulos dele como base
   // pra ela (e ainda quebra: a view não tem as colunas de data de capítulo).
-  let query = supabase
+  const { data, error } = await supabase
     .from("works")
     .select(`
-      id, title, personal_status_id, total_chapters, chapters_read, last_read_at,
+      id, title, total_chapters,
       last_chapter_released_at, next_chapter_predicted_at,
       calculated_scores(expected_score),
       work_covers(url, is_primary, position),
       work_external_ids(source, external_id, is_rejected)
     `)
     .eq("is_archived", false)
-  query = ownIds ? query.in("id", ownIds) : query.in("personal_status_id", statusIds)
-
-  const { data, error } = await query.order("last_read_at", {
-    ascending: false,
-    nullsFirst: false,
-  })
+    .in("id", ownIds)
 
   if (error) throw new Error(error.message)
 
   const items = ((data ?? []) as Array<{
     id: string
     title: string
-    personal_status_id: number | null
     total_chapters: number | null
-    chapters_read: number | null
-    last_read_at: string | null
     last_chapter_released_at: string | null
     next_chapter_predicted_at: string | null
     calculated_scores?: { expected_score?: number | null } | null
@@ -303,7 +290,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
     work_external_ids?: ExternalIdRow[] | null
   }>).map((w) => {
     const comixHid = pickComixHid(w.work_external_ids)
-    const state = personal.get(w.id, w)
+    const state = personal.get(w.id)
     const pending =
       w.total_chapters != null ? Math.max(0, w.total_chapters - (state.chaptersRead ?? 0)) : null
     return {
@@ -322,10 +309,16 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
     }
   })
 
-  // O `.order()` é por `works.last_read_at` (a data DELE) — reordena pela dela.
-  if (!personal.isOwner) {
-    items.sort((a, b) => (b.lastReadAt ?? "").localeCompare(a.lastReadAt ?? ""))
-  }
+  // Ordena pela "última leitura" de QUEM OLHA — em memória. Era um `.order("last_read_at")` no
+  // SQL (a data que estava em `works`, ou seja, a DELE) corrigido depois por um re-sort só pros
+  // outros usuários. Agora a data vem do espelho e o SQL não tem mais essa coluna: o re-sort é
+  // o único caminho, e vale pros dois. Nulos por último (era `nullsFirst: false`).
+  items.sort((a, b) => {
+    if (a.lastReadAt === b.lastReadAt) return 0
+    if (a.lastReadAt == null) return 1
+    if (b.lastReadAt == null) return -1
+    return b.lastReadAt.localeCompare(a.lastReadAt)
+  })
 
   // Só as com capítulos pendentes (total > lidos); corta em `limit` depois do filtro.
   return items.filter((i) => i.pending != null && i.pending > 0).slice(0, limit)

@@ -3,7 +3,6 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import { unstable_cache } from "next/cache"
 import {
   getPublicationStatusIdByName,
-  getPersonalStatusIdByName,
   getPublicationStatusNameById,
   getPersonalStatusNameById,
 } from "@/lib/constants/status-lookups"
@@ -281,7 +280,6 @@ export async function getRanking(
     return ids.length > 0 ? ids : []
   }
   const publicationStatusIdFilter = resolveStatusIds(filters.publicationStatus, getPublicationStatusIdByName)
-  const personalStatusIdFilter = resolveStatusIds(filters.personalStatus, getPersonalStatusIdByName)
 
   // Estado de leitura de QUEM está olhando (Fatia 1). Pro dono, isto é a própria linha de
   // `works` que a query já traz (custo zero). Pros demais, vem de `user_work_state` — e é o
@@ -294,33 +292,26 @@ export async function getRanking(
   // DELES — e, sem modelo, saem NULL: o que sobra é a nota da comunidade, que é um fato.
   const scoresReader = await getScoresReader()
 
-  // Os filtros pessoais (status de leitura, "só favoritos") não podem sair das colunas de
-  // `works` quando quem filtra não é o dono — seriam os favoritos DELE. `null` = dono, filtra
-  // no SQL como sempre; array = ids dela (vazio = nenhuma obra casa, e aí o resultado tem que
-  // ser vazio de verdade, não "sem filtro").
-  // 🔴 O filtro por STATUS não pode sair por id para quem não é o dono.
+  // Os filtros pessoais saem de `user_work_state` — pra TODO MUNDO, o dono inclusive. As
+  // colunas de `works` não filtram mais nada (Fase D). `null` = o caller não pediu filtro
+  // pessoal; array vazio = nenhuma obra casa, e aí o resultado tem que ser vazio DE VERDADE,
+  // não "sem filtro" (ignorar vazaria o catálogo inteiro como se fosse tudo favorito dela).
   //
-  // Uma obra SEM linha em `user_work_state` é "Want to Read" — é esse o default que o próprio
-  // mapeamento das entries usa (`getPersonalStatusNameById(null) ?? "Want to Read"`). Mas um
-  // filtro por LISTA DE IDS não consegue dizer "e também todas as que não têm linha": ele
-  // devolve só as que têm. E o /ranking filtra por ["Want to Read", "Untracked"] POR PADRÃO.
-  //
-  // Consequência (bug que veio da Fatia 1 e só apareceu agora): a Leitora, que não tem nenhuma
-  // linha de estado, abria o /ranking de um catálogo com 882 obras e lia "Nenhuma obra
-  // encontrada com os filtros aplicados". Não deu erro — deu vazio, que é pior.
-  //
-  // Por isso o status dela é filtrado EM MEMÓRIA, sobre `entry.personalStatus` (que já carrega
-  // o default). Favorito continua por id: sem linha = não é favorito, e aí a lista de ids diz
-  // a verdade inteira.
+  // 🔴 STATUS não entra aqui — de propósito. Uma obra SEM linha de estado **é** "Want to Read"
+  // (é o default que o mapeamento abaixo usa: `getPersonalStatusNameById(null) ?? "Want to
+  // Read"`), e uma lista de ids só consegue dizer quem TEM linha. Como o /ranking filtra por
+  // ["Want to Read", "Untracked"] POR PADRÃO, filtrar status por id fazia a Leitora (zero
+  // linhas) abrir um catálogo de 882 obras e ler "Nenhuma obra encontrada". Não deu erro — deu
+  // vazio, que é pior. O status é filtrado EM MEMÓRIA, lá embaixo, sobre `entry.personalStatus`
+  // (que já carrega o default). Favorito e ♥ podem sair por id: sem linha = não é favorito e
+  // não tem ♥, e aí a lista de ids diz a verdade inteira.
   const personalFilterIds = await resolvePersonalFilterIds({
-    personalStatusIds: personal.isOwner ? personalStatusIdFilter : null,
     onlyFavorites: filters.onlyFavorites,
   })
 
-  // Interesse ♥ manual (Fatia 2a) — mesma história do status: pra quem não é o dono, `♥♥♥`
-  // filtrado na coluna de `works` devolveria as obras que ELE marcou. Vai num set separado
-  // (e não junto do de cima) porque este filtro só vale no SQL quando não está no modo OR com
-  // a previsão da IA — a condição abaixo é a mesma que já existia.
+  // Interesse ♥ manual (Fatia 2a). Vai num set separado (e não junto do de cima) porque só
+  // vale como recorte quando NÃO está no modo OR com a previsão da IA — senão excluiria do
+  // fetch as obras que casam só pela previsão. A condição é a mesma que já existia.
   const orWithPredActive =
     (filters.interestMode ?? "or") === "or" && !!filters.predictedSynopsisQualities?.length
   const interestFilterIds =
@@ -463,12 +454,16 @@ export async function getRanking(
     if (allowedIds.length === 0) return []
   }
 
+  // ⚠️ NENHUMA coluna pessoal aqui (Fase D). Status, capítulos, nota, ♥, favorito, anotações e
+  // "última leitura" vêm de `personal.get()` — a linha de QUEM OLHA. Trazê-las de `works` era
+  // trazer as do dono e depois sobrescrevê-las; o que sobrava era um select que só existia
+  // para o `DROP COLUMN` tropeçar nele.
   let worksQuery = supabase
     .from("works")
     .select(`
-      id, title, publication_status_id, personal_status_id, ai_eval_status,
-      total_chapters, chapters_read, user_score, is_archived, is_favorite,
-      synopsis_quality, synopsis_quality_source, canonical_synopsis, observations, year, updated_at, last_read_at,
+      id, title, publication_status_id, ai_eval_status,
+      total_chapters, is_archived,
+      canonical_synopsis, year, updated_at,
       calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
       category_scores(criterion_slug, score),
       work_covers(url, is_primary, position)
@@ -497,25 +492,14 @@ export async function getRanking(
     // Filter pediu status que nenhum nome resolve — força match vazio.
     worksQuery = worksQuery.eq("id", "00000000-0000-0000-0000-000000000000")
   }
-  // Só o DONO filtra pelas colunas de `works` — pros demais o recorte já veio por id, em
-  // `personalFilterIds` (acima). Aplicar este `.in()` pra elas seria filtrar pelo status DELE.
-  if (personal.isOwner && personalStatusIdFilter && personalStatusIdFilter.length > 0) {
-    worksQuery = worksQuery.in("personal_status_id", personalStatusIdFilter)
-  } else if (personalStatusIdFilter && personalStatusIdFilter.length === 0) {
-    worksQuery = worksQuery.eq("id", "00000000-0000-0000-0000-000000000000")
-  }
+  // O STATUS de leitura NÃO é filtrado em SQL — nem pro dono. Ele sai em memória, sobre
+  // `entry.personalStatus`, porque só lá a obra sem linha de estado aparece como
+  // "Want to Read" (ver o comentário no topo, em `personalFilterIds`).
   if (filters.aiEvalStatus?.length) {
     worksQuery = worksQuery.in("ai_eval_status", filters.aiEvalStatus)
   }
-  // Pré-filtra o Interesse manual no SQL sempre que for seguro. Só NÃO é seguro
-  // no modo OR com a previsão IA também ativa: aí os dois viram OR (em memória,
-  // abaixo) e este pré-filtro excluiria do fetch as obras que casam só pela
-  // previsão. No modo AND (ambos precisam casar) pré-filtrar por manual é válido.
-  // Só o DONO filtra pela coluna de `works` — pros demais o recorte já veio por id em
-  // `interestFilterIds` (acima).
-  if (personal.isOwner && filters.synopsisQualities?.length && !orWithPredActive) {
-    worksQuery = worksQuery.in("synopsis_quality", filters.synopsisQualities)
-  }
+  // O Interesse ♥ manual já virou recorte por id em `interestFilterIds` (acima), que entra
+  // no `allowedIds`. Nada a filtrar aqui.
   if (filters.minTotalChapters != null) {
     worksQuery = worksQuery.gte("total_chapters", filters.minTotalChapters)
   }
@@ -528,11 +512,7 @@ export async function getRanking(
   if (filters.maxYear != null) {
     worksQuery = worksQuery.lte("year", filters.maxYear)
   }
-  // Idem "só favoritos": pro dono, a coluna de `works` É o favorito dele; pros demais o
-  // recorte veio por id em `personalFilterIds`.
-  if (filters.onlyFavorites && personal.isOwner) {
-    worksQuery = worksQuery.eq("is_favorite", true)
-  }
+  // "Só favoritos" também já veio por id em `personalFilterIds` (→ `allowedIds`).
   // Escopo por grupo de favoritos: AND com o allowedIds/exclude acima. Lista
   // vazia => força match vazio (grupo sem obras não deve vazar o catálogo).
   if (filters.onlyWorkIds) {
@@ -569,7 +549,7 @@ export async function getRanking(
       : undefined
     // Estado de leitura de quem está olhando — NÃO as colunas de `works` (que são as do
     // dono). Pro dono, `get()` devolve exatamente essas colunas; pros demais, as linhas dela.
-    const state = personal.get(w.id, w)
+    const state = personal.get(w.id)
     const personalStatusId = state.personalStatusId
     const scores: Record<string, number> = {}
     for (const cs of w.category_scores ?? []) {

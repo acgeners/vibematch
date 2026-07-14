@@ -50,30 +50,28 @@ export async function getReadingWorks(
 
   const supabase = createAdminClient()
 
-  // ⚠️ Aqui o filtro É o estado pessoal — "o que EU estou lendo". Pro dono, isso continua
-  // sendo a coluna de `works`. Pra Leitora, tem que sair de `user_work_state`: filtrar por
-  // `works.personal_status_id` devolveria a lista de leitura DELE, com os capítulos DELE, na
-  // página dela. `[]` = ela não está lendo nada → página vazia (e não o catálogo inteiro).
+  // ⚠️ Aqui o filtro É o estado pessoal — "o que EU estou lendo". Ele sai de
+  // `user_work_state`, pra TODO MUNDO (Fase D): filtrar por `works.personal_status_id` devolvia
+  // a lista de leitura DO DONO, com os capítulos DELE, na página de quem quer que abrisse.
+  //
+  // Aqui, ao contrário do /ranking, o filtro por id é EXATO: "estou lendo" é sempre uma linha
+  // explícita de estado. Obra sem linha não é "lendo" — é justamente o que não aparece nesta
+  // página. `[]` = não estou lendo nada → página vazia (e NÃO o catálogo inteiro).
   const personal = await getPersonalStateReader()
   // Fatia 2b: a Nota Prevista é de QUEM OLHA. Sem esta troca, ela vinha de `calculated_scores`
   // — a linha do DONO — e a Leitora via a previsão do gosto dele como se fosse a dela.
   const scoresReader = await getScoresReader()
   const ownIds = await resolvePersonalFilterIds({ personalStatusIds: statusIds })
-  if (ownIds && ownIds.length === 0) return []
+  if (!ownIds || ownIds.length === 0) return []
 
   const baseSelect = `
-    id, title, personal_status_id, publication_status_id, total_chapters, chapters_read, last_read_at,
+    id, title, publication_status_id, total_chapters,
     calculated_scores(expected_score),
     work_covers(url, is_primary, position),
     work_external_ids(source, external_id, is_rejected)`
 
-  const runQuery = (select: string) => {
-    let query = supabase.from("works").select(select).eq("is_archived", false)
-    query = ownIds
-      ? query.in("id", ownIds)
-      : query.in("personal_status_id", statusIds)
-    return query.order("last_read_at", { ascending: false, nullsFirst: false })
-  }
+  const runQuery = (select: string) =>
+    supabase.from("works").select(select).eq("is_archived", false).in("id", ownIds)
 
   // Tenta com as colunas de data (migration 087); cai pro select-base se ainda
   // não existirem, sem quebrar a página.
@@ -86,11 +84,8 @@ export async function getReadingWorks(
   const works = ((data ?? []) as unknown as Array<{
     id: string
     title: string
-    personal_status_id: number | null
     publication_status_id: number | null
     total_chapters: number | null
-    chapters_read: number | null
-    last_read_at: string | null
     last_chapter_released_at?: string | null
     next_chapter_predicted_at?: string | null
     chapters_checked_at?: string | null
@@ -101,7 +96,7 @@ export async function getReadingWorks(
     const comix = (w.work_external_ids ?? []).find(
       (e) => e.source === "comix" && !e.is_rejected && e.external_id,
     )
-    const state = personal.get(w.id, w)
+    const state = personal.get(w.id)
     return {
       id: w.id,
       title: w.title,
@@ -119,11 +114,19 @@ export async function getReadingWorks(
     }
   })
 
-  // O `.order()` acima ordena por `works.last_read_at` — a data DELE. Pra quem lê do espelho,
-  // reordena pela própria: sem isto a lista dela sairia na ordem de leitura do dono.
-  if (!personal.isOwner) {
-    works.sort((a, b) => (b.lastReadAt ?? "").localeCompare(a.lastReadAt ?? ""))
-  }
+  // A ordenação por "última leitura" é EM MEMÓRIA — pra todo mundo, o dono inclusive.
+  //
+  // Antes ela era um `.order("last_read_at")` no SQL, ou seja, ordenava pela data que estava em
+  // `works`: a DELE. Isso já estava errado pra Leitora (a lista dela saía na ordem de leitura
+  // do dono) e era corrigido por um re-sort só pra ela. Agora a data vem do espelho de quem
+  // olha, e o SQL não tem mais essa coluna pra ordenar — o re-sort passa a ser o único caminho,
+  // e vale pros dois. Nulos por último (era `nullsFirst: false`).
+  works.sort((a, b) => {
+    if (a.lastReadAt === b.lastReadAt) return 0
+    if (a.lastReadAt == null) return 1
+    if (b.lastReadAt == null) return -1
+    return b.lastReadAt.localeCompare(a.lastReadAt)
+  })
 
   return works
 }

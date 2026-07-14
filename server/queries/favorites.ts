@@ -16,16 +16,19 @@ export interface FavoritesSummary {
  * (não respeita filtros aplicados na página) — usado pra contexto rápido no header de
  * /favorites.
  *
- * `favoriteIds` = null → o dono: os favoritos são a coluna de `works`, como sempre. Array →
- * os ids dela, vindos de `user_work_state` (vazio = zero favoritos, não "todos").
+ * `favoriteIds` são os ids vindos de `user_work_state` — de TODO MUNDO, o dono inclusive
+ * (Fase D). Lista vazia = zero favoritos, e o resultado tem que ser vazio DE VERDADE: era um
+ * `null` que caía num `.eq("is_favorite", true)` sobre `works`, ou seja, sobre os favoritos
+ * DELE. `null` aqui já não acontece (o caller sempre pede o filtro), mas se acontecesse seria
+ * "sem favorito", nunca "o catálogo inteiro".
  */
 async function _getFavoritesSummary(favoriteIds: string[] | null): Promise<FavoritesSummary> {
   const empty = { total: 0, withExpectedScore: 0, avgExpectedScore: null, topCriteria: [] }
-  if (favoriteIds && favoriteIds.length === 0) return empty
+  if (!favoriteIds || favoriteIds.length === 0) return empty
 
   const supabase = createAdminClient()
 
-  let query = supabase
+  const { data: works, error } = await supabase
     .from("works")
     .select(`
       id,
@@ -33,10 +36,7 @@ async function _getFavoritesSummary(favoriteIds: string[] | null): Promise<Favor
       category_scores(criterion_slug, score)
     `)
     .eq("is_archived", false)
-
-  query = favoriteIds ? query.in("id", favoriteIds) : query.eq("is_favorite", true)
-
-  const { data: works, error } = await query
+    .in("id", favoriteIds)
 
   if (error) {
     console.error("[favorites] erro lendo stats:", error)
