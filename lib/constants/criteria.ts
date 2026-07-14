@@ -121,24 +121,26 @@ export const PUBLICATION_STATUS_LABELS: Record<string, string> = {
 export const PERSONAL_STATUS_LABELS: Record<string, string> = {
   "want-to-read": "Want to Read",
   "Want to Read": "Want to Read",
-  "untracked": "Untracked",
-  "Untracked": "Untracked",
-  "not_now": "Not Now",
-  "Not Now": "Not Now",
-  "reading": "Reading",
-  "Reading": "Reading",
   "started": "Started",
   "Started": "Started",
+  "reading": "Reading",
+  "Reading": "Reading",
   "stalled": "Stalled",
   "Stalled": "Stalled",
   "on-hold": "On-hold",
   "On-hold": "On-hold",
-  "completed": "Completed",
-  "Completed": "Completed",
   "hiatus": "Hiatus",
   "Hiatus": "Hiatus",
+  "finished": "Finished",
+  "Finished": "Finished",
+  "read_again": "Read Again",
+  "Read Again": "Read Again",
   "dropped": "Dropped",
   "Dropped": "Dropped",
+  "not_now": "Not Now",
+  "Not Now": "Not Now",
+  "untracked": "Untracked",
+  "Untracked": "Untracked",
 }
 
 export interface PublicationStatusInfo {
@@ -165,20 +167,45 @@ export interface PersonalStatusInfo {
   color: string
   symbol: string
   comment: string
+  /** A leitura encerrou (concluiu ou desistiu). */
+  isTerminal: boolean
+  /** Leu até o fim. */
+  isFullyRead: boolean
+  /** Faz sentido ter capítulo lido neste status. */
+  tracksProgress: boolean
+  /** Não precisa de estimativa de Interesse — sai da fila do Avaliar. */
+  hideFromInterest: boolean
 }
 
 export const PERSONAL_STATUSES_BY_ID: Record<number, PersonalStatusInfo> = {
-  8: { id: 8, status: "Want to Read", slug: "want-to-read", color: "#8B5CF6", symbol: "⭐️", comment: "Not started yet, but intended for future reading" },
-  10: { id: 10, status: "Untracked", slug: "untracked", color: "#6B7280", symbol: "○", comment: "Stored in the database without an active reading status" },
-  11: { id: 11, status: "Not Now", slug: "not_now", color: "#7C6F9B", symbol: "💤", comment: "Not interested in reading for now, but not permanently dismissed" },
-  2: { id: 2, status: "Reading", slug: "reading", color: "#2563EB", symbol: "📖", comment: "Currently reading or actively following new chapters/releases" },
-  3: { id: 3, status: "Started", slug: "started", color: "#06B6D4", symbol: "▶️", comment: "Started recently; still deciding whether to continue" },
-  4: { id: 4, status: "Stalled", slug: "stalled", color: "#64748B", symbol: "⏸️", comment: "Lost momentum or interest. Not sure I liked it; likely needs rereading before continuing" },
-  7: { id: 7, status: "On-hold", slug: "on-hold", color: "#F97316", symbol: "📁", comment: "Paused for now, but I still want to continue; likely needs rereading before continuing" },
-  1: { id: 1, status: "Completed", slug: "completed", color: "#16A34A", symbol: "✔", comment: "Finished reading" },
-  6: { id: 6, status: "Hiatus", slug: "hiatus", color: "#D97706", symbol: "⏳", comment: "Waiting for new chapters, season, translation, or official return" },
-  9: { id: 9, status: "Dropped", slug: "dropped", color: "#DC2626", symbol: "🗑️", comment: "Dropped before finishing" },
+  8: { id: 8, status: "Want to Read", slug: "want-to-read", color: "#A3E635", symbol: "⭐️", comment: "Not started yet, but intended for future reading", isTerminal: false, isFullyRead: false, tracksProgress: false, hideFromInterest: false },
+  3: { id: 3, status: "Started", slug: "started", color: "#22D3EE", symbol: "▶️", comment: "Started recently; still deciding whether to continue", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false },
+  2: { id: 2, status: "Reading", slug: "reading", color: "#60A5FA", symbol: "📖", comment: "Currently reading or actively following new chapters/releases", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false },
+  4: { id: 4, status: "Stalled", slug: "stalled", color: "#FACC15", symbol: "⏸️", comment: "Lost momentum or interest. Not sure I liked it; likely needs rereading before continuing", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: true },
+  7: { id: 7, status: "On-hold", slug: "on-hold", color: "#FB923C", symbol: "📁", comment: "Paused for now, but I still want to continue; likely needs rereading before continuing", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false },
+  6: { id: 6, status: "Hiatus", slug: "hiatus", color: "#A78BFA", symbol: "⏳", comment: "Waiting for new chapters, season, translation, or official return", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false },
+  1: { id: 1, status: "Finished", slug: "finished", color: "#4ADE80", symbol: "✔", comment: "Finished reading", isTerminal: true, isFullyRead: true, tracksProgress: true, hideFromInterest: true },
+  12: { id: 12, status: "Read Again", slug: "read_again", color: "#F472B6", symbol: "🔁", comment: "Already read, but want to read again", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: true },
+  9: { id: 9, status: "Dropped", slug: "dropped", color: "#F87171", symbol: "🗑️", comment: "Dropped before finishing", isTerminal: true, isFullyRead: false, tracksProgress: true, hideFromInterest: true },
+  11: { id: 11, status: "Not Now", slug: "not_now", color: "#D6A77A", symbol: "💤", comment: "Not interested in reading for now, but not permanently dismissed", isTerminal: false, isFullyRead: false, tracksProgress: false, hideFromInterest: false },
+  10: { id: 10, status: "Untracked", slug: "untracked", color: "#9CA3AF", symbol: "⎯", comment: "Stored in the database without an active reading status", isTerminal: false, isFullyRead: false, tracksProgress: false, hideFromInterest: false },
 }
+
+/**
+ * Conjuntos SEMÂNTICOS de status pessoal — gerados da tabela `personal_status` (migration 155).
+ *
+ * 🔴 NÃO escreva o nome de um status à mão no código. Renomear "Completed" → "Finished" no
+ * Supabase quebrou 10 lugares, e o TypeScript só pegou 6: os outros eram strings soltas dentro de
+ * `new Set([...])` / arrays, que param de casar EM SILÊNCIO. As 74 obras terminadas deixariam de
+ * pedir as 8 notas pós-leitura e de sumir do ranking, sem um único erro.
+ *
+ * Use estes conjuntos (ou os helpers de `lib/constants/status-lookups.ts`). Assim um rename vira
+ * operação de banco: roda `sync-constants` e o código nem fica sabendo.
+ */
+export const TERMINAL_PERSONAL_STATUSES = ["Finished", "Dropped"] as const
+export const FULLY_READ_PERSONAL_STATUSES = ["Finished"] as const
+export const PROGRESS_PERSONAL_STATUSES = ["Started", "Reading", "Stalled", "On-hold", "Hiatus", "Finished", "Read Again", "Dropped"] as const
+export const INTEREST_HIDDEN_PERSONAL_STATUSES = ["Stalled", "Finished", "Read Again", "Dropped"] as const
 
 export const SYNOPSIS_QUALITY_LABELS: Record<string, string> = {
   "♥": "Fraca",

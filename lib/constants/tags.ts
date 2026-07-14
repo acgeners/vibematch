@@ -517,6 +517,7 @@ export const TAG_GROUPS_CATALOG: Array<{ groupSlug: string; label: string; value
     "Prostitution",
     "Public Sex",
     "R15 but Based on a R19 Novel",
+    "R19",
     "R19 Version",
     "Rough Sex",
     "School Intercourse",

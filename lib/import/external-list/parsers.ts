@@ -1,4 +1,5 @@
 import { gunzipSync } from "node:zlib"
+import { FULLY_READ_STATUS } from "@/lib/constants/status-lookups"
 import type { PersonalStatus } from "@/types/domain"
 import type { ExternalListEntry, ExternalListSource } from "./types"
 
@@ -7,7 +8,7 @@ import type { ExternalListEntry, ExternalListSource } from "./types"
 // listas externas ("read", "want to read", "Plan to Read") não está lá.
 
 const MAL_JSON_STATUS: Record<string, PersonalStatus> = {
-  read: "Completed",
+  read: FULLY_READ_STATUS as PersonalStatus,
   reading: "Reading",
   "want to read": "Want to Read",
   stalled: "Stalled",
@@ -17,7 +18,7 @@ const MAL_JSON_STATUS: Record<string, PersonalStatus> = {
 
 // Formato XML do MyAnimeList (também usado pela exportação do Anime-Planet).
 const MAL_XML_STATUS: Record<string, PersonalStatus> = {
-  completed: "Completed",
+  completed: FULLY_READ_STATUS as PersonalStatus,
   reading: "Reading",
   "on-hold": "On-hold",
   dropped: "Dropped",

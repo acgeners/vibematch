@@ -38,6 +38,7 @@ import {
 } from "@/lib/constants/post-reading-criteria"
 import { cn, readingProgressPercent } from "@/lib/utils"
 import { BookOpen, Users, Palette, FileEdit, Bookmark, ChevronDown, Star, X } from "lucide-react"
+import { isFullyReadPersonalStatus } from "@/lib/constants/status-lookups"
 import {
   Tooltip,
   TooltipProvider,
@@ -272,7 +273,7 @@ export function WorkStatusForm({
   }, [chaptersRead, onChaptersReadChange])
 
   useEffect(() => {
-    if (personalStatus !== "Completed") return
+    if (!isFullyReadPersonalStatus(personalStatus)) return
     if (typeof totalChapters !== "number" || totalChapters <= 0) return
     if (chaptersRead != null && chaptersRead >= totalChapters) return
     setValue("chapters_read", totalChapters, { shouldDirty: true, shouldValidate: true })

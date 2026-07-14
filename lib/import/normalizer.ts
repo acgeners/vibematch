@@ -49,16 +49,18 @@ export function normalizePersonalStatus(
   const map: Record<string, PersonalStatus> = {
     "want-to-read": "Want to Read",
     "want to read": "Want to Read",
-    "untracked": "Untracked",
-    "not_now": "Not Now",
-    "not now": "Not Now",
-    "reading": "Reading",
     "started": "Started",
+    "reading": "Reading",
     "stalled": "Stalled",
     "on-hold": "On-hold",
-    "completed": "Completed",
     "hiatus": "Hiatus",
+    "finished": "Finished",
+    "read_again": "Read Again",
+    "read again": "Read Again",
     "dropped": "Dropped",
+    "not_now": "Not Now",
+    "not now": "Not Now",
+    "untracked": "Untracked",
   }
   return map[s] ?? null
 }

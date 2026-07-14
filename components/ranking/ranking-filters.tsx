@@ -22,6 +22,7 @@ import { CRITERION_SLUGS, SYNOPSIS_QUALITIES, DEFAULT_CRITERION_SCORE_PRESETS } 
 import type { CriterionScorePresets } from "@/types/domain"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { saveFilterPreset, renameFilterPreset, deleteFilterPreset } from "@/server/actions/filter-presets"
+import { TERMINAL_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 
 interface SavedFilterPreset {
   id: string
@@ -65,8 +66,9 @@ const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
   })),
 ]
 
-// Personal statuses que devem ser excluídos do filtro (sempre ocultos no ranking)
-const HIDDEN_PERSONAL_STATUSES = new Set(["Completed", "Dropped"])
+// Personal statuses sempre ocultos no ranking = os TERMINAIS (a leitura acabou).
+// A lista vem do banco (`personal_status.is_terminal`), não de nomes escritos à mão.
+const HIDDEN_PERSONAL_STATUSES = new Set<string>(TERMINAL_PERSONAL_STATUSES)
 
 interface SortLevel {
   field: string
