@@ -880,7 +880,7 @@ function personalPatchFromForm(data: WorkFormValues): PersonalStatePatch {
 
 async function persistNewWork(
   values: WorkFormValues,
-  aiMeta?: CreateWorkAiMeta,
+  aiMeta: CreateWorkAiMeta | undefined,
   /**
    * `skipAiCascade` — nada que queime token. É o caminho do Leitor FREE (Fatia 2b): ele pode
    * cadastrar uma obra que falta no catálogo, mas SÓ com o que a busca externa trouxe
@@ -889,8 +889,17 @@ async function persistNewWork(
    *
    * Sem esta opção, `createWorkPending` disparava a consolidação de sinopse por LLM (abaixo) —
    * ou seja, "pending" não era livre de IA. O nome mentia.
+   *
+   * 🔴 `creatorId` — QUEM está cadastrando. Não é decoração: o form de criação carrega, junto
+   * do catálogo, o estado PESSOAL de quem preenche (status, capítulos, nota, ♥, pós-leitura).
+   * Sem este argumento, esta função espelhava esse estado em `mirrorOwnerState(getOwnerUserId())`
+   * — SEMPRE no dono, quem quer que estivesse cadastrando. Como `createWork` é aberto a qualquer
+   * usuário logado (Fatia 2b/5), a Leitora cadastrando uma obra com "nota 9.5, cap. 12" gravava
+   * a nota DELA na linha DELE — e `user_score` é o RÓTULO que treina o Ridge do dono. O modelo
+   * dele passava a aprender o gosto dela. Sem erro, sem log; medido no banco antes de existir
+   * este parâmetro (scripts/e2e/verify-create-ownership.mjs).
    */
-  opts?: { skipAiCascade?: boolean },
+  opts: { skipAiCascade?: boolean; creatorId: string },
 ): Promise<
   | { ok: true; workId: string }
   | { ok: false; error: Record<string, string[]> }
@@ -931,6 +940,55 @@ async function persistNewWork(
     }
   }
 
+  // As colunas pessoais de `works` são a linha do DONO. Quem cadastra uma obra não
+  // necessariamente É o dono (`createWork` é aberto a qualquer usuário logado desde a Fatia
+  // 2b/5) — então o estado pessoal do form só entra aqui quando quem cadastra é ele.
+  //
+  // Pra qualquer outra pessoa, a obra nasce NEUTRA para o dono: "Want to Read" é exatamente o
+  // que uma obra sem linha de estado significa no resto do app (o /ranking já trata assim).
+  // Ele não leu, não deu nota, não marcou capítulo — e a linha compartilhada não pode dizer
+  // que sim.
+  const ownerId = await getOwnerUserId()
+  const isOwnerCreating = opts.creatorId === ownerId
+  const sharedPersonalColumns = isOwnerCreating
+    ? {
+        personal_status_id:
+          data.personal_status_id ?? getPersonalStatusIdByName(data.personal_status),
+        chapters_read: data.chapters_read ?? null,
+        synopsis_quality: data.synopsis_quality ?? null,
+        // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
+        synopsis_quality_source:
+          data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
+        observation_adjustment: data.observation_adjustment,
+        user_score: data.user_score ?? null,
+        post_story_score: data.post_story_score ?? null,
+        post_fl_score: data.post_fl_score ?? null,
+        post_ml_score: data.post_ml_score ?? null,
+        post_character_development_score: data.post_character_development_score ?? null,
+        post_pacing_score: data.post_pacing_score ?? null,
+        post_art_visual_score: data.post_art_visual_score ?? null,
+        post_impact_immersion_score: data.post_impact_immersion_score ?? null,
+        post_originality_score: data.post_originality_score ?? null,
+        observations: data.observations ?? null,
+      }
+    : {
+        personal_status_id: getPersonalStatusIdByName("Want to Read"),
+        chapters_read: null,
+        synopsis_quality: null,
+        synopsis_quality_source: "legacy_unknown",
+        observation_adjustment: 0,
+        user_score: null,
+        post_story_score: null,
+        post_fl_score: null,
+        post_ml_score: null,
+        post_character_development_score: null,
+        post_pacing_score: null,
+        post_art_visual_score: null,
+        post_impact_immersion_score: null,
+        post_originality_score: null,
+        observations: null,
+      }
+
   const { data: work, error } = await supabase
     .from("works")
     .insert({
@@ -941,24 +999,8 @@ async function persistNewWork(
       year_end: data.year_end ?? null,
       publication_status_id:
         data.publication_status_id ?? getPublicationStatusIdByName(data.publication_status),
-      personal_status_id:
-        data.personal_status_id ?? getPersonalStatusIdByName(data.personal_status),
       total_chapters: data.total_chapters ?? null,
-      chapters_read: data.chapters_read ?? null,
-      synopsis_quality: data.synopsis_quality ?? null,
-      // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
-      synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
-      observation_adjustment: data.observation_adjustment,
-      user_score: data.user_score ?? null,
-      post_story_score: data.post_story_score ?? null,
-      post_fl_score: data.post_fl_score ?? null,
-      post_ml_score: data.post_ml_score ?? null,
-      post_character_development_score: data.post_character_development_score ?? null,
-      post_pacing_score: data.post_pacing_score ?? null,
-      post_art_visual_score: data.post_art_visual_score ?? null,
-      post_impact_immersion_score: data.post_impact_immersion_score ?? null,
-      post_originality_score: data.post_originality_score ?? null,
-      observations: data.observations ?? null,
+      ...sharedPersonalColumns,
       ai_eval_status: "pending",
     })
     .select("id")
@@ -968,12 +1010,19 @@ async function persistNewWork(
 
   const workId = work.id
 
-  // Espelha o estado pessoal que acabou de nascer junto com a obra. O form de criação traz
-  // status, capítulos, nota, ♥ e pós-leitura — e eles são do CURADOR, não da obra. Sem esta
-  // linha, uma obra criada com "Reading, cap. 12, nota 8" ficaria com esse estado só em
-  // `works` e o espelho do dono nasceria vazio: a /leitura dele não mostraria a obra que ele
-  // acabou de cadastrar como "lendo".
-  const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], personalPatchFromForm(data))
+  // O estado pessoal que nasceu junto com a obra é de QUEM CADASTROU — status, capítulos, nota,
+  // ♥ e pós-leitura são dele, não da obra.
+  //
+  // 🔴 Isto era `mirrorOwnerState(await getOwnerUserId(), ...)`: espelhava no DONO, quem quer que
+  // estivesse cadastrando. A Leitora cadastrava com "nota 9.5" e a nota virava RÓTULO DE TREINO
+  // do Ridge dele — enquanto ela ficava sem linha nenhuma, ou seja, perdia o próprio dado.
+  //
+  // Vai no cliente de SESSÃO de propósito. `mirrorOwnerState` usa service role, que IGNORA a
+  // RLS — é por isso que um `user_id` errado ali virou dado errado em silêncio em vez de um
+  // insert negado. Com o cliente de sessão, a política da mig 142 (`user_id = auth.uid()`)
+  // torna este bug IMPOSSÍVEL de reescrever: escrever na linha de outra pessoa é negado pelo
+  // Postgres.
+  const mirror = await writeReadingState(opts.creatorId, [workId], personalPatchFromForm(data))
   if (mirror.error) return { ok: false, error: { _root: [mirror.error] } }
 
   // Create the AI evaluation row FIRST when AI justifications exist, so the
@@ -1126,6 +1175,7 @@ export async function createWork(
 
   const result = await persistNewWork(safeValues, isCurator ? aiMeta : undefined, {
     skipAiCascade: !isCurator,
+    creatorId: session.userId,
   })
   if (!result.ok) return { error: result.error }
   // `skipAiEnrichment`: o usuário optou por salvar SEM o enriquecimento pago
@@ -1236,7 +1286,10 @@ export async function createWorkPending(values: WorkFormValues) {
   if (!gate.ok) return { error: { _root: [gate.error] } }
 
   const isOwner = await canWriteSharedWorkRow(session.userId)
-  const result = await persistNewWork(values, undefined, { skipAiCascade: !isOwner })
+  const result = await persistNewWork(values, undefined, {
+    skipAiCascade: !isOwner,
+    creatorId: session.userId,
+  })
   if (!result.ok) return { error: result.error }
 
   revalidatePath("/titles")
@@ -1257,6 +1310,10 @@ export async function createWorksBatch(
 ) {
   const gate = await ensureAdmin()
   if (!gate.ok) return { error: { _root: [gate.error] } }
+  // O estado pessoal do lote é de quem importou. ⚠️ `ensureAdmin()` NÃO diz que é o dono: um
+  // segundo Curador passa nele e mesmo assim não pode herdar o estado pessoal de ninguém.
+  const session = await ensureSignedIn()
+  if (!session.ok) return { error: { _root: [session.error] } }
   if (items.length === 0) {
     return { error: { _root: ["Nenhuma obra para criar"] } }
   }
@@ -1281,7 +1338,7 @@ export async function createWorksBatch(
   const needEdgeReviews: string[] = []
   let saveWorkReviewsFn: typeof import("@/lib/external/persist-reviews").saveWorkReviews | null = null
   for (const { values, aiMeta, externalReviews } of normalized) {
-    const result = await persistNewWork(values, aiMeta)
+    const result = await persistNewWork(values, aiMeta, { creatorId: session.userId })
     if (!result.ok) return { error: result.error, data: { created } }
     if (externalReviews && externalReviews.length > 0) {
       if (!saveWorkReviewsFn) {
