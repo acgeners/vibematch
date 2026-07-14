@@ -25,6 +25,28 @@ import { measureCover, scoreCover } from "@/lib/server/covers/measure-cover"
 const fixBroken = process.argv.includes("--fix-broken")
 const fixAll = process.argv.includes("--fix-all")
 
+/**
+ * `--apply=<workId,workId,…>` — troca a primária SÓ nas obras listadas.
+ *
+ * É a saída de `scripts/review-covers.ts`: o score sabe medir resolução, compressão e proporção,
+ * mas NÃO sabe distinguir uma capa de um painel interno. No "Young Lady's Knight" ele propunha
+ * trocar a capa (230×341) por um painel com texto coreano cravado (771×1080) — maior em tudo que
+ * ele mede, e pior como capa. Não há fórmula pra isso; a decisão é do olho.
+ *
+ * Então o caminho de aplicação em lote (--fix-all) existe, mas o recomendado é revisar na página e
+ * aplicar só o aprovado.
+ */
+const applyArg = process.argv.find((a) => a.startsWith("--apply="))
+const applyIds = new Set(
+  applyArg
+    ? applyArg
+        .slice("--apply=".length)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [],
+)
+
 async function main() {
   const sb = createAdminClient()
 
@@ -184,20 +206,35 @@ async function main() {
     console.log("\n✅ nenhuma troca proposta diminui a capa.")
   }
 
-  if (!fixBroken && !fixAll) {
-    console.log("\n(auditoria — nada foi alterado. --fix-broken ou --fix-all pra aplicar)\n")
+  if (!fixBroken && !fixAll && applyIds.size === 0) {
+    console.log("\n(auditoria — nada foi alterado.)")
+    console.log("  --fix-broken       só as primárias MORTAS")
+    console.log("  --apply=<ids>      só as obras aprovadas na revisão visual  ← recomendado")
+    console.log("  --fix-all          todas as materiais (o score NÃO distingue capa de painel)\n")
     process.exit(0)
   }
 
+  const selecionadas = piores
+    .filter((p) => !downgrades.includes(p)) // a trava anti-downgrade vale SEMPRE
+    .filter((p) =>
+      applyIds.size > 0
+        ? applyIds.has(p.atual.work_id) // revisão visual: só o que o humano aprovou
+        : fixAll && p.ganho >= 0.15,
+    )
+
   const alvos = [
-    ...quebradas.filter((q) => q.melhor).map((q) => ({ atual: q.atual, novo: q.melhor! })),
-    ...(fixAll
-      ? piores
-          .filter((p) => p.ganho >= 0.15)
-          .filter((p) => !downgrades.includes(p)) // a trava acima
-          .map((p) => ({ atual: p.atual, novo: p.melhor }))
+    ...(fixBroken || fixAll
+      ? quebradas.filter((q) => q.melhor).map((q) => ({ atual: q.atual, novo: q.melhor! }))
       : []),
+    ...selecionadas.map((p) => ({ atual: p.atual, novo: p.melhor })),
   ]
+
+  if (applyIds.size > 0) {
+    const naoAchadas = [...applyIds].filter((id) => !selecionadas.some((p) => p.atual.work_id === id))
+    if (naoAchadas.length) {
+      console.log(`\n⚠️  ${naoAchadas.length} id(s) da lista não têm troca pendente (já aplicada? travada?)`)
+    }
+  }
 
   console.log(`\naplicando ${alvos.length} troca(s) de capa primária…`)
   for (const { atual, novo } of alvos) {
