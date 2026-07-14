@@ -120,20 +120,16 @@ export async function applySynopsisPredictionAction(
     const prediction = await getSynopsisPredictionForWork(workId)
     if (!prediction) return { error: "Não há previsão para esta obra." }
 
-    const supabase = createAdminClient()
     const applied = {
       synopsis_quality: prediction.predictedQuality,
       // Proveniência (Plano 3): cópia da previsão IA. NÃO muda o valor copiado.
       synopsis_quality_source: "prediction_applied" as const,
       synopsis_quality_prediction_id: prediction.id,
     }
-    const { error } = await supabase.from("works").update(applied).eq("id", workId)
-    if (error) return { error: `Falha aplicando previsão: ${error.message}` }
-
-    // O ♥ é estado pessoal (Fatia 2a) — espelha, senão o espelho do dono envelhece a cada
-    // previsão aplicada e a Fase 2 não pode confiar nele.
+    // O ♥ é estado pessoal (Fatia 2a) e mora SÓ no espelho do dono (Fase E). O `update` em
+    // `works` que vinha antes desta linha gravava exatamente o mesmo objeto `applied`.
     const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], applied)
-    if (mirror.error) return { error: mirror.error }
+    if (mirror.error) return { error: `Falha aplicando previsão: ${mirror.error}` }
 
     // synopsis_quality é feature do Ridge global → marca recálculo pendente em
     // vez de recalcular na hora. A resposta volta assim que synopsis_quality está
@@ -212,24 +208,18 @@ export async function applySynopsisPredictionForWorks(
       skipped++ // protege rótulo humano (ground-truth)
       continue
     }
-    const { error } = await supabase
-      .from("works")
-      .update({
-        synopsis_quality: prediction.predictedQuality,
-        synopsis_quality_source: "prediction_applied",
-        synopsis_quality_prediction_id: prediction.id,
-      })
-      .eq("id", id)
-    if (error) {
-      failed++
-      continue
-    }
-    applied++
     appliedRows.push({ id, quality: prediction.predictedQuality, predictionId: prediction.id })
   }
 
-  // Uma linha por previsão (cada obra tem a SUA), em blocos — não dá pra fazer um upsert só,
-  // porque o valor difere por obra.
+  // FASE E: a ÚNICA escrita é o espelho — e por isso ela é quem manda nos contadores.
+  //
+  // ⚠️ Antes eram DUAS escritas (works + espelho) e DOIS lugares mexendo em `applied`/`failed`:
+  // o loop de cima incrementava `applied` no sucesso do `works`, e este aqui fazia
+  // `applied--; failed++` se o espelho falhasse depois. Com o `works` fora, contar no lugar
+  // errado faria a UI dizer "12 aplicadas" com o espelho vazio. Uma escrita, um contador.
+  //
+  // Uma linha por previsão (cada obra tem a SUA) — não dá pra fazer um upsert só, porque o
+  // valor difere por obra.
   const ownerId = await getOwnerUserId()
   for (const row of appliedRows) {
     const mirror = await mirrorOwnerState(ownerId, [row.id], {
@@ -237,10 +227,8 @@ export async function applySynopsisPredictionForWorks(
       synopsis_quality_source: "prediction_applied",
       synopsis_quality_prediction_id: row.predictionId,
     })
-    if (mirror.error) {
-      failed++
-      applied--
-    }
+    if (mirror.error) failed++
+    else applied++
   }
 
   if (applied > 0) await markRecalcPending("applySynopsisPredictionBatch")
@@ -270,22 +258,18 @@ export async function skipSynopsisInterestAction(
   try {
     const gate = await ensureAdmin()
     if (!gate.ok) return { error: gate.error }
-    const supabase = createAdminClient()
-    const { error } = await supabase
-      .from("works")
-      .update({ synopsis_interest_skipped: skipped })
-      .eq("id", workId)
-    if (!error) {
-      const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], {
-        synopsis_interest_skipped: skipped,
-      })
-      if (mirror.error) return { error: mirror.error }
-    }
-    if (error) {
-      if (/synopsis_interest_skipped|column|schema cache/i.test(error.message)) {
+    // FASE E: só o espelho. O `update` em `works` que vinha antes gravava o mesmo booleano, e
+    // era ELE que gateava o espelho (`if (!error)`) — agora o espelho é a escrita, não a cópia.
+    const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], {
+      synopsis_interest_skipped: skipped,
+    })
+    if (mirror.error) {
+      // A dica da migration continua valendo, mas agora aponta pra coluna do ESPELHO (mig 138+),
+      // que é onde o "Pular" de fato grava.
+      if (/synopsis_interest_skipped|column|schema cache/i.test(mirror.error)) {
         return { error: "Aplique a migration 121 (synopsis_interest_skipped) pra usar o 'Pular'." }
       }
-      return { error: `Falha ao pular: ${error.message}` }
+      return { error: `Falha ao pular: ${mirror.error}` }
     }
     revalidatePath("/ai-evaluation")
     revalidateTag("ai-eval-tab-counts", "max")
@@ -312,7 +296,6 @@ export async function setSynopsisQualityAction(
     if (quality !== null && !(SYNOPSIS_QUALITIES as readonly string[]).includes(quality)) {
       return { error: "Valor de Interesse inválido." }
     }
-    const supabase = createAdminClient()
     const triaged = {
       synopsis_quality: quality,
       // Proveniência (Plano 3): triagem manual direta. Limpar (null) zera a origem.
@@ -321,11 +304,9 @@ export async function setSynopsisQualityAction(
         | "human_manual",
       synopsis_quality_prediction_id: null,
     }
-    const { error } = await supabase.from("works").update(triaged).eq("id", workId)
-    if (error) return { error: `Falha gravando Interesse: ${error.message}` }
-
+    // FASE E: só o espelho (o `update` em `works` gravava o mesmo objeto `triaged`).
     const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], triaged)
-    if (mirror.error) return { error: mirror.error }
+    if (mirror.error) return { error: `Falha gravando Interesse: ${mirror.error}` }
 
     await markRecalcPending("setSynopsisQuality")
 

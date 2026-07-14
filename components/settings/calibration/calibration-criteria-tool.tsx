@@ -23,8 +23,10 @@ import type { ReactNode } from "react"
 
 async function countRatedWorks(): Promise<number> {
   const supabase = createAdminClient()
+  // `works_owner`: "quantas obras VOCÊ notou" é a contagem de rótulos DO DONO (é o que calibra
+  // o modelo dele). Vem do espelho via a view — `works.user_score` vai deixar de existir.
   const { count, error } = await supabase
-    .from("works")
+    .from("works_owner")
     .select("id", { count: "exact", head: true })
     .not("user_score", "is", null)
     .eq("is_archived", false)

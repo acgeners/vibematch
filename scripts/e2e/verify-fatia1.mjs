@@ -244,10 +244,16 @@ async function main() {
     owner.cookie,
   )
   check(!said(ownerSt, "Fatia 2"), "aceita (ele é o dono)")
+  // FASE E inverteu este assert. Ele exigia `works.chapters_read === 77` — o dual-write. Agora
+  // a linha compartilhada NÃO recebe escrita pessoal de ninguém, nem do dono: ela fica parada,
+  // esperando o DROP. Quem tem que receber o 77 é o espelho DELE.
   const worksB = await workRow(workB.id)
-  check(worksB.chapters_read === 77, "works.chapters_read = 77 (a linha compartilhada é dele)")
+  check(
+    worksB.chapters_read !== 77,
+    `works.chapters_read NÃO virou 77 (segue ${worksB.chapters_read}) — \`works\` não recebe mais escrita pessoal`,
+  )
   const ownerB = await stateOf(owner.userId, workB.id)
-  check(ownerB?.chapters_read === 77, "espelho do dono também = 77 (dual-write)")
+  check(ownerB?.chapters_read === 77, "o ESPELHO do dono recebeu o 77 (é a única fonte agora)")
   const readerB = await stateOf(reader.userId, workB.id)
   check(
     readerB == null || readerB.chapters_read !== 77,

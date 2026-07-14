@@ -177,17 +177,14 @@ async function createWork(
 ): Promise<string> {
   const publicationStatus = row.publication_status ?? "Unknown"
   const personalStatus = row.personal_status ?? "Want to Read"
+  // Só CATÁLOGO (Fase E). O que a planilha traz de PESSOAL — status de leitura, capítulos
+  // lidos, ♥, ajuste e nota — vai pro espelho do dono, logo abaixo, e só pra lá.
   const { data, error } = await supabase
     .from("works")
     .insert({
       title: row.title,
       publication_status_id: getPublicationStatusIdByName(publicationStatus),
-      personal_status_id: getPersonalStatusIdByName(personalStatus),
       total_chapters: row.total_chapters ?? null,
-      chapters_read: row.chapters_read ?? null,
-      synopsis_quality: row.synopsis_quality ?? null,
-      observation_adjustment: row.observation_adjustment ?? 0,
-      user_score: row.user_score ?? null,
       ai_eval_status: "pending",
     })
     .select("id")
@@ -212,27 +209,28 @@ async function updateWork(
   workId: string,
   row: MappedImportRow
 ) {
+  // FASE E: a planilha traz as duas coisas misturadas numa linha só, e elas vão pra tabelas
+  // diferentes. CATÁLOGO (status de publicação, capítulos totais) → `works`. PESSOAL (status de
+  // leitura, capítulos lidos, ♥, ajuste, nota) → o espelho do dono, via `personalPatchFromImportRow`.
+  //
+  // ⚠️ Os dois `if` são independentes de propósito: uma planilha só com nota não tem nada de
+  // catálogo pra escrever, e uma só com capítulos totais não tem nada de pessoal. Gatear um pelo
+  // outro (como o `if (Object.keys(update).length > 0)` fazia com o espelho) engoliria o import
+  // em silêncio — foi exatamente esse aninhamento que existia aqui.
   const update: Record<string, unknown> = {}
   if (row.publication_status) {
     update.publication_status_id = getPublicationStatusIdByName(row.publication_status)
   }
-  if (row.personal_status) {
-    update.personal_status_id = getPersonalStatusIdByName(row.personal_status)
-  }
   if (row.total_chapters != null) update.total_chapters = row.total_chapters
-  if (row.chapters_read != null) update.chapters_read = row.chapters_read
-  if (row.synopsis_quality) update.synopsis_quality = row.synopsis_quality
-  if (row.observation_adjustment != null) update.observation_adjustment = row.observation_adjustment
-  if (row.user_score != null) update.user_score = row.user_score
 
   if (Object.keys(update).length > 0) {
     await supabase.from("works").update(update).eq("id", workId)
+  }
 
-    const patch = personalPatchFromImportRow(row)
-    if (Object.keys(patch).length > 0) {
-      const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], patch)
-      if (mirror.error) throw new Error(mirror.error)
-    }
+  const patch = personalPatchFromImportRow(row)
+  if (Object.keys(patch).length > 0) {
+    const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], patch)
+    if (mirror.error) throw new Error(mirror.error)
   }
 }
 

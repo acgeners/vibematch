@@ -939,55 +939,13 @@ async function persistNewWork(
     }
   }
 
-  // As colunas pessoais de `works` são a linha do DONO. Quem cadastra uma obra não
-  // necessariamente É o dono (`createWork` é aberto a qualquer usuário logado desde a Fatia
-  // 2b/5) — então o estado pessoal do form só entra aqui quando quem cadastra é ele.
+  // ⚠️ NENHUMA coluna pessoal no insert (FASE E). A obra que nasce aqui é CATÁLOGO — título,
+  // ano, capítulos, status de publicação. Status de leitura, capítulos lidos, nota, ♥,
+  // anotações e pós-leitura são de QUEM CADASTROU e vão pra `user_work_state`, logo abaixo.
   //
-  // Pra qualquer outra pessoa, a obra nasce NEUTRA para o dono: "Want to Read" é exatamente o
-  // que uma obra sem linha de estado significa no resto do app (o /ranking já trata assim).
-  // Ele não leu, não deu nota, não marcou capítulo — e a linha compartilhada não pode dizer
-  // que sim.
-  const ownerId = await getOwnerUserId()
-  const isOwnerCreating = opts.creatorId === ownerId
-  const sharedPersonalColumns = isOwnerCreating
-    ? {
-        personal_status_id:
-          data.personal_status_id ?? getPersonalStatusIdByName(data.personal_status),
-        chapters_read: data.chapters_read ?? null,
-        synopsis_quality: data.synopsis_quality ?? null,
-        // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
-        synopsis_quality_source:
-          data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
-        observation_adjustment: data.observation_adjustment,
-        user_score: data.user_score ?? null,
-        post_story_score: data.post_story_score ?? null,
-        post_fl_score: data.post_fl_score ?? null,
-        post_ml_score: data.post_ml_score ?? null,
-        post_character_development_score: data.post_character_development_score ?? null,
-        post_pacing_score: data.post_pacing_score ?? null,
-        post_art_visual_score: data.post_art_visual_score ?? null,
-        post_impact_immersion_score: data.post_impact_immersion_score ?? null,
-        post_originality_score: data.post_originality_score ?? null,
-        observations: data.observations ?? null,
-      }
-    : {
-        personal_status_id: getPersonalStatusIdByName("Want to Read"),
-        chapters_read: null,
-        synopsis_quality: null,
-        synopsis_quality_source: "legacy_unknown",
-        observation_adjustment: 0,
-        user_score: null,
-        post_story_score: null,
-        post_fl_score: null,
-        post_ml_score: null,
-        post_character_development_score: null,
-        post_pacing_score: null,
-        post_art_visual_score: null,
-        post_impact_immersion_score: null,
-        post_originality_score: null,
-        observations: null,
-      }
-
+  // `works.personal_status_id` era NOT NULL sem default e por isso obrigava este insert a
+  // inventar um valor; a mig 153 tirou o NOT NULL. As outras 4 NOT NULL têm default e se
+  // resolvem sozinhas. As colunas ficam aí, nulas, até o `DROP` (§13.4).
   const { data: work, error } = await supabase
     .from("works")
     .insert({
@@ -999,7 +957,6 @@ async function persistNewWork(
       publication_status_id:
         data.publication_status_id ?? getPublicationStatusIdByName(data.publication_status),
       total_chapters: data.total_chapters ?? null,
-      ...sharedPersonalColumns,
       ai_eval_status: "pending",
     })
     .select("id")
@@ -1010,7 +967,7 @@ async function persistNewWork(
   const workId = work.id
 
   // O estado pessoal que nasceu junto com a obra é de QUEM CADASTROU — status, capítulos, nota,
-  // ♥ e pós-leitura são dele, não da obra.
+  // ♥ e pós-leitura são dele, não da obra. Agora esta é a ÚNICA escrita dele.
   //
   // 🔴 Isto era `mirrorOwnerState(await getOwnerUserId(), ...)`: espelhava no DONO, quem quer que
   // estivesse cadastrando. A Leitora cadastrava com "nota 9.5" e a nota virava RÓTULO DE TREINO
@@ -1437,8 +1394,12 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
 
   const data = parsed.data
   const supabase = createAdminClient()
+  // `works_owner`: `user_score` aqui é a nota ANTERIOR do dono — ela alimenta o ledger de
+  // previsões (`capturePredictionForFirstRating` / `resolvePredictionsForWork`). Lida de
+  // `works` ela morre no `DROP`; lida da view, ela vem do espelho dele e sobrevive. O `title`
+  // é catálogo e passa igual.
   const { data: existingWork } = await supabase
-    .from("works")
+    .from("works_owner")
     .select("title, user_score")
     .eq("id", id)
     .maybeSingle()
@@ -1453,6 +1414,8 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
     return { error: { genres: [message] } }
   }
 
+  // ⚠️ Só CATÁLOGO (Fase E). A parte pessoal do form (status, capítulos, nota, ♥, anotações,
+  // pós-leitura) vai pro espelho do dono logo abaixo — e SÓ pra lá.
   const { error } = await supabase
     .from("works")
     .update({
@@ -1463,24 +1426,7 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
       year_end: data.year_end ?? null,
       publication_status_id:
         getPublicationStatusIdByName(data.publication_status) ?? data.publication_status_id ?? null,
-      personal_status_id:
-        getPersonalStatusIdByName(data.personal_status) ?? data.personal_status_id ?? null,
       total_chapters: data.total_chapters ?? null,
-      chapters_read: data.chapters_read ?? null,
-      synopsis_quality: data.synopsis_quality ?? null,
-      // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
-      synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
-      observation_adjustment: data.observation_adjustment,
-      user_score: data.user_score ?? null,
-      post_story_score: data.post_story_score ?? null,
-      post_fl_score: data.post_fl_score ?? null,
-      post_ml_score: data.post_ml_score ?? null,
-      post_character_development_score: data.post_character_development_score ?? null,
-      post_pacing_score: data.post_pacing_score ?? null,
-      post_art_visual_score: data.post_art_visual_score ?? null,
-      post_impact_immersion_score: data.post_impact_immersion_score ?? null,
-      post_originality_score: data.post_originality_score ?? null,
-      observations: data.observations ?? null,
     })
     .eq("id", id)
 
@@ -1764,14 +1710,10 @@ async function applyReadingState(
   workIds: string[],
   patch: ReadingStatePatch,
 ): Promise<{ error: string | null }> {
-  const write = await writeReadingState(gate.userId, workIds, patch)
-  if (write.error) return { error: write.error }
-
-  if (!gate.isOwner) return { error: null }
-
-  const supabase = createAdminClient()
-  const { error } = await supabase.from("works").update(patch).in("id", workIds)
-  return { error: error ? error.message : null }
+  // FASE E: uma escrita, um destino. O `if (gate.isOwner)` que espelhava o mesmo `patch` em
+  // `works` saiu — a linha compartilhada não guarda mais estado pessoal de ninguém, nem do dono.
+  // Ele lê do espelho desde a Fase D, então este segundo write não tinha mais leitor.
+  return writeReadingState(gate.userId, workIds, patch)
 }
 
 export async function toggleFavorite(id: string, isFavorite: boolean) {
@@ -1850,11 +1792,12 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   const data = parsed.data
   const supabase = createAdminClient()
 
-  // A linha de `works` = o estado do DONO (e, pra ele, a `user_score` anterior que o ledger de
-  // previsões usa). Literal de propósito: o client do Supabase tipa o retorno a partir da
-  // STRING do select — montá-la com template/`join()` devolve `ParserError`.
+  // O estado ATUAL do DONO (e, pra ele, a `user_score` anterior que o ledger de previsões usa).
+  // Vem da view: é o espelho dele, não a linha compartilhada — que vai perder estas colunas.
+  // Literal de propósito: o client do Supabase tipa o retorno a partir da STRING do select —
+  // montá-la com template/`join()` devolve `ParserError`.
   const { data: sharedRow } = await supabase
-    .from("works")
+    .from("works_owner")
     .select(
       `personal_status_id, chapters_read, last_read_at,
        user_score, observation_adjustment, observations, synopsis_quality,
@@ -1964,13 +1907,9 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
     return { data: { id } }
   }
 
-  // ── Dono: exatamente o que sempre foi (`works` inteira, inclusive a nota que treina o
-  // Ridge), + o espelho per-usuário. O `personalState` é o MESMO objeto que a Leitora grava —
-  // o que muda não é o conteúdo, é o DESTINO.
-  const { error } = await supabase.from("works").update(personalState).eq("id", id)
-
-  if (error) return { error: { _root: [error.message] } }
-
+  // ── Dono: MESMO destino que qualquer outra pessoa (Fase E). O `update` em `works` que existia
+  // aqui gravava o mesmo `personalState` que a linha abaixo já grava no espelho — inclusive a
+  // nota que treina o Ridge, que desde a Fase B é lida do espelho. Era uma cópia sem leitor.
   const mirror = await writeReadingState(gate.userId, [id], personalState)
   if (mirror.error) return { error: { _root: [mirror.error] } }
 
@@ -2110,7 +2049,6 @@ async function doUpdateWorkExternalData(
       workFields.publication_status_id = getPublicationStatusIdByName(updates.publicationStatus)
     }
     if (updates.totalChapters !== undefined) workFields.total_chapters = updates.totalChapters ?? null
-    if (updates.observations !== undefined) workFields.observations = updates.observations ?? null
 
     // "Atualizar dados" sempre carimba o timestamp de refresh de dados —
     // separado de updated_at (que o trigger toca em qualquer edição da linha).
@@ -2120,8 +2058,9 @@ async function doUpdateWorkExternalData(
     if (error) return { error: error.message }
 
     // `observations` é a única coluna PESSOAL que este caminho escreve (o resto é catálogo:
-    // título, status de publicação, capítulos totais, capas). Espelha só ela — e só quando o
-    // caller de fato mandou o campo, porque `undefined` aqui significa "não mexi", não "apague".
+    // título, status de publicação, capítulos totais, capas) — e agora vai SÓ pro espelho do
+    // dono. Só quando o caller de fato mandou o campo: `undefined` aqui significa "não mexi",
+    // não "apague".
     if (updates.observations !== undefined) {
       const mirror = await mirrorOwnerState(await getOwnerUserId(), [id], {
         observations: updates.observations ?? null,

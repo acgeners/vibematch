@@ -1,11 +1,19 @@
 /**
- * FASE A — o espelho parou de apodrecer?
+ * FASE E — `works` parou de receber escrita pessoal?
  *
- * Antes: 8 caminhos de curadoria escreviam dado pessoal em `works` e o espelho ficava para
- * trás — em silêncio. Este teste exercita os writers de VERDADE (server actions, sessão do
- * curador) e, depois de cada um, exige que `works` e `user_work_state` estejam IDÊNTICOS.
+ * ⚠️ ESTE TESTE MUDOU DE CONTRATO. Na Fase A ele exigia que `works` e `user_work_state`
+ * ficassem IDÊNTICOS depois de cada writer (o dual-write). A Fase E **removeu** o lado `works`:
+ * agora a pergunta é a INVERSA.
  *
- * Sem este teste, "religuei os writers" é uma afirmação, não um fato.
+ *   ANTES (Fase A):  depois do writer → works == espelho
+ *   AGORA (Fase E):  depois do writer → o ESPELHO tem o valor novo
+ *                                     E `works` NÃO mudou (a coluna está congelada, esperando o DROP)
+ *
+ * Não apaguei os asserts: INVERTI. "`works` não recebeu nada" é o invariante que passa a valer
+ * a pena proteger — a regressão a temer agora é alguém RE-ADICIONAR um dual-write, e é
+ * exatamente isso que este teste pega.
+ *
+ * Exercita os writers de VERDADE (server actions, sessão do curador). O juiz é o banco.
  */
 import fs from "node:fs"
 import { createRequire } from "node:module"
@@ -82,6 +90,9 @@ const call = async (id, args, cookie, referer = "/titles") =>
   ).text()
 
 const COLS = [
+  // `is_favorite` FALTAVA aqui. O check 3 o conferia à parte, então o check 4 (o catálogo
+  // inteiro) nunca olhou pra ele — 882 obras varridas, e o favorito não era uma delas.
+  "is_favorite",
   "personal_status_id",
   "chapters_read",
   "user_score",
@@ -93,25 +104,52 @@ const COLS = [
   "post_story_score",
 ]
 
-/** works × espelho do dono: iguais? É a única pergunta deste teste. */
-async function drift(ownerId, workId) {
-  const { data: w } = await admin.from("works").select(COLS.join(", ")).eq("id", workId).single()
-  const { data: s } = await admin
-    .from("user_work_state")
-    .select(COLS.join(", "))
-    .eq("user_id", ownerId)
-    .eq("work_id", workId)
-    .maybeSingle()
-  if (!s) return ["(sem linha no espelho)"]
-  return COLS.filter((c) => {
-    const a = w[c] ?? null
-    const b = s[c] ?? null
-    if (c === "observation_adjustment") return Number(a ?? 0) !== Number(b ?? 0)
-    return String(a) !== String(b)
-  }).map((c) => `${c}: works=${w[c]} espelho=${s[c]}`)
-}
+const same = (a, b, col) =>
+  col === "observation_adjustment"
+    ? Number(a ?? 0) === Number(b ?? 0)
+    : String(a ?? null) === String(b ?? null)
+
+/** As colunas pessoais da linha COMPARTILHADA (a que tem que ficar PARADA). */
+const worksRow = async (workId) =>
+  (await admin.from("works").select(COLS.join(", ")).eq("id", workId).single()).data
+
+/** A linha do espelho do dono (a que tem que RECEBER a escrita). */
+const mirrorRow = async (ownerId, workId) =>
+  (
+    await admin
+      .from("user_work_state")
+      .select(COLS.join(", "))
+      .eq("user_id", ownerId)
+      .eq("work_id", workId)
+      .maybeSingle()
+  ).data
+
+/** `works` mexeu depois do writer? Se mexeu, alguém re-adicionou um dual-write. */
+const worksMexeu = (antes, depois) =>
+  COLS.filter((c) => !same(antes[c], depois[c], c)).map(
+    (c) => `${c}: ${antes[c]} → ${depois[c]}`,
+  )
 
 const owner = await session(OWNER.email)
+
+// 📸 O estado de `works` ANTES de qualquer writer rodar. É o baseline do check 4: nenhuma
+// coluna pessoal da linha compartilhada pode ter se mexido no fim do teste.
+const WORKS_ANTES = await (async () => {
+  const rows = []
+  for (let f = 0; ; f += 500) {
+    const { data, error } = await admin
+      .from("works")
+      .select(["id", ...COLS].join(", "))
+      .order("id")
+      .range(f, f + 499)
+    if (error) throw new Error(error.message)
+    if (!data?.length) break
+    rows.push(...data)
+    if (data.length < 500) break
+  }
+  return rows
+})()
+
 const { data: firstWork } = await admin.from("works").select("id").limit(1).single()
 const ids = await actionIds(["/titles", `/titles/${firstWork.id}`, "/ai-evaluation"])
 console.log(`dono: ${owner.userId}\n`)
@@ -127,9 +165,12 @@ const { data: w1 } = await admin
 const orig1 = w1.synopsis_quality
 const novo1 = orig1 === "♥♥♥♥" ? "♥" : "♥♥♥♥"
 if (ids.setSynopsisQualityAction) {
+  const antes = await worksRow(w1.id)
   await call(ids.setSynopsisQualityAction, [w1.id, novo1], owner.cookie)
-  const d = await drift(owner.userId, w1.id)
-  check(d.length === 0, `♥ mudou pra ${novo1} e o espelho acompanhou` + (d.length ? ` — DIVERGIU: ${d}` : ""))
+  const esp = await mirrorRow(owner.userId, w1.id)
+  const mexeu = worksMexeu(antes, await worksRow(w1.id))
+  check(esp?.synopsis_quality === novo1, `o ESPELHO recebeu o ♥ novo (${esp?.synopsis_quality})`)
+  check(mexeu.length === 0, "`works` NÃO mudou" + (mexeu.length ? ` — VOLTOU O DUAL-WRITE: ${mexeu}` : ""))
   await call(ids.setSynopsisQualityAction, [w1.id, orig1], owner.cookie) // restaura
 } else {
   console.log("  ⏭️  action não encontrada no bundle (a página /ai-evaluation não a expõe aqui)")
@@ -143,6 +184,7 @@ const { data: w2 } = await admin
   .not("user_score", "is", null)
   .limit(1)
   .single()
+const w2Antes = await worksRow(w2.id)
 await call(
   ids.updateWorkStatus,
   [
@@ -158,11 +200,17 @@ await call(
   ],
   owner.cookie,
 )
-const d2 = await drift(owner.userId, w2.id)
-check(d2.length === 0, "capítulo +1 e o espelho acompanhou" + (d2.length ? ` — DIVERGIU: ${d2}` : ""))
+const esp2 = await mirrorRow(owner.userId, w2.id)
+const mexeu2 = worksMexeu(w2Antes, await worksRow(w2.id))
+check(
+  esp2?.chapters_read === (w2.chapters_read ?? 0) + 1,
+  `o ESPELHO recebeu o capítulo +1 (${esp2?.chapters_read})`,
+)
+check(mexeu2.length === 0, "`works` NÃO mudou" + (mexeu2.length ? ` — VOLTOU O DUAL-WRITE: ${mexeu2}` : ""))
 
 // ── 3. toggleFavorite
 console.log("\n3) toggleFavorite")
+const favAntes = (await worksRow(w2.id)).is_favorite
 await call(ids.toggleFavorite, [w2.id, true], owner.cookie)
 const { data: f1 } = await admin.from("works").select("is_favorite").eq("id", w2.id).single()
 const { data: f2 } = await admin
@@ -171,11 +219,23 @@ const { data: f2 } = await admin
   .eq("user_id", owner.userId)
   .eq("work_id", w2.id)
   .single()
-check(f1.is_favorite === f2.is_favorite, `favorito espelhado (${f1.is_favorite})`)
+check(f2.is_favorite === true, "o ESPELHO recebeu o favorito (true)")
+check(
+  f1.is_favorite === favAntes,
+  `\`works.is_favorite\` NÃO mudou (segue ${favAntes})` +
+    (f1.is_favorite !== favAntes ? " — VOLTOU O DUAL-WRITE" : ""),
+)
 await call(ids.toggleFavorite, [w2.id, false], owner.cookie)
 
-// ── 4. O CATÁLOGO INTEIRO: nenhuma obra divergente
-console.log("\n4) 🔴 O catálogo inteiro — quantas obras têm works ≠ espelho?")
+// ── 4. 🔴 O CATÁLOGO INTEIRO — `works` ficou PARADA?
+//
+// Este check mudou de pergunta. Ele era "quantas obras têm works ≠ espelho?" (o invariante do
+// dual-write). Agora `works` não é mais escrita, então divergir é o ESPERADO — o espelho anda,
+// a coluna morta não. Perguntar aquilo hoje seria exigir que o bug voltasse.
+//
+// A pergunta que vale: depois de rodar TODOS os writers acima, alguma coluna pessoal de `works`
+// se mexeu? Se mexeu, alguém re-adicionou um dual-write — e é isso que não pode voltar.
+console.log("\n4) 🔴 O catálogo inteiro — `works` ficou parada durante os writers?")
 const PAGE = 500
 const all = async (t, cols, uid) => {
   const rows = []
@@ -190,23 +250,26 @@ const all = async (t, cols, uid) => {
   }
   return rows
 }
-const works = await all("works", ["id", ...COLS].join(", "))
-const state = await all("user_work_state", ["work_id", ...COLS].join(", "), owner.userId)
-const byId = new Map(state.map((s) => [s.work_id, s]))
-const divergentes = works.filter((w) => {
-  const s = byId.get(w.id)
-  if (!s) return true
-  return COLS.some((c) => {
-    const a = w[c] ?? null
-    const b = s[c] ?? null
-    if (c === "observation_adjustment") return Number(a ?? 0) !== Number(b ?? 0)
-    return String(a) !== String(b)
-  })
+
+const worksDepois = await all("works", ["id", ...COLS].join(", "))
+const antesById = new Map(WORKS_ANTES.map((w) => [w.id, w]))
+const mexidas = worksDepois.filter((w) => {
+  const antes = antesById.get(w.id)
+  if (!antes) return false // obra criada durante o teste (não é escrita pessoal)
+  return COLS.some((c) => !same(antes[c], w[c], c))
 })
 check(
-  divergentes.length === 0,
-  `${works.length} obras conferidas · divergentes: ${divergentes.length}` +
-    (divergentes.length ? ` (ex.: ${divergentes.slice(0, 3).map((d) => d.id.slice(0, 8))})` : ""),
+  mexidas.length === 0,
+  `${worksDepois.length} obras conferidas · \`works\` mexeu em: ${mexidas.length}` +
+    (mexidas.length ? ` 🔴 VOLTOU O DUAL-WRITE (ex.: ${mexidas.slice(0, 3).map((d) => d.id.slice(0, 8))})` : ""),
+)
+
+// E o espelho do dono tem que estar VIVO — se ele estivesse vazio, os checks acima passariam
+// por vacuidade (nada escrito em works, nada escrito em lugar nenhum).
+const espelho = await all("user_work_state", ["work_id", ...COLS].join(", "), owner.userId)
+check(
+  espelho.length > 800,
+  `o espelho do dono tem ${espelho.length} linhas (não ficou vazio — os checks acima não passam por vacuidade)`,
 )
 
 // restaura o capítulo da obra 2
@@ -226,5 +289,9 @@ await call(
   owner.cookie,
 )
 
-console.log(failures === 0 ? "\n✅ O ESPELHO PAROU DE APODRECER." : `\n❌ ${failures} falha(s).`)
+console.log(
+  failures === 0
+    ? "\n✅ `works` NÃO recebe mais escrita pessoal — o espelho é a única fonte."
+    : `\n❌ ${failures} falha(s).`,
+)
 process.exit(failures === 0 ? 0 : 1)
