@@ -136,7 +136,7 @@ await call(ids.createWork, [values], leitora.cookie)
 
 const { data: work } = await admin
   .from("works")
-  .select("id, title, user_score, chapters_read, personal_status_id")
+  .select("id, title")
   .eq("title", TITLE)
   .maybeSingle()
 
@@ -162,7 +162,8 @@ const dela = await stateOf(OTHER.current_user_id)
 console.log("  estado pessoal gravado para a obra recém-criada:")
 console.log(`    dono   : ${JSON.stringify(doDono)}`)
 console.log(`    leitora: ${JSON.stringify(dela)}`)
-console.log(`    works  : ${JSON.stringify({ user_score: work.user_score, chapters_read: work.chapters_read })}\n`)
+// `works` não tem mais coluna pessoal pra imprimir (migration 154 dropou as 19).
+console.log(`    works  : (sem colunas pessoais — o espelho é a única fonte)\n`)
 
 // 🔴 O crime: a nota DELA virar rótulo DELE.
 check(
@@ -204,7 +205,7 @@ await call(
 
 const { data: workDono } = await admin
   .from("works")
-  .select("id, user_score, chapters_read, personal_status_id")
+  .select("id")
   .eq("title", TITLE_DONO)
   .maybeSingle()
 
@@ -220,7 +221,7 @@ const { data: mirrorDono } = await admin
   .eq("user_id", OWNER.current_user_id)
   .maybeSingle()
 
-console.log(`    works  : ${JSON.stringify({ user_score: workDono.user_score, chapters_read: workDono.chapters_read })}`)
+console.log(`    works  : (sem colunas pessoais — o espelho é a única fonte)`)
 console.log(`    espelho: ${JSON.stringify(mirrorDono)}\n`)
 
 check(

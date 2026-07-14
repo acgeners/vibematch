@@ -78,14 +78,17 @@ const call = async (id, args, cookie) =>
     })
   ).text()
 
+// A migration 154 dropou as colunas pessoais de `works`. O que esta suíte chamava de "a linha
+// compartilhada" é agora a linha do DONO no espelho — é ela que não pode ser sobrescrita por ela.
 const workRow = async (id) =>
   (
     await admin
-      .from("works")
-      .select("title, user_score, observations, synopsis_quality, post_story_score, chapters_read")
-      .eq("id", id)
-      .single()
-  ).data
+      .from("user_work_state")
+      .select("user_score, observations, synopsis_quality, post_story_score, chapters_read")
+      .eq("user_id", OWNER.current_user_id)
+      .eq("work_id", id)
+      .maybeSingle()
+  ).data ?? {}
 const stateRow = async (uid, id) =>
   (
     await admin
@@ -113,14 +116,17 @@ if (!ids.updateWorkStatus) throw new Error("não achei o id de updateWorkStatus 
 console.log(`updateWorkStatus: ${ids.updateWorkStatus}\n`)
 
 // Obra que o DONO já avaliou — o pior caso: a nota dela poderia sobrescrever a dele.
-const { data: cand } = await admin
-  .from("works")
-  .select("id, title, user_score, post_story_score")
+const { data: candRow, error: candErr } = await admin
+  .from("user_work_state")
+  .select("work_id, user_score, post_story_score, works!inner(id, title, is_archived)")
+  .eq("user_id", OWNER.current_user_id)
   .not("user_score", "is", null)
   .not("post_story_score", "is", null)
-  .eq("is_archived", false)
+  .eq("works.is_archived", false)
   .limit(1)
   .single()
+if (candErr) throw new Error(`não achei cobaia no espelho: ${candErr.message}`)
+const cand = { ...candRow, id: candRow.works.id, title: candRow.works.title }
 
 const before = await workRow(cand.id)
 const beforeCalc = await calcRow(cand.id)

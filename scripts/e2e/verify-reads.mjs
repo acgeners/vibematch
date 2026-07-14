@@ -70,19 +70,21 @@ async function main() {
     await admin.from("personal_status").select("id").eq("status", "Reading").single()
   ).data.id
 
-  // O que o DONO está lendo (via works — a fonte dele) e o que ele favoritou.
-  const { data: hisReading } = await admin
-    .from("works")
-    .select("id, title")
-    .eq("personal_status_id", readingId)
-    .eq("is_archived", false)
-    .limit(50)
-  const { data: hisFavs } = await admin
-    .from("works")
-    .select("id, title")
-    .eq("is_favorite", true)
-    .eq("is_archived", false)
-    .limit(50)
+  // O que o DONO está lendo e o que ele favoritou. Sai do ESPELHO (`user_work_state`): a
+  // migration 154 dropou as colunas pessoais de `works`, e o espelho é a única fonte.
+  const ownerMirror = async (narrow) => {
+    const q = admin
+      .from("user_work_state")
+      .select("work_id, works!inner(id, title, is_archived)")
+      .eq("user_id", OWNER.current_user_id)
+      .eq("works.is_archived", false)
+      .limit(50)
+    const { data, error } = await narrow(q)
+    if (error) throw new Error(`baseline do espelho falhou: ${error.message}`)
+    return (data ?? []).map((r) => ({ id: r.works.id, title: r.works.title }))
+  }
+  const hisReading = await ownerMirror((q) => q.eq("personal_status_id", readingId))
+  const hisFavs = await ownerMirror((q) => q.eq("is_favorite", true))
   console.log(`dono: ${hisReading.length} obras "Reading", ${hisFavs.length} favoritas`)
 
   // A obra DELA: uma que ele NÃO está lendo e NÃO favoritou.
