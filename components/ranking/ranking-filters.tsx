@@ -23,6 +23,7 @@ import type { CriterionScorePresets } from "@/types/domain"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { saveFilterPreset, renameFilterPreset, deleteFilterPreset } from "@/server/actions/filter-presets"
 import { TERMINAL_PERSONAL_STATUSES } from "@/lib/constants/criteria"
+import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 
 interface SavedFilterPreset {
   id: string
@@ -1759,7 +1760,7 @@ export function RankingFilters({
   const interestMode: "and" | "or" = searchParams.get("synopsis_mode") === "and" ? "and" : "or"
 
   const DEFAULT_PUB_STATUS = "Completed"
-  const DEFAULT_PER_STATUSES = ["Want to Read", "Untracked"]
+  const DEFAULT_PER_STATUSES = [...UNREAD_PERSONAL_STATUSES]
 
   const pubStatusParam = searchParams.get("pub_status")
   const isAllPublication = pubStatusParam === "all"

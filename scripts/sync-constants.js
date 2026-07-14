@@ -138,7 +138,7 @@ async function main() {
     supabase
       .from("personal_status")
       .select(
-        "id, status, slug, color, symbol, comment, is_terminal, is_fully_read, tracks_progress, hide_from_interest, sort_order",
+        "id, status, slug, color, symbol, comment, bg_class, description_pt, is_terminal, is_fully_read, tracks_progress, hide_from_interest, is_default_unset, is_following, is_unread, sort_order",
       )
       .order("sort_order"),
     supabase.from("source").select("slug, name").order("order", { ascending: true, nullsFirst: false }).order("name"),
@@ -233,7 +233,7 @@ async function main() {
   ).join("\n")
 
   const persByIdEntries = persStatuses.map(r =>
-    `  ${r.id}: { id: ${r.id}, status: ${JSON.stringify(r.status)}, slug: ${JSON.stringify(r.slug ?? "")}, color: ${JSON.stringify(r.color ?? "")}, symbol: ${JSON.stringify(r.symbol ?? "")}, comment: ${JSON.stringify(r.comment ?? "")}, isTerminal: ${!!r.is_terminal}, isFullyRead: ${!!r.is_fully_read}, tracksProgress: ${!!r.tracks_progress}, hideFromInterest: ${!!r.hide_from_interest} },`
+    `  ${r.id}: { id: ${r.id}, status: ${JSON.stringify(r.status)}, slug: ${JSON.stringify(r.slug ?? "")}, color: ${JSON.stringify(r.color ?? "")}, symbol: ${JSON.stringify(r.symbol ?? "")}, comment: ${JSON.stringify(r.comment ?? "")}, bgClass: ${JSON.stringify(r.bg_class ?? "")}, descriptionPt: ${JSON.stringify(r.description_pt ?? "")}, isTerminal: ${!!r.is_terminal}, isFullyRead: ${!!r.is_fully_read}, tracksProgress: ${!!r.tracks_progress}, hideFromInterest: ${!!r.hide_from_interest}, isDefaultUnset: ${!!r.is_default_unset}, isFollowing: ${!!r.is_following}, isUnread: ${!!r.is_unread} },`
   ).join("\n")
 
   // Conjuntos SEMÂNTICOS. O código pergunta "a leitura acabou?", nunca "o status se chama X" —
@@ -289,6 +289,10 @@ export interface PersonalStatusInfo {
   color: string
   symbol: string
   comment: string
+  /** Classe Tailwind de fundo (gráfico de distribuição do dashboard). */
+  bgClass: string
+  /** Descrição em PT exibida no seletor de status. */
+  descriptionPt: string
   /** A leitura encerrou (concluiu ou desistiu). */
   isTerminal: boolean
   /** Leu até o fim. */
@@ -297,6 +301,12 @@ export interface PersonalStatusInfo {
   tracksProgress: boolean
   /** Não precisa de estimativa de Interesse — sai da fila do Avaliar. */
   hideFromInterest: boolean
+  /** É o status que a obra APARENTA quando não há linha no espelho. Exatamente um. */
+  isDefaultUnset: boolean
+  /** "Estou acompanhando" — KPI da home, widget de progresso. */
+  isFollowing: boolean
+  /** "Ainda não comecei" — filtro padrão do ranking, seed da auditoria. */
+  isUnread: boolean
 }
 
 export const PERSONAL_STATUSES_BY_ID: Record<number, PersonalStatusInfo> = {
@@ -318,6 +328,17 @@ export const TERMINAL_PERSONAL_STATUSES = ${persByFlag("is_terminal")} as const
 export const FULLY_READ_PERSONAL_STATUSES = ${persByFlag("is_fully_read")} as const
 export const PROGRESS_PERSONAL_STATUSES = ${persByFlag("tracks_progress")} as const
 export const INTEREST_HIDDEN_PERSONAL_STATUSES = ${persByFlag("hide_from_interest")} as const
+export const FOLLOWING_PERSONAL_STATUSES = ${persByFlag("is_following")} as const
+export const UNREAD_PERSONAL_STATUSES = ${persByFlag("is_unread")} as const
+
+/**
+ * O status que a obra APARENTA quando o usuário não tem linha no espelho.
+ *
+ * Não confundir com "Untracked", que é escolha EXPLÍCITA do usuário. Os dois coexistiam sem nome
+ * no código — e por isso pareciam contradição: o Zod tinha default "Untracked" enquanto a exibição
+ * caía em \`?? "Want to Read"\` em 8 lugares.
+ */
+export const DEFAULT_PERSONAL_STATUS = ${JSON.stringify((persStatuses.find((r) => r.is_default_unset) ?? {}).status ?? "")}
 
 export const SYNOPSIS_QUALITY_LABELS: Record<string, string> = {
   "♥": "Fraca",

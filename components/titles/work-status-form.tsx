@@ -45,6 +45,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 
 const SYNOPSIS_LEGEND_BY_LABEL = new Map(
   SYNOPSIS_INTEREST_LEGEND.map((entry) => [entry.label, entry] as const),
@@ -256,7 +257,7 @@ export function WorkStatusForm({
   // (mesma dos atributos pós-leitura) ou cai na regra antiga (status != "Want to Read").
   // Fatia 2a: a nota e a pós-leitura deixaram de ser do Curador — são de quem está logado, e
   // vão pra `user_work_state`. Voltou a valer a regra original, sem gate de papel.
-  const criteriaVisible = showEvaluationCriteria ?? personalStatus !== "Want to Read"
+  const criteriaVisible = showEvaluationCriteria ?? personalStatus !== DEFAULT_PERSONAL_STATUS
 
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
@@ -533,7 +534,7 @@ export function WorkStatusForm({
             </div>
           </div>
 
-          {personalStatus !== "Want to Read" && (
+          {personalStatus !== DEFAULT_PERSONAL_STATUS && (
             <div className="space-y-1.5 w-full sm:w-[280px]">
               <Label htmlFor="status-last-read-at">Última leitura</Label>
               <div className="flex items-center gap-1 h-9">

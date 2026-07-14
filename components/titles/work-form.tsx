@@ -77,6 +77,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { BarChart3, ChevronDown, ImageIcon, Info, LayoutDashboard, Loader2, Pencil, Plus, Settings2, Tags, Trash2, User, X } from "lucide-react"
 import { PROGRESS_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { isFullyReadPersonalStatus } from "@/lib/constants/status-lookups"
+import { UNTRACKED_PERSONAL_STATUS } from "@/lib/constants/status-lookups"
 
 export interface WorkFormAiEvaluation {
   model_name: string | null
@@ -576,7 +577,7 @@ const getEmptyCreateValues = (): Partial<WorkFormValues> => ({
   year: null,
   year_end: null,
   publication_status: "Unknown",
-  personal_status: "Untracked",
+  personal_status: UNTRACKED_PERSONAL_STATUS,
   total_chapters: null,
   chapters_read: null,
   synopsis_quality: null,

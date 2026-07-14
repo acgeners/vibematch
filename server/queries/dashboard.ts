@@ -9,6 +9,8 @@ import { pickPrimaryCover } from "@/lib/covers"
 import { comixWorkUrl } from "@/lib/external/comix"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { FOLLOWING_PERSONAL_STATUSES } from "@/lib/constants/criteria"
+import { isFollowingPersonalStatus, personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean | null }
@@ -143,10 +145,10 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   for (const w of active) {
     const state = personal.get(w.id)
     const pubName = getPublicationStatusNameById(w.publication_status_id) ?? "Unknown"
-    const persName = getPersonalStatusNameById(state.personalStatusId) ?? "Want to Read"
+    const persName = personalStatusNameOrDefault(state.personalStatusId)
     byPublicationStatus[pubName] = (byPublicationStatus[pubName] ?? 0) + 1
     byPersonalStatus[persName] = (byPersonalStatus[persName] ?? 0) + 1
-    if (persName === "Reading" || persName === "Started") {
+    if (isFollowingPersonalStatus(persName)) {
       following++
       if (w.total_chapters != null && w.total_chapters - (state.chaptersRead ?? 0) > 0) {
         followingWithPending++
@@ -245,8 +247,11 @@ export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]>
  * todas as acompanhadas (conjunto pequeno) e corta em `limit` depois.
  */
 export async function getContinueReading(limit = 6): Promise<ContinueReadingItem[]> {
-  const readingId = getPersonalStatusIdByName("Reading")
-  const startedId = getPersonalStatusIdByName("Started")
+  // "Acompanhando" = os status marcados `is_following` no banco (migration 156).
+  const followingIds = FOLLOWING_PERSONAL_STATUSES.map((s) => getPersonalStatusIdByName(s)).filter(
+    (id): id is number => id != null,
+  )
+  const [readingId, startedId] = followingIds
   const statusIds = [readingId, startedId].filter((id): id is number => id != null)
   if (statusIds.length === 0) return []
 

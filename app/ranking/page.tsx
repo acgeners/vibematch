@@ -27,6 +27,8 @@ import type { FormulaConfig, CriterionScorePresets } from "@/types/domain"
 import { unstable_cache } from "next/cache"
 import { after } from "next/server"
 import { recordRankingSnapshots } from "@/lib/server/predictions/record-prediction"
+import { UNREAD_PERSONAL_STATUSES, DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
+import { UNTRACKED_PERSONAL_STATUS } from "@/lib/constants/status-lookups"
 
 interface RankingPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -183,7 +185,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
       ? undefined
       : perStatusParam
         ? perStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
-        : ["Want to Read", "Untracked"]
+        : [...UNREAD_PERSONAL_STATUSES]
 
   const pubStatusParam = str("pub_status")
   const publicationStatus =
@@ -317,9 +319,12 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     const s = p.toString()
     return `/ranking${s ? `?${s}` : ""}`
   }
+  // Rótulos dos chips do filtro padrão. As CHAVES são computadas do banco — escrevê-las à mão
+  // faria o chip sumir em silêncio no dia em que o status fosse renomeado (o filtro continuaria
+  // ativo, mas sem rótulo pra removê-lo).
   const PERSONAL_STATUS_LABELS: Record<string, string> = {
-    "Want to Read": "Lista: Quero ler",
-    Untracked: "Inclui: Sem status",
+    [DEFAULT_PERSONAL_STATUS]: "Lista: Quero ler",
+    [UNTRACKED_PERSONAL_STATUS]: "Inclui: Sem status",
   }
   const activeFilterChips: ActiveFilterChip[] = []
   if (publicationStatus?.length) {

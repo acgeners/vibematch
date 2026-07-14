@@ -1,28 +1,35 @@
 import { gunzipSync } from "node:zlib"
-import { FULLY_READ_STATUS } from "@/lib/constants/status-lookups"
+import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
 import type { PersonalStatus } from "@/types/domain"
 import type { ExternalListEntry, ExternalListSource } from "./types"
 
 // ── Mapas de status por fonte ────────────────────────────────────────
-// Não usamos lib/import/normalizer.ts (gerado) porque o vocabulário das
-// listas externas ("read", "want to read", "Plan to Read") não está lá.
+//
+// Não usamos lib/import/normalizer.ts (gerado) porque o vocabulário das listas externas
+// ("read", "want to read", "Plan to Read") não está lá.
+//
+// A CHAVE é da FONTE (o vocabulário do MyAnimeList/Anime-Planet) — fica escrita à mão, é o
+// contrato deles. O VALOR é NOSSO status, e por isso sai do banco pelo SLUG: escrever o nome
+// aqui é o que fez `read: "Completed"` traduzir, em silêncio, para um status que já não existia.
+// `personalStatusNameBySlugOrThrow` estoura se o slug sumir, em vez de importar lixo.
+const ours = (slug: string) => personalStatusNameBySlugOrThrow(slug) as PersonalStatus
 
 const MAL_JSON_STATUS: Record<string, PersonalStatus> = {
-  read: FULLY_READ_STATUS as PersonalStatus,
-  reading: "Reading",
-  "want to read": "Want to Read",
-  stalled: "Stalled",
-  dropped: "Dropped",
-  "on-hold": "On-hold",
+  read: ours("finished"),
+  reading: ours("reading"),
+  "want to read": ours("want-to-read"),
+  stalled: ours("stalled"),
+  dropped: ours("dropped"),
+  "on-hold": ours("on-hold"),
 }
 
 // Formato XML do MyAnimeList (também usado pela exportação do Anime-Planet).
 const MAL_XML_STATUS: Record<string, PersonalStatus> = {
-  completed: FULLY_READ_STATUS as PersonalStatus,
-  reading: "Reading",
-  "on-hold": "On-hold",
-  dropped: "Dropped",
-  "plan to read": "Want to Read",
+  completed: ours("finished"),
+  reading: ours("reading"),
+  "on-hold": ours("on-hold"),
+  dropped: ours("dropped"),
+  "plan to read": ours("want-to-read"),
 }
 
 function clampScore(value: number): number {

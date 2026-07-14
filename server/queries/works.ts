@@ -13,6 +13,7 @@ import {
 import { titleToSlug } from "@/lib/utils"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 
 const WORK_WITH_RELATIONS_SELECT = `
   *,
@@ -328,7 +329,7 @@ export async function getWorks(
     if (filters.personalStatus?.length) {
       const wanted = new Set<string>(filters.personalStatus)
       scored = scored.filter((w) =>
-        wanted.has(getPersonalStatusNameById(w.personalStatusId) ?? "Want to Read"),
+        wanted.has(personalStatusNameOrDefault(w.personalStatusId)),
       )
     }
     if (filters.isFavorite) {
@@ -389,8 +390,8 @@ export async function getWorks(
       })
     } else if (sort.field === "personal_status") {
       scored.sort((a, b) => {
-        const an = getPersonalStatusNameById(a.personalStatusId) ?? "Want to Read"
-        const bn = getPersonalStatusNameById(b.personalStatusId) ?? "Want to Read"
+        const an = personalStatusNameOrDefault(a.personalStatusId)
+        const bn = personalStatusNameOrDefault(b.personalStatusId)
         return dir * -an.localeCompare(bn)
       })
     } else {

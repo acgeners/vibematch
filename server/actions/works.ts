@@ -48,6 +48,8 @@ import { buildAutoRefreshPlan } from "@/lib/external/auto-refresh"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
 import { titleToSlug } from "@/lib/utils"
+import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
+import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>
 
@@ -639,7 +641,7 @@ function dbWorkToFormValues(work: any): WorkFormValues {
     year: work.year ?? null,
     year_end: work.year_end ?? null,
     publication_status: getPublicationStatusNameById(work.publication_status_id) ?? "Unknown",
-    personal_status: getPersonalStatusNameById(work.personal_status_id) ?? "Want to Read",
+    personal_status: personalStatusNameOrDefault(work.personal_status_id),
     publication_status_id: work.publication_status_id ?? null,
     personal_status_id: work.personal_status_id ?? null,
     total_chapters: work.total_chapters ?? null,
@@ -1859,11 +1861,11 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
     (current?.chapters_read == null || data.chapters_read > current.chapters_read)
 
   let nextLastReadAt: string | null
-  if (newStatus === "Want to Read") {
+  if (newStatus === DEFAULT_PERSONAL_STATUS) {
     nextLastReadAt = null
   } else if (userTouchedDate) {
     nextLastReadAt = data.last_read_at ?? null
-  } else if (currentStatusName === "Want to Read" || chaptersGrew) {
+  } else if (currentStatusName === DEFAULT_PERSONAL_STATUS || chaptersGrew) {
     nextLastReadAt = today
   } else {
     nextLastReadAt = currentLastRead

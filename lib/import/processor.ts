@@ -10,6 +10,7 @@ import {
 import { mirrorOwnerState } from "@/server/queries/user-work-state"
 import type { PersonalStatePatch } from "@/server/queries/user-work-state"
 import { getOwnerUserId } from "@/server/queries/current-user"
+import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 
 export type DuplicateMode = "skip" | "update" | "create_new"
 
@@ -176,7 +177,7 @@ async function createWork(
   row: MappedImportRow
 ): Promise<string> {
   const publicationStatus = row.publication_status ?? "Unknown"
-  const personalStatus = row.personal_status ?? "Want to Read"
+  const personalStatus = row.personal_status ?? DEFAULT_PERSONAL_STATUS
   // Só CATÁLOGO (Fase E). O que a planilha traz de PESSOAL — status de leitura, capítulos
   // lidos, ♥, ajuste e nota — vai pro espelho do dono, logo abaixo, e só pra lá.
   const { data, error } = await supabase

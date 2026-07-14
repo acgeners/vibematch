@@ -8,6 +8,7 @@ import {
   type PublicationStatusInfo,
   type PersonalStatusInfo,
 } from "@/lib/constants/criteria"
+import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 
 const PUBLICATION_STATUSES_BY_NAME: Record<string, PublicationStatusInfo> = Object.fromEntries(
   Object.values(PUBLICATION_STATUSES_BY_ID).map((info) => [info.status, info])
@@ -100,7 +101,7 @@ interface PersonalStatusBadgeProps {
 
 export function PersonalStatusBadge({ statusId, status, className, iconOnly }: PersonalStatusBadgeProps) {
   const info = resolvePersonalInfo(statusId, status)
-  const name = info?.status ?? "Want to Read"
+  const name = info?.status ?? DEFAULT_PERSONAL_STATUS
   // Text color comes straight from the DB `color` hex; the background reuses
   // the same color at low opacity so it stays subtle. Inline styles override
   // the secondary variant's bg/text utilities.

@@ -4,8 +4,9 @@ import {
   PUBLICATION_STATUS_LABELS,
   PERSONAL_STATUS_LABELS,
 } from "./criteria"
-import { FULLY_READ_PERSONAL_STATUSES } from "./criteria"
+import { FULLY_READ_PERSONAL_STATUSES, DEFAULT_PERSONAL_STATUS } from "./criteria"
 import type { PersonalStatusInfo } from "./criteria"
+import type { PersonalStatus } from "@/types/domain"
 
 const PUBLICATION_BY_NAME = new Map<string, number>(
   Object.values(PUBLICATION_STATUSES_BY_ID).map((info) => [info.status, info.id])
@@ -86,6 +87,63 @@ export function isInterestHiddenPersonalStatus(status: number | string | null | 
   return infoOf(status)?.hideFromInterest ?? false
 }
 
+/** "Estou acompanhando" (KPI da home, widget de progresso)? */
+export function isFollowingPersonalStatus(status: number | string | null | undefined): boolean {
+  return infoOf(status)?.isFollowing ?? false
+}
+
+/** "Ainda não comecei"? */
+export function isUnreadPersonalStatus(status: number | string | null | undefined): boolean {
+  return infoOf(status)?.isUnread ?? false
+}
+
+/**
+ * O nome do status quando o usuário NÃO tem linha no espelho.
+ *
+ * Substitui o `?? "Want to Read"` que estava repetido em 8 lugares. Não é o mesmo que "Untracked",
+ * que é escolha EXPLÍCITA do usuário (667 obras) — os dois coexistiam sem nome no código, e por
+ * isso pareciam contradição (o Zod tinha default "Untracked", a exibição caía em "Want to Read").
+ */
+export function personalStatusNameOrDefault(id: number | null | undefined): string {
+  return getPersonalStatusNameById(id) ?? DEFAULT_PERSONAL_STATUS
+}
+
+const PERSONAL_BY_SLUG = new Map<string, PersonalStatusInfo>(
+  Object.values(PERSONAL_STATUSES_BY_ID).map((info) => [info.slug, info]),
+)
+
+/**
+ * O nome de UM status específico, buscado pelo slug — e ESTOURA se o slug não existir.
+ *
+ * Existe pros poucos lugares onde o código legitimamente precisa nomear um status: a página
+ * /leitura tem uma seção "Lendo" e outra "Em hiato". Não há conceito a abstrair ali — a seção É
+ * daquele status.
+ *
+ * O ganho não é evitar o acoplamento (ele é inevitável aqui); é trocar uma falha SILENCIOSA por
+ * uma falha ALTA. Com `=== "Reading"` escrito à mão, renomear o status faz a seção simplesmente
+ * vir vazia — sem erro, sem log, e ninguém percebe. Com isto, o build/render quebra na cara.
+ */
+export function personalStatusNameBySlugOrThrow(slug: string): string {
+  const info = PERSONAL_BY_SLUG.get(slug)
+  if (!info) {
+    throw new Error(
+      `personal_status: não existe status com slug "${slug}". ` +
+        `Slugs válidos: ${[...PERSONAL_BY_SLUG.keys()].join(", ")}. ` +
+        `Se o slug mudou no Supabase, rode sync-constants e ajuste o chamador.`,
+    )
+  }
+  return info.status
+}
+
+/**
+ * "Está no catálogo, sem status de leitura ativo" — escolha EXPLÍCITA do usuário (667 obras).
+ *
+ * Não confundir com [DEFAULT_PERSONAL_STATUS], que é o que a obra APARENTA quando não há linha
+ * nenhuma no espelho. A diferença não tinha nome, e por isso o código parecia se contradizer: o
+ * Zod tinha `default("Untracked")` enquanto a exibição caía em `?? "Want to Read"`.
+ */
+export const UNTRACKED_PERSONAL_STATUS = personalStatusNameBySlugOrThrow("untracked") as PersonalStatus
+
 /**
  * O status canônico que significa "leu tudo" — hoje "Finished", ontem "Completed".
  *
@@ -96,7 +154,7 @@ export function isInterestHiddenPersonalStatus(status: number | string | null | 
  * Se um dia a tabela tiver zero ou mais de um status marcado `is_fully_read`, isto estoura no
  * import — de propósito. É melhor que traduzir em silêncio para um status que não existe.
  */
-export const FULLY_READ_STATUS: string = (() => {
+export const FULLY_READ_STATUS = ((): PersonalStatus => {
   const [only, ...rest] = FULLY_READ_PERSONAL_STATUSES
   if (!only || rest.length) {
     throw new Error(
@@ -104,5 +162,5 @@ export const FULLY_READ_STATUS: string = (() => {
         `[${FULLY_READ_PERSONAL_STATUSES.join(", ")}]. Ajuste a tabela e rode sync-constants.`,
     )
   }
-  return only
+  return only as PersonalStatus
 })()

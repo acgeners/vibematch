@@ -167,6 +167,10 @@ export interface PersonalStatusInfo {
   color: string
   symbol: string
   comment: string
+  /** Classe Tailwind de fundo (gráfico de distribuição do dashboard). */
+  bgClass: string
+  /** Descrição em PT exibida no seletor de status. */
+  descriptionPt: string
   /** A leitura encerrou (concluiu ou desistiu). */
   isTerminal: boolean
   /** Leu até o fim. */
@@ -175,20 +179,26 @@ export interface PersonalStatusInfo {
   tracksProgress: boolean
   /** Não precisa de estimativa de Interesse — sai da fila do Avaliar. */
   hideFromInterest: boolean
+  /** É o status que a obra APARENTA quando não há linha no espelho. Exatamente um. */
+  isDefaultUnset: boolean
+  /** "Estou acompanhando" — KPI da home, widget de progresso. */
+  isFollowing: boolean
+  /** "Ainda não comecei" — filtro padrão do ranking, seed da auditoria. */
+  isUnread: boolean
 }
 
 export const PERSONAL_STATUSES_BY_ID: Record<number, PersonalStatusInfo> = {
-  8: { id: 8, status: "Want to Read", slug: "want-to-read", color: "#A3E635", symbol: "⭐️", comment: "Not started yet, but intended for future reading", isTerminal: false, isFullyRead: false, tracksProgress: false, hideFromInterest: false },
-  3: { id: 3, status: "Started", slug: "started", color: "#22D3EE", symbol: "▶️", comment: "Started recently; still deciding whether to continue", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false },
-  2: { id: 2, status: "Reading", slug: "reading", color: "#60A5FA", symbol: "📖", comment: "Currently reading or actively following new chapters/releases", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false },
-  4: { id: 4, status: "Stalled", slug: "stalled", color: "#FACC15", symbol: "⏸️", comment: "Lost momentum or interest. Not sure I liked it; likely needs rereading before continuing", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: true },
-  7: { id: 7, status: "On-hold", slug: "on-hold", color: "#FB923C", symbol: "📁", comment: "Paused for now, but I still want to continue; likely needs rereading before continuing", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false },
-  6: { id: 6, status: "Hiatus", slug: "hiatus", color: "#A78BFA", symbol: "⏳", comment: "Waiting for new chapters, season, translation, or official return", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false },
-  1: { id: 1, status: "Finished", slug: "finished", color: "#4ADE80", symbol: "✔", comment: "Finished reading", isTerminal: true, isFullyRead: true, tracksProgress: true, hideFromInterest: true },
-  12: { id: 12, status: "Read Again", slug: "read_again", color: "#F472B6", symbol: "🔁", comment: "Already read, but want to read again", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: true },
-  9: { id: 9, status: "Dropped", slug: "dropped", color: "#F87171", symbol: "🗑️", comment: "Dropped before finishing", isTerminal: true, isFullyRead: false, tracksProgress: true, hideFromInterest: true },
-  11: { id: 11, status: "Not Now", slug: "not_now", color: "#D6A77A", symbol: "💤", comment: "Not interested in reading for now, but not permanently dismissed", isTerminal: false, isFullyRead: false, tracksProgress: false, hideFromInterest: false },
-  10: { id: 10, status: "Untracked", slug: "untracked", color: "#9CA3AF", symbol: "⎯", comment: "Stored in the database without an active reading status", isTerminal: false, isFullyRead: false, tracksProgress: false, hideFromInterest: false },
+  8: { id: 8, status: "Want to Read", slug: "want-to-read", color: "#A3E635", symbol: "⭐️", comment: "Not started yet, but intended for future reading", bgClass: "bg-slate-400", descriptionPt: "Não comecei — está na lista de leitura", isTerminal: false, isFullyRead: false, tracksProgress: false, hideFromInterest: false, isDefaultUnset: true, isFollowing: false, isUnread: true },
+  3: { id: 3, status: "Started", slug: "started", color: "#22D3EE", symbol: "▶️", comment: "Started recently; still deciding whether to continue", bgClass: "bg-violet-500", descriptionPt: "Comecei a leitura recentemente, ainda não terminei", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false, isDefaultUnset: false, isFollowing: true, isUnread: false },
+  2: { id: 2, status: "Reading", slug: "reading", color: "#60A5FA", symbol: "📖", comment: "Currently reading or actively following new chapters/releases", bgClass: "bg-emerald-500", descriptionPt: "Estou lendo e acompanhando os capítulos novos", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false, isDefaultUnset: false, isFollowing: true, isUnread: false },
+  4: { id: 4, status: "Stalled", slug: "stalled", color: "#FACC15", symbol: "⏸️", comment: "Lost momentum or interest. Not sure I liked it; likely needs rereading before continuing", bgClass: "bg-orange-500", descriptionPt: "Comecei e pausei por tensão na história — pretendo terminar", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: true, isDefaultUnset: false, isFollowing: false, isUnread: false },
+  7: { id: 7, status: "On-hold", slug: "on-hold", color: "#FB923C", symbol: "📁", comment: "Paused for now, but I still want to continue; likely needs rereading before continuing", bgClass: "bg-slate-500", descriptionPt: "Comecei, planejo retomar, mas preciso reler antes", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false, isDefaultUnset: false, isFollowing: false, isUnread: false },
+  6: { id: 6, status: "Hiatus", slug: "hiatus", color: "#A78BFA", symbol: "⏳", comment: "Waiting for new chapters, season, translation, or official return", bgClass: "bg-cyan-500", descriptionPt: "Aguardando nova temporada / retorno do título", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: false, isDefaultUnset: false, isFollowing: false, isUnread: false },
+  1: { id: 1, status: "Finished", slug: "finished", color: "#4ADE80", symbol: "✔", comment: "Finished reading", bgClass: "bg-blue-500", descriptionPt: "Terminei de ler", isTerminal: true, isFullyRead: true, tracksProgress: true, hideFromInterest: true, isDefaultUnset: false, isFollowing: false, isUnread: false },
+  12: { id: 12, status: "Read Again", slug: "read_again", color: "#F472B6", symbol: "🔁", comment: "Already read, but want to read again", bgClass: "bg-teal-500", descriptionPt: "Já li e estou relendo", isTerminal: false, isFullyRead: false, tracksProgress: true, hideFromInterest: true, isDefaultUnset: false, isFollowing: false, isUnread: false },
+  9: { id: 9, status: "Dropped", slug: "dropped", color: "#F87171", symbol: "🗑️", comment: "Dropped before finishing", bgClass: "bg-red-500", descriptionPt: "Abandonado, não pretendo continuar", isTerminal: true, isFullyRead: false, tracksProgress: true, hideFromInterest: true, isDefaultUnset: false, isFollowing: false, isUnread: false },
+  11: { id: 11, status: "Not Now", slug: "not_now", color: "#D6A77A", symbol: "💤", comment: "Not interested in reading for now, but not permanently dismissed", bgClass: "bg-stone-400", descriptionPt: "Não me interessa agora, mas não descartei de vez", isTerminal: false, isFullyRead: false, tracksProgress: false, hideFromInterest: false, isDefaultUnset: false, isFollowing: false, isUnread: false },
+  10: { id: 10, status: "Untracked", slug: "untracked", color: "#9CA3AF", symbol: "⎯", comment: "Stored in the database without an active reading status", bgClass: "bg-zinc-400", descriptionPt: "Está no catálogo, sem status de leitura ativo", isTerminal: false, isFullyRead: false, tracksProgress: false, hideFromInterest: false, isDefaultUnset: false, isFollowing: false, isUnread: true },
 }
 
 /**
@@ -206,6 +216,17 @@ export const TERMINAL_PERSONAL_STATUSES = ["Finished", "Dropped"] as const
 export const FULLY_READ_PERSONAL_STATUSES = ["Finished"] as const
 export const PROGRESS_PERSONAL_STATUSES = ["Started", "Reading", "Stalled", "On-hold", "Hiatus", "Finished", "Read Again", "Dropped"] as const
 export const INTEREST_HIDDEN_PERSONAL_STATUSES = ["Stalled", "Finished", "Read Again", "Dropped"] as const
+export const FOLLOWING_PERSONAL_STATUSES = ["Started", "Reading"] as const
+export const UNREAD_PERSONAL_STATUSES = ["Want to Read", "Untracked"] as const
+
+/**
+ * O status que a obra APARENTA quando o usuário não tem linha no espelho.
+ *
+ * Não confundir com "Untracked", que é escolha EXPLÍCITA do usuário. Os dois coexistiam sem nome
+ * no código — e por isso pareciam contradição: o Zod tinha default "Untracked" enquanto a exibição
+ * caía em `?? "Want to Read"` em 8 lugares.
+ */
+export const DEFAULT_PERSONAL_STATUS = "Want to Read"
 
 export const SYNOPSIS_QUALITY_LABELS: Record<string, string> = {
   "♥": "Fraca",

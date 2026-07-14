@@ -5,6 +5,7 @@ import {
   SYNOPSIS_QUALITIES,
   AI_EVAL_STATUSES,
 } from "@/types/domain"
+import { UNTRACKED_PERSONAL_STATUS } from "@/lib/constants/status-lookups"
 
 const scoreField = (label: string) =>
   z
@@ -52,7 +53,7 @@ export const workFormSchema = z.object({
   year: z.number({ message: "Ano deve ser um número" }).int().min(1900).max(2100).nullable().optional(),
   year_end: z.number({ message: "Ano deve ser um número" }).int().min(1900).max(2100).nullable().optional(),
   publication_status: z.enum(PUBLICATION_STATUSES).default("Unknown"),
-  personal_status: z.enum(PERSONAL_STATUSES).default("Untracked"),
+  personal_status: z.enum(PERSONAL_STATUSES).default(UNTRACKED_PERSONAL_STATUS),
   // FKs canônicos (derivados do nome canônico no save). Opcionais aqui porque
   // o form ainda usa as colunas texto como binding; o server action faz a
   // conversão e grava ambos. Sairão obrigatórios após Fase 4.1.

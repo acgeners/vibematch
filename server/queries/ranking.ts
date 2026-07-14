@@ -12,6 +12,7 @@ import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quali
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { isTerminalPersonalStatus } from "@/lib/constants/status-lookups"
+import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 
 // Tokeniza a busca igual ao filtro antigo do ranking: separa por espaços e
 // pontuação para que o padrão "a depois b depois c" atravesse vírgulas/`?`/etc.
@@ -596,7 +597,7 @@ export async function getRanking(
       publicationStatusId,
       publicationStatusShort: publicationStatusDisplay?.short ?? null,
       publicationStatusColor: publicationStatusDisplay?.color ?? null,
-      personalStatus: getPersonalStatusNameById(personalStatusId) ?? "Want to Read",
+      personalStatus: personalStatusNameOrDefault(personalStatusId),
       personalStatusId,
       personalStatusSymbol:
         personalStatusId != null ? personalStatusSymbolsById.get(personalStatusId) ?? null : null,

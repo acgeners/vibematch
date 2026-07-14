@@ -10,6 +10,7 @@
 
 import { z } from "zod"
 import { isFullyReadPersonalStatus, tracksProgressPersonalStatus } from "@/lib/constants/status-lookups"
+import { isUnreadPersonalStatus } from "@/lib/constants/status-lookups"
 
 // ── Vocabulário congelado ────────────────────────────────────────────────────
 
@@ -286,7 +287,7 @@ export function suggestReadingStatusFromDb(input: { personalStatus: string; chap
   if (tracksProgressPersonalStatus(input.personalStatus)) {
     return read ? "partially_read" : "uncertain"
   }
-  if (input.personalStatus === "Want to Read" || input.personalStatus === "Untracked") return "unread"
+  if (isUnreadPersonalStatus(input.personalStatus)) return "unread"
   return "uncertain"
 }
 

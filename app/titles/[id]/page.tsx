@@ -78,6 +78,7 @@ import type { PersonalStatus, SynopsisQuality } from "@/types/domain"
 import { pickPrimarySynopsis, pickPrimaryCover } from "@/lib/work-derived"
 import { TAG_GROUP_IDS, TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 import { CRITERION_SLUGS } from "@/types/domain"
+import { isFollowingPersonalStatus, personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 import {
   DEFAULT_POST_READING_WEIGHTS,
   POST_READING_WEIGHT_LABELS,
@@ -314,7 +315,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // hid aceito. `pending` = capítulos não lidos (total − lidos), sinal persistido
   // e refrescado pela checagem manual do /leitura.
   const personalStatusName = getPersonalStatusNameById(work.personal_status_id)
-  const isFollowing = personalStatusName === "Reading" || personalStatusName === "Started"
+  const isFollowing = isFollowingPersonalStatus(personalStatusName)
   const comixHid = externalIdMap.comix ?? null
   const comixReadUrl = isFollowing && comixHid ? comixWorkUrl(comixHid) : null
   const comixPending =
@@ -527,7 +528,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
   const statusInitial: WorkStatusValues = {
     personal_status:
-      (getPersonalStatusNameById(work.personal_status_id) as PersonalStatus | undefined) ?? "Want to Read",
+      personalStatusNameOrDefault(work.personal_status_id) as PersonalStatus,
     personal_status_id: work.personal_status_id ?? null,
     synopsis_quality: work.synopsis_quality ?? null,
     observation_adjustment: work.observation_adjustment ?? 0,
