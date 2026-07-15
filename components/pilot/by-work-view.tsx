@@ -6,7 +6,7 @@ import { CoverImage } from "@/components/ui/cover-image"
 import { PersonalStatusBadge } from "@/components/ui/status-badge"
 import { cn, titleToSlug } from "@/lib/utils"
 import { TasteStars } from "@/components/pilot/taste-stars"
-import { fmtLastRead } from "@/components/pilot/pilot-shared"
+import { fmtLastRead, isAnswered } from "@/components/pilot/pilot-shared"
 import { isFullyReadPersonalStatus } from "@/lib/constants/status-lookups"
 import type { WorkState } from "@/components/pilot/pilot-shared"
 import type { PilotWork, TasteCriterion } from "@/server/queries/pilot-taste"
@@ -54,10 +54,10 @@ export function ByWorkView({
   const wi = visibleIndices[safePos] ?? -1
   const w = works[wi]
   const ws = state[wi]
-  const overallKey = overall?.key
-  const done = overallKey
-    ? visibleIndices.filter((i) => state[i].scores[overallKey] != null).length
-    : 0
+  // "Avaliada" = todos os aspectos aplicáveis respondidos (o veredito manual foi aposentado).
+  const done = visibleIndices.filter((i) =>
+    aspects.every((a) => isAnswered(state[i], a, isFullyReadPersonalStatus(works[i].personalStatusId))),
+  ).length
   // Barra do topo desta visão = POSIÇÃO na pilha (obra atual), enche ao navegar.
   const posPct = total === 0 ? 0 : Math.round(((safePos + 1) / total) * 100)
 

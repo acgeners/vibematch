@@ -3,15 +3,24 @@ import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { pickCoverUrls, pickPrimarySynopsis } from "@/lib/work-derived"
 
-/** Os 7 campos de gosto (6 eixos + gostei geral), na ordem do banco. */
+/**
+ * Os 8 eixos de gosto, NA ORDEM DA TELA (esta lista é a fonte da ordem — `getTasteCriteria`
+ * ordena por ela, não pelo `id` do banco). Personagens desagrupados (mig 158) vêm primeiro.
+ *
+ * `like_leads_score` (o antigo "Protagonistas & Casal" agrupado) e `like_overall_score` (o veredito
+ * manual) saíram daqui de propósito: leads virou FL/ML/Casal; o veredito foi substituído pela nota
+ * de gosto CALCULADA. As colunas continuam no banco (dado preservado) — só não são mais lidas/escritas
+ * nem renderizadas. O DROP delas é uma fase 2 separada.
+ */
 export const TASTE_SCORE_KEYS = [
-  "like_leads_score",
+  "like_female_lead_score",
+  "like_male_lead_score",
+  "like_couple_score",
   "like_setting_score",
   "like_tone_score",
   "like_art_score",
   "like_pacing_score",
   "like_ending_score",
-  "like_overall_score",
 ] as const
 
 export type TasteScoreKey = (typeof TASTE_SCORE_KEYS)[number]
@@ -57,25 +66,32 @@ export async function getTasteScoresForWork(
   return { scores, endingNa: Boolean((data as Record<string, unknown> | null)?.ending_na) }
 }
 
-/** Critérios de gosto (criteria eval_type='Gosto'), na ordem de inserção. */
+/**
+ * Critérios de gosto (criteria eval_type='Gosto'), na ordem de `TASTE_SCORE_KEYS`.
+ * FILTRA pelos keys dessa lista → os critérios deprecados que sobraram no banco
+ * (`like_leads_score`, `like_overall_score`) não são retornados, logo não renderizam.
+ */
 export async function getTasteCriteria(): Promise<TasteCriterion[]> {
   const sb = createAdminClient()
   const { data, error } = await sb
     .from("criteria")
     .select("slug, key, criteria, emoji, description, ranges")
     .eq("eval_type", "Gosto")
-    .order("id")
   if (error) throw new Error(`getTasteCriteria: ${error.message}`)
-  return (data ?? []).map((c) => ({
-    slug: c.slug as string,
-    key: c.key as TasteScoreKey,
-    name: c.criteria as string,
-    emoji: (c.emoji as string | null) ?? "",
-    description: (c.description as string | null) ?? "",
-    hints: Array.isArray(c.ranges) ? (c.ranges as string[]) : [],
-    allowsNa: c.slug === "taste_ending",
-    isOverall: c.slug === "taste_overall",
-  }))
+  const order = new Map(TASTE_SCORE_KEYS.map((k, i) => [k, i]))
+  return (data ?? [])
+    .filter((c) => order.has(c.key as TasteScoreKey))
+    .sort((a, b) => order.get(a.key as TasteScoreKey)! - order.get(b.key as TasteScoreKey)!)
+    .map((c) => ({
+      slug: c.slug as string,
+      key: c.key as TasteScoreKey,
+      name: c.criteria as string,
+      emoji: (c.emoji as string | null) ?? "",
+      description: (c.description as string | null) ?? "",
+      hints: Array.isArray(c.ranges) ? (c.ranges as string[]) : [],
+      allowsNa: c.slug === "taste_ending",
+      isOverall: c.slug === "taste_overall",
+    }))
 }
 
 /**
