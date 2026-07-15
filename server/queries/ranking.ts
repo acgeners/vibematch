@@ -11,6 +11,7 @@ import { computeDecisionScore } from "@/lib/calculations/decision"
 import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quality"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { selectByIdsInChunks } from "@/lib/supabase/paginate"
 import { isTerminalPersonalStatus } from "@/lib/constants/status-lookups"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 
@@ -460,72 +461,71 @@ export async function getRanking(
   // "última leitura" vêm de `personal.get()` — a linha de QUEM OLHA. Trazê-las de `works` era
   // trazer as do dono e depois sobrescrevê-las; o que sobrava era um select que só existia
   // para o `DROP COLUMN` tropeçar nele.
-  let worksQuery = supabase
-    .from("works")
-    .select(`
-      id, title, publication_status_id, ai_eval_status,
-      total_chapters, is_archived,
-      canonical_synopsis, year, updated_at,
-      calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
-      category_scores(criterion_slug, score),
-      work_covers(url, is_primary, position)
-    `)
-  // Nota: work_tags/work_genres NÃO são embutidos aqui. O filtro por gênero/tag
-  // já é resolvido em SQL (allowedIds, acima) e nenhum consumidor do RankingEntry
-  // lê entry.tags/entry.genres no client — embuti-los só inflava o payload (~3.9MB
-  // pra 660 obras). work_synopses idem: vem da query achatada primarySynopsisPromise.
-
-  if (!filters.includeArchived) {
-    worksQuery = worksQuery.eq("is_archived", false)
-  }
-
-  // A busca por título agora é resolvida para IDs no bloco paralelo acima
-  // (searchIds → includeSets), cobrindo também alternative_titles.
-
-  if (allowedIds) worksQuery = worksQuery.in("id", allowedIds)
-  // If only exclude filters are present, apply them via .not(in)
-  if (!allowedIds && excludeIds.size > 0) {
-    worksQuery = worksQuery.not("id", "in", `(${[...excludeIds].join(",")})`)
-  }
-
-  if (publicationStatusIdFilter && publicationStatusIdFilter.length > 0) {
-    worksQuery = worksQuery.in("publication_status_id", publicationStatusIdFilter)
-  } else if (publicationStatusIdFilter && publicationStatusIdFilter.length === 0) {
-    // Filter pediu status que nenhum nome resolve — força match vazio.
-    worksQuery = worksQuery.eq("id", "00000000-0000-0000-0000-000000000000")
-  }
-  // O STATUS de leitura NÃO é filtrado em SQL — nem pro dono. Ele sai em memória, sobre
-  // `entry.personalStatus`, porque só lá a obra sem linha de estado aparece como
-  // "Want to Read" (ver o comentário no topo, em `personalFilterIds`).
-  if (filters.aiEvalStatus?.length) {
-    worksQuery = worksQuery.in("ai_eval_status", filters.aiEvalStatus)
-  }
-  // O Interesse ♥ manual já virou recorte por id em `interestFilterIds` (acima), que entra
-  // no `allowedIds`. Nada a filtrar aqui.
-  if (filters.minTotalChapters != null) {
-    worksQuery = worksQuery.gte("total_chapters", filters.minTotalChapters)
-  }
-  if (filters.maxTotalChapters != null) {
-    worksQuery = worksQuery.lte("total_chapters", filters.maxTotalChapters)
-  }
-  if (filters.minYear != null) {
-    worksQuery = worksQuery.gte("year", filters.minYear)
-  }
-  if (filters.maxYear != null) {
-    worksQuery = worksQuery.lte("year", filters.maxYear)
-  }
-  // "Só favoritos" também já veio por id em `personalFilterIds` (→ `allowedIds`).
-  // Escopo por grupo de favoritos: AND com o allowedIds/exclude acima. Lista
-  // vazia => força match vazio (grupo sem obras não deve vazar o catálogo).
+  // Restrição POSITIVA por id — allowedIds (gênero/tag/busca/♥) ∩ onlyWorkIds (grupo de
+  // favoritos) — resolvida em MEMÓRIA, não com dois `.in("id", ...)` encadeados.
+  //
+  // ⚠️ Empurrar centenas de ids num único `.in("id", ...)` JUNTO dos embeds
+  // (calculated_scores/category_scores/work_covers) faz o planner do Postgres despencar num
+  // nested-loop: medido, a mesma query passa de ~0,1s (≤300 ids) para ~8s acima disso — o
+  // gateway do Supabase derruba a conexão e o Node reporta `TypeError: fetch failed` (era o
+  // bug do /ranking com o filtro de ♥, que resolve pra 385 ids). A in-list OU os embeds,
+  // sozinhos, são baratos; é a COMBINAÇÃO que explode. Por isso o filtro por id sai em LOTES
+  // (selectByIdsInChunks, 100/lote): cada lote é uma query curta — e ainda mantém a URL longe
+  // do teto de ~24KB do gateway. As linhas são reordenadas em memória mais abaixo, então a
+  // ordem por lote não importa.
+  let restrictIds: string[] | null = allowedIds
   if (filters.onlyWorkIds) {
-    if (filters.onlyWorkIds.length === 0) {
-      worksQuery = worksQuery.eq("id", "00000000-0000-0000-0000-000000000000")
-    } else {
-      worksQuery = worksQuery.in("id", filters.onlyWorkIds)
+    // Lista vazia => grupo sem obras não deve vazar o catálogo.
+    if (filters.onlyWorkIds.length === 0) return []
+    const wanted = new Set(filters.onlyWorkIds)
+    restrictIds = restrictIds ? restrictIds.filter((id) => wanted.has(id)) : filters.onlyWorkIds
+  }
+  if (restrictIds && restrictIds.length === 0) return []
+
+  // Todos os filtros ESCALARES (mais o exclude por not-in) numa fábrica, pra reaplicá-los
+  // idênticos a cada lote de ids. Nota: work_tags/work_genres NÃO são embutidos — o filtro por
+  // gênero/tag já virou id em `allowedIds` e nenhum consumidor lê entry.tags/genres no client
+  // (embuti-los inflava o payload ~3.9MB). work_synopses idem: vem de primarySynopsisPromise.
+  const buildWorksQuery = () => {
+    let q = supabase
+      .from("works")
+      .select(`
+        id, title, publication_status_id, ai_eval_status,
+        total_chapters, is_archived,
+        canonical_synopsis, year, updated_at,
+        calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
+        category_scores(criterion_slug, score),
+        work_covers(url, is_primary, position)
+      `)
+    if (!filters.includeArchived) q = q.eq("is_archived", false)
+    // Exclude por not-in só quando NÃO há restrição positiva por allowedIds — senão o exclude
+    // já foi removido de allowedIds acima. (Baseado em `allowedIds`, não `restrictIds`: com
+    // onlyWorkIds sozinho o exclude ainda precisa valer.)
+    if (!allowedIds && excludeIds.size > 0) {
+      q = q.not("id", "in", `(${[...excludeIds].join(",")})`)
     }
+    if (publicationStatusIdFilter && publicationStatusIdFilter.length > 0) {
+      q = q.in("publication_status_id", publicationStatusIdFilter)
+    } else if (publicationStatusIdFilter && publicationStatusIdFilter.length === 0) {
+      // Filter pediu status que nenhum nome resolve — força match vazio.
+      q = q.eq("id", "00000000-0000-0000-0000-000000000000")
+    }
+    // O STATUS de leitura NÃO é filtrado em SQL — nem pro dono. Ele sai em memória, sobre
+    // `entry.personalStatus`, porque só lá a obra sem linha de estado aparece como
+    // "Want to Read" (ver o comentário no topo, em `personalFilterIds`).
+    if (filters.aiEvalStatus?.length) q = q.in("ai_eval_status", filters.aiEvalStatus)
+    if (filters.minTotalChapters != null) q = q.gte("total_chapters", filters.minTotalChapters)
+    if (filters.maxTotalChapters != null) q = q.lte("total_chapters", filters.maxTotalChapters)
+    if (filters.minYear != null) q = q.gte("year", filters.minYear)
+    if (filters.maxYear != null) q = q.lte("year", filters.maxYear)
+    return q
   }
 
-  const { data, error } = await worksQuery.order("title").limit(2000)
+  const { data, error } = restrictIds
+    ? await selectByIdsInChunks(restrictIds, (chunk) =>
+        buildWorksQuery().in("id", chunk).limit(2000),
+      )
+    : await buildWorksQuery().order("title").limit(2000)
 
   if (error) throw new Error(error.message)
 
