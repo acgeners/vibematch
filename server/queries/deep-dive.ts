@@ -451,15 +451,25 @@ export async function getDeepDiveHistory(workId: string, limit = 10): Promise<De
   return (data ?? []).map((row) => mapDeepDiveRow(row as Record<string, unknown>))
 }
 
-export async function getDeepDivesToday(): Promise<number> {
+/**
+ * Deep Dives do USUÁRIO nas últimas 24h.
+ *
+ * ⚠️ Antes da migration 159 esta contagem não tinha `.eq("user_id", …)` — a tabela nem
+ * tinha a coluna. O teto de 10/dia era GLOBAL: um usuário esgotava os Deep Dives de todos.
+ */
+export async function getDeepDivesToday(userId: string): Promise<number> {
   const supabase = createAdminClient()
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
   const { count, error } = await supabase
     .from("deep_dive_results")
     .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
     .gte("created_at", since)
   if (error) {
-    console.error("[deep-dive] erro contando deep dives do dia:", error)
+    // FALLBACK-SAFE (igual getRunsToday): sem a coluna user_id não dá pra contar por
+    // usuário. Devolver 0 mantém o app funcionando — e a trava de custo em US$
+    // (`ensureAiConsumption`) continua valendo, porque ela não depende desta coluna.
+    console.error("[deep-dive] erro contando deep dives do dia (a coluna user_id existe? migration 159):", error.message)
     return 0
   }
   return count ?? 0

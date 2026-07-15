@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { runDeepDive } from "@/lib/ai-recommendation/deep-dive"
 import { MAX_DEEP_DIVES_PER_DAY } from "@/lib/ai-recommendation/deep-dive-limits"
 import { ensureAiConsumption } from "@/server/queries/ai-quota"
+import { getSessionUserId } from "@/server/queries/current-user"
 import {
   getDeepDiveContext,
   getDeepDiveHistory,
@@ -31,7 +32,15 @@ export async function deepDiveWorkAction(
     const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
 
-    const runsToday = await getDeepDivesToday()
+    // Dono desta ação. Depois do gate de consumo (que exige sessão), sempre há um id;
+    // usamos `getSessionUserId` (não `getCurrentUserId`) de propósito: a variante que cai
+    // no singleton gravaria o Deep Dive na linha do dono num POST sem sessão (current-user.ts:82).
+    const userId = await getSessionUserId()
+    if (!userId) return { error: "Entre na sua conta para usar o Deep Dive." }
+
+    // Teto de frequência POR USUÁRIO (migration 159). Antes era global: um usuário
+    // esgotava os Deep Dives de todos. Custo já é limitado à parte por `ensureAiConsumption`.
+    const runsToday = await getDeepDivesToday(userId)
     if (runsToday >= MAX_DEEP_DIVES_PER_DAY) {
       return {
         error: `Limite diário de ${MAX_DEEP_DIVES_PER_DAY} Deep Dives atingido. Tente novamente amanhã.`,
@@ -58,6 +67,7 @@ export async function deepDiveWorkAction(
       .from("deep_dive_results")
       .insert({
         work_id: workId,
+        user_id: userId,
         taste_profile_id: ctxResult.data.context.profileId,
         user_context: trimmedContext,
         payload: result.payload,
