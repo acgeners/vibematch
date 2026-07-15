@@ -23,7 +23,6 @@ export interface StatusEditDialogProps {
   /** Critérios/notas de gosto ("Como foi pra você"). Sem eles a seção não aparece. */
   tasteCriteria?: TasteCriterion[]
   tasteScores?: Record<TasteScoreKey, number | null>
-  tasteEndingNa?: boolean
 }
 
 export function StatusEditDialog({
@@ -36,7 +35,6 @@ export function StatusEditDialog({
   existingAssessment,
   tasteCriteria,
   tasteScores,
-  tasteEndingNa,
 }: StatusEditDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -58,7 +56,6 @@ export function StatusEditDialog({
           existingAssessment={existingAssessment}
           tasteCriteria={tasteCriteria}
           tasteScores={tasteScores}
-          tasteEndingNa={tasteEndingNa}
           formId="work-status-form-dialog"
           onSaved={() => onOpenChange(false)}
         />

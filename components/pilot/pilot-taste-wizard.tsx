@@ -6,6 +6,7 @@ import { savePilotTaste } from "@/server/actions/pilot-taste"
 import { starsToPostReadingScore } from "@/lib/constants/post-reading-criteria"
 import { ByWorkView } from "@/components/pilot/by-work-view"
 import { ByCriterionView } from "@/components/pilot/by-criterion-view"
+import { isFullyReadPersonalStatus } from "@/lib/constants/status-lookups"
 import {
   buildStatusFacets,
   matchesStatus,
@@ -32,6 +33,9 @@ export function PilotTasteWizard({ criteria, works }: Props) {
   const [state, setState] = useState<WorkState[]>(() =>
     works.map((w) => ({ scores: { ...w.scores }, endingNa: w.endingNa })),
   )
+  // Chave do eixo "Final" (o único com allowsNa). Sua aplicabilidade deriva do status
+  // da obra: só obras terminadas (isFullyRead) recebem nota; nas demais é gravado vazio.
+  const endingKey = useMemo(() => criteria.find((c) => c.allowsNa)?.key, [criteria])
   const [save, setSave] = useState<SaveState>("idle")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const view = useSyncExternalStore(subscribeViewMode, readViewMode, () => "work" as const)
@@ -55,8 +59,12 @@ export function PilotTasteWizard({ criteria, works }: Props) {
   const doSave = (i: number) => {
     const w = works[i]
     const s = stateRef.current[i]
+    // O "Final" só se aplica a obra terminada. Fora disso: grava vazio + ending_na,
+    // independente do que estiver no estado (a regra é autoritativa no save).
+    const endingApplicable = isFullyReadPersonalStatus(w.personalStatusId)
+    const scores = endingApplicable || !endingKey ? s.scores : { ...s.scores, [endingKey]: null }
     setSave("saving")
-    savePilotTaste(w.id, s.scores, s.endingNa)
+    savePilotTaste(w.id, scores, !endingApplicable)
       .then((r) => setSave(r.ok ? "saved" : "idle"))
       .catch(() => setSave("idle"))
   }
@@ -87,14 +95,7 @@ export function PilotTasteWizard({ criteria, works }: Props) {
 
   const rate = (i: number, crit: TasteCriterion, stars: number) => {
     const value = starsToPostReadingScore(stars)
-    patch(i, (ws) => ({
-      scores: { ...ws.scores, [crit.key]: value },
-      endingNa: crit.allowsNa ? false : ws.endingNa,
-    }))
-    scheduleSave(i)
-  }
-  const markNa = (i: number, crit: TasteCriterion) => {
-    patch(i, (ws) => ({ scores: { ...ws.scores, [crit.key]: null }, endingNa: true }))
+    patch(i, (ws) => ({ ...ws, scores: { ...ws.scores, [crit.key]: value } }))
     scheduleSave(i)
   }
 
@@ -205,7 +206,6 @@ export function PilotTasteWizard({ criteria, works }: Props) {
           state={state}
           visibleIndices={visibleIndices}
           onRate={rate}
-          onNa={markNa}
           onFlush={flushAll}
         />
       ) : (
@@ -215,7 +215,6 @@ export function PilotTasteWizard({ criteria, works }: Props) {
           state={state}
           visibleIndices={visibleIndices}
           onRate={rate}
-          onNa={markNa}
         />
       )}
     </div>
