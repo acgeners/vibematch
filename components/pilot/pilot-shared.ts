@@ -50,12 +50,13 @@ export function fmtLastRead(d: string | null): string {
 }
 
 /**
- * Uma obra "respondeu" o critério quando tem nota; no Final, marcar N/A também
- * conta como respondido. Base pra contadores por critério e filtro "Só faltando".
+ * Uma obra "respondeu" o critério quando tem nota. O eixo "Final" (allowsNa) só se
+ * aplica a obra terminada: numa obra não terminada ele está travado — logo, não há o
+ * que responder e conta como respondido. Base pra contadores e filtro "Só faltando".
  */
-export function isAnswered(ws: WorkState, crit: TasteCriterion): boolean {
+export function isAnswered(ws: WorkState, crit: TasteCriterion, isFullyRead = true): boolean {
   if (ws.scores[crit.key] != null) return true
-  return crit.allowsNa && ws.endingNa
+  return crit.allowsNa && !isFullyRead
 }
 
 /** Valor do filtro por status de leitura: um id, "todos", ou "sem status". */

@@ -114,7 +114,6 @@ export function StatusActionButton({
   existingAssessment,
   tasteCriteria,
   tasteScores,
-  tasteEndingNa,
   label = "Alterar Status",
   variant = "outline",
   size = "sm",
@@ -128,7 +127,6 @@ export function StatusActionButton({
   /** Critérios/notas de gosto ("Como foi pra você") — repassados ao dialog. */
   tasteCriteria?: TasteCriterion[]
   tasteScores?: Record<TasteScoreKey, number | null>
-  tasteEndingNa?: boolean
   label?: string
   variant?: "outline" | "default" | "ghost"
   size?: "sm" | "default" | "lg"
@@ -157,7 +155,6 @@ export function StatusActionButton({
         existingAssessment={existingAssessment}
         tasteCriteria={tasteCriteria}
         tasteScores={tasteScores}
-        tasteEndingNa={tasteEndingNa}
       />
     </>
   )

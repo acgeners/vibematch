@@ -7,17 +7,23 @@ import { PostAttributeAssessmentForm } from "./post-attribute-assessment-form"
 import type { PostAttributeAssessmentFormProps } from "./post-attribute-assessment-form"
 import type { WorkStatusValues } from "@/lib/validations/work.schema"
 import { CRITERION_SLUGS } from "@/types/domain"
-import type { PersonalStatus, CriterionSlug } from "@/types/domain"
+import type { CriterionSlug } from "@/types/domain"
 import { submitPostReadingAttributes } from "@/server/actions/post-reading-attributes"
 import { PostTasteAssessment } from "@/components/pilot/post-taste-assessment"
 import type { TasteCriterion, TasteScoreKey } from "@/server/queries/pilot-taste"
-import { isTerminalPersonalStatus } from "@/lib/constants/status-lookups"
+import { isTerminalPersonalStatus, isFullyReadPersonalStatus } from "@/lib/constants/status-lookups"
 
 // Atributos pós-leitura aparecem quando a obra já tem leitura suficiente:
 // status terminal OU mais de 20% lido. Quais status são "terminais" vem do banco
 // (`personal_status.is_terminal`, migration 155) — escrever o nome aqui é o que quebrou
 // este fluxo quando "Completed" virou "Finished".
 const MIN_READ_PCT_FOR_POST_ATTR = 20
+
+// Craft (os 8 critérios de execução + o badge "Nota Pessoal Calculada") saiu de vista: a nota
+// de gosto calculada dos 6 eixos o substitui na tela. NÃO é remoção — o dado craft continua
+// salvo e o `user_score` (rótulo do modelo) segue computado dele por baixo; só a UI some. Vira
+// `true` de novo se um dia a avaliação craft voltar a ser preenchida manualmente.
+const CRAFT_EVALUATION_VISIBLE = false
 
 interface PostReadingFlowProps {
   workId: string
@@ -30,7 +36,6 @@ interface PostReadingFlowProps {
    *  não é renderizado. */
   tasteCriteria?: TasteCriterion[]
   tasteScores?: Record<TasteScoreKey, number | null>
-  tasteEndingNa?: boolean
   /** Id do `<form>` do status (default "work-status-form"). Use um id distinto
    *  quando houver outra instância montada ao mesmo tempo (ex.: aba + dialog). */
   formId?: string
@@ -54,7 +59,6 @@ export function PostReadingFlow({
   existingAssessment,
   tasteCriteria = [],
   tasteScores = {} as Record<TasteScoreKey, number | null>,
-  tasteEndingNa = false,
   formId = "work-status-form",
   onSaved,
 }: PostReadingFlowProps) {
@@ -119,7 +123,7 @@ export function PostReadingFlow({
           showAttributes ? () => submitPostReadingAttributes(workId, attrValues) : undefined
         }
         extraDirty={attrDirty}
-        showEvaluationCriteria={isVisible}
+        showEvaluationCriteria={CRAFT_EVALUATION_VISIBLE}
         criteriaDefaultOpen={false}
         formId={formId}
         onSaved={onSaved}
@@ -130,7 +134,7 @@ export function PostReadingFlow({
           workId={workId}
           criteria={tasteCriteria}
           initialScores={tasteScores}
-          initialEndingNa={tasteEndingNa}
+          endingApplicable={isFullyReadPersonalStatus(liveStatus)}
         />
       )}
       {isVisible && (
@@ -141,7 +145,7 @@ export function PostReadingFlow({
           value={hasEval ? attrValues : undefined}
           onChange={hasEval ? setAttrValues : undefined}
           hideOwnSave={hasEval}
-          defaultOpen={false}
+          defaultOpen={true}
         />
       )}
       {/* Botão Salvar no fim de tudo — submete o WorkStatusForm via form={formId}. */}

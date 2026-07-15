@@ -1,8 +1,9 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
-import { Star } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Star, Lock } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ScoreBadge } from "@/components/ui/score-badge"
 import { cn } from "@/lib/utils"
 import { savePilotTaste } from "@/server/actions/pilot-taste"
 import {
@@ -15,7 +16,12 @@ interface Props {
   workId: string
   criteria: TasteCriterion[]
   initialScores: Record<TasteScoreKey, number | null>
-  initialEndingNa: boolean
+  /**
+   * O eixo "Final" (o único com `allowsNa`) só é avaliável quando a obra está
+   * terminada (status fully-read). Vem do fluxo ao vivo — muda sem reload conforme o
+   * status muda. Quando false, a linha vira um selo travado e é gravada vazia.
+   */
+  endingApplicable: boolean
 }
 
 type SaveState = "idle" | "saving" | "saved"
@@ -25,18 +31,20 @@ type SaveState = "idle" | "saving" | "saved"
  * leitura. Nota direta (não calculada da média — ver PLANO-ARQUITETURA-NOTAS.md).
  * Autosave em `pilot_taste_scores`.
  */
-export function PostTasteAssessment({ workId, criteria, initialScores, initialEndingNa }: Props) {
+export function PostTasteAssessment({ workId, criteria, initialScores, endingApplicable }: Props) {
   const aspects = useMemo(() => criteria.filter((c) => !c.isOverall), [criteria])
   const overall = useMemo(() => criteria.find((c) => c.isOverall) ?? null, [criteria])
+  const endingKey = useMemo(() => criteria.find((c) => c.allowsNa)?.key, [criteria])
 
   const [scores, setScores] = useState<Record<TasteScoreKey, number | null>>({ ...initialScores })
-  const [endingNa, setEndingNa] = useState(initialEndingNa)
   const [active, setActive] = useState<string | null>(null)
   const [hint, setHint] = useState<{ stars: number; text: string } | null>(null)
   const [save, setSave] = useState<SaveState>("idle")
 
-  const stateRef = useRef({ scores, endingNa })
-  stateRef.current = { scores, endingNa }
+  const stateRef = useRef({ scores, endingApplicable })
+  useEffect(() => {
+    stateRef.current = { scores, endingApplicable }
+  }, [scores, endingApplicable])
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const scheduleSave = () => {
@@ -44,7 +52,10 @@ export function PostTasteAssessment({ workId, criteria, initialScores, initialEn
     if (timer.current) clearTimeout(timer.current)
     timer.current = setTimeout(() => {
       const s = stateRef.current
-      savePilotTaste(workId, s.scores, s.endingNa)
+      // Regra autoritativa no save: obra não terminada → "Final" vazio + ending_na.
+      const payload =
+        s.endingApplicable || !endingKey ? s.scores : { ...s.scores, [endingKey]: null }
+      savePilotTaste(workId, payload, !s.endingApplicable)
         .then((r) => setSave(r.ok ? "saved" : "idle"))
         .catch(() => setSave("idle"))
     }, 550)
@@ -53,23 +64,43 @@ export function PostTasteAssessment({ workId, criteria, initialScores, initialEn
   const setStar = (crit: TasteCriterion, stars: number) => {
     const value = starsToPostReadingScore(stars)
     setScores((p) => ({ ...p, [crit.key]: value }))
-    if (crit.allowsNa) setEndingNa(false)
-    setActive(crit.slug)
-    scheduleSave()
-  }
-  const setNa = (crit: TasteCriterion) => {
-    setScores((p) => ({ ...p, [crit.key]: null }))
-    setEndingNa(true)
     setActive(crit.slug)
     scheduleSave()
   }
 
-  const overallVal = overall ? scores[overall.key] : null
+  // Nota calculada = média dos eixos DISPONÍVEIS (o "Final" travado sai da conta por ser
+  // null). É só exibição: NÃO alimenta `user_score` (que segue a média craft por ora).
+  const aspectScores = aspects
+    .map((c) => scores[c.key])
+    .filter((v): v is number => v != null)
+  const calcScore =
+    aspectScores.length > 0
+      ? Math.round((aspectScores.reduce((a, b) => a + b, 0) / aspectScores.length) * 10) / 10
+      : null
 
   const row = (crit: TasteCriterion, goal: boolean) => {
     const val = scores[crit.key]
-    const na = crit.allowsNa && endingNa && val == null
-    const filled = na ? 0 : scoreToPostReadingStars(val) ?? 0
+    const locked = crit.allowsNa && !endingApplicable
+    if (locked) {
+      return (
+        <div
+          key={crit.slug}
+          className="flex items-center gap-3 rounded-lg border border-transparent px-2.5 py-2"
+        >
+          <span className="w-6 shrink-0 text-center text-lg opacity-50" aria-hidden>
+            {crit.emoji}
+          </span>
+          <div className="min-w-0 flex-1 text-sm font-semibold tracking-tight text-muted-foreground">
+            {crit.name}
+          </div>
+          <span className="flex items-center gap-1.5 text-[12px] italic text-muted-foreground/70">
+            <Lock className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+            Avalie ao terminar de ler
+          </span>
+        </div>
+      )
+    }
+    const filled = scoreToPostReadingStars(val) ?? 0
     return (
       <div
         key={crit.slug}
@@ -110,23 +141,6 @@ export function PostTasteAssessment({ workId, criteria, initialScores, initialEn
               />
             </button>
           ))}
-          {crit.allowsNa && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                setNa(crit)
-              }}
-              className={cn(
-                "ml-1.5 rounded-full border px-2 py-0.5 text-[11px] tracking-wide transition-colors",
-                na
-                  ? "border-foreground bg-foreground text-background"
-                  : "border-border text-muted-foreground hover:border-muted-foreground",
-              )}
-            >
-              N/A
-            </button>
-          )}
         </div>
       </div>
     )
@@ -138,10 +152,16 @@ export function PostTasteAssessment({ workId, criteria, initialScores, initialEn
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base font-bold">Como foi pra você?</CardTitle>
           <div className="flex items-center gap-3">
-            {overallVal != null && (
-              <span className="text-sm text-muted-foreground">
-                Gostei geral <b className="tabular-nums text-foreground">{overallVal}</b>
-              </span>
+            {calcScore != null && (
+              <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background/40 px-2.5 py-1 shadow-xs">
+                <div className="flex flex-col leading-none">
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Nota de gosto
+                  </span>
+                  <span className="text-[10px] leading-none text-muted-foreground/70">Calculada</span>
+                </div>
+                <ScoreBadge score={calcScore} size="sm" className="h-7 w-11 text-sm font-bold shadow-xs" />
+              </div>
             )}
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span

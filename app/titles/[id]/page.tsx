@@ -608,7 +608,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             existingAssessment={postAttrExisting}
             tasteCriteria={tasteCriteria}
             tasteScores={tasteScoresData.scores}
-            tasteEndingNa={tasteScoresData.endingNa}
           />
           <MoreActionsMenu workId={work.id} isArchived={work.is_archived} />
           <Button asChild size="sm">
@@ -976,7 +975,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 existingAssessment={postAttrExisting}
                 tasteCriteria={tasteCriteria}
                 tasteScores={tasteScoresData.scores}
-                tasteEndingNa={tasteScoresData.endingNa}
               />
             </TabsContent>
 

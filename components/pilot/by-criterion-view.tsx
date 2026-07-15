@@ -7,6 +7,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { cn, titleToSlug } from "@/lib/utils"
 import { TasteStars } from "@/components/pilot/taste-stars"
 import { CRITERION_BATCH, fmtLastRead, isAnswered } from "@/components/pilot/pilot-shared"
+import { isFullyReadPersonalStatus } from "@/lib/constants/status-lookups"
 import type { WorkState } from "@/components/pilot/pilot-shared"
 import type { PilotWork, TasteCriterion } from "@/server/queries/pilot-taste"
 
@@ -23,7 +24,6 @@ export function ByCriterionView({
   state,
   visibleIndices,
   onRate,
-  onNa,
 }: {
   works: PilotWork[]
   criteria: TasteCriterion[]
@@ -31,7 +31,6 @@ export function ByCriterionView({
   /** Índices (originais em `works`/`state`) visíveis sob o filtro de status. */
   visibleIndices: number[]
   onRate: (workIndex: number, crit: TasteCriterion, stars: number) => void
-  onNa: (workIndex: number, crit: TasteCriterion) => void
 }) {
   const [critSlug, setCritSlug] = useState(() => criteria[0]?.slug ?? "")
   const [page, setPage] = useState(0)
@@ -54,14 +53,20 @@ export function ByCriterionView({
   // quantas obras VISÍVEIS já responderam cada critério (pros contadores dos chips)
   const answeredByCrit = useMemo(() => {
     const m: Record<string, number> = {}
-    for (const c of criteria) m[c.slug] = visibleIndices.filter((i) => isAnswered(state[i], c)).length
+    for (const c of criteria)
+      m[c.slug] = visibleIndices.filter((i) =>
+        isAnswered(state[i], c, isFullyReadPersonalStatus(works[i].personalStatusId)),
+      ).length
     return m
-  }, [criteria, state, visibleIndices])
+  }, [criteria, state, visibleIndices, works])
 
   // obras visíveis (com índice original) filtradas pelo eixo ativo; ordem = leitura recente (query)
   const filtered = useMemo(() => {
     const all = visibleIndices.map((i) => ({ w: works[i], i }))
-    if (filter === "missing") return all.filter(({ i }) => !isAnswered(state[i], crit))
+    if (filter === "missing")
+      return all.filter(
+        ({ i }) => !isAnswered(state[i], crit, isFullyReadPersonalStatus(works[i].personalStatusId)),
+      )
     return all
   }, [works, state, crit, filter, visibleIndices])
 
@@ -91,7 +96,6 @@ export function ByCriterionView({
       if (e.key === "ArrowLeft") return stepCrit(-1)
       if (hoverIdx == null) return
       if (e.key >= "1" && e.key <= "5") onRate(hoverIdx, crit, Number(e.key))
-      else if (e.key.toLowerCase() === "n" && crit.allowsNa) onNa(hoverIdx, crit)
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -235,7 +239,7 @@ export function ByCriterionView({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {pageItems.map(({ w, i }) => {
             const val = state[i].scores[crit.key]
-            const na = crit.allowsNa && state[i].endingNa && val == null
+            const locked = crit.allowsNa && !isFullyReadPersonalStatus(w.personalStatusId)
             return (
               <div
                 key={w.id}
@@ -271,12 +275,10 @@ export function ByCriterionView({
                   </div>
                   <div className="mt-auto pt-1">
                     <TasteStars
-                      crit={crit}
                       value={val}
-                      na={na}
                       starClass="h-[22px] w-[22px]"
                       onStar={(s) => onRate(i, crit, s)}
-                      onNa={crit.allowsNa ? () => onNa(i, crit) : undefined}
+                      lockedReason={locked ? "Avalie ao terminar de ler" : undefined}
                     />
                   </div>
                 </div>
@@ -293,12 +295,6 @@ export function ByCriterionView({
           <kbd className="rounded border border-border bg-muted px-1.5 text-[10px]">5</kbd> nota na
           obra sob o mouse
         </span>
-        {crit.allowsNa && (
-          <span>
-            <kbd className="rounded border border-border bg-muted px-1.5 text-[10px]">N</kbd> não se
-            aplica
-          </span>
-        )}
         <span>
           <kbd className="rounded border border-border bg-muted px-1.5 text-[10px]">←</kbd>{" "}
           <kbd className="rounded border border-border bg-muted px-1.5 text-[10px]">→</kbd> troca de

@@ -7,6 +7,7 @@ import { PersonalStatusBadge } from "@/components/ui/status-badge"
 import { cn, titleToSlug } from "@/lib/utils"
 import { TasteStars } from "@/components/pilot/taste-stars"
 import { fmtLastRead } from "@/components/pilot/pilot-shared"
+import { isFullyReadPersonalStatus } from "@/lib/constants/status-lookups"
 import type { WorkState } from "@/components/pilot/pilot-shared"
 import type { PilotWork, TasteCriterion } from "@/server/queries/pilot-taste"
 
@@ -20,7 +21,6 @@ export function ByWorkView({
   state,
   visibleIndices,
   onRate,
-  onNa,
   onFlush,
 }: {
   works: PilotWork[]
@@ -29,7 +29,6 @@ export function ByWorkView({
   /** Índices (originais em `works`/`state`) visíveis sob o filtro de status. */
   visibleIndices: number[]
   onRate: (workIndex: number, crit: TasteCriterion, stars: number) => void
-  onNa: (workIndex: number, crit: TasteCriterion) => void
   onFlush: () => void
 }) {
   const aspects = useMemo(() => criteria.filter((c) => !c.isOverall), [criteria])
@@ -66,10 +65,6 @@ export function ByWorkView({
     onRate(wi, crit, stars)
     setActive(crit.slug)
   }
-  const setNa = (crit: TasteCriterion) => {
-    onNa(wi, crit)
-    setActive(crit.slug)
-  }
 
   const go = (d: number) => {
     const n = safePos + d
@@ -89,7 +84,6 @@ export function ByWorkView({
       const crit = criteria.find((c) => c.slug === active)
       if (!crit) return
       if (e.key >= "1" && e.key <= "5") setStar(crit, Number(e.key))
-      else if (e.key.toLowerCase() === "n" && crit.allowsNa) setNa(crit)
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -104,9 +98,11 @@ export function ByWorkView({
     )
   }
 
+  const endingLocked = !isFullyReadPersonalStatus(w.personalStatusId)
+
   const rowFor = (crit: TasteCriterion, goal: boolean) => {
     const val = ws.scores[crit.key]
-    const na = crit.allowsNa && ws.endingNa && val == null
+    const locked = crit.allowsNa && endingLocked
     return (
       <div
         key={crit.slug}
@@ -129,11 +125,9 @@ export function ByWorkView({
           )}
         </div>
         <TasteStars
-          crit={crit}
           value={val}
-          na={na}
           onStar={(s) => setStar(crit, s)}
-          onNa={crit.allowsNa ? () => setNa(crit) : undefined}
+          lockedReason={locked ? "Avalie ao terminar de ler" : undefined}
           onHover={(s) => {
             setActive(crit.slug)
             setHint({ stars: s, text: crit.hints[s - 1] ?? "" })
@@ -296,10 +290,6 @@ export function ByWorkView({
           <kbd className="rounded border border-border bg-muted px-1.5 text-[10px]">1</kbd>–
           <kbd className="rounded border border-border bg-muted px-1.5 text-[10px]">5</kbd> nota na
           linha ativa
-        </span>
-        <span>
-          <kbd className="rounded border border-border bg-muted px-1.5 text-[10px]">N</kbd> não se
-          aplica
         </span>
         <span>
           <kbd className="rounded border border-border bg-muted px-1.5 text-[10px]">←</kbd>{" "}
