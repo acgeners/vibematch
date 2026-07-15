@@ -100,7 +100,7 @@ function fitInSample(X: number[][], y: number[]) {
 
 async function main() {
   // ---- carga ----
-  const uws = await all("user_work_state", "work_id,user_score," + POST.join(","), q => q.eq("user_id", DONO))
+  const uws = await all("user_work_state", "work_id,user_score,personal_status_id," + POST.join(","), q => q.eq("user_id", DONO))
   const pts = await all("pilot_taste_scores", "work_id,like_overall_score," + LIKE6.join(","))
   const cs = await all("category_scores", "work_id,criterion_slug,score")
   const calc = await all("calculated_scores", "work_id,platform_avg,total_votes")
@@ -127,18 +127,27 @@ async function main() {
   }
 
   // ---- amostras ----
-  type Row = { id: string; feat: number[]; user: number | null; overall: number | null; axes: number[] | null }
+  // FINISHED (personal_status_id=1) = obra terminada → o eixo "Final" (like_ending_score) só
+  // conta pra ela. Nas demais, ele é N/A (não é dado faltante). É a mesma regra que a UI aplica.
+  const ENDING = "like_ending_score"
+  type Row = { id: string; feat: number[]; user: number | null; overall: number | null; axes: number[] | null; availMean: number | null }
   const rows: Row[] = []
   for (const r of uws) {
     const feat = features(r.work_id); if (!feat) continue
     const pt = ptsBy.get(r.work_id)
     const axesRaw = pt ? LIKE6.map(k => pt[k]) : null
     const axes = axesRaw && axesRaw.every(v => v != null) ? axesRaw.map(Number) : null
+    // média dos eixos DISPONÍVEIS: exclui o Final quando a obra não está terminada, e ignora nulls
+    const finished = r.personal_status_id === 1
+    const availVals = pt
+      ? LIKE6.filter(k => k !== ENDING || finished).map(k => pt[k]).filter(v => v != null).map(Number)
+      : []
     rows.push({
       id: r.work_id, feat,
       user: r.user_score != null ? Number(r.user_score) : null,
       overall: pt?.like_overall_score != null ? Number(pt.like_overall_score) : null,
       axes,
+      availMean: availVals.length ? mean(availVals) : null,
     })
   }
 
@@ -159,6 +168,123 @@ async function main() {
   evalTarget("like_overall (veredito)", B.map(r => r.feat), B.map(r => r.overall!))
   evalTarget("composição 6 eixos (fit)", B.map(r => r.feat), composite)
   evalTarget("média simples 6 eixos", B.map(r => r.feat), simpleMean6)
+
+  // ================= COMP C: alvo = média dos eixos DISPONÍVEIS (cobertura REAL) =================
+  // Sob a regra "Final só p/ terminada", a nota de gosto existe pra ~toda obra avaliada — não só
+  // as 77 com as 6 cruas. Head-to-head craft × preferência no n grande de verdade.
+  const C = rows.filter(r => r.user != null && r.availMean != null)
+  console.log(`\n=== COMP C — alvo = média dos eixos DISPONÍVEIS, n=${C.length} ===`)
+  evalTarget("user_score (craft calc)", C.map(r => r.feat), C.map(r => r.user!))
+  evalTarget("pref: média eixos disp.", C.map(r => r.feat), C.map(r => r.availMean!))
+  // variante homogênea: média dos 5 eixos FIXOS (sem o Final), igual pra toda obra
+  const FIX5 = LIKE6.filter(k => k !== ENDING)
+  const fix5 = (id: string) => { const p = ptsBy.get(id); if (!p) return null; const v = FIX5.map(k => p[k]).filter(x => x != null).map(Number); return v.length ? mean(v) : null }
+  const C5 = rows.filter(r => r.user != null && fix5(r.id) != null)
+  console.log(`  — variante 5 eixos fixos (sem Final), n=${C5.length}:`)
+  evalTarget("pref: média 5 fixos", C5.map(r => r.feat), C5.map(r => fix5(r.id)!))
+
+  // ================= COMP D — UNIFICAÇÃO: melhor COMBINAÇÃO de critérios =================
+  // A pergunta certa: não é craft vs pref isolados, é ATUAL (craft) vs a MELHOR COMBINAÇÃO dos dois.
+  // Âncora de "quanto gostei" = o veredito (like_overall). Reconstruímos ele (OOF, sem leakage) a
+  // partir de: só craft (8 post_*), só pref (5 eixos fixos), e OS DOIS JUNTOS (13). Se juntar bate
+  // cada um sozinho → a nota unificada deve blendar craft + preferência.
+  const uwsBy = new Map(uws.map(u => [u.work_id, u]))
+  const craft8Of = (id: string): number[] | null => {
+    const w = uwsBy.get(id); return w && POST.every(c => w[c] != null) ? POST.map(c => Number(w[c])) : null
+  }
+  const pref5Of = (id: string): number[] | null => {
+    const p = ptsBy.get(id); const F = LIKE6.filter(k => k !== ENDING)
+    return p && F.every(k => p[k] != null) ? F.map(k => Number(p[k])) : null
+  }
+  const D = rows.filter(r => r.overall != null && craft8Of(r.id) && pref5Of(r.id))
+  const yD = D.map(r => r.overall!)
+  const oofR2 = (X: number[][], y: number[]) => {
+    const preds = oofRidge(X, y)
+    const ok = preds.map((v, i) => [v, y[i]] as const).filter(([v]) => Number.isFinite(v))
+    return r2(ok.map(o => o[1]), ok.map(o => o[0]))
+  }
+  console.log(`\n=== COMP D — melhor combinação p/ reconstruir o veredito "gostei geral" (OOF), n=${D.length} ===`)
+  console.log(`  só craft (8 post_*)       R²=${oofR2(D.map(r => craft8Of(r.id)!), yD).toFixed(3)}`)
+  console.log(`  só pref  (5 eixos fixos)  R²=${oofR2(D.map(r => pref5Of(r.id)!), yD).toFixed(3)}`)
+  console.log(`  CRAFT + PREF (13 juntos)  R²=${oofR2(D.map(r => [...craft8Of(r.id)!, ...pref5Of(r.id)!]), yD).toFixed(3)}`)
+  // E a previsibilidade a partir de features objetivas: atual (craft) vs a combinação fitada (13→veredito)
+  const comboLabel = oofRidge(D.map(r => [...craft8Of(r.id)!, ...pref5Of(r.id)!]), yD)
+  console.log(`  — como ALVO do modelo (previsão por features objetivas), mesmo n:`)
+  evalTarget("atual: user_score (craft)", D.map(r => r.feat), D.map(r => r.user!))
+  evalTarget("combinação craft+pref", D.filter((_, i) => Number.isFinite(comboLabel[i])).map(r => r.feat), comboLabel.filter(v => Number.isFinite(v)))
+
+  // ================= COMP E — SUBCONJUNTO MÍNIMO (forward selection) =================
+  // Quantos e quais critérios (craft+pref) bastam pra reconstruir o veredito ~= aos 13?
+  // Greedy: a cada passo, adiciona o critério que MAIS sobe o R² OOF. Plateau = subconjunto mínimo.
+  const FIX5N = LIKE6.filter(k => k !== ENDING)
+  const ALL13 = [...POST, ...FIX5N]
+  const LABEL13 = [
+    "craft:história", "craft:FL", "craft:ML", "craft:desenv", "craft:ritmo", "craft:arte", "craft:impacto", "craft:orig",
+    "pref:leads", "pref:setting", "pref:tom", "pref:arte", "pref:ritmo",
+  ]
+  const feat13 = (id: string): number[] | null => {
+    const c = craft8Of(id), p = pref5Of(id); return c && p ? [...c, ...p] : null
+  }
+  const E = rows.filter(r => r.overall != null && feat13(r.id))
+  const yE = E.map(r => r.overall!)
+  const matE = E.map(r => feat13(r.id)!)
+  console.log(`\n=== COMP E — subconjunto mínimo p/ reconstruir o veredito (forward, OOF), n=${E.length} ===`)
+  const chosen: number[] = []
+  const remaining = ALL13.map((_, i) => i)
+  let prev = 0
+  for (let step = 0; step < 8 && remaining.length; step++) {
+    let bestJ = -1, bestR2 = -Infinity
+    for (const j of remaining) {
+      const cols = [...chosen, j]
+      const X = matE.map(row => cols.map(c => row[c]))
+      const r = oofR2(X, yE)
+      if (r > bestR2) { bestR2 = r; bestJ = j }
+    }
+    chosen.push(bestJ)
+    remaining.splice(remaining.indexOf(bestJ), 1)
+    console.log(`  +${LABEL13[bestJ].padEnd(14)} → R²=${bestR2.toFixed(3)}  (ganho ${(bestR2 - prev >= 0 ? "+" : "")}${(bestR2 - prev).toFixed(3)})`)
+    prev = bestR2
+  }
+
+  // ================= COMP F — REDUNDÂNCIA: craft ↔ preferência medem o mesmo aspecto? =================
+  // Spearman de cada par. Alto (~0.85+) = redundante (execução ≈ gosto do mesmo eixo) → colapsar.
+  // Moderado (~0.5-0.7) = cada um carrega sinal próprio → manter os dois faz sentido.
+  const CRAFT_LBL: Record<string, string> = {
+    post_story_score: "História", post_fl_score: "FemLead", post_ml_score: "MaleLead",
+    post_character_development_score: "Desenv", post_pacing_score: "Ritmo",
+    post_art_visual_score: "Arte", post_impact_immersion_score: "Impacto", post_originality_score: "Orig",
+  }
+  const PREF_ORDER = ["like_leads_score", "like_setting_score", "like_tone_score", "like_art_score", "like_pacing_score"]
+  const PREF_LBL: Record<string, string> = {
+    like_leads_score: "Casal/Prot", like_setting_score: "Ambient", like_tone_score: "Tom",
+    like_art_score: "Arte", like_pacing_score: "Ritmo",
+  }
+  const pairSpearman = (craftField: string, prefField: string): { n: number; s: number } => {
+    const xs: number[] = [], ys: number[] = []
+    for (const u of uws) {
+      const p = ptsBy.get(u.work_id)
+      if (u[craftField] != null && p && p[prefField] != null) { xs.push(Number(u[craftField])); ys.push(Number(p[prefField])) }
+    }
+    return { n: xs.length, s: xs.length > 5 ? spearman(xs, ys) : NaN }
+  }
+  console.log(`\n=== COMP F — correlação craft × preferência (Spearman) — redundância ===`)
+  console.log(`  ${"".padEnd(9)}${PREF_ORDER.map(p => PREF_LBL[p].padStart(11)).join("")}`)
+  for (const c of POST) {
+    const cells = PREF_ORDER.map(p => pairSpearman(c, p).s.toFixed(2).padStart(11)).join("")
+    console.log(`  ${CRAFT_LBL[c].padEnd(9)}${cells}`)
+  }
+  // par de personagens: preferência "Casal/Prot" vs média craft (FemLead+MaleLead+Desenv)
+  {
+    const xs: number[] = [], ys: number[] = []
+    for (const u of uws) {
+      const p = ptsBy.get(u.work_id)
+      const trio = [u.post_fl_score, u.post_ml_score, u.post_character_development_score]
+      if (trio.every(v => v != null) && p && p.like_leads_score != null) {
+        xs.push(mean(trio.map(Number))); ys.push(Number(p.like_leads_score))
+      }
+    }
+    console.log(`\n  personagens: pref "Casal/Prot" × craft média(FL+ML+Desenv) → ρ=${spearman(xs, ys).toFixed(2)} (n=${xs.length})`)
+  }
 
   // ================= Q5: coerência 6 eixos ↔ veredito =================
   console.log(`\n=== Q5 — os 6 eixos explicam o veredito? (n=${B.length}) ===`)
