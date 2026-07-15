@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureAiConsumption } from "@/server/queries/ai-quota"
+import { getSessionUserId } from "@/server/queries/current-user"
 import { loadOrEnsureProfile } from "@/lib/ai-recommendation/ensure-profile"
 import {
   runChatTurn,
@@ -43,14 +44,23 @@ function defaultChatFilters() {
   return parseFiltersFromSearchParams(new URLSearchParams())
 }
 
+/**
+ * Mensagens de chat do USUÁRIO nas últimas 24h.
+ *
+ * ⚠️ Antes desta contagem não tinha `.eq("user_id", …)` — o teto de 60/dia era GLOBAL: um
+ * usuário esgotava o chat de todos. A coluna `ai_api_calls.user_id` já existia e é populada
+ * em toda chamada Claude (anthropic-client.ts), então bastou filtrar — sem migration.
+ */
 async function getChatMessagesToday(
   supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
 ): Promise<number> {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
   const { count } = await supabase
     .from("ai_api_calls")
     .select("id", { count: "exact", head: true })
     .eq("operation", "recommendation_chat")
+    .eq("user_id", userId)
     .gte("created_at", since)
   return count ?? 0
 }
@@ -244,13 +254,18 @@ export async function sendChatMessageAction(
     const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
 
+    // Depois do gate de consumo (que exige sessão) sempre há um id.
+    const userId = await getSessionUserId()
+    if (!userId) return { error: "Entre na sua conta para usar o chat." }
+
     const forceRecommend = args.forceRecommend === true
     const userText = args.userText?.trim() ?? ""
     if (!userText && !forceRecommend) return { error: "Mensagem vazia." }
 
     const supabase = createAdminClient()
 
-    const msgsToday = await getChatMessagesToday(supabase)
+    // Teto de frequência POR USUÁRIO. Antes era global: um usuário esgotava o chat de todos.
+    const msgsToday = await getChatMessagesToday(supabase, userId)
     if (msgsToday >= MAX_CHAT_MESSAGES_PER_DAY) {
       return {
         error: `Limite diário de ${MAX_CHAT_MESSAGES_PER_DAY} mensagens de chat atingido. Tente novamente amanhã.`,
