@@ -300,4 +300,18 @@ async function main() {
   else console.log(`Rode 'npm run recalc:scores' pra propagar nas features.`)
 }
 
-main().catch((e) => { console.error("FATAL:", e instanceof Error ? e.stack : String(e)); process.exit(1) })
+main()
+  .then(async () => {
+    // O6: uma passada de escrita mudou as tags → marca a base como recálculo pendente,
+    // como faz o fluxo de create/update (markRecalcPending → RPC `touch_recalc_pending`).
+    // markRecalcPending é server-only e não importa em script, então chamamos a RPC direto.
+    // Só nos modos que GRAVAM (WITH_REVIEWS só gera CSV, não escreve tags). A Nota Prevista
+    // recalcula no próximo auto-recalc em vez de depender do operador rodar `recalc:scores`.
+    if (EXECUTE && !WITH_REVIEWS) {
+      const sb = createAdminClient()
+      const { error } = await sb.rpc("touch_recalc_pending")
+      if (error) console.log(`! recalc_pending não marcado: ${error.message}`)
+      else console.log(`· recalc_pending marcado — Nota Prevista recalcula no próximo auto-recalc.`)
+    }
+  })
+  .catch((e) => { console.error("FATAL:", e instanceof Error ? e.stack : String(e)); process.exit(1) })

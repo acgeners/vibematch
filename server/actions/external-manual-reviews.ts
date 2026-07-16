@@ -16,6 +16,7 @@ import {
   type ExternalManualReviewActionResult,
 } from "@/lib/validations/external-review-action-result"
 import { ensureAdmin } from "@/server/queries/current-user"
+import { markWorkAlignmentStale } from "@/server/queries/alignment"
 
 /**
  * Server Actions do EDITOR LOCAL de reviews externas manuais (Plano 3 B2.2M §4).
@@ -69,6 +70,10 @@ async function confirmWorkExists(
 function regenReviewArtifactsAfterManualEdit(workId: string): void {
   after(async () => {
     const sb = createAdminClient()
+    // O Veredito IA (alignment_score) é gerado a partir do resumo/digest das reviews
+    // (service.ts v5/v6) → mexer no corpus manual deixa o Veredito persistido stale.
+    // Só ergue a flag (re-rank é manual); no-op quando a obra nunca foi rankeada.
+    await markWorkAlignmentStale(workId)
     const [s, d] = await Promise.allSettled([
       ensureReviewSummary(workId, { supabase: sb, allowPaid: true }),
       ensureReviewDigest(workId, { supabase: sb, allowPaid: true, force: true }),
