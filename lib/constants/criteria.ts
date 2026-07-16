@@ -29,10 +29,10 @@ export const CRITERIA_RUBRICS: Record<
   couple_dynamics: {
     title: "Dinâmica do Casal",
     ranges: [
-      "0-3 | Dinâmica prejudicial ao parceiro contra sua vontade: abuso emocional ativo, manipulação não-consensual, sofrimento contínuo do parceiro abusado dentro do desenvolvimento. Dinâmicas não-tradicionais (BDSM, Dom/Sub, posse, ciúme intenso) com consenso mútuo e tom romântico/cômico NÃO se enquadram aqui — vão para 7-8 ou 9-10.",
-      "4-6 | Há mal-entendidos eventuais, ciúme e algum nível de conflito.",
-      "7-8 | Relacionamento saudável, com alguns conflitos eventuais, mas trabalhados e resolvidos relativamente rápido.",
-      "9-10 | Dinâmica leve, divertida e saudável; parceria, desenvolvimento mútuo e boa comunicação.",
+      "0-3 | Tóxica: Dinâmica prejudicial ao parceiro contra sua vontade: abuso emocional ativo, manipulação não-consensual, sofrimento contínuo do parceiro abusado dentro do desenvolvimento. Dinâmicas não-tradicionais (BDSM, Dom/Sub, posse, ciúme intenso) com consenso mútuo e tom romântico/cômico NÃO se enquadram aqui — vão para 7-8 ou 9-10.",
+      "4-6 | Conflituosa: Há mal-entendidos eventuais, ciúme e algum nível de conflito.",
+      "7-8 | Saudável: Relacionamento saudável, com alguns conflitos eventuais, mas trabalhados e resolvidos relativamente rápido.",
+      "9-10 | Parceria: Dinâmica leve, divertida e saudável; parceria, desenvolvimento mútuo e boa comunicação.",
     ],
   },
   fantasy_nobility: {
@@ -47,10 +47,10 @@ export const CRITERIA_RUBRICS: Record<
   action_adventure: {
     title: "Ação/Aventura",
     ranges: [
-      "0-3 | Principalmente slice of life: ritmo mais parado, eventos cotidianos.",
-      "4-6 | Ritmo um pouco mais agitado, mas sem grandes eventos ou desenrolar emocionante.",
-      "7-8 | Presença constante de situações marcantes, ritmo acelerado, protagonistas envolvidos em eventos significativos para o mundo.",
-      "9-10 | Raramente há momentos parados/cotidianos; protagonistas em missão para salvar/mudar o mundo/história ou centro de eventos extremamente marcantes.",
+      "0-3 | Slice of life: ritmo mais parado, eventos cotidianos.",
+      "4-6 | Moderado: Ritmo um pouco mais agitado, mas sem grandes eventos ou desenrolar emocionante.",
+      "7-8 | Agitado: Presença constante de situações marcantes, ritmo acelerado, protagonistas envolvidos em eventos significativos para o mundo.",
+      "9-10 | Épico: Raramente há momentos parados/cotidianos; protagonistas em missão para salvar/mudar o mundo/história ou centro de eventos extremamente marcantes.",
     ],
   },
   adult_content: {
