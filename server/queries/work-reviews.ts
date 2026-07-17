@@ -19,6 +19,20 @@ export interface WorkReview {
   createdAt: string
 }
 
+/**
+ * Remove — só na EXIBIÇÃO — os rótulos de metadado que alguns scrapers embutem no texto:
+ * "Título do comentário: …" e a linha "Nota do usuário: X/10". O texto ARMAZENADO fica intacto
+ * (o dedup do pool é por texto exato — reescrever duplicaria reviews num re-fetch; e o corpus da
+ * IA/digest lê o texto cru). A nota já vira o badge; o título fica como lead da review.
+ */
+function stripReviewMetadata(text: string): string {
+  if (!text) return text
+  return text
+    .replace(/^[ \t]*T[íi]tulo do coment[áa]rio:[ \t]*/i, "")
+    .replace(/^[ \t]*Nota do usu[áa]rio:[^\n]*\n?/im, "")
+    .trim()
+}
+
 export interface WorkReviewsBySource {
   source: ExternalSourceId
   reviews: WorkReview[]
@@ -100,7 +114,7 @@ export async function getWorkReviews(workId: string): Promise<WorkReviewsSnapsho
       workId: r.work_id as string,
       source: r.source as ExternalSourceId,
       sourceTitle: (r.source_title as string | null) ?? null,
-      text: r.text as string,
+      text: stripReviewMetadata(r.text as string),
       textLength: r.text_length != null ? Number(r.text_length) : null,
       userRating: r.user_rating != null ? Number(r.user_rating) : null,
       matchScore: Number(r.match_score ?? 0),

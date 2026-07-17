@@ -1080,12 +1080,23 @@ const REVIEW_SOURCE_PRIORITY: Record<ExternalSourceId, number> = {
  * Sem nota em nenhuma frente, devolve `{ cleanText: text }` sem rating.
  */
 export function extractUserRating(text: string): { rating?: number; cleanText: string } {
-  const match = text.match(/^\s*Nota do usu[áa]rio:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*10)?\s*\n+/i)
-  if (match) {
-    const cleanText = text.slice(match[0].length)
-    const raw = Number(match[1])
+  // Marcador no INÍCIO (ComicK/AniList/AnimePlanet prefixam "Nota do usuário: X/10\n"): extrai E
+  // remove do texto — comportamento histórico (o texto salvo já vem sem ele; mexer nisso divergiria
+  // do pool e duplicaria reviews no dedup por texto exato).
+  const atStart = text.match(/^\s*Nota do usu[áa]rio:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*10)?\s*\n+/i)
+  if (atStart) {
+    const cleanText = text.slice(atStart[0].length)
+    const raw = Number(atStart[1])
     if (!Number.isFinite(raw) || raw < 0 || raw > 10) return { cleanText }
     return { rating: raw, cleanText }
+  }
+  // Marcador em QUALQUER linha (o MangaUpdates o põe DEPOIS do "Título do comentário:", então o `^`
+  // acima falhava e a nota se perdia — 2.091 reviews sem nota): extrai a nota mas NÃO mexe no texto
+  // (dedup por texto exato → mudar duplicaria num re-fetch). A limpeza pra exibição é no getWorkReviews.
+  const anywhere = text.match(/^[ \t]*Nota do usu[áa]rio:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*10)?/im)
+  if (anywhere) {
+    const raw = Number(anywhere[1])
+    if (Number.isFinite(raw) && raw >= 0 && raw <= 10) return { rating: raw, cleanText: text }
   }
   return { rating: extractInlineRating(text), cleanText: text }
 }
