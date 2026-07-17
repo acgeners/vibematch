@@ -21,10 +21,16 @@ import type { SettingsAccent } from "@/lib/settings-accent"
 // seus itens no conteúdo. Um accent por grupo (cor = hierarquia, não decoração).
 // A metadata de navegação sai daqui; o CORPO de cada card vive em page.tsx.
 
+// Cada chip declara QUE TIPO de metadado carrega — a UI pinta um por cor+ícone:
+//   cost    → custo ($/tokens), com tier (grátis/barato/caro)
+//   cadence → frequência de uso (Frequente/Ocasional/Raro · dev)
+//   trigger → gatilho: a condição que dispara o uso (Quando faltam reviews…)
+//   nature  → natureza: o que a etapa é / como age (Diagnóstico, Preferência)
 export type SettingsChip =
-  | { kind: "step"; label: string }
-  | { kind: "cadence"; label: string }
   | { kind: "cost"; tier: "free" | "low" | "high"; label: string }
+  | { kind: "cadence"; label: string }
+  | { kind: "trigger"; label: string }
+  | { kind: "nature"; label: string }
 
 export interface SettingsSection {
   id: string
@@ -77,10 +83,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
           "MAEs e pseudo-votos são recalculados a partir dos dados reais sempre que um título é incluído ou alterado.",
         help: "Recalcula os MAEs (o erro médio da Nota Prevista) e os pseudo-votos bayesianos a partir de todas as obras que já têm nota manual. Roda sozinha sempre que você salva ou altera uma obra; o botão aqui força o recálculo na hora. Depende dos Embeddings estarem atualizados — o kNN usa a vizinhança vetorial das obras.",
         icon: Gauge,
-        chips: [
-          { kind: "step", label: "Passo 2" },
-          { kind: "cost", tier: "free", label: "Grátis" },
-        ],
+        chips: [{ kind: "cost", tier: "free", label: "Grátis" }],
       },
       {
         id: "ai-audit",
@@ -101,7 +104,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
           "Relatórios agregados (só leitura): viés sistemático do catálogo e saúde da Nota Prevista. Nenhum score é alterado.",
         help: "Detecta viés sistemático — quando a IA puxa um critério pra cima ou pra baixo no catálogo inteiro (ex.: subestimar “drama”) — e mostra a saúde da Nota Prevista com o offset dos atributos pós-leitura. É só diagnóstico; a única ação de escrita é regenerar os artefatos calibrados (TasteProfile + Ridge + alignment).",
         icon: ChartNoAxesCombined,
-        chips: [{ kind: "cadence", label: "Diagnóstico" }],
+        chips: [{ kind: "nature", label: "Diagnóstico" }],
         collapsible: true,
       },
     ],
@@ -121,12 +124,9 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         panelTitle: "Embeddings das obras",
         description:
           "Representação vetorial via OpenAI para 'obras parecidas' e kNN predictor. Cacheado por obra — só re-embeda quando sinopse/tags/critérios mudam.",
-        help: "Cada obra é convertida num vetor pela OpenAI a partir da sinopse + tags + critérios. Esse vetor alimenta as “obras parecidas” e o kNN que a Calibração usa. É cacheado por obra: só re-embeda quando um desses inputs muda. É o Passo 1 — atualize antes de recalibrar.",
+        help: "Cada obra é convertida num vetor pela OpenAI a partir da sinopse + tags + critérios. Esse vetor alimenta as “obras parecidas” e o kNN que a Calibração usa. É cacheado por obra: só re-embeda quando um desses inputs muda. Atualize-o antes de recalibrar as notas.",
         icon: Brain,
-        chips: [
-          { kind: "step", label: "Passo 1" },
-          { kind: "cost", tier: "low", label: "OpenAI ~$" },
-        ],
+        chips: [{ kind: "cost", tier: "low", label: "OpenAI ~$" }],
       },
       {
         id: "synopsis-canonical",
@@ -135,10 +135,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
           "Consolida múltiplas sinopses por obra em uma única canônica via Haiku — usada nos prompts de recomendação.",
         help: "Uma obra costuma ter várias sinopses (uma por fonte). Aqui o Haiku funde todas numa versão única e limpa, que passa a ser o texto oficial usado nos prompts de recomendação. Barato (Haiku) e independente das outras etapas.",
         icon: FileText,
-        chips: [
-          { kind: "cadence", label: "Independente" },
-          { kind: "cost", tier: "low", label: "Haiku $" },
-        ],
+        chips: [{ kind: "cost", tier: "low", label: "Haiku $" }],
       },
       {
         id: "review-synthesis",
@@ -149,7 +146,6 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         help: "Duas destilações das mesmas reviews externas. O Resumo (Haiku) é um parágrafo de consenso mostrado pra você na aba Notas & Avaliações. O Digest (Sonnet) é estruturado — consenso, divergências, traços salientes e alertas — e serve de insumo pro consultor de IA (Recomendar, Veredito IA, Deep Dive e Chat).",
         icon: MessageSquareText,
         chips: [
-          { kind: "cadence", label: "Independente" },
           { kind: "cost", tier: "low", label: "Haiku $" },
           { kind: "cost", tier: "high", label: "Sonnet $$" },
         ],
@@ -172,7 +168,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
           "A fonte principal de reviews. Resolve o hid das obras (pra habilitar reviews), permite preencher manualmente as não encontradas e testar a conexão.",
         help: "A Comix é a maior fonte de reviews do app, mas exige resolver o “hid” (o identificador interno) de cada obra pra habilitar a coleta. Aqui você resolve os hids pendentes, preenche à mão os que não casaram e roda um diagnóstico da conexão (FlareSolverr/Cloudflare) sem precisar abrir nenhuma obra.",
         icon: BookOpen,
-        chips: [{ kind: "cadence", label: "Quando faltam reviews" }],
+        chips: [{ kind: "trigger", label: "Quando faltam reviews" }],
       },
       {
         id: "cloudflare-sources",
@@ -181,7 +177,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
           "Mangago e AnimePlanet só respondem via bypass (FlareSolverr). Testa se elas estão puxando dados agora — e não apenas se o container está de pé.",
         help: "Um fetch direto do Mangago ou do AnimePlanet volta 403 (challenge do Cloudflare), então as duas dependem do bypass pra funcionar. Diferente da Comix, que passa em texto puro. Aqui o canário puxa um detalhe real de cada uma: se vier o título, o bypass está funcionando; se não vier, a obra vai mostrar “fonte fora do ar” e é isso que este painel antecipa.",
         icon: ShieldAlert,
-        chips: [{ kind: "cadence", label: "Quando uma fonte some" }],
+        chips: [{ kind: "trigger", label: "Quando uma fonte some" }],
       },
     ],
   },
@@ -202,7 +198,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         help: "As chaves que controlam quando a IA gasta tokens sozinha. Avaliação IA, Sinopse canônica e Inferência de tags (Haiku) só rodam na CRIAÇÃO via “Buscar dados”. Resumo (Haiku) e Digest (Sonnet) de reviews rodam em QUALQUER save (criação e “Atualizar dados”) — desligá-los persiste as reviews sem a síntese paga, que você gera depois pela seção “Síntese de reviews”. O shadow de Interesse é um experimento A/B de dev que DOBRA o custo do Interesse na criação (fica desligado, salvo testes). Pesos automáticos é a mesma chave da Calibração automática: usa pesos inferidos do seu histórico e recalcula o catálogo ao alternar. Deixe desligado o que não quiser que dispare sem você pedir.",
         icon: Wand2,
         chips: [
-          { kind: "cadence", label: "Preferência" },
+          { kind: "nature", label: "Preferência" },
           { kind: "cost", tier: "low", label: "Haiku $" },
           { kind: "cost", tier: "high", label: "Sonnet $$" },
         ],

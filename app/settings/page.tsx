@@ -277,7 +277,7 @@ async function ItemBody({
             >
               Embeddings
             </Link>{" "}
-            — atualize-os (Passo 1, grupo &ldquo;Gerado por IA&rdquo;) antes de recalibrar (Passo 2).
+            (grupo &ldquo;Gerado por IA&rdquo;) — atualize-os antes de recalibrar.
           </ConsoleSectionNote>
           <CalibrationPanel
             config={config}
