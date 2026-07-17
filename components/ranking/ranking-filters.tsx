@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { useCallback, useMemo, useState, useTransition } from "react"
 import type { ReactNode } from "react"
-import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, ChevronUp, Filter, Loader2, Minus, Pencil, Plus, Save, Search, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, ChevronUp, Filter, Info, Loader2, Minus, Pencil, Plus, Save, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -437,6 +437,8 @@ type ScoreDef = {
   presets: number[]
   kind?: "votes"
   fullWidth?: boolean
+  /** Texto do ⓘ ao lado do rótulo do filtro (explica o que a métrica é). */
+  help?: string
 }
 
 // Presets ≥ configuráveis (migration 132): overrides[slug] ?? default. As demais
@@ -460,7 +462,7 @@ const GENERAL_SCORE_DEFS: ScoreDef[] = [
   { key: "fit", emoji: "🧭", label: LABELS.personal_fit.full, minKey: "min_fit", maxKey: "max_fit", min: 0, max: 100, step: 5, presets: [50, 75, 90] },
   { key: "platform", emoji: "🌐", label: LABELS.platform_avg.full, minKey: "min_platform_avg", maxKey: "max_platform_avg", min: 0, max: 10, step: 0.5, presets: [6, 7, 8] },
   { key: "align", emoji: "🤖", label: LABELS.alignment_score.full, minKey: "min_align", maxKey: "max_align", min: 0, max: 100, step: 5, presets: [50, 75, 90] },
-  { key: "votes", emoji: "🗳️", label: LABELS.total_votes.full, minKey: "min_votes", maxKey: "max_votes", min: 0, max: 0, step: 1, presets: [], kind: "votes", fullWidth: true },
+  { key: "votes", emoji: "🗳️", label: LABELS.total_votes.full, minKey: "min_votes", maxKey: "max_votes", min: 0, max: 0, step: 1, presets: [], kind: "votes", fullWidth: true, help: "Soma dos votos das plataformas externas (MyAnimeList, AniList, Kitsu…) — o tamanho da amostra da opinião pública. Quanto mais votos, mais a média do público pesa na Nota Prevista; abaixo de ~1.000 votos a nota é puxada pra IA. Filtrar por ≥1k deixa só as obras onde a nota externa é estatisticamente confiável." },
 ]
 
 function scoreDecimals(step: number): number {
@@ -683,9 +685,27 @@ function ScorePillGroup({
       {selectedDef && (
         <div className="mt-2.5 flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/[0.05] p-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="flex items-center gap-2 text-sm font-semibold">
+            <span className="flex items-center gap-1.5 text-sm font-semibold">
               <span className="text-base leading-none">{selectedDef.emoji}</span>
               {selectedDef.label}
+              {selectedDef.help && (
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={`O que é ${selectedDef.label}`}
+                        className="inline-flex items-center justify-center rounded-sm p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
+                      >
+                        <Info className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs text-xs leading-relaxed">
+                      {selectedDef.help}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </span>
             <button
               type="button"

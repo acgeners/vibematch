@@ -41,7 +41,8 @@ import {
   type CurrentWeight,
   type WeightInferenceResult,
 } from "@/lib/ml/weight-inference"
-import { computeCalibration } from "@/lib/calculations/calibration"
+import { computeCalibration, computeBucketBreakdown } from "@/lib/calculations/calibration"
+import type { BucketInput, OofBucketBreakdown } from "@/lib/calculations/calibration"
 import {
   criterionAlignment,
   weightedTagOverlap,
@@ -606,7 +607,7 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
     rows, pseudoVotesNotaM, pseudoVotesBlend, gptMean, gptClampHits, gptClampHitRate,
     gptNegativeActivations, negativeActivationRate, inferenceSnapshot, newMaeCalc, newRmseCalc,
     maeExpected, rmseExpected, maeExpectedBaseline, cvMaeExpected, calcBlendWeight, expectedPredictor,
-    cvSig,
+    cvSig, oofBucketBreakdown,
   } = computeRecalc({ works, weights, config, tasteProfile, declaredTagPrefs, includeQuality, aiQualityByWork, effectiveInterestByWork })
 
   const { error: upsertErr } = await supabase
@@ -679,6 +680,9 @@ export async function recalculateAll(ctx: RecalculateExecutionContext = "next-ru
             // Assinatura dos inputs da nested-CV (quick-win Q): pula o recompute
             // de ~550ms quando as obras rotuladas não mudaram entre recalcs.
             cvSig: cvSig ?? undefined,
+            // MAE por faixa OUT-OF-FOLD (diagnóstico honesto do painel). Fica aqui
+            // pra não exigir migration de coluna nova no caminho crítico do recalc.
+            oofBucketBreakdown: oofBucketBreakdown ?? undefined,
           },
       last_recalculated_at: new Date().toISOString(),
       // Limpa a pendência (migration 096) NO MESMO update — corta 1 round-trip
@@ -1023,15 +1027,16 @@ export function computeRecalc(input: RecalcComputeInput) {
   // Ridge) por busca 1-D minimizando MAE de w·ridgeOOF + (1-w)·calcNoObs. w=1
   // (sem blend) quando OOF indisponível (treino < 30 ou stub).
   let calcBlendWeight = 1
+  let oofPreds: number[] | null = null
   if (!expectedPredictor.isStub && trainSet.length >= 30) {
-    const expectedOof = expectedOutOfFoldPredictions(expectedTrainInputs, trainTargets, includeQuality)
-    if (expectedOof) {
+    oofPreds = expectedOutOfFoldPredictions(expectedTrainInputs, trainTargets, includeQuality)
+    if (oofPreds) {
       let bestW = 1
       let bestMae = Infinity
       for (let wgrid = 0; wgrid <= 1.0001; wgrid += 0.05) {
         let sum = 0
         for (let i = 0; i < trainSet.length; i++) {
-          const blended = wgrid * expectedOof[i] + (1 - wgrid) * trainSet[i].calcScoreNoObs
+          const blended = wgrid * oofPreds[i] + (1 - wgrid) * trainSet[i].calcScoreNoObs
           sum += Math.abs(blended - (trainSet[i].userScore as number))
         }
         const mae = sum / trainSet.length
@@ -1042,6 +1047,37 @@ export function computeRecalc(input: RecalcComputeInput) {
       }
       calcBlendWeight = bestW
     }
+  }
+
+  // MAE por faixa OUT-OF-FOLD (honesto) — resíduos das predições OOF por faixa de
+  // tipicidade (distância ao centróide) e de votos, no lugar do MAE in-sample que
+  // o painel mostrava (otimista por construção: o expected_score é treinado NA
+  // própria obra). Reusa `computeBucketBreakdown` passando a predição OOF blendada
+  // no campo `expectedScore`. `overallMae` OOF é a referência pra "faixas fora do
+  // padrão". Só quando há OOF (treino ≥ 30 e não-stub); senão null → painel cai no
+  // in-sample. É diagnóstico: não toca em nenhum score.
+  let oofBucketBreakdown: OofBucketBreakdown | null = null
+  if (oofPreds) {
+    const distances = expectedPredictor.predictWithDistance(expectedTrainInputs).distances
+    const oofInputs: BucketInput[] = trainSet.map((w, i) => {
+      const blended = calcBlendWeight * (oofPreds as number[])[i] + (1 - calcBlendWeight) * w.calcScoreNoObs
+      return {
+        workId: w.id,
+        userScore: w.userScore as number,
+        calcScore: null,
+        predictedScore: null,
+        finalScore: null,
+        totalVotes: w.totalVotes,
+        predictionDistance: Number.isFinite(distances[i]) ? distances[i] : null,
+        expectedScore: Number.isFinite(blended) ? blended : null,
+      }
+    })
+    const covered = oofInputs.filter((it) => it.expectedScore != null)
+    const overallMae =
+      covered.length > 0
+        ? covered.reduce((s, it) => s + Math.abs((it.expectedScore as number) - it.userScore!), 0) / covered.length
+        : null
+    oofBucketBreakdown = { ...computeBucketBreakdown(oofInputs), overallMae }
   }
 
   for (let i = 0; i < works.length; i++) {
@@ -1340,6 +1376,6 @@ export function computeRecalc(input: RecalcComputeInput) {
     rows, pseudoVotesNotaM, pseudoVotesBlend, gptMean, gptClampHits, gptClampHitRate,
     gptNegativeActivations, negativeActivationRate, inferenceSnapshot, newMaeCalc, newRmseCalc,
     maeExpected, rmseExpected, maeExpectedBaseline, cvMaeExpected, calcBlendWeight, expectedPredictor,
-    cvSig,
+    cvSig, oofBucketBreakdown,
   }
 }

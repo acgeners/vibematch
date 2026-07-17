@@ -88,6 +88,16 @@ export interface BucketBreakdown {
   byVotes: BucketBreakdownEntry[]
 }
 
+/**
+ * Breakdown OUT-OF-FOLD do MAE por faixa (o honesto). Mesma forma do
+ * `BucketBreakdown`, mas o `expectedScore` de cada obra foi a predição OOF (sem
+ * leakage), não o `expected_score` in-sample. `overallMae` é o MAE OOF geral,
+ * referência pra sinalizar faixas fora do padrão de forma consistente.
+ */
+export interface OofBucketBreakdown extends BucketBreakdown {
+  overallMae: number | null
+}
+
 export interface BucketInput extends CalibrationInput {
   predictionDistance: number | null
   /** Nota Prevista (expected_score) — métrica do bucket pós-remoção do legado. */
