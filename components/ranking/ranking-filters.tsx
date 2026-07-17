@@ -1919,6 +1919,13 @@ export function RankingFilters({
   for (const slug of CRITERION_SLUGS) {
     pushRangeChip(`crit-${slug}`, CRITERION_LABELS[slug] ?? slug, `min_${slug}`, `max_${slug}`)
   }
+  if (searchParams.get("rated") === "1") {
+    activeFilterChips.push({
+      key: "rated",
+      label: "Só avaliadas",
+      onRemove: () => updateParams({ rated: null }),
+    })
+  }
   if (isAllPublication) {
     activeFilterChips.push({
       key: "pub-all",
