@@ -33,7 +33,6 @@ import { getLastDeepDive } from "@/server/queries/deep-dive"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getGenerationReadinessMany } from "@/server/queries/generation-readiness"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
-import { RefetchReviewsButton } from "@/components/titles/refetch-reviews-button"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
 import { ScoreBadge, getScoreTextColor, pickCriterionTierByRange, criterionTierPillClass } from "@/components/ui/score-badge"
@@ -1444,10 +1443,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         </CardContent>
       </Card>
 
-      {/* Reviews externas — apoiam visualmente os scores da IA */}
-      <div className="flex justify-end">
-        <RefetchReviewsButton workId={work.id as string} />
-      </div>
+      {/* Reviews externas — apoiam visualmente os scores da IA. "Buscar reviews" vive no header do card. */}
       <WorkReviewsCard snapshot={reviewsSnapshot} workId={work.id as string} />
         </TabsContent>
 

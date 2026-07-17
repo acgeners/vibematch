@@ -1,12 +1,14 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { AlertTriangle, ChevronDown, Layers, Loader2, MessageSquareText, PenLine, RefreshCw, Sparkles } from "lucide-react"
+import type { ComponentType } from "react"
+import { AlertTriangle, ArrowLeftRight, ChevronDown, Info, Layers, Loader2, MessageSquareText, PenLine, RefreshCw, Sparkles, Users } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ExpandableText } from "@/components/ui/expandable-text"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
 import { formatRelativeDateTime } from "@/lib/date-utils"
@@ -14,6 +16,7 @@ import { useRefresh } from "@/lib/use-refresh"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { generateWorkReviewDigest } from "@/server/actions/review-digest"
 import { isDigestCorrupted } from "@/lib/ai-recommendation/digest-integrity"
+import { RefetchReviewsButton } from "@/components/titles/refetch-reviews-button"
 import type { ReviewDigest } from "@/lib/ai-recommendation/types"
 import type { WorkReviewsSnapshot } from "@/server/queries/work-reviews"
 
@@ -26,69 +29,110 @@ interface WorkReviewsCardProps {
 const MIN_SUMMARY_CHARS = 40
 
 // `border-<cor>` não pinta neste app: o `* { border-color }` de globals.css vence a utility.
-// Contorno colorido só sai com `ring-*`.
+// Contorno colorido só sai com `ring-*`. A polaridade "neutra" (ressalva) é SLATE de propósito —
+// se fosse amber, se confundiria com o aviso de conteúdo, que passa ideia sem relação.
 function polarityChipClass(p: string): string {
   return p === "positive"
     ? "bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300"
     : p === "negative"
       ? "bg-rose-500/10 text-rose-700 ring-1 ring-rose-500/30 dark:text-rose-300"
-      : "bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-300"
+      : "bg-slate-500/10 text-slate-600 ring-1 ring-slate-400/30 dark:text-slate-300"
 }
 
-/** Traços salientes como chips — o "por quê" do consenso, escaneável. */
-function TraitChips({ traits }: { traits: ReviewDigest["salient_traits"] }) {
+// Grupos de chips por polaridade — o sentimento das reviews, escaneável e alinhado.
+const TRAIT_GROUPS = [
+  { key: "positive", label: "Elogios", cls: "text-emerald-600 dark:text-emerald-300", dot: "bg-emerald-500" },
+  { key: "neutral", label: "Ressalvas", cls: "text-slate-500 dark:text-slate-300", dot: "bg-slate-400" },
+  { key: "negative", label: "Críticas", cls: "text-rose-600 dark:text-rose-300", dot: "bg-rose-500" },
+] as const
+function traitGroup(p: string): "positive" | "negative" | "neutral" {
+  return p === "positive" ? "positive" : p === "negative" ? "negative" : "neutral"
+}
+
+/** Traços salientes agrupados por polaridade (sentimento das reviews), com rótulo por grupo. */
+function TraitGroups({ traits }: { traits: ReviewDigest["salient_traits"] }) {
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {traits.map((t, i) => (
-        <span
-          key={i}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11.5px]",
-            polarityChipClass(t.polarity),
-          )}
-          title={t.axis || undefined}
-        >
-          <span className="size-1 rounded-full bg-current" aria-hidden />
-          {t.trait}
-        </span>
-      ))}
+    <div className="flex flex-col gap-2.5">
+      {TRAIT_GROUPS.map((g) => {
+        const items = traits.filter((t) => traitGroup(t.polarity) === g.key)
+        if (items.length === 0) return null
+        return (
+          <div key={g.key} className="grid grid-cols-1 gap-1.5 sm:grid-cols-[88px_1fr] sm:gap-3">
+            <span className={cn("flex items-center gap-1.5 pt-0.5 text-[10.5px] font-semibold uppercase tracking-wide", g.cls)}>
+              <span className={cn("size-1.5 rounded-full", g.dot)} aria-hidden />
+              {g.label}
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {items.map((t, i) => (
+                <span
+                  key={i}
+                  className={cn("rounded-full px-2.5 py-0.5 text-[11.5px]", polarityChipClass(t.polarity))}
+                  title={t.axis || undefined}
+                >
+                  {t.trait}
+                </span>
+              ))}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
 
-/** Campo secundário do digest (divergência / execução): rotulado e subordinado ao consenso. */
-function DigestField({ label, children }: { label: string; children: string }) {
+/** Bloco rotulado (Consenso / Divergência / Execução). `lead` = Consenso, destacado por elevação. */
+function LabeledBlock({
+  icon: Icon,
+  label,
+  children,
+  lead = false,
+}: {
+  icon: ComponentType<{ className?: string }>
+  label: string
+  children: string
+  lead?: boolean
+}) {
   return (
-    <div className="flex flex-col gap-1 bg-muted/40 p-3">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <span className="text-[13.5px] leading-relaxed text-foreground/90">{children}</span>
-    </div>
-  )
-}
-
-/** Resumo em prosa (Haiku): a mesma síntese em texto corrido, fechada por padrão. */
-function ProseDisclosure({ summary, summaryAt }: { summary: string; summaryAt: string | null }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="border-t pt-2.5">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex items-center gap-1.5 rounded text-xs text-muted-foreground transition-colors hover:text-foreground"
+    <div className={cn("rounded-xl p-3.5", lead ? "border bg-card shadow-md dark:bg-foreground/[0.03]" : "bg-muted/40")}>
+      <div
+        className={cn(
+          "flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-wide",
+          lead ? "text-foreground" : "text-muted-foreground",
+        )}
       >
-        <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-        Ler o resumo em prosa
-        {summaryAt && <span className="text-[11px] text-muted-foreground/70">· {formatRelativeDateTime(summaryAt)}</span>}
-      </button>
-      {open && (
-        <p className="mt-2.5 whitespace-pre-line rounded-md bg-muted/40 p-3 text-sm leading-relaxed text-foreground/90">
-          {summary}
-        </p>
-      )}
+        <Icon className="size-3.5" />
+        {label}
+      </div>
+      <p className={cn("mt-2 leading-relaxed", lead ? "text-[14.5px] text-foreground" : "text-[13.5px] text-muted-foreground")}>
+        {children}
+      </p>
     </div>
+  )
+}
+
+/** Explica que a cor dos chips é o sentimento das reviews, não o alinhamento ao perfil do usuário. */
+function TraitsInfoTooltip() {
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label="O que as cores dos chips significam"
+            className="text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+          >
+            <Info className="size-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          className="max-w-[260px] text-left text-xs font-normal normal-case leading-relaxed tracking-normal"
+        >
+          As cores refletem o <span className="font-semibold text-foreground">sentimento das reviews</span> (elogio,
+          ressalva ou crítica) — não o alinhamento ao seu perfil.
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 
@@ -102,6 +146,7 @@ function ratingColor(rating: number | null): string {
 
 export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
   const [expanded, setExpanded] = useState(false)
+  const [proseOpen, setProseOpen] = useState(false)
   const refresh = useRefresh()
   const confirmCost = useCostConfirm()
   const [generating, startGenerate] = useTransition()
@@ -131,12 +176,15 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
     return (
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <MessageSquareText className="h-4 w-4 text-muted-foreground" />
-              <CardTitle className="text-base">O que dizem as reviews</CardTitle>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 flex-col gap-1">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <MessageSquareText className="size-4 text-muted-foreground" />
+                O que dizem as reviews
+              </CardTitle>
+              <span className="text-[11.5px] text-muted-foreground">Nenhuma review salva</span>
             </div>
-            <Badge variant="outline" className="text-[11px]">0 reviews</Badge>
+            <RefetchReviewsButton workId={workId} variant="default" size="sm" />
           </div>
         </CardHeader>
         <CardContent>
@@ -179,27 +227,32 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
 
   return (
     <Card>
+      {/* HEADER: título + 1 linha de meta + ações agrupadas (Buscar em destaque, Regerar secundário). */}
       <CardHeader className="pb-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <MessageSquareText className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-base">O que dizem as reviews</CardTitle>
-            <Badge variant="outline" className="text-[11px] tabular-nums">
-              {totalReviews} review{totalReviews === 1 ? "" : "s"}
-              {snapshot.bySource.length > 0 && ` · ${snapshot.bySource.length} fonte${snapshot.bySource.length === 1 ? "" : "s"}`}
-            </Badge>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-col gap-1">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MessageSquareText className="size-4 text-muted-foreground" />
+              O que dizem as reviews
+            </CardTitle>
+            <div className="text-[11.5px] text-muted-foreground">
+              <span className="tabular-nums">{totalReviews} review{totalReviews === 1 ? "" : "s"}</span>
+              {snapshot.bySource.length > 0 && (
+                <>
+                  {" · "}
+                  <span className="tabular-nums">{snapshot.bySource.length} fonte{snapshot.bySource.length === 1 ? "" : "s"}</span>
+                </>
+              )}
+              {synthesizedAt && <> · sintetizado {formatRelativeDateTime(synthesizedAt)}</>}
+            </div>
           </div>
           <div className="flex items-center gap-2">
-            {synthesizedAt && (
-              <span className="text-[11px] text-muted-foreground">
-                sintetizado {formatRelativeDateTime(synthesizedAt)}
-              </span>
-            )}
+            <RefetchReviewsButton workId={workId} variant="default" size="sm" />
             {digest != null && (
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-6 gap-1 px-2 text-[11px] text-muted-foreground"
+                className="gap-1.5"
                 disabled={generating}
                 onClick={() => void runGenerate(true)}
                 title={
@@ -208,45 +261,52 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
                     : "Refaz a síntese estruturada a partir das reviews atuais (custo Sonnet ~$0,02–0,05). Não regera o resumo em prosa."
                 }
               >
-                {generating ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                Regerar
+                {generating ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                Regerar síntese
               </Button>
             )}
           </div>
         </div>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-3 pt-0">
+      <CardContent className="flex flex-col gap-3.5 pt-0">
         {digestLeads && digest ? (
           <>
-            {/* O consenso É a resposta — abre o painel sem rótulo, em corpo maior. */}
-            <p className="text-[16.5px] leading-snug text-foreground">{digest.consensus}</p>
+            {/* 1. Consenso | Divergência — os dois lados, Consenso destacado por elevação. */}
+            {digest.divergence?.trim() ? (
+              <div className="grid gap-2.5 sm:grid-cols-2">
+                <LabeledBlock icon={Users} label="Consenso" lead>{digest.consensus}</LabeledBlock>
+                <LabeledBlock icon={ArrowLeftRight} label="Divergência">{digest.divergence}</LabeledBlock>
+              </div>
+            ) : (
+              <LabeledBlock icon={Users} label="Consenso" lead>{digest.consensus}</LabeledBlock>
+            )}
 
-            {digest.salient_traits?.length > 0 && <TraitChips traits={digest.salient_traits} />}
-
-            {(digest.divergence?.trim() || digest.execution?.trim()) && (
-              <div className="grid gap-px overflow-hidden rounded-md bg-border sm:grid-cols-2">
-                {digest.divergence?.trim() && (
-                  <DigestField label="Onde discordam">{digest.divergence}</DigestField>
-                )}
-                {digest.execution?.trim() && (
-                  <DigestField label="Execução">{digest.execution}</DigestField>
-                )}
+            {/* 2. Destaques — chips agrupados por polaridade + tooltip explicando a cor. */}
+            {digest.salient_traits?.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Destaques das reviews
+                  <TraitsInfoTooltip />
+                </div>
+                <TraitGroups traits={digest.salient_traits} />
               </div>
             )}
 
+            {/* 3. Execução */}
+            {digest.execution?.trim() && (
+              <LabeledBlock icon={Sparkles} label="Execução">{digest.execution}</LabeledBlock>
+            )}
+
+            {/* 4. Aviso de conteúdo — único amber do painel. */}
             {digest.content_warnings?.length > 0 && (
-              <div className="flex items-center gap-2 rounded-md bg-amber-500/10 p-2.5 text-xs text-muted-foreground ring-1 ring-amber-500/30">
-                <AlertTriangle className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 p-2.5 text-xs text-muted-foreground ring-1 ring-amber-500/30">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
                 <span>
                   <span className="font-semibold text-amber-700 dark:text-amber-400">Avisos de conteúdo:</span>{" "}
                   {digest.content_warnings.join(" · ")}
                 </span>
               </div>
-            )}
-
-            {snapshot.summary && (
-              <ProseDisclosure summary={snapshot.summary} summaryAt={snapshot.summaryAt} />
             )}
           </>
         ) : (
@@ -258,7 +318,7 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
                 <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
                 <span>
                   A síntese estruturada foi gerada com uma resposta corrompida do modelo e não pode
-                  ser exibida. Use <span className="font-medium text-foreground">Regerar</span> para refazê-la.
+                  ser exibida. Use <span className="font-medium text-foreground">Regerar síntese</span> para refazê-la.
                 </span>
               </div>
             )}
@@ -327,29 +387,54 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
         )}
       </CardContent>
 
-      {/* As reviews cruas ficam onde sempre estiveram — atrás de um clique, agora explícito. */}
-      <div className="border-t bg-muted/30">
+      {/* RODAPÉ UNIFICADO: prosa (quando há digest) e reviews cruas, mesmo tratamento. */}
+      <div className="border-t">
+        {digestLeads && snapshot.summary && (
+          <>
+            <button
+              type="button"
+              onClick={() => setProseOpen((v) => !v)}
+              aria-expanded={proseOpen}
+              className="flex w-full items-center gap-2.5 px-6 py-3 text-left text-[13px] text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground"
+            >
+              <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", proseOpen && "rotate-180")} />
+              <span className="font-medium text-foreground">Resumo em prosa</span>
+              {snapshot.summaryAt && (
+                <span className="ml-auto text-[11px] text-muted-foreground/70">{formatRelativeDateTime(snapshot.summaryAt)}</span>
+              )}
+            </button>
+            {proseOpen && (
+              <p className="mx-6 mb-3 whitespace-pre-line rounded-md bg-muted/40 p-3 text-sm leading-relaxed text-foreground/90">
+                {snapshot.summary}
+              </p>
+            )}
+          </>
+        )}
+
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="flex w-full items-center justify-between gap-3 px-6 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+          className={cn(
+            "flex w-full items-center gap-2.5 px-6 py-3 text-left text-[13px] text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground",
+            digestLeads && snapshot.summary && "border-t",
+          )}
         >
-          <span className="flex flex-wrap items-center gap-2">
+          <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-180")} />
+          <span className="font-medium text-foreground">
             {expanded ? "Ocultar as reviews" : `Ver as ${totalReviews} review${totalReviews === 1 ? "" : "s"}`}
-            {snapshot.manual.length > 0 && (
-              <Badge variant="secondary" className="gap-1 text-[11px]">
-                <PenLine className="h-3 w-3" />
-                {snapshot.manual.length} manual{snapshot.manual.length === 1 ? "" : "is"}
-              </Badge>
-            )}
-            {snapshot.fetchedAt && (
-              <span className="text-[11px] text-muted-foreground/70">
-                buscadas {formatRelativeDateTime(snapshot.fetchedAt)}
-              </span>
-            )}
           </span>
-          <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", expanded && "rotate-180")} />
+          {snapshot.manual.length > 0 && (
+            <Badge variant="secondary" className="gap-1 text-[11px]">
+              <PenLine className="h-3 w-3" />
+              {snapshot.manual.length} manual{snapshot.manual.length === 1 ? "" : "is"}
+            </Badge>
+          )}
+          {snapshot.fetchedAt && (
+            <span className="ml-auto text-[11px] text-muted-foreground/70">
+              buscadas {formatRelativeDateTime(snapshot.fetchedAt)}
+            </span>
+          )}
         </button>
       </div>
 

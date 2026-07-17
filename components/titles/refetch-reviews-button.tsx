@@ -4,9 +4,13 @@ import { useEffect, useRef, useState } from "react"
 import { Loader2, MessageSquareText } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { refetchWorkReviews } from "@/server/actions/reviews"
 import { getWorkUpdateStatus } from "@/server/actions/update-status"
 import { useRefresh } from "@/lib/use-refresh"
+
+type BtnVariant = "default" | "outline" | "ghost" | "secondary"
+type BtnSize = "sm" | "default"
 
 const POLL_MS = 4_000
 const MAX_POLLS = 30 // ~120s — cobre o Mangago (o mais lento) com folga
@@ -19,7 +23,17 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
  * de progresso + estado "Buscando…" no botão + poll até terminar), já que a faixa do
  * watcher fica no topo da página e pode estar fora da vista aqui embaixo.
  */
-export function RefetchReviewsButton({ workId }: { workId: string }) {
+export function RefetchReviewsButton({
+  workId,
+  variant = "outline",
+  size = "sm",
+  className,
+}: {
+  workId: string
+  variant?: BtnVariant
+  size?: BtnSize
+  className?: string
+}) {
   const [loading, setLoading] = useState(false)
   const refresh = useRefresh()
   const mounted = useRef(true)
@@ -80,7 +94,7 @@ export function RefetchReviewsButton({ workId }: { workId: string }) {
   }
 
   return (
-    <Button variant="outline" size="sm" onClick={onClick} disabled={loading} className="gap-1.5">
+    <Button variant={variant} size={size} onClick={onClick} disabled={loading} className={cn("gap-1.5", className)}>
       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquareText className="h-4 w-4" />}
       {loading ? "Buscando reviews…" : "Buscar reviews"}
     </Button>
