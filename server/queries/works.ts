@@ -11,6 +11,7 @@ import {
   getPersonalStatusNameById,
 } from "@/lib/constants/status-lookups"
 import { titleToSlug } from "@/lib/utils"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
@@ -512,11 +513,14 @@ export async function getWorkById(id: string): Promise<WorkWithRelations | null>
 const getSlugToIdMap = unstable_cache(
   async (): Promise<Record<string, string>> => {
     const supabase = createAdminClient()
-    const { data } = await supabase
-      .from("works")
-      .select("id, title")
+    // Pagina: `.select()` corta em 1000 linhas sem avisar. Acima disso, obras na
+    // cauda sumiriam do índice slug→id → 404 ao navegar/renomear (gotcha nº1).
+    const rows = await fetchAllRows<{ id: string; title: string | null }>(
+      (from, to) => supabase.from("works").select("id, title").range(from, to),
+      "getSlugToIdMap",
+    )
     const map: Record<string, string> = {}
-    for (const row of data ?? []) {
+    for (const row of rows) {
       const slug = titleToSlug(row.title ?? "")
       if (slug && !map[slug]) map[slug] = row.id
     }
@@ -528,14 +532,18 @@ const getSlugToIdMap = unstable_cache(
 
 export async function getWorkBySlug(slug: string) {
   const map = await getSlugToIdMap()
-  let id = map[slug]
+  let id: string | undefined = map[slug]
   if (!id) {
     // O índice slug→id é cacheado e a invalidação por tag pode não propagar
     // a tempo da navegação após criar uma obra. Fallback: consulta direta no
-    // banco para evitar 404 em obras recém-criadas.
+    // banco para evitar 404 em obras recém-criadas. Pagina (`.select()` corta
+    // em 1000) — senão a obra da cauda cairia justo aqui, no caminho de 404.
     const supabase = createAdminClient()
-    const { data } = await supabase.from("works").select("id, title")
-    id = (data ?? []).find((row) => titleToSlug(row.title ?? "") === slug)?.id
+    const rows = await fetchAllRows<{ id: string; title: string | null }>(
+      (from, to) => supabase.from("works").select("id, title").range(from, to),
+      "getWorkBySlug.fallback",
+    )
+    id = rows.find((row) => titleToSlug(row.title ?? "") === slug)?.id
   }
   if (!id) return null
   return getWorkWithAiEvaluations(id)
@@ -582,23 +590,27 @@ export async function getWorkTitleByIdOrSlug(idOrSlug: string): Promise<string |
       .maybeSingle()
     return (data?.title as string | null) ?? null
   }
-  const { data } = await supabase.from("works").select("title")
-  return (
-    (data ?? []).find((row) => titleToSlug(row.title ?? "") === idOrSlug)?.title ?? null
+  // Pagina (`.select()` corta em 1000): sem isto o título de uma obra na cauda
+  // viria null e a aba do navegador cairia no fallback genérico.
+  const rows = await fetchAllRows<{ title: string | null }>(
+    (from, to) => supabase.from("works").select("title").range(from, to),
+    "getWorkTitleByIdOrSlug",
   )
+  return rows.find((row) => titleToSlug(row.title ?? "") === idOrSlug)?.title ?? null
 }
 
 export async function getWorkIdsBySlug(slug: string): Promise<string[]> {
   const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("works")
-    .select("id, title")
-
-  if (error) throw new Error(error.message)
-
-  return (data ?? [])
+  // Pagina (`.select()` corta em 1000). Aqui o custo do truncamento é DOBRADO:
+  // a detail page usa esta contagem pra decidir o redirect UUID→slug (só redireciona
+  // se o slug for único). Uma obra da cauda perdida daria falso "não-único".
+  const rows = await fetchAllRows<{ id: string; title: string | null }>(
+    (from, to) => supabase.from("works").select("id, title").range(from, to),
+    "getWorkIdsBySlug",
+  )
+  return rows
     .filter((row) => titleToSlug(row.title ?? "") === slug)
-    .map((row) => row.id as string)
+    .map((row) => row.id)
 }
 
 export async function getWorkWithAiEvaluations(id: string) {
