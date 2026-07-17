@@ -44,3 +44,11 @@ export async function checkComixHealth() {
 export async function setComixHidManually(input: { workId: string; hidOrUrl: string }) {
   return impl.setComixHidManually(input)
 }
+
+export async function markComixAbsent(workId: string) {
+  return impl.markComixAbsent(workId)
+}
+
+export async function unmarkComixAbsent(workId: string) {
+  return impl.unmarkComixAbsent(workId)
+}

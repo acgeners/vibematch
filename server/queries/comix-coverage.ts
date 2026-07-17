@@ -1,33 +1,83 @@
 import "server-only"
+import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 
 export interface WorkMissingComix {
   id: string
   title: string
 }
 
+export interface ComixCoverageLists {
+  /** Obras ativas SEM hid do Comix e NÃO marcadas como inexistentes — pendentes de fato. */
+  missing: WorkMissingComix[]
+  /** Obras marcadas pelo usuário como "não existem no Comix" (marcador da mig 038). */
+  absent: WorkMissingComix[]
+}
+
 /**
- * Obras (ativas) SEM um hid da Comix ativo em work_external_ids — ou seja, sem
- * linha `source='comix'` com `is_rejected=false` e `external_id` preenchido.
- * Obras já rejeitadas pelo usuário (is_rejected=true) também aparecem, pra
- * permitir override manual. Usada na lista de preenchimento manual em /settings.
+ * Classifica o catálogo ativo em 3 estados frente ao Comix, a partir de
+ * `work_external_ids` (source='comix'):
+ *   - ATIVO    → is_rejected=false E external_id preenchido (hid válido; reviews funcionam)
+ *   - AUSENTE  → is_rejected=true  E external_id NULL ("não existe no Comix" — semântica da
+ *                migration 038: rejeitado sem match válido). Marcado à mão em /settings.
+ *   - PENDENTE → sem linha, ou linha que não é nem ativa nem ausente (ex.: rejeitou um
+ *                candidato específico mas ainda cabe um hid certo).
+ *
+ * Só PENDENTE conta como "a resolver" (badge da sidebar/tópico e contador do card). AUSENTE
+ * sai da contagem — mas fica listável pra restaurar. Memoizado por request (`cache`), então
+ * a page (que precisa das duas listas) e o badge (só do count) compartilham uma leitura.
+ *
+ * Pagina os dois selects: o catálogo ativo já está perto de 1000 linhas e o `select` do
+ * Supabase corta em 1000 SEM avisar — truncar aqui esconderia obras da análise (elas
+ * sumiriam de "pendente" em silêncio).
+ */
+const loadComixCoverage = cache(async (): Promise<ComixCoverageLists> => {
+  const supabase = createAdminClient()
+  const [works, comixRows] = await Promise.all([
+    fetchAllRows<{ id: string; title: string | null }>(
+      (from, to) =>
+        supabase.from("works").select("id, title").eq("is_archived", false).order("title").range(from, to),
+      "loadComixCoverage.works",
+    ),
+    fetchAllRows<{ work_id: string; external_id: string | null; is_rejected: boolean }>(
+      (from, to) =>
+        supabase
+          .from("work_external_ids")
+          .select("work_id, external_id, is_rejected")
+          .eq("source", "comix")
+          .range(from, to),
+      "loadComixCoverage.comix",
+    ),
+  ])
+
+  const active = new Set<string>()
+  const absent = new Set<string>()
+  for (const r of comixRows) {
+    if (r.is_rejected === false && r.external_id) active.add(r.work_id)
+    else if (r.is_rejected === true && !r.external_id) absent.add(r.work_id)
+  }
+
+  const missing: WorkMissingComix[] = []
+  const absentList: WorkMissingComix[] = []
+  for (const w of works) {
+    if (active.has(w.id)) continue
+    const item = { id: w.id, title: w.title ?? "" }
+    if (absent.has(w.id)) absentList.push(item)
+    else missing.push(item)
+  }
+  return { missing, absent: absentList }
+})
+
+/**
+ * Obras (ativas) pendentes de hid do Comix — sem hid ativo E sem o marcador de
+ * "não existe". Usada no badge/contador de /settings e na lista de preenchimento manual.
  */
 export async function getWorksMissingComixHid(): Promise<WorkMissingComix[]> {
-  const supabase = createAdminClient()
-  const [worksRes, comixRes] = await Promise.all([
-    supabase.from("works").select("id, title").eq("is_archived", false).order("title"),
-    supabase.from("work_external_ids").select("work_id, external_id, is_rejected").eq("source", "comix"),
-  ])
-  if (worksRes.error) throw new Error(worksRes.error.message)
-  if (comixRes.error) throw new Error(comixRes.error.message)
+  return (await loadComixCoverage()).missing
+}
 
-  const hasActiveComix = new Set(
-    (comixRes.data ?? [])
-      .filter((r) => r.is_rejected === false && r.external_id)
-      .map((r) => r.work_id as string),
-  )
-
-  return (worksRes.data ?? [])
-    .filter((w) => !hasActiveComix.has(w.id as string))
-    .map((w) => ({ id: w.id as string, title: (w.title as string) ?? "" }))
+/** Listas de cobertura do Comix: pendentes de hid + marcadas como inexistentes. */
+export async function getComixCoverageLists(): Promise<ComixCoverageLists> {
+  return loadComixCoverage()
 }
