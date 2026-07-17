@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import type { ReactNode } from "react"
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react"
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -55,15 +55,34 @@ export function CollapsibleCardInner({
       return next
     })
 
+  // O cabeçalho INTEIRO expande/recolhe — só a setinha era pequena demais pra
+  // mirar. `data-no-toggle` (no ⓘ e nos botões Desfazer/Lida, marcados em
+  // settings-card) blinda os controles interativos: clique neles não colapsa.
+  const onHeaderClick = (e: MouseEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("[data-no-toggle]")) return
+    toggle()
+  }
+  const onHeaderKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Enter" && e.key !== " ") return
+    if ((e.target as HTMLElement).closest("[data-no-toggle]")) return
+    e.preventDefault() // Space rolaria a página
+    toggle()
+  }
+
   return (
     <>
-      <div className="flex items-start gap-3.5">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={onHeaderClick}
+        onKeyDown={onHeaderKey}
+        className="group/hd flex cursor-pointer items-start gap-3.5 rounded-xl transition-colors hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
         {headerInner}
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={open}
-          className="grid size-8 shrink-0 place-items-center rounded-lg border border-border/60 bg-card/60 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        <span
+          aria-hidden
+          className="grid size-8 shrink-0 self-start place-items-center rounded-lg border border-border/60 bg-card/60 text-muted-foreground transition-colors group-hover/hd:bg-muted/60 group-hover/hd:text-foreground"
         >
           <ChevronDown
             className={cn(
@@ -72,8 +91,7 @@ export function CollapsibleCardInner({
               open ? "" : "-rotate-90",
             )}
           />
-          <span className="sr-only">{open ? "Recolher item" : "Expandir item"}</span>
-        </button>
+        </span>
       </div>
       <div
         className={cn(

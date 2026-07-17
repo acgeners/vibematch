@@ -72,8 +72,8 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
           Gera representação vetorial (1536 dims) de cada obra usando OpenAI{" "}
           <span className="font-mono">text-embedding-3-small</span>. Cacheado eternamente em{" "}
           <span className="font-mono">work_embeddings</span> — só re-embeda quando sinopse, tags ou
-          critérios mudam. Fundação pras features &quot;obras parecidas&quot; (Passo 4) e kNN
-          predictor (Passo 5). Custo: ~$0.02 por milhão de tokens (~$0.10–1.00 pra base inteira).
+          critérios mudam. Fundação pras features &quot;obras parecidas&quot; e o kNN
+          predictor. Custo: ~$0.02 por milhão de tokens (~$0.10–1.00 pra base inteira).
         </p>
         <div className="flex flex-col items-end gap-1 shrink-0">
           <Button
