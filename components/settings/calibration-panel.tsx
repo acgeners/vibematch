@@ -53,11 +53,6 @@ interface CalibrationPanelProps {
   }
 }
 
-const CRITERIA_LABEL: Record<string, string> = {
-  drama: "Drama",
-  tragedy: "Tragédia",
-}
-
 function formatRelativeTime(iso: string | null): string {
   if (!iso) return "nunca"
   const date = new Date(iso)
@@ -162,7 +157,13 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
   const skillGainPct = reduction != null ? reduction * 100 : null
 
   // Faixas fora do padrão + confiança do público: movidas pra Diagnósticos (dev).
-  const bucketOutliers = findOutliers(snapshot.maeExpected, snapshot.buckets)
+  // MAE por faixa: preferir o breakdown OUT-OF-FOLD (honesto, do recalc); cair no
+  // in-sample (otimista) só quando o OOF não existe (treino < 30 ou stub).
+  const oofBuckets = config.expected_ridge_coefficients?.oofBucketBreakdown ?? null
+  const displayBuckets: BucketBreakdown = oofBuckets ?? snapshot.buckets
+  const displayBucketsMae = oofBuckets ? oofBuckets.overallMae : snapshot.maeExpected
+  const bucketsAreOof = oofBuckets != null
+  const bucketOutliers = findOutliers(displayBucketsMae, displayBuckets)
   const pseudoVotesLive = snapshot.pseudoVotesNotaM ?? config.pseudo_votes_nota_m
   const pseudoVotesStale = hasMismatch(snapshot.pseudoVotesNotaM, config.pseudo_votes_nota_m, 0.1)
 
@@ -360,54 +361,10 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
                 regressões silenciosas — não precisa monitorar com frequência.
               </p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {/* Notas que estouraram a escala (ex-"Clamp GPT") */}
-                <div className="rounded-md border border-border p-3">
-                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <span>Notas que estouraram a escala 0–10</span>
-                    <InfoTooltip
-                      label="Escala estourada"
-                      text="% de obras cujo agregado da IA passou de [0,10] antes de ser cortado. Esse agregado, amplificado, vira o sinal 'Nota da IA (combinada)'. Alto (>20%) = a amplificação está empurrando obras pra fora da escala. (Interno: gpt_clamp_hit_rate.)"
-                    />
-                  </p>
-                  <p className="mt-1 font-mono text-base">
-                    {config.gpt_clamp_hit_rate != null
-                      ? `${(config.gpt_clamp_hit_rate * 100).toFixed(1)}%`
-                      : "—"}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {config.gpt_clamp_hit_rate != null && config.gpt_clamp_hit_rate > 0.2
-                      ? "Alto — a amplificação pode estar empurrando obras pra fora da escala"
-                      : "Abaixo de 20% = saudável"}
-                  </p>
-                </div>
-
-                {/* Critérios negativos */}
-                <div className="rounded-md border border-border p-3">
-                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <span>Critérios negativos que penalizaram</span>
-                    <InfoTooltip
-                      label="Critérios negativos"
-                      text="% de obras em que drama/tragédia ultrapassaram o limiar e penalizaram a nota. Se ficar 0%, o critério virou decorativo. (Interno: negative_activation_rate.)"
-                    />
-                  </p>
-                  <div className="mt-1 space-y-1">
-                    {config.negative_activation_rate && Object.keys(config.negative_activation_rate).length > 0 ? (
-                      Object.entries(config.negative_activation_rate)
-                        .sort(([a], [b]) => a.localeCompare(b))
-                        .map(([slug, rate]) => (
-                          <p key={slug} className="text-xs">
-                            {CRITERIA_INFO[slug as keyof typeof CRITERIA_INFO]?.name ??
-                              CRITERIA_LABEL[slug] ??
-                              slug}
-                            :{" "}
-                            <span className="font-mono text-foreground">{(rate * 100).toFixed(1)}%</span>
-                          </p>
-                        ))
-                    ) : (
-                      <p className="text-xs text-muted-foreground">—</p>
-                    )}
-                  </div>
-                </div>
+                {/* "Critérios negativos que penalizaram" saiu daqui: virou o painel
+                    "Saúde do modelo de gosto" (declarado × aprendido + flags de
+                    vulnerabilidade) em "Viés & atributos". `negative_activation_rate`
+                    segue sendo computado no recalc, só não é mais exibido aqui. */}
 
                 {/* Confiança mínima do público (ex-"Pseudo Nota.M") */}
                 <div
@@ -442,7 +399,7 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
                     <span>Faixas onde a previsão erra mais</span>
                     <InfoTooltip
                       label="Faixas fora do padrão"
-                      text={`Procura perfis de obra (por quão típica é a obra ou por nº de votos) onde o modelo erra bem mais que a média — só sinaliza com ≥ ${OUTLIER_MIN_N} obras na faixa e MAE ≥ média + ${OUTLIER_DELTA.toFixed(2)}. MAE por faixa é in-sample (otimista), serve só pra comparação relativa.`}
+                      text={`Procura perfis de obra (por quão típica é a obra ou por nº de votos) onde o modelo erra bem mais que a média — só sinaliza com ≥ ${OUTLIER_MIN_N} obras na faixa e MAE ≥ média + ${OUTLIER_DELTA.toFixed(2)}. ${bucketsAreOof ? "MAE por faixa é out-of-fold (honesto, sem leakage) — mesma metodologia do erro do topo." : "MAE por faixa cai no in-sample (otimista) enquanto não há obras rotuladas suficientes pro out-of-fold (≥ 30)."}`}
                     />
                   </p>
                   {bucketOutliers.length === 0 ? (
@@ -473,18 +430,18 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
                 </div>
               </div>
 
-              {/* MAE por faixa (detalhado, in-sample) */}
+              {/* MAE por faixa (detalhado) — out-of-fold quando disponível */}
               <details className="group">
                 <summary className="cursor-pointer list-none text-[11px] text-muted-foreground transition-colors hover:text-foreground">
                   <ChevronDown className="mr-1 inline h-3 w-3 transition-transform group-open:rotate-180" />
-                  Ver MAE por faixa (in-sample, aproximado)
+                  Ver MAE por faixa ({bucketsAreOof ? "out-of-fold, honesto" : "in-sample, aproximado"})
                 </summary>
                 <div className="mt-3 space-y-3">
                   <BucketBars
                     title="Por quão típica é a obra (distância ao centróide do treino)"
-                    buckets={snapshot.buckets.byDistance}
+                    buckets={displayBuckets.byDistance}
                   />
-                  <BucketBars title="Por número de votos na plataforma" buckets={snapshot.buckets.byVotes} />
+                  <BucketBars title="Por número de votos na plataforma" buckets={displayBuckets.byVotes} />
                 </div>
               </details>
             </div>

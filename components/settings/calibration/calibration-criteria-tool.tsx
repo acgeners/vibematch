@@ -9,7 +9,9 @@ import { RunHistoryTable } from "@/components/settings/calibration/run-history-t
 import { AttributeBiasTable } from "@/components/settings/calibration/attribute-bias-table"
 import { RegenerateCalibratedArtifactsButton } from "@/components/settings/calibration/regenerate-calibrated-artifacts-button"
 import { PredictionHealthCard } from "@/components/settings/calibration/prediction-health-card"
+import { TasteModelHealthPanel } from "@/components/settings/calibration/taste-model-health-panel"
 import { getPredictionHealth } from "@/server/queries/calibration-guards"
+import { getTasteModelHealth } from "@/server/queries/taste-model-health"
 import {
   countPendingSuggestions,
   loadLastRun,
@@ -118,16 +120,19 @@ export async function CalibrationAuditTool() {
  * é alterado aqui (a única ação de escrita é regenerar artefatos calibrados).
  */
 export async function CalibrationBiasTool() {
-  const [lastBias, ratedWorksCount, attributeBias, predictionHealth] = await Promise.all([
+  const [lastBias, ratedWorksCount, attributeBias, predictionHealth, tasteHealth] = await Promise.all([
     loadLastRun("bias"),
     countRatedWorks(),
     getAttributeBiasOverview(),
     getPredictionHealth(),
+    getTasteModelHealth(),
   ])
 
   return (
     <div className="space-y-4">
       <BiasTriggerZone lastBias={lastBias} ratedWorksCount={ratedWorksCount} />
+
+      {tasteHealth && <TasteModelHealthPanel health={tasteHealth} />}
 
       <Tabs defaultValue="bias" className="w-full">
         <TabsList variant="line" className={TABS_LIST_CLASS}>
