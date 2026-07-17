@@ -1419,7 +1419,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   className="flex flex-col gap-2.5 rounded-lg border bg-muted/20 p-3.5"
                 >
                   <div className="flex items-center gap-2.5">
-                    <span className="grid h-9 w-9 shrink-0 place-items-center">
+                    <span className="grid h-[52px] w-[52px] shrink-0 place-items-center">
                       <CriterionIcon slug={slug} />
                     </span>
                     <div className="min-w-0 flex-1">
