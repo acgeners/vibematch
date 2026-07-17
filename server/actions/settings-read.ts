@@ -25,8 +25,10 @@ function isBatchSection(section: string): section is BatchReadSection {
 
 /**
  * Marca UM card agregado como lido: grava um snapshot da contagem atual daquela
- * seção. Unread passa a `max(0, atual - snapshot)` → 0 agora; re-notifica quando
- * a contagem subir acima do snapshot.
+ * seção. Unread passa a `max(0, atual - snapshot)` → 0 agora. Re-notifica quando
+ * a contagem sobe acima do snapshot OU quando as pendências marcadas são
+ * resolvidas e novas aparecem — o snapshot é um PISO que DESCE junto com a
+ * pendência (`lowerSettingsReadAcks`), não uma marca d'água permanente.
  */
 export async function markSettingsSectionRead(
   section: string,
