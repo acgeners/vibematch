@@ -415,6 +415,12 @@ export interface FormulaConfig {
     calcBlendWeight?: number
     /** Assinatura dos inputs da nested-CV honesta — pula o recompute quando idêntica. */
     cvSig?: string
+    /** MAE por faixa OUT-OF-FOLD (diagnóstico honesto do painel de calibração). */
+    oofBucketBreakdown?: {
+      byDistance: { label: string; count: number; mae: number | null }[]
+      byVotes: { label: string; count: number; mae: number | null }[]
+      overallMae: number | null
+    } | null
   } | null
 }
 
