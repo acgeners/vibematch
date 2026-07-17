@@ -299,7 +299,33 @@ export async function ensureSignedIn(): Promise<
 //  - Logado com linha própria + coluna is_admin → usa a flag.
 //  - Fallback (coluna ausente pré-mig 139, ou logado sem linha própria) → critério
 //    legado (=== singleton).
+// Aviso único por processo quando o bypass de dev está ligado — pra nunca ser
+// silencioso (e gritar caso alguém rode um build não-prod com a flag ligada).
+let devAdminBypassWarned = false
+function warnDevAdminBypassOnce(): void {
+  if (devAdminBypassWarned) return
+  devAdminBypassWarned = true
+  console.warn(
+    "⚠️  DEV_ADMIN_BYPASS ligado: TODA request é tratada como Curador (admin). " +
+      "Só vale em dev (NODE_ENV!=production); NUNCA suba isto pra produção.",
+  )
+}
+
 export const isCurrentUserAdmin = cache(async (): Promise<boolean> => {
+  // ── Bypass de DESENVOLVIMENTO (opt-in) ─────────────────────────────────────
+  // Trata QUALQUER request (inclusive anônimo) como Curador, pra testar ações
+  // gated sem logar. DUPLO portão pra NUNCA valer em produção:
+  //   1. NODE_ENV !== "production" — `next start` (prod, Fly) força
+  //      NODE_ENV=production, então mesmo que a env var vaze pro ambiente de prod
+  //      o bypass fica DESLIGADO.
+  //   2. DEV_ADMIN_BYPASS === "1" — opt-in explícito, só no .env.local (gitignored).
+  // É EXATAMENTE o buraco P0 descrito abaixo (anônimo=admin); por isso os dois
+  // portões + o aviso barulhento no log. Nunca commitar com isto ligado em prod.
+  if (process.env.NODE_ENV !== "production" && process.env.DEV_ADMIN_BYPASS === "1") {
+    warnDevAdminBypassOnce()
+    return true
+  }
+
   const sessionId = await getSessionUserId()
   if (!sessionId) return false // anônimo/deslogado = read-only
 
