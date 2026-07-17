@@ -36,7 +36,7 @@ import {
 } from "@/components/settings/tag-consolidation/tag-consolidation-tool"
 import { getCalibrationSnapshot } from "@/server/actions/settings"
 import { getComixResolverStatus } from "@/server/actions/comix-resolver"
-import { getWorksMissingComixHid } from "@/server/queries/comix-coverage"
+import { getComixCoverageLists } from "@/server/queries/comix-coverage"
 import {
   getAiEvalOnCreate,
   getSynopsisCanonicalOnCreate,
@@ -386,10 +386,11 @@ async function ItemBody({
     }
 
     case "comix": {
-      const [comixStatus, comixMissing] = await Promise.all([
+      const [comixStatus, comixLists] = await Promise.all([
         getComixResolverStatus(),
-        getWorksMissingComixHid(),
+        getComixCoverageLists(),
       ])
+      const comixMissing = comixLists.missing
       const missingCount = comixMissing.length
       return (
         <div className="space-y-5">
@@ -414,7 +415,12 @@ async function ItemBody({
               )}
             </summary>
             <div className="pt-3">
-              <ResolveComixPanel accent="amber" initialStatus={comixStatus} initialMissing={comixMissing} />
+              <ResolveComixPanel
+                accent="amber"
+                initialStatus={comixStatus}
+                initialMissing={comixMissing}
+                initialAbsent={comixLists.absent}
+              />
             </div>
           </details>
         </div>
