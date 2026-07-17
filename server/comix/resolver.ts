@@ -662,3 +662,50 @@ export async function setComixHidManually(input: {
   revalidatePath("/titles")
   return validated
 }
+
+/**
+ * Marca que a obra NÃO EXISTE no Comix — grava o marcador da migration 038
+ * (`external_id=NULL, is_rejected=true`, "sem match válido"). A obra sai da lista
+ * de pendentes e do contador/badge de Cobertura (ver `loadComixCoverage`), mas
+ * fica listável em "Ignoradas" pra restaurar. Upsert por (work_id, source): só é
+ * chamado de uma linha pendente (sem hid ativo), então não sobrescreve hid válido.
+ */
+export async function markComixAbsent(workId: string): Promise<{ ok: boolean; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
+  if (!workId) return { ok: false, error: "Obra inválida." }
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from("work_external_ids")
+    .upsert(
+      { work_id: workId, source: "comix", external_id: null, is_rejected: true },
+      { onConflict: "work_id,source" },
+    )
+  if (error) return { ok: false, error: error.message }
+  revalidatePath("/settings")
+  revalidatePath("/titles")
+  return { ok: true }
+}
+
+/**
+ * Desfaz o "não existe no Comix": apaga o marcador → a obra volta a ser pendente.
+ * O filtro `external_id IS NULL AND is_rejected=true` garante que só o marcador de
+ * ausência some, nunca um hid válido (defesa contra chamar na obra errada).
+ */
+export async function unmarkComixAbsent(workId: string): Promise<{ ok: boolean; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
+  if (!workId) return { ok: false, error: "Obra inválida." }
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from("work_external_ids")
+    .delete()
+    .eq("work_id", workId)
+    .eq("source", "comix")
+    .is("external_id", null)
+    .eq("is_rejected", true)
+  if (error) return { ok: false, error: error.message }
+  revalidatePath("/settings")
+  revalidatePath("/titles")
+  return { ok: true }
+}
