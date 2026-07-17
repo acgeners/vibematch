@@ -178,6 +178,17 @@ export const COST_TIER_STYLES: Record<"free" | "low" | "high", string> = {
   high: "bg-rose-500/15 text-rose-700 ring-rose-500/30 dark:text-rose-300",
 }
 
+// Chips não-custo codificam o TIPO da informação por cor+ícone (não o accent do
+// grupo): frequência (com que frequência rodar), gatilho (o que dispara o uso) e
+// natureza (o que a etapa é/como age). Cada tipo = uma cor estável no app inteiro,
+// pra bater o olho e saber que categoria de metadado o chip carrega. `ring` (não
+// `border`): a utility de border-color está morta no projeto (globals.css).
+export const CHIP_KIND_STYLES: Record<"cadence" | "trigger" | "nature", string> = {
+  cadence: "bg-sky-500/15 text-sky-700 ring-sky-500/30 dark:text-sky-300",
+  trigger: "bg-indigo-500/15 text-indigo-700 ring-indigo-500/30 dark:text-indigo-300",
+  nature: "bg-slate-500/15 text-slate-700 ring-slate-500/30 dark:text-slate-300",
+}
+
 export const NOTE_ACCENT: Record<ConsoleAccent, string> = {
   cyan: "border-cyan-500/30 bg-cyan-500/5",
   violet: "border-violet-500/30 bg-violet-500/5",

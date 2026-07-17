@@ -1,8 +1,10 @@
 import type { ReactNode } from "react"
 import Link from "next/link"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, Coins, Repeat, Shapes, Zap } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import {
   ACCENT_STYLES,
+  CHIP_KIND_STYLES,
   COST_TIER_STYLES,
 } from "@/components/console/console-registry"
 import { ItemHelpPopover } from "@/components/settings/item-help-popover"
@@ -71,11 +73,13 @@ export function SettingsCard({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <h2 className="text-base font-semibold leading-tight text-foreground">{title}</h2>
-          <ItemHelpPopover title={title} help={section.help} accent={accent} />
+          {/* `data-no-toggle` + z-10: o ⓘ é interativo — clicar nele não pode
+              expandir o card (nem no overlay clicável nem no header-botão). */}
+          <span data-no-toggle className="relative z-10 inline-flex">
+            <ItemHelpPopover title={title} help={section.help} accent={accent} />
+          </span>
         </div>
-        {section.chips && section.chips.length > 0 && (
-          <Chips chips={section.chips} accent={accent} />
-        )}
+        {section.chips && section.chips.length > 0 && <Chips chips={section.chips} />}
         <p className="mt-1 text-xs text-muted-foreground">{section.description}</p>
       </div>
       {pending > 0 && (
@@ -95,7 +99,13 @@ export function SettingsCard({
           </span>
         </span>
       )}
-      {readControl}
+      {readControl && (
+        // `contents`: não altera o layout do controle; só marca a subárvore como
+        // interativa pra o clique (Desfazer/Lida) não expandir/recolher o card.
+        <span data-no-toggle className="contents">
+          {readControl}
+        </span>
+      )}
     </>
   )
 
@@ -107,17 +117,25 @@ export function SettingsCard({
       <div aria-hidden className={cn("absolute inset-y-0 left-0 w-1", s.rail)} />
       {serverCollapse ? (
         <div className="px-5 py-5 pl-6">
-          <div className="flex items-start gap-3.5">
+          {/* Cabeçalho inteiro clicável: um <Link> em overlay cobre só o header.
+              Transparente (só captura o clique); o realce mora no wrapper
+              `group/hd`. O ⓘ (z-10) fica clicável por cima do overlay. */}
+          <div className="group/hd relative flex items-start gap-3.5 rounded-xl transition-colors hover:bg-muted/25">
             {headerInner}
-            <Link
-              href={serverCollapse.href}
-              aria-expanded={serverCollapse.open}
-              scroll={false}
-              className="grid size-8 shrink-0 place-items-center rounded-lg border border-border/60 bg-card/60 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            <span
+              aria-hidden
+              className="grid size-8 shrink-0 self-start place-items-center rounded-lg border border-border/60 bg-card/60 text-muted-foreground transition-colors group-hover/hd:bg-muted/60 group-hover/hd:text-foreground"
             >
               <ChevronDown
                 className={cn("size-4 transition-transform", serverCollapse.open ? "" : "-rotate-90")}
               />
+            </span>
+            <Link
+              href={serverCollapse.href}
+              aria-expanded={serverCollapse.open}
+              scroll={false}
+              className="absolute inset-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+            >
               <span className="sr-only">{serverCollapse.open ? "Recolher item" : "Expandir item"}</span>
             </Link>
           </div>
@@ -143,44 +161,30 @@ export function SettingsCard({
   )
 }
 
-function Chips({ chips, accent }: { chips: SettingsChip[]; accent: SettingsAccent }) {
-  const s = ACCENT_STYLES[accent]
+// Ícone por TIPO de chip — reforça a cor (custo/frequência/gatilho/natureza), pra
+// dar pra bater o olho e saber que categoria de metadado o chip carrega.
+const CHIP_ICON: Record<SettingsChip["kind"], LucideIcon> = {
+  cost: Coins,
+  cadence: Repeat,
+  trigger: Zap,
+  nature: Shapes,
+}
+
+function Chips({ chips }: { chips: SettingsChip[] }) {
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
       {chips.map((chip, i) => {
-        if (chip.kind === "cost") {
-          return (
-            <span
-              key={i}
-              className={cn(
-                "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1",
-                COST_TIER_STYLES[chip.tier]
-              )}
-            >
-              {chip.label}
-            </span>
-          )
-        }
-        if (chip.kind === "step") {
-          return (
-            <span
-              key={i}
-              className={cn(
-                "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1",
-                s.iconBg,
-                s.iconText,
-                s.ring
-              )}
-            >
-              {chip.label}
-            </span>
-          )
-        }
+        const style = chip.kind === "cost" ? COST_TIER_STYLES[chip.tier] : CHIP_KIND_STYLES[chip.kind]
+        const Icon = CHIP_ICON[chip.kind]
         return (
           <span
             key={i}
-            className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1",
+              style
+            )}
           >
+            <Icon className="size-3" aria-hidden />
             {chip.label}
           </span>
         )
