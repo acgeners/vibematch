@@ -133,7 +133,7 @@ async function main() {
   }
 
   const [criteriaRes, pubStatusRes, persStatusRes, sourceRes, tagGroupRes, tagsRes, genresRes, tooltipsRes, uiLabelsRes] = await Promise.all([
-    supabase.from("criteria").select("eval_type, slug, criteria, emoji, description, weight, key, ranges").order("id"),
+    supabase.from("criteria").select("eval_type, slug, criteria, emoji, description, weight, key, ranges, icon_url").order("id"),
     supabase.from("publication_status").select("id, status, slug, short, color, symbol").order("id"),
     supabase
       .from("personal_status")
@@ -205,9 +205,10 @@ async function main() {
   // ─────────────────────────────────────────────────────────────
   // 1. lib/constants/criteria.ts
   // ─────────────────────────────────────────────────────────────
-  const criteriaInfoEntries = iaCriteria.map(c =>
-    `  ${c.slug}: { name: ${JSON.stringify(c.criteria)}, emoji: ${JSON.stringify(c.emoji ?? "")}, description: ${JSON.stringify(c.description ?? "")} },`
-  ).join("\n")
+  const criteriaInfoEntries = iaCriteria.map(c => {
+    const icon = c.icon_url ? `, iconUrl: ${JSON.stringify(c.icon_url)}` : ""
+    return `  ${c.slug}: { name: ${JSON.stringify(c.criteria)}, emoji: ${JSON.stringify(c.emoji ?? "")}, description: ${JSON.stringify(c.description ?? "")}${icon} },`
+  }).join("\n")
 
   const criteriaRubricsEntries = iaCriteria.map(c => {
     const ranges = (c.ranges || []).map(r => `      ${JSON.stringify(r)},`).join("\n")
@@ -249,7 +250,7 @@ async function main() {
 
   write("lib/constants/criteria.ts", `export const CRITERIA_INFO: Record<
   string,
-  { name: string; emoji: string; description: string }
+  { name: string; emoji: string; description: string; iconUrl?: string }
 > = {
 ${criteriaInfoEntries}
 }
