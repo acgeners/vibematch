@@ -98,12 +98,17 @@ function AlertRow({ c }: { c: TasteCriterionHealth }) {
         </span>
       </div>
       <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{explain(c)}</p>
+      {/* Só as AVALIADAS (com nota pessoal) com o critério alto — são elas que
+          treinaram o peso. A URL neutraliza os defaults de "lista de leitura"
+          (status + Nota Prevista) pra o conjunto bater com o que treinou o modelo:
+          rated=1 (só avaliadas + finalizadas), pub/per=all, min_expected=0, e
+          ordena pelo critério (as mais influentes primeiro). */}
       <Link
-        href={`/ranking?min_${c.slug}=7`}
+        href={`/ranking?rated=1&pub_status=all&per_status=all&min_expected=0&min_${c.slug}=7&sort=crit_${c.slug}:desc`}
         className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-colors hover:bg-violet-500/20 dark:text-violet-300"
       >
         <Search className="size-3" />
-        Ver obras que puxam esse peso
+        Ver as obras avaliadas que puxam esse peso
       </Link>
     </div>
   )

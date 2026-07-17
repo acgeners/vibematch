@@ -203,6 +203,12 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   const rawTopN = num("top_n")
   const overrideTopN = rawTopN != null && rawTopN > 0 ? rawTopN : undefined
   const overrideMinExpected = num("min_expected")
+  // "Só avaliadas" (?rated=1): filtra pras obras com nota pessoal (as que treinaram
+  // o modelo) e mostra as finalizadas. Os OUTROS defaults de "lista de leitura"
+  // (status, mínimos de nota) são neutralizados pela PRÓPRIA URL do CTA
+  // (pub_status=all, per_status=all, min_expected=0) — assim cliente e servidor
+  // ficam consistentes, sem lógica de supressão escondida no servidor.
+  const onlyRated = str("rated") === "1"
 
   const filters: RankingFilters = {
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
@@ -240,6 +246,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     topN: overrideTopN ?? prefs.topN ?? undefined,
     onlyWithFinalScore: str("only_scored") === "1",
     onlyFavorites: str("fav") === "1",
+    onlyRated,
     sortLevels,
   }
 
@@ -364,11 +371,20 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
       removeHref: filterHref((p) => p.set("top_n", "9999")),
     })
   }
+  if (filters.onlyRated) {
+    activeFilterChips.push({
+      key: "rated",
+      label: "Só avaliadas",
+      isDefault: false,
+      removeHref: filterHref((p) => p.delete("rated")),
+    })
+  }
   const clearFiltersHref = filterHref((p) => {
     p.set("pub_status", "all")
     p.set("per_status", "all")
     p.set("min_expected", "0")
     p.set("top_n", "9999")
+    p.delete("rated")
   })
 
   return (
