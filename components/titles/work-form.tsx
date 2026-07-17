@@ -1239,6 +1239,16 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     // banco, então o cache slug->id desatualizado não causa 404.
     const newSlug = result.data?.slug ?? (values.title ? titleToSlug(values.title) : "")
     const destination = newSlug || result.data?.id || workSlug || workId
+    if (workId) {
+      // UPDATE: hard-nav. Como a URL é o slug DERIVADO do título, renomear muda o
+      // slug — e o `revalidatePath(/titles/<slug-antigo>/edit)` da action re-renderiza
+      // a ROTA ATUAL (onde estamos) na resposta. Com o título já trocado, o slug
+      // antigo não resolve mais → `notFound()` → 404. Um `router.push` soft pro slug
+      // novo CORRE com esse refresh e é engolido, deixando a URL velha presa em 404.
+      // A recarga total ignora a corrida e cai direto no slug novo (resolve 200).
+      window.location.assign(`/titles/${destination}`)
+      return
+    }
     router.push(`/titles/${destination}`)
     // Chrome (badge "Avaliação IA" / footer de recálculo): atualiza pelo barramento,
     // SEM router.refresh(). Chamar router.refresh() logo ANTES do push() cria uma
