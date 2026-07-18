@@ -204,6 +204,11 @@ export interface RankingFilters {
   topN?: number
   /** "Só obras com nota" — filtra por Nota Prevista presente (era finalScore). */
   onlyWithFinalScore?: boolean
+  /** "Só avaliadas" — obras com nota pessoal (user_score). Como avaliar costuma
+   *  implicar ter terminado a obra, ligar isto também DESLIGA o hard filter que
+   *  esconde Finished/Dropped — senão o filtro esconderia justamente o que quer
+   *  mostrar (ex.: "as obras avaliadas que puxam o peso de um critério"). */
+  onlyRated?: boolean
   onlyFavorites?: boolean
   /** Restringe o resultado a um conjunto explícito de IDs (grupos de favoritos).
    *  Lista vazia => nenhum resultado. Combina (AND) com os demais filtros. */
@@ -638,12 +643,19 @@ export async function getRanking(
   }
 
   // Hard filter: ranking/recomendações escondem obras já finalizadas/dropadas.
-  // Páginas tipo /titles e /favorites passam includeFinishedDropped=true.
-  if (!filters.includeFinishedDropped) {
+  // Páginas tipo /titles e /favorites passam includeFinishedDropped=true. "Só
+  // avaliadas" também desliga isto (avaliar ≈ terminou → esconder terminais
+  // apagaria quase todo o conjunto que o filtro quer mostrar).
+  if (!filters.includeFinishedDropped && !filters.onlyRated) {
     // Antes: ["Finalizado", "Droppado", "Completed", "Dropped"] — português E inglês, chutando as
     // duas grafias porque o conceito "a leitura acabou" não tinha casa. Agora tem: vem do banco
     // (`personal_status.is_terminal`, migration 155).
     entries = entries.filter((e) => !isTerminalPersonalStatus(e.personalStatus))
+  }
+
+  // "Só avaliadas": mantém apenas obras com nota pessoal (as que treinaram o modelo).
+  if (filters.onlyRated) {
+    entries = entries.filter((e) => e.userScore != null)
   }
 
   if (filters.publicationStatus?.length) {
