@@ -92,52 +92,80 @@ function buildTags(rows: RawTagRow[] | null | undefined): Array<{ name: string; 
     }))
 }
 
-export async function loadWorksForAudit(limit = 1000): Promise<AuditWorkInput[]> {
+function mapAuditRow(row: unknown): AuditWorkInput {
+  const work = row as Record<string, unknown>
+  const categoryScores: AuditWorkInput["categoryScores"] = {}
+  for (const cs of (work.category_scores as RawCategoryScoreRow[] | null) ?? []) {
+    if (cs.score == null) continue
+    categoryScores[cs.criterion_slug as CriterionSlug] = {
+      score: Number(cs.score),
+      source: (cs.source ?? "imported") as ScoreSource,
+    }
+  }
+  const postScores: Partial<Record<string, number>> = {}
+  for (const field of POST_SCORE_FIELDS) {
+    const v = work[field]
+    if (v != null) postScores[field] = Number(v)
+  }
+  const synopsis = pickPrimarySynopsis(
+    (work.work_synopses as RawSynopsisRow[] | undefined)?.map((s) => ({
+      text: s.text ?? null,
+      is_primary: s.is_primary ?? null,
+      position: s.position ?? null,
+    })),
+  )
+  return {
+    workId: work.id as string,
+    title: work.title as string,
+    userScore: Number(work.user_score),
+    isFavorite: Boolean(work.is_favorite),
+    synopsis,
+    observation: (work.observations as string | null) ?? null,
+    tags: buildTags(work.work_tags as RawTagRow[] | null),
+    categoryScores,
+    postScores,
+  } satisfies AuditWorkInput
+}
+
+/**
+ * Obras que a auditoria varre. Sem `onlyIds` = pool inteira (varredura completa). Com `onlyIds`
+ * = só essas obras (varredura incremental — o conjunto que `changedAuditWorkIdsSince` devolve).
+ *
+ * ⚠️ `onlyIds` vai em LOTES: `.in("id")` + os embeds (category_scores/work_tags/work_synopses)
+ * acima de ~300 ids vira `fetch failed` (o mesmo buraco de `selectByIdsInChunks`).
+ */
+export async function loadWorksForAudit(
+  opts: { limit?: number; onlyIds?: string[] } = {},
+): Promise<AuditWorkInput[]> {
   const supabase = createAdminClient()
+
+  if (opts.onlyIds) {
+    if (opts.onlyIds.length === 0) return []
+    const out: AuditWorkInput[] = []
+    for (let i = 0; i < opts.onlyIds.length; i += 150) {
+      const idChunk = opts.onlyIds.slice(i, i + 150)
+      const { data, error } = await supabase
+        .from("works_owner")
+        .select(AUDIT_WORK_SELECT)
+        .not("user_score", "is", null)
+        .eq("is_archived", false)
+        .in("id", idChunk)
+      if (error) throw new Error(`Falha lendo obras pra audit (incremental): ${error.message}`)
+      for (const row of data ?? []) out.push(mapAuditRow(row))
+    }
+    return out
+  }
+
   const { data, error } = await supabase
     .from("works_owner")
     .select(AUDIT_WORK_SELECT)
     .not("user_score", "is", null)
     .eq("is_archived", false)
     .order("updated_at", { ascending: false })
-    .limit(limit)
+    .limit(opts.limit ?? 1000)
 
   if (error) throw new Error(`Falha lendo obras pra audit: ${error.message}`)
-
-  return (data ?? []).map((row) => {
-    const work = row as unknown as Record<string, unknown>
-    const categoryScores: AuditWorkInput["categoryScores"] = {}
-    for (const cs of (work.category_scores as RawCategoryScoreRow[] | null) ?? []) {
-      if (cs.score == null) continue
-      categoryScores[cs.criterion_slug as CriterionSlug] = {
-        score: Number(cs.score),
-        source: (cs.source ?? "imported") as ScoreSource,
-      }
-    }
-    const postScores: Partial<Record<string, number>> = {}
-    for (const field of POST_SCORE_FIELDS) {
-      const v = work[field]
-      if (v != null) postScores[field] = Number(v)
-    }
-    const synopsis = pickPrimarySynopsis(
-      (work.work_synopses as RawSynopsisRow[] | undefined)?.map((s) => ({
-        text: s.text ?? null,
-        is_primary: s.is_primary ?? null,
-        position: s.position ?? null,
-      })),
-    )
-    return {
-      workId: work.id as string,
-      title: work.title as string,
-      userScore: Number(work.user_score),
-      isFavorite: Boolean(work.is_favorite),
-      synopsis,
-      observation: (work.observations as string | null) ?? null,
-      tags: buildTags(work.work_tags as RawTagRow[] | null),
-      categoryScores,
-      postScores,
-    } satisfies AuditWorkInput
-  })
+  return (data ?? []).map(mapAuditRow)
 }
 
 function quantile(sorted: number[], q: number): number {
@@ -480,6 +508,78 @@ function shortModel(m: string): string {
   return m.replace(/^claude-/, "")
 }
 
+type Admin = ReturnType<typeof createAdminClient>
+
+/** Ids da pool que a auditoria varre: obras do dono, avaliadas e não arquivadas. */
+async function auditPoolIds(supabase: Admin): Promise<Set<string>> {
+  const rows = await fetchAllRows<{ id: string }>(
+    (from, to) =>
+      supabase
+        .from("works_owner")
+        .select("id")
+        .not("user_score", "is", null)
+        .eq("is_archived", false)
+        .order("id", { ascending: true })
+        .range(from, to),
+    "audit/pool",
+  )
+  return new Set(rows.map((r) => r.id))
+}
+
+/**
+ * Obras (dentro da pool) cujo INPUT da auditoria mudou desde `since`:
+ * - `score`: nota pessoal mudou (`user_work_state.updated_at`).
+ * - `criteria`: `category_scores` mudou por fonte que a auditoria pode reescrever (imported/ai_accepted).
+ * Ver a doc de `loadAuditStaleness` pro porquê de cada escolha. Fonte única da verdade do "mudou":
+ * o nudge conta `|score ∪ criteria|` e a auditoria incremental re-varre esse mesmo conjunto.
+ */
+async function auditChangedSets(
+  supabase: Admin,
+  ownerId: string,
+  since: string,
+  poolIds: Set<string>,
+): Promise<{ score: Set<string>; criteria: Set<string> }> {
+  const scoreChanged = await fetchAllRows<{ work_id: string }>(
+    (from, to) =>
+      supabase
+        .from("user_work_state")
+        .select("work_id")
+        .eq("user_id", ownerId)
+        .not("user_score", "is", null)
+        .gt("updated_at", since)
+        .order("work_id", { ascending: true })
+        .range(from, to),
+    "audit/score-changed",
+  )
+  const criteriaChanged = await fetchAllRows<{ work_id: string }>(
+    (from, to) =>
+      supabase
+        .from("category_scores")
+        .select("work_id")
+        .gt("updated_at", since)
+        .in("source", ["imported", "ai_accepted"])
+        .order("work_id", { ascending: true })
+        .range(from, to),
+    "audit/criteria-changed",
+  )
+  return {
+    score: new Set(scoreChanged.map((r) => r.work_id).filter((id) => poolIds.has(id))),
+    criteria: new Set(criteriaChanged.map((r) => r.work_id).filter((id) => poolIds.has(id))),
+  }
+}
+
+/**
+ * Ids que a auditoria INCREMENTAL deve re-varrer: o MESMO conjunto que o nudge conta
+ * (`score ∪ criteria`, dentro da pool). Garante que o "N mudadas" do card seja exatamente o que
+ * o run processa. O chamador decide varredura completa quando há drift / nunca rodou.
+ */
+export async function changedAuditWorkIdsSince(since: string): Promise<string[]> {
+  const supabase = createAdminClient()
+  const [ownerId, poolIds] = await Promise.all([getOwnerUserId(supabase), auditPoolIds(supabase)])
+  const { score, criteria } = await auditChangedSets(supabase, ownerId, since, poolIds)
+  return [...new Set([...score, ...criteria])]
+}
+
 /**
  * Estima o quão DEFASADAS estão as sugestões aplicadas em relação ao dado que mudou desde a
  * última auditoria — barato (contagens, sem IA). É o sinal pra sugerir "hora de re-rodar".
@@ -503,21 +603,11 @@ function shortModel(m: string): string {
  */
 export async function loadAuditStaleness(): Promise<AuditStaleness> {
   const supabase = createAdminClient()
-  const [lastRun, ownerId] = await Promise.all([loadLastRun("audit"), getOwnerUserId(supabase)])
-
-  // Pool: ids das obras avaliadas e não arquivadas do dono (o que a auditoria varreria hoje).
-  const poolRows = await fetchAllRows<{ id: string }>(
-    (from, to) =>
-      supabase
-        .from("works_owner")
-        .select("id")
-        .not("user_score", "is", null)
-        .eq("is_archived", false)
-        .order("id", { ascending: true })
-        .range(from, to),
-    "audit-staleness/pool",
-  )
-  const poolIds = new Set(poolRows.map((r) => r.id))
+  const [lastRun, ownerId, poolIds] = await Promise.all([
+    loadLastRun("audit"),
+    getOwnerUserId(supabase),
+    auditPoolIds(supabase),
+  ])
   const ratedWorks = poolIds.size
 
   if (!lastRun) {
@@ -537,38 +627,12 @@ export async function loadAuditStaleness(): Promise<AuditStaleness> {
 
   const since = lastRun.completed_at ?? lastRun.created_at
 
-  // C — nota pessoal do dono mudou desde o run.
-  const scoreChanged = await fetchAllRows<{ work_id: string }>(
-    (from, to) =>
-      supabase
-        .from("user_work_state")
-        .select("work_id")
-        .eq("user_id", ownerId)
-        .not("user_score", "is", null)
-        .gt("updated_at", since)
-        .order("work_id", { ascending: true })
-        .range(from, to),
-    "audit-staleness/score-changed",
+  const { score: changedByScore, criteria: changedByCriteria } = await auditChangedSets(
+    supabase,
+    ownerId,
+    since,
+    poolIds,
   )
-  const changedByScore = new Set(scoreChanged.map((r) => r.work_id).filter((id) => poolIds.has(id)))
-
-  // B — critério-base mudou por fonte que a auditoria PODE reescrever (imported/ai_accepted).
-  // Exclui as travadas (manual/ai_edited) e a própria auditoria (ai_calibrated) — ver doc acima.
-  const criteriaChanged = await fetchAllRows<{ work_id: string }>(
-    (from, to) =>
-      supabase
-        .from("category_scores")
-        .select("work_id")
-        .gt("updated_at", since)
-        .in("source", ["imported", "ai_accepted"])
-        .order("work_id", { ascending: true })
-        .range(from, to),
-    "audit-staleness/criteria-changed",
-  )
-  const changedByCriteria = new Set(
-    criteriaChanged.map((r) => r.work_id).filter((id) => poolIds.has(id)),
-  )
-
   const changedWorks = new Set([...changedByScore, ...changedByCriteria]).size
   const staleFraction = ratedWorks > 0 ? changedWorks / ratedWorks : 0
 
