@@ -1,8 +1,13 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllRows } from "@/lib/supabase/paginate"
+import { getOwnerUserId } from "@/server/queries/current-user"
+import { MODEL, PROMPT_VERSION } from "@/lib/ai-calibration/service"
 import { pickPrimarySynopsis } from "@/lib/work-derived"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { CRITERION_SLUGS, type CriterionSlug, type ScoreSource } from "@/types/domain"
 import type {
+  AuditStaleness,
+  AuditStalenessLevel,
   AuditWorkInput,
   BiasCorrelationEntry,
   BiasResidualExample,
@@ -463,4 +468,135 @@ export async function countPendingSuggestions(): Promise<number> {
     .eq("status", "pending")
   if (error) return 0
   return count ?? 0
+}
+
+// Faixas de materialidade da defasagem (fração da pool avaliada que mudou desde o último
+// run). Defaults a calibrar contra o churn real de sugestões — não são lei.
+const AUDIT_STALE_FRACTION_REVIEW = 0.1
+const AUDIT_STALE_FRACTION_STALE = 0.25
+
+/** Encurta o id do modelo pra exibição ("claude-sonnet-5" → "sonnet-5"). */
+function shortModel(m: string): string {
+  return m.replace(/^claude-/, "")
+}
+
+/**
+ * Estima o quão DEFASADAS estão as sugestões aplicadas em relação ao dado que mudou desde a
+ * última auditoria — barato (contagens, sem IA). É o sinal pra sugerir "hora de re-rodar".
+ *
+ * O sinal certo pra "nota pessoal mudou" é `user_work_state.updated_at` (setado a cada gravação
+ * em `mirrorOwnerState`), NÃO `works_owner.updated_at` — este último é `works.updated_at`, o
+ * timestamp do CATÁLOGO (digest de review, checagem de capítulo), que se move sozinho e choraria
+ * lobo. Ver 152_works_owner_view_completa.sql:53.
+ *
+ * `category_scores` fecha o ponto cego: re-avaliar a IA muda os critérios-base SEM tocar
+ * `user_work_state`. Contamos só as fontes que a auditoria PODE reescrever (`imported`,
+ * `ai_accepted`): excluir `ai_calibrated` evita auto-referência (o run reescreve com essa
+ * fonte), e excluir as travadas (`manual`/`ai_edited`, `LOCKED_SOURCES`) evita marcar como
+ * defasada uma obra cujo único delta foi num critério que a auditoria não mexeria de qualquer
+ * jeito. É um LIMITE SUPERIOR do valor de re-rodar, não uma promessa: "input mudou" ≠ "a nota
+ * vai mudar" (re-eval pode cair no mesmo valor / abaixo do limiar |Δ|≥0.5 da sugestão).
+ *
+ * ⚠️ Limitação conhecida (v1): `user_work_state.updated_at` também sobe ao marcar capítulo /
+ * favoritar, que a auditoria quase não lê → `changedByScore` super-conta um pouco. Aceitável pro
+ * nudge; apertar exigiria um timestamp dedicado de "nota mudou".
+ */
+export async function loadAuditStaleness(): Promise<AuditStaleness> {
+  const supabase = createAdminClient()
+  const [lastRun, ownerId] = await Promise.all([loadLastRun("audit"), getOwnerUserId(supabase)])
+
+  // Pool: ids das obras avaliadas e não arquivadas do dono (o que a auditoria varreria hoje).
+  const poolRows = await fetchAllRows<{ id: string }>(
+    (from, to) =>
+      supabase
+        .from("works_owner")
+        .select("id")
+        .not("user_score", "is", null)
+        .eq("is_archived", false)
+        .order("id", { ascending: true })
+        .range(from, to),
+    "audit-staleness/pool",
+  )
+  const poolIds = new Set(poolRows.map((r) => r.id))
+  const ratedWorks = poolIds.size
+
+  if (!lastRun) {
+    return {
+      hasRun: false,
+      lastRunAt: null,
+      ratedWorks,
+      changedWorks: ratedWorks,
+      changedByScore: ratedWorks,
+      changedByCriteria: 0,
+      staleFraction: ratedWorks > 0 ? 1 : 0,
+      modelDrift: false,
+      driftDetail: null,
+      level: "never",
+    }
+  }
+
+  const since = lastRun.completed_at ?? lastRun.created_at
+
+  // C — nota pessoal do dono mudou desde o run.
+  const scoreChanged = await fetchAllRows<{ work_id: string }>(
+    (from, to) =>
+      supabase
+        .from("user_work_state")
+        .select("work_id")
+        .eq("user_id", ownerId)
+        .not("user_score", "is", null)
+        .gt("updated_at", since)
+        .order("work_id", { ascending: true })
+        .range(from, to),
+    "audit-staleness/score-changed",
+  )
+  const changedByScore = new Set(scoreChanged.map((r) => r.work_id).filter((id) => poolIds.has(id)))
+
+  // B — critério-base mudou por fonte que a auditoria PODE reescrever (imported/ai_accepted).
+  // Exclui as travadas (manual/ai_edited) e a própria auditoria (ai_calibrated) — ver doc acima.
+  const criteriaChanged = await fetchAllRows<{ work_id: string }>(
+    (from, to) =>
+      supabase
+        .from("category_scores")
+        .select("work_id")
+        .gt("updated_at", since)
+        .in("source", ["imported", "ai_accepted"])
+        .order("work_id", { ascending: true })
+        .range(from, to),
+    "audit-staleness/criteria-changed",
+  )
+  const changedByCriteria = new Set(
+    criteriaChanged.map((r) => r.work_id).filter((id) => poolIds.has(id)),
+  )
+
+  const changedWorks = new Set([...changedByScore, ...changedByCriteria]).size
+  const staleFraction = ratedWorks > 0 ? changedWorks / ratedWorks : 0
+
+  // Drift da régua: modelo primeiro (mais material), senão prompt. `driftDetail` é o rótulo
+  // curto que o card mostra no chip — o client não importa a constante `MODEL` (é server-only).
+  let driftDetail: string | null = null
+  if (lastRun.model_name !== MODEL) {
+    driftDetail = `modelo ${shortModel(lastRun.model_name)} → ${shortModel(MODEL)}`
+  } else if (lastRun.prompt_version !== PROMPT_VERSION) {
+    driftDetail = `prompt ${lastRun.prompt_version} → ${PROMPT_VERSION}`
+  }
+  const modelDrift = driftDetail !== null
+
+  let level: AuditStalenessLevel
+  if (modelDrift || staleFraction >= AUDIT_STALE_FRACTION_STALE) level = "stale"
+  else if (staleFraction >= AUDIT_STALE_FRACTION_REVIEW) level = "review"
+  else level = "fresh"
+
+  return {
+    hasRun: true,
+    lastRunAt: since,
+    ratedWorks,
+    changedWorks,
+    changedByScore: changedByScore.size,
+    changedByCriteria: changedByCriteria.size,
+    staleFraction,
+    modelDrift,
+    driftDetail,
+    level,
+  }
 }

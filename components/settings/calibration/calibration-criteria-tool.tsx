@@ -15,6 +15,7 @@ import { getPredictionHealth } from "@/server/queries/calibration-guards"
 import { getTasteModelHealth, getOofBucketBreakdown } from "@/server/queries/taste-model-health"
 import {
   countPendingSuggestions,
+  loadAuditStaleness,
   loadLastRun,
   loadRunHistory,
   loadSuggestions,
@@ -63,6 +64,7 @@ export async function CalibrationAuditTool() {
   const [
     lastAudit,
     ratedWorksCount,
+    staleness,
     pendingSuggestions,
     historySuggestions,
     pendingCount,
@@ -71,6 +73,7 @@ export async function CalibrationAuditTool() {
   ] = await Promise.all([
     loadLastRun("audit"),
     countRatedWorks(),
+    loadAuditStaleness(),
     loadSuggestions({ status: "pending", limit: 1000 }),
     loadSuggestions({
       status: ["auto_applied", "accepted", "edited", "rejected", "reverted"],
@@ -83,7 +86,11 @@ export async function CalibrationAuditTool() {
 
   return (
     <div className="space-y-4">
-      <AuditTriggerZone lastAudit={lastAudit} ratedWorksCount={ratedWorksCount} />
+      <AuditTriggerZone
+        lastAudit={lastAudit}
+        ratedWorksCount={ratedWorksCount}
+        staleness={staleness}
+      />
 
       <Tabs defaultValue="pending" className="w-full">
         <TabsList variant="line" className={TABS_LIST_CLASS}>
