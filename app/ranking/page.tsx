@@ -134,22 +134,22 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // Default: ordena pela Nota Prevista e, como desempate, Veredito IA no plano Pago
   // (NULL no Free) ou Alinhamento no Free. Os empates só quebram no EXATO no
   // SQL; o desempate band-aware fino é client-side.
-  // `plan` é buscado junto do bloco de metadados abaixo (Promise.all) pra não
-  // pagar um round-trip serial só dele.
+  // `plan` (canAi) é buscado no Promise.all do trio abaixo (junto de prefs/declaredPrefs)
+  // pra não pagar um round-trip serial só dele.
   // Filtro opt-in "esconder minhas tags evitadas", em 3 estados:
   //   off | "strong" (só as evitadas com ênfase 2×) | "all" (todas as evitadas).
   // Só busca as declarações quando ligado (custo zero quando off). O efeito SUAVE
   // do evito (deprioriza via personal_fit) vale sempre, sem este toggle.
   const hideMode = str("hide_avoided") // "strong" | "all" | undefined
   const hideActive = hideMode === "strong" || hideMode === "all"
-  const [canAi, prefs, allGenres, genreCatTypes, allTags, statusOptions, savedPresets, declaredPrefs] = await Promise.all([
+  // Só estas três alimentam `filters` (canAi → sort/plano, prefs → mínimos/topN,
+  // declaredPrefs → tags evitadas). O getRanking (a query pesada, ~90% do tempo da página)
+  // depende SÓ delas — então só elas o bloqueiam. Os metadados do painel (gêneros, tags,
+  // status, presets) e as queries independentes da lista descem pro Promise.all de baixo,
+  // pra rodarem em PARALELO com o getRanking em vez de na frente dele.
+  const [canAi, prefs, declaredPrefs] = await Promise.all([
     canConsumeAi(),
     getPreferences(),
-    getAllGenres(),
-    getGenreCatTypes(),
-    getAllTags(),
-    getStatusOptions(),
-    getFilterPresets("/ranking"),
     hideActive ? getDeclaredTagPreferences() : Promise.resolve([]),
   ])
   const avoided = declaredPrefs.filter((p) => p.stance === "avoid")
@@ -250,8 +250,21 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     sortLevels,
   }
 
-  const [rawEntries, scoreThresholds, tierBandWidth, lowCoverageIds, staleAlignmentCount, recalcState, criterionPrefs] = await Promise.all([
+  // getRanking (a query pesada) roda em paralelo com TUDO que não alimenta `filters`: os
+  // metadados do painel (gêneros/tags/status/presets) e as queries independentes da lista.
+  // Um único Promise.all mantém os handlers de rejeição anexados (nada de promise solta que
+  // vira unhandledRejection se o getRanking estourar antes de ser aguardado).
+  const [
+    rawEntries,
+    allGenres, genreCatTypes, allTags, statusOptions, savedPresets,
+    scoreThresholds, tierBandWidth, lowCoverageIds, staleAlignmentCount, recalcState, criterionPrefs,
+  ] = await Promise.all([
     getRanking(filters),
+    getAllGenres(),
+    getGenreCatTypes(),
+    getAllTags(),
+    getStatusOptions(),
+    getFilterPresets("/ranking"),
     getScoreColorThresholds(),
     getTierBandWidth(),
     getLowCoverageWorkIds(),

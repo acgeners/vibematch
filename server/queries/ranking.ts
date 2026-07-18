@@ -293,12 +293,19 @@ export async function getRanking(
   // `works` que a query já traz (custo zero). Pros demais, vem de `user_work_state` — e é o
   // que impede a Leitora de ver os favoritos, o status e os capítulos do dono como se fossem
   // dela. Ver server/queries/user-work-state.ts.
-  const personal = await getPersonalStateReader()
+  //
+  // ⚡ DISPARADO aqui, AGUARDADO só antes do .map() (bem abaixo). Carregar as ~882 linhas do
+  // espelho custa ~800ms, e a query principal de `works` NÃO usa este dado — `personal.get()`
+  // só é chamado ao MONTAR as entries, depois que a query volta. Aguardar aqui empilhava os
+  // dois round-trips em série (~800ms + ~500ms); disparar deixa a query pesada correr em
+  // paralelo com o carregamento do estado. Mesmo padrão das promises de sinopse acima.
+  const personalPromise = getPersonalStateReader()
 
   // Os scores DERIVADOS também são de quem olha (Fatia 2b). Pro dono, `calculated_scores` já é
   // a linha dele (custo zero). Pros demais, a Nota Prevista/Chance/Alinhamento saem das linhas
   // DELES — e, sem modelo, saem NULL: o que sobra é a nota da comunidade, que é um fato.
-  const scoresReader = await getScoresReader()
+  // Idem: disparado aqui, aguardado antes do .map() (só usado em overlay/hasModel, pós-query).
+  const scoresReaderPromise = getScoresReader()
 
   // Os filtros pessoais saem de `user_work_state` — pra TODO MUNDO, o dono inclusive. As
   // colunas de `works` não filtram mais nada (Fase D). `null` = o caller não pediu filtro
@@ -536,6 +543,10 @@ export async function getRanking(
 
   const synopsisPredictions = await synopsisPredictionsPromise
   const primarySynopses = await primarySynopsisPromise
+  // Leitores pessoais disparados lá em cima — já rodaram em paralelo com a query principal.
+  // A partir daqui `personal`/`scoresReader` são consumidos ao montar/filtrar as entries.
+  const personal = await personalPromise
+  const scoresReader = await scoresReaderPromise
 
   const personalStatusSymbolsById = new Map(
     personalStatusOptions.map((status) => [status.id, status.symbol])
