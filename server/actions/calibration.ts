@@ -10,6 +10,7 @@ import {
   type TokenUsage,
 } from "@/lib/ai-calibration/service"
 import {
+  changedAuditWorkIdsSince,
   loadInputsForBias,
   loadLastRun,
   loadWorksForAudit,
@@ -73,22 +74,71 @@ async function runWithLimit<T, R>(
 }
 
 export interface RunAuditResult {
-  runId: string
+  /** `null` quando não houve run (nada mudou / pool vazia). */
+  runId: string | null
+  /** `full` = varreu a pool inteira; `incremental` = só as obras que mudaram. */
+  scope: "full" | "incremental"
   nWorksScanned: number
   nSuggestions: number
   nAutoApplied: number
   usage: RunUsageAccumulator
 }
 
-export async function runCalibrationAuditAction(): Promise<{
+const EMPTY_USAGE: RunUsageAccumulator = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheCreationTokens: 0,
+}
+
+export async function runCalibrationAuditAction(
+  opts: { full?: boolean } = {},
+): Promise<{
   data?: RunAuditResult
   error?: string
 }> {
   const gate = await ensureAdmin()
   if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
-  const tasteProfile = await loadCurrentTasteProfile()
 
+  // ── Escopo: incremental (só as obras que mudaram) por padrão; varredura COMPLETA quando o
+  // chamador pede `full`, quando a régua mudou (modelo/prompt) ou quando nunca rodou — nesses
+  // casos TODAS as obras estão stale. Decidido ANTES de criar o run row pra não gravar um run
+  // vazio quando nada mudou (isso só avançaria o `since` à toa).
+  const lastRun = await loadLastRun("audit")
+  const driftOrNever =
+    !lastRun || lastRun.model_name !== MODEL || lastRun.prompt_version !== PROMPT_VERSION
+  const fullScan = opts.full === true || driftOrNever
+  const scope: RunAuditResult["scope"] = fullScan ? "full" : "incremental"
+
+  let works: AuditWorkInput[]
+  if (fullScan) {
+    works = await loadWorksForAudit()
+  } else {
+    // O MESMO conjunto que o nudge conta em `loadAuditStaleness` (score ∪ critério na pool).
+    // Cadeia completa: cada run varre tudo que mudou desde o run anterior e avança `completed_at`,
+    // então nenhuma obra escapa entre runs. Borda aceita: uma mudança feita DURANTE o run anterior
+    // (após o read, antes do completed_at) pode passar batida — auto-cura na próxima edição da obra
+    // (a alternativa, usar created_at, re-auditaria obras já cobertas).
+    const since = lastRun!.completed_at ?? lastRun!.created_at
+    const changedIds = await changedAuditWorkIdsSince(since)
+    if (changedIds.length === 0) {
+      // Nada mudou desde o último run — não cria run vazio.
+      return {
+        data: { runId: null, scope, nWorksScanned: 0, nSuggestions: 0, nAutoApplied: 0, usage: EMPTY_USAGE },
+      }
+    }
+    works = await loadWorksForAudit({ onlyIds: changedIds })
+  }
+
+  if (works.length === 0) {
+    // Pool vazia (full scan sem obras avaliadas) — nada a fazer, sem run.
+    return {
+      data: { runId: null, scope, nWorksScanned: 0, nSuggestions: 0, nAutoApplied: 0, usage: EMPTY_USAGE },
+    }
+  }
+
+  const tasteProfile = await loadCurrentTasteProfile()
   const { data: runRow, error: insertError } = await supabase
     .from("calibration_runs")
     .insert({
@@ -109,27 +159,6 @@ export async function runCalibrationAuditAction(): Promise<{
   const runId = runRow.id as string
 
   try {
-    const works = await loadWorksForAudit()
-    if (works.length === 0) {
-      await supabase
-        .from("calibration_runs")
-        .update({
-          status: "completed",
-          n_works_scanned: 0,
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", runId)
-      return {
-        data: {
-          runId,
-          nWorksScanned: 0,
-          nSuggestions: 0,
-          nAutoApplied: 0,
-          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
-        },
-      }
-    }
-
     const chunks = chunk(works, AUDIT_CHUNK_SIZE)
     const usage: RunUsageAccumulator = {
       inputTokens: 0,
@@ -252,6 +281,7 @@ export async function runCalibrationAuditAction(): Promise<{
     return {
       data: {
         runId,
+        scope,
         nWorksScanned: works.length,
         nSuggestions: nInserted,
         nAutoApplied: nAutoApplied,

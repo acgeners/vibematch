@@ -204,13 +204,24 @@ export function AuditTriggerZone({
   const [auditMsg, setAuditMsg] = useState<string | null>(null)
   const confirmCost = useCostConfirm()
 
-  const handleAudit = async () => {
+  // Escopo que o botão primário vai rodar: completa quando a régua mudou / nunca rodou (todas
+  // stale), senão só as que mudaram. Espelha a decisão de runCalibrationAuditAction.
+  const driftOrNever = staleness.modelDrift || !staleness.hasRun
+  const willScan = driftOrNever ? ratedWorksCount : staleness.changedWorks
+  const nothingChanged = !driftOrNever && willScan === 0
+
+  const handleAudit = async (full: boolean) => {
+    const scanCount = full || driftOrNever ? ratedWorksCount : staleness.changedWorks
+    if (scanCount === 0) return
+    const fullRun = full || driftOrNever
     if (
       !(await confirmCost({
         action: "calibration_audit",
-        scale: ratedWorksCount,
-        title: "Rodar auditoria de critérios?",
-        description: `Analisa ${ratedWorksCount} obras com nota pessoal e sugere ajustes. Scores com source "manual" ou "ai_edited" não são tocados.`,
+        scale: scanCount,
+        title: fullRun ? "Rodar auditoria completa?" : "Rodar auditoria incremental?",
+        description: fullRun
+          ? `Reavalia as ${scanCount} obras com nota pessoal${driftOrNever && !full ? " (a régua mudou desde o último run)" : ""}. Scores "manual"/"ai_edited" não são tocados.`
+          : `Reavalia só as ${scanCount} obras que mudaram desde a última auditoria. Scores "manual"/"ai_edited" não são tocados.`,
         confirmLabel: "Rodar",
       }))
     ) {
@@ -218,13 +229,19 @@ export function AuditTriggerZone({
     }
     setAuditMsg(null)
     startAudit(async () => {
-      const res = await runCalibrationAuditAction()
+      const res = await runCalibrationAuditAction(full ? { full: true } : {})
       if (res.error) {
         setAuditMsg(`Erro: ${res.error}`)
       } else if (res.data) {
-        setAuditMsg(
-          `${res.data.nWorksScanned} obras processadas, ${res.data.nAutoApplied} auto-aplicadas, ${res.data.nSuggestions - res.data.nAutoApplied} pendentes.`,
-        )
+        const d = res.data
+        if (d.nWorksScanned === 0) {
+          setAuditMsg("Nada mudou desde a última auditoria — nenhum run criado.")
+        } else {
+          const label = d.scope === "full" ? "Varredura completa" : "Incremental"
+          setAuditMsg(
+            `${label}: ${d.nWorksScanned} obras · ${d.nAutoApplied} auto-aplicadas · ${d.nSuggestions - d.nAutoApplied} pendentes.`,
+          )
+        }
       }
     })
   }
@@ -247,14 +264,35 @@ export function AuditTriggerZone({
       message={auditMsg}
       footer={<AuditStalenessRow staleness={staleness} />}
       button={
-        <Button size="sm" onClick={() => void handleAudit()} disabled={auditPending || ratedWorksCount === 0}>
-          {auditPending ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <ScanSearch className="mr-2 h-4 w-4" />
+        <div className="flex flex-col items-end gap-1">
+          <Button
+            size="sm"
+            onClick={() => void handleAudit(false)}
+            disabled={auditPending || ratedWorksCount === 0 || nothingChanged}
+          >
+            {auditPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <ScanSearch className="mr-2 h-4 w-4" />
+            )}
+            {nothingChanged
+              ? "Nada a auditar"
+              : `Rodar auditoria${ratedWorksCount > 0 ? ` · ${willScan}` : ""}`}
+          </Button>
+          {staleness.modelDrift && (
+            <span className="text-[10.5px] text-muted-foreground/70">varre tudo · régua mudou</span>
           )}
-          Rodar auditoria
-        </Button>
+          {!driftOrNever && ratedWorksCount > 0 && (
+            <button
+              type="button"
+              onClick={() => void handleAudit(true)}
+              disabled={auditPending}
+              className="text-[11px] text-muted-foreground/70 underline underline-offset-2 outline-none hover:text-foreground focus-visible:text-foreground disabled:opacity-50"
+            >
+              rodar tudo ({ratedWorksCount})
+            </button>
+          )}
+        </div>
       }
     />
   )
