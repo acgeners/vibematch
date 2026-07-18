@@ -1,3 +1,4 @@
+import { Suspense } from "react"
 import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
@@ -44,6 +45,7 @@ import {
   PersonalStatusBadge,
 } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Skeleton } from "@/components/ui/skeleton"
 import { SimilarWorksCard } from "@/components/titles/similar-works-card"
 import { getSimilarWorks } from "@/server/queries/similar-works"
 import {
@@ -297,10 +299,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData] = await Promise.all([
+  // `similarWorks` e `reviewsSnapshot` saem do caminho crítico: ambos são cards em ABAS
+  // não-default (Recomendações / Notas), invisíveis no load inicial, e `getSimilarWorks` é a
+  // query mais lenta do lote (~406ms). Agora fluem via <Suspense> — a página não espera
+  // conteúdo de aba escondida (ver SimilarWorksSlot/WorkReviewsSlot no fim do arquivo).
+  const [scoreThresholds, lastDeepDive, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData] = await Promise.all([
     getScoreColorThresholds(),
-    getWorkReviews(work.id as string),
-    getSimilarWorks(work.id as string, 8),
     getLastDeepDive(work.id as string),
     getSourceRows(),
     canConsumeAi(),
@@ -980,7 +984,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </TabsContent>
 
             <TabsContent value="recommendations" className="mt-0 space-y-5">
-              <SimilarWorksCard works={similarWorks} />
+              <Suspense fallback={<SimilarWorksSkeleton />}>
+                <SimilarWorksSlot workId={work.id as string} />
+              </Suspense>
             </TabsContent>
 
             <TabsContent value="scores" className="mt-0 space-y-6">
@@ -1444,7 +1450,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       </Card>
 
       {/* Reviews externas — apoiam visualmente os scores da IA. "Buscar reviews" vive no header do card. */}
-      <WorkReviewsCard snapshot={reviewsSnapshot} workId={work.id as string} />
+      <Suspense fallback={<WorkReviewsSkeleton />}>
+        <WorkReviewsSlot workId={work.id as string} />
+      </Suspense>
         </TabsContent>
 
             <TabsContent value="tags" className="mt-0 space-y-6">
@@ -1620,6 +1628,50 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           </div>
         </div>
       </Tabs>
+    </div>
+  )
+}
+
+/** Obras similares (aba Recomendações) — flui via <Suspense>; getSimilarWorks é a query mais lenta.
+ * try/catch: um stall que LANÇA (`fetch failed`) omite só este card em vez de derrubar a página. */
+async function SimilarWorksSlot({ workId }: { workId: string }) {
+  try {
+    const works = await getSimilarWorks(workId, 8)
+    return <SimilarWorksCard works={works} />
+  } catch (e) {
+    console.warn("[SimilarWorksSlot] falhou, card omitido:", (e as Error).message)
+    return null
+  }
+}
+
+function SimilarWorksSkeleton() {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <Skeleton key={i} className="aspect-[3/4] w-full rounded-lg" />
+      ))}
+    </div>
+  )
+}
+
+/** Reviews externas (aba Notas) — flui via <Suspense>. try/catch: stall omite só este card. */
+async function WorkReviewsSlot({ workId }: { workId: string }) {
+  try {
+    const snapshot = await getWorkReviews(workId)
+    return <WorkReviewsCard snapshot={snapshot} workId={workId} />
+  } catch (e) {
+    console.warn("[WorkReviewsSlot] falhou, card omitido:", (e as Error).message)
+    return null
+  }
+}
+
+function WorkReviewsSkeleton() {
+  return (
+    <div className="space-y-3 rounded-xl border border-border/60 p-4">
+      <Skeleton className="h-5 w-48" />
+      <Skeleton className="h-4 w-full" />
+      <Skeleton className="h-4 w-5/6" />
+      <Skeleton className="h-4 w-2/3" />
     </div>
   )
 }

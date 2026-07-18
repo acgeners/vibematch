@@ -1,3 +1,4 @@
+import { Suspense } from "react"
 import Link from "next/link"
 import {
   BookMarked,
@@ -33,17 +34,21 @@ import { DashboardGreeting } from "@/components/dashboard/dashboard-greeting"
 import { Header } from "@/components/layout/header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 
 export default async function DashboardPage() {
+  // ProfileSummary (perfil de gosto) e HealthStrip saem do caminho crítico: as duas eram a
+  // CAUDA da home — `getTasteProfileStatusAction` sozinha carrega 200 obras avaliadas + embeds
+  // + bias map (~1–1.8s) só pra checar staleness de um card lateral. Agora fluem via <Suspense>,
+  // então o shell + KPIs pintam assim que o cluster rápido resolve (~800ms) e os dois cards
+  // entram depois com skeleton próprio. Medido: home quente ~1.2s → ~0.8s.
   const [
     stats,
     scoreThresholds,
     continueReading,
     topPicks,
     queueCounts,
-    profileStatus,
-    health,
     usage,
     profile,
   ] = await Promise.all([
@@ -52,8 +57,6 @@ export default async function DashboardPage() {
     getContinueReading(),
     getTopUnratedByExpected(5),
     getAiQueueCounts(),
-    getTasteProfileStatusAction(),
-    getPredictionHealth(),
     getAiUsageTotals(),
     getCurrentUserProfile(),
   ])
@@ -150,7 +153,9 @@ export default async function DashboardPage() {
           following={stats.following}
           followingWithPending={stats.followingWithPending}
         />
-        <ProfileSummary status={profileStatus} />
+        <Suspense fallback={<ProfileSummarySkeleton />}>
+          <ProfileSummarySlot />
+        </Suspense>
       </div>
 
       {/* Melhores notas previstas — só obras que você ainda não avaliou */}
@@ -202,7 +207,48 @@ export default async function DashboardPage() {
       />
 
       {/* Faixa de saúde do sistema (telemetria de dev) */}
-      <HealthStrip health={health} />
+      <Suspense fallback={<Skeleton className="h-11 w-full rounded-lg" />}>
+        <HealthStripSlot />
+      </Suspense>
     </div>
   )
+}
+
+/** Card lateral do perfil de gosto — flui via <Suspense> (era a cauda da home).
+ * try/catch: um stall que LANÇA omite só este card em vez de derrubar a home. */
+async function ProfileSummarySlot() {
+  try {
+    const status = await getTasteProfileStatusAction()
+    return <ProfileSummary status={status} />
+  } catch (e) {
+    console.warn("[ProfileSummarySlot] falhou, card omitido:", (e as Error).message)
+    return null
+  }
+}
+
+function ProfileSummarySkeleton() {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-3">
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="h-5 w-16" />
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-16 w-full" />
+      </CardContent>
+    </Card>
+  )
+}
+
+/** Faixa de saúde da previsão (telemetria) — flui via <Suspense>. try/catch: stall omite só a faixa. */
+async function HealthStripSlot() {
+  try {
+    const health = await getPredictionHealth()
+    return <HealthStrip health={health} />
+  } catch (e) {
+    console.warn("[HealthStripSlot] falhou, faixa omitida:", (e as Error).message)
+    return null
+  }
 }
