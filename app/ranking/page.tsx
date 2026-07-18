@@ -40,6 +40,7 @@ const getPreferences = unstable_cache(async (): Promise<{
   minAlign: number | null
   minFinal: number | null
   criterionPresets: CriterionScorePresets
+  confidenceVotes: number | null
 }> => {
   const supabase = createAdminClient()
   // select("*") (não lista de colunas) pra tolerar a coluna criterion_score_presets
@@ -52,10 +53,14 @@ const getPreferences = unstable_cache(async (): Promise<{
     .single()
   const cfg = data as Pick<
     FormulaConfig,
-    "top_n" | "min_calc_score" | "min_predicted_score" | "min_final_score" | "criterion_score_presets"
+    "top_n" | "min_calc_score" | "min_predicted_score" | "min_final_score" | "criterion_score_presets" | "pseudo_votes_nota_m"
   > | null
   return {
     topN: cfg?.top_n ?? null,
+    // Confiança do público (pseudo-votos bayesianos): acima desse nº de votos a
+    // média externa pesa ≥ 50% na Nota Prevista. Vira o limiar "confiável" do
+    // filtro de Votos externos (era um card passivo em /settings).
+    confidenceVotes: cfg?.pseudo_votes_nota_m ?? null,
     // Colunas legadas repurposadas como filtros padrão (ver ranking-preferences-form):
     // min_calc_score → Alinhamento, min_predicted_score → Veredito IA, min_final_score → Nota Prevista.
     minFit: cfg?.min_calc_score ?? null,
@@ -432,6 +437,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         savedPresets={savedPresets}
         defaultBand={tierBandWidth}
         criterionPresets={prefs.criterionPresets}
+        confidenceVotes={prefs.confidenceVotes}
       />
 
       <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} activeFilters={activeFilterChips} clearFiltersHref={clearFiltersHref} />

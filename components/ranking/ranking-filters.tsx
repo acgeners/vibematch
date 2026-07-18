@@ -6,6 +6,7 @@ import { useCallback, useMemo, useState, useTransition } from "react"
 import type { ReactNode } from "react"
 import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, ChevronUp, Filter, Info, Loader2, Minus, Pencil, Plus, Save, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
@@ -230,6 +231,9 @@ interface RankingFiltersProps {
   defaultBand?: number
   /** Atalhos ≥ configuráveis da aba Notas (migration 132). Ausente = default [5,6,7,8]. */
   criterionPresets?: CriterionScorePresets
+  /** Confiança do público (pseudo_votes_nota_m): acima desse nº de votos a média
+   *  externa pesa ≥50% na Nota Prevista. Marca o limiar "confiável" no filtro de votos. */
+  confidenceVotes?: number | null
 }
 
 interface FilterSectionProps {
@@ -462,7 +466,7 @@ const GENERAL_SCORE_DEFS: ScoreDef[] = [
   { key: "fit", emoji: "🧭", label: LABELS.personal_fit.full, minKey: "min_fit", maxKey: "max_fit", min: 0, max: 100, step: 5, presets: [50, 75, 90] },
   { key: "platform", emoji: "🌐", label: LABELS.platform_avg.full, minKey: "min_platform_avg", maxKey: "max_platform_avg", min: 0, max: 10, step: 0.5, presets: [6, 7, 8] },
   { key: "align", emoji: "🤖", label: LABELS.alignment_score.full, minKey: "min_align", maxKey: "max_align", min: 0, max: 100, step: 5, presets: [50, 75, 90] },
-  { key: "votes", emoji: "🗳️", label: LABELS.total_votes.full, minKey: "min_votes", maxKey: "max_votes", min: 0, max: 0, step: 1, presets: [], kind: "votes", fullWidth: true, help: "Soma dos votos das plataformas externas (MyAnimeList, AniList, Kitsu…) — o tamanho da amostra da opinião pública. Quanto mais votos, mais a média do público pesa na Nota Prevista; abaixo de ~1.000 votos a nota é puxada pra IA. Filtrar por ≥1k deixa só as obras onde a nota externa é estatisticamente confiável." },
+  { key: "votes", emoji: "🗳️", label: LABELS.total_votes.full, minKey: "min_votes", maxKey: "max_votes", min: 0, max: 0, step: 1, presets: [], kind: "votes", fullWidth: true, help: "Soma dos votos das plataformas externas (MyAnimeList, AniList, Kitsu…) — o tamanho da amostra da opinião pública. Quanto mais votos, mais a média do público pesa na Nota Prevista; abaixo do limiar de confiança (marcado ✓ nos presets) a nota é puxada pra IA. Filtrar acima dele deixa só as obras onde a nota externa é estatisticamente confiável." },
 ]
 
 function scoreDecimals(step: number): number {
@@ -599,14 +603,26 @@ function ScoreThresholdEditor({
 function VotesThresholdEditor({
   searchParams,
   updateParams,
+  confidenceVotes,
 }: {
   searchParams: Pick<URLSearchParams, "get">
   updateParams: (updates: Record<string, string | null>) => void
+  confidenceVotes?: number | null
 }) {
   const currentMin = num(searchParams.get("min_votes"))
   const hasMax = searchParams.get("max_votes") != null
   const presetActive = (p: number | null) =>
     !hasMax && (p == null ? currentMin === undefined : currentMin === p)
+  // Limiar de confiança do público (pseudo-votos): acima dele a média externa pesa
+  // ≥50%. Marca o preset mais perto e oferece um clique pra usar o valor exato.
+  const C = confidenceVotes != null && confidenceVotes > 0 ? Math.round(confidenceVotes) : null
+  const nearestMin =
+    C == null
+      ? null
+      : VOTES_PRESETS.reduce<number | null>((best, p) => {
+          if (p.min == null) return best
+          return best == null || Math.abs(p.min - C) < Math.abs(best - C) ? p.min : best
+        }, null)
   return (
     <>
       <div className="flex flex-wrap gap-1.5">
@@ -617,12 +633,33 @@ function VotesThresholdEditor({
             onClick={() =>
               updateParams({ min_votes: preset.min != null ? String(preset.min) : null, max_votes: null })
             }
-            className={editorChip(presetActive(preset.min))}
+            title={preset.min === nearestMin ? "≈ limiar de confiança do público" : undefined}
+            className={cn(
+              editorChip(presetActive(preset.min)),
+              preset.min === nearestMin && "ring-1 ring-emerald-500/50",
+            )}
           >
             {preset.label}
+            {preset.min === nearestMin && <span className="ml-1 text-emerald-500">✓</span>}
           </button>
         ))}
       </div>
+      {C != null && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <span>
+            <span className="text-emerald-600 dark:text-emerald-400">Confiável</span> ≈{" "}
+            <span className="font-mono font-semibold text-foreground">{C.toLocaleString("pt-BR")}</span>{" "}
+            votos — acima disso a média externa pesa ≥ 50% na Nota Prevista.
+          </span>
+          <button
+            type="button"
+            onClick={() => updateParams({ min_votes: String(C), max_votes: null })}
+            className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-semibold text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300"
+          >
+            usar
+          </button>
+        </div>
+      )}
       <div className="flex items-center gap-2">
         <Label className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
           Manual
@@ -659,12 +696,14 @@ function ScorePillGroup({
   cols,
   searchParams,
   updateParams,
+  confidenceVotes,
 }: {
   title: string
   defs: ScoreDef[]
   cols: 2 | 3
   searchParams: Pick<URLSearchParams, "get">
   updateParams: (updates: Record<string, string | null>) => void
+  confidenceVotes?: number | null
 }) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const selectedDef = defs.find((d) => d.key === selectedKey) ?? null
@@ -716,7 +755,7 @@ function ScorePillGroup({
             </button>
           </div>
           {selectedDef.kind === "votes" ? (
-            <VotesThresholdEditor searchParams={searchParams} updateParams={updateParams} />
+            <VotesThresholdEditor searchParams={searchParams} updateParams={updateParams} confidenceVotes={confidenceVotes} />
           ) : (
             <ScoreThresholdEditor def={selectedDef} searchParams={searchParams} updateParams={updateParams} />
           )}
@@ -1666,6 +1705,7 @@ export function RankingFilters({
   savedPresets = [],
   defaultBand = 0.5,
   criterionPresets,
+  confidenceVotes,
 }: RankingFiltersProps) {
   const router = useRouter()
   const criterionScoreDefs = useMemo(
@@ -2356,6 +2396,7 @@ export function RankingFilters({
               cols={2}
               searchParams={searchParams}
               updateParams={updateParams}
+              confidenceVotes={confidenceVotes}
             />
           </div>
         </TabsContent>

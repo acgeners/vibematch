@@ -82,7 +82,6 @@ function maeColor(value: number | null | undefined): string {
 export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot }: CalibrationPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [lastRun, setLastRun] = useState<string | null>(null)
-  const [showDetails, setShowDetails] = useState(false)
   const [showPendingGuard, setShowPendingGuard] = useState(false)
 
   // Trava: só entram itens gerados por IA que estão de fato pendentes.
@@ -130,15 +129,6 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
     })
   }
 
-  const hasMismatch = (
-    live: number | null,
-    stored: number | null,
-    threshold = 0.05
-  ) => {
-    if (live == null || stored == null) return false
-    return Math.abs(live - stored) / Math.max(stored, 0.001) > threshold
-  }
-
   // Métrica PRINCIPAL honesta (F4): prospectiva > CV/OOF > indisponível. Nunca
   // a in-sample. A prospectiva (prediction_ledger) ainda não é alimentada aqui
   // — vive na página técnica /admin/model-metrics; aqui a principal é a CV/OOF.
@@ -155,17 +145,9 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
       ? calculateRelativeErrorReduction(primaryMae, baselineMae)
       : null
   const skillGainPct = reduction != null ? reduction * 100 : null
-
-  // Faixas fora do padrão + confiança do público: movidas pra Diagnósticos (dev).
-  // MAE por faixa: preferir o breakdown OUT-OF-FOLD (honesto, do recalc); cair no
-  // in-sample (otimista) só quando o OOF não existe (treino < 30 ou stub).
-  const oofBuckets = config.expected_ridge_coefficients?.oofBucketBreakdown ?? null
-  const displayBuckets: BucketBreakdown = oofBuckets ?? snapshot.buckets
-  const displayBucketsMae = oofBuckets ? oofBuckets.overallMae : snapshot.maeExpected
-  const bucketsAreOof = oofBuckets != null
-  const bucketOutliers = findOutliers(displayBucketsMae, displayBuckets)
-  const pseudoVotesLive = snapshot.pseudoVotesNotaM ?? config.pseudo_votes_nota_m
-  const pseudoVotesStale = hasMismatch(snapshot.pseudoVotesNotaM, config.pseudo_votes_nota_m, 0.1)
+  // "Diagnósticos do pipeline (dev)" foi aposentado: as faixas de erro por MAE
+  // (OOF) vivem em "Viés & atributos" (getOofBucketBreakdown) e a confiança do
+  // público virou ação no filtro de Votos externos do ranking.
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -337,116 +319,6 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
             , junto dos outros gatilhos de custo de IA.
           </span>
         </p>
-
-        {/* ============================================================ */}
-        {/* DIAGNÓSTICOS DO PIPELINE (dev) — colapsável                  */}
-        {/* ============================================================ */}
-        <div className="rounded-lg border border-border/60 bg-card/30">
-          <button
-            type="button"
-            onClick={() => setShowDetails((v) => !v)}
-            className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            aria-expanded={showDetails}
-          >
-            <span>Diagnósticos do pipeline (dev)</span>
-            <ChevronDown
-              className={cn("h-4 w-4 transition-transform", showDetails && "rotate-180")}
-            />
-          </button>
-
-          {showDetails && (
-            <div className="space-y-4 border-t border-border/60 px-4 py-4">
-              <p className="text-xs text-muted-foreground">
-                Sinais de saúde dos cálculos internos e valores auto-recalculados. Úteis pra detectar
-                regressões silenciosas — não precisa monitorar com frequência.
-              </p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {/* "Critérios negativos que penalizaram" saiu daqui: virou o painel
-                    "Saúde do modelo de gosto" (declarado × aprendido + flags de
-                    vulnerabilidade) em "Viés & atributos". `negative_activation_rate`
-                    segue sendo computado no recalc, só não é mais exibido aqui. */}
-
-                {/* Confiança mínima do público (ex-"Pseudo Nota.M") */}
-                <div
-                  className={cn(
-                    "rounded-md border p-3",
-                    pseudoVotesStale ? "border-amber-500/40 bg-amber-500/5" : "border-border",
-                  )}
-                >
-                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <span>Confiança mínima do público</span>
-                    <InfoTooltip
-                      label="Confiança mínima do público"
-                      text="Quantos votos uma obra precisa pra a opinião do público valer de fato. Ex.: 1620 → a média global pesa 50% contra a nota da IA. Ajusta-se sozinho — molda o passo 'Mistura com o público'. (Interno: pseudo_votes_nota_m, prior bayesiano ≈ mediana × 2,0.)"
-                    />
-                  </p>
-                  <p className="mt-1 font-mono text-base">
-                    {fmt(pseudoVotesLive, 0)}{" "}
-                    <span className="font-sans text-[11px] text-muted-foreground">votos</span>
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {pseudoVotesStale ? (
-                      <span className="text-amber-500">Desatualizado — recalibre pra atualizar</span>
-                    ) : (
-                      "Recalculado automaticamente"
-                    )}
-                  </p>
-                </div>
-
-                {/* Faixas onde erra mais (ex-card "Faixas fora do padrão") */}
-                <div className="rounded-md border border-border p-3">
-                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <span>Faixas onde a previsão erra mais</span>
-                    <InfoTooltip
-                      label="Faixas fora do padrão"
-                      text={`Procura perfis de obra (por quão típica é a obra ou por nº de votos) onde o modelo erra bem mais que a média — só sinaliza com ≥ ${OUTLIER_MIN_N} obras na faixa e MAE ≥ média + ${OUTLIER_DELTA.toFixed(2)}. ${bucketsAreOof ? "MAE por faixa é out-of-fold (honesto, sem leakage) — mesma metodologia do erro do topo." : "MAE por faixa cai no in-sample (otimista) enquanto não há obras rotuladas suficientes pro out-of-fold (≥ 30)."}`}
-                    />
-                  </p>
-                  {bucketOutliers.length === 0 ? (
-                    <>
-                      <p className="mt-1 text-base font-medium text-emerald-500">Uniforme ✓</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        Nenhuma faixa fora do padrão — erro parelho no catálogo.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="mt-1 text-base font-medium text-amber-500">
-                        {bucketOutliers.length} faixa(s) fora do padrão
-                      </p>
-                      <div className="mt-0.5 space-y-0.5">
-                        {bucketOutliers.map((o) => (
-                          <p
-                            key={`${o.group}-${o.label}`}
-                            className="text-[11px] text-amber-600 dark:text-amber-400"
-                          >
-                            <span className="font-mono">{o.label}</span> ({o.group}) · +
-                            {o.delta.toFixed(2)}
-                          </p>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* MAE por faixa (detalhado) — out-of-fold quando disponível */}
-              <details className="group">
-                <summary className="cursor-pointer list-none text-[11px] text-muted-foreground transition-colors hover:text-foreground">
-                  <ChevronDown className="mr-1 inline h-3 w-3 transition-transform group-open:rotate-180" />
-                  Ver MAE por faixa ({bucketsAreOof ? "out-of-fold, honesto" : "in-sample, aproximado"})
-                </summary>
-                <div className="mt-3 space-y-3">
-                  <BucketBars
-                    title="Por quão típica é a obra (distância ao centróide do treino)"
-                    buckets={displayBuckets.byDistance}
-                  />
-                  <BucketBars title="Por número de votos na plataforma" buckets={displayBuckets.byVotes} />
-                </div>
-              </details>
-            </div>
-          )}
-        </div>
       </div>
     </TooltipProvider>
   )
@@ -852,76 +724,3 @@ function RidgeFeatureImportance({
     </div>
   )
 }
-
-// Gate de effect-size pra sinalizar uma faixa como outlier:
-//   - amostra mínima pra não cair em ruído (buckets pequenos são instáveis);
-//   - erro >= overall + margem (effect-size absoluto, robusto à otimismo
-//     in-sample uniforme do MAE por bucket).
-const OUTLIER_MIN_N = 30
-const OUTLIER_DELTA = 0.15
-
-interface FlaggedBucket {
-  group: string
-  label: string
-  mae: number
-  count: number
-  delta: number
-}
-
-function findOutliers(overallMae: number | null, buckets: BucketBreakdown): FlaggedBucket[] {
-  if (overallMae == null) return []
-  const scan = (group: string, list: BucketBreakdown["byDistance"]) =>
-    list
-      .filter(
-        (b): b is { label: string; count: number; mae: number } =>
-          b.mae != null && b.count >= OUTLIER_MIN_N && b.mae >= overallMae + OUTLIER_DELTA,
-      )
-      .map((b) => ({ group, label: b.label, mae: b.mae, count: b.count, delta: b.mae - overallMae }))
-  return [
-    ...scan("distância ao centróide", buckets.byDistance),
-    ...scan("nº de votos", buckets.byVotes),
-  ]
-}
-
-function BucketBars({
-  title,
-  buckets,
-}: {
-  title: string
-  buckets: BucketBreakdown["byDistance"]
-}) {
-  // Escala visual relativa ao pior bucket — sem selos de veredito (o gate de
-  // outlier acima já cuida do "tem algo aqui?"); aqui são só os números crus.
-  const maxMae = Math.max(...buckets.map((b) => b.mae ?? 0), 0.1)
-  return (
-    <div>
-      <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">{title}</p>
-      <div className="space-y-1">
-        {buckets.map((bucket) => {
-          const pct = bucket.mae != null ? (bucket.mae / maxMae) * 100 : 0
-          return (
-            <div key={bucket.label} className="flex items-center gap-2 px-1 text-xs">
-              <span className="w-20 font-mono text-muted-foreground">{bucket.label}</span>
-              <div className="flex-1 overflow-hidden rounded-sm bg-muted/40">
-                <div
-                  className={cn("h-3 transition-all", bucket.mae != null ? "bg-muted-foreground/40" : "bg-muted")}
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              <span className="w-24 text-right font-mono text-[11px]">
-                MAE{" "}
-                {bucket.mae != null ? (
-                  bucket.mae.toFixed(2)
-                ) : (
-                  <span className="text-muted-foreground">sem amostra</span>
-                )}{" "}
-                <span className="text-muted-foreground">({bucket.count})</span>
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
