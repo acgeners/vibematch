@@ -30,19 +30,6 @@ const ANCHOR = {
     { name: "Politics", stance: "" },
     { name: "Love Triangle", stance: "avoid" },
   ] as { name: string; stance: Stance }[],
-  queue: [
-    {
-      title: "The Remarried Empress",
-      cover: "https://media.kitsu.app/manga/poster_images/55733/original.png",
-      score: "9,0",
-    },
-    {
-      title: "I Shall Master This Family",
-      cover:
-        "https://uploads.mangadex.org/covers/f89ed57a-e4c0-48f5-b664-8ef88aa87fd9/56a636ca-405f-4524-ab7c-39b3b15c9880.jpg.512.jpg",
-      score: "8,8",
-    },
-  ],
 }
 
 const PROFILE = {
@@ -76,20 +63,18 @@ function tagClass(stance: Stance): string {
   return "bg-muted/40 text-foreground/80 ring-border"
 }
 
-/** Barra de faixa ideal (0–10) com a janela do critério destacada + peso. */
+/** Faixa ideal (0–10) de um atributo, compacta pra caber 2 lado a lado. */
 function CriterionRange({ icon, name, min, max, weight }: (typeof PROFILE.criteria)[number]) {
   const left = (min / 10) * 100
   const width = ((max - min) / 10) * 100
   return (
     <div>
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-[11.5px] font-medium">
-          <span aria-hidden="true">{icon}</span>
-          {name}
-        </span>
-        <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
-          {min.toFixed(1)}–{max.toFixed(1)} · {weight}%
-        </span>
+      <div className="flex items-center gap-1.5 text-[11.5px] font-medium">
+        <span aria-hidden="true">{icon}</span>
+        <span className="truncate">{name}</span>
+      </div>
+      <div className="mt-1 font-mono text-[10px] tabular-nums text-muted-foreground">
+        {min.toFixed(1)}–{max.toFixed(1)} · {weight}%
       </div>
       <div className="relative mt-1.5 h-1.5 rounded-full bg-muted-foreground/15">
         <div
@@ -181,26 +166,6 @@ function RecommendationCard() {
           ))}
         </div>
       </div>
-
-      <div className="mt-3 border-t border-border pt-3">
-        <p className="mb-2 text-[9px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-          Próximas na sua fila prevista
-        </p>
-        <div className="flex flex-col gap-2">
-          {ANCHOR.queue.map((q) => (
-            <div key={q.title} className="flex items-center gap-2.5">
-              <CoverImage
-                url={q.cover}
-                alt={q.title}
-                loading="eager"
-                className="h-8 w-6 shrink-0 rounded object-cover ring-1 ring-white/10"
-              />
-              <span className="min-w-0 flex-1 truncate text-[12px]">{q.title}</span>
-              <span className="text-[12.5px] font-bold tabular-nums text-emerald-400">{q.score}</span>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
@@ -231,10 +196,10 @@ function ProfileCard() {
 
       <div className="mt-3.5">
         <p className="mb-2.5 text-[9px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-          Faixa ideal e peso por critério
+          Principais atributos e faixa ideal
         </p>
-        <div className="flex flex-col gap-2.5">
-          {PROFILE.criteria.map((c) => (
+        <div className="grid grid-cols-2 gap-x-4">
+          {PROFILE.criteria.slice(0, 2).map((c) => (
             <CriterionRange key={c.name} {...c} />
           ))}
         </div>
