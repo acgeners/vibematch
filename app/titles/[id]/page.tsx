@@ -648,14 +648,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             {work.title}
           </h1>
           {work.is_archived && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border bg-red-50 px-2.5 py-1 text-xs font-bold text-red-900 dark:bg-red-950/40 dark:text-red-200">
-              <Archive className="h-3.5 w-3.5" />
+            <span className="inline-flex items-center gap-2 rounded-full border bg-red-50 px-3.5 py-1.5 text-base font-bold text-red-900 dark:bg-red-950/40 dark:text-red-200">
+              <Archive className="h-4 w-4" />
               Arquivada
             </span>
           )}
           {isAdult && (
             <span
-              className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-50 px-2.5 py-1 text-xs font-bold text-red-800 dark:bg-red-950/40 dark:text-red-200"
+              className="inline-flex items-center gap-2 rounded-full border border-red-500/40 bg-red-50 px-3.5 py-1.5 text-base font-bold text-red-800 dark:bg-red-950/40 dark:text-red-200"
               title="Conteúdo adulto (18+) — nota de conteúdo adulto ≥ 7"
             >
               🔞 18+
