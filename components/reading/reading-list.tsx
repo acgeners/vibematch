@@ -260,13 +260,33 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
         setResults(map)
         setJustCheckedAt(new Date().toISOString())
         const news = res.filter((r) => r.hasNew).length
-        const failed = res.filter((r) => r.failed).length
+        const failedWorks = res.filter((r) => r.failed)
         const statusChanges = res.filter((r) => r.statusApplied).length
-        const descParts = [
-          statusChanges > 0 ? `${statusChanges} mudança(s) de status` : null,
-          failed > 0 ? `${failed} fonte(s) não responderam` : null,
-        ].filter(Boolean)
-        toast.success(
+
+        const descParts: string[] = []
+        if (statusChanges > 0) descParts.push(`${statusChanges} mudança(s) de status`)
+        if (failedWorks.length > 0) {
+          // Nomeia AS OBRAS que ficaram sem retorno — o toast é global e antes só dizia
+          // "N fonte(s) não responderam", o que dava a entender que uma fonte externa caiu.
+          // A falha é por OBRA (nenhuma fonte de capítulo respondeu por ela), então mostra
+          // quais foram (até 3 nomes + "e mais N").
+          const titleById = new Map(works.map((w) => [w.id, w.title]))
+          const names = failedWorks
+            .map((r) => titleById.get(r.workId))
+            .filter((t): t is string => !!t)
+          const shown = names.slice(0, 3).join(", ")
+          const extra = names.length > 3 ? ` e mais ${names.length - 3}` : ""
+          const plural = failedWorks.length !== 1
+          descParts.push(
+            `${failedWorks.length} obra${plural ? "s" : ""} não verificada${plural ? "s" : ""}` +
+              (names.length > 0 ? `: ${shown}${extra}` : ""),
+          )
+        }
+
+        // Verde só quando houve novidade; caiu em aviso quando o único destaque é falha.
+        const notify =
+          news === 0 && failedWorks.length > 0 ? toast.warning : toast.success
+        notify(
           news > 0
             ? `${news} obra${news !== 1 ? "s" : ""} com capítulo novo`
             : "Nenhuma novidade encontrada",
