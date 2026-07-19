@@ -199,17 +199,6 @@ function ProfileCard() {
         genuíno, ML nobre e frio que se apaixona primeiro, com política e vingança ao fundo.
       </p>
 
-      <div className="mt-3.5">
-        <p className="mb-2.5 text-[9px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-          Principais atributos e faixa ideal
-        </p>
-        <div className="grid grid-cols-2 gap-x-4">
-          {PROFILE.criteria.slice(0, 2).map((c) => (
-            <CriterionRange key={c.name} {...c} />
-          ))}
-        </div>
-      </div>
-
       <div className="mt-3.5 grid grid-cols-4 gap-2">
         {PROFILE.kpis.map((k) => (
           <div key={k.l} className="rounded-[10px] border border-border bg-card/50 px-2 py-2">
@@ -219,6 +208,17 @@ function ProfileCard() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="mt-3.5">
+        <p className="mb-2.5 text-[9px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
+          Principais atributos e faixa ideal
+        </p>
+        <div className="grid grid-cols-2 gap-x-4">
+          {PROFILE.criteria.slice(0, 2).map((c) => (
+            <CriterionRange key={c.name} {...c} />
+          ))}
+        </div>
       </div>
 
       <div className="mt-3 border-t border-border pt-3">
