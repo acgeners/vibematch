@@ -88,27 +88,6 @@ export function FavoriteToggleButton({
   )
 }
 
-export function EditLinkButton({
-  workSlug,
-  workId,
-  iconOnly = false,
-}: {
-  workSlug?: string
-  workId: string
-  iconOnly?: boolean
-}) {
-  const isAdmin = useIsAdmin()
-  if (!isAdmin) return null
-  return (
-    <Button asChild variant="outline" size={iconOnly ? "icon" : "sm"} aria-label="Editar">
-      <Link href={`/titles/${workSlug ?? workId}/edit`}>
-        <Edit className="h-4 w-4" />
-        {!iconOnly && "Editar"}
-      </Link>
-    </Button>
-  )
-}
-
 export function StatusActionButton({
   workId,
   statusInitialValues,
@@ -254,12 +233,15 @@ function AutoRefreshButton({ workId }: { workId: string }) {
 
 export function MoreActionsMenu({
   workId,
+  workSlug,
   isArchived,
   isAdult = false,
   adultOverride = null,
   iconOnly = false,
 }: {
   workId: string
+  /** Slug pra rota de edição (fallback pro id). */
+  workSlug?: string
   isArchived: boolean
   /** Classificação 18+ efetiva (works.is_adult). */
   isAdult?: boolean
@@ -328,6 +310,12 @@ export function MoreActionsMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuItem asChild>
+            <Link href={`/titles/${workSlug ?? workId}/edit`}>
+              <Edit className="h-4 w-4" />
+              Editar obra
+            </Link>
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={handleArchive} disabled={isPending}>
             <Archive className="h-4 w-4" />
             {isArchived ? "Desarquivar" : "Arquivar"}

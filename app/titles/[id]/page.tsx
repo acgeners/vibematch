@@ -1,7 +1,6 @@
 import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
-import Link from "next/link"
-import { Archive, BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash, ExternalLink } from "lucide-react"
+import { Archive, BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash, ExternalLink } from "lucide-react"
 import { ArchivedBanner } from "@/components/titles/archived-banner"
 import { AdultGate } from "@/components/titles/adult-gate"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
@@ -49,7 +48,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { SimilarWorksCard } from "@/components/titles/similar-works-card"
 import { getSimilarWorks } from "@/server/queries/similar-works"
 import {
-  EditLinkButton,
   FavoriteToggleButton,
   MoreActionsMenu,
   StatusActionButton,
@@ -604,19 +602,27 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               size="sm"
               className="border-emerald-500/45 bg-emerald-500/10 text-emerald-700 hover:border-emerald-500/60 hover:bg-emerald-500/20 hover:text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/12 dark:text-emerald-300 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-200"
             >
-              <a href={comixReadUrl} target="_blank" rel="noopener noreferrer" title="Abre no Comix em nova aba">
+              <a
+                href={comixReadUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={
+                  comixPending != null && comixPending > 0
+                    ? `Abre no Comix — ${comixPending} capítulos não lidos`
+                    : "Abre no Comix em nova aba"
+                }
+              >
                 <ExternalLink className="h-4 w-4" />
                 Ler no Comix
                 {comixPending != null && comixPending > 0 && (
                   <span className="ml-1 rounded-full bg-emerald-500/90 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-emerald-950">
-                    {comixPending} pend.
+                    {comixPending}
                   </span>
                 )}
               </a>
             </Button>
           )}
-          <FavoriteToggleButton workId={work.id} isFavorite={work.is_favorite} />
-          <EditLinkButton workSlug={id} workId={work.id} />
+          <FavoriteToggleButton workId={work.id} isFavorite={work.is_favorite} iconOnly />
           <StatusActionButton
             workId={work.id}
             statusInitialValues={statusInitial}
@@ -625,19 +631,16 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             existingAssessment={postAttrExisting}
             tasteCriteria={tasteCriteria}
             tasteScores={tasteScoresData.scores}
+            label="Status"
           />
           <MoreActionsMenu
             workId={work.id}
+            workSlug={id}
             isArchived={work.is_archived}
             isAdult={isAdult}
             adultOverride={work.adult_override ?? null}
+            iconOnly
           />
-          <Button asChild size="sm">
-            <Link href="/titles/new">
-              <Plus className="h-4 w-4" />
-              Novo título
-            </Link>
-          </Button>
         </div>
       </div>
 
