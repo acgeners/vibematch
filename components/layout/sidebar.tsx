@@ -32,6 +32,7 @@ import { BalanceChip } from "@/components/layout/balance-chip"
 import { useIsAdmin } from "@/components/layout/admin-context"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
 import { SidebarTasks } from "@/components/tasks/sidebar-tasks"
+import { LogoMark } from "@/components/ui/logo-mark"
 
 type BadgeKey = "ai-eval" | "settings"
 // Derivado do retorno da action (evita importar o módulo server-only comix-gate no client).
@@ -284,31 +285,7 @@ export function Sidebar({ defaultCollapsed = false }: { defaultCollapsed?: boole
           collapsed && "justify-center px-2"
         )}
       >
-        <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary to-[hsl(200_98%_50%)] text-white shadow-md shadow-primary/30 ring-1 ring-white/15">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.6}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="size-9"
-            aria-hidden="true"
-          >
-            {/* pétalas do lótus */}
-            <path d="M12 17 Q8.5 11 12 5 Q15.5 11 12 17 Z" />
-            <path d="M12 17 Q6.5 13.5 6 7 Q10.5 10.5 12 17 Z" />
-            <path d="M12 17 Q17.5 13.5 18 7 Q13.5 10.5 12 17 Z" />
-            <path d="M12 17 Q6 16 4 11 Q9 13 12 17 Z" />
-            <path d="M12 17 Q18 16 20 11 Q15 13 12 17 Z" />
-            {/* faísca de insight (IA) */}
-            <path
-              d="M12 1 C12.2 2.3 12.6 2.7 13.9 2.9 C12.6 3.1 12.2 3.5 12 4.8 C11.8 3.5 11.4 3.1 10.1 2.9 C11.4 2.7 11.8 2.3 12 1 Z"
-              fill="currentColor"
-              stroke="none"
-            />
-          </svg>
-        </div>
+        <LogoMark className="size-10 shrink-0 rounded-xl shadow-md shadow-primary/30 ring-1 ring-white/10" />
         {!collapsed && (
           <div className="min-w-0">
             <span className="block text-base font-bold tracking-tight text-sidebar-foreground">
