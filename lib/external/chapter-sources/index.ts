@@ -2,6 +2,7 @@ import { withTimeout } from "@/lib/external/with-timeout"
 import type { PublicationStatus } from "@/types/domain"
 import { getComixLatestChapter } from "./comix"
 import { getCoffeemangaLatestChapter } from "./coffeemanga"
+import { getMangagoLatestChapter } from "./mangago"
 import type { ChapterCheckInput, ChapterLookup, ChapterSourceId } from "./types"
 
 export type { ChapterCheckInput, ChapterLookup, ChapterSourceId } from "./types"
@@ -14,6 +15,8 @@ const CHAPTER_SOURCES: Array<{
 }> = [
   { id: "comix", lookup: getComixLatestChapter },
   { id: "coffeemanga", lookup: getCoffeemangaLatestChapter },
+  // Mangago é slug-only (não busca por título) → só roda em obra com Mangago confirmado.
+  { id: "mangago", lookup: getMangagoLatestChapter },
 ]
 
 // Scrapers atrás de Cloudflare (comix via FlareSolverr) podem travar; o timeout
