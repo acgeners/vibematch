@@ -401,7 +401,9 @@ export function Sidebar({ defaultCollapsed = false }: { defaultCollapsed?: boole
 
       {(comixHealth === "down" || comixHealth === "degraded") && (
         <Link
-          href="/settings"
+          href="/settings?g=fontes"
+          target="_blank"
+          rel="noopener noreferrer"
           title={
             comixHealth === "down"
               ? "Comix indisponível (API exigindo token) — avaliações podem rodar sem reviews da Comix."
