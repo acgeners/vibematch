@@ -444,9 +444,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   const lovedTags = [...segmented.loved].sort(byProvenanceThenLabel)
   const avoidedTags = [...segmented.avoided].sort(byProvenanceThenLabel)
 
-  // Resto agrupado por grupo → sub-grupo (mesma lógica de antes, só sobre o resto).
+  // Agrupamento por grupo → sub-grupo. As amadas/evitadas seguem em destaque no
+  // topo E reaparecem dentro dos seus grupos (duplicadas, com a cor da stance) —
+  // por isso agrupamos TODAS as tags segmentadas, não só o "resto". (Gêneros já
+  // saíram na segmentação.)
+  const groupableTags = [...segmented.loved, ...segmented.avoided, ...segmented.rest]
   const tagGroupMap = new Map<string, DetailTag[]>()
-  for (const t of segmented.rest) {
+  for (const t of groupableTags) {
     const groupTags = tagGroupMap.get(t.groupLabel) ?? []
     groupTags.push(t)
     tagGroupMap.set(t.groupLabel, groupTags)
@@ -1522,41 +1526,46 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     <span className="text-xs font-medium text-muted-foreground">
                       {tags.length} {tags.length === 1 ? "tag" : "tags"}
                     </span>
-                    {tagGroups.some((g) => g.subGroups) && <TagsExpandAll targetId="work-tags-masonry" />}
+                    {(lovedTags.length > 0 || avoidedTags.length > 0 || tagGroups.some((g) => g.subGroups)) && (
+                      <TagsExpandAll targetId="work-tags-region" />
+                    )}
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="pt-0">
                 <TooltipProvider delayDuration={150}>
+                <div id="work-tags-region">
                 {lovedTags.length > 0 && (
-                  <section className="mb-5 space-y-2">
-                    <div className="flex items-baseline gap-2 border-b-2 border-emerald-500/40 pb-1">
+                  <details open className="group mb-5">
+                    <summary className="flex cursor-pointer list-none items-center gap-2 border-b-2 border-emerald-500/40 pb-1">
+                      <ChevronDown className="h-3 w-3 shrink-0 text-emerald-600/80 transition-transform group-open:rotate-180 dark:text-emerald-400/80" />
                       <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-300">
                         <Heart className="h-3 w-3" /> Amadas
                       </h3>
                       <span className="text-[11px] font-semibold text-muted-foreground/70">{lovedTags.length}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
+                    </summary>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
                       {lovedTags.map((tag) => (
                         <TagBadge key={tag.key} tag={tag} stance="love" />
                       ))}
                     </div>
-                  </section>
+                  </details>
                 )}
                 {avoidedTags.length > 0 && (
-                  <section className="mb-5 space-y-2">
-                    <div className="flex items-baseline gap-2 border-b-2 border-rose-500/40 pb-1">
+                  <details open className="group mb-5">
+                    <summary className="flex cursor-pointer list-none items-center gap-2 border-b-2 border-rose-500/40 pb-1">
+                      <ChevronDown className="h-3 w-3 shrink-0 text-rose-600/80 transition-transform group-open:rotate-180 dark:text-rose-400/80" />
                       <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.14em] text-rose-700 dark:text-rose-300">
                         <Ban className="h-3 w-3" /> Evitadas
                       </h3>
                       <span className="text-[11px] font-semibold text-muted-foreground/70">{avoidedTags.length}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
+                    </summary>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
                       {avoidedTags.map((tag) => (
                         <TagBadge key={tag.key} tag={tag} stance="avoid" />
                       ))}
                     </div>
-                  </section>
+                  </details>
                 )}
                 {tagGroups.length > 0 && (
                 <div id="work-tags-masonry" className="gap-x-6 sm:columns-2 [&>section]:mb-5 [&>section]:break-inside-avoid">
@@ -1598,6 +1607,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   ))}
                 </div>
                 )}
+                </div>
                 <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-dashed border-border/60 pt-3 text-[11px] text-muted-foreground">
                   {aiTagCount > 0 && (
                     <>
