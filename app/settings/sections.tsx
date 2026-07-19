@@ -214,6 +214,17 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         collapsible: true,
       },
       {
+        id: "adult-audit",
+        title: "Auditoria 18+",
+        panelTitle: "Auditoria de classificação 18+",
+        description:
+          "Revise as obras que a 2ª opinião da IA não conseguiu confirmar — decida e o override vira verdade.",
+        help: "As obras de sinal fraco (só tag genérica ou só nota, sem evidência de cena explícita nas reviews) que a 2ª opinião marcou como incertas. Aqui você confirma se cada uma é 18+ ou não; a escolha vira o override humano, que vence a classificação automática (migração 161). Some da lista assim que decidida.",
+        icon: ShieldAlert,
+        chips: [{ kind: "nature", label: "Curadoria" }],
+        collapsible: true,
+      },
+      {
         id: "sync",
         title: "Sincronização de constantes",
         description:

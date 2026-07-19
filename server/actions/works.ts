@@ -31,6 +31,7 @@ import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
+import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
 import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin, ensurePermission, ensureSignedIn, getOwnerUserId } from "@/server/queries/current-user"
 import {
   writeReadingState,
@@ -360,6 +361,8 @@ async function syncWorkTags(
       console.error(`[syncWorkTags] upsert work_tags failed (workId=${workId})`, error.message)
     }
   }
+  // Tags mudaram → recomputa a classificação 18+ (monotônico; migração 161).
+  await recomputeAdultAuto(supabase, workId)
 }
 
 async function syncWorkGenres(
@@ -1660,6 +1663,24 @@ export async function unarchiveWork(id: string) {
   revalidateTag("works-slug-index", "max")
   revalidateTag("score-color-thresholds", "max")
   revalidateFavorites()
+  return { data: null }
+}
+
+/**
+ * Override HUMANO da classificação 18+ (migração 161). É a garantia contra erro
+ * da IA/tag: vence o `adult_auto`. Curadoria — `is_adult` mora na linha
+ * compartilhada de `works`, então só o dono (ensureAdmin). Valores:
+ *   true  → força 18+   | false → força limpo | null → volta ao automático.
+ */
+export async function setAdultOverride(id: string, value: boolean | null) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
+  const supabase = createAdminClient()
+  const { error } = await supabase.from("works").update({ adult_override: value }).eq("id", id)
+  if (error) return { error: error.message }
+  revalidatePath(`/titles/${id}`)
+  revalidatePath("/titles")
+  revalidatePath("/")
   return { data: null }
 }
 

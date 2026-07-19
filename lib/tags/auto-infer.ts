@@ -2,6 +2,7 @@ import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { buildTagMenu, inferTagsFromText, buildReviewContext } from "@/lib/tags/infer-from-text"
 import { resolveOrCreateTags } from "@/lib/tags/ingest"
+import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>
 
@@ -95,6 +96,8 @@ export async function inferAndPersistTagsForWork(
       console.error("[inferAndPersistTagsForWork] upsert falhou:", error.message)
       return 0
     }
+    // Uma tag explícita recém-inferida pode tornar a obra 18+ — recomputa (monotônico).
+    await recomputeAdultAuto(supabase, workId)
     return insertRows.length
   } catch (err) {
     console.error(

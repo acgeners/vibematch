@@ -15,6 +15,8 @@ import {
   CalibrationBiasTool,
 } from "@/components/settings/calibration/calibration-criteria-tool"
 import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
+import { AdultAuditTool } from "@/components/settings/adult-audit-tool"
+import { getAdultAuditQueue } from "@/server/queries/adult-audit"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
 import { ReviewSummaryPanel } from "@/components/settings/review-summary-panel"
@@ -309,6 +311,11 @@ async function ItemBody({
 
     case "ai-bias":
       return <CalibrationBiasTool />
+
+    case "adult-audit": {
+      const queue = await getAdultAuditQueue()
+      return <AdultAuditTool initialQueue={queue} />
+    }
 
     case "embeddings": {
       const supabase = createAdminClient()

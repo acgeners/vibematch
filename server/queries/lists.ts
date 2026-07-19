@@ -4,7 +4,7 @@ import { pickPrimaryCover } from "@/lib/covers"
 import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
 import type { FavoritesSummary } from "@/server/queries/favorites"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
-import { getCurrentUserId } from "@/server/queries/current-user"
+import { getCurrentUserId, getHideAdultContent } from "@/server/queries/current-user"
 import { getScoresReader } from "@/server/queries/user-scores"
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -316,12 +316,15 @@ export async function getListsForPicker(): Promise<ListPickerOption[]> {
  *  escolha de capas. Todas as obras não arquivadas, mais leves. */
 export async function getWorksLiteForPicker(): Promise<WorkLiteForPicker[]> {
   const supabase = createAdminClient()
-  const { data, error } = await supabase
+  let query = supabase
     .from("works")
     .select("id, title, calculated_scores(expected_score), work_covers(url, is_primary, position)")
     .eq("is_archived", false)
     .order("title", { ascending: true })
     .limit(3000)
+  // Quem oculta 18+ não vê obras adultas nem no picker de adicionar à lista.
+  if (await getHideAdultContent()) query = query.eq("is_adult", false)
+  const { data, error } = await query
 
   if (error) {
     console.error("[lists] erro lendo catálogo lite:", error.message)

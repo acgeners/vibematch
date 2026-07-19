@@ -8,6 +8,7 @@ import {
   Palette,
   Scale,
   Settings,
+  ShieldAlert,
   SlidersHorizontal,
   Sparkles,
   Trophy,
@@ -40,6 +41,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   Scale,
   Palette,
   Settings,
+  ShieldAlert,
   SlidersHorizontal,
 }
 

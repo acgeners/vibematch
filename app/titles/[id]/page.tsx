@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
 import { Archive, BarChart3, Ban, ChevronDown, Compass, Heart, LayoutDashboard, Plus, Sparkles, Tags as TagsIcon, User, BrainCircuit, FileText, Calculator, Globe, Sliders, Hash, ExternalLink } from "lucide-react"
 import { ArchivedBanner } from "@/components/titles/archived-banner"
+import { AdultGate } from "@/components/titles/adult-gate"
 import { AiEvaluationButton } from "@/components/titles/ai-evaluation-button"
 import { ComixResolutionWatcher } from "@/components/titles/comix-resolution-watcher"
 import { UpdateProgressWatcher } from "@/components/titles/update-progress-watcher"
@@ -25,7 +26,7 @@ import {
   getLatestAiEvaluationAttributes,
   getExistingPostReadingAssessment,
 } from "@/server/queries/post-attribute-assessment"
-import { getCurrentUserId, canConsumeAi } from "@/server/queries/current-user"
+import { getCurrentUserId, canConsumeAi, getHideAdultContent } from "@/server/queries/current-user"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
@@ -295,7 +296,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -310,6 +311,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getWorkExternalIds(work.id as string),
     getTasteCriteria(),
     getTasteScoresForWork(work.id as string),
+    getHideAdultContent(),
   ])
   // "Ler no Comix": só pra obras que você acompanha (Reading/Started) e que têm
   // hid aceito. `pending` = capítulos não lidos (total − lidos), sinal persistido
@@ -356,6 +358,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     scoreMap[cs.criterion_slug] = cs.score
     sourceMap[cs.criterion_slug] = cs.source ?? "imported"
   }
+  // 18+ oficial = works.is_adult (COALESCE(adult_override, adult_auto), migração
+  // 161) — alimentado pelas 59 tags curadas do content_indicator + override humano,
+  // NÃO pela nota da IA. Fallback pra nota enquanto a coluna não existe (pré-migração).
+  const adultScore = scoreMap["adult_content"]
+  const isAdult =
+    typeof work.is_adult === "boolean"
+      ? work.is_adult
+      : adultScore != null && adultScore >= 7
+  const gateAdult = isAdult && hideAdultContent
   // Atributos cuja nota da IA é calibrada on-read no pipeline (offset != 0 e
   // origem IA). Mostra "→ Y no cálculo" no card de notas por critério.
   const BIAS_APPLICABLE = new Set(["ai_accepted", "ai_calibrated"])
@@ -609,7 +620,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             tasteCriteria={tasteCriteria}
             tasteScores={tasteScoresData.scores}
           />
-          <MoreActionsMenu workId={work.id} isArchived={work.is_archived} />
+          <MoreActionsMenu
+            workId={work.id}
+            isArchived={work.is_archived}
+            isAdult={isAdult}
+            adultOverride={work.adult_override ?? null}
+          />
           <Button asChild size="sm">
             <Link href="/titles/new">
               <Plus className="h-4 w-4" />
@@ -629,6 +645,14 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             <span className="inline-flex items-center gap-1.5 rounded-full border bg-red-50 px-2.5 py-1 text-xs font-bold text-red-900 dark:bg-red-950/40 dark:text-red-200">
               <Archive className="h-3.5 w-3.5" />
               Arquivada
+            </span>
+          )}
+          {isAdult && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-50 px-2.5 py-1 text-xs font-bold text-red-800 dark:bg-red-950/40 dark:text-red-200"
+              title="Conteúdo adulto (18+) — nota de conteúdo adulto ≥ 7"
+            >
+              🔞 18+
             </span>
           )}
         </div>
@@ -777,7 +801,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           </div>
         </div>
 
-        {/* Layout principal: sidebar (capa + ações) | conteúdo da aba */}
+        {/* Layout principal: sidebar (capa + ações) | conteúdo da aba.
+            Envolto no AdultGate: se a obra é 18+ E o usuário optou por ocultar,
+            capa + conteúdo saem desfocados atrás de um portão de revelar. */}
+        <AdultGate gated={gateAdult}>
         <div className="mt-5 grid gap-6 md:grid-cols-[240px_minmax(0,1fr)] lg:grid-cols-[260px_minmax(0,1fr)]">
           {/* Sidebar persistente — visível em todas as abas */}
           <aside className="space-y-4">
@@ -1620,6 +1647,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </TabsContent>
           </div>
         </div>
+        </AdultGate>
       </Tabs>
     </div>
   )
