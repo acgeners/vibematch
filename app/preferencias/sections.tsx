@@ -1,4 +1,4 @@
-import { Droplets, Heart, Palette, Scale, Sparkles, Trophy, Wand2 } from "lucide-react"
+import { Droplets, Heart, Palette, Scale, ShieldAlert, Sparkles, Trophy, Wand2 } from "lucide-react"
 import type { SettingsGroup, SettingsSection } from "@/app/settings/sections"
 
 // Registry das PREFERÊNCIAS pro console de duas camadas (mesmo modelo do /settings:
@@ -59,6 +59,24 @@ export function buildPreferencesGroups(plan: string, isAdmin: boolean): Settings
       iconName: "Trophy",
       accent: "indigo",
       sections: rankingSections,
+    },
+    {
+      id: "conteudo",
+      label: "Conteúdo",
+      hint: "o que aparece pra você",
+      info: "Controla que tipo de obra aparece pra você — hoje, o portão de conteúdo adulto (18+) na página da obra.",
+      icon: ShieldAlert,
+      iconName: "ShieldAlert",
+      accent: "rose",
+      sections: [
+        {
+          id: "adult-content",
+          title: "Conteúdo adulto (18+)",
+          description: "Exibir ou ocultar obras classificadas como adultas (18+).",
+          help: "Quando ligado, obras 18+ ficam desfocadas na página da obra (com botão de revelar) e somem das listas — ranking, catálogo, recomendações e favoritos. A marca 🔞 18+ continua visível ao lado do título. Desligado por padrão. A classificação 18+ vem de tags de conteúdo sexual explícito (com 2ª opinião da IA nas dúvidas) e pode ser corrigida obra a obra pelo Curador.",
+          icon: ShieldAlert,
+        },
+      ],
     },
     {
       id: "pesos",

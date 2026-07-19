@@ -219,6 +219,14 @@ export async function getGenerateAllOnCreate(_admin?: AdminClient): Promise<bool
   return (row?.generate_all_on_create as boolean | undefined) ?? false
 }
 
+// Toggle "ocultar conteúdo adulto (18+)" (migration 160). Default false (exibe).
+// Ligado: obra 18+ (category_scores.adult_content >= 7) ganha portão na página e
+// some das listas. Lido na página da obra e nas queries de listagem.
+export async function getHideAdultContent(_admin?: AdminClient): Promise<boolean> {
+  const row = await getCurrentUserSettingsRow()
+  return (row?.hide_adult_content as boolean | undefined) ?? false
+}
+
 export interface ReviewSynthesisToggles {
   summaryEnabled: boolean
   digestEnabled: boolean

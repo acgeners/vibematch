@@ -11,10 +11,13 @@ import {
   Heart,
   MoreHorizontal,
   RefreshCw,
+  RotateCcw,
+  ShieldAlert,
+  ShieldOff,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
-import { archiveWork, autoRefreshWorkData, deleteWork, toggleFavorite, unarchiveWork } from "@/server/actions/works"
+import { archiveWork, autoRefreshWorkData, deleteWork, setAdultOverride, toggleFavorite, unarchiveWork } from "@/server/actions/works"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import { StatusEditDialog } from "@/components/titles/status-edit-dialog"
 import { useCan, useIsAdmin, useCanWriteOwnState } from "@/components/layout/admin-context"
@@ -252,10 +255,16 @@ function AutoRefreshButton({ workId }: { workId: string }) {
 export function MoreActionsMenu({
   workId,
   isArchived,
+  isAdult = false,
+  adultOverride = null,
   iconOnly = false,
 }: {
   workId: string
   isArchived: boolean
+  /** Classificação 18+ efetiva (works.is_adult). */
+  isAdult?: boolean
+  /** Override humano ativo (works.adult_override): true/false força, null = automático. */
+  adultOverride?: boolean | null
   iconOnly?: boolean
 }) {
   const isAdmin = useIsAdmin()
@@ -272,6 +281,24 @@ export function MoreActionsMenu({
         return
       }
       toast.success(isArchived ? "Obra desarquivada." : "Obra arquivada.")
+      refresh()
+    })
+  }
+
+  const handleAdult = (value: boolean | null) => {
+    startTransition(async () => {
+      const result = await setAdultOverride(workId, value)
+      if (result.error) {
+        toast.error(result.error)
+        return
+      }
+      toast.success(
+        value === true
+          ? "Marcada como 18+."
+          : value === false
+            ? "Marcada como não-18+."
+            : "Classificação 18+ voltou ao automático.",
+      )
       refresh()
     })
   }
@@ -305,6 +332,26 @@ export function MoreActionsMenu({
             <Archive className="h-4 w-4" />
             {isArchived ? "Desarquivar" : "Arquivar"}
           </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+          {isAdult ? (
+            <DropdownMenuItem onSelect={() => handleAdult(false)} disabled={isPending}>
+              <ShieldOff className="h-4 w-4" />
+              Desmarcar 18+
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onSelect={() => handleAdult(true)} disabled={isPending}>
+              <ShieldAlert className="h-4 w-4" />
+              Marcar como 18+
+            </DropdownMenuItem>
+          )}
+          {adultOverride !== null && (
+            <DropdownMenuItem onSelect={() => handleAdult(null)} disabled={isPending}>
+              <RotateCcw className="h-4 w-4" />
+              18+: voltar ao automático
+            </DropdownMenuItem>
+          )}
+
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onSelect={() => setDeleteOpen(true)}

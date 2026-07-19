@@ -322,6 +322,28 @@ export async function setGenerateAllOnCreate(enabled: boolean) {
   return { error: null }
 }
 
+/**
+ * Liga/desliga "ocultar conteúdo adulto (18+)" (migration 160). Preferência
+ * PESSOAL — grava na linha própria de user_settings (não gateado por admin, não
+ * vaza entre usuários). Default false (exibe). Lido por getHideAdultContent
+ * (server/queries/current-user.ts); aplicado na página da obra e nas listas.
+ */
+export async function setHideAdultContent(enabled: boolean) {
+  const supabase = createAdminClient()
+  const settingsId = await getCurrentUserSettingsId()
+  if (!settingsId) return { error: "user_settings sem linha pro usuário atual (rode a migration 074)" }
+
+  const { error } = await supabase
+    .from("user_settings")
+    .update({ hide_adult_content: enabled })
+    .eq("id", settingsId)
+
+  if (error) return { error: error.message }
+
+  revalidatePath("/preferencias")
+  return { error: null }
+}
+
 export interface ScoreColorPercentilesUpdate {
   score_color_pct_top: number
   score_color_pct_high: number

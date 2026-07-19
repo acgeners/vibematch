@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { getHideAdultContent } from "@/server/queries/current-user"
 
 export interface FavoritesSummary {
   total: number
@@ -22,13 +23,16 @@ export interface FavoritesSummary {
  * DELE. `null` aqui já não acontece (o caller sempre pede o filtro), mas se acontecesse seria
  * "sem favorito", nunca "o catálogo inteiro".
  */
-async function _getFavoritesSummary(favoriteIds: string[] | null): Promise<FavoritesSummary> {
+async function _getFavoritesSummary(
+  favoriteIds: string[] | null,
+  hideAdult: boolean,
+): Promise<FavoritesSummary> {
   const empty = { total: 0, withExpectedScore: 0, avgExpectedScore: null, topCriteria: [] }
   if (!favoriteIds || favoriteIds.length === 0) return empty
 
   const supabase = createAdminClient()
 
-  const { data: works, error } = await supabase
+  let query = supabase
     .from("works")
     .select(`
       id,
@@ -37,6 +41,12 @@ async function _getFavoritesSummary(favoriteIds: string[] | null): Promise<Favor
     `)
     .eq("is_archived", false)
     .in("id", favoriteIds)
+  // Parity com a lista de favoritos (getRanking): quem oculta 18+ não conta obras
+  // adultas no header também, senão o "N favoritos" não bate com a lista exibida.
+  // hideAdult vem por PARÂMETRO — resolvê-lo aqui dentro leria cookies() no callback
+  // do unstable_cache (fora do request scope) e quebraria.
+  if (hideAdult) query = query.eq("is_adult", false)
+  const { data: works, error } = await query
 
   if (error) {
     console.error("[favorites] erro lendo stats:", error)
@@ -100,14 +110,17 @@ async function _getFavoritesSummary(favoriteIds: string[] | null): Promise<Favor
  * todos os usuários de uma vez — que é o que os writers já fazem.
  */
 export async function getFavoritesSummary(): Promise<FavoritesSummary> {
-  const [reader, favoriteIds] = await Promise.all([
+  const [reader, favoriteIds, hideAdult] = await Promise.all([
     getPersonalStateReader(),
     resolvePersonalFilterIds({ onlyFavorites: true }),
+    getHideAdultContent(),
   ])
 
+  // hideAdult entra na CHAVE do cache: sem isso, ligar/desligar o toggle serviria
+  // o contador antigo por até 5 min (a chave é por usuário, não pela preferência).
   return unstable_cache(
-    () => _getFavoritesSummary(favoriteIds),
-    ["favorites-summary", reader.userId],
+    () => _getFavoritesSummary(favoriteIds, hideAdult),
+    ["favorites-summary", reader.userId, hideAdult ? "noadult" : "all"],
     { revalidate: 300, tags: ["favorites-summary"] },
   )()
 }

@@ -11,6 +11,7 @@ import { computeDecisionScore } from "@/lib/calculations/decision"
 import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quality"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
+import { getHideAdultContent } from "@/server/queries/current-user"
 import { selectByIdsInChunks } from "@/lib/supabase/paginate"
 import { isTerminalPersonalStatus } from "@/lib/constants/status-lookups"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
@@ -162,6 +163,12 @@ export interface SortLevel {
 export interface RankingFilters {
   search?: string
   includeArchived?: boolean
+  /**
+   * Ignora a preferência "ocultar 18+" do usuário e traz obras adultas mesmo assim.
+   * Só pra views de CURADORIA/AUDITORIA (que precisam ver tudo). Sem isto, `getRanking`
+   * respeita `hide_adult_content` e esconde `is_adult` das listas de quem optou por ocultar.
+   */
+  includeAdult?: boolean
   criterionMin?: Partial<Record<string, number>>
   criterionMax?: Partial<Record<string, number>>
   publicationStatus?: string[]
@@ -300,6 +307,13 @@ export async function getRanking(
   // dois round-trips em série (~800ms + ~500ms); disparar deixa a query pesada correr em
   // paralelo com o carregamento do estado. Mesmo padrão das promises de sinopse acima.
   const personalPromise = getPersonalStateReader()
+
+  // Preferência "ocultar 18+" (per-usuário). Disparada aqui, aguardada só antes de
+  // montar a query pesada — não serializa. `includeAdult` (curadoria/auditoria)
+  // curto-circuita: essas views precisam ver as obras adultas.
+  const hideAdultPromise = filters.includeAdult
+    ? Promise.resolve(false)
+    : getHideAdultContent()
 
   // Os scores DERIVADOS também são de quem olha (Fatia 2b). Pro dono, `calculated_scores` já é
   // a linha dele (custo zero). Pros demais, a Nota Prevista/Chance/Alinhamento saem das linhas
@@ -498,6 +512,8 @@ export async function getRanking(
   // idênticos a cada lote de ids. Nota: work_tags/work_genres NÃO são embutidos — o filtro por
   // gênero/tag já virou id em `allowedIds` e nenhum consumidor lê entry.tags/genres no client
   // (embuti-los inflava o payload ~3.9MB). work_synopses idem: vem de primarySynopsisPromise.
+  const hideAdult = await hideAdultPromise
+
   const buildWorksQuery = () => {
     let q = supabase
       .from("works")
@@ -510,6 +526,9 @@ export async function getRanking(
         work_covers(url, is_primary, position)
       `)
     if (!filters.includeArchived) q = q.eq("is_archived", false)
+    // Fase 2 do 18+: quem optou por ocultar não vê obras adultas nas listas. Cobre
+    // ranking, catálogo, favoritos e o pool de recomendações — todos passam por aqui.
+    if (hideAdult) q = q.eq("is_adult", false)
     // Exclude por not-in só quando NÃO há restrição positiva por allowedIds — senão o exclude
     // já foi removido de allowedIds acima. (Baseado em `allowedIds`, não `restrictIds`: com
     // onlyWorkIds sozinho o exclude ainda precisa valer.)
