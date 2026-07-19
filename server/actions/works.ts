@@ -1773,6 +1773,52 @@ export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
 }
 
 /**
+ * Escrita ENXUTA do progresso de leitura, disparada in-loco pelo card da /leitura
+ * (stepper − / + e "Marcar até o último"). Grava só `chapters_read` (+ carimba
+ * `last_read_at` quando o número CRESCE) — nada de nota, status ou pós-leitura, ao
+ * contrário do `updateWorkStatus` completo. Sem recalc: `chapters_read` não é feature
+ * do Ridge (o modelo usa `total_chapters`, não o quanto VOCÊ leu).
+ *
+ * Vai por `applyReadingState` → `user_work_state` (cliente de sessão): o dado é de quem
+ * clicou, e a RLS da mig 142 barra escrever na linha de outra pessoa.
+ */
+export async function setChaptersRead(id: string, chaptersRead: number) {
+  const gate = await ensureReadingStateWriter()
+  if (!gate.ok) return { error: gate.error }
+
+  const n = Math.floor(Number(chaptersRead))
+  if (!Number.isFinite(n) || n < 0) return { error: "Número de capítulos inválido." }
+
+  // Estado atual DE QUEM ESCREVE (mora em user_work_state pra todo mundo desde a Fase E),
+  // pra decidir o carimbo de `last_read_at`: só marca "li agora" quando o número avança —
+  // corrigir um typo pra baixo não deve mexer na data de última leitura.
+  const supabase = createAdminClient()
+  const { data: current } = await supabase
+    .from("user_work_state")
+    .select("chapters_read")
+    .eq("user_id", gate.userId)
+    .eq("work_id", id)
+    .maybeSingle()
+
+  const prev = (current?.chapters_read as number | null | undefined) ?? null
+  const grew = prev == null || n > prev
+  const patch: ReadingStatePatch = {
+    chapters_read: n,
+    ...(grew ? { last_read_at: new Date().toISOString().slice(0, 10) } : {}),
+  }
+
+  const { error } = await applyReadingState(gate, [id], patch)
+  if (error) return { error }
+
+  revalidatePath("/leitura")
+  revalidatePath("/titles")
+  revalidatePath("/ranking")
+  revalidatePath("/")
+  revalidateFavorites()
+  return { data: { chaptersRead: n } }
+}
+
+/**
  * O estado de GOSTO (FATIA 2a): nota, anotações, interesse ♥ e as 8 pós-leitura.
  *
  * Até a Fatia 1 estes campos eram RECUSADOS para quem não é o dono — moravam só na linha
