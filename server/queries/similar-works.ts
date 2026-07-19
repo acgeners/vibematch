@@ -20,6 +20,8 @@ export interface SimilarWork {
   totalChapters: number | null
   publicationStatusId: number | null
   personalStatusId: number | null
+  /** Conteúdo adulto (18+) efetivo — works.is_adult. */
+  isAdult: boolean
   platformAvg: number | null
   totalVotes: number | null
   /** Veredito IA (alignment_score, 0–100); NULL quando a obra não passou pelo re-rank. */
@@ -49,6 +51,7 @@ interface WorkMetaRow {
   year: number | null
   total_chapters: number | null
   publication_status_id: number | null
+  is_adult: boolean | null
   canonical_synopsis: string | null
 }
 
@@ -100,7 +103,7 @@ export async function getSimilarWorks(
   const [metaResult, genresResult, ratingsResult, calcResult, predictions] = await Promise.all([
     supabase
       .from("works")
-      .select("id, year, total_chapters, publication_status_id, canonical_synopsis")
+      .select("id, year, total_chapters, publication_status_id, is_adult, canonical_synopsis")
       .in("id", ids),
     supabase
       .from("work_genres")
@@ -207,6 +210,7 @@ export async function getSimilarWorks(
       totalChapters: meta?.total_chapters ?? null,
       publicationStatusId: meta?.publication_status_id ?? null,
       personalStatusId: state.personalStatusId,
+      isAdult: Boolean(meta?.is_adult),
       platformAvg,
       totalVotes: totalVotes > 0 ? totalVotes : null,
       alignmentScore: calc?.alignment_score == null ? null : Number(calc.alignment_score),

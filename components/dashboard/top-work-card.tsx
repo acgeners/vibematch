@@ -1,6 +1,7 @@
 import { ScoreBadge } from "@/components/ui/score-badge"
 import type { ScoreColorThresholds } from "@/components/ui/score-badge"
 import { PublicationStatusBadge, PersonalStatusBadge } from "@/components/ui/status-badge"
+import { AdultBadge } from "@/components/ui/adult-badge"
 import { CoverImage } from "@/components/ui/cover-image"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 
@@ -13,6 +14,7 @@ interface TopWorkCardProps {
     expectedScore: number | null
     publicationStatusId: number | null
     personalStatusId: number | null
+    isAdult: boolean
   }
   scoreThresholds: ScoreColorThresholds | null
 }
@@ -50,6 +52,7 @@ export function TopWorkCard({ rank, work, scoreThresholds }: TopWorkCardProps) {
         className="line-clamp-2 text-sm font-semibold leading-snug hover:underline"
       />
       <div className="mt-auto flex flex-wrap gap-1 pt-1">
+        {work.isAdult && <AdultBadge className="px-1.5 py-0" />}
         <PublicationStatusBadge statusId={work.publicationStatusId} />
         <PersonalStatusBadge statusId={work.personalStatusId} />
       </div>

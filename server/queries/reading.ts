@@ -14,6 +14,8 @@ export interface ReadingWork {
   coverUrl: string | null
   personalStatusId: number | null
   publicationStatusId: number | null
+  /** Conteúdo adulto (18+) efetivo — works.is_adult. */
+  isAdult: boolean
   chaptersRead: number | null
   totalChapters: number | null
   lastReadAt: string | null
@@ -66,7 +68,7 @@ export async function getReadingWorks(
   if (!ownIds || ownIds.length === 0) return []
 
   const baseSelect = `
-    id, title, publication_status_id, total_chapters,
+    id, title, publication_status_id, total_chapters, is_adult,
     calculated_scores(expected_score),
     work_covers(url, is_primary, position),
     work_external_ids(source, external_id, is_rejected)`
@@ -87,6 +89,7 @@ export async function getReadingWorks(
     title: string
     publication_status_id: number | null
     total_chapters: number | null
+    is_adult?: boolean | null
     last_chapter_released_at?: string | null
     next_chapter_predicted_at?: string | null
     chapters_checked_at?: string | null
@@ -104,6 +107,7 @@ export async function getReadingWorks(
       coverUrl: pickPrimaryCover(w.work_covers),
       personalStatusId: state.personalStatusId,
       publicationStatusId: w.publication_status_id ?? null,
+      isAdult: Boolean(w.is_adult),
       chaptersRead: state.chaptersRead,
       totalChapters: w.total_chapters ?? null,
       lastReadAt: state.lastReadAt,

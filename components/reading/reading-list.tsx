@@ -26,6 +26,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { CoverImage } from "@/components/ui/cover-image"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
+import { AdultBadge } from "@/components/ui/adult-badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
@@ -570,6 +571,7 @@ function ReadingCard({
               className="line-clamp-2 text-base font-semibold leading-snug hover:underline"
             />
             <div className="flex shrink-0 items-center gap-1.5">
+              {work.isAdult && <AdultBadge className="px-1.5 py-0" />}
               <ReadingStatusBadge pending={pending} />
               <PublicationStatusBadge statusId={work.publicationStatusId} iconOnly />
             </div>

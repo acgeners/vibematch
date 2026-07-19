@@ -55,6 +55,7 @@ import {
   PersonalStatusBadge,
   PublicationStatusBadge,
 } from "@/components/ui/status-badge"
+import { AdultBadge } from "@/components/ui/adult-badge"
 import {
   TableBody,
   TableCell,
@@ -739,6 +740,7 @@ function WorkCardsView({
                   </div>
                 )}
                 <div className="absolute inset-x-0 bottom-0 flex items-end gap-1 bg-gradient-to-t from-black/75 via-black/30 to-transparent p-1.5">
+                  {work.is_adult && <AdultBadge className="px-1.5 py-0" />}
                   <PublicationStatusBadge statusId={work.publication_status_id} />
                   <PersonalStatusBadge statusId={work.personal_status_id} />
                 </div>

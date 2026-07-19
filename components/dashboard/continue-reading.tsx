@@ -3,6 +3,7 @@ import { BookMarked, ArrowRight, ExternalLink } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CoverImage } from "@/components/ui/cover-image"
+import { AdultBadge } from "@/components/ui/adult-badge"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { formatRelativeDate } from "@/lib/date-utils"
 import type { ContinueReadingItem } from "@/server/queries/dashboard"
@@ -59,11 +60,14 @@ export function ContinueReading({
                     className="h-11 w-8 shrink-0 rounded-md object-cover"
                   />
                   <div className="min-w-0 flex-1">
-                    <WorkTitleLink
-                      title={item.title}
-                      workId={item.id}
-                      className="line-clamp-1 text-sm font-medium hover:underline"
-                    />
+                    <div className="flex items-center gap-1.5">
+                      {item.isAdult && <AdultBadge className="shrink-0 px-1.5 py-0 text-[10px]" />}
+                      <WorkTitleLink
+                        title={item.title}
+                        workId={item.id}
+                        className="line-clamp-1 min-w-0 text-sm font-medium hover:underline"
+                      />
+                    </div>
                     {item.lastReadAt && (
                       <span className="text-[11px] text-muted-foreground">
                         Última leitura: {formatRelativeDate(item.lastReadAt)}

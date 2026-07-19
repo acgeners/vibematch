@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { AlertTriangle, CheckCircle2, Crown, ExternalLink, ImageOff, Lightbulb, Trophy } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { AdultBadge } from "@/components/ui/adult-badge"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug } from "@/lib/utils"
 import type { RankedCandidate } from "@/lib/ai-recommendation/types"
@@ -73,9 +74,12 @@ export function RankedWorkWinnerCard({ ranked, totalCount }: RankedWorkWinnerCar
               <ExternalLink className="h-4 w-4 text-muted-foreground/60 shrink-0" />
             </Link>
           </div>
-          <Badge variant="outline" className={cn("w-fit mt-1.5 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 select-none", q.badgeClass)}>
-            {q.label}
-          </Badge>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <Badge variant="outline" className={cn("w-fit text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 select-none", q.badgeClass)}>
+              {q.label}
+            </Badge>
+            {work.isAdult && <AdultBadge className="text-[10px] px-2 py-0.5" />}
+          </div>
 
           {/* AI Score card containing the Laurel Wreath and details */}
           <div className="flex items-center gap-4 rounded-xl border border-border/80 bg-card/65 p-3.5 mt-4">
