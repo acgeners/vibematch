@@ -179,6 +179,8 @@ export interface Work {
   cover_url: string | null
   ai_eval_status: AiEvalStatus
   is_archived: boolean
+  /** Conteúdo adulto (18+) efetivo — COALESCE(adult_override, adult_auto). */
+  is_adult: boolean
   is_favorite: boolean
   last_read_at: string | null
   created_at: string

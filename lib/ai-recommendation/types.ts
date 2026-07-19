@@ -209,6 +209,8 @@ export interface RatedWorkInput {
 export interface CandidateWorkInput {
   id: string
   title: string
+  /** Conteúdo adulto (18+) efetivo — works.is_adult. Só pra exibição (selo no card). */
+  isAdult: boolean
   synopsis: string | null
   categoryScores: Partial<Record<CriterionSlug, number>>
   tags: Array<{ name: string; group: string | null }>

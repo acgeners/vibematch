@@ -46,6 +46,8 @@ export interface TopWorkItem {
   expectedScore: number | null
   publicationStatusId: number | null
   personalStatusId: number | null
+  /** Conteúdo adulto (18+) efetivo — works.is_adult. */
+  isAdult: boolean
 }
 
 export interface ContinueReadingItem {
@@ -63,6 +65,8 @@ export interface ContinueReadingItem {
   expectedScore: number | null
   lastChapterReleasedAt: string | null
   nextChapterPredictedAt: string | null
+  /** Conteúdo adulto (18+) efetivo — works.is_adult. */
+  isAdult: boolean
 }
 
 export interface AiQueueCounts {
@@ -189,7 +193,7 @@ export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]>
   const { data, error } = await supabase
     .from("works")
     .select(`
-      id, title, is_archived, publication_status_id,
+      id, title, is_archived, publication_status_id, is_adult,
       calculated_scores(expected_score, platform_avg),
       work_covers(url, is_primary, position)
     `)
@@ -202,6 +206,7 @@ export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]>
     id: string
     title: string
     publication_status_id: number | null
+    is_adult?: boolean | null
     calculated_scores: { expected_score: number | null; platform_avg: number | null } | null
     work_covers?: CoverRow[] | null
   }
@@ -219,6 +224,7 @@ export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]>
         publicationStatusId: w.publication_status_id ?? null,
         personalStatusId: state.personalStatusId,
         userScore: state.userScore,
+        isAdult: Boolean(w.is_adult),
       }
     })
     // "ainda não avaliou" = a nota DELA é nula (não a dele).
@@ -236,6 +242,7 @@ export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]>
     expectedScore: w.expectedScore,
     publicationStatusId: w.publicationStatusId,
     personalStatusId: w.personalStatusId,
+    isAdult: w.isAdult,
   }))
 }
 
@@ -273,7 +280,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
   const { data, error } = await supabase
     .from("works")
     .select(`
-      id, title, total_chapters,
+      id, title, total_chapters, is_adult,
       last_chapter_released_at, next_chapter_predicted_at,
       calculated_scores(expected_score),
       work_covers(url, is_primary, position),
@@ -288,6 +295,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
     id: string
     title: string
     total_chapters: number | null
+    is_adult?: boolean | null
     last_chapter_released_at: string | null
     next_chapter_predicted_at: string | null
     calculated_scores?: { expected_score?: number | null } | null
@@ -311,6 +319,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
       expectedScore: scoresReader.overlay(w.id, w.calculated_scores)?.expected_score ?? null,
       lastChapterReleasedAt: w.last_chapter_released_at ?? null,
       nextChapterPredictedAt: w.next_chapter_predicted_at ?? null,
+      isAdult: Boolean(w.is_adult),
     }
   })
 

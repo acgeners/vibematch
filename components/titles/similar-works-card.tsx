@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import { PersonalStatusBadge } from "@/components/ui/status-badge"
+import { AdultBadge } from "@/components/ui/adult-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
@@ -324,6 +325,8 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
                     title={w.title}
                     className="block font-bold text-[15px] leading-tight text-foreground group-hover:text-primary transition-colors hover:underline line-clamp-2"
                   />
+
+                  {w.isAdult && <AdultBadge className="w-fit px-1.5 py-0 text-[11px]" />}
 
                   {hasMetaLine && (
                     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12.5px] font-medium text-foreground/85">

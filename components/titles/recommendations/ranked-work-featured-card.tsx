@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { ExternalLink, ImageOff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { AdultBadge } from "@/components/ui/adult-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn, titleToSlug } from "@/lib/utils"
@@ -106,9 +107,12 @@ export function RankedWorkFeaturedCard({ rank, ranked }: RankedWorkFeaturedCardP
           </TooltipProvider>
         </div>
 
-        <Badge variant="outline" className={cn("w-fit text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 select-none", q.badgeClass)}>
-          {q.label}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant="outline" className={cn("w-fit text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 select-none", q.badgeClass)}>
+            {q.label}
+          </Badge>
+          {work.isAdult && <AdultBadge className="text-[9px] px-1.5 py-0.5" />}
+        </div>
 
         <p className="text-xs leading-relaxed text-muted-foreground mt-0.5">
           {justification}

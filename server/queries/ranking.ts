@@ -103,6 +103,8 @@ export interface RankingEntry {
   } | null
   userScore: number | null
   isFavorite: boolean
+  /** Conteúdo adulto (18+) efetivo — works.is_adult (COALESCE(adult_override, adult_auto)). */
+  isAdult: boolean
   publicationStatus: string
   publicationStatusId: number | null
   publicationStatusShort: string | null
@@ -519,7 +521,7 @@ export async function getRanking(
       .from("works")
       .select(`
         id, title, publication_status_id, ai_eval_status,
-        total_chapters, is_archived,
+        total_chapters, is_archived, is_adult,
         canonical_synopsis, year, updated_at,
         calculated_scores(expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, platform_avg, total_votes, personal_fit, personal_fit_percentile, tag_overlap_net, alignment_score, alignment_justification, alignment_payload, alignment_at, alignment_stale),
         category_scores(criterion_slug, score),
@@ -628,6 +630,7 @@ export async function getRanking(
       alignmentPayload: w.calculated_scores?.alignment_payload ?? null,
       userScore: state.userScore,
       isFavorite: state.isFavorite,
+      isAdult: Boolean(w.is_adult),
       publicationStatus: getPublicationStatusNameById(publicationStatusId) ?? "Unknown",
       publicationStatusId,
       publicationStatusShort: publicationStatusDisplay?.short ?? null,

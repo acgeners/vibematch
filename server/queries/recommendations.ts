@@ -76,6 +76,7 @@ const RATED_WORK_SELECT = `
 const CANDIDATE_WORK_SELECT = `
   id,
   title,
+  is_adult,
   canonical_synopsis,
   review_summary,
   user_work_state(user_score, is_favorite),
@@ -296,6 +297,7 @@ function mapRowToCandidate(
   return {
     id: work.id as string,
     title: work.title as string,
+    isAdult: Boolean(work.is_adult),
     synopsis,
     categoryScores: buildCategoryScores(work.category_scores as RawCategoryScore[] | null, biasMap),
     tags: buildTags(work.work_tags as RawTagRow[] | null),
