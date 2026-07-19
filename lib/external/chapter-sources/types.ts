@@ -2,7 +2,7 @@ import type { PublicationStatus } from "@/types/domain"
 
 // As fontes de capítulo são um registro próprio (checadoras de release),
 // desacoplado do `ExternalSourceId` (gerado por DB pro pipeline de metadata/IA).
-export type ChapterSourceId = "comix" | "coffeemanga"
+export type ChapterSourceId = "comix" | "coffeemanga" | "mangago"
 
 /** IDs cross-source salvos da obra, usados pra confirmar o match do comix por igualdade. */
 export interface ChapterCrossIds {
@@ -19,6 +19,8 @@ export interface ChapterCheckInput {
   alternativeTitles?: string[]
   /** hid do comix salvo em `work_external_ids` (match exato; pula a busca). */
   comixHid?: string | null
+  /** slug do Mangago salvo em `work_external_ids` (match exato; a fonte é slug-only, sem busca). */
+  mangagoSlug?: string | null
   /** IDs cross-source pra confirmação de match e fallback de sinônimos (AniList). */
   crossIds?: ChapterCrossIds
 }

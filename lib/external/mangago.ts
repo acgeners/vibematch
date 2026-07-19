@@ -453,6 +453,94 @@ export async function fetchMangagoById(
   return null
 }
 
+// ---------------------------------------------------------------------------
+// Chapters (fonte de capítulo — último release + datas + lista)
+// ---------------------------------------------------------------------------
+
+export interface MangagoChapters {
+  /** Maior número de capítulo (o "último lançado"). */
+  latest: number | null
+  /** Data (ISO) do capítulo mais recente (o de maior número). */
+  lastDateIso: string | null
+  /** Datas (ISO, desc) dos capítulos recentes — pra estimar cadência. */
+  recentDatesIso: string[]
+  /** Todos os números de capítulo (desc, dedup) — pra CONTAR de verdade (cada decimal é 1 cap). */
+  chapterNumbers: number[]
+}
+
+/** Converte a data do Mangago ("Feb 1, 2026") em ISO. Best-effort → null. */
+function parseMangagoDate(text: string | undefined): string | null {
+  if (!text) return null
+  const m = text.match(/([A-Z][a-z]{2})\s+(\d{1,2}),\s+(\d{4})/)
+  if (!m) return null
+  const t = Date.parse(`${m[1]} ${m[2]}, ${m[3]}`)
+  return Number.isFinite(t) ? new Date(t).toISOString() : null
+}
+
+/**
+ * Parseia a tabela de capítulos (`#chapter_table`) do detalhe do Mangago.
+ *
+ * ⚠️ As linhas NÃO estão em ordem numérica — o Mangago intercala grupos de upload
+ * distintos (`nml_chapter-…` / `br_chapter-…`), então o "último" é o MAIOR número,
+ * não o 1º da tabela. Cada linha é `…<a class="chico"><b>Ch.N</b> …</a>…<td>Mon DD,
+ * YYYY</td>`. Escopa ao `#chapter_table` pra não pegar as capas "also-like".
+ */
+export function parseMangagoChapters(html: string): MangagoChapters | null {
+  const start = html.search(/id=["']chapter_table["']/i)
+  if (start < 0) return null
+  const rest = html.slice(start)
+  const end = rest.search(/<\/table>/i)
+  const scope = end >= 0 ? rest.slice(0, end) : rest
+
+  let latest: number | null = null
+  let lastDateIso: string | null = null
+  const dates: string[] = []
+  const nums = new Set<number>()
+
+  const rowRe = /<tr\b[\s\S]*?<\/tr>/gi
+  let row: RegExpExecArray | null
+  while ((row = rowRe.exec(scope)) !== null) {
+    const block = row[0]
+    const bold = block.match(/<b[^>]*>([\s\S]*?)<\/b>/i)?.[1] ?? ""
+    // Exige DÍGITO (não `[\d.]+`, que casaria "." de "Ch.prologue"/"Ch. Extra" e viraria NaN).
+    const numRaw = bold.match(/(?:Ch\.?|Chapter)\s*(\d+(?:\.\d+)?)/i)?.[1]
+    if (!numRaw) continue
+    const num = Number(numRaw)
+    if (!Number.isFinite(num)) continue
+    const dateIso = parseMangagoDate(block.match(/([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})/)?.[1])
+    nums.add(num)
+    if (dateIso) dates.push(dateIso)
+    if (latest == null || num > latest) {
+      latest = num
+      lastDateIso = dateIso
+    }
+  }
+  if (latest == null) return null
+
+  return {
+    latest,
+    lastDateIso,
+    // Ordem da tabela não é cronológica → ordena as datas (ISO ⇒ lexicográfico = temporal).
+    recentDatesIso: [...dates].sort((a, b) => b.localeCompare(a)).slice(0, 16),
+    chapterNumbers: [...nums].sort((a, b) => b - a),
+  }
+}
+
+/**
+ * Último capítulo no Mangago por slug (match exato). CF-gated como o resto do
+ * módulo: sem FlareSolverr (circuito aberto) volta `null`.
+ */
+export async function fetchMangagoChapters(slug: string): Promise<MangagoChapters | null> {
+  if (isFlareSolverrCircuitOpen()) return null
+  try {
+    const result = await fetchHtmlWithCfFallback(`${BASE}/read-manga/${slug}/`, HEADERS, CF_ABORT_MS, FS_SESSION)
+    if (!result) return null
+    return parseMangagoChapters(result.html)
+  } catch {
+    return null
+  }
+}
+
 // Descrição genérica do rodapé do site (aparece no meta de tópicos vazios) — não é opinião.
 function isSiteBoilerplate(text: string): boolean {
   return /free yaoi manga|read .{0,40}manga online|all manga.*copyright/i.test(text)

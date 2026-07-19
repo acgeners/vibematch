@@ -17,10 +17,11 @@ import {
 
 type ExternalIdRow = { source: string; external_id: string | null; is_rejected: boolean }
 
-/** Extrai o hid do comix (não-rejeitado) e os cross-IDs de uma obra a partir das linhas de work_external_ids. */
+/** Extrai o hid do comix (não-rejeitado), o slug do Mangago e os cross-IDs de uma obra a partir das linhas de work_external_ids. */
 function readExternalIds(rows: ExternalIdRow[] | null | undefined): {
   comixHid: string | null
   comixRejected: boolean
+  mangagoSlug: string | null
   crossIds: NonNullable<ChapterCheckInput["crossIds"]>
 } {
   const active = (rows ?? []).filter((e) => !e.is_rejected && e.external_id)
@@ -28,6 +29,7 @@ function readExternalIds(rows: ExternalIdRow[] | null | undefined): {
   return {
     comixHid: bySource("comix"),
     comixRejected: (rows ?? []).some((e) => e.source === "comix" && e.is_rejected),
+    mangagoSlug: bySource("mangago"),
     crossIds: {
       anilist: bySource("anilist"),
       myanimelist: bySource("myanimelist"),
@@ -113,8 +115,9 @@ export async function checkReadingUpdates(
           return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: false, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: "Completed", statusApplied: null, skipped: true }
         }
 
-        const { comixHid, comixRejected, crossIds } = readExternalIds(w.work_external_ids)
-        // Respeita rejeição explícita do comix: não busca nem persiste.
+        const { comixHid, comixRejected, mangagoSlug, crossIds } = readExternalIds(w.work_external_ids)
+        // Respeita rejeição explícita do comix: não busca nem persiste. (Nota: por ora
+        // isto também pula coffeemanga/mangago da obra — comix-rejeitada é caso raro.)
         if (comixRejected && !comixHid) {
           return { workId: w.id, latestExternal: null, hasNew: false, delta: null, unreadCount: null, failed: true, releasedLabel: null, releasedAt: null, latestUrl: null, nextPredictedAt: null, statusExternal: null, statusApplied: null, skipped: false }
         }
@@ -125,6 +128,7 @@ export async function checkReadingUpdates(
             originalTitle: w.original_title,
             alternativeTitles: w.alternative_titles ?? [],
             comixHid,
+            mangagoSlug,
             crossIds,
           }),
           fetchMuStatus(crossIds.mangaupdates),
