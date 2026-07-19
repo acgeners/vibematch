@@ -27,7 +27,6 @@ import {
   getExistingPostReadingAssessment,
 } from "@/server/queries/post-attribute-assessment"
 import { getCurrentUserId, canConsumeAi, getHideAdultContent } from "@/server/queries/current-user"
-import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
@@ -38,7 +37,8 @@ import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
 import { RefetchReviewsButton } from "@/components/titles/refetch-reviews-button"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
-import { ScoreBadge, getCriterionColorClass, getScoreTextColor } from "@/components/ui/score-badge"
+import { ScoreBadge, getScoreTextColor, pickCriterionTierByRange, criterionTierPillClass } from "@/components/ui/score-badge"
+import type { CriterionTier } from "@/components/ui/score-badge"
 import { ForceMeters } from "@/components/ranking/force-meters"
 import { computeWorkForces } from "@/lib/calculations/forces"
 import {
@@ -66,7 +66,10 @@ import { Badge } from "@/components/ui/badge"
 import { TagRowAction } from "@/components/ai-evaluation/tag-actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { ExpandableText } from "@/components/ui/expandable-text"
+import { CriterionIcon } from "@/components/titles/criterion-icon"
+import { CriterionBandChip } from "@/components/titles/criterion-band-chip"
+import { CriterionFitBar } from "@/components/titles/criterion-fit-bar"
+import { parseJustification, collapseBand, bandBounds, rubricForBand, rubricTitle } from "@/lib/criteria/justification"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CRITERIA_INFO, PLATFORM_LABELS } from "@/lib/constants/criteria"
 import {
@@ -296,13 +299,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, biasMap, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
     getLastDeepDive(work.id as string),
     getSourceRows(),
-    getBiasMap(await getCurrentUserId(configClient), configClient),
     canConsumeAi(),
     getAllTags(),
     getSynopsisPredictionForWork(work.id as string),
@@ -353,10 +355,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     : []
 
   const scoreMap: Record<string, number> = {}
-  const sourceMap: Record<string, string> = {}
   for (const cs of work.category_scores ?? []) {
     scoreMap[cs.criterion_slug] = cs.score
-    sourceMap[cs.criterion_slug] = cs.source ?? "imported"
   }
   // 18+ oficial = works.is_adult (COALESCE(adult_override, adult_auto), migração
   // 161) — alimentado pelas 59 tags curadas do content_indicator + override humano,
@@ -367,9 +367,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       ? work.is_adult
       : adultScore != null && adultScore >= 7
   const gateAdult = isAdult && hideAdultContent
-  // Atributos cuja nota da IA é calibrada on-read no pipeline (offset != 0 e
-  // origem IA). Mostra "→ Y no cálculo" no card de notas por critério.
-  const BIAS_APPLICABLE = new Set(["ai_accepted", "ai_calibrated"])
+  // Faixas ideais do perfil (criterion_preferences): a cor e a barra medem o FIT (distância da sua
+  // faixa), não a altura no catálogo. Sem entrada pro slug → tier neutro, sem zona ideal na barra.
+  const criterionPrefs = (tasteProfileRow?.profile.criterion_preferences ?? {}) as Partial<
+    Record<string, { ideal_min: number; ideal_max: number; weight: number }>
+  >
 
   const aiEvaluations: Array<{
     id: string
@@ -1402,65 +1404,66 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               const info = CRITERIA_INFO[slug]
               const score = scoreMap[slug]
               const aiScore = latestAiScoreMap.get(slug)
+              const pref = criterionPrefs[slug]
+              const hasIdeal = !!pref && pref.weight >= 0.05
+              // Cor/tier pela faixa ideal do perfil; sem pref → neutro (não pinta como se fosse fit).
+              const tier: CriterionTier =
+                score == null ? "neutral" : pref ? pickCriterionTierByRange(score, pref) : "neutral"
+              // Legenda (faixa + rótulo) separada da justificativa específica da obra.
+              const parsed = aiScore?.justification ? parseJustification(aiScore.justification) : null
+              const band = parsed?.band ?? null
+              const [bandLo, bandHi] = band ? bandBounds(band) : [null, null]
               return (
                 <div
                   key={slug}
-                  className="flex items-center gap-3 rounded-md border bg-muted/20 p-3"
+                  className="flex flex-col gap-2.5 rounded-lg border bg-muted/20 p-3.5"
                 >
-                  <div className="shrink-0 flex flex-col items-center gap-1">
-                    <span className="text-4xl leading-none" aria-hidden>
-                      {info.emoji}
+                  <div className="flex items-center gap-2.5">
+                    <span className="grid h-[52px] w-[52px] shrink-0 place-items-center">
+                      <CriterionIcon slug={slug} />
                     </span>
+                    <div className="min-w-0 flex-1">
+                      <CriterionTitleTooltip name={info.name} description={info.description} multiline />
+                    </div>
                     {score != null ? (
                       <div
                         className={cn(
-                          "grid place-items-center w-14 h-9 rounded-md font-mono text-xl font-bold leading-none",
-                          getCriterionColorClass(score, slug, scoreThresholds?.criteria?.[slug])
+                          "grid h-9 min-w-[52px] shrink-0 place-items-center rounded-md px-2 font-mono text-lg font-bold leading-none",
+                          criterionTierPillClass(tier),
                         )}
                       >
                         {score.toFixed(1)}
                       </div>
                     ) : (
-                      <div className="grid place-items-center w-14 h-9 rounded-md border border-dashed text-muted-foreground text-base">
+                      <div className="grid h-9 min-w-[52px] shrink-0 place-items-center rounded-md border border-dashed text-base text-muted-foreground">
                         —
                       </div>
                     )}
                   </div>
-                  <div className="flex-1 min-w-0 space-y-1.5">
-                    <CriterionTitleTooltip
-                      name={info.name}
-                      description={info.description}
+                  {band && (
+                    <CriterionBandChip
+                      band={collapseBand(band)}
+                      label={rubricTitle(slug, band)}
+                      rubric={rubricForBand(slug, band)}
                     />
-                    {aiScore?.justification && (
-                      <ExpandableText
-                        text={aiScore.justification}
-                        limit={140}
-                        className="text-[11px] leading-4 text-muted-foreground/80"
+                  )}
+                  {parsed?.detail && (
+                    <p className="text-xs leading-relaxed text-muted-foreground">{parsed.detail}</p>
+                  )}
+                  {score != null && (
+                    <div className="mt-auto pt-1">
+                      <CriterionFitBar
+                        score={score}
+                        tier={tier}
+                        idealMin={pref?.ideal_min ?? 0}
+                        idealMax={pref?.ideal_max ?? 0}
+                        hasIdeal={hasIdeal}
+                        bandLo={bandLo}
+                        bandHi={bandHi}
+                        bandLabel={band ? collapseBand(band) : null}
                       />
-                    )}
-                    {aiScore && aiScore.suggested_score != null && aiScore.suggested_score !== score && (
-                      <p className="text-[11px] text-muted-foreground/70">
-                        Sugestão IA:{" "}
-                        <span className="font-mono font-semibold">
-                          {Number(aiScore.suggested_score).toFixed(1)}
-                        </span>
-                      </p>
-                    )}
-                    {score != null &&
-                      BIAS_APPLICABLE.has(sourceMap[slug]) &&
-                      (biasMap[slug] ?? 0) !== 0 && (
-                        <p
-                          className="text-[11px] text-sky-600/80 dark:text-sky-400/80"
-                          title={`Offset do seu perfil: ${biasMap[slug] > 0 ? "+" : ""}${biasMap[slug]}. O cálculo usa o valor calibrado, não o bruto da IA.`}
-                        >
-                          → calibrado p/{" "}
-                          <span className="font-mono font-semibold">
-                            {(score - biasMap[slug]).toFixed(1)}
-                          </span>{" "}
-                          no cálculo
-                        </p>
-                      )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               )
             })}

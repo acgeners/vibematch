@@ -1,16 +1,16 @@
 export const CRITERIA_INFO: Record<
   string,
-  { name: string; emoji: string; description: string }
+  { name: string; emoji: string; description: string; iconUrl?: string }
 > = {
-  romance: { name: "Romance", emoji: "💞", description: "Avalia o quanto o romance está presente e influencia a obra.\nConsidera se o relacionamento é apenas um detalhe, um subplot relevante ou o eixo principal da história." },
-  couple_dynamics: { name: "Dinâmica do Casal", emoji: "💑", description: "Avalia a qualidade da relação entre o casal principal.\nConsidera se a dinâmica é tóxica, conflituosa, saudável, divertida, comunicativa ou baseada em parceria." },
-  fantasy_nobility: { name: "Fantasia/Nobreza", emoji: "👑", description: "Avalia o quanto elementos de fantasia, magia, nobreza, realeza ou política de corte fazem parte da obra.\nConsidera se esses elementos são só estética ou se realmente moldam o mundo, os conflitos e as decisões dos personagens." },
-  action_adventure: { name: "Ação/Aventura", emoji: "⚔️", description: "Avalia o nível de movimento, tensão e eventos marcantes da história.\nConsidera se a obra é mais cotidiana/parada ou se envolve missões, conflitos externos, perigos, batalhas, viagens ou eventos de grande escala." },
-  adult_content: { name: "Conteúdo Adulto", emoji: "🔥", description: "Avalia o nível de sexualização ou conteúdo sexual presente na obra.\nConsidera desde ausência quase total até cenas explícitas recorrentes, levando em conta frequência, intensidade e relevância para a narrativa." },
-  protagonist: { name: "Protagonista Marcante", emoji: "🦸", description: "Avalia o quanto o protagonista se destaca e impacta a história — presença, agência, decisões marcantes, personalidade reconhecível.\nNÃO avalia se o protagonista é simpático, bem escrito, equilibrado ou agradável de acompanhar. Mary Sues, OPs, vilões marcantes, FLs frias/insensíveis/inconsistentes podem todos ser muito marcantes." },
-  humor: { name: "Humor", emoji: "😂", description: "Avalia o quanto o humor está presente no tom da obra.\nConsidera se há apenas alívio cômico pontual ou se a comédia é parte frequente e importante da experiência." },
-  drama: { name: "Drama", emoji: "🎭", description: "Avalia a intensidade dos conflitos emocionais da obra.\nConsidera sofrimento, tensão emocional, dilemas, conflitos de relacionamento e o quanto isso afeta o ritmo e as decisões dos personagens." },
-  tragedy: { name: "Tragédia", emoji: "💔", description: "Avalia o peso de acontecimentos trágicos durante o desenvolvimento principal da história (não considera background nem acontecimentos no começo imediato da história).\nConsidera perdas, separações, mortes, injustiças e sofrimento que acontecem no meio da obra e impactam diretamente os personagens principais." },
+  romance: { name: "Romance", emoji: "💞", description: "Avalia o quanto o romance está presente e influencia a obra.\nConsidera se o relacionamento é apenas um detalhe, um subplot relevante ou o eixo principal da história.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/romance.png" },
+  couple_dynamics: { name: "Dinâmica do Casal", emoji: "💑", description: "Avalia a qualidade da relação entre o casal principal.\nConsidera se a dinâmica é tóxica, conflituosa, saudável, divertida, comunicativa ou baseada em parceria.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/couple_dynamics.png" },
+  fantasy_nobility: { name: "Fantasia/Nobreza", emoji: "👑", description: "Avalia o quanto elementos de fantasia, magia, nobreza, realeza ou política de corte fazem parte da obra.\nConsidera se esses elementos são só estética ou se realmente moldam o mundo, os conflitos e as decisões dos personagens.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/fantasy_nobility.png" },
+  action_adventure: { name: "Ação/Aventura", emoji: "⚔️", description: "Avalia o nível de movimento, tensão e eventos marcantes da história.\nConsidera se a obra é mais cotidiana/parada ou se envolve missões, conflitos externos, perigos, batalhas, viagens ou eventos de grande escala.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/action_adventure.png" },
+  adult_content: { name: "Conteúdo Adulto", emoji: "🔥", description: "Avalia o nível de sexualização ou conteúdo sexual presente na obra.\nConsidera desde ausência quase total até cenas explícitas recorrentes, levando em conta frequência, intensidade e relevância para a narrativa.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/adult_content.png" },
+  protagonist: { name: "Protagonista Marcante", emoji: "🦸", description: "Avalia o quanto o protagonista se destaca e impacta a história — presença, agência, decisões marcantes, personalidade reconhecível.\nNÃO avalia se o protagonista é simpático, bem escrito, equilibrado ou agradável de acompanhar. Mary Sues, OPs, vilões marcantes, FLs frias/insensíveis/inconsistentes podem todos ser muito marcantes.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/protagonist.png" },
+  humor: { name: "Humor", emoji: "😂", description: "Avalia o quanto o humor está presente no tom da obra.\nConsidera se há apenas alívio cômico pontual ou se a comédia é parte frequente e importante da experiência.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/humor.png" },
+  drama: { name: "Drama", emoji: "🎭", description: "Avalia a intensidade dos conflitos emocionais da obra.\nConsidera sofrimento, tensão emocional, dilemas, conflitos de relacionamento e o quanto isso afeta o ritmo e as decisões dos personagens.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/drama.png" },
+  tragedy: { name: "Tragédia", emoji: "💔", description: "Avalia o peso de acontecimentos trágicos durante o desenvolvimento principal da história (não considera background nem acontecimentos no começo imediato da história).\nConsidera perdas, separações, mortes, injustiças e sofrimento que acontecem no meio da obra e impactam diretamente os personagens principais.", iconUrl: "https://obwlwukwovetgjqdpizd.supabase.co/storage/v1/object/public/criteria-icons/tragedy.png" },
 }
 
 export const CRITERIA_RUBRICS: Record<
@@ -29,10 +29,10 @@ export const CRITERIA_RUBRICS: Record<
   couple_dynamics: {
     title: "Dinâmica do Casal",
     ranges: [
-      "0-3 | Dinâmica prejudicial ao parceiro contra sua vontade: abuso emocional ativo, manipulação não-consensual, sofrimento contínuo do parceiro abusado dentro do desenvolvimento. Dinâmicas não-tradicionais (BDSM, Dom/Sub, posse, ciúme intenso) com consenso mútuo e tom romântico/cômico NÃO se enquadram aqui — vão para 7-8 ou 9-10.",
-      "4-6 | Há mal-entendidos eventuais, ciúme e algum nível de conflito.",
-      "7-8 | Relacionamento saudável, com alguns conflitos eventuais, mas trabalhados e resolvidos relativamente rápido.",
-      "9-10 | Dinâmica leve, divertida e saudável; parceria, desenvolvimento mútuo e boa comunicação.",
+      "0-3 | Tóxica: Dinâmica prejudicial ao parceiro contra sua vontade: abuso emocional ativo, manipulação não-consensual, sofrimento contínuo do parceiro abusado dentro do desenvolvimento. Dinâmicas não-tradicionais (BDSM, Dom/Sub, posse, ciúme intenso) com consenso mútuo e tom romântico/cômico NÃO se enquadram aqui — vão para 7-8 ou 9-10.",
+      "4-6 | Conflituosa: Há mal-entendidos eventuais, ciúme e algum nível de conflito.",
+      "7-8 | Saudável: Relacionamento saudável, com alguns conflitos eventuais, mas trabalhados e resolvidos relativamente rápido.",
+      "9-10 | Parceria: Dinâmica leve, divertida e saudável; parceria, desenvolvimento mútuo e boa comunicação.",
     ],
   },
   fantasy_nobility: {
@@ -47,10 +47,10 @@ export const CRITERIA_RUBRICS: Record<
   action_adventure: {
     title: "Ação/Aventura",
     ranges: [
-      "0-3 | Principalmente slice of life: ritmo mais parado, eventos cotidianos.",
-      "4-6 | Ritmo um pouco mais agitado, mas sem grandes eventos ou desenrolar emocionante.",
-      "7-8 | Presença constante de situações marcantes, ritmo acelerado, protagonistas envolvidos em eventos significativos para o mundo.",
-      "9-10 | Raramente há momentos parados/cotidianos; protagonistas em missão para salvar/mudar o mundo/história ou centro de eventos extremamente marcantes.",
+      "0-3 | Slice of life: ritmo mais parado, eventos cotidianos.",
+      "4-6 | Moderado: Ritmo um pouco mais agitado, mas sem grandes eventos ou desenrolar emocionante.",
+      "7-8 | Agitado: Presença constante de situações marcantes, ritmo acelerado, protagonistas envolvidos em eventos significativos para o mundo.",
+      "9-10 | Épico: Raramente há momentos parados/cotidianos; protagonistas em missão para salvar/mudar o mundo/história ou centro de eventos extremamente marcantes.",
     ],
   },
   adult_content: {

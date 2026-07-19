@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "re
 import { useRouter } from "next/navigation"
 import { useRefresh } from "@/lib/use-refresh"
 import { refreshChrome } from "@/lib/chrome-refresh"
-import { useFieldArray, useForm, useWatch, type FieldPath } from "react-hook-form"
+import { useFieldArray, useForm, useWatch, type Control, type FieldPath } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
 import { titleToSlug, readingProgressPercent } from "@/lib/utils"
@@ -637,6 +637,32 @@ const normalizePostReadingScoresInValues = (values: WorkFormValues): WorkFormVal
 const scrollToTop = () => {
   document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" })
   window.scrollTo({ top: 0, behavior: "smooth" })
+}
+
+/**
+ * Exibe a nota de um atributo em modo LEITURA (valor limpo, sem caixa). Usado quando o craft é a
+ * sugestão da IA e não deve ser editável na obra — a divergência de percepção do usuário mora no
+ * momento 2 (avaliação pós-leitura → attribute_bias), não aqui. Lê o valor commitado via useWatch
+ * pra refletir uma reavaliação (ex.: "Reavaliar com Opus") sem depender de re-render externo.
+ */
+function CriterionReadonlyValue({
+  control,
+  name,
+}: {
+  control: Control<WorkFormInput>
+  name: FieldPath<WorkFormInput>
+}) {
+  const raw = useWatch({ control, name })
+  const num = typeof raw === "number" ? raw : raw != null && raw !== "" ? Number(raw) : null
+  const display =
+    num != null && Number.isFinite(num)
+      ? num.toLocaleString("pt-BR", { maximumFractionDigits: 1 })
+      : "—"
+  return (
+    <div className="flex h-9 items-center text-lg font-semibold tabular-nums text-foreground">
+      {display}
+    </div>
+  )
 }
 
 export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEvalOnCreate = false, reviewsSlot, existingExternalIds }: WorkFormProps) {
@@ -2642,20 +2668,33 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               {CRITERION_SLUGS.map((slug) => {
                 const info = CRITERIA_INFO[slug]
+                // Na EDIÇÃO de uma obra já avaliada, o craft é a sugestão da IA e vira read-only:
+                // o ajuste manual pré-leitura foi removido de propósito. A percepção do usuário
+                // entra no momento 2 (pós-leitura → attribute_bias), não aqui. Criação e obras sem
+                // eval IA seguem editáveis (única forma de dar craft a uma obra que a IA não tocou).
+                const locked = !isCreating && Boolean(aiEvaluation)
                 return (
                   <div key={slug} className="space-y-1">
                     {renderFieldLabel(slug, `${info.emoji} ${info.name}`, renderCriterionRubric(slug))}
-                    <Input
-                      id={slug}
-                      type="number"
-                      step={0.5}
-                      min={0}
-                      max={10}
-                      placeholder="—"
-                      {...register(slug, {
-                        setValueAs: optionalNumber,
-                      })}
-                    />
+                    {locked ? (
+                      <>
+                        <CriterionReadonlyValue control={control} name={slug as FieldPath<WorkFormInput>} />
+                        {/* Mantém o valor registrado pro submit sem input visível. */}
+                        <input type="hidden" {...register(slug, { setValueAs: optionalNumber })} />
+                      </>
+                    ) : (
+                      <Input
+                        id={slug}
+                        type="number"
+                        step={0.5}
+                        min={0}
+                        max={10}
+                        placeholder="—"
+                        {...register(slug, {
+                          setValueAs: optionalNumber,
+                        })}
+                      />
+                    )}
                     {criteriaJustifications[slug] && (
                       <div className="rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
                         <span className="font-medium text-foreground">IA: </span>
