@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils"
 // a "Recomendação Principal" (prosa + porquês) e o "Resumo do perfil de gosto".
 // Logado, essas telas puxam o dado real (taste_profile / recomendação). A obra-âncora
 // do card A é real e de votos altos (Raeliana, ~51,7 mil) só pra dar credibilidade à capa.
+type Stance = "love" | "avoid" | ""
+
 const ANCHOR = {
   title: "The Reason Why Raeliana Ended up at the Duke's Mansion",
   coverUrl: "https://media.kitsu.app/manga/poster_images/54519/original.jpg",
@@ -20,11 +22,36 @@ const ANCHOR = {
     "Nobreza + política — fantasy_nobility 9,1 no seu ideal",
     "Contrato falso que vira amor genuíno (o ML frio cai primeiro)",
   ],
-  tags: ["Contract Marriage", "Nobility", "Politics", "Transmigration"],
+  // stance: verde = você ama · vermelho = você evita · neutro = sem relação
+  tags: [
+    { name: "Contract Marriage", stance: "love" },
+    { name: "Nobility", stance: "love" },
+    { name: "Transmigration", stance: "love" },
+    { name: "Politics", stance: "" },
+    { name: "Love Triangle", stance: "avoid" },
+  ] as { name: string; stance: Stance }[],
+  queue: [
+    {
+      title: "The Remarried Empress",
+      cover: "https://media.kitsu.app/manga/poster_images/55733/original.png",
+      score: "9,0",
+    },
+    {
+      title: "I Shall Master This Family",
+      cover:
+        "https://uploads.mangadex.org/covers/f89ed57a-e4c0-48f5-b664-8ef88aa87fd9/56a636ca-405f-4524-ab7c-39b3b15c9880.jpg.512.jpg",
+      score: "8,8",
+    },
+  ],
 }
 
 const PROFILE = {
   worksLearned: "178 obras",
+  criteria: [
+    { icon: "👑", name: "Fantasia/Nobreza", min: 7.5, max: 9.5, weight: 90 },
+    { icon: "💑", name: "Dinâmica do Casal", min: 7.0, max: 9.5, weight: 88 },
+    { icon: "💕", name: "Romance", min: 7.0, max: 9.5, weight: 85 },
+  ],
   loved: ["Reincarnated FL", "Nobility", "Contract Marriage", "Regressed FL"],
   lovedMore: 24,
   avoided: ["Modern Era", "Netorare", "Slice-of-life"],
@@ -37,9 +64,42 @@ const PROFILE = {
   ],
 }
 
+// h-full + flex-col: cada card preenche a célula do carrossel (altura = a do card
+// mais alto), então os dois ficam com a MESMA altura ao alternar.
 const CARD_SHELL =
-  "rounded-2xl border border-border bg-card/75 p-4 shadow-[0_24px_50px_-26px_rgba(6,12,24,0.6)] backdrop-blur-md backdrop-saturate-150"
+  "flex h-full flex-col rounded-2xl border border-border bg-card/75 p-4 shadow-[0_24px_50px_-26px_rgba(6,12,24,0.6)] backdrop-blur-md backdrop-saturate-150"
 const CHIP_BASE = "rounded-md px-2 py-0.5 text-[11px] font-medium ring-1"
+
+function tagClass(stance: Stance): string {
+  if (stance === "love") return "bg-emerald-500/12 text-emerald-300 ring-emerald-500/30"
+  if (stance === "avoid") return "bg-rose-500/10 text-rose-300 ring-rose-500/30"
+  return "bg-muted/40 text-foreground/80 ring-border"
+}
+
+/** Barra de faixa ideal (0–10) com a janela do critério destacada + peso. */
+function CriterionRange({ icon, name, min, max, weight }: (typeof PROFILE.criteria)[number]) {
+  const left = (min / 10) * 100
+  const width = ((max - min) / 10) * 100
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-[11.5px] font-medium">
+          <span aria-hidden="true">{icon}</span>
+          {name}
+        </span>
+        <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+          {min.toFixed(1)}–{max.toFixed(1)} · {weight}%
+        </span>
+      </div>
+      <div className="relative mt-1.5 h-1.5 rounded-full bg-muted-foreground/15">
+        <div
+          className="absolute inset-y-0 rounded-full bg-primary"
+          style={{ left: `${left}%`, width: `${width}%` }}
+        />
+      </div>
+    </div>
+  )
+}
 
 function RecommendationCard() {
   return (
@@ -102,12 +162,42 @@ function RecommendationCard() {
       </div>
 
       <div className="mt-3 border-t border-border pt-3">
-        <p className="mb-2 text-[9px] font-bold uppercase tracking-[0.08em] text-muted-foreground">Tags da obra</p>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-[9px] font-bold uppercase tracking-[0.08em] text-muted-foreground">Tags da obra</p>
+          <span className="flex items-center gap-2 text-[9px] text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-emerald-400" /> você ama
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-rose-400" /> você evita
+            </span>
+          </span>
+        </div>
         <div className="flex flex-wrap gap-1.5">
           {ANCHOR.tags.map((t) => (
-            <span key={t} className={cn(CHIP_BASE, "bg-muted/40 text-foreground/80 ring-border")}>
-              {t}
+            <span key={t.name} className={cn(CHIP_BASE, tagClass(t.stance))}>
+              {t.name}
             </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 border-t border-border pt-3">
+        <p className="mb-2 text-[9px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
+          Próximas na sua fila prevista
+        </p>
+        <div className="flex flex-col gap-2">
+          {ANCHOR.queue.map((q) => (
+            <div key={q.title} className="flex items-center gap-2.5">
+              <CoverImage
+                url={q.cover}
+                alt={q.title}
+                loading="eager"
+                className="h-8 w-6 shrink-0 rounded object-cover ring-1 ring-white/10"
+              />
+              <span className="min-w-0 flex-1 truncate text-[12px]">{q.title}</span>
+              <span className="text-[12.5px] font-bold tabular-nums text-emerald-400">{q.score}</span>
+            </div>
           ))}
         </div>
       </div>
@@ -138,6 +228,17 @@ function ProfileCard() {
         reencarnadas que usam inteligência pra reescrever destinos trágicos — casamento de conveniência que vira amor
         genuíno, ML nobre e frio que se apaixona primeiro, com política e vingança ao fundo.
       </p>
+
+      <div className="mt-3.5">
+        <p className="mb-2.5 text-[9px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
+          Faixa ideal e peso por critério
+        </p>
+        <div className="flex flex-col gap-2.5">
+          {PROFILE.criteria.map((c) => (
+            <CriterionRange key={c.name} {...c} />
+          ))}
+        </div>
+      </div>
 
       <div className="mt-3.5 grid grid-cols-4 gap-2">
         {PROFILE.kpis.map((k) => (
@@ -174,6 +275,11 @@ function ProfileCard() {
           <span className="text-[10.5px] text-muted-foreground">+{PROFILE.avoidedMore}</span>
         </div>
       </div>
+
+      <p className="mt-3 border-t border-border pt-3 text-[11.5px] leading-relaxed text-muted-foreground">
+        <span className="font-semibold text-foreground">Você busca:</span> heroínas que voltam ao passado pra reescrever
+        o destino — vingança fria e romance que amadurece devagar.
+      </p>
     </div>
   )
 }
@@ -190,7 +296,22 @@ export function TastePreview() {
 
   return (
     <div className="w-full">
-      {CARDS[i].node}
+      {/* Os dois cards ocupam a MESMA célula do grid → a altura é a do mais alto e
+          não pula ao alternar; o inativo fica transparente e sem interação. */}
+      <div className="grid">
+        {CARDS.map((c, idx) => (
+          <div
+            key={c.key}
+            aria-hidden={idx !== i}
+            className={cn(
+              "col-start-1 row-start-1 transition-opacity duration-200",
+              idx === i ? "opacity-100" : "pointer-events-none opacity-0",
+            )}
+          >
+            {c.node}
+          </div>
+        ))}
+      </div>
 
       <div className="mt-3 flex items-center justify-center gap-3">
         <button
