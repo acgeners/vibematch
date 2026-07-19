@@ -191,6 +191,15 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     accent: "slate",
     sections: [
       {
+        id: "sync",
+        title: "Sincronização de constantes",
+        description:
+          "Regenera os arquivos locais de constantes a partir do Supabase. Só precisa quando o schema/tabelas de constantes do DB mudam.",
+        help: "Regenera os arquivos de constantes do código (critérios, status, plataformas…) a partir das tabelas do Supabase. Só é necessário quando o schema do banco muda — é uma tarefa rara, de manutenção/dev.",
+        icon: Database,
+        chips: [{ kind: "cadence", label: "Raro · dev" }],
+      },
+      {
         id: "on-create",
         title: "Comportamento na criação",
         description:
@@ -223,15 +232,6 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         icon: ShieldAlert,
         chips: [{ kind: "nature", label: "Curadoria" }],
         collapsible: true,
-      },
-      {
-        id: "sync",
-        title: "Sincronização de constantes",
-        description:
-          "Regenera os arquivos locais de constantes a partir do Supabase. Só precisa quando o schema/tabelas de constantes do DB mudam.",
-        help: "Regenera os arquivos de constantes do código (critérios, status, plataformas…) a partir das tabelas do Supabase. Só é necessário quando o schema do banco muda — é uma tarefa rara, de manutenção/dev.",
-        icon: Database,
-        chips: [{ kind: "cadence", label: "Raro · dev" }],
       },
     ],
   },
