@@ -27,7 +27,12 @@ const ANCHOR = {
     { name: "Contract Marriage", stance: "love" },
     { name: "Nobility", stance: "love" },
     { name: "Transmigration", stance: "love" },
+    { name: "Smart Female Lead", stance: "love" },
+    { name: "European Ambience", stance: "love" },
+    { name: "Male Lead Falls First", stance: "love" },
+    { name: "Fake Couple Becomes Genuine", stance: "love" },
     { name: "Politics", stance: "" },
+    { name: "Reverse Harem", stance: "avoid" },
     { name: "Love Triangle", stance: "avoid" },
   ] as { name: string; stance: Stance }[],
 }
