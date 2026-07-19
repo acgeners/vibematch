@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ArrowDown, ArrowRight, ChevronDown, Info, Layers } from "lucide-react"
+import { ArrowDownWideNarrow, ArrowRight, ChevronDown, Info, Layers, SlidersHorizontal } from "lucide-react"
 import { MaeHistoryChart } from "@/components/settings/calibration/mae-history-chart"
 import { Button } from "@/components/ui/button"
 import { AiPendingGuardDialog } from "@/components/settings/ai-pending-guard-dialog"
@@ -264,6 +264,25 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
         )}
 
         {/* ============================================================ */}
+        {/* DE ONDE VEM A NOTA (feature importance do Ridge)            */}
+        {/* Fica logo abaixo do KPI de precisão — os dois formam o par  */}
+        {/* "quão certeira / de onde vem".                              */}
+        {/* ============================================================ */}
+        {config.expected_ridge_coefficients && (
+          <div className="rounded-lg border border-border bg-card/50 p-4 space-y-2">
+            <RidgeFeatureImportance
+              ridge={config.expected_ridge_coefficients}
+              label="De onde vem a nota"
+            />
+            <p className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
+              O <span className="font-medium">ajuste de observação</span> que você define por obra é
+              aplicado por fora deste modelo, como soma determinística (±0,30) sobre a Nota Prevista —
+              por isso não aparece entre os pesos aprendidos acima.
+            </p>
+          </div>
+        )}
+
+        {/* ============================================================ */}
         {/* HISTÓRICO — MAE ao longo do tempo                            */}
         {/* ============================================================ */}
         <div className="rounded-lg border border-border bg-card/50 p-4 space-y-3">
@@ -286,23 +305,6 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
         {/* COMO A NOTA PREVISTA É MONTADA (pipeline didático)           */}
         {/* ============================================================ */}
         <ScorePipeline />
-
-        {/* ============================================================ */}
-        {/* DE ONDE VEM A NOTA (feature importance do Ridge)            */}
-        {/* ============================================================ */}
-        {config.expected_ridge_coefficients && (
-          <div className="rounded-lg border border-border bg-card/50 p-4 space-y-2">
-            <RidgeFeatureImportance
-              ridge={config.expected_ridge_coefficients}
-              label="De onde vem a nota"
-            />
-            <p className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
-              O <span className="font-medium">ajuste de observação</span> que você define por obra é
-              aplicado por fora deste modelo, como soma determinística (±0,30) sobre a Nota Prevista —
-              por isso não aparece entre os pesos aprendidos acima.
-            </p>
-          </div>
-        )}
 
         {/* Ponteiro: "Pesos automáticos" migrou pra Comportamento na criação */}
         <p className="flex items-start gap-1.5 px-1 text-[11px] text-muted-foreground/80">
@@ -661,29 +663,60 @@ function RidgeFeatureImportance({
         ))}
       </ul>
 
+      {/* Botão avançado: afordância de botão de verdade (ícone + título +
+          subtítulo + selo), não um link cinza — deixa claro que expande a
+          lista completa de pesos. */}
       <button
         type="button"
         onClick={() => setShowLegend((v) => !v)}
-        className="inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+        className={cn(
+          "flex w-full items-center gap-2.5 rounded-lg border border-border bg-muted/35 px-3 py-2 text-left transition-colors",
+          "hover:border-primary/50 hover:bg-primary/[0.08]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card",
+          showLegend && "border-primary/45 bg-primary/[0.07]",
+        )}
         aria-expanded={showLegend}
       >
+        <span className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/15 text-primary">
+          <SlidersHorizontal className="h-4 w-4" />
+        </span>
+        <span className="flex min-w-0 flex-col">
+          <span className="text-[13px] font-semibold text-foreground">
+            {showLegend ? "Ocultar pesos" : "Ver todos os pesos, sinal a sinal"}
+          </span>
+          <span className="text-[11px] text-muted-foreground">
+            {showLegend
+              ? "Voltar pra visão por família de sinais"
+              : "Cada feature do modelo e o quanto puxa a nota"}
+          </span>
+        </span>
+        {!showLegend && (
+          <span className="ml-auto shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+            avançado
+          </span>
+        )}
         <ChevronDown
-          className={cn("h-3 w-3 transition-transform", showLegend && "rotate-180")}
+          className={cn(
+            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            showLegend && "ml-auto rotate-180",
+          )}
         />
-        {showLegend ? "Ocultar pesos" : "Ver todos os pesos, sinal a sinal (avançado)"}
       </button>
 
       {showLegend && (
         <div className="space-y-2 border-t border-border/40 pt-2">
-          {/* Legenda logo abaixo do controle de expandir: ordem + sinal +/− */}
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground/70">
-            <span className="inline-flex items-center gap-1">
-              <ArrowDown className="h-3 w-3" />
-              do maior pro menor peso
+          {/* Legenda logo abaixo do controle de expandir: ordem + sinal +/−.
+              Ícone de "ordenar (maior→menor)", NÃO uma seta simples — pra não
+              brigar com o chevron de recolher logo acima (antes eram duas
+              setas em direções opostas, o que confundia). */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground/70">
+            <span className="inline-flex items-center gap-1.5">
+              <ArrowDownWideNarrow className="h-3.5 w-3.5" />
+              Ordenado do maior pro menor peso
             </span>
-            <span className="flex gap-3">
+            <span className="ml-auto flex gap-3">
               <span className="inline-flex items-center gap-1">
-                <span className="font-semibold text-emerald-500">+</span> pra cima
+                <span className="font-semibold text-emerald-500">+</span> puxa a nota pra cima
               </span>
               <span className="inline-flex items-center gap-1">
                 <span className="font-semibold text-rose-500">−</span> pra baixo
