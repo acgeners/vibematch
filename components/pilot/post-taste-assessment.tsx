@@ -68,14 +68,18 @@ export function PostTasteAssessment({ workId, criteria, initialScores, endingApp
     scheduleSave()
   }
 
-  // Nota calculada = média dos eixos DISPONÍVEIS (o "Final" travado sai da conta por ser
-  // null). É só exibição: NÃO alimenta `user_score` (que segue a média craft por ora).
-  const aspectScores = aspects
+  // Nota de gosto calculada = média dos 7 eixos do RÓTULO (todos menos o "Final"). É a MESMA
+  // conta de `computeTasteUserScore`, que vira o `user_score` da obra: com os 7 preenchidos, este
+  // número é idêntico à "Real" da página. O "Final" fica de fora de propósito (piora como rótulo —
+  // PR #153); ele segue avaliável na tela como feature, só não entra nesta média. Antes de os 7
+  // fecharem, isto é só um preview parcial (não há `user_score` gravado ainda).
+  const labelScores = aspects
+    .filter((c) => !c.allowsNa)
     .map((c) => scores[c.key])
     .filter((v): v is number => v != null)
   const calcScore =
-    aspectScores.length > 0
-      ? Math.round((aspectScores.reduce((a, b) => a + b, 0) / aspectScores.length) * 10) / 10
+    labelScores.length > 0
+      ? Math.round((labelScores.reduce((a, b) => a + b, 0) / labelScores.length) * 10) / 10
       : null
 
   const row = (crit: TasteCriterion, goal: boolean) => {
