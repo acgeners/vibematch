@@ -25,6 +25,39 @@ export const TASTE_SCORE_KEYS = [
 
 export type TasteScoreKey = (typeof TASTE_SCORE_KEYS)[number]
 
+/**
+ * Os eixos que COMPÕEM o rótulo de gosto (`user_score`): os 7 aspectos, SEM o "Final"
+ * (`like_ending_score`). O experimento de rótulo (PR #153, `scripts/taste-label-experiment.ts`)
+ * mostrou que incluir o Final como componente do rótulo PIORA a previsão (R² 0.472 → 0.419);
+ * ele continua sendo exibido e pode virar feature, mas não entra no rótulo. Conjunto FIXO de
+ * propósito — ver `computeTasteUserScore`.
+ */
+export const TASTE_LABEL_KEYS = TASTE_SCORE_KEYS.filter(
+  (k) => k !== "like_ending_score",
+) as Array<Exclude<TasteScoreKey, "like_ending_score">>
+
+/**
+ * Deriva a nota pessoal (`user_score`) da avaliação por GOSTO: média simples dos 7 eixos
+ * fixos (`TASTE_LABEL_KEYS`). É esta a nota que treina o Ridge do dono, a Chance e o ledger.
+ *
+ * ⚠️ Conjunto FIXO, tudo-ou-nada: se QUALQUER um dos 7 falta, devolve `null` (não grava). O
+ * experimento mostrou que "média dos disponíveis" injeta ruído (nº de eixos heterogêneo derruba
+ * o R² 0.472 → 0.419) — por isso não caímos numa média parcial.
+ */
+export function computeTasteUserScore(
+  scores: Partial<Record<TasteScoreKey, number | null>>,
+): number | null {
+  const vals: number[] = []
+  for (const k of TASTE_LABEL_KEYS) {
+    const v = scores[k]
+    if (v == null || !Number.isFinite(Number(v))) return null
+    vals.push(Number(v))
+  }
+  if (vals.length === 0) return null
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length
+  return Math.round(mean * 10) / 10
+}
+
 export interface TasteCriterion {
   slug: string
   key: TasteScoreKey
