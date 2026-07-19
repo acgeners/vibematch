@@ -1,9 +1,14 @@
 import { LogoMark } from "@/components/ui/logo-mark"
 
 /** Marca do SatorIA — badge (lótus/bússola) + "SatorIA" com o "IA" destacado. */
-export function Wordmark({ size = "md" }: { size?: "md" | "sm" }) {
-  const mark = size === "sm" ? "size-[30px] rounded-[9px]" : "size-[34px] rounded-[10px]"
-  const text = size === "sm" ? "text-[19px]" : "text-2xl"
+export function Wordmark({ size = "md" }: { size?: "lg" | "md" | "sm" }) {
+  const mark =
+    size === "sm"
+      ? "size-[30px] rounded-[9px]"
+      : size === "lg"
+        ? "size-[46px] rounded-[13px]"
+        : "size-[34px] rounded-[10px]"
+  const text = size === "sm" ? "text-[19px]" : size === "lg" ? "text-[31px]" : "text-2xl"
 
   return (
     <div className="flex items-center gap-2.5">
