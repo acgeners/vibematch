@@ -161,8 +161,8 @@ export async function AuthHero() {
       <div className="authhero-veil" aria-hidden="true" />
 
       <div className="relative z-[2] flex h-full flex-col justify-between gap-6 p-[46px]">
-        <Wordmark />
-        <div className="flex w-full flex-col gap-6 md:w-[54%]">
+        <Wordmark size="lg" />
+        <div className="flex w-full flex-col gap-6 md:w-[64%]">
           <h1 className="text-[30px] font-extrabold leading-[1.15] tracking-[-0.02em] text-balance">
             Seu catálogo de manhwas com uma IA que <span className="text-primary">aprende o seu gosto</span>.
           </h1>
