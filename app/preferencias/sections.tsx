@@ -73,7 +73,7 @@ export function buildPreferencesGroups(plan: string, isAdmin: boolean): Settings
           id: "adult-content",
           title: "Conteúdo adulto (18+)",
           description: "Exibir ou ocultar obras classificadas como adultas (18+).",
-          help: "Quando ligado, obras 18+ ficam desfocadas na página da obra (com botão de revelar) e somem das listas — ranking, catálogo, recomendações e favoritos. A marca 🔞 18+ continua visível ao lado do título. Desligado por padrão. A classificação 18+ vem de tags de conteúdo sexual explícito (com 2ª opinião da IA nas dúvidas) e pode ser corrigida obra a obra pelo Curador.",
+          help: "Ligado por padrão: obras 18+ aparecem normalmente. Desligue para desfocá-las na página da obra (com botão de revelar) e tirá-las das listas — ranking, catálogo, recomendações e favoritos. A marca 🔞 18+ continua visível ao lado do título. A classificação 18+ vem de tags de conteúdo sexual explícito (com 2ª opinião da IA nas dúvidas) e pode ser corrigida obra a obra pelo Curador.",
           icon: ShieldAlert,
         },
       ],

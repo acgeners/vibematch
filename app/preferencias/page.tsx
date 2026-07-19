@@ -136,7 +136,7 @@ async function ItemBody({ section, isAdmin }: { section: SettingsSection; isAdmi
 
     case "adult-content": {
       const hideAdult = await getHideAdultContent()
-      return <HideAdultContentToggle initialEnabled={hideAdult} />
+      return <HideAdultContentToggle initialHidden={hideAdult} />
     }
 
     case "preference-rules": {
