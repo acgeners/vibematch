@@ -599,7 +599,7 @@ function ReadingCard({
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
                 Último lido
               </span>
-              <div className="flex items-center rounded-lg border border-border/80">
+              <div className="flex h-8 items-center rounded-lg border border-border/80">
                 <button
                   type="button"
                   onClick={() => bump(-1)}
@@ -622,27 +622,35 @@ function ReadingCard({
                 </button>
               </div>
             </div>
-            <span className="mb-1.5 text-muted-foreground/50">→</span>
+            <span className="flex h-8 items-center text-muted-foreground/50">→</span>
             <Stat label="Último lançado" value={lancado ?? "—"} highlight={result?.hasNew} />
             {result?.hasNew && (
-              <Badge className="mb-1 gap-1 border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                +{result.delta != null ? Math.max(1, wholeChapters(result.delta)) : ""} novo
-                {result.delta != null && Math.max(1, wholeChapters(result.delta)) !== 1 ? "s" : ""}
-              </Badge>
+              <span className="flex h-8 items-center">
+                <Badge className="gap-1 border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                  +{result.delta != null ? Math.max(1, wholeChapters(result.delta)) : ""} novo
+                  {result.delta != null && Math.max(1, wholeChapters(result.delta)) !== 1 ? "s" : ""}
+                </Badge>
+              </span>
             )}
-            {saving && <Loader2 className="mb-1.5 size-3.5 animate-spin text-muted-foreground/60" />}
+            {saving && (
+              <span className="flex h-8 items-center">
+                <Loader2 className="size-3.5 animate-spin text-muted-foreground/60" />
+              </span>
+            )}
 
-            {/* Botão discreto de "marcar até o último", à direita da linha dos capítulos. */}
+            {/* Botão de "marcar até o último", à direita da linha dos capítulos. */}
             {canMarkLatest && (
-              <button
-                type="button"
-                onClick={markLatest}
-                title={`Marcar como lido até o capítulo ${wholeChapters(lancado)}`}
-                className="mb-0.5 ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400"
-              >
-                <CheckCheck className="size-3.5" />
-                Marcar até o {wholeChapters(lancado)}
-              </button>
+              <span className="ml-auto flex h-8 items-center">
+                <button
+                  type="button"
+                  onClick={markLatest}
+                  title={`Marcar como lido até o capítulo ${wholeChapters(lancado)}`}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400"
+                >
+                  <CheckCheck className="size-3.5" />
+                  Marcar até o {wholeChapters(lancado)}
+                </button>
+              </span>
             )}
           </div>
 
@@ -727,16 +735,18 @@ function Stat({
   highlight?: boolean
 }) {
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col gap-1">
       <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
-      <span
-        className={cn(
-          "text-xl font-bold tabular-nums leading-none",
-          highlight ? "text-emerald-500" : "text-foreground",
-        )}
-      >
-        {value}
-      </span>
+      <div className="flex h-8 items-center">
+        <span
+          className={cn(
+            "text-xl font-bold tabular-nums leading-none",
+            highlight ? "text-emerald-500" : "text-foreground",
+          )}
+        >
+          {value}
+        </span>
+      </div>
     </div>
   )
 }
