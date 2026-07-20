@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useState, useMemo, useTransition, useEffect, useRef } from "react"
+import { useState, useMemo, useTransition, useEffect, useRef } from "react"
 import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
 import {
@@ -114,22 +114,17 @@ function progressOf(w: ReadingWork, result: ReadingUpdateResult | undefined): nu
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Estado de leitura: separa "acompanha de perto" de "desacelerou" cruzando 3 sinais —
-// quanto falta (gap), quanto do que saiu já foi lido (%) e HÁ QUANTO TEMPO não lê (recência).
-//
-// Calibrado nos dados reais (2026-07-20, 25 obras): as obras "largadas" do usuário NÃO têm
-// % baixo — têm % médio/alto mas ~4 meses sem abrir. Ou seja, o que separa "acompanha
-// religiosamente" de "desacelerou" é a RECÊNCIA, não o %. Por isso a banda "Parado" é dirigida
-// por frieza (independe do %); o % vira textura (tag "recém-começou" + ordenação dentro da banda).
-// Os cortes são o ponto de ajuste — recalibre se a distribuição mudar.
+// Estado de leitura: separa as obras acompanhadas por QUANTO FALTA LER (% lido), NÃO pela data.
+// % baixo = muitos capítulos pela frente. A recência (última leitura) não muda de banda uma obra
+// que você só pausou perto do fim — ela vira só textura: a linha "Última leitura" no card e a tag
+// "recém-começou" (< 40% lido, mas aberto nos últimos dias). Os cortes de % são o ponto de ajuste.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ReadingState = "uptodate" | "onpace" | "slowing" | "behind"
 
-const ONPACE_PCT = 0.8 // ≥ 80% lido e não-frio → colado no front (poucos capítulos pra alcançar)
-const SLOWING_PCT = 0.4 // < 40% lido + recente → "recém-começou"; abaixo disso vira só textura
-const RECENT_DAYS = 14 // lida nos últimos 14 dias → lendo agora
-const COLD_DAYS = 45 // sem leitura há mais de ~6 semanas → "Parado" (calibrado nos dados reais)
+const ONPACE_PCT = 0.8 // ≥ 80% lido → No ritmo (faltam poucos capítulos)
+const SLOWING_PCT = 0.4 // 40–80% → Desacelerando; < 40% → Muito atrás (backlog grande)
+const RECENT_DAYS = 14 // só pra tag "recém-começou": < 40% lido mas aberto nos últimos 14 dias
 
 const READING_STATE_ORDER: ReadingState[] = ["uptodate", "onpace", "slowing", "behind"]
 
@@ -146,21 +141,21 @@ const READING_STATE_CONFIG: Record<
   },
   onpace: {
     label: "No ritmo",
-    hint: "lendo agora — ou colado no último capítulo",
+    hint: "≥ 80% lido — faltam poucos capítulos",
     bar: "bg-lime-500",
     progress: "bg-lime-500",
     chip: "border-lime-500/30 bg-lime-500/15 text-lime-600 dark:text-lime-400",
   },
   slowing: {
     label: "Desacelerando",
-    hint: "esfriando — algumas semanas sem abrir",
+    hint: "40–80% lido",
     bar: "bg-amber-500",
     progress: "bg-amber-500",
     chip: "border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400",
   },
   behind: {
-    label: "Atrasado / Parado",
-    hint: "sem leitura há mais de ~6 semanas",
+    label: "Muito atrás",
+    hint: "menos de 40% lido — backlog grande",
     bar: "bg-rose-500",
     progress: "bg-rose-500",
     chip: "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400",
@@ -175,52 +170,41 @@ function daysSince(iso: string | null): number {
   return differenceInCalendarDays(new Date(), d)
 }
 
-/**
- * Classifica a obra numa das 4 bandas (recência-primeiro). `recentlyStarted` = está "No ritmo"
- * só pela recência apesar de estar longe do front (< 40% lido) — provavelmente recém-começou ou
- * voltou a ler; é agrupada à parte pra não se confundir com quem está colado no fim.
- */
+/** Classifica a obra numa das 4 bandas, por % lido (a data NÃO entra aqui — vira só textura no card). */
 function classifyReadingState(
   w: ReadingWork,
   result: ReadingUpdateResult | undefined,
-): { state: ReadingState; recentlyStarted: boolean } {
+): ReadingState {
   const pending = pendingOf(w, result, w.chaptersRead ?? 0)
   const pct = progressOf(w, result)
-  // Sem total conhecido não dá pra medir progresso: fica em "No ritmo" (neutro) em vez
-  // de cair injustamente em "Atrasado".
-  if (pending == null || pct == null) return { state: "onpace", recentlyStarted: false }
-  if (pending === 0) return { state: "uptodate", recentlyStarted: false }
-
-  const days = daysSince(w.lastReadAt)
-  // Frio primeiro: sem abrir há > 6 semanas = "Parado", mesmo com % alto (pausou perto do fim).
-  if (days > COLD_DAYS) return { state: "behind", recentlyStarted: false }
-  if (pct >= ONPACE_PCT) return { state: "onpace", recentlyStarted: false } // colado no front
-  if (days <= RECENT_DAYS) return { state: "onpace", recentlyStarted: pct < SLOWING_PCT } // lendo agora
-  return { state: "slowing", recentlyStarted: false } // esfriando (RECENT–COLD dias, longe do front)
+  // Sem total conhecido não dá pra medir progresso: fica em "No ritmo" (neutro).
+  if (pending == null || pct == null) return "onpace"
+  if (pending === 0) return "uptodate"
+  if (pct >= ONPACE_PCT) return "onpace"
+  if (pct >= SLOWING_PCT) return "slowing"
+  return "behind"
 }
 
-type BandItem = { work: ReadingWork; recentlyStarted: boolean }
+/** "Recém-começou": pouco lido (< 40%) mas aberto há pouco — tag de textura, não muda de banda. */
+function isRecentlyStarted(w: ReadingWork, result: ReadingUpdateResult | undefined): boolean {
+  const pct = progressOf(w, result)
+  return pct != null && pct < SLOWING_PCT && daysSince(w.lastReadAt) <= RECENT_DAYS
+}
 
-/** Agrupa as obras (já filtradas/ordenadas) nas bandas, em ordem de engajamento. */
+/** Agrupa as obras (já filtradas/ordenadas) nas bandas, na ordem das bandas. */
 function groupIntoBands(
   works: ReadingWork[],
   results: Record<string, ReadingUpdateResult>,
-): Array<{ state: ReadingState; items: BandItem[] }> {
-  const buckets: Record<ReadingState, BandItem[]> = {
+): Array<{ state: ReadingState; works: ReadingWork[] }> {
+  const buckets: Record<ReadingState, ReadingWork[]> = {
     uptodate: [],
     onpace: [],
     slowing: [],
     behind: [],
   }
-  for (const work of works) {
-    const { state, recentlyStarted } = classifyReadingState(work, results[work.id])
-    buckets[state].push({ work, recentlyStarted })
-  }
-  // Dentro de "No ritmo", os "lendo agora / longe do front" descem pro fim (sob divisória).
-  // sort estável (ES2019): preserva a ordem original de `works` dentro de cada subgrupo.
-  buckets.onpace.sort((a, b) => Number(a.recentlyStarted) - Number(b.recentlyStarted))
-  return READING_STATE_ORDER.map((state) => ({ state, items: buckets[state] })).filter(
-    (b) => b.items.length > 0,
+  for (const w of works) buckets[classifyReadingState(w, results[w.id])].push(w)
+  return READING_STATE_ORDER.map((state) => ({ state, works: buckets[state] })).filter(
+    (b) => b.works.length > 0,
   )
 }
 
@@ -230,7 +214,7 @@ function tallyStates(
   results: Record<string, ReadingUpdateResult>,
 ): Record<ReadingState, number> {
   const counts: Record<ReadingState, number> = { uptodate: 0, onpace: 0, slowing: 0, behind: 0 }
-  for (const w of works) counts[classifyReadingState(w, results[w.id]).state]++
+  for (const w of works) counts[classifyReadingState(w, results[w.id])]++
   return counts
 }
 
@@ -535,7 +519,7 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
               open={isOpen("ongoing")}
               onToggle={() => toggleSection("ongoing")}
             >
-              <BandedGrid works={ongoing} results={results} />
+              <BandedGrid works={ongoing} results={results} sectionKey="ongoing" />
             </ReadingSection>
           )}
           {others.length > 0 && (
@@ -546,7 +530,7 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
               open={isOpen("others")}
               onToggle={() => toggleSection("others")}
             >
-              <BandedGrid works={others} results={results} />
+              <BandedGrid works={others} results={results} sectionKey="others" />
             </ReadingSection>
           )}
         </div>
@@ -596,7 +580,11 @@ function ReadingSection({
   )
 }
 
-/** Faixa-resumo do topo: barra segmentada + legenda com a contagem por estado. */
+/**
+ * Nav FIXA do topo: barra segmentada + abas por banda. Clicar (aba ou segmento) rola até a banda;
+ * a aba ativa acompanha a rolagem (scrollspy via IntersectionObserver sobre os `[data-band-state]`).
+ * Rola pra PRIMEIRA ocorrência da banda no DOM — "Em andamento" vem antes de "Concluída".
+ */
 function ReadingStateSummary({
   works,
   results,
@@ -605,35 +593,77 @@ function ReadingStateSummary({
   results: Record<string, ReadingUpdateResult>
 }) {
   const counts = useMemo(() => tallyStates(works, results), [works, results])
+  const [active, setActive] = useState<ReadingState | null>(null)
+
+  useEffect(() => {
+    const els = Array.from(document.querySelectorAll<HTMLElement>("[data-band-state]"))
+    if (els.length === 0) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        const top = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+        if (top) setActive(top.target.getAttribute("data-band-state") as ReadingState)
+      },
+      // Faixa de "leitura" logo abaixo da nav fixa; ignora o rodapé pra não piscar.
+      { rootMargin: "-140px 0px -55% 0px", threshold: [0.01, 0.25, 0.5] },
+    )
+    els.forEach((el) => io.observe(el))
+    return () => io.disconnect()
+  }, [works, results])
+
+  const jump = (s: ReadingState) => {
+    const el = document.querySelector<HTMLElement>(`[data-band-state="${s}"]`)
+    if (!el) return
+    setActive(s)
+    el.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
   if (works.length === 0) return null
+  const present = READING_STATE_ORDER.filter((s) => counts[s] > 0)
+
   return (
-    <div className="rounded-xl border border-border bg-card/40 p-3.5">
+    <div className="sticky top-0 z-10 rounded-xl border border-border bg-background/85 px-3.5 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-background/70">
       <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        Seu ritmo nas {works.length} obras que você acompanha
+        Seu ritmo nas {works.length} obras
+        <span className="ml-1.5 lowercase tracking-normal text-muted-foreground/60">· clique pra pular</span>
       </p>
-      <div className="mb-3 flex h-2 gap-0.5 overflow-hidden rounded-full">
-        {READING_STATE_ORDER.filter((s) => counts[s] > 0).map((s) => (
-          <div
+      <div className="mb-2.5 flex h-2 gap-0.5 overflow-hidden rounded-full">
+        {present.map((s) => (
+          <button
             key={s}
-            className={cn("h-full", READING_STATE_CONFIG[s].bar)}
+            type="button"
+            aria-label={`Ir para ${READING_STATE_CONFIG[s].label} (${counts[s]})`}
+            onClick={() => jump(s)}
+            className={cn("h-full cursor-pointer transition-[filter] hover:brightness-125", READING_STATE_CONFIG[s].bar)}
             style={{ flexGrow: counts[s] }}
-            title={`${READING_STATE_CONFIG[s].label}: ${counts[s]}`}
           />
         ))}
       </div>
-      <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+      <div className="flex flex-wrap gap-1.5">
         {READING_STATE_ORDER.map((s) => {
           const cfg = READING_STATE_CONFIG[s]
+          const disabled = counts[s] === 0
+          const isActive = active === s && !disabled
           return (
-            <div
+            <button
               key={s}
-              className={cn("flex items-center gap-1.5 text-xs", counts[s] === 0 && "opacity-40")}
+              type="button"
+              disabled={disabled}
+              onClick={() => jump(s)}
+              aria-current={isActive ? "true" : undefined}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors",
+                "disabled:pointer-events-none disabled:opacity-40",
+                isActive
+                  ? cfg.chip
+                  : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
             >
               <span className={cn("size-2 rounded-[3px]", cfg.bar)} />
-              <span className="font-medium text-foreground">{cfg.label}</span>
-              <span className="tabular-nums text-muted-foreground">{counts[s]}</span>
-              <span className="hidden text-[11px] text-muted-foreground/60 md:inline">{cfg.hint}</span>
-            </div>
+              <span className="font-medium">{cfg.label}</span>
+              <span className="tabular-nums">{counts[s]}</span>
+            </button>
           )
         })}
       </div>
@@ -645,21 +675,25 @@ function ReadingStateSummary({
 function BandedGrid({
   works,
   results,
+  sectionKey,
 }: {
   works: ReadingWork[]
   results: Record<string, ReadingUpdateResult>
+  sectionKey: SectionKey
 }) {
   const bands = useMemo(() => groupIntoBands(works, results), [works, results])
   return (
-    <div className="space-y-5">
-      {bands.map(({ state, items }) => {
+    <div className="space-y-6">
+      {bands.map(({ state, works: items }) => {
         const cfg = READING_STATE_CONFIG[state]
-        // "No ritmo" pode ter um subgrupo "lendo agora / longe do front" no fim da banda.
-        // splitAt > 0 garante que existe mainstream ANTES da divisória (senão não a mostra).
-        const splitAt = state === "onpace" ? items.findIndex((i) => i.recentlyStarted) : -1
-        const hasSplit = splitAt > 0
         return (
-          <div key={state} className="space-y-2.5">
+          // `scroll-mt` reserva a altura da nav fixa pra o cabeçalho não sumir sob ela ao pular.
+          <div
+            key={state}
+            id={`band-${sectionKey}-${state}`}
+            data-band-state={state}
+            className="scroll-mt-32 space-y-2.5"
+          >
             <div className="flex items-center gap-2.5">
               <span className={cn("h-3.5 w-1 shrink-0 rounded-full", cfg.bar)} />
               <h3 className="text-sm font-semibold">{cfg.label}</h3>
@@ -671,16 +705,8 @@ function BandedGrid({
               </span>
             </div>
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {items.map(({ work }, i) => (
-                <Fragment key={work.id}>
-                  {hasSplit && i === splitAt && (
-                    <div className="col-span-full flex items-center gap-2 pt-0.5 text-[10.5px] uppercase tracking-wide text-muted-foreground/60">
-                      lendo agora · ainda longe do front
-                      <span className="h-px flex-1 bg-border" />
-                    </div>
-                  )}
-                  <ReadingCard work={work} result={results[work.id]} state={state} />
-                </Fragment>
+              {items.map((work) => (
+                <ReadingCard key={work.id} work={work} result={results[work.id]} state={state} />
               ))}
             </div>
           </div>
@@ -869,6 +895,11 @@ function ReadingCard({
               <span className="flex items-center gap-1.5 text-muted-foreground/70">
                 <BookOpenCheck className="size-3.5 shrink-0" /> Última leitura:{" "}
                 {formatRelativeDate(work.lastReadAt)}
+                {isRecentlyStarted(work, result) && (
+                  <span className="font-medium text-rose-600 dark:text-rose-400">
+                    · recém-começou
+                  </span>
+                )}
               </span>
             )}
             {result?.failed ? (
