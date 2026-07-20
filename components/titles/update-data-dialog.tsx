@@ -9,8 +9,11 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
+import { ChipInput } from "@/components/ui/chip-input"
 import { Separator } from "@/components/ui/separator"
+import { GENRE_NAMES, TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
 import {
   Dialog,
   DialogContent,
@@ -107,7 +110,9 @@ function getConflicts(current: CurrentWork, external: ExternalWorkData): FieldCo
 }
 
 interface SynopsisChoice {
-  source: ExternalSourceId
+  // `string` e não `ExternalSourceId`: uma sinopse manual entra com source "manual",
+  // que não faz parte do union de fontes externas (mesma convenção da capa manual).
+  source: string
   text: string
   included: boolean
   isPrimary: boolean
@@ -194,7 +199,7 @@ export function UpdateDataDialog({
     if (!isControlled) setUncontrolledOpen(v)
     onOpenChange?.(v)
   }
-  const [phase, setPhase] = useState<"sources" | "refreshing" | "search" | "synopses-pick" | "covers-pick" | "conflicts" | "saving">(
+  const [phase, setPhase] = useState<"sources" | "refreshing" | "search" | "synopses-pick" | "covers-pick" | "tags-pick" | "conflicts" | "saving">(
     withSourceStep ? "sources" : "refreshing"
   )
   const [pendingData, setPendingData] = useState<ExternalWorkData | null>(null)
@@ -203,8 +208,14 @@ export function UpdateDataDialog({
   const [conflicts, setConflicts] = useState<FieldConflict[]>([])
   const [resolutions, setResolutions] = useState<Record<string, "current" | "external">>({})
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
+  // Adicionar sinopse manual (item 3): botão que revela o campo, oculto por padrão.
+  const [synManualOpen, setSynManualOpen] = useState(false)
+  const [synManualText, setSynManualText] = useState("")
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
   const [coversNeedPick, setCoversNeedPick] = useState(false)
+  // Passo de revisão de tags/gêneros (item 4A) — aditivo: revisa só o que veio das fontes.
+  const [tagChoices, setTagChoices] = useState<string[]>([])
+  const [genreChoices, setGenreChoices] = useState<string[]>([])
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [activeRefineUrl, setActiveRefineUrl] = useState<string | null>(null)
   // Capa por link manual durante a seleção (mesmo recurso do CoversManager na edição).
@@ -253,27 +264,37 @@ export function UpdateDataDialog({
       (savedCovers.length === 0 && externalCovers.length > 1) ||
       (savedCovers.length > 0 && newExternal.length > 0)
 
-    if (synopses.length > 1 || coversNeedPick) {
-      setPendingData(data)
-      setSynopsisChoices(
-        synopses.map((s, i) => ({
-          source: s.source,
-          text: s.text,
-          included: true,
-          isPrimary: i === 0,
-        }))
-      )
-      setCoverChoices(pool)
-      setCoversNeedPick(coversNeedPick)
-      if (synopses.length > 1) {
-        setPhase("synopses-pick")
-      } else {
-        setActiveRefineUrl(pool.find((c) => c.included)?.url ?? pool[0]?.url ?? null)
-        setPhase("covers-pick")
-      }
-      return
-    }
-    proceedToConflictsOrApply(data)
+    setPendingData(data)
+    setSynopsisChoices(
+      synopses.map((s, i) => ({
+        source: s.source,
+        text: s.text,
+        included: true,
+        isPrimary: i === 0,
+      }))
+    )
+    setSynManualOpen(false)
+    setSynManualText("")
+    setCoverChoices(pool)
+    setCoversNeedPick(coversNeedPick)
+    setActiveRefineUrl(pool.find((c) => c.included)?.url ?? pool[0]?.url ?? null)
+    setTagChoices(data.tags ?? [])
+    setGenreChoices(data.genres ?? [])
+    // Item 3: o passo de sinopse aparece SEMPRE (mesmo com 0-1 externa) pra você poder
+    // digitar uma manual. Os passos de capa (se houver decisão) e de tags vêm depois.
+    setPhase("synopses-pick")
+  }
+
+  // Adiciona uma sinopse manual à lista do passo de sinopses (source "manual").
+  const addManualSynopsis = () => {
+    const text = synManualText.trim()
+    if (!text) return
+    setSynopsisChoices((prev) => [
+      ...prev,
+      { source: "manual", text, included: true, isPrimary: prev.length === 0 },
+    ])
+    setSynManualText("")
+    setSynManualOpen(false)
   }
 
   const proceedToConflictsOrApply = (
@@ -338,13 +359,18 @@ export function UpdateDataDialog({
       preResolved.coverUrl = "external"
     }
 
+    // Tags/gêneros revisados no passo de tags (item 4A, aditivo). Vazios = nada é enviado
+    // e o server preserva as tags existentes; não-vazios são ADICIONADOS (syncWorkTagsPartial).
+    next.tags = tagChoices
+    next.genres = genreChoices
+
     proceedToConflictsOrApply(next, preResolved)
   }
 
   const handleConfirmSynopses = () => {
     if (!pendingData) return
-    // Vai pra galeria de capas só quando há decisão de capa a tomar; senão
-    // finaliza direto (as capas atuais são preservadas).
+    // Vai pra galeria de capas só quando há decisão de capa a tomar; senão pula direto
+    // pro passo de tags (as capas atuais são preservadas).
     if (coversNeedPick) {
       const initialUrl =
         coverChoices.find((c) => c.included && c.isPrimary)?.url ??
@@ -355,10 +381,15 @@ export function UpdateDataDialog({
       setPhase("covers-pick")
       return
     }
-    finalizeChoicesAndProceed()
+    setPhase("tags-pick")
   }
 
   const handleConfirmCovers = () => {
+    if (!pendingData) return
+    setPhase("tags-pick")
+  }
+
+  const handleConfirmTags = () => {
     if (!pendingData) return
     finalizeChoicesAndProceed()
   }
@@ -660,8 +691,12 @@ export function UpdateDataDialog({
     setPendingData(null)
     setConflicts([])
     setSynopsisChoices([])
+    setSynManualOpen(false)
+    setSynManualText("")
     setCoverChoices([])
     setCoversNeedPick(false)
+    setTagChoices([])
+    setGenreChoices([])
     setPreviewUrl(null)
     setActiveRefineUrl(null)
     setManualCoverUrl("")
@@ -736,20 +771,27 @@ export function UpdateDataDialog({
           {phase === "synopses-pick" && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Múltiplas sinopses vieram das fontes. Marque quais incluir e qual é a principal.
+                Marque quais sinopses incluir e qual é a principal — ou escreva a sua.
               </p>
 
               <section className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-medium">Sinopses</h3>
-                  <label className="flex items-center gap-1.5 cursor-pointer text-xs">
-                    <Checkbox
-                      checked={allSynopsesIncluded ? true : someSynopsesIncluded ? "indeterminate" : false}
-                      onCheckedChange={toggleAllSynopses}
-                    />
-                    Selecionar todas
-                  </label>
+                  {synopsisChoices.length > 0 && (
+                    <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+                      <Checkbox
+                        checked={allSynopsesIncluded ? true : someSynopsesIncluded ? "indeterminate" : false}
+                        onCheckedChange={toggleAllSynopses}
+                      />
+                      Selecionar todas
+                    </label>
+                  )}
                 </div>
+                {synopsisChoices.length === 0 && (
+                  <p className="rounded-md border border-dashed p-3 text-xs italic text-muted-foreground">
+                    Nenhuma sinopse veio das fontes. Você pode escrever uma manual abaixo.
+                  </p>
+                )}
                 {synopsisChoices.map((s, idx) => (
                   <div
                     key={`${s.source}-${idx}`}
@@ -782,6 +824,44 @@ export function UpdateDataDialog({
                     <p className="text-xs text-muted-foreground line-clamp-6 whitespace-pre-wrap">{s.text}</p>
                   </div>
                 ))}
+
+                {/* Adicionar sinopse manual (item 3): botão que revela o campo. */}
+                {synManualOpen ? (
+                  <div className="space-y-2 rounded-md border border-dashed border-emerald-500/50 bg-emerald-500/5 p-3">
+                    <p className="text-xs font-medium text-muted-foreground">Nova sinopse manual</p>
+                    <Textarea
+                      value={synManualText}
+                      onChange={(e) => setSynManualText(e.target.value)}
+                      rows={3}
+                      placeholder="Escreva uma sinopse própria…"
+                      className="resize-y text-sm"
+                      autoFocus
+                    />
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setSynManualOpen(false); setSynManualText("") }}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button size="sm" onClick={addManualSynopsis} disabled={!synManualText.trim()}>
+                        Adicionar
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSynManualOpen(true)}
+                    className="gap-1 border-dashed text-primary hover:border-solid"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Adicionar sinopse manual
+                  </Button>
+                )}
               </section>
 
               <Separator />
@@ -802,7 +882,6 @@ export function UpdateDataDialog({
           {phase === "covers-pick" && (() => {
             const activeCover =
               coverChoices.find((c) => c.url === activeRefineUrl) ?? coverChoices[0] ?? null
-            const canGoBackToSynopses = synopsisChoices.length > 1
             return (
               <div className="space-y-4">
                 <div className="flex items-center justify-between gap-3">
@@ -954,13 +1033,8 @@ export function UpdateDataDialog({
 
                 <Separator />
                 <div className="flex gap-2 justify-between">
-                  {canGoBackToSynopses ? (
-                    <Button variant="ghost" onClick={() => setPhase("synopses-pick")}>Voltar</Button>
-                  ) : withSourceStep ? (
-                    <Button variant="ghost" onClick={() => setPhase("sources")}>Voltar</Button>
-                  ) : (
-                    <span />
-                  )}
+                  {/* Sinopses vem sempre antes das capas → Voltar sempre volta pra lá. */}
+                  <Button variant="ghost" onClick={() => setPhase("synopses-pick")}>Voltar</Button>
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={handleClose}>Cancelar</Button>
                     <Button onClick={handleConfirmCovers}>Continuar</Button>
@@ -969,6 +1043,59 @@ export function UpdateDataDialog({
               </div>
             )
           })()}
+
+          {phase === "tags-pick" && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Tags e gêneros que vieram das fontes — revise antes de adicionar à obra.
+              </p>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Gêneros</label>
+                <ChipInput
+                  value={genreChoices}
+                  onChange={setGenreChoices}
+                  suggestions={GENRE_NAMES}
+                  restrictToSuggestions
+                  showSuggestionMenu={false}
+                  placeholder="Digite um gênero válido…"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Tags</label>
+                <ChipInput
+                  value={tagChoices}
+                  onChange={setTagChoices}
+                  suggestionGroups={TAG_GROUPS_CATALOG}
+                  groups={TAG_GROUPS_CATALOG.map((grp) => ({
+                    label: grp.label,
+                    values: tagChoices.filter((t) => grp.values.includes(t)),
+                  })).filter((g) => g.values.length > 0)}
+                  placeholder="Digite para buscar tag… (várias de uma vez separadas por , ou ;)"
+                />
+              </div>
+
+              <p className="rounded-md border border-dashed border-amber-500/40 bg-amber-500/5 p-2.5 text-xs text-muted-foreground">
+                Aditivo: você revisa só o que veio das fontes. As tags que já existem na obra não
+                são tocadas. Pra remover tags existentes, use a página de edição da obra.
+              </p>
+
+              <Separator />
+              <div className="flex gap-2 justify-between">
+                <Button
+                  variant="ghost"
+                  onClick={() => setPhase(coversNeedPick ? "covers-pick" : "synopses-pick")}
+                >
+                  Voltar
+                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={handleClose}>Cancelar</Button>
+                  <Button onClick={handleConfirmTags}>Continuar</Button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {phase === "conflicts" && (
             <div className="space-y-4">
@@ -1007,20 +1134,10 @@ export function UpdateDataDialog({
               ))}
               <Separator />
               <div className="flex gap-2 justify-between">
-                {coversNeedPick || synopsisChoices.length > 1 || withSourceStep ? (
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      if (coversNeedPick) setPhase("covers-pick")
-                      else if (synopsisChoices.length > 1) setPhase("synopses-pick")
-                      else setPhase("sources")
-                    }}
-                  >
-                    Voltar
-                  </Button>
-                ) : (
-                  <span />
-                )}
+                {/* O passo de tags vem sempre logo antes dos conflitos. */}
+                <Button variant="ghost" onClick={() => setPhase("tags-pick")}>
+                  Voltar
+                </Button>
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={handleClose}>Cancelar</Button>
                   <Button onClick={handleConfirm}>Confirmar e salvar</Button>

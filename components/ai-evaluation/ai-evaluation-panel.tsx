@@ -126,6 +126,9 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null)
   const [skippingId, setSkippingId] = useState<string | null>(null)
   const [reviewData, setReviewData] = useState<ReviewData | null>(null)
+  // Guarda o fechamento acidental do popup de revisão (clique fora / Esc / X): descartar aqui
+  // cancela a fila inteira de revisão, então confirma antes.
+  const [confirmDiscardReview, setConfirmDiscardReview] = useState(false)
   // Comparação lado a lado de dois modelos (ex.: Sonnet atual vs. Haiku reavaliado).
   const [compareData, setCompareData] = useState<{ a: ReviewData; b: ReviewData } | null>(null)
   const [queue, setQueue] = useState<PendingWork[]>([])
@@ -755,7 +758,14 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
       </WorkQueueGrid>
 
       {/* Review Dialog */}
-      <Dialog open={reviewData != null && compareData == null} onOpenChange={(open) => !open && handleCancel()}>
+      <Dialog
+        open={reviewData != null && compareData == null}
+        onOpenChange={(open) => {
+          // X/Esc/clique-fora confirma antes de descartar (cancela a fila). Salvar/Cancelar
+          // chamam handleSaved/handleCancel direto e passam por fora deste guard.
+          if (!open) setConfirmDiscardReview(true)
+        }}
+      >
         <DialogContent ref={reviewScrollRef} className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Revisão da avaliação IA</DialogTitle>
@@ -817,6 +827,16 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
           )}
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={confirmDiscardReview}
+        onOpenChange={setConfirmDiscardReview}
+        title="Descartar a avaliação?"
+        description="Você perderá o resultado da IA que ainda não foi aplicado. Ele continua pendente e pode ser revisado depois."
+        confirmText="Descartar"
+        cancelText="Continuar revisando"
+        onConfirm={handleCancel}
+      />
 
       {/* Comparação lado a lado de modelos (ex.: Sonnet vs. Haiku). */}
       <Dialog open={compareData != null} onOpenChange={(open) => !open && setCompareData(null)}>

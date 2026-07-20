@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect, KeyboardEvent } from "react"
+import { useState, useRef, useEffect, KeyboardEvent, ClipboardEvent } from "react"
 import { X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
@@ -105,17 +105,41 @@ export function ChipInput({
 
   const isOpen = showSuggestionMenu && showDropdown && dropdownGroups.length > 0
 
-  const addChip = (raw: string) => {
+  // Resolve UM token pra o valor final do chip (respeitando restrictToSuggestions),
+  // deduplicando contra o que já existe e contra os que estão sendo adicionados agora.
+  const resolveChip = (raw: string, taken: string[]): string | null => {
     const trimmed = raw.trim()
-    if (!trimmed || value.includes(trimmed)) return
+    if (!trimmed) return null
     const nextChip = restrictToSuggestions
       ? allSuggestions.find((item) => normalizeSuggestion(item) === normalizeSuggestion(trimmed))
       : trimmed
-    if (!nextChip || value.includes(nextChip)) return
-    onChange([...value, nextChip])
+    if (!nextChip) return null
+    if (value.includes(nextChip) || taken.includes(nextChip)) return null
+    return nextChip
+  }
+
+  // Adiciona UM ou VÁRIOS chips: o texto é quebrado por vírgula / ponto-e-vírgula / nova linha,
+  // então "Age Gap, Remarriage; Pregnancy" (digitado ou colado) vira três chips de uma vez.
+  // Seleção do dropdown chama com um nome único (sem separador) → resolve exatamente um.
+  const addChip = (raw: string) => {
+    const additions: string[] = []
+    for (const token of raw.split(/[,;\n]/)) {
+      const chip = resolveChip(token, additions)
+      if (chip) additions.push(chip)
+    }
+    if (additions.length > 0) onChange([...value, ...additions])
     setInputValue("")
     setShowDropdown(false)
     setActiveIndex(-1)
+  }
+
+  // Colar uma lista com separador cai direto no split (senão o texto colado vira um chip só).
+  const handlePaste = (e: ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData("text")
+    if (/[,;\n]/.test(text)) {
+      e.preventDefault()
+      addChip(text)
+    }
   }
 
   const removeChip = (chip: string) => {
@@ -150,7 +174,7 @@ export function ChipInput({
       }
     }
 
-    if ((e.key === "Enter" || e.key === ",") && (!restrictToSuggestions || !showSuggestionMenu)) {
+    if ((e.key === "Enter" || e.key === "," || e.key === ";") && (!restrictToSuggestions || !showSuggestionMenu)) {
       e.preventDefault()
       addChip(inputValue)
     } else if (e.key === "Backspace" && !inputValue && value.length > 0) {
@@ -222,6 +246,7 @@ export function ChipInput({
             }}
             onFocus={() => { if (inputValue) setShowDropdown(true) }}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             onBlur={handleBlur}
             placeholder={value.length === 0 ? placeholder : ""}
             className="flex-1 min-w-[120px] bg-transparent outline-none placeholder:text-muted-foreground"

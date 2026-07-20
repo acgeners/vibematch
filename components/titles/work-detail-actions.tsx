@@ -316,10 +316,6 @@ export function MoreActionsMenu({
               Editar obra
             </Link>
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={handleArchive} disabled={isPending}>
-            <Archive className="h-4 w-4" />
-            {isArchived ? "Desarquivar" : "Arquivar"}
-          </DropdownMenuItem>
 
           <DropdownMenuSeparator />
           {isAdult ? (
@@ -341,6 +337,10 @@ export function MoreActionsMenu({
           )}
 
           <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={handleArchive} disabled={isPending}>
+            <Archive className="h-4 w-4" />
+            {isArchived ? "Desarquivar" : "Arquivar"}
+          </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => setDeleteOpen(true)}
             disabled={isPending}
