@@ -32,25 +32,40 @@ const DIGEST: ReviewDigest = {
 }
 
 describe("WorkReviewsCard — digest na aba Notas & Avaliações", () => {
-  it("renderiza o digest estruturado + botão Regerar quando há digest", () => {
+  it("renderiza o digest + traços agrupados por polaridade + botão Regerar", () => {
     render(<WorkReviewsCard workId="w1" snapshot={{ ...base, digest: DIGEST, digestN: 12, digestAt: ISO }} />)
-    expect(screen.getByText("Digest de reviews (IA)")).toBeTruthy()
+    expect(screen.getByText("O que dizem as reviews")).toBeTruthy()
     expect(screen.getByText(/casal carismatico/)).toBeTruthy()
     expect(screen.getByText(/o ritmo do meio divide/)).toBeTruthy()
     expect(screen.getByText("protagonista calculista")).toBeTruthy()
     expect(screen.getByText("vilao raso")).toBeTruthy()
     expect(screen.getByText(/arte solida/)).toBeTruthy()
     expect(screen.getByText(/violencia grafica/)).toBeTruthy()
-    expect(screen.getByText("12 reviews")).toBeTruthy()
     expect(screen.getByText("Regerar")).toBeTruthy()
-    // sem o CTA de gerar (já existe digest)
-    expect(screen.queryByText("Gerar digest")).toBeNull()
+    // DIGEST tem 1 traço positivo + 1 negativo, nenhum misto: só essas duas seções saem.
+    expect(screen.getByText("Positivo")).toBeTruthy()
+    expect(screen.getByText("Negativo")).toBeTruthy()
+    expect(screen.queryByText("Misto")).toBeNull()
   })
 
-  it("mostra 'Gerar digest' quando NÃO há digest mas há reviews", () => {
+  it("agrupa os traços na ordem positivo → misto → negativo", () => {
+    const mixedDigest: ReviewDigest = {
+      ...DIGEST,
+      salient_traits: [
+        { trait: "vilao raso", polarity: "negative", axis: "personagens" },
+        { trait: "ritmo divide", polarity: "mixed", axis: "ritmo" },
+        { trait: "protagonista calculista", polarity: "positive", axis: "personagens" },
+      ],
+    }
+    render(<WorkReviewsCard workId="w1" snapshot={{ ...base, digest: mixedDigest, digestAt: ISO }} />)
+    const labels = screen.getAllByText(/^(Positivo|Misto|Negativo)$/).map((el) => el.textContent)
+    expect(labels).toEqual(["Positivo", "Misto", "Negativo"])
+  })
+
+  it("mostra o CTA de síntese quando NÃO há digest mas há reviews", () => {
     render(<WorkReviewsCard workId="w1" snapshot={{ ...base, total: 3, digest: null }} />)
-    expect(screen.getByText("Gerar digest")).toBeTruthy()
-    expect(screen.queryByText("Digest de reviews (IA)")).toBeNull()
+    expect(screen.getByText("Destilar")).toBeTruthy()
+    expect(screen.getByText("O que dizem as reviews")).toBeTruthy()
   })
 
   it("não mostra botão de digest quando não há nenhuma review", () => {
