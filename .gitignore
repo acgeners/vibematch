@@ -77,3 +77,7 @@ infer-tags-proposals.csv
 
 # Backups lógicos do banco (scripts/backup-db.mjs) — nunca no git: contêm dados e são grandes.
 .backups/
+
+# Originais de design (logo, ícones de atributo) — PNGs crus de ~1,5–2MB, 44MB no total.
+# Não versionar: são fonte, não asset de web. Assets otimizados vão em public/ (esses sim no git).
+Imagens/

@@ -234,6 +234,11 @@ interface RankingFiltersProps {
   /** Confiança do público (pseudo_votes_nota_m): acima desse nº de votos a média
    *  externa pesa ≥50% na Nota Prevista. Marca o limiar "confiável" no filtro de votos. */
   confidenceVotes?: number | null
+  /** Controles de tuning exclusivos do /ranking: "Obras exibidas" (top_n) e "Largura
+   *  dos tiers" (band). Favoritos passa false — lá não têm efeito (mostra todas as
+   *  obras do recorte e não forma tiers), então só confundiriam. Default = exibe. */
+  showTopN?: boolean
+  showTierBand?: boolean
 }
 
 interface FilterSectionProps {
@@ -1706,6 +1711,8 @@ export function RankingFilters({
   defaultBand = 0.5,
   criterionPresets,
   confidenceVotes,
+  showTopN = true,
+  showTierBand = true,
 }: RankingFiltersProps) {
   const router = useRouter()
   const criterionScoreDefs = useMemo(
@@ -2131,7 +2138,7 @@ export function RankingFilters({
         <TabsContent value="geral">
           <div className="grid gap-3">
             {/* LINHA 1: Publicação · Status pessoal · Largura dos tiers */}
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_max-content]">
+            <div className={cn("grid gap-3", showTierBand ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_max-content]" : "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]")}>
             <FilterSection
               title={`Publicação${isAllPublication ? " (todos)" : selectedPublicationStatuses.size ? ` (${selectedPublicationStatuses.size})` : ""}`}
               headerAction={
@@ -2189,13 +2196,15 @@ export function RankingFilters({
               </div>
             </FilterSection>
 
-            <TierBandSection
-              searchParams={searchParams}
-              updateParams={updateParams}
-              defaultBand={defaultBand}
-              className="flex flex-col"
-              contentClassName="flex-1 flex flex-col justify-center"
-            />
+            {showTierBand && (
+              <TierBandSection
+                searchParams={searchParams}
+                updateParams={updateParams}
+                defaultBand={defaultBand}
+                className="flex flex-col"
+                contentClassName="flex-1 flex flex-col justify-center"
+              />
+            )}
             </div>
 
             {/* LINHA 2: Interesse na obra · Critérios gerais · Ordenação */}
@@ -2253,8 +2262,10 @@ export function RankingFilters({
               >
                 <div className="flex flex-col gap-4">
                   {/* Linha de cima: Obras exibidas + Esconder tags evitadas (sem min/máx) */}
+                  {(showTopN || hideAvoided) && (
                   <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-4">
                     {/* Obras exibidas */}
+                    {showTopN && (
                     <div className="flex items-center gap-2">
                       <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
                         Obras exibidas
@@ -2270,6 +2281,7 @@ export function RankingFilters({
                         onChange={(e) => updateParams({ top_n: e.target.value || null })}
                       />
                     </div>
+                    )}
 
                     {hideAvoided && (
                       <>
@@ -2309,6 +2321,7 @@ export function RankingFilters({
                       </>
                     )}
                   </div>
+                  )}
 
                   {/* Linha de baixo: os dois com Mín/Máx (Capítulos + Ano) */}
                   <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-4">

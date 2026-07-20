@@ -119,8 +119,11 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     tagSlugsExclude: multi("tags_exclude"),
     synopsisQualities: multi("synopsis_q"),
     predictedSynopsisQualities: multi("synopsis_pred"),
+    interestMode: str("synopsis_mode") === "and" ? "and" : "or",
     minTotalChapters: num("min_chapters"),
     maxTotalChapters: num("max_chapters"),
+    minYear: num("min_year"),
+    maxYear: num("max_year"),
     minExpectedScore: num("min_expected"),
     maxExpectedScore: num("max_expected"),
     minPersonalFitPct: num("min_fit"),
@@ -254,6 +257,8 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         defaultTopN={null}
         basePath={basePath}
         savedPresets={savedPresets}
+        showTopN={false}
+        showTierBand={false}
       />
 
       <WorkTable
