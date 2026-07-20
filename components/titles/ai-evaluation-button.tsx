@@ -78,6 +78,9 @@ export function AiEvaluationButton({
   const myEvalRunning = tasks.some((t) => t.id === evalTaskId && t.status === "running")
   const [evaluating, setEvaluating] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
+  // Guarda o fechamento acidental do popup de revisão (clique fora / Esc / X): o
+  // resultado da IA ainda não foi aplicado, então dispara uma confirmação antes de descartar.
+  const [confirmDiscardReview, setConfirmDiscardReview] = useState(false)
   const [evaluation, setEvaluation] = useState<AiEvaluation | null>(null)
   const [currentScores, setCurrentScores] = useState<Record<string, number>>({})
   const [currentEvaluation, setCurrentEvaluation] = useState<CurrentEvaluationMeta | null>(null)
@@ -348,7 +351,14 @@ export function AiEvaluationButton({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
+      <Dialog
+        open={reviewOpen}
+        onOpenChange={(open) => {
+          // Fechar via X/Esc/clique-fora NÃO fecha direto: confirma antes de perder o
+          // resultado. Salvar/Cancelar chamam setReviewOpen(false) direto e passam por fora daqui.
+          if (!open) setConfirmDiscardReview(true)
+        }}
+      >
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Revisar avaliação IA</DialogTitle>
@@ -376,6 +386,16 @@ export function AiEvaluationButton({
           )}
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={confirmDiscardReview}
+        onOpenChange={setConfirmDiscardReview}
+        title="Descartar a avaliação?"
+        description="Você perderá o resultado da IA que ainda não foi aplicado. Ele continua pendente e pode ser revisado depois."
+        confirmText="Descartar"
+        cancelText="Continuar revisando"
+        onConfirm={() => setReviewOpen(false)}
+      />
 
       {/* Editor de entradas: sinopse usada pela IA + reviews manuais. */}
       <Dialog open={inputsOpen} onOpenChange={(open) => !open && !savingInputs && setInputsOpen(false)}>

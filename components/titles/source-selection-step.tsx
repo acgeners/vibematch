@@ -291,12 +291,16 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
                             <AlertTriangle className="h-3 w-3 shrink-0" />
                             {c.unconfirmed === "source-down"
                               ? "detalhes indisponíveis — fonte fora do ar"
-                              : "palpite pelo título — não confirmado nesta fonte"}
+                              : c.unconfirmed === "saved-link"
+                                ? "vínculo salvo — não reconfirmado nesta busca"
+                                : "palpite pelo título — não confirmado nesta fonte"}
                           </span>
                           <p className="mt-1 text-[11px] text-muted-foreground">
                             {c.unconfirmed === "source-down"
                               ? "Vínculo salvo mantido. Capa e título vêm da sua obra, não da fonte."
-                              : "A busca não achou nada aqui. Capa e título vêm da sua obra; confira antes de aceitar."}
+                              : c.unconfirmed === "saved-link"
+                                ? "Este é o vínculo já salvo — a busca desta vez trouxe outros resultados. Segue selecionado até você trocar. Capa e título vêm da sua obra."
+                                : "A busca não achou nada aqui. Capa e título vêm da sua obra; confira antes de aceitar."}
                           </p>
                         </>
                       ) : (

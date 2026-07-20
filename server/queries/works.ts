@@ -544,6 +544,18 @@ export async function getWorkBySlug(slug: string) {
       "getWorkBySlug.fallback",
     )
     id = rows.find((row) => titleToSlug(row.title ?? "") === slug)?.id
+    if (!id) {
+      // Alias (migration 162): o slug pode ser um slug ANTIGO de um título renomeado.
+      // `previous_slugs` guarda os slugs de títulos anteriores → resolve pra obra atual e a
+      // página redireciona pro slug canônico, em vez de 404 (Voltar/bookmark/aba). Best-effort:
+      // se a coluna ainda não existe, `error` vem setado e a busca só cai no 404 de antes.
+      const { data: aliasRows, error } = await supabase
+        .from("works")
+        .select("id")
+        .contains("previous_slugs", [slug])
+        .limit(1)
+      if (!error && aliasRows && aliasRows.length > 0) id = aliasRows[0].id as string
+    }
   }
   if (!id) return null
   return getWorkWithAiEvaluations(id)

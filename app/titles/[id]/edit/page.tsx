@@ -125,6 +125,11 @@ export default async function EditTitlePage({ params }: EditPageProps) {
   } else {
     const fetched = await getWorkBySlug(id)
     work = (fetched as WorkWithRelations | null) ?? null
+    // Slug ANTIGO (previous_slugs, migration 162) → redireciona pro slug canônico de edição.
+    if (work) {
+      const canonical = titleToSlug(work.title)
+      if (canonical && canonical !== id) redirect(`/titles/${canonical}/edit`)
+    }
   }
 
   if (!work) notFound()

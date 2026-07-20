@@ -136,6 +136,16 @@ export function personalStatusNameBySlugOrThrow(slug: string): string {
 }
 
 /**
+ * Status "estou lendo agora" (slug `reading`). Usado pra promover automaticamente uma obra
+ * que sai de "Want to Read" quando os capítulos lidos passam de 0 — "não comecei" com progresso
+ * é um estado contraditório. Estoura se o slug sumir do Supabase (mesma falha-alta de
+ * [personalStatusNameBySlugOrThrow]), em vez de virar um `=== "Reading"` que quebra em silêncio.
+ */
+export function readingPersonalStatusName(): string {
+  return personalStatusNameBySlugOrThrow("reading")
+}
+
+/**
  * "Está no catálogo, sem status de leitura ativo" — escolha EXPLÍCITA do usuário (667 obras).
  *
  * Não confundir com [DEFAULT_PERSONAL_STATUS], que é o que a obra APARENTA quando não há linha

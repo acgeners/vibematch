@@ -293,6 +293,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     }
   } else {
     work = await getWorkBySlug(id)
+    // Resolvido por um slug ANTIGO (previous_slugs, migration 162)? Redireciona pro slug
+    // canônico — evita 404 em URLs velhas (Voltar/bookmark/aba) sem servir a obra sob dois slugs.
+    if (work) {
+      const canonical = titleToSlug(work.title)
+      if (canonical && canonical !== id) redirect(`/titles/${canonical}`)
+    }
   }
 
   if (!work) notFound()

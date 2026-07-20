@@ -38,7 +38,7 @@ import {
 } from "@/lib/constants/post-reading-criteria"
 import { cn, readingProgressPercent } from "@/lib/utils"
 import { BookOpen, Users, Palette, FileEdit, Bookmark, ChevronDown, Star, X } from "lucide-react"
-import { isFullyReadPersonalStatus } from "@/lib/constants/status-lookups"
+import { isFullyReadPersonalStatus, readingPersonalStatusName } from "@/lib/constants/status-lookups"
 import {
   Tooltip,
   TooltipProvider,
@@ -286,6 +286,19 @@ export function WorkStatusForm({
     if (chaptersRead != null && chaptersRead >= totalChapters) return
     setValue("chapters_read", totalChapters, { shouldDirty: true, shouldValidate: true })
   }, [personalStatus, totalChapters, chaptersRead, setValue])
+
+  // Simétrico ao de cima: "Want to Read" = "não comecei". Se há capítulos lidos > 0, a obra já
+  // foi começada → promove pra "Reading" na hora, pra a UI nunca exibir o estado contraditório.
+  // A mesma regra é reforçada no servidor (updateWorkStatus), que cobre os caminhos que não
+  // passam por este form. Sem loop: ao virar "Reading", a condição abaixo deixa de valer.
+  useEffect(() => {
+    if (personalStatus !== DEFAULT_PERSONAL_STATUS) return
+    if (chaptersRead == null || chaptersRead <= 0) return
+    setValue("personal_status", readingPersonalStatusName() as WorkStatusValues["personal_status"], {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+  }, [personalStatus, chaptersRead, setValue])
 
   const computedManualScore = useMemo(() => {
     let scoreSum = 0

@@ -11,6 +11,7 @@ import {
   getPersonalStatusIdByName,
   getPublicationStatusNameById,
   getPersonalStatusNameById,
+  readingPersonalStatusName,
 } from "@/lib/constants/status-lookups"
 import {
   dedupeSynopsisEntries,
@@ -1411,6 +1412,24 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
   const previousSlug = existingWork?.title ? titleToSlug(existingWork.title) : null
   const prevUserScore = (existingWork?.user_score as number | null | undefined) ?? null
   const nextSlug = titleToSlug(data.title)
+  const titleSlugChanged = Boolean(previousSlug && nextSlug && previousSlug !== nextSlug)
+
+  // Item 1 (alias de slug): ao renomear, guarda o slug ANTIGO em works.previous_slugs pra
+  // getWorkBySlug redirecionar URLs antigas em vez de 404. Best-effort: se a coluna ainda não
+  // existe (migration 162), a leitura falha → não grava, e o rename segue normal.
+  let previousSlugsUpdate: string[] | undefined
+  if (titleSlugChanged && previousSlug) {
+    const { data: cur, error: readErr } = await supabase
+      .from("works")
+      .select("previous_slugs")
+      .eq("id", id)
+      .maybeSingle()
+    if (!readErr && cur) {
+      const existing = ((cur as { previous_slugs?: string[] | null }).previous_slugs ?? []) as string[]
+      // Dedup e nunca lista o slug ATUAL como alias (ex.: rename A→B→A limpa o A).
+      previousSlugsUpdate = Array.from(new Set([...existing, previousSlug])).filter((s) => s !== nextSlug)
+    }
+  }
   let knownGenres: Awaited<ReturnType<typeof filterKnownGenres>>
   try {
     knownGenres = await filterKnownGenres(supabase, data.genres ?? [])
@@ -1432,6 +1451,7 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
       publication_status_id:
         getPublicationStatusIdByName(data.publication_status) ?? data.publication_status_id ?? null,
       total_chapters: data.total_chapters ?? null,
+      ...(previousSlugsUpdate ? { previous_slugs: previousSlugsUpdate } : {}),
     })
     .eq("id", id)
 
@@ -1859,6 +1879,15 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   }
 
   const data = parsed.data
+
+  // "Want to Read" = "não comecei". Capítulos lidos > 0 contradiz isso → promove pra "Reading".
+  // Espelha o auto-switch do WorkStatusForm e fecha os caminhos que não passam por ele (a action
+  // é um endpoint público). O id é resolvido do nome mais abaixo (getPersonalStatusIdByName).
+  if (data.personal_status === DEFAULT_PERSONAL_STATUS && (data.chapters_read ?? 0) > 0) {
+    data.personal_status = readingPersonalStatusName() as typeof data.personal_status
+    data.personal_status_id = null
+  }
+
   const supabase = createAdminClient()
 
   // O estado ATUAL do DONO (e, pra ele, a `user_score` anterior que o ledger de previsões usa).

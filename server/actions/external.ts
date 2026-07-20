@@ -456,11 +456,15 @@ export async function evaluateCandidateForCreate(input: {
  *   FlareSolverr fora / circuito aberto) — ver o branch de falha de `ensureGatedCandidate`.
  * - `slug-guess`: a busca não devolveu nada e o candidato é um slug DERIVADO DO TÍTULO,
  *   nunca verificado na fonte — ver `addAnimePlanetFallbackCandidate`.
+ * - `saved-link`: a fonte respondeu e trouxe candidatos, mas NENHUM tem o id já vinculado
+ *   (`work_external_ids`). Sem este marcador o vínculo salvo ficava órfão — sem card que o
+ *   representasse, o rádio não pré-marcava e o selo "Fontes" (que lê o mesmo banco) contradizia
+ *   o diálogo. Ver o loop de "vínculos salvos não representados" no fim de `revalidateWorkSources`.
  *
- * A UI precisa distinguir os dois de um match real: sem isso, uma queda de infra e um
- * palpite de slug chegam na tela com a mesma cara de "match 95–100% com capa".
+ * A UI precisa distinguir os três de um match real: sem isso, uma queda de infra, um palpite de
+ * slug ou um vínculo antigo chegam na tela com a mesma cara de "match 95–100% com capa".
  */
-export type UnconfirmedReason = "source-down" | "slug-guess"
+export type UnconfirmedReason = "source-down" | "slug-guess" | "saved-link"
 
 export interface SourceCandidateOption {
   externalId: string
@@ -939,6 +943,32 @@ export async function revalidateWorkSources(workId: string): Promise<{ data?: Re
       fetchDetail: (id) => fetchMangagoById(id, { retry: true }),
     }),
   ])
+
+  // Vínculos salvos que a busca desta vez NÃO reproduziu. Acontece quando a fonte responde e
+  // ranqueia primeiro um id diferente do que está em `work_external_ids` (ex.: o AnimePlanet tem
+  // mais de um "No Mercy" e o slug salvo "no-mercy" não é o topo). Sem isto, o id salvo fica em
+  // `selection` sem candidato que o represente → nenhum rádio pré-marca, e o selo "Fontes" (que lê
+  // o mesmo banco) parece mentir. Injeta o vínculo salvo como candidato pré-marcado — mesmo padrão
+  // do comix/mangago e do `source-down`, só que aqui a fonte está no ar; por isso o motivo próprio.
+  for (const [source, id] of Object.entries(acceptedIds)) {
+    if (!id) continue
+    const src = source as ExternalSourceId
+    const existing = candidatesPerSource[src] ?? []
+    if (existing.some((c) => c.externalId === id)) continue
+    candidatesPerSource[src] = [
+      {
+        externalId: id,
+        title: work.title,
+        coverUrl: pickPrimaryCover(work.work_covers),
+        matchScore: 1,
+        synopsis: null,
+        year: null,
+        chapters: null,
+        unconfirmed: "saved-link",
+      },
+      ...existing,
+    ]
+  }
 
   return {
     data: {
