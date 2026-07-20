@@ -346,20 +346,21 @@ export function AiEvaluationReviewForm({
               >
                 {reviewBadge.label}
               </span>
-              {evaluation.confidence != null && (
-                <span
-                  className={`rounded-full border px-2 py-0.5 text-xs font-medium ${confidenceBadgeClass(evaluation.confidence)}`}
-                  title="Confiança da IA na avaliação SUGERIDA (0–100%). Reflete a consistência da evidência, NÃO a quantidade de reviews: obras com opiniões divididas ou sinais ambíguos (ex.: enemies-to-lovers) recebem confiança baixa mesmo com muitas reviews — isso é o modelo sendo honesto, não uma falha."
-                >
-                  <span className="opacity-70">Sugerida</span> {Math.round(evaluation.confidence * 100)}%
-                </span>
-              )}
+              {/* Ordem Atual → Sugerida, igual às colunas de nota de cada critério. */}
               {currentEvaluation?.confidence != null && (
                 <span
                   className={`rounded-full border px-2 py-0.5 text-xs font-medium ${confidenceBadgeClass(currentEvaluation.confidence)}`}
                   title="Confiança da IA na avaliação ATUAL (a que gerou as notas em vigor). Comparar com a Sugerida ajuda a decidir se vale trocar."
                 >
                   <span className="opacity-70">Atual</span> {Math.round(currentEvaluation.confidence * 100)}%
+                </span>
+              )}
+              {evaluation.confidence != null && (
+                <span
+                  className={`rounded-full border px-2 py-0.5 text-xs font-medium ${confidenceBadgeClass(evaluation.confidence)}`}
+                  title="Confiança da IA na avaliação SUGERIDA (0–100%). Reflete a consistência da evidência, NÃO a quantidade de reviews: obras com opiniões divididas ou sinais ambíguos (ex.: enemies-to-lovers) recebem confiança baixa mesmo com muitas reviews — isso é o modelo sendo honesto, não uma falha."
+                >
+                  <span className="opacity-70">Sugerida</span> {Math.round(evaluation.confidence * 100)}%
                 </span>
               )}
             </div>
