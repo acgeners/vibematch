@@ -15,6 +15,7 @@ import {
   updatePrimarySynopsis,
 } from "@/server/actions/manual-reviews"
 import { AiEvaluationReviewForm } from "@/components/ai-evaluation/ai-evaluation-review-form"
+import type { CurrentEvaluationMeta } from "@/components/ai-evaluation/ai-evaluation-review-form"
 import { AiEvaluationCompare } from "@/components/ai-evaluation/ai-evaluation-compare"
 import type { CompareEval } from "@/components/ai-evaluation/ai-evaluation-compare"
 import { ExternalManualReviewsSection } from "@/components/titles/external-manual-reviews-section"
@@ -79,6 +80,7 @@ export function AiEvaluationButton({
   const [reviewOpen, setReviewOpen] = useState(false)
   const [evaluation, setEvaluation] = useState<AiEvaluation | null>(null)
   const [currentScores, setCurrentScores] = useState<Record<string, number>>({})
+  const [currentEvaluation, setCurrentEvaluation] = useState<CurrentEvaluationMeta | null>(null)
   const [noReviewConfirm, setNoReviewConfirm] = useState<NoReviewsReason | null | "none">(null)
   // Comparação Sonnet (existente) vs. Haiku (recém-rodado).
   const [compareData, setCompareData] = useState<{ a: CompareEval; b: AiEvaluation } | null>(null)
@@ -148,6 +150,7 @@ export function AiEvaluationButton({
 
     setEvaluation(result.data.evaluation)
     setCurrentScores(result.data.currentScores ?? {})
+    setCurrentEvaluation(result.data.currentEvaluation ?? null)
     setReviewOpen(true)
     const reviewsUsed = result.data.reviewsUsed ?? 0
     toast.success(
@@ -195,6 +198,7 @@ export function AiEvaluationButton({
         // Se ainda montado (não navegou), abre o review inline.
         setEvaluation(result.data.evaluation)
         setCurrentScores(result.data.currentScores ?? {})
+        setCurrentEvaluation(result.data.currentEvaluation ?? null)
         setReviewOpen(true)
       },
     })
@@ -241,6 +245,7 @@ export function AiEvaluationButton({
       return
     }
     setCurrentScores(result.data.currentScores ?? {})
+    setCurrentEvaluation(result.data.currentEvaluation ?? null)
     setCompareData({ a: latestEvaluation, b: result.data.evaluation })
   }
 
@@ -348,7 +353,7 @@ export function AiEvaluationButton({
           <DialogHeader>
             <DialogTitle>Revisar avaliação IA</DialogTitle>
             <DialogDescription>
-              Ajuste manualmente qualquer nota antes de aplicar na obra.
+              Revise as notas da IA e escolha entre a nota atual e a sugerida antes de aplicar na obra.
             </DialogDescription>
           </DialogHeader>
           {evaluation && (
@@ -358,6 +363,7 @@ export function AiEvaluationButton({
               workTitle={workTitle}
               coverUrl={coverUrl}
               currentScores={currentScores}
+              currentEvaluation={currentEvaluation}
               onReevaluate={async (model) => {
                 await runEvaluation({ model, proceedWithoutReviews: true })
               }}
