@@ -1,109 +1,111 @@
 # LEITURA — Bandas de estado de leitura
 
-> **Data:** 2026-07-20 · **Status:** ✅ entregue — **PR #200** (mergeado na `main`, commit `cd070d1`)
+> **Data:** 2026-07-20 · **Status:** ✅ na `main`
+> **PRs:** **#200** (bandas, 1ª versão) · **#201** (este doc) · **#202** (reversão p/ %-primeiro + navegação)
+> **Modelo final:** bandas por **% lido** (quanto falta ler). A data (última leitura) é só **textura**.
 > **Escopo:** página `/leitura` (Acompanhamento) · arquivo único `components/reading/reading-list.tsx`
-> **Marcação:** ✅ verificado no código/app · ⚡ achado empírico que mudou o desenho · ⚠️ armadilha registrada
+> **Marcação:** ✅ verificado no código/app · ⚡ virada de decisão · ⚠️ armadilha registrada
 
 ---
 
 ## 1. O problema (pedido)
 
 A página de acompanhamento mostrava um selo **binário** por obra: `Em dia` ou `N pra ler`. O pedido foi
-**separar visualmente** as obras que se acompanha de perto das que estão pendentes — mas considerando a
-**situação real**:
+**separar visualmente** as obras que se acompanha de perto das pendentes, considerando o **% lido**:
 
-> "O usuário acompanha algumas obras religiosamente, mas em outras ele **desacelera e fica bem atrasado**
-> em relação ao último lançamento. Precisa considerar `em dia`/`pendente` **mas também o % lido**
-> (ex.: uma obra 20/21 ≠ outra 10/56)."
+> "Acompanho algumas obras religiosamente, mas em outras eu **desacelero e fico bem atrasado**. Precisa
+> considerar `em dia`/`pendente` **mas também o % lido** (ex.: 20/21 ≠ 10/56)."
 
 O binário não capta isso: 20/21 e 10/56 são ambos "pendente", mas são situações opostas.
 
-## 2. O insight — não é 1 eixo, são 3
+## 2. Os 3 eixos possíveis
 
 | Eixo | Mede | Vem de |
 |---|---|---|
 | **Gap** (falta 0?) | alcançou o último lançamento | `lançado − lido` |
-| **% lido** | profundidade do backlog / o quão investido | `lido / lançado` |
-| **Recência** | está *ativamente* lendo ou parou? | `last_read_at` (`user_work_state`) |
+| **% lido** | quanto falta ler / profundidade do backlog | `lido / lançado` |
+| **Recência** | está lendo agora ou parou? | `last_read_at` (`user_work_state`) |
 
-Um `%` baixo significa coisas **opostas** conforme a recência: 4/73 lida **ontem** = "comecei agora,
-devorando"; 4/73 há **2 meses** = "larguei". Só a recência desempata.
+Qual eixo dirige as bandas? A resposta **mudou duas vezes** — ver §3. O modelo final: **% dirige a banda,
+recência é textura.**
 
-## 3. Decisões de design (aprovadas via mockup + perguntas)
+## 3. ⚡ A jornada (por que o eixo mudou 2×)
 
-Fluxo: mockup em Artifact → aprovação → 2 decisões:
+Vale registrar porque o aprendizado é maior que o código: **calibração no papel ≠ ver no app + o gosto do dono.**
 
-1. **Incluir o 3º eixo (recência)?** → **SIM.** Uma obra recém-lida com % baixo não é "atrasada".
-2. **Como separar?** → **Bandas agrupadas** (sub-seções tituladas dentro de cada seção), não filtro nem
-   lista plana com acento.
+**v1 — %-primeiro ingênuo (`behind` = < 40% lido E frio).** A banda "Atrasado" ficava **VAZIA**. Motivo:
+as obras que o Geners largou **não têm % baixo** — têm % médio/alto mas ~4 meses sem abrir; e as de %
+baixo dele são quase todas **recentes** (recém-começadas), então caíam em "No ritmo".
 
-## 4. ⚡ O achado da calibração (mudou o desenho)
+**v2 — recência-primeiro (PR #200).** Rodei `scratchpad/calibrate.mjs` contra o banco (25 obras reais) e
+inverti: **frio → "Parado", independente do %**. Distribuição 4/13/1/7 — "Parado" enfim populada.
+Parecia certo.
 
-Rodei um script contra o banco (`scratchpad/calibrate.mjs`) com as **25 obras reais** do usuário. Com a
-regra inicial (**%-primeiro**: `Atrasado` = % baixo), a banda **"Atrasado" ficava VAZIA**.
+**v3 — de volta a %-primeiro (PR #202).** Vendo **no app com dado real**, "Atrasado/Parado" agrupava
+`I Shall Master This Family` (95%, 79d) e `The Remarried Empress` (81%, 100d) junto com % baixo — uma obra
+quase terminada marcada como "atrasada" **confunde**. O Geners:
 
-**Por quê:** as obras que o usuário largou **não têm % baixo** — têm % médio/alto mas **~4 meses sem
-abrir**:
+> "Tira 'Atrasado / Parado', importa muito mais a % de leitura do que a data."
 
-| Obra | % lido | Última leitura | Banda (regra %-primeiro) |
+Então: **a banda passa a dizer QUANTO FALTA LER (%)**; a recência vira textura. A diferença crucial pro
+v1 não voltar a dar banda vazia: a banda de baixo é **% puro** (< 40%, sem exigir frieza) — as obras de %
+baixo recentes agora populam "Muito atrás" (com a tag "recém-começou"), em vez de escaparem pra "No ritmo".
+
+## 4. A regra final (%-primeiro)
+
+Cortes como constantes ajustáveis no topo do arquivo. **A data não entra na classificação.**
+
+```
+gap == 0            → Em dia (uptodate)
+pct >= 0.8          → No ritmo (onpace)        // faltam poucos capítulos
+pct >= 0.4          → Desacelerando (slowing)  // 40–80% lido
+senão               → Muito atrás (behind)     // < 40% lido, backlog grande
+```
+
+| Banda | Cor | Regra | Distribuição real |
 |---|---|---|---|
-| I Wish I Could Have Two Beds | 81% | 116 dias | ~~onpace~~ ❌ |
-| The Duke's Fluffy Secret | 69% | 116 dias | ~~slowing~~ ❌ |
-| I Shall Master This Family | 95% | 79 dias | ~~onpace~~ ❌ |
+| 🟢 **Em dia** | emerald | leu tudo (gap 0) | 4 |
+| 🟩 **No ritmo** | lime | ≥ 80% lido | 10 |
+| 🟠 **Desacelerando** | amber | 40–80% lido | 7 |
+| 🔴 **Muito atrás** | rose | < 40% lido | 4 |
 
-Ou seja: o sinal que separa "religioso" de "desacelerou" — que é *exatamente* como o usuário descreveu o
-problema — é a **recência**, não o %. As obras de % baixo dele são quase todas **recentes**
-(recém-começadas).
+**Recência = textura, não banda:**
+- Linha *"Última leitura: …"* em todo card.
+- Tag *"recém-começou"* (`isRecentlyStarted`): `< 40% lido` **e** aberto nos últimos **14 dias**. Explica
+  um % baixo sem rebaixar de banda uma obra que você só começou agora.
 
-**Conclusão:** a regra virou **recência-primeiro**. Frio → "Parado" (independe do %); o `%` vira
-**textura** (tag "recém-começou" + ordenação dentro da banda).
+**Caso-chave:** `The Archduke's...` 93% lido, frio há 79d → fica em **No ritmo** (não "Muito atrás"). É
+justamente o que o v2 errava.
 
-## 5. A regra final
+## 5. Navegação (PR #202)
 
-Ordem de avaliação (recência-primeiro), com os cortes como constantes ajustáveis no topo do arquivo:
+Pedido: *"alguma forma mais fácil de navegar — clicando e rolando, com abas".*
 
-```
-gap == 0                         → Em dia (uptodate)
-days > COLD_DAYS (45)            → Atrasado/Parado (behind)   ← PRIMEIRO, mesmo com % alto
-pct >= ONPACE_PCT (0.8)          → No ritmo (onpace)          ← colado no front
-days <= RECENT_DAYS (14)         → No ritmo; se pct < 0.4 → tag "recém-começou"
-resto (15–45d, longe do front)   → Desacelerando (slowing)
-```
-
-| Banda | Cor | Significado |
-|---|---|---|
-| 🟢 **Em dia** | emerald | leu tudo o que saiu |
-| 🟡 **No ritmo** | lime | lendo agora — ou colado no último capítulo |
-| 🟠 **Desacelerando** | amber | esfriando — algumas semanas sem abrir |
-| 🔴 **Atrasado / Parado** | rose | sem leitura há mais de ~6 semanas |
-
-**Casos-chave que a regra acerta:**
-- The Remarried Empress **81% mas frio há 100d** → **Parado** ("pausou perto do fim"), não No ritmo.
-- 4/73 lida ontem → No ritmo (tag "recém-começou"); a mesma 4/73 há 2 meses → Parado.
-
-**Distribuição real do usuário** (25 obras): Em dia 4 · No ritmo 13 · Desacelerando 1 · Parado 7.
-A distribuição é **bimodal** (ou lê nos últimos dias, ou some ~4 meses) — por isso "Desacelerando" fica
-pequena. É um retrato honesto do comportamento, não um bug (bandas vazias somem).
+- A antiga faixa-resumo virou uma **nav FIXA (sticky, `top-0`)** no topo da lista.
+- **Abas por banda** (bolinha + nome + contagem) + a **barra segmentada** — ambas **clicáveis**: clicar
+  **rola suave** até a banda (`scrollIntoView`).
+- A **aba ativa acompanha a rolagem** (scrollspy via `IntersectionObserver` sobre os `[data-band-state]`).
+- Rola pra **primeira ocorrência** da banda no DOM ("Em andamento" vem antes de "Concluída").
+- `scroll-mt-32` nas bandas reserva a altura da nav fixa pra o cabeçalho não sumir sob ela.
 
 ## 6. Implementação
 
 Tudo em `components/reading/reading-list.tsx` (client), **sem migration e sem mudança de query** —
 `lastReadAt` já vinha no `ReadingWork` via `user_work_state`.
 
-- `classifyReadingState(work, result)` → `{ state, recentlyStarted }` (a regra da §5).
-- `groupIntoBands()` → agrupa em bandas na ordem de engajamento; `sort` estável desce os "recém" pro fim.
-- `BandedGrid` → sub-cabeçalho colorido (barra + label + contagem + hint) por banda; divisória
-  *"lendo agora · ainda longe do front"* antes do subgrupo recém-começado.
-- `ReadingStateSummary` → **faixa-resumo do topo**: barra segmentada + contagem por estado (só sem filtro).
-- `ReadingCard` ganhou: faixa de cor por estado, barra de progresso + chip na cor do estado, linha
-  *"Última leitura: …"*.
-- `ReadingSection` deixou de envolver os filhos num grid 2-col (o `BandedGrid` já faz o grid por banda).
+- `classifyReadingState(work, result)` → devolve **só** o `ReadingState` (a regra da §4, sem data).
+- `isRecentlyStarted(work, result)` → a tag "recém-começou" (< 40% + ≤ 14d).
+- `groupIntoBands()` → agrupa por banda na ordem fixa; sem divisória (a de recência do v2 saiu).
+- `ReadingStateSummary` → a **nav fixa** (§5): abas + barra clicáveis + scrollspy.
+- `BandedGrid` → sub-cabeçalho colorido por banda; recebe `sectionKey` e marca cada banda com
+  `id={band-<section>-<state>}` + `data-band-state` (âncoras da nav) + `scroll-mt-32`.
+- `ReadingCard` → faixa de cor por estado (`bg-*`), barra + chip na cor do estado, linha "Última leitura"
+  + tag "recém-começou".
 
 ### ⚠️ Armadilhas registradas
 
 - **Faixa de cor via `bg-*`, NÃO `border-<cor>`.** A regra `* { border-color }` em `globals.css:113`
   (fora de `@layer`) sobrepõe as utilities do Tailwind v4 → `border-l-<cor>` é **morto** neste projeto.
-  O `border-l-amber-500/70` que já existia no card estava, na prática, invisível.
 - **Nuance de estado:** a banda reflete os capítulos **persistidos**. Editar o stepper atualiza o chip na
   hora, mas a obra só troca de banda no próximo refresh (não há refresh por edição — de propósito).
 - **Infra:** martelar o dev server (curl + browsers headless em paralelo durante compile do Turbopack)
@@ -112,13 +114,21 @@ Tudo em `components/reading/reading-list.tsx` (client), **sem migration e sem mu
 ## 7. Verificação
 
 - `tsc` + `eslint` **limpos (0 erros)**.
-- Renderizado no app via rota de preview temporária com mocks (removida antes do commit), screenshot
-  headless (playwright-core do sidecar `comix-render`) confirmando as 4 bandas, cores, faixa-resumo e o
-  caso "81% frio → Parado".
-- Distribuição real conferida pelo script de calibração.
+- Testado no app (preview temporário com mocks + Playwright no `playwright-core` do sidecar `comix-render`):
+  clicar numa aba **rola** até a banda (medido 2181px → 154px) e marca a **aba ativa** (`aria-current`);
+  a tag "recém-começou" só aparece em % baixo lido recentemente; obra 93% fria há 79d fica em "No ritmo".
+- Distribuição real (`scratchpad/calibrate.mjs`) confere a §4.
 
-## 8. Ideias futuras (não são pendências)
+## 8. Aprendizado central
 
-- Talvez uma 5ª banda **"Começando"** própria, em vez de embutir os recém-começados em "No ritmo".
-- **Recalibrar** os cortes (`RECENT 14d`, `COLD 45d`, `% 0.8/0.4`) se a distribuição mudar com o tempo —
-  o `scratchpad/calibrate.mjs` serve de molde.
+**Não confie só na calibração — valide na UI real, e o gosto do dono é o árbitro.** A recência parecia o
+eixo certo no papel (era o único que populava "Atrasado"); mas ver as obras empilhadas no app mostrou que
+misturar "% alto + frio" com "% baixo" confunde. O usuário quer **quanto falta ler**. A data ainda ajuda —
+como textura, não como eixo de banda.
+
+## 9. Ideias futuras (não são pendências)
+
+- Talvez uma 5ª banda **"Começando"** própria para os recém-começados de % baixo, em vez da tag.
+- **Recalibrar** os cortes de % (`0.8` / `0.4`) ou o `RECENT_DAYS` (14) se a distribuição mudar —
+  `scratchpad/calibrate.mjs` serve de molde.
+- Abas de banda **por seção** (hoje a nav rola pra "Em andamento"); ou permitir isolar/filtrar uma banda.
