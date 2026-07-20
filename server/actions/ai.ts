@@ -43,6 +43,56 @@ function toPositiveInt(value: string | undefined): number | undefined {
   return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
+/** Confiança + justificativas da avaliação que respalda as notas ATUAIS da obra.
+ *  Usado pelo review form pra exibir, ao lado da sugestão nova, a confiança e a
+ *  justificativa que geraram cada nota atual. Null quando nenhuma nota atual veio
+ *  de IA (todas manuais/importadas → sem `ai_evaluation_id`).
+ *  O tipo público espelha `CurrentEvaluationMeta` do review form (não exportamos
+ *  daqui: é um módulo "use server", que só pode exportar async functions). */
+interface CurrentEvaluationMeta {
+  confidence: number | null
+  justifications: Record<string, string>
+}
+
+async function loadCurrentEvaluationMeta(
+  supabase: ReturnType<typeof createAdminClient>,
+  currentScoreRows: Array<{ criterion_slug: string; ai_evaluation_id: string | null }>,
+): Promise<CurrentEvaluationMeta | null> {
+  // IDs das avaliações que respaldam as notas atuais (uma nota manual/importada
+  // tem ai_evaluation_id null). Tipicamente todas as 9 apontam pra mesma.
+  const evalIds = [...new Set(currentScoreRows.map((r) => r.ai_evaluation_id).filter((id): id is string => !!id))]
+  if (evalIds.length === 0) return null
+
+  const { data: evals } = await supabase
+    .from("ai_evaluations")
+    .select("id, confidence, created_at, ai_evaluation_scores(criterion_slug, justification)")
+    .in("id", evalIds)
+  if (!evals || evals.length === 0) return null
+
+  const evalById = new Map(evals.map((e) => [e.id as string, e]))
+
+  // Justificativa por critério, buscada na avaliação que respalda AQUELA nota
+  // (robusto ao caso raro de critérios de avaliações diferentes).
+  const justifications: Record<string, string> = {}
+  for (const row of currentScoreRows) {
+    if (!row.ai_evaluation_id) continue
+    const ev = evalById.get(row.ai_evaluation_id)
+    const scores = (ev?.ai_evaluation_scores ?? []) as Array<{ criterion_slug: string; justification: string | null }>
+    const match = scores.find((s) => s.criterion_slug === row.criterion_slug)
+    if (match?.justification) justifications[row.criterion_slug] = match.justification
+  }
+
+  // Uma confiança só pro badge "Atual": a da avaliação mais recente que respalda
+  // as notas (ordena por created_at desc).
+  const mostRecent = [...evals].sort(
+    (a, b) => new Date(b.created_at as string).getTime() - new Date(a.created_at as string).getTime(),
+  )[0]
+  const confidence = mostRecent?.confidence == null ? null : Number(mostRecent.confidence)
+
+  if (confidence == null && Object.keys(justifications).length === 0) return null
+  return { confidence, justifications }
+}
+
 /**
  * Resolve o contexto externo (reviews/sinopses/similares/ratings) de uma obra,
  * escolhendo entre o caminho por IDs confirmados (candidate) e o fallback por
@@ -179,14 +229,19 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     .filter((name): name is string => Boolean(name))
 
   // Snapshot dos scores atuais — usado pelo review form para mostrar diff
-  // entre nota atual e a sugestão nova da IA.
+  // entre nota atual e a sugestão nova da IA. `ai_evaluation_id` liga cada nota
+  // à avaliação que a gerou → dá pra buscar confiança + justificativa "atuais".
   const { data: currentScoreRows } = await supabase
     .from("category_scores")
-    .select("criterion_slug, score")
+    .select("criterion_slug, score, ai_evaluation_id")
     .eq("work_id", workId)
   const currentScores: Record<string, number> = Object.fromEntries(
     (currentScoreRows ?? []).map((row) => [row.criterion_slug, Number(row.score)])
   )
+  // Confiança + justificativas da avaliação que respalda as notas ATUAIS (a
+  // anterior). Null quando as notas não vieram de IA (manual/import) ou a obra
+  // nunca foi avaliada — nesse caso a coluna "Atual" não mostra esses extras.
+  const currentEvaluation = await loadCurrentEvaluationMeta(supabase, currentScoreRows ?? [])
 
   // Setado após o insert (que agora ocorre depois do gate). Usado pelo catch
   // pra marcar a avaliação como failed — se o erro acontecer antes do insert
@@ -390,7 +445,7 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     revalidatePath(`/titles/${workId}`)
     revalidatePath("/ai-evaluation")
     revalidateTag("ai-eval-tab-counts", "max")
-    return { data: { evaluation: completedEvaluation as AiEvaluation, currentScores, reviewsUsed: response.reviewsUsed } }
+    return { data: { evaluation: completedEvaluation as AiEvaluation, currentScores, currentEvaluation, reviewsUsed: response.reviewsUsed } }
   } catch (err) {
     if (evaluationId) {
       await supabase

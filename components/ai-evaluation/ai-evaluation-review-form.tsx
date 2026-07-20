@@ -3,12 +3,12 @@
 import { useMemo, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { Loader2 } from "lucide-react"
+import { ChevronRight, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { submitAiReview } from "@/server/actions/ai"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { getCoverImageSrc } from "@/lib/image-proxy"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Label } from "@/components/ui/label"
 import { cn, titleToSlug } from "@/lib/utils"
@@ -29,12 +29,21 @@ const CONFIRM_THRESHOLD = 0.7
 
 type ReevalModel = "sonnet" | "opus" | "haiku"
 
+/** Confiança + justificativas da avaliação que gerou as notas ATUAIS (a anterior).
+ *  Vem de `triggerAiEvaluation`. Null quando nenhuma nota atual veio de IA. */
+export interface CurrentEvaluationMeta {
+  confidence: number | null
+  justifications: Record<string, string>
+}
+
 interface AiEvaluationReviewFormProps {
   evaluation: AiEvaluation
   workId: string
   workTitle: string
   coverUrl?: string | null
   currentScores?: Record<string, number>
+  /** Confiança + justificativas da avaliação anterior (respalda a coluna "Atual"). */
+  currentEvaluation?: CurrentEvaluationMeta | null
   /** Quando fornecido, mostra botão de re-avaliar com modelo alternativo em caso de confiança baixa. */
   onReevaluate?: (model: ReevalModel) => Promise<void> | void
   onSaved: (acceptedScores: Record<string, number>) => void
@@ -127,6 +136,7 @@ export function AiEvaluationReviewForm({
   workTitle,
   coverUrl,
   currentScores,
+  currentEvaluation,
   onReevaluate,
   onSaved,
   onCancel,
@@ -138,11 +148,14 @@ export function AiEvaluationReviewForm({
         suggestedScore: s.suggested_score ?? 0,
         acceptedScore: s.suggested_score ?? 0,
         currentScore: currentScores?.[s.criterion_slug],
+        // Justificativa sugerida (nova avaliação) e a atual (avaliação anterior),
+        // pra alternar conforme o modo selecionado no critério.
         justification: s.justification,
+        currentJustification: currentEvaluation?.justifications?.[s.criterion_slug] ?? null,
         wasEdited: false,
-        mode: "suggested" as "current" | "suggested" | "custom",
+        mode: "suggested" as "current" | "suggested",
       })),
-    [currentScores, evaluation.ai_evaluation_scores]
+    [currentScores, currentEvaluation, evaluation.ai_evaluation_scores]
   )
 
   const [scores, setScores] = useState(initialScores)
@@ -157,6 +170,16 @@ export function AiEvaluationReviewForm({
   const isLowConfidence =
     evaluation.confidence != null && evaluation.confidence < CONFIRM_THRESHOLD
   const thresholdPct = Math.round(CONFIRM_THRESHOLD * 100)
+
+  // Contagens pros chips do cabeçalho de "Dados usados na avaliação".
+  const debugCounts = debugContext
+    ? {
+        genres: debugContext.genres?.length ?? 0,
+        tags: (debugContext.tagsGrouped ?? []).reduce((acc, g) => acc + g.names.length, 0),
+        reviews:
+          (debugContext.sourcedReviews?.length ?? 0) + (debugContext.legacyReviews?.length ?? 0),
+      }
+    : null
 
   const reviewBadge = (() => {
     switch (reviewUsage.kind) {
@@ -187,16 +210,14 @@ export function AiEvaluationReviewForm({
     }
   })()
 
-  const selectMode = (slug: string, mode: "current" | "suggested" | "custom") => {
+  // Só dois modos: manter a nota ATUAL ou aceitar a SUGERIDA. Escolher a atual
+  // (quando difere da sugerida) marca wasEdited → grava como `ai_edited`.
+  const selectMode = (slug: string, mode: "current" | "suggested") => {
     setScores((prev) =>
       prev.map((s) => {
         if (s.criterionSlug !== slug) return s
         const value =
-          mode === "current" && s.currentScore !== undefined
-            ? s.currentScore
-            : mode === "suggested"
-              ? s.suggestedScore
-              : s.acceptedScore
+          mode === "current" && s.currentScore !== undefined ? s.currentScore : s.suggestedScore
         return {
           ...s,
           mode,
@@ -204,32 +225,6 @@ export function AiEvaluationReviewForm({
           wasEdited: value !== s.suggestedScore,
         }
       })
-    )
-  }
-
-  const updateCustomScore = (slug: string, value: number) => {
-    setScores((prev) =>
-      prev.map((s) =>
-        s.criterionSlug === slug
-          ? {
-              ...s,
-              mode: "custom",
-              acceptedScore: value,
-              wasEdited: value !== s.suggestedScore,
-            }
-          : s
-      )
-    )
-  }
-
-  const resetToSuggested = () => {
-    setScores((prev) =>
-      prev.map((s) => ({
-        ...s,
-        mode: "suggested",
-        acceptedScore: s.suggestedScore,
-        wasEdited: false,
-      }))
     )
   }
 
@@ -313,14 +308,14 @@ export function AiEvaluationReviewForm({
         description={`A IA declarou ${
           evaluation.confidence != null ? `${Math.round(evaluation.confidence * 100)}%` : "?"
         } de confiança, abaixo do limiar configurado (${thresholdPct}%). Quer aceitar todas as notas mesmo assim?`}
-        confirmText="Aceitar todos"
+        confirmText="Aceitar"
         cancelText="Voltar"
         onConfirm={() => doAcceptAll()}
       />
 
       <div className="flex justify-end">
         <Button size="sm" onClick={handleAcceptAll} disabled={submitting}>
-          {submitting ? "Salvando..." : "Aceitar todos"}
+          {submitting ? "Salvando..." : "Aceitar"}
         </Button>
       </div>
 
@@ -354,9 +349,17 @@ export function AiEvaluationReviewForm({
               {evaluation.confidence != null && (
                 <span
                   className={`rounded-full border px-2 py-0.5 text-xs font-medium ${confidenceBadgeClass(evaluation.confidence)}`}
-                  title="Confiança da IA nas NOTAS (0–100%). Reflete a consistência da evidência, NÃO a quantidade de reviews: obras com opiniões divididas ou sinais ambíguos (ex.: enemies-to-lovers) recebem confiança baixa mesmo com muitas reviews — isso é o modelo sendo honesto, não uma falha."
+                  title="Confiança da IA na avaliação SUGERIDA (0–100%). Reflete a consistência da evidência, NÃO a quantidade de reviews: obras com opiniões divididas ou sinais ambíguos (ex.: enemies-to-lovers) recebem confiança baixa mesmo com muitas reviews — isso é o modelo sendo honesto, não uma falha."
                 >
-                  Confiança: {Math.round(evaluation.confidence * 100)}%
+                  <span className="opacity-70">Sugerida</span> {Math.round(evaluation.confidence * 100)}%
+                </span>
+              )}
+              {currentEvaluation?.confidence != null && (
+                <span
+                  className={`rounded-full border px-2 py-0.5 text-xs font-medium ${confidenceBadgeClass(currentEvaluation.confidence)}`}
+                  title="Confiança da IA na avaliação ATUAL (a que gerou as notas em vigor). Comparar com a Sugerida ajuda a decidir se vale trocar."
+                >
+                  <span className="opacity-70">Atual</span> {Math.round(currentEvaluation.confidence * 100)}%
                 </span>
               )}
             </div>
@@ -415,12 +418,34 @@ export function AiEvaluationReviewForm({
         <details
           open={showDebug}
           onToggle={(e) => setShowDebug((e.target as HTMLDetailsElement).open)}
-          className="rounded-md border border-dashed border-amber-300 bg-amber-50/40 p-3 text-xs"
+          className="group overflow-hidden rounded-lg border border-border/70 border-l-2 border-l-sky-400/50 bg-muted/20 text-xs [&_summary::-webkit-details-marker]:hidden"
         >
-          <summary className="cursor-pointer text-xs font-medium text-amber-800">
-            🐛 Dados usados na avaliação (debug temporário)
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 hover:bg-muted/40">
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+            <span className="text-sm leading-none">📋</span>
+            <span className="text-[13px] font-medium text-foreground/90">Dados usados na avaliação</span>
+            <span className="hidden text-muted-foreground sm:inline">· contexto enviado à IA</span>
+            {debugCounts && (
+              <span className="ml-auto flex flex-wrap items-center gap-1">
+                {debugCounts.genres > 0 && (
+                  <span className="rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                    {debugCounts.genres} gêneros
+                  </span>
+                )}
+                {debugCounts.tags > 0 && (
+                  <span className="rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                    {debugCounts.tags} tags
+                  </span>
+                )}
+                {debugCounts.reviews > 0 && (
+                  <span className="rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                    {debugCounts.reviews} reviews
+                  </span>
+                )}
+              </span>
+            )}
           </summary>
-          <div className="mt-3 space-y-3 text-foreground">
+          <div className="space-y-3 border-t border-border/60 px-3 pb-3 pt-3 text-foreground">
             {debugContext.title && (
               <div>
                 <p className="font-semibold">Título</p>
@@ -536,7 +561,9 @@ export function AiEvaluationReviewForm({
           const hasCurrentScore = s.currentScore !== undefined
           const isCurrent = s.mode === "current"
           const isSuggested = s.mode === "suggested"
-          const isCustom = s.mode === "custom"
+          // Justificativa referente ao modo selecionado: a atual vem da avaliação
+          // anterior (pode não existir se a nota atual não veio de IA).
+          const justForMode = isCurrent ? s.currentJustification : s.justification
           return (
             <div key={s.criterionSlug} className="space-y-2 p-3 border rounded-md">
               <div className="flex items-center justify-between gap-2">
@@ -551,7 +578,7 @@ export function AiEvaluationReviewForm({
               <div
                 className={cn(
                   "grid gap-1 rounded-md border bg-muted/30 p-1",
-                  hasCurrentScore ? "grid-cols-3" : "grid-cols-2"
+                  hasCurrentScore ? "grid-cols-2" : "grid-cols-1"
                 )}
               >
                 {hasCurrentScore && (
@@ -584,53 +611,23 @@ export function AiEvaluationReviewForm({
                     {s.suggestedScore.toFixed(1)}
                   </span>
                 </Button>
-                {isCustom ? (
-                  <div
-                    className={cn(
-                      buttonVariants({ variant: "default", size: "sm" }),
-                      "h-auto flex-col gap-0.5 py-1.5"
-                    )}
-                  >
-                    <span className="text-[10px] uppercase tracking-wide opacity-80">
-                      Personalizado
-                    </span>
-                    <input
-                      type="number"
-                      step={0.5}
-                      min={0}
-                      max={10}
-                      autoFocus
-                      value={s.acceptedScore}
-                      onChange={(e) =>
-                        updateCustomScore(
-                          s.criterionSlug,
-                          parseFloat(e.target.value) || 0
-                        )
-                      }
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-16 rounded bg-background/20 text-center font-mono text-base font-bold leading-none text-primary-foreground outline-none ring-1 ring-background/30 focus:ring-2 focus:ring-background/60"
-                    />
-                  </div>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => selectMode(s.criterionSlug, "custom")}
-                    className="h-auto flex-col gap-0.5 py-1.5"
-                  >
-                    <span className="text-[10px] uppercase tracking-wide opacity-80">
-                      Personalizado
-                    </span>
-                    <span className="font-mono text-base font-bold leading-none">
-                      —
-                    </span>
-                  </Button>
-                )}
               </div>
 
-              {s.justification && (
-                <p className="text-xs text-muted-foreground">{s.justification}</p>
+              {(justForMode || isCurrent) && (
+                <div className="rounded-md border border-border/60 bg-muted/20 px-2.5 py-2">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide">
+                    <span className={isCurrent ? "text-muted-foreground" : "text-primary"}>
+                      Justificativa · {isCurrent ? "atual" : "sugerida"}
+                    </span>
+                  </p>
+                  {justForMode ? (
+                    <p className="text-xs text-muted-foreground">{justForMode}</p>
+                  ) : (
+                    <p className="text-xs italic text-muted-foreground/70">
+                      Sem justificativa — a nota atual não veio de avaliação IA.
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           )
@@ -638,9 +635,6 @@ export function AiEvaluationReviewForm({
       </div>
 
       <div className="flex gap-2 pt-2">
-        <Button variant="secondary" size="sm" onClick={resetToSuggested}>
-          Resetar
-        </Button>
         <div className="flex-1" />
         <Button variant="outline" size="sm" onClick={onCancel}>
           Cancelar

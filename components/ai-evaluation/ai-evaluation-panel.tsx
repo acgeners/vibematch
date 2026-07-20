@@ -11,6 +11,7 @@ import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { previewCascade } from "@/lib/cost-preview/catalog"
 import { useToggleRead } from "@/components/ai-evaluation/queue/use-toggle-read"
 import { AiEvaluationReviewForm } from "./ai-evaluation-review-form"
+import type { CurrentEvaluationMeta } from "./ai-evaluation-review-form"
 import { AiEvaluationCompare } from "./ai-evaluation-compare"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -71,6 +72,7 @@ interface ReviewData {
   workTitle: string
   coverUrl: string | null
   currentScores: Record<string, number>
+  currentEvaluation: CurrentEvaluationMeta | null
 }
 
 /** Resultado de uma avaliação disparada: pronta pra revisar, precisa de
@@ -234,6 +236,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
         workTitle: work.title,
         coverUrl: work.cover_url ?? null,
         currentScores: result.data.currentScores ?? {},
+        currentEvaluation: result.data.currentEvaluation ?? null,
       },
     }
   }
@@ -784,6 +787,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
               workTitle={reviewData.workTitle}
               coverUrl={reviewData.coverUrl}
               currentScores={reviewData.currentScores}
+              currentEvaluation={reviewData.currentEvaluation}
               onReevaluate={async (model) => {
                 const before = reviewData
                 const pseudoWork: PendingWork = {
