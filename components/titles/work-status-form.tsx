@@ -225,10 +225,6 @@ export function WorkStatusForm({
     defaultValues: initialValues,
   })
 
-  useEffect(() => {
-    reset(initialValues)
-  }, [initialValues, reset])
-
   const personalStatus = useWatch({ control, name: "personal_status" })
   const chaptersRead = useWatch({ control, name: "chapters_read" })
   const synopsisQuality = useWatch({ control, name: "synopsis_quality" })
@@ -244,6 +240,17 @@ export function WorkStatusForm({
     if (!currentValues) return false
     return hasChanges(initialValues, currentValues as WorkStatusValues)
   }, [initialValues, currentValues])
+
+  // Re-seed o form quando `initialValues` muda (ex.: dado novo do servidor após salvar).
+  // Guard: NÃO reseta enquanto o usuário edita (isDirty) ou salva — senão um refresh em
+  // background atropela capítulos/status digitados e ainda não salvos. O autosave de gosto
+  // ("Como foi pra você?") chama `revalidatePath` a cada nota, o que re-renderiza a rota e
+  // manda um novo objeto `initialValues`; sem esse guard o reset zerava os capítulos, o
+  // que fechava a própria seção de gosto (visível por % lido). Ver post-reading-flow.tsx.
+  useEffect(() => {
+    if (isDirty || saving) return
+    reset(initialValues)
+  }, [initialValues, isDirty, saving, reset])
 
   const canSubmit = (isDirty || extraDirty) && !saving
 
