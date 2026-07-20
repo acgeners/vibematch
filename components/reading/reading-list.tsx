@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useTransition, useEffect, useRef } from "react"
+import { Fragment, useState, useMemo, useTransition, useEffect, useRef } from "react"
 import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
 import {
@@ -31,6 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
 import { formatRelativeDate, formatPredictedDate, formatRelativeDateTime } from "@/lib/date-utils"
+import { differenceInCalendarDays } from "date-fns"
 import { checkReadingUpdates, type ReadingUpdateResult } from "@/server/actions/reading"
 import { setChaptersRead } from "@/server/actions/works"
 import type { ReadingWork } from "@/server/queries/reading"
@@ -110,6 +111,127 @@ function progressOf(w: ReadingWork, result: ReadingUpdateResult | undefined): nu
   const total = latestOf(w, result)
   if (total == null || total <= 0) return null
   return Math.min(1, Math.max(0, (w.chaptersRead ?? 0) / total))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Estado de leitura: separa "acompanha de perto" de "desacelerou" cruzando 3 sinais —
+// quanto falta (gap), quanto do que saiu já foi lido (%) e HÁ QUANTO TEMPO não lê (recência).
+//
+// Calibrado nos dados reais (2026-07-20, 25 obras): as obras "largadas" do usuário NÃO têm
+// % baixo — têm % médio/alto mas ~4 meses sem abrir. Ou seja, o que separa "acompanha
+// religiosamente" de "desacelerou" é a RECÊNCIA, não o %. Por isso a banda "Parado" é dirigida
+// por frieza (independe do %); o % vira textura (tag "recém-começou" + ordenação dentro da banda).
+// Os cortes são o ponto de ajuste — recalibre se a distribuição mudar.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ReadingState = "uptodate" | "onpace" | "slowing" | "behind"
+
+const ONPACE_PCT = 0.8 // ≥ 80% lido e não-frio → colado no front (poucos capítulos pra alcançar)
+const SLOWING_PCT = 0.4 // < 40% lido + recente → "recém-começou"; abaixo disso vira só textura
+const RECENT_DAYS = 14 // lida nos últimos 14 dias → lendo agora
+const COLD_DAYS = 45 // sem leitura há mais de ~6 semanas → "Parado" (calibrado nos dados reais)
+
+const READING_STATE_ORDER: ReadingState[] = ["uptodate", "onpace", "slowing", "behind"]
+
+const READING_STATE_CONFIG: Record<
+  ReadingState,
+  { label: string; hint: string; bar: string; progress: string; chip: string }
+> = {
+  uptodate: {
+    label: "Em dia",
+    hint: "você leu tudo o que saiu",
+    bar: "bg-emerald-500",
+    progress: "bg-emerald-500",
+    chip: "border-emerald-500/30 text-emerald-600 dark:text-emerald-400",
+  },
+  onpace: {
+    label: "No ritmo",
+    hint: "lendo agora — ou colado no último capítulo",
+    bar: "bg-lime-500",
+    progress: "bg-lime-500",
+    chip: "border-lime-500/30 bg-lime-500/15 text-lime-600 dark:text-lime-400",
+  },
+  slowing: {
+    label: "Desacelerando",
+    hint: "esfriando — algumas semanas sem abrir",
+    bar: "bg-amber-500",
+    progress: "bg-amber-500",
+    chip: "border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  },
+  behind: {
+    label: "Atrasado / Parado",
+    hint: "sem leitura há mais de ~6 semanas",
+    bar: "bg-rose-500",
+    progress: "bg-rose-500",
+    chip: "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400",
+  },
+}
+
+/** Dias desde `iso` (calendário). `Infinity` quando nulo/inválido — nunca conta como recente. */
+function daysSince(iso: string | null): number {
+  if (!iso) return Infinity
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return Infinity
+  return differenceInCalendarDays(new Date(), d)
+}
+
+/**
+ * Classifica a obra numa das 4 bandas (recência-primeiro). `recentlyStarted` = está "No ritmo"
+ * só pela recência apesar de estar longe do front (< 40% lido) — provavelmente recém-começou ou
+ * voltou a ler; é agrupada à parte pra não se confundir com quem está colado no fim.
+ */
+function classifyReadingState(
+  w: ReadingWork,
+  result: ReadingUpdateResult | undefined,
+): { state: ReadingState; recentlyStarted: boolean } {
+  const pending = pendingOf(w, result, w.chaptersRead ?? 0)
+  const pct = progressOf(w, result)
+  // Sem total conhecido não dá pra medir progresso: fica em "No ritmo" (neutro) em vez
+  // de cair injustamente em "Atrasado".
+  if (pending == null || pct == null) return { state: "onpace", recentlyStarted: false }
+  if (pending === 0) return { state: "uptodate", recentlyStarted: false }
+
+  const days = daysSince(w.lastReadAt)
+  // Frio primeiro: sem abrir há > 6 semanas = "Parado", mesmo com % alto (pausou perto do fim).
+  if (days > COLD_DAYS) return { state: "behind", recentlyStarted: false }
+  if (pct >= ONPACE_PCT) return { state: "onpace", recentlyStarted: false } // colado no front
+  if (days <= RECENT_DAYS) return { state: "onpace", recentlyStarted: pct < SLOWING_PCT } // lendo agora
+  return { state: "slowing", recentlyStarted: false } // esfriando (RECENT–COLD dias, longe do front)
+}
+
+type BandItem = { work: ReadingWork; recentlyStarted: boolean }
+
+/** Agrupa as obras (já filtradas/ordenadas) nas bandas, em ordem de engajamento. */
+function groupIntoBands(
+  works: ReadingWork[],
+  results: Record<string, ReadingUpdateResult>,
+): Array<{ state: ReadingState; items: BandItem[] }> {
+  const buckets: Record<ReadingState, BandItem[]> = {
+    uptodate: [],
+    onpace: [],
+    slowing: [],
+    behind: [],
+  }
+  for (const work of works) {
+    const { state, recentlyStarted } = classifyReadingState(work, results[work.id])
+    buckets[state].push({ work, recentlyStarted })
+  }
+  // Dentro de "No ritmo", os "lendo agora / longe do front" descem pro fim (sob divisória).
+  // sort estável (ES2019): preserva a ordem original de `works` dentro de cada subgrupo.
+  buckets.onpace.sort((a, b) => Number(a.recentlyStarted) - Number(b.recentlyStarted))
+  return READING_STATE_ORDER.map((state) => ({ state, items: buckets[state] })).filter(
+    (b) => b.items.length > 0,
+  )
+}
+
+/** Conta as obras por estado (pra faixa-resumo do topo). */
+function tallyStates(
+  works: ReadingWork[],
+  results: Record<string, ReadingUpdateResult>,
+): Record<ReadingState, number> {
+  const counts: Record<ReadingState, number> = { uptodate: 0, onpace: 0, slowing: 0, behind: 0 }
+  for (const w of works) counts[classifyReadingState(w, results[w.id]).state]++
+  return counts
 }
 
 function matchesReadFilter(
@@ -395,6 +517,8 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
         </div>
       </div>
 
+      {!filtering && <ReadingStateSummary works={works} results={results} />}
+
       {displayed.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
@@ -411,9 +535,7 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
               open={isOpen("ongoing")}
               onToggle={() => toggleSection("ongoing")}
             >
-              {ongoing.map((work) => (
-                <ReadingCard key={work.id} work={work} result={results[work.id]} />
-              ))}
+              <BandedGrid works={ongoing} results={results} />
             </ReadingSection>
           )}
           {others.length > 0 && (
@@ -424,9 +546,7 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
               open={isOpen("others")}
               onToggle={() => toggleSection("others")}
             >
-              {others.map((work) => (
-                <ReadingCard key={work.id} work={work} result={results[work.id]} />
-              ))}
+              <BandedGrid works={others} results={results} />
             </ReadingSection>
           )}
         </div>
@@ -471,8 +591,102 @@ function ReadingSection({
           {cfg.hint}
         </span>
       </button>
-      {open && <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">{children}</div>}
+      {open && children}
     </section>
+  )
+}
+
+/** Faixa-resumo do topo: barra segmentada + legenda com a contagem por estado. */
+function ReadingStateSummary({
+  works,
+  results,
+}: {
+  works: ReadingWork[]
+  results: Record<string, ReadingUpdateResult>
+}) {
+  const counts = useMemo(() => tallyStates(works, results), [works, results])
+  if (works.length === 0) return null
+  return (
+    <div className="rounded-xl border border-border bg-card/40 p-3.5">
+      <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        Seu ritmo nas {works.length} obras que você acompanha
+      </p>
+      <div className="mb-3 flex h-2 gap-0.5 overflow-hidden rounded-full">
+        {READING_STATE_ORDER.filter((s) => counts[s] > 0).map((s) => (
+          <div
+            key={s}
+            className={cn("h-full", READING_STATE_CONFIG[s].bar)}
+            style={{ flexGrow: counts[s] }}
+            title={`${READING_STATE_CONFIG[s].label}: ${counts[s]}`}
+          />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+        {READING_STATE_ORDER.map((s) => {
+          const cfg = READING_STATE_CONFIG[s]
+          return (
+            <div
+              key={s}
+              className={cn("flex items-center gap-1.5 text-xs", counts[s] === 0 && "opacity-40")}
+            >
+              <span className={cn("size-2 rounded-[3px]", cfg.bar)} />
+              <span className="font-medium text-foreground">{cfg.label}</span>
+              <span className="tabular-nums text-muted-foreground">{counts[s]}</span>
+              <span className="hidden text-[11px] text-muted-foreground/60 md:inline">{cfg.hint}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** Grade agrupada por estado de leitura — sub-cabeçalho colorido + cards de cada banda. */
+function BandedGrid({
+  works,
+  results,
+}: {
+  works: ReadingWork[]
+  results: Record<string, ReadingUpdateResult>
+}) {
+  const bands = useMemo(() => groupIntoBands(works, results), [works, results])
+  return (
+    <div className="space-y-5">
+      {bands.map(({ state, items }) => {
+        const cfg = READING_STATE_CONFIG[state]
+        // "No ritmo" pode ter um subgrupo "lendo agora / longe do front" no fim da banda.
+        // splitAt > 0 garante que existe mainstream ANTES da divisória (senão não a mostra).
+        const splitAt = state === "onpace" ? items.findIndex((i) => i.recentlyStarted) : -1
+        const hasSplit = splitAt > 0
+        return (
+          <div key={state} className="space-y-2.5">
+            <div className="flex items-center gap-2.5">
+              <span className={cn("h-3.5 w-1 shrink-0 rounded-full", cfg.bar)} />
+              <h3 className="text-sm font-semibold">{cfg.label}</h3>
+              <span className="rounded-full border border-border px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+                {items.length}
+              </span>
+              <span className="hidden truncate pl-1 text-[11px] text-muted-foreground/70 sm:inline">
+                {cfg.hint}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {items.map(({ work }, i) => (
+                <Fragment key={work.id}>
+                  {hasSplit && i === splitAt && (
+                    <div className="col-span-full flex items-center gap-2 pt-0.5 text-[10.5px] uppercase tracking-wide text-muted-foreground/60">
+                      lendo agora · ainda longe do front
+                      <span className="h-px flex-1 bg-border" />
+                    </div>
+                  )}
+                  <ReadingCard work={work} result={results[work.id]} state={state} />
+                </Fragment>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -480,9 +694,11 @@ function ReadingSection({
 function ReadingCard({
   work,
   result,
+  state,
 }: {
   work: ReadingWork
   result: ReadingUpdateResult | undefined
+  state: ReadingState
 }) {
   // Progresso local otimista. `read` é a fonte da verdade da UI do card; o servidor é
   // atualizado com debounce. Ressincroniza se o valor persistido mudar (ex.: pós-refresh)
@@ -534,13 +750,7 @@ function ReadingCard({
   const pending = pendingOf(work, result, read)
   const fraction = lancado != null && lancado > 0 ? Math.min(1, Math.max(0, read / lancado)) : null
   const canMarkLatest = lancado != null && read < lancado
-
-  const accent =
-    pending == null
-      ? "border-l-transparent"
-      : pending > 0
-        ? "border-l-amber-500/70"
-        : "border-l-emerald-500/40"
+  const cfg = READING_STATE_CONFIG[state]
 
   // "Continuar lendo" → fonte com o cap mais recente (pós-check); senão comix por hid (load).
   const readUrl = result?.latestUrl ?? (work.comixHid ? comixUrlFor(work.comixHid) : null)
@@ -556,8 +766,11 @@ function ReadingCard({
   const predicted = formatPredictedDate(result?.nextPredictedAt ?? work.nextChapterPredictedAt)
 
   return (
-    <Card className={cn("overflow-hidden border-l-4", accent)}>
-      <CardContent className="flex gap-4 p-3">
+    <Card className="relative overflow-hidden">
+      {/* Faixa de estado: `bg-*` porque `border-<cor>` é morto neste projeto
+          (regra `* { border-color }` fora de @layer sobrepõe as utilities do Tailwind). */}
+      <span className={cn("absolute inset-y-0 left-0 w-1", cfg.bar)} aria-hidden />
+      <CardContent className="flex gap-4 p-3 pl-3.5">
         <CoverImage
           url={work.coverUrl}
           alt={work.title}
@@ -572,7 +785,7 @@ function ReadingCard({
             />
             <div className="flex shrink-0 items-center gap-1.5">
               {work.isAdult && <AdultBadge className="px-1.5 py-0" />}
-              <ReadingStatusBadge pending={pending} />
+              <ReadingStatusBadge pending={pending} state={state} />
               <PublicationStatusBadge statusId={work.publicationStatusId} iconOnly />
             </div>
           </div>
@@ -581,10 +794,7 @@ function ReadingCard({
             <div className="flex items-center gap-2.5">
               <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                 <div
-                  className={cn(
-                    "h-full rounded-full",
-                    pending === 0 ? "bg-emerald-500" : "bg-amber-500",
-                  )}
+                  className={cn("h-full rounded-full", cfg.progress)}
                   style={{ width: `${Math.round(fraction * 100)}%` }}
                 />
               </div>
@@ -655,6 +865,12 @@ function ReadingCard({
           </div>
 
           <div className="min-h-[1.25rem] space-y-0.5 text-[13px] text-muted-foreground">
+            {work.lastReadAt && (
+              <span className="flex items-center gap-1.5 text-muted-foreground/70">
+                <BookOpenCheck className="size-3.5 shrink-0" /> Última leitura:{" "}
+                {formatRelativeDate(work.lastReadAt)}
+              </span>
+            )}
             {result?.failed ? (
               <span className="flex items-center gap-1.5">
                 <AlertCircle className="size-3.5" /> não verificado
@@ -706,19 +922,20 @@ function ReadingCard({
   )
 }
 
-/** Selo "Em dia" (leu tudo) vs "{N} pra ler" (capítulos lançados não lidos). */
-function ReadingStatusBadge({ pending }: { pending: number | null }) {
+/** Selo "Em dia" (leu tudo) vs "{N} pra ler" (capítulos lançados não lidos), na cor da banda. */
+function ReadingStatusBadge({ pending, state }: { pending: number | null; state: ReadingState }) {
   if (pending == null) return null
+  const cfg = READING_STATE_CONFIG[state]
   if (pending > 0) {
     return (
-      <Badge className="gap-1 border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400">
+      <Badge className={cn("gap-1", cfg.chip)}>
         <BookOpen className="size-3" />
         {pending} pra ler
       </Badge>
     )
   }
   return (
-    <Badge variant="outline" className="gap-1 border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+    <Badge variant="outline" className={cn("gap-1", cfg.chip)}>
       <Check className="size-3" />
       Em dia
     </Badge>
