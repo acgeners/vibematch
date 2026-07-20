@@ -35,23 +35,54 @@ function polarityChipClass(p: string): string {
       : "bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-300"
 }
 
-/** Traços salientes como chips — o "por quê" do consenso, escaneável. */
+// Ordem-espectro e rótulo de cada polaridade. `mixed` (e qualquer valor inesperado)
+// cai no balde do meio, espelhando o fallback de polarityChipClass. Só text-*: `border-<cor>`
+// não pinta neste app (ver polarityChipClass acima).
+const POLARITY_GROUPS = [
+  { key: "positive", label: "Positivo", labelClass: "text-emerald-700 dark:text-emerald-300" },
+  { key: "mixed", label: "Misto", labelClass: "text-amber-700 dark:text-amber-300" },
+  { key: "negative", label: "Negativo", labelClass: "text-rose-700 dark:text-rose-300" },
+] as const
+
+/** Traços salientes como chips, agrupados por polaridade (positivo → misto → negativo). */
 function TraitChips({ traits }: { traits: ReviewDigest["salient_traits"] }) {
+  const groups: Record<(typeof POLARITY_GROUPS)[number]["key"], ReviewDigest["salient_traits"]> = {
+    positive: [],
+    mixed: [],
+    negative: [],
+  }
+  for (const t of traits) {
+    const key = t.polarity === "positive" ? "positive" : t.polarity === "negative" ? "negative" : "mixed"
+    groups[key].push(t)
+  }
+
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {traits.map((t, i) => (
-        <span
-          key={i}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11.5px]",
-            polarityChipClass(t.polarity),
-          )}
-          title={t.axis || undefined}
-        >
-          <span className="size-1 rounded-full bg-current" aria-hidden />
-          {t.trait}
-        </span>
-      ))}
+    <div className="flex flex-col gap-2">
+      {POLARITY_GROUPS.map(({ key, label, labelClass }) =>
+        groups[key].length === 0 ? null : (
+          // Seção some sozinha quando não há traço daquela polaridade.
+          <div key={key} className="grid grid-cols-[64px_1fr] items-start gap-2.5">
+            <span className={cn("pt-1 text-[10px] font-semibold uppercase tracking-wider", labelClass)}>
+              {label}
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {groups[key].map((t, i) => (
+                <span
+                  key={i}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11.5px]",
+                    polarityChipClass(t.polarity),
+                  )}
+                  title={t.axis || undefined}
+                >
+                  <span className="size-1 rounded-full bg-current" aria-hidden />
+                  {t.trait}
+                </span>
+              ))}
+            </div>
+          </div>
+        ),
+      )}
     </div>
   )
 }
