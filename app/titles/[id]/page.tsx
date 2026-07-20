@@ -55,6 +55,7 @@ import {
 } from "@/components/titles/work-detail-actions"
 import { BatchCreatedNavigator } from "@/components/titles/batch-created-navigator"
 import { WorkCoverGallery } from "@/components/titles/work-cover-gallery"
+import { LinkedSources } from "@/components/titles/linked-sources"
 import { SynopsesViewer } from "@/components/titles/synopses-viewer"
 import { BackButton } from "@/components/titles/back-button"
 import { AltTitlesChips } from "@/components/titles/alt-titles-chips"
@@ -865,6 +866,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 )}
               </div>
             )}
+
+            <LinkedSources externalIds={externalIdMap} />
           </aside>
 
           {/* Coluna do conteúdo das abas */}
