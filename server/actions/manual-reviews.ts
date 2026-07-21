@@ -23,9 +23,14 @@ export async function getEvaluationInputs(workId: string): Promise<{ synopsis: s
 
 /**
  * Define o texto da sinopse PRIMÁRIA (manual) de uma obra — a que a avaliação IA
- * lê via `pickPrimarySynopsis`. Promove a linha `source='manual'` a primary
- * (criando-a se não existir) e rebaixa as demais. Texto vazio remove a linha
- * manual e deixa as sinopses externas assumirem.
+ * lê via `pickPrimarySynopsis`. Reescreve a manual que já é primária, ou cria uma
+ * nova e rebaixa as demais. Texto vazio remove essa linha e deixa as externas
+ * assumirem.
+ *
+ * Quando a primária atual NÃO é manual, cria uma linha nova em vez de reaproveitar
+ * alguma outra manual da obra: desde que editar uma sinopse de fonte a converte em
+ * "manual", as outras manuais são sinopses distintas que você curou — sobrescrever
+ * uma delas apagaria texto que ninguém mandou apagar.
  */
 export async function updatePrimarySynopsis(
   workId: string,
@@ -39,16 +44,25 @@ export async function updatePrimarySynopsis(
 
   const { data: existing, error: loadErr } = await supabase
     .from("work_synopses")
-    .select("id, source")
+    .select("id, source, is_primary")
     .eq("work_id", workId)
   if (loadErr) return { error: loadErr.message }
 
+  // Alvo = a linha manual que HOJE é a primária. Mirar em `source === "manual"`
+  // solto escolhia uma linha arbitrária desde que o picker passou a permitir
+  // várias manuais (sinopse editada vira "manual"), e o caminho de texto vazio
+  // apagava TODAS elas — inclusive as que não estavam em jogo aqui.
+  const rows = existing ?? []
+  const primaryManual = rows.find((r) => r.is_primary && r.source === "manual")
+
   if (!text) {
-    const { error } = await supabase
-      .from("work_synopses")
-      .delete()
-      .eq("work_id", workId)
-      .eq("source", "manual")
+    // Sem texto: remove só a manual primária e deixa as externas assumirem. Se a
+    // primária nem é manual, não há o que apagar.
+    if (!primaryManual) {
+      revalidatePath(`/titles/${workId}`)
+      return { error: null }
+    }
+    const { error } = await supabase.from("work_synopses").delete().eq("id", primaryManual.id)
     if (error) return { error: error.message }
     revalidatePath(`/titles/${workId}`)
     return { error: null }
@@ -61,12 +75,11 @@ export async function updatePrimarySynopsis(
     .eq("work_id", workId)
   if (demoteErr) return { error: demoteErr.message }
 
-  const manualRow = (existing ?? []).find((r) => r.source === "manual")
-  if (manualRow) {
+  if (primaryManual) {
     const { error } = await supabase
       .from("work_synopses")
       .update({ text, is_primary: true, position: 0 })
-      .eq("id", manualRow.id)
+      .eq("id", primaryManual.id)
     if (error) return { error: error.message }
   } else {
     const { error } = await supabase

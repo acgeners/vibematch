@@ -9,7 +9,6 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ChipInput } from "@/components/ui/chip-input"
 import { Separator } from "@/components/ui/separator"
@@ -22,6 +21,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 import { ExternalSearch } from "@/components/titles/external-search"
+import { SynopsisPicker, normalizeSynopsisChoices } from "@/components/titles/synopsis-picker"
+import type { SynopsisChoice } from "@/components/titles/synopsis-picker"
 import { SourceSelectionStep } from "@/components/titles/source-selection-step"
 import { WORK_UPDATED_EVENT } from "@/components/titles/update-progress-watcher"
 import { fetchComicKClient, fetchAnimePlanetClient } from "@/lib/external/client-fetches"
@@ -48,6 +49,9 @@ interface UpdateDataDialogProps {
   // Capas já salvas na obra (todas, não só a primária). Mostradas no passo de
   // capas e mantidas por padrão. Quando ausente, cai pra currentWork.coverUrl.
   currentCovers?: SavedCover[]
+  // Sinopses já salvas na obra. Entram no pool do passo de sinopses junto com as
+  // das fontes — sem isto o save (delete + re-insert) apaga as suas.
+  currentSynopses?: SavedSynopsis[]
   open?: boolean
   onOpenChange?: (open: boolean) => void
   hideTrigger?: boolean
@@ -109,13 +113,49 @@ function getConflicts(current: CurrentWork, external: ExternalWorkData): FieldCo
   return conflicts
 }
 
-interface SynopsisChoice {
-  // `string` e não `ExternalSourceId`: uma sinopse manual entra com source "manual",
-  // que não faz parte do union de fontes externas (mesma convenção da capa manual).
+// SynopsisChoice + a invariante da principal moram no SynopsisPicker, que é
+// compartilhado com o fluxo de criação (ExternalSearch).
+
+/** Sinopse já salva na obra — entra no pool do passo junto com as das fontes. */
+export interface SavedSynopsis {
   source: string
   text: string
-  included: boolean
   isPrimary: boolean
+}
+
+/**
+ * Junta as sinopses JÁ SALVAS com as que a busca acabou de trazer, na mesma
+ * lógica do `buildCoverPool`. Sem isto o passo listava só as novas e o save
+ * (delete + re-insert) apagava as salvas — uma sinopse manual sua morria em
+ * silêncio a cada "Atualizar dados".
+ *
+ * Dedup por TEXTO: a mesma sinopse volta da fonte a cada atualização, e sem isso
+ * ela apareceria duas vezes (uma "já salva", uma "nova"). A salva vence — é ela
+ * que carrega a sua curadoria (principal, texto editado).
+ */
+export function buildSynopsisPool(
+  saved: SavedSynopsis[],
+  external: Array<{ source: string; text: string }>
+): SynopsisChoice[] {
+  const pool: SynopsisChoice[] = []
+  const seen = new Set<string>()
+  const key = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ")
+
+  for (const s of saved) {
+    const text = (s.text ?? "").trim()
+    if (!text || seen.has(key(text))) continue
+    seen.add(key(text))
+    pool.push({ source: s.source, text, included: true, isPrimary: s.isPrimary, saved: true })
+  }
+  // Obra sem nada salvo mantém o comportamento antigo: externas já vêm marcadas.
+  const hasSaved = pool.length > 0
+  for (const e of external) {
+    const text = (e.text ?? "").trim()
+    if (!text || seen.has(key(text))) continue
+    seen.add(key(text))
+    pool.push({ source: e.source, text, included: !hasSaved, isPrimary: false })
+  }
+  return normalizeSynopsisChoices(pool)
 }
 
 interface CoverChoice {
@@ -179,6 +219,7 @@ export function UpdateDataDialog({
   workId,
   currentWork,
   currentCovers,
+  currentSynopses,
   open: controlledOpen,
   onOpenChange,
   hideTrigger = false,
@@ -192,6 +233,9 @@ export function UpdateDataDialog({
   // obra). Quando ausente (ex.: revisão de importadas), savedCovers fica vazio e
   // o picker volta ao comportamento antigo: capas externas marcadas por padrão.
   const savedCovers: SavedCover[] = (currentCovers ?? []).filter((c) => c.url)
+  // Idem capas: só o fluxo "Atualizar dados" da página da obra passa isto. Sem
+  // ele o pool fica só com as externas (comportamento antigo).
+  const savedSynopses: SavedSynopsis[] = (currentSynopses ?? []).filter((s) => s.text?.trim())
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : uncontrolledOpen
@@ -208,9 +252,6 @@ export function UpdateDataDialog({
   const [conflicts, setConflicts] = useState<FieldConflict[]>([])
   const [resolutions, setResolutions] = useState<Record<string, "current" | "external">>({})
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
-  // Adicionar sinopse manual (item 3): botão que revela o campo, oculto por padrão.
-  const [synManualOpen, setSynManualOpen] = useState(false)
-  const [synManualText, setSynManualText] = useState("")
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
   const [coversNeedPick, setCoversNeedPick] = useState(false)
   // Passo de revisão de tags/gêneros (item 4A) — aditivo: revisa só o que veio das fontes.
@@ -265,16 +306,7 @@ export function UpdateDataDialog({
       (savedCovers.length > 0 && newExternal.length > 0)
 
     setPendingData(data)
-    setSynopsisChoices(
-      synopses.map((s, i) => ({
-        source: s.source,
-        text: s.text,
-        included: true,
-        isPrimary: i === 0,
-      }))
-    )
-    setSynManualOpen(false)
-    setSynManualText("")
+    setSynopsisChoices(buildSynopsisPool(savedSynopses, synopses))
     setCoverChoices(pool)
     setCoversNeedPick(coversNeedPick)
     setActiveRefineUrl(pool.find((c) => c.included)?.url ?? pool[0]?.url ?? null)
@@ -283,18 +315,6 @@ export function UpdateDataDialog({
     // Item 3: o passo de sinopse aparece SEMPRE (mesmo com 0-1 externa) pra você poder
     // digitar uma manual. Os passos de capa (se houver decisão) e de tags vêm depois.
     setPhase("synopses-pick")
-  }
-
-  // Adiciona uma sinopse manual à lista do passo de sinopses (source "manual").
-  const addManualSynopsis = () => {
-    const text = synManualText.trim()
-    if (!text) return
-    setSynopsisChoices((prev) => [
-      ...prev,
-      { source: "manual", text, included: true, isPrimary: prev.length === 0 },
-    ])
-    setSynManualText("")
-    setSynManualOpen(false)
   }
 
   const proceedToConflictsOrApply = (
@@ -394,22 +414,6 @@ export function UpdateDataDialog({
     finalizeChoicesAndProceed()
   }
 
-  const toggleSynopsisIncluded = (idx: number) => {
-    setSynopsisChoices((prev) => {
-      const next = prev.map((s, i) => (i === idx ? { ...s, included: !s.included } : s))
-      // Se o item desmarcado era primary, transfere pra outro incluído (ou limpa).
-      if (prev[idx].isPrimary && !next[idx].included) {
-        const fallbackIdx = next.findIndex((s) => s.included)
-        return next.map((s, i) => ({ ...s, isPrimary: fallbackIdx >= 0 && i === fallbackIdx }))
-      }
-      return next
-    })
-  }
-  const setSynopsisPrimary = (idx: number) => {
-    setSynopsisChoices((prev) =>
-      prev.map((s, i) => ({ ...s, isPrimary: i === idx, included: i === idx ? true : s.included }))
-    )
-  }
   const toggleCoverIncluded = (url: string) => {
     setCoverChoices((prev) => {
       const next = prev.map((c) => (c.url === url ? { ...c, included: !c.included } : c))
@@ -444,24 +448,9 @@ export function UpdateDataDialog({
     }
   }
 
-  const allSynopsesIncluded = synopsisChoices.length > 0 && synopsisChoices.every((s) => s.included)
-  const someSynopsesIncluded = synopsisChoices.some((s) => s.included)
   const allCoversIncluded = coverChoices.length > 0 && coverChoices.every((c) => c.included)
   const someCoversIncluded = coverChoices.some((c) => c.included)
 
-  const toggleAllSynopses = () => {
-    setSynopsisChoices((prev) => {
-      if (prev.every((s) => s.included)) {
-        return prev.map((s) => ({ ...s, included: false, isPrimary: false }))
-      }
-      const hasPrimary = prev.some((s) => s.isPrimary)
-      return prev.map((s, i) => ({
-        ...s,
-        included: true,
-        isPrimary: hasPrimary ? s.isPrimary : i === 0,
-      }))
-    })
-  }
   const toggleAllCovers = () => {
     setCoverChoices((prev) => {
       if (prev.every((c) => c.included)) {
@@ -691,8 +680,6 @@ export function UpdateDataDialog({
     setPendingData(null)
     setConflicts([])
     setSynopsisChoices([])
-    setSynManualOpen(false)
-    setSynManualText("")
     setCoverChoices([])
     setCoversNeedPick(false)
     setTagChoices([])
@@ -771,98 +758,15 @@ export function UpdateDataDialog({
           {phase === "synopses-pick" && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Marque quais sinopses incluir e qual é a principal — ou escreva a sua.
+                Marque quais incluir e qual é a <span className="text-foreground">Principal</span> — a
+                Principal é a única que vai pro prompt da avaliação IA e pras features da Nota Prevista.
               </p>
 
-              <section className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-medium">Sinopses</h3>
-                  {synopsisChoices.length > 0 && (
-                    <label className="flex items-center gap-1.5 cursor-pointer text-xs">
-                      <Checkbox
-                        checked={allSynopsesIncluded ? true : someSynopsesIncluded ? "indeterminate" : false}
-                        onCheckedChange={toggleAllSynopses}
-                      />
-                      Selecionar todas
-                    </label>
-                  )}
-                </div>
-                {synopsisChoices.length === 0 && (
-                  <p className="rounded-md border border-dashed p-3 text-xs italic text-muted-foreground">
-                    Nenhuma sinopse veio das fontes. Você pode escrever uma manual abaixo.
-                  </p>
-                )}
-                {synopsisChoices.map((s, idx) => (
-                  <div
-                    key={`${s.source}-${idx}`}
-                    className={`rounded-md border p-3 space-y-2 ${
-                      s.included ? "border-primary/60 bg-primary/5" : ""
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <Badge variant="outline" className="text-[11px]">{s.source}</Badge>
-                      <div className="flex items-center gap-3 text-xs">
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                          <Checkbox
-                            checked={s.included}
-                            onCheckedChange={() => toggleSynopsisIncluded(idx)}
-                          />
-                          Incluir
-                        </label>
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="synopsis-primary"
-                            checked={s.isPrimary}
-                            onChange={() => setSynopsisPrimary(idx)}
-                            className="accent-primary"
-                          />
-                          Principal
-                        </label>
-                      </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground line-clamp-6 whitespace-pre-wrap">{s.text}</p>
-                  </div>
-                ))}
-
-                {/* Adicionar sinopse manual (item 3): botão que revela o campo. */}
-                {synManualOpen ? (
-                  <div className="space-y-2 rounded-md border border-dashed border-emerald-500/50 bg-emerald-500/5 p-3">
-                    <p className="text-xs font-medium text-muted-foreground">Nova sinopse manual</p>
-                    <Textarea
-                      value={synManualText}
-                      onChange={(e) => setSynManualText(e.target.value)}
-                      rows={3}
-                      placeholder="Escreva uma sinopse própria…"
-                      className="resize-y text-sm"
-                      autoFocus
-                    />
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => { setSynManualOpen(false); setSynManualText("") }}
-                      >
-                        Cancelar
-                      </Button>
-                      <Button size="sm" onClick={addManualSynopsis} disabled={!synManualText.trim()}>
-                        Adicionar
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSynManualOpen(true)}
-                    className="gap-1 border-dashed text-primary hover:border-solid"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Adicionar sinopse manual
-                  </Button>
-                )}
-              </section>
+              <SynopsisPicker
+                choices={synopsisChoices}
+                onChange={setSynopsisChoices}
+                emptyHint="Esta obra não tem sinopse salva e nenhuma veio das fontes. Você pode escrever a sua abaixo."
+              />
 
               <Separator />
               <div className="flex gap-2 justify-between">
