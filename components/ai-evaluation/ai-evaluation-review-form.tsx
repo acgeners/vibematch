@@ -21,7 +21,7 @@ import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import { SHOW_HAIKU_AB } from "@/lib/ai-evaluation/ab-config"
 import type { AiEvaluation } from "@/types/domain"
 
-// Limiar fixo de fricção no "Aceitar todos" e no botão "Reavaliar com Opus".
+// Limiar fixo de fricção no "Salvar" e no botão "Reavaliar com Opus".
 // Desacoplado do `formula_config.low_confidence_threshold` (que controla o
 // filtro da fila): aqui o objetivo é só pedir confirmação quando há risco real,
 // alinhado com a faixa amarela/vermelha dos badges (≥75% = verde, sem fricção).
@@ -47,7 +47,6 @@ interface AiEvaluationReviewFormProps {
   /** Quando fornecido, mostra botão de re-avaliar com modelo alternativo em caso de confiança baixa. */
   onReevaluate?: (model: ReevalModel) => Promise<void> | void
   onSaved: (acceptedScores: Record<string, number>) => void
-  onCancel: () => void
 }
 
 
@@ -64,10 +63,12 @@ type ReviewUsageState =
   | { kind: "declined"; available: number }    // reviews disponíveis mas modelo não citou nenhuma
   | { kind: "used"; count: number; available: number }
 
-function confidenceBadgeClass(confidence: number): string {
-  if (confidence >= 0.75) return "border-emerald-300 bg-emerald-50 text-emerald-700"
-  if (confidence >= 0.5) return "border-amber-300 bg-amber-50 text-amber-700"
-  return "border-rose-300 bg-rose-50 text-rose-700"
+/** Só a COR DO TEXTO da confiança — o fundo é do botão que a contém. Sem
+ *  `border-<cor>`: `* { border-color }` em globals.css mata essas utilidades no TW v4. */
+function confidenceTextClass(confidence: number): string {
+  if (confidence >= 0.75) return "text-emerald-600 dark:text-emerald-400"
+  if (confidence >= 0.5) return "text-amber-600 dark:text-amber-400"
+  return "text-rose-600 dark:text-rose-400"
 }
 
 function getReviewUsage(rawResponse: unknown): ReviewUsageState {
@@ -139,7 +140,6 @@ export function AiEvaluationReviewForm({
   currentEvaluation,
   onReevaluate,
   onSaved,
-  onCancel,
 }: AiEvaluationReviewFormProps) {
   const initialScores = useMemo(
     () =>
@@ -161,7 +161,7 @@ export function AiEvaluationReviewForm({
   const [scores, setScores] = useState(initialScores)
   const [submitting, setSubmitting] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
-  const [confirmAcceptAllOpen, setConfirmAcceptAllOpen] = useState(false)
+  const [confirmLowConfidenceOpen, setConfirmLowConfidenceOpen] = useState(false)
   const [reevaluatingModel, setReevaluatingModel] = useState<ReevalModel | null>(null)
   const [coverFailed, setCoverFailed] = useState(false)
   const reviewUsage = getReviewUsage(evaluation.raw_response)
@@ -181,34 +181,6 @@ export function AiEvaluationReviewForm({
       }
     : null
 
-  const reviewBadge = (() => {
-    switch (reviewUsage.kind) {
-      case "used": {
-        const ofTotal =
-          reviewUsage.available > 0 ? ` de ${reviewUsage.available}` : ""
-        return {
-          label: `${reviewUsage.count}${ofTotal} reviews citadas pela IA`,
-          className: "border-emerald-300 bg-emerald-50 text-emerald-700",
-        }
-      }
-      case "declined":
-        // Citação genérica (sem IDs) é o caso normal agora — o modelo usou as
-        // reviews no contexto, só não cita R1/R2. Rótulo neutro (não "não usadas").
-        return {
-          label:
-            reviewUsage.available > 0
-              ? `${reviewUsage.available} review(s) externa(s) no contexto`
-              : "reviews externas no contexto",
-          className: "border-sky-300 bg-sky-50 text-sky-700",
-        }
-      case "unavailable":
-      default:
-        return {
-          label: "sem reviews externas",
-          className: "border-slate-300 bg-slate-100 text-slate-600",
-        }
-    }
-  })()
 
   // Só dois modos: manter a nota ATUAL ou aceitar a SUGERIDA. Escolher a atual
   // (quando difere da sugerida) marca wasEdited → grava como `ai_edited`.
@@ -257,26 +229,50 @@ export function AiEvaluationReviewForm({
     }
   }
 
-  const handleSubmit = () => submitScores(scores)
-
-  const doAcceptAll = () => {
-    // Reseta todos pros valores sugeridos pela IA (descarta edits) e salva.
-    const allSuggested = scores.map((s) => ({
-      ...s,
-      acceptedScore: s.suggestedScore,
-      wasEdited: false,
-    }))
-    setScores(allSuggested)
-    void submitScores(allSuggested)
+  /** Posiciona os 9 critérios no conjunto escolhido. NÃO salva — quem salva é o
+   *  botão "Salvar". Depois de aplicar, cada critério continua livre pra destoar. */
+  const applyToAll = (mode: "current" | "suggested") => {
+    setScores((prev) =>
+      prev.map((s) => {
+        const value =
+          mode === "current" && s.currentScore !== undefined ? s.currentScore : s.suggestedScore
+        return { ...s, mode, acceptedScore: value, wasEdited: value !== s.suggestedScore }
+      })
+    )
   }
 
-  const handleAcceptAll = () => {
-    if (isLowConfidence) {
-      setConfirmAcceptAllOpen(true)
+  const doSubmit = () => submitScores(scores)
+
+  const handleSubmit = () => {
+    // A fricção de confiança baixa migrou do antigo "Aceitar" (que salvava na
+    // hora) pro Salvar — só faz sentido perguntar quando o que vai gravar de
+    // fato inclui alguma nota nova da IA.
+    if (isLowConfidence && scores.some((s) => s.mode === "suggested")) {
+      setConfirmLowConfidenceOpen(true)
       return
     }
-    doAcceptAll()
+    doSubmit()
   }
+
+  // Quantos critérios diferem, e quantos a gravação vai de fato mudar.
+  const diffCount = scores.filter(
+    (s) => s.currentScore !== undefined && s.currentScore !== s.suggestedScore
+  ).length
+  const changing = scores.filter(
+    (s) => s.currentScore === undefined || s.acceptedScore !== s.currentScore
+  )
+  // Média do |delta|, não do delta com sinal: com +2 e −2 a média assinada dá
+  // 0.0 e a linha diria "6 mudam · Δ médio +0.0" — lendo isso você conclui que
+  // quase nada muda enquanto 6 notas se mexem. Mesma escolha do comparador de
+  // modelos (`meanAbsDelta` em ai-evaluation-compare.tsx).
+  const avgAbsDelta =
+    changing.length > 0
+      ? changing.reduce(
+          (acc, s) => acc + Math.abs(s.acceptedScore - (s.currentScore ?? s.acceptedScore)),
+          0
+        ) / changing.length
+      : 0
+  const hasCurrent = scores.some((s) => s.currentScore !== undefined)
 
   const handleReevaluate = async (model: ReevalModel) => {
     if (!onReevaluate || reevaluatingModel) return
@@ -302,26 +298,29 @@ export function AiEvaluationReviewForm({
   return (
     <div className="space-y-4">
       <ConfirmDialog
-        open={confirmAcceptAllOpen}
-        onOpenChange={setConfirmAcceptAllOpen}
+        open={confirmLowConfidenceOpen}
+        onOpenChange={setConfirmLowConfidenceOpen}
         title="Confiança baixa"
         description={`A IA declarou ${
           evaluation.confidence != null ? `${Math.round(evaluation.confidence * 100)}%` : "?"
-        } de confiança, abaixo do limiar configurado (${thresholdPct}%). Quer aceitar todas as notas mesmo assim?`}
-        confirmText="Aceitar"
+        } de confiança, abaixo do limiar configurado (${thresholdPct}%). Quer salvar as notas sugeridas mesmo assim?`}
+        confirmText="Salvar"
         cancelText="Voltar"
-        onConfirm={() => doAcceptAll()}
+        onConfirm={() => doSubmit()}
       />
-
+      {/* Salvar no alto à direita, FORA da grade da capa: dentro dela a coluna
+          sobra pouco e ele empurraria o Atual/Sugerido pra outra linha. */}
       <div className="flex justify-end">
-        <Button size="sm" onClick={handleAcceptAll} disabled={submitting}>
-          {submitting ? "Salvando..." : "Aceitar"}
+        <Button size="sm" onClick={handleSubmit} disabled={submitting}>
+          {submitting ? "Salvando..." : "Salvar"}
         </Button>
       </div>
 
-      {evaluation.summary && (
-        <div className="grid gap-3 rounded-md bg-muted/50 p-3 text-sm sm:grid-cols-[96px_1fr]">
-          <div className="relative h-36 w-24 overflow-hidden rounded-md border bg-muted">
+      {/* Capa + aplicar-a-todos + resumo. A grade NÃO é mais condicionada ao
+          `summary`: ela carrega o aplicar-a-todos, e uma avaliação sem resumo
+          sumia com o controle inteiro. */}
+      <div className="grid gap-3 rounded-md bg-muted/50 p-3 text-sm sm:grid-cols-[96px_1fr]">
+        <div className="relative h-36 w-24 overflow-hidden rounded-md border bg-muted">
             {coverUrl && !coverFailed ? (
               <Image
                 src={getCoverImageSrc(coverUrl)}
@@ -338,32 +337,101 @@ export function AiEvaluationReviewForm({
               </div>
             )}
           </div>
-          <div>
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <p className="text-xs font-medium text-muted-foreground">Resumo da IA</p>
-              <span
-                className={`rounded-full border px-2 py-0.5 text-xs font-medium ${reviewBadge.className}`}
-              >
-                {reviewBadge.label}
-              </span>
-              {/* Ordem Atual → Sugerida, igual às colunas de nota de cada critério. */}
-              {currentEvaluation?.confidence != null && (
+          <div className="min-w-0">
+            {/* Aplicar a todos + confiança no MESMO controle: o selo "Atual 55%" e o
+                botão "Atual" sempre falaram do mesmo conjunto de notas. Separados,
+                ocupavam duas linhas dizendo a mesma coisa duas vezes. */}
+            {/* PRIMEIRA avaliação da obra: não há "atual" pra escolher, então não há
+                aplicar-a-todos — mas a confiança precisa aparecer assim mesmo. Ela
+                mora dentro dos botões, e sem este ramo sumia da tela inteira. */}
+            {!hasCurrent && evaluation.confidence != null && (
+              <div className="mb-2">
                 <span
-                  className={`rounded-full border px-2 py-0.5 text-xs font-medium ${confidenceBadgeClass(currentEvaluation.confidence)}`}
-                  title="Confiança da IA na avaliação ATUAL (a que gerou as notas em vigor). Comparar com a Sugerida ajuda a decidir se vale trocar."
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 text-xs font-semibold tabular-nums",
+                    confidenceTextClass(evaluation.confidence)
+                  )}
+                  title="Confiança da IA nesta avaliação (0–100%). Reflete a consistência da evidência, NÃO a quantidade de reviews: obras com opiniões divididas recebem confiança baixa mesmo com muitas reviews."
                 >
-                  <span className="opacity-70">Atual</span> {Math.round(currentEvaluation.confidence * 100)}%
+                  Confiança {Math.round(evaluation.confidence * 100)}%
                 </span>
-              )}
-              {evaluation.confidence != null && (
-                <span
-                  className={`rounded-full border px-2 py-0.5 text-xs font-medium ${confidenceBadgeClass(evaluation.confidence)}`}
-                  title="Confiança da IA na avaliação SUGERIDA (0–100%). Reflete a consistência da evidência, NÃO a quantidade de reviews: obras com opiniões divididas ou sinais ambíguos (ex.: enemies-to-lovers) recebem confiança baixa mesmo com muitas reviews — isso é o modelo sendo honesto, não uma falha."
-                >
-                  <span className="opacity-70">Sugerida</span> {Math.round(evaluation.confidence * 100)}%
-                </span>
-              )}
-            </div>
+              </div>
+            )}
+
+            {hasCurrent && scores.length > 0 && (
+              <div className="rounded-md border bg-muted/40 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Aplicar a todos
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={submitting}
+                    onClick={() => applyToAll("current")}
+                    className="h-auto flex-col items-start gap-0.5 px-3 py-1.5"
+                    aria-label="Aplicar a nota atual a todos os critérios"
+                    title="Mantém as notas em vigor em todos os critérios."
+                  >
+                    <span className="text-xs font-semibold leading-none">Atual</span>
+                    <span
+                      className={cn(
+                        "text-[10px] font-semibold leading-none tabular-nums",
+                        currentEvaluation?.confidence == null
+                          ? "font-medium text-muted-foreground"
+                          : confidenceTextClass(currentEvaluation.confidence)
+                      )}
+                    >
+                      {currentEvaluation?.confidence != null
+                        ? `confiança ${Math.round(currentEvaluation.confidence * 100)}%`
+                        : "sem avaliação IA"}
+                    </span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={submitting}
+                    onClick={() => applyToAll("suggested")}
+                    className="h-auto flex-col items-start gap-0.5 px-3 py-1.5"
+                    aria-label="Aplicar a nota sugerida a todos os critérios"
+                    title="Confiança da IA nesta avaliação (0–100%). Reflete a consistência da evidência, NÃO a quantidade de reviews: obras com opiniões divididas recebem confiança baixa mesmo com muitas reviews."
+                  >
+                    <span className="text-xs font-semibold leading-none">Sugerido</span>
+                    <span
+                      className={cn(
+                        "text-[10px] font-semibold leading-none tabular-nums",
+                        evaluation.confidence == null
+                          ? "font-medium text-muted-foreground"
+                          : confidenceTextClass(evaluation.confidence)
+                      )}
+                    >
+                      {evaluation.confidence != null
+                        ? `confiança ${Math.round(evaluation.confidence * 100)}%`
+                        : "confiança não declarada"}
+                    </span>
+                  </Button>
+                </div>
+                <p className="mt-1.5 text-[11px] tabular-nums text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    {diffCount} de {scores.length}
+                  </span>{" "}
+                  {diffCount === 1 ? "critério tem" : "critérios têm"} nota diferente.{" "}
+                  {changing.length === 0 ? (
+                    <>Você está mantendo todas as notas atuais — salvar não muda nada.</>
+                  ) : (
+                    <>
+                      Salvando agora,{" "}
+                      <span className="font-medium text-foreground">{changing.length}</span>{" "}
+                      {changing.length === 1 ? "muda" : "mudam"} · variação média{" "}
+                      <span className="font-medium text-foreground">
+                        {avgAbsDelta.toFixed(1)}
+                      </span>
+                    </>
+                  )}
+                </p>
+              </div>
+            )}
+
             {evaluation.summary}
             {reviewUsage.kind === "unavailable" && noReviewsReason && (
               <p className="mt-2 text-xs text-muted-foreground">
@@ -412,8 +480,7 @@ export function AiEvaluationReviewForm({
               </div>
             )}
           </div>
-        </div>
-      )}
+      </div>
 
       {debugContext && (
         <details
@@ -424,22 +491,23 @@ export function AiEvaluationReviewForm({
           <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 hover:bg-muted/40">
             <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
             <span className="text-sm leading-none">📋</span>
-            <span className="text-[13px] font-medium text-foreground/90">Dados usados na avaliação</span>
-            <span className="hidden text-muted-foreground sm:inline">· contexto enviado à IA</span>
+            <span className="whitespace-nowrap text-[13px] font-medium text-foreground/90">
+              Dados usados na avaliação
+            </span>
             {debugCounts && (
-              <span className="ml-auto flex flex-wrap items-center gap-1">
+              <span className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1">
                 {debugCounts.genres > 0 && (
-                  <span className="rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  <span className="whitespace-nowrap rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                     {debugCounts.genres} gêneros
                   </span>
                 )}
                 {debugCounts.tags > 0 && (
-                  <span className="rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  <span className="whitespace-nowrap rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                     {debugCounts.tags} tags
                   </span>
                 )}
                 {debugCounts.reviews > 0 && (
-                  <span className="rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  <span className="whitespace-nowrap rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                     {debugCounts.reviews} reviews
                   </span>
                 )}
@@ -635,15 +703,6 @@ export function AiEvaluationReviewForm({
         })}
       </div>
 
-      <div className="flex gap-2 pt-2">
-        <div className="flex-1" />
-        <Button variant="outline" size="sm" onClick={onCancel}>
-          Cancelar
-        </Button>
-        <Button size="sm" onClick={handleSubmit} disabled={submitting}>
-          {submitting ? "Salvando..." : "Salvar"}
-        </Button>
-      </div>
     </div>
   )
 }
