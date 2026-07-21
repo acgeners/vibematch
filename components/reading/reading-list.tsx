@@ -114,24 +114,39 @@ function progressOf(w: ReadingWork, result: ReadingUpdateResult | undefined): nu
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Estado de leitura: separa as obras acompanhadas por QUANTO FALTA LER (% lido), NÃO pela data.
-// % baixo = muitos capítulos pela frente. A recência (última leitura) não muda de banda uma obra
-// que você só pausou perto do fim — ela vira só textura: a linha "Última leitura" no card e a tag
-// "recém-começou" (< 40% lido, mas aberto nos últimos dias). Os cortes de % são o ponto de ajuste.
+// Estado de leitura: 6 bandas cruzando % lido × recência (STALE_DAYS) + hiato de publicação.
+// O % dirige a maior parte; a recência separa "lendo agora" de "esfriou"; publicação em Hiatus
+// (série pausada oficialmente) vai pra "Possível hiato". A matriz completa está em
+// classifyReadingState. Cortes = constantes ajustáveis. A ORDEM DE EXIBIÇÃO (READING_STATE_ORDER)
+// é o pedido do usuário — não é o gradiente de %.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type ReadingState = "uptodate" | "onpace" | "slowing" | "behind"
+type ReadingState = "onpace" | "uptodate" | "trailing" | "slowing" | "hiatus" | "behind"
 
-const ONPACE_PCT = 0.8 // ≥ 80% lido → No ritmo (faltam poucos capítulos)
-const SLOWING_PCT = 0.4 // 40–80% → Desacelerando; < 40% → Muito atrás (backlog grande)
-const RECENT_DAYS = 14 // só pra tag "recém-começou": < 40% lido mas aberto nos últimos 14 dias
+const ONPACE_PCT = 0.85 // ≥ 85% lido (e recente) → No ritmo (quase no fim)
+const BEHIND_PCT = 0.4 // < 40% lido → Atrasado (independe da recência)
+const STALE_DAYS = 30 // ≥ 30 dias sem ler → "frio" (Desacelerando / Possível hiato)
 
-const READING_STATE_ORDER: ReadingState[] = ["uptodate", "onpace", "slowing", "behind"]
+const READING_STATE_ORDER: ReadingState[] = [
+  "onpace", // 1 No ritmo
+  "uptodate", // 2 Em dia
+  "trailing", // 3 Muito atrás
+  "slowing", // 4 Desacelerando
+  "hiatus", // 5 Possível hiato
+  "behind", // 6 Atrasado
+]
 
 const READING_STATE_CONFIG: Record<
   ReadingState,
   { label: string; hint: string; bar: string; progress: string; chip: string }
 > = {
+  onpace: {
+    label: "No ritmo",
+    hint: "85–99% lido — quase no fim",
+    bar: "bg-lime-500",
+    progress: "bg-lime-500",
+    chip: "border-lime-500/30 bg-lime-500/15 text-lime-600 dark:text-lime-400",
+  },
   uptodate: {
     label: "Em dia",
     hint: "você leu tudo o que saiu",
@@ -139,23 +154,30 @@ const READING_STATE_CONFIG: Record<
     progress: "bg-emerald-500",
     chip: "border-emerald-500/30 text-emerald-600 dark:text-emerald-400",
   },
-  onpace: {
-    label: "No ritmo",
-    hint: "≥ 80% lido — faltam poucos capítulos",
-    bar: "bg-lime-500",
-    progress: "bg-lime-500",
-    chip: "border-lime-500/30 bg-lime-500/15 text-lime-600 dark:text-lime-400",
-  },
-  slowing: {
-    label: "Desacelerando",
-    hint: "40–80% lido",
+  trailing: {
+    label: "Muito atrás",
+    hint: "40–84% lido — lendo, mas longe do fim",
     bar: "bg-amber-500",
     progress: "bg-amber-500",
     chip: "border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400",
   },
+  slowing: {
+    label: "Desacelerando",
+    hint: "sem ler há mais de 30 dias",
+    bar: "bg-orange-500",
+    progress: "bg-orange-500",
+    chip: "border-orange-500/30 bg-orange-500/15 text-orange-600 dark:text-orange-400",
+  },
+  hiatus: {
+    label: "Possível hiato",
+    hint: "leu tudo e parou — ou série em hiato",
+    bar: "bg-violet-500",
+    progress: "bg-violet-500",
+    chip: "border-violet-500/30 bg-violet-500/15 text-violet-600 dark:text-violet-400",
+  },
   behind: {
-    label: "Muito atrás",
-    hint: "menos de 40% lido — backlog grande",
+    label: "Atrasado",
+    hint: "menos de 40% lido",
     bar: "bg-rose-500",
     progress: "bg-rose-500",
     chip: "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400",
@@ -170,25 +192,40 @@ function daysSince(iso: string | null): number {
   return differenceInCalendarDays(new Date(), d)
 }
 
-/** Classifica a obra numa das 4 bandas, por % lido (a data NÃO entra aqui — vira só textura no card). */
+/**
+ * Classifica a obra numa das 6 bandas — matriz % lido × recência (STALE_DAYS) + hiato de publicação.
+ * Ordem de avaliação (a 1ª que casa vence):
+ *   pub. Hiatus → Possível hiato · 100% → Em dia (recente) / Possível hiato (frio) · < 40% → Atrasado
+ *   · frio (≥ 30d) → Desacelerando (inclui 85–99% frio) · ≥ 85% → No ritmo · resto (40–84% recente) → Muito atrás
+ */
 function classifyReadingState(
   w: ReadingWork,
   result: ReadingUpdateResult | undefined,
 ): ReadingState {
+  // Série em hiato oficial → provável pausa, seja qual for o % (prioridade máxima).
+  if (
+    w.publicationStatusId != null &&
+    PUBLICATION_STATUSES_BY_ID[w.publicationStatusId]?.status === "Hiatus"
+  ) {
+    return "hiatus"
+  }
   const pending = pendingOf(w, result, w.chaptersRead ?? 0)
   const pct = progressOf(w, result)
   // Sem total conhecido não dá pra medir progresso: fica em "No ritmo" (neutro).
   if (pending == null || pct == null) return "onpace"
-  if (pending === 0) return "uptodate"
-  if (pct >= ONPACE_PCT) return "onpace"
-  if (pct >= SLOWING_PCT) return "slowing"
-  return "behind"
+
+  const stale = daysSince(w.lastReadAt) >= STALE_DAYS
+  if (pending === 0) return stale ? "hiatus" : "uptodate" // 100%
+  if (pct < BEHIND_PCT) return "behind" // ≤ 39%
+  if (stale) return "slowing" // 40–99% + frio (inclui o vazio 85–99% frio)
+  if (pct >= ONPACE_PCT) return "onpace" // 85–99% + recente
+  return "trailing" // 40–84% + recente
 }
 
-/** "Recém-começou": pouco lido (< 40%) mas aberto há pouco — tag de textura, não muda de banda. */
+/** "Recém-começou": pouco lido (< 40%) mas aberto nos últimos 30 dias — tag de textura no card. */
 function isRecentlyStarted(w: ReadingWork, result: ReadingUpdateResult | undefined): boolean {
   const pct = progressOf(w, result)
-  return pct != null && pct < SLOWING_PCT && daysSince(w.lastReadAt) <= RECENT_DAYS
+  return pct != null && pct < BEHIND_PCT && daysSince(w.lastReadAt) < STALE_DAYS
 }
 
 /** Agrupa as obras (já filtradas/ordenadas) nas bandas, na ordem das bandas. */
@@ -197,9 +234,11 @@ function groupIntoBands(
   results: Record<string, ReadingUpdateResult>,
 ): Array<{ state: ReadingState; works: ReadingWork[] }> {
   const buckets: Record<ReadingState, ReadingWork[]> = {
-    uptodate: [],
     onpace: [],
+    uptodate: [],
+    trailing: [],
     slowing: [],
+    hiatus: [],
     behind: [],
   }
   for (const w of works) buckets[classifyReadingState(w, results[w.id])].push(w)
@@ -213,7 +252,14 @@ function tallyStates(
   works: ReadingWork[],
   results: Record<string, ReadingUpdateResult>,
 ): Record<ReadingState, number> {
-  const counts: Record<ReadingState, number> = { uptodate: 0, onpace: 0, slowing: 0, behind: 0 }
+  const counts: Record<ReadingState, number> = {
+    onpace: 0,
+    uptodate: 0,
+    trailing: 0,
+    slowing: 0,
+    hiatus: 0,
+    behind: 0,
+  }
   for (const w of works) counts[classifyReadingState(w, results[w.id])]++
   return counts
 }
