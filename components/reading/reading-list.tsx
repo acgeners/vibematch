@@ -19,6 +19,8 @@ import {
   Plus,
   Minus,
   ChevronDown,
+  PauseCircle,
+  Archive,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -29,11 +31,12 @@ import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { AdultBadge } from "@/components/ui/adult-badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
+import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
 import { cn } from "@/lib/utils"
 import { formatRelativeDate, formatPredictedDate, formatRelativeDateTime } from "@/lib/date-utils"
 import { differenceInCalendarDays } from "date-fns"
 import { checkReadingUpdates, type ReadingUpdateResult } from "@/server/actions/reading"
-import { setChaptersRead } from "@/server/actions/works"
+import { setChaptersRead, setReadingStatusForWorks, archiveWork } from "@/server/actions/works"
 import type { ReadingWork } from "@/server/queries/reading"
 
 type SortKey = "last_read" | "released" | "predicted" | "progress"
@@ -71,7 +74,7 @@ const SECTIONS: Record<
   others: {
     label: "Concluída & outras",
     dotClass: "bg-emerald-500",
-    hint: "completa · hiato · cancelada — dá pra maratonar até o fim",
+    hint: "completa · hiato · cancelada — dá pra maratonar ou definir",
   },
 }
 
@@ -113,22 +116,24 @@ function progressOf(w: ReadingWork, result: ReadingUpdateResult | undefined): nu
   return Math.min(1, Math.max(0, (w.chaptersRead ?? 0) / total))
 }
 
+/** Config visual compartilhada por qualquer banda (ritmo ou triagem). */
+type BandConfig = { label: string; hint: string; bar: string; progress: string; chip: string }
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Estado de leitura: 6 bandas cruzando % lido × recência (STALE_DAYS) + hiato de publicação.
-// O % dirige a maior parte; a recência separa "lendo agora" de "esfriou"; publicação em Hiatus
-// (série pausada oficialmente) vai pra "Possível hiato". A matriz completa está em
-// classifyReadingState. Cortes = constantes ajustáveis. A ORDEM DE EXIBIÇÃO (READING_STATE_ORDER)
-// é o pedido do usuário — não é o gradiente de %.
+// TAXONOMIA A — RITMO (só seção "Em andamento" / publicação Ongoing).
+// 6 bandas cruzando % lido × recência (STALE_DAYS) + hiato de publicação. O % dirige a
+// maior parte; a recência separa "lendo agora" de "esfriou". A ORDEM DE EXIBIÇÃO é o pedido
+// do usuário, não o gradiente de %.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ReadingState = "onpace" | "uptodate" | "trailing" | "slowing" | "hiatus" | "behind"
 
-const ONPACE_PCT = 0.85 // ≥ 85% lido (e recente) → No ritmo (quase no fim)
+const ONPACE_PCT = 0.85 // ≥ 85% lido (e recente) → Acompanhando (quase no fim)
 const BEHIND_PCT = 0.4 // < 40% lido → Atrasado (independe da recência)
 const STALE_DAYS = 30 // ≥ 30 dias sem ler → "frio" (Desacelerando / Possível hiato)
 
-const READING_STATE_ORDER: ReadingState[] = [
-  "onpace", // 1 No ritmo
+const READING_STATE_ORDER: readonly ReadingState[] = [
+  "onpace", // 1 Acompanhando
   "uptodate", // 2 Em dia
   "trailing", // 3 Muito atrás
   "slowing", // 4 Desacelerando
@@ -136,12 +141,9 @@ const READING_STATE_ORDER: ReadingState[] = [
   "behind", // 6 Atrasado
 ]
 
-const READING_STATE_CONFIG: Record<
-  ReadingState,
-  { label: string; hint: string; bar: string; progress: string; chip: string }
-> = {
+const READING_STATE_CONFIG: Record<ReadingState, BandConfig> = {
   onpace: {
-    label: "No ritmo",
+    label: "Acompanhando",
     hint: "85–99% lido — quase no fim",
     bar: "bg-lime-500",
     progress: "bg-lime-500",
@@ -193,10 +195,8 @@ function daysSince(iso: string | null): number {
 }
 
 /**
- * Classifica a obra numa das 6 bandas — matriz % lido × recência (STALE_DAYS) + hiato de publicação.
- * Ordem de avaliação (a 1ª que casa vence):
- *   pub. Hiatus → Possível hiato · 100% → Em dia (recente) / Possível hiato (frio) · < 40% → Atrasado
- *   · frio (≥ 30d) → Desacelerando (inclui 85–99% frio) · ≥ 85% → No ritmo · resto (40–84% recente) → Muito atrás
+ * Classifica a obra numa das 6 bandas de ritmo — matriz % lido × recência + hiato de publicação.
+ * Aplicada SÓ à seção "Em andamento" (publicação Ongoing). Ordem de avaliação (a 1ª que casa vence).
  */
 function classifyReadingState(
   w: ReadingWork,
@@ -211,7 +211,7 @@ function classifyReadingState(
   }
   const pending = pendingOf(w, result, w.chaptersRead ?? 0)
   const pct = progressOf(w, result)
-  // Sem total conhecido não dá pra medir progresso: fica em "No ritmo" (neutro).
+  // Sem total conhecido não dá pra medir progresso: fica em "Acompanhando" (neutro).
   if (pending == null || pct == null) return "onpace"
 
   const stale = daysSince(w.lastReadAt) >= STALE_DAYS
@@ -222,45 +222,85 @@ function classifyReadingState(
   return "trailing" // 40–84% + recente
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TAXONOMIA B — TRIAGEM (seção "Concluída & outras": completa · hiato · cancelada).
+// Obra sem capítulos novos previsíveis não se mede por "ritmo"; a pergunta vira "vou
+// terminar / vou decidir / parei". Só % lido × recência (STALLED_DAYS).
+// ─────────────────────────────────────────────────────────────────────────────
+
+type TriageState = "continuar" | "definir" | "parado"
+
+const CONTINUE_PCT = 0.5 // > 50% lido → você está dentro → Continuar
+const STALLED_DAYS = 45 // ≥ 45 dias sem ler → Parado (decida o que fazer)
+
+const TRIAGE_STATE_ORDER: readonly TriageState[] = ["continuar", "definir", "parado"]
+
+const TRIAGE_STATE_CONFIG: Record<TriageState, BandConfig> = {
+  continuar: {
+    label: "Continuar",
+    hint: "mais de 50% lido · leu há menos de 45 dias — você está dentro",
+    bar: "bg-emerald-500",
+    progress: "bg-emerald-500",
+    chip: "border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  },
+  definir: {
+    label: "Definir",
+    hint: "menos de 50% lido · leu há menos de 45 dias — ainda decidindo se vai",
+    bar: "bg-sky-500",
+    progress: "bg-sky-500",
+    chip: "border-sky-500/30 bg-sky-500/15 text-sky-600 dark:text-sky-400",
+  },
+  parado: {
+    label: "Parado",
+    hint: "sem ler há 45 dias ou mais — decida o que fazer",
+    bar: "bg-slate-500",
+    progress: "bg-slate-500",
+    chip: "border-slate-500/30 bg-slate-500/15 text-slate-600 dark:text-slate-400",
+  },
+}
+
+/**
+ * Classifica uma obra da seção "Concluída & outras" na triagem. Frio (≥45d) vence sempre
+ * (Parado). Recente: >50% → Continuar; senão (ou % desconhecido) → Definir.
+ */
+function classifyTriageState(
+  w: ReadingWork,
+  result: ReadingUpdateResult | undefined,
+): TriageState {
+  if (daysSince(w.lastReadAt) >= STALLED_DAYS) return "parado"
+  const pct = progressOf(w, result)
+  if (pct != null && pct > CONTINUE_PCT) return "continuar"
+  return "definir"
+}
+
 /** "Recém-começou": pouco lido (< 40%) mas aberto nos últimos 30 dias — tag de textura no card. */
 function isRecentlyStarted(w: ReadingWork, result: ReadingUpdateResult | undefined): boolean {
   const pct = progressOf(w, result)
   return pct != null && pct < BEHIND_PCT && daysSince(w.lastReadAt) < STALE_DAYS
 }
 
-/** Agrupa as obras (já filtradas/ordenadas) nas bandas, na ordem das bandas. */
-function groupIntoBands(
+/** Agrupa as obras nas bandas de uma taxonomia, na ordem dela (bandas vazias caem fora). */
+function groupBands<S extends string>(
   works: ReadingWork[],
   results: Record<string, ReadingUpdateResult>,
-): Array<{ state: ReadingState; works: ReadingWork[] }> {
-  const buckets: Record<ReadingState, ReadingWork[]> = {
-    onpace: [],
-    uptodate: [],
-    trailing: [],
-    slowing: [],
-    hiatus: [],
-    behind: [],
-  }
-  for (const w of works) buckets[classifyReadingState(w, results[w.id])].push(w)
-  return READING_STATE_ORDER.map((state) => ({ state, works: buckets[state] })).filter(
-    (b) => b.works.length > 0,
-  )
+  classify: (w: ReadingWork, r: ReadingUpdateResult | undefined) => S,
+  order: readonly S[],
+): Array<{ state: S; works: ReadingWork[] }> {
+  const buckets = new Map<S, ReadingWork[]>()
+  for (const s of order) buckets.set(s, [])
+  for (const w of works) buckets.get(classify(w, results[w.id]))!.push(w)
+  return order.map((state) => ({ state, works: buckets.get(state)! })).filter((b) => b.works.length > 0)
 }
 
-/** Conta as obras por estado (pra faixa-resumo do topo). */
-function tallyStates(
+/** Conta as obras por banda de uma taxonomia (pra faixa-resumo). */
+function tallyBands<S extends string>(
   works: ReadingWork[],
   results: Record<string, ReadingUpdateResult>,
-): Record<ReadingState, number> {
-  const counts: Record<ReadingState, number> = {
-    onpace: 0,
-    uptodate: 0,
-    trailing: 0,
-    slowing: 0,
-    hiatus: 0,
-    behind: 0,
-  }
-  for (const w of works) counts[classifyReadingState(w, results[w.id])]++
+  classify: (w: ReadingWork, r: ReadingUpdateResult | undefined) => S,
+  order: readonly S[],
+): Record<S, number> {
+  const counts = Object.fromEntries(order.map((s) => [s, 0])) as Record<S, number>
+  for (const w of works) counts[classify(w, results[w.id])]++
   return counts
 }
 
@@ -547,8 +587,6 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
         </div>
       </div>
 
-      {!filtering && <ReadingStateSummary works={works} results={results} />}
-
       {displayed.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
@@ -565,7 +603,23 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
               open={isOpen("ongoing")}
               onToggle={() => toggleSection("ongoing")}
             >
-              <BandedGrid works={ongoing} results={results} sectionKey="ongoing" />
+              <SectionSummary
+                works={ongoing}
+                results={results}
+                classify={classifyReadingState}
+                order={READING_STATE_ORDER}
+                config={READING_STATE_CONFIG}
+                sectionKey="ongoing"
+                label={`Seu ritmo nas ${ongoing.length} em andamento`}
+              />
+              <BandedGrid
+                works={ongoing}
+                results={results}
+                sectionKey="ongoing"
+                classify={classifyReadingState}
+                order={READING_STATE_ORDER}
+                config={READING_STATE_CONFIG}
+              />
             </ReadingSection>
           )}
           {others.length > 0 && (
@@ -576,7 +630,24 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
               open={isOpen("others")}
               onToggle={() => toggleSection("others")}
             >
-              <BandedGrid works={others} results={results} sectionKey="others" />
+              <SectionSummary
+                works={others}
+                results={results}
+                classify={classifyTriageState}
+                order={TRIAGE_STATE_ORDER}
+                config={TRIAGE_STATE_CONFIG}
+                sectionKey="others"
+                label={`Sua triagem nas ${others.length} concluídas & outras`}
+              />
+              <BandedGrid
+                works={others}
+                results={results}
+                sectionKey="others"
+                classify={classifyTriageState}
+                order={TRIAGE_STATE_ORDER}
+                config={TRIAGE_STATE_CONFIG}
+                actionState="parado"
+              />
             </ReadingSection>
           )}
         </div>
@@ -585,7 +656,7 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
   )
 }
 
-/** Seção colapsável (cabeçalho com contagem + grade de cards). */
+/** Seção colapsável (cabeçalho com contagem + faixa-resumo + grade de cards). */
 function ReadingSection({
   ref,
   sectionKey,
@@ -621,57 +692,50 @@ function ReadingSection({
           {cfg.hint}
         </span>
       </button>
-      {open && children}
+      {open && <div className="space-y-4">{children}</div>}
     </section>
   )
 }
 
 /**
- * Nav FIXA do topo: barra segmentada + abas por banda. Clicar (aba ou segmento) rola até a banda;
- * a aba ativa acompanha a rolagem (scrollspy via IntersectionObserver sobre os `[data-band-state]`).
- * Rola pra PRIMEIRA ocorrência da banda no DOM — "Em andamento" vem antes de "Concluída".
+ * Faixa-resumo de UMA seção: barra segmentada + chips por banda. Vive DENTRO da seção
+ * (não é mais fixa no topo). Clicar (segmento ou chip) rola até a banda pelo id
+ * `band-${sectionKey}-${state}` — como cada seção tem taxonomia própria, o id nunca colide.
  */
-function ReadingStateSummary({
+function SectionSummary<S extends string>({
   works,
   results,
+  classify,
+  order,
+  config,
+  sectionKey,
+  label,
 }: {
   works: ReadingWork[]
   results: Record<string, ReadingUpdateResult>
+  classify: (w: ReadingWork, r: ReadingUpdateResult | undefined) => S
+  order: readonly S[]
+  config: Record<S, BandConfig>
+  sectionKey: SectionKey
+  label: string
 }) {
-  const counts = useMemo(() => tallyStates(works, results), [works, results])
-  const [active, setActive] = useState<ReadingState | null>(null)
+  const counts = useMemo(
+    () => tallyBands(works, results, classify, order),
+    [works, results, classify, order],
+  )
+  const present = order.filter((s) => counts[s] > 0)
+  if (works.length === 0 || present.length === 0) return null
 
-  useEffect(() => {
-    const els = Array.from(document.querySelectorAll<HTMLElement>("[data-band-state]"))
-    if (els.length === 0) return
-    const io = new IntersectionObserver(
-      (entries) => {
-        const top = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
-        if (top) setActive(top.target.getAttribute("data-band-state") as ReadingState)
-      },
-      // Faixa de "leitura" logo abaixo da nav fixa; ignora o rodapé pra não piscar.
-      { rootMargin: "-140px 0px -55% 0px", threshold: [0.01, 0.25, 0.5] },
-    )
-    els.forEach((el) => io.observe(el))
-    return () => io.disconnect()
-  }, [works, results])
-
-  const jump = (s: ReadingState) => {
-    const el = document.querySelector<HTMLElement>(`[data-band-state="${s}"]`)
-    if (!el) return
-    setActive(s)
-    el.scrollIntoView({ behavior: "smooth", block: "start" })
+  const jump = (s: S) => {
+    document
+      .getElementById(`band-${sectionKey}-${s}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
 
-  if (works.length === 0) return null
-  const present = READING_STATE_ORDER.filter((s) => counts[s] > 0)
-
   return (
-    <div className="sticky top-0 z-10 rounded-xl border border-border bg-background/85 px-3.5 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+    <div className="rounded-xl border border-border bg-muted/30 px-3.5 py-2.5">
       <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        Seu ritmo nas {works.length} obras
+        {label}
         <span className="ml-1.5 lowercase tracking-normal text-muted-foreground/60">· clique pra pular</span>
       </p>
       <div className="mb-2.5 flex h-2 gap-0.5 overflow-hidden rounded-full">
@@ -679,31 +743,26 @@ function ReadingStateSummary({
           <button
             key={s}
             type="button"
-            aria-label={`Ir para ${READING_STATE_CONFIG[s].label} (${counts[s]})`}
+            aria-label={`Ir para ${config[s].label} (${counts[s]})`}
             onClick={() => jump(s)}
-            className={cn("h-full cursor-pointer transition-[filter] hover:brightness-125", READING_STATE_CONFIG[s].bar)}
+            className={cn("h-full cursor-pointer transition-[filter] hover:brightness-125", config[s].bar)}
             style={{ flexGrow: counts[s] }}
           />
         ))}
       </div>
       <div className="flex flex-wrap gap-1.5">
-        {READING_STATE_ORDER.map((s) => {
-          const cfg = READING_STATE_CONFIG[s]
+        {order.map((s) => {
+          const cfg = config[s]
           const disabled = counts[s] === 0
-          const isActive = active === s && !disabled
           return (
             <button
               key={s}
               type="button"
               disabled={disabled}
               onClick={() => jump(s)}
-              aria-current={isActive ? "true" : undefined}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors",
-                "disabled:pointer-events-none disabled:opacity-40",
-                isActive
-                  ? cfg.chip
-                  : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+                "inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors",
+                "hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
               )}
             >
               <span className={cn("size-2 rounded-[3px]", cfg.bar)} />
@@ -717,29 +776,35 @@ function ReadingStateSummary({
   )
 }
 
-/** Grade agrupada por estado de leitura — sub-cabeçalho colorido + cards de cada banda. */
-function BandedGrid({
+/** Grade agrupada por banda — sub-cabeçalho colorido + cards de cada banda. */
+function BandedGrid<S extends string>({
   works,
   results,
   sectionKey,
+  classify,
+  order,
+  config,
+  actionState,
 }: {
   works: ReadingWork[]
   results: Record<string, ReadingUpdateResult>
   sectionKey: SectionKey
+  classify: (w: ReadingWork, r: ReadingUpdateResult | undefined) => S
+  order: readonly S[]
+  config: Record<S, BandConfig>
+  /** Banda cujos cards ganham ações (On-hold / Arquivar) — ex.: "parado". */
+  actionState?: S
 }) {
-  const bands = useMemo(() => groupIntoBands(works, results), [works, results])
+  const bands = useMemo(
+    () => groupBands(works, results, classify, order),
+    [works, results, classify, order],
+  )
   return (
     <div className="space-y-6">
       {bands.map(({ state, works: items }) => {
-        const cfg = READING_STATE_CONFIG[state]
+        const cfg = config[state]
         return (
-          // `scroll-mt` reserva a altura da nav fixa pra o cabeçalho não sumir sob ela ao pular.
-          <div
-            key={state}
-            id={`band-${sectionKey}-${state}`}
-            data-band-state={state}
-            className="scroll-mt-32 space-y-2.5"
-          >
+          <div key={state} id={`band-${sectionKey}-${state}`} className="scroll-mt-4 space-y-2.5">
             <div className="flex items-center gap-2.5">
               <span className={cn("h-3.5 w-1 shrink-0 rounded-full", cfg.bar)} />
               <h3 className="text-sm font-semibold">{cfg.label}</h3>
@@ -752,7 +817,13 @@ function BandedGrid({
             </div>
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               {items.map((work) => (
-                <ReadingCard key={work.id} work={work} result={results[work.id]} state={state} />
+                <ReadingCard
+                  key={work.id}
+                  work={work}
+                  result={results[work.id]}
+                  cfg={cfg}
+                  showActions={actionState != null && state === actionState}
+                />
               ))}
             </div>
           </div>
@@ -766,12 +837,15 @@ function BandedGrid({
 function ReadingCard({
   work,
   result,
-  state,
+  cfg,
+  showActions,
 }: {
   work: ReadingWork
   result: ReadingUpdateResult | undefined
-  state: ReadingState
+  cfg: BandConfig
+  showActions?: boolean
 }) {
+  const refresh = useRefresh()
   // Progresso local otimista. `read` é a fonte da verdade da UI do card; o servidor é
   // atualizado com debounce. Ressincroniza se o valor persistido mudar (ex.: pós-refresh)
   // pelo padrão "adjust during render": roda na render, só quando o prop de fato muda —
@@ -779,6 +853,7 @@ function ReadingCard({
   const [read, setRead] = useState(work.chaptersRead ?? 0)
   const [syncedFrom, setSyncedFrom] = useState(work.chaptersRead)
   const [saving, startSave] = useTransition()
+  const [acting, startAct] = useTransition()
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   if (work.chaptersRead !== syncedFrom) {
@@ -819,10 +894,33 @@ function ReadingCard({
     toast.success(`Marcado como lido até o ${next}`)
   }
 
+  // Ações do "Parado": tira a obra do ritmo ativo (On-hold sai de /leitura) ou arquiva.
+  const moveToOnHold = () => {
+    startAct(async () => {
+      const res = await setReadingStatusForWorks([work.id], personalStatusNameBySlugOrThrow("on-hold"))
+      if (res && "error" in res && res.error) {
+        toast.error("Não mudou o status", { description: res.error })
+        return
+      }
+      toast.success(`"${work.title}" movida para On-hold`)
+      refresh()
+    })
+  }
+  const archive = () => {
+    startAct(async () => {
+      const res = await archiveWork(work.id)
+      if (res && "error" in res && res.error) {
+        toast.error("Não arquivou", { description: res.error })
+        return
+      }
+      toast.success(`"${work.title}" arquivada`)
+      refresh()
+    })
+  }
+
   const pending = pendingOf(work, result, read)
   const fraction = lancado != null && lancado > 0 ? Math.min(1, Math.max(0, read / lancado)) : null
   const canMarkLatest = lancado != null && read < lancado
-  const cfg = READING_STATE_CONFIG[state]
 
   // "Continuar lendo" → fonte com o cap mais recente (pós-check); senão comix por hid (load).
   const readUrl = result?.latestUrl ?? (work.comixHid ? comixUrlFor(work.comixHid) : null)
@@ -835,7 +933,14 @@ function ReadingCard({
       : work.lastChapterReleasedAt
         ? formatRelativeDate(work.lastChapterReleasedAt)
         : null
-  const predicted = formatPredictedDate(result?.nextPredictedAt ?? work.nextChapterPredictedAt)
+  // Próxima previsão + realce quando já venceu (item 3): a data já exibida vira "· já passou".
+  const predictedIso = result?.nextPredictedAt ?? work.nextChapterPredictedAt
+  const predictedOverdue =
+    predictedIso != null && differenceInCalendarDays(new Date(), new Date(predictedIso)) > 0
+  const predicted = formatPredictedDate(predictedIso)
+  const predictedShort = predictedIso
+    ? new Date(predictedIso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })
+    : null
 
   return (
     <Card className="relative overflow-hidden">
@@ -857,7 +962,7 @@ function ReadingCard({
             />
             <div className="flex shrink-0 items-center gap-1.5">
               {work.isAdult && <AdultBadge className="px-1.5 py-0" />}
-              <ReadingStatusBadge pending={pending} state={state} />
+              <ReadingStatusBadge pending={pending} cfg={cfg} />
               <PublicationStatusBadge statusId={work.publicationStatusId} iconOnly />
             </div>
           </div>
@@ -969,11 +1074,20 @@ function ReadingCard({
                     <Clock className="size-3.5 shrink-0" /> Último cap lançado {releasedAge}
                   </span>
                 )}
-                {predicted && (
-                  <span className="flex items-center gap-1.5 text-foreground/80">
-                    <CalendarClock className="size-3.5 shrink-0 text-sky-500" /> Próximo cap previsto: {predicted}
-                  </span>
-                )}
+                {predictedIso &&
+                  (predictedOverdue ? (
+                    <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                      <CalendarClock className="size-3.5 shrink-0 text-amber-500" /> Próximo previsto:{" "}
+                      {predictedShort} <span className="font-semibold">· já passou</span>
+                    </span>
+                  ) : (
+                    predicted && (
+                      <span className="flex items-center gap-1.5 text-foreground/80">
+                        <CalendarClock className="size-3.5 shrink-0 text-sky-500" /> Próximo cap previsto:{" "}
+                        {predicted}
+                      </span>
+                    )
+                  ))}
               </>
             )}
           </div>
@@ -992,6 +1106,37 @@ function ReadingCard({
                 Sem link (verifique atualizações)
               </span>
             )}
+
+            {showActions && (
+              <div className="ml-auto flex items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={moveToOnHold}
+                  disabled={acting}
+                  className="text-muted-foreground"
+                  title="Mover para On-hold (sai da lista de leitura)"
+                >
+                  {acting ? (
+                    <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                  ) : (
+                    <PauseCircle className="mr-1.5 size-3.5" />
+                  )}
+                  On-hold
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={archive}
+                  disabled={acting}
+                  className="text-muted-foreground"
+                  title="Arquivar obra"
+                >
+                  <Archive className="mr-1.5 size-3.5" />
+                  Arquivar
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </CardContent>
@@ -1000,9 +1145,8 @@ function ReadingCard({
 }
 
 /** Selo "Em dia" (leu tudo) vs "{N} pra ler" (capítulos lançados não lidos), na cor da banda. */
-function ReadingStatusBadge({ pending, state }: { pending: number | null; state: ReadingState }) {
+function ReadingStatusBadge({ pending, cfg }: { pending: number | null; cfg: BandConfig }) {
   if (pending == null) return null
-  const cfg = READING_STATE_CONFIG[state]
   if (pending > 0) {
     return (
       <Badge className={cn("gap-1", cfg.chip)}>
