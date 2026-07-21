@@ -25,6 +25,7 @@ import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import { fetchComicKClient, fetchAnimePlanetClient } from "@/lib/external/client-fetches"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { getCoverImageSrc } from "@/lib/image-proxy"
+import { SMALL_COVER_WIDTH } from "@/lib/cover-quality"
 import { cn, titleToSlug } from "@/lib/utils"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
 import { SynopsisPicker } from "@/components/titles/synopsis-picker"
@@ -87,9 +88,8 @@ interface CoverChoice {
   height?: number
 }
 
-/** Abaixo disso a capa aparece serrilhada na página da obra. Metade das capas do
- *  catálogo cai aqui (1.206 de 2.307), então vale sinalizar em vez de só ordenar. */
-const SMALL_COVER_WIDTH = 500
+// SMALL_COVER_WIDTH saiu daqui para lib/cover-quality.ts — o gerenciador de
+// capas sinaliza pelo mesmo limiar, e dois números soltos divergiriam.
 // SynopsisChoice mora no SynopsisPicker — o passo de sinopses é compartilhado
 // com o UpdateDataDialog e as invariantes precisam ser as mesmas nos dois.
 type SourceSelectionValue = string | "rejected" | "none"
