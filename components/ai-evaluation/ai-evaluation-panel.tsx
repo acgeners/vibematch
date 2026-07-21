@@ -766,7 +766,7 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
           if (!open) setConfirmDiscardReview(true)
         }}
       >
-        <DialogContent ref={reviewScrollRef} className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent ref={reviewScrollRef} className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Revisão da avaliação IA</DialogTitle>
             {reviewData && (
@@ -822,7 +822,6 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
                 }
               }}
               onSaved={handleSaved}
-              onCancel={handleCancel}
             />
           )}
         </DialogContent>

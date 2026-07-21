@@ -86,7 +86,15 @@ export function AiEvaluationButton({
   const [currentEvaluation, setCurrentEvaluation] = useState<CurrentEvaluationMeta | null>(null)
   const [noReviewConfirm, setNoReviewConfirm] = useState<NoReviewsReason | null | "none">(null)
   // Comparação Sonnet (existente) vs. Haiku (recém-rodado).
-  const [compareData, setCompareData] = useState<{ a: CompareEval; b: AiEvaluation } | null>(null)
+  // `aFull` só existe quando a coluna A é uma avaliação COMPLETA (tem id) e
+  // portanto pode voltar pro formulário editável. No caminho do Haiku a coluna A
+  // é a `latestEvaluation` — forma frouxa, sem id, já aplicada na obra: ali
+  // "usar A" é literalmente não fazer nada.
+  const [compareData, setCompareData] = useState<{
+    a: CompareEval
+    aFull: AiEvaluation | null
+    b: AiEvaluation
+  } | null>(null)
   // Editor de entradas (sinopse + reviews EXTERNAS manuais) antes de rodar a IA. As reviews
   // externas são persistidas pelo próprio ExternalManualReviewsSection (imediato); aqui só a
   // sinopse é draft/salva no "Avaliar". A avaliação lê as reviews externas do banco.
@@ -133,35 +141,6 @@ export function AiEvaluationButton({
     if (!ok) return
     setInputsOpen(false)
     dispatchEvaluation()
-  }
-
-  const runEvaluation = async (opts?: { model?: "sonnet" | "opus" | "haiku"; proceedWithoutReviews?: boolean }) => {
-    setEvaluating(true)
-    const result = await triggerAiEvaluation(workId, opts)
-    setEvaluating(false)
-
-    // Gate: sem reviews externas, confirma antes de chamar o LLM.
-    if ("needsReviewConfirmation" in result && result.needsReviewConfirmation) {
-      setNoReviewConfirm(result.noReviewsReason ?? "none")
-      return false
-    }
-
-    if (("error" in result && result.error) || !("data" in result) || !result.data?.evaluation) {
-      toast.error(`Erro na avaliação IA: ${("error" in result && result.error) || "resposta vazia"}`)
-      return false
-    }
-
-    setEvaluation(result.data.evaluation)
-    setCurrentScores(result.data.currentScores ?? {})
-    setCurrentEvaluation(result.data.currentEvaluation ?? null)
-    setReviewOpen(true)
-    const reviewsUsed = result.data.reviewsUsed ?? 0
-    toast.success(
-      reviewsUsed === 0
-        ? "Avaliação IA gerada sem reviews externas."
-        : `Avaliação IA gerada usando ${reviewsUsed} review${reviewsUsed === 1 ? "" : "s"} externa${reviewsUsed === 1 ? "" : "s"}.`
-    )
-    return true
   }
 
   // Dispara a avaliação em SEGUNDO PLANO via store global. Não bloqueia a UI:
@@ -236,21 +215,33 @@ export function AiEvaluationButton({
     dispatchEvaluation()
   }
 
-  // Roda o Haiku e abre a comparação contra a avaliação existente (sem refazer
-  // o modelo atual). `proceedWithoutReviews` porque a obra já foi avaliada.
-  const runHaikuCompare = async () => {
-    if (!latestEvaluation) return
+  /**
+   * Roda `model` e abre a comparação lado a lado contra `baseline` (sem refazer o
+   * modelo já rodado). `proceedWithoutReviews` porque a obra já foi avaliada.
+   *
+   * Duas entradas: o botão "Comparar com Haiku" (baseline = última avaliação
+   * salva) e o "Reavaliar com Opus" de dentro da revisão (baseline = a avaliação
+   * aberta no formulário, que pode ainda não estar salva).
+   */
+  const runModelCompare = async (
+    model: "sonnet" | "opus" | "haiku",
+    baseline: CompareEval | null,
+    baselineFull: AiEvaluation | null = null,
+  ) => {
+    if (!baseline) return
     setEvaluating(true)
-    const result = await triggerAiEvaluation(workId, { model: "haiku", proceedWithoutReviews: true })
+    const result = await triggerAiEvaluation(workId, { model, proceedWithoutReviews: true })
     setEvaluating(false)
     if (("error" in result && result.error) || !("data" in result) || !result.data?.evaluation) {
-      toast.error(`Erro na avaliação Haiku: ${("error" in result && result.error) || "resposta vazia"}`)
+      toast.error(`Erro na avaliação: ${("error" in result && result.error) || "resposta vazia"}`)
       return
     }
     setCurrentScores(result.data.currentScores ?? {})
     setCurrentEvaluation(result.data.currentEvaluation ?? null)
-    setCompareData({ a: latestEvaluation, b: result.data.evaluation })
+    setCompareData({ a: baseline, aFull: baselineFull, b: result.data.evaluation })
   }
+
+  const runHaikuCompare = () => runModelCompare("haiku", latestEvaluation ?? null)
 
   // `evaluating` (modal bloqueante) cobre só os fluxos interativos (comparar
   // Haiku / reavaliar dentro do review). `myEvalRunning` é a avaliação principal
@@ -352,14 +343,18 @@ export function AiEvaluationButton({
       </Dialog>
 
       <Dialog
-        open={reviewOpen}
+        // Some enquanto o comparador está aberto — senão o de comparar empilha por
+        // cima do de revisar, e fechar um revela o outro por baixo. Mesmo padrão
+        // do painel da fila.
+        open={reviewOpen && compareData == null}
         onOpenChange={(open) => {
           // Fechar via X/Esc/clique-fora NÃO fecha direto: confirma antes de perder o
-          // resultado. Salvar/Cancelar chamam setReviewOpen(false) direto e passam por fora daqui.
-          if (!open) setConfirmDiscardReview(true)
+          // resultado. Salvar chama setReviewOpen(false) direto e passa por fora daqui.
+          // O comparador fecha este diálogo por `compareData`, não por aqui.
+          if (!open && compareData == null) setConfirmDiscardReview(true)
         }}
       >
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+        <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Revisar avaliação IA</DialogTitle>
             <DialogDescription>
@@ -375,13 +370,16 @@ export function AiEvaluationButton({
               currentScores={currentScores}
               currentEvaluation={currentEvaluation}
               onReevaluate={async (model) => {
-                await runEvaluation({ model, proceedWithoutReviews: true })
+                // Compara em vez de SUBSTITUIR. Antes o resultado do modelo novo
+                // sobrescrevia o formulário e a avaliação anterior sumia da tela
+                // sem chance de comparar — o painel da fila já fazia certo, só
+                // esta porta de entrada é que trocava em silêncio.
+                await runModelCompare(model, evaluation, evaluation)
               }}
               onSaved={() => {
                 setReviewOpen(false)
                 refresh()
               }}
-              onCancel={() => setReviewOpen(false)}
             />
           )}
         </DialogContent>
@@ -467,10 +465,13 @@ export function AiEvaluationButton({
               a={compareData.a}
               b={compareData.b}
               onPick={(which) => {
-                // "b" (Haiku) → carrega no form pra aceitar/editar.
-                // "a" (atual) → mantém o que já existe; só fecha.
-                if (which === "b") {
-                  setEvaluation(compareData.b)
+                // A escolhida volta pro formulário editável. A coluna A só tem
+                // pra onde voltar quando é uma avaliação completa (`aFull`) —
+                // no A/B do Haiku ela é a nota JÁ aplicada na obra, então
+                // escolhê-la é mesmo só fechar.
+                const chosen = which === "b" ? compareData.b : compareData.aFull
+                if (chosen) {
+                  setEvaluation(chosen)
                   setReviewOpen(true)
                 }
                 setCompareData(null)
