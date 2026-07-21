@@ -3,10 +3,12 @@
 import { useState, useTransition } from "react"
 import {
   Activity,
-  AlertTriangle,
+  ArrowRight,
   BookOpen,
+  Check,
   FileText,
   Heart,
+  Info,
   Loader2,
   RefreshCw,
   SlidersHorizontal,
@@ -18,13 +20,36 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CoverImage } from "@/components/ui/cover-image"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { AlignmentCell } from "@/components/ranking/ranking-cells"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS } from "@/types/domain"
+import { formatUsd } from "@/lib/cost-preview/catalog"
+import {
+  classifyProfileStalenessLevel,
+  profileStalenessTriggers,
+  PROFILE_DRIFT_REGEN_THRESHOLD,
+  PROFILE_DRIFT_THRESHOLD,
+  PROFILE_STALE_AGE_DAYS,
+  PROFILE_STALE_FRACTION_NEW,
+} from "@/lib/ai-recommendation/profile-staleness"
+import type {
+  ProfileStaleness,
+  ProfileStalenessLevel,
+} from "@/lib/ai-recommendation/profile-staleness"
 import { generateTasteProfileAction } from "@/server/actions/recommendations"
 import type { ProfileStatus } from "@/server/actions/recommendations"
-import type { AlignedWork } from "@/server/queries/recommendations"
+import type {
+  AlignedWork,
+  AlignedWorkSplit,
+  AlignmentConfirmation,
+} from "@/server/queries/recommendations"
 import type {
   ProfileCriterionPreference,
   ProfileTag,
@@ -54,13 +79,16 @@ function timeAgo(iso: string): string {
  */
 export function TasteProfilePanel({
   status,
-  topAligned,
+  aligned,
 }: {
   status: ProfileStatus
-  topAligned: AlignedWork[]
+  aligned: AlignedWorkSplit
 }) {
   const [profile, setProfile] = useState<TasteProfileRow | null>(status.profile)
-  const [isStale, setIsStale] = useState(status.isStale)
+  // Depois de recomputar, o perfil recém-gerado É a nova referência: drift zero, idade
+  // zero, nenhum gatilho. Guardar o objeto (e não só um booleano) mantém a barra honesta
+  // sem precisar de um round-trip só pra ela.
+  const [staleness, setStaleness] = useState<ProfileStaleness | null>(status.staleness)
   const [error, setError] = useState<string | null>(null)
   const [recompute, startRecompute] = useTransition()
 
@@ -73,10 +101,11 @@ export function TasteProfilePanel({
       if (res.error) setError(res.error)
       else if (res.data) {
         setProfile(res.data)
-        setIsStale(false)
+        setStaleness(FRESHLY_GENERATED)
       }
     })
   }
+  const level = staleness ? classifyProfileStalenessLevel(staleness) : null
 
   const p = profile?.profile
   const lovedTags = [...(p?.loved_tags ?? [])].sort((a, b) => b.strength - a.strength)
@@ -132,34 +161,43 @@ export function TasteProfilePanel({
                   <>{status.ratedWorksCount} obra(s) com nota pessoal</>
                 )}
               </p>
-              {isStale && profile && (
-                <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
-                  <AlertTriangle className="size-3" /> pode estar defasado — recompute
-                </span>
-              )}
             </div>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleRecompute}
-            disabled={recompute || insufficient}
-            title={
-              insufficient
-                ? `Avalie pelo menos ${MIN_WORKS} obras com user_score`
-                : isStale
-                  ? "Perfil pode estar defasado — recompute"
-                  : "Recomputar perfil"
-            }
-          >
-            {recompute ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              <RefreshCw />
+          <div className="flex items-center gap-2">
+            {status.regenCostUsd > 0 && (
+              <span className="rounded-md bg-foreground/[0.06] px-2 py-1 text-[11px] tabular-nums text-muted-foreground ring-1 ring-inset ring-border">
+                {formatUsd(status.regenCostUsd)}
+              </span>
             )}
-            {profile ? "Recomputar" : "Gerar perfil"}
-          </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRecompute}
+              disabled={recompute || insufficient}
+              title={
+                insufficient
+                  ? `Avalie pelo menos ${MIN_WORKS} obras com user_score`
+                  : `Recomputar perfil (${formatUsd(status.regenCostUsd)})`
+              }
+            >
+              {recompute ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <RefreshCw />
+              )}
+              {profile ? "Recomputar" : "Gerar perfil"}
+            </Button>
+          </div>
         </div>
+
+        {profile && staleness && level && (
+          <ProfileStalenessRow
+            staleness={staleness}
+            level={level}
+            nWorks={profile.n_works_used}
+            costUsd={status.regenCostUsd}
+          />
+        )}
       </section>
 
       {!profile ? (
@@ -270,18 +308,44 @@ export function TasteProfilePanel({
             </Segment>
           )}
 
-          {/* ── Top obras alinhadas ── */}
-          {topAligned.length > 0 && (
+          {/* ── Top obras alinhadas: confirmação × direcionamento ── */}
+          {(aligned.read.length > 0 || aligned.unread.length > 0) && (
             <Segment
               icon={<Trophy />}
               title="Mais alinhadas com seu perfil"
               subtitle="Maior personal_fit na sua biblioteca (último recálculo)"
             >
-              <ol className="grid grid-cols-5 gap-2.5 sm:gap-3">
-                {topAligned.map((work, i) => (
-                  <AlignedCard key={work.id} work={work} rank={i + 1} />
-                ))}
-              </ol>
+              {aligned.read.length > 0 && (
+                <AlignedRow
+                  icon={<Check className="size-3.5" />}
+                  tone="emerald"
+                  title="Já li"
+                  hint={`o perfil bate com o que você gostou · ${aligned.readTotal} obras`}
+                  works={aligned.read}
+                  showUserScore
+                />
+              )}
+
+              {aligned.confirmation && <ConfirmationLine c={aligned.confirmation} />}
+
+              {aligned.unread.length > 0 && (
+                <div className={cn(aligned.read.length > 0 && "mt-5 border-t border-border/60 pt-4")}>
+                  <AlignedRow
+                    icon={<ArrowRight className="size-3.5" />}
+                    tone="sky"
+                    title="Ainda não li"
+                    hint={`o que ler em seguida · ${aligned.unreadTotal} obras`}
+                    works={aligned.unread}
+                  />
+                </div>
+              )}
+
+              {aligned.otherTotal > 0 && (
+                <p className="mt-3 border-t border-border/60 pt-2.5 text-[11px] leading-relaxed text-muted-foreground">
+                  {aligned.otherTotal} obras em andamento ou pausadas não entram em nenhuma das
+                  duas linhas — não confirmam o gosto nem são sugestão de próxima leitura.
+                </p>
+              )}
             </Segment>
           )}
         </>
@@ -293,6 +357,180 @@ export function TasteProfilePanel({
         </div>
       )}
     </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// Defasagem do perfil
+// ─────────────────────────────────────────────────────────────
+
+/** Estado de um perfil acabado de gerar: é a própria referência, então drift zero. */
+const FRESHLY_GENERATED: ProfileStaleness = {
+  stale: false,
+  reason: "identical",
+  driftPct: 0,
+  changedTags: 0,
+  lovedJaccard: 1,
+  avoidedJaccard: 1,
+  fractionNew: 0,
+  ageDays: 0,
+}
+
+const LEVEL_STYLE: Record<
+  ProfileStalenessLevel,
+  { label: string; pill: string; dot: string; fill: string }
+> = {
+  fresh: {
+    label: "Em dia",
+    pill: "bg-emerald-500/10 text-emerald-600 ring-emerald-500/25 dark:text-emerald-400",
+    dot: "bg-emerald-500",
+    fill: "bg-emerald-500",
+  },
+  moving: {
+    label: "Começando a mudar",
+    pill: "bg-sky-500/10 text-sky-600 ring-sky-500/25 dark:text-sky-400",
+    dot: "bg-sky-500",
+    fill: "bg-sky-500",
+  },
+  stale: {
+    label: "Vale recomputar",
+    pill: "bg-amber-500/10 text-amber-600 ring-amber-500/25 dark:text-amber-400",
+    dot: "bg-amber-500",
+    fill: "bg-amber-500",
+  },
+  severe: {
+    label: "Recomputar",
+    pill: "bg-rose-500/12 text-rose-600 ring-rose-500/30 dark:text-rose-400",
+    dot: "bg-rose-500",
+    fill: "bg-rose-500",
+  },
+}
+
+const pctLabel = (v: number) =>
+  `${(v * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`
+
+/**
+ * "Quão defasado" — substitui o aviso binário que acendia igual pra 15% e pra 60%.
+ *
+ * A barra é o DRIFT MEDIDO (quanto as tags amadas/evitadas destiladas se moveram
+ * desde a geração); as duas marcas são os limiares já calibrados (0,15 marca stale,
+ * 0,30 é o patamar que autoriza pagar a regeneração no lote de Interesse). Os três
+ * chips são os três gatilhos do gate composto — acende só o que disparou, senão um
+ * perfil marcado por IDADE mostraria a barra perto de zero e pareceria alerta sem causa.
+ */
+function ProfileStalenessRow({
+  staleness: st,
+  level,
+  nWorks,
+  costUsd,
+}: {
+  staleness: ProfileStaleness
+  level: ProfileStalenessLevel
+  nWorks: number
+  costUsd: number
+}) {
+  const style = LEVEL_STYLE[level]
+  const trig = profileStalenessTriggers(st)
+  // Escala a barra até o corte severo: acima dele o preenchimento satura em 100%.
+  const width = Math.min(100, (st.driftPct / PROFILE_DRIFT_REGEN_THRESHOLD) * 100)
+  const tickAt = (v: number) => `${(v / PROFILE_DRIFT_REGEN_THRESHOLD) * 100}%`
+  const days = st.ageDays == null ? null : Math.floor(st.ageDays)
+  // Perfil legado (pré-migration 118) não tem fingerprint: o drift não é medível e a
+  // barra em 0% mentiria. Nesse caso o texto diz o que de fato se sabe.
+  const measurable = st.reason !== "legacy_hash"
+
+  return (
+    <div className="mt-3 border-t border-border/60 pt-3">
+      <TooltipProvider delayDuration={150}>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset outline-none focus-visible:ring-2",
+                  style.pill,
+                )}
+              >
+                <span className={cn("size-1.5 rounded-full", style.dot)} />
+                {style.label}
+                <Info className="size-3 opacity-70" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
+              {measurable ? (
+                <>
+                  O perfil foi destilado de <b>{nWorks} obras</b>. Desde então{" "}
+                  <b>{st.changedTags} tag{st.changedTags === 1 ? "" : "s"}</b> entraram ou saíram
+                  do seu gosto destilado ({pctLabel(st.driftPct)} de mudança). Recomputar só
+                  compensa acima de {pctLabel(PROFILE_DRIFT_THRESHOLD)} — abaixo disso o perfil
+                  novo sai praticamente igual, e a geração custa {formatUsd(costUsd)}.
+                </>
+              ) : (
+                <>
+                  Este perfil foi gerado antes de o app guardar a impressão digital do gosto,
+                  então não dá pra medir o quanto ele se moveu. Recomputar passa a permitir a
+                  medida ({formatUsd(costUsd)}).
+                </>
+              )}
+            </TooltipContent>
+          </Tooltip>
+
+          {measurable && (
+            <div className="flex min-w-[150px] flex-1 items-center gap-2.5">
+              <div className="relative h-1.5 flex-1 rounded-full bg-foreground/10">
+                <div
+                  className={cn("absolute inset-y-0 left-0 rounded-full", style.fill)}
+                  style={{ width: `${Math.max(width, 2)}%` }}
+                />
+                <span
+                  className="absolute inset-y-[-2px] w-px bg-foreground/25"
+                  style={{ left: tickAt(PROFILE_DRIFT_THRESHOLD) }}
+                />
+              </div>
+              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                {pctLabel(st.driftPct)} de mudança no gosto
+              </span>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-1.5">
+            <TriggerChip on={trig.drift}>
+              {st.changedTags} tag{st.changedTags === 1 ? "" : "s"} mudaram
+            </TriggerChip>
+            <TriggerChip on={trig.fractionNew}>
+              {st.fractionNew > 0 ? `+${pctLabel(st.fractionNew)} de obras` : "+0 obras"}
+            </TriggerChip>
+            {days != null && (
+              <TriggerChip on={trig.age}>
+                {days} dia{days === 1 ? "" : "s"}
+              </TriggerChip>
+            )}
+          </div>
+        </div>
+      </TooltipProvider>
+    </div>
+  )
+}
+
+/** Chip de um gatilho do gate — âmbar quando foi ELE que marcou o perfil. */
+function TriggerChip({ on, children }: { on: boolean; children: React.ReactNode }) {
+  return (
+    <span
+      className={cn(
+        "rounded-md px-2 py-0.5 text-[11px] tabular-nums ring-1 ring-inset",
+        on
+          ? "bg-amber-500/10 text-amber-600 ring-amber-500/30 dark:text-amber-400"
+          : "bg-foreground/[0.06] text-muted-foreground ring-border",
+      )}
+      title={
+        on
+          ? "Este é o gatilho que marcou o perfil como desatualizado"
+          : `Abaixo do limiar (drift ${pctLabel(PROFILE_DRIFT_THRESHOLD)} · obras ${pctLabel(PROFILE_STALE_FRACTION_NEW)} · idade ${PROFILE_STALE_AGE_DAYS} dias)`
+      }
+    >
+      {children}
+    </span>
   )
 }
 
@@ -470,10 +708,99 @@ function CriterionBar({ slug, pref }: { slug: string; pref: ProfileCriterionPref
   )
 }
 
-function AlignedCard({ work, rank }: { work: AlignedWork; rank: number }) {
+const ROW_TONE = {
+  emerald: "text-emerald-600 dark:text-emerald-400",
+  sky: "text-sky-600 dark:text-sky-400",
+} as const
+
+/**
+ * Uma das duas linhas de alinhamento. A de cima leva a NOTA PESSOAL ao lado do
+ * alinhamento (é o que a torna confirmação, e não vitrine); a de baixo leva a Nota
+ * Prevista, que é o análogo pra quem ainda não leu.
+ */
+function AlignedRow({
+  icon,
+  tone,
+  title,
+  hint,
+  works,
+  showUserScore = false,
+}: {
+  icon: React.ReactNode
+  tone: keyof typeof ROW_TONE
+  title: string
+  hint: string
+  works: AlignedWork[]
+  showUserScore?: boolean
+}) {
+  return (
+    <div>
+      <p className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 font-semibold uppercase tracking-wide",
+            ROW_TONE[tone],
+          )}
+        >
+          {icon}
+          {title}
+        </span>
+        <span className="text-muted-foreground">— {hint}</span>
+      </p>
+      <ol className="grid grid-cols-5 gap-2.5 sm:gap-3">
+        {works.map((work, i) => (
+          <AlignedCard key={work.id} work={work} rank={i + 1} showUserScore={showUserScore} />
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+/**
+ * A frase que prova a linha de cima. Sem ela a confirmação fica implícita em cinco
+ * capas — e "implícito" é onde mora a leitura errada: até a divisão em duas linhas,
+ * a obra nº 1 do bloco único era uma que o usuário nunca abriu.
+ */
+function ConfirmationLine({ c }: { c: AlignmentConfirmation }) {
+  const n = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })
+  return (
+    <p className="mt-3 rounded-md bg-emerald-500/[0.07] px-3 py-2 text-[11px] leading-relaxed text-muted-foreground ring-1 ring-inset ring-emerald-500/20">
+      Nas <b className="tabular-nums text-emerald-600 dark:text-emerald-400">{c.topN}</b> mais
+      alinhadas que você já leu, sua nota média é{" "}
+      <b className="tabular-nums text-emerald-600 dark:text-emerald-400">{n(c.topAvgScore)}</b> —
+      contra <b className="tabular-nums">{n(c.overallAvgScore)}</b> na média de tudo que leu.{" "}
+      <b className="tabular-nums text-emerald-600 dark:text-emerald-400">
+        {c.topHighCount} de {c.topN}
+      </b>{" "}
+      levaram nota ≥ {c.highScoreThreshold}, e a correlação entre alinhamento e sua nota é{" "}
+      <b className="tabular-nums text-emerald-600 dark:text-emerald-400">
+        {/* 2 casas: com 1, um 0,739 vira "0,7" e some a diferença entre correlação forte e morna. */}
+        {c.correlation.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+      </b>{" "}
+      (nas {c.ratedRead} lidas com nota).
+    </p>
+  )
+}
+
+function AlignedCard({
+  work,
+  rank,
+  showUserScore,
+}: {
+  work: AlignedWork
+  rank: number
+  showUserScore: boolean
+}) {
   // Card retrato (altura > largura): capa grande no topo, título + alinhamento
   // embaixo. Alinhamento via AlignmentCell — mesmo percentil/tooltip da
   // ranking-table e work-table.
+  const score = showUserScore ? work.userScore : work.expectedScore
+  const progress =
+    showUserScore && work.totalChapters
+      ? `${work.chaptersRead}/${work.totalChapters}`
+      : work.totalChapters
+        ? `${work.totalChapters} cap`
+        : null
   return (
     <li className="group flex flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20">
       <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted">
@@ -492,8 +819,20 @@ function AlignedCard({ work, rank }: { work: AlignedWork; rank: number }) {
           workId={work.id}
           className="line-clamp-2 text-xs font-medium leading-snug hover:underline"
         />
-        <div className="mt-auto pt-1">
+        <div className="mt-auto flex flex-col gap-1 pt-1">
           <AlignmentCell value={work.personalFit} percentile={work.personalFitPercentile} />
+          <div className="flex items-center justify-between gap-1.5 text-[10.5px] tabular-nums text-muted-foreground">
+            <span className="truncate">{progress ?? "—"}</span>
+            {score != null && (
+              <span
+                className={cn("shrink-0 font-mono font-semibold", showUserScore && "text-foreground")}
+                title={showUserScore ? "Sua nota" : "Nota Prevista"}
+              >
+                {score.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
+                {!showUserScore && <span className="ml-0.5 font-normal opacity-70">prev</span>}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </li>

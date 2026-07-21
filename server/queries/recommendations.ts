@@ -4,6 +4,13 @@ import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { getCurrentUserId, getSessionUserId } from "@/server/queries/current-user"
+import { getPersonalStateReader } from "@/server/queries/user-work-state"
+import { getScoresReader } from "@/server/queries/user-scores"
+import {
+  isFullyReadPersonalStatus,
+  isUnreadPersonalStatus,
+  personalStatusNameOrDefault,
+} from "@/lib/constants/status-lookups"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import {
   applyBiasToCategoryScores,
@@ -1392,10 +1399,84 @@ export interface AlignedWork {
   personalFit: number
   /** Percentil (0–100) dentro da biblioteca; comunica "Top X%" de forma mais honesta. */
   personalFitPercentile: number | null
+  /** Status pessoal de QUEM OLHA (nome canônico; "Want to Read" quando não há linha). */
+  personalStatus: string
+  chaptersRead: number
+  totalChapters: number | null
+  /** Nota pessoal — a evidência que transforma a linha "Já li" em confirmação. */
+  userScore: number | null
+  /** Nota Prevista — o análogo da nota pessoal pra quem ainda não leu. */
+  expectedScore: number | null
 }
 
 /**
- * Top obras mais alinhadas com o TasteProfile atual.
+ * A evidência de que o alinhamento acerta: nas obras que a pessoa JÁ LEU, o
+ * personal_fit alto anda junto com a nota alta? Sem isto, a linha "Já li" é só
+ * uma vitrine — o número é o que a torna uma confirmação.
+ */
+export interface AlignmentConfirmation {
+  /** Nº de obras lidas COM nota pessoal (a base do cálculo). */
+  ratedRead: number
+  /** Nota média das `topN` mais alinhadas entre elas. */
+  topAvgScore: number
+  /** Nota média de TODAS as lidas com nota — o contraste que dá sentido à de cima. */
+  overallAvgScore: number
+  topN: number
+  /** Quantas das `topN` levaram nota ≥ `HIGH_SCORE`. */
+  topHighCount: number
+  highScoreThreshold: number
+  /** Pearson(personal_fit, user_score) nas lidas com nota. */
+  correlation: number
+}
+
+export interface AlignedWorkSplit {
+  /** Top alinhadas que a pessoa já leu — confirmação do perfil. */
+  read: AlignedWork[]
+  /** Top alinhadas ainda não lidas — direcionamento do que ler em seguida. */
+  unread: AlignedWork[]
+  readTotal: number
+  unreadTotal: number
+  /**
+   * Obras com alinhamento que não caem em nenhuma das duas listas (em andamento,
+   * pausadas, abandonadas). Exposto porque o silêncio seria pior: sem este número
+   * as duas linhas parecem cobrir a biblioteca inteira, e não cobrem.
+   */
+  otherTotal: number
+  confirmation: AlignmentConfirmation | null
+}
+
+/** Fração dos capítulos a partir da qual a obra conta como lida, mesmo sem status terminal. */
+const READ_CHAPTER_FRACTION = 0.8
+/** Nota a partir da qual a obra conta como "gostei" na frase de confirmação. */
+const HIGH_SCORE = 8
+/** Quantas obras entram na média de cima da confirmação. */
+const CONFIRMATION_TOP_N = 20
+/** Base mínima pra a confirmação não virar ruído estatístico. */
+const CONFIRMATION_MIN_RATED = 10
+
+function pearson(xs: number[], ys: number[]): number {
+  const n = xs.length
+  if (n < 2) return 0
+  const mean = (v: number[]) => v.reduce((a, b) => a + b, 0) / n
+  const mx = mean(xs), my = mean(ys)
+  let cov = 0, vx = 0, vy = 0
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my
+    cov += dx * dy; vx += dx * dx; vy += dy * dy
+  }
+  // Variância zero (todo mundo com a mesma nota) ⇒ correlação indefinida, não 1.
+  if (vx === 0 || vy === 0) return 0
+  return cov / Math.sqrt(vx * vy)
+}
+
+/**
+ * Obras mais alinhadas com o TasteProfile atual, SEPARADAS entre já lidas e não lidas.
+ *
+ * Uma lista só respondia a duas perguntas diferentes ao mesmo tempo e não respondia
+ * nenhuma: a #1 do bloco único era uma obra que a pessoa nunca abriu, então ele
+ * parecia dizer "o perfil bate com o que você gostou" sem dizer nada disso.
+ * Separado, o de cima é confirmação (com a nota dela ao lado) e o de baixo é fila
+ * de leitura.
  *
  * Lê o `personal_fit` DETERMINÍSTICO já persistido em `calculated_scores`
  * (computado no último `recalculateAll` — zero LLM, zero recompute aqui). É a
@@ -1403,28 +1484,49 @@ export interface AlignedWork {
  * desc em JS (PostgREST não ordena confiável por coluna embedada). Retorna
  * vazio quando não há perfil não-stub — nesse caso o personal_fit fica null
  * pra todas as obras.
+ *
+ * ⚠️ Os scores passam pelo `getScoresReader()`: `calculated_scores` não tem
+ * `user_id`, então a linha crua é a do DONO. Sem o overlay, a Leitora veria o
+ * alinhamento do gosto dele apresentado como o dela.
  */
-export async function getTopAlignedWorks(limit = 5): Promise<AlignedWork[]> {
+export async function getAlignedWorkSplit(limit = 5): Promise<AlignedWorkSplit> {
   const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("works")
-    .select(
-      "id, title, work_covers(url, is_primary, position), calculated_scores!inner(personal_fit, personal_fit_percentile)",
-    )
-    .eq("is_archived", false)
-    .not("calculated_scores.personal_fit", "is", null)
-  if (error) throw new Error(`Falha listando obras alinhadas: ${error.message}`)
+  const [personal, scoresReader] = await Promise.all([
+    getPersonalStateReader(),
+    getScoresReader(),
+  ])
 
-  return (data ?? [])
-    .map((row) => {
-      const w = row as Record<string, unknown>
-      const calc =
+  // ⚠️ Paginado: são 880 obras com personal_fit hoje. Abaixo do teto de 1000, mas um
+  // select cru passa a mentir em silêncio no dia em que passarem — e o sintoma seria
+  // "sumiu do topo", que ninguém investiga.
+  const rows = await fetchAllRows<Record<string, unknown>>(
+    (from, to) =>
+      supabase
+        .from("works")
+        .select(
+          "id, title, total_chapters, work_covers(url, is_primary, position), calculated_scores!inner(personal_fit, personal_fit_percentile, expected_score)",
+        )
+        .eq("is_archived", false)
+        .not("calculated_scores.personal_fit", "is", null)
+        .order("id", { ascending: true })
+        .range(from, to),
+    "getAlignedWorkSplit",
+  )
+
+  const works = rows
+    .map((w) => {
+      const id = w.id as string
+      const calc = scoresReader.overlay(
+        id,
         (w.calculated_scores as {
           personal_fit?: number | null
           personal_fit_percentile?: number | null
-        } | null) ?? null
+          expected_score?: number | null
+        } | null) ?? null,
+      )
+      const state = personal.get(id)
       return {
-        id: w.id as string,
+        id,
         title: w.title as string,
         coverUrl: pickPrimaryCover(
           (w.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
@@ -1436,8 +1538,59 @@ export async function getTopAlignedWorks(limit = 5): Promise<AlignedWork[]> {
         personalFit: calc?.personal_fit != null ? Number(calc.personal_fit) : 0,
         personalFitPercentile:
           calc?.personal_fit_percentile != null ? Number(calc.personal_fit_percentile) : null,
+        personalStatus: personalStatusNameOrDefault(state.personalStatusId),
+        chaptersRead: state.chaptersRead ?? 0,
+        totalChapters: (w.total_chapters as number | null) ?? null,
+        userScore: state.userScore ?? null,
+        expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
       } satisfies AlignedWork
     })
+    // O overlay zera os campos pessoais de quem não tem linha própria: sem este
+    // filtro, quem não tem modelo receberia a biblioteca inteira empatada em 0.
+    .filter((w) => w.personalFit > 0)
     .sort((a, b) => b.personalFit - a.personalFit)
-    .slice(0, limit)
+
+  // "Já li" = status que o BANCO marca como leitura concluída, ou passou de 80% dos
+  // capítulos (pega o "Lendo 215/227", que na prática já foi lido). Nome de status
+  // nunca é escrito à mão aqui — ver o alerta em status-lookups.ts.
+  const isRead = (w: AlignedWork) =>
+    isFullyReadPersonalStatus(w.personalStatus) ||
+    (w.totalChapters != null &&
+      w.totalChapters > 0 &&
+      w.chaptersRead / w.totalChapters > READ_CHAPTER_FRACTION)
+  // "Ainda não li" = Quero ler / Sem status (`isUnread` do banco). As do meio (Lendo
+  // abaixo do corte, Travada, Em espera, Agora não, Abandonada) ficam de FORA das duas
+  // — não confirmam gosto nem são recomendação de próxima leitura.
+  const isUnread = (w: AlignedWork) => !isRead(w) && isUnreadPersonalStatus(w.personalStatus)
+
+  const read = works.filter(isRead)
+  const unread = works.filter(isUnread)
+
+  const ratedRead = read.filter((w) => w.userScore != null)
+  const top = ratedRead.slice(0, CONFIRMATION_TOP_N)
+  const avg = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length
+  const confirmation: AlignmentConfirmation | null =
+    ratedRead.length >= CONFIRMATION_MIN_RATED
+      ? {
+          ratedRead: ratedRead.length,
+          topAvgScore: avg(top.map((w) => w.userScore as number)),
+          overallAvgScore: avg(ratedRead.map((w) => w.userScore as number)),
+          topN: top.length,
+          topHighCount: top.filter((w) => (w.userScore as number) >= HIGH_SCORE).length,
+          highScoreThreshold: HIGH_SCORE,
+          correlation: pearson(
+            ratedRead.map((w) => w.personalFit),
+            ratedRead.map((w) => w.userScore as number),
+          ),
+        }
+      : null
+
+  return {
+    read: read.slice(0, limit),
+    unread: unread.slice(0, limit),
+    readTotal: read.length,
+    unreadTotal: unread.length,
+    otherTotal: works.length - read.length - unread.length,
+    confirmation,
+  }
 }

@@ -8,6 +8,8 @@ import { ensureAdmin, getSessionUserId } from "@/server/queries/current-user"
 import { ensureAiConsumption } from "@/server/queries/ai-quota"
 import { buildTasteProfileHeuristic } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import { classifyProfileStaleness, computeHeuristicFingerprint } from "@/lib/ai-recommendation/profile-drift"
+import type { ProfileStaleness } from "@/lib/ai-recommendation/profile-staleness"
+import { estimateStep } from "@/lib/orchestration/cost"
 import { loadOrEnsureProfile } from "@/lib/ai-recommendation/ensure-profile"
 import {
   buildStubProfile,
@@ -127,6 +129,14 @@ export interface ProfileStatus {
   isStale: boolean
   currentHash: string
   ratedWorksCount: number
+  /**
+   * O gate de staleness INTEIRO, não só o booleano. O card mostra "quão defasado"
+   * (drift medido + qual gatilho disparou); devolver só `isStale` obrigaria a UI a
+   * recalcular — ou, pior, a chutar. Null quando não há perfil.
+   */
+  staleness: ProfileStaleness | null
+  /** Custo provável de recomputar AGORA (USD), na escala de obras rotuladas de hoje. */
+  regenCostUsd: number
 }
 
 export async function getTasteProfileStatusAction(): Promise<ProfileStatus> {
@@ -135,24 +145,29 @@ export async function getTasteProfileStatusAction(): Promise<ProfileStatus> {
     getRatedWorksForProfile(),
   ])
   const currentHash = computeInputHash(ratedWorks)
-  const isStale =
-    profile != null &&
-    classifyProfileStaleness({
-      savedFingerprint: profile.heuristic_fingerprint ?? null,
-      currentFingerprint: computeHeuristicFingerprint(ratedWorks),
-      savedInputHash: profile.input_hash,
-      currentInputHash: currentHash,
-      savedNWorks: profile.n_works_used,
-      currentNWorks: ratedWorks.length,
-      savedCreatedAt: profile.created_at,
-      nowMs: Date.now(),
-    }).stale
+  const staleness =
+    profile == null
+      ? null
+      : classifyProfileStaleness({
+          savedFingerprint: profile.heuristic_fingerprint ?? null,
+          currentFingerprint: computeHeuristicFingerprint(ratedWorks),
+          savedInputHash: profile.input_hash,
+          currentInputHash: currentHash,
+          savedNWorks: profile.n_works_used,
+          currentNWorks: ratedWorks.length,
+          savedCreatedAt: profile.created_at,
+          nowMs: Date.now(),
+        })
   return {
     hasProfile: profile != null,
     profile,
-    isStale,
+    isStale: staleness?.stale ?? false,
     currentHash,
     ratedWorksCount: ratedWorks.length,
+    staleness,
+    // Mesmo estimador que o popup de custo usa nos fluxos pagos — o chip do botão
+    // não pode prometer um preço diferente do que a execução cobra (PR #206).
+    regenCostUsd: estimateStep("ensure_taste_profile", ratedWorks.length).likelyUsd,
   }
 }
 
