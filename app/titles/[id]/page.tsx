@@ -898,6 +898,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       isPrimary: c.is_primary,
                     })
                   )}
+                  currentSynopses={(work.work_synopses ?? []).map(
+                    (s: { source?: string | null; text: string; is_primary?: boolean }) => ({
+                      source: s.source ?? "manual",
+                      text: s.text,
+                      isPrimary: Boolean(s.is_primary),
+                    })
+                  )}
                 />
                 <GenerateAllBanner
                   compact
@@ -918,6 +925,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       url: c.url,
                       source: c.source,
                       isPrimary: c.is_primary,
+                    })
+                  )}
+                  currentSynopses={(work.work_synopses ?? []).map(
+                    (s: { source?: string | null; text: string; is_primary?: boolean }) => ({
+                      source: s.source ?? "manual",
+                      text: s.text,
+                      isPrimary: Boolean(s.is_primary),
                     })
                   )}
                 />

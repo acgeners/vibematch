@@ -146,6 +146,7 @@ export function UpdateDataActionButton({
   workId,
   currentWork,
   currentCovers,
+  currentSynopses,
 }: {
   workId: string
   currentWork: {
@@ -158,6 +159,7 @@ export function UpdateDataActionButton({
     observations?: string | null
   }
   currentCovers?: Array<{ url: string; source?: string | null; isPrimary?: boolean }>
+  currentSynopses?: Array<{ source: string; text: string; isPrimary: boolean }>
 }) {
   const isAdmin = useIsAdmin()
   const canRefresh = useCan("refresh_work")
@@ -182,6 +184,7 @@ export function UpdateDataActionButton({
         workId={workId}
         currentWork={currentWork}
         currentCovers={currentCovers}
+        currentSynopses={currentSynopses}
         open={open}
         onOpenChange={setOpen}
         hideTrigger
