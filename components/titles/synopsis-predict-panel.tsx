@@ -20,6 +20,7 @@ import {
   planSynopsisInterestBatchAction,
   runSynopsisInterestBatchAction,
 } from "@/server/actions/synopsis-quality"
+import { buildInterestBatchCost } from "@/lib/cost-preview/interest-cost-steps"
 import { cn } from "@/lib/utils"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
@@ -148,19 +149,28 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
       toast.success("As obras selecionadas já estão atualizadas — nada a estimar.")
       return
     }
-    const profileNote = p.needsProfile ? " Inclui gerar/atualizar o seu perfil de gosto." : ""
+    // Itemiza perfil (custo ÚNICO) × previsões quando o perfil vai ser regenerado —
+    // deixando explícito que ele está defasado — em vez de amortizar em "N × por-obra".
+    const cost = buildInterestBatchCost({
+      needCalls,
+      regenProfile: planned.regenProfile,
+      driftPct: planned.driftPct,
+      profileLikelyUsd: p.profileLikelyUsd,
+      totalLikelyUsd: p.likelyUsd,
+    })
     const maxCostUsd = Math.max(p.upperBoundUsd, 0.01)
     const ok = await confirmCost({
       estimate: {
         likelyUsd: p.likelyUsd,
         upperBoundUsd: p.upperBoundUsd,
-        etaSeconds: needCalls * 15,
+        etaSeconds: cost.etaSeconds,
         model: "claude-sonnet-4-6",
         background: false,
         scale: needCalls,
       },
+      steps: cost.steps,
       title: `Prever Interesse — ${needCalls} obra(s)?`,
-      description: `Dry-run real: ${needCalls} previsão(ões), uma chamada Sonnet por obra.${profileNote}`,
+      description: `${cost.profileSentence}Dry-run real: ${needCalls} previsão(ões), uma chamada Sonnet por obra.`,
       confirmLabel: "Executar",
     })
     if (ok) void executeBatch(batchIds, maxCostUsd)

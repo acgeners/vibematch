@@ -32,7 +32,11 @@ export function CostSummary({
   steps?: CostStep[]
   className?: string
 }) {
-  const isBatch = preview.scale > 1
+  // "N × por-obra" só é honesto quando NÃO há passos itemizados. Com `steps` (ex.:
+  // perfil + previsões), a divisão ingênua amortizaria o custo ÚNICO do perfil em
+  // cada obra — então cai pro "teto $X" e deixa o detalhe pros passos abaixo.
+  const hasSteps = (steps?.length ?? 0) > 0
+  const isBatch = preview.scale > 1 && !hasSteps
   const perItem = isBatch ? preview.likelyUsd / preview.scale : null
 
   return (

@@ -93,6 +93,28 @@ export const PROFILE_STALE_FRACTION_NEW = 0.15
 /** Idade do perfil (dias) que marca stale independentemente do drift. */
 export const PROFILE_STALE_AGE_DAYS = 90
 
+/**
+ * Drift heurístico acima do qual vale a pena REGENERAR o perfil mesmo num fluxo
+ * gated por custo (lote "Reprocessar/Prever Interesse"). É um patamar MAIS ALTO que
+ * o de staleness: "materialmente movido" (0.15) apenas marca o perfil como
+ * desatualizado; "muito defasado" (este) é o que justifica pagar os ~$0,60 da
+ * regeneração antes de prever. Abaixo dele, um perfil stale (por drift pequeno,
+ * idade ou fração de obras novas) é USADO como está e a previsão roda contra ele
+ * (~$0,05 em vez de ~$0,65). Heurístico (2× o limiar de staleness), NÃO calibrado —
+ * ajuste aqui se quiser regenerar com mais/menos frequência.
+ */
+export const PROFILE_DRIFT_REGEN_THRESHOLD = 0.3
+
+/**
+ * "Muito defasado": o drift MEDIDO justifica pagar a regeneração. Só o drift
+ * heurístico conta — idade e fração-de-obras-novas são proxies de staleness, não
+ * evidência de que o gosto se moveu muito. Perfil legado sem fingerprint
+ * (driftPct = 0) ⇒ não-severo (usa-se como está; não força cobrança inesperada).
+ */
+export function isProfileDriftSevere(driftPct: number): boolean {
+  return driftPct >= PROFILE_DRIFT_REGEN_THRESHOLD
+}
+
 export type ProfileStaleReason = "fresh" | "identical" | "drift" | "fraction_new" | "age" | "legacy_hash"
 
 export interface ProfileStalenessArgs {
