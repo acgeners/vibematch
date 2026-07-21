@@ -73,16 +73,20 @@ export async function getLatestChapter(
     }
   })
 
-  // Fonte autoritativa: coffeemanga quando achou a obra (dá a LISTA real de capítulos,
-  // pra contar de verdade — cada decimal é 1 cap, sem aritmética de rótulo). Senão, a
-  // fonte de maior capítulo (comix). Todo o display (latest, datas, URL) vem dela.
-  const coffee = fulfilled.find((v) => v.source === "coffeemanga")
-  const primary =
-    coffee ??
-    fulfilled.reduce<NonNullable<ChapterLookup> | undefined>(
-      (best, v) => (!best || v.chapter > best.chapter ? v : best),
-      undefined,
-    )
+  // Fonte autoritativa = a de MAIOR capítulo; EMPATE → coffeemanga (ela dá a LISTA real de
+  // capítulos, pra contar de verdade — cada decimal é 1 cap, sem aritmética de rótulo — e
+  // datas absolutas). ⚠️ Antes o coffeemanga vencia INCONDICIONALMENTE, e isso SUBCONTAVA
+  // quando ele estava ATRÁS de outra fonte: se o comix já tinha o cap novo (ex.: ch23) e o
+  // coffeemanga ainda não o indexou (ch22), a obra ficava PRESA no total antigo e o "cap
+  // novo" nunca aparecia (bug real: "My Husband Is Definitely a Paladin"). Agora quem tem o
+  // cap mais alto vence; o coffeemanga só é autoritativo quando NÃO está atrás.
+  const primary = fulfilled.reduce<NonNullable<ChapterLookup> | undefined>((best, v) => {
+    if (!best || v.chapter > best.chapter) return v
+    if (v.chapter === best.chapter && v.source === "coffeemanga" && best.source !== "coffeemanga") {
+      return v
+    }
+    return best
+  }, undefined)
 
   // Status vem SEMPRE da comix (coffeemanga não fornece), independente de quem
   // venceu como fonte autoritativa do capítulo.
