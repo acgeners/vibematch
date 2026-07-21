@@ -601,6 +601,10 @@ export interface InterestBatchPlan {
   upperBoundUsd: number
   /** Custo provável TOTAL (sem a margem) — para exibir a faixa. */
   likelyUsd: number
+  /** Porção do custo que é a REGENERAÇÃO do perfil (custo ÚNICO; 0 quando
+   * needsProfile=false). Itemizado no popup pra não amortizar em "N × por-obra". */
+  profileLikelyUsd: number
+  profileUpperBoundUsd: number
 }
 
 /**
@@ -652,6 +656,8 @@ export async function planInterestBatch(
     needsProfile: args.profileNeedsGeneration,
     upperBoundUsd: profile.upperBoundUsd + predict.upperBoundUsd * needs,
     likelyUsd: profile.likelyUsd + predict.likelyUsd * needs,
+    profileLikelyUsd: profile.likelyUsd,
+    profileUpperBoundUsd: profile.upperBoundUsd,
   }
 }
 
@@ -680,6 +686,12 @@ export interface RunInterestBatchDeps {
   concurrency?: number
   /** Teto TOTAL da cascata (USD). Ao acumular ≥ teto, para de gastar. */
   maxCostUsd?: number
+  /**
+   * Prevê contra o perfil ATUAL sem regenerá-lo, mesmo stale (repassa por obra).
+   * O caller decide isto pelo gate de severidade do drift: stale-mas-não-severo ⇒
+   * true (não paga a regeneração); ausente/stub/severo ⇒ false (regenera 1×).
+   */
+  acceptStaleProfile?: boolean
 }
 
 /**
@@ -712,6 +724,7 @@ export async function runInterestBatch(
         predict: deps.predict,
         jobStore: deps.jobStore,
         allowPaid: true,
+        acceptStaleProfile: deps.acceptStaleProfile,
         maxCostUsd: deps.maxCostUsd != null ? deps.maxCostUsd - acc : undefined,
       })
       switch (out.status) {

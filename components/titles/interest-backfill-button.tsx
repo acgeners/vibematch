@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { useRefresh } from "@/lib/use-refresh"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { planInterestBackfillForIds, runSynopsisInterestBatchAction } from "@/server/actions/synopsis-quality"
+import { buildInterestBatchCost } from "@/lib/cost-preview/interest-cost-steps"
 import type { SynopsisQueueWork } from "@/server/queries/recommendations"
 
 /** Teto por chamada = SYNOPSIS_BATCH_MAX do servidor. O loop encadeia os lotes. */
@@ -87,17 +88,27 @@ export function InterestBackfillButton({ works, isPaid = true }: { works: Synops
       return
     }
     const cap = Math.max(plan.upperBoundUsd, 0.01)
+    // Itemiza perfil (custo ÚNICO) × previsões quando o perfil vai ser regenerado —
+    // e deixa explícito na descrição que ele está defasado.
+    const cost = buildInterestBatchCost({
+      needCalls: plan.needCalls,
+      regenProfile: plan.regenProfile,
+      driftPct: plan.driftPct,
+      profileLikelyUsd: plan.profileLikelyUsd,
+      totalLikelyUsd: plan.likelyUsd,
+    })
     const ok = await confirmCost({
       estimate: {
         likelyUsd: plan.likelyUsd,
         upperBoundUsd: plan.upperBoundUsd,
-        etaSeconds: (plan.needCalls * 10) / 3,
+        etaSeconds: cost.etaSeconds,
         model: "claude-sonnet-4-6",
         background: false,
         scale: plan.needCalls,
       },
+      steps: cost.steps,
       title: `Reprocessar Interesse — ${plan.needCalls} obra(s)?`,
-      description: `Respeita os filtros: ${plan.needCalls} a prever (de ${plan.total} exibidas). Pula as já frescas.`,
+      description: `${cost.profileSentence}Respeita os filtros: ${plan.needCalls} a prever (de ${plan.total} exibidas). Pula as já frescas.`,
       confirmLabel: "Reprocessar",
     })
     if (ok) void runLoop(plan.targetIds, cap)

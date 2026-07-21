@@ -324,9 +324,95 @@ export async function setSynopsisQualityAction(
 
 /** Plano (dry-run) do lote — devolvido à UI antes de executar. */
 export type BatchPlanResult =
-  | { status: "ok"; plan: InterestBatchPlan; profileReadiness: "fresh" | "stale" | "absent" | "stub" }
+  | {
+      status: "ok"
+      plan: InterestBatchPlan
+      profileReadiness: "fresh" | "stale" | "absent" | "stub"
+      /** true ⇒ a cascata vai REGENERAR o perfil (custo somado); false ⇒ prevê
+       * contra o perfil atual (stale aceito). Governa `acceptStaleProfile` no run. */
+      regenProfile: boolean
+      /** Drift heurístico do perfil (0..1) — pra mostrar "~X% defasado" no popup. */
+      driftPct: number
+    }
   | { status: "blocked_manual"; message: string }
   | { status: "failed"; error: string }
+
+/**
+ * Decisão central de PERFIL para os fluxos de LOTE gated por custo (o "Prever
+ * Interesse" do painel e o "Reprocessar Interesse" do /ai-evaluation). Lê o perfil
+ * atual + a biblioteca UMA vez e resolve:
+ *  - `readinessState`: fresh | stale | absent | stub (materialidade, não hash cru);
+ *  - `driftPct`: quanto o gosto se moveu (0 quando fresh/legado/sem perfil);
+ *  - `regenProfile`: se a cascata deve REGENERAR o perfil (⇒ soma ~$0,60 no custo)
+ *    ou prever contra o atual. `absent`/`stub` SEMPRE regeneram (não há perfil
+ *    usável); `stale` só regenera quando o drift é SEVERO (isProfileDriftSevere).
+ * Assim o teto do plano e o comportamento da execução ficam consistentes, e um
+ * perfil só levemente defasado não dispara a regeneração cara.
+ */
+async function resolveBatchProfilePlan(): Promise<{
+  current: Awaited<ReturnType<typeof loadCurrentTasteProfile>>
+  ratedWorksCount: number
+  readinessState: "fresh" | "stale" | "absent" | "stub"
+  driftPct: number
+  needsGen: boolean
+  regenProfile: boolean
+}> {
+  const { classifyTasteProfileReadiness } = await import("@/lib/orchestration/integrations/taste-profile")
+  const { classifyProfileStaleness, computeHeuristicFingerprint, isProfileDriftSevere } = await import(
+    "@/lib/ai-recommendation/profile-drift"
+  )
+  const { computeInputHash } = await import("@/lib/ai-recommendation/taste-profile")
+  const { getRatedWorksForProfile } = await import("@/server/queries/recommendations")
+
+  const ratedWorks = await getRatedWorksForProfile()
+  const current = await loadCurrentTasteProfile()
+  const libraryHash = computeInputHash(ratedWorks)
+  const libraryFingerprint = computeHeuristicFingerprint(ratedWorks)
+  const nowMs = Date.now()
+  const readiness = classifyTasteProfileReadiness({
+    current: current
+      ? {
+          isStub: current.is_stub,
+          inputHash: current.input_hash,
+          fingerprint: current.heuristic_fingerprint ?? null,
+          nWorks: current.n_works_used,
+          createdAt: current.created_at,
+        }
+      : null,
+    libraryHash,
+    libraryFingerprint,
+    libraryNWorks: ratedWorks.length,
+    nowMs,
+  })
+  // driftPct só é medível com perfil não-stub existente; senão 0 (fresh/absent/stub/legado).
+  let driftPct = 0
+  if (readiness.state === "stale" && current && !current.is_stub) {
+    driftPct = classifyProfileStaleness({
+      savedFingerprint: current.heuristic_fingerprint ?? null,
+      currentFingerprint: libraryFingerprint,
+      savedInputHash: current.input_hash,
+      currentInputHash: libraryHash,
+      savedNWorks: current.n_works_used ?? 0,
+      currentNWorks: ratedWorks.length,
+      savedCreatedAt: current.created_at ?? null,
+      nowMs,
+    }).driftPct
+  }
+  const needsGen = readiness.state !== "fresh"
+  // absent/stub: não há perfil usável ⇒ tem que gerar. stale: só se muito defasado.
+  const regenProfile =
+    readiness.state === "absent" ||
+    readiness.state === "stub" ||
+    (readiness.state === "stale" && isProfileDriftSevere(driftPct))
+  return {
+    current,
+    ratedWorksCount: ratedWorks.length,
+    readinessState: readiness.state,
+    driftPct,
+    needsGen,
+    regenProfile,
+  }
+}
 
 /** Relatório do lote executado. */
 export type BatchRunResult =
@@ -349,43 +435,27 @@ export async function planSynopsisInterestBatchAction(workIds: string[]): Promis
     if (ids.length === 0) return { status: "failed", error: "Nenhuma obra para o lote." }
 
     const { SupabaseInterestGateway, planInterestBatch } = await import("@/lib/orchestration/integrations/synopsis-interest")
-    const { classifyTasteProfileReadiness } = await import("@/lib/orchestration/integrations/taste-profile")
-    const { computeInputHash, computeProfileSignature, computeProfileStalenessKey, MIN_WORKS_FOR_FULL_PROFILE } = await import("@/lib/ai-recommendation/taste-profile")
-    const { computeHeuristicFingerprint } = await import("@/lib/ai-recommendation/profile-drift")
-    const { getRatedWorksForProfile } = await import("@/server/queries/recommendations")
+    const { computeProfileSignature, computeProfileStalenessKey, MIN_WORKS_FOR_FULL_PROFILE } = await import("@/lib/ai-recommendation/taste-profile")
 
-    const ratedWorks = await getRatedWorksForProfile()
-    const libraryHash = computeInputHash(ratedWorks)
-    const current = await loadCurrentTasteProfile()
-    const readiness = classifyTasteProfileReadiness({
-      current: current
-        ? {
-            isStub: current.is_stub,
-            inputHash: current.input_hash,
-            fingerprint: current.heuristic_fingerprint ?? null,
-            nWorks: current.n_works_used,
-            createdAt: current.created_at,
-          }
-        : null,
-      libraryHash,
-      libraryFingerprint: computeHeuristicFingerprint(ratedWorks),
-      libraryNWorks: ratedWorks.length,
-      nowMs: Date.now(),
-    })
-    const needsGen = readiness.state !== "fresh"
-    if (needsGen && ratedWorks.length < MIN_WORKS_FOR_FULL_PROFILE) {
-      return { status: "blocked_manual", message: `Avalie ao menos ${MIN_WORKS_FOR_FULL_PROFILE} obras (você tem ${ratedWorks.length}) para gerar o perfil do lote.` }
+    const decision = await resolveBatchProfilePlan()
+    // Só a REGENERAÇÃO exige o mínimo de obras — prever contra um perfil já existente
+    // (stale aceito) não gera nada, então não precisa do piso.
+    if (decision.regenProfile && decision.ratedWorksCount < MIN_WORKS_FOR_FULL_PROFILE) {
+      return { status: "blocked_manual", message: `Avalie ao menos ${MIN_WORKS_FOR_FULL_PROFILE} obras (você tem ${decision.ratedWorksCount}) para gerar o perfil do lote.` }
     }
+    const current = decision.current
     const profileSignature = current && !current.is_stub ? computeProfileStalenessKey(current) : null
     const profileSignatureLegacy = current && !current.is_stub ? computeProfileSignature(current.profile) : null
     const plan = await planInterestBatch(ids, {
       gateway: new SupabaseInterestGateway(),
       profileSignature,
       profileSignatureLegacy,
-      profileNeedsGeneration: needsGen,
-      profileScale: ratedWorks.length,
+      // Custo do perfil entra no plano SÓ quando vamos de fato regenerar (ausente/
+      // stub/drift severo). stale-mas-não-severo ⇒ prevê contra o atual, custo zero.
+      profileNeedsGeneration: decision.regenProfile,
+      profileScale: decision.ratedWorksCount,
     })
-    return { status: "ok", plan, profileReadiness: readiness.state }
+    return { status: "ok", plan, profileReadiness: decision.readinessState, regenProfile: decision.regenProfile, driftPct: decision.driftPct }
   } catch (err) {
     return { status: "failed", error: err instanceof Error ? err.message : "Erro desconhecido" }
   }
@@ -422,6 +492,9 @@ export async function runSynopsisInterestBatchAction(
       gateway: new SupabaseInterestGateway(),
       maxCostUsd: opts.maxCostUsd,
       concurrency: 3,
+      // Consistente com o plano acima: se ele NÃO incluiu o custo do perfil (stale
+      // não-severo), a execução também não regenera — prevê contra o perfil atual.
+      acceptStaleProfile: !planned.regenProfile,
     })
 
     revalidatePath("/ai-evaluation")
@@ -445,6 +518,13 @@ export interface InterestBackfillPlan {
   needCalls: number
   likelyUsd: number
   upperBoundUsd: number
+  /** true ⇒ o run vai regenerar o perfil (muito defasado/ausente) antes de prever. */
+  regenProfile: boolean
+  /** Drift heurístico do perfil (0..1) — pra mostrar "~X% defasado" no popup. */
+  driftPct: number
+  /** Porção do custo que é a regeneração do perfil (0 quando regenProfile=false). */
+  profileLikelyUsd: number
+  profileUpperBoundUsd: number
 }
 
 /**
@@ -460,7 +540,7 @@ export async function planInterestBackfillForIds(
     const gate = await ensureAiConsumption()
     if (!gate.ok) return { status: "blocked_manual", message: gate.error }
     const ids = [...new Set((workIds ?? []).filter(Boolean))]
-    if (ids.length === 0) return { status: "ok", targetIds: [], total: 0, fresh: 0, needCalls: 0, likelyUsd: 0, upperBoundUsd: 0 }
+    if (ids.length === 0) return { status: "ok", targetIds: [], total: 0, fresh: 0, needCalls: 0, likelyUsd: 0, upperBoundUsd: 0, regenProfile: false, driftPct: 0, profileLikelyUsd: 0, profileUpperBoundUsd: 0 }
     const supabase = createAdminClient()
 
     // Já frescas na versão ativa ⇒ puladas (reuse). Estima só o restante.
@@ -482,14 +562,28 @@ export async function planInterestBackfillForIds(
     // ~fixo por CHAMADA, base domina), então multiplicamos nós — senão o teto do
     // plano vem ~1 chamada e o 1º lote de 100 estoura.
     const per = estimateStep("predict_interest_potential", 1)
+    // Custo do PERFIL: o run regenera 1× quando o perfil está ausente/stub OU muito
+    // defasado (drift severo). Só então soma no teto — senão o botão prometia um teto
+    // sem o perfil e o 1º lote (que INCLUI a regeneração) estourava. stale-não-severo
+    // ⇒ prevê contra o perfil atual, sem custo de perfil. Nada a prever ⇒ sem perfil
+    // (e evita 2 leituras de DB à toa).
+    const decision = targetIds.length > 0 ? await resolveBatchProfilePlan() : null
+    const regenProfile = decision?.regenProfile ?? false
+    const profileCost = regenProfile
+      ? estimateStep("ensure_taste_profile", decision!.ratedWorksCount)
+      : { likelyUsd: 0, upperBoundUsd: 0 }
     return {
       status: "ok",
       targetIds,
       total: ids.length,
       fresh: ids.length - targetIds.length,
       needCalls: targetIds.length,
-      likelyUsd: per.likelyUsd * targetIds.length,
-      upperBoundUsd: per.upperBoundUsd * targetIds.length,
+      likelyUsd: profileCost.likelyUsd + per.likelyUsd * targetIds.length,
+      upperBoundUsd: profileCost.upperBoundUsd + per.upperBoundUsd * targetIds.length,
+      regenProfile,
+      driftPct: decision?.driftPct ?? 0,
+      profileLikelyUsd: profileCost.likelyUsd,
+      profileUpperBoundUsd: profileCost.upperBoundUsd,
     }
   } catch (err) {
     return { status: "failed", error: err instanceof Error ? err.message : "Erro desconhecido" }
