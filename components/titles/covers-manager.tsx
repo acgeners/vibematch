@@ -5,9 +5,8 @@ import { ImageIcon, Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { PLATFORMS } from "@/types/domain"
-import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { getCoverImageSrc } from "@/lib/image-proxy"
+import { normalizeCoverSource } from "@/lib/utils"
 
 export interface CoverEntry {
   url: string
@@ -20,8 +19,6 @@ interface CoversManagerProps {
   onChange: (next: CoverEntry[]) => void
 }
 
-const SOURCE_OPTIONS = [...PLATFORMS, "manual" as const]
-
 function isHttpUrl(value: string): boolean {
   try {
     const u = new URL(value)
@@ -33,10 +30,13 @@ function isHttpUrl(value: string): boolean {
 
 export function CoversManager({ value, onChange }: CoversManagerProps) {
   const [newUrl, setNewUrl] = useState("")
-  const [newSource, setNewSource] = useState<string>("manual")
+  const [newSource, setNewSource] = useState<string>("")
   const [showAddForm, setShowAddForm] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [failedUrls, setFailedUrls] = useState<Set<string>>(new Set())
+  // Enquanto o campo está em foco vale o texto cru — normalizar a cada tecla
+  // faria o cursor pular no meio da digitação. O valor salvo é o normalizado.
+  const [sourceDrafts, setSourceDrafts] = useState<Record<string, string>>({})
 
   const markFailed = (url: string) =>
     setFailedUrls((prev) => (prev.has(url) ? prev : new Set(prev).add(url)))
@@ -58,12 +58,12 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
     setError(null)
     const next: CoverEntry = {
       url: trimmed,
-      source: newSource || "manual",
+      source: normalizeCoverSource(newSource),
       isPrimary: value.length === 0,
     }
     onChange([...value, next])
     setNewUrl("")
-    setNewSource("manual")
+    setNewSource("")
     setShowAddForm(false)
   }
 
@@ -146,17 +146,26 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
                 </div>
 
                 <div className="space-y-2 bg-card p-2">
-                  <select
-                    value={cover.source}
-                    onChange={(e) => handleSourceChange(cover.url, e.target.value)}
-                    className="block w-full rounded border bg-background px-1.5 py-1 text-[10px] uppercase tracking-wide"
-                  >
-                    {SOURCE_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {PLATFORM_LABELS[opt] ?? opt}
-                      </option>
-                    ))}
-                  </select>
+                  <input
+                    type="text"
+                    value={sourceDrafts[cover.url] ?? cover.source}
+                    placeholder="manual"
+                    aria-label="Fonte da capa"
+                    onChange={(e) =>
+                      setSourceDrafts((prev) => ({ ...prev, [cover.url]: e.target.value }))
+                    }
+                    onBlur={() => {
+                      const draft = sourceDrafts[cover.url]
+                      if (draft !== undefined) handleSourceChange(cover.url, normalizeCoverSource(draft))
+                      setSourceDrafts((prev) => {
+                        if (!(cover.url in prev)) return prev
+                        const rest = { ...prev }
+                        delete rest[cover.url]
+                        return rest
+                      })
+                    }}
+                    className="block w-full rounded border bg-background px-1.5 py-1 text-[10px] tracking-wide"
+                  />
 
                   <div className="flex items-center justify-between gap-1 text-xs">
                     <label className="flex items-center gap-1 cursor-pointer">
@@ -209,22 +218,38 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
               autoFocus
             />
           </div>
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <select
-              value={newSource}
-              onChange={(e) => setNewSource(e.target.value)}
-              className="h-10 w-full rounded-md border bg-background px-3 text-xs uppercase tracking-wide"
-            >
-              {SOURCE_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {PLATFORM_LABELS[opt] ?? opt}
-                </option>
-              ))}
-            </select>
-            <Button type="button" variant="secondary" onClick={handleAdd} className="gap-1">
-              <Plus className="h-4 w-4" />
-              Adicionar
-            </Button>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-cover-source" className="text-xs text-muted-foreground">
+              Fonte
+            </Label>
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <Input
+                id="new-cover-source"
+                type="text"
+                placeholder="manual"
+                value={newSource}
+                onChange={(e) => setNewSource(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    handleAdd()
+                  }
+                }}
+                className="w-full"
+              />
+              <Button type="button" variant="secondary" onClick={handleAdd} className="gap-1">
+                <Plus className="h-4 w-4" />
+                Adicionar
+              </Button>
+            </div>
+            {newSource.trim() && normalizeCoverSource(newSource) !== newSource.trim() && (
+              <p className="text-[11px] text-muted-foreground">
+                Será salva como{" "}
+                <span className="font-mono font-medium text-foreground">
+                  {normalizeCoverSource(newSource)}
+                </span>
+              </p>
+            )}
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>

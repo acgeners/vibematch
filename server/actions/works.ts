@@ -49,7 +49,7 @@ import type {
 import { buildAutoRefreshPlan } from "@/lib/external/auto-refresh"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
-import { titleToSlug } from "@/lib/utils"
+import { normalizeCoverSource, titleToSlug } from "@/lib/utils"
 import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 
@@ -407,7 +407,10 @@ async function syncWorkCovers(
   const rows = covers.map((c, position) => ({
     work_id: workId,
     url: c.url,
-    source: c.source,
+    // O nome da fonte é digitado à mão desde que a lista suspensa saiu. O Zod só
+    // limita o tamanho, então sem isto um "Meu Pinterest" passaria a validação e
+    // quebraria o CHECK do banco — com as capas antigas JÁ apagadas acima.
+    source: normalizeCoverSource(c.source),
     is_primary: c.isPrimary,
     position,
   }))

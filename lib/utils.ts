@@ -45,6 +45,23 @@ export function slugifyTagName(name: string): string {
     .replace(/^-|-$/g, "")
 }
 
+/**
+ * Nome de fonte de capa digitado à mão → slug aceito pelo banco.
+ *
+ * `work_covers.source` tem `CHECK (source ~ '^[a-z0-9][a-z0-9-]{0,79}$')`, mas o
+ * Zod só limita o tamanho: um nome com espaço ou acento passa na validação e
+ * estoura no INSERT. E `syncWorkCovers` apaga as capas ANTES de inserir, sem
+ * transação — um erro de constraint deixaria a obra sem capa nenhuma. Normalizar
+ * aqui torna o caso impossível em vez de tratável.
+ *
+ * Acento é dobrado antes (`Ilustração` → `ilustracao`, não `ilustra-o`).
+ */
+export function normalizeCoverSource(raw: string | null | undefined): string {
+  if (!raw) return "manual"
+  const folded = raw.normalize("NFD").replace(/\p{M}/gu, "")
+  return slugifyTagName(folded).slice(0, 80).replace(/-+$/, "") || "manual"
+}
+
 export function readingProgressPercent(
   read: number | null | undefined,
   total: number | null | undefined,
