@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { getCoverImageSrc } from "@/lib/image-proxy"
+import { SMALL_COVER_WIDTH } from "@/lib/cover-quality"
 import { normalizeCoverSource } from "@/lib/utils"
 
 export interface CoverEntry {
@@ -37,9 +38,28 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
   // Enquanto o campo está em foco vale o texto cru — normalizar a cada tecla
   // faria o cursor pular no meio da digitação. O valor salvo é o normalizado.
   const [sourceDrafts, setSourceDrafts] = useState<Record<string, string>>({})
+  // Escolher a primária às cegas erra: medindo o catálogo, a ordem por
+  // prioridade de fonte pegava a melhor capa em só 32% das obras com 2+ capas.
+  // O tamanho vem do próprio `img` que já está na tela — sem requisição extra.
+  const [dims, setDims] = useState<Record<string, { w: number; h: number }>>({})
 
   const markFailed = (url: string) =>
     setFailedUrls((prev) => (prev.has(url) ? prev : new Set(prev).add(url)))
+
+  /**
+   * Guarda as dimensões de uma capa já carregada.
+   *
+   * Chamado do `onLoad` E do `ref`: a imagem vem no HTML do servidor e costuma
+   * terminar de carregar ANTES de o React hidratar, e nesse caso o evento `load`
+   * já passou — só o `img.complete` no ref pega esse caso (era o que deixava
+   * todos os cards em "—").
+   */
+  const recordDims = (url: string, img: HTMLImageElement | null) => {
+    if (!img?.complete || !img.naturalWidth) return
+    setDims((prev) =>
+      prev[url] ? prev : { ...prev, [url]: { w: img.naturalWidth, h: img.naturalHeight } },
+    )
+  }
 
   const handleAdd = () => {
     const trimmed = newUrl.trim()
@@ -141,6 +161,8 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
                       alt={`Capa (${cover.source})`}
                       className="h-full w-full object-cover"
                       onError={() => markFailed(imageSrc)}
+                      onLoad={(e) => recordDims(cover.url, e.currentTarget)}
+                      ref={(node) => recordDims(cover.url, node)}
                     />
                   )}
                 </div>
@@ -166,6 +188,33 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
                     }}
                     className="block w-full rounded border bg-background px-1.5 py-1 text-[10px] tracking-wide"
                   />
+
+                  {(() => {
+                    const d = dims[cover.url]
+                    if (failed) return null
+                    if (!d) {
+                      return (
+                        <p className="text-[10px] text-muted-foreground/50" title="Medindo…">
+                          —
+                        </p>
+                      )
+                    }
+                    const isSmall = d.w < SMALL_COVER_WIDTH
+                    return (
+                      <p
+                        className={`text-[10px] tabular-nums ${
+                          isSmall ? "text-destructive" : "text-muted-foreground"
+                        }`}
+                        title={
+                          isSmall
+                            ? `Menor que ${SMALL_COVER_WIDTH}px de largura — fica serrilhada na página da obra`
+                            : undefined
+                        }
+                      >
+                        {d.w} × {d.h}
+                      </p>
+                    )
+                  })()}
 
                   <div className="flex items-center justify-between gap-1 text-xs">
                     <label className="flex items-center gap-1 cursor-pointer">

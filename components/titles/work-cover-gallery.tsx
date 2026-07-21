@@ -70,6 +70,13 @@ export function WorkCoverGallery({ title, fallbackUrl, covers }: WorkCoverGaller
     el?.scrollIntoView({ block: "nearest", inline: "center" })
   }, [lightboxOpen, safeIndex])
 
+  const recordDims = (id: string, img: HTMLImageElement | null) => {
+    if (!img?.complete || !img.naturalWidth) return
+    setDims((prev) =>
+      prev[id] ? prev : { ...prev, [id]: { w: img.naturalWidth, h: img.naturalHeight } },
+    )
+  }
+
   const sourceLabel = (s: string | null) => (s ? (PLATFORM_LABELS[s] ?? s) : null)
 
   return (
@@ -173,15 +180,10 @@ export function WorkCoverGallery({ title, fallbackUrl, covers }: WorkCoverGaller
                   key={active.id}
                   src={getCoverImageSrc(active.url)}
                   alt={`Capa de ${title}`}
-                  onLoad={(e) => {
-                    const img = e.currentTarget
-                    if (!img.naturalWidth) return
-                    setDims((prev) =>
-                      prev[active.id]
-                        ? prev
-                        : { ...prev, [active.id]: { w: img.naturalWidth, h: img.naturalHeight } },
-                    )
-                  }}
+                  // `onLoad` E `ref`: imagem em cache pode completar antes de o
+                  // handler ser anexado, e aí o evento `load` nunca chega.
+                  onLoad={(e) => recordDims(active.id, e.currentTarget)}
+                  ref={(node) => recordDims(active.id, node)}
                   className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
                 />
               </div>
