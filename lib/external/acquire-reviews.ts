@@ -5,7 +5,7 @@ import {
   fetchExternalEvaluationContextForCandidate,
 } from "@/lib/external/index"
 import { saveWorkReviews } from "@/lib/external/persist-reviews"
-import type { ExternalSourceId } from "@/lib/external/types"
+import type { ExternalSourceId, SourcedReview } from "@/lib/external/types"
 
 /**
  * Adquire reviews externas de uma obra na BORDA (ex.: ao "atualizar dados") e as
@@ -64,7 +64,7 @@ export async function acquireAndPersistWorkReviews(
       acceptedExternalIds,
     )
 
-    const { allReviews } = await fetchExternalEvaluationContextForCandidate(candidate, {
+    const { allReviews, failedSources } = await fetchExternalEvaluationContextForCandidate(candidate, {
       rejectedSources,
       // INCREMENTAL + ACUMULATIVO: cada fonte grava assim que resolve
       // (skipPaidEnrichment=true → só as linhas; resumo/digest pagos rodam UMA vez no
@@ -75,17 +75,47 @@ export async function acquireAndPersistWorkReviews(
         saveWorkReviews(workId, reviews, { skipPaidEnrichment: true, accumulate: true }),
     })
 
+    // 2ª PASSADA dirigida: alguma fonte foi tentada e FALHOU (timeout/erro). O pool
+    // desta rodada é um recorte — e o gate de materialidade (crescimento ≥ max(2, 20%))
+    // faria o resumo/digest ignorarem a chegada tardia dessas reviews, congelando o
+    // recorte como se fosse o universo. Vale re-tentar SÓ quem falhou: o motivo mais
+    // comum de timeout é contenção (9 fontes em paralelo, sidecar com fila), e sozinha
+    // a fonte costuma responder.
+    //
+    // Vai ANTES do save final de propósito: assim o enriquecimento pago roda UMA vez,
+    // já sobre o pool recuperado, em vez de pagar duas.
+    let recovered: SourcedReview[] = []
+    if (failedSources.length > 0) {
+      console.warn(
+        `[acquireWorkReviews] work ${workId}: ${failedSources.join(", ")} falhou(ram) — 2ª passada dirigida`,
+      )
+      // Chama o coletor DIRETO, sem passar pelo contexto cacheado: o cache tem TTL de
+      // 5 min e a chave é a mesma da 1ª passada, então re-entrar por lá devolveria o
+      // resultado parcial de novo — um retry que não retenta nada.
+      const { collectReviewsFromCandidate } = await import("@/lib/external/index")
+      const retry = await collectReviewsFromCandidate(candidate, undefined, failedSources)
+      recovered = retry.reviews
+      console.info(
+        `[acquireWorkReviews] work ${workId}: 2ª passada recuperou ${recovered.length} review(s)` +
+          (retry.failedSources.length ? ` · segue faltando ${retry.failedSources.join(", ")}` : ""),
+      )
+    }
+
     // Save final do pool COMPLETO (acumulativo, idempotente com o incremental): dispara
     // o enriquecimento pago (resumo/digest) UMA vez e cobre o caso de cache-hit (onde o
     // callback incremental não roda). Vazio = no-op.
     // `awaitDigest`: quem chama daqui em background e CONSOME o digest na sequência
     // (criação de obra → inferência de tags) precisa dele pronto na volta.
-    await saveWorkReviews(workId, allReviews ?? [], {
+    // `forcePaidEnrichment`: houve recuperação tardia ⇒ fura o gate de materialidade,
+    // que é justamente o que impediria essas reviews de entrarem no digest.
+    const pool = [...(allReviews ?? []), ...recovered]
+    await saveWorkReviews(workId, pool, {
       skipPaidEnrichment: opts.skipPaidEnrichment,
       accumulate: true,
       awaitDigest: opts.awaitDigest,
+      forcePaidEnrichment: recovered.length > 0,
     })
-    return allReviews?.length ?? 0
+    return pool.length
   } catch (err) {
     console.error(
       "[acquireWorkReviews] falha colhendo reviews:",

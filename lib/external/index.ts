@@ -1107,10 +1107,11 @@ export function extractUserRating(text: string): { rating?: number; cleanText: s
  * `selectReviewsForEvaluation()`. ComicK contribui reviews curadas (com nota /10)
  * + comentários da obra (opinião livre dos usuários), unificados como "review".
  */
-async function collectReviewsFromCandidate(
+export async function collectReviewsFromCandidate(
   candidate: MergedCandidate,
   onSourceReviews?: (reviews: SourcedReview[]) => void | Promise<void>,
-): Promise<SourcedReview[]> {
+  onlySources?: ReadonlyArray<ExternalSourceId>,
+): Promise<{ reviews: SourcedReview[]; failedSources: ExternalSourceId[] }> {
   // Kitsu expõe "reactions" (não reviews completos), tipicamente 40-90 chars.
   // Pra outras fontes mantemos o threshold em 100 (reviews curtos demais
   // adicionam ruído). Pra Kitsu baixamos pra 30 — uma frase como "great FL,
@@ -1162,35 +1163,35 @@ async function collectReviewsFromCandidate(
       }
     })
 
-  const fetchers: Array<Promise<{ source: ExternalSourceId; reviews: string[] } | null>> = [
-    candidate.muId
-      ? withTimeout(fetchMangaUpdatesReviews(candidate.muId).then((reviews) => ({ source: "mangaupdates" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:mangaupdates")
-      : Promise.resolve(null),
-    candidate.anilistId
-      ? withTimeout(fetchAniListReviews(candidate.anilistId).then((reviews) => ({ source: "anilist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:anilist")
-      : Promise.resolve(null),
-    candidate.malId
-      ? withTimeout(fetchMalReviews(candidate.malId).then((reviews) => ({ source: "myanimelist" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:myanimelist")
-      : Promise.resolve(null),
-    candidate.kitsuId
-      ? withTimeout(fetchKitsuReactions(candidate.kitsuId).then((reviews) => ({ source: "kitsu" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:kitsu")
-      : Promise.resolve(null),
-    candidate.animePlanetSlug
-      ? withTimeout(fetchAnimePlanetReviews(candidate.animePlanetSlug).then((reviews) => ({ source: "animeplanet" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:animeplanet")
-      : Promise.resolve(null),
-    candidate.mangadexId
-      ? withTimeout(fetchMangaDexForumComments(candidate.mangadexId).then((reviews) => ({ source: "mangadex" as const, reviews })), TIMEOUT_REVIEWS_MS, "reviews:mangadex")
-      : Promise.resolve(null),
-    candidate.comickHid
-      ? withTimeout(fetchComicKReviews(candidate.comickHid).then((reviews) => ({ source: "comick" as const, reviews })), TIMEOUT_REVIEWS_COMICK_MS, "reviews:comick")
-      : Promise.resolve(null),
-    candidate.comixHid
-      ? withTimeout(fetchComixReviews(candidate.comixHid).then((reviews) => ({ source: "comix" as const, reviews })), TIMEOUT_REVIEWS_COMIX_MS, "reviews:comix")
-      : Promise.resolve(null),
-    candidate.mangagoSlug
-      ? withTimeout(fetchMangagoReviews(candidate.mangagoSlug).then((reviews) => ({ source: "mangago" as const, reviews })), TIMEOUT_REVIEWS_MANGAGO_MS, "reviews:mangago")
-      : Promise.resolve(null),
-  ]
+  // Plano declarativo: cada entrada carrega a PRÓPRIA fonte. Antes isto era um
+  // array posicional e o log de debug repetia a ordem numa SEGUNDA lista hardcoded
+  // — mexer na ordem (ou inserir uma fonte no meio) desalinhava os rótulos em
+  // silêncio, atribuindo a contagem de uma fonte ao nome de outra. É também esta
+  // estrutura que permite saber QUEM falhou, e não só quantas reviews vieram.
+  //
+  // Desestruturar antes estreita os tipos: dentro do `if` o id é não-nulo, sem cast.
+  const { muId, anilistId, malId, kitsuId, animePlanetSlug, mangadexId, comickHid, comixHid, mangagoSlug } = candidate
+  const plan: Array<{ source: ExternalSourceId; timeoutMs: number; run: () => Promise<string[]> }> = []
+  if (muId) plan.push({ source: "mangaupdates", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchMangaUpdatesReviews(muId) })
+  if (anilistId) plan.push({ source: "anilist", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchAniListReviews(anilistId) })
+  if (malId) plan.push({ source: "myanimelist", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchMalReviews(malId) })
+  if (kitsuId) plan.push({ source: "kitsu", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchKitsuReactions(kitsuId) })
+  if (animePlanetSlug) plan.push({ source: "animeplanet", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchAnimePlanetReviews(animePlanetSlug) })
+  if (mangadexId) plan.push({ source: "mangadex", timeoutMs: TIMEOUT_REVIEWS_MS, run: () => fetchMangaDexForumComments(mangadexId) })
+  if (comickHid) plan.push({ source: "comick", timeoutMs: TIMEOUT_REVIEWS_COMICK_MS, run: () => fetchComicKReviews(comickHid) })
+  if (comixHid) plan.push({ source: "comix", timeoutMs: TIMEOUT_REVIEWS_COMIX_MS, run: () => fetchComixReviews(comixHid) })
+  if (mangagoSlug) plan.push({ source: "mangago", timeoutMs: TIMEOUT_REVIEWS_MANGAGO_MS, run: () => fetchMangagoReviews(mangagoSlug) })
+
+  // `onlySources` = segunda passada dirigida às fontes que falharam na primeira
+  // (ver `acquireAndPersistWorkReviews`). Sem ele, roda o plano inteiro.
+  const active = onlySources ? plan.filter((p) => onlySources.includes(p.source)) : plan
+  const fetchers = active.map((p) =>
+    withTimeout(
+      p.run().then((reviews) => ({ source: p.source, reviews })),
+      p.timeoutMs,
+      `reviews:${p.source}`,
+    ),
+  )
 
   // Persistência INCREMENTAL: entrega cada fonte ao `onSourceReviews` assim que ELA
   // resolve — não no fim, junto com todas. Assim uma interrupção no meio da coleta
@@ -1210,20 +1211,30 @@ async function collectReviewsFromCandidate(
 
   const settled = await Promise.allSettled(observed)
 
-  // DEBUG: contar reviews raw por fonte antes de filtrar
+  // Quem FALHOU (timeout/erro) é diferente de quem não tinha o que dizer. Sem essa
+  // distinção o pool parcial passava por completo: resumo e digest saíam de um
+  // recorte, custavam o mesmo e ninguém ficava sabendo. Fontes sem id sequer entram
+  // no plano, então não aparecem aqui — o que é medido é só o que foi tentado.
+  const failedSources: ExternalSourceId[] = []
   const rawCounts = settled.map((entry, i) => {
-    const src = ["mangaupdates", "anilist", "myanimelist", "kitsu", "animeplanet", "mangadex", "comick", "comix", "mangago"][i]
-    if (entry.status === "rejected") return `${src}=REJECTED(${entry.reason})`
-    if (!entry.value) return `${src}=skipped(no_id)`
+    const src = active[i].source
+    if (entry.status === "rejected") {
+      failedSources.push(src)
+      return `${src}=FALHOU(${entry.reason instanceof Error ? entry.reason.message : String(entry.reason)})`
+    }
+    if (!entry.value) return `${src}=vazio`
     const reviews = entry.value.reviews
     const lens = reviews.map((r) => r.length).sort((a, b) => b - a).slice(0, 3)
     return `${src}=${reviews.length}(top3lens=${lens.join(",")})`
   })
-  console.log(`[collectReviews] candidate="${candidate.title}" ids={mu:${candidate.muId},ani:${candidate.anilistId},mal:${candidate.malId},kitsu:${candidate.kitsuId},ap:${candidate.animePlanetSlug},md:${candidate.mangadexId},cmk:${candidate.comickHid}} raw=${rawCounts.join(" ")}`)
+  console.log(
+    `[collectReviews] candidate="${candidate.title}" tentadas=${active.length} falharam=${failedSources.length ? failedSources.join(",") : "nenhuma"} raw=${rawCounts.join(" ")}`,
+  )
 
-  return settled
+  const reviews = settled
     .flatMap((entry) => (entry.status === "fulfilled" && entry.value ? [entry.value] : []))
     .flatMap((group) => mapGroup(group))
+  return { reviews, failedSources }
 }
 
 /**
@@ -1455,6 +1466,14 @@ interface ReviewContextResult {
   similarWorks: SimilarWork[]
   /** Classificações de conteúdo das fontes ACEITAS que expõem o campo (MangaDex/ComicK), normalizadas em minúsculas e deduplicadas. Eleva o piso de adult_content na avaliação. */
   contentRatings: string[]
+  /**
+   * Fontes que foram TENTADAS e falharam (timeout/erro) nesta coleta — distinto de
+   * "não tinha reviews" e de "não tinha id". Se vier não-vazio, `allReviews` é um
+   * recorte, não o universo: quem deriva artefato pago daqui (resumo/digest) está
+   * pagando por um pool parcial sem saber. Ver a 2ª passada em
+   * `acquireAndPersistWorkReviews`.
+   */
+  failedSources: ExternalSourceId[]
 }
 
 interface ReviewContextCacheEntry {
@@ -1605,10 +1624,11 @@ async function fetchExternalEvaluationContextForCandidateUncached(
     ...(candidate.trustedSources ?? []).filter((source) => !rejected.has(source)),
   ])
   const reviewCandidate = restrictCandidateToSources(candidate, reviewSources)
-  const [allReviews, similarWorks] = await Promise.all([
+  const [collected, similarWorks] = await Promise.all([
     collectReviewsFromCandidate(reviewCandidate, opts.onSourceReviews),
     collectSimilarFromCandidate(reviewCandidate),
   ])
+  const allReviews = collected.reviews
 
   const platformRatings: PlatformRating[] = filteredAccepted
     .filter((result) => typeof result.score === "number" || typeof result.votes === "number")
@@ -1631,6 +1651,7 @@ async function fetchExternalEvaluationContextForCandidateUncached(
       maxPerSource: opts.maxPerSource ?? 12,
     }),
     allReviews,
+    failedSources: collected.failedSources,
     externalContext: uniqueSynopsisBlocks(
       filteredAccepted.map((result) => result.synopsis)
     ).slice(0, 6),
@@ -1729,7 +1750,7 @@ async function fetchExternalEvaluationContextForWorkUncached(input: {
     }
   }
 
-  return { sourcedReviews: [], allReviews: [], externalContext: [], platformRatings: [], similarWorks: [], contentRatings: [] }
+  return { sourcedReviews: [], allReviews: [], externalContext: [], platformRatings: [], similarWorks: [], contentRatings: [], failedSources: [] }
 }
 
 // ============================================================================
