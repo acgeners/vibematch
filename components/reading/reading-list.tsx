@@ -373,6 +373,10 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
   const [sortBy, setSortBy] = useState<SortKey>("last_read")
   // Otimista: marca "agora" assim que a checagem termina (antes do refresh trazer o persistido).
   const [justCheckedAt, setJustCheckedAt] = useState<string | null>(null)
+  // Vermelho no "Última verificação" quando a última checagem DESTA sessão deu erro (obra
+  // sem retorno ou falha total). A falha não é persistida no banco, então um reload limpa
+  // o sinal — ele reflete só a checagem que o usuário acabou de disparar.
+  const [lastCheckFailed, setLastCheckFailed] = useState(false)
 
   // Estado das seções (accordion). `null` = ainda não interagiu → cai no default (só
   // "Em andamento" aberta, ou "outras" se não houver nenhuma em andamento). Depois do
@@ -452,27 +456,36 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
         for (const r of res) map[r.workId] = r
         setResults(map)
         setJustCheckedAt(new Date().toISOString())
-        const news = res.filter((r) => r.hasNew).length
+        const newWorks = res.filter((r) => r.hasNew)
         const failedWorks = res.filter((r) => r.failed)
+        const news = newWorks.length
         const statusChanges = res.filter((r) => r.statusApplied).length
+        setLastCheckFailed(failedWorks.length > 0)
 
-        const descParts: string[] = []
-        if (statusChanges > 0) descParts.push(`${statusChanges} mudança(s) de status`)
-        if (failedWorks.length > 0) {
-          // Nomeia AS OBRAS que ficaram sem retorno — o toast é global e antes só dizia
-          // "N fonte(s) não responderam", o que dava a entender que uma fonte externa caiu.
-          // A falha é por OBRA (nenhuma fonte de capítulo respondeu por ela), então mostra
-          // quais foram (até 3 nomes + "e mais N").
-          const titleById = new Map(works.map((w) => [w.id, w.title]))
-          const names = failedWorks
+        // Nomeia as OBRAS nos toasts (novidade e falha): até 3 títulos + "e mais N". O toast
+        // é global; sem os nomes ele só dava a contagem — "2 obras com capítulo novo" sem
+        // dizer quais — e "N não verificadas" parecia uma fonte externa fora do ar (a falha
+        // é por OBRA: nenhuma fonte de capítulo respondeu por ela).
+        const titleById = new Map(works.map((w) => [w.id, w.title]))
+        const formatNames = (rows: ReadingUpdateResult[]): string => {
+          const names = rows
             .map((r) => titleById.get(r.workId))
             .filter((t): t is string => !!t)
+          if (names.length === 0) return ""
           const shown = names.slice(0, 3).join(", ")
-          const extra = names.length > 3 ? ` e mais ${names.length - 3}` : ""
+          return names.length > 3 ? `${shown} e mais ${names.length - 3}` : shown
+        }
+
+        const descParts: string[] = []
+        const newNames = formatNames(newWorks)
+        if (newNames) descParts.push(newNames)
+        if (statusChanges > 0) descParts.push(`${statusChanges} mudança(s) de status`)
+        if (failedWorks.length > 0) {
           const plural = failedWorks.length !== 1
+          const failedNames = formatNames(failedWorks)
           descParts.push(
             `${failedWorks.length} obra${plural ? "s" : ""} não verificada${plural ? "s" : ""}` +
-              (names.length > 0 ? `: ${shown}${extra}` : ""),
+              (failedNames ? `: ${failedNames}` : ""),
           )
         }
 
@@ -487,6 +500,10 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
         )
         refresh() // traz hids recém-persistidos pra próxima carga
       } catch (err) {
+        // Falha total (nada verificado): marca "agora" como a última tentativa e pinta
+        // de vermelho — foi uma verificação, e ela deu erro.
+        setJustCheckedAt(new Date().toISOString())
+        setLastCheckFailed(true)
         toast.error("Falha ao verificar atualizações", {
           description: err instanceof Error ? err.message : undefined,
         })
@@ -580,7 +597,13 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
             Verificar atualizações
           </Button>
           {lastChecked && (
-            <span className="text-[11px] text-muted-foreground">
+            <span
+              className={cn(
+                "flex items-center gap-1 text-[11px]",
+                lastCheckFailed ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground",
+              )}
+            >
+              {lastCheckFailed && <AlertCircle className="size-3 shrink-0" />}
               Última verificação: {formatRelativeDateTime(lastChecked)}
             </span>
           )}
