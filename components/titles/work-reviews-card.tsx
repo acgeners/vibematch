@@ -207,6 +207,12 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
   const digestLeads = digest != null && !corrupted && Boolean(digest.consensus?.trim())
   const synthesizedAt = digestLeads ? snapshot.digestAt : snapshot.summaryAt
   const totalReviews = snapshot.total + snapshot.manual.length
+  // Fontes = união das raspadas com as das manuais. Contar só `bySource` sub-reporta:
+  // uma review manual de uma fonte que nunca foi raspada não aparecia na contagem.
+  const sourceCount = new Set<string>([
+    ...snapshot.bySource.map((s) => s.source),
+    ...snapshot.manual.map((r) => r.source),
+  ]).size
 
   return (
     <Card>
@@ -217,8 +223,18 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
             <CardTitle className="text-base">O que dizem as reviews</CardTitle>
             <Badge variant="outline" className="text-[11px] tabular-nums">
               {totalReviews} review{totalReviews === 1 ? "" : "s"}
-              {snapshot.bySource.length > 0 && ` · ${snapshot.bySource.length} fonte${snapshot.bySource.length === 1 ? "" : "s"}`}
+              {sourceCount > 0 && ` · ${sourceCount} fonte${sourceCount === 1 ? "" : "s"}`}
             </Badge>
+            {snapshot.manual.length > 0 && (
+              <Badge
+                variant="secondary"
+                className="gap-1 text-[11px] tabular-nums"
+                title="Reviews externas adicionadas à mão, já incluídas no total"
+              >
+                <PenLine className="h-3 w-3" />
+                {snapshot.manual.length} {snapshot.manual.length === 1 ? "manual" : "manuais"}
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {synthesizedAt && (
@@ -371,7 +387,7 @@ export function WorkReviewsCard({ snapshot, workId }: WorkReviewsCardProps) {
             {snapshot.manual.length > 0 && (
               <Badge variant="secondary" className="gap-1 text-[11px]">
                 <PenLine className="h-3 w-3" />
-                {snapshot.manual.length} manual{snapshot.manual.length === 1 ? "" : "is"}
+                {snapshot.manual.length} {snapshot.manual.length === 1 ? "manual" : "manuais"}
               </Badge>
             )}
             {snapshot.fetchedAt && (
