@@ -368,6 +368,56 @@ async function tryResolveComixViaSidecar(workId: string): Promise<boolean> {
   }
 }
 
+// Orçamento da descoberta barata do hid (ver `quickResolveComixHidForWork`). O
+// sidecar tem timeout PRÓPRIO de 25s × 2 tentativas (~50s): sem um teto aqui, as
+// reviews ficariam reféns de um sidecar pendurado. 15s cobre com folga o caso
+// típico (render de alguns segundos) e desiste antes de virar problema.
+const QUICK_RESOLVE_BUDGET_MS = 15_000
+
+/**
+ * Descoberta BARATA do hid da Comix, pensada pra rodar ANTES da aquisição de
+ * reviews. `acquireAndPersistWorkReviews` lê `work_external_ids` UMA vez, no
+ * início — um hid que chega depois deixa a Comix fora do pool e, por tabela, fora
+ * do resumo, do digest e das tags. Como a resolução mora numa `after()` paralela
+ * (as callbacks de `after()` NÃO são uma fila — p-queue sem opções = concurrency
+ * Infinity), "depois" era o caso de 100% das criações.
+ *
+ * O que esta função deliberadamente NÃO faz, e é por isso que ela cabe no caminho
+ * crítico: nada de spawn de Chrome (~60s), nada de `ensureComixReady` (backoff de
+ * até ~3min quando a Comix está fora) e nada do enrich de rating/sinopse/capa.
+ * Só a via sidecar, limitada por `budgetMs`.
+ *
+ * Sem sidecar (prod hoje, sem `COMIX_RENDER_URL`), sem cross-ID, ou estourado o
+ * orçamento ⇒ `false` na hora e o pipeline segue EXATAMENTE como antes — a
+ * resolução completa continua acontecendo na task paralela. Nunca lança.
+ */
+export async function quickResolveComixHidForWork(
+  workId: string,
+  opts: { budgetMs?: number } = {},
+): Promise<boolean> {
+  if (!workId) return false
+  // Já tem hid (vínculo manual, ou a avaliação de criação já resolveu): nada a fazer.
+  if ((await getComixResolutionStatus(workId)).resolved) return true
+  // Sem sidecar a descoberta cairia no batch Puppeteer — que é justamente o que
+  // não pode entrar aqui. No-op imediato.
+  if (!isComixRenderConfigured()) return false
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    // A promise perdedora segue viva de propósito: se o hid chegar depois do
+    // orçamento, ele ainda é persistido e vale pra próxima aquisição de reviews.
+    // `tryResolveComixViaSidecar` nunca rejeita, então não há unhandled rejection.
+    return await Promise.race([
+      tryResolveComixViaSidecar(workId),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), opts.budgetMs ?? QUICK_RESOLVE_BUDGET_MS)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export async function resolveComixHidForWork(workId: string): Promise<void> {
   if (!workId) return
   // Já tem hid do Comix (ex.: vínculo manual)? Pula a descoberta (Puppeteer/Chrome)

@@ -1167,6 +1167,23 @@ export async function createWork(
     if (added > 0) await markRecalcPending("ai_inferred_tags_on_create")
   }
 
+  // Descoberta do hid da Comix ANTES da aquisição de reviews. O `acquire` lê
+  // `work_external_ids` uma única vez, no início; como a resolução da Comix mora
+  // numa `after()` PARALELA (callbacks de `after()` não são fila — p-queue sem
+  // opções = concurrency Infinity), o hid sempre chegava tarde e a Comix ficava
+  // fora do 1º pool de reviews — logo, fora do resumo, do digest e das tags.
+  //
+  // Uma promise ÚNICA compartilhada pelas duas tasks: a de reviews espera por ela
+  // antes de ler os ids; a de enriquecimento reusa o mesmo resultado em vez de
+  // descobrir de novo (e, se o hid já foi persistido aqui, `resolveComixHidForWork`
+  // curto-circuita direto pro enrich). Só a via barata/sidecar, com orçamento —
+  // sem `COMIX_RENDER_URL` (prod hoje) é no-op imediato, comportamento idêntico.
+  let comixHidPromise: Promise<boolean> | null = null
+  const comixHidReady = () =>
+    (comixHidPromise ??= import("@/server/comix/resolver").then((m) =>
+      m.quickResolveComixHidForWork(result.workId),
+    ))
+
   // Cascata "gerar todos os dados" (toggle /settings, default off). Quando ligada,
   // a cascata (server/actions/generate-all.ts) faz a aquisição de reviews + tags +
   // resto em ordem — então pulamos aqui o fluxo leve de reviews/tags pra não
@@ -1198,6 +1215,9 @@ export async function createWork(
     // própria página sem esperar uma avaliação. No-op se não há IDs aceitos.
     // A inferência de tags roda DEPOIS, na MESMA task (reviews já persistidas).
     after(async () => {
+      // Espera o hid da Comix (bounded) ANTES de ler os ids aceitos — senão a
+      // Comix fica de fora deste pool e de tudo que é derivado dele.
+      await comixHidReady()
       const { acquireAndPersistWorkReviews } = await import("@/lib/external/acquire-reviews")
       await acquireAndPersistWorkReviews(result.workId, {
         skipPaidEnrichment: skipAi,
@@ -1215,6 +1235,10 @@ export async function createWork(
   // estar presente no gate de fontes; a cascata termina em needs_authorization
   // (banner acionável na página da obra).
   after(async () => {
+    // Mesma promise que a task de reviews aguarda: a descoberta barata roda UMA
+    // vez. Se ela persistiu o hid, `resolveComixHidForWork` já entra pelo ramo
+    // "resolved" e vai direto ao enrich, sem re-descobrir.
+    await comixHidReady()
     const { resolveComixHidForWork } = await import("@/server/comix/resolver")
     await resolveComixHidForWork(result.workId)
     if (generateAll) {
