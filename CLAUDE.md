@@ -99,6 +99,26 @@ import type { WorkFormValues } from "@/lib/validations/work.schema"
 
 Also: files without extensions (e.g. `work-form` alongside `work-form.tsx`) are resolved by Turbopack before the `.tsx` file. Rename any such files to `.bak` or `.unused`.
 
+## `output: "standalone"`: `npm start` ≠ `next start`, e o servidor não lê `.env`
+
+`next.config.ts` usa `output: "standalone"` (pacote enxuto pra imagem Docker). Isso muda o servidor de
+produção, e três coisas falham **sem erro claro** — todas resolvidas em prod pela plataforma (Fly), mas
+que mordem ao rodar local:
+
+- **`next start` NÃO funciona** com standalone (o próprio Next avisa e sobe um servidor que não serve
+  a build). O servidor certo é `.next/standalone/server.js`. `npm start` já aponta pra
+  `scripts/start-standalone.mjs`, que faz isso — **não troque de volta pra `next start`**.
+- **`public/` e `.next/static/` ficam FORA do pacote** (num deploy real vão pro CDN). Sem copiar pra
+  dentro, o servidor responde **200 com a página inteira sem CSS e sem JS** — parece bug de estilo, é
+  de deploy. O Dockerfile copia (linhas 21-23); o script `start-standalone` reproduz local.
+- **`server.js` não lê `.env.local`** (em prod quem injeta as env é a plataforma). Sem isso, toda
+  página morre com `supabaseKey is required` numa tela genérica. O script injeta local.
+
+Corolário do file tracing: ele erra pro lado de **incluir demais**. Já puxou `.cache/comix-chrome/`
+(o Chrome de 90 MB do sidecar, que o Next nunca executa) pra dentro do artefato —
+`outputFileTracingExcludes: { "**/*": [".cache/**"] }` corta. Ao adicionar dependência pesada que só um
+sidecar usa, confira se ela vazou pro standalone (`du -sh .next/standalone`).
+
 ## Preferência de UI que o servidor renderiza vai em COOKIE, nunca em localStorage
 
 O servidor **não enxerga** `localStorage`. Se o estado inicial de um componente é lido dele, o HTML
