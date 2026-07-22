@@ -26,7 +26,7 @@ import type { ExternalSourceId } from "@/lib/external/types"
  */
 export async function acquireAndPersistWorkReviews(
   workId: string,
-  opts: { skipPaidEnrichment?: boolean } = {},
+  opts: { skipPaidEnrichment?: boolean; awaitDigest?: boolean } = {},
 ): Promise<number> {
   if (!workId) return 0
   try {
@@ -78,9 +78,12 @@ export async function acquireAndPersistWorkReviews(
     // Save final do pool COMPLETO (acumulativo, idempotente com o incremental): dispara
     // o enriquecimento pago (resumo/digest) UMA vez e cobre o caso de cache-hit (onde o
     // callback incremental não roda). Vazio = no-op.
+    // `awaitDigest`: quem chama daqui em background e CONSOME o digest na sequência
+    // (criação de obra → inferência de tags) precisa dele pronto na volta.
     await saveWorkReviews(workId, allReviews ?? [], {
       skipPaidEnrichment: opts.skipPaidEnrichment,
       accumulate: true,
+      awaitDigest: opts.awaitDigest,
     })
     return allReviews?.length ?? 0
   } catch (err) {

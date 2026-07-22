@@ -1150,10 +1150,13 @@ export async function createWork(
   //
   // Pro não-curador é FORÇADO: ele não escolhe gastar o saldo da Anthropic de outra pessoa.
   const skipAi = opts.skipAiEnrichment === true || !isCurator
-  // Inferência de tags (Haiku) em background, SEQUENCIADA após as reviews —
-  // usa o contexto de leitores (digest → resumo) quando disponível, que puxa
-  // tags que a sinopse omite (passada `--with-reviews` validada). Grava tags de
-  // alta confiança (source='ai_inferred'); se adicionou, marca recalc pendente.
+  // Inferência de tags (Haiku) em background, SEQUENCIADA após as reviews E após o
+  // resumo/digest (`awaitDigest: true` nos dois ramos abaixo) — o contexto de
+  // leitores puxa tags que a sinopse omite (passada `--with-reviews` validada).
+  // Sem esse await o digest (Sonnet, ~20s) era fire-and-forget e a inferência
+  // SEMPRE o perdia: pagava-se o digest e as tags saíam só com o resumo.
+  // Grava tags de alta confiança (source='ai_inferred'); se adicionou, marca
+  // recalc pendente.
   const inferTagsForNewWork = async (workId: string) => {
     if (skipAi) return
     // Gate por configuração (toggle em /settings). Desligado, a obra nasce sem
@@ -1172,13 +1175,23 @@ export async function createWork(
 
   if (externalReviews && externalReviews.length > 0) {
     // A avaliação (Path B) já buscou as reviews pra montar o prompt — reusa o
-    // pool em vez de re-buscar na borda. Tag-inference roda depois (usa o que
-    // houver de contexto; o resumo é aguardado em saveWorkReviews).
-    const { saveWorkReviews } = await import("@/lib/external/persist-reviews")
-    // fromFreshEval: a obra acabou de ser avaliada com estas reviews ⇒ não marca
-    // a avaliação como desatualizada (só atualiza o fingerprint do pool).
-    await saveWorkReviews(result.workId, externalReviews, { fromFreshEval: true, skipPaidEnrichment: skipAi })
-    if (!generateAll) after(() => inferTagsForNewWork(result.workId))
+    // pool em vez de re-buscar na borda.
+    //
+    // TUDO em `after()`: o save agora aguarda resumo (Haiku) E digest (Sonnet) pra a
+    // inferência de tags enxergar os dois — ~30s de IA que não podem segurar a
+    // resposta do create. Antes o save era inline e já pendurava o resumo (~10s) na
+    // resposta do usuário; sair da borda também devolve esse tempo.
+    after(async () => {
+      const { saveWorkReviews } = await import("@/lib/external/persist-reviews")
+      // fromFreshEval: a obra acabou de ser avaliada com estas reviews ⇒ não marca
+      // a avaliação como desatualizada (só atualiza o fingerprint do pool).
+      await saveWorkReviews(result.workId, externalReviews, {
+        fromFreshEval: true,
+        skipPaidEnrichment: skipAi,
+        awaitDigest: true,
+      })
+      if (!generateAll) await inferTagsForNewWork(result.workId)
+    })
   } else if (!generateAll) {
     // Criada SEM avaliar: extrai + persiste reviews na borda, desacoplado da
     // avaliação, em background (`after()`). A obra passa a exibir reviews na
@@ -1186,7 +1199,10 @@ export async function createWork(
     // A inferência de tags roda DEPOIS, na MESMA task (reviews já persistidas).
     after(async () => {
       const { acquireAndPersistWorkReviews } = await import("@/lib/external/acquire-reviews")
-      await acquireAndPersistWorkReviews(result.workId, { skipPaidEnrichment: skipAi })
+      await acquireAndPersistWorkReviews(result.workId, {
+        skipPaidEnrichment: skipAi,
+        awaitDigest: true,
+      })
       await inferTagsForNewWork(result.workId)
     })
   }
