@@ -380,7 +380,9 @@ export function SourceSelectionStep({ workId, onConfirm, onCancel, confirmLabel 
         )
       })}
 
-      <div className="flex gap-2 justify-end pt-1">
+      {/* Grudada no rodapé da rolagem do diálogo que hospeda este passo: a lista de
+          fontes cresce com a obra e empurrava o "Continuar" pra fora da tela. */}
+      <div className="sticky bottom-0 z-10 flex justify-end gap-2 border-t bg-background pt-3 pb-2">
         <Button variant="outline" onClick={onCancel} disabled={saving}>
           Cancelar
         </Button>
