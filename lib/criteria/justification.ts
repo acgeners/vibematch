@@ -30,6 +30,22 @@ export function bandBounds(band: string): [number, number] {
   return [Math.min(...nums), Math.max(...nums)]
 }
 
+/**
+ * Extensão VISUAL da faixa numa régua 0–10 — use ISTO pra desenhar, `bandBounds` pra rotular.
+ *
+ * As faixas da rubrica são BINS DE INTEIROS e NÃO são contíguas: "0-3" | "4-6" | "7-8" | "9-10".
+ * Nenhuma contém 3,5 · 6,5 · 8,5. Desenhar [lo, hi] cru joga toda nota de meio ponto pra FORA do
+ * próprio segmento — a barra fica com o marcador do lado de fora e parece defeito (medido em
+ * 2026-07-22: 132 dos 205 pontos-fora-da-faixa do catálogo eram só isto).
+ *
+ * O bin real é semiaberto — "7-8" cobre [7, 9) —, então o topo vira exclusivo (hi + 1, teto 10) e
+ * os bins passam a se tocar: "0-3"→[0,4] · "4-6"→[4,7] · "7-8"→[7,9] · "9-10"→[9,10].
+ */
+export function bandBarBounds(band: string): [number, number] {
+  const [lo, hi] = bandBounds(band)
+  return [lo, Math.min(hi + 1, 10)]
+}
+
 /** Colapsa faixa dupla ao primeiro-último: "7-8/9-10" → "7-10" · "4-6" → "4-6". */
 export function collapseBand(band: string): string {
   const [lo, hi] = bandBounds(band)
