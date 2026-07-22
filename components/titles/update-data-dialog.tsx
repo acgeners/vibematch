@@ -11,7 +11,6 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ChipInput } from "@/components/ui/chip-input"
-import { Separator } from "@/components/ui/separator"
 import { GENRE_NAMES, TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
 import {
   Dialog,
@@ -32,6 +31,16 @@ import { getCoverImageSrc } from "@/lib/image-proxy"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
 import { titleToSlug } from "@/lib/utils"
 import type { ExternalSourceId, ExternalWorkData } from "@/lib/external/types"
+
+/**
+ * Barra de ações de cada passo. Fica GRUDADA no rodapé da área de rolagem: os
+ * passos deste diálogo (sinopses, capas, tags, conflitos) crescem com o dado da
+ * obra, e uma sinopse longa bastava pra empurrar o "Continuar" pra fora da tela.
+ * O `bg-background` é obrigatório — sem ele o conteúdo rolaria POR TRÁS da barra
+ * e apareceria através dela.
+ */
+const ACTION_BAR =
+  "sticky bottom-0 z-10 flex justify-between gap-2 border-t bg-background pt-3 pb-2"
 
 interface CurrentWork {
   title: string
@@ -700,8 +709,12 @@ export function UpdateDataDialog({
       )}
 
       <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose() }}>
-        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
-          <DialogHeader className="gap-1.5">
+        {/* `sm:max-w-xl` e não `max-w-xl`: o DialogContent já traz `sm:max-w-lg`, e
+            no CSS gerado as utilidades com variante `sm:` saem DEPOIS das puras —
+            um `max-w-xl` sem variante perdia em silêncio e o diálogo ficava 512px.
+            Só header e barra de ações são fixos; o miolo é que rola (ver abaixo). */}
+        <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-xl">
+          <DialogHeader className="shrink-0 gap-1.5">
             <DialogTitle>Atualizar dados externos</DialogTitle>
             <p className="text-base font-semibold text-foreground">{currentWork.title}</p>
             <DialogDescription>
@@ -721,6 +734,15 @@ export function UpdateDataDialog({
               </p>
             )}
           </DialogHeader>
+
+          {/* ÚNICA área de rolagem do diálogo. Antes quem rolava era o próprio
+              DialogContent, e aí o cabeçalho E a linha de botões rolavam junto com
+              o conteúdo: com sinopse longa o "Continuar" ficava fora da tela e o
+              passo virava um beco sem saída. O `min-h-0` é o que permite o flex
+              item encolher abaixo do conteúdo — sem ele o `overflow-y-auto` não
+              tem o que rolar e o diálogo estoura a altura de novo.
+              O `-mx-6 px-6` faz a barra grudada (sticky) sangrar até as bordas. */}
+          <div className="-mx-6 min-h-0 flex-1 overflow-y-auto px-6">
 
           {/* Montado enquanto o diálogo está aberto (NÃO desmonta ao avançar pra
               sinopses/capas): assim o "Voltar" reexibe as MESMAS fontes já
@@ -768,8 +790,7 @@ export function UpdateDataDialog({
                 emptyHint="Esta obra não tem sinopse salva e nenhuma veio das fontes. Você pode escrever a sua abaixo."
               />
 
-              <Separator />
-              <div className="flex gap-2 justify-between">
+              <div className={ACTION_BAR}>
                 {withSourceStep ? (
                   <Button variant="ghost" onClick={() => setPhase("sources")}>Voltar</Button>
                 ) : (
@@ -935,8 +956,7 @@ export function UpdateDataDialog({
                   {manualCoverError && <p className="text-[11px] text-destructive">{manualCoverError}</p>}
                 </div>
 
-                <Separator />
-                <div className="flex gap-2 justify-between">
+                <div className={ACTION_BAR}>
                   {/* Sinopses vem sempre antes das capas → Voltar sempre volta pra lá. */}
                   <Button variant="ghost" onClick={() => setPhase("synopses-pick")}>Voltar</Button>
                   <div className="flex gap-2">
@@ -985,8 +1005,7 @@ export function UpdateDataDialog({
                 são tocadas. Pra remover tags existentes, use a página de edição da obra.
               </p>
 
-              <Separator />
-              <div className="flex gap-2 justify-between">
+              <div className={ACTION_BAR}>
                 <Button
                   variant="ghost"
                   onClick={() => setPhase(coversNeedPick ? "covers-pick" : "synopses-pick")}
@@ -1036,8 +1055,7 @@ export function UpdateDataDialog({
                   </div>
                 </div>
               ))}
-              <Separator />
-              <div className="flex gap-2 justify-between">
+              <div className={ACTION_BAR}>
                 {/* O passo de tags vem sempre logo antes dos conflitos. */}
                 <Button variant="ghost" onClick={() => setPhase("tags-pick")}>
                   Voltar
@@ -1055,6 +1073,8 @@ export function UpdateDataDialog({
               Salvando dados...
             </div>
           )}
+
+          </div>
 
           {previewUrl && (
             <div
