@@ -46,6 +46,27 @@ export function bandBarBounds(band: string): [number, number] {
   return [lo, Math.min(hi + 1, 10)]
 }
 
+/** As 4 faixas da rubrica, em ordem — idênticas nos 9 critérios (conferido em `CRITERIA_RUBRICS`). */
+const RUBRIC_BANDS = ["0-3", "4-6", "7-8", "9-10"] as const
+
+/**
+ * Faixa da rubrica a que uma nota pertence — a FONTE DA VERDADE para exibir faixa.
+ *
+ * Não use a faixa que a IA citou na prosa. Ela apodrece de três jeitos, todos silenciosos:
+ *  - a nota é editada depois e a prosa fica falando da faixa antiga (82 casos no catálogo);
+ *  - uma regra de pós-processamento sobe a nota (`enforceR19AdultContentRule`,
+ *    `enforceNeutralCoupleDynamicsWhenNoRomance`) sem reescrever a justificativa (~31 casos);
+ *  - o modelo simplesmente foge do formato `Faixa X-Y:` e o regex não casa — 5,1% dos atributos
+ *    no v21 · Sonnet 5, contra 0,2% no Sonnet 4.6 com o MESMO prompt.
+ *
+ * Derivando, faixa · rótulo · barra · nota ficam coerentes por construção. Casa por `bandBarBounds`
+ * (bin semiaberto), então o marcador da nota cai SEMPRE dentro do próprio segmento.
+ */
+export function bandForScore(score: number): string {
+  const s = Math.round(score * 10) / 10
+  return RUBRIC_BANDS.find((b) => s < bandBarBounds(b)[1]) ?? RUBRIC_BANDS[RUBRIC_BANDS.length - 1]
+}
+
 /** Colapsa faixa dupla ao primeiro-último: "7-8/9-10" → "7-10" · "4-6" → "4-6". */
 export function collapseBand(band: string): string {
   const [lo, hi] = bandBounds(band)

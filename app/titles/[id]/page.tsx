@@ -68,7 +68,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { CriterionIcon } from "@/components/titles/criterion-icon"
 import { CriterionBandChip } from "@/components/titles/criterion-band-chip"
 import { CriterionFitBar } from "@/components/titles/criterion-fit-bar"
-import { parseJustification, collapseBand, bandBarBounds, rubricForBand, rubricTitle } from "@/lib/criteria/justification"
+import { parseJustification, bandForScore, bandBarBounds, rubricForBand, rubricTitle } from "@/lib/criteria/justification"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CRITERIA_INFO, PLATFORM_LABELS } from "@/lib/constants/criteria"
 import {
@@ -1439,10 +1439,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               // Cor/tier pela faixa ideal do perfil; sem pref → neutro (não pinta como se fosse fit).
               const tier: CriterionTier =
                 score == null ? "neutral" : pref ? pickCriterionTierByRange(score, pref) : "neutral"
-              // Legenda (faixa + rótulo) separada da justificativa específica da obra.
+              // Legenda (faixa + rótulo) separada da justificativa específica da obra. A faixa é
+              // DERIVADA da nota vigente, nunca da prosa da IA — ver `bandForScore` para os três
+              // jeitos silenciosos de a faixa citada apodrecer.
               const parsed = aiScore?.justification ? parseJustification(aiScore.justification) : null
-              const band = parsed?.band ?? null
-              // Geometria = bin semiaberto (bandBarBounds); o RÓTULO segue `collapseBand`.
+              const band = score != null ? bandForScore(score) : null
               const [bandLo, bandHi] = band ? bandBarBounds(band) : [null, null]
               return (
                 <div
@@ -1473,7 +1474,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   </div>
                   {band && (
                     <CriterionBandChip
-                      band={collapseBand(band)}
+                      band={band}
                       label={rubricTitle(slug, band)}
                       rubric={rubricForBand(slug, band)}
                     />
@@ -1491,7 +1492,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                         hasIdeal={hasIdeal}
                         bandLo={bandLo}
                         bandHi={bandHi}
-                        bandLabel={band ? collapseBand(band) : null}
+                        bandLabel={band}
                       />
                     </div>
                   )}
