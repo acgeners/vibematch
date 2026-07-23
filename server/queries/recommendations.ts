@@ -1069,32 +1069,6 @@ export async function getSynopsisPredictionVersions(): Promise<string[]> {
 }
 
 /**
- * Conta as obras na fila de ATRIBUTOS de /ai-evaluation (aba "IA atributos"):
- * ai_eval_status ∈ {pending, review_pending}, não arquivadas. É o número que
- * alimenta o badge "Avaliação IA" da sidebar — espelha EXATAMENTE o contador
- * dessa aba.
- *
- * Antes, o badge somava a UNIÃO distinta de três filas (atributos ∪ Veredito IA
- * stale ∪ Interesse Sinopse não-previsto). As duas últimas inflavam o número —
- * sobretudo após uma regeneração de perfil, que marca centenas de
- * `alignment_stale` de uma vez — e faziam o badge divergir da aba que o usuário
- * olha. Essas filas têm seus próprios contadores na página; ficam fora do badge.
- *
- * Head-count (`count: "exact", head: true`): agrega no Postgres, sem trafegar
- * linhas nem paginar.
- */
-export async function getAttributesQueueCount(): Promise<number> {
-  const supabase = createAdminClient()
-  const { count, error } = await supabase
-    .from("works")
-    .select("id", { count: "exact", head: true })
-    .in("ai_eval_status", ["pending", "review_pending"])
-    .eq("is_archived", false)
-  if (error) throw new Error(`Falha contando fila de atributos: ${error.message}`)
-  return count ?? 0
-}
-
-/**
  * Hidrata obras específicas (por ID) como `FavoriteCandidate`, preservando a
  * ordem dos IDs e filtrando arquivadas. Usado pelos lotes que agem exatamente
  * sobre as obras visíveis na fila (na ordem que o usuário vê): Interesse Sinopse
