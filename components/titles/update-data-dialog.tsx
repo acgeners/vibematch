@@ -709,11 +709,14 @@ export function UpdateDataDialog({
       )}
 
       <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose() }}>
-        {/* `sm:max-w-xl` e não `max-w-xl`: o DialogContent já traz `sm:max-w-lg`, e
+        {/* `sm:max-w-2xl` e não `max-w-2xl`: o DialogContent já traz `sm:max-w-lg`, e
             no CSS gerado as utilidades com variante `sm:` saem DEPOIS das puras —
-            um `max-w-xl` sem variante perdia em silêncio e o diálogo ficava 512px.
+            um `max-w-2xl` sem variante perdia em silêncio e o diálogo ficava 512px.
+            Largura 2xl (672px) + `max-h-[95vh]` pra dar espaço à galeria de capas: o
+            preview grande + a grade de miniaturas estouravam a altura antiga (90vh) e o
+            passo da capa ficava cortado/rolando.
             Só header e barra de ações são fixos; o miolo é que rola (ver abaixo). */}
-        <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-xl">
+        <DialogContent className="flex max-h-[95vh] flex-col overflow-hidden sm:max-w-2xl">
           <DialogHeader className="shrink-0 gap-1.5">
             <DialogTitle>Atualizar dados externos</DialogTitle>
             <p className="text-base font-semibold text-foreground">{currentWork.title}</p>
