@@ -239,6 +239,9 @@ interface RankingFiltersProps {
    *  obras do recorte e não forma tiers), então só confundiriam. Default = exibe. */
   showTopN?: boolean
   showTierBand?: boolean
+  /** Mostra o segmentado "Conteúdo 18+" (?adult=). Só /ranking passa true — as
+   *  outras páginas não parseiam ?adult, então o controle não deve aparecer lá. */
+  showAdultFilter?: boolean
 }
 
 interface FilterSectionProps {
@@ -915,6 +918,60 @@ function HideAvoidedSegment({
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={6} className="w-[220px] text-pretty">{tooltip}</TooltipContent>
     </Tooltip>
+  )
+}
+
+/**
+ * Segmentado "Conteúdo 18+" — filtra pela classificação da obra (works.is_adult),
+ * NÃO por tags. Espelha o padrão visual do "Esconder tags evitadas" vizinho, mas
+ * usa updateParams (draft) como os demais controles de ?adult=. "Tudo" respeita a
+ * preferência global do usuário; "Ocultar"/"Só 18+" mandam neste ranking.
+ */
+function AdultContentSegment({
+  value,
+  onChange,
+}: {
+  value: "all" | "hide" | "only"
+  onChange: (v: "all" | "hide" | "only") => void
+}) {
+  const seg = (active: boolean, danger: boolean) =>
+    `inline-flex h-7 items-center gap-1 rounded px-2.5 text-xs font-medium transition-colors ${
+      active
+        ? danger
+          ? "bg-red-500/15 text-red-600 dark:text-red-300"
+          : "bg-primary/15 text-primary"
+        : "text-muted-foreground hover:text-foreground"
+    }`
+  return (
+    <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
+      <button
+        type="button"
+        onClick={() => onChange("all")}
+        aria-pressed={value === "all"}
+        className={seg(value === "all", false)}
+        title="Mostra todas as obras (respeita sua preferência global de 18+ em /preferencias)."
+      >
+        Tudo
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("hide")}
+        aria-pressed={value === "hide"}
+        className={seg(value === "hide", true)}
+        title="Esconde as obras classificadas como 18+ neste ranking."
+      >
+        Ocultar <span aria-hidden>🔞</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("only")}
+        aria-pressed={value === "only"}
+        className={seg(value === "only", true)}
+        title="Mostra apenas as obras classificadas como 18+."
+      >
+        Só 18+ <span aria-hidden>🔞</span>
+      </button>
+    </div>
   )
 }
 
@@ -1726,6 +1783,7 @@ export function RankingFilters({
   confidenceVotes,
   showTopN = true,
   showTierBand = true,
+  showAdultFilter = false,
 }: RankingFiltersProps) {
   const router = useRouter()
   const criterionScoreDefs = useMemo(
@@ -2293,8 +2351,8 @@ export function RankingFilters({
                 contentClassName="flex-1 flex flex-col justify-center"
               >
                 <div className="flex flex-col gap-4">
-                  {/* Linha de cima: Obras exibidas + Esconder tags evitadas (sem min/máx) */}
-                  {(showTopN || hideAvoided) && (
+                  {/* Linha de cima: Obras exibidas + Esconder tags evitadas + Conteúdo 18+ (sem min/máx) */}
+                  {(showTopN || hideAvoided || showAdultFilter) && (
                   <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-4">
                     {/* Obras exibidas */}
                     {showTopN && (
@@ -2349,6 +2407,33 @@ export function RankingFilters({
                               />
                             </div>
                           </TooltipProvider>
+                        </div>
+                      </>
+                    )}
+
+                    {showAdultFilter && (
+                      <>
+                        {(showTopN || hideAvoided) && (
+                          <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
+                        )}
+                        {/* Conteúdo 18+ — filtra pela classificação da obra (is_adult), não por tags */}
+                        <div className="flex items-center gap-2">
+                          <Label
+                            className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0 leading-tight text-left"
+                            title="Filtra obras 18+ pela classificação da obra (o mesmo selo 🔞 da página da obra), não pelas tags. 'Tudo' respeita sua preferência global."
+                          >
+                            Conteúdo<br />18+
+                          </Label>
+                          <AdultContentSegment
+                            value={
+                              searchParams.get("adult") === "hide"
+                                ? "hide"
+                                : searchParams.get("adult") === "only"
+                                  ? "only"
+                                  : "all"
+                            }
+                            onChange={(v) => updateParams({ adult: v === "all" ? null : v })}
+                          />
                         </div>
                       </>
                     )}
