@@ -20,7 +20,27 @@ export type ConsolidateForWorkResult =
  * de Interesse explicitamente; o `scheduleSynopsisConsolidation` mantém o eager
  * da 1ª previsão por fora). Marca a previsão como stale ao consolidar.
  */
-export async function consolidateSynopsisForWork(
+const inFlightConsolidation = new Map<string, Promise<ConsolidateForWorkResult>>()
+
+export function consolidateSynopsisForWork(
+  workId: string,
+): Promise<ConsolidateForWorkResult> {
+  // Single-flight por workId: na criação, DUAS `after()` PARALELAS pedem a canônica —
+  // a consolidação agendada (`scheduleSynopsisConsolidation`) e a inferência de tags
+  // que passou a aguardá-la (Lacuna #4). O hash-gate abaixo NÃO protege chamada
+  // concorrente (ambas leem o hash antes de qualquer uma gravar) ⇒ 2× Haiku. Aqui a
+  // 2ª chamada reusa a promise em voo; a entrada sai no `finally`, e chamadas já
+  // concluídas seguem cobertas pelo hash-gate.
+  const existing = inFlightConsolidation.get(workId)
+  if (existing) return existing
+  const promise = runConsolidateSynopsisForWork(workId).finally(() =>
+    inFlightConsolidation.delete(workId),
+  )
+  inFlightConsolidation.set(workId, promise)
+  return promise
+}
+
+async function runConsolidateSynopsisForWork(
   workId: string,
 ): Promise<ConsolidateForWorkResult> {
   try {

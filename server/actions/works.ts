@@ -1162,6 +1162,18 @@ export async function createWork(
     // Gate por configuração (toggle em /settings). Desligado, a obra nasce sem
     // tags ai_inferred e você as gera depois. Default true preserva o histórico.
     if (!(await getTagInferenceOnCreate())) return
+    // Lacuna #4: `inferAndPersistTagsForWork` lê `canonical_synopsis`; se a
+    // consolidação (numa `after()` PARALELA) ainda não gravou, ela cai no fallback da
+    // sinopse "mais longa" e infere do texto errado. Se a canônica-na-criação está
+    // ligada, AGUARDA a consolidação antes de inferir — o single-flight dela dedupa
+    // com a task de consolidação, então é um Haiku só. Desligada, não dispara nada: aí
+    // o fallback pra sinopse mais longa é o comportamento correto.
+    if (await getSynopsisCanonicalOnCreate()) {
+      const { consolidateSynopsisForWork } = await import(
+        "@/lib/ai-recommendation/consolidate-for-work"
+      )
+      await consolidateSynopsisForWork(workId)
+    }
     const { inferAndPersistTagsForWork } = await import("@/lib/tags/auto-infer")
     const added = await inferAndPersistTagsForWork(workId)
     if (added > 0) await markRecalcPending("ai_inferred_tags_on_create")
