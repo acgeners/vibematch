@@ -8,6 +8,17 @@ import { SynopsisPicker, normalizeSynopsisChoices } from "@/components/titles/sy
 import type { SynopsisChoice } from "@/components/titles/synopsis-picker"
 import { buildSynopsisPool } from "@/components/titles/update-data-dialog"
 
+// jsdom não define ResizeObserver; o SynopsisPicker instancia um pra medir se a sinopse
+// cabe em N linhas (feature "expandível", commit 565b2bd) — sem o stub, o effect lança e
+// os testes que montam o componente quebram. No-op basta: estes testes exercitam
+// edição/inclusão, não a medição de layout (que jsdom não faz de qualquer forma).
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+vi.stubGlobal("ResizeObserver", ResizeObserverStub)
+
 /** Casca controlada: o picker é controlado pelo pai, igual nos dois diálogos reais. */
 function Harness({
   initial,
