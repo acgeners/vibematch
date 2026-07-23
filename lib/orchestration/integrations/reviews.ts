@@ -64,11 +64,16 @@ export function classifySummaryReadiness(args: {
   nowN: number
   storedSummary: string | null
   storedMeta: string | null
+  /** Ver `EnsureSummaryDeps.force`: pula só a materialidade, nunca o hash. */
+  force?: boolean
 }): ArtifactReadiness {
   if (args.reviewCount === 0) return { state: "not_applicable", reason: "no_reviews" }
   if (args.storedSummary == null) return { state: "absent" }
   const { hash: prevHash, n: prevN } = parseReviewSummaryMeta(args.storedMeta)
+  // Hash igual = MESMO conteúdo: nada a regenerar, nem sob `force` (senão a
+  // recuperação tardia que não trouxe nada novo pagaria um Haiku à toa).
   if (prevHash === args.currentHash) return { state: "fresh" }
+  if (args.force) return { state: "stale", reason: "forced" }
   if (!isMaterialReviewChange(prevN, args.nowN)) return { state: "immaterial" }
   return { state: "stale", reason: "hash" }
 }
@@ -212,6 +217,13 @@ export interface EnsureSummaryDeps extends CommonDeps {
   reviews?: ReviewSummaryInput[]
   gateway?: SummaryGateway
   consolidate?: (r: ReviewSummaryInput[], o: { workId?: string | null }) => Promise<ConsolidateReviewsStatus>
+  /**
+   * Força o regen ignorando o gate de MATERIALIDADE (espelha o `force` do digest).
+   * Caso de uso: recuperação tardia de uma fonte que falhou — costuma trazer poucas
+   * reviews, abaixo do limiar, e sem isto o resumo fica congelado no pool parcial.
+   * NÃO fura o gate de hash: conteúdo idêntico segue `fresh` (não paga à toa).
+   */
+  force?: boolean
 }
 
 export interface EnsureDigestDeps extends CommonDeps {
@@ -257,6 +269,7 @@ export async function ensureReviewSummary(
     nowN,
     storedSummary: artifact.summary,
     storedMeta: artifact.meta,
+    force: deps.force,
   })
 
   if (readiness.state === "not_applicable") return { status: "not_ready", reason: "no_reviews", message: NO_REVIEWS_MSG }
@@ -282,7 +295,7 @@ export async function ensureReviewSummary(
     async () => {
       // Re-check (anti-cobrança-dupla): outro processo pode ter produzido fresh.
       const fresh = await gateway.readArtifact(workId)
-      const r2 = classifySummaryReadiness({ reviewCount: cleaned.length, currentHash: hash, nowN, storedSummary: fresh.summary, storedMeta: fresh.meta })
+      const r2 = classifySummaryReadiness({ reviewCount: cleaned.length, currentHash: hash, nowN, storedSummary: fresh.summary, storedMeta: fresh.meta, force: deps.force })
       if (r2.state === "fresh" || r2.state === "immaterial") return { costActualUsd: 0 }
       const status = await consolidate(ordered, { workId })
       if (status.kind === "api_failed") throw new Error(status.error)
