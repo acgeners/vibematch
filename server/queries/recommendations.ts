@@ -679,17 +679,21 @@ export async function getStaleAlignmentCandidates(limit = 200): Promise<Favorite
  * link/badge da fila no header do ranking só quando há o que processar.
  */
 export async function countStaleAlignmentWorks(): Promise<number> {
-  const supabase = createAdminClient()
-  const { count, error } = await supabase
-    .from("calculated_scores")
-    .select("work_id", { count: "exact", head: true })
-    .eq("alignment_stale", true)
-    .not("alignment_score", "is", null)
-  if (error) {
-    console.warn("[alignment] countStaleAlignmentWorks falhou:", error.message)
+  // Mesma definição da fila /ai-evaluation?tab=ia-rk (getAlignmentQueueWorks stale):
+  // view works_owner, exclui arquivadas e ai_eval_status="skipped". Antes contava
+  // `calculated_scores` cru — incluía arquivadas/skipped, então o "N desatualizados"
+  // do menu do ranking não batia com o que a aba de fato lista ao clicar. `countOnly`
+  // pula o join de capas/título (só ids) pra manter a contagem barata.
+  try {
+    const rows = await getAlignmentQueueWorks({ states: ["stale"], countOnly: true })
+    return rows.length
+  } catch (error) {
+    console.warn(
+      "[alignment] countStaleAlignmentWorks falhou:",
+      error instanceof Error ? error.message : String(error),
+    )
     return 0
   }
-  return count ?? 0
 }
 
 export interface SynopsisQueueWork {

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { LastRunHint } from "@/components/settings/last-run-hint"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
+import { useRefresh } from "@/lib/use-refresh"
 import { cn } from "@/lib/utils"
 import {
   startComixResolver,
@@ -40,6 +41,7 @@ export function ResolveComixPanel({
   const [absent, setAbsent] = useState<WorkMissingComix[]>(initialAbsent)
   const [starting, startTransition] = useTransition()
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const refresh = useRefresh()
 
   const running = status.state === "running"
 
@@ -74,19 +76,28 @@ export function ResolveComixPanel({
     })
   }
 
-  // Vínculo manual salvo → sai de vez (resolvida).
-  const onSaved = (workId: string) => setMissing((prev) => prev.filter((w) => w.id !== workId))
+  // Vínculo manual salvo → sai de vez (resolvida). refresh() reconcilia o badge da
+  // sidebar + pill da sub-nav (o contador local já cai sozinho): a pendência de Comix
+  // alimenta getSettingsItemPending().comix, que é server-side e não escutava o bus —
+  // por isso o badge só caía ao recarregar. Uso refresh() puro (re-busca a contagem
+  // REAL) em vez de um delta otimista: contagem errada é justamente o que queremos evitar.
+  const onSaved = (workId: string) => {
+    setMissing((prev) => prev.filter((w) => w.id !== workId))
+    refresh()
+  }
 
-  // "Não existe" → move de pendente pra ignorada.
+  // "Não existe" → move de pendente pra ignorada (ignoradas não contam no badge).
   const onMarkedAbsent = (work: WorkMissingComix) => {
     setMissing((prev) => prev.filter((w) => w.id !== work.id))
     setAbsent((prev) => [...prev, work].sort(byTitle))
+    refresh()
   }
 
-  // "Restaurar" → volta de ignorada pra pendente.
+  // "Restaurar" → volta de ignorada pra pendente (badge sobe de novo).
   const onRestored = (work: WorkMissingComix) => {
     setAbsent((prev) => prev.filter((w) => w.id !== work.id))
     setMissing((prev) => [...prev, work].sort(byTitle))
+    refresh()
   }
 
   const stateLabel =

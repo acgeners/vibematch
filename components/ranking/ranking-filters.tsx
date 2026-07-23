@@ -1482,6 +1482,19 @@ function GroupedTagRuleGrid({
   )
 }
 
+/**
+ * Canoniza uma query string pra comparar dois conjuntos de filtros por igualdade
+ * independentemente da ORDEM dos parâmetros — o draft monta na ordem de edição e a
+ * URL na ordem que o Next serializa, então uma comparação byte-a-byte falharia à toa.
+ * Ordena os pares `key=value` e junta.
+ */
+function canonicalizeQuery(query: string): string {
+  const entries = [...new URLSearchParams(query).entries()].sort(
+    ([ak, av], [bk, bv]) => ak.localeCompare(bk) || av.localeCompare(bv),
+  )
+  return entries.map(([k, v]) => `${k}=${v}`).join("&")
+}
+
 function SavedFiltersControl({
   presets,
   basePath,
@@ -1729,6 +1742,16 @@ export function RankingFilters({
   const [isApplying, startTransition] = useTransition()
   const [collapsed, setCollapsed] = useCollapsedFilters(`ranking:${basePath}`)
   const [presets, setPresets] = useState<SavedFilterPreset[]>(savedPresets)
+
+  // Preset salvo que casa EXATAMENTE com os filtros aplicados (na URL) — alimenta o
+  // chip "filtro salvo ativo" ao lado do título. Comparação canônica (ordem-insensível).
+  // Ao mexer em qualquer filtro/ordenação depois de aplicar, deixa de casar e o chip
+  // some (honesto: o que está na tela já não é mais o preset).
+  const appliedPreset = useMemo(() => {
+    const canon = canonicalizeQuery(appliedSearchString)
+    if (!canon) return null
+    return presets.find((p) => canonicalizeQuery(p.query) === canon) ?? null
+  }, [appliedSearchString, presets])
 
   const updateParams = useCallback(
     (updates: Record<string, string | null>) => {
@@ -2076,6 +2099,15 @@ export function RankingFilters({
               {activeFilterChips.length > 0 && (
                 <span className="rounded-full border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                   {activeFilterLabel}
+                </span>
+              )}
+              {appliedPreset && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+                  title={`Filtro salvo aplicado: ${appliedPreset.name}`}
+                >
+                  <Bookmark className="h-3 w-3" />
+                  {appliedPreset.name}
                 </span>
               )}
             </div>
