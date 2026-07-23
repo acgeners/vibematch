@@ -2,6 +2,7 @@ import "server-only"
 import type Anthropic from "@anthropic-ai/sdk"
 import { CRITERION_SLUGS } from "@/types/domain"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
+import { coerceToolPayload } from "@/lib/ai/tool-payload"
 import {
   RANKING_SYSTEM_PROMPT,
   TASTE_PROFILE_SYSTEM_PROMPT,
@@ -316,7 +317,18 @@ export async function rankFavorites(args: RankFavoritesArgs): Promise<RankingRes
       continue
     }
 
-    const parsed = rankingToolPayloadSchema.safeParse(toolUse.input)
+    // Duplo-encode (o array `rankings` vindo como string de JSON) é recuperável —
+    // ver `coerceToolPayload`. Mesma classe de erro já tratada na avaliação IA
+    // (#216). O warn NÃO é decorativo: sem ele a recuperação vira silenciosa e a
+    // gente perde o sinal de que o modelo/prompt regrediu.
+    const { value: toolInput, coerced } = coerceToolPayload(toolUse.input, ["rankings"])
+    if (coerced.length > 0) {
+      console.warn(
+        `[AI] Payload do ranking veio com JSON duplo-encodado em ${coerced.join(", ")} — recuperado (modelo=${MODEL}, prompt=${PROMPT_VERSION}, mode=${args.mode}).`,
+      )
+    }
+
+    const parsed = rankingToolPayloadSchema.safeParse(toolInput)
     if (!parsed.success) {
       lastError = new Error(
         `Payload do ranking não atende ao schema: ${parsed.error.issues

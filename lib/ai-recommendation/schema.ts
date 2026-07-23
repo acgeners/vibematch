@@ -70,8 +70,22 @@ export const tasteProfileToolPayloadSchema = z.object({
 
 export type TasteProfileToolPayload = z.infer<typeof tasteProfileToolPayloadSchema>
 
+// Mesmo espírito do `tolerantSummary`: o modelo às vezes omite o mode_summary
+// (visto em prod junto com o `rankings` duplo-encodado). O valor real do payload
+// são os `rankings` — descartar 20 obras já rankeadas por causa do parágrafo de
+// resumo ausente é o mau negócio. Ausência vira fallback; o ranking sobrevive.
+const RANKING_SUMMARY_FALLBACK = "(ranking gerado sem resumo)"
+
+const tolerantModeSummary = z
+  .string()
+  .nullish()
+  .transform((s) => {
+    const trimmed = s?.trim()
+    return trimmed && trimmed.length > 0 ? trimmed : RANKING_SUMMARY_FALLBACK
+  })
+
 export const rankingToolPayloadSchema = z.object({
-  mode_summary: z.string().min(1),
+  mode_summary: tolerantModeSummary,
   rankings: z.array(
     z.object({
       work_id: z.string().min(1),
