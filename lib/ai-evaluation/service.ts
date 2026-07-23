@@ -7,6 +7,7 @@ import { CRITERIA_INFO, CRITERIA_RUBRICS } from "@/lib/constants/criteria"
 import { normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { createLoggedMessage, getAnthropicClient } from "@/lib/ai/anthropic-client"
 import { SONNET_MODEL } from "@/lib/ai/models"
+import { coerceToolPayload } from "@/lib/ai/tool-payload"
 import { fetchCoverForModelWithStatus, isImageRelatedModelError } from "@/lib/server/covers/fetch-cover-for-model"
 import { recordCacheEventAsync } from "@/server/queries/ai-cache"
 import { buildCacheKey } from "@/lib/ai-cache"
@@ -425,48 +426,10 @@ const evaluationToolPayloadSchema = z.object({
   reviewsRejectedReason: z.string().optional(),
 })
 
-/**
- * Desfaz o duplo-encode do payload da tool. O modelo às vezes entrega um campo
- * estruturado como STRING de JSON (`"scores": "[{...}]"`) — ou o input inteiro
- * como string — mesmo com `input_schema` correto (`type: "array"` + `items`).
- * Visto em produção 2026-07-22 com sonnet-5/v21: `stop_reason: "tool_use"` (ou
- * seja, resposta COMPLETA, não truncada), ~1.5k tokens de saída, e o Zod
- * reprovando com "expected array, received string".
- *
- * Descartar isso significa jogar fora uma avaliação inteira já paga (~US$0,03 e
- * ~40s por tentativa, e o loop gasta DUAS) por uma questão de codificação, com o
- * dado todo ali. Mesmo espírito do `enforceAuditableReviewUsage`, que deixou de
- * ser fatal pelo mesmo motivo.
- *
- * Só recupera o que de fato é JSON válido: prosa numa string continua reprovando
- * no schema (aí o dado realmente não veio). Puro e sem efeito colateral — quem
- * chama decide o que logar.
- */
-export function coerceToolPayload(input: unknown): { value: unknown; coerced: string[] } {
-  const coerced: string[] = []
-  const parseIfJson = (v: unknown, label: string): unknown => {
-    if (typeof v !== "string") return v
-    try {
-      const parsed: unknown = JSON.parse(v)
-      // Só aceita se virou estrutura. `JSON.parse('"texto"')` devolve string e
-      // `JSON.parse('7')` devolve número — nenhum dos dois é o que se perdeu aqui.
-      if (parsed === null || typeof parsed !== "object") return v
-      coerced.push(label)
-      return parsed
-    } catch {
-      return v
-    }
-  }
-
-  const top = parseIfJson(input, "input")
-  if (top === null || typeof top !== "object" || Array.isArray(top)) return { value: top, coerced }
-
-  const obj = { ...(top as Record<string, unknown>) }
-  for (const field of ["scores", "reviewUsage", "review_usage"]) {
-    if (field in obj) obj[field] = parseIfJson(obj[field], field)
-  }
-  return { value: obj, coerced }
-}
+// `coerceToolPayload` foi extraído pra `@/lib/ai/tool-payload` (util puro,
+// parametrizável por campo) pra ser reusado também pelo fluxo de recomendação.
+// Reexportado aqui pra preservar o import path histórico (testes + call-site).
+export { coerceToolPayload }
 
 /** Prévia curta e segura de um valor recusado pelo schema — sem isto, a próxima
  *  ocorrência volta a ser um mistério (o payload cru não é persistido em lugar nenhum). */
