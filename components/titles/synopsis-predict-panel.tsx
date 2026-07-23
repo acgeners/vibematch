@@ -303,6 +303,8 @@ export function SynopsisPredictPanel({ works, readIds = [], isPaid = true }: { w
               title={w.title}
               coverUrls={w.coverUrls}
               expectedScore={w.expectedScore}
+              isAdult={w.isAdult}
+              userScore={w.userScore}
               publicationStatusId={w.publicationStatusId}
               personalStatusId={w.personalStatusId}
               tagCount={w.tagCount}

@@ -45,6 +45,8 @@ interface PendingWork {
   synopsis_quality?: string | null
   cover_url?: string | null
   expected_score?: number | null
+  is_adult?: boolean
+  user_score?: number | null
   tagCount?: number | null
   reviewCount?: number | null
   matchedFilters?: Array<"pending" | "review-pending" | "low-confidence" | "outdated-model" | "outdated-reviews">
@@ -737,6 +739,8 @@ export function AiEvaluationPanel({ pendingWorks, readIds = [] }: AiEvaluationPa
               title={work.title}
               coverUrl={work.cover_url}
               expectedScore={work.expected_score}
+              isAdult={work.is_adult}
+              userScore={work.user_score}
               publicationStatusId={work.publication_status_id}
               personalStatusId={work.personal_status_id}
               interest={work.synopsis_quality}

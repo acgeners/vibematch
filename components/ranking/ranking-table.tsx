@@ -326,6 +326,10 @@ function entryToPreview(entry: RankingEntry): WorkPreview {
     year: entry.year,
     platformAvg: entry.platformAvg,
     totalVotes: entry.totalVotes,
+    isAdult: entry.isAdult,
+    expectedScore: entry.expectedScore,
+    expectedIsStub: entry.expectedIsStub,
+    userScore: entry.userScore,
   }
 }
 
@@ -1226,14 +1230,14 @@ function RankingCardsView({
   entries: RankingEntry[]
   scoreThresholds: ColumnThresholds | null
 }) {
+  // 3 colunas no máximo (era 4): com o AdultBadge + as stats, 4/linha ficava espremido
+  // e a linha de metadados quebrava. Mais largura → tudo respira e o 18+ não empurra linha.
   return (
-    <TooltipProvider delayDuration={300}>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {entries.map((entry) => (
-          <RankingCard key={entry.workId} entry={entry} scoreThresholds={scoreThresholds} />
-        ))}
-      </div>
-    </TooltipProvider>
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {entries.map((entry) => (
+        <RankingCard key={entry.workId} entry={entry} scoreThresholds={scoreThresholds} />
+      ))}
+    </div>
   )
 }
 
@@ -1299,9 +1303,8 @@ function RankingCard({
 }) {
   const slug = titleToSlug(entry.title)
   const isTop3 = entry.rank <= 3
-  const synopsis = entry.synopsis?.trim()
 
-  const card = (
+  return (
     <div
       className={cn(
         "group relative flex overflow-hidden rounded-xl border bg-card shadow-sm transition-all",
@@ -1309,12 +1312,20 @@ function RankingCard({
         rankCardStyles(entry.rank),
       )}
     >
-      {/* Link esticado: clicar em qualquer lugar do card abre a obra (o coração fica por cima). */}
-      <Link
+      {/* Link esticado + prévia rica no hover: o MESMO WorkHoverPreview da view Lista
+          (via entryToPreview), no lugar do tooltip branco de texto plano. Clicar em qualquer
+          lugar do card abre a obra; passar o mouse abre a prévia (interativa, com "Ler mais").
+          O coração (FavoriteCell) fica por cima (z-20). */}
+      <WorkTitleLink
+        workId={entry.workId}
+        title={entry.title}
+        preview={entryToPreview(entry)}
+        previewVariant="compact"
         href={`/titles/${slug}`}
-        aria-label={entry.title}
         className="absolute inset-0 z-10 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-      />
+      >
+        <span className="sr-only">{entry.title}</span>
+      </WorkTitleLink>
 
       {/* Capa: rank (canto sup-esq) + Nota Prevista (canto sup-dir) */}
       <div className="relative w-[150px] shrink-0 self-stretch overflow-hidden bg-muted/40">
@@ -1378,22 +1389,6 @@ function RankingCard({
       </div>
     </div>
   )
-
-  // Sem sinopse → card puro (sem trigger de tooltip vazia).
-  if (!synopsis) return card
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{card}</TooltipTrigger>
-      <TooltipContent
-        side="top"
-        align="start"
-        className="max-w-sm whitespace-normal text-left text-[12.5px] leading-snug [text-wrap:normal]"
-      >
-        <p className="line-clamp-[12]">{synopsis}</p>
-      </TooltipContent>
-    </Tooltip>
-  )
 }
 
 /** Rótulo minúsculo em caixa alta pros stats do card (trunca em vez de vazar).
@@ -1440,12 +1435,20 @@ function CardScores({
           className={cn("flex flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-center", prevChipClass)}
           title={LABELS.expected_score.tooltip_short}
         >
+          {/* Prevista sozinha, ou "Prevista / Real" quando você já avaliou (mesmo
+              pareamento do cabeçalho da obra). O chip tinge pela faixa da Prevista. */}
           <span className="font-mono text-base font-extrabold leading-none tabular-nums">
             {entry.expectedScore != null ? entry.expectedScore.toFixed(1) : "—"}
             {entry.expectedIsStub && <span className="ml-0.5 text-[10px] font-normal opacity-60">~</span>}
+            {entry.userScore != null && (
+              <>
+                <span className="mx-1 font-normal opacity-40">/</span>
+                {entry.userScore.toFixed(1)}
+              </>
+            )}
           </span>
-          <span className="text-[8.5px] font-bold uppercase tracking-wide text-muted-foreground">
-            {LABELS.expected_score.short}
+          <span className="whitespace-nowrap text-[8.5px] font-bold uppercase tracking-wide text-muted-foreground">
+            {entry.userScore != null ? "Prevista / Real" : LABELS.expected_score.short}
           </span>
         </div>
         <div

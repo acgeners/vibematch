@@ -19,6 +19,9 @@ export interface UntrackedWorkWithMeta {
   expectedScore: number | null
   tagCount: number
   reviewCount: number
+  /** Chip 🔞 (works.is_adult) e badge "Real" (works_owner.user_score) — anexados na page. */
+  isAdult?: boolean
+  userScore?: number | null
 }
 
 export function UntrackedStatusPanel({ works, readIds = [] }: { works: UntrackedWorkWithMeta[]; readIds?: string[] }) {
@@ -57,6 +60,8 @@ export function UntrackedStatusPanel({ works, readIds = [] }: { works: Untracked
               title={w.title}
               coverUrls={w.coverUrls}
               expectedScore={w.expectedScore}
+              isAdult={w.isAdult}
+              userScore={w.userScore}
               publicationStatusId={w.publicationStatusId}
               personalStatusId={w.personalStatusId}
               interest={w.synopsisQuality}

@@ -494,6 +494,9 @@ export interface AlignmentQueueWork {
   /** Hidratados só na aba ativa (cards) — ausentes no caminho do cache de contagens. */
   tagCount?: number | null
   reviewCount?: number | null
+  /** Chip 🔞 (works.is_adult) e badge "Real" (works_owner.user_score) — anexados na page. */
+  isAdult?: boolean
+  userScore?: number | null
 }
 
 /**
@@ -725,6 +728,9 @@ export interface SynopsisQueueWork {
   /** #tags e #reviews úteis (hidratados na aba ativa) — pro badge e o filtro de "dados suficientes". */
   tagCount?: number
   reviewCount?: number
+  /** Chip 🔞 (works.is_adult) e badge "Real" (works_owner.user_score) — anexados na page. */
+  isAdult?: boolean
+  userScore?: number | null
   /** Prontidão do gerador de Interesse (motor de orquestração → UI). Anexada só
    *  na fila EXIBIDA (não no countOnly). null quando o cálculo falhou. */
   readiness?: UiReadiness | null

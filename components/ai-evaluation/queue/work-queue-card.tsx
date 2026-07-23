@@ -5,6 +5,7 @@ import { Tag, MessageSquare, Check, X } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScoreBadge } from "@/components/ui/score-badge"
+import { AdultBadge } from "@/components/ui/adult-badge"
 import { PersonalStatusBadge, PublicationStatusBadge } from "@/components/ui/status-badge"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { CoverThumb } from "@/components/ai-evaluation/cover-thumb"
@@ -42,6 +43,10 @@ export interface WorkQueueCardProps {
   coverUrl?: string | null
   coverUrls?: (string | null | undefined)[]
   expectedScore?: number | null
+  /** Conteúdo adulto (18+) — chip 🔞 ao lado do título. */
+  isAdult?: boolean
+  /** Sua nota (Real) — badge ao lado do título quando você já avaliou. */
+  userScore?: number | null
   publicationStatusId?: number | null
   personalStatusId?: number | null
   /** Interesse na sinopse (♥–♥♥♥♥), manual/efetivo. */
@@ -95,6 +100,8 @@ export function WorkQueueCard({
   coverUrl,
   coverUrls,
   expectedScore,
+  isAdult,
+  userScore,
   publicationStatusId,
   personalStatusId,
   interest,
@@ -156,18 +163,31 @@ export function WorkQueueCard({
 
           {/* Coluna principal — preenche a largura, esquerda-alinhada */}
           <div className="flex min-w-0 flex-1 flex-col gap-2 self-stretch py-0.5">
-            <WorkTitleLink
-              title={title}
-              workId={workId}
-              className="line-clamp-2 break-words text-base font-semibold leading-snug hover:underline text-foreground pr-14"
-            />
+            {/* Título + chip 18+ ao lado (como no cabeçalho da obra). O pr-14 do
+                container reserva a faixa da pílula de nota (canto sup-dir). */}
+            <div className="flex items-start gap-1.5 pr-14">
+              <WorkTitleLink
+                title={title}
+                workId={workId}
+                className="line-clamp-2 min-w-0 flex-1 break-words text-base font-semibold leading-snug hover:underline text-foreground"
+              />
+              {isAdult && (
+                <AdultBadge className="mt-0.5 shrink-0 text-[11px]" />
+              )}
+            </div>
 
-            {/* Meta comum — status (short code) · interesse · contagens */}
+            {/* Meta comum — status (short code) · Real · interesse · contagens */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <PublicationStatusBadge statusId={publicationStatusId ?? null} compact />
                 <PersonalStatusBadge statusId={personalStatusId ?? null} iconOnly />
               </span>
+              {userScore != null && (
+                <span className="inline-flex items-center gap-1" title="Sua nota (Real)">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground/70">Real</span>
+                  <ScoreBadge score={userScore} size="sm" />
+                </span>
+              )}
               {interest && (
                 <span title="Interesse na sinopse" className="font-semibold text-rose-600 dark:text-rose-300">
                   {interest}

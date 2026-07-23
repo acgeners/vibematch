@@ -47,6 +47,7 @@ import type {
   PersonalStatePatch,
 } from "@/server/queries/user-work-state"
 import { buildAutoRefreshPlan } from "@/lib/external/auto-refresh"
+import { getScoresReader } from "@/server/queries/user-scores"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
 import { normalizeCoverSource, titleToSlug } from "@/lib/utils"
@@ -702,6 +703,14 @@ export interface WorkPreview {
   year: number | null
   platformAvg: number | null
   totalVotes: number
+  /** Conteúdo adulto (18+) efetivo — works.is_adult. Renderiza o chip 🔞 no hover. */
+  isAdult: boolean
+  /** Nota Prevista DE QUEM OLHA (após overlay per-usuário). NULL sem os 9 atributos IA / sem modelo. */
+  expectedScore: number | null
+  /** Prevista é estimativa (sem modelo ML) → marca `~`. */
+  expectedIsStub: boolean
+  /** Sua nota (user_score) — do espelho pessoal. NULL quando você ainda não avaliou. */
+  userScore: number | null
 }
 
 export async function getWorkPreview(workId: string): Promise<WorkPreview | null> {
@@ -711,11 +720,11 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
     supabase
       .from("works")
       .select(`
-        id, title, canonical_synopsis,
+        id, title, canonical_synopsis, is_adult,
         publication_status_id, total_chapters, year,
         work_covers(url, is_primary, position),
         work_synopses(source, text, is_primary, position),
-        calculated_scores(platform_avg, total_votes)
+        calculated_scores(platform_avg, total_votes, expected_score, expected_is_stub)
       `)
       .eq("id", workId)
       .maybeSingle(),
@@ -724,7 +733,15 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
 
   if (error || !data) return null
 
-  const calc = (data as { calculated_scores?: { platform_avg?: number | null; total_votes?: number | null } | null }).calculated_scores
+  // Nota Prevista é PESSOAL: a linha crua de `calculated_scores` é a do dono. Overlay troca os
+  // campos pessoais (expected_score…) pelos de quem olha — ou null — mantendo platform_avg/votos.
+  const scoresReader = await getScoresReader()
+  const calcRaw = (data as {
+    calculated_scores?:
+      | { platform_avg?: number | null; total_votes?: number | null; expected_score?: number | null; expected_is_stub?: boolean | null }
+      | null
+  }).calculated_scores
+  const calc = scoresReader.overlay(data.id as string, calcRaw)
   const covers = (data as { work_covers?: Parameters<typeof pickPrimaryCover>[0] }).work_covers
   const synopses = (data as { work_synopses?: Parameters<typeof pickPrimarySynopsis>[0] }).work_synopses
   // Hover mostra a sinopse CANÔNICA (consolidada via IA) quando existe; cai na
@@ -751,6 +768,10 @@ export async function getWorkPreview(workId: string): Promise<WorkPreview | null
     year: (data.year as number | null) ?? null,
     platformAvg: calc?.platform_avg ?? null,
     totalVotes: calc?.total_votes ?? 0,
+    isAdult: Boolean((data as { is_adult?: boolean | null }).is_adult),
+    expectedScore: calc?.expected_score ?? null,
+    expectedIsStub: calc?.expected_is_stub ?? false,
+    userScore: state.userScore,
   }
 }
 
