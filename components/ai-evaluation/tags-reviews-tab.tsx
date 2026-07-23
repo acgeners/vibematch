@@ -34,6 +34,9 @@ export interface TagsReviewsWork {
   tagGap: boolean
   tagCount: number
   reviewCount: number
+  /** Chip 🔞 (works.is_adult) e badge "Real" (works_owner.user_score) — anexados na page. */
+  isAdult?: boolean
+  userScore?: number | null
 }
 
 /**
@@ -195,6 +198,8 @@ export function TagsReviewsTab({
                 title={w.title}
                 coverUrl={w.coverUrl}
                 expectedScore={w.expectedScore}
+                isAdult={w.isAdult}
+                userScore={w.userScore}
                 publicationStatusId={w.publicationStatusId}
                 personalStatusId={w.personalStatusId}
                 interest={w.interest}

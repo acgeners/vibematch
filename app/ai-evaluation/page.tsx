@@ -31,6 +31,7 @@ import type { TagsReviewsWork } from "@/components/ai-evaluation/tags-reviews-ta
 import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
 import { getWorksWithoutTags } from "@/server/queries/works-without-tags"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
+import { fetchAdultScoreFlags } from "@/server/queries/adult-score-flags"
 import { getReadAckSets, getEvalReadSummary } from "@/server/queries/ai-eval-read"
 import type { ReadQueue } from "@/server/queries/ai-eval-read"
 import { filterWorkIdsByInterest } from "@/server/queries/interest-filter"
@@ -134,6 +135,10 @@ interface EligibleWork {
   synopsis_quality: string | null
   cover_url?: string | null
   expected_score: number | null
+  /** Conteúdo adulto (18+) efetivo — works.is_adult. Renderiza o chip 🔞 no card. */
+  is_adult?: boolean
+  /** Sua nota (user_score) do DONO (via works_owner) — mostra "Real" ao lado da Prevista. */
+  user_score?: number | null
   /** Hidratados só na aba ativa (cards) — ausentes no caminho do cache de contagens. */
   tagCount?: number | null
   reviewCount?: number | null
@@ -406,13 +411,14 @@ async function getEligibleWorks(
     personal_status_id: number | null
     synopsis_quality: string | null
     total_chapters: number | null
+    user_score: number | null
   }
   const worksResult = await chunkedInQuery<WorkRow>(eligibleIds, CHUNK_SIZE, (chunk) => {
-    // `works_owner`: a fila de curadoria mostra o status de leitura e o ♥ DO DONO (é a tela de
-    // trabalho dele). Vêm do espelho dele via a view — `works` vai perder essas colunas.
+    // `works_owner`: a fila de curadoria mostra o status de leitura, o ♥ e a NOTA DO DONO (é a
+    // tela de trabalho dele). Vêm do espelho dele via a view — `works` já perdeu essas colunas.
     let q = supabase
       .from("works_owner")
-      .select("id, title, publication_status_id, personal_status_id, synopsis_quality, total_chapters")
+      .select("id, title, publication_status_id, personal_status_id, synopsis_quality, total_chapters, user_score")
       .in("id", chunk)
       .eq("is_archived", false)
     if (pubStatusIds.length > 0) q = q.in("publication_status_id", pubStatusIds)
@@ -435,7 +441,9 @@ async function getEligibleWorks(
   // filtros low-confidence/outdated já dispararam o full-load, reusamos o promise.
   type CoverRow = { work_id: string; url: string | null; is_primary: boolean | null; position: number | null }
   type ScoreRow = { work_id: string; expected_score: number | null }
-  const [coversResult, scoresResult, latestEvals] = await Promise.all([
+  // `is_adult` é catálogo (não está na view works_owner) — busca direta em `works`.
+  type AdultRow = { id: string; is_adult: boolean | null }
+  const [coversResult, scoresResult, adultResult, latestEvals] = await Promise.all([
     chunkedInQuery<CoverRow>(displayedIds, CHUNK_SIZE, (chunk) =>
       supabase
         .from("work_covers")
@@ -450,6 +458,13 @@ async function getEligibleWorks(
         .in("work_id", chunk)
         .then(({ data, error }) => ({ data: (data ?? []) as ScoreRow[], error })),
     ),
+    chunkedInQuery<AdultRow>(displayedIds, CHUNK_SIZE, (chunk) =>
+      supabase
+        .from("works")
+        .select("id, is_adult")
+        .in("id", chunk)
+        .then(({ data, error }) => ({ data: (data ?? []) as AdultRow[], error })),
+    ),
     latestEvalsPromise ?? loadLatestEvalsForIds(supabase, displayedIds, CHUNK_SIZE),
   ])
 
@@ -462,6 +477,10 @@ async function getEligibleWorks(
   const scoreByWork = new Map<string, ScoreRow>()
   for (const s of scoresResult.data) {
     scoreByWork.set(s.work_id, s)
+  }
+  const adultByWork = new Map<string, boolean>()
+  for (const a of adultResult.data) {
+    adultByWork.set(a.id, Boolean(a.is_adult))
   }
 
   const eligibleIdSet = new Set(eligibleIds)
@@ -495,6 +514,8 @@ async function getEligibleWorks(
       total_chapters: row.total_chapters,
       cover_url: pickPrimaryCover(coversByWork.get(row.id) ?? []),
       expected_score: scoreByWork.get(row.id)?.expected_score ?? null,
+      is_adult: adultByWork.get(row.id) ?? false,
+      user_score: row.user_score ?? null,
       matchedFilters: matchedByWork.get(row.id) ?? [],
       evaluation: evalByWork.get(row.id) ?? null,
     } as EligibleWork
@@ -1065,13 +1086,19 @@ export default async function AiEvaluationPage({
     // Só as contagens 🏷/💬 (badge + filtro de faixa) entram no crítico. Os inputs
     // pesados do popover (sinopse/tags/digest) carregam sob demanda ao abrir.
     const idsToHydrate = synopsisQueue.map((w) => w.id)
-    const counts = await getWorkTagReviewCounts(idsToHydrate)
+    const [counts, flags] = await Promise.all([
+      getWorkTagReviewCounts(idsToHydrate),
+      fetchAdultScoreFlags(idsToHydrate),
+    ])
     let works = synopsisQueue.map((w) => {
       const c = counts.get(w.id)
+      const f = flags.get(w.id)
       return {
         ...w,
         tagCount: c?.tagCount ?? 0,
         reviewCount: c?.reviewCount ?? 0,
+        isAdult: f?.isAdult ?? false,
+        userScore: f?.userScore ?? null,
       }
     })
     // Filtro "Dados (nº)": faixa mín–máx de tags/reviews (aba sinopse), pós-hidratação
@@ -1143,9 +1170,13 @@ export default async function AiEvaluationPage({
     // TODAS as obras) — evita re-varrer work_tags/work_reviews aqui (getWorkTagReviewCounts).
     const tagCounts = tagRes.tagCountByWork ?? new Map<string, number>()
     const revCounts = revRes.usefulCountByWork ?? new Map<string, number>()
+    const flags = await fetchAdultScoreFlags(mergedWorks.map((w) => w.id))
     for (const w of mergedWorks) {
       w.tagCount = tagCounts.get(w.id) ?? 0
       w.reviewCount = revCounts.get(w.id) ?? 0
+      const f = flags.get(w.id)
+      w.isAdult = f?.isAdult ?? false
+      w.userScore = f?.userScore ?? null
     }
     const readIds = readIdsFor("tags_reviews", mergedWorks)
     activeCount = mergedWorks.length - readIds.length
@@ -1171,11 +1202,17 @@ export default async function AiEvaluationPage({
     const isPaidPlan = canAi
     const keep = await filterWorkIdsByInterest(iaRkQueue.map((w) => w.id), synopsisQualities, predictionQualities)
     const members = iaRkQueue.filter((w) => keep.has(w.id))
-    const counts = await getWorkTagReviewCounts(members.map((w) => w.id))
+    const memberIds = members.map((w) => w.id)
+    const [counts, flags] = await Promise.all([
+      getWorkTagReviewCounts(memberIds),
+      fetchAdultScoreFlags(memberIds),
+    ])
     const works = members.map((w) => ({
       ...w,
       tagCount: counts.get(w.id)?.tagCount ?? 0,
       reviewCount: counts.get(w.id)?.reviewCount ?? 0,
+      isAdult: flags.get(w.id)?.isAdult ?? false,
+      userScore: flags.get(w.id)?.userScore ?? null,
     }))
     const readIds = readIdsFor("veredito", works)
     activeCount = works.length - readIds.length
@@ -1198,13 +1235,19 @@ export default async function AiEvaluationPage({
     // Inputs do popover carregam sob demanda (getSynopsisInputsAction) — só as
     // contagens 🏷/💬 entram no crítico.
     const idsToHydrate = untrackedWorks.map((w) => w.id)
-    const counts = await getWorkTagReviewCounts(idsToHydrate)
+    const [counts, flags] = await Promise.all([
+      getWorkTagReviewCounts(idsToHydrate),
+      fetchAdultScoreFlags(idsToHydrate),
+    ])
     const works = untrackedWorks.map((w) => {
       const c = counts.get(w.id)
+      const f = flags.get(w.id)
       return {
         ...w,
         tagCount: c?.tagCount ?? 0,
         reviewCount: c?.reviewCount ?? 0,
+        isAdult: f?.isAdult ?? false,
+        userScore: f?.userScore ?? null,
       }
     })
     const readIds = readIdsFor("untracked", works)

@@ -1,9 +1,12 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
-import { BookOpen, MessageSquare, Star, StickyNote, Tag, Users } from "lucide-react"
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import { BookOpen, ChevronDown, ChevronUp, MessageSquare, Star, StickyNote, Tag, Users } from "lucide-react"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
+import { LABELS } from "@/lib/constants/ui-labels"
 import { CoverImage } from "@/components/ui/cover-image"
+import { AdultBadge } from "@/components/ui/adult-badge"
+import { ScoreBadge } from "@/components/ui/score-badge"
 import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import { cn } from "@/lib/utils"
 import { getWorkHoverCounts, type WorkPreview } from "@/server/actions/works"
@@ -11,6 +14,15 @@ import { getWorkHoverCounts, type WorkPreview } from "@/server/actions/works"
 interface WorkHoverPreviewProps {
   preview: WorkPreview
   anchorRect: DOMRect
+  /** Ponte de hover: manter a prévia aberta quando o mouse entra nela (prévia interativa). */
+  onMouseEnter?: () => void
+  onMouseLeave?: () => void
+  /**
+   * "compact" (view de Cards do /ranking): o card já mostra capa/título/18+/notas, então a
+   * prévia foca no que NÃO está lá — sinopse (destaque) + ano + tags/reviews/nota. "full"
+   * (default, demais telas) mantém a prévia completa.
+   */
+  variant?: "full" | "compact"
 }
 
 interface WorkCounts {
@@ -111,10 +123,11 @@ function Metric({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-export function WorkHoverPreview({ preview, anchorRect }: WorkHoverPreviewProps) {
+export function WorkHoverPreview({ preview, anchorRect, onMouseEnter, onMouseLeave, variant = "full" }: WorkHoverPreviewProps) {
+  const compact = variant === "compact"
   const margin = 2
   const screenMargin = 8
-  const popupWidth = 420
+  const popupWidth = compact ? 340 : 420
   const popupHeight = 250
   const willOverflowRight = anchorRect.right + margin + popupWidth > window.innerWidth
   const left = willOverflowRight
@@ -124,6 +137,19 @@ export function WorkHoverPreview({ preview, anchorRect }: WorkHoverPreviewProps)
     Math.max(screenMargin, anchorRect.top),
     window.innerHeight - popupHeight - screenMargin
   )
+  // Teto de altura ancorado no `top`: a prévia expandida ("Ler mais") cresce até aqui e então
+  // rola por dentro, sem estourar a viewport. Colapsada (~250px) cabe folgado, sem scroll.
+  const maxHeight = window.innerHeight - top - screenMargin
+
+  // "Ler mais": mede o overflow da sinopse com o clamp ligado; o botão só aparece se transbordar.
+  const [expanded, setExpanded] = useState(false)
+  const synopsisRef = useRef<HTMLParagraphElement | null>(null)
+  const [synopsisOverflow, setSynopsisOverflow] = useState(false)
+  useLayoutEffect(() => {
+    if (expanded) return
+    const el = synopsisRef.current
+    setSynopsisOverflow(el ? el.scrollHeight > el.clientHeight + 1 : false)
+  }, [preview.synopsis, expanded])
 
   // Tags + reviews sob demanda no hover (1 chamada por obra, cacheada).
   const [counts, setCounts] = useState<WorkCounts | null>(
@@ -149,10 +175,89 @@ export function WorkHoverPreview({ preview, anchorRect }: WorkHoverPreviewProps)
   const hasInterest = Boolean(preview.synopsisQuality || preview.predictedSynopsisQuality)
   const hasComment = Boolean(preview.observations && preview.observations.trim())
 
+  // ── Variante enxuta (view de Cards do /ranking) ──────────────────────────────────────
+  // Só o que o card NÃO mostra: sinopse em destaque (largura toda, sem capa) + ano no
+  // cabeçalho + rodapé com tags/reviews/nota. Sem 18+, corações, N.Prevista, Externa, Votos —
+  // tudo isso já está no card ao lado.
+  if (compact) {
+    const hasFooter =
+      hasComment || (counts != null && (counts.tagCount > 0 || counts.reviewCount > 0))
+    return (
+      <div
+        className="fixed z-50 w-[340px] overflow-y-auto overflow-x-hidden rounded-xl border border-black/10 bg-[#f4f6fb] text-popover-foreground shadow-2xl dark:border-white/12 dark:bg-[#1c2230]"
+        style={{ left, top, maxHeight }}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
+      >
+        {/* Cabeçalho discreto: título (âncora quando há vários cards) + ano */}
+        <div className="flex items-start justify-between gap-2.5 border-b border-border/60 px-4 pb-2.5 pt-3.5">
+          <p className="min-w-0 break-words font-semibold text-[14.5px] leading-tight line-clamp-2">{preview.title}</p>
+          {preview.year != null && (
+            <span className="shrink-0 pt-px text-xs font-semibold tabular-nums text-muted-foreground">
+              {preview.year}
+            </span>
+          )}
+        </div>
+
+        {/* Sinopse — o herói. Sem capa, ocupa a largura toda (até 8 linhas, depois "Ler mais"). */}
+        {preview.synopsis ? (
+          <div className="px-4 py-3">
+            <p
+              ref={synopsisRef}
+              className={cn(
+                "text-[13px] italic text-muted-foreground break-words whitespace-normal leading-relaxed",
+                !expanded && "line-clamp-[8]",
+              )}
+            >
+              {preview.synopsis}
+            </p>
+            {(synopsisOverflow || expanded) && (
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="mt-1.5 inline-flex items-center gap-0.5 text-[11px] font-semibold not-italic text-primary hover:underline"
+              >
+                {expanded ? "Ler menos" : "Ler mais"}
+                {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="px-4 py-3 text-[13px] italic text-muted-foreground/70">Sem sinopse.</div>
+        )}
+
+        {/* Rodapé: só tags · reviews · nota (o resto está no card). */}
+        {hasFooter && (
+          <div className="flex items-center gap-3.5 border-t border-border/60 bg-black/[0.015] px-4 py-2 text-xs text-muted-foreground dark:bg-white/[0.025]">
+            {counts != null && counts.tagCount > 0 && (
+              <span title="Tags da obra" className="inline-flex items-center gap-1 tabular-nums">
+                <Tag className="size-3.5" />
+                {counts.tagCount}
+              </span>
+            )}
+            {counts != null && counts.reviewCount > 0 && (
+              <span title="Reviews úteis (≥40 caracteres)" className="inline-flex items-center gap-1 tabular-nums">
+                <MessageSquare className="size-3.5" />
+                {counts.reviewCount}
+              </span>
+            )}
+            {hasComment && (
+              <span title="Você comentou nesta obra" className="inline-flex items-center">
+                <StickyNote className="size-3.5" />
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div
-      className="fixed z-50 w-[420px] overflow-hidden rounded-xl border border-black/10 bg-[#f4f6fb] text-popover-foreground shadow-2xl pointer-events-none dark:border-white/12 dark:bg-[#1c2230]"
-      style={{ left, top }}
+      className="fixed z-50 w-[420px] overflow-y-auto overflow-x-hidden rounded-xl border border-black/10 bg-[#f4f6fb] text-popover-foreground shadow-2xl dark:border-white/12 dark:bg-[#1c2230]"
+      style={{ left, top, maxHeight }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       <div className="flex gap-4 p-4">
         {preview.coverUrl ? (
@@ -164,8 +269,14 @@ export function WorkHoverPreview({ preview, anchorRect }: WorkHoverPreviewProps)
             Sem capa
           </div>
         )}
-        <div className="flex flex-col min-w-0 flex-1 h-44">
-          <p className="font-semibold text-[15px] leading-tight line-clamp-2 shrink-0 break-words">{preview.title}</p>
+        <div className="flex flex-col min-w-0 flex-1 min-h-[11rem]">
+          {/* Título + chip 18+ (mesmo tratamento do cabeçalho da obra) */}
+          <div className="flex items-start gap-1.5 shrink-0">
+            <p className="font-semibold text-[15px] leading-tight line-clamp-2 min-w-0 flex-1 break-words">{preview.title}</p>
+            {preview.isAdult && (
+              <AdultBadge className="mt-px shrink-0 px-1.5 py-0 text-[10px] leading-tight" />
+            )}
+          </div>
 
           {(hasMeta1 || hasInterest) && (
             <div className="mt-1.5 pb-2 border-b border-border/60 shrink-0 flex flex-col gap-1.5">
@@ -202,8 +313,26 @@ export function WorkHoverPreview({ preview, anchorRect }: WorkHoverPreviewProps)
           )}
 
           {preview.synopsis && (
-            <div className="flex-1 min-h-0 overflow-hidden mt-2">
-              <p className="text-[13px] italic text-muted-foreground line-clamp-5 break-words whitespace-normal leading-snug">{preview.synopsis}</p>
+            <div className="mt-2">
+              <p
+                ref={synopsisRef}
+                className={cn(
+                  "text-[13px] italic text-muted-foreground break-words whitespace-normal leading-snug",
+                  !expanded && "line-clamp-5",
+                )}
+              >
+                {preview.synopsis}
+              </p>
+              {(synopsisOverflow || expanded) && (
+                <button
+                  type="button"
+                  onClick={() => setExpanded((v) => !v)}
+                  className="mt-1 inline-flex items-center gap-0.5 text-[11px] font-semibold not-italic text-primary hover:underline"
+                >
+                  {expanded ? "Ler menos" : "Ler mais"}
+                  {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -232,7 +361,31 @@ export function WorkHoverPreview({ preview, anchorRect }: WorkHoverPreviewProps)
             </span>
           )}
         </div>
-        <div className="inline-flex items-stretch gap-4">
+        <div className="inline-flex items-stretch gap-3">
+          {/* Nota Prevista + Sua nota (Real) — mesmo pareamento "Prevista / Real" do
+              cabeçalho da obra. Só a Prevista quando você ainda não avaliou. */}
+          {(preview.expectedScore != null || preview.userScore != null) && (
+            <>
+              <Metric
+                label={
+                  preview.expectedScore != null && preview.userScore != null
+                    ? "Prevista / Real"
+                    : preview.userScore != null
+                      ? "Real"
+                      : LABELS.expected_score.short
+                }
+              >
+                {preview.expectedScore != null && (
+                  <ScoreBadge score={preview.expectedScore} size="sm" showStub={preview.expectedIsStub} />
+                )}
+                {preview.expectedScore != null && preview.userScore != null && (
+                  <span className="font-mono text-muted-foreground/50">/</span>
+                )}
+                {preview.userScore != null && <ScoreBadge score={preview.userScore} size="sm" />}
+              </Metric>
+              <span className="w-px self-stretch bg-border/60" aria-hidden />
+            </>
+          )}
           <Metric label="Externa">
             {preview.platformAvg != null ? (
               <>

@@ -266,6 +266,8 @@ export function StaleRerankPanel({
               title={w.title}
               coverUrls={w.coverUrls}
               expectedScore={w.expectedScore}
+              isAdult={w.isAdult}
+              userScore={w.userScore}
               publicationStatusId={w.publicationStatusId}
               personalStatusId={w.personalStatusId}
               interest={w.synopsisQuality}
