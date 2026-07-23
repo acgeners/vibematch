@@ -40,6 +40,20 @@ import type {
   SourcedReview,
 } from "./types"
 
+// SANITIZAÇÃO do merge: descarta um `yearEnd` vindo de fonte externa quando ele é
+// anterior ao `year` (dado impossível/corrompido). Ao contrário do form — que REJEITA
+// a entrada manual (ver work.schema.ts) — aqui só DROPAMOS o campo ruim, pra uma fonte
+// com ano errado não bloquear a criação da obra inteira. Sem isto, o corrompido chegaria
+// a `year_end` e viraria RunLength negativo = outlier que infla a Nota Prevista (ver
+// buildWork em server/actions/calculations.ts e a memória do outlier de RunLength).
+function coerceMergedYearEnd(
+  year: number | undefined,
+  yearEnd: number | undefined,
+): number | undefined {
+  if (year != null && yearEnd != null && yearEnd < year) return undefined
+  return yearEnd
+}
+
 // Timeouts por fonte externa (ms). `Promise.allSettled` espera a fonte mais
 // lenta; sem teto, um scraper travado somava dezenas de segundos. Valores
 // conservadores — afináveis pelos logs `[ai-eval timing]`. Reviews têm teto
@@ -518,7 +532,7 @@ function mergeSearchResults(query: string, results: ExternalSearchResult[]): Mer
       synopsis: primary.synopsis ?? main.synopsis,
       coverUrl: primary.coverUrl ?? main.coverUrl,
       year: primary.year ?? main.year,
-      yearEnd: primary.yearEnd ?? main.yearEnd,
+      yearEnd: coerceMergedYearEnd(primary.year ?? main.year, primary.yearEnd ?? main.yearEnd),
       publicationStatus: primary.publicationStatus ?? main.publicationStatus,
       chapters: primary.chapters ?? main.chapters,
       score: primary.score ?? main.score,
@@ -1870,7 +1884,10 @@ function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[],
     coverUrl: multiCovers[0]?.url ?? candidate.coverUrl,
     multiCovers,
     year: accepted.find((result) => result.year)?.year ?? candidate.year,
-    yearEnd: accepted.find((result) => result.yearEnd)?.yearEnd ?? candidate.yearEnd,
+    yearEnd: coerceMergedYearEnd(
+      accepted.find((result) => result.year)?.year ?? candidate.year,
+      accepted.find((result) => result.yearEnd)?.yearEnd ?? candidate.yearEnd,
+    ),
     publicationStatus: accepted.find((result) => result.publicationStatus)?.publicationStatus ?? candidate.publicationStatus,
     totalChapters: accepted.find((result) => result.chapters != null)?.chapters ?? candidate.chapters,
     genres: uniqueStrings(accepted.flatMap((result) => result.genres ?? [])),

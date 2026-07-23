@@ -253,7 +253,14 @@ export function buildWork(raw: RawWork, biasMap: AttributeBiasMap): WorkComputed
     synopsisQuality: raw.synopsis_quality as SynopsisQuality | null,
     observationAdjustment: Number(raw.observation_adjustment ?? 0),
     releaseAge: raw.year != null ? CURRENT_YEAR - raw.year : null,
-    runLength: raw.year != null && raw.year_end != null ? raw.year_end - raw.year : null,
+    // year_end < year é dado corrompido (fim antes do início) — trata como null pra
+    // imputar a mediana em vez de virar outlier de dezenas de σ no StandardScaler do
+    // Ridge, que inflava a Nota Prevista (contribuição fantasma). Ver memória
+    // project_expected_runlength_corrupt_yearend_outlier.
+    runLength:
+      raw.year != null && raw.year_end != null && raw.year_end >= raw.year
+        ? raw.year_end - raw.year
+        : null,
     origin: detectOrigin(raw.original_title),
     categoryScores,
     categoryScoresCalibrated,

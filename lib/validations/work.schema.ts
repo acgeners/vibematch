@@ -43,7 +43,11 @@ const synopsisEntrySchema = z.object({
   isPrimary: z.boolean(),
 })
 
-export const workFormSchema = z.object({
+// Objeto-base SEM a checagem de campo cruzado. Exportado porque o LOADER (que
+// converte uma obra armazenada → valores do form pra edição) precisa parsear SEM
+// lançar: se um dado corrompido (year_end < year) já existir no banco, você tem que
+// conseguir ABRIR a obra pra corrigi-la — a rejeição vale só na SUBMISSÃO.
+export const workFormBase = z.object({
   title: z.string().min(1, "Título obrigatório").max(500),
   original_title: z.string().max(500).nullable().optional(),
   alternative_titles: z.array(z.string().trim().min(1).max(500)).default([]),
@@ -106,12 +110,28 @@ export const workFormSchema = z.object({
   external_ids: z.record(z.string().trim().min(1), z.string().trim().min(1)).default({}),
 })
 
+// Regra de campo cruzado: o ano de fim não pode ser anterior ao de início. Barra na
+// ENTRADA MANUAL o dado corrompido (year_end < year) que virava RunLength negativo =
+// outlier de dezenas de σ inflando a Nota Prevista (ver buildWork em
+// server/actions/calculations.ts:256 e a memória do outlier de RunLength). O import NÃO
+// é rejeitado aqui — ele SANITIZA no merge (lib/external/index.ts) pra uma fonte com ano
+// ruim não bloquear a obra inteira.
+const yearEndNotBeforeStart = (d: { year?: number | null; year_end?: number | null }) =>
+  d.year == null || d.year_end == null || d.year_end >= d.year
+const yearEndIssue = {
+  message: "Ano de fim não pode ser anterior ao ano de início",
+  path: ["year_end"],
+}
+
+export const workFormSchema = workFormBase.refine(yearEndNotBeforeStart, yearEndIssue)
+
 export type WorkFormValues = z.infer<typeof workFormSchema>
 export type WorkFormInput = z.input<typeof workFormSchema>
 
-export const workUpdateSchema = workFormSchema.partial().extend({
-  title: z.string().min(1).max(500),
-})
+export const workUpdateSchema = workFormBase
+  .partial()
+  .extend({ title: z.string().min(1).max(500) })
+  .refine(yearEndNotBeforeStart, yearEndIssue)
 
 export type WorkUpdateValues = z.infer<typeof workUpdateSchema>
 
