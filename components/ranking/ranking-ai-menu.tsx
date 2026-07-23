@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import { ChevronDown, MessageCircle, RotateCw, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { RecommendDialog } from "@/components/recommendations/recommend-dialog"
 import { readActiveChat, subscribeActiveChat } from "@/lib/active-chat"
+import { useChromeRefresh } from "@/lib/use-refresh"
+import { getStaleAlignmentCountAction } from "@/server/actions/recommendations"
 
 interface RankingAiMenuProps {
   /** Gate de plano — Recomendar/Conversar são features Pago (`smart_shortlist`). */
@@ -42,7 +44,47 @@ export function RankingAiMenu({ isPaid, staleAlignmentCount }: RankingAiMenuProp
   const [recommendOpen, setRecommendOpen] = useState(false)
   const active = useSyncExternalStore(subscribeActiveChat, readActiveChat, () => null)
   const chatHref = active?.slug ? `/recommendations/chat/${active.slug}` : "/recommendations/chat"
-  const hasStale = staleAlignmentCount > 0
+
+  // Contador VIVO. A prop é a fonte na renderização do servidor; daí em diante o menu
+  // se atualiza sozinho pra não exigir reload (era prop estática — resolveu o veredito
+  // e o número só mudava recarregando). Dois gatilhos:
+  //  • mesma aba → refreshChrome(null) de qualquer re-rank dispara o re-fetch;
+  //  • outra aba (fluxo do link "abrir em nova aba") → o event-bus não cruza abas,
+  //    então re-busca ao VOLTAR O FOCO pra esta aba.
+  const [staleCount, setStaleCount] = useState(staleAlignmentCount)
+  // Sincroniza a prop SEM effect (evita cascading-render): "ajuste durante o render",
+  // semeado com o valor inicial pra não disparar na hidratação. Só sobrescreve quando a
+  // prop REALMENTE muda; entre renders com a mesma prop, o valor re-buscado sobrevive.
+  const [prevProp, setPrevProp] = useState(staleAlignmentCount)
+  if (staleAlignmentCount !== prevProp) {
+    setPrevProp(staleAlignmentCount)
+    setStaleCount(staleAlignmentCount)
+  }
+
+  const lastFetch = useRef(0)
+  const refetch = useCallback(() => {
+    const now = Date.now()
+    if (now - lastFetch.current < 3000) return // throttle: foco/blur pode disparar em rajada
+    lastFetch.current = now
+    void getStaleAlignmentCountAction()
+      .then((n) => setStaleCount(n))
+      .catch(() => {})
+  }, [])
+
+  useChromeRefresh(useCallback((patch) => { if (!patch) refetch() }, [refetch]))
+
+  useEffect(() => {
+    const onFocus = () => refetch()
+    const onVisible = () => { if (document.visibilityState === "visible") refetch() }
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [refetch])
+
+  const hasStale = staleCount > 0
 
   return (
     <>
@@ -105,11 +147,11 @@ export function RankingAiMenu({ isPaid, staleAlignmentCount }: RankingAiMenuProp
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild className="gap-2.5 py-2">
-                <Link href="/ai-evaluation?tab=ia-rk">
+                <Link href="/ai-evaluation?tab=ia-rk" target="_blank" rel="noopener noreferrer">
                   <RotateCw className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
                   <span className="flex min-w-0 flex-col">
                     <span className="text-sm font-medium text-amber-700 dark:text-amber-300">
-                      Veredito IA · {staleAlignmentCount} desatualizados
+                      Veredito IA · {staleCount} desatualizados
                     </span>
                     <span className="text-xs text-muted-foreground">Obras editadas depois da última análise.</span>
                   </span>

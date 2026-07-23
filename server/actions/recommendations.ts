@@ -19,6 +19,7 @@ import {
   MIN_WORKS_FOR_FULL_PROFILE,
 } from "@/lib/ai-recommendation/taste-profile"
 import {
+  countStaleAlignmentWorks,
   getCandidateById,
   getCandidatesByIds,
   getFavoriteCandidates,
@@ -221,6 +222,16 @@ export async function getSynopsisInputsAction(workId: string): Promise<SynopsisI
   if (!workId) return { canonicalSynopsis: null, tags: [], reviewDigest: null }
   const map = await getSynopsisInputsBatch([workId])
   return map.get(workId) ?? { canonicalSynopsis: null, tags: [], reviewDigest: null }
+}
+
+/**
+ * Contagem de vereditos IA desatualizados (mesma definição da fila ia-rk). Existe
+ * como action pra o menu do /ranking se atualizar SEM reload — no mesmo tab via
+ * event-bus e, no fluxo "abrir a fila em nova aba", ao voltar o foco pra cá.
+ * Dado de catálogo (agregado, não per-usuário), sem sessão exigida.
+ */
+export async function getStaleAlignmentCountAction(): Promise<number> {
+  return countStaleAlignmentWorks()
 }
 
 export async function generateTasteProfileAction(): Promise<{

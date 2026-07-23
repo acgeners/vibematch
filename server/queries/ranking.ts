@@ -847,9 +847,16 @@ export async function getRanking(
     const m = dir === "asc" ? 1 : -1
     const rawScore = (value: number | null | undefined) =>
       value == null ? -Infinity : value
+    // Nota Prevista ordena pela nota EXIBIDA (1 casa), não pelo valor cru: a lista
+    // mostra `expectedScore.toFixed(1)`, então 8,44 e 8,37 aparecem iguais ("8,4").
+    // Comparar o cru fazia o 8,44 vir na frente sem empatar — e o critério de
+    // desempate seguinte (ex.: Veredito) nunca entrava. Arredondar aqui faz notas
+    // que APARECEM iguais empatarem e caírem pro próximo nível de ordenação.
+    const displayScore = (value: number | null | undefined) =>
+      value == null ? -Infinity : Math.round(value * 10) / 10
     if (field === "title") return m * a.title.localeCompare(b.title)
     if (field === "expected_score")
-      return m * (rawScore(a.expectedScore) - rawScore(b.expectedScore))
+      return m * (displayScore(a.expectedScore) - displayScore(b.expectedScore))
     if (field === "decision")
       return m * (rawScore(a.decisionScore) - rawScore(b.decisionScore))
     if (field === "recommended")
@@ -857,8 +864,8 @@ export async function getRanking(
       // `expected × (0.6 + 0.4·personal_fit)` era ruído — pf é ~constante e ordena
       // pior que o acaso. "Recomendado" (default Free) agora = Nota Prevista,
       // agrupada em tiers e diferenciada DENTRO do tier por tag overlap
-      // (reorderTiersByFit no cliente).
-      return m * (rawScore(a.expectedScore) - rawScore(b.expectedScore))
+      // (reorderTiersByFit no cliente). Mesmo eixo → mesmo arredondamento de exibição.
+      return m * (displayScore(a.expectedScore) - displayScore(b.expectedScore))
     if (field === "platform_avg") return m * (rawScore(a.platformAvg) - rawScore(b.platformAvg))
     if (field === "personal_fit") {
       const av = a.personalFit ?? -Infinity
