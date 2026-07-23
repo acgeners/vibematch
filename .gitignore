@@ -81,3 +81,6 @@ infer-tags-proposals.csv
 # Originais de design (logo, ícones de atributo) — PNGs crus de ~1,5–2MB, 44MB no total.
 # Não versionar: são fonte, não asset de web. Assets otimizados vão em public/ (esses sim no git).
 Imagens/
+
+# Config local do editor (VSCode) — não versionar (entrou por engano num git add -A).
+.vscode/
