@@ -118,3 +118,24 @@ console.log(`\n✅ ${totalRows} linhas em ${tables.length} tabelas · ${(totalBy
 console.log(`   manifest: ${path.join(outDir, "manifest.json")}`)
 console.log(`\n   Cada tabela é um NDJSON gzipado (1 linha = 1 registro JSON). Pra restaurar:`)
 console.log(`   zcat <tabela>.ndjson.gz | ... → upsert via service role (a ordem importa: FKs).`)
+
+// Retenção: mantém os KEEP backups mais recentes e apaga os antigos. Sem isto o
+// .backups cresce sem limite (~30M por execução, nunca podado). Só age DEPOIS de um
+// backup bem-sucedido — o script já teria dado throw acima se qualquer tabela truncasse,
+// então nunca podamos um backup bom por causa de um novo que falhou.
+// Só apaga dirs cujo nome casa com o stamp ISO (não toca em nada mais na pasta).
+// Ajustável por env: BACKUP_KEEP (default 5).
+const KEEP = Math.max(1, Number(process.env.BACKUP_KEEP ?? 5))
+const stampDirs = fs
+  .readdirSync(base, { withFileTypes: true })
+  .filter((e) => e.isDirectory() && /^\d{4}-\d{2}-\d{2}T[\d-]+Z$/.test(e.name))
+  .map((e) => e.name)
+  .sort()
+  .reverse() // stamp ISO é lexicograficamente ordenável → mais novo primeiro
+const toDelete = stampDirs.slice(KEEP)
+for (const name of toDelete) {
+  fs.rmSync(path.join(base, name), { recursive: true, force: true })
+}
+if (toDelete.length) {
+  console.log(`\n🧹 retenção: mantidos ${Math.min(KEEP, stampDirs.length)}, apagados ${toDelete.length} antigo(s) (BACKUP_KEEP=${KEEP})`)
+}

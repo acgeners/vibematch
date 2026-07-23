@@ -30,7 +30,16 @@ Dump lógico de todas as tabelas em NDJSON gzipado (24 MB / ~120k linhas hoje). 
 contra `count: "exact"`**: se faltar uma linha, ele FALHA em vez de gravar um backup truncado — que é
 a pior forma possível do bug das 1000 linhas, porque você só descobre quando precisa restaurar.
 
+**Retenção:** depois de um backup bem-sucedido o script mantém os **5 mais recentes** e apaga os
+antigos (só dirs com nome de stamp ISO) — sem isto o `.backups` cresce sem limite (~30M/execução).
+Ajuste com `BACKUP_KEEP=<n>`.
+
 Rode antes de: partição per-user (Fase 2), backfill em massa, qualquer migration que dropa coluna.
+
+**Cache de dev incha:** o `.next/dev` (cache do Turbopack) chega fácil a **dobra dígito de GB**. Não
+tem teto configurável — limpe periodicamente com `npm run clean` (`rm -rf .next .turbo`; regenera no
+próximo `npm run dev`, só a 1ª compilação fica mais lenta). Confira `next-server` órfãos antes
+(`pkill -f next-server`): cada dev server zumbi segura o cache e infla o `.next`.
 
 ## Architecture
 
@@ -259,6 +268,14 @@ The model is `claude-sonnet-4-6`, prompt version `v21` (toggled by `CONCISE_OUTP
 >    de automação e `content_rating`).
 > 2. **FlareSolverr** (Docker `:8191`) — rede de segurança. Sem o sidecar, a busca perde ComicK,
 >    AnimePlanet e Mangago quando o container pisca (medido: 5/9 fontes vs 8/9).
+>
+> **Em dev, o Docker/FlareSolverr é OPCIONAL — o sidecar é a camada primária.** O sidecar não tem
+> nenhum fio pro FlareSolverr (só o cita em comentário); ele atravessa o Cloudflare com o Chromium
+> próprio do Playwright. **Comprovado com o Docker DESLIGADO** (2026-07-22): container parado, porta
+> 8191 morta, e `POST :8790/render` de `anime-planet.com/manga/berserk` voltou 200 com HTML real (não
+> desafio) em ~3,75s. O FlareSolverr só é acionado se o sidecar devolver `null` (ver
+> `fetchHtmlWithCfFallback`). Regra prática: dia a dia pode fechar o Docker; deixe aberto só em
+> aquisição pesada (import em massa / backfill), pela redundância.
 >
 > **MyAnimeList**: metadados vêm da **API oficial v2** (`lib/external/myanimelist.ts`, header
 > `X-MAL-CLIENT-ID` ← `MAL_CLIENT_ID` no env; OAuth só serve pra dados de usuário logado). Reviews
