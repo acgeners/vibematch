@@ -3,7 +3,7 @@
 import { revalidatePath, revalidateTag } from "next/cache"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { workFormSchema, workStatusSchema } from "@/lib/validations/work.schema"
+import { workFormSchema, workFormBase, workStatusSchema } from "@/lib/validations/work.schema"
 import type { WorkFormValues, WorkStatusValues } from "@/lib/validations/work.schema"
 import { CRITERION_SLUGS } from "@/types/domain"
 import {
@@ -638,7 +638,10 @@ function dbWorkToFormValues(work: any): WorkFormValues {
     CRITERION_SLUGS.map((slug) => [slug, scoreMap[slug] ?? null])
   )
 
-  return workFormSchema.parse({
+  // Base SEM a refine de year_end: carregar uma obra pra EDIÇÃO não pode lançar por
+  // year_end < year — é justamente na edição que você corrige. A rejeição vale na
+  // submissão (persistNewWork/updateWork usam o workFormSchema refinado).
+  return workFormBase.parse({
     title: work.title,
     original_title: work.original_title ?? "",
     alternative_titles: work.alternative_titles ?? [],
