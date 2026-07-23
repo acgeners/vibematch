@@ -171,6 +171,16 @@ export interface RankingFilters {
    * respeita `hide_adult_content` e esconde `is_adult` das listas de quem optou por ocultar.
    */
   includeAdult?: boolean
+  /**
+   * Filtro de conteúdo adulto (18+) POR-RANKING, controlado na UI (?adult=). Usa
+   * `works.is_adult` — a mesma fonte do chip 🔞 da obra, independente de tags.
+   * - "hide": esconde obras is_adult mesmo que a preferência global as mostre.
+   * - "only": mostra SÓ obras is_adult e IGNORA a preferência global de ocultar
+   *   (senão o `hideAdult=true` cairia em is_adult=false e zeraria o resultado).
+   * - undefined: respeita a preferência global (getHideAdultContent).
+   * Ortogonal a `includeAdult` (opt-out interno de curadoria/auditoria).
+   */
+  adultFilter?: "hide" | "only"
   criterionMin?: Partial<Record<string, number>>
   criterionMax?: Partial<Record<string, number>>
   publicationStatus?: string[]
@@ -528,9 +538,17 @@ export async function getRanking(
         work_covers(url, is_primary, position)
       `)
     if (!filters.includeArchived) q = q.eq("is_archived", false)
-    // Fase 2 do 18+: quem optou por ocultar não vê obras adultas nas listas. Cobre
-    // ranking, catálogo, favoritos e o pool de recomendações — todos passam por aqui.
-    if (hideAdult) q = q.eq("is_adult", false)
+    // Conteúdo 18+ (works.is_adult). O filtro POR-RANKING (?adult=) tem prioridade
+    // sobre a preferência global:
+    //   "only" → só adultas; ignora `hideAdult` de propósito (senão is_adult=false
+    //            do hideAdult conflitaria com is_adult=true e zeraria o resultado).
+    //   "hide" → esconde adultas explicitamente, mesmo se a pessoa costuma vê-las.
+    //   ausente → cai na Fase 2 do 18+: quem optou por ocultar (hideAdult) não vê
+    //            adultas nas listas. Cobre ranking, catálogo, favoritos e o pool de
+    //            recomendações — todos passam por aqui.
+    if (filters.adultFilter === "only") q = q.eq("is_adult", true)
+    else if (filters.adultFilter === "hide") q = q.eq("is_adult", false)
+    else if (hideAdult) q = q.eq("is_adult", false)
     // Exclude por not-in só quando NÃO há restrição positiva por allowedIds — senão o exclude
     // já foi removido de allowedIds acima. (Baseado em `allowedIds`, não `restrictIds`: com
     // onlyWorkIds sozinho o exclude ainda precisa valer.)

@@ -215,6 +215,11 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // ficam consistentes, sem lógica de supressão escondida no servidor.
   const onlyRated = str("rated") === "1"
 
+  // Filtro de conteúdo 18+ por-ranking (?adult=hide|only). Usa works.is_adult (a
+  // mesma fonte do chip da obra), não tags. Ausente = respeita a preferência global.
+  const adultParam = str("adult")
+  const adultFilter = adultParam === "hide" || adultParam === "only" ? adultParam : undefined
+
   const filters: RankingFilters = {
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
     criterionMax: Object.keys(criterionMax).length ? criterionMax : undefined,
@@ -252,6 +257,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     onlyWithFinalScore: str("only_scored") === "1",
     onlyFavorites: str("fav") === "1",
     onlyRated,
+    adultFilter,
     sortLevels,
   }
 
@@ -438,6 +444,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         defaultBand={tierBandWidth}
         criterionPresets={prefs.criterionPresets}
         confidenceVotes={prefs.confidenceVotes}
+        showAdultFilter
       />
 
       <RankingTable entries={entries} scoreThresholds={scoreThresholds} defaultSort={defaultSort} isPaid={isPaid} tierBandWidth={effectiveTierBandWidth} criterionPrefs={criterionPrefs} activeFilters={activeFilterChips} clearFiltersHref={clearFiltersHref} />
