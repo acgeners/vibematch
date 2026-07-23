@@ -1146,7 +1146,10 @@ export function ExternalSearch({
       </Button>
 
       <Sheet open={isOpen} onOpenChange={(open) => { if (!open) handleClose() }}>
-        <SheetContent side="right" className="w-full sm:max-w-xl overflow-y-auto">
+        {/* Largura 2xl (era xl): a galeria de capas do passo "multipick-covers" fica
+            apertada em 576px. O Sheet já é full-height (side=right), então só a largura
+            precisa crescer — mantém par com o UpdateDataDialog. */}
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
           <SheetHeader className="mb-4">
             <SheetTitle>Buscar dados externos</SheetTitle>
             <SheetDescription>
