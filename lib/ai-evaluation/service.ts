@@ -425,6 +425,58 @@ const evaluationToolPayloadSchema = z.object({
   reviewsRejectedReason: z.string().optional(),
 })
 
+/**
+ * Desfaz o duplo-encode do payload da tool. O modelo às vezes entrega um campo
+ * estruturado como STRING de JSON (`"scores": "[{...}]"`) — ou o input inteiro
+ * como string — mesmo com `input_schema` correto (`type: "array"` + `items`).
+ * Visto em produção 2026-07-22 com sonnet-5/v21: `stop_reason: "tool_use"` (ou
+ * seja, resposta COMPLETA, não truncada), ~1.5k tokens de saída, e o Zod
+ * reprovando com "expected array, received string".
+ *
+ * Descartar isso significa jogar fora uma avaliação inteira já paga (~US$0,03 e
+ * ~40s por tentativa, e o loop gasta DUAS) por uma questão de codificação, com o
+ * dado todo ali. Mesmo espírito do `enforceAuditableReviewUsage`, que deixou de
+ * ser fatal pelo mesmo motivo.
+ *
+ * Só recupera o que de fato é JSON válido: prosa numa string continua reprovando
+ * no schema (aí o dado realmente não veio). Puro e sem efeito colateral — quem
+ * chama decide o que logar.
+ */
+export function coerceToolPayload(input: unknown): { value: unknown; coerced: string[] } {
+  const coerced: string[] = []
+  const parseIfJson = (v: unknown, label: string): unknown => {
+    if (typeof v !== "string") return v
+    try {
+      const parsed: unknown = JSON.parse(v)
+      // Só aceita se virou estrutura. `JSON.parse('"texto"')` devolve string e
+      // `JSON.parse('7')` devolve número — nenhum dos dois é o que se perdeu aqui.
+      if (parsed === null || typeof parsed !== "object") return v
+      coerced.push(label)
+      return parsed
+    } catch {
+      return v
+    }
+  }
+
+  const top = parseIfJson(input, "input")
+  if (top === null || typeof top !== "object" || Array.isArray(top)) return { value: top, coerced }
+
+  const obj = { ...(top as Record<string, unknown>) }
+  for (const field of ["scores", "reviewUsage", "review_usage"]) {
+    if (field in obj) obj[field] = parseIfJson(obj[field], field)
+  }
+  return { value: obj, coerced }
+}
+
+/** Prévia curta e segura de um valor recusado pelo schema — sem isto, a próxima
+ *  ocorrência volta a ser um mistério (o payload cru não é persistido em lugar nenhum). */
+function previewRejectedValue(input: unknown): string {
+  const scores = (input as { scores?: unknown } | null)?.scores
+  if (typeof scores !== "string") return ""
+  const flat = scores.replace(/\s+/g, " ").trim()
+  return ` · scores recebido como string: "${flat.slice(0, 120)}${flat.length > 120 ? "…" : ""}"`
+}
+
 type EvaluationToolPayload = z.infer<typeof evaluationToolPayloadSchema>
 
 // ============================================================================
@@ -1490,12 +1542,22 @@ async function runEvaluationProvider(
       continue
     }
 
-    const parsed = evaluationToolPayloadSchema.safeParse(toolUseBlock.input)
+    // Duplo-encode (campo estruturado vindo como string de JSON) é recuperável —
+    // ver `coerceToolPayload`. O warn NÃO é decorativo: sem ele a recuperação vira
+    // silenciosa e a gente perde o sinal de que o modelo/prompt regrediu.
+    const { value: toolInput, coerced } = coerceToolPayload(toolUseBlock.input)
+    if (coerced.length > 0) {
+      console.warn(
+        `[AI] Payload da tool veio com JSON duplo-encodado em ${coerced.join(", ")} — recuperado (modelo=${modelToUse}, prompt=${PROMPT_VERSION}, work=${req.workId ?? "?"}).`
+      )
+    }
+
+    const parsed = evaluationToolPayloadSchema.safeParse(toolInput)
     if (!parsed.success) {
       lastError = new Error(
         `Payload da tool não atende ao schema: ${parsed.error.issues
           .map((i) => `${i.path.join(".")}: ${i.message}`)
-          .join("; ")}`
+          .join("; ")}${previewRejectedValue(toolInput)}`
       )
       continue
     }
