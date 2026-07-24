@@ -404,6 +404,10 @@ export function WorkTable({
           onSelectAll={selectAllVisible}
           onClearAll={clearCompare}
           criterionPrefs={criterionPrefs}
+          // O default de coluna do namespace "titles" foi escrito pra LISTA e
+          // esconde os 9 critérios; herdado aqui, abria uma matriz de atributos
+          // sem atributo nenhum.
+          forceCriterionColumns={namespace === "titles"}
         />
       ) : (
         <WorkListView

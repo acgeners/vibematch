@@ -47,6 +47,17 @@ interface WorkHeatmapViewProps {
   onClearAll?: () => void
   /** Faixas ideais por critério (perfil). Habilita o modo de cor "Minha faixa". */
   criterionPrefs?: Record<string, CriterionRange>
+  /**
+   * Garante as 9 colunas de critério na matriz mesmo que o namespace as esconda
+   * por padrão.
+   *
+   * Existe por causa de /titles: lá o default de coluna foi escrito pra LISTA
+   * ("visão enxuta") e esconde os 9 critérios. A matriz herdava esse default e
+   * abria mostrando Nota Prevista/Média/Votos — ou seja, uma matriz de atributos
+   * sem nenhum atributo. Ela ainda respeita a ORDEM e as colunas não-critério da
+   * config; só não deixa o conjunto de critérios ficar vazio por herança.
+   */
+  forceCriterionColumns?: boolean
 }
 
 const HEATMAP_TITLE_COL_WIDTH = 280
@@ -276,6 +287,7 @@ export function WorkHeatmapView({
   onSelectAll,
   onClearAll,
   criterionPrefs,
+  forceCriterionColumns = false,
 }: WorkHeatmapViewProps) {
   const columnConfig = useSyncExternalStore(
     (onChange) => subscribeWorkColumnConfig(onChange, namespace),
@@ -286,10 +298,15 @@ export function WorkHeatmapView({
   // ScoreCell cai pro catálogo por célula.
   const colorMode = useSyncExternalStore(subscribeAttrColorMode, readAttrColorMode, () => "catalog" as const)
 
-  const visibleScoreColumns = useMemo(
-    () => getConfiguredWorkColumns(columnConfig).filter((c) => isScoreColumn(c.key)),
-    [columnConfig]
-  )
+  const visibleScoreColumns = useMemo(() => {
+    const config = forceCriterionColumns
+      ? {
+          ...columnConfig,
+          hidden: columnConfig.hidden.filter((key) => !key.startsWith("crit_")),
+        }
+      : columnConfig
+    return getConfiguredWorkColumns(config).filter((c) => isScoreColumn(c.key))
+  }, [columnConfig, forceCriterionColumns])
 
   const { widths, setWidth } = useHeatmapColumnWidths(namespace)
 

@@ -14,6 +14,7 @@ import { getScoresReader } from "@/server/queries/user-scores"
 import { getHideAdultContent } from "@/server/queries/current-user"
 import { selectByIdsInChunks, fetchAllRows } from "@/lib/supabase/paginate"
 import { titleTokens, workMatchesQuery } from "@/lib/title-match"
+import { resolveSignatureWorkIds } from "@/server/queries/work-signature"
 import { isTerminalPersonalStatus } from "@/lib/constants/status-lookups"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 
@@ -157,6 +158,13 @@ export interface RankingFilters {
    * Ortogonal a `includeAdult` (opt-out interno de curadoria/auditoria).
    */
   adultFilter?: "hide" | "only"
+  /**
+   * ASSINATURA (?signature=) — filtra pelo atributo que mais MARCA a obra
+   * (maior z-score contra a média do catálogo), não por limiar de nota. É a lente
+   * de atributos de /titles; ver server/queries/work-signature.ts. Vários slugs =
+   * união (obra com QUALQUER uma dessas assinaturas).
+   */
+  signatureSlugs?: string[]
   criterionMin?: Partial<Record<string, number>>
   criterionMax?: Partial<Record<string, number>>
   publicationStatus?: string[]
@@ -350,6 +358,7 @@ export async function getRanking(
     tagAnyIds,
     tagExcludeIds,
     searchIds,
+    signatureIds,
   ] = await Promise.all([
     filters.genreAll?.length
       ? supabase
@@ -438,6 +447,8 @@ export async function getRanking(
           return rows.filter((w) => workMatchesQuery(w, tokens)).map((w) => w.id)
         })()
       : Promise.resolve(null),
+    // Assinatura: resolve os slugs pedidos pras obras que eles marcam.
+    resolveSignatureWorkIds(filters.signatureSlugs),
     ])
 
   // Combine include sets via intersection; expand exclude set.
@@ -449,6 +460,8 @@ export async function getRanking(
   // searchIds é null quando não há busca; [] quando a busca não casou nada (a
   // interseção vazia abaixo retorna [] corretamente).
   if (searchIds) includeSets.push(searchIds)
+  // Idem: [] = nenhuma obra tem essa assinatura → resultado vazio de verdade.
+  if (signatureIds) includeSets.push(signatureIds)
   // Idem pro filtro pessoal de quem NÃO é o dono: [] = ela não tem nenhuma obra nesse status
   // (ou nenhuma favorita) → interseção vazia → resultado vazio. Ignorar a lista vazia aqui
   // devolveria o catálogo inteiro como se fosse tudo dela.
