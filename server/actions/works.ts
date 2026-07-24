@@ -243,9 +243,27 @@ function findMatchingWorkName(work: any, incomingNames: Set<string>) {
   return savedNames.find((name) => incomingNames.has(name)) ?? null
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function workMatchesAnyName(work: any, incomingNames: Set<string>) {
-  return getSavedComparableNames(work).some((name) => incomingNames.has(name))
+/**
+ * O casamento de duplicata se apoia num nome FORTE (título/original) de PELO MENOS
+ * UM dos lados? Só então a auto-cura (`absorbIncomingAliases`) reescreve a linha
+ * existente.
+ *
+ * Casamento que existe só por alias-com-alias NÃO prova identidade — foi assim que
+ * o fragmento "your majesty", que sobra de dezenas de títulos quebrados na vírgula,
+ * fundiu duas obras distintas e ainda derramou o pacote de nomes de uma dentro da
+ * outra (envenenamento PERMANENTE: depois disso a colisão passava a ser por título
+ * exato e nenhuma retentativa saía). Ainda tratamos como possível duplicata e
+ * bloqueamos o cadastro; só não mexemos no catálogo.
+ */
+function isStrongIdentityMatch(
+  matchKey: string,
+  existing: { title?: string | null; original_title?: string | null },
+  incoming: { title?: string | null; original_title?: string | null },
+): boolean {
+  const strongKeys = [existing.title, existing.original_title, incoming.title, incoming.original_title]
+    .map(foldTitle)
+    .filter(Boolean)
+  return strongKeys.includes(matchKey)
 }
 
 function normalizePlatformRatings(
@@ -858,16 +876,22 @@ export async function findDuplicateWorkByTitle(
       (from, to) => supabase.from("works").select(DUPLICATE_WORK_SELECT).range(from, to),
       "findDuplicateWorkByTitle",
     )
-    const aliasMatch = allData.find((work) => workMatchesAnyName(work, incomingNames))
-    if (aliasMatch) {
-      const matched = aliasMatch as {
+    const aliasMatch = allData
+      .map((work) => ({ work, matchingName: findMatchingWorkName(work, incomingNames) }))
+      .find((m) => m.matchingName)
+    if (aliasMatch?.matchingName) {
+      const matched = aliasMatch.work as {
         id: string
         title: string
         original_title?: string | null
         alternative_titles?: string[] | null
       }
-      // Casou por um nome que veio de fora: grava, senão a busca segue sem ele.
-      await absorbIncomingAliases(supabase, matched, [normalizedTitle, ...alternativeTitles])
+      // Casou por um nome que veio de fora: grava, senão a busca segue sem ele —
+      // mas só quando o casamento é por nome forte (título/original), nunca
+      // alias-com-alias, que não prova identidade e envenenaria a linha.
+      if (isStrongIdentityMatch(aliasMatch.matchingName, matched, { title: normalizedTitle })) {
+        await absorbIncomingAliases(supabase, matched, [normalizedTitle, ...alternativeTitles])
+      }
       return {
         id: matched.id,
         title: matched.title,
@@ -1013,11 +1037,16 @@ async function persistNewWork(
     // A obra existente foi reconhecida por um nome que veio do formulário (em
     // geral trazido pela fonte externa). Se ela não guarda esse nome, a busca
     // continuaria sem achá-la — e o usuário voltaria aqui pelo mesmo caminho.
-    await absorbIncomingAliases(supabase, duplicate.work, [
-      data.title,
-      data.original_title ?? "",
-      ...(data.alternative_titles ?? []),
-    ])
+    //
+    // Só absorve quando o casamento veio de um nome forte (título/original) —
+    // casamento alias-com-alias não prova identidade e não pode reescrever a linha.
+    if (isStrongIdentityMatch(duplicate.matchingName, duplicate.work, data)) {
+      await absorbIncomingAliases(supabase, duplicate.work, [
+        data.title,
+        data.original_title ?? "",
+        ...(data.alternative_titles ?? []),
+      ])
+    }
     return {
       ok: false,
       error: {
