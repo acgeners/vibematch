@@ -146,7 +146,7 @@ export function UpdateDataActionButton({
   workId,
   currentWork,
   currentCovers,
-  archivedCoverUrls,
+  archivedCovers,
   currentSynopses,
 }: {
   workId: string
@@ -160,8 +160,8 @@ export function UpdateDataActionButton({
     observations?: string | null
   }
   currentCovers?: Array<{ url: string; source?: string | null; isPrimary?: boolean }>
-  /** URLs de capa arquivadas na edição — não voltam no refresh (migration 163). */
-  archivedCoverUrls?: string[]
+  /** Capas arquivadas na edição — não voltam no refresh; restauráveis no diálogo (migration 163). */
+  archivedCovers?: Array<{ url: string; source?: string | null }>
   currentSynopses?: Array<{ source: string; text: string; isPrimary: boolean }>
 }) {
   const isAdmin = useIsAdmin()
@@ -187,7 +187,7 @@ export function UpdateDataActionButton({
         workId={workId}
         currentWork={currentWork}
         currentCovers={currentCovers}
-        archivedCoverUrls={archivedCoverUrls}
+        archivedCovers={archivedCovers}
         currentSynopses={currentSynopses}
         open={open}
         onOpenChange={setOpen}

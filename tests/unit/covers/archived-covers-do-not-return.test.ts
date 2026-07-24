@@ -18,6 +18,11 @@ const FRESH = "https://cdn.exemplo/capa-boa.jpg"
 
 let insertedCovers: Array<Record<string, unknown>> = []
 let coversDeleted = false
+// Arquivo VIVO: o teste de restore precisa que o `.delete().in([url])` reflita na
+// leitura seguinte (getArchivedCoverUrls) — senão o filtro do syncExternalCovers
+// barraria a capa que acabou de ser desarquivada. Um mock estático não pegaria a
+// ordem "desarquiva ANTES de gravar", que é toda a correção do restore.
+let archivedUrls = new Set<string>()
 
 /** Encadeável: qualquer método devolve o proxy; o `await` resolve `result`. */
 const chain = (result: unknown, onCall?: (method: string, arg: unknown) => void): unknown =>
@@ -56,11 +61,31 @@ vi.mock("@/server/queries/current-user", () => ({
   getGenerateAllOnCreate: async () => false,
 }))
 
+// Builder ESTATEFUL só pra work_cover_archive: `.delete().in("url",[...])` remove
+// do conjunto; a leitura seguinte enxerga o conjunto atualizado.
+function archiveChain(): unknown {
+  let op: "select" | "delete" | "insert" | null = null
+  let inUrls: string[] | null = null
+  const builder: Record<string, unknown> = {
+    select: () => ((op = "select"), builder),
+    delete: () => ((op = "delete"), builder),
+    insert: (rows: Array<{ url: string }>) => ((op = "insert"), rows.forEach((r) => archivedUrls.add(r.url)), builder),
+    eq: () => builder,
+    in: (_col: string, urls: string[]) => ((inUrls = urls), builder),
+    then: (res: (v: unknown) => void) => {
+      if (op === "delete") (inUrls ?? []).forEach((u) => archivedUrls.delete(u))
+      const data = op === "select" ? [...archivedUrls].map((url) => ({ url })) : null
+      return Promise.resolve({ data, error: null }).then(res)
+    },
+  }
+  return builder
+}
+
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: (table: string) => {
       if (table === "work_cover_archive") {
-        return chain({ data: [{ url: ARCHIVED }], error: null })
+        return archiveChain()
       }
       if (table === "work_covers") {
         return chain({ data: null, error: null }, (method, arg) => {
@@ -81,6 +106,7 @@ import { updateWorkExternalData } from "@/server/actions/works"
 beforeEach(() => {
   insertedCovers = []
   coversDeleted = false
+  archivedUrls = new Set([ARCHIVED])
 })
 
 describe("capa arquivada não volta pelo 'Atualizar dados'", () => {
@@ -109,5 +135,38 @@ describe("capa arquivada não volta pelo 'Atualizar dados'", () => {
     expect(insertedCovers).toEqual([])
     // O delete é o ponto sem volta: se rodar, a obra fica sem capa.
     expect(coversDeleted).toBe(false)
+  })
+})
+
+describe("restaurar uma arquivada no 'Atualizar dados'", () => {
+  it("desarquiva ANTES de gravar, então a capa restaurada é inserida", async () => {
+    const result = await updateWorkExternalData("work-1", {
+      covers: [
+        { url: ARCHIVED, source: "comix", isPrimary: true },
+        { url: FRESH, source: "anilist", isPrimary: false },
+      ],
+      // o cliente só manda o que de fato foi restaurado + incluído
+      restoredCoverUrls: [ARCHIVED],
+    })
+
+    expect(result).not.toHaveProperty("error")
+    // A ordem é o que importa: o delete do arquivo roda ANTES do syncExternalCovers,
+    // então a leitura do filtro já não vê ARCHIVED e ela passa.
+    expect(archivedUrls.has(ARCHIVED)).toBe(false)
+    const urls = insertedCovers.map((r) => r.url).sort()
+    expect(urls).toEqual([FRESH, ARCHIVED].sort())
+  })
+
+  it("sem restoredCoverUrls, a MESMA capa em covers continua barrada (contraprova)", async () => {
+    const result = await updateWorkExternalData("work-1", {
+      covers: [
+        { url: ARCHIVED, source: "comix", isPrimary: true },
+        { url: FRESH, source: "anilist", isPrimary: false },
+      ],
+    })
+
+    expect(result).not.toHaveProperty("error")
+    expect(archivedUrls.has(ARCHIVED)).toBe(true) // segue arquivada
+    expect(insertedCovers.map((r) => r.url)).toEqual([FRESH])
   })
 })

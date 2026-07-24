@@ -321,9 +321,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getHideAdultContent(),
     getArchivedCovers(work.id as string),
   ])
-  // Capas que você apagou na edição: o diálogo de "Atualizar dados" não as
-  // reoferece (migration 163). O servidor também as descarta na gravação.
-  const archivedCoverUrls = archivedCovers.map((c) => c.url)
+  // Capas que você apagou na edição (migration 163): o "Atualizar dados" não as
+  // traz de volta sozinho, mas as lista numa seção "Arquivadas (N)" de onde podem
+  // ser restauradas. `getArchivedCovers` já devolve {url, source}.
   // "Ler no Comix": só pra obras que você acompanha (Reading/Started) e que têm
   // hid aceito. `pending` = capítulos não lidos (total − lidos), sinal persistido
   // e refrescado pela checagem manual do /leitura.
@@ -902,7 +902,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       isPrimary: c.is_primary,
                     })
                   )}
-                  archivedCoverUrls={archivedCoverUrls}
+                  archivedCovers={archivedCovers}
                   currentSynopses={(work.work_synopses ?? []).map(
                     (s: { source?: string | null; text: string; is_primary?: boolean }) => ({
                       source: s.source ?? "manual",
@@ -932,7 +932,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       isPrimary: c.is_primary,
                     })
                   )}
-                  archivedCoverUrls={archivedCoverUrls}
+                  archivedCovers={archivedCovers}
                   currentSynopses={(work.work_synopses ?? []).map(
                     (s: { source?: string | null; text: string; is_primary?: boolean }) => ({
                       source: s.source ?? "manual",
