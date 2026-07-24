@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type Ref } from "react"
 import Image from "next/image"
 import { toast } from "sonner"
-import { Search, Loader2, Sparkles, Trash2, Plus, AlertTriangle } from "lucide-react"
+import { Search, Loader2, Sparkles, Trash2, Plus, AlertTriangle, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -24,6 +24,7 @@ import { NO_REVIEWS_REASON_LABEL } from "@/lib/ai-evaluation/no-reviews"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import { fetchComicKClient, fetchAnimePlanetClient } from "@/lib/external/client-fetches"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
+import { SELECTABLE_EXTERNAL_SOURCES, sourceOrderIndex } from "@/lib/external/source-order"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { SMALL_COVER_WIDTH } from "@/lib/cover-quality"
 import { cn, titleToSlug } from "@/lib/utils"
@@ -122,9 +123,10 @@ interface ExternalSearchCacheEntry {
   ts: number
   candidates: MergedCandidate[]
   selection: SelectionSnapshot | null
-  /** A busca do ComicK falhou (FlareSolverr/Cloudflare) — preserva o sinal pra que
-   * uma reabertura cacheada ainda re-tente o ComicK em vez de descartá-lo. */
-  comickSearchFailed: boolean
+  /** Fontes cuja BUSCA falhou (Cloudflare/timeout), não que "não têm a obra".
+   * Preservado no cache pra que uma reabertura cacheada ainda mostre a falha (e
+   * re-tente o ComicK) em vez de exibir a fonte como se ela nada tivesse achado. */
+  failedSources: ExternalSourceId[]
 }
 
 let externalSearchCache: ExternalSearchCacheEntry | null = null
@@ -148,9 +150,9 @@ function writeSearchCache(
   query: string,
   candidates: MergedCandidate[],
   selection: SelectionSnapshot | null,
-  comickSearchFailed: boolean,
+  failedSources: ExternalSourceId[],
 ) {
-  externalSearchCache = { query: normalizeSearchQuery(query), ts: Date.now(), candidates, selection, comickSearchFailed }
+  externalSearchCache = { query: normalizeSearchQuery(query), ts: Date.now(), candidates, selection, failedSources }
 }
 
 function clearSearchCache() {
@@ -162,22 +164,42 @@ const SOURCE_COLORS: Partial<Record<string, string>> = {
   mangaupdates: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
 }
 
-// Comix fica por ÚLTIMO: a busca dela é gateada (token/FlareSolverr), entra só
-// via hid manual e é validada à parte. Mantê-la no fim da ordenação garante que,
-// mesmo depois de validar e salvar o hid, o bloco da Comix permaneça no final.
-const SOURCE_ORDER: ExternalSourceId[] = [
-  "anilist",
-  "animeplanet",
-  "comick",
-  "kitsu",
-  "mangadex",
-  "mangaupdates",
-  "myanimelist",
-  "comix",
-]
+// A ordem vive em `lib/external/source-order.ts` (uma lista só, com trava de
+// compilação). A lista LOCAL que existia aqui havia esquecido o `mangago`: como a
+// ordenação é por `indexOf`, ele recebia −1 e ia parar antes de TODAS as outras.
+// A intenção antiga de "Comix por último" (pra posição não pular depois de validar
+// o hid) deixou de depender da ordenação: agora todas as fontes aparecem sempre,
+// então nenhuma posição muda entre buscas.
 
 function getSourceLabel(source: string) {
   return PLATFORM_LABELS[source] ?? source
+}
+
+/**
+ * URL pública da entrada na fonte, pra conferir na dúvida (o rótulo vira link).
+ * Só as fontes cujo padrão de URL é estável a partir do id que já temos; o resto
+ * degrada pra texto simples — nunca chutamos uma URL que pode dar 404.
+ */
+function sourceEntryUrl(source: ExternalSourceId, externalId: string): string | null {
+  const id = encodeURIComponent(externalId)
+  switch (source) {
+    case "mangago": return `https://www.mangago.me/read-manga/${id}/`
+    case "animeplanet": return `https://www.anime-planet.com/manga/${id}`
+    case "anilist": return `https://anilist.co/manga/${id}`
+    case "mangaupdates": return `https://www.mangaupdates.com/series.html?id=${id}`
+    case "myanimelist": return `https://myanimelist.net/manga/${id}`
+    case "mangadex": return `https://mangadex.org/title/${id}`
+    case "kitsu": return `https://kitsu.app/manga/${id}`
+    case "comick": return `https://comick.io/comic/${id}`
+    case "comix": return `https://comix.to/title/${id}`
+    case "outros": return null
+  }
+}
+
+// Título "igual" pra fins de duplicata dentro de UMA fonte: só capitalização e
+// pontuação separam as duas entradas que o Mangago devolve pra mesma obra.
+function normalizeOptionTitle(title: string): string {
+  return title.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "")
 }
 
 function isHttpUrl(value: string): boolean {
@@ -265,7 +287,23 @@ function fallbackSourceOption(
   }
 }
 
-function getSourceMatchGroups(candidate: MergedCandidate) {
+/** Em que pé a fonte está — "não achou" e "a busca falhou" NÃO são a mesma coisa. */
+export type SourceGroupState = "ok" | "empty" | "failed"
+
+/**
+ * Exportado só pra teste: aqui mora a ordem das fontes, a ordem da pré-seleção e a
+ * detecção de duplicata.
+ *
+ * TODAS as fontes saem daqui, sempre, na ordem canônica — inclusive as que não
+ * acharam nada. Antes só saíam as que tinham resultado: a lista mudava de tamanho e
+ * de ordem a cada busca, e uma fonte que FALHOU (Cloudflare/timeout) desaparecia
+ * exatamente como uma que simplesmente não tem a obra. `failedSources` vem da própria
+ * busca (`searchAllSourcesWithStatus`) e já existia — a tela só não usava.
+ */
+export function getSourceMatchGroups(
+  candidate: MergedCandidate,
+  failedSources: readonly ExternalSourceId[] = []
+) {
   const bySource = new Map<ExternalSourceId, ExternalSourceCandidateOption[]>()
   for (const option of candidate.sourceCandidates ?? []) {
     const current = bySource.get(option.source) ?? []
@@ -279,13 +317,39 @@ function getSourceMatchGroups(candidate: MergedCandidate) {
     const fallback = fallbackSourceOption(candidate, source)
     if (fallback) bySource.set(source, [fallback])
   }
+  // Completa com as fontes que não vieram na busca, pra nenhuma sumir da lista.
+  for (const source of SELECTABLE_EXTERNAL_SOURCES) {
+    if (!bySource.has(source)) bySource.set(source, [])
+  }
 
   return [...bySource.entries()]
-    .map(([source, options]) => ({
-      source,
-      options: [...options].sort((a, b) => b.matchScore - a.matchScore),
-    }))
-    .sort((a, b) => SOURCE_ORDER.indexOf(a.source) - SOURCE_ORDER.indexOf(b.source))
+    .map(([source, options]) => {
+      // Desempate por ÚLTIMO CAPÍTULO. Sem ele, duas entradas da mesma obra na
+      // mesma fonte empatam em match 100% e a pré-seleção vira a ordem em que a
+      // fonte devolveu — que no Mangago costuma ser o upload ABANDONADO. Com o
+      // desempate, a entrada mais avançada é a que já vem marcada.
+      const sorted = [...options].sort(
+        (a, b) => b.matchScore - a.matchScore || (b.latestChapter ?? -1) - (a.latestChapter ?? -1)
+      )
+      // Mesma fonte devolveu ≥2 entradas com o MESMO título: é a duplicata que o
+      // usuário não conseguia distinguir. Vira aviso explícito em vez de duas
+      // linhas idênticas (e nenhuma some — a escolha continua sendo dele).
+      const titleCounts = new Map<string, number>()
+      for (const option of sorted) {
+        const key = normalizeOptionTitle(option.title)
+        titleCounts.set(key, (titleCounts.get(key) ?? 0) + 1)
+      }
+      const duplicateCount = Math.max(0, ...titleCounts.values())
+      const state: SourceGroupState =
+        sorted.length > 0 ? "ok" : failedSources.includes(source) ? "failed" : "empty"
+      return {
+        source,
+        options: sorted,
+        state,
+        duplicateCount: duplicateCount > 1 ? duplicateCount : 0,
+      }
+    })
+    .sort((a, b) => sourceOrderIndex(a.source) - sourceOrderIndex(b.source))
 }
 
 function buildInitialSourceSelection(candidate: MergedCandidate) {
@@ -331,10 +395,24 @@ function applySelectedId(
     case "animeplanet":
       candidate.animePlanetSlug = option.externalId
       break
+    // ⚠️ Este case FALTAVA. Como `buildCandidateFromSourceSelection` reconstrói o
+    // candidato do zero, escolher o Mangago no diálogo descartava o slug em silêncio:
+    // a fonte aparecia selecionada e não era persistida em `work_external_ids`.
+    case "mangago":
+      candidate.mangagoSlug = option.externalId
+      break
+    case "outros":
+      break // catch-all: não tem campo de id próprio no candidato
+    default:
+      // Trava de compilação: fonte nova em `ExternalSourceId` sem case aqui quebra o
+      // build, em vez de perder o id caladamente (foi o que aconteceu com o mangago).
+      option.source satisfies never
   }
 }
 
-function buildCandidateFromSourceSelection(
+/** Exportado só pra teste: é o passo que reconstrói o candidato do ZERO — quem
+ *  esquecer de copiar um id aqui (ou no `applySelectedId`) o perde em silêncio. */
+export function buildCandidateFromSourceSelection(
   candidate: MergedCandidate,
   selection: Partial<Record<ExternalSourceId, SourceSelectionValue>>
 ): MergedCandidate | null {
@@ -414,6 +492,10 @@ export function ExternalSearch({
   // em silêncio. Quando ligado, proceedWithCandidate re-tenta o ComicK pra dar
   // feedback/retry (em vez de descartá-lo). Setado por handleSearch.
   const comickSearchFailedRef = useRef(false)
+  // Fontes cuja BUSCA falhou — o diálogo mostra "a busca falhou" em vez de deixar a
+  // fonte parecer que simplesmente não tem a obra. A busca sempre devolveu isso; só
+  // o ComicK era aproveitado e o resto ia pro lixo.
+  const [failedSearchSources, setFailedSearchSources] = useState<ExternalSourceId[]>([])
   const [phase, setPhase] = useState<Phase>("idle")
   const [candidates, setCandidates] = useState<MergedCandidate[]>([])
   const [pendingData, setPendingData] = useState<ExternalWorkData | null>(null)
@@ -479,7 +561,8 @@ export function ExternalSearch({
       if (cached) {
         setIsOpen(true)
         setCandidates(cached.candidates)
-        comickSearchFailedRef.current = cached.comickSearchFailed
+        setFailedSearchSources(cached.failedSources)
+        comickSearchFailedRef.current = cached.failedSources.includes("comick")
         const sel = cached.selection
         if (sel?.comixComickFailed) {
           // Comix/ComicK falharam (FlareSolverr) na 1ª vez ⇒ refaz o fetch da obra.
@@ -501,11 +584,13 @@ export function ExternalSearch({
     try {
       const { candidates: found, failedSources } = await searchExternalTitles(titleQuery)
       comickSearchFailedRef.current = failedSources.includes("comick")
+      setFailedSearchSources(failedSources)
       setCandidates(found)
-      if (enableResultCache) writeSearchCache(titleQuery, found, null, comickSearchFailedRef.current)
+      if (enableResultCache) writeSearchCache(titleQuery, found, null, failedSources)
     } catch (error) {
       console.error("[ExternalSearch] searchExternalTitles failed", error)
       comickSearchFailedRef.current = false
+      setFailedSearchSources([])
       setCandidates([])
     } finally {
       setPhase("results")
@@ -1043,7 +1128,7 @@ export function ExternalSearch({
               comixComickFailed: comixComickFailedRef.current,
             }
           : null
-      writeSearchCache(titleQuery, candidates, selection, comickSearchFailedRef.current)
+      writeSearchCache(titleQuery, candidates, selection, failedSearchSources)
     }
     setIsOpen(false)
     setPhase("idle")
@@ -1060,16 +1145,17 @@ export function ExternalSearch({
     setManualCoverError(null)
   }
 
-  const sourceMatchGroups = pendingCandidate ? getSourceMatchGroups(pendingCandidate) : []
+  const sourceMatchGroups = pendingCandidate
+    ? getSourceMatchGroups(pendingCandidate, failedSearchSources)
+    : []
   // Comix na confirmação: a busca dela é gateada (token) e nunca vem em
-  // sourceCandidates. Com o auto-resolve LIGADO (sidecar), a Comix é descoberta
-  // por cross-ID sozinha → escondemos o group (e o bloco de hid manual). Sem o
-  // sidecar (ex.: prod), injetamos o group sintético pra manter o preenchimento manual.
+  // sourceCandidates. Com o auto-resolve LIGADO (sidecar), a Comix é descoberta por
+  // cross-ID sozinha → escondemos o group (e o bloco de hid manual). Sem o sidecar
+  // (ex.: prod), ela agora já vem da lista canônica com o bloco de hid manual — o
+  // group sintético que existia aqui virou desnecessário.
   const displayGroups = comixAutoResolve
     ? sourceMatchGroups.filter((g) => g.source !== "comix")
-    : sourceMatchGroups.some((g) => g.source === "comix")
-      ? sourceMatchGroups
-      : [...sourceMatchGroups, { source: "comix" as ExternalSourceId, options: [] as ExternalSourceCandidateOption[] }]
+    : sourceMatchGroups
   const hasSelectedSource = sourceMatchGroups.some((group) => {
     const value = sourceSelection[group.source]
     return Boolean(value && value !== "rejected" && value !== "none")
@@ -1206,8 +1292,23 @@ export function ExternalSearch({
                 return (
                   <div key={group.source} className="rounded-md border p-3 space-y-2">
                     <p className="text-sm font-medium">{getSourceLabel(group.source)}</p>
-                    {group.options.map((option) => {
+                    {group.duplicateCount > 0 && (
+                      <p className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-[11px] text-muted-foreground dark:border-amber-800 dark:bg-amber-950/30">
+                        <span aria-hidden>⚠︎</span>
+                        <span>
+                          <strong className="font-semibold text-amber-700 dark:text-amber-400">
+                            {group.duplicateCount} entradas para esta obra nesta fonte.
+                          </strong>{" "}
+                          Marcamos a de maior capítulo; confira antes de seguir.
+                        </span>
+                      </p>
+                    )}
+                    {group.options.map((option, index) => {
                       const checked = value === option.externalId
+                      // Só rotulamos "mais completa"/"parada" quando HÁ duplicata e há
+                      // capítulo pra comparar — fora disso o selo seria ruído.
+                      const ranked = group.duplicateCount > 0 && option.latestChapter != null
+                      const entryUrl = sourceEntryUrl(group.source, option.externalId)
                       return (
                         <label
                           key={`${group.source}-${option.externalId}`}
@@ -1238,44 +1339,111 @@ export function ExternalSearch({
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="line-clamp-2 text-sm font-medium">{option.title}</p>
-                            <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            <p className="line-clamp-2 text-sm font-medium">
+                              {option.title}
+                              {ranked && (
+                                <span
+                                  className={`ml-1.5 rounded-full px-1.5 py-px align-[1px] text-[10px] font-semibold ${
+                                    index === 0
+                                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"
+                                      : "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400"
+                                  }`}
+                                >
+                                  {index === 0 ? "mais completa" : `parada no ${option.latestChapter}`}
+                                </span>
+                              )}
+                            </p>
+                            <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
                               match {Math.round(option.matchScore * 100)}%
                               {option.year ? ` · ${option.year}` : ""}
                               {option.chapters ? ` · ${option.chapters} cap.` : ""}
+                              {option.latestChapter != null ? ` · últ. cap. ${option.latestChapter}` : ""}
                             </p>
+                            {/* Identificador visível só quando a fonte devolveu duplicata: é o
+                                único jeito de saber QUAL entrada é qual. Fora daí, é ruído. */}
+                            {group.duplicateCount > 0 && (
+                              <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+                                {option.externalId}
+                              </p>
+                            )}
                           </div>
+                          {/* Abrir a obra na fonte, em nova aba — pra conferir QUAL das
+                              entradas duplicadas é a certa sem sair do diálogo. Só aparece
+                              quando há duplicata (é onde a conferência importa) e quando a
+                              URL da fonte é conhecida. `stopPropagation` pra o clique no
+                              link não marcar o radio da label. */}
+                          {group.duplicateCount > 0 && entryUrl && (
+                            <a
+                              href={entryUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              title={`Abrir na fonte (${getSourceLabel(group.source)}) em nova aba`}
+                              aria-label={`Abrir "${option.title}" na fonte em nova aba`}
+                              className="mt-0.5 shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          )}
                         </label>
                       )
                     })}
-                    <label
-                      className={`flex items-center gap-3 rounded-md border p-2 cursor-pointer transition-colors ${
-                        value === "rejected" ? "border-rose-300 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/30" : "hover:bg-muted/40"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name={`source-${group.source}`}
-                        checked={value === "rejected"}
-                        onChange={() => setSourceMatchSelection(group.source, "rejected")}
-                        className="accent-primary"
-                      />
-                      <span className="text-xs">Nenhum match válido — ignorar esta fonte</span>
-                    </label>
-                    <label
-                      className={`flex items-center gap-3 rounded-md border p-2 cursor-pointer transition-colors ${
-                        value === "none" ? "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30" : "hover:bg-muted/40"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name={`source-${group.source}`}
-                        checked={value === "none"}
-                        onChange={() => setSourceMatchSelection(group.source, "none")}
-                        className="accent-primary"
-                      />
-                      <span className="text-xs">Não decidir agora (refazer busca depois)</span>
-                    </label>
+                    {/* Fonte sem nenhuma opção: em vez de sumir da lista (era o que
+                        acontecia), diz em que pé está.
+                        ⚠️ O texto do caso vazio é DELIBERADAMENTE neutro ("sem match"),
+                        não "a fonte não tem a obra": 7 dos 9 conectores de busca engolem
+                        o próprio erro e devolvem `[]`, então um 400/500 interno chega aqui
+                        indistinguível de uma resposta vazia. Só timeout e exceção entram em
+                        `failedSources`. Afirmar que a fonte respondeu seria mentira nos
+                        casos que ela nem respondeu. (O fluxo de "Atualizar dados" resolve
+                        isso lendo `external_source_health` — ver source-selection-step.tsx.) */}
+                    {group.options.length === 0 && group.source !== "comix" && (
+                      group.state === "failed" ? (
+                        <p className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-[11px] text-muted-foreground dark:border-amber-800 dark:bg-amber-950/30">
+                          <span aria-hidden>⚠︎</span>
+                          <span>
+                            <strong className="font-semibold text-amber-700 dark:text-amber-400">A busca falhou</strong>{" "}
+                            (Cloudflare/timeout) — não é &ldquo;sem resultado&rdquo;. Será re-tentada ao confirmar.
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="rounded-md border p-2 text-[11px] italic text-muted-foreground">
+                          Nenhum match nesta fonte.
+                        </p>
+                      )
+                    )}
+                    {group.options.length > 0 && (
+                      <>
+                        <label
+                          className={`flex items-center gap-3 rounded-md border p-2 cursor-pointer transition-colors ${
+                            value === "rejected" ? "border-rose-300 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/30" : "hover:bg-muted/40"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name={`source-${group.source}`}
+                            checked={value === "rejected"}
+                            onChange={() => setSourceMatchSelection(group.source, "rejected")}
+                            className="accent-primary"
+                          />
+                          <span className="text-xs">Nenhum match válido — ignorar esta fonte</span>
+                        </label>
+                        <label
+                          className={`flex items-center gap-3 rounded-md border p-2 cursor-pointer transition-colors ${
+                            value === "none" ? "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30" : "hover:bg-muted/40"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name={`source-${group.source}`}
+                            checked={value === "none"}
+                            onChange={() => setSourceMatchSelection(group.source, "none")}
+                            className="accent-primary"
+                          />
+                          <span className="text-xs">Não decidir agora (refazer busca depois)</span>
+                        </label>
+                      </>
+                    )}
 
                     {group.source === "comix" && (
                       <div className="mt-1 space-y-1.5 rounded-md border border-dashed border-border p-2">

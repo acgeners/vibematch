@@ -106,3 +106,111 @@ describe("parseSearchResults — compatibilidade (não quebra slug/title/cover)"
     expect(results.find((r) => r.id === "mangago:second")?.alternativeTitles).toEqual(["Alias Second"])
   })
 })
+
+// ---------------------------------------------------------------------------
+// Título longo — a fonte inteira sumia em silêncio
+// ---------------------------------------------------------------------------
+// Reproduz o HTML REAL (medido 2026-07-24 contra a busca ao vivo) das DUAS âncoras
+// que carregam o título e que crescem com ele: a da capa (título em alt= E title=,
+// sobre uma URL de CDN longa) e a do <h2>, onde o Mangago embrulha CADA palavra
+// casada da busca em <span class="hilight">. Com o teto de 400 chars no miolo do
+// regex de âncora, as duas estouravam e só sobravam os links de capítulo — que o
+// parser descarta. Resultado: [] , sem erro, e o Mangago não aparecia no diálogo.
+const LONG_TITLE = "Shut up, Evil Dragon, I don't want to raise a child with you anymore"
+const LONG_SLUG = "shut_up_evil_dragon_i_don_t_want_to_raise_a_child_with_you_anymore"
+
+// Capa com URL de CDN do tamanho real (~200 chars) — é ela que empurra o miolo pro teto.
+const LONG_COVER =
+  "https://i0.mangapicgallery.com/r/coverlink/rROHYYKHa8H0kze7mzRDeI6d3aDYsVioY7tgIErRSAUz7kctKsWCX7nW15KW8DJAf6WiPFq0Y0dwJDKk-Acwetkf2_jDdBKmMKMTcwivwxfUxcxegG4IEPsb9i0i_iEXVNCJ2EDMfI0mCgz.jpeg?4"
+
+/** Título com cada palavra embrulhada em <span class="hilight"> (como o Mangago devolve). */
+const hilight = (title: string) =>
+  title.split(" ").map((w) => `<span class="hilight">${w}</span>`).join(" ")
+
+function realLi(slug: string, title: string, chapters: number[]) {
+  const chapterLinks = chapters
+    .map((n) => `<a class="chico" href="/read-manga/${slug}/uu/nml_chapter-${n}/pg-1/"><b>Ch.${n}</b></a>`)
+    .join(", ")
+  return `
+  <li>
+    <div class="box ">
+      <div class="left">
+        <a href="https://www.mangago.me/read-manga/${slug}/" class="thm-effect" title="${title}">
+          <img src="${LONG_COVER}" alt="${title}" title="${title}" style="width:100px;height:142px">
+        </a>
+      </div>
+      <div class="left">
+        <div class="row-1"><span class="tit"><h2>
+          <a style="background: url(&quot;https://pic1.mangapicgallery.com/images/manga_opened.png&quot;) no-repeat;padding-left:20px" href="https://www.mangago.me/read-manga/${slug}/">${hilight(title)}</a>
+        </h2></span></div>
+        <div class="row-3"><span class="blue">Latest Chapters: </span>${chapterLinks}</div>
+      </div>
+    </div>
+  </li>`
+}
+
+describe("parseSearchResults — título longo (fonte sumia em silêncio)", () => {
+  it("acha a obra mesmo com título longo nas DUAS âncoras (regressão do teto de 400)", () => {
+    const html = page(realLi(LONG_SLUG, LONG_TITLE, [103, 102.5, 102, 101, 100, 99]))
+
+    // Sanidade: o miolo da âncora de capa PRECISA passar de 400, senão o teste
+    // não estaria exercendo o bug que existia.
+    const inner = html.match(/<a\b[^>]*class="thm-effect"[^>]*>([\s\S]*?)<\/a>/i)?.[1] ?? ""
+    expect(inner.length).toBeGreaterThan(400)
+
+    const results = parseSearchResults(html)
+    expect(results).toHaveLength(1)
+    expect(results[0].id).toBe(`mangago:${LONG_SLUG}`)
+    expect(results[0].title).toBe(LONG_TITLE)
+  })
+
+  it("títulos curtos continuam funcionando igual", () => {
+    const results = parseSearchResults(page(realLi("solo_leveling", "Solo Leveling", [200])))
+    expect(results.map((r) => r.title)).toEqual(["Solo Leveling"])
+  })
+
+  // Com o teto maior, uma âncora sem `</a>` passa a casar e "engole" a marcação
+  // seguinte como miolo. O `title=` tem que continuar vencendo esse texto — senão
+  // a obra órfã herdaria o título da obra de baixo.
+  it("âncora sem </a> não rouba o título da obra seguinte", () => {
+    const broken = `<html><body><ul class="pic_list">
+      <li><a href="https://www.mangago.me/read-manga/orfa/" class="thm-effect" title="Órfã">
+      ${realLi("boa", "Boa", [7])}</ul></body></html>`
+    const results = parseSearchResults(broken)
+    expect(results.find((r) => r.id === "mangago:orfa")?.title).toBe("Órfã")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Último capítulo — desempate da duplicata da MESMA fonte
+// ---------------------------------------------------------------------------
+// Caso real: o Mangago hospeda duas páginas da mesma obra coreana — o upload
+// mantido (Ch.48) e um abandonado (Ch.10). As duas chegavam à tela com o mesmo
+// título e match 100%, sem ano nem capítulo: impossível escolher.
+describe("parseSearchResults — latestChapter", () => {
+  it("lê o MAIOR capítulo do bloco (a lista não vem ordenada)", () => {
+    const results = parseSearchResults(page(realLi("x", "X", [45, 48, 46, 47])))
+    expect(results[0].latestChapter).toBe(48)
+  })
+
+  it("distingue as duas entradas duplicadas da mesma obra", () => {
+    const results = parseSearchResults(
+      page(
+        realLi("i_caught_the_male_lead_on_a_deserted_island", "Reeling in the Male Lead", [48, 47, 46]),
+        realLi("reeling_in_the_male_lead", "Reeling in the Male Lead", [10, 9, 8])
+      )
+    )
+    expect(results.map((r) => [r.id, r.latestChapter])).toEqual([
+      ["mangago:i_caught_the_male_lead_on_a_deserted_island", 48],
+      ["mangago:reeling_in_the_male_lead", 10],
+    ])
+  })
+
+  it("aceita capítulo decimal", () => {
+    expect(parseSearchResults(page(realLi("x", "X", [102, 102.5]))).at(0)?.latestChapter).toBe(102.5)
+  })
+
+  it("sem lista de capítulos → undefined (não 0, que ordenaria errado)", () => {
+    expect(parseSearchResults(page(li("x", "X"))).at(0)?.latestChapter).toBeUndefined()
+  })
+})

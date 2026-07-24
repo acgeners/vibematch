@@ -1,6 +1,6 @@
 import type { PublicationStatus } from "@/types/domain"
 import type { ExternalSearchResult } from "./types"
-import { fetchHtmlWithCfFallback, isFlareSolverrCircuitOpen } from "./flaresolverr"
+import { fetchHtmlWithCfFallback, isCfBypassUnavailable } from "./flaresolverr"
 
 // ============================================================================
 // Mangago (www.mangago.me) — fonte externa: metadados + rating + reviews
@@ -169,6 +169,59 @@ function looksLikeChapterRef(text: string | undefined): boolean {
 }
 
 /**
+ * Teto do miolo (`<a …>MIOLO</a>`) na varredura de âncoras da busca.
+ *
+ * ⚠️ ERA 400 — e isso APAGAVA a fonte inteira em títulos longos, sem erro nenhum.
+ * As DUAS âncoras que carregam o título são grandes, e crescem com o título:
+ *   • a da capa embute um `<img>` cuja URL de CDN já tem ~200 chars e repete o
+ *     título em `alt=` E `title=` (≈ 270 + 2× título);
+ *   • a do `<h2>` vem com CADA palavra casada da busca embrulhada em
+ *     `<span class="hilight">` — ~29 chars de marcação POR PALAVRA.
+ * Estourando as duas, sobram só as âncoras de capítulo (`class="chico"`), que o
+ * `looksLikeChapterRef` descarta → `parseSearchResults` devolve `[]` e o Mangago
+ * some do diálogo como se não tivesse a obra. Medido em "Shut up, Evil Dragon, I
+ * don't want to raise a child with you anymore": miolo de 405 contra o teto de 400.
+ *
+ * O teto existe só pra não varrer a página inteira se um `</a>` faltar; 8000 dá
+ * folga de ordens de grandeza pro maior título plausível sem perder essa proteção
+ * (o quantificador é preguiçoso, então para no 1º `</a>` — não custa nada no caso comum).
+ */
+const ANCHOR_INNER_MAX = 8000
+
+/**
+ * Último capítulo listado no bloco do resultado ("Latest Chapters: Ch.103, Ch.102.5…").
+ *
+ * Serve pra DESEMPATAR: o Mangago hospeda com frequência duas páginas da MESMA obra
+ * (um upload abandonado + o mantido) — ex.: `reeling_in_the_male_lead` (Ch.10) e
+ * `i_caught_the_male_lead_on_a_deserted_island` (Ch.48). Sem isto as duas chegam à
+ * tela idênticas ("match 100%", sem ano nem capítulo) e não há como escolher.
+ *
+ * É o MAIOR número, não o primeiro: a lista de "Latest Chapters" nem sempre está
+ * ordenada (grupos de upload distintos se intercalam, ver `parseMangagoChapters`).
+ */
+function extractLatestChapter(block: string): number | undefined {
+  const nums = [...block.matchAll(/(?:Ch\.?|Chapter)\s*(\d+(?:\.\d+)?)/gi)]
+    .map((m) => Number(m[1]))
+    .filter((n) => Number.isFinite(n))
+  return nums.length ? Math.max(...nums) : undefined
+}
+
+/** Último capítulo por slug, escopado ao `<li>` do resultado (mesma varredura do "Other Title"). */
+function extractSearchLatestChapters(html: string): Map<string, number> {
+  const bySlug = new Map<string, number>()
+  const liRegex = /<li\b[^>]*>([\s\S]*?)<\/li>/gi
+  let li: RegExpExecArray | null
+  while ((li = liRegex.exec(html)) !== null) {
+    const block = li[1]
+    const slug = block.match(/\/read-manga\/([^"/?#]+)/i)?.[1]
+    if (!slug || bySlug.has(slug)) continue
+    const latest = extractLatestChapter(block)
+    if (latest != null) bySlug.set(slug, latest)
+  }
+  return bySlug
+}
+
+/**
  * Aliases ("Other Title") por slug na página de busca. Cada resultado é um `<li>`
  * com `<span class="blue">Other Title: </span>…</div>`, separados por ";" (ou "；").
  * Escopamos ao `<li>` do resultado pra associar ao slug certo (o 1º `/read-manga/`
@@ -213,10 +266,14 @@ export function parseSearchResults(html: string): ExternalSearchResult[] {
   const order: string[] = []
   const bySlug = new Map<string, { titleAttr?: string; text?: string; cover?: string }>()
   const otherBySlug = extractSearchOtherTitles(html)
+  const latestBySlug = extractSearchLatestChapters(html)
 
   // Aceita host absoluto opcional; captura o slug (1º segmento) e ignora o resto
   // do path (caminho de capítulo). Casa tanto a âncora de capa quanto as de cap.
-  const anchorRegex = /<a\b([^>]*?)href="(?:https?:\/\/[^"/]+)?\/read-manga\/([^"/?#]+)[^"]*"([^>]*)>([\s\S]{0,400}?)<\/a>/gi
+  const anchorRegex = new RegExp(
+    String.raw`<a\b([^>]*?)href="(?:https?://[^"/]+)?/read-manga/([^"/?#]+)[^"]*"([^>]*)>([\s\S]{0,${ANCHOR_INNER_MAX}}?)</a>`,
+    "gi",
+  )
   let match: RegExpExecArray | null
   while ((match = anchorRegex.exec(html)) !== null) {
     const [, pre, slug, post, inner] = match
@@ -265,6 +322,7 @@ export function parseSearchResults(html: string): ExternalSearchResult[] {
       title,
       coverUrl: entry.cover,
       alternativeTitles: alternativeTitles.length ? alternativeTitles : undefined,
+      latestChapter: latestBySlug.get(slug),
     })
   }
   return results
@@ -272,7 +330,7 @@ export function parseSearchResults(html: string): ExternalSearchResult[] {
 
 export async function searchMangago(query: string): Promise<ExternalSearchResult[]> {
   // CF-gated: sem FlareSolverr (circuito aberto) o fetch só volta o desafio.
-  if (isFlareSolverrCircuitOpen()) return []
+  if (isCfBypassUnavailable()) return []
   try {
     const url = `${BASE}/r/l_search/?name=${encodeURIComponent(query)}&page=1`
     const result = await fetchHtmlWithCfFallback(url, HEADERS, CF_ABORT_MS, FS_SESSION)
@@ -440,7 +498,7 @@ export async function fetchMangagoById(
   const budgets = opts?.retry ? [CF_ABORT_MS, RETRY_ABORT_MS] : [CF_ABORT_MS]
   for (let i = 0; i < budgets.length; i++) {
     // Circuito aberto = container fora (ECONNREFUSED). Retentar só pagaria latência.
-    if (isFlareSolverrCircuitOpen()) return null
+    if (isCfBypassUnavailable()) return null
     try {
       const result = await fetchHtmlWithCfFallback(url, HEADERS, budgets[i], FS_SESSION)
       const detail = result ? parseMangagoDetailHtml(result.html) : null
@@ -531,7 +589,7 @@ export function parseMangagoChapters(html: string): MangagoChapters | null {
  * módulo: sem FlareSolverr (circuito aberto) volta `null`.
  */
 export async function fetchMangagoChapters(slug: string): Promise<MangagoChapters | null> {
-  if (isFlareSolverrCircuitOpen()) return null
+  if (isCfBypassUnavailable()) return null
   try {
     const result = await fetchHtmlWithCfFallback(`${BASE}/read-manga/${slug}/`, HEADERS, CF_ABORT_MS, FS_SESSION)
     if (!result) return null
@@ -584,13 +642,13 @@ function extractTopics(html: string, seen: Set<string>, out: Array<{ id: string;
  * Fail-soft: [] em qualquer erro; para no meio se o circuito do FlareSolverr abrir.
  */
 export async function fetchMangagoReviews(slug: string, limit = 40): Promise<string[]> {
-  if (isFlareSolverrCircuitOpen()) return []
+  if (isCfBypassUnavailable()) return []
   try {
     // 1) Junta ids de tópico paginando a lista até ter `limit` (ou esgotar páginas).
     const topics: Array<{ id: string; title: string }> = []
     const seen = new Set<string>()
     for (let page = 1; page <= MANGAGO_REVIEW_LIST_PAGES && topics.length < limit; page++) {
-      if (isFlareSolverrCircuitOpen()) break
+      if (isCfBypassUnavailable()) break
       const url =
         page === 1
           ? `${BASE}/home/manga/discussion/${slug}/`
@@ -605,7 +663,7 @@ export async function fetchMangagoReviews(slug: string, limit = 40): Promise<str
     // 2) Busca o corpo de cada tópico (parte cara: 1 fetch por review).
     const reviews: string[] = []
     for (const { id, title } of topics) {
-      if (isFlareSolverrCircuitOpen()) break
+      if (isCfBypassUnavailable()) break
       const topic = await fetchHtmlWithCfFallback(`${BASE}/home/mangatopic/${id}/`, HEADERS, CF_ABORT_MS, FS_SESSION)
       if (!topic) continue
       const body = cleanHtml(decodeAttr(metaContent(topic.html, "description")))
