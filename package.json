@@ -19,6 +19,7 @@
     "resolve-comix-hids": "node scripts/resolve-comix-hids.mjs",
     "comick:canary": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/resolve-comick-canary.ts",
     "backfill:interest": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-work-data.ts",
+    "backfill:synopses": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/backfill-clean-synopses.ts",
     "e1:scope": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/e1-prod-scope.ts",
     "e1:digest": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/e1-prod-digest.ts",
     "recalc:scores": "npx tsx --tsconfig tsconfig.smoke.json --env-file=.env.local scripts/recalculate-scores.ts",
