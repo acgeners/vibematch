@@ -1,13 +1,21 @@
 "use client"
 
-import { useCallback, useMemo, useRef, useState, useTransition } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Filter, RotateCcw, Search, Trash2, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
@@ -20,6 +28,11 @@ import {
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { TagFilter } from "@/components/titles/tag-filter"
 import type { TagOption } from "@/server/queries/tags"
+import { searchWorkSuggestions } from "@/server/actions/work-search"
+import type { WorkSuggestion } from "@/server/queries/work-suggestions"
+import type { SignatureCount } from "@/server/queries/work-signature"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { AI_EVAL_STATUSES, CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { LABELS } from "@/lib/constants/ui-labels"
@@ -46,6 +59,19 @@ const SORTABLE_FIELDS: Array<{ value: string; label: string }> = [
   { value: "chapters", label: LABELS.chapters_total.short },
 ]
 
+/**
+ * Ordenar pelos 9 atributos. O backend de /titles já aceitava `crit_<slug>`
+ * (a whitelist em app/titles/page.tsx), só a UI não oferecia.
+ */
+const CRITERION_SORT_FIELDS: Array<{ value: string; label: string }> = CRITERION_SLUGS.map(
+  (slug) => ({
+    value: `crit_${slug}`,
+    label: `${CRITERIA_INFO[slug]?.emoji ?? ""} ${CRITERION_LABELS[slug] ?? slug}`.trim(),
+  }),
+)
+
+const ALL_SORTABLE_FIELDS = [...SORTABLE_FIELDS, ...CRITERION_SORT_FIELDS]
+
 const AI_STATUS_LABELS: Record<string, string> = {
   pending: "Pendente atributos",
   review_pending: "Pendente Veredito IA",
@@ -67,6 +93,8 @@ interface TitleFiltersProps {
   availableTags: TagOption[]
   publicationStatuses?: StatusOption[]
   personalStatuses?: StatusOption[]
+  /** Contagem por assinatura (atributo dominante) — alimenta a aba Atributos. */
+  signatureCounts?: SignatureCount[]
 }
 
 function dedupeStatusOptions(options: StatusOption[]): StatusOption[] {
@@ -159,6 +187,164 @@ function num(v: string | null | undefined): number | undefined {
   if (!v) return undefined
   const n = parseFloat(v)
   return isNaN(n) ? undefined : n
+}
+
+/** Chip liga/desliga de um recorte booleano ("Só avaliadas", "Só favoritas"…). */
+function ToggleChip({
+  label,
+  active,
+  onClick,
+  tooltip,
+  tone = "primary",
+}: {
+  label: React.ReactNode
+  active: boolean
+  onClick: () => void
+  tooltip?: string
+  tone?: "primary" | "positive"
+}) {
+  const chip = (
+    <button type="button" onClick={onClick} aria-pressed={active}>
+      <Badge
+        variant={active ? "default" : "outline"}
+        className={cn(
+          "cursor-pointer rounded-full px-2.5 py-1 text-xs transition-transform hover:-translate-y-px",
+          active && tone === "positive" && "border-transparent bg-emerald-600 text-white hover:bg-emerald-600",
+        )}
+      >
+        {label}
+      </Badge>
+    </button>
+  )
+  if (!tooltip) return chip
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>{chip}</TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[240px] text-pretty">
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+/**
+ * Segmentado "Conteúdo 18+" — filtra pela classificação da obra (works.is_adult),
+ * NÃO por tags. "Tudo" respeita a preferência global de /preferencias; as outras
+ * duas mandam nesta listagem.
+ */
+function AdultContentSegment({
+  value,
+  onChange,
+}: {
+  value: "all" | "hide" | "only"
+  onChange: (v: "all" | "hide" | "only") => void
+}) {
+  const seg = (active: boolean, danger: boolean) =>
+    cn(
+      "inline-flex h-7 items-center gap-1 rounded px-2.5 text-xs font-medium transition-colors",
+      active
+        ? danger
+          ? "bg-red-500/15 text-red-600 dark:text-red-300"
+          : "bg-primary/15 text-primary"
+        : "text-muted-foreground hover:text-foreground",
+    )
+  return (
+    <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
+      <button
+        type="button"
+        onClick={() => onChange("all")}
+        aria-pressed={value === "all"}
+        className={seg(value === "all", false)}
+        title="Mostra todas as obras (respeita sua preferência global de 18+ em /preferencias)."
+      >
+        Tudo
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("hide")}
+        aria-pressed={value === "hide"}
+        className={seg(value === "hide", true)}
+        title="Esconde as obras classificadas como 18+ nesta listagem."
+      >
+        Ocultar <span aria-hidden>🔞</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("only")}
+        aria-pressed={value === "only"}
+        className={seg(value === "only", true)}
+        title="Mostra apenas as obras classificadas como 18+."
+      >
+        Só 18+ <span aria-hidden>🔞</span>
+      </button>
+    </div>
+  )
+}
+
+/**
+ * ASSINATURA — chips do atributo que mais marca a obra.
+ *
+ * A lente que diferencia /titles do /ranking: lá se pergunta "vale a pena?"
+ * (limiar de nota), aqui "que tipo de obra é essa?" (forma). A contagem é de
+ * CATÁLOGO — não conhece os outros filtros ativos —, por isso o rótulo diz "no
+ * catálogo" em vez de prometer o tamanho do resultado.
+ */
+function SignatureGrid({
+  counts,
+  selected,
+  onToggle,
+}: {
+  counts: SignatureCount[]
+  selected: Set<string>
+  onToggle: (slug: string) => void
+}) {
+  const max = Math.max(1, ...counts.map((c) => c.count))
+  return (
+    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+      {counts.map(({ slug, count }) => {
+        const active = selected.has(slug)
+        return (
+          <button
+            key={slug}
+            type="button"
+            onClick={() => onToggle(slug)}
+            aria-pressed={active}
+            disabled={count === 0}
+            className={cn(
+              "flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors",
+              active
+                ? "border-transparent bg-primary/15"
+                : "border-border hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border",
+            )}
+          >
+            <span aria-hidden className="shrink-0 text-base leading-none">
+              {CRITERIA_INFO[slug]?.emoji ?? "•"}
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="truncate text-xs font-medium">
+                {CRITERION_LABELS[slug] ?? CRITERIA_INFO[slug]?.name ?? slug}
+              </span>
+              <span
+                className={cn(
+                  "text-[11px] tabular-nums",
+                  active ? "font-semibold text-primary" : "text-muted-foreground",
+                )}
+              >
+                {count} {count === 1 ? "obra" : "obras"}
+              </span>
+              <span
+                aria-hidden
+                className={cn("mt-0.5 block h-[3px] rounded-full bg-primary", active ? "" : "opacity-40")}
+                style={{ width: `${Math.round((count / max) * 100)}%` }}
+              />
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 function ScoreRangeCard({
@@ -429,6 +615,17 @@ function pushToSearchHistory(term: string): string[] {
   return next
 }
 
+/** Mínimo de caracteres pra buscar sugestões — espelha o guard da server action. */
+const MIN_SUGGEST_LENGTH = 2
+/** Espera depois da última tecla antes de ir ao servidor. */
+const SUGGEST_DEBOUNCE_MS = 250
+/**
+ * Espera antes de re-filtrar a TABELA. Maior que a do dropdown de propósito: o
+ * dropdown é uma chamada barata, a tabela é uma navegação que re-renderiza a
+ * página inteira no servidor.
+ */
+const LIVE_SEARCH_DEBOUNCE_MS = 450
+
 function SearchInputWithHistory({
   value,
   onChange,
@@ -440,7 +637,51 @@ function SearchInputWithHistory({
 }) {
   const [history, setHistory] = useState<string[]>(() => readSearchHistory())
   const [open, setOpen] = useState(false)
+  // `settledQuery` é a busca que as sugestões atuais REPRESENTAM. Sem ele, o
+  // "Nenhuma obra com esse nome" pisca entre a 2ª tecla e a resposta chegar —
+  // afirmando que não existe algo que ainda nem foi procurado.
+  const [suggestions, setSuggestions] = useState<WorkSuggestion[]>([])
+  const [settledQuery, setSettledQuery] = useState<string | null>(null)
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const router = useRouter()
+
+  // Contador de requisição em vez de uma flag `mounted`: sob StrictMode o cleanup
+  // zera a flag e ela nunca mais volta a true, e o loading trava pra sempre.
+  // Aqui cada busca ganha um id e a resposta velha simplesmente é descartada —
+  // o que também resolve a resposta que chega fora de ordem.
+  const requestIdRef = useRef(0)
+
+  const trimmed = value.trim()
+
+  useEffect(() => {
+    // Abaixo do mínimo só invalida o que está em voo. Nada de setState aqui: o
+    // que segura a renderização das sugestões velhas é o `showSuggestions`.
+    if (trimmed.length < MIN_SUGGEST_LENGTH) {
+      requestIdRef.current += 1
+      return
+    }
+
+    const requestId = ++requestIdRef.current
+    const timer = setTimeout(() => {
+      setLoadingSuggestions(true)
+      searchWorkSuggestions(trimmed)
+        .then((rows) => {
+          if (requestIdRef.current !== requestId) return
+          setSuggestions(rows)
+          setSettledQuery(trimmed)
+          setLoadingSuggestions(false)
+        })
+        .catch(() => {
+          if (requestIdRef.current !== requestId) return
+          setSuggestions([])
+          setSettledQuery(trimmed)
+          setLoadingSuggestions(false)
+        })
+    }, SUGGEST_DEBOUNCE_MS)
+
+    return () => clearTimeout(timer)
+  }, [trimmed])
 
   const submit = (term: string) => {
     setHistory(pushToSearchHistory(term))
@@ -448,13 +689,18 @@ function SearchInputWithHistory({
     onSubmit(term)
   }
 
-  const filtered = useMemo(() => {
-    const q = value.trim().toLowerCase()
+  const filteredHistory = useMemo(() => {
+    const q = trimmed.toLowerCase()
     if (!q) return history
     return history.filter((t) => t.toLowerCase().includes(q))
-  }, [history, value])
+  }, [history, trimmed])
 
-  const showPopover = open && filtered.length > 0
+  const showSuggestions = trimmed.length >= MIN_SUGGEST_LENGTH
+  const isSearching = showSuggestions && loadingSuggestions
+  // Só afirma "não existe" depois que a resposta DESTA busca voltou.
+  const searchedAndEmpty = showSuggestions && settledQuery === trimmed && suggestions.length === 0
+  const showPopover =
+    open && (showSuggestions || filteredHistory.length > 0)
 
   const clearHistory = () => {
     writeSearchHistory([])
@@ -470,7 +716,7 @@ function SearchInputWithHistory({
           <Input
             id="title-filter-search"
             ref={inputRef}
-            placeholder="Digite o nome da obra e pressione Enter"
+            placeholder="Digite o nome da obra"
             className="h-9 pl-9 pr-9 text-sm"
             value={value}
             onChange={(e) => {
@@ -488,18 +734,25 @@ function SearchInputWithHistory({
               }
             }}
           />
-          {value && (
-            <button
-              type="button"
-              aria-label="Limpar busca por título"
-              onClick={() => {
-                onChange("")
-                inputRef.current?.focus()
-              }}
-              className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
+          {isSearching ? (
+            <span
+              aria-hidden
+              className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin rounded-full border-2 border-muted border-t-primary"
+            />
+          ) : (
+            value && (
+              <button
+                type="button"
+                aria-label="Limpar busca por título"
+                onClick={() => {
+                  onChange("")
+                  inputRef.current?.focus()
+                }}
+                className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )
           )}
         </div>
       </PopoverAnchor>
@@ -510,11 +763,71 @@ function SearchInputWithHistory({
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <Command shouldFilter={false}>
-          <CommandList>
-            <CommandEmpty>Nenhuma busca recente</CommandEmpty>
-            {filtered.length > 0 && (
+          <CommandList className="max-h-[22rem]">
+            {showSuggestions && suggestions.length > 0 && (
+              <CommandGroup heading="Obras no catálogo">
+                {suggestions.map((s) => (
+                  <CommandItem
+                    key={s.id}
+                    value={`work-${s.id}`}
+                    onSelect={() => {
+                      setOpen(false)
+                      router.push(`/titles/${s.slug}`)
+                    }}
+                    onMouseDown={(e) => e.preventDefault()}
+                    className="gap-2.5"
+                  >
+                    {s.coverUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={s.coverUrl}
+                        alt=""
+                        className="h-11 w-8 shrink-0 rounded-sm object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <span className="h-11 w-8 shrink-0 rounded-sm bg-muted" />
+                    )}
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span className="truncate text-sm font-medium">{s.title}</span>
+                      <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                        {s.publicationStatus && <span>{s.publicationStatus}</span>}
+                        {s.totalChapters != null && (
+                          <>
+                            <span className="opacity-50">·</span>
+                            <span className="tabular-nums">{s.totalChapters} caps</span>
+                          </>
+                        )}
+                        {s.year != null && (
+                          <>
+                            <span className="opacity-50">·</span>
+                            <span className="tabular-nums">{s.year}</span>
+                          </>
+                        )}
+                      </span>
+                      {/* Sem isto o usuário vê um nome que não tem nada a ver com o
+                          que digitou — o casamento veio de um título alternativo. */}
+                      {s.matchedAlias && (
+                        <span className="truncate text-[11px] italic text-muted-foreground">
+                          achou por: {s.matchedAlias}
+                        </span>
+                      )}
+                    </span>
+                    {s.isAdult && (
+                      <span className="ml-auto shrink-0 rounded-full bg-destructive/15 px-1.5 py-0.5 text-[10px] font-bold text-destructive">
+                        18+
+                      </span>
+                    )}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+
+            {searchedAndEmpty && <CommandEmpty>Nenhuma obra com esse nome</CommandEmpty>}
+
+            {filteredHistory.length > 0 && (
               <CommandGroup heading="Buscas recentes">
-                {filtered.map((term) => (
+                {filteredHistory.map((term) => (
                   <CommandItem
                     key={term}
                     value={term}
@@ -548,6 +861,7 @@ export function TitleFilters({
   availableTags,
   publicationStatuses = [],
   personalStatuses = [],
+  signatureCounts = [],
 }: TitleFiltersProps) {
   const router = useRouter()
   const appliedSearchParams = useSearchParams()
@@ -572,6 +886,36 @@ export function TitleFilters({
     []
   )
 
+  // Busca ao vivo: aplica o termo por cima dos filtros JÁ APLICADOS (a URL), não
+  // por cima do rascunho. Digitar não pode commitar em silêncio filtros que você
+  // mexeu mas ainda não clicou em "Aplicar".
+  const applySearchNow = useCallback(
+    (term: string) => {
+      const next = new URLSearchParams(appliedSearchString)
+      const trimmed = term.trim()
+      if (trimmed) next.set("search", trimmed)
+      else next.delete("search")
+      // Sem isto, buscar estando na página 3 cai num recorte vazio: a busca nova
+      // costuma ter menos de 3 páginas.
+      next.delete("page")
+      const qs = next.toString()
+      startTransition(() => router.replace(qs ? `/titles?${qs}` : "/titles"))
+    },
+    [appliedSearchString, router],
+  )
+
+  const liveSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const applySearchLive = useCallback(
+    (term: string) => {
+      if (liveSearchTimer.current) clearTimeout(liveSearchTimer.current)
+      liveSearchTimer.current = setTimeout(() => applySearchNow(term), LIVE_SEARCH_DEBOUNCE_MS)
+    },
+    [applySearchNow],
+  )
+  useEffect(() => () => {
+    if (liveSearchTimer.current) clearTimeout(liveSearchTimer.current)
+  }, [])
+
   const filtersDirty = draftSearch !== appliedSearchString
   const hasFilters = draftSearch !== "" || appliedSearchString !== ""
 
@@ -588,7 +932,7 @@ export function TitleFilters({
   const rawSort = searchParams.get("sort") ?? "expected_score:desc"
   const [sortField, sortDir] = (() => {
     const [f, d] = rawSort.split(":")
-    const validField = SORTABLE_FIELDS.some((x) => x.value === f) ? f : "expected_score"
+    const validField = ALL_SORTABLE_FIELDS.some((x) => x.value === f) ? f : "expected_score"
     return [validField, d === "asc" ? "asc" : "desc"] as const
   })()
   const setSort = (field: string, dir: "asc" | "desc") =>
@@ -660,6 +1004,14 @@ export function TitleFilters({
 
   const selectedGenreAny = csvSet(searchParams, "genres_any")
   const selectedTagAny = csvSet(searchParams, "tags_any")
+  const selectedSignatures = csvSet(searchParams, "signature")
+  const adultParam = searchParams.get("adult")
+  const adultMode: "all" | "hide" | "only" =
+    adultParam === "hide" ? "hide" : adultParam === "only" ? "only" : "all"
+  const criterionRangeCount = CRITERION_SLUGS.filter(
+    (slug) => searchParams.get(`min_${slug}`) || searchParams.get(`max_${slug}`),
+  ).length
+  const attributesTabCount = selectedSignatures.size + criterionRangeCount
 
   // Active filter chips
   const activeChips: Array<{ key: string; label: string; onRemove: () => void }> = []
@@ -709,6 +1061,34 @@ export function TitleFilters({
   selectedAiStatuses.forEach((s) => activeChips.push({
     key: `ai-${s}`, label: `IA: ${AI_STATUS_LABELS[s] ?? s}`, onRemove: () => toggleCsv("ai_status", s),
   }))
+  selectedSignatures.forEach((slug) => activeChips.push({
+    key: `sig-${slug}`,
+    label: `Assinatura: ${CRITERION_LABELS[slug] ?? slug}`,
+    onRemove: () => toggleCsv("signature", slug),
+  }))
+  if (searchParams.get("rated") === "1") {
+    activeChips.push({ key: "rated", label: "Só avaliadas", onRemove: () => updateParams({ rated: null }) })
+  }
+  if (searchParams.get("only_scored") === "1") {
+    activeChips.push({
+      key: "only_scored",
+      label: `Só com ${LABELS.expected_score.full}`,
+      onRemove: () => updateParams({ only_scored: null }),
+    })
+  }
+  if (searchParams.get("fav") === "1") {
+    activeChips.push({ key: "fav", label: "Só favoritas", onRemove: () => updateParams({ fav: null }) })
+  }
+  if (searchParams.get("archived") === "1") {
+    activeChips.push({ key: "archived", label: "Incluindo arquivadas", onRemove: () => updateParams({ archived: null }) })
+  }
+  if (adultMode !== "all") {
+    activeChips.push({
+      key: "adult",
+      label: adultMode === "only" ? "Só 18+" : "Ocultando 18+",
+      onRemove: () => updateParams({ adult: null }),
+    })
+  }
   selectedGenreAny.forEach((g) => activeChips.push({
     key: `genre-${g}`, label: `Gênero: ${g}`, onRemove: () => {
       const next = new Set(selectedGenreAny)
@@ -787,22 +1167,11 @@ export function TitleFilters({
             value={currentSearch}
             onChange={(v) => {
               updateParams({ search: v || null })
-              if (!v) {
-                startTransition(() => {
-                  const next = new URLSearchParams(draftSearch)
-                  next.delete("search")
-                  const qs = next.toString()
-                  router.replace(qs ? `/titles?${qs}` : "/titles")
-                })
-              }
+              applySearchLive(v)
             }}
             onSubmit={(term) => {
               updateParams({ search: term || null })
-              const next = new URLSearchParams(draftSearch)
-              if (term) next.set("search", term)
-              else next.delete("search")
-              const qs = next.toString()
-              startTransition(() => router.replace(qs ? `/titles?${qs}` : "/titles"))
+              applySearchNow(term)
             }}
           />
         </div>
@@ -816,11 +1185,26 @@ export function TitleFilters({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {SORTABLE_FIELDS.map((f) => (
-                  <SelectItem key={f.value} value={f.value} className="text-sm">
-                    {f.label}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  <SelectLabel className="text-[10px] uppercase tracking-wider">
+                    Notas e metadados
+                  </SelectLabel>
+                  {SORTABLE_FIELDS.map((f) => (
+                    <SelectItem key={f.value} value={f.value} className="text-sm">
+                      {f.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+                <SelectGroup>
+                  <SelectLabel className="text-[10px] uppercase tracking-wider">
+                    Atributos
+                  </SelectLabel>
+                  {CRITERION_SORT_FIELDS.map((f) => (
+                    <SelectItem key={f.value} value={f.value} className="text-sm">
+                      {f.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
             <button
@@ -855,7 +1239,82 @@ export function TitleFilters({
       </div>
 
       {tabsExpanded && (
-        <div className="mt-3 space-y-3">
+        <Tabs defaultValue="geral" className="mt-3 space-y-3">
+          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-muted/60 p-1">
+            <TabsTrigger value="geral" className="h-9 min-w-20 flex-none text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">
+              Geral
+            </TabsTrigger>
+            {/* "Atributos", não "Notas": aqui a pergunta é que TIPO de obra é, não
+                se a nota passa de um limiar — essa é a do /ranking. */}
+            <TabsTrigger value="atributos" className="h-9 min-w-20 flex-none gap-1.5 text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">
+              Atributos
+              {attributesTabCount > 0 && (
+                <Badge className="h-4 px-1.5 text-[10px] tabular-nums">{attributesTabCount}</Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="generos" className="h-9 min-w-20 flex-none gap-1.5 text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">
+              Gêneros
+              {selectedGenreAny.size > 0 && (
+                <Badge className="h-4 px-1.5 text-[10px] tabular-nums">{selectedGenreAny.size}</Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="tags" className="h-9 min-w-20 flex-none gap-1.5 text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">
+              Tags
+              {selectedTagAny.size > 0 && (
+                <Badge className="h-4 px-1.5 text-[10px] tabular-nums">{selectedTagAny.size}</Badge>
+              )}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="geral" className="space-y-3">
+          {/* O que mostrar: recortes booleanos + conteúdo 18+ */}
+          <FilterCard title="O que mostrar">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <ToggleChip
+                label="⭐ Só avaliadas"
+                tone="positive"
+                active={searchParams.get("rated") === "1"}
+                onClick={() =>
+                  updateParams({ rated: searchParams.get("rated") === "1" ? null : "1" })
+                }
+                tooltip="Só obras com nota pessoal sua — as que treinaram o modelo. Ligar isto também mostra as já terminadas e abandonadas."
+              />
+              <ToggleChip
+                label={`🎯 Só com ${LABELS.expected_score.short}`}
+                active={searchParams.get("only_scored") === "1"}
+                onClick={() =>
+                  updateParams({ only_scored: searchParams.get("only_scored") === "1" ? null : "1" })
+                }
+                tooltip="Esconde obras sem Nota Prevista (as que ainda não têm os 9 atributos de IA)."
+              />
+              <ToggleChip
+                label="❤️ Só favoritas"
+                active={searchParams.get("fav") === "1"}
+                onClick={() => updateParams({ fav: searchParams.get("fav") === "1" ? null : "1" })}
+              />
+              <ToggleChip
+                label="📦 Incluir arquivadas"
+                active={searchParams.get("archived") === "1"}
+                onClick={() =>
+                  updateParams({ archived: searchParams.get("archived") === "1" ? null : "1" })
+                }
+              />
+
+              <div className="flex items-center gap-2">
+                <Label
+                  className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                  title="Filtra pela classificação da obra (o mesmo selo 🔞 da página da obra), não pelas tags. 'Tudo' respeita sua preferência global."
+                >
+                  Conteúdo 18+
+                </Label>
+                <AdultContentSegment
+                  value={adultMode}
+                  onChange={(v) => updateParams({ adult: v === "all" ? null : v })}
+                />
+              </div>
+            </div>
+          </FilterCard>
+
           {/* Linha 1: Publicação + Status Pessoal + Status IA (cards estreitos) */}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <FilterCard
@@ -1011,9 +1470,73 @@ export function TitleFilters({
               updateParams={updateParams}
             />
           </div>
+          </TabsContent>
 
-          {/* Linha 3: Gênero + Tags (estreitos) */}
-          <div className="grid gap-3 xl:grid-cols-2">
+          {/* ==================== ATRIBUTOS ==================== */}
+          <TabsContent value="atributos" className="space-y-3">
+            <FilterCard
+              title={`Assinatura — o que mais marca a obra${selectedSignatures.size ? ` (${selectedSignatures.size})` : ""}`}
+              action={
+                selectedSignatures.size > 0 ? (
+                  <button
+                    type="button"
+                    className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    onClick={() => updateParams({ signature: null })}
+                  >
+                    Limpar
+                  </button>
+                ) : undefined
+              }
+            >
+              <p className="mb-2.5 text-[11px] leading-relaxed text-muted-foreground">
+                O atributo mais fora da curva da obra, comparado à média do catálogo — não a nota
+                mais alta. Seu catálogo tem Romance alto em quase tudo, então &ldquo;Romance
+                alto&rdquo; não distinguiria nada. Contagens sobre o catálogo, sem os outros
+                filtros.
+              </p>
+              {signatureCounts.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Nenhuma obra com os 9 atributos avaliados ainda.
+                </p>
+              ) : (
+                <SignatureGrid
+                  counts={signatureCounts}
+                  selected={selectedSignatures}
+                  onToggle={(slug) => toggleCsv("signature", slug)}
+                />
+              )}
+            </FilterCard>
+
+            {/* Mín/máx dos 9 fica RECOLHIDO: é o controle que o /ranking já tem, e
+                deixá-lo aberto faria esta aba virar cópia daquela. */}
+            <details className="group rounded-lg border bg-background shadow-sm">
+              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground">
+                <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
+                Ajuste fino — mín/máx dos 9 atributos
+                {criterionRangeCount > 0 && (
+                  <Badge className="ml-1 h-4 px-1.5 text-[10px] tabular-nums">{criterionRangeCount}</Badge>
+                )}
+              </summary>
+              <div className="grid grid-cols-2 gap-2 border-t px-3 py-3 md:grid-cols-3 xl:grid-cols-5">
+                {CRITERION_SLUGS.map((slug) => (
+                  <ScoreRangeCard
+                    key={slug}
+                    emoji={CRITERIA_INFO[slug]?.emoji ?? "•"}
+                    label={CRITERION_LABELS[slug] ?? slug}
+                    tooltip={CRITERIA_INFO[slug]?.description}
+                    minKey={`min_${slug}`}
+                    maxKey={`max_${slug}`}
+                    step={0.5}
+                    searchParams={searchParams}
+                    updateParams={updateParams}
+                  />
+                ))}
+              </div>
+            </details>
+          </TabsContent>
+
+          {/* ==================== GÊNEROS ==================== */}
+          <TabsContent value="generos">
             <FilterCard title={`Gênero${selectedGenreAny.size ? ` (${selectedGenreAny.size})` : ""}`}>
               {availableGenres.length === 0 ? (
                 <p className="text-xs text-muted-foreground">Nenhum gênero disponível</p>
@@ -1036,7 +1559,10 @@ export function TitleFilters({
                 </div>
               )}
             </FilterCard>
+          </TabsContent>
 
+          {/* ==================== TAGS ==================== */}
+          <TabsContent value="tags">
             <FilterCard title={`Tags${selectedTagAny.size ? ` (${selectedTagAny.size})` : ""}`}>
               <TagFilter
                 selected={[...selectedTagAny]}
@@ -1046,8 +1572,8 @@ export function TitleFilters({
                 availableTags={availableTags}
               />
             </FilterCard>
-          </div>
-        </div>
+          </TabsContent>
+        </Tabs>
       )}
 
       {/* Active chips */}

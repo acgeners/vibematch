@@ -8,6 +8,7 @@ import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
 import { isCurrentUserAdmin } from "@/server/queries/current-user"
+import { getSignatureCounts } from "@/server/queries/work-signature"
 import { Header } from "@/components/layout/header"
 import { TitleFilters } from "@/components/titles/title-filters"
 import { WorkTable } from "@/components/titles/work-table"
@@ -84,9 +85,21 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
       ? undefined
       : pubStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
 
+  // Filtro de conteúdo 18+ por-listagem (?adult=hide|only). Usa works.is_adult —
+  // o mesmo selo 🔞 da página da obra, não as tags. Ausente = respeita a
+  // preferência global de /preferencias.
+  const adultParam = str("adult")
+  const adultFilter = adultParam === "hide" || adultParam === "only" ? adultParam : undefined
+
   const filters: RankingFilters = {
     search: str("search"),
     includeArchived: str("archived") === "1",
+    // "Só avaliadas" (?rated=1): obras com nota pessoal.
+    onlyRated: str("rated") === "1",
+    adultFilter,
+    // Assinatura (?signature=): o atributo que mais marca a obra. Slugs inválidos
+    // são descartados dentro de resolveSignatureWorkIds.
+    signatureSlugs: multi("signature"),
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
     criterionMax: Object.keys(criterionMax).length ? criterionMax : undefined,
     publicationStatus,
@@ -121,7 +134,16 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
   const pageSize = 50
   const page = Math.max(1, parseInt(str("page") ?? "1", 10))
 
-  const [entries, allGenres, allTags, statusOptions, scoreThresholds, criterionPrefs, isAdmin] = await Promise.all([
+  const [
+    entries,
+    allGenres,
+    allTags,
+    statusOptions,
+    scoreThresholds,
+    criterionPrefs,
+    isAdmin,
+    signatureCounts,
+  ] = await Promise.all([
     getRanking(filters),
     getAllGenres(),
     getAllTags(),
@@ -129,6 +151,7 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     getScoreColorThresholds(),
     getCriterionColorRanges(),
     isCurrentUserAdmin(),
+    getSignatureCounts(),
   ])
 
   const total = entries.length
@@ -161,6 +184,7 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
         availableTags={allTags}
         publicationStatuses={statusOptions.publicationStatuses}
         personalStatuses={statusOptions.personalStatuses}
+        signatureCounts={signatureCounts}
       />
 
       <WorkTable
@@ -172,7 +196,10 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
         scoreThresholds={scoreThresholds}
         criterionPrefs={criterionPrefs}
         enableCompare={false}
-        enableHeatmap={false}
+        // Matriz de atributos: a view existe (WorkHeatmapView) e estava desligada
+        // aqui desde o commit inicial, então só aparecia dentro de lista de
+        // favoritos — justamente a página com MENOS obras pra comparar.
+        enableHeatmap
       />
     </div>
   )
