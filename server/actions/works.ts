@@ -27,7 +27,8 @@ import {
   markPredictionLabelChanged,
 } from "@/lib/server/predictions/resolve-prediction"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
-import { duplicateKeys } from "@/lib/title-match"
+import { duplicateKeys, foldTitle, isWeakDuplicateAlias } from "@/lib/title-match"
+import { fetchAllRows } from "@/lib/supabase/paginate"
 import { startUpdateJob, finishUpdateJob } from "@/lib/background/update-jobs"
 import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
@@ -748,6 +749,71 @@ export async function getWorkHoverCounts(
   return counts.get(workId) ?? { tagCount: 0, reviewCount: 0 }
 }
 
+/**
+ * AUTO-CURA — grava na obra os nomes pelos quais ela acabou de ser reconhecida.
+ *
+ * A detecção de duplicata compara o pacote INTEIRO de aliases que veio da fonte
+ * externa contra o título salvo. A busca não tem esse pacote: ela só olha os
+ * nomes guardados na linha da obra. É daí que vinha o "não acha em /titles mas
+ * acusa duplicata em /titles/new" — a duplicata enxerga um nome que a busca
+ * nunca teve.
+ *
+ * Então, no exato momento em que descobrimos que aquele nome identifica a obra,
+ * ele é persistido. O catálogo para de regredir sozinho: sem isto, o backfill
+ * conserta o passado e obras novas voltam a divergir com o tempo.
+ *
+ * Não lança: é um efeito colateral oportunista, e falhar aqui não pode impedir
+ * o usuário de resolver a duplicata que ele veio resolver.
+ */
+const MAX_ALTERNATIVE_TITLES = 40
+
+async function absorbIncomingAliases(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  work: { id: string; title?: string | null; original_title?: string | null; alternative_titles?: string[] | null },
+  incomingRawNames: string[],
+): Promise<void> {
+  try {
+    // Chaves que a obra JÁ reconhece — inclui título e original, que não devem
+    // virar alias redundante.
+    const known = new Set(
+      duplicateKeys({
+        title: work.title,
+        original_title: work.original_title,
+        alternative_titles: work.alternative_titles,
+      }),
+    )
+    // `duplicateKeys` descarta alias genérico ("Official", "English"…); os
+    // já-salvos entram no known por fora pra não serem re-adicionados.
+    for (const saved of work.alternative_titles ?? []) known.add(foldTitle(saved))
+
+    const toAdd: string[] = []
+    for (const raw of incomingRawNames) {
+      const trimmed = (raw ?? "").trim()
+      if (!trimmed) continue
+      const key = foldTitle(trimmed)
+      if (!key || known.has(key) || isWeakDuplicateAlias(key)) continue
+      known.add(key)
+      toAdd.push(trimmed)
+    }
+    if (!toAdd.length) return
+
+    const next = [...(work.alternative_titles ?? []), ...toAdd].slice(0, MAX_ALTERNATIVE_TITLES)
+    const { error } = await supabase
+      .from("works")
+      .update({ alternative_titles: next })
+      .eq("id", work.id)
+    if (error) {
+      console.error("[auto-cura] falha gravando aliases:", error.message)
+      return
+    }
+    // Sem isto o alias novo só ficaria buscável quando o cache expirasse.
+    revalidateTag("works-slug-index", "max")
+  } catch (error) {
+    console.error("[auto-cura] erro inesperado:", error)
+  }
+}
+
 export async function findDuplicateWorkByTitle(
   title: string,
   alternativeTitles: string[] = []
@@ -786,15 +852,25 @@ export async function findDuplicateWorkByTitle(
       }
     }
 
-    const { data: allData } = await supabase
-      .from("works")
-      .select(DUPLICATE_WORK_SELECT)
-      .limit(1000)
-    const aliasMatch = (allData ?? []).find((work) => workMatchesAnyName(work, incomingNames))
+    // Pagina: `.limit(1000)` estava a 94 obras de cortar em silêncio (906 hoje),
+    // e o corte faria a duplicata passar batido — cria obra repetida.
+    const allData = await fetchAllRows<Record<string, unknown>>(
+      (from, to) => supabase.from("works").select(DUPLICATE_WORK_SELECT).range(from, to),
+      "findDuplicateWorkByTitle",
+    )
+    const aliasMatch = allData.find((work) => workMatchesAnyName(work, incomingNames))
     if (aliasMatch) {
+      const matched = aliasMatch as {
+        id: string
+        title: string
+        original_title?: string | null
+        alternative_titles?: string[] | null
+      }
+      // Casou por um nome que veio de fora: grava, senão a busca segue sem ele.
+      await absorbIncomingAliases(supabase, matched, [normalizedTitle, ...alternativeTitles])
       return {
-        id: aliasMatch.id,
-        title: aliasMatch.title,
+        id: matched.id,
+        title: matched.title,
         values: dbWorkToFormValues(aliasMatch),
       }
     }
@@ -913,16 +989,35 @@ async function persistNewWork(
   }
 
   const incomingNames = new Set(getComparableNames(data))
-  const { data: existingWorks } = await supabase
-    .from("works")
-    .select("title, original_title, alternative_titles")
-    .limit(2000)
+  // Pagina: um corte silencioso aqui deixaria passar duplicata e criaria obra
+  // repetida no catálogo.
+  const existingWorks = await fetchAllRows<{
+    id: string
+    title: string
+    original_title: string | null
+    alternative_titles: string[] | null
+  }>(
+    (from, to) =>
+      supabase
+        .from("works")
+        .select("id, title, original_title, alternative_titles")
+        .range(from, to),
+    "createWork:duplicate",
+  )
 
-  const duplicate = (existingWorks ?? [])
+  const duplicate = existingWorks
     .map((work) => ({ work, matchingName: findMatchingWorkName(work, incomingNames) }))
     .find((match) => match.matchingName)
 
   if (duplicate?.matchingName) {
+    // A obra existente foi reconhecida por um nome que veio do formulário (em
+    // geral trazido pela fonte externa). Se ela não guarda esse nome, a busca
+    // continuaria sem achá-la — e o usuário voltaria aqui pelo mesmo caminho.
+    await absorbIncomingAliases(supabase, duplicate.work, [
+      data.title,
+      data.original_title ?? "",
+      ...(data.alternative_titles ?? []),
+    ])
     return {
       ok: false,
       error: {
