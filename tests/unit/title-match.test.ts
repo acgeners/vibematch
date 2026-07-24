@@ -142,4 +142,43 @@ describe("duplicateKeys", () => {
     const longa = duplicateKeys({ title: "Villain Duke's Precious One" })
     expect(curta.some((k) => longa.includes(k))).toBe(false)
   })
+
+  it("descarta alias fragmento curto de um nome mais longo da própria obra", () => {
+    // "Your Majesty" é a quebra na vírgula de "Your Majesty, Your Territory Is
+    // Not Good" — não pode virar chave que casa obra de outro gênero.
+    const keys = duplicateKeys({
+      title: "Milady's Land's a Mess!",
+      alternative_titles: ["Your Majesty", "Your Majesty, Your Territory Is Not Good"],
+    })
+    expect(keys).not.toContain("your majesty")
+    expect(keys).toContain("your majesty your territory is not good")
+  })
+
+  it("mantém alias de 3+ palavras mesmo que também apareça em nome mais longo", () => {
+    const keys = duplicateKeys({
+      title: "My Unexpected Marriage (EMOTO Mashimesa)",
+      alternative_titles: ["My Unexpected Marriage"],
+    })
+    expect(keys).toContain("my unexpected marriage")
+  })
+
+  it("nunca descarta título/original, ainda que sejam fragmento de um alias", () => {
+    const keys = duplicateKeys({
+      title: "Your Majesty",
+      alternative_titles: ["Your Majesty, and the Long Tail"],
+    })
+    expect(keys).toContain("your majesty")
+  })
+
+  it("duas obras distintas deixam de colidir pelo fragmento honorífico", () => {
+    const a = duplicateKeys({
+      title: "Milady's Land's a Mess!",
+      alternative_titles: ["Your Majesty", "Your Majesty, Your Territory Is Not Good"],
+    })
+    const b = duplicateKeys({
+      title: "I'll Raise You Well in This Life, Your Majesty!",
+      alternative_titles: ["Your Majesty!", "Your Majesty, I will raise you well in this life"],
+    })
+    expect(a.some((k) => b.includes(k))).toBe(false)
+  })
 })

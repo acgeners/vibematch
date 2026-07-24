@@ -170,8 +170,34 @@ export function isWeakDuplicateAlias(foldedKey: string): boolean {
 }
 
 /**
+ * Acima disto um alias fragmento continua sendo chave de duplicata. Com 1-2
+ * palavras ("Your Majesty", "Duke", "Your Highness") o alias é quase sempre um
+ * honorífico ou pedaço solto de um nome mais longo — não prova identidade. Com 3+
+ * palavras já é específico o bastante pra provar ("My Unexpected Marriage").
+ */
+const MAX_FRAGMENT_ALIAS_TOKENS = 2
+
+/**
+ * O alias é um pedaço curto de um nome mais LONGO da própria obra?
+ *
+ * Fontes externas quebram títulos na vírgula: "Your Majesty, Your Territory Is
+ * Not Good" entra como "Your Majesty" + "Your Territory Is Not Good". O primeiro
+ * fragmento ("your majesty") reaparece em dezenas de obras do gênero e, como
+ * chave de duplicata, casava obras que não têm nada a ver — e a auto-cura então
+ * fundia os aliases das duas. Prefixo/sufixo em fronteira de palavra (não
+ * substring solta, senão "art" casaria "smart").
+ */
+function isShortFragmentOfLongerName(key: string, allFoldedNames: string[]): boolean {
+  if (!key || key.split(" ").length > MAX_FRAGMENT_ALIAS_TOKENS) return false
+  return allFoldedNames.some(
+    (other) => other !== key && (other.startsWith(key + " ") || other.endsWith(" " + key)),
+  )
+}
+
+/**
  * Chaves normalizadas pelas quais uma obra é considerada duplicata de outra:
- * título e título original sempre; aliases só quando não são genéricos.
+ * título e título original sempre; aliases só quando não são genéricos NEM
+ * fragmento curto de um nome mais longo da própria obra.
  *
  * Duplicata compara IGUALDADE de chave (não prefixo) — "Villain Duke" não pode
  * bloquear o cadastro de "Villain Duke's Precious One".
@@ -181,9 +207,15 @@ export function duplicateKeys(work: MatchableWorkNames): string[] {
     .map(foldTitle)
     .filter(Boolean)
 
+  const allFoldedNames = [work.title, work.original_title, ...(work.alternative_titles ?? [])]
+    .map(foldTitle)
+    .filter(Boolean)
+
   const aliases = (work.alternative_titles ?? [])
     .map(foldTitle)
     .filter((key) => key && !isWeakDuplicateAlias(key))
+    // Título/original nunca caem nesta regra — só o pacote de aliases.
+    .filter((key) => !isShortFragmentOfLongerName(key, allFoldedNames))
 
   return [...new Set([...strong, ...aliases])]
 }
