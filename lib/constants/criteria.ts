@@ -56,10 +56,10 @@ export const CRITERIA_RUBRICS: Record<
   adult_content: {
     title: "Conteúdo Adulto",
     ranges: [
-      "0-3 | Clean: sem sexualização relevante; no máximo beijo leve ou sugestão implícita. NÃO use esta faixa se há marcador R19 disponível na obra, mesmo sem corroboração de tag/review (piso 6.0).",
-      "4-6 | Suggestive: insinuação clara, roupas/situações/tensão sexual; pode ter cena cortada/fade to black.",
-      "7-8 | Mature: sexo parcialmente mostrado, sem foco explícito; nudez e contexto sexual relevante para a trama.",
-      "9-10 | Smut: sexo explícito recorrente; foco no ato, não só na narrativa.",
+      "0-3 | Clean: sem sexualização relevante; no máximo beijo leve ou sugestão implícita. Marcador de EDIÇÃO (\"R19 disponível\", \"Original Webtoon: R19\") NÃO impede esta faixa: ele diz que existe uma edição R19 da história, não que a obra avaliada mostre algo.",
+      "4-6 | Suggestive: insinuação clara, roupas/situações/tensão sexual; nada de sexo é mostrado — pode ter cena cortada/fade to black.",
+      "7-8 | Mature: sexo mostrado PARCIALMENTE, sem cena explícita; nudez e contexto sexual relevante para a trama. Se existe cena explícita, mesmo uma só, a faixa é 9-10.",
+      "9-10 | Smut: há cena de sexo explícito, em QUALQUER quantidade. Uma única cena basta. NÃO rebaixe porque é pouco frequente, escasso ou porque o foco da obra é outro — frequência muda o FOCO, não a natureza do conteúdo.",
     ],
   },
   protagonist: {
@@ -141,6 +141,8 @@ export const PERSONAL_STATUS_LABELS: Record<string, string> = {
   "Not Now": "Not Now",
   "untracked": "Untracked",
   "Untracked": "Untracked",
+  "not_interested": "Not Interested",
+  "Not Interested": "Not Interested",
 }
 
 export interface PublicationStatusInfo {
@@ -199,6 +201,7 @@ export const PERSONAL_STATUSES_BY_ID: Record<number, PersonalStatusInfo> = {
   9: { id: 9, status: "Dropped", slug: "dropped", color: "#F87171", symbol: "🗑️", comment: "Dropped before finishing", bgClass: "bg-red-500", descriptionPt: "Abandonado, não pretendo continuar", isTerminal: true, isFullyRead: false, tracksProgress: true, hideFromInterest: true, isDefaultUnset: false, isFollowing: false, isUnread: false },
   11: { id: 11, status: "Not Now", slug: "not_now", color: "#D6A77A", symbol: "💤", comment: "Not interested in reading for now, but not permanently dismissed", bgClass: "bg-stone-400", descriptionPt: "Não me interessa agora, mas não descartei de vez", isTerminal: false, isFullyRead: false, tracksProgress: false, hideFromInterest: false, isDefaultUnset: false, isFollowing: false, isUnread: false },
   10: { id: 10, status: "Untracked", slug: "untracked", color: "#9CA3AF", symbol: "⎯", comment: "Stored in the database without an active reading status", bgClass: "bg-zinc-400", descriptionPt: "Está no catálogo, sem status de leitura ativo", isTerminal: false, isFullyRead: false, tracksProgress: false, hideFromInterest: false, isDefaultUnset: false, isFollowing: false, isUnread: true },
+  13: { id: 13, status: "Not Interested", slug: "not_interested", color: "#C06C84", symbol: "🚫", comment: "Works the user reviewed based on their synopsis, tags, and images and decided not to read.", bgClass: "bg-pink-600", descriptionPt: "Obras que o usuário avaliou pela sinopse, tags e imagens e decidiu não ler.", isTerminal: false, isFullyRead: false, tracksProgress: false, hideFromInterest: false, isDefaultUnset: false, isFollowing: false, isUnread: false },
 }
 
 /**

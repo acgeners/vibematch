@@ -17,6 +17,7 @@ export const PERSONAL_STATUSES = [
   "Dropped",
   "Not Now",
   "Untracked",
+  "Not Interested",
 ] as const
 export type PersonalStatus = (typeof PERSONAL_STATUSES)[number]
 

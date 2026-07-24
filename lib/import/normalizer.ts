@@ -61,6 +61,8 @@ export function normalizePersonalStatus(
     "not_now": "Not Now",
     "not now": "Not Now",
     "untracked": "Untracked",
+    "not_interested": "Not Interested",
+    "not interested": "Not Interested",
   }
   return map[s] ?? null
 }
