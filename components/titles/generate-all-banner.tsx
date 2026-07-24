@@ -34,6 +34,7 @@ export function GenerateAllBanner({
   initialStatus,
   currentWork,
   currentCovers,
+  archivedCoverUrls,
   currentSynopses,
   compact = false,
 }: {
@@ -44,6 +45,7 @@ export function GenerateAllBanner({
    *  do "Atualizar dados") que abre ANTES da cascata. */
   currentWork: UpdateDataProps["currentWork"]
   currentCovers?: UpdateDataProps["currentCovers"]
+  archivedCoverUrls?: UpdateDataProps["archivedCoverUrls"]
   currentSynopses?: UpdateDataProps["currentSynopses"]
   /** Modo botão inline (linha de ações da aba Geral) em vez do banner cheio. */
   compact?: boolean
@@ -112,6 +114,7 @@ export function GenerateAllBanner({
         workId={workId}
         currentWork={currentWork}
         currentCovers={currentCovers}
+        archivedCoverUrls={archivedCoverUrls}
         currentSynopses={currentSynopses}
         open={selectOpen}
         onOpenChange={setSelectOpen}

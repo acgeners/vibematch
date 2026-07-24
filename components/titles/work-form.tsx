@@ -612,6 +612,7 @@ const getEmptyCreateValues = (): Partial<WorkFormValues> => ({
   cmx_votes: null,
   extra_platform_ratings: [],
   covers: [],
+  archived_covers: [],
   synopses: [],
 })
 
@@ -782,6 +783,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
   const personalStatus = useWatch({ control, name: "personal_status" })
   const coverUrl = useWatch({ control, name: "cover_url" })
   const covers = useWatch({ control, name: "covers" }) ?? []
+  const archivedCovers = useWatch({ control, name: "archived_covers" }) ?? []
   const userScore = useWatch({ control, name: "user_score" })
   const titleValue = useWatch({ control, name: "title" })
   const yearValue = useWatch({ control, name: "year" })
@@ -1055,11 +1057,17 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     if (data.coverUrl) setValue("cover_url", data.coverUrl)
     if (data.multiCovers?.length) {
       const primaryUrl = data.coverUrl
-      setValue("covers", data.multiCovers.map((c) => ({
-        url: c.url,
-        source: c.source,
-        isPrimary: c.url === primaryUrl,
-      })))
+      // Capa que você arquivou não volta pela busca externa (migration 163) — é o
+      // mesmo contrato do "Atualizar dados", só que no formulário.
+      const archivedUrls = new Set(archivedCovers.map((a) => a.url))
+      const incoming = data.multiCovers.filter((c) => !archivedUrls.has(c.url))
+      if (incoming.length > 0) {
+        setValue("covers", incoming.map((c) => ({
+          url: c.url,
+          source: c.source,
+          isPrimary: c.url === primaryUrl,
+        })))
+      }
     }
     let synopsisBlocksForCanonical: string[] = []
     if (data.multiSynopses?.length) {
@@ -2110,6 +2118,10 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                 </div>
                 <CoversManager
                   value={covers}
+                  archived={archivedCovers}
+                  onArchivedChange={(next) =>
+                    setValue("archived_covers", next, { shouldDirty: true })
+                  }
                   onChange={(next) => {
                     setValue("covers", next, { shouldDirty: true })
                     // Keep the legacy single cover_url in sync with the primary,

@@ -298,7 +298,15 @@ async function enrichComixDataForWork(workId: string): Promise<boolean> {
       .select("source, position")
       .eq("work_id", workId)
     const hasComix = (coverRows ?? []).some((r) => r.source === "comix")
-    if (!hasComix) {
+    // Capa arquivada na edição (migration 163) não volta por aqui. Este caminho é
+    // o mais silencioso dos três que inserem capa: roda em background, sem UI.
+    const { data: archivedRow } = await supabase
+      .from("work_cover_archive")
+      .select("url")
+      .eq("work_id", workId)
+      .eq("url", coverUrl)
+      .maybeSingle()
+    if (!hasComix && !archivedRow) {
       const nextPos = Math.max(-1, ...(coverRows ?? []).map((r) => r.position ?? 0)) + 1
       const { error } = await supabase
         .from("work_covers")

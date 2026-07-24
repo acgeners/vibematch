@@ -58,6 +58,10 @@ interface UpdateDataDialogProps {
   // Capas já salvas na obra (todas, não só a primária). Mostradas no passo de
   // capas e mantidas por padrão. Quando ausente, cai pra currentWork.coverUrl.
   currentCovers?: SavedCover[]
+  // Capas apagadas na edição (migration 163). Não entram no pool de escolha —
+  // o servidor também as descarta, mas oferecer uma opção que ele vai ignorar
+  // seria pior que não oferecer.
+  archivedCoverUrls?: string[]
   // Sinopses já salvas na obra. Entram no pool do passo de sinopses junto com as
   // das fontes — sem isto o save (delete + re-insert) apaga as suas.
   currentSynopses?: SavedSynopsis[]
@@ -192,11 +196,12 @@ interface SavedCover {
 function buildCoverPool(
   externalCovers: Array<{ url: string; source: ExternalSourceId }>,
   saved: SavedCover[],
+  archivedUrls: Set<string> = new Set(),
 ): CoverChoice[] {
   const hasSaved = saved.length > 0
   const byUrl = new Map<string, CoverChoice>()
   for (const c of saved) {
-    if (!c.url) continue
+    if (!c.url || archivedUrls.has(c.url)) continue
     byUrl.set(c.url, {
       source: c.source ?? "atual",
       url: c.url,
@@ -206,7 +211,7 @@ function buildCoverPool(
     })
   }
   for (const c of externalCovers) {
-    if (!c.url || byUrl.has(c.url)) continue
+    if (!c.url || byUrl.has(c.url) || archivedUrls.has(c.url)) continue
     byUrl.set(c.url, {
       source: c.source,
       url: c.url,
@@ -228,6 +233,7 @@ export function UpdateDataDialog({
   workId,
   currentWork,
   currentCovers,
+  archivedCoverUrls,
   currentSynopses,
   open: controlledOpen,
   onOpenChange,
@@ -241,7 +247,10 @@ export function UpdateDataDialog({
   // Capas atuais da obra (passadas só pelo fluxo "Atualizar dados" da página da
   // obra). Quando ausente (ex.: revisão de importadas), savedCovers fica vazio e
   // o picker volta ao comportamento antigo: capas externas marcadas por padrão.
-  const savedCovers: SavedCover[] = (currentCovers ?? []).filter((c) => c.url)
+  const archivedUrlSet = new Set(archivedCoverUrls ?? [])
+  const savedCovers: SavedCover[] = (currentCovers ?? []).filter(
+    (c) => c.url && !archivedUrlSet.has(c.url),
+  )
   // Idem capas: só o fluxo "Atualizar dados" da página da obra passa isto. Sem
   // ele o pool fica só com as externas (comportamento antigo).
   const savedSynopses: SavedSynopsis[] = (currentSynopses ?? []).filter((s) => s.text?.trim())
@@ -300,8 +309,10 @@ export function UpdateDataDialog({
     // picker(s) antes do conflict resolver — passo separado pra cada tipo
     // (sinopses → capas) pra dar espaço pra galeria de capas em tamanho grande.
     const synopses = data.multiSynopses ?? []
-    const externalCovers = data.multiCovers ?? []
-    const pool = buildCoverPool(externalCovers, savedCovers)
+    // Capa arquivada some do pool aqui — e a contagem de "novidades" abaixo usa a
+    // MESMA lista filtrada, senão o passo de capas abriria só pra mostrar nada.
+    const externalCovers = (data.multiCovers ?? []).filter((c) => !archivedUrlSet.has(c.url))
+    const pool = buildCoverPool(externalCovers, savedCovers, archivedUrlSet)
 
     // Mostra o passo de capas quando há decisão real a tomar:
     //  - obra SEM capas salvas e várias externas → escolher entre elas (antigo);

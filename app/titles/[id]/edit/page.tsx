@@ -1,6 +1,12 @@
 import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
-import { getWorkWithAiEvaluations, getWorkBySlug, getWorkTitleByIdOrSlug, getWorkExternalIds } from "@/server/queries/works"
+import {
+  getWorkWithAiEvaluations,
+  getWorkBySlug,
+  getWorkTitleByIdOrSlug,
+  getWorkExternalIds,
+  getArchivedCovers,
+} from "@/server/queries/works"
 import { titleToSlug } from "@/lib/utils"
 import { Header } from "@/components/layout/header"
 import { WorkForm, type WorkFormAiEvaluation } from "@/components/titles/work-form"
@@ -137,10 +143,14 @@ export default async function EditTitlePage({ params }: EditPageProps) {
   const slug = titleToSlug(work.title) || work.id
   // IDs externos já vinculados (ex.: hid da Comix) — pra exibir/manter no passo
   // de seleção de fontes do "Buscar dados".
-  const existingExternalIds = await getWorkExternalIds(work.id)
+  const [existingExternalIds, archivedCovers] = await Promise.all([
+    getWorkExternalIds(work.id),
+    getArchivedCovers(work.id),
+  ])
   const initialValues: Partial<WorkFormValues> = {
     ...workToFormValues(work),
     external_ids: existingExternalIds,
+    archived_covers: archivedCovers,
   }
   // Canal ÚNICO de review manual (externas) — só com o gate local aberto; as Server Actions
   // reexecutam o gate. Em produção (sem auth) o card não aparece.

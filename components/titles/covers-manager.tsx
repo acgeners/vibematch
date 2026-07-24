@@ -1,40 +1,50 @@
 "use client"
 
-import { useState } from "react"
-import { ImageIcon, Plus, Trash2 } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
+import { Archive, ChevronRight, ImageIcon, Maximize2, Plus, RotateCcw, Star, Trash2, ZoomIn } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { SMALL_COVER_WIDTH } from "@/lib/cover-quality"
 import { normalizeCoverSource } from "@/lib/utils"
+import { CoversAdvancedDialog } from "@/components/titles/covers-advanced-dialog"
+import { addCover, archiveCover, restoreCover, setPrimaryCover } from "@/lib/cover-entries"
+import type { ArchivedCoverEntry, CoverEntry, CoverLists } from "@/lib/cover-entries"
 
-export interface CoverEntry {
-  url: string
-  source: string
-  isPrimary: boolean
-}
+// Reexportados: o tipo agora mora em `lib/cover-entries` (a grade e o diálogo
+// avançado compartilham as mesmas regras), mas quem importava daqui continua valendo.
+export type { CoverEntry, ArchivedCoverEntry }
 
 interface CoversManagerProps {
   value: CoverEntry[]
   onChange: (next: CoverEntry[]) => void
+  /** Capas apagadas que NÃO devem voltar num "Atualizar dados" (migration 163). */
+  archived?: ArchivedCoverEntry[]
+  onArchivedChange?: (next: ArchivedCoverEntry[]) => void
 }
 
-function isHttpUrl(value: string): boolean {
-  try {
-    const u = new URL(value)
-    return u.protocol === "http:" || u.protocol === "https:"
-  } catch {
-    return false
-  }
-}
-
-export function CoversManager({ value, onChange }: CoversManagerProps) {
+export function CoversManager({
+  value,
+  onChange,
+  archived = [],
+  onArchivedChange,
+}: CoversManagerProps) {
   const [newUrl, setNewUrl] = useState("")
   const [newSource, setNewSource] = useState<string>("")
   const [showAddForm, setShowAddForm] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [addedNotice, setAddedNotice] = useState<string | null>(null)
   const [failedUrls, setFailedUrls] = useState<Set<string>>(new Set())
+  const [showArchived, setShowArchived] = useState(false)
+  /** Capa aberta em tamanho grande (lightbox). `null` = fechado. */
+  const [preview, setPreview] = useState<{ url: string; source: string } | null>(null)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  // O foco volta pro campo de URL depois de cada inclusão: sem isso ele fica no
+  // botão, e colar a próxima capa exige um clique a mais. Faz par com o form
+  // continuar aberto — os dois existem pra você adicionar várias em sequência.
+  const newUrlRef = useRef<HTMLInputElement>(null)
   // Enquanto o campo está em foco vale o texto cru — normalizar a cada tecla
   // faria o cursor pular no meio da digitação. O valor salvo é o normalizado.
   const [sourceDrafts, setSourceDrafts] = useState<Record<string, string>>({})
@@ -42,6 +52,16 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
   // prioridade de fonte pegava a melhor capa em só 32% das obras com 2+ capas.
   // O tamanho vem do próprio `img` que já está na tela — sem requisição extra.
   const [dims, setDims] = useState<Record<string, { w: number; h: number }>>({})
+
+  // Esc fecha o lightbox. Só monta o listener enquanto ele está aberto.
+  useEffect(() => {
+    if (!preview) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPreview(null)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [preview])
 
   const markFailed = (url: string) =>
     setFailedUrls((prev) => (prev.has(url) ? prev : new Set(prev).add(url)))
@@ -61,45 +81,50 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
     )
   }
 
+  const lists: CoverLists = { covers: value, archived }
+
+  /**
+   * Um ponto ÚNICO de escrita das duas listas. As transições vivem em
+   * `lib/cover-entries` porque a grade e o diálogo avançado editam a mesma capa:
+   * regras duplicadas divergiriam em silêncio — arquivar por um caminho e não
+   * pelo outro é exatamente o bug que a tabela de arquivadas existe pra impedir.
+   */
+  const applyLists = (next: CoverLists) => {
+    if (next.covers !== value) onChange(next.covers)
+    if (next.archived !== archived) onArchivedChange?.(next.archived)
+  }
+
   const handleAdd = () => {
-    const trimmed = newUrl.trim()
-    if (!trimmed) {
-      setError("URL obrigatória")
-      return
-    }
-    if (!isHttpUrl(trimmed)) {
-      setError("URL precisa começar com http:// ou https://")
-      return
-    }
-    if (value.some((c) => c.url === trimmed)) {
-      setError("Essa URL já está na lista")
+    const result = addCover(lists, newUrl, newSource)
+    // O foco volta pro campo de URL nos DOIS caminhos: no erro é onde você vai
+    // corrigir, no acerto é onde você cola a próxima.
+    newUrlRef.current?.focus()
+    if (!result.ok) {
+      setError(result.error)
       return
     }
     setError(null)
-    const next: CoverEntry = {
-      url: trimmed,
-      source: normalizeCoverSource(newSource),
-      isPrimary: value.length === 0,
-    }
-    onChange([...value, next])
+    applyLists(result.lists)
     setNewUrl("")
     setNewSource("")
-    setShowAddForm(false)
+    setAddedNotice(`Capa adicionada (${result.added.source}).`)
+    // O formulário PERMANECE aberto — fechar depois de cada inclusão obrigava a
+    // reabrir pra cada capa. Só o botão "Ocultar" fecha.
   }
 
   const handleDelete = (url: string) => {
-    const removed = value.find((c) => c.url === url)
-    const remaining = value.filter((c) => c.url !== url)
-    // If we removed the primary, promote the first remaining (if any).
-    if (removed?.isPrimary && remaining.length > 0 && !remaining.some((c) => c.isPrimary)) {
-      remaining[0] = { ...remaining[0], isPrimary: true }
+    if (!onArchivedChange) {
+      // Sem o canal de arquivadas (uso legado do componente), apagar é só remover.
+      onChange(value.filter((c) => c.url !== url))
+      return
     }
-    onChange(remaining)
+    applyLists(archiveCover(lists, url))
+    setShowArchived(true)
   }
 
-  const handleSetPrimary = (url: string) => {
-    onChange(value.map((c) => ({ ...c, isPrimary: c.url === url })))
-  }
+  const handleRestore = (url: string) => applyLists(restoreCover(lists, url))
+
+  const handleSetPrimary = (url: string) => onChange(setPrimaryCover(value, url))
 
   const handleSourceChange = (url: string, source: string) => {
     onChange(value.map((c) => (c.url === url ? { ...c, source } : c)))
@@ -111,25 +136,43 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
         <div className="space-y-0.5">
           <Label className="text-sm font-medium">Capas ({value.length})</Label>
           <p className="text-xs text-muted-foreground">
-            Marque <strong>Primária</strong> para definir qual aparece nos cards.
+            Clique na imagem para ampliar. A <Star className="inline h-3 w-3 -translate-y-px fill-amber-400 text-amber-400" /> define qual aparece nos cards.
           </p>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setShowAddForm((current) => !current)
-            setError(null)
-          }}
-          className="h-8 shrink-0 gap-1 px-2.5"
-          aria-expanded={showAddForm}
-        >
-          <Plus className="h-4 w-4" />
-          <span className="sr-only sm:not-sr-only sm:text-xs">
-            {showAddForm ? "Ocultar" : "Adicionar"}
-          </span>
-        </Button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* A grade é boa pra ver tudo de relance; o avançado é pra DECIDIR capa a
+              capa, com a imagem grande. As duas escrevem no mesmo estado. */}
+          {(value.length > 0 || archived.length > 0) && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setAdvancedOpen(true)}
+              className="h-8 gap-1 px-2.5"
+              title="Abrir a galeria em tela cheia, com setas e ações por capa"
+            >
+              <Maximize2 className="h-4 w-4" />
+              <span className="sr-only sm:not-sr-only sm:text-xs">Avançado</span>
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setShowAddForm((current) => !current)
+              setError(null)
+              setAddedNotice(null)
+            }}
+            className="h-8 gap-1 px-2.5"
+            aria-expanded={showAddForm}
+          >
+            <Plus className="h-4 w-4" />
+            <span className="sr-only sm:not-sr-only sm:text-xs">
+              {showAddForm ? "Ocultar" : "Adicionar"}
+            </span>
+          </Button>
+        </div>
       </div>
 
       {value.length === 0 ? (
@@ -155,19 +198,53 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
                       <span className="text-[11px]">indisponível</span>
                     </div>
                   ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={imageSrc}
-                      alt={`Capa (${cover.source})`}
-                      className="h-full w-full object-cover"
-                      onError={() => markFailed(imageSrc)}
-                      onLoad={(e) => recordDims(cover.url, e.currentTarget)}
-                      ref={(node) => recordDims(cover.url, node)}
-                    />
+                    <button
+                      type="button"
+                      onClick={() => setPreview({ url: cover.url, source: cover.source })}
+                      className="group relative block h-full w-full cursor-zoom-in"
+                      aria-label={`Ampliar capa (${cover.source})`}
+                      title="Ampliar"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={imageSrc}
+                        alt={`Capa (${cover.source})`}
+                        className="h-full w-full object-cover"
+                        onError={() => markFailed(imageSrc)}
+                        onLoad={(e) => recordDims(cover.url, e.currentTarget)}
+                        ref={(node) => recordDims(cover.url, node)}
+                      />
+                      <span className="pointer-events-none absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                        <ZoomIn className="h-3.5 w-3.5" />
+                      </span>
+                      {/* Dimensões SOBRE a arte: com 3 colunas o card tem ~98px, e
+                          disputar essa largura com os dois botões quebrava
+                          "1199 × 1719" em duas linhas. O span fica DENTRO do botão,
+                          então clicar nele ainda amplia — e o `title` sobrevive. */}
+                      {(() => {
+                        const d = dims[cover.url]
+                        if (!d) return null
+                        const isSmall = d.w < SMALL_COVER_WIDTH
+                        return (
+                          <span
+                            className={`absolute bottom-1 left-1 rounded bg-black/65 px-1 py-px text-[9px] tabular-nums leading-tight ${
+                              isSmall ? "text-red-400" : "text-white/85"
+                            }`}
+                            title={
+                              isSmall
+                                ? `Menor que ${SMALL_COVER_WIDTH}px de largura — fica serrilhada na página da obra`
+                                : undefined
+                            }
+                          >
+                            {d.w} × {d.h}
+                          </span>
+                        )
+                      })()}
+                    </button>
                   )}
                 </div>
 
-                <div className="space-y-2 bg-card p-2">
+                <div className="space-y-1.5 bg-card p-2">
                   <input
                     type="text"
                     value={sourceDrafts[cover.url] ?? cover.source}
@@ -189,56 +266,113 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
                     className="block w-full rounded border bg-background px-1.5 py-1 text-[10px] tracking-wide"
                   />
 
-                  {(() => {
-                    const d = dims[cover.url]
-                    if (failed) return null
-                    if (!d) {
-                      return (
-                        <p className="text-[10px] text-muted-foreground/50" title="Medindo…">
-                          —
-                        </p>
-                      )
-                    }
-                    const isSmall = d.w < SMALL_COVER_WIDTH
-                    return (
-                      <p
-                        className={`text-[10px] tabular-nums ${
-                          isSmall ? "text-destructive" : "text-muted-foreground"
+                  {/* Só os dois botões: o rótulo "Primária" gastava uma linha
+                      inteira por card e as dimensões foram pra cima da arte. */}
+                  <div className="flex items-center justify-center gap-1">
+                    <span className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleSetPrimary(cover.url)}
+                        aria-pressed={cover.isPrimary}
+                        aria-label={cover.isPrimary ? "Capa principal" : "Definir como capa principal"}
+                        title={cover.isPrimary ? "Capa principal" : "Definir como principal"}
+                        className={`rounded p-1 hover:bg-muted ${
+                          cover.isPrimary
+                            ? "text-amber-400"
+                            : "text-muted-foreground hover:text-foreground"
                         }`}
-                        title={
-                          isSmall
-                            ? `Menor que ${SMALL_COVER_WIDTH}px de largura — fica serrilhada na página da obra`
-                            : undefined
-                        }
                       >
-                        {d.w} × {d.h}
-                      </p>
-                    )
-                  })()}
-
-                  <div className="flex items-center justify-between gap-1 text-xs">
-                    <label className="flex items-center gap-1 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="cover-primary"
-                        checked={cover.isPrimary}
-                        onChange={() => handleSetPrimary(cover.url)}
-                      />
-                      Primária
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(cover.url)}
-                      className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      aria-label="Remover capa"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                        <Star className={`h-4 w-4 ${cover.isPrimary ? "fill-current" : ""}`} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(cover.url)}
+                        className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        aria-label="Arquivar capa"
+                        title="Arquivar capa"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </span>
                   </div>
                 </div>
               </div>
             )
           })}
+        </div>
+      )}
+
+      {archived.length > 0 && (
+        <div className="border-t border-dashed pt-3">
+          <button
+            type="button"
+            onClick={() => setShowArchived((s) => !s)}
+            aria-expanded={showArchived}
+            className="flex w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <ChevronRight
+              className={`h-3 w-3 transition-transform ${showArchived ? "rotate-90" : ""}`}
+            />
+            <Archive className="h-3.5 w-3.5" />
+            Arquivadas ({archived.length})
+          </button>
+
+          {showArchived && (
+            <div className="mt-2 space-y-2">
+              <p className="text-[11px] text-muted-foreground">
+                Não voltam num “Atualizar dados”. Clique em ↺ para restaurar.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {archived.map((entry) => {
+                  const src = getCoverImageSrc(entry.url)
+                  const failed = failedUrls.has(src)
+                  return (
+                    <div
+                      key={entry.url}
+                      className="w-14 overflow-hidden rounded border opacity-60 transition-opacity hover:opacity-100"
+                      title={`${entry.source || "sem fonte"} — arquivada`}
+                    >
+                      <div className="aspect-[2/3] bg-muted">
+                        {failed ? (
+                          <div className="grid h-full w-full place-items-center text-muted-foreground">
+                            <ImageIcon className="h-4 w-4 opacity-50" />
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreview({ url: entry.url, source: entry.source || "arquivada" })
+                            }
+                            className="block h-full w-full cursor-zoom-in"
+                            aria-label="Ampliar capa arquivada"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={src}
+                              alt=""
+                              className="h-full w-full object-cover"
+                              onError={() => markFailed(src)}
+                            />
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex justify-center bg-card py-0.5">
+                        <button
+                          type="button"
+                          onClick={() => handleRestore(entry.url)}
+                          className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                          aria-label="Restaurar capa"
+                          title="Restaurar capa"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -250,16 +384,24 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
             </Label>
             <Input
               id="new-cover-url"
+              ref={newUrlRef}
               type="url"
               placeholder="https://..."
               value={newUrl}
               onChange={(e) => {
                 setNewUrl(e.target.value)
                 if (error) setError(null)
+                if (addedNotice) setAddedNotice(null)
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault()
+                  // O <form> tem uma regra GLOBAL: Enter em qualquer input valida e
+                  // dá `blur()` (work-form.tsx:handleFormKeyDown). Ela roda no
+                  // borbulhamento, DEPOIS daqui, e desfazia o foco que acabamos de
+                  // devolver. Aqui o Enter significa "adicionar e continuar", não
+                  // "terminei este campo" — então ele não sobe.
+                  e.stopPropagation()
                   handleAdd()
                 }
               }}
@@ -281,6 +423,7 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault()
+                    e.stopPropagation() // idem: o blur global do <form> comeria o foco
                     handleAdd()
                   }
                 }}
@@ -301,8 +444,52 @@ export function CoversManager({ value, onChange }: CoversManagerProps) {
             )}
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
+          {!error && addedNotice && (
+            <p className="text-xs text-emerald-500">{addedNotice} O formulário segue aberto.</p>
+          )}
         </div>
       )}
+
+      {/* PORTAL pro <body>: a página de edição tem ancestrais com `filter`/
+          `backdrop-filter`, e eles viram bloco de contenção de `position: fixed` —
+          sem o portal o lightbox escurecia só o pedaço do formulário, não a tela. */}
+      {preview &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[60] flex cursor-zoom-out items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
+            onClick={() => setPreview(null)}
+            role="button"
+            tabIndex={-1}
+            aria-label="Fechar visualização"
+          >
+            <div className="relative flex max-h-full w-full max-w-md flex-col items-center gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={getCoverImageSrc(preview.url)}
+                alt={`Capa ampliada (${preview.source})`}
+                className="max-h-[80vh] w-auto max-w-full rounded-lg object-contain"
+              />
+              <p className="text-xs text-white/70">
+                {preview.source}
+                {dims[preview.url] ? ` · ${dims[preview.url].w} × ${dims[preview.url].h}` : ""}
+              </p>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {/* Modo avançado. `dims` é COMPARTILHADO: as capas que a grade já mediu
+          entram no diálogo com o tamanho pronto, sem piscar "medindo…". */}
+      <CoversAdvancedDialog
+        open={advancedOpen}
+        onOpenChange={setAdvancedOpen}
+        covers={value}
+        archived={archived}
+        onChange={applyLists}
+        dims={dims}
+        onDims={recordDims}
+      />
     </div>
   )
 }

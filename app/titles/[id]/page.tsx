@@ -15,7 +15,7 @@ import type { CascadeStatus } from "@/lib/generate-all/types"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
 import { getTasteCriteria, getTasteScoresForWork } from "@/server/queries/pilot-taste"
 import { TagsExpandAll } from "@/components/titles/tags-expand-all"
-import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug, getWorkExternalIds } from "@/server/queries/works"
+import { getWorkWithAiEvaluations, getWorkBySlug, getWorkIdsBySlug, getWorkTitleByIdOrSlug, getWorkExternalIds, getArchivedCovers } from "@/server/queries/works"
 import { comixWorkUrl } from "@/lib/external/comix"
 import { getAllTags } from "@/server/queries/tags"
 import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
@@ -304,7 +304,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent, archivedCovers] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -319,7 +319,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getTasteCriteria(),
     getTasteScoresForWork(work.id as string),
     getHideAdultContent(),
+    getArchivedCovers(work.id as string),
   ])
+  // Capas que você apagou na edição: o diálogo de "Atualizar dados" não as
+  // reoferece (migration 163). O servidor também as descarta na gravação.
+  const archivedCoverUrls = archivedCovers.map((c) => c.url)
   // "Ler no Comix": só pra obras que você acompanha (Reading/Started) e que têm
   // hid aceito. `pending` = capítulos não lidos (total − lidos), sinal persistido
   // e refrescado pela checagem manual do /leitura.
@@ -898,6 +902,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       isPrimary: c.is_primary,
                     })
                   )}
+                  archivedCoverUrls={archivedCoverUrls}
                   currentSynopses={(work.work_synopses ?? []).map(
                     (s: { source?: string | null; text: string; is_primary?: boolean }) => ({
                       source: s.source ?? "manual",
@@ -927,6 +932,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       isPrimary: c.is_primary,
                     })
                   )}
+                  archivedCoverUrls={archivedCoverUrls}
                   currentSynopses={(work.work_synopses ?? []).map(
                     (s: { source?: string | null; text: string; is_primary?: boolean }) => ({
                       source: s.source ?? "manual",
