@@ -395,6 +395,65 @@ async function syncWorkCovers(
 }
 
 /**
+ * Lê as URLs de capa arquivadas de uma obra (migration 163).
+ *
+ * Fail-soft: erro devolve conjunto vazio. A pior consequência é uma capa
+ * arquivada reaparecer — enquanto abortar a gravação inteira por causa disto
+ * perderia a edição que o usuário acabou de fazer.
+ */
+async function getArchivedCoverUrls(
+  supabase: SupabaseAdminClient,
+  workId: string,
+): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("work_cover_archive")
+    .select("url")
+    .eq("work_id", workId)
+  if (error) {
+    console.error("[getArchivedCoverUrls] falhou:", error.message)
+    return new Set()
+  }
+  return new Set((data ?? []).map((r) => r.url as string))
+}
+
+/**
+ * Persiste a lista de capas arquivadas do formulário (migration 163).
+ *
+ * Replace-all, igual a `syncWorkCovers`: o formulário é a fonte da verdade —
+ * restaurar uma capa é simplesmente ela sumir desta lista.
+ */
+async function syncArchivedCovers(
+  supabase: SupabaseAdminClient,
+  workId: string,
+  archived: Array<{ url: string; source?: string | null }> | undefined,
+): Promise<{ error: string | null }> {
+  if (archived === undefined) return { error: null }
+
+  const { error: deleteError } = await supabase
+    .from("work_cover_archive")
+    .delete()
+    .eq("work_id", workId)
+  if (deleteError) return { error: `Falha ao limpar capas arquivadas: ${deleteError.message}` }
+
+  if (archived.length === 0) return { error: null }
+
+  // Dedup por URL: o UNIQUE (work_id, url) rejeitaria o INSERT INTEIRO — e as
+  // arquivadas já teriam sido apagadas acima, desarquivando tudo em silêncio.
+  const seen = new Set<string>()
+  const rows: Array<{ work_id: string; url: string; source: string | null }> = []
+  for (const entry of archived) {
+    if (!entry.url || seen.has(entry.url)) continue
+    seen.add(entry.url)
+    rows.push({ work_id: workId, url: entry.url, source: entry.source || null })
+  }
+  if (rows.length === 0) return { error: null }
+
+  const { error } = await supabase.from("work_cover_archive").insert(rows)
+  if (error) return { error: `Falha ao salvar capas arquivadas: ${error.message}` }
+  return { error: null }
+}
+
+/**
  * Upsert incremental para capas vindas do diálogo "Atualizar dados".
  * Preserva capas pré-existentes não citadas na lista (apenas marca primária=false
  * em todas as outras). Quando a URL já existe, só atualiza is_primary; quando
@@ -407,11 +466,22 @@ async function syncExternalCovers(
 ): Promise<{ error: string | null }> {
   if (covers.length === 0) return { error: null }
 
+  // Capa arquivada (migration 163) não volta. Esta é a garantia de servidor: o
+  // seletor do diálogo já não a oferece, mas quem grava é aqui — e "a capa que
+  // eu apaguei voltou" é o tipo de bug que não levanta erro nenhum.
+  const archivedUrls = await getArchivedCoverUrls(supabase, workId)
+  const kept = archivedUrls.size > 0 ? covers.filter((c) => !archivedUrls.has(c.url)) : covers
+  if (kept.length === 0) {
+    // Tudo que veio está arquivado: não é erro, é o arquivamento funcionando.
+    // Sair aqui PRESERVA as capas atuais — o delete abaixo as apagaria.
+    return { error: null }
+  }
+
   const normalizedPrimaryIdx = (() => {
-    const idx = covers.findIndex((c) => c.isPrimary)
+    const idx = kept.findIndex((c) => c.isPrimary)
     return idx === -1 ? 0 : idx
   })()
-  const primaryUrl = covers[normalizedPrimaryIdx].url
+  const primaryUrl = kept[normalizedPrimaryIdx].url
 
   // Replace mode: deleta todas as capas atuais da obra e insere a lista nova.
   // Antes era aditivo (mantinha capas não listadas), mas a UX de refresh +
@@ -423,7 +493,7 @@ async function syncExternalCovers(
     .eq("work_id", workId)
   if (deleteError) return { error: `Falha ao limpar capas: ${deleteError.message}` }
 
-  const rows = covers.map((cover, position) => ({
+  const rows = kept.map((cover, position) => ({
     work_id: workId,
     url: cover.url,
     source: cover.source,
@@ -1725,7 +1795,17 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
   // Salvar tags
   await syncWorkTags(supabase, id, data.tags ?? [])
   await syncWorkGenres(supabase, id, knownGenres.genreIds, "replace")
-  const coversResult = await syncWorkCovers(supabase, id, data.covers)
+  // Arquivadas ANTES das ativas: se o insert das ativas falhar, o pior caso é uma
+  // capa a mais no arquivo — e não uma capa arquivada que "desarquivou" sozinha.
+  const archivedResult = await syncArchivedCovers(supabase, id, data.archived_covers)
+  if (archivedResult.error) return { error: { covers: [archivedResult.error] } }
+  // Defesa contra a lista incoerente: uma URL nas DUAS listas gravaria a capa e
+  // a bloquearia ao mesmo tempo. Arquivada vence — é o lado recuperável: ela
+  // aparece em "Arquivadas" com o botão de restaurar, em vez de virar uma capa
+  // visível que o próximo "Atualizar dados" apaga sem explicação.
+  const archivedUrlSet = new Set((data.archived_covers ?? []).map((a) => a.url))
+  const activeCovers = data.covers?.filter((c) => !archivedUrlSet.has(c.url))
+  const coversResult = await syncWorkCovers(supabase, id, activeCovers)
   if (coversResult.error) return { error: { covers: [coversResult.error] } }
   const synopsesResult = await syncWorkSynopses(supabase, id, normalizeFormSynopses(data))
   if (synopsesResult.error) return { error: { synopses: [synopsesResult.error] } }

@@ -37,6 +37,14 @@ const coverEntrySchema = z.object({
   isPrimary: z.boolean(),
 })
 
+// Capa arquivada (migration 163). `source` é rótulo, não chave: aceita vazio
+// porque uma capa legada pode ter sido salva sem fonte e ainda assim precisa
+// poder ser arquivada.
+const archivedCoverEntrySchema = z.object({
+  url: z.string().url(),
+  source: z.string().trim().max(80).nullable().optional(),
+})
+
 const synopsisEntrySchema = z.object({
   source: z.string().trim().min(1).max(80),
   text: z.string().trim().min(1).max(5000),
@@ -103,6 +111,9 @@ export const workFormBase = z.object({
 
   // Multi-source metadata (Fase 2)
   covers: z.array(coverEntrySchema).default([]),
+  // Capas que você apagou. Ficam fora de `covers` mas persistem, pra que
+  // "Atualizar dados" não as traga de volta (migration 163).
+  archived_covers: z.array(archivedCoverEntrySchema).default([]),
   synopses: z.array(synopsisEntrySchema).default([]),
 
   // External source IDs (anilist, mangaupdates, myanimelist, kitsu, mangadex, comick, comix, animeplanet)

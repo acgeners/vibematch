@@ -576,6 +576,31 @@ export async function getWorkExternalIds(workId: string): Promise<Record<string,
   return map
 }
 
+/**
+ * Capas que você apagou na edição (migration 163). Ficam FORA de `work_covers`
+ * de propósito: assim nenhum dos ~25 pontos que leem capa precisa filtrar nada —
+ * quem lê capa só enxerga capa viva. Só os gravadores consultam esta lista.
+ *
+ * Fail-soft: erro aqui devolve lista vazia. A consequência é a capa arquivada
+ * poder reaparecer numa atualização — chato, não destrutivo — enquanto lançar
+ * derrubaria a página de edição inteira.
+ */
+export async function getArchivedCovers(
+  workId: string,
+): Promise<Array<{ url: string; source: string | null }>> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("work_cover_archive")
+    .select("url, source")
+    .eq("work_id", workId)
+    .order("archived_at", { ascending: false })
+  if (error) {
+    console.error("[getArchivedCovers] failed:", error.message)
+    return []
+  }
+  return (data ?? []).map((r) => ({ url: r.url as string, source: (r.source as string) ?? null }))
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
