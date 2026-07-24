@@ -143,7 +143,7 @@ describe("Revisão da avaliação IA — aplicar a todos", () => {
         onSaved={vi.fn()}
       />
     )
-    expect(screen.getByTitle(/Confiança da IA nesta avaliação/).textContent).toMatch(/82%/)
+    expect(screen.getByTitle(/Confiança declarada pela IA/).textContent).toMatch(/82%/)
     // Sem nota atual não há conjunto pra escolher — o aplicar-a-todos não aparece.
     expect(
       screen.queryByRole("button", { name: /Aplicar a nota atual/ })
@@ -166,5 +166,74 @@ describe("Revisão da avaliação IA — aplicar a todos", () => {
     save()
     // Nenhuma nota nova da IA entra — não há por que perguntar.
     expect(submitAiReview).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("Revisão da avaliação IA — réguas de confiança", () => {
+  beforeEach(() => {
+    submitAiReview.mockReset()
+    submitAiReview.mockResolvedValue({ error: null })
+  })
+
+  /** `evaluation()` fixa sonnet-4-6; aqui a sugestão é sempre da config ATIVA. */
+  function renderWithRulers(current: {
+    confidence: number | null
+    modelName: string | null
+    promptVersion: string | null
+  }) {
+    render(
+      <AiEvaluationReviewForm
+        evaluation={
+          {
+            ...(evaluation(0.75) as unknown as Record<string, unknown>),
+            model_name: "claude-sonnet-5",
+            prompt_version: "v21",
+            created_at: "2026-07-23T10:00:00Z",
+          } as never
+        }
+        workId="w1"
+        workTitle="Obra"
+        currentScores={CURRENT}
+        currentEvaluation={{ ...current, evaluatedAt: "2026-05-21T10:00:00Z", justifications: {} }}
+        onSaved={vi.fn()}
+      />
+    )
+  }
+
+  it("avisa quando as duas confianças vieram de modelos diferentes", () => {
+    renderWithRulers({ confidence: 0.82, modelName: "claude-sonnet-4-6", promptVersion: "v19" })
+    const aviso = screen.getByText(/Réguas diferentes/i).closest("p")?.textContent ?? ""
+    // Nomeia as duas procedências, senão o aviso não é acionável.
+    expect(aviso).toMatch(/sonnet-4-6\/v19 → sonnet-5\/v21/)
+    // Cita o teto pelo MODELO, não pela config: o n=371 agrega v20+v21.
+    expect(aviso).toMatch(/O sonnet-5 nunca passou de 88% em 371 avaliações/)
+    expect(aviso).not.toMatch(/sonnet-5\/v21 nunca passou/)
+    // A procedência também aparece sob cada botão (dois lugares, de propósito).
+    expect(screen.getAllByText(/sonnet-4-6\/v19/).length).toBeGreaterThan(1)
+  })
+
+  it("NÃO avisa quando a régua é a mesma — a comparação é legítima", () => {
+    renderWithRulers({ confidence: 0.7, modelName: "claude-sonnet-5", promptVersion: "v21" })
+    expect(screen.queryByText(/Réguas diferentes/i)).toBeNull()
+  })
+
+  it("diz 'inalcançável' quando a confiança atual passa do teto do modelo novo", () => {
+    // O caso das 50 obras: 93% do sonnet-4-6 contra o teto observado de 88%.
+    renderWithRulers({ confidence: 0.93, modelName: "claude-sonnet-4-6", promptVersion: "v17" })
+    const aviso = screen.getByText(/Réguas diferentes/i).closest("p")?.textContent ?? ""
+    expect(aviso).toMatch(/93%\) é inalcançável pro sonnet-5/)
+    expect(aviso).toMatch(/A queda é aritmética, não um sinal de piora/)
+  })
+
+  it("não afirma 'inalcançável' quando a confiança atual cabe no teto novo", () => {
+    renderWithRulers({ confidence: 0.8, modelName: "claude-sonnet-4-6", promptVersion: "v19" })
+    expect(screen.getByText(/Réguas diferentes/i)).toBeTruthy()
+    expect(screen.queryByText(/inalcançável/i)).toBeNull()
+  })
+
+  it("cala quando a nota atual não veio de IA (sem procedência nenhuma)", () => {
+    renderWithRulers({ confidence: null, modelName: null, promptVersion: null })
+    expect(screen.queryByText(/Réguas diferentes/i)).toBeNull()
+    expect(screen.getByText(/sem avaliação IA/i)).toBeTruthy()
   })
 })

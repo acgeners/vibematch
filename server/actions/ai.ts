@@ -48,9 +48,17 @@ function toPositiveInt(value: string | undefined): number | undefined {
  *  justificativa que geraram cada nota atual. Null quando nenhuma nota atual veio
  *  de IA (todas manuais/importadas → sem `ai_evaluation_id`).
  *  O tipo público espelha `CurrentEvaluationMeta` do review form (não exportamos
- *  daqui: é um módulo "use server", que só pode exportar async functions). */
+ *  daqui: é um módulo "use server", que só pode exportar async functions).
+ *
+ *  `modelName`/`promptVersion` NÃO são cosméticos: sem eles a tela põe "Atual 93%"
+ *  ao lado de "Sugerido 75%" sem poder dizer que os dois números vieram de modelos
+ *  diferentes, com tetos diferentes (0,95 vs 0,88) — e é essa justaposição que faz
+ *  concluir "piorou" quando só a régua mudou. Ver `lib/ai-evaluation/confidence-ruler.ts`. */
 interface CurrentEvaluationMeta {
   confidence: number | null
+  modelName: string | null
+  promptVersion: string | null
+  evaluatedAt: string | null
   justifications: Record<string, string>
 }
 
@@ -65,7 +73,9 @@ async function loadCurrentEvaluationMeta(
 
   const { data: evals } = await supabase
     .from("ai_evaluations")
-    .select("id, confidence, created_at, ai_evaluation_scores(criterion_slug, justification)")
+    .select(
+      "id, confidence, created_at, model_name, prompt_version, ai_evaluation_scores(criterion_slug, justification)",
+    )
     .in("id", evalIds)
   if (!evals || evals.length === 0) return null
 
@@ -83,14 +93,21 @@ async function loadCurrentEvaluationMeta(
   }
 
   // Uma confiança só pro badge "Atual": a da avaliação mais recente que respalda
-  // as notas (ordena por created_at desc).
+  // as notas (ordena por created_at desc). A procedência sai da MESMA linha — se
+  // viesse de outra, o rótulo diria um modelo e o número seria de outro.
   const mostRecent = [...evals].sort(
     (a, b) => new Date(b.created_at as string).getTime() - new Date(a.created_at as string).getTime(),
   )[0]
   const confidence = mostRecent?.confidence == null ? null : Number(mostRecent.confidence)
 
   if (confidence == null && Object.keys(justifications).length === 0) return null
-  return { confidence, justifications }
+  return {
+    confidence,
+    modelName: (mostRecent?.model_name as string | null) ?? null,
+    promptVersion: (mostRecent?.prompt_version as string | null) ?? null,
+    evaluatedAt: (mostRecent?.created_at as string | null) ?? null,
+    justifications,
+  }
 }
 
 /**
