@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useRef, useState, useTransition } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Filter, RotateCcw, Search, Trash2, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -20,6 +20,8 @@ import {
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { TagFilter } from "@/components/titles/tag-filter"
 import type { TagOption } from "@/server/queries/tags"
+import { searchWorkSuggestions } from "@/server/actions/work-search"
+import type { WorkSuggestion } from "@/server/queries/work-suggestions"
 import { AI_EVAL_STATUSES, CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { LABELS } from "@/lib/constants/ui-labels"
@@ -429,6 +431,17 @@ function pushToSearchHistory(term: string): string[] {
   return next
 }
 
+/** Mínimo de caracteres pra buscar sugestões — espelha o guard da server action. */
+const MIN_SUGGEST_LENGTH = 2
+/** Espera depois da última tecla antes de ir ao servidor. */
+const SUGGEST_DEBOUNCE_MS = 250
+/**
+ * Espera antes de re-filtrar a TABELA. Maior que a do dropdown de propósito: o
+ * dropdown é uma chamada barata, a tabela é uma navegação que re-renderiza a
+ * página inteira no servidor.
+ */
+const LIVE_SEARCH_DEBOUNCE_MS = 450
+
 function SearchInputWithHistory({
   value,
   onChange,
@@ -440,7 +453,51 @@ function SearchInputWithHistory({
 }) {
   const [history, setHistory] = useState<string[]>(() => readSearchHistory())
   const [open, setOpen] = useState(false)
+  // `settledQuery` é a busca que as sugestões atuais REPRESENTAM. Sem ele, o
+  // "Nenhuma obra com esse nome" pisca entre a 2ª tecla e a resposta chegar —
+  // afirmando que não existe algo que ainda nem foi procurado.
+  const [suggestions, setSuggestions] = useState<WorkSuggestion[]>([])
+  const [settledQuery, setSettledQuery] = useState<string | null>(null)
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const router = useRouter()
+
+  // Contador de requisição em vez de uma flag `mounted`: sob StrictMode o cleanup
+  // zera a flag e ela nunca mais volta a true, e o loading trava pra sempre.
+  // Aqui cada busca ganha um id e a resposta velha simplesmente é descartada —
+  // o que também resolve a resposta que chega fora de ordem.
+  const requestIdRef = useRef(0)
+
+  const trimmed = value.trim()
+
+  useEffect(() => {
+    // Abaixo do mínimo só invalida o que está em voo. Nada de setState aqui: o
+    // que segura a renderização das sugestões velhas é o `showSuggestions`.
+    if (trimmed.length < MIN_SUGGEST_LENGTH) {
+      requestIdRef.current += 1
+      return
+    }
+
+    const requestId = ++requestIdRef.current
+    const timer = setTimeout(() => {
+      setLoadingSuggestions(true)
+      searchWorkSuggestions(trimmed)
+        .then((rows) => {
+          if (requestIdRef.current !== requestId) return
+          setSuggestions(rows)
+          setSettledQuery(trimmed)
+          setLoadingSuggestions(false)
+        })
+        .catch(() => {
+          if (requestIdRef.current !== requestId) return
+          setSuggestions([])
+          setSettledQuery(trimmed)
+          setLoadingSuggestions(false)
+        })
+    }, SUGGEST_DEBOUNCE_MS)
+
+    return () => clearTimeout(timer)
+  }, [trimmed])
 
   const submit = (term: string) => {
     setHistory(pushToSearchHistory(term))
@@ -448,13 +505,18 @@ function SearchInputWithHistory({
     onSubmit(term)
   }
 
-  const filtered = useMemo(() => {
-    const q = value.trim().toLowerCase()
+  const filteredHistory = useMemo(() => {
+    const q = trimmed.toLowerCase()
     if (!q) return history
     return history.filter((t) => t.toLowerCase().includes(q))
-  }, [history, value])
+  }, [history, trimmed])
 
-  const showPopover = open && filtered.length > 0
+  const showSuggestions = trimmed.length >= MIN_SUGGEST_LENGTH
+  const isSearching = showSuggestions && loadingSuggestions
+  // Só afirma "não existe" depois que a resposta DESTA busca voltou.
+  const searchedAndEmpty = showSuggestions && settledQuery === trimmed && suggestions.length === 0
+  const showPopover =
+    open && (showSuggestions || filteredHistory.length > 0)
 
   const clearHistory = () => {
     writeSearchHistory([])
@@ -470,7 +532,7 @@ function SearchInputWithHistory({
           <Input
             id="title-filter-search"
             ref={inputRef}
-            placeholder="Digite o nome da obra e pressione Enter"
+            placeholder="Digite o nome da obra"
             className="h-9 pl-9 pr-9 text-sm"
             value={value}
             onChange={(e) => {
@@ -488,18 +550,25 @@ function SearchInputWithHistory({
               }
             }}
           />
-          {value && (
-            <button
-              type="button"
-              aria-label="Limpar busca por título"
-              onClick={() => {
-                onChange("")
-                inputRef.current?.focus()
-              }}
-              className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
+          {isSearching ? (
+            <span
+              aria-hidden
+              className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin rounded-full border-2 border-muted border-t-primary"
+            />
+          ) : (
+            value && (
+              <button
+                type="button"
+                aria-label="Limpar busca por título"
+                onClick={() => {
+                  onChange("")
+                  inputRef.current?.focus()
+                }}
+                className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )
           )}
         </div>
       </PopoverAnchor>
@@ -510,11 +579,71 @@ function SearchInputWithHistory({
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <Command shouldFilter={false}>
-          <CommandList>
-            <CommandEmpty>Nenhuma busca recente</CommandEmpty>
-            {filtered.length > 0 && (
+          <CommandList className="max-h-[22rem]">
+            {showSuggestions && suggestions.length > 0 && (
+              <CommandGroup heading="Obras no catálogo">
+                {suggestions.map((s) => (
+                  <CommandItem
+                    key={s.id}
+                    value={`work-${s.id}`}
+                    onSelect={() => {
+                      setOpen(false)
+                      router.push(`/titles/${s.slug}`)
+                    }}
+                    onMouseDown={(e) => e.preventDefault()}
+                    className="gap-2.5"
+                  >
+                    {s.coverUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={s.coverUrl}
+                        alt=""
+                        className="h-11 w-8 shrink-0 rounded-sm object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <span className="h-11 w-8 shrink-0 rounded-sm bg-muted" />
+                    )}
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span className="truncate text-sm font-medium">{s.title}</span>
+                      <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                        {s.publicationStatus && <span>{s.publicationStatus}</span>}
+                        {s.totalChapters != null && (
+                          <>
+                            <span className="opacity-50">·</span>
+                            <span className="tabular-nums">{s.totalChapters} caps</span>
+                          </>
+                        )}
+                        {s.year != null && (
+                          <>
+                            <span className="opacity-50">·</span>
+                            <span className="tabular-nums">{s.year}</span>
+                          </>
+                        )}
+                      </span>
+                      {/* Sem isto o usuário vê um nome que não tem nada a ver com o
+                          que digitou — o casamento veio de um título alternativo. */}
+                      {s.matchedAlias && (
+                        <span className="truncate text-[11px] italic text-muted-foreground">
+                          achou por: {s.matchedAlias}
+                        </span>
+                      )}
+                    </span>
+                    {s.isAdult && (
+                      <span className="ml-auto shrink-0 rounded-full bg-destructive/15 px-1.5 py-0.5 text-[10px] font-bold text-destructive">
+                        18+
+                      </span>
+                    )}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+
+            {searchedAndEmpty && <CommandEmpty>Nenhuma obra com esse nome</CommandEmpty>}
+
+            {filteredHistory.length > 0 && (
               <CommandGroup heading="Buscas recentes">
-                {filtered.map((term) => (
+                {filteredHistory.map((term) => (
                   <CommandItem
                     key={term}
                     value={term}
@@ -571,6 +700,36 @@ export function TitleFilters({
     },
     []
   )
+
+  // Busca ao vivo: aplica o termo por cima dos filtros JÁ APLICADOS (a URL), não
+  // por cima do rascunho. Digitar não pode commitar em silêncio filtros que você
+  // mexeu mas ainda não clicou em "Aplicar".
+  const applySearchNow = useCallback(
+    (term: string) => {
+      const next = new URLSearchParams(appliedSearchString)
+      const trimmed = term.trim()
+      if (trimmed) next.set("search", trimmed)
+      else next.delete("search")
+      // Sem isto, buscar estando na página 3 cai num recorte vazio: a busca nova
+      // costuma ter menos de 3 páginas.
+      next.delete("page")
+      const qs = next.toString()
+      startTransition(() => router.replace(qs ? `/titles?${qs}` : "/titles"))
+    },
+    [appliedSearchString, router],
+  )
+
+  const liveSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const applySearchLive = useCallback(
+    (term: string) => {
+      if (liveSearchTimer.current) clearTimeout(liveSearchTimer.current)
+      liveSearchTimer.current = setTimeout(() => applySearchNow(term), LIVE_SEARCH_DEBOUNCE_MS)
+    },
+    [applySearchNow],
+  )
+  useEffect(() => () => {
+    if (liveSearchTimer.current) clearTimeout(liveSearchTimer.current)
+  }, [])
 
   const filtersDirty = draftSearch !== appliedSearchString
   const hasFilters = draftSearch !== "" || appliedSearchString !== ""
@@ -787,22 +946,11 @@ export function TitleFilters({
             value={currentSearch}
             onChange={(v) => {
               updateParams({ search: v || null })
-              if (!v) {
-                startTransition(() => {
-                  const next = new URLSearchParams(draftSearch)
-                  next.delete("search")
-                  const qs = next.toString()
-                  router.replace(qs ? `/titles?${qs}` : "/titles")
-                })
-              }
+              applySearchLive(v)
             }}
             onSubmit={(term) => {
               updateParams({ search: term || null })
-              const next = new URLSearchParams(draftSearch)
-              if (term) next.set("search", term)
-              else next.delete("search")
-              const qs = next.toString()
-              startTransition(() => router.replace(qs ? `/titles?${qs}` : "/titles"))
+              applySearchNow(term)
             }}
           />
         </div>

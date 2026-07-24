@@ -27,6 +27,7 @@ import {
   markPredictionLabelChanged,
 } from "@/lib/server/predictions/resolve-prediction"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
+import { duplicateKeys } from "@/lib/title-match"
 import { startUpdateJob, finishUpdateJob } from "@/lib/background/update-jobs"
 import { fetchExternalData } from "./external"
 import { buildCandidateFromExternalIds } from "@/lib/external/index"
@@ -215,63 +216,24 @@ async function filterKnownGenres(supabase: SupabaseAdminClient, values: string[]
   return { names, tagIds, genreIds }
 }
 
-function normalizeTitleMatch(value: string | null | undefined) {
-  return (value ?? "").trim().toLowerCase()
-}
-
-const WEAK_DUPLICATE_ALIAS_KEYS = new Set([
-  "status",
-  "official",
-  "english",
-  "korean",
-  "japanese",
-  "chinese",
-  "novel",
-  "webtoon",
-  "oneshot",
-  "one shot",
-  "promo",
-  "promo art",
-])
-
-function isWeakDuplicateAlias(key: string) {
-  return WEAK_DUPLICATE_ALIAS_KEYS.has(key)
-}
-
-function uniqueComparableKeys(keys: string[]) {
-  const seen = new Set<string>()
-  return keys.filter((key) => {
-    if (!key || seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
+// As chaves de duplicata (normalização + descarte de alias genérico) moram em
+// lib/title-match.ts, junto com a normalização da BUSCA. Divergir das duas era o
+// que produzia "não acha em /titles mas acusa duplicata em /titles/new".
 function getComparableNames(values: Pick<WorkFormValues, "title" | "original_title" | "alternative_titles">) {
-  const names = normalizeTextList([
-    values.title,
-    values.original_title ?? "",
-  ]).map(normalizeTitleMatch).filter(Boolean)
-
-  const aliases = normalizeTextList(values.alternative_titles ?? [])
-    .map(normalizeTitleMatch)
-    .filter((key) => key && !isWeakDuplicateAlias(key))
-
-  return uniqueComparableKeys([...names, ...aliases])
+  return duplicateKeys({
+    title: values.title,
+    original_title: values.original_title ?? "",
+    alternative_titles: normalizeTextList(values.alternative_titles ?? []),
+  })
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getSavedComparableNames(work: any) {
-  const names = normalizeTextList([
-    work.title,
-    work.original_title,
-  ]).map(normalizeTitleMatch).filter(Boolean)
-
-  const aliases = normalizeTextList(work.alternative_titles ?? [])
-    .map(normalizeTitleMatch)
-    .filter((key) => key && !isWeakDuplicateAlias(key))
-
-  return uniqueComparableKeys([...names, ...aliases])
+  return duplicateKeys({
+    title: work.title,
+    original_title: work.original_title,
+    alternative_titles: normalizeTextList(work.alternative_titles ?? []),
+  })
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -282,8 +244,7 @@ function findMatchingWorkName(work: any, incomingNames: Set<string>) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function workMatchesAnyName(work: any, incomingNames: Set<string>) {
-  const savedNames = getSavedComparableNames(work)
-  return savedNames.some((name) => incomingNames.has(name))
+  return getSavedComparableNames(work).some((name) => incomingNames.has(name))
 }
 
 function normalizePlatformRatings(

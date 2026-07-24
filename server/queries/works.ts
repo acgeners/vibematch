@@ -12,6 +12,7 @@ import {
 } from "@/lib/constants/status-lookups"
 import { titleToSlug } from "@/lib/utils"
 import { fetchAllRows } from "@/lib/supabase/paginate"
+import { foldTitle, titleTokens, workMatchesQuery } from "@/lib/title-match"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
@@ -51,44 +52,29 @@ const WORK_LIST_SELECT = `
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SupabaseFilterableQuery = any
 
-function normalizeTitleSearchMatch(value: string | null | undefined) {
-  return (value ?? "").trim().toLowerCase()
-}
-
-function workMatchesSearchTerm(
-  work: { title: string | null; original_title: string | null; alternative_titles: string[] | null },
-  searchTerm: string,
-) {
-  const normalizedSearch = normalizeTitleSearchMatch(searchTerm)
-  if (!normalizedSearch) return false
-
-  return [
-    work.title,
-    work.original_title,
-    ...(work.alternative_titles ?? []),
-  ].some((name) => normalizeTitleSearchMatch(name).includes(normalizedSearch))
-}
-
 // Supabase/PostgREST does not support a simple ilike over text[] values, so
 // resolve title-search matches to IDs first and keep pagination/counts coherent.
+// A normalização vem de lib/title-match.ts — a MESMA da busca do ranking e da
+// detecção de duplicata (divergir aqui devolvia menos obras, sem erro nenhum).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getSearchMatchIds(supabase: any, searchTerm: string | undefined): Promise<string[] | null> {
   if (!searchTerm) return null
-  const escaped = searchTerm.replace(/[%,]/g, " ").trim()
-  if (!escaped) return null
+  const tokens = titleTokens(searchTerm)
+  if (!tokens.length) return null
 
-  const { data, error } = await supabase
-    .from("works")
-    .select("id, title, original_title, alternative_titles")
-    .limit(1000)
+  // Pagina: `.limit(1000)` estava a 94 obras de cortar em silêncio (906 hoje).
+  const rows = await fetchAllRows<{
+    id: string
+    title: string | null
+    original_title: string | null
+    alternative_titles: string[] | null
+  }>(
+    (from, to) =>
+      supabase.from("works").select("id, title, original_title, alternative_titles").range(from, to),
+    "getSearchMatchIds",
+  )
 
-  if (error) throw new Error(error.message)
-
-  return (data ?? [])
-    .filter((work: { title: string | null; original_title: string | null; alternative_titles: string[] | null }) =>
-      workMatchesSearchTerm(work, escaped),
-    )
-    .map((work: { id: string }) => work.id)
+  return rows.filter((work) => workMatchesQuery(work, tokens)).map((work) => work.id)
 }
 
 /**
@@ -99,8 +85,13 @@ async function getSearchMatchIds(supabase: any, searchTerm: string | undefined):
  *  - `not_found` → nenhuma correspondência
  *
  * Ranqueia por faixa: igualdade exata > começa-com > contém (em qualquer um de
- * title/original_title/alternative_titles, normalizados). Reusa a mesma
- * normalização da busca por título da listagem.
+ * title/original_title/alternative_titles, normalizados por `foldTitle`).
+ *
+ * NÃO usa `matchTier` de lib/title-match: aqui a entrada é um título INTEIRO
+ * digitado (pelo chat), então o casamento reverso importa — "The Villainess Flips
+ * the Script (2021)" precisa resolver pra obra sem o "(2021)". A busca incremental
+ * de /titles quer o oposto (prefixo de token), por isso as duas faixas divergem
+ * de propósito. A normalização, essa sim, é a mesma.
  */
 export type TitleResolution =
   | { query: string; status: "matched"; work: { id: string; title: string } }
@@ -114,7 +105,7 @@ function titleMatchTier(
   normalizedQuery: string,
 ): 0 | 1 | 2 | 3 {
   const names = [work.title, work.original_title, ...(work.alternative_titles ?? [])]
-    .map(normalizeTitleSearchMatch)
+    .map(foldTitle)
     .filter(Boolean)
   let best: 0 | 1 | 2 | 3 = 0
   for (const name of names) {
@@ -145,7 +136,7 @@ export async function resolveWorksByTitles(titles: string[]): Promise<TitleResol
   }>
 
   return queries.map((query) => {
-    const normalizedQuery = normalizeTitleSearchMatch(query)
+    const normalizedQuery = foldTitle(query)
     let bestTier: 0 | 1 | 2 | 3 = 0
     let bucket: Array<{ id: string; title: string }> = []
     for (const w of works) {

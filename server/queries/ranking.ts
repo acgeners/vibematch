@@ -12,34 +12,10 @@ import { getAllActiveSynopsisPredictions } from "@/server/queries/synopsis-quali
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { getHideAdultContent } from "@/server/queries/current-user"
-import { selectByIdsInChunks } from "@/lib/supabase/paginate"
+import { selectByIdsInChunks, fetchAllRows } from "@/lib/supabase/paginate"
+import { titleTokens, workMatchesQuery } from "@/lib/title-match"
 import { isTerminalPersonalStatus } from "@/lib/constants/status-lookups"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
-
-// Tokeniza a busca igual ao filtro antigo do ranking: separa por espaços e
-// pontuação para que o padrão "a depois b depois c" atravesse vírgulas/`?`/etc.
-// presentes no título mas ausentes na busca.
-function searchTokens(search: string): string[] {
-  return search
-    .replace(/[%_]/g, "")
-    .split(/[\s,;:!?·•–—()[\]{}'"`]+/)
-    .filter(Boolean)
-    .map((t) => t.toLowerCase())
-}
-
-// Verdadeiro quando `name` contém todos os tokens na ordem dada (equivalente ao
-// ILIKE `%a%b%c%`). Usado para casar title/original_title/alternative_titles.
-function nameMatchesTokens(name: string | null | undefined, tokens: string[]): boolean {
-  if (!name) return false
-  const haystack = name.toLowerCase()
-  let from = 0
-  for (const token of tokens) {
-    const idx = haystack.indexOf(token, from)
-    if (idx === -1) return false
-    from = idx + token.length
-  }
-  return true
-}
 
 export interface RankingDifferentiator {
   slug: string
@@ -436,31 +412,30 @@ export async function getRanking(
     // Resolve a busca por título para IDs. PostgREST não faz ilike sobre text[]
     // (alternative_titles), então a busca DB antiga só cobria title +
     // original_title — um título encontrável apenas pelo alias "não aparecia na
-    // busca mas acusava duplicado ao criar". Aqui cobrimos os MESMOS campos da
-    // detecção de duplicata (server/actions/works.ts): title + original_title +
-    // alternative_titles. Mesma técnica de getSearchMatchIds em
-    // server/queries/works.ts; mantém a tokenização atravessa-pontuação.
+    // busca mas acusava duplicado ao criar". Cobrimos os MESMOS campos da detecção
+    // de duplicata (server/actions/works.ts) e, desde lib/title-match.ts, com a
+    // MESMA normalização — divergir aqui era um bug mudo (a busca "funcionava", só
+    // devolvia menos).
     filters.search?.trim()
       ? (async (): Promise<string[] | null> => {
-          const tokens = searchTokens(filters.search!)
+          const tokens = titleTokens(filters.search)
           if (!tokens.length) return null
-          const { data, error } = await supabase
-            .from("works")
-            .select("id, title, original_title, alternative_titles")
-            .limit(2000)
-          if (error) throw new Error(error.message)
-          return (data ?? [])
-            .filter(
-              (w: {
-                title: string | null
-                original_title: string | null
-                alternative_titles: string[] | null
-              }) =>
-                nameMatchesTokens(w.title, tokens) ||
-                nameMatchesTokens(w.original_title, tokens) ||
-                (w.alternative_titles ?? []).some((alt) => nameMatchesTokens(alt, tokens)),
-            )
-            .map((w: { id: string }) => w.id)
+          // Pagina: `.limit(2000)` mentia se o PostgREST cortasse em 1000, e a
+          // busca voltaria silenciosamente incompleta.
+          const rows = await fetchAllRows<{
+            id: string
+            title: string | null
+            original_title: string | null
+            alternative_titles: string[] | null
+          }>(
+            (from, to) =>
+              supabase
+                .from("works")
+                .select("id, title, original_title, alternative_titles")
+                .range(from, to),
+            "getRanking:search",
+          )
+          return rows.filter((w) => workMatchesQuery(w, tokens)).map((w) => w.id)
         })()
       : Promise.resolve(null),
     ])
