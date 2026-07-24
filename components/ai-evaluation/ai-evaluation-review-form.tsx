@@ -19,6 +19,7 @@ import {
 } from "@/lib/ai-evaluation/no-reviews"
 import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import { SHOW_HAIKU_AB } from "@/lib/ai-evaluation/ab-config"
+import { describeCrossRuler, formatRuler } from "@/lib/ai-evaluation/confidence-ruler"
 import type { AiEvaluation } from "@/types/domain"
 
 // Limiar fixo de fricção no "Salvar" e no botão "Reavaliar com Opus".
@@ -27,12 +28,27 @@ import type { AiEvaluation } from "@/types/domain"
 // alinhado com a faixa amarela/vermelha dos badges (≥75% = verde, sem fricção).
 const CONFIRM_THRESHOLD = 0.7
 
+// O texto anterior dizia o CONTRÁRIO do que os dados mostram: afirmava que a
+// confiança reflete "a consistência da evidência, NÃO a quantidade de reviews".
+// Medido em 2026-07-24 sobre 2.178 avaliações, a relação com a QUANTIDADE é
+// monotônica (0 reviews → 0,651 · 1-5 → 0,751 · 6-15 → 0,792 · 16-30 → 0,802 ·
+// 31-60 → 0,812 · 61+ → 0,839; rho 0,44 com reviews substantivas), e a relação
+// com acerto é nula (rho −0,078 com a correção humana — teste sem poder, porque
+// só 0,1–4% dos critérios são editados). Ver lib/ai-evaluation/confidence-ruler.ts.
+const CONFIDENCE_TOOLTIP =
+  "Confiança declarada pela IA nesta avaliação (0–100%). Medido no nosso corpus: acompanha o VOLUME DE EVIDÊNCIA que chegou ao prompt (sem reviews ≈ 65%; com 61+ reviews ≈ 84%) — não mede se a nota está certa. Não é comparável entre modelos: cada um tem um teto próprio."
+
 type ReevalModel = "sonnet" | "opus" | "haiku"
 
 /** Confiança + justificativas da avaliação que gerou as notas ATUAIS (a anterior).
  *  Vem de `triggerAiEvaluation`. Null quando nenhuma nota atual veio de IA. */
 export interface CurrentEvaluationMeta {
   confidence: number | null
+  /** Procedência da confiança "Atual". Sem ela a tela compara réguas diferentes
+   *  em silêncio — ver `lib/ai-evaluation/confidence-ruler.ts`. */
+  modelName: string | null
+  promptVersion: string | null
+  evaluatedAt: string | null
   justifications: Record<string, string>
 }
 
@@ -69,6 +85,20 @@ function confidenceTextClass(confidence: number): string {
   if (confidence >= 0.75) return "text-emerald-600 dark:text-emerald-400"
   if (confidence >= 0.5) return "text-amber-600 dark:text-amber-400"
   return "text-rose-600 dark:text-rose-400"
+}
+
+/** "2026-06-08" → "08/06". Só dia/mês: a coluna do botão é estreita e o ano só
+ *  importa quando a avaliação é de outro ano — aí o rótulo cai pra dd/mm/aa. */
+function formatShortDate(iso: string | null): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const sameYear = d.getFullYear() === new Date().getFullYear()
+  return d.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    ...(sameYear ? {} : { year: "2-digit" }),
+  })
 }
 
 function getReviewUsage(rawResponse: unknown): ReviewUsageState {
@@ -274,6 +304,30 @@ export function AiEvaluationReviewForm({
       : 0
   const hasCurrent = scores.some((s) => s.currentScore !== undefined)
 
+  // Non-null só quando as duas confianças vieram de configs DIFERENTES — é o caso
+  // de 75% das obras. Quando é a mesma régua a comparação é legítima e nada disto
+  // aparece (senão o aviso viraria ruído permanente conforme o catálogo migra).
+  const crossRuler = describeCrossRuler(
+    currentEvaluation
+      ? {
+          confidence: currentEvaluation.confidence,
+          modelName: currentEvaluation.modelName,
+          promptVersion: currentEvaluation.promptVersion,
+        }
+      : null,
+    { modelName: evaluation.model_name, promptVersion: evaluation.prompt_version },
+  )
+  const currentRulerLabel = formatRuler({
+    modelName: currentEvaluation?.modelName ?? null,
+    promptVersion: currentEvaluation?.promptVersion ?? null,
+  })
+  const suggestedRulerLabel = formatRuler({
+    modelName: evaluation.model_name,
+    promptVersion: evaluation.prompt_version,
+  })
+  const currentRulerDate = formatShortDate(currentEvaluation?.evaluatedAt ?? null)
+  const suggestedRulerDate = formatShortDate(evaluation.created_at ?? null)
+
   const handleReevaluate = async (model: ReevalModel) => {
     if (!onReevaluate || reevaluatingModel) return
     setReevaluatingModel(model)
@@ -351,7 +405,7 @@ export function AiEvaluationReviewForm({
                     "rounded-full border px-2.5 py-1 text-xs font-semibold tabular-nums",
                     confidenceTextClass(evaluation.confidence)
                   )}
-                  title="Confiança da IA nesta avaliação (0–100%). Reflete a consistência da evidência, NÃO a quantidade de reviews: obras com opiniões divididas recebem confiança baixa mesmo com muitas reviews."
+                  title={CONFIDENCE_TOOLTIP}
                 >
                   Confiança {Math.round(evaluation.confidence * 100)}%
                 </span>
@@ -377,7 +431,11 @@ export function AiEvaluationReviewForm({
                     <span
                       className={cn(
                         "text-[10px] font-semibold leading-none tabular-nums",
-                        currentEvaluation?.confidence == null
+                        // Régua diferente ⇒ NEUTRO de propósito. A escala
+                        // verde/amarelo/vermelho dos dois lados era metade do
+                        // convite a comparar: um "82% verde" ao lado de um "75%
+                        // verde" lê como queda mesmo quando as escalas diferem.
+                        currentEvaluation?.confidence == null || crossRuler
                           ? "font-medium text-muted-foreground"
                           : confidenceTextClass(currentEvaluation.confidence)
                       )}
@@ -386,6 +444,11 @@ export function AiEvaluationReviewForm({
                         ? `confiança ${Math.round(currentEvaluation.confidence * 100)}%`
                         : "sem avaliação IA"}
                     </span>
+                    {(currentRulerLabel || currentRulerDate) && (
+                      <span className="text-[9px] font-medium leading-none tabular-nums text-muted-foreground/80">
+                        {[currentRulerLabel, currentRulerDate].filter(Boolean).join(" · ")}
+                      </span>
+                    )}
                   </Button>
                   <Button
                     type="button"
@@ -394,7 +457,7 @@ export function AiEvaluationReviewForm({
                     onClick={() => applyToAll("suggested")}
                     className="h-auto flex-col items-start gap-0.5 px-3 py-1.5"
                     aria-label="Aplicar a nota sugerida a todos os critérios"
-                    title="Confiança da IA nesta avaliação (0–100%). Reflete a consistência da evidência, NÃO a quantidade de reviews: obras com opiniões divididas recebem confiança baixa mesmo com muitas reviews."
+                    title={CONFIDENCE_TOOLTIP}
                   >
                     <span className="text-xs font-semibold leading-none">Sugerido</span>
                     <span
@@ -409,8 +472,50 @@ export function AiEvaluationReviewForm({
                         ? `confiança ${Math.round(evaluation.confidence * 100)}%`
                         : "confiança não declarada"}
                     </span>
+                    {(suggestedRulerLabel || suggestedRulerDate) && (
+                      <span className="text-[9px] font-medium leading-none tabular-nums text-muted-foreground/80">
+                        {[suggestedRulerLabel, suggestedRulerDate].filter(Boolean).join(" · ")}
+                      </span>
+                    )}
                   </Button>
                 </div>
+
+                {crossRuler && (
+                  <p className="mt-2 rounded-md bg-sky-50 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground dark:bg-sky-950/40">
+                    <span className="font-semibold text-foreground">
+                      Réguas diferentes — não compare os dois números.
+                    </span>{" "}
+                    {crossRuler.currentAboveCeiling && crossRuler.suggestedCeiling ? (
+                      <>
+                        A confiança atual (
+                        {Math.round((currentEvaluation?.confidence ?? 0) * 100)}%) é{" "}
+                        <span className="font-medium text-foreground">inalcançável</span> pro{" "}
+                        {crossRuler.suggestedModelLabel ?? "modelo de hoje"}, que nunca passou de{" "}
+                        {Math.round(crossRuler.suggestedCeiling.max * 100)}% em{" "}
+                        {crossRuler.suggestedCeiling.n} avaliações. A queda é aritmética, não
+                        um sinal de piora.
+                      </>
+                    ) : (
+                      <>
+                        As duas confianças vieram de configs diferentes
+                        {crossRuler.currentLabel && crossRuler.suggestedLabel
+                          ? ` (${crossRuler.currentLabel} → ${crossRuler.suggestedLabel})`
+                          : ""}
+                        , que têm tetos diferentes.
+                        {crossRuler.suggestedCeiling
+                          ? ` O ${crossRuler.suggestedModelLabel} nunca passou de ${Math.round(
+                              crossRuler.suggestedCeiling.max * 100
+                            )}% em ${crossRuler.suggestedCeiling.n} avaliações.`
+                          : ""}
+                      </>
+                    )}{" "}
+                    Confiança mede{" "}
+                    <span className="font-medium text-foreground">
+                      quanta evidência o modelo teve
+                    </span>
+                    , não se a nota está certa.
+                  </p>
+                )}
                 <p className="mt-1.5 text-[11px] tabular-nums text-muted-foreground">
                   <span className="font-medium text-foreground">
                     {diffCount} de {scores.length}
