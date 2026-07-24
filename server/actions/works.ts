@@ -2309,6 +2309,11 @@ export interface ExternalWorkUpdate {
    *  preservando capas existentes não listadas (apenas troca primária). Tem
    *  precedência sobre coverUrl. */
   covers?: Array<{ url: string; source: string; isPrimary: boolean }>
+  /** URLs que estavam arquivadas (migration 163) e o usuário restaurou no diálogo.
+   *  O server tira do `work_cover_archive` ANTES do syncExternalCovers, senão o
+   *  filtro de arquivadas as barraria de novo e o restaurar não pegaria. Devem
+   *  também constar em `covers` pra serem de fato inseridas. */
+  restoredCoverUrls?: string[]
   /** Idem capas, mas para sinopses (chave: texto). */
   synopses?: Array<{ text: string; source: string; isPrimary: boolean }>
   publicationStatus?: string | null
@@ -2379,6 +2384,19 @@ async function doUpdateWorkExternalData(
         observations: updates.observations ?? null,
       })
       if (mirror.error) return { error: mirror.error }
+    }
+
+    // Desarquivar ANTES de gravar capas: o usuário restaurou estas no diálogo, e o
+    // filtro do syncExternalCovers barra tudo que ainda está no arquivo. Some daqui
+    // primeiro pra a capa restaurada passar. Só as que voltam mesmo (o cliente já
+    // manda a interseção com o que foi de fato incluído).
+    if (updates.restoredCoverUrls?.length) {
+      const { error: unarchiveError } = await supabase
+        .from("work_cover_archive")
+        .delete()
+        .eq("work_id", id)
+        .in("url", updates.restoredCoverUrls)
+      if (unarchiveError) return { error: `Falha ao restaurar capas: ${unarchiveError.message}` }
     }
 
     // Capas: se vier o array `covers` (multipick), upserta cada uma preservando

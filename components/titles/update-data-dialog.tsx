@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { useRefresh } from "@/lib/use-refresh"
-import { Loader2, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { Archive, ChevronRight, Loader2, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -59,9 +59,10 @@ interface UpdateDataDialogProps {
   // capas e mantidas por padrão. Quando ausente, cai pra currentWork.coverUrl.
   currentCovers?: SavedCover[]
   // Capas apagadas na edição (migration 163). Não entram no pool de escolha —
-  // o servidor também as descarta, mas oferecer uma opção que ele vai ignorar
-  // seria pior que não oferecer.
-  archivedCoverUrls?: string[]
+  // o servidor também as descarta. Mas aparecem numa seção "Arquivadas (N)" no
+  // passo de capas, de onde podem ser RESTAURADAS pra esta atualização (o server
+  // então as tira do arquivo — ver `restoredCoverUrls` em updateWorkExternalData).
+  archivedCovers?: Array<{ url: string; source?: string | null }>
   // Sinopses já salvas na obra. Entram no pool do passo de sinopses junto com as
   // das fontes — sem isto o save (delete + re-insert) apaga as suas.
   currentSynopses?: SavedSynopsis[]
@@ -233,7 +234,7 @@ export function UpdateDataDialog({
   workId,
   currentWork,
   currentCovers,
-  archivedCoverUrls,
+  archivedCovers,
   currentSynopses,
   open: controlledOpen,
   onOpenChange,
@@ -247,7 +248,8 @@ export function UpdateDataDialog({
   // Capas atuais da obra (passadas só pelo fluxo "Atualizar dados" da página da
   // obra). Quando ausente (ex.: revisão de importadas), savedCovers fica vazio e
   // o picker volta ao comportamento antigo: capas externas marcadas por padrão.
-  const archivedUrlSet = new Set(archivedCoverUrls ?? [])
+  const archivedList = archivedCovers ?? []
+  const archivedUrlSet = new Set(archivedList.map((a) => a.url))
   const savedCovers: SavedCover[] = (currentCovers ?? []).filter(
     (c) => c.url && !archivedUrlSet.has(c.url),
   )
@@ -272,6 +274,7 @@ export function UpdateDataDialog({
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
   const [coversNeedPick, setCoversNeedPick] = useState(false)
+  const [showArchivedCovers, setShowArchivedCovers] = useState(false)
   // Passo de revisão de tags/gêneros (item 4A) — aditivo: revisa só o que veio das fontes.
   const [tagChoices, setTagChoices] = useState<string[]>([])
   const [genreChoices, setGenreChoices] = useState<string[]>([])
@@ -318,12 +321,17 @@ export function UpdateDataDialog({
     //  - obra SEM capas salvas e várias externas → escolher entre elas (antigo);
     //  - obra COM capas salvas e ao menos uma capa externa NOVA → manter as
     //    atuais (default) e opcionalmente incluir as novas / remover atuais.
-    // Quando o externo não traz nada novo, não há o que decidir → preserva.
+    //  - existem capas ARQUIVADAS → o passo precisa abrir pra você poder
+    //    restaurá-las; sem isto, a obra cujas externas estão TODAS arquivadas
+    //    (o caso que motivou a feature) pularia o passo e a seção ficaria fora de
+    //    alcance. A contagem é a do arquivo — não das externas, que já saíram.
+    // Quando o externo não traz nada novo E não há arquivada, não há o que decidir.
     const savedUrls = new Set(savedCovers.map((c) => c.url))
     const newExternal = externalCovers.filter((c) => !savedUrls.has(c.url))
     const coversNeedPick =
       (savedCovers.length === 0 && externalCovers.length > 1) ||
-      (savedCovers.length > 0 && newExternal.length > 0)
+      (savedCovers.length > 0 && newExternal.length > 0) ||
+      archivedList.length > 0
 
     setPendingData(data)
     setSynopsisChoices(buildSynopsisPool(savedSynopses, synopses))
@@ -451,6 +459,25 @@ export function UpdateDataDialog({
       prev.map((c) => ({ ...c, isPrimary: c.url === url, included: c.url === url ? true : c.included }))
     )
   }
+  // Traz uma capa arquivada de volta pra ESTA atualização. Ela entra no pool como
+  // incluída; a seção "Arquivadas" some com ela porque a lista exibida é derivada
+  // (arquivadas MENOS o que já está no pool). O desarquivar durável acontece no
+  // save: applyResolutions manda `restoredCoverUrls` e o server tira do arquivo.
+  const restoreArchivedCover = (entry: { url: string; source?: string | null }) => {
+    setCoverChoices((prev) => {
+      if (prev.some((c) => c.url === entry.url)) return prev
+      return [
+        ...prev,
+        { source: entry.source ?? "atual", url: entry.url, included: true, isPrimary: false, saved: false },
+      ]
+    })
+    setActiveRefineUrl(entry.url)
+  }
+  // Exibidas = arquivadas que ainda NÃO estão no pool. Restaurar tira daqui;
+  // excluir uma restaurada (deleteCover) faz ela reaparecer — sem estado extra.
+  const archivedForDisplay = archivedList.filter(
+    (a) => !coverChoices.some((c) => c.url === a.url),
+  )
   const deleteCover = (url: string) => {
     setCoverChoices((prev) => {
       const removed = prev.find((c) => c.url === url)
@@ -589,6 +616,12 @@ export function UpdateDataDialog({
         source: c.source,
         isPrimary: c.url === primaryUrl,
       }))
+      // Capas que estavam arquivadas e o usuário restaurou (estão em `covers` mas
+      // ainda no arquivo). O server precisa tirá-las de work_cover_archive ANTES do
+      // syncExternalCovers, senão o filtro delas as barraria de novo — restaurar
+      // não pegaria. Só as que de fato entram: restaurar e depois excluir não conta.
+      const restored = data.multiCovers.filter((c) => archivedUrlSet.has(c.url)).map((c) => c.url)
+      if (restored.length > 0) updates.restoredCoverUrls = restored
     }
     if (data.multiSynopses && data.multiSynopses.length > 0 && fieldResolutions["synopsis"] !== "current") {
       const selectedSynopses = dedupeSynopsisEntries(data.multiSynopses.map((s, index) => ({
@@ -969,6 +1002,59 @@ export function UpdateDataDialog({
                   </div>
                   {manualCoverError && <p className="text-[11px] text-destructive">{manualCoverError}</p>}
                 </div>
+
+                {archivedForDisplay.length > 0 && (
+                  <div className="rounded-md border border-dashed p-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowArchivedCovers((s) => !s)}
+                      aria-expanded={showArchivedCovers}
+                      className="flex w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      <ChevronRight
+                        className={`h-3 w-3 transition-transform ${showArchivedCovers ? "rotate-90" : ""}`}
+                      />
+                      <Archive className="h-3.5 w-3.5" />
+                      Arquivadas ({archivedForDisplay.length})
+                    </button>
+
+                    {showArchivedCovers && (
+                      <div className="mt-2 space-y-2">
+                        <p className="text-[11px] text-muted-foreground">
+                          Você arquivou estas capas — por isso a busca não as trouxe. Clique em{" "}
+                          <strong>Restaurar</strong> pra incluir uma nesta atualização.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {archivedForDisplay.map((a) => (
+                            <div key={a.url} className="w-14">
+                              <div className="relative h-20 w-14 overflow-hidden rounded border opacity-60 transition-opacity hover:opacity-100">
+                                <Image
+                                  src={getCoverImageSrc(a.url)}
+                                  alt=""
+                                  fill
+                                  sizes="56px"
+                                  unoptimized
+                                  className="object-cover grayscale"
+                                />
+                                <span className="absolute left-0.5 top-0.5 rounded bg-black/70 px-1 text-[8px] font-semibold text-white/90">
+                                  🗄 {a.source || "—"}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => restoreArchivedCover(a)}
+                                className="mt-1 flex w-full items-center justify-center gap-1 rounded border bg-muted px-1 py-0.5 text-[10px] font-medium hover:border-emerald-500/50 hover:bg-emerald-500/10"
+                              >
+                                <RotateCcw className="h-2.5 w-2.5" />
+                                Restaurar
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className={ACTION_BAR}>
                   {/* Sinopses vem sempre antes das capas → Voltar sempre volta pra lá. */}
