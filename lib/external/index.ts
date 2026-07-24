@@ -10,6 +10,7 @@ import { resolveMangagoUrlProd } from "./mangago-resolve-prod"
 import { boolEnv } from "./mangago-band"
 import { extractInlineRating } from "./inline-rating"
 import { isBlockedCoverUrl } from "./blocked-covers"
+import { cleanSynopsisText, dedupeByMeaning } from "@/lib/synopsis-text"
 import { measureCover, scoreCover } from "@/lib/server/covers/measure-cover"
 // Metadados pela API OFICIAL do MAL; reviews por scraping do próprio myanimelist.net
 // (a v2 não tem endpoint nem campo de reviews). O Jikan — scraper de terceiros que
@@ -178,109 +179,23 @@ function compositeAcceptScore(
 // ============================================================================
 // Synopsis cleanup
 // ============================================================================
-
-function cleanSynopsisPre(text: string | null | undefined): string {
-  if (!text) return ""
-
-  // Detecta marcadores de classificação ANTES da limpeza pra não perdê-los.
-  // Aparecem em vários contextos ("Original Webtoon: R19", "Official
-  // Translations (R19)", "R19 only", etc) e a maioria é removida pelas regras
-  // de boilerplate abaixo. Reinjetamos no fim se foram apagados.
-  const detectedRatings: string[] = []
-  if (/\bR\s*-?\s*19\b/i.test(text)) detectedRatings.push("R19")
-  if (/\bR\s*-?\s*18\b/i.test(text)) detectedRatings.push("R18")
-
-  let cleaned = text
-    .replace(/\r\n?/g, "\n")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#(?:039|x27);/gi, "'")
-    .replace(/\[([^\]]*)\]\(https?:\/\/[^)]*\)/g, "$1")
-    .replace(/https?:\/\/\S+/g, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\[(?:source|src|via|from|written\s+by|translation|official)[^\]]{0,160}\]/gi, "")
-    .replace(/\((?:source|src|via|from|written\s+by|translation|official)[^)]{0,160}\)/gi, "")
-    .replace(/^\s*R19\s*:\s*[^\n]+$/gim, "R19")
-    .replace(/^\s*R(?:15|18)\s*:\s*[^\n]+$/gim, "")
-    .replace(/\s*\*{0,2}\s*(?:original\s+(?:webtoon|comic|manhwa|manga|work|source)|official\s+(?:translations?|release)|season\s+\d+\s+(?:author|artist)|published\s+(?:by|in|on)|serialized\s+(?:in|by))\s*\*{0,2}\s*[:\s].*/gim, "")
-    .replace(/^\s*(?:links?|notes?|source|from|via)\s*:?\s*$/gim, "")
-    .replace(/^\s*[*•]\s+[^\n]*$/gm, "")
-    .replace(/\*+/g, "")
-    .replace(/^\s*-{2,}\s*$/gm, "")
-    .replace(/(?:^|\n)\s*R19\s*(?=(?:\n\s*R19\s*)+)/gi, "")
-    .replace(/\n{2,}(?!R19\s*$)[^\n]{0,80}$/, "")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
-
-  // Reinjeta marcadores ausentes — garante sinal pra enforceR19AdultContentRule
-  // e pra IA mesmo quando o bloco "Original Webtoon"/"Official Translations" foi
-  // removido pela limpeza.
-  for (const marker of detectedRatings) {
-    const re = new RegExp(`\\b${marker}\\b`, "i")
-    if (!re.test(cleaned)) {
-      cleaned = cleaned
-        ? `${cleaned}\n\n[${marker} disponível]`
-        : `[${marker} disponível]`
-    }
-  }
-  return cleaned
-}
+// As REGRAS (limpar, e o que conta como "a mesma sinopse") moram em
+// `@/lib/synopsis-text`. Elas viviam aqui, e por isso valiam só nesta fronteira:
+// o pool do "Atualizar dados", o dedup do save e o gravador comparavam por
+// igualdade exata e nunca relimpavam. Aqui ficou só a parte que é DESTA camada —
+// quebrar o texto de uma fonte em blocos e casar bloco com a fonte de origem.
 
 function splitSynopsisBlocks(text: string | null | undefined): string[] {
   if (!text) return []
   return text
     .replace(/\r\n?/g, "\n")
     .split(/(?:^|\n)\s*(?:-{3,}|_{3,}|={3,})\s*(?:\n|$)/g)
-    .map(cleanSynopsisPre)
+    .map(cleanSynopsisText)
     .filter((block) => block.length > 0)
 }
 
-function normalizeSynopsisForComparison(text: string): string {
-  return cleanSynopsisPre(text)
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[“”„‟«»]/g, '"')
-    .replace(/[‘’‚‛]/g, "'")
-    .replace(/[‐‑‒–—―]/g, "-")
-    .replace(/…/g, "...")
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-}
-
-function synopsisDuplicateScore(a: string, b: string): number {
-  const na = normalizeSynopsisForComparison(a)
-  const nb = normalizeSynopsisForComparison(b)
-  if (!na || !nb) return 0
-  if (na === nb || na.includes(nb) || nb.includes(na)) return 1
-
-  const aw = new Set(na.split(" ").filter((word) => word.length > 2))
-  const bw = new Set(nb.split(" ").filter((word) => word.length > 2))
-  if (!aw.size || !bw.size) return 0
-
-  const intersection = [...aw].filter((word) => bw.has(word)).length
-  const overlap = intersection / Math.min(aw.size, bw.size)
-  const jaccard = intersection / new Set([...aw, ...bw]).size
-  return Math.min(overlap, jaccard / 0.78)
-}
-
 function uniqueSynopsisBlocks(values: Array<string | null | undefined>): string[] {
-  const result: string[] = []
-  for (const block of values.flatMap(splitSynopsisBlocks)) {
-    const norm = normalizeSynopsisForComparison(block)
-    if (!norm) continue
-    const alreadyCovered = result.some((r) => {
-      const rn = normalizeSynopsisForComparison(r)
-      return rn === norm || rn.includes(norm) || norm.includes(rn) || synopsisDuplicateScore(r, block) >= 0.92
-    })
-    if (!alreadyCovered) result.push(block)
-  }
-  return result
+  return dedupeByMeaning(values.flatMap(splitSynopsisBlocks), (block) => block)
 }
 
 /**
@@ -291,26 +206,15 @@ function uniqueSynopsisBlocks(values: Array<string | null | undefined>): string[
 function uniqueSynopsisBlocksWithSource(
   inputs: Array<{ source: ExternalSourceId; text: string | null | undefined }>
 ): Array<{ source: ExternalSourceId; text: string }> {
-  const result: Array<{ source: ExternalSourceId; text: string }> = []
   const expanded = inputs.flatMap((entry) =>
     splitSynopsisBlocks(entry.text).map((block) => ({ source: entry.source, text: block }))
   )
-  for (const entry of expanded) {
-    if (!entry.text) continue
-    const norm = normalizeSynopsisForComparison(entry.text)
-    if (!norm) continue
-    const alreadyCovered = result.some((r) => {
-      const rn = normalizeSynopsisForComparison(r.text)
-      return rn === norm || rn.includes(norm) || norm.includes(rn) || synopsisDuplicateScore(r.text, entry.text) >= 0.92
-    })
-    if (!alreadyCovered) result.push(entry)
-  }
-  return result
+  return dedupeByMeaning(expanded, (entry) => entry.text)
 }
 
 function synopsisSimilarity(a?: string, b?: string) {
-  const na = normalizeText(cleanSynopsisPre(a))
-  const nb = normalizeText(cleanSynopsisPre(b))
+  const na = normalizeText(cleanSynopsisText(a))
+  const nb = normalizeText(cleanSynopsisText(b))
   if (!na || !nb) return 0.5
   const aw = new Set(na.split(" ").filter((w) => w.length > 4))
   const bw = new Set(nb.split(" ").filter((w) => w.length > 4))
@@ -1878,7 +1782,7 @@ function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[],
       ...(candidate.alternativeTitles ?? []),
       ...accepted.flatMap((result) => [result.originalTitle, ...(result.alternativeTitles ?? [])]),
     ]),
-    synopsis: multiSynopses[0]?.text ?? synopses[0] ?? cleanSynopsisPre(candidate.synopsis),
+    synopsis: multiSynopses[0]?.text ?? synopses[0] ?? cleanSynopsisText(candidate.synopsis),
     synopsisIsMerged: multiSynopses.length > 1,
     multiSynopses,
     coverUrl: multiCovers[0]?.url ?? candidate.coverUrl,

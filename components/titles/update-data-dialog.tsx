@@ -29,6 +29,7 @@ import { updateWorkExternalData, refreshWorkExternalData } from "@/server/action
 import { buildPlatformRatings } from "@/lib/external/auto-refresh"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
+import { cleanSynopsisText, dedupeByMeaning } from "@/lib/synopsis-text"
 import { titleToSlug } from "@/lib/utils"
 import type { ExternalSourceId, ExternalWorkData } from "@/lib/external/types"
 
@@ -143,33 +144,39 @@ export interface SavedSynopsis {
  * (delete + re-insert) apagava as salvas — uma sinopse manual sua morria em
  * silêncio a cada "Atualizar dados".
  *
- * Dedup por TEXTO: a mesma sinopse volta da fonte a cada atualização, e sem isso
- * ela apareceria duas vezes (uma "já salva", uma "nova"). A salva vence — é ela
- * que carrega a sua curadoria (principal, texto editado).
+ * Dedup pelo SIGNIFICADO (`@/lib/synopsis-text`), não por igualdade de string: a
+ * mesma sinopse volta da fonte a cada atualização com uma vírgula a mais ou um bloco
+ * "Original Novel:" no fim, e a chave exata que morava aqui a listava de novo como
+ * "nova". A salva vem primeiro e por isso vence — é ela que carrega a sua curadoria
+ * (principal, texto editado).
+ *
+ * O texto também passa pela LIMPEZA aqui, e não só no gravador: a tela precisa
+ * mostrar o que vai ser salvo. Isso é o que descontamina o que já está no banco —
+ * cada "Atualizar dados" regrava a versão limpa da linha antiga.
  */
 export function buildSynopsisPool(
   saved: SavedSynopsis[],
   external: Array<{ source: string; text: string }>
 ): SynopsisChoice[] {
-  const pool: SynopsisChoice[] = []
-  const seen = new Set<string>()
-  const key = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ")
-
-  for (const s of saved) {
-    const text = (s.text ?? "").trim()
-    if (!text || seen.has(key(text))) continue
-    seen.add(key(text))
-    pool.push({ source: s.source, text, included: true, isPrimary: s.isPrimary, saved: true })
-  }
   // Obra sem nada salvo mantém o comportamento antigo: externas já vêm marcadas.
-  const hasSaved = pool.length > 0
-  for (const e of external) {
-    const text = (e.text ?? "").trim()
-    if (!text || seen.has(key(text))) continue
-    seen.add(key(text))
-    pool.push({ source: e.source, text, included: !hasSaved, isPrimary: false })
-  }
-  return normalizeSynopsisChoices(pool)
+  const hasSaved = saved.some((s) => (s.text ?? "").trim())
+  const candidates: SynopsisChoice[] = [
+    ...saved.map((s) => ({
+      source: s.source,
+      text: cleanSynopsisText(s.text),
+      included: true,
+      isPrimary: s.isPrimary,
+      saved: true,
+    })),
+    ...external.map((e) => ({
+      source: e.source,
+      text: cleanSynopsisText(e.text),
+      included: !hasSaved,
+      isPrimary: false,
+    })),
+  ].filter((c) => c.text.length > 0)
+
+  return normalizeSynopsisChoices(dedupeByMeaning(candidates, (c) => c.text))
 }
 
 interface CoverChoice {

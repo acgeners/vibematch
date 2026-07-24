@@ -17,6 +17,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchComixById, fetchComixReviews } from "@/lib/external/comix"
 import { extractComixHid } from "@/lib/external/comix-hid"
 import { isBlockedCoverUrl, recordCoverUrlResult } from "@/lib/external/blocked-covers"
+import { cleanSynopsisText, isSameSynopsis } from "@/lib/synopsis-text"
 import { flareSolverrHealth } from "@/lib/external/flaresolverr"
 import { getComixStatus } from "@/lib/external/comix-gate"
 import { ensureComixHid } from "@/server/actions/comix-hid"
@@ -274,14 +275,21 @@ async function enrichComixDataForWork(workId: string): Promise<boolean> {
   }
 
   // 2. Sinopse do Comix → work_synopses (não-destrutivo: só se ainda não houver fonte comix).
-  const synopsis = detail.synopsis?.trim()
+  //
+  // LIMPA e checa duplicata pelo MESMO critério do resto do app (`@/lib/synopsis-text`).
+  // Este caminho gravava o texto CRU e comparava só `source === "comix"`: como ele roda
+  // em background, sem UI, era por aqui que entravam markdown, listas de links e
+  // `**Original Novel:**` — 55% das linhas comix do catálogo — além de uma segunda
+  // cópia da sinopse que o MangaUpdates já tinha trazido.
+  const synopsis = cleanSynopsisText(detail.synopsis)
   if (synopsis) {
     const { data: synRows } = await supabase
       .from("work_synopses")
-      .select("source, position")
+      .select("source, position, text")
       .eq("work_id", workId)
     const hasComix = (synRows ?? []).some((r) => r.source === "comix")
-    if (!hasComix) {
+    const alreadyThere = (synRows ?? []).some((r) => isSameSynopsis(r.text, synopsis))
+    if (!hasComix && !alreadyThere) {
       const nextPos = Math.max(-1, ...(synRows ?? []).map((r) => r.position ?? 0)) + 1
       const { error } = await supabase
         .from("work_synopses")

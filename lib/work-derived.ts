@@ -1,3 +1,10 @@
+import {
+  cleanSynopsisText,
+  dedupeByMeaning,
+  isSameSynopsis,
+  normalizeSynopsisForComparison,
+} from "@/lib/synopsis-text"
+
 interface WorkSynopsisRow {
   text?: string | null
   is_primary?: boolean | null
@@ -19,28 +26,9 @@ interface WorkCoverRow {
 export const SYNOPSIS_SEPARATOR = "---------------------------------------------------------------------------------------------"
 const SYNOPSIS_SEPARATOR_RE = /(?:\r?\n)?-{10,}(?:\r?\n)?/g
 
-function normalizeSynopsisKey(text: string): string {
-  return text
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[’‘`´]/g, "'")
-    .replace(/[“”]/g, '"')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-}
-
 function dedupeSynopsisTexts(values: Array<string | null | undefined>): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const value of values) {
-    const text = (value ?? "").trim()
-    const key = normalizeSynopsisKey(text)
-    if (!text || !key || seen.has(key)) continue
-    seen.add(key)
-    out.push(text)
-  }
-  return out
+  const trimmed = values.map((value) => (value ?? "").trim()).filter((text) => text.length > 0)
+  return dedupeByMeaning(trimmed, (text) => text)
 }
 
 export function sortWorkSynopses<T extends WorkSynopsisRow>(rows: T[] | null | undefined): T[] {
@@ -50,42 +38,43 @@ export function sortWorkSynopses<T extends WorkSynopsisRow>(rows: T[] | null | u
   })
 }
 
+/**
+ * LEITURA: colapsa as quase-idênticas (a principal vem primeiro na ordenação e por
+ * isso é a que sobrevive), mas NÃO reescreve o texto — quem limpa é o gravador
+ * (`dedupeSynopsisEntries`). Exibir uma coisa e ter outra no banco seria pior que o
+ * texto sujo.
+ */
 export function dedupeWorkSynopses<T extends WorkSynopsisRow>(rows: T[] | null | undefined): T[] {
-  const seen = new Set<string>()
-  const out: T[] = []
-  for (const row of sortWorkSynopses(rows)) {
-    const text = (row.text ?? "").trim()
-    const key = normalizeSynopsisKey(text)
-    if (!text || !key || seen.has(key)) continue
-    seen.add(key)
-    out.push({ ...row, text } as T)
-  }
-  return out
+  const trimmed = sortWorkSynopses(rows)
+    .map((row) => ({ ...row, text: (row.text ?? "").trim() }) as T)
+    .filter((row) => (row.text ?? "").length > 0)
+  return dedupeByMeaning(trimmed, (row) => row.text)
 }
 
+/**
+ * ESCRITA: limpa cada texto e só então deduplica pelo significado. É o ponto único
+ * onde as duas regras valem — o picker chama pra MOSTRAR, o `syncWorkSynopses` chama
+ * pra GRAVAR, e os dois chegam no mesmo resultado.
+ */
 export function dedupeSynopsisEntries<T extends SynopsisEntryRow>(
   rows: T[] | null | undefined
 ): Array<T & { source: string; text: string; isPrimary: boolean }> {
-  const seen = new Set<string>()
-  const out: Array<T & { source: string; text: string; isPrimary: boolean }> = []
-  let primaryKey: string | null = null
-
-  for (const row of rows ?? []) {
-    const text = (row.text ?? "").trim()
-    const key = normalizeSynopsisKey(text)
-    if (!text || !key) continue
-    if (row.isPrimary) primaryKey = key
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push({
+  const cleaned = (rows ?? [])
+    .map((row) => ({
       ...row,
       source: (row.source ?? "manual").trim() || "manual",
-      text,
+      text: cleanSynopsisText(row.text),
       isPrimary: Boolean(row.isPrimary),
-    })
-  }
+    }))
+    .filter((row) => row.text.length > 0 && normalizeSynopsisForComparison(row.text).length > 0)
 
-  const primaryIdx = primaryKey ? out.findIndex((row) => normalizeSynopsisKey(row.text) === primaryKey) : -1
+  // A principal é lembrada ANTES do dedup: quando ela é a que sai (por ser quase
+  // igual a outra), quem a absorveu herda o posto. Sem isto a obra ficaria sem
+  // principal e o gravador escolheria a posição 0 no lugar dela.
+  const primaryText = cleaned.find((row) => row.isPrimary)?.text ?? null
+  const out = dedupeByMeaning(cleaned, (row) => row.text)
+
+  const primaryIdx = primaryText ? out.findIndex((row) => isSameSynopsis(row.text, primaryText)) : -1
   const canonicalPrimaryIdx = primaryIdx === -1 ? 0 : primaryIdx
   return out.map((row, index) => ({ ...row, isPrimary: index === canonicalPrimaryIdx }))
 }
