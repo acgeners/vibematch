@@ -11,6 +11,10 @@ import { coerceToolPayload } from "@/lib/ai/tool-payload"
 import { fetchCoverForModelWithStatus, isImageRelatedModelError } from "@/lib/server/covers/fetch-cover-for-model"
 import { recordCacheEventAsync } from "@/server/queries/ai-cache"
 import { buildCacheKey } from "@/lib/ai-cache"
+import {
+  clampAdultContentScore,
+  computeAdultContentBounds,
+} from "@/lib/ai-evaluation/adult-content-rules"
 import { runSingleFlight } from "@/lib/ai-cache/single-flight"
 import type { AiImageStatus, AiWorkloadType } from "@/lib/ai-observability/types"
 import type { SourcedReview, PlatformRating, SimilarWork } from "@/lib/external/types"
@@ -115,17 +119,28 @@ export interface AiEvaluationResponse {
 
 export const MODEL = SONNET_MODEL
 
-// ── Reversível (1 linha) ────────────────────────────────────────────────────
+// ── Flag de CONCISÃO — não é um rollback ────────────────────────────────────
 // Output enxuto do Sonnet: justificativas curtas (≤2 frases). Corta ~30% dos
 // tokens de SAÍDA (≈ -15~20s de latência) mantendo o MESMO modelo e as mesmas
-// notas. Se o output piorar (notas ou justificativas), volte para `false`: isso
-// reverte o prompt E a versão de volta pra v18, reaproveitando os caches antigos.
+// notas. Medido: a mediana da justificativa caiu de 527 pra 237 caracteres quando
+// esta instrução entrou (v18 → v19), no MESMO modelo.
+//
+// ⚠️ Virar para `false` NÃO reverte o prompt. Sai apenas o bloco de concisão do
+// prompt do USUÁRIO (ver `CONCISE_OUTPUT` mais abaixo); o SYSTEM_PROMPT inteiro
+// continua o atual, então as avaliações sairiam rotuladas "v18" com a semântica
+// de hoje. E os caches v18 originais (mai/2026) não voltam a ser aproveitados:
+// `EVAL_OUTPUT_SCHEMA_VERSION` entra na chave de cache e mudou para "eval-2" em
+// jul/2026. Para reverter de verdade é preciso restaurar o texto do prompt.
 export const CONCISE_OUTPUT: boolean = true
-// v21 (2026-07-07): avaliação baseada no CONSENSO das reviews, nunca em opiniões
-// isoladas — proibido citar reviews individuais ou IDs (R1/R2) e removido o campo
-// `review_usage` da tool. Bump invalida o cache v20 pra a nova instrução valer.
+// v22 (2026-07-24): adult_content passou a ter piso E TETO por PROCEDÊNCIA do
+// sinal (ver lib/ai-evaluation/adult-content-rules.ts). Marcador de EDIÇÃO
+// ("[R19 disponível]" vindo de boilerplate da fonte) deixou de gerar piso — era a
+// origem de 48% dos pisos aplicados, e produzia notas que contradiziam a própria
+// justificativa. Cena explícita, em qualquer quantidade, agora exige 9-10; a tag
+// "R15 but Based on a R19 Novel" virou TETO.
+// (v21 2026-07-07: consenso das reviews, proibido citar review individual ou ID.)
 // (v20 2026-06-27: citação genérica de reviews, sem exigir IDs nem auditoria.)
-export const PROMPT_VERSION = CONCISE_OUTPUT ? "v21" : "v18"
+export const PROMPT_VERSION = CONCISE_OUTPUT ? "v22" : "v18"
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
@@ -338,8 +353,13 @@ ${buildCriteriaPromptSection()}
 REGRA OBRIGATÓRIA PARA FANTASY_NOBILITY:
 Obras ambientadas majoritariamente em corte, aristocracia, realeza, império, ducado, nobreza ou famílias nobres devem receber nota alta quando esse ambiente organiza a premissa e os conflitos. Se a obra combina nobreza/realeza com reencarnação, transmigração, isekai, regressão, segunda chance ou viagem no tempo, trate isso como evidência estrutural forte: em geral use 7-8, ou 9-10 se política nobre, magia, regras do mundo ou hierarquia social definirem a história. Não deixe em 4-6 quando a ambientação de nobreza/realeza for central.
 
-REGRA PARA ADULT_CONTENT:
-Pontue adult_content com base em sinopse, tags (especialmente do grupo "content_indicator"), gêneros e reviews compatíveis. Use 9-10 se sinopse, tags ou reviews indicarem smut/sexo explícito recorrente. Marcador R19 disponível na obra é evidência POSITIVA de conteúdo adulto mesmo sem corroboração de tag/review — aplique o princípio "ausência de evidência ≠ ausência".
+REGRA PARA ADULT_CONTENT (leia com atenção — a natureza do conteúdo manda, não a frequência):
+- Pontue adult_content com base em sinopse, tags (especialmente do grupo "content_indicator"), gêneros e reviews compatíveis.
+- QUALQUER quantidade de cena de sexo explícito coloca a obra em 9-10. Uma única cena explícita basta. NÃO rebaixe porque "aparece pouco", "é escasso", "não é recorrente" ou "não é o foco": frequência muda o FOCO da obra, não a natureza do conteúdo. "Tem uma cena explícita mas o foco é o romance" continua sendo 9-10.
+- A faixa 7-8 é pra sexo MOSTRADO PARCIALMENTE (nudez, contexto sexual relevante) sem cena explícita. A faixa 4-6 é pra insinuação e fade to black — nada mostrado.
+- Marcadores de EDIÇÃO ("[R19 disponível]", "Original Webtoon: R19", "Official Translations (R19)") dizem apenas que EXISTE uma edição R19 desta história em algum lugar. Isso NÃO é evidência de que a obra avaliada mostre conteúdo explícito — com frequência a obra avaliada é justamente a versão sem ele. Trate como dica fraca, nunca como piso.
+- A marcação "R15 but Based on a R19 Novel" diz o contrário de conteúdo explícito: a obra avaliada é R15, o R19 é do novel de origem. Nesse caso adult_content tem TETO, não piso.
+- Quando houver piso ou teto obrigatório para esta obra, ele vem informado no prompt do usuário. Sem essa informação, não invente piso a partir de marcador.
 
 REGRA PARA COUPLE_DYNAMICS (leia com atenção):
 Couple_dynamics é avaliada pelo RESULTADO EMOCIONAL do casal na obra, NÃO pela forma da dinâmica. Tags como BDSM, Femdom, Dom/Sub, Master-Pet, posse, ciúme intenso, "Yandere ML/FL", "Masochistic ML", "Submissive ML/FL", "Crazy ML/FL" NÃO determinam automaticamente 0-3. Antes de pontuar, avalie:
@@ -567,130 +587,16 @@ function prepareReviews(req: AiEvaluationRequest): PreparedReviews {
 }
 
 // ============================================================================
-// R19 detection
-// ============================================================================
-
-const R19_REGEX = /(?:^|[^a-z0-9])R\s*-?\s*19(?:[^a-z0-9]|$)/i
-const R15_REGEX = /(?:^|[^a-z0-9])R\s*-?\s*15(?:[^a-z0-9]|$)/i
-
-const ADULT_GENRE_KEYWORDS = ["adult", "smut", "mature", "hentai", "ecchi"]
-const ADULT_SYNOPSIS_KEYWORDS = [
-  "explicit",
-  "explícito",
-  "smut",
-  "erotic",
-  "erótic",
-  "sexual",
-  "nsfw",
-]
-const ADULT_TAG_GROUP = "content_indicator"
-
-/** Strings de evidência onde um marcador R-rating pode aparecer (sinopse, gêneros,
- *  tags, contexto externo e reviews). */
-function collectRatingEvidence(req: AiEvaluationRequest): string[] {
-  const tags = normalizeTags(req.tags)
-  return [
-    req.synopsis ?? "",
-    ...(req.genres ?? []),
-    ...tags.map((t) => t.name),
-    ...(req.externalContext ?? []),
-    ...(req.sourcedReviews?.map((review) => review.text) ?? []),
-    ...(req.reviews ?? []),
-  ]
-}
-
-/**
- * Evidência tipo "R15 but Based on a R19 Novel": menciona R15 E R19 na mesma
- * string. Aqui o R19 se refere ao NOVEL original, não à obra avaliada (que é
- * R15). NÃO deve acionar o piso do R19 — trata-se com um piso menor
- * ([R15_FROM_R19_FLOOR]).
- */
-function isR15FromR19(text: string): boolean {
-  return R15_REGEX.test(text) && R19_REGEX.test(text)
-}
-
-function detectR15FromR19(req: AiEvaluationRequest): boolean {
-  return collectRatingEvidence(req).some(isR15FromR19)
-}
-
-/**
- * Detecção R19 em duas camadas:
- *  - "weak" → regex match em qualquer evidência (sugestiva). Aciona piso 6.0.
- *  - "strong" → regex match + corroboração: tag do grupo content_indicator,
- *    gênero adulto explícito ou keyword adulta na sinopse. Aciona piso 7.0.
- *
- * Evidências "R15 ... R19 ... novel" são EXCLUÍDAS do haystack: o R19 ali é do
- * novel original, não da obra. Sem isso, a tag "R15 but Based on a R19 Novel"
- * disparava o piso 7 indevidamente.
- */
-function detectR19(req: AiEvaluationRequest): "none" | "weak" | "strong" {
-  const synopsis = req.synopsis ?? ""
-  const tags = normalizeTags(req.tags)
-  const haystack = collectRatingEvidence(req)
-    .filter((text) => !isR15FromR19(text))
-    .join("\n")
-
-  if (!R19_REGEX.test(haystack)) return "none"
-
-  const hasContentIndicatorTag = tags.some((t) => t.group === ADULT_TAG_GROUP)
-  const genresLower = (req.genres ?? []).map((g) => g.toLowerCase())
-  const hasAdultGenre = genresLower.some((g) =>
-    ADULT_GENRE_KEYWORDS.some((kw) => g.includes(kw))
-  )
-  const synopsisLower = synopsis.toLowerCase()
-  const hasAdultKeyword = ADULT_SYNOPSIS_KEYWORDS.some((kw) =>
-    synopsisLower.includes(kw)
-  )
-
-  return hasContentIndicatorTag || hasAdultGenre || hasAdultKeyword
-    ? "strong"
-    : "weak"
-}
-
-function hasR19Marker(req: AiEvaluationRequest): boolean {
-  return detectR19(req) === "strong"
-}
-
-// Piso de adult_content para obras R15 derivadas de novel R19 (a obra em si é
-// R15 — conteúdo maduro mas não explícito). Menor que os pisos do R19 (6/7).
-const R15_FROM_R19_FLOOR = 4
-
-// Piso mínimo de adult_content por classificação de conteúdo das fontes externas
-// (MangaDex/ComicK). "safe" não tem piso. "pornographic" (só MangaDex) fica acima
-// de "erotica". Análogo à regra do R19 — garante que conteúdo marcado como adulto
-// na fonte não receba nota baixa por falta de menção em sinopse/reviews.
-const CONTENT_RATING_FLOORS: Record<string, number> = {
-  suggestive: 5,
-  erotica: 7,
-  pornographic: 8,
-}
-
-/**
- * Maior piso de adult_content implicado pelos content ratings das fontes aceitas.
- * Quando várias fontes divergem (ex.: MangaDex "suggestive" + ComicK "erotica"),
- * vence o mais restritivo. Retorna null quando nenhuma classificação aciona piso.
- */
-function detectContentRatingFloor(
-  req: AiEvaluationRequest
-): { floor: number; rating: string } | null {
-  let best: { floor: number; rating: string } | null = null
-  for (const raw of req.contentRatings ?? []) {
-    const rating = raw.toLowerCase().trim()
-    const floor = CONTENT_RATING_FLOORS[rating]
-    if (floor != null && (best === null || floor > best.floor)) {
-      best = { floor, rating }
-    }
-  }
-  return best
-}
-
-// ============================================================================
 // User prompt
 // ============================================================================
 
 function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): string {
-  const r19Level = detectR19(req)
-  const r15FromR19 = detectR15FromR19(req)
+  const adultBounds = computeAdultContentBounds({
+    tags: normalizeTags(req.tags),
+    genres: req.genres,
+    contentRatings: req.contentRatings,
+    synopsis: req.synopsis,
+  })
   const lines: string[] = [
     `Título oficial da obra a avaliar: "${req.title}"`,
     "(use SOMENTE este título nas suas respostas)",
@@ -774,17 +680,23 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     )
   }
 
-  if (r19Level === "strong") {
+  // Limites de adult_content vindos de sinal ESTRUTURADO (tag/gênero/classificação
+  // da fonte). Só isto entra como regra; keyword em sinopse ou review NÃO — a
+  // review que motivou a mudança dizia "smut are lacking", e casar "smut" em texto
+  // livre acionaria o piso justamente no caso oposto.
+  if (adultBounds.floor != null || adultBounds.ceiling != null) {
+    lines.push(`\nREGRA OBRIGATÓRIA para adult_content nesta obra: ${adultBounds.reasons.join(" ")}`)
+    if (adultBounds.floor != null) {
+      lines.push(
+        `Portanto adult_content NÃO pode ficar abaixo de ${adultBounds.floor.toFixed(1)}. Não rebaixe por a cena ser pouco frequente: frequência muda o FOCO, não a natureza do conteúdo.`
+      )
+    }
+    if (adultBounds.ceiling != null) {
+      lines.push(`Portanto adult_content NÃO pode passar de ${adultBounds.ceiling.toFixed(1)}.`)
+    }
+  } else if (adultBounds.hasEditionMarkerOnly) {
     lines.push(
-      `\nMarcador R19 detectado nas evidências com corroboração (tag content_indicator, gênero adulto ou termo explícito na sinopse). Para adult_content, aplique a regra obrigatória: nota mínima 7.0.`
-    )
-  } else if (r19Level === "weak") {
-    lines.push(
-      `\nMarcador R19 encontrado em alguma evidência, sem corroboração explícita de tag/gênero/termo adulto. A presença do marcador é, ainda assim, evidência POSITIVA de conteúdo adulto — reviews/tags podem simplesmente não ter mencionado. Aplique o princípio "ausência de evidência ≠ ausência": adult_content tem nota mínima 6.0. Pode subir mais conforme outras evidências.`
-    )
-  } else if (r15FromR19) {
-    lines.push(
-      `\nAtenção: há a marcação "R15 but Based on a R19 Novel". O "R19" aqui se refere ao NOVEL original — a OBRA avaliada é R15 (conteúdo maduro, mas não explícito). NÃO trate isso como conteúdo adulto explícito: adult_content tem nota mínima 4.0 (não o piso do R19), podendo subir só se outras evidências (tags/reviews/sinopse) indicarem conteúdo sexual de fato.`
+      `\nA sinopse traz um marcador do tipo "[R19 disponível]". Ele vem do boilerplate da fonte ("Original Webtoon: R19", "Official Translations (R19)") e significa apenas que EXISTE uma edição R19 desta história em algum lugar — NÃO que a obra avaliada mostre conteúdo explícito. Trate como dica fraca: NÃO há piso obrigatório. Pontue adult_content pela evidência de fato (tags, gêneros, o que as reviews descrevem).`
     )
   }
 
@@ -916,107 +828,86 @@ function buildResponseFromToolPayload(
   }
 }
 
-function enforceR19AdultContentRule(
-  response: AiEvaluationResponse,
-  req: AiEvaluationRequest
-): AiEvaluationResponse {
-  const level = detectR19(req)
-  if (level === "none") return response
-
-  const floor = level === "strong" ? 7 : 6
-
+/**
+ * Piso e teto de `adult_content` por PROCEDÊNCIA do sinal — ver
+ * `lib/ai-evaluation/adult-content-rules.ts` para o raciocínio e as medições.
+ *
+ * Substituiu três regras que eram encadeadas e só sabiam SUBIR (R19 weak/strong,
+ * R15-derivado-de-R19, content rating externo). O problema não era o encadeamento:
+ * era a premissa. A antiga procurava o token "R19" em qualquer texto — incluindo o
+ * marcador que o próprio pipeline reinjeta na sinopse a partir de boilerplate como
+ * "Original Webtoon: R19" — e 48% dos pisos aplicados vinham daí. Marcador de
+ * EDIÇÃO deixou de virar limite; virou dica no prompt.
+ */
+/** Os mesmos limites, para registrar no `evaluationContext`. Fica separado porque
+ *  `attachEvaluationContext` roda depois e não recebe o resultado do enforce. */
+function adultBoundsForContext(req: AiEvaluationRequest) {
+  const b = computeAdultContentBounds({
+    tags: normalizeTags(req.tags),
+    genres: req.genres,
+    contentRatings: req.contentRatings,
+    synopsis: req.synopsis,
+  })
   return {
-    ...response,
-    scores: response.scores.map((score) => {
-      if (score.criterionSlug !== "adult_content" || score.suggestedScore >= floor) {
-        return score
-      }
-      const reason =
-        level === "strong"
-          ? `Marcador R19 corroborado por tag/gênero/termo adulto; pela regra obrigatória, adult_content não pode ficar abaixo de 7.0.`
-          : `Marcador R19 detectado na sinopse/tags/reviews; presença do marcador é evidência positiva de conteúdo adulto, adult_content não pode ficar abaixo de 6.0.`
-      return {
-        ...score,
-        suggestedScore: floor,
-        justification: score.justification.includes("R19") ? score.justification : `${score.justification} ${reason}`,
-      }
-    }),
-    rawResponse: {
-      ...rawObject(response.rawResponse),
-      r19AdultContentRuleApplied: true,
-      r19AdultContentLevel: level,
-    },
+    floor: b.floor,
+    ceiling: b.ceiling,
+    explicitSignals: b.explicitSignals,
+    hasEditionMarkerOnly: b.hasEditionMarkerOnly,
+    conflict: b.conflict,
   }
 }
 
-/**
- * Obras "R15 but Based on a R19 Novel": a obra avaliada é R15 (o R19 é do novel
- * original). Aplica piso 4 a adult_content — em vez do piso 7 que a menção de R19
- * acionaria. Monotônica, então compõe com as demais regras pelo MAIOR piso (se
- * houver R19 real ou content rating adulto por outra evidência, esses prevalecem).
- */
-function enforceR15FromR19AdultContentRule(
+function enforceAdultContentBounds(
   response: AiEvaluationResponse,
   req: AiEvaluationRequest
 ): AiEvaluationResponse {
-  if (!detectR15FromR19(req)) return response
-  const floor = R15_FROM_R19_FLOOR
-
-  return {
-    ...response,
-    scores: response.scores.map((score) => {
-      if (score.criterionSlug !== "adult_content" || score.suggestedScore >= floor) {
-        return score
-      }
-      const reason = `Tag "R15 but Based on a R19 Novel": a obra é R15 (o R19 é do novel original); adult_content tem piso ${floor.toFixed(1)}, não o piso do R19.`
-      return {
-        ...score,
-        suggestedScore: floor,
-        justification: score.justification.includes("R15") ? score.justification : `${score.justification} ${reason}`,
-      }
-    }),
-    rawResponse: {
-      ...rawObject(response.rawResponse),
-      r15FromR19RuleApplied: true,
-      r15FromR19Floor: floor,
-    },
+  const bounds = computeAdultContentBounds({
+    tags: normalizeTags(req.tags),
+    genres: req.genres,
+    contentRatings: req.contentRatings,
+    synopsis: req.synopsis,
+  })
+  if (bounds.floor == null && bounds.ceiling == null) {
+    return {
+      ...response,
+      rawResponse: {
+        ...rawObject(response.rawResponse),
+        adultContentBounds: { floor: null, ceiling: null, hasEditionMarkerOnly: bounds.hasEditionMarkerOnly },
+      },
+    }
   }
-}
 
-/**
- * Eleva o piso de adult_content conforme a classificação de conteúdo das fontes
- * externas aceitas (MangaDex/ComicK): suggestive→5, erotica→7, pornographic→8.
- * Monotônica (só sobe), então compõe com a regra do R19: encadeadas, o resultado
- * final é o MAIOR piso acionado entre as duas.
- */
-function enforceExternalContentRatingRule(
-  response: AiEvaluationResponse,
-  req: AiEvaluationRequest
-): AiEvaluationResponse {
-  const detected = detectContentRatingFloor(req)
-  if (!detected) return response
-  const { floor, rating } = detected
+  let applied = false
+  const scores = response.scores.map((score) => {
+    if (score.criterionSlug !== "adult_content") return score
+    const clamped = clampAdultContentScore(score.suggestedScore, bounds)
+    if (clamped === score.suggestedScore) return score
+    applied = true
+    const reason = bounds.reasons.join(" ")
+    return {
+      ...score,
+      suggestedScore: clamped,
+      // Não duplica o texto quando o modelo já explicou o mesmo limite.
+      justification: score.justification.includes(reason)
+        ? score.justification
+        : `${score.justification} ${reason}`,
+    }
+  })
 
   return {
     ...response,
-    scores: response.scores.map((score) => {
-      if (score.criterionSlug !== "adult_content" || score.suggestedScore >= floor) {
-        return score
-      }
-      const reason = `Fonte externa classifica o conteúdo como "${rating}"; pela regra obrigatória, adult_content não pode ficar abaixo de ${floor.toFixed(1)}.`
-      return {
-        ...score,
-        suggestedScore: floor,
-        justification: score.justification.includes("classifica o conteúdo")
-          ? score.justification
-          : `${score.justification} ${reason}`,
-      }
-    }),
+    scores,
     rawResponse: {
       ...rawObject(response.rawResponse),
-      externalContentRatingRuleApplied: true,
-      externalContentRatingFloor: floor,
-      externalContentRating: rating,
+      adultContentBounds: {
+        floor: bounds.floor,
+        ceiling: bounds.ceiling,
+        applied,
+        conflict: bounds.conflict,
+        explicitSignals: bounds.explicitSignals,
+        hasEditionMarkerOnly: bounds.hasEditionMarkerOnly,
+        reasons: bounds.reasons,
+      },
     },
   }
 }
@@ -1180,10 +1071,11 @@ function attachEvaluationContext(
             id: prepared.ids[index] ?? `R${index + 1}`,
             text,
           })) ?? [],
-        r19Detected: hasR19Marker(req),
-        r19Level: detectR19(req),
-        r15FromR19Detected: detectR15FromR19(req),
-        contentRatingFloor: detectContentRatingFloor(req),
+        // `r19Detected` continua existindo pro painel "Dados usados na avaliação"
+        // (é o único leitor), mas agora significa "há sinal ESTRUTURADO de conteúdo
+        // adulto", não "a string R19 apareceu em algum lugar".
+        r19Detected: adultBoundsForContext(req).floor != null,
+        adultContentBounds: adultBoundsForContext(req),
         coverUrlSentToModel: req.coverUrl ?? null,
       },
     },
@@ -1199,10 +1091,7 @@ function postProcessEvaluation(
     enforceAuditableReviewUsage(
       enforceConfidenceCapWhenLowEvidence(
         enforceNeutralCoupleDynamicsWhenNoRomance(
-          enforceExternalContentRatingRule(
-            enforceR15FromR19AdultContentRule(enforceR19AdultContentRule(response, req), req),
-            req
-          )
+          enforceAdultContentBounds(response, req)
         ),
         req
       ),
