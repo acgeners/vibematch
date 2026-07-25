@@ -22,7 +22,7 @@ import { createWork, createWorksBatch, findDuplicateWorkById, findDuplicateWorkB
 import type { DuplicateWorkForForm } from "@/server/actions/works"
 import { previewCanonicalSynopsis } from "@/server/actions/synopsis"
 import { GENRE_NAMES, TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
-import { evaluateCandidateForCreate, listGenreCatalog } from "@/server/actions/external"
+import { checkExistingWorkInDb, evaluateCandidateForCreate, listGenreCatalog } from "@/server/actions/external"
 import { useCostConfirm } from "@/components/cost/cost-confirm"
 import { previewCascade } from "@/lib/cost-preview/catalog"
 import {
@@ -381,6 +381,21 @@ type DuplicateResolutionState = {
 
 const BATCH_DRAFTS_STORAGE_KEY = "animedb:new-title-batch-drafts"
 
+const MATCH_TYPE_LABEL: Record<ExistingWorkMatch["matchType"], string> = {
+  exact_title: "título idêntico",
+  original_title: "título original idêntico",
+  exact_alt: "título alternativo idêntico",
+  fuzzy: "título muito parecido",
+}
+
+function describeBatchDuplicate(matches: ExistingWorkMatch[]): string {
+  const [first] = matches
+  if (!first) return ""
+  const how = MATCH_TYPE_LABEL[first.matchType] ?? "título parecido"
+  const extra = matches.length > 1 ? ` (e mais ${matches.length - 1})` : ""
+  return `Já existe "${first.title}" no catálogo — casou por ${how}${extra}. Adicionar ao lote mesmo assim?`
+}
+
 function readBatchDrafts(): BatchDraft[] {
   if (typeof window === "undefined") return []
   try {
@@ -728,6 +743,12 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
   })
   const [topFeedback, setTopFeedback] = useState<string | null>(null)
   const [duplicateResolution, setDuplicateResolution] = useState<DuplicateResolutionState | null>(null)
+  // Obra vinda de "Buscar dados" que colidiu com o catálogo ao entrar no lote.
+  // Diferente de `duplicateResolution` (fusão campo-a-campo p/ obra manual): aqui
+  // só barramos a entrada e oferecemos "adicionar mesmo assim".
+  const [pendingBatchDuplicate, setPendingBatchDuplicate] = useState<
+    { values: WorkFormValues; matches: ExistingWorkMatch[] } | null
+  >(null)
   const [canonicalPreview, setCanonicalPreview] = useState<string | null>(null)
   const [canonicalLoading, setCanonicalLoading] = useState(false)
   const [canonicalError, setCanonicalError] = useState<string | null>(null)
@@ -1342,12 +1363,36 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     window.localStorage.setItem(BATCH_DRAFTS_STORAGE_KEY, JSON.stringify(drafts))
   }
 
-  const executeAddMoreSubmit = async (values: WorkFormValues) => {
+  const executeAddMoreSubmit = async (
+    values: WorkFormValues,
+    opts: { skipDuplicateCheck?: boolean } = {},
+  ) => {
     scrollToTop()
-    const shouldCheckDuplicate = Object.keys(values.external_ids ?? {}).length === 0
-    if (shouldCheckDuplicate) {
-      setTopFeedback("Verificando duplicidade...")
-      if (await checkDuplicateBeforeCreate(values, "addMore")) return
+    if (!opts.skipDuplicateCheck) {
+      const hasExternalIds = Object.keys(values.external_ids ?? {}).length > 0
+      if (!hasExternalIds) {
+        // Obra digitada à mão: diálogo de fusão, que permite atualizar a obra
+        // existente campo a campo.
+        setTopFeedback("Verificando duplicidade...")
+        if (await checkDuplicateBeforeCreate(values, "addMore")) return
+      } else {
+        // Obra vinda de "Buscar dados": o diálogo de fusão não se aplica (os dados
+        // já vêm da fonte). Mas ela PODE colidir com o catálogo — e antes esta
+        // checagem era pulada pelo portão `external_ids`, deixando a duplicata
+        // poluir o lote e só estourar no save (com o nome da obra existente, sem
+        // dizer qual item colidiu). Usa a MESMA RPC do "Buscar dados".
+        setTopFeedback("Verificando duplicidade...")
+        const matches = await checkExistingWorkInDb({
+          title: values.title,
+          originalTitle: values.original_title,
+          alternativeTitles: values.alternative_titles,
+        })
+        setTopFeedback(null)
+        if (matches.length > 0) {
+          setPendingBatchDuplicate({ values, matches })
+          return
+        }
+      }
     }
     setTopFeedback(null)
 
@@ -1370,6 +1415,13 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
       const titleField = document.getElementById("title") as HTMLInputElement | null
       titleField?.focus()
     }, 0)
+  }
+
+  const handleConfirmBatchDuplicate = async () => {
+    if (!pendingBatchDuplicate) return
+    const pending = pendingBatchDuplicate
+    setPendingBatchDuplicate(null)
+    await executeAddMoreSubmit(pending.values, { skipDuplicateCheck: true })
   }
 
   const onSubmitAddMore = async (rawValues: WorkFormValues) => {
@@ -1530,9 +1582,23 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
           return
         }
         const normalizedCurrent = normalizePostReadingScoresInValues(parsedCurrent.data)
+        setTopFeedback("Verificando duplicidade...")
         if (Object.keys(normalizedCurrent.external_ids ?? {}).length === 0) {
-          setTopFeedback("Verificando duplicidade...")
           if (await checkDuplicateBeforeCreate(normalizedCurrent, "addMore")) return
+        } else {
+          // Mesmo portão do executeAddMoreSubmit: obra do "Buscar dados" também
+          // precisa colidir com o catálogo AQUI, e não só no save. Ao confirmar
+          // "adicionar mesmo assim", ela vai pro standby (handleConfirmBatchDuplicate)
+          // e o próximo "Criar" a inclui.
+          const matches = await checkExistingWorkInDb({
+            title: normalizedCurrent.title,
+            originalTitle: normalizedCurrent.original_title,
+            alternativeTitles: normalizedCurrent.alternative_titles,
+          })
+          if (matches.length > 0) {
+            setPendingBatchDuplicate({ values: normalizedCurrent, matches })
+            return
+          }
         }
         setTopFeedback("Criando lote...")
         const currentItem = {
@@ -1745,6 +1811,18 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
         confirmText={pendingLowConfidenceSubmit?.kind === "create-and-add" ? "Salvar no lote" : "Criar obra"}
         cancelText="Voltar"
         onConfirm={() => void handleConfirmLowConfidenceSubmit()}
+      />
+
+      <ConfirmDialog
+        open={pendingBatchDuplicate != null}
+        onOpenChange={(open) => {
+          if (!open) setPendingBatchDuplicate(null)
+        }}
+        title="Esta obra já existe no catálogo"
+        description={pendingBatchDuplicate ? describeBatchDuplicate(pendingBatchDuplicate.matches) : undefined}
+        confirmText="Adicionar mesmo assim"
+        cancelText="Não adicionar"
+        onConfirm={() => void handleConfirmBatchDuplicate()}
       />
 
       {actionButtons}
