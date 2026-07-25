@@ -35,7 +35,7 @@ export type SynopsisQualitySource = (typeof SYNOPSIS_QUALITY_SOURCES)[number]
 export const AI_EVAL_STATUSES = ["pending", "review_pending", "done", "skipped"] as const
 export type AiEvalStatus = (typeof AI_EVAL_STATUSES)[number]
 
-export const PLATFORMS = ["mangaupdates", "comick", "comix", "animeplanet", "myanimelist", "mangadex", "kitsu", "anilist", "mangago", "outros"] as const
+export const PLATFORMS = ["mangaupdates", "myanimelist", "anilist", "animeplanet", "comick", "mangadex", "kitsu", "comix", "mangago", "outros"] as const
 export type Platform = (typeof PLATFORMS)[number]
 
 export const CRITERION_SLUGS = [
