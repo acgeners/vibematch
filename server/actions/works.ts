@@ -324,19 +324,48 @@ async function upsertTagsBatch(
   return ids
 }
 
+// Chunk pequeno o bastante pra caber num `in(...)` sem estourar a URL do
+// PostgREST (uma obra pode ter ~200 tags).
+const TAG_DELETE_CHUNK = 100
+
 async function syncWorkTags(
   supabase: SupabaseAdminClient,
   workId: string,
   tags: string[]
 ) {
-  await supabase.from("work_tags").delete().eq("work_id", workId)
-
   const uniqueTagIds = [...new Set(await upsertTagsBatch(supabase, tags))]
-  if (uniqueTagIds.length > 0) {
+
+  // DIFF, não delete-tudo-e-reinsere. O insert cru não carrega `source` nem
+  // `confidence`, então recriar a linha APAGAVA a proveniência ("ai_inferred")
+  // de toda tag que a obra manteve — bastava salvar o formulário uma vez pro
+  // rodapé da aba Tags passar a dizer "0 por IA" (e a data de inferência virar
+  // mentira). Medido em 2026-07-24: 26 das 42 obras no estado "rodou e 0 por
+  // IA" eram isto, não inferência vazia.
+  const { data: current } = await supabase
+    .from("work_tags")
+    .select("tag_id")
+    .eq("work_id", workId)
+  const existing = new Set((current ?? []).map((r) => r.tag_id as string))
+  const keep = new Set(uniqueTagIds)
+
+  const toRemove = [...existing].filter((id) => !keep.has(id))
+  for (let i = 0; i < toRemove.length; i += TAG_DELETE_CHUNK) {
+    const { error } = await supabase
+      .from("work_tags")
+      .delete()
+      .eq("work_id", workId)
+      .in("tag_id", toRemove.slice(i, i + TAG_DELETE_CHUNK))
+    if (error) {
+      console.error(`[syncWorkTags] delete work_tags failed (workId=${workId})`, error.message)
+    }
+  }
+
+  const toAdd = uniqueTagIds.filter((id) => !existing.has(id))
+  if (toAdd.length > 0) {
     const { error } = await supabase
       .from("work_tags")
       .upsert(
-        uniqueTagIds.map((tag_id) => ({ work_id: workId, tag_id })),
+        toAdd.map((tag_id) => ({ work_id: workId, tag_id })),
         { onConflict: "work_id,tag_id", ignoreDuplicates: true }
       )
     if (error) {

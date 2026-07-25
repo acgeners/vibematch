@@ -1663,9 +1663,25 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     {tagsInferenceRan ? (
                       <span
                         className="inline-flex items-center gap-1"
-                        title={tagsInferredAt ? `Inferência rodou em ${new Date(tagsInferredAt).toLocaleDateString("pt-BR")}` : "Tem tags inferidas por IA (backfill anterior ao registro de data)"}
+                        title={tagsInferredAt ? `Inferência rodou em ${new Date(tagsInferredAt).toLocaleString("pt-BR")}` : "Tem tags inferidas por IA (backfill anterior ao registro de data)"}
                       >
-                        <Sparkles className="h-3 w-3 text-violet-500" /> inferência de tags aplicada
+                        <Sparkles className="h-3 w-3 text-violet-500" />
+                        {tagsInferredAt ? (
+                          <>
+                            tags inferidas em{" "}
+                            <span className="font-medium text-foreground/80">
+                              {new Date(tagsInferredAt).toLocaleDateString("pt-BR", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                year: "numeric",
+                              })}
+                            </span>
+                          </>
+                        ) : (
+                          // Backfill anterior à migration 119: tem tag de IA, mas
+                          // nunca registrou quando. Sem data pra mostrar.
+                          "inferência de tags aplicada"
+                        )}
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
