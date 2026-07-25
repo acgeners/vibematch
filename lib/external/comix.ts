@@ -1,6 +1,6 @@
 import type { PublicationStatus } from "@/types/domain"
 import type { ExternalSearchResult } from "./types"
-import { fetchHtmlWithCfFallback, isCloudflareChallenge, isFlareSolverrEnabled, isFlareSolverrCircuitOpen } from "./flaresolverr"
+import { fetchHtmlWithCfFallback, isCloudflareChallenge, isCfBypassUnavailable } from "./flaresolverr"
 import { recordComixOk, recordComixFailure } from "./comix-gate"
 import type { ComixFailure } from "./comix-gate"
 
@@ -104,10 +104,15 @@ async function fetchComixJson(path: string): Promise<unknown | null> {
   // até o TTL reabrir.
   if (Date.now() < comixAuthCircuitOpenUntil) return null
 
-  // comix.to é sempre CF-protegido; sem FlareSolverr não há como passar. Quando
-  // o circuito está aberto (container fora), pula tudo — inclusive o fetch direto
-  // inútil — pra não somar segundos em cada chamada (a busca chama comix N×).
-  if (isFlareSolverrEnabled() && isFlareSolverrCircuitOpen()) return null
+  // comix.to é sempre CF-protegido. Só pula quando NÃO há nenhuma camada de bypass
+  // (nem sidecar, nem FlareSolverr) — aí o fetch direto voltaria só o desafio.
+  // ⚠️ Antes checava `isFlareSolverrEnabled() && isFlareSolverrCircuitOpen()`, o que
+  // vetava a Comix inteira quando o circuito do FlareSolverr abria (container fora) —
+  // mesmo com o sidecar (a camada PRIMÁRIA) saudável. Era o mesmo buraco já corrigido
+  // em mangago/animeplanet: em dev o Docker fica desligado por padrão e o circuito
+  // vive aberto, então a Comix sumia da busca sem erro. `isCfBypassUnavailable()`
+  // considera o sidecar (ver flaresolverr.ts).
+  if (isCfBypassUnavailable()) return null
 
   let directBodyLooksLikeChallenge = false
   try {
@@ -149,7 +154,10 @@ async function fetchComixJson(path: string): Promise<unknown | null> {
     logComixFailure(url, "network_error", err instanceof Error ? err.message : String(err))
   }
 
-  if (!isFlareSolverrEnabled()) {
+  // Sem nenhuma camada de bypass, o fallback só voltaria o desafio — registra e sai.
+  // (Antes checava só `!isFlareSolverrEnabled()`, ignorando o sidecar: com o sidecar
+  // configurado e o FlareSolverr fora, pulava a única camada que passaria.)
+  if (isCfBypassUnavailable()) {
     if (directBodyLooksLikeChallenge) logComixFailure(url, "flaresolverr_unavailable")
     return null
   }
@@ -205,7 +213,9 @@ async function fetchComixHtml(url: string, isValid?: (html: string) => boolean):
     logComixFailure(url, "network_error", err instanceof Error ? err.message : String(err))
   }
 
-  if (!isFlareSolverrEnabled() || isFlareSolverrCircuitOpen()) return null
+  // Sem bypass (sidecar + FlareSolverr) não há como atravessar o CF; considera o
+  // sidecar, não só o FlareSolverr (senão o circuito do FS vetava a camada primária).
+  if (isCfBypassUnavailable()) return null
   const fallback = await fetchHtmlWithCfFallback(url, HTML_HEADERS, COMIX_CF_ABORT_MS, COMIX_FS_SESSION)
   if (!fallback) {
     logComixFailure(url, "cloudflare_challenge", "flaresolverr returned no response")
@@ -251,7 +261,9 @@ async function fetchComixThreadJson(path: string): Promise<unknown | null> {
     logComixFailure(url, "network_error", err instanceof Error ? err.message : String(err))
   }
 
-  if (!isFlareSolverrEnabled() || isFlareSolverrCircuitOpen()) return null
+  // Sem bypass (sidecar + FlareSolverr) não há como atravessar o CF; considera o
+  // sidecar, não só o FlareSolverr (senão o circuito do FS vetava a camada primária).
+  if (isCfBypassUnavailable()) return null
   const fallback = await fetchHtmlWithCfFallback(url, HEADERS, COMIX_CF_ABORT_MS, COMIX_FS_SESSION)
   if (!fallback) return null
   const preMatch = fallback.html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i)
