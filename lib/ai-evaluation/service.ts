@@ -132,15 +132,18 @@ export const MODEL = SONNET_MODEL
 // `EVAL_OUTPUT_SCHEMA_VERSION` entra na chave de cache e mudou para "eval-2" em
 // jul/2026. Para reverter de verdade é preciso restaurar o texto do prompt.
 export const CONCISE_OUTPUT: boolean = true
-// v22 (2026-07-24): adult_content passou a ter piso E TETO por PROCEDÊNCIA do
-// sinal (ver lib/ai-evaluation/adult-content-rules.ts). Marcador de EDIÇÃO
-// ("[R19 disponível]" vindo de boilerplate da fonte) deixou de gerar piso — era a
-// origem de 48% dos pisos aplicados, e produzia notas que contradiziam a própria
-// justificativa. Cena explícita, em qualquer quantidade, agora exige 9-10; a tag
-// "R15 but Based on a R19 Novel" virou TETO.
+// v23 (2026-07-25): redesign das rubricas dos 9 critérios. Escala NEUTRA de
+// intensidade (existe? → freq×potência), exceto couple_dynamics (valência); topo
+// por SATURAÇÃO ("onipresente"), não primazia, pra critérios não se excluírem.
+// Dois grupos (FATO/SENTIMENTO) com regra de evidência por confiabilidade. Regra
+// "prática, não teoria" e sinopse lida em 3 partes (contexto × direção). Romance =
+// conteúdo retratado, não tema; protagonista = presença, não qualidade; tragédia =
+// gravidade × irreversibilidade na direção da trama. Deletadas as regras globais
+// contraditórias (piso ≥5, "0-4 reservado", "critérios negativos", valor central).
+// Rubricas na migration 165 + criteria.ranges. Ver REGISTRO-2026-07-25.
+// (v22 2026-07-24: adult_content piso/teto por procedência; cena explícita ⇒ 9-10.)
 // (v21 2026-07-07: consenso das reviews, proibido citar review individual ou ID.)
-// (v20 2026-06-27: citação genérica de reviews, sem exigir IDs nem auditoria.)
-export const PROMPT_VERSION = CONCISE_OUTPUT ? "v22" : "v18"
+export const PROMPT_VERSION = CONCISE_OUTPUT ? "v23" : "v18"
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Extrai inteiro de "v12" → 12. Retorna null pra strings não-vXX. */
@@ -189,10 +192,28 @@ function formatVotes(votes: number): string {
 // System prompt (estático — beneficia-se de prompt caching)
 // ============================================================================
 
+// Grupo de interpretação de cada critério (v23). FATO/AÇÃO: presença = fato
+// concreto/ação retratada, evidência mais confiável em tags/gêneros/premissa.
+// SENTIMENTO: registro emocional que a obra constrói, evidência mais confiável no
+// consenso das reviews. NÃO é exclusivo — todas as fontes valem pra todos; o grupo
+// só diz qual é mais confiável. Ver REGISTRO-2026-07-25.
+export const CRITERION_GROUP: Record<string, "FATO" | "SENTIMENTO"> = {
+  romance: "FATO",
+  fantasy_nobility: "FATO",
+  action_adventure: "FATO",
+  adult_content: "FATO",
+  protagonist: "FATO",
+  couple_dynamics: "SENTIMENTO",
+  humor: "SENTIMENTO",
+  drama: "SENTIMENTO",
+  tragedy: "SENTIMENTO",
+}
+
 function buildCriteriaPromptSection(): string {
   return CRITERION_SLUGS.map((slug, index) => {
     const info = CRITERIA_INFO[slug]
     const rubric = CRITERIA_RUBRICS[slug]
+    const group = CRITERION_GROUP[slug] ?? "FATO"
     const description = info?.description?.trim()
       ? `\nDescrição do critério: ${info.description.trim()}`
       : ""
@@ -200,7 +221,7 @@ function buildCriteriaPromptSection(): string {
       .map((range) => `- ${range}`)
       .join("\n")
 
-    return `${index + 1}. ${slug} (${rubric?.title ?? info?.name ?? slug})${description}\n${ranges}`
+    return `${index + 1}. ${slug} [${group}] (${rubric?.title ?? info?.name ?? slug})${description}\n${ranges}`
   }).join("\n\n")
 }
 
@@ -217,10 +238,22 @@ REGRAS DE FIDELIDADE AO TÍTULO (críticas):
 - No campo "summary", refira-se à obra apenas pelo título fornecido. NÃO mencione títulos de outras obras, nem invente subtítulos ou nomes de personagens que não estejam na sinopse/tags.
 - Se a sinopse for vazia/curta e as reviews parecerem inconsistentes, baixe a "confidence" e prefira notas conservadoras nas faixas centrais (4-6) ou na faixa baixa, explicando a incerteza.
 
-REGRAS DE EVIDÊNCIA:
-- Trate a sinopse como apresentação de premissa/background. Ela normalmente descreve o ponto de partida e o cenário inicial, não o desenvolvimento. Priorize tom, ritmo, atmosfera e gênero que ela sugere — não a leia como sumário literal dos eventos centrais da obra.
-- Para cada critério, cruze ao menos 2 fontes (sinopse, tags por grupo, gêneros, reviews compatíveis). NÃO ancore a nota em uma única tag, uma única review ou um único fato isolado da sinopse. A avaliação deve ser conceitual e abrangente, refletindo o conjunto das evidências.
-- Quando tags E reviews estiverem disponíveis, use as duas simultaneamente. Não escolha uma em detrimento da outra; ambas são exigidas sempre que existirem.
+DOIS GRUPOS DE CRITÉRIOS (cada critério está marcado [FATO] ou [SENTIMENTO] na lista abaixo):
+- [FATO/AÇÃO] (romance, fantasia/nobreza, ação/aventura, conteúdo adulto, protagonista): presença = um FATO concreto ou AÇÃO retratada (há magia? corte nobre? guerra? sexo mostrado? protagonista ativo?). Evidência mais confiável: tags, gêneros e premissa; a sinopse estabelece esses fatos com autoridade.
+- [SENTIMENTO] (dinâmica entre protagonistas, humor, drama, tragédia): presença = o REGISTRO EMOCIONAL que a obra constrói e sustenta. Evidência mais confiável: o CONSENSO das reviews (a experiência sentida, média entre leitores). Meça o que a obra CONSTRÓI (ela emprega comédia? encena perdas? sustenta tensão?), NÃO se um leitor específico sentiria isso — o consenso tira o gosto individual.
+- TODAS as fontes valem para TODOS os critérios; o grupo só diz qual é MAIS confiável, nunca qual ignorar. Gênero "Comedy" ajuda humor (sentimento); reviews que dizem "super picante" ajudam adult_content (fato). Para cada critério, cruze ao menos 2 fontes e NÃO ancore em uma tag, uma review ou um fato isolado.
+
+COMO LER INTENSIDADE (vale para todos os critérios [FATO] e para humor/drama/tragédia — dinâmica é valência, ver abaixo):
+- Pergunta 1 — o elemento EXISTE na obra? Se não, 0-3.
+- Pergunta 2 — existindo, quão intenso? Combine FREQUÊNCIA (o quanto aparece) e POTÊNCIA (quão forte quando aparece): 9-10 exige as duas altas (constante E intensa); 7-8 quando UMA é claramente alta (rara-porém-intensa cai aqui, não é rebaixada); 4-6 presente mas moderado; 0-3 ausente.
+- Exceções: adult_content mede só POTÊNCIA (explicitude; frequência não rebaixa); tragédia mede GRAVIDADE × IRREVERSIBILIDADE (não frequência).
+
+PRÁTICA, NÃO TEORIA (regra de topo): conta o que se MANIFESTA nos eventos/na página, com consequências (cenas, ações, comportamento encenado). NÃO conta pra intensidade o que é só MENCIONADO, DISCUTIDO, PLANEJADO ou PRETENDIDO (tema debatido, background citado, capacidade descrita mas não mostrada). Ressalva: esquema/plano que se EXECUTA com consequências É prática.
+
+COMO LER A SINOPSE (ela é confiável, mas descreve o PONTO DE PARTIDA, não a obra inteira):
+- A sinopse tem 3 partes: BACKGROUND (o que aconteceu antes e explica o início) + SITUAÇÃO INICIAL (estado dos personagens/mundo quando a trama começa) = "contexto estabelecido"; e DIREÇÃO DA TRAMA (o que os personagens vão ter que fazer/enfrentar/buscar dali em diante).
+- Critérios de DESENVOLVIMENTO (tragédia, drama, arco da dinâmica) se avaliam pela DIREÇÃO DA TRAMA + reviews — NUNCA pelo contexto estabelecido. Ex.: "família assassinada antes do início" é background → NÃO é tragédia da obra.
+- Critérios de SETUP (sobretudo fantasia/nobreza) leem o contexto legitimamente — o mundo mágico/nobre estabelecido É o sinal.
 
 TAGS POR GRUPO — GUIA DE PESO POR CRITÉRIO:
 Use o grupo das tags fornecidas como sinal principal por critério. Peso entre parênteses indica o quanto o grupo é indicativo daquele critério:
@@ -246,27 +279,15 @@ COERÊNCIA JUSTIFICATIVA × FAIXA (obrigatória):
 - A justificativa deve ser semanticamente consistente com a faixa escolhida. Se a justificativa contém expressões como "presença constante", "frequente", "recorrente", "um dos pilares", "elemento central", "abundante", a nota NÃO pode terminar em faixa 4-6 (pontual/subplot) — deve ser 7-8 ou 9-10. Se diz "pontual", "esporádico", "leve", "sutil", "subliminar", NÃO pode terminar em 7-8.
 - A regra de incerteza entre faixas adjacentes (acima) NÃO autoriza ancorar a nota em 5 quando a própria justificativa lista evidências claras de presença. Ela só vale pra borderline real — quando duas faixas adjacentes são ambas plausíveis a partir do mesmo conjunto de evidências. Não use essa regra como "atalho" pro neutro.
 
-INTERPRETAÇÃO DA ESCALA (regra crítica para evitar viés sistemático):
-- 5 é o ponto NEUTRO: significa "o critério está presente de forma reconhecível, mas não define a obra".
-- Notas 0-4 são RESERVADAS pra casos onde o critério é claramente ausente, irrelevante ou atua negativamente. Se há QUALQUER evidência (mesmo parcial, mesmo com ressalvas) de que o critério está presente, a nota deve ser ≥ 5.
-- Críticas, tropos clichês ou execução fraca NÃO justificam baixar abaixo de 5 quando o critério genuinamente existe. Use ressalvas pra escolher entre 5 e 6 (ou 7 e 8), NUNCA pra ancorar no piso da faixa.
-- Dentro de uma faixa, prefira o valor CENTRAL salvo quando a evidência puxa claramente pra um extremo.
-
-PRINCÍPIO "AUSÊNCIA DE EVIDÊNCIA NÃO É EVIDÊNCIA DE AUSÊNCIA":
-- Reviews que não mencionam um critério NÃO comprovam que ele está ausente — só não comentaram. Gêneros/tags que não incluem um critério não são evidência negativa pra ele.
-- Pra justificar nota < 5 num critério (positivo), é preciso evidência POSITIVA de ausência ou negatividade, como:
-  · review afirmando explicitamente ("a obra não tem nenhum humor", "sem nenhum momento engraçado", "personagem genérico sem personalidade")
-  · sinopse descrevendo cenário incompatível ("história puramente política sem qualquer alívio")
-  · tag/gênero estruturalmente excludente do critério avaliado
-- "Drama domina o tom" indica drama PRESENTE, NÃO ausência de humor — critérios são independentes entre si. Não use a presença de um pra inferir a ausência de outro.
-- Quando faltam evidências em qualquer direção (positivas ou negativas), use 5 (neutro) e baixe a "confidence" pra refletir a incerteza. NÃO ancore no piso da escala só porque a evidência foi escassa ou silenciosa.
+SILÊNCIO NÃO É AUSÊNCIA (mas ausência genuína é nota baixa):
+- Reviews que não mencionam um critério NÃO provam que ele falta — só não comentaram. Gêneros/tags que não incluem um critério não são evidência negativa. NÃO conclua "ausente" (0-3) só porque uma fonte ficou em silêncio.
+- "Drama domina o tom" indica drama PRESENTE, NÃO ausência de humor. Critérios são INDEPENDENTES: nunca infira a ausência de um a partir da presença de outro.
+- Mas quando o CONJUNTO das evidências genuinamente não aponta pro elemento (nada indica presença — não é só o silêncio de uma fonte), a nota é 0-3 mesmo; não force pra cima. Na incerteza real entre existir ou não, use o meio-baixo e baixe a "confidence".
+- Críticas, clichês ou execução fraca NÃO derrubam a nota: um romance malfeito ainda é romance presente. Qualidade não é o que se mede — exceto dinâmica entre protagonistas, que é valência.
 
 SANITY CHECK CRUZADO (não-vinculante):
 - Combinações extremas em critérios opostos (humor 9-10 + tragedy 9-10; protagonist 9-10 + drama 0-3; romance 9-10 + couple_dynamics 0-3) são RARAS mas POSSÍVEIS. Antes de finalizar, releia a evidência e baixe a "confidence" se a combinação não estiver bem suportada por sinais explícitos.
 - NÃO force ajuste de score. Critérios continuam INDEPENDENTES — esta regra só pede mais cautela e confidence menor em combinações incomuns, nunca alteração do valor.
-
-EXCEÇÃO PRA CRITÉRIOS NEGATIVOS (drama, tragedy):
-- As regras "5 como piso" e "ausência de evidência" NÃO se aplicam. Pra esses, notas baixas (0-3) significam ausência saudável, não defeito. Drama 2 = "obra leve sem conflito intenso", o que é positivo. Silêncio sobre tragédia é razoavelmente interpretado como ausência (a maioria das obras não é trágica). Score esses pela rubrica normal sem viés de piso.
 
 INTERPRETAÇÃO DE REVIEWS DE USUÁRIOS:
 
@@ -295,12 +316,12 @@ Romance presente:
 - Emoção em torno do casal: "I cried when they finally got together", "ML is everything", "FL deserves better than ML"
 - Críticas a QUALIDADE do romance ("rushed romance", "forced romance", "cringe romance") ainda confirmam que romance é elemento central — só com execução fraca.
 
-Couple dynamics:
-- "Banter is great" / "way they tease each other" → dinâmica leve/divertida
-- "Toxic ship", "yandere", "obsessive ML/FL", "possessive but I love it" → dinâmica tóxica/intensa (0-3)
-- "Mutual support", "communication goals", "they really get each other" → dinâmica saudável (7-8 ou 9-10)
+Dinâmica entre protagonistas (valência — combine com a "REGRA PARA DINÂMICA ENTRE PROTAGONISTAS" abaixo):
+- "Mutual support", "communication goals", "they really get each other", "healing each other" → construtiva (7-8/9-10)
+- "Banter is great", "way they tease each other", "soft moments together" → leve/carinhosa (positiva)
 - "Misunderstandings drag on", "constant fighting" → conflituosa (4-6)
-- "Healing each other", "soft moments together" → carinhosa
+- "Toxic ship", "abusive", "he hurts her and she suffers" → destrutiva (0-3) SÓ se o dano for NÃO-CONSENSUAL e ativo no desenvolvimento
+- "Yandere", "obsessive", "possessive but I love it" → NÃO é 0-3 por si só: o "but I love it" sinaliza CONSENSO → tende a 7-8/9-10
 
 Drama:
 - "I cried", "tear-jerker", "emotional rollercoaster", "broke me", "angst", "suffering" → drama alto
@@ -313,7 +334,7 @@ Humor:
 D) Princípio geral:
 - Vocabulário de fandom é EVIDÊNCIA, não ruído. Quem usa "OTP" está declarando que romance é central pra sua experiência da obra.
 - Não exija menção literal ("a obra tem romance") quando há sinais indiretos abundantes ("FL deserves better than ML").
-- Lembre dos princípios anteriores: presença com ressalvas → mín 5; ausência de evidência → 5 + confidence baixa.
+- Lembre: sinal indireto abundante ("FL deserves better than ML", "OTP") É evidência de presença; o silêncio de uma fonte não é ausência.
 
 USO DE AVALIAÇÕES DE PLATAFORMA (quando o bloco "Avaliações em plataformas externas" estiver presente):
 - São NOTAS NUMÉRICAS dadas pela comunidade de cada plataforma à obra (ex.: 7.8/10 no AniList com 12k votos). Tratam-se de sinal de RECEPÇÃO/POPULARIDADE, não de conteúdo temático.
@@ -351,6 +372,7 @@ CRITÉRIOS, DESCRIÇÕES E RUBRICAS (use a descrição para entender o que cada 
 ${buildCriteriaPromptSection()}
 
 REGRA OBRIGATÓRIA PARA FANTASY_NOBILITY:
+Este critério agrupa DOIS caminhos, e BASTA UM pra nota alta — não exige os dois. Um drama de corte SEM magia OU um mundo mágico SEM nobreza, ambos pontuam alto se o elemento organiza a obra. Não rebaixe uma obra de política de corte por não ter magia, nem uma de magia por não ter nobreza. Cenário histórico real (monarquia real, sem fantasia) conta pela rota "nobreza".
 Obras ambientadas majoritariamente em corte, aristocracia, realeza, império, ducado, nobreza ou famílias nobres devem receber nota alta quando esse ambiente organiza a premissa e os conflitos. Se a obra combina nobreza/realeza com reencarnação, transmigração, isekai, regressão, segunda chance ou viagem no tempo, trate isso como evidência estrutural forte: em geral use 7-8, ou 9-10 se política nobre, magia, regras do mundo ou hierarquia social definirem a história. Não deixe em 4-6 quando a ambientação de nobreza/realeza for central.
 
 REGRA PARA ADULT_CONTENT (leia com atenção — a natureza do conteúdo manda, não a frequência):
@@ -361,24 +383,24 @@ REGRA PARA ADULT_CONTENT (leia com atenção — a natureza do conteúdo manda, 
 - A marcação "R15 but Based on a R19 Novel" diz o contrário de conteúdo explícito: a obra avaliada é R15, o R19 é do novel de origem. Nesse caso adult_content tem TETO, não piso.
 - Quando houver piso ou teto obrigatório para esta obra, ele vem informado no prompt do usuário. Sem essa informação, não invente piso a partir de marcador.
 
-REGRA PARA COUPLE_DYNAMICS (leia com atenção):
-Couple_dynamics é avaliada pelo RESULTADO EMOCIONAL do casal na obra, NÃO pela forma da dinâmica. Tags como BDSM, Femdom, Dom/Sub, Master-Pet, posse, ciúme intenso, "Yandere ML/FL", "Masochistic ML", "Submissive ML/FL", "Crazy ML/FL" NÃO determinam automaticamente 0-3. Antes de pontuar, avalie:
-(a) há CONSENSO mútuo entre os parceiros na dinâmica retratada?
-(b) ambos demonstram SATISFAÇÃO/prazer na dinâmica conforme o desenvolvimento?
-(c) o TOM geral indicado por sinopse/tags/reviews é romântico, cômico, fluffy — ou angustiante, sofrido, abusivo?
-Dinâmica não-tradicional + consensual + tom romântico/cômico/fluffy → faixa 7-8 ou 9-10 (relação saudável dentro da dinâmica que ambos escolheram).
-Reserve 0-3 para abuso real (manipulação contra a vontade do outro, sofrimento ativo do parceiro abusado, controle não-consensual) presente NO DESENVOLVIMENTO. Tropes "dark romance" com consenso retratado ou comédia BDSM ficam em 7-8/9-10, NÃO em 0-3.
+REGRA PARA DINÂMICA ENTRE PROTAGONISTAS (valência — leia com atenção, é o critério mais sutil):
+Mede a VALÊNCIA (destrutiva ↔ construtiva) da relação/conduta nos VÍNCULOS CENTRAIS do protagonista (o par, quando existe; sem par, a conduta com aliados/pessoas queridas). NÃO é a forma da dinâmica nem qualidade de escrita; é o resultado sobre quem é próximo.
+- Crueldade com ANTAGONISTAS que a merecem NÃO rebaixa — é fronteira apropriada, não dinâmica destrutiva. "Protagonistas contra o mundo" com um núcleo afetuoso é valência ALTA.
+- Consenso importa: BDSM, posse, ciúme, "Yandere/Obsessive ML/FL" com CONSENSO mútuo e tom romântico/cômico → 7-8/9-10, NÃO 0-3. Reserve 0-3 pra dano NÃO-CONSENSUAL e ativo (abuso, manipulação, sofrimento contínuo de quem é próximo).
+- Devoção a um abusador NÃO-ARREPENDIDO é 0-3 (autodestrutiva), não "amor" — não suba a nota por isso.
+- Julgue o ESTADO PREDOMINANTE do desenvolvimento (regra "prática, não teoria"): enemies-to-lovers que evolui pra parceria = alto; babaquice por 80% da obra com redenção só no fim = baixo (o fim não resgata o grosso). A cura tem que ser ENCENADA (o dano PARA e vira tratamento mútuo/respeitoso), não só NARRADA ("ela o curou" com o comportamento nocivo continuando = ainda destrutivo). Dois danificados que genuinamente se curam CEDO e se entendem = 9-10.
+- Passado trágico do ML NÃO sobe a nota — explica o comportamento, não o torna saudável. EXCEÇÃO: agência removida (maldição, controle mental, engano que o fez interpretar errado) tira o dano do "eu real"; aí julgue o que emerge quando resolve.
 
-REGRA OBRIGATÓRIA PARA TRAGEDY (leia com atenção):
-Considere tragédia apenas o que ocorre NO DESENVOLVIMENTO (meio da obra), não o cenário inicial nem o background.
-EVITE citar na justificativa: infância, traumas passados, abandono/traição pré-história, premissa de revenge, regressão/segunda chance, transmigração ou qualquer fato anterior ao início da narrativa. Esses fatos podem indicar tom da obra, mas não devem ser usados como argumento direto para a nota de tragedy nem aparecer listados na justificativa.
-Se não houver eventos trágicos ativos no desenvolvimento, atribua nota baixa (0-3) e justifique com algo como "sem eventos trágicos ativos no desenvolvimento principal" — sem detalhar o background.
-Nota alta (7-10) só quando há perdas, separações, mortes, conflitos prolongados ou sofrimento que acontecem no meio da obra e impactam os personagens principais.
-Não infira tragédia ativa a partir de premissas tristes ou tropes de revenge/segunda chance.
+REGRA OBRIGATÓRIA PARA TRAGEDY (gravidade × irreversibilidade, na DIREÇÃO da trama):
+Tragédia mede a GRAVIDADE e a IRREVERSIBILIDADE das perdas — distinta de DRAMA (intensidade e duração do conflito emocional, que PODE se resolver). Sofrimento psicológico prolongado SEM perda irreversível é DRAMA, não tragédia.
+- Considere apenas o que ocorre na DIREÇÃO DA TRAMA (desenvolvimento), nunca o contexto estabelecido (background/situação inicial). EVITE citar na justificativa: infância, traumas passados, abandono/traição pré-história, premissa de revenge, regressão/transmigração ou qualquer fato anterior ao início — podem indicar tom, mas não são argumento pra nota de tragedy.
+- 0-3: nenhuma perda irreversível nem luto relevante no desenvolvimento. Justifique com "sem perdas irreversíveis ativas no desenvolvimento", sem detalhar o background.
+- 7-8: perdas irreversíveis (mortes, separações definitivas) na direção da trama que reconfiguram a história. Uma perda central séria basta pra 7-8; 9-10 exige luto/perda que PERMEIA a obra.
+- Não infira tragédia a partir de premissa triste ou tropes de revenge/segunda chance.
 
-AVALIE O DESENVOLVIMENTO, NÃO O PONTO DE PARTIDA (generaliza pra couple_dynamics e romance):
-- COUPLE_DYNAMICS: se a premissa coloca FL e ML como inimigos, rivais, contratantes hostis, transmigrada/regressora com ressentimento, casamento arranjado tenso — ou qualquer dinâmica negativa INICIAL que evolui ao longo da obra para parceria/romance — avalie pelo ESTADO PREDOMINANTE do desenvolvimento, não pela cena inicial. "Enemies to lovers" não é couple_dynamics 0-3; é 7-8/9-10 quando o arco é eles se entendendo e amadurecendo a relação.
-- ROMANCE: "slow burn" é um TROPO POSITIVO indicando romance core com desenvolvimento gradual. NÃO rebaixe romance para subplot só por ser slow burn. Se a obra tem foco romântico claro (mesmo que desenvolvimento gradual), está em 7-8 (Core romance). Subplot (4-6) é sobre QUANTO FOCO recebe na narrativa, não sobre velocidade do desenvolvimento romântico.`
+REGRA PARA ROMANCE (conteúdo retratado, NÃO tema):
+Romance mede QUANTO conteúdo romântico o leitor acompanha na página (cenas, interação entre o par, beats: atração, tensão, aproximação, declaração), NÃO o quanto "amor" é o tema. Uma obra 100% sobre amor mas SEM interação/desenvolvimento romântico (um obcecado por algo inalcançável, sem contato) é romance BAIXO — é psicológico/filosófico, não romance de fato.
+"Slow burn" desenvolve o romance ao longo do tempo, com tensão e beats constantes — é conteúdo, só gradual: 7-8, não subplot. Amor não-correspondido conta, mas pontua pelo conteúdo romântico realmente retratado (muita pinação/quase-acontece = médio; zero interação = baixo). Não rebaixe por ser lento nem suba por ser "tema central" sem cenas.`
 
 // ============================================================================
 // Structured output: tool definition + Zod payload schema
