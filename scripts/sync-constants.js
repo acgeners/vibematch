@@ -603,6 +603,30 @@ export type LabelField = keyof typeof LABELS
   write("lib/external/types.ts", typesContent)
 
   // ─────────────────────────────────────────────────────────────
+  // 4b. lib/external/source-order.ts  (ordem de EXIBIÇÃO das fontes)
+  // ─────────────────────────────────────────────────────────────
+  // `sources` já vem ordenado pela coluna `order` da tabela `source` (ver o
+  // .order("order") na query lá em cima). Regenera só o bloco entre os marcadores;
+  // a trava de compilação e os helpers ficam fora e não são tocados.
+  const sourceOrderPath = path.resolve(ROOT, "lib/external/source-order.ts")
+  let sourceOrderContent = fs.readFileSync(sourceOrderPath, "utf-8")
+
+  const orderList = sources.filter(s => s.slug).map(s => `  ${JSON.stringify(s.slug)},`).join("\n")
+  const newOrderBlock =
+    `// <generated:external-source-order>\n` +
+    `export const EXTERNAL_SOURCE_ORDER = [\n${orderList}\n] as const satisfies readonly ExternalSourceId[]\n` +
+    `// </generated:external-source-order>`
+
+  if (!/\/\/ <generated:external-source-order>[\s\S]*?\/\/ <\/generated:external-source-order>/.test(sourceOrderContent)) {
+    throw new Error("source-order.ts: marcadores <generated:external-source-order> não encontrados — o bloco não foi regenerado.")
+  }
+  sourceOrderContent = sourceOrderContent.replace(
+    /\/\/ <generated:external-source-order>[\s\S]*?\/\/ <\/generated:external-source-order>/,
+    newOrderBlock
+  )
+  write("lib/external/source-order.ts", sourceOrderContent)
+
+  // ─────────────────────────────────────────────────────────────
   // 5. lib/import/mapper.ts  (critérios de todas as eval_types)
   // ─────────────────────────────────────────────────────────────
   const allIaCriteria = allCriteria.filter(c => c.eval_type === "IA" || c.eval_type === "IArite")

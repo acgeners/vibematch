@@ -6,6 +6,7 @@ import { searchComix, fetchComixById, fetchComixReviews } from "./comix"
 import { searchMangago, fetchMangagoById, fetchMangagoReviews } from "./mangago"
 import { resolveComixUrl } from "./comix-resolve"
 import { isComixRenderConfigured } from "./comix-render-client"
+import { EXTERNAL_SOURCE_ORDER } from "./source-order"
 import { resolveMangagoUrlProd } from "./mangago-resolve-prod"
 import { boolEnv } from "./mangago-band"
 import { extractInlineRating } from "./inline-rating"
@@ -241,6 +242,7 @@ function sourceCandidateOption(
     synopsis: result.synopsis ?? null,
     year: result.year ?? null,
     chapters: result.chapters ?? null,
+    latestChapter: result.latestChapter ?? null,
     trusted,
   }
 }
@@ -972,21 +974,23 @@ async function refineWithAlternativeTitles(
 // ============================================================================
 
 /**
- * Priority order applied to reviews fed to the AI prompt. MangaUpdates first
- * (highest signal), then AniList, MAL, Kitsu, ComicK, AnimePlanet, MangaDex.
+ * Prioridade das reviews mandadas ao prompt da IA (round-robin global as consome
+ * nesta ordem: MangaUpdates primeiro, maior sinal).
+ *
+ * ⚠️ É A MESMA ordem da EXIBIÇÃO do diálogo — DERIVADA de `EXTERNAL_SOURCE_ORDER`,
+ * que é gerada da coluna `order` da tabela `source` no Supabase. Ou seja: mexer no
+ * `order` do banco reordena a tela E muda quais reviews entram no prompt da IA. Foi
+ * decisão consciente (as duas devem coincidir) — ordene o `order` pensando na
+ * prioridade das reviews e a exibição segue de graça. UMA fonte de verdade, sem duas
+ * listas pra divergirem.
+ *
+ * A exaustividade vem da trava de compilação em `EXTERNAL_SOURCE_ORDER`: uma fonte
+ * nova em `ExternalSourceId` que a tabela `source` não cobrir quebra o build — nenhuma
+ * fonte cai no `?? 99` do sort por esquecimento (foi o buraco do `indexOf` −1).
  */
-const REVIEW_SOURCE_PRIORITY: Record<ExternalSourceId, number> = {
-  mangaupdates: 0,
-  anilist: 1,
-  myanimelist: 2,
-  animeplanet: 3,
-  kitsu: 4,
-  comick: 5,
-  mangadex: 6,
-  comix: 7,
-  mangago: 8, // metadados-only (sem reviews); prioridade baixa na ordenação
-  outros: 9, // catch-all sem fetcher próprio → menor prioridade
-}
+const REVIEW_SOURCE_PRIORITY: Record<ExternalSourceId, number> = Object.fromEntries(
+  EXTERNAL_SOURCE_ORDER.map((source, index) => [source, index])
+) as Record<ExternalSourceId, number>
 
 /**
  * Extrai a nota numérica de uma review em duas frentes, nesta ordem:

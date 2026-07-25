@@ -7,7 +7,7 @@
 //
 // When the env var is unset, helpers fall back to a plain fetch (no CF bypass).
 
-import { renderHtmlViaSidecar } from "./comix-render-client"
+import { isComixRenderConfigured, renderHtmlViaSidecar } from "./comix-render-client"
 
 const ENDPOINT = process.env.FLARESOLVERR_URL?.trim() || ""
 
@@ -38,6 +38,27 @@ export function isFlareSolverrEnabled(): boolean {
  *  não pagar o timeout repetidamente (reabre sozinho após o TTL). */
 export function isFlareSolverrCircuitOpen(): boolean {
   return Date.now() < circuitOpenUntil
+}
+
+/**
+ * Não há NENHUMA camada de bypass de Cloudflare disponível agora — só então vale
+ * a pena uma fonte CF-gated desistir antes de tentar.
+ *
+ * ⚠️ É isto que as fontes devem checar, NÃO `isFlareSolverrCircuitOpen()` sozinho.
+ * O circuito do FlareSolverr é global e abre em ECONNREFUSED (container fora) — que
+ * hoje é o estado NORMAL de dev, já que o sidecar é a camada primária e o Docker é
+ * opcional (ver CLAUDE.md). Com `FLARESOLVERR_URL` setado e o container parado, basta
+ * UM render cair no FlareSolverr (sidecar ocupado/erro) pra abrir o circuito por 60s
+ * — e quem checava só o circuito devolvia `[]` sem nem tentar o sidecar, que estava
+ * saudável. Resultado: Mangago e AnimePlanet sumiam da busca por um minuto, em
+ * silêncio, por causa da saúde de um fallback que nem seria usado.
+ *
+ * Com o sidecar configurado nunca pulamos: se ELE também estiver fora, o próprio
+ * circuito interno dele (`renderHtmlViaSidecar`) devolve null na hora, e o
+ * FlareSolverr é pulado pelo circuito dele — o atalho continua barato.
+ */
+export function isCfBypassUnavailable(): boolean {
+  return !isComixRenderConfigured() && isFlareSolverrCircuitOpen()
 }
 
 /**

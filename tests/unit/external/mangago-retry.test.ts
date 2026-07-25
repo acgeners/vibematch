@@ -10,14 +10,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 // Aqui a política fica presa por asserção, e não por raciocínio.
 vi.mock("@/lib/external/flaresolverr", () => ({
   fetchHtmlWithCfFallback: vi.fn(),
-  isFlareSolverrCircuitOpen: vi.fn(() => false),
+  isCfBypassUnavailable: vi.fn(() => false),
 }))
 
 import { fetchMangagoById } from "@/lib/external/mangago"
-import { fetchHtmlWithCfFallback, isFlareSolverrCircuitOpen } from "@/lib/external/flaresolverr"
+import { fetchHtmlWithCfFallback, isCfBypassUnavailable } from "@/lib/external/flaresolverr"
 
 const fetchHtml = vi.mocked(fetchHtmlWithCfFallback)
-const circuitOpen = vi.mocked(isFlareSolverrCircuitOpen)
+const bypassUnavailable = vi.mocked(isCfBypassUnavailable)
 
 // Teto da 1ª tentativa (CF_ABORT_MS) e o da tentativa extra (RETRY_ABORT_MS), como o
 // módulo os define. A 2ª é DELIBERADAMENTE curta: se a sessão do FlareSolverr não ficou
@@ -36,7 +36,7 @@ beforeEach(() => {
   // código fez menos tentativas do que ele esperava) vazaria pro teste seguinte e o faria
   // falhar por tabela — mascarando qual asserção de fato quebrou.
   vi.resetAllMocks()
-  circuitOpen.mockReturnValue(false)
+  bypassUnavailable.mockReturnValue(false)
 })
 
 describe("fetchMangagoById — política de tentativas", () => {
@@ -49,7 +49,7 @@ describe("fetchMangagoById — política de tentativas", () => {
     expect(fetchHtml).toHaveBeenCalledTimes(1)
   })
 
-  it("com o circuito FECHADO, uma falha transitória ganha a 2ª tentativa — e ela vem com abort curto", async () => {
+  it("havendo bypass, uma falha transitória ganha a 2ª tentativa — e ela vem com abort curto", async () => {
     fetchHtml
       .mockResolvedValueOnce(null) // 1ª: solve estourou o abort
       .mockResolvedValueOnce(html("Solo Leveling")) // 2ª: sessão já quente
@@ -73,11 +73,12 @@ describe("fetchMangagoById — política de tentativas", () => {
     expect(fetchHtml).toHaveBeenCalledTimes(2)
   })
 
-  it("se o circuito ABRE durante a 1ª tentativa (container caiu), a 2ª é PULADA", async () => {
-    // O circuito só abre em ECONNREFUSED — container fora. Retentar aí é latência pura:
-    // é exatamente o caso em que o card degradado precisa aparecer RÁPIDO.
+  it("se o bypass CAI durante a 1ª tentativa (nem sidecar nem FlareSolverr), a 2ª é PULADA", async () => {
+    // Sem NENHUMA camada de bypass, retentar é latência pura: é exatamente o caso em
+    // que o card degradado precisa aparecer RÁPIDO. Note que o circuito do FlareSolverr
+    // sozinho NÃO basta pra pular — o sidecar é a camada primária (ver isCfBypassUnavailable).
     fetchHtml.mockResolvedValueOnce(null)
-    circuitOpen.mockReturnValueOnce(false).mockReturnValueOnce(true)
+    bypassUnavailable.mockReturnValueOnce(false).mockReturnValueOnce(true)
 
     const detail = await fetchMangagoById("solo_leveling", { retry: true })
 
@@ -85,8 +86,8 @@ describe("fetchMangagoById — política de tentativas", () => {
     expect(fetchHtml).toHaveBeenCalledTimes(1)
   })
 
-  it("circuito JÁ aberto: nem a 1ª tentativa é feita", async () => {
-    circuitOpen.mockReturnValue(true)
+  it("nenhum bypass disponível desde o início: nem a 1ª tentativa é feita", async () => {
+    bypassUnavailable.mockReturnValue(true)
 
     const detail = await fetchMangagoById("solo_leveling", { retry: true })
 
@@ -94,7 +95,7 @@ describe("fetchMangagoById — política de tentativas", () => {
     expect(fetchHtml).not.toHaveBeenCalled()
   })
 
-  it("sem `retry` (default): uma tentativa só, mesmo com o circuito fechado", async () => {
+  it("sem `retry` (default): uma tentativa só, mesmo com bypass disponível", async () => {
     // O hydrate em lote roda sob um withTimeout de 30s — um retry embutido ali só
     // queimaria o orçamento dele antes de devolver o mesmo `null`. Por isso é opt-in.
     fetchHtml.mockResolvedValue(null)

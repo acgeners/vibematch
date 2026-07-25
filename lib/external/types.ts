@@ -8,13 +8,13 @@ export interface TagSuggestion {
 
 export type ExternalSourceId =
   | "mangaupdates"
-  | "comick"
-  | "comix"
-  | "animeplanet"
   | "myanimelist"
+  | "anilist"
+  | "animeplanet"
+  | "comick"
   | "mangadex"
   | "kitsu"
-  | "anilist"
+  | "comix"
   | "mangago"
   | "outros"
 
@@ -37,6 +37,15 @@ export interface ExternalSearchResult {
   contentRating?: string
   /** Data relativa pré-formatada do último capítulo (ex.: comix "8mos ago"). */
   lastChapterAt?: string
+  /**
+   * Nº do último capítulo listado no RESULTADO DA BUSCA (não é o total — o `chapters`
+   * segue sendo o total, quando a fonte o expõe). Existe pra desempatar duas entradas
+   * da MESMA fonte que chegam idênticas à tela (ver `ExternalSourceCandidateOption`).
+   * Deliberadamente NÃO entra no merge de dados: contagem de capítulo tem pipeline
+   * própria (`lib/external/chapter-sources`) e um "último capítulo" da busca ali
+   * viraria total errado.
+   */
+  latestChapter?: number
   /** Cross-platform IDs the source itself surfaces (e.g. MangaDex `attributes.links`, AniList `idMal`). Used by the search pipeline to populate sibling-source IDs on the merged candidate so we can hydrate sources whose title search failed. */
   crossIds?: Partial<Record<ExternalSourceId, string>>
 }
@@ -50,6 +59,13 @@ export interface ExternalSourceCandidateOption {
   synopsis: string | null
   year: number | null
   chapters: number | null
+  /**
+   * Último capítulo visto na busca. É o que torna DISTINGUÍVEIS duas entradas da
+   * mesma fonte para a mesma obra — caso real do Mangago, que hospeda um upload
+   * abandonado (Ch.10) ao lado do mantido (Ch.48) e devolve os dois com o mesmo
+   * título e match 100%. Também desempata a pré-seleção.
+   */
+  latestChapter?: number | null
   trusted?: boolean
 }
 

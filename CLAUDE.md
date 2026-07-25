@@ -201,6 +201,7 @@ These files are **fully overwritten** by `npm run sync-constants` and must not b
 | `lib/constants/tags.ts` | `tags` + `genres` (autocomplete catalog) |
 | `lib/constants/ui-labels.ts` | `ui_labels` (`LABELS` keyed by field → `{full, short, abbrev, tooltip_full, tooltip_short}`; free-floating UI names/tooltips not owned by another table) |
 | `lib/external/types.ts` | `source` (ExternalSourceId only, rest preserved) |
+| `lib/external/source-order.ts` | `source` (`EXTERNAL_SOURCE_ORDER`, coluna `order`; só o bloco entre os marcadores `<generated:external-source-order>`). ⚠️ Esta ordem governa DOIS usos ao mesmo tempo: a EXIBIÇÃO das fontes no diálogo E a PRIORIDADE das reviews no prompt da IA (`REVIEW_SOURCE_PRIORITY` em `index.ts` é DERIVADA dela). Mexer no `order` do Supabase muda os dois. |
 | `lib/import/mapper.ts` | `criteria` aliases |
 | `lib/import/normalizer.ts` | `publication_status` + `personal_status` maps |
 | `types/domain.ts` | `PUBLICATION_STATUSES`, `PERSONAL_STATUSES`, `PLATFORMS`, `CRITERION_SLUGS` arrays |
