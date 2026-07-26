@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { useCallback, useMemo, useState, useTransition } from "react"
-import type { ReactNode } from "react"
+import type { CSSProperties, ReactNode } from "react"
 import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, ChevronUp, Filter, Info, Loader2, Minus, Pencil, Plus, Save, Search, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -149,7 +149,7 @@ function SortLevelsSection({ searchParams, updateParams, className, defaultSort 
       <div className="space-y-2">
         <div className="grid grid-cols-1 gap-2">
         {levels.map((level, i) => (
-          <div key={i} className="grid grid-cols-[1.25rem_minmax(0,1fr)_4.5rem_2rem] items-center gap-2 rounded-lg border border-border/55 bg-background/45 p-1.5">
+          <div key={i} className="grid grid-cols-[1.25rem_minmax(0,1fr)_2rem_2rem] items-center gap-2 rounded-lg border border-border/55 bg-background/45 p-1.5">
             <span className="text-xs text-muted-foreground w-4 shrink-0 text-right">{i + 1}.</span>
             <Select value={level.field} onValueChange={(v) => updateField(i, v)}>
               <SelectTrigger className="h-8 w-full text-xs">
@@ -166,12 +166,13 @@ function SortLevelsSection({ searchParams, updateParams, className, defaultSort 
             <button
               type="button"
               onClick={() => toggleDir(i)}
-              className="flex h-8 items-center justify-center gap-1 rounded-lg border border-border/70 bg-background/45 px-2 text-xs transition-colors hover:bg-muted"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-background/45 transition-colors hover:bg-muted"
               title={level.dir === "desc" ? "Decrescente" : "Crescente"}
+              aria-label={level.dir === "desc" ? "Ordem decrescente" : "Ordem crescente"}
             >
               {level.dir === "desc"
-                ? <><ArrowDown className="h-3 w-3" /><span>Desc</span></>
-                : <><ArrowUp className="h-3 w-3" /><span>Asc</span></>}
+                ? <ArrowDown className="h-3.5 w-3.5" />
+                : <ArrowUp className="h-3.5 w-3.5" />}
             </button>
             <button
               type="button"
@@ -321,7 +322,7 @@ function QualityToggles({
       ? "border-red-500/60 bg-red-500/15 text-red-500"
       : "border-orange-500/60 bg-orange-500/15 text-orange-500"
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1">
       {values.map((q) => {
         const on = selected.has(q)
         return (
@@ -330,11 +331,11 @@ function QualityToggles({
             type="button"
             onClick={() => onToggle(q)}
             aria-pressed={on}
-            className={`inline-flex h-8 items-center justify-center rounded-full border px-3 text-xs font-semibold tracking-tight transition-colors ${
+            className={`inline-flex h-8 items-center justify-center rounded-full border px-2 text-xs font-semibold tracking-tight transition-colors ${
               on ? onCls : `border-border/70 bg-background/45 hover:border-border ${base}`
             }`}
           >
-            <span className="text-[14px] leading-none tracking-[0.12em]">{q}</span>
+            <span className="text-[13px] leading-none tracking-[0.06em]">{q}</span>
           </button>
         )
       })}
@@ -403,33 +404,42 @@ function TierBandSection({
 }) {
   const active = searchParams.get("band")
   const chip = (on: boolean) =>
-    `inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold tabular-nums transition-colors ${
+    `inline-flex h-8 items-center whitespace-nowrap rounded-full border px-2.5 text-xs font-semibold tabular-nums transition-colors ${
       on
         ? "border-primary/45 bg-primary/10 text-primary"
         : "border-border/70 bg-background/45 text-muted-foreground hover:border-border hover:text-foreground"
     }`
   return (
     <FilterSection title="Largura dos tiers" className={className} contentClassName={contentClassName}>
+      {/* Ordem crescente por valor. O "Padrão (X)" ocupa a posição do seu próprio
+          valor (defaultBand) em vez de vir sempre primeiro — e substitui o chip numérico
+          equivalente, que seria redundante. */}
       <div className="flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          onClick={() => updateParams({ band: null })}
-          className={chip(active == null)}
-          title={`Usa o valor salvo no banco (${defaultBand.toFixed(2).replace(".", ",")})`}
-        >
-          Padrão ({defaultBand.toFixed(2).replace(".", ",")})
-        </button>
-        {[0.3, 0.4, 0.5, 0.6, 0.8].map((b) => (
-          <button
-            key={b}
-            type="button"
-            onClick={() => updateParams({ band: String(b) })}
-            className={chip(active === String(b))}
-            title={`Agrupa no mesmo tier obras a até ${b} de distância na nota`}
-          >
-            {b.toFixed(1).replace(".", ",")}
-          </button>
-        ))}
+        {[...new Set([0.3, 0.4, 0.5, 0.6, 0.8, defaultBand])]
+          .sort((a, b) => a - b)
+          .map((b) =>
+            b === defaultBand ? (
+              <button
+                key="padrao"
+                type="button"
+                onClick={() => updateParams({ band: null })}
+                className={chip(active == null)}
+                title={`Usa o valor salvo no banco (${defaultBand.toFixed(2).replace(".", ",")})`}
+              >
+                Padrão ({defaultBand.toFixed(2).replace(".", ",")})
+              </button>
+            ) : (
+              <button
+                key={b}
+                type="button"
+                onClick={() => updateParams({ band: String(b) })}
+                className={chip(active === String(b))}
+                title={`Agrupa no mesmo tier obras a até ${b} de distância na nota`}
+              >
+                {b.toFixed(1).replace(".", ",")}
+              </button>
+            ),
+          )}
       </div>
     </FilterSection>
   )
@@ -802,7 +812,7 @@ function StatusButton({
     <button onClick={onClick} type="button" className="shrink-0">
       <Badge
         variant={active ? "default" : "outline"}
-        className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-transform hover:-translate-y-px"
+        className="inline-flex h-8 cursor-pointer items-center gap-1 whitespace-nowrap rounded-full px-2 text-[13px] font-medium transition-transform hover:-translate-y-px"
         style={style}
       >
         {option.symbol && <span className="text-xs">{option.symbol}</span>}
@@ -935,7 +945,7 @@ function AdultContentSegment({
   onChange: (v: "all" | "hide" | "only") => void
 }) {
   const seg = (active: boolean, danger: boolean) =>
-    `inline-flex h-7 items-center gap-1 rounded px-2.5 text-xs font-medium transition-colors ${
+    `inline-flex h-7 items-center gap-1 whitespace-nowrap rounded px-2.5 text-xs font-medium transition-colors ${
       active
         ? danger
           ? "bg-red-500/15 text-red-600 dark:text-red-300"
@@ -2227,8 +2237,10 @@ export function RankingFilters({
 
         <TabsContent value="geral">
           <div className="grid gap-3">
-            {/* LINHA 1: Publicação · Status pessoal · Largura dos tiers */}
-            <div className={cn("grid gap-3", showTierBand ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_max-content]" : "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]")}>
+            {/* LINHA 1: Publicação · Status pessoal · Critérios gerais (numéricos).
+                Larguras calibradas p/ cada container caber em 2 linhas: Publicação
+                (5 pills → 3/linha), Status pessoal (10 pills → 5/linha), Critérios enxuto. */}
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,2.25fr)_minmax(0,1.3fr)]">
             <FilterSection
               title={`Publicação${isAllPublication ? " (todos)" : selectedPublicationStatuses.size ? ` (${selectedPublicationStatuses.size})` : ""}`}
               headerAction={
@@ -2286,221 +2298,242 @@ export function RankingFilters({
               </div>
             </FilterSection>
 
-            {showTierBand && (
-              <TierBandSection
-                searchParams={searchParams}
-                updateParams={updateParams}
-                defaultBand={defaultBand}
-                className="flex flex-col"
-                contentClassName="flex-1 flex flex-col justify-center"
-              />
-            )}
-            </div>
-
-            {/* LINHA 2: Interesse na obra · Critérios gerais · Ordenação */}
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.2fr)_minmax(0,1.05fr)]">
-              <FilterSection title="Interesse na obra">
-                <div className="flex flex-col gap-3">
+            {/* Critérios gerais — só os numéricos (Caps · Ano · Obras exibidas) */}
+            <FilterSection
+              title="Critérios gerais"
+              className="flex flex-col"
+              contentClassName="flex-1 flex flex-col justify-center"
+            >
+              <div className="flex items-stretch justify-center gap-x-7 gap-y-4">
+                <div className="flex flex-col justify-center gap-3">
+                  {/* Capítulos */}
                   <div className="flex items-center gap-2">
-                    <Label className="w-16 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Manual
+                    <Label className="w-10 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Caps
                     </Label>
-                    <QualityToggles
-                      values={SYNOPSIS_QUALITIES}
-                      selected={selectedSynopsisQ}
-                      onToggle={(q) => toggleCsv("synopsis_q", q)}
-                      tone="rose"
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Mín"
+                        size="sm"
+                        className="w-16 text-center h-8"
+                        value={searchParams.get("min_chapters") ?? ""}
+                        onChange={(e) => updateParams({ min_chapters: e.target.value || null })}
+                      />
+                      <span className="text-xs font-semibold text-muted-foreground shrink-0">-</span>
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Máx"
+                        size="sm"
+                        className="w-16 text-center h-8"
+                        value={searchParams.get("max_chapters") ?? ""}
+                        onChange={(e) => updateParams({ max_chapters: e.target.value || null })}
+                      />
+                    </div>
                   </div>
+                  {/* Ano */}
                   <div className="flex items-center gap-2">
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Label className="w-16 shrink-0 cursor-help text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                            {LABELS.synopsis_pred.abbrev}
-                          </Label>
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs text-xs">
-                          {LABELS.synopsis_pred.tooltip_full}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                    <QualityToggles
-                      values={SYNOPSIS_QUALITIES}
-                      selected={selectedSynopsisPred}
-                      onToggle={(q) => toggleCsv("synopsis_pred", q)}
-                      tone="salmon"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Label className="w-16 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Combinar
+                    <Label className="w-10 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Ano
                     </Label>
-                    <InterestModeToggle
-                      mode={interestMode}
-                      onChange={(m) => updateParams({ synopsis_mode: m === "and" ? "and" : null })}
-                      active={selectedSynopsisQ.size > 0 && selectedSynopsisPred.size > 0}
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        type="number"
+                        placeholder="Mín"
+                        size="sm"
+                        className="w-16 text-center h-8"
+                        value={searchParams.get("min_year") ?? ""}
+                        onChange={(e) => updateParams({ min_year: e.target.value || null })}
+                      />
+                      <span className="text-xs font-semibold text-muted-foreground shrink-0">-</span>
+                      <Input
+                        type="number"
+                        placeholder="Máx"
+                        size="sm"
+                        className="w-16 text-center h-8"
+                        value={searchParams.get("max_year") ?? ""}
+                        onChange={(e) => updateParams({ max_year: e.target.value || null })}
+                      />
+                    </div>
                   </div>
                 </div>
-              </FilterSection>
 
+                {/* Obras exibidas — divisória + rótulo em cima, input embaixo, à direita */}
+                {showTopN && (
+                  <div className="flex items-center gap-x-5 shrink-0">
+                    <div className="w-px self-stretch bg-border/60" />
+                    <div className="flex flex-col items-center gap-1.5">
+                    <Label className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-muted-foreground text-center leading-tight">
+                      Obras exibidas
+                    </Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={100}
+                      placeholder="Todas"
+                      size="sm"
+                      className="w-16 text-center h-8"
+                      value={(urlTopN && urlTopN > 0 ? urlTopN : null) ?? defaultTopN ?? ""}
+                      onChange={(e) => updateParams({ top_n: e.target.value || null })}
+                    />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </FilterSection>
+            </div>
+
+            {/* LINHA 2: Interesse na obra · Conteúdo exibido · Largura dos tiers · Ordenação */}
+            <div
+              className="grid gap-3 lg:[grid-template-columns:var(--l2cols)]"
+              style={
+                {
+                  ["--l2cols"]: [
+                    "minmax(0,1.6fr)",
+                    hideAvoided || showAdultFilter ? "minmax(0,1.35fr)" : null,
+                    showTierBand ? "minmax(0,0.95fr)" : null,
+                    "minmax(0,1.05fr)",
+                  ]
+                    .filter(Boolean)
+                    .join(" "),
+                } as CSSProperties
+              }
+            >
               <FilterSection
-                title="Critérios gerais"
+                title="Interesse na obra"
                 className="flex flex-col"
                 contentClassName="flex-1 flex flex-col justify-center"
               >
-                <div className="flex flex-col gap-4">
-                  {/* Linha de cima: Obras exibidas + Esconder tags evitadas + Conteúdo 18+ (sem min/máx) */}
-                  {(showTopN || hideAvoided || showAdultFilter) && (
-                  <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-4">
-                    {/* Obras exibidas */}
-                    {showTopN && (
+                <div className="flex items-stretch justify-start gap-6">
+                  <div className="flex flex-col justify-center gap-3">
                     <div className="flex items-center gap-2">
-                      <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
-                        Obras exibidas
+                      <Label className="w-16 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Manual
                       </Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={100}
-                        placeholder="Todas"
-                        size="sm"
-                        className="w-16 text-center h-8"
-                        value={(urlTopN && urlTopN > 0 ? urlTopN : null) ?? defaultTopN ?? ""}
-                        onChange={(e) => updateParams({ top_n: e.target.value || null })}
+                      <QualityToggles
+                        values={SYNOPSIS_QUALITIES}
+                        selected={selectedSynopsisQ}
+                        onToggle={(q) => toggleCsv("synopsis_q", q)}
+                        tone="rose"
                       />
                     </div>
-                    )}
-
-                    {hideAvoided && (
-                      <>
-                        {/* Divisor vertical */}
-                        <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
-                        {/* Esconder tags evitadas — esconde obras com tags declaradas como evitadas */}
-                        <div className="flex items-center gap-2">
-                          <Label
-                            className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0 leading-tight text-left"
-                            title="Esconde obras com tags que você declarou evitar (em /preferencias). Fortes = só as marcadas 2×."
-                          >
-                            Esconder<br />tags evitadas
-                          </Label>
-                          <TooltipProvider delayDuration={150} disableHoverableContent>
-                            <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
-                              <HideAvoidedSegment
-                                href={hideAvoided.offUrl}
-                                active={hideAvoided.current === "off"}
-                                label="Não"
-                                tooltip="Não esconde nada; mostra todas as obras."
-                              />
-                              <HideAvoidedSegment
-                                href={hideAvoided.strongUrl}
-                                active={hideAvoided.current === "strong"}
-                                label="Fortes"
-                                tooltip="Esconde obras com tags evitadas marcadas como fortes (2×)."
-                              />
-                              <HideAvoidedSegment
-                                href={hideAvoided.allUrl}
-                                active={hideAvoided.current === "all"}
-                                label="Todas"
-                                tooltip="Esconde obras com qualquer tag evitada."
-                              />
-                            </div>
-                          </TooltipProvider>
-                        </div>
-                      </>
-                    )}
-
-                    {showAdultFilter && (
-                      <>
-                        {(showTopN || hideAvoided) && (
-                          <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
-                        )}
-                        {/* Conteúdo 18+ — filtra pela classificação da obra (is_adult), não por tags */}
-                        <div className="flex items-center gap-2">
-                          <Label
-                            className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0 leading-tight text-left"
-                            title="Filtra obras 18+ pela classificação da obra (o mesmo selo 🔞 da página da obra), não pelas tags. 'Tudo' respeita sua preferência global."
-                          >
-                            Conteúdo<br />18+
-                          </Label>
-                          <AdultContentSegment
-                            value={
-                              searchParams.get("adult") === "hide"
-                                ? "hide"
-                                : searchParams.get("adult") === "only"
-                                  ? "only"
-                                  : "all"
-                            }
-                            onChange={(v) => updateParams({ adult: v === "all" ? null : v })}
-                          />
-                        </div>
-                      </>
-                    )}
-                  </div>
-                  )}
-
-                  {/* Linha de baixo: os dois com Mín/Máx (Capítulos + Ano) */}
-                  <div className="flex flex-wrap items-center justify-start gap-x-6 gap-y-4">
-                    {/* Capítulos */}
                     <div className="flex items-center gap-2">
-                      <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
-                        Capítulos
-                      </Label>
-                      <div className="flex items-center gap-1.5">
-                        <Input
-                          type="number"
-                          min={0}
-                          placeholder="Mín"
-                          size="sm"
-                          className="w-16 text-center h-8"
-                          value={searchParams.get("min_chapters") ?? ""}
-                          onChange={(e) => updateParams({ min_chapters: e.target.value || null })}
-                        />
-                        <span className="text-xs font-semibold text-muted-foreground shrink-0">-</span>
-                        <Input
-                          type="number"
-                          min={0}
-                          placeholder="Máx"
-                          size="sm"
-                          className="w-16 text-center h-8"
-                          value={searchParams.get("max_chapters") ?? ""}
-                          onChange={(e) => updateParams({ max_chapters: e.target.value || null })}
-                        />
-                      </div>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Label className="w-16 shrink-0 cursor-help text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              {LABELS.synopsis_pred.abbrev}
+                            </Label>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs text-xs">
+                            {LABELS.synopsis_pred.tooltip_full}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <QualityToggles
+                        values={SYNOPSIS_QUALITIES}
+                        selected={selectedSynopsisPred}
+                        onToggle={(q) => toggleCsv("synopsis_pred", q)}
+                        tone="salmon"
+                      />
                     </div>
-
-                    {/* Divisor vertical */}
-                    <div className="hidden sm:block w-px h-6 bg-border/40 shrink-0 self-center" />
-
-                    {/* Ano */}
-                    <div className="flex items-center gap-2">
-                      <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
-                        Ano
+                  </div>
+                  {/* Combinar — divisória + rótulo em cima, toggle embaixo, à direita */}
+                  <div className="flex items-center gap-4 shrink-0">
+                    <div className="w-px self-stretch bg-border/60" />
+                    <div className="flex flex-col items-center gap-1.5">
+                      <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Combinar
                       </Label>
-                      <div className="flex items-center gap-1.5">
-                        <Input
-                          type="number"
-                          placeholder="Mín"
-                          size="sm"
-                          className="w-16 text-center h-8"
-                          value={searchParams.get("min_year") ?? ""}
-                          onChange={(e) => updateParams({ min_year: e.target.value || null })}
-                        />
-                        <span className="text-xs font-semibold text-muted-foreground shrink-0">-</span>
-                        <Input
-                          type="number"
-                          placeholder="Máx"
-                          size="sm"
-                          className="w-16 text-center h-8"
-                          value={searchParams.get("max_year") ?? ""}
-                          onChange={(e) => updateParams({ max_year: e.target.value || null })}
-                        />
-                      </div>
+                      <InterestModeToggle
+                        mode={interestMode}
+                        onChange={(m) => updateParams({ synopsis_mode: m === "and" ? "and" : null })}
+                        active={selectedSynopsisQ.size > 0 && selectedSynopsisPred.size > 0}
+                      />
                     </div>
                   </div>
                 </div>
               </FilterSection>
+
+              {/* Conteúdo exibido — filtros que escondem/mostram obras (tags evitadas + 18+) */}
+              {(hideAvoided || showAdultFilter) && (
+                <FilterSection
+                  title="Conteúdo exibido"
+                  className="flex flex-col"
+                  contentClassName="flex-1 flex flex-col justify-center"
+                >
+                  <div className="flex flex-col gap-3.5">
+                    {hideAvoided && (
+                      /* Esconder tags evitadas — esconde obras com tags declaradas como evitadas */
+                      <div className="flex items-center gap-3">
+                        <Label
+                          className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground leading-tight"
+                          title="Esconde obras com tags que você declarou evitar (em /preferencias). Fortes = só as marcadas 2×."
+                        >
+                          Esconder<br />tags evitadas
+                        </Label>
+                        <TooltipProvider delayDuration={150} disableHoverableContent>
+                          <div className="inline-flex rounded-md border border-border/70 bg-background/60 p-0.5">
+                            <HideAvoidedSegment
+                              href={hideAvoided.offUrl}
+                              active={hideAvoided.current === "off"}
+                              label="Não"
+                              tooltip="Não esconde nada; mostra todas as obras."
+                            />
+                            <HideAvoidedSegment
+                              href={hideAvoided.strongUrl}
+                              active={hideAvoided.current === "strong"}
+                              label="Fortes"
+                              tooltip="Esconde obras com tags evitadas marcadas como fortes (2×)."
+                            />
+                            <HideAvoidedSegment
+                              href={hideAvoided.allUrl}
+                              active={hideAvoided.current === "all"}
+                              label="Todas"
+                              tooltip="Esconde obras com qualquer tag evitada."
+                            />
+                          </div>
+                        </TooltipProvider>
+                      </div>
+                    )}
+
+                    {showAdultFilter && (
+                      /* Conteúdo 18+ — filtra pela classificação da obra (is_adult), não por tags */
+                      <div className="flex items-center gap-3">
+                        <Label
+                          className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground leading-tight"
+                          title="Filtra obras 18+ pela classificação da obra (o mesmo selo 🔞 da página da obra), não pelas tags. 'Tudo' respeita sua preferência global."
+                        >
+                          Conteúdo 18+
+                        </Label>
+                        <AdultContentSegment
+                          value={
+                            searchParams.get("adult") === "hide"
+                              ? "hide"
+                              : searchParams.get("adult") === "only"
+                                ? "only"
+                                : "all"
+                          }
+                          onChange={(v) => updateParams({ adult: v === "all" ? null : v })}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </FilterSection>
+              )}
+
+              {/* Largura dos tiers — movida da linha 1 pra cá */}
+              {showTierBand && (
+                <TierBandSection
+                  searchParams={searchParams}
+                  updateParams={updateParams}
+                  defaultBand={defaultBand}
+                  className="flex flex-col"
+                  contentClassName="flex-1 flex flex-col justify-center"
+                />
+              )}
 
               <SortLevelsSection
                 searchParams={searchParams}
