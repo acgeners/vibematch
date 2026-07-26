@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="SatorIA">
+  <defs>
+    <linearGradient id="b" x1="0" y1="0" x2="0.2" y2="1"><stop offset="0" stop-color="#8FDBFF"/><stop offset="1" stop-color="#2E7FF0"/></linearGradient>
+    <path id="p" d="M0,-50 C13,-30 12,-8 0,3 C-12,-8 -13,-30 0,-50 Z"/>
+    <g id="lotus" fill="url(#b)">
+      <use href="#p" transform="rotate(-90) scale(.6)" opacity=".5"/>
+      <use href="#p" transform="rotate(90) scale(.6)" opacity=".5"/>
+      <use href="#p" transform="rotate(-60) scale(.82)" opacity=".68"/>
+      <use href="#p" transform="rotate(60) scale(.82)" opacity=".68"/>
+      <use href="#p" transform="rotate(-31) scale(.93)" opacity=".85"/>
+      <use href="#p" transform="rotate(31) scale(.93)" opacity=".85"/>
+      <use href="#p"/>
+    </g>
+  </defs>
+  <rect width="120" height="120" rx="26" fill="#0B1526"/>
+  <circle cx="60" cy="60" r="50" fill="none" stroke="url(#b)" stroke-width="5" stroke-linecap="round" stroke-dasharray="244 70" transform="rotate(126 60 60)"/>
+  <use href="#lotus" transform="translate(60 76) scale(.94)"/>
+</svg>

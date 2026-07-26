@@ -25,7 +25,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "SatorIA",
-  description: "Seu catálogo de manhwas com uma IA que aprende o seu gosto e prevê o que você vai amar ler.",
+  description: "Curadoria pessoal movida por IA: a SatorIA aprende o seu gosto e recomenda os próximos mangás e manhwas à altura dele.",
 }
 
 export default async function RootLayout({
