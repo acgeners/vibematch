@@ -1849,7 +1849,11 @@ export function RankingFilters({
     startTransition(() => router.replace(target))
   }
 
-  const clearAll = () => setDraftSearch("")
+  // "Limpar" é imediato: zera o rascunho E navega, sem exigir "Aplicar filtros".
+  const clearAll = () => {
+    setDraftSearch("")
+    startTransition(() => router.replace(basePath))
+  }
 
   const applyPreset = (query: string) => {
     setDraftSearch(query)
