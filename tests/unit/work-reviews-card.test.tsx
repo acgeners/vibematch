@@ -3,6 +3,9 @@ import { vi, describe, it, expect } from "vitest"
 // "use server" / server-only não rodam no ambiente de teste — mocka o módulo da action.
 vi.mock("server-only", () => ({}))
 vi.mock("@/server/actions/review-digest", () => ({ generateWorkReviewDigest: vi.fn() }))
+// O card agora importa o RefetchReviewsButton, que puxa estas actions "use server".
+vi.mock("@/server/actions/reviews", () => ({ refetchWorkReviews: vi.fn() }))
+vi.mock("@/server/actions/update-status", () => ({ getWorkUpdateStatus: vi.fn() }))
 vi.mock("@/lib/use-refresh", () => ({ useRefresh: () => vi.fn() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 // O card chama useCostConfirm(), que exige o <CostConfirmProvider> acima na árvore.
@@ -41,14 +44,14 @@ describe("WorkReviewsCard — digest na aba Notas & Avaliações", () => {
     expect(screen.getByText("vilao raso")).toBeTruthy()
     expect(screen.getByText(/arte solida/)).toBeTruthy()
     expect(screen.getByText(/violencia grafica/)).toBeTruthy()
-    expect(screen.getByText("Regerar")).toBeTruthy()
-    // DIGEST tem 1 traço positivo + 1 negativo, nenhum misto: só essas duas seções saem.
-    expect(screen.getByText("Positivo")).toBeTruthy()
-    expect(screen.getByText("Negativo")).toBeTruthy()
-    expect(screen.queryByText("Misto")).toBeNull()
+    expect(screen.getByText("Regerar síntese")).toBeTruthy()
+    // DIGEST tem 1 traço positivo + 1 negativo, nenhuma ressalva: só essas duas seções saem.
+    expect(screen.getByText("Elogios")).toBeTruthy()
+    expect(screen.getByText("Críticas")).toBeTruthy()
+    expect(screen.queryByText("Ressalvas")).toBeNull()
   })
 
-  it("agrupa os traços na ordem positivo → misto → negativo", () => {
+  it("agrupa os traços na ordem Elogios → Ressalvas → Críticas", () => {
     const mixedDigest: ReviewDigest = {
       ...DIGEST,
       salient_traits: [
@@ -58,8 +61,8 @@ describe("WorkReviewsCard — digest na aba Notas & Avaliações", () => {
       ],
     }
     render(<WorkReviewsCard workId="w1" snapshot={{ ...base, digest: mixedDigest, digestAt: ISO }} />)
-    const labels = screen.getAllByText(/^(Positivo|Misto|Negativo)$/).map((el) => el.textContent)
-    expect(labels).toEqual(["Positivo", "Misto", "Negativo"])
+    const labels = screen.getAllByText(/^(Elogios|Ressalvas|Críticas)$/).map((el) => el.textContent)
+    expect(labels).toEqual(["Elogios", "Ressalvas", "Críticas"])
   })
 
   it("mostra o CTA de síntese quando NÃO há digest mas há reviews", () => {
