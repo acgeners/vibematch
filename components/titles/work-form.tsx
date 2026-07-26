@@ -742,6 +742,19 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     return map
   })
   const [topFeedback, setTopFeedback] = useState<string | null>(null)
+  // Rede de segurança da navegação soft pós-criação (ver executeCreateSubmit): o
+  // slug de destino quando o `router.push` foi disparado. Um effect arma um timer
+  // de hard-nav; se o push foi engolido pelo refresh implícito do `revalidatePath`
+  // o form segue montado e o timer dispara. Na nav bem-sucedida o form desmonta →
+  // o cleanup do effect cancela o fallback antes de ele rodar.
+  const [pendingCreateNav, setPendingCreateNav] = useState<string | null>(null)
+  useEffect(() => {
+    if (!pendingCreateNav) return
+    const timer = setTimeout(() => {
+      window.location.assign(`/titles/${pendingCreateNav}`)
+    }, 1200)
+    return () => clearTimeout(timer)
+  }, [pendingCreateNav])
   const [duplicateResolution, setDuplicateResolution] = useState<DuplicateResolutionState | null>(null)
   // Obra vinda de "Buscar dados" que colidiu com o catálogo ao entrar no lote.
   // Diferente de `duplicateResolution` (fusão campo-a-campo p/ obra manual): aqui
@@ -1068,7 +1081,15 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     }
 
     const finalTitle = mergedValues.title || title
-    router.push(`/titles/${finalTitle ? titleToSlug(finalTitle) : (result.data?.id ?? duplicateResolution.existing.id)}`)
+    // Hard-nav (não `router.push` soft) pelo MESMO motivo do branch de update em
+    // executeCreateSubmit: este merge é um updateWork numa obra existente que PODE
+    // ter renomeado (usuário escolheu o título "incoming" → slug muda). Uma nav
+    // soft pro slug novo corre com o refresh implícito do revalidatePath da action
+    // e é engolida — deixando ou a URL antiga presa em 404 (slug renomeado não
+    // resolve mais), ou o usuário parado no form. A recarga total ignora a corrida.
+    window.location.assign(
+      `/titles/${finalTitle ? titleToSlug(finalTitle) : (result.data?.id ?? duplicateResolution.existing.id)}`,
+    )
   }
 
   const handleExternalSelect = (data: ExternalWorkData) => {
@@ -1312,6 +1333,13 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     // A rota de destino já vem fresca via revalidatePath() na server action; só os
     // chips persistentes do chrome (client) precisam do nudge.
     refreshChrome()
+    // Mas o `revalidatePath()` da própria createWork dispara um refresh IMPLÍCITO
+    // da rota atual (/titles/new) que às vezes ENGOLE este push soft — o form não
+    // desmonta e o overlay "Criando obra..." trava (o sintoma reportado). Não dá
+    // pra remover esse refresh (as revalidações são necessárias). Arma o fallback:
+    // o effect de `pendingCreateNav` faz hard-nav em 1.2s se o form ainda estiver
+    // montado; na nav bem-sucedida o form desmonta e o cleanup cancela o timer.
+    setPendingCreateNav(destination ?? null)
   }
 
   // Flow 1 do popup de custo: ao CRIAR uma obra com dados externos, o createWork
