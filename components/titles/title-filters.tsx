@@ -770,9 +770,11 @@ function SearchInputWithHistory({
                   <CommandItem
                     key={s.id}
                     value={`work-${s.id}`}
-                    onSelect={() => {
+                    // Abrir só no clique de verdade. onSelect do cmdk também
+                    // dispararia por teclado; o Enter é do input (→ submit).
+                    onClick={() => {
                       setOpen(false)
-                      router.push(`/titles/${s.slug}`)
+                      window.open(`/titles/${s.slug}`, "_blank", "noopener,noreferrer")
                     }}
                     onMouseDown={(e) => e.preventDefault()}
                     className="gap-2.5"
