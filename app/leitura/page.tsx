@@ -1,8 +1,10 @@
+import { cookies } from "next/headers"
 import { BookMarked } from "lucide-react"
 import { Header } from "@/components/layout/header"
 import { ReadingList } from "@/components/reading/reading-list"
 import { getReadingWorks } from "@/server/queries/reading"
 import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
+import { READING_VIEW_COOKIE, normalizeReadingView } from "@/lib/reading-view-preference"
 
 export const dynamic = "force-dynamic"
 
@@ -18,6 +20,11 @@ export default async function ReadingPage() {
     ],
   })
 
+  // Vista inicial (lista × calendário) do cookie → o servidor já renderiza a vista final,
+  // sem divergir da hidratação. `nowIso` ancora o mês/hoje do calendário nos dois lados.
+  const defaultView = normalizeReadingView((await cookies()).get(READING_VIEW_COOKIE)?.value)
+  const nowIso = new Date().toISOString()
+
   return (
     <div className="space-y-4">
       <Header
@@ -27,7 +34,7 @@ export default async function ReadingPage() {
         icon={<BookMarked />}
       />
 
-      <ReadingList works={works} />
+      <ReadingList works={works} defaultView={defaultView} nowIso={nowIso} />
     </div>
   )
 }
