@@ -32,6 +32,7 @@ import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getGenerationReadinessMany } from "@/server/queries/generation-readiness"
+import { getWorkAiCost } from "@/server/queries/ai-usage"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
 import { RefetchReviewsButton } from "@/components/titles/refetch-reviews-button"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
@@ -55,6 +56,7 @@ import {
   UpdateDataActionButton,
 } from "@/components/titles/work-detail-actions"
 import { BatchCreatedNavigator } from "@/components/titles/batch-created-navigator"
+import { DevWorkAiCost } from "@/components/titles/dev-work-ai-cost"
 import { WorkCoverGallery } from "@/components/titles/work-cover-gallery"
 import { LinkedSources } from "@/components/titles/linked-sources"
 import { SynopsesViewer } from "@/components/titles/synopses-viewer"
@@ -364,6 +366,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   const externalManualReviews = externalEditorEnabled
     ? await readManualExternalReviewsForDisplay(work.id as string)
     : []
+
+  // Custo de IA acumulado desta obra — só em dev; em produção a query nem roda.
+  const devAiCost =
+    process.env.NODE_ENV !== "production" ? await getWorkAiCost(work.id as string) : null
 
   const scoreMap: Record<string, number> = {}
   for (const cs of work.category_scores ?? []) {
@@ -949,6 +955,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     })
                   )}
                 />
+                {devAiCost && (
+                  <div className="ml-auto">
+                    <DevWorkAiCost summary={devAiCost} />
+                  </div>
+                )}
               </div>
               <AltTitlesChips
                 title={work.title}
