@@ -19,8 +19,12 @@ import {
   Plus,
   Minus,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   PauseCircle,
   Archive,
+  CalendarDays,
+  List,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -34,9 +38,13 @@ import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
 import { cn } from "@/lib/utils"
 import { formatRelativeDate, formatPredictedDate, formatRelativeDateTime } from "@/lib/date-utils"
-import { differenceInCalendarDays } from "date-fns"
+import { differenceInCalendarDays, startOfMonth, addMonths, format } from "date-fns"
+import { ptBR } from "date-fns/locale"
 import { checkReadingUpdates, type ReadingUpdateResult } from "@/server/actions/reading"
 import { setChaptersRead, setReadingStatusForWorks, archiveWork } from "@/server/actions/works"
+import { ReadingCalendar, CalendarLegend } from "@/components/reading/reading-calendar"
+import { writeReadingViewCookie } from "@/lib/reading-view-preference"
+import type { ReadingView } from "@/lib/reading-view-preference"
 import type { ReadingWork } from "@/server/queries/reading"
 
 type SortKey = "last_read" | "released" | "predicted" | "progress"
@@ -365,7 +373,17 @@ function formatComixAge(label: string | null | undefined): string | null {
   return `${n} ${word} atrás`
 }
 
-export function ReadingList({ works }: { works: ReadingWork[] }) {
+export function ReadingList({
+  works,
+  defaultView = "list",
+  nowIso,
+}: {
+  works: ReadingWork[]
+  /** Vista inicial lida do cookie no servidor (evita divergência de hidratação). */
+  defaultView?: ReadingView
+  /** "agora" do servidor (ISO) — base do mês/hoje do calendário, igual nos dois lados. */
+  nowIso: string
+}) {
   const refresh = useRefresh()
   const [results, setResults] = useState<Record<string, ReadingUpdateResult>>({})
   const [checking, startCheck] = useTransition()
@@ -377,6 +395,16 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
   // sem retorno ou falha total). A falha não é persistida no banco, então um reload limpa
   // o sinal — ele reflete só a checagem que o usuário acabou de disparar.
   const [lastCheckFailed, setLastCheckFailed] = useState(false)
+
+  // Vista (lista × calendário) — persistida em cookie pra o servidor renderizar a
+  // vista final e a hidratação não divergir. Mês do calendário ancorado no "agora" do
+  // servidor (nowIso), idêntico nos dois lados.
+  const [view, setView] = useState<ReadingView>(defaultView)
+  const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date(nowIso)))
+  const changeView = (next: ReadingView) => {
+    setView(next)
+    writeReadingViewCookie(next)
+  }
 
   // Estado das seções (accordion). `null` = ainda não interagiu → cai no default (só
   // "Em andamento" aberta, ou "outras" se não houver nenhuma em andamento). Depois do
@@ -525,92 +553,133 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
 
   return (
     <div className="space-y-4">
-      {/* Abas de topo = split de publicação; controlam qual seção abre + rolam até ela. */}
-      <div className="inline-flex h-9 w-fit items-center rounded-lg bg-muted p-[3px] text-muted-foreground">
-        {(Object.keys(SECTIONS) as SectionKey[]).map((key) => {
-          const count = key === "ongoing" ? ongoing.length : others.length
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => selectSection(key)}
-              disabled={count === 0}
-              className={cn(
-                "inline-flex h-full items-center gap-2 rounded-md border border-transparent px-3.5 text-sm font-medium whitespace-nowrap transition-all",
-                "text-foreground/60 hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
-                isOpen(key) &&
-                  "bg-background text-foreground shadow-sm dark:border-input dark:bg-input/30 dark:text-foreground",
+      {/* Barra de controles em painel. Linha 1 (modo + ação) = nível superior, em destaque;
+          Linha 2 (navegar/filtrar) = prateleira rebaixada e discreta. Hierarquia por FORMA
+          (segmented preenchido + botão em gradiente na L1 × chips planos na prateleira). */}
+      <div className="overflow-hidden rounded-xl border border-border bg-card/40">
+        {/* Linha 1 — modo (esq) ⟷ ação (dir) */}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="inline-flex h-10 items-center rounded-xl bg-muted p-1 text-muted-foreground">
+            <ViewToggleButton active={view === "list"} onClick={() => changeView("list")} icon={<List className="size-4" />} label="Lista" />
+            <ViewToggleButton active={view === "calendar"} onClick={() => changeView("calendar")} icon={<CalendarDays className="size-4" />} label="Calendário" />
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <Button onClick={handleCheckAll} disabled={checking}>
+              {checking ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 size-4" />
               )}
-            >
-              <span className={cn("size-1.5 rounded-full", SECTIONS[key].dotClass)} />
-              {SECTIONS[key].label}
-              <span className="tabular-nums text-muted-foreground">{count}</span>
-            </button>
-          )
-        })}
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm text-muted-foreground">
-            {filtering
-              ? `${displayed.length} de ${works.length}`
-              : `${works.length} obra${works.length !== 1 ? "s" : ""} acompanhada${works.length !== 1 ? "s" : ""}`}
-          </p>
-
-          <Select value={readFilter} onValueChange={setReadFilter}>
-            <SelectTrigger size="sm" className="w-auto min-w-28 gap-1.5 text-xs">
-              <BookOpenCheck className="size-3.5 text-muted-foreground" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {READ_FILTER_OPTIONS.map(([value, label]) => (
-                <SelectItem key={value} value={value}>
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortKey)}>
-            <SelectTrigger size="sm" className="w-auto min-w-36 gap-1.5 text-xs">
-              <ArrowDownUp className="size-3.5 text-muted-foreground" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
-                <SelectItem key={key} value={key}>
-                  {SORT_LABELS[key]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              Verificar atualizações
+            </Button>
+            {lastChecked && (
+              <span
+                className={cn(
+                  "flex items-center gap-1 text-[11px]",
+                  lastCheckFailed ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground",
+                )}
+              >
+                {lastCheckFailed && <AlertCircle className="size-3 shrink-0" />}
+                Última verificação: {formatRelativeDateTime(lastChecked)}
+              </span>
+            )}
+          </div>
         </div>
 
-        <div className="flex flex-col items-end gap-1">
-          <Button size="sm" onClick={handleCheckAll} disabled={checking}>
-            {checking ? (
-              <Loader2 className="mr-2 size-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 size-4" />
-            )}
-            Verificar atualizações
-          </Button>
-          {lastChecked && (
-            <span
-              className={cn(
-                "flex items-center gap-1 text-[11px]",
-                lastCheckFailed ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground",
-              )}
-            >
-              {lastCheckFailed && <AlertCircle className="size-3 shrink-0" />}
-              Última verificação: {formatRelativeDateTime(lastChecked)}
-            </span>
+        {/* Linha 2 — prateleira rebaixada: navegar (esq) ⟷ filtrar/legenda (dir) */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/40 px-4 py-2.5">
+          {view === "calendar" ? (
+            <>
+              <div className="inline-flex items-center gap-1">
+                <Button variant="outline" size="icon" className="size-8" onClick={() => setMonthAnchor((m) => addMonths(m, -1))} aria-label="Mês anterior">
+                  <ChevronLeft className="size-4" />
+                </Button>
+                <span className="min-w-32 text-center text-sm font-semibold capitalize tabular-nums">
+                  {format(monthAnchor, "MMMM yyyy", { locale: ptBR })}
+                </span>
+                <Button variant="outline" size="icon" className="size-8" onClick={() => setMonthAnchor((m) => addMonths(m, 1))} aria-label="Próximo mês">
+                  <ChevronRight className="size-4" />
+                </Button>
+                <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={() => setMonthAnchor(startOfMonth(new Date(nowIso)))}>
+                  Hoje
+                </Button>
+              </div>
+              <CalendarLegend />
+            </>
+          ) : (
+            <>
+              {/* Navegação de seção (pills discretas — split de publicação, rola até a seção). */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(Object.keys(SECTIONS) as SectionKey[]).map((key) => {
+                  const count = key === "ongoing" ? ongoing.length : others.length
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => selectSection(key)}
+                      disabled={count === 0}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-[13px] font-medium whitespace-nowrap transition-colors",
+                        "text-foreground hover:bg-background disabled:pointer-events-none disabled:opacity-40",
+                        isOpen(key) && "bg-background ring-1 ring-inset ring-primary/40",
+                      )}
+                    >
+                      <span className={cn("size-1.5 rounded-full", SECTIONS[key].dotClass)} />
+                      {SECTIONS[key].label}
+                      <span className="tabular-nums text-muted-foreground">{count}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              {/* Contagem + filtros. "25 obras" discreto; vira "N de 25" quando há filtro. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {filtering ? (
+                    <>
+                      <b className="font-semibold text-foreground">{displayed.length}</b> de {works.length}
+                    </>
+                  ) : (
+                    <>
+                      <b className="font-semibold text-foreground">{works.length}</b> obra{works.length !== 1 ? "s" : ""}
+                    </>
+                  )}
+                </span>
+                <Select value={readFilter} onValueChange={setReadFilter}>
+                  <SelectTrigger size="sm" className="w-auto min-w-28 gap-1.5 text-xs">
+                    <BookOpenCheck className="size-3.5 text-muted-foreground" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {READ_FILTER_OPTIONS.map(([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortKey)}>
+                  <SelectTrigger size="sm" className="w-auto min-w-36 gap-1.5 text-xs">
+                    <ArrowDownUp className="size-3.5 text-muted-foreground" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+                      <SelectItem key={key} value={key}>
+                        {SORT_LABELS[key]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
           )}
         </div>
       </div>
 
-      {displayed.length === 0 ? (
+      {/* Conteúdo da vista ativa */}
+      {view === "calendar" ? (
+        <ReadingCalendar works={works} results={results} monthAnchor={monthAnchor} nowIso={nowIso} />
+      ) : displayed.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
             Nenhuma obra com esse filtro.
@@ -676,6 +745,36 @@ export function ReadingList({ works }: { works: ReadingWork[] }) {
         </div>
       )}
     </div>
+  )
+}
+
+/** Botão de alternância de vista (Lista × Calendário) no segmented control do topo. */
+function ViewToggleButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex h-full items-center gap-2 rounded-lg border border-transparent px-4 text-sm font-semibold whitespace-nowrap transition-all",
+        "text-foreground/60 hover:text-foreground",
+        active &&
+          "bg-background text-foreground shadow-sm dark:border-input dark:bg-input/30 dark:text-foreground",
+      )}
+    >
+      {icon}
+      {label}
+    </button>
   )
 }
 
