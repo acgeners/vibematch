@@ -312,6 +312,65 @@ export async function getListsForPicker(): Promise<ListPickerOption[]> {
   )
 }
 
+export interface FavoriteFolderMenu {
+  /** Grupos do usuário (id/nome/cor/contagem), na ordem do índice. */
+  folders: ListPickerOption[]
+  /** IDs dos grupos (⊆ `folders`) que já contêm esta obra. */
+  memberOf: string[]
+}
+
+/** Dados do menu "salvar em pasta" do botão de favoritar na página da obra: os
+ *  grupos do usuário + em quais deles esta obra já está. Escopado ao dono — sem
+ *  `user_id` (anônimo) devolve vazio. */
+export async function getFavoriteFolderMenu(workId: string): Promise<FavoriteFolderMenu> {
+  const supabase = createAdminClient()
+  const viewerId = await getCurrentUserId()
+  if (!viewerId) return { folders: [], memberOf: [] }
+
+  const [listsRes, itemsRes, memberRes] = await Promise.all([
+    supabase
+      .from("work_lists")
+      .select("id, name, color, position, created_at")
+      .eq("user_id", viewerId)
+      .order("position", { ascending: true })
+      .order("created_at", { ascending: false }),
+    supabase.from("work_list_items").select("list_id"),
+    supabase.from("work_list_items").select("list_id").eq("work_id", workId),
+  ])
+
+  if (listsRes.error) {
+    console.error("[lists] erro lendo menu de pastas:", listsRes.error.message)
+    return { folders: [], memberOf: [] }
+  }
+
+  const lists = (listsRes.data ?? []) as Array<{ id: string; name: string; color: string | null }>
+  const ownedIds = new Set(lists.map((l) => l.id))
+
+  const counts = new Map<string, number>()
+  for (const it of (itemsRes.data ?? []) as Array<{ list_id: string }>) {
+    counts.set(it.list_id, (counts.get(it.list_id) ?? 0) + 1)
+  }
+
+  // `memberRes` (admin) traz itens desta obra de QUALQUER dono; interseção com os
+  // grupos do viewer garante que só as pastas dele contam como membership.
+  const memberOf = Array.from(
+    new Set(
+      ((memberRes.data ?? []) as Array<{ list_id: string }>)
+        .map((r) => r.list_id)
+        .filter((id) => ownedIds.has(id)),
+    ),
+  )
+
+  const folders: ListPickerOption[] = lists.map((l) => ({
+    id: l.id,
+    name: l.name,
+    color: l.color,
+    count: counts.get(l.id) ?? 0,
+  }))
+
+  return { folders, memberOf }
+}
+
 /** Catálogo "lite" pro picker de obras (adicionar/remover do grupo) e pra
  *  escolha de capas. Todas as obras não arquivadas, mais leves. */
 export async function getWorksLiteForPicker(): Promise<WorkLiteForPicker[]> {

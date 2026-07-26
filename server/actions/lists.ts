@@ -189,6 +189,36 @@ export async function removeWorksFromList(
   return { data: { count: ids.length } }
 }
 
+/**
+ * Desfavoritar a partir da página da obra: zera `is_favorite` E tira a obra de
+ * TODAS as pastas do usuário. Grupo ⊂ favoritos, então "não é mais favorita"
+ * implica "não está em pasta nenhuma" — senão sobraria o estado órfão "em pasta
+ * mas não favorita". (O coração das tabelas/ranking segue só no `toggleFavorite`
+ * simples; o menu de pastas só existe na página da obra.)
+ */
+export async function unfavoriteWorkFromFolders(
+  workId: string,
+): Promise<ActionResult<null>> {
+  const gate = await ensureListWriter()
+  if (!gate.ok) return { error: gate.error }
+
+  const supabase = await createUserClient()
+  // Sem filtro de `list_id`: a RLS de `work_list_items` só deixa apagar itens de
+  // grupos DELE, então isto tira a obra das pastas do usuário e de mais ninguém.
+  const { error: delError } = await supabase
+    .from("work_list_items")
+    .delete()
+    .eq("work_id", workId)
+  if (delError) return { error: delError.message }
+
+  const mirror = await writeReadingState(gate.userId, [workId], { is_favorite: false })
+  if (mirror.error) return { error: mirror.error }
+
+  revalidateLists()
+  revalidatePath(`/titles/${workId}`)
+  return { data: null }
+}
+
 // ── Comentários do grupo (log JSONB em work_lists.comments) ──────────────────
 
 async function readComments(
