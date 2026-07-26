@@ -7,7 +7,11 @@ import { useRefresh } from "@/lib/use-refresh"
 import {
   Archive,
   BookOpen,
+  Check,
+  ChevronDown,
+  ChevronsDown,
   Edit,
+  FolderPlus,
   Heart,
   MoreHorizontal,
   RefreshCw,
@@ -18,6 +22,11 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { archiveWork, autoRefreshWorkData, deleteWork, setAdultOverride, toggleFavorite, unarchiveWork } from "@/server/actions/works"
+import { addWorksToList, createWorkList, removeWorksFromList, unfavoriteWorkFromFolders } from "@/server/actions/lists"
+import { GROUP_COLORS } from "@/components/favorites/lists/group-form-dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Input } from "@/components/ui/input"
+import type { ListPickerOption } from "@/server/queries/lists"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import { StatusEditDialog } from "@/components/titles/status-edit-dialog"
 import { useCan, useIsAdmin, useCanWriteOwnState } from "@/components/layout/admin-context"
@@ -47,20 +56,49 @@ import { cn } from "@/lib/utils"
 export function FavoriteToggleButton({
   workId,
   isFavorite,
-  iconOnly = false,
+  folders,
+  memberOf,
 }: {
   workId: string
   isFavorite: boolean
-  iconOnly?: boolean
+  /** Grupos do usuário pro menu "salvar em pasta". Ausente ⇒ botão simples (sem caret). */
+  folders?: ListPickerOption[]
+  /** IDs dos grupos que já contêm esta obra (⊆ `folders`). */
+  memberOf?: string[]
 }) {
   const canFavorite = useCanWriteOwnState()
   const refresh = useRefresh()
   const [isPending, startTransition] = useTransition()
-  const handleClick = () => {
-    const next = !isFavorite
+
+  // Estado otimista local. `refresh()` re-renderiza o server component mas NÃO
+  // reseta useState → o clique reflete na hora e não "pisca" quando a action volta.
+  const [fav, setFav] = useState(isFavorite)
+  const [folderList, setFolderList] = useState<ListPickerOption[]>(() => folders ?? [])
+  const [members, setMembers] = useState<Set<string>>(() => new Set(memberOf ?? []))
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState("")
+
+  const hasFolderMenu = folders != null
+
+  // Favorito é estado pessoal (Fatia 1) → qualquer usuário LOGADO. Anônimo não: sem sessão
+  // não há linha própria pra escrever. Os outros botões deste arquivo seguem só do Curador —
+  // eles mutam o catálogo compartilhado (editar, arquivar, apagar).
+  if (!canFavorite) return null
+
+  const runFavorite = () => {
+    const next = !fav
+    const prevMembers = members
+    setFav(next)
+    // Desfavoritar tira de TODAS as pastas (grupo ⊂ favoritos) — otimista.
+    if (!next) setMembers(new Set())
     startTransition(async () => {
-      const result = await toggleFavorite(workId, next)
-      if (result.error) {
+      const result = next
+        ? await toggleFavorite(workId, true)
+        : await unfavoriteWorkFromFolders(workId)
+      if ("error" in result) {
+        setFav(!next)
+        if (!next) setMembers(prevMembers)
         toast.error(result.error)
         return
       }
@@ -68,23 +106,231 @@ export function FavoriteToggleButton({
       refresh()
     })
   }
-  // Favorito é estado pessoal (Fatia 1) → qualquer usuário LOGADO. Anônimo não: sem sessão
-  // não há linha própria pra escrever. Os outros botões deste arquivo seguem só do Curador —
-  // eles mutam o catálogo compartilhado (editar, arquivar, apagar).
-  if (!canFavorite) return null
-  return (
-    <Button
-      variant={isFavorite ? "default" : "outline"}
-      size={iconOnly ? "icon" : "sm"}
-      onClick={handleClick}
+
+  const toggleFolder = (folder: ListPickerOption) => {
+    const wasMember = members.has(folder.id)
+    const prevMembers = members
+    const prevFav = fav
+    const nextMembers = new Set(members)
+    if (wasMember) nextMembers.delete(folder.id)
+    else nextMembers.add(folder.id)
+    setMembers(nextMembers)
+    setFolderList((list) =>
+      list.map((f) =>
+        f.id === folder.id ? { ...f, count: Math.max(0, f.count + (wasMember ? -1 : 1)) } : f,
+      ),
+    )
+    // Salvar numa pasta favorita a obra (a action addWorksToList força is_favorite=true).
+    if (!wasMember) setFav(true)
+
+    startTransition(async () => {
+      const res = wasMember
+        ? await removeWorksFromList(folder.id, [workId])
+        : await addWorksToList(folder.id, [workId])
+      if ("error" in res) {
+        setMembers(prevMembers)
+        setFav(prevFav)
+        setFolderList((list) =>
+          list.map((f) =>
+            f.id === folder.id ? { ...f, count: Math.max(0, f.count + (wasMember ? 1 : -1)) } : f,
+          ),
+        )
+        toast.error(res.error)
+        return
+      }
+      toast.success(wasMember ? `Removido de “${folder.name}”.` : `Salvo em “${folder.name}”.`)
+      refresh()
+    })
+  }
+
+  const nextColor = GROUP_COLORS[folderList.length % GROUP_COLORS.length]
+  const runCreate = () => {
+    const name = newName.trim()
+    if (!name) return
+    startTransition(async () => {
+      const created = await createWorkList({ name, color: nextColor })
+      if ("error" in created) {
+        toast.error(created.error)
+        return
+      }
+      const added = await addWorksToList(created.data.id, [workId])
+      if ("error" in added) {
+        toast.error(added.error)
+        return
+      }
+      setFolderList((list) => [...list, { id: created.data.id, name, color: nextColor, count: 1 }])
+      setMembers((m) => new Set(m).add(created.data.id))
+      setFav(true)
+      setNewName("")
+      setCreating(false)
+      toast.success(`Pasta “${name}” criada e salva.`)
+      refresh()
+    })
+  }
+
+  // Botão nativo (não o componente Button) pra fixar a largura sem que o `size-*`
+  // brigue com o override de `w-*` no tailwind-merge. Coração LARGO (dominante) +
+  // caret ESTREITO, mesma altura dos vizinhos (h-9), lendo como um controle só.
+  const heart = (
+    <button
+      type="button"
+      onClick={runFavorite}
       disabled={isPending}
-      aria-pressed={isFavorite}
-      aria-label={isFavorite ? "Remover dos favoritos" : "Favoritar"}
-      className={cn(isFavorite ? "bg-rose-500/90 hover:bg-rose-500 text-white" : undefined)}
+      aria-pressed={fav}
+      aria-label={fav ? "Remover dos favoritos" : "Favoritar"}
+      className={cn(
+        "inline-flex h-9 items-center justify-center rounded-lg border shadow-xs outline-none transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/35 disabled:pointer-events-none disabled:opacity-50",
+        hasFolderMenu ? "w-10 rounded-r-none" : "w-9",
+        fav
+          ? "border-rose-500/90 bg-rose-500/90 text-white hover:border-rose-500 hover:bg-rose-500"
+          : "border-border/80 bg-background/65 text-foreground hover:border-primary/35 hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+      )}
     >
-      <Heart className={isFavorite ? "h-4 w-4 fill-current" : "h-4 w-4"} />
-      {!iconOnly && (isFavorite ? "Favorito" : "Favoritar")}
-    </Button>
+      <Heart className={cn("size-4", fav && "fill-current")} />
+    </button>
+  )
+
+  // Sem grupos disponíveis (outros pontos de uso): botão simples, como antes.
+  if (!hasFolderMenu) return heart
+
+  return (
+    <div className="inline-flex">
+      {heart}
+      <Popover
+        open={menuOpen}
+        onOpenChange={(open) => {
+          setMenuOpen(open)
+          if (!open) {
+            setCreating(false)
+            setNewName("")
+          }
+        }}
+      >
+        <PopoverTrigger asChild>
+          {/* Caret subordinado: mais estreito e chevron apagado, mesma superfície do
+              coração (dividida só pela borda) — pra ler como "um botão com caret",
+              não dois botões lado a lado. Botão nativo pra fixar a largura sem brigar
+              com o `size-*` do componente Button (conflito no tailwind-merge). */}
+          <button
+            type="button"
+            aria-label="Salvar em pasta"
+            title="Salvar em pasta"
+            className={cn(
+              "inline-flex h-9 w-6 items-center justify-center rounded-l-none rounded-r-lg border border-l-0 border-border/80 bg-background/65 text-muted-foreground shadow-xs outline-none transition-all hover:border-primary/35 hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/35 disabled:pointer-events-none disabled:opacity-50 dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+              fav &&
+                "border-rose-500/50 bg-rose-500/12 text-rose-500 hover:bg-rose-500/20 hover:text-rose-600 dark:border-rose-500/40 dark:bg-rose-500/12 dark:text-rose-300 dark:hover:text-rose-200",
+            )}
+          >
+            {members.size > 0 ? (
+              <ChevronsDown className="size-3.5" />
+            ) : (
+              <ChevronDown className="size-3.5" />
+            )}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-64 p-1.5">
+          <p className="px-2 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Salvar em pasta
+          </p>
+
+          {folderList.length === 0 && !creating && (
+            <p className="px-2 pb-1.5 text-xs text-muted-foreground">Você ainda não tem pastas.</p>
+          )}
+
+          {folderList.length > 0 && (
+            <ul className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
+              {folderList.map((f) => {
+                const member = members.has(f.id)
+                return (
+                  <li key={f.id}>
+                    <button
+                      type="button"
+                      onClick={() => toggleFolder(f)}
+                      disabled={isPending}
+                      aria-pressed={member}
+                      className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-accent/60 disabled:opacity-60"
+                    >
+                      <span
+                        aria-hidden
+                        className="size-2.5 shrink-0 rounded-[3px]"
+                        style={{
+                          backgroundColor: f.color ? `hsl(${f.color})` : "hsl(var(--muted-foreground))",
+                        }}
+                      />
+                      <span className={cn("min-w-0 flex-1 truncate", member && "font-semibold")}>
+                        {f.name}
+                      </span>
+                      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                        {f.count}
+                      </span>
+                      <Check
+                        className={cn(
+                          "size-4 shrink-0 text-rose-500 transition-opacity",
+                          member ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+
+          <div className={cn("mt-1 pt-1", folderList.length > 0 && "border-t")}>
+            {creating ? (
+              <>
+                <div className="flex items-center gap-1.5 px-1 py-1">
+                  <FolderPlus className="size-4 shrink-0 text-muted-foreground" />
+                  <Input
+                    autoFocus
+                    value={newName}
+                    placeholder="Nome da pasta…"
+                    maxLength={80}
+                    className="h-8"
+                    disabled={isPending}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newName.trim() && !isPending) runCreate()
+                    }}
+                  />
+                </div>
+                <div className="mt-1 flex justify-end gap-1.5 px-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={isPending}
+                    onClick={() => {
+                      setCreating(false)
+                      setNewName("")
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={isPending || !newName.trim()}
+                    onClick={runCreate}
+                  >
+                    Criar e salvar
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCreating(true)}
+                className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+              >
+                <FolderPlus className="size-4 shrink-0" />
+                Criar nova pasta…
+              </button>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
   )
 }
 

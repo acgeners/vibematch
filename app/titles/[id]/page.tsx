@@ -47,6 +47,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { SimilarWorksCard } from "@/components/titles/similar-works-card"
 import { getSimilarWorks } from "@/server/queries/similar-works"
+import { getFavoriteFolderMenu } from "@/server/queries/lists"
 import {
   FavoriteToggleButton,
   MoreActionsMenu,
@@ -304,7 +305,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   if (!work) notFound()
 
   const configClient = createAdminClient()
-  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent, archivedCovers] = await Promise.all([
+  const [scoreThresholds, reviewsSnapshot, similarWorks, lastDeepDive, sources, canAi, allTagsCatalog, synopsisPrediction, declaredTagPrefs, tasteProfileRow, externalIdMap, tasteCriteria, tasteScoresData, hideAdultContent, archivedCovers, favoriteFolderMenu] = await Promise.all([
     getScoreColorThresholds(),
     getWorkReviews(work.id as string),
     getSimilarWorks(work.id as string, 8),
@@ -320,6 +321,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     getTasteScoresForWork(work.id as string),
     getHideAdultContent(),
     getArchivedCovers(work.id as string),
+    getFavoriteFolderMenu(work.id as string),
   ])
   // Capas que você apagou na edição (migration 163): o "Atualizar dados" não as
   // traz de volta sozinho, mas as lista numa seção "Arquivadas (N)" de onde podem
@@ -610,7 +612,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             <Button
               asChild
               variant="outline"
-              size="sm"
+              size="default"
               className="border-emerald-500/45 bg-emerald-500/10 text-emerald-700 hover:border-emerald-500/60 hover:bg-emerald-500/20 hover:text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/12 dark:text-emerald-300 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-200"
             >
               <a
@@ -633,7 +635,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               </a>
             </Button>
           )}
-          <FavoriteToggleButton workId={work.id} isFavorite={work.is_favorite} iconOnly />
+          <FavoriteToggleButton
+            workId={work.id}
+            isFavorite={work.is_favorite}
+            folders={favoriteFolderMenu.folders}
+            memberOf={favoriteFolderMenu.memberOf}
+          />
           <StatusActionButton
             workId={work.id}
             statusInitialValues={statusInitial}
@@ -643,6 +650,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             tasteCriteria={tasteCriteria}
             tasteScores={tasteScoresData.scores}
             label="Status"
+            size="default"
           />
           <MoreActionsMenu
             workId={work.id}
