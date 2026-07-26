@@ -678,18 +678,47 @@ export async function getStaleAlignmentCandidates(limit = 200): Promise<Favorite
 }
 
 /**
+ * IDs marcados como "lidos" na fila `veredito` (silenciados sem resolver, via
+ * "Marcar como lido" em /ai-evaluation). Escopo só nesta fila — mais barato que
+ * `getReadAckSets` (que lê todas). Tolera a tabela ausente (migration 125 não
+ * aplicada): nada lido. Inline aqui de propósito — importar de `ai-eval-read.ts`
+ * criaria import circular (ele já importa deste módulo).
+ */
+async function getVeredictoReadAckIds(): Promise<Set<string>> {
+  const supabase = createAdminClient()
+  try {
+    const rows = await fetchAllRows<{ work_id: string }>(
+      (from, to) =>
+        supabase.from("ai_eval_read_acks").select("work_id").eq("queue", "veredito").range(from, to),
+      "getVeredictoReadAckIds",
+    )
+    return new Set(rows.map((r) => r.work_id))
+  } catch (err) {
+    console.warn(
+      "[alignment] getVeredictoReadAckIds falhou (migration 125 aplicada?):",
+      err instanceof Error ? err.message : err,
+    )
+    return new Set()
+  }
+}
+
+/**
  * Conta (head-count) quantas obras têm Veredito IA desatualizado. Usado pra exibir o
  * link/badge da fila no header do ranking só quando há o que processar.
  */
 export async function countStaleAlignmentWorks(): Promise<number> {
-  // Mesma definição da fila /ai-evaluation?tab=ia-rk (getAlignmentQueueWorks stale):
-  // view works_owner, exclui arquivadas e ai_eval_status="skipped". Antes contava
-  // `calculated_scores` cru — incluía arquivadas/skipped, então o "N desatualizados"
-  // do menu do ranking não batia com o que a aba de fato lista ao clicar. `countOnly`
+  // Mesma definição da fila /ai-evaluation?tab=ia-rk: view works_owner, exclui
+  // arquivadas e ai_eval_status="skipped", E subtrai as obras marcadas como lidas
+  // na fila `veredito` — como faz o contador da aba (page.tsx: `!ackVer.has(id)`) e
+  // o badge da sidebar. Sem isto, marcar um veredito como lido sumia do badge lateral
+  // mas continuava contando aqui (divergência "N desatualizados" × badge). `countOnly`
   // pula o join de capas/título (só ids) pra manter a contagem barata.
   try {
-    const rows = await getAlignmentQueueWorks({ states: ["stale"], countOnly: true })
-    return rows.length
+    const [rows, ackVer] = await Promise.all([
+      getAlignmentQueueWorks({ states: ["stale"], countOnly: true }),
+      getVeredictoReadAckIds(),
+    ])
+    return rows.filter((w) => !ackVer.has(w.id)).length
   } catch (error) {
     console.warn(
       "[alignment] countStaleAlignmentWorks falhou:",
