@@ -142,20 +142,27 @@ export function RankingAiMenu({ isPaid, staleAlignmentCount }: RankingAiMenuProp
             </DropdownMenuItem>
           )}
 
-          {/* Veredito IA desatualizado — só aparece quando há pendências */}
+          {/* Veredito IA desatualizado — só aparece quando há pendências.
+              Abre em nova aba via window.open: um <Link target="_blank"> dentro do
+              DropdownMenuItem não abre confiável, porque o Radix fecha/desmonta o menu
+              no onSelect e cancela a navegação nativa da âncora. URL relativa de
+              propósito — resolve na origem atual (não fixar host/porta). */}
           {hasStale && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem asChild className="gap-2.5 py-2">
-                <Link href="/ai-evaluation?tab=ia-rk" target="_blank" rel="noopener noreferrer">
-                  <RotateCw className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                  <span className="flex min-w-0 flex-col">
-                    <span className="text-sm font-medium text-amber-700 dark:text-amber-300">
-                      Veredito IA · {staleCount} desatualizados
-                    </span>
-                    <span className="text-xs text-muted-foreground">Obras editadas depois da última análise.</span>
+              <DropdownMenuItem
+                onSelect={() =>
+                  window.open("/ai-evaluation?tab=ia-rk", "_blank", "noopener,noreferrer")
+                }
+                className="gap-2.5 py-2"
+              >
+                <RotateCw className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                    Veredito IA · {staleCount} desatualizados
                   </span>
-                </Link>
+                  <span className="text-xs text-muted-foreground">Obras editadas depois da última análise.</span>
+                </span>
               </DropdownMenuItem>
             </>
           )}
