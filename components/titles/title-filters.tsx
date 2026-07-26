@@ -925,7 +925,11 @@ export function TitleFilters({
     const target = draftSearch ? `/titles?${draftSearch}` : "/titles"
     startTransition(() => router.replace(target))
   }
-  const clearAll = () => setDraftSearch("")
+  // "Limpar" é imediato: zera o rascunho E navega, sem exigir "Aplicar filtros".
+  const clearAll = () => {
+    setDraftSearch("")
+    startTransition(() => router.replace("/titles"))
+  }
 
   // Search
   const currentSearch = searchParams.get("search") ?? ""
