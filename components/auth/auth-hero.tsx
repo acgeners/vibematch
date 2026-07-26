@@ -78,7 +78,7 @@ export async function AuthHero() {
         <Wordmark size="lg" />
         <div className="flex w-full flex-col gap-6 md:w-[64%]">
           <h1 className="text-[30px] font-extrabold leading-[1.15] tracking-[-0.02em] text-balance">
-            Seu catálogo de manhwas com uma IA que <span className="text-primary">aprende o seu gosto</span>.
+            Uma curadoria que conhece o seu gosto <span className="text-primary">tão bem quanto você</span>.
           </h1>
           <StatsRow stats={stats} />
           <TastePreview />

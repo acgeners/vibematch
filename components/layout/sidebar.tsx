@@ -292,9 +292,9 @@ export function Sidebar({ defaultCollapsed = false }: { defaultCollapsed?: boole
               Sator<span className="text-primary">IA</span>
             </span>
             <span className="mt-0.5 block text-[10px] font-semibold uppercase leading-tight tracking-[0.18em] text-muted-foreground">
-              Recomendações
+              Curadoria à altura
               <br />
-              que te entendem
+              do seu gosto
             </span>
           </div>
         )}
