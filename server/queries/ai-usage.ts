@@ -8,6 +8,8 @@ import {
   compareImplementationPeriods,
   percentile,
   summarizeCacheMetrics,
+  AI_OPERATIONS,
+  isKnownAiOperation,
   type AiCallRecord,
   type AiCacheStatus,
   type AiErrorCategory,
@@ -480,6 +482,78 @@ export async function getRecentAiCalls(
     return []
   }
   return ((data ?? []) as unknown as RawRow[]).map(rowToCall)
+}
+
+// ── Custo de IA atribuído a UMA obra (widget dev-only da página da obra) ──────
+// A obra é ligada à chamada por `metadata->>'work_id'` (não há coluna dedicada
+// — ver migration 059). Some `cost_total_usd` de TODAS as chamadas dessa obra
+// (inclui erros: uma tentativa que falhou também gastou tokens) e quebra por
+// `operation`. Sem índice nesse campo JSONB, mas é 1 obra (dezenas de linhas) e
+// só roda em dev. Ressalva: avaliações do fluxo de CRIAÇÃO (`/titles/new`) rodam
+// antes de a obra existir (`work_id` nulo) e não são atribuídas aqui.
+
+interface WorkCostRawRow {
+  operation: string
+  cost_total_usd: number | string | null
+}
+
+export interface WorkCostByOperation {
+  operation: string
+  /** Rótulo amigável de AI_OPERATIONS; cai pro próprio slug se desconhecido. */
+  label: string
+  nCalls: number
+  totalCostUsd: number
+}
+
+export interface WorkAiCostSummary {
+  totalCostUsd: number
+  nCalls: number
+  /** Quebra por operação, ordenada por custo desc. */
+  byOperation: WorkCostByOperation[]
+}
+
+export async function getWorkAiCost(workId: string): Promise<WorkAiCostSummary> {
+  const supabase = createAdminClient()
+  const rows: WorkCostRawRow[] = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await supabase
+      .from("ai_api_calls")
+      .select("operation, cost_total_usd")
+      .eq("metadata->>work_id", workId)
+      .order("created_at", { ascending: false })
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) {
+      console.error("[ai-usage] getWorkAiCost falhou:", error.message)
+      break
+    }
+    const batch = (data ?? []) as unknown as WorkCostRawRow[]
+    rows.push(...batch)
+    if (batch.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+
+  const byOp = new Map<string, { nCalls: number; totalCostUsd: number }>()
+  let totalCostUsd = 0
+  for (const r of rows) {
+    const cost = Number(r.cost_total_usd ?? 0)
+    totalCostUsd += cost
+    const cur = byOp.get(r.operation) ?? { nCalls: 0, totalCostUsd: 0 }
+    cur.nCalls += 1
+    cur.totalCostUsd += cost
+    byOp.set(r.operation, cur)
+  }
+
+  const byOperation: WorkCostByOperation[] = [...byOp.entries()]
+    .map(([operation, agg]) => ({
+      operation,
+      label: isKnownAiOperation(operation) ? AI_OPERATIONS[operation].label : operation,
+      nCalls: agg.nCalls,
+      totalCostUsd: agg.totalCostUsd,
+    }))
+    .sort((a, b) => b.totalCostUsd - a.totalCostUsd || b.nCalls - a.nCalls)
+
+  return { totalCostUsd, nCalls: rows.length, byOperation }
 }
 
 // ============================================================================
