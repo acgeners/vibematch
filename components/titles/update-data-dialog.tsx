@@ -10,8 +10,6 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
-import { ChipInput } from "@/components/ui/chip-input"
-import { GENRE_NAMES, TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
 import {
   Dialog,
   DialogContent,
@@ -35,7 +33,7 @@ import type { ExternalSourceId, ExternalWorkData } from "@/lib/external/types"
 
 /**
  * Barra de ações de cada passo. Fica GRUDADA no rodapé da área de rolagem: os
- * passos deste diálogo (sinopses, capas, tags, conflitos) crescem com o dado da
+ * passos deste diálogo (sinopses, capas, conflitos) crescem com o dado da
  * obra, e uma sinopse longa bastava pra empurrar o "Continuar" pra fora da tela.
  * O `bg-background` é obrigatório — sem ele o conteúdo rolaria POR TRÁS da barra
  * e apareceria através dela.
@@ -270,7 +268,7 @@ export function UpdateDataDialog({
     if (!isControlled) setUncontrolledOpen(v)
     onOpenChange?.(v)
   }
-  const [phase, setPhase] = useState<"sources" | "refreshing" | "search" | "synopses-pick" | "covers-pick" | "tags-pick" | "conflicts" | "saving">(
+  const [phase, setPhase] = useState<"sources" | "refreshing" | "search" | "synopses-pick" | "covers-pick" | "conflicts" | "saving">(
     withSourceStep ? "sources" : "refreshing"
   )
   const [pendingData, setPendingData] = useState<ExternalWorkData | null>(null)
@@ -282,9 +280,6 @@ export function UpdateDataDialog({
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
   const [coversNeedPick, setCoversNeedPick] = useState(false)
   const [showArchivedCovers, setShowArchivedCovers] = useState(false)
-  // Passo de revisão de tags/gêneros (item 4A) — aditivo: revisa só o que veio das fontes.
-  const [tagChoices, setTagChoices] = useState<string[]>([])
-  const [genreChoices, setGenreChoices] = useState<string[]>([])
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [activeRefineUrl, setActiveRefineUrl] = useState<string | null>(null)
   // Capa por link manual durante a seleção (mesmo recurso do CoversManager na edição).
@@ -345,10 +340,8 @@ export function UpdateDataDialog({
     setCoverChoices(pool)
     setCoversNeedPick(coversNeedPick)
     setActiveRefineUrl(pool.find((c) => c.included)?.url ?? pool[0]?.url ?? null)
-    setTagChoices(data.tags ?? [])
-    setGenreChoices(data.genres ?? [])
     // Item 3: o passo de sinopse aparece SEMPRE (mesmo com 0-1 externa) pra você poder
-    // digitar uma manual. Os passos de capa (se houver decisão) e de tags vêm depois.
+    // digitar uma manual. O passo de capa (se houver decisão) vem depois.
     setPhase("synopses-pick")
   }
 
@@ -414,18 +407,16 @@ export function UpdateDataDialog({
       preResolved.coverUrl = "external"
     }
 
-    // Tags/gêneros revisados no passo de tags (item 4A, aditivo). Vazios = nada é enviado
-    // e o server preserva as tags existentes; não-vazios são ADICIONADOS (syncWorkTagsPartial).
-    next.tags = tagChoices
-    next.genres = genreChoices
-
+    // Tags/gêneros seguem direto das fontes (via `...pendingData`), sem revisão manual.
+    // Aditivo: vazios = nada é enviado e o server preserva as tags existentes; não-vazios
+    // são ADICIONADOS (syncWorkTagsPartial), nunca removem o que já existe na obra.
     proceedToConflictsOrApply(next, preResolved)
   }
 
   const handleConfirmSynopses = () => {
     if (!pendingData) return
-    // Vai pra galeria de capas só quando há decisão de capa a tomar; senão pula direto
-    // pro passo de tags (as capas atuais são preservadas).
+    // Vai pra galeria de capas só quando há decisão de capa a tomar; senão finaliza
+    // direto (as capas atuais são preservadas).
     if (coversNeedPick) {
       const initialUrl =
         coverChoices.find((c) => c.included && c.isPrimary)?.url ??
@@ -436,15 +427,10 @@ export function UpdateDataDialog({
       setPhase("covers-pick")
       return
     }
-    setPhase("tags-pick")
+    finalizeChoicesAndProceed()
   }
 
   const handleConfirmCovers = () => {
-    if (!pendingData) return
-    setPhase("tags-pick")
-  }
-
-  const handleConfirmTags = () => {
     if (!pendingData) return
     finalizeChoicesAndProceed()
   }
@@ -742,8 +728,6 @@ export function UpdateDataDialog({
     setSynopsisChoices([])
     setCoverChoices([])
     setCoversNeedPick(false)
-    setTagChoices([])
-    setGenreChoices([])
     setPreviewUrl(null)
     setActiveRefineUrl(null)
     setManualCoverUrl("")
@@ -1075,58 +1059,6 @@ export function UpdateDataDialog({
             )
           })()}
 
-          {phase === "tags-pick" && (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Tags e gêneros que vieram das fontes — revise antes de adicionar à obra.
-              </p>
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Gêneros</label>
-                <ChipInput
-                  value={genreChoices}
-                  onChange={setGenreChoices}
-                  suggestions={GENRE_NAMES}
-                  restrictToSuggestions
-                  showSuggestionMenu={false}
-                  placeholder="Digite um gênero válido…"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Tags</label>
-                <ChipInput
-                  value={tagChoices}
-                  onChange={setTagChoices}
-                  suggestionGroups={TAG_GROUPS_CATALOG}
-                  groups={TAG_GROUPS_CATALOG.map((grp) => ({
-                    label: grp.label,
-                    values: tagChoices.filter((t) => grp.values.includes(t)),
-                  })).filter((g) => g.values.length > 0)}
-                  placeholder="Digite para buscar tag… (várias de uma vez separadas por , ou ;)"
-                />
-              </div>
-
-              <p className="rounded-md border border-dashed border-amber-500/40 bg-amber-500/5 p-2.5 text-xs text-muted-foreground">
-                Aditivo: você revisa só o que veio das fontes. As tags que já existem na obra não
-                são tocadas. Pra remover tags existentes, use a página de edição da obra.
-              </p>
-
-              <div className={ACTION_BAR}>
-                <Button
-                  variant="ghost"
-                  onClick={() => setPhase(coversNeedPick ? "covers-pick" : "synopses-pick")}
-                >
-                  Voltar
-                </Button>
-                <div className="flex gap-2">
-                  <Button variant="outline" onClick={handleClose}>Cancelar</Button>
-                  <Button onClick={handleConfirmTags}>Continuar</Button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {phase === "conflicts" && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
@@ -1163,8 +1095,10 @@ export function UpdateDataDialog({
                 </div>
               ))}
               <div className={ACTION_BAR}>
-                {/* O passo de tags vem sempre logo antes dos conflitos. */}
-                <Button variant="ghost" onClick={() => setPhase("tags-pick")}>
+                <Button
+                  variant="ghost"
+                  onClick={() => setPhase(coversNeedPick ? "covers-pick" : "synopses-pick")}
+                >
                   Voltar
                 </Button>
                 <div className="flex gap-2">
