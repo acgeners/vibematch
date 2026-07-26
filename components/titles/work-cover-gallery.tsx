@@ -82,7 +82,9 @@ export function WorkCoverGallery({ title, fallbackUrl, covers }: WorkCoverGaller
   return (
     <div className="flex flex-col gap-2">
       {/* Capa grande — clique abre a imagem completa */}
-      <div className="aspect-[2/3] overflow-hidden rounded-lg border bg-muted shadow-sm">
+      {/* `bg-background`: a faixa neutra do `object-contain` fica da cor do fundo
+          do site (não `bg-muted`), pra a capa parecer "flutuar" sem moldura. */}
+      <div className="aspect-[2/3] overflow-hidden rounded-lg border bg-background shadow-sm">
         {active ? (
           <button
             type="button"
@@ -95,7 +97,10 @@ export function WorkCoverGallery({ title, fallbackUrl, covers }: WorkCoverGaller
             <img
               src={getCoverImageSrc(active.url)}
               alt={`Capa de ${title}`}
-              className="h-full w-full object-cover"
+              // `object-contain`: a capa aparece INTEIRA dentro da caixa 2:3 fixa;
+              // o `bg-background` do container preenche a faixa neutra quando a
+              // proporção da imagem não bate com 2:3. `object-cover` cortava.
+              className="h-full w-full object-contain"
             />
             <span className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-all group-hover:bg-black/30 group-hover:opacity-100">
               <ZoomIn className="h-8 w-8 text-white drop-shadow" />
