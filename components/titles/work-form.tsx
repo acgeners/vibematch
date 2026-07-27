@@ -50,6 +50,7 @@ import {
   type PostReadingScoreField,
 } from "@/lib/constants/post-reading-criteria"
 import { Button } from "@/components/ui/button"
+import { SaveButton } from "@/components/ui/save-button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { StarRating } from "@/components/ui/star-rating"
@@ -855,6 +856,19 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
     control,
     name: ["mu_rating", "mu_votes", "cmx_rating", "cmx_votes", "ap_rating", "ap_votes"],
   })
+
+  // "Atualizar" (modo edição) só habilita quando algo mudou. Este form muta muito
+  // campo por setValue SEM shouldDirty (capa, tags, sinopse, status), então o
+  // isDirty do RHF não é confiável aqui: comparamos um snapshot do formulário
+  // inteiro — o useWatch sem `name` cobre TODO caminho de mudança. Erra pro lado
+  // seguro (se divergir por ruído de serialização, o botão fica habilitado como
+  // era antes, nunca travado). Em criação não gateia — não há linha-base.
+  const allFormValues = useWatch({ control })
+  // Snapshot do form no 1º render (useState lazy — não pode ler ref durante o
+  // render pela regra do react-hooks). É a linha-base contra a qual medimos mudança.
+  const [initialFormSnapshot] = useState(() => JSON.stringify(getValues()))
+  const editHasChanges =
+    isCreating || JSON.stringify(allFormValues) !== initialFormSnapshot
 
   const filterKnownGenres = useCallback((values: string[]) => {
     const byKey = new Map(genreSuggestions.map((genre) => [normalizeSourceName(genre), genre]))
@@ -1807,9 +1821,14 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
               : "Salvar e incluir mais"}
         </Button>
       )}
-      <Button
+      <SaveButton
         type={isCreating && batchDrafts.length > 0 ? "button" : "submit"}
-        disabled={isSubmitting || batchSubmitting}
+        disabled={isSubmitting || batchSubmitting || !editHasChanges}
+        disabledReason={
+          !isCreating && !editHasChanges && !isSubmitting && !batchSubmitting
+            ? "Nenhuma alteração para salvar"
+            : undefined
+        }
         onClick={isCreating && batchDrafts.length > 0 ? handleCreateBatch : undefined}
       >
         {isSubmitting || batchSubmitting
@@ -1819,7 +1838,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
             : batchDrafts.length > 0
               ? `Criar ${batchDrafts.length + (titleValue?.trim() ? 1 : 0)} obra${batchDrafts.length + (titleValue?.trim() ? 1 : 0) === 1 ? "" : "s"}`
               : "Criar obra"}
-      </Button>
+      </SaveButton>
     </div>
   )
 

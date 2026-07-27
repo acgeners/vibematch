@@ -24,7 +24,7 @@ export const AUTO_COLUMN_ALIASES: Record<string, keyof MappedImportRow> = {
   "Romance": "romance",
   "💑": "couple_dynamics",
   "couple_dynamics": "couple_dynamics",
-  "Dinâmica do Casal": "couple_dynamics",
+  "Dinâmica entre Protagonistas": "couple_dynamics",
   "👑": "fantasy_nobility",
   "fantasy_nobility": "fantasy_nobility",
   "Fantasia/Nobreza": "fantasy_nobility",

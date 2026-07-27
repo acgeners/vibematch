@@ -9,6 +9,7 @@ import { CRITERION_SLUGS } from "@/types/domain"
 import type { CriterionSlug } from "@/types/domain"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { Button } from "@/components/ui/button"
+import { SaveButton } from "@/components/ui/save-button"
 import { Slider } from "@/components/ui/slider"
 import {
   Select,
@@ -47,6 +48,15 @@ export function CriterionColorPercentilesForm({ config }: CriterionColorPercenti
   const [saving, setSaving] = useState(false)
 
   const hasOverride = useMemo(() => slug in overrides, [slug, overrides])
+
+  // Baseline do atributo selecionado (override próprio ou os percentis globais).
+  // "Salvar" só faz sentido quando algum slider difere desse baseline.
+  const baseline = overrides[slug] ?? globalPcts
+  const dirty =
+    pcts.top !== baseline.top ||
+    pcts.high !== baseline.high ||
+    pcts.mid !== baseline.mid ||
+    pcts.low !== baseline.low
 
   const selectSlug = (next: CriterionSlug) => {
     setSlug(next)
@@ -146,9 +156,14 @@ export function CriterionColorPercentilesForm({ config }: CriterionColorPercenti
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" onClick={save} disabled={saving}>
+        <SaveButton
+          type="button"
+          onClick={save}
+          disabled={saving || !dirty}
+          disabledReason={!dirty ? "Nenhuma alteração para salvar" : undefined}
+        >
           {saving ? "Salvando..." : "Salvar para este atributo"}
-        </Button>
+        </SaveButton>
         <Button type="button" variant="ghost" size="sm" onClick={useGlobal} disabled={saving || !hasOverride}>
           <RotateCcw className="h-3.5 w-3.5" />
           Usar percentis globais

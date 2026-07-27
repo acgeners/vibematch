@@ -21,6 +21,7 @@ import type { CompareEval } from "@/components/ai-evaluation/ai-evaluation-compa
 import { ExternalManualReviewsSection } from "@/components/titles/external-manual-reviews-section"
 import type { ExternalManualReviewDisplayRow } from "@/server/queries/external-manual-reviews"
 import { Button } from "@/components/ui/button"
+import { SaveButton } from "@/components/ui/save-button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -102,12 +103,16 @@ export function AiEvaluationButton({
   const [inputsLoading, setInputsLoading] = useState(false)
   const [savingInputs, setSavingInputs] = useState(false)
   const [synopsisDraft, setSynopsisDraft] = useState("")
+  // Sinopse como veio do banco, pra saber se o "Salvar" (só sinopse) tem o que gravar.
+  const [synopsisLoaded, setSynopsisLoaded] = useState("")
+  const synopsisDirty = synopsisDraft !== synopsisLoaded
 
   const openInputsEditor = async () => {
     setInputsOpen(true)
     setInputsLoading(true)
     const inputs = await getEvaluationInputs(workId)
     setSynopsisDraft(inputs.synopsis)
+    setSynopsisLoaded(inputs.synopsis)
     setInputsLoading(false)
   }
 
@@ -440,9 +445,18 @@ export function AiEvaluationButton({
             <Button variant="ghost" onClick={() => setInputsOpen(false)} disabled={savingInputs}>
               Cancelar
             </Button>
-            <Button variant="outline" onClick={() => void handleSaveInputs()} disabled={savingInputs || inputsLoading}>
+            {/* "Salvar" só grava a sinopse → gateado pela mudança dela. "Salvar e
+                avaliar" roda a IA de qualquer jeito, então não é gateado. */}
+            <SaveButton
+              variant="outline"
+              onClick={() => void handleSaveInputs()}
+              disabled={savingInputs || inputsLoading || !synopsisDirty}
+              disabledReason={
+                !inputsLoading && !synopsisDirty ? "Nenhuma alteração para salvar" : undefined
+              }
+            >
               {savingInputs ? "Salvando…" : "Salvar"}
-            </Button>
+            </SaveButton>
             <Button onClick={() => void handleSaveInputsAndEvaluate()} disabled={savingInputs || inputsLoading}>
               <Sparkles className="h-4 w-4" />
               Salvar e avaliar

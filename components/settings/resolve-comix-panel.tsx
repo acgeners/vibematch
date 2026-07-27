@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react"
 import { Ban, ChevronRight, ExternalLink, Info, Loader2, Play, Search, Undo2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { SaveButton } from "@/components/ui/save-button"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { LastRunHint } from "@/components/settings/last-run-hint"
@@ -189,10 +190,20 @@ export function ResolveComixPanel({
               </p>
             </div>
             <div className="flex flex-col items-end gap-1">
-              <Button type="button" onClick={handleStart} disabled={running || starting} className={ACCENT_BUTTON[accent]}>
+              <SaveButton
+                type="button"
+                onClick={handleStart}
+                disabled={running || starting || missing.length === 0}
+                disabledReason={
+                  !running && !starting && missing.length === 0
+                    ? "Todas as obras já têm hid da Comix (ou foram ignoradas)"
+                    : undefined
+                }
+                className={ACCENT_BUTTON[accent]}
+              >
                 {running || starting ? <Loader2 className="animate-spin" /> : <Play />}
                 {running ? "Em execução…" : starting ? "Iniciando…" : "Resolver hids da Comix"}
-              </Button>
+              </SaveButton>
               <LastRunHint iso={status.finishedAt ?? status.startedAt} label="Última execução" />
             </div>
           </div>

@@ -1,5 +1,7 @@
 "use client"
 
+import { useRouter } from "next/navigation"
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,7 +17,7 @@ import {
 export interface AiPendingItem {
   label: string
   count: number
-  /** URL da seção correspondente (ex.: "/settings?s=embeddings"). */
+  /** URL da seção correspondente (ex.: "/settings?g=ia#card-embeddings"). */
   href: string
 }
 
@@ -38,7 +40,9 @@ interface AiPendingGuardDialogProps {
  * Trava reutilizável: avisa que há artefatos gerados por IA pendentes antes de
  * uma ação que os consome como sinal (calibração / recálculo de notas). O
  * usuário decide seguir mesmo assim ou resolver as pendências antes. Cada item
- * é um link que fecha o popup e leva à seção correspondente.
+ * é um link que fecha o popup e leva à seção correspondente; o botão "Resolver
+ * pendências antes" leva direto ao /settings na primeira pendência da lista
+ * (todas moram no mesmo grupo "Gerado por IA", então as demais ficam à vista).
  */
 export function AiPendingGuardDialog({
   open,
@@ -51,6 +55,11 @@ export function AiPendingGuardDialog({
   cancelLabel = "Resolver pendências antes",
   proceedClassName,
 }: AiPendingGuardDialogProps) {
+  const router = useRouter()
+  // "Resolver pendências antes" abre o /settings na primeira pendência (o popup
+  // só abre com items.length > 0, então sempre há um alvo).
+  const resolveHref = items[0]?.href
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -75,7 +84,13 @@ export function AiPendingGuardDialog({
           ))}
         </ul>
         <AlertDialogFooter>
-          <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
+          <AlertDialogCancel
+            onClick={() => {
+              if (resolveHref) router.push(resolveHref)
+            }}
+          >
+            {cancelLabel}
+          </AlertDialogCancel>
           <AlertDialogAction onClick={onProceed} className={proceedClassName}>
             {proceedLabel}
           </AlertDialogAction>
