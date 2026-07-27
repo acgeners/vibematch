@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { CHROME_REFRESH_EVENT, refreshChrome } from "@/lib/chrome-refresh"
 import type { ChromePatch } from "@/lib/chrome-refresh"
+import { broadcastRefresh, subscribeCrossTabRefresh } from "@/lib/cross-tab-refresh"
 
 /**
  * `router.refresh()` + refresh do chrome (saldo/badges/conta) num só lugar.
@@ -16,6 +17,11 @@ import type { ChromePatch } from "@/lib/chrome-refresh"
  * Passe um `patch` quando souber o que mudou (ex.: avaliação IA gastou tokens e
  * tirou 1 da fila) pra atualizar o chrome otimisticamente, sem re-buscar do DB.
  * Sem patch = re-busca tudo (comportamento original).
+ *
+ * Além do refresh local, avisa as OUTRAS abas abertas (`broadcastRefresh`) pra
+ * elas re-buscarem — quem escuta é `useCrossTabRefreshListener` no shell. O
+ * `patch` é local só: a ponte cross-tab manda apenas o sinal (ver
+ * `lib/cross-tab-refresh.ts`).
  */
 export function useRefresh(): (patch?: ChromePatch) => void {
   const router = useRouter()
@@ -23,9 +29,48 @@ export function useRefresh(): (patch?: ChromePatch) => void {
     (patch?: ChromePatch) => {
       router.refresh()
       refreshChrome(patch)
+      broadcastRefresh()
     },
     [router],
   )
+}
+
+/**
+ * Ouvinte cross-tab: quando OUTRA aba faz uma mutação, re-busca a verdade do
+ * servidor nesta aba (`router.refresh()` + `refreshChrome()` sem patch). Monte
+ * UMA vez no shell do app.
+ *
+ * Não re-transmite (só `useRefresh` transmite; `refreshChrome` sem patch dispara
+ * evento LOCAL) → sem loop A→B→A.
+ *
+ * Gating por visibilidade: aba escondida não re-busca na hora (evita N abas de
+ * fundo batendo no DB a cada mutação); marca "sujo" e re-busca ao voltar a ficar
+ * visível.
+ */
+export function useCrossTabRefreshListener(): void {
+  const router = useRouter()
+  const dirty = useRef(false)
+
+  useEffect(() => {
+    const refreshNow = () => {
+      dirty.current = false
+      router.refresh()
+      refreshChrome()
+    }
+    const onMessage = () => {
+      if (document.visibilityState === "visible") refreshNow()
+      else dirty.current = true
+    }
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && dirty.current) refreshNow()
+    }
+    const unsubscribe = subscribeCrossTabRefresh(onMessage)
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      unsubscribe()
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [router])
 }
 
 /**
