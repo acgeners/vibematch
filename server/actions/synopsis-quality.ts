@@ -4,7 +4,12 @@ import { revalidatePath, revalidateTag } from "next/cache"
 import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { ensureAdmin, getOwnerUserId } from "@/server/queries/current-user"
-import { mirrorOwnerState } from "@/server/queries/user-work-state"
+import {
+  mirrorOwnerState,
+  writeReadingState,
+  ensureReadingStateWriter,
+} from "@/server/queries/user-work-state"
+import { recalculateForUser } from "@/server/recalc/user-recalc"
 import { ensureAiConsumption } from "@/server/queries/ai-quota"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
 import { getSynopsisPredictionForWork, getSynopsisPredictionsByWorkIds } from "@/server/queries/synopsis-quality"
@@ -280,18 +285,24 @@ export async function skipSynopsisInterestAction(
 }
 
 /**
- * Atribui (ou limpa) o Interesse Sinopse MANUAL (works.synopsis_quality)
- * diretamente — sem passar pela previsão IA. É o caminho GRÁTIS de triagem
- * manual da fila /ai-evaluation?tab=sinopse. `quality = null` limpa o campo
- * ("Não avaliada"). Igual ao apply: marca recálculo pendente (synopsis_quality
- * é feature do Ridge global) em vez de recalcular na hora.
+ * Atribui (ou limpa) o Interesse Sinopse MANUAL (`synopsis_quality`) diretamente — sem
+ * passar pela previsão IA. É o caminho GRÁTIS de triagem manual (fila
+ * /ai-evaluation?tab=sinopse e os corações da faixa na página da obra).
+ * `quality = null` limpa o campo ("Não avaliada").
+ *
+ * ⚠️ NÃO é `ensureAdmin()`, e a distinção importa: PREVER o interesse por IA é que é
+ * restrito (`applySynopsisPredictionAction`/`predictSynopsisQualityForWorkAction` gastam
+ * tokens e mexem no perfil do dono). Dizer "esta sinopse me interessa" é dado PESSOAL, e
+ * desde a Fatia 2a ele tem casa própria em `user_work_state` — o mesmo lugar onde o form
+ * completo (`updateWorkStatus`) já grava o ♥ de qualquer usuário logado. Manter o admin aqui
+ * fazia o atalho recusar o que o form ao lado aceitava.
  */
 export async function setSynopsisQualityAction(
   workId: string,
   quality: SynopsisQuality | null,
 ): Promise<{ data?: { synopsisQuality: SynopsisQuality | null }; error?: string }> {
   try {
-    const gate = await ensureAdmin()
+    const gate = await ensureReadingStateWriter()
     if (!gate.ok) return { error: gate.error }
     if (quality !== null && !(SYNOPSIS_QUALITIES as readonly string[]).includes(quality)) {
       return { error: "Valor de Interesse inválido." }
@@ -304,14 +315,31 @@ export async function setSynopsisQualityAction(
         | "human_manual",
       synopsis_quality_prediction_id: null,
     }
-    // FASE E: só o espelho (o `update` em `works` gravava o mesmo objeto `triaged`).
-    const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], triaged)
-    if (mirror.error) return { error: `Falha gravando Interesse: ${mirror.error}` }
+    // Cliente de SESSÃO: a RLS da mig 142 barra escrever na linha de outra pessoa. Vale pro
+    // dono também — o `mirrorOwnerState` que estava aqui só existia porque o gate era admin.
+    const write = await writeReadingState(gate.userId, [workId], triaged)
+    if (write.error) return { error: `Falha gravando Interesse: ${write.error}` }
 
-    await markRecalcPending("setSynopsisQuality")
+    if (gate.isOwner) {
+      // synopsis_quality é feature do Ridge GLOBAL (treinado nos rótulos do dono) → marca
+      // recálculo pendente em vez de recalcular na hora.
+      await markRecalcPending("setSynopsisQuality")
+    } else {
+      // O modelo DELA (Fatia 2b): Ridge em TS puro, zero IA — mas ~880 obras, então não segura
+      // a resposta do clique. Best-effort, igual ao ramo não-dono de `updateWorkStatus`.
+      after(async () => {
+        try {
+          await recalculateForUser(gate.userId)
+        } catch (err) {
+          console.error("[setSynopsisQuality] recalc do usuário falhou:", err)
+        }
+      })
+    }
 
     revalidatePath("/titles")
-    revalidatePath(`/titles/${workId}`)
+    // Por ROTA, não por caminho: o `/titles/${workId}` que estava aqui usava o UUID, e a
+    // página é servida pelo SLUG — ou seja, revalidava um caminho que ninguém visita.
+    revalidatePath("/titles/[id]", "page")
     revalidatePath("/ranking")
     revalidatePath("/ai-evaluation")
     revalidateTag("ai-eval-tab-counts", "max")

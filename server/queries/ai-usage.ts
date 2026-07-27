@@ -557,6 +557,153 @@ export async function getWorkAiCost(workId: string): Promise<WorkAiCostSummary> 
 }
 
 // ============================================================================
+// Baseline "criar uma obra do zero" (dev). Responde: dos $X que ESTA obra já
+// gastou, quanto seria só o mínimo pra existir com todos os dados de catálogo?
+// ============================================================================
+
+/**
+ * As operações de IA que uma criação do zero roda UMA vez cada. É a fase paga da
+ * cascata `generateAllWorkData` (server/actions/generate-all.ts) traduzida de
+ * `ActionName` (o vocabulário do orquestrador) para `operation` (o vocabulário do
+ * log) — os dois nomes existem e não batem.
+ *
+ * 🔴 FORA de propósito, e é o ponto do pedido: `predict_interest_potential`
+ * (→ `synopsis_quality_predict`) e `run_alignment` (→ `recommendation_rank`) são
+ * PER-USUÁRIO — Interesse previsto e Veredito IA valem contra o perfil de gosto de
+ * QUEM pergunta, não contra a obra. Somá-los aqui responderia "quanto custou pro
+ * dono", não "quanto custa a obra existir". `generate_embedding` fica fora por ser
+ * grátis (OpenAI ~$0).
+ *
+ * Se a cascata ganhar/perder um passo pago, esta lista tem que acompanhar — não há
+ * como o TypeScript ligar as duas pontas (`ActionName` ≠ `AiOperationKey`).
+ */
+const FROM_SCRATCH_OPERATIONS = [
+  "synopsis_consolidator",
+  "review_summarizer",
+  "review_digest",
+  "tag_inference",
+  "ai_evaluation",
+] as const
+
+/**
+ * `tag_inference` NÃO carrega `metadata.work_id` (as 491 chamadas medidas em
+ * 2026-07-27 têm só `nCandidates`/`withReviews`), então ela não pode ser agrupada
+ * por obra como as outras. Vale como proxy porque é **uma chamada por obra**:
+ * `inferTagsFromText` faz um único `createLoggedMessage` por execução
+ * (lib/tags/infer-from-text.ts). Ou seja, aqui a mediana é POR CHAMADA — que, para
+ * esta operação, é a mediana por obra.
+ */
+const OPERATIONS_WITHOUT_WORK_ID = new Set<string>(["tag_inference"])
+
+export interface FromScratchBaselineOperation {
+  operation: string
+  label: string
+  /** Mediana do custo da 1ª execução por obra (USD). */
+  medianUsd: number
+  /** Quantas obras (ou chamadas, quando não há work_id) entraram na mediana. */
+  nSamples: number
+}
+
+export interface FromScratchBaseline {
+  /** Soma das medianas das operações de catálogo. `null` = sem histórico. */
+  totalUsd: number | null
+  byOperation: FromScratchBaselineOperation[]
+  /** Operações do baseline que ainda não têm nenhuma chamada registrada. */
+  missingOperations: string[]
+}
+
+function medianOf(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2
+}
+
+/**
+ * Custo TÍPICO (mediana, não estimativa) de gerar do zero os dados de catálogo de
+ * uma obra. Mede o que já aconteceu de verdade em `ai_api_calls`, então acompanha
+ * sozinho mudanças de modelo e de prompt — ao contrário do `estimateStepUsd` do
+ * checkpoint, que é upper bound com margem 1,5× (mediu ~$0,13 contra ~$0,07 reais).
+ *
+ * "Primeira execução" por obra = as chamadas do PRIMEIRO DIA em que aquela operação
+ * rodou para aquela obra. Somar o dia inteiro (em vez de pegar uma chamada só) é o
+ * que faz a retentativa e o digest em pedaços contarem — eles são parte do custo de
+ * gerar aquilo uma vez. Reavaliações posteriores ("Reavaliar com Opus", A/B) ficam
+ * de fora, que é o ponto: elas não são criar do zero.
+ *
+ * Chamadas com ERRO entram (gastaram tokens de verdade). Roda só em dev — a soma
+ * paginada varre ~2,7 mil linhas.
+ */
+export async function getFromScratchBaselineCost(): Promise<FromScratchBaseline> {
+  const supabase = createAdminClient()
+  const rows: Array<{
+    operation: string
+    cost_total_usd: number | string | null
+    created_at: string
+    work_id: string | null
+  }> = []
+
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("ai_api_calls")
+      // `work_id:metadata->>work_id` puxa só o campo do JSONB — o metadata inteiro
+      // seria ~10× o payload sem nenhum leitor aqui.
+      .select("operation, cost_total_usd, created_at, work_id:metadata->>work_id")
+      .in("operation", FROM_SCRATCH_OPERATIONS as unknown as string[])
+      .order("created_at", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) {
+      console.error("[ai-usage] getFromScratchBaselineCost falhou:", error.message)
+      return { totalUsd: null, byOperation: [], missingOperations: [] }
+    }
+    const batch = (data ?? []) as unknown as typeof rows
+    rows.push(...batch)
+    // ⚠️ Paginado: o select corta em 1000 linhas SEM AVISAR, e um recorte aqui não
+    // dá erro — dá uma mediana errada, que é pior.
+    if (batch.length < PAGE_SIZE) break
+  }
+
+  const byOperation: FromScratchBaselineOperation[] = []
+  const missingOperations: string[] = []
+
+  for (const operation of FROM_SCRATCH_OPERATIONS) {
+    const calls = rows.filter((r) => r.operation === operation)
+    const label = isKnownAiOperation(operation) ? AI_OPERATIONS[operation].label : operation
+
+    let samples: number[]
+    if (OPERATIONS_WITHOUT_WORK_ID.has(operation)) {
+      samples = calls.map((c) => Number(c.cost_total_usd ?? 0))
+    } else {
+      // Agrupa por obra e soma o primeiro DIA de execução (retries + chamadas em pedaços).
+      const firstRunByWork = new Map<string, { day: string; total: number }>()
+      for (const call of calls) {
+        if (!call.work_id) continue
+        const day = String(call.created_at).slice(0, 10)
+        const acc = firstRunByWork.get(call.work_id)
+        // `rows` vem ordenado por created_at asc ⇒ o primeiro dia visto é o primeiro dia.
+        if (!acc) firstRunByWork.set(call.work_id, { day, total: Number(call.cost_total_usd ?? 0) })
+        else if (acc.day === day) acc.total += Number(call.cost_total_usd ?? 0)
+      }
+      samples = [...firstRunByWork.values()].map((v) => v.total)
+    }
+
+    const usable = samples.filter((v) => v > 0)
+    if (usable.length === 0) {
+      missingOperations.push(label)
+      continue
+    }
+    byOperation.push({ operation, label, medianUsd: medianOf(usable), nSamples: usable.length })
+  }
+
+  return {
+    // Sem NENHUMA operação medida não existe baseline — `0` seria uma resposta
+    // falsa ("criar uma obra é de graça"), então devolve null e a UI omite a linha.
+    totalUsd: byOperation.length === 0 ? null : byOperation.reduce((s, o) => s + o.medianUsd, 0),
+    byOperation,
+    missingOperations,
+  }
+}
+
+// ============================================================================
 // Diagnóstico de operações (Plano 1 — Fase B). Reusa o fetch paginado e delega
 // TODA a matemática às funções puras de lib/ai-observability. Distingue
 // solicitação lógica × tentativa, custo por sucesso, p50/p95, categoria de erro

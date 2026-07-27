@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Heart, Loader2, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
 import { setSynopsisQualityAction } from "@/server/actions/synopsis-quality"
 import { SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
@@ -22,15 +23,29 @@ export interface SynopsisQualityPickerProps {
   workId: string
   /** Valor manual atual (works.synopsis_quality), ou null se não avaliado. */
   value: string | null
+  /** `synopsis_quality_source === "prediction_applied"` ⇒ selo ✨ ao lado dos corações. */
+  fromPrediction?: boolean
+  /**
+   * "x" de limpar só no hover/foco — para a faixa de stats da página da obra, onde um ✕
+   * permanente ao lado dos corações vira ruído. Em ponteiro grosso (touch, sem hover) ele
+   * fica sempre visível: senão limpar dependeria de um hover que nunca acontece.
+   */
+  subtleClear?: boolean
 }
 
 /**
  * Seletor rápido do Interesse Sinopse MANUAL (♥..♥♥♥♥) — 4 corações estilo
  * rating + limpar. É o caminho GRÁTIS de triagem: grava direto em
  * works.synopsis_quality via setSynopsisQualityAction (sem IA). Clicar no nível
- * atual limpa; o "x" também limpa. Usado nos cards da fila /ai-evaluation?tab=sinopse.
+ * atual limpa; o "x" também limpa. Usado nos cards da fila /ai-evaluation?tab=sinopse
+ * e na faixa de stats da página da obra.
  */
-export function SynopsisQualityPicker({ workId, value }: SynopsisQualityPickerProps) {
+export function SynopsisQualityPicker({
+  workId,
+  value,
+  fromPrediction = false,
+  subtleClear = false,
+}: SynopsisQualityPickerProps) {
   const refresh = useRefresh()
   const [pending, startTransition] = useTransition()
   const [hover, setHover] = useState(0)
@@ -50,7 +65,7 @@ export function SynopsisQualityPicker({ workId, value }: SynopsisQualityPickerPr
   }
 
   return (
-    <div className="flex items-center gap-1" aria-busy={pending}>
+    <div className="group flex items-center gap-1" aria-busy={pending}>
       <div className="flex items-center" onMouseLeave={() => setHover(0)}>
         {SYNOPSIS_QUALITIES.map((q, i) => {
           const level = i + 1
@@ -78,6 +93,7 @@ export function SynopsisQualityPicker({ workId, value }: SynopsisQualityPickerPr
             </button>
           )
         })}
+        {current > 0 && fromPrediction && <InterestAppliedMark size={12} className="ml-0.5" />}
       </div>
       {pending ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
@@ -87,7 +103,11 @@ export function SynopsisQualityPicker({ workId, value }: SynopsisQualityPickerPr
           title="Limpar interesse"
           aria-label="Limpar interesse"
           onClick={() => save(null)}
-          className="p-0.5 text-muted-foreground hover:text-foreground"
+          className={cn(
+            "p-0.5 text-muted-foreground transition-opacity hover:text-foreground",
+            subtleClear &&
+              "[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100",
+          )}
         >
           <X className="h-3.5 w-3.5" />
         </button>

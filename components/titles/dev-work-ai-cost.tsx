@@ -2,7 +2,7 @@
 
 import { Coins } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import type { WorkAiCostSummary } from "@/server/queries/ai-usage"
+import type { WorkAiCostSummary, FromScratchBaseline } from "@/server/queries/ai-usage"
 
 /**
  * Badge DEV-ONLY (canto da aba Visão Geral): mostra só o custo de IA total
@@ -18,7 +18,14 @@ function formatUsd(value: number): string {
   return `$${value.toFixed(4)}`
 }
 
-export function DevWorkAiCost({ summary }: { summary: WorkAiCostSummary }) {
+export function DevWorkAiCost({
+  summary,
+  baseline,
+}: {
+  summary: WorkAiCostSummary
+  /** Custo típico de gerar uma obra do zero (só catálogo). null = sem histórico. */
+  baseline?: FromScratchBaseline | null
+}) {
   const { totalCostUsd, nCalls, byOperation } = summary
   return (
     <Popover>
@@ -81,6 +88,31 @@ export function DevWorkAiCost({ summary }: { summary: WorkAiCostSummary }) {
             Visível apenas em desenvolvimento.
           </p>
         </div>
+
+        {baseline?.totalUsd != null && (
+          <div className="border-t border-border/50 bg-muted/30 px-3.5 py-3">
+            <div className="flex items-baseline justify-between gap-4">
+              <span className="text-sm font-semibold text-foreground/85">Criar do zero</span>
+              <span className="font-mono text-sm font-bold tabular-nums text-foreground">
+                ~{formatUsd(baseline.totalUsd)}
+              </span>
+            </div>
+            <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/80">
+              Custo típico (mediana das obras já geradas) das {baseline.byOperation.length}{" "}
+              operações de catálogo que uma criação do zero roda uma vez cada:{" "}
+              {/* Sem `toLowerCase()`: ele transformava "Avaliação IA" em "avaliação ia". */}
+              {baseline.byOperation.map((op) => op.label).join(", ")}.{" "}
+              <strong className="font-semibold">Exclui o que é por usuário</strong> — Interesse
+              previsto e Veredito IA dependem do perfil de quem pergunta.
+              {baseline.missingOperations.length > 0 && (
+                <>
+                  {" "}
+                  Sem histórico ainda (fora da conta): {baseline.missingOperations.join(", ")}.
+                </>
+              )}
+            </p>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   )
