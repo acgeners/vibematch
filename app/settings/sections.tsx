@@ -5,11 +5,13 @@ import {
   Database,
   FileText,
   Gauge,
+  Globe,
   MessageSquareText,
   ScanSearch,
   ShieldAlert,
   Sparkles,
   Tags,
+  Target,
   Wand2,
   Wrench,
 } from "lucide-react"
@@ -82,7 +84,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         description:
           "MAEs e pseudo-votos são recalculados a partir dos dados reais sempre que um título é incluído ou alterado.",
         help: "Recalcula os MAEs (o erro médio da Nota Prevista) e os pseudo-votos bayesianos a partir de todas as obras que já têm nota manual. Roda sozinha sempre que você salva ou altera uma obra; o botão aqui força o recálculo na hora. Depende dos Embeddings estarem atualizados — o kNN usa a vizinhança vetorial das obras.",
-        icon: Gauge,
+        icon: Target,
         chips: [{ kind: "cost", tier: "free", label: "Grátis" }],
       },
       {
@@ -157,15 +159,15 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     label: "Fontes externas",
     hint: "Comix, Mangago e AnimePlanet",
     info: "Operação das fontes externas. Resolve o hid das obras da Comix (habilita a coleta de reviews) e testa a conexão de cada fonte — inclusive as que só passam via bypass do Cloudflare. Use quando obras novas estão sem reviews, ou quando uma fonte some.",
-    icon: BookOpen,
-    iconName: "BookOpen",
+    icon: Globe,
+    iconName: "Globe",
     accent: "amber",
     sections: [
       {
         id: "comix",
         title: "Comix",
         description:
-          "A fonte principal de reviews. Resolve o hid das obras (pra habilitar reviews), permite preencher manualmente as não encontradas e testar a conexão.",
+          "A principal fonte de reviews — resolve os hids das obras pra habilitar a coleta.",
         help: "A Comix é a maior fonte de reviews do app, mas exige resolver o “hid” (o identificador interno) de cada obra pra habilitar a coleta. Aqui você resolve os hids pendentes, preenche à mão os que não casaram e roda um diagnóstico da conexão (FlareSolverr/Cloudflare) sem precisar abrir nenhuma obra.",
         icon: BookOpen,
         chips: [{ kind: "trigger", label: "Quando faltam reviews" }],
@@ -174,7 +176,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         id: "cloudflare-sources",
         title: "Fontes atrás do Cloudflare",
         description:
-          "Mangago e AnimePlanet só respondem via bypass (FlareSolverr). Testa se elas estão puxando dados agora — e não apenas se o container está de pé.",
+          "Mangago e AnimePlanet só respondem via bypass (FlareSolverr) — testa se estão puxando dados agora.",
         help: "Um fetch direto do Mangago ou do AnimePlanet volta 403 (challenge do Cloudflare), então as duas dependem do bypass pra funcionar. Diferente da Comix, que passa em texto puro. Aqui o canário puxa um detalhe real de cada uma: se vier o título, o bypass está funcionando; se não vier, a obra vai mostrar “fonte fora do ar” e é isso que este painel antecipa.",
         icon: ShieldAlert,
         chips: [{ kind: "trigger", label: "Quando uma fonte some" }],

@@ -21,7 +21,8 @@ import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
 import { ReviewSummaryPanel } from "@/components/settings/review-summary-panel"
 import { ReviewDigestPanel } from "@/components/settings/review-digest-panel"
-import { ResolveComixPanel } from "@/components/settings/resolve-comix-panel"
+import { ResolveComixPanel, CoberturaInfoTooltip } from "@/components/settings/resolve-comix-panel"
+import { ItemHelpPopover } from "@/components/settings/item-help-popover"
 import { ComixHealthPanel } from "@/components/settings/comix-health-panel"
 import { ProtectedSourcesHealthPanel } from "@/components/settings/protected-sources-health-panel"
 import { AiEvalOnCreateToggle } from "@/components/settings/ai-eval-on-create-toggle"
@@ -51,13 +52,13 @@ import {
   countMissingEmbeddings,
   countPendingCanonicalSynopses,
   countPendingReviewSummaries,
+  countReviewDigestCoverage,
   getSettingsItemPending,
 } from "@/server/queries/settings-pending"
 import {
   BATCH_READ_SECTIONS,
   getSettingsItemUnread,
   getSettingsReadAcks,
-  getSuggestionReadAckIds,
 } from "@/server/queries/settings-read"
 import { MarkAllReadButton } from "@/components/settings/mark-all-read-button"
 import { CardMarkRead } from "@/components/settings/card-mark-read"
@@ -138,19 +139,17 @@ export default async function SettingsPage({
   // snapshot (selo "Lida") e quantas sugestões foram silenciadas. O
   // getSettingsItemPending é memoizado por request → compartilha a computação com
   // o layout (sub-nav) e com getSettingsItemUnread.
-  const [itemPending, itemUnread, batchAcks, suggestionAckIds] = await Promise.all([
+  const [itemPending, itemUnread, batchAcks] = await Promise.all([
     getSettingsItemPending(),
     getSettingsItemUnread(),
     getSettingsReadAcks(),
-    getSuggestionReadAckIds(),
   ])
   const batchReadSet = new Set<string>(BATCH_READ_SECTIONS as readonly string[])
   const totalUnread = Object.values(itemUnread).reduce((sum, n) => sum + n, 0)
-  const hasAnyRead = batchAcks.size > 0 || suggestionAckIds.length > 0
-  // Botão global: aparece quando há algo a marcar OU algo já lido; vira "Desmarcar
-  // tudo" quando tudo está lido (algo lido e nenhuma pendência não-lida).
-  const showMarkAll = totalUnread > 0 || hasAnyRead
-  const allRead = hasAnyRead && totalUnread === 0
+  // Botão global só quando há pendência NÃO-LIDA de fato a silenciar. Sem isso,
+  // nada a marcar → o botão some (nada de "Desmarcar tudo" ocioso). O desfazer
+  // por item continua no selo "Lida" de cada card.
+  const showMarkAll = totalUnread > 0
 
   return (
     <div className="w-full max-w-5xl">
@@ -169,9 +168,11 @@ export default async function SettingsPage({
           <h1 className="text-2xl font-bold tracking-tight text-foreground">{group.label}</h1>
           <p className="text-sm text-muted-foreground first-letter:uppercase">{group.hint}</p>
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          {showMarkAll && <MarkAllReadButton allRead={allRead} />}
-          <span className="rounded-full border border-border/60 bg-card/60 px-3 py-1 text-xs font-medium text-muted-foreground">
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          {showMarkAll && <MarkAllReadButton />}
+          {/* Contagem de itens do TÓPICO — texto simples (não pílula), pra não ser
+              lido como um badge de pendências. */}
+          <span className="text-xs font-medium text-muted-foreground">
             {group.sections.length} {group.sections.length === 1 ? "item" : "itens"}
           </span>
         </div>
@@ -355,12 +356,13 @@ async function ItemBody({
     }
 
     case "review-synthesis": {
-      const [worksCount, pendingCount] = await Promise.all([
+      const [worksCount, pendingCount, digest] = await Promise.all([
         activeWorksCount(),
         countPendingReviewSummaries(),
+        countReviewDigestCoverage(),
       ])
       return (
-        <div className="space-y-5">
+        <div className="space-y-4">
           <div>
             <p className="mb-2 text-sm font-semibold text-foreground">Resumo · exibido no app</p>
             <ReviewSummaryPanel accent={accent} pendingCount={pendingCount} totalCount={worksCount} />
@@ -369,7 +371,7 @@ async function ItemBody({
             <p className="mb-2 text-sm font-semibold text-foreground">
               Digest estruturado · consumido pela IA
             </p>
-            <ReviewDigestPanel accent={accent} />
+            <ReviewDigestPanel accent={accent} pendingCount={digest.pending} totalCount={digest.total} />
           </div>
         </div>
       )
@@ -379,13 +381,14 @@ async function ItemBody({
       return (
         <div className="space-y-5">
           <div>
-            <p className="mb-2 text-sm font-semibold text-foreground">Diagnóstico</p>
-            <p className="mb-3 text-xs text-muted-foreground">
-              Mangago e AnimePlanet devolvem 403 (challenge do Cloudflare) num fetch direto, então
-              só respondem via bypass. O canário puxa um detalhe real de cada uma pra dizer se elas
-              estão puxando dados <em>agora</em> — um bypass vivo mas com o solve falhando derruba as
-              duas do mesmo jeito.
-            </p>
+            <div className="mb-2 flex items-center gap-1.5">
+              <p className="text-sm font-semibold text-foreground">Diagnóstico do bypass</p>
+              <ItemHelpPopover
+                title="Diagnóstico do bypass"
+                help="Um fetch direto volta 403 (challenge do Cloudflare), então as duas dependem do bypass. Um bypass no ar mas com o solve falhando derruba as duas do mesmo jeito — por isso o teste puxa um detalhe real, não só checa se o container está de pé."
+                accent="amber"
+              />
+            </div>
             <ProtectedSourcesHealthPanel accent="amber" />
           </div>
         </div>
@@ -402,11 +405,14 @@ async function ItemBody({
       return (
         <div className="space-y-5">
           <div>
-            <p className="mb-2 text-sm font-semibold text-foreground">Diagnóstico</p>
-            <p className="mb-3 text-xs text-muted-foreground">
-              Testa se as chamadas pra Comix estão funcionando (FlareSolverr, detalhe, reviews,
-              imagem) sem precisar abrir uma obra.
-            </p>
+            <div className="mb-2 flex items-center gap-1.5">
+              <p className="text-sm font-semibold text-foreground">Diagnóstico da conexão</p>
+              <ItemHelpPopover
+                title="Diagnóstico da conexão"
+                help="O FlareSolverr aparece só como informação: a Comix passa em texto puro e não depende dele. Mangago e AnimePlanet dependem — veja “Fontes atrás do Cloudflare”."
+                accent="amber"
+              />
+            </div>
             <ComixHealthPanel accent="amber" />
           </div>
 
@@ -420,6 +426,7 @@ async function ItemBody({
                   {missingCount}
                 </span>
               )}
+              <CoberturaInfoTooltip />
             </summary>
             <div className="pt-3">
               <ResolveComixPanel
@@ -427,6 +434,7 @@ async function ItemBody({
                 initialStatus={comixStatus}
                 initialMissing={comixMissing}
                 initialAbsent={comixLists.absent}
+                catalogTotal={comixLists.total}
               />
             </div>
           </details>

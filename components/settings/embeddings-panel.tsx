@@ -2,10 +2,12 @@
 
 import { useState, useTransition } from "react"
 import { toast } from "sonner"
-import { Brain, AlertCircle } from "lucide-react"
+import { Brain, AlertCircle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LastRunHint } from "@/components/settings/last-run-hint"
+import { RunningStrip } from "@/components/settings/running-strip"
 import { StatCard } from "@/components/settings/stat-card"
+import { ConsoleSectionNote } from "@/components/console/console-section"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
 import { useRefresh } from "@/lib/use-refresh"
 import {
@@ -63,30 +65,45 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
     })
   }
 
-  const completionPct = totalWorks > 0 ? Math.round((initialCachedCount / totalWorks) * 100) : 0
+  // `initialCachedCount` conta TODAS as linhas de work_embeddings (inclui obras
+  // arquivadas), enquanto `totalWorks` é só o catálogo ativo — daí dava "937/931
+  // = 101%". Clampa pro universo ativo: a cobertura é sobre o catálogo ativo.
+  const cachedShown = Math.min(initialCachedCount, totalWorks)
+  const completionPct = totalWorks > 0 ? Math.round((cachedShown / totalWorks) * 100) : 0
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <p className="text-xs text-muted-foreground max-w-2xl">
-          Gera representação vetorial (1536 dims) de cada obra usando OpenAI{" "}
-          <span className="font-mono">text-embedding-3-small</span>. Cacheado eternamente em{" "}
-          <span className="font-mono">work_embeddings</span> — só re-embeda quando sinopse, tags ou
-          critérios mudam. Fundação pras features &quot;obras parecidas&quot; e o kNN
-          predictor. Custo: ~$0.02 por milhão de tokens (~$0.10–1.00 pra base inteira).
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="max-w-2xl space-y-1 text-sm text-muted-foreground">
+          <p>
+            Gera a representação vetorial (1536 dims) de cada obra via OpenAI{" "}
+            <span className="font-mono">text-embedding-3-small</span> — fundação das &quot;obras
+            parecidas&quot; e do kNN predictor. Cacheada em{" "}
+            <span className="font-mono">work_embeddings</span>; só re-embeda quando sinopse, tags ou
+            critérios mudam.
+          </p>
+          <p className="text-xs">
+            Custo ~$0.02 por milhão de tokens (~$0.10–1.00 pra base inteira).
+          </p>
+        </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
           <Button
             onClick={handleRefresh}
             disabled={isPending || pendingCount === 0}
             className={ACCENT_BUTTON[accent]}
           >
-            <Brain className="mr-1 h-4 w-4" />
-            {isPending ? "Embedando..." : "Atualizar embeddings"}
+            {isPending ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Brain className="mr-1 h-4 w-4" />
+            )}
+            {isPending ? "Embedando…" : "Atualizar embeddings"}
           </Button>
           <LastRunHint iso={lastRun} label="Última atualização" />
         </div>
       </div>
+
+      <RunningStrip accent={accent} label="Gerando embeddings das obras" running={isPending} />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard
@@ -96,7 +113,7 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
         />
         <StatCard
           label="Cacheados"
-          value={`${initialCachedCount} / ${totalWorks}`}
+          value={`${cachedShown} / ${totalWorks}`}
           hint={`${completionPct}% da base`}
         />
         <StatCard
@@ -137,17 +154,12 @@ export function EmbeddingsPanel({ accent, initialCachedCount, initialPendingCoun
       )}
 
       {totalWorks > 0 && initialCachedCount === 0 && !lastResult && (
-        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
-          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <p className="font-medium">Nenhum embedding gerado ainda.</p>
-            <p>
-              Configure <span className="font-mono">OPENAI_API_KEY</span> no{" "}
-              <span className="font-mono">.env.local</span>, rode a migration 053 (habilita
-              pgvector + cria tabela) e clique em &quot;Atualizar embeddings&quot;.
-            </p>
-          </div>
-        </div>
+        <ConsoleSectionNote accent="amber">
+          <span className="font-medium text-foreground">Nenhum embedding gerado ainda.</span>{" "}
+          Configure <span className="font-mono">OPENAI_API_KEY</span> no{" "}
+          <span className="font-mono">.env.local</span>, rode a migration 053 (habilita pgvector +
+          cria tabela) e clique em &ldquo;Atualizar embeddings&rdquo;.
+        </ConsoleSectionNote>
       )}
     </div>
   )
