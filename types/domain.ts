@@ -436,66 +436,6 @@ export interface CategoryScoreMap {
 }
 
 // ============================================================
-// Tipos de importação
-// ============================================================
-
-export interface RawImportRow {
-  [key: string]: string | number | null | undefined
-}
-
-export interface MappedImportRow {
-  title: string
-  romance?: number
-  couple_dynamics?: number
-  fantasy_nobility?: number
-  action_adventure?: number
-  adult_content?: number
-  protagonist?: number
-  humor?: number
-  drama?: number
-  tragedy?: number
-  mu_rating?: number
-  mu_votes?: number
-  ap_rating?: number
-  ap_votes?: number
-  cmx_rating?: number
-  cmx_votes?: number
-  publication_status?: PublicationStatus
-  total_chapters?: number
-  chapters_read?: number
-  synopsis_quality?: SynopsisQuality
-  personal_status?: PersonalStatus
-  observation_adjustment?: number
-  user_score?: number
-  ia_eval?: number
-  ia_eval_normalized?: number
-  calc_score?: number
-  predicted_score?: number
-  final_score?: number
-}
-
-export interface ImportColumnMapping {
-  sourceColumn: string
-  targetField: keyof MappedImportRow | "ignore"
-}
-
-export interface ImportValidationError {
-  rowIndex: number
-  field: string
-  message: string
-}
-
-export interface ImportResult {
-  importedCount: number
-  updatedCount: number
-  skippedCount: number
-  errorCount: number
-  duplicateCount: number
-  errors: ImportValidationError[]
-  pendingAiCount: number
-}
-
-// ============================================================
 // Tipos para listagem / filtros
 // ============================================================
 
