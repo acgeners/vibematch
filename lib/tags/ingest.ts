@@ -6,6 +6,7 @@ import { TAG_GROUP_IDS } from "@/lib/constants/tag-groups"
 import { TAG_GROUPS_CATALOG } from "@/lib/constants/tags"
 import { classifyTagsByGroup } from "@/lib/ai-evaluation/tag-classifier"
 import { enrichTagsForGroup } from "@/lib/ai-evaluation/tag-enricher"
+import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>
 
@@ -45,6 +46,7 @@ export function resolveCatalogGroupId(name: string): string | null {
 export async function resolveOrCreateTags(
   supabase: SupabaseAdmin,
   names: string[],
+  origin: "manual" | "external" | "ai_inferred" = "manual",
 ): Promise<{ ids: string[]; createdIds: string[] }> {
   const prepared = names
     .map((name) => ({ name: name.trim(), slug: slugifyTagName(name) }))
@@ -86,7 +88,7 @@ export async function resolveOrCreateTags(
     if (missing.length > 0) {
       const rows = missing.map((slug) => {
         const t = bySlug.get(slug)!
-        return { slug, name: t.name, tag_group_id: resolveCatalogGroupId(t.name) }
+        return { slug, name: t.name, tag_group_id: resolveCatalogGroupId(t.name), origin }
       })
       const { data: inserted, error: insertError } = await supabase
         .from("tags")
@@ -170,6 +172,9 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
     .in("id", [...byGroup.keys()])
   const groupById = new Map((groupRows ?? []).map((g) => [g.id as string, g]))
   const now = new Date().toISOString()
+  // Tags que a IA marcou como 18+ nesta rodada — usadas depois pra recomputar o
+  // adult_auto das obras que já as carregam (o enriquecimento roda em after()).
+  const adultTagIds: string[] = []
 
   for (const [groupId, groupTags] of byGroup) {
     const g = groupById.get(groupId)
@@ -266,6 +271,29 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
           })
         }
       }
+
+      // 18+: grava adult_indicator/_strong a partir da classificação da IA. Só sobe
+      // (nunca desmarca uma tag já flagada pela curadoria). As tags do catálogo já
+      // vêm com o flag da semente/migração 161; aqui cobrimos as CRIADAS de fonte.
+      if (r.adultLevel !== "none") {
+        const strong = r.adultLevel === "explicit"
+        await supabase
+          .from("tags")
+          .update({ adult_indicator: true, ...(strong ? { adult_indicator_strong: true } : {}) })
+          .eq("id", t.id)
+        adultTagIds.push(t.id)
+      }
     }
+  }
+
+  // Recomputa adult_auto das obras que carregam as tags recém-flagadas como 18+.
+  // recomputeAdultAuto é monotônico (só sobe) e best-effort.
+  if (adultTagIds.length > 0) {
+    const { data: wt } = await supabase
+      .from("work_tags")
+      .select("work_id")
+      .in("tag_id", adultTagIds)
+    const workIds = [...new Set((wt ?? []).map((r) => r.work_id as string))]
+    for (const workId of workIds) await recomputeAdultAuto(supabase, workId)
   }
 }

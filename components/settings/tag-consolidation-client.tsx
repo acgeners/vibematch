@@ -19,6 +19,9 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { TagSubgroupsPanel } from "@/components/settings/tag-subgroups-panel"
+import { NewTagsPanel } from "@/components/settings/tag-consolidation/new-tags-panel"
+import { GenreProposalsPanel } from "@/components/settings/tag-consolidation/genre-proposals-panel"
+import type { NewTagRow, GenreProposalRow } from "@/server/actions/tag-review"
 import type {
   Subgroup,
   SubgroupStatus,
@@ -54,7 +57,7 @@ import {
   type UncoveredTag,
 } from "@/server/actions/tag-consolidation"
 
-type View = "clusters" | "groupmoves" | "subgroups"
+type View = "clusters" | "groupmoves" | "subgroups" | "tags-novas" | "genres"
 type SubgroupPhase = "define" | "assign"
 
 interface Props {
@@ -71,6 +74,10 @@ interface Props {
   subgroups: Subgroup[]
   subgroupsWithTags: SubgroupWithTags[]
   unassignedSubgroupTags: UnassignedSubgroupTag[]
+  newTags: NewTagRow[]
+  newTagsCount: number
+  genreProposals: GenreProposalRow[]
+  genreProposalsCount: number
   /** Rota que a navegação de filtros reescreve. Default = a página dedicada;
    *  quando embutida inline em /settings, recebe "/settings" pra ficar na pilha. */
   basePath?: string
@@ -102,6 +109,10 @@ export function TagConsolidationClient({
   subgroups,
   subgroupsWithTags,
   unassignedSubgroupTags,
+  newTags,
+  newTagsCount,
+  genreProposals,
+  genreProposalsCount,
   basePath = "/settings/tag-consolidation",
 }: Props) {
   const router = useRouter() // mantido pro router.replace em updateQuery
@@ -398,7 +409,7 @@ export function TagConsolidationClient({
         </div>
       )}
 
-      <div className="flex gap-1 rounded-lg border border-border/65 bg-background/40 p-1">
+      <div className="flex flex-wrap gap-1 rounded-lg border border-border/65 bg-background/40 p-1">
         <button
           type="button"
           onClick={() => switchView("clusters")}
@@ -437,9 +448,45 @@ export function TagConsolidationClient({
         >
           Sub-grupos
         </button>
+        <button
+          type="button"
+          onClick={() => switchView("tags-novas")}
+          className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+            view === "tags-novas"
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          }`}
+        >
+          Tags novas
+          {newTagsCount > 0 && (
+            <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/20 px-1.5 text-xs font-bold tabular-nums text-primary">
+              {newTagsCount}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => switchView("genres")}
+          className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+            view === "genres"
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          }`}
+        >
+          Gêneros propostos
+          {genreProposalsCount > 0 && (
+            <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500/20 px-1.5 text-xs font-bold tabular-nums text-amber-700 dark:text-amber-300">
+              {genreProposalsCount}
+            </span>
+          )}
+        </button>
       </div>
 
-      {view === "subgroups" ? (
+      {view === "tags-novas" ? (
+        <NewTagsPanel tags={newTags} groups={groups} />
+      ) : view === "genres" ? (
+        <GenreProposalsPanel proposals={genreProposals} />
+      ) : view === "subgroups" ? (
         <TagSubgroupsPanel
           groups={groups}
           initialGroup={initialGroup}

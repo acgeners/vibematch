@@ -74,6 +74,7 @@ export async function inferAndPersistTagsForWork(
     const { ids } = await resolveOrCreateTags(
       supabase,
       keep.map((p) => p.name),
+      "ai_inferred",
     )
     const confByName = new Map(keep.map((p) => [p.name.toLowerCase(), p.confidence]))
 
