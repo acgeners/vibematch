@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation"
 import type { ReactNode } from "react"
+import { useCrossTabRefreshListener } from "@/lib/use-refresh"
 
 // Rotas de auth renderizam full-bleed (sem sidebar/nav/fabs). Aditivo: todo o
 // resto do app mantém o chrome idêntico ao de antes.
@@ -21,6 +22,10 @@ export function AppShell({
   children: ReactNode
 }) {
   const pathname = usePathname() ?? ""
+
+  // Mantém esta aba em dia quando outra aba faz uma mutação. Chamado antes de
+  // qualquer return pra o hook rodar em toda rota (inclusive auth).
+  useCrossTabRefreshListener()
 
   if (isAuthRoute(pathname)) {
     return <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">{children}</div>
