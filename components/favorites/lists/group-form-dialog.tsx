@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { SaveButton } from "@/components/ui/save-button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
@@ -66,6 +67,20 @@ export function GroupFormDialog({ open, onOpenChange, mode, list, coverCandidate
     setWasOpen(false)
   }
 
+  // Criar: basta um nome válido. Editar: só habilita quando algum campo difere
+  // do grupo atual (a ordem das capas importa — vira o número do selo).
+  const trimmedName = name.trim()
+  const dirty = useMemo(() => {
+    if (mode === "create") return trimmedName.length > 0
+    if (!list) return false
+    if (trimmedName !== (list.name ?? "")) return true
+    if (description !== (list.description ?? "")) return true
+    if (color !== (list.color ?? GROUP_COLORS[0])) return true
+    const base = list.coverWorkIds ?? []
+    if (coverIds.length !== base.length) return true
+    return coverIds.some((id, i) => id !== base[i])
+  }, [mode, list, trimmedName, description, color, coverIds])
+
   function toggleCover(id: string) {
     setCoverIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id)
@@ -80,6 +95,8 @@ export function GroupFormDialog({ open, onOpenChange, mode, list, coverCandidate
       toast.error("Dê um nome ao grupo.")
       return
     }
+    // Enter no modo edição sem nenhuma mudança não deve gravar um no-op.
+    if (!dirty) return
     startTransition(async () => {
       const payload = { name: trimmed, description, color, coverWorkIds: coverIds }
       const res =
@@ -210,9 +227,19 @@ export function GroupFormDialog({ open, onOpenChange, mode, list, coverCandidate
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             Cancelar
           </Button>
-          <Button onClick={handleSubmit} disabled={pending}>
+          <SaveButton
+            onClick={handleSubmit}
+            disabled={pending || !dirty}
+            disabledReason={
+              !dirty
+                ? mode === "create"
+                  ? "Dê um nome ao grupo"
+                  : "Nenhuma alteração para salvar"
+                : undefined
+            }
+          >
             {pending ? "Salvando…" : mode === "create" ? "Criar grupo" : "Salvar"}
-          </Button>
+          </SaveButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

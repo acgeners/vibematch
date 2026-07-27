@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRefresh } from "@/lib/use-refresh"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { SaveButton } from "@/components/ui/save-button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { CRITERION_SLUGS } from "@/types/domain"
@@ -73,6 +74,20 @@ export function PostAttributeAssessmentForm({
 
   const [internalValues, setInternalValues] = useState<Record<CriterionSlug, number>>(initialValues)
   const values = isControlled ? (value as Record<CriterionSlug, number>) : internalValues
+
+  // Ainda não há avaliação pós-leitura salva? Salvar é sempre significativo
+  // (registra o passo, mesmo concordando com a IA). Com avaliação salva,
+  // "Salvar" só habilita quando algum valor difere do que já está persistido
+  // (= initialValues, que embute `existing ?? ia`).
+  const hasSavedAssessment = useMemo(
+    () => ratedSlugs.some((slug) => existingAssessment?.[slug as CriterionSlug] != null),
+    [ratedSlugs, existingAssessment],
+  )
+  const dirty =
+    !hasSavedAssessment ||
+    ratedSlugs.some(
+      (slug) => values[slug as CriterionSlug] !== initialValues[slug as CriterionSlug],
+    )
   const writeValues = (next: Record<CriterionSlug, number>) => {
     if (isControlled) onChange!(next)
     else setInternalValues(next)
@@ -212,9 +227,15 @@ export function PostAttributeAssessmentForm({
             Aceitar valores da IA
           </Button>
           {!hideOwnSave && (
-            <Button type="button" size="sm" onClick={save} disabled={isPending}>
+            <SaveButton
+              type="button"
+              size="sm"
+              onClick={save}
+              disabled={isPending || !dirty}
+              disabledReason={!dirty ? "Nenhuma alteração para salvar" : undefined}
+            >
               {isPending ? "Salvando…" : "Salvar avaliação"}
-            </Button>
+            </SaveButton>
           )}
         </div>
       </CardContent>

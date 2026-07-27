@@ -20,6 +20,7 @@ import type { ExternalManualReviewDisplayRow } from "@/server/queries/external-m
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { useRefresh } from "@/lib/use-refresh"
 import { Button } from "@/components/ui/button"
+import { SaveButton } from "@/components/ui/save-button"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
@@ -122,6 +123,7 @@ function ManualReviewCard({
   const [editing, setEditing] = useState(false)
   const [pending, startTransition] = useTransition()
   const form = useForm<FormFields>({ resolver, defaultValues: rowToForm(review), mode: "onSubmit" })
+  const isDirty = form.formState.isDirty
 
   const beginEdit = () => {
     form.reset(rowToForm(review))
@@ -156,9 +158,15 @@ function ManualReviewCard({
             </Button>
           </div>
           <ReviewFields form={form} />
-          <Button type="button" size="sm" disabled={pending} onClick={submit}>
+          <SaveButton
+            type="button"
+            size="sm"
+            disabled={pending || !isDirty}
+            disabledReason={!isDirty ? "Nenhuma alteração para salvar" : undefined}
+            onClick={submit}
+          >
             <PencilLine className="mr-1 h-3.5 w-3.5" /> Salvar alterações
-          </Button>
+          </SaveButton>
         </div>
       </li>
     )
@@ -212,6 +220,7 @@ export function ExternalManualReviewsSection({ workId, reviews }: Props) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   const form = useForm<FormFields>({ resolver, defaultValues: EMPTY, mode: "onSubmit" })
+  const isDirty = form.formState.isDirty
 
   const submitAdd = () =>
     form.handleSubmit((values) => {
@@ -262,9 +271,15 @@ export function ExternalManualReviewsSection({ workId, reviews }: Props) {
       <div onKeyDown={enterToSubmit(submitAdd, pending)} className="space-y-3 rounded-md border bg-card/40 p-3">
         <span className="text-xs font-semibold text-muted-foreground">Adicionar review externa</span>
         <ReviewFields form={form} />
-        <Button type="button" size="sm" disabled={pending} onClick={submitAdd}>
+        <SaveButton
+          type="button"
+          size="sm"
+          disabled={pending || !isDirty}
+          disabledReason={!isDirty ? "Escreva a review para adicionar" : undefined}
+          onClick={submitAdd}
+        >
           <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar review externa
-        </Button>
+        </SaveButton>
       </div>
 
       {reviews.length === 0 ? (

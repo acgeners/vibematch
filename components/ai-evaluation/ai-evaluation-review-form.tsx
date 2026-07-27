@@ -9,6 +9,7 @@ import { submitAiReview } from "@/server/actions/ai"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { Button } from "@/components/ui/button"
+import { SaveButton } from "@/components/ui/save-button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Label } from "@/components/ui/label"
 import { cn, titleToSlug } from "@/lib/utils"
@@ -365,9 +366,17 @@ export function AiEvaluationReviewForm({
       {/* Salvar no alto à direita, FORA da grade da capa: dentro dela a coluna
           sobra pouco e ele empurraria o Atual/Sugerido pra outra linha. */}
       <div className="flex justify-end">
-        <Button size="sm" onClick={handleSubmit} disabled={submitting}>
+        {/* `changing` = critérios que a gravação de fato muda. Vazio só quando há
+            notas atuais e o usuário mantém todas (o painel já avisa "salvar não
+            muda nada"). Na primeira avaliação tudo conta como mudança → liberado. */}
+        <SaveButton
+          size="sm"
+          onClick={handleSubmit}
+          disabled={submitting || changing.length === 0}
+          disabledReason={changing.length === 0 ? "Nenhuma alteração para salvar" : undefined}
+        >
           {submitting ? "Salvando..." : "Salvar"}
-        </Button>
+        </SaveButton>
       </div>
 
       {/* Capa + aplicar-a-todos + resumo. A grade NÃO é mais condicionada ao

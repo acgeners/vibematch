@@ -110,9 +110,12 @@ export function BalanceCard({ status }: { status: BalanceStatus }) {
               className="w-28 rounded-lg border border-border/70 bg-background/60 py-1.5 pl-6 pr-2 text-sm tabular-nums text-foreground outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
             />
           </div>
+          {/* Sem gate de "valor igual": reinformar o mesmo saldo é intencional
+              (re-sincroniza o "gasto desde então"). Só bloqueia campo vazio. */}
           <button
             type="submit"
-            disabled={pending}
+            disabled={pending || !value.trim()}
+            title={!value.trim() ? "Informe um valor para salvar" : undefined}
             className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/30 transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {pending ? "Salvando…" : hasBalance ? "Atualizar" : "Salvar"}

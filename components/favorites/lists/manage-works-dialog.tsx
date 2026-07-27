@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { SaveButton } from "@/components/ui/save-button"
 import { Input } from "@/components/ui/input"
 import { CoverImage } from "@/components/ui/cover-image"
 import { cn } from "@/lib/utils"
@@ -55,6 +56,14 @@ export function ManageWorksDialog({
     if (!q) return catalog
     return catalog.filter((w) => w.title.toLowerCase().includes(q))
   }, [catalog, search])
+
+  // A seleção difere dos membros atuais? Se não, não há o que salvar.
+  const dirty = useMemo(() => {
+    const memberSet = new Set(memberIds)
+    if (selected.size !== memberSet.size) return true
+    for (const id of selected) if (!memberSet.has(id)) return true
+    return false
+  }, [selected, memberIds])
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -180,9 +189,13 @@ export function ManageWorksDialog({
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
               Cancelar
             </Button>
-            <Button onClick={handleSave} disabled={pending}>
+            <SaveButton
+              onClick={handleSave}
+              disabled={pending || !dirty}
+              disabledReason={!dirty ? "Nenhuma alteração para salvar" : undefined}
+            >
               {pending ? "Salvando…" : "Salvar"}
-            </Button>
+            </SaveButton>
           </div>
         </DialogFooter>
       </DialogContent>
