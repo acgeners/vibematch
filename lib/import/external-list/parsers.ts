@@ -1,12 +1,13 @@
 import { gunzipSync } from "node:zlib"
 import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
 import type { PersonalStatus } from "@/types/domain"
+import type { AniListListEntry } from "@/lib/external/anilist"
 import type { ExternalListEntry, ExternalListSource } from "./types"
 
 // ── Mapas de status por fonte ────────────────────────────────────────
 //
-// Não usamos lib/import/normalizer.ts (gerado) porque o vocabulário das listas externas
-// ("read", "want to read", "Plan to Read") não está lá.
+// Os mapas ficam escritos à mão aqui porque o vocabulário das listas externas
+// ("read", "want to read", "Plan to Read") não vem do banco.
 //
 // A CHAVE é da FONTE (o vocabulário do MyAnimeList/Anime-Planet) — fica escrita à mão, é o
 // contrato deles. O VALOR é NOSSO status, e por isso sai do banco pelo SLUG: escrever o nome
@@ -30,6 +31,16 @@ const MAL_XML_STATUS: Record<string, PersonalStatus> = {
   "on-hold": ours("on-hold"),
   dropped: ours("dropped"),
   "plan to read": ours("want-to-read"),
+}
+
+// Enum de status do MediaList do AniList → NOSSO status (via slug).
+const ANILIST_STATUS: Record<string, PersonalStatus> = {
+  CURRENT: ours("reading"),
+  PLANNING: ours("want-to-read"),
+  COMPLETED: ours("finished"),
+  DROPPED: ours("dropped"),
+  PAUSED: ours("on-hold"),
+  REPEATING: ours("reading"),
 }
 
 function clampScore(value: number): number {
@@ -75,8 +86,57 @@ export function parseExternalList(text: string, source: ExternalListSource): Ext
     case "mangaupdates":
       return parseMangaUpdates(text)
     case "animeplanet":
-      return parseMalXml(text)
+    case "comix":
+      // Comix exporta no mesmo formato XML do MyAnimeList.
+      return parseMalXml(text, source)
+    case "anilist":
+      // AniList não vem de texto/arquivo — é buscado pela API e convertido por
+      // parseAniListList. Cair aqui é erro de uso.
+      throw new Error("A lista do AniList é buscada pela API, não parseada de arquivo.")
+    case "titles":
+      return parseTitleList(text)
   }
+}
+
+// Lista de títulos colada: um título por linha. Títulos costumam ter vírgula e
+// ponto-e-vírgula no meio, então quebrar por linha é o único separador seguro.
+// Dedup dentro da lista (case-insensitive); a dedup contra o DB é da reconciliação.
+export function parseTitleList(text: string): ExternalListEntry[] {
+  const seen = new Set<string>()
+  const out: ExternalListEntry[] = []
+  for (const line of text.split(/\r?\n/)) {
+    const title = line.trim()
+    if (!title) continue
+    const key = title.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      source: "titles",
+      externalId: null,
+      title,
+      personalStatus: null,
+      userScore: null,
+      chaptersRead: null,
+    })
+  }
+  return out
+}
+
+// AniList: converte as entradas já buscadas da API em entradas normalizadas.
+// O externalId é o media id do AniList → casa com work_external_ids (source "anilist").
+// Ordena por mediaId: as decisões do usuário são indexadas por POSIÇÃO, e o commit
+// re-busca a lista — a API não garante ordem estável entre chamadas, então fixamos.
+export function parseAniListList(entries: AniListListEntry[]): ExternalListEntry[] {
+  return [...entries]
+    .sort((a, b) => a.mediaId - b.mediaId)
+    .map((e) => ({
+    source: "anilist" as const,
+    externalId: String(e.mediaId),
+    title: e.title,
+    personalStatus: e.status ? ANILIST_STATUS[e.status] ?? null : null,
+    userScore: e.score != null ? clampScore(e.score) : null,
+    chaptersRead: e.progress != null ? toPositiveInt(e.progress) : null,
+  }))
 }
 
 // ── MyAnimeList JSON ─────────────────────────────────────────────────
@@ -143,7 +203,10 @@ function parseMangaUpdates(text: string): ExternalListEntry[] {
 // ── Anime-Planet / MyAnimeList XML ───────────────────────────────────
 // <myanimelist><manga>…</manga>…</myanimelist>
 // Estrutura plana e regular → extração por blocos, sem dependência de XML.
-function parseMalXml(text: string): ExternalListEntry[] {
+function parseMalXml(
+  text: string,
+  source: "animeplanet" | "comix" = "animeplanet"
+): ExternalListEntry[] {
   const blocks = text.split(/<manga>/i).slice(1).map((b) => b.split(/<\/manga>/i)[0])
   const out: ExternalListEntry[] = []
   for (const block of blocks) {
@@ -152,7 +215,7 @@ function parseMalXml(text: string): ExternalListEntry[] {
     const statusKey = (xmlTag(block, "my_status") ?? "").toLowerCase().trim()
     const score = toPositiveInt(xmlTag(block, "my_score"))
     out.push({
-      source: "animeplanet",
+      source,
       externalId: xmlTag(block, "manga_mangadb_id"),
       title,
       personalStatus: MAL_XML_STATUS[statusKey] ?? null,

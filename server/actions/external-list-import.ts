@@ -13,7 +13,9 @@ import {
   decodeContent,
   detectSource,
   parseExternalList,
+  parseAniListList,
 } from "@/lib/import/external-list/parsers"
+import { fetchAniListUserMangaList } from "@/lib/external/anilist"
 import {
   buildMatchContext,
   matchEntry,
@@ -41,20 +43,39 @@ type AnySupabaseClient = any
 
 export interface ExternalListInput {
   filename: string
+  // Vazio quando source === "anilist" (a lista vem da API, não de arquivo).
   contentBase64: string
   source?: ExternalListSource
+  // Só para source === "anilist": nome de usuário público do AniList.
+  username?: string
 }
 
 const FILE_TYPE: Record<ExternalListSource, string> = {
   myanimelist: "mal_json",
   mangaupdates: "mu_json",
   animeplanet: "mal_xml",
+  anilist: "anilist_user",
+  titles: "titles_paste",
+  comix: "comix_xml",
 }
 
-function resolveEntries(input: ExternalListInput): {
+async function resolveEntries(input: ExternalListInput): Promise<{
   source: ExternalListSource
   entries: ExternalListEntry[]
-} {
+}> {
+  // AniList: sem arquivo — busca a lista pública pela API.
+  if (input.source === "anilist") {
+    const username = input.username?.trim()
+    if (!username) throw new Error("Informe seu nome de usuário do AniList.")
+    const raw = await fetchAniListUserMangaList(username)
+    if (raw === null) {
+      throw new Error(
+        "Não foi possível buscar a lista no AniList. Confira o nome de usuário e se a lista está pública."
+      )
+    }
+    return { source: "anilist", entries: parseAniListList(raw) }
+  }
+
   const text = decodeContent(input.contentBase64)
   const source = input.source ?? detectSource(text)
   if (!source) {
@@ -87,7 +108,7 @@ export async function analyzeExternalListImport(
   const gate = await ensureAdmin()
   if (!gate.ok) return { error: gate.error }
   try {
-    const { source, entries } = resolveEntries(input)
+    const { source, entries } = await resolveEntries(input)
     const supabase = createAdminClient()
     const ctx = await buildMatchContext(supabase)
 
@@ -240,7 +261,7 @@ export async function commitExternalListImport(
   try {
     const gate = await ensureAdmin()
     if (!gate.ok) return { error: gate.error }
-    const { source, entries } = resolveEntries(input)
+    const { source, entries } = await resolveEntries(input)
     const supabase = createAdminClient()
     const ctx = await buildMatchContext(supabase)
 
@@ -355,6 +376,7 @@ export async function commitExternalListImport(
     revalidatePath("/")
     revalidatePath("/ranking")
     revalidatePath("/ai-evaluation")
+    revalidatePath("/import")
     revalidateTag("ai-eval-tab-counts", "max")
 
     return { data: result }

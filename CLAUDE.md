@@ -202,8 +202,6 @@ These files are **fully overwritten** by `npm run sync-constants` and must not b
 | `lib/constants/ui-labels.ts` | `ui_labels` (`LABELS` keyed by field → `{full, short, abbrev, tooltip_full, tooltip_short}`; free-floating UI names/tooltips not owned by another table) |
 | `lib/external/types.ts` | `source` (ExternalSourceId only, rest preserved) |
 | `lib/external/source-order.ts` | `source` (`EXTERNAL_SOURCE_ORDER`, coluna `order`; só o bloco entre os marcadores `<generated:external-source-order>`). ⚠️ Esta ordem governa DOIS usos ao mesmo tempo: a EXIBIÇÃO das fontes no diálogo E a PRIORIDADE das reviews no prompt da IA (`REVIEW_SOURCE_PRIORITY` em `index.ts` é DERIVADA dela). Mexer no `order` do Supabase muda os dois. |
-| `lib/import/mapper.ts` | `criteria` aliases |
-| `lib/import/normalizer.ts` | `publication_status` + `personal_status` maps |
 | `types/domain.ts` | `PUBLICATION_STATUSES`, `PERSONAL_STATUSES`, `PLATFORMS`, `CRITERION_SLUGS` arrays |
 
 The canonical list of AI evaluation criteria (`CRITERION_SLUGS`) comes from the `criteria` table where `eval_type = 'IA'`. Any change to criteria must go through the DB and then `sync-constants`.
@@ -254,6 +252,41 @@ Post-processing applied to every evaluation (in `service.ts`):
 - `enforceAuditableReviewUsage`: **non-fatal since v20 (2026-06-27)** — generic review citation is accepted ("algumas reviews apontam…"), so it no longer requires/validates specific review IDs (`R1`, `R2`…) nor throws. It only records an informational `reviewAudit` (`required` = "havia reviews no prompt"; `usedReviewIds` = whatever IDs the model happened to cite, often empty with generic citation). `review_usage` is now an OPTIONAL tool/schema field. (Earlier behavior: threw + retried when IDs weren't cited — removed because a citation slip discarded otherwise-valid evals.)
 
 The model is `claude-sonnet-4-6`, prompt version `v21` (toggled by `CONCISE_OUTPUT` in `service.ts`: `v21` concise output / `v18` verbose — flipping it falls back to the old caches; `v21` = concise + **consensus** review citation (generic, never a single review/ID), succeeded `v20`), up to 2 attempts (4500 max tokens on **both** attempts; temperature 0.2 then 0). Opus 4.7 and Haiku 4.5 are supported as per-evaluation overrides (the A/B "Reavaliar com…" buttons); Opus 4.7 doesn't accept the `temperature` param. MAE values stored in `formula_config` reflect calibration runs against the current model+prompt; the hardcoded fallbacks in `calibration.ts` (1.27/0.92) are historical defaults from the original spreadsheet — not authoritative.
+
+## Importação (`/import`)
+
+Quatro métodos, **todos pela MESMA reconciliação** (`analyzeExternalListImport` → buckets de
+auto-update / conflitos / ambíguos / novas / sem-mudança → `commitExternalListImport`). O input comum é
+`ExternalListInput { filename, contentBase64, source?, username? }`; o servidor **re-parseia no commit**
+(determinístico), então só recebe as decisões do usuário indexadas por posição.
+
+| Método (`ExternalListSource`) | Como entra | Parser |
+|---|---|---|
+| Arquivo — `myanimelist` / `mangaupdates` / `animeplanet` | upload (.json / .json / .xml.gz) | `parseExternalList` |
+| `anilist` | **API pública por usuário** (`fetchAniListUserMangaList`, GraphQL `MediaListCollection`) — sem arquivo | `parseAniListList` (ordena por `mediaId`: o commit re-busca e a ordem tem que bater) |
+| `titles` | **lista colada, um título por linha** (só-título, curadoria em massa do admin) | `parseTitleList` |
+
+Título tem vírgula/`;` no meio → o único separador seguro da lista colada é **quebra de linha**. A
+dedup contra o DB é a própria reconciliação (matcher Jaccard + rede `pg_trgm`), igual para todos.
+
+**"Revisar pendentes" mostra SÓ obras criadas por importação** (`getPendingReviewWorks`: junta
+`import_rows.status = "imported"` ao filtro `ai_eval_status = "pending"` + não-arquivada). Obra criada
+em `/titles/new` **NÃO entra** aqui, mesmo sem avaliação IA — antes entrava e poluía a lista.
+
+### ⚠️ Postergado — depende do import multi-user (hoje é `ensureAdmin`-only, curador único)
+
+Enquanto o import for admin-only, estes **não têm efeito prático** e foram deixados de fora **de
+propósito** (não é bug, é escopo):
+
+- **Per-user** ("só as obras que ESTE usuário importou"): a tabela `imports` **NÃO tem `user_id`** →
+  precisa migration + setar no create + escopar `imports → import_rows → work_id` em
+  `getPendingReviewWorks`. Hoje, curador único, todo import é do dono.
+- **Gate por plano**: esconder a aba "Revisar pendentes" para `leitor` (free, sem autonomia de IA);
+  o plano vem de `getCurrentUserProfile().plan` (`leitor→free`, resto `→paid`).
+- **Fluxo do usuário free**: abrir o import para não-admin + aviso "obra criada, não enriquecida" (as
+  etapas que chamam IA ficam pendentes; a aba de pendências nem aparece para quem não pode gerar nada).
+
+Só reabrir estes quando/se o import deixar de ser `ensureAdmin`-only.
 
 ## External data sources
 

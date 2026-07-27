@@ -1,74 +1,127 @@
 "use client"
 
 import { useState } from "react"
+import { Upload, ClipboardCheck, History } from "lucide-react"
 import { useRefresh } from "@/lib/use-refresh"
-import { cn } from "@/lib/utils"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { StatCard } from "@/components/settings/stat-card"
 import { ExternalListImport } from "@/components/import/external-list-import"
+import { ExportHelp } from "@/components/import/export-help"
+import { ImportHistory } from "@/components/import/import-history"
+import { SourceTag } from "@/components/import/source-tag"
 import { ImportReview } from "@/components/titles/import-review"
 import type { ReviewWork } from "@/server/actions/enrich"
+import type { ImportHistoryRow, ImportStats } from "@/server/queries/imports"
 
-type Mode = "external" | "review"
+const RELATIVE = new Intl.RelativeTimeFormat("pt-BR", { numeric: "auto" })
 
-export function ImportModes({ pendingReviewWorks }: { pendingReviewWorks: ReviewWork[] }) {
+function relativeDays(iso: string): string {
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return "—"
+  const days = Math.round((then - Date.now()) / 86_400_000)
+  if (days === 0) return "hoje"
+  return RELATIVE.format(days, "day")
+}
+
+export function ImportModes({
+  pendingReviewWorks,
+  history,
+  stats,
+}: {
+  pendingReviewWorks: ReviewWork[]
+  history: ImportHistoryRow[]
+  stats: ImportStats
+}) {
   const refresh = useRefresh()
-  const [mode, setMode] = useState<Mode>("external")
-  // Obras revisadas nesta sessão — somem da contagem/aba de pendentes.
+  const [tab, setTab] = useState("import")
+  // Obras revisadas nesta sessão — somem da contagem de pendentes.
   const [reviewed, setReviewed] = useState<Set<string>>(new Set())
-  const pendingCount = pendingReviewWorks.filter((w) => !reviewed.has(w.id)).length
-  // Mostra a aba de revisão se há pendentes OU se o usuário está nela (pra não
-  // sumir bruscamente ao revisar a última — exibe o estado vazio 🎉).
-  const showReview = pendingCount > 0 || mode === "review"
 
-  const modes: { id: Mode; label: string }[] = [
-    { id: "external", label: "Listas externas" },
-    ...(showReview
-      ? [{ id: "review" as Mode, label: `Revisar pendentes (${pendingCount})` }]
-      : []),
-  ]
+  const pending = pendingReviewWorks.filter((w) => !reviewed.has(w.id))
+  const pendingCount = pending.length
+  const coverless = pending.filter((w) => w.coverCount === 0).length
+  const pct =
+    stats.catalogCount > 0 ? Math.round((stats.evaluatedCount / stats.catalogCount) * 100) : 0
 
   return (
     <div className="space-y-6">
-      {modes.length > 1 && (
-        <div className="inline-flex w-fit items-center gap-1 rounded-lg bg-muted p-[3px]">
-          {modes.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => setMode(m.id)}
-              className={cn(
-                "rounded-md px-3 py-1 text-sm font-medium transition",
-                mode === m.id
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-foreground/60 hover:text-foreground"
-              )}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {mode === "external" && (
-        <ExternalListImport
-          onReviewBatchComplete={() => {
-            // Lote de "Buscar dados das sem capa" terminou → atualiza as
-            // pendentes (servidor) e vai pra aba "Revisar pendentes".
-            refresh()
-            setMode("review")
-          }}
+      {/* ── Panorama ─────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatCard
+          label="No catálogo"
+          value={<span className="tabular-nums">{stats.catalogCount}</span>}
+          hint={`obras · ${pct}% já avaliadas pela IA`}
         />
-      )}
-      {mode === "review" && (
-        <div className="space-y-3">
+        <StatCard
+          label="Pendentes de revisão"
+          value={
+            <span className={pendingCount > 0 ? "tabular-nums text-amber-600 dark:text-amber-400" : "tabular-nums"}>
+              {pendingCount}
+            </span>
+          }
+          hint={pendingCount === 0 ? "nada a revisar" : coverless > 0 ? `${coverless} sem capa` : "todas com capa"}
+        />
+        <StatCard
+          label="Última importação"
+          value={stats.lastImport ? relativeDays(stats.lastImport.createdAt) : "—"}
+          valueClassName="text-sm"
+          hint={
+            stats.lastImport ? (
+              <span className="inline-flex items-center gap-1.5">
+                <SourceTag source={stats.lastImport.source} className="px-1.5 py-0" />
+                {stats.lastImport.createdCount > 0 ? `+${stats.lastImport.createdCount} novas` : "sem novas"}
+              </span>
+            ) : (
+              "nenhuma ainda"
+            )
+          }
+        />
+      </div>
+
+      {/* ── Abas: nível 1 = segmentado preenchido (padrão /leitura) ──── */}
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="h-10 w-fit rounded-xl p-1">
+          <TabsTrigger value="import" className="flex-none rounded-lg px-4 font-semibold">
+            <Upload /> Importar
+          </TabsTrigger>
+          <TabsTrigger value="review" className="flex-none rounded-lg px-4 font-semibold">
+            <ClipboardCheck /> Revisar pendentes
+            {pendingCount > 0 && (
+              <span className="tabular-nums text-xs text-muted-foreground">{pendingCount}</span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="history" className="flex-none rounded-lg px-4 font-semibold">
+            <History /> Histórico
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="import" className="space-y-4 pt-5">
+          <ExternalListImport
+            onReviewBatchComplete={() => {
+              // Lote de "Buscar dados das sem capa" terminou → atualiza pendentes
+              // (servidor) e vai pra aba de revisão.
+              refresh()
+              setTab("review")
+            }}
+          />
+          <ExportHelp />
+        </TabsContent>
+
+        <TabsContent value="review" className="space-y-3 pt-5">
           <p className="text-sm text-muted-foreground">
-            Obras importadas pendentes de avaliação. Busque capa/sinopses das que estão sem capa e confira o que veio das fontes. As notas dos atributos são geradas na Avaliação IA.
+            Obras importadas pendentes de avaliação. Busque capa/sinopses das que estão sem capa e
+            confira o que veio das fontes. As notas dos atributos são geradas na Avaliação IA.
           </p>
           <ImportReview
             works={pendingReviewWorks}
             onReviewed={(id) => setReviewed((prev) => new Set(prev).add(id))}
           />
-        </div>
-      )}
+        </TabsContent>
+
+        <TabsContent value="history" className="pt-5">
+          <ImportHistory rows={history} />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
