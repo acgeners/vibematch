@@ -2,13 +2,12 @@ import Link from "next/link"
 import { AlertTriangle, ArrowRight, MessageCircle, Sparkles } from "lucide-react"
 import { Header } from "@/components/layout/header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { CollapsibleCard } from "@/components/ui/collapsible-card"
 import { RecommendDialog } from "@/components/recommendations/recommend-dialog"
-import { RunHistoryList } from "@/components/recommendations/run-history-list"
-import { RUN_MODE_LEGEND } from "@/components/recommendations/run-mode-display"
+import { HistoryTabs } from "@/components/recommendations/history-tabs"
 import { RecommendationChat } from "@/components/recommendations/recommendation-chat"
 import { getTasteProfileStatusAction } from "@/server/actions/recommendations"
 import { listRecommendationRuns } from "@/server/queries/recommendations"
+import { listAllDeepDives } from "@/server/queries/deep-dive"
 import { listChatsAction } from "@/server/actions/recommendation-chat"
 import { canConsumeAi } from "@/server/queries/current-user"
 import { deniedMessage } from "@/lib/plans/roles"
@@ -17,11 +16,12 @@ import { formatRelativeDateTime } from "@/lib/date-utils"
 export const revalidate = 60
 
 export default async function RecommendationsPage() {
-  const [status, runs, canAi, chats] = await Promise.all([
+  const [status, runs, canAi, chats, deepDives] = await Promise.all([
     getTasteProfileStatusAction(),
     listRecommendationRuns(50),
     canConsumeAi(),
     listChatsAction(8),
+    listAllDeepDives(100),
   ])
 
   const canChat = canAi
@@ -151,35 +151,11 @@ export default async function RecommendationsPage() {
             </CardContent>
           </Card>
 
-          <section className="space-y-4">
-            <div className="flex flex-col gap-2">
-              <div className="flex items-baseline justify-between">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                  Histórico
-                </h2>
-                <span className="text-xs text-muted-foreground select-none">{runs.length} salva(s)</span>
-              </div>
-              
-              {runs.length > 0 && (
-                <div className="space-y-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60 select-none pl-0.5">
-                    Legenda
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-                    {RUN_MODE_LEGEND.map(({ label, Icon }) => (
-                      <div
-                        key={label}
-                        className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-card/25 px-2.5 py-1.5 text-xs text-muted-foreground select-none"
-                      >
-                        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/85" />
-                        <span className="font-semibold text-[11px] leading-tight">{label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-            <RunHistoryList runs={runs} />
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Histórico
+            </h2>
+            <HistoryTabs runs={runs} dives={deepDives} />
           </section>
         </div>
       </div>

@@ -7,6 +7,7 @@ import { MAX_DEEP_DIVES_PER_DAY } from "@/lib/ai-recommendation/deep-dive-limits
 import { ensureAiConsumption } from "@/server/queries/ai-quota"
 import { getSessionUserId } from "@/server/queries/current-user"
 import {
+  getDeepDiveById,
   getDeepDiveContext,
   getDeepDiveHistory,
   getDeepDivesToday,
@@ -136,4 +137,12 @@ export async function listDeepDiveHistoryAction(
   limit = 10,
 ): Promise<DeepDiveResultRow[]> {
   return getDeepDiveHistory(workId, limit)
+}
+
+/**
+ * Carrega a linha completa (com `payload`) de um Deep Dive — usada pelo modal da
+ * central de Deep Dives em /recommendations, que só recebe o resumo leve na lista.
+ */
+export async function getDeepDiveByIdAction(id: string): Promise<DeepDiveResultRow | null> {
+  return getDeepDiveById(id)
 }

@@ -17,6 +17,7 @@ import type {
   DeepDiveAlternativeCandidate,
   DeepDiveContext,
   DeepDivePayload,
+  DeepDiveReadWhen,
   DeepDiveResultRow,
   DeepDiveSimilarsBundle,
   DeepDiveWorkBundle,
@@ -449,6 +450,119 @@ export async function getDeepDiveHistory(workId: string, limit = 10): Promise<De
     return []
   }
   return (data ?? []).map((row) => mapDeepDiveRow(row as Record<string, unknown>))
+}
+
+/** Uma linha específica por id — usada pelo modal da central de Deep Dives, que
+ *  carrega o `payload` completo on-demand (a listagem só traz os campos leves). */
+export async function getDeepDiveById(id: string): Promise<DeepDiveResultRow | null> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from("deep_dive_results")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle()
+  if (error) {
+    console.error("[deep-dive] erro lendo deep dive por id:", error)
+    return null
+  }
+  if (!data) return null
+  return mapDeepDiveRow(data as Record<string, unknown>)
+}
+
+/** Resumo leve de um Deep Dive pra listagem global (sem o `payload` pesado). */
+export interface DeepDiveSummary {
+  id: string
+  workId: string
+  workTitle: string
+  coverUrl: string | null
+  matchScore: number | null
+  confidence: number | null
+  readWhen: DeepDiveReadWhen | null
+  oneLiner: string | null
+  createdAt: string
+}
+
+/**
+ * ÚLTIMA análise Deep Dive POR OBRA do usuário atual, mais recente primeiro.
+ *
+ * Espelha `listRecommendationRuns` (hidrata título+capa num segundo query), mas
+ * escopa por `user_id` (migration 159 + índice `deep_dive_results_user_created_idx`) —
+ * mais correto que a lista de runs, que hoje não escopa.
+ *
+ * NÃO traz o `payload` (5-10KB/linha): manteria a página pesada. O modal carrega a
+ * linha completa on-demand via `getDeepDiveById`. O histórico completo por obra
+ * continua no drawer da própria obra (`getDeepDiveHistory`).
+ */
+export async function listAllDeepDives(limit = 100): Promise<DeepDiveSummary[]> {
+  const supabase = createAdminClient()
+  const userId = await getCurrentUserId(supabase)
+
+  // Pagina: o `select` corta em 1000 linhas SEM avisar (ver CLAUDE.md). Sem o
+  // payload, as linhas são minúsculas — varrer tudo é barato, e precisamos de TODAS
+  // pra deduplicar "última por obra" corretamente (truncar perderia a última análise
+  // de qualquer obra cujo registro caísse fora do recorte).
+  const raw: Array<Record<string, unknown>> = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("deep_dive_results")
+      .select("id, work_id, match_score, confidence, read_when, one_liner, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .range(from, from + 999)
+    if (error) {
+      console.error("[deep-dive] erro listando deep dives:", error)
+      return []
+    }
+    if (!data?.length) break
+    raw.push(...(data as Array<Record<string, unknown>>))
+    if (data.length < 1000) break
+  }
+
+  // Dedupe: mantém a 1ª ocorrência por work_id (a mais recente, pois vem em ordem desc).
+  const seen = new Set<string>()
+  const latestPerWork: Array<Record<string, unknown>> = []
+  for (const row of raw) {
+    const wid = row.work_id as string
+    if (seen.has(wid)) continue
+    seen.add(wid)
+    latestPerWork.push(row)
+    if (latestPerWork.length >= limit) break
+  }
+  if (latestPerWork.length === 0) return []
+
+  // Hidrata título + capa primária (mesmo padrão do `listRecommendationRuns`). A lista
+  // deduplicada é pequena (≤ nº de obras com Deep Dive), então `.in()` com embed não
+  // corre o risco do PostgREST estourar o plano (ver gotcha do `.in("id")` + embeds).
+  const workIds = latestPerWork.map((r) => r.work_id as string)
+  const { data: works, error: worksErr } = await supabase
+    .from("works")
+    .select("id, title, work_covers(url, is_primary, position)")
+    .in("id", workIds)
+  if (worksErr) {
+    console.error("[deep-dive] erro hidratando obras dos deep dives:", worksErr)
+  }
+  const workById = new Map<string, { title: string; coverUrl: string | null }>(
+    (works ?? []).map((w) => {
+      const row = w as { id: string; title: string; work_covers?: RawCoverRow[] }
+      return [row.id, { title: row.title, coverUrl: pickPrimaryCover(row.work_covers) }]
+    }),
+  )
+
+  return latestPerWork.map((r) => {
+    const wid = r.work_id as string
+    const w = workById.get(wid)
+    return {
+      id: r.id as string,
+      workId: wid,
+      workTitle: w?.title ?? "(obra removida)",
+      coverUrl: w?.coverUrl ?? null,
+      matchScore: r.match_score != null ? Number(r.match_score) : null,
+      confidence: r.confidence != null ? Number(r.confidence) : null,
+      readWhen: (r.read_when as DeepDiveReadWhen | null) ?? null,
+      oneLiner: (r.one_liner as string | null) ?? null,
+      createdAt: r.created_at as string,
+    } satisfies DeepDiveSummary
+  })
 }
 
 /**
