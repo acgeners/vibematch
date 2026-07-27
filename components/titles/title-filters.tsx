@@ -33,7 +33,7 @@ import type { WorkSuggestion } from "@/server/queries/work-suggestions"
 import type { SignatureCount } from "@/server/queries/work-signature"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
-import { AI_EVAL_STATUSES, CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
+import { CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { cn } from "@/lib/utils"
@@ -71,13 +71,6 @@ const CRITERION_SORT_FIELDS: Array<{ value: string; label: string }> = CRITERION
 )
 
 const ALL_SORTABLE_FIELDS = [...SORTABLE_FIELDS, ...CRITERION_SORT_FIELDS]
-
-const AI_STATUS_LABELS: Record<string, string> = {
-  pending: "Pendente atributos",
-  review_pending: "Pendente Veredito IA",
-  done: "Avaliado",
-  skipped: "Pulado",
-}
 
 interface StatusOption {
   id: number
@@ -1006,7 +999,6 @@ export function TitleFilters({
   }
 
   const selectedSynopsisQ = csvSet(searchParams, "synopsis_q")
-  const selectedAiStatuses = csvSet(searchParams, "ai_status")
 
   const selectedGenreAny = csvSet(searchParams, "genres_any")
   const selectedTagAny = csvSet(searchParams, "tags_any")
@@ -1063,9 +1055,6 @@ export function TitleFilters({
   }
   selectedSynopsisQ.forEach((q) => activeChips.push({
     key: `syn-${q}`, label: `Sinopse: ${q}`, onRemove: () => toggleCsv("synopsis_q", q),
-  }))
-  selectedAiStatuses.forEach((s) => activeChips.push({
-    key: `ai-${s}`, label: `IA: ${AI_STATUS_LABELS[s] ?? s}`, onRemove: () => toggleCsv("ai_status", s),
   }))
   selectedSignatures.forEach((slug) => activeChips.push({
     key: `sig-${slug}`,
@@ -1259,70 +1248,66 @@ export function TitleFilters({
               )}
             </TabsTrigger>
             <TabsTrigger value="generos" className="h-9 min-w-20 flex-none gap-1.5 text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">
-              Gêneros
-              {selectedGenreAny.size > 0 && (
-                <Badge className="h-4 px-1.5 text-[10px] tabular-nums">{selectedGenreAny.size}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="tags" className="h-9 min-w-20 flex-none gap-1.5 text-sm data-[state=active]:bg-card/85 data-[state=active]:shadow-sm xl:min-w-0 xl:flex-1">
-              Tags
-              {selectedTagAny.size > 0 && (
-                <Badge className="h-4 px-1.5 text-[10px] tabular-nums">{selectedTagAny.size}</Badge>
+              Gêneros e Tags
+              {selectedGenreAny.size + selectedTagAny.size > 0 && (
+                <Badge className="h-4 px-1.5 text-[10px] tabular-nums">
+                  {selectedGenreAny.size + selectedTagAny.size}
+                </Badge>
               )}
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral" className="space-y-3">
-          {/* O que mostrar: recortes booleanos + conteúdo 18+ */}
-          <FilterCard title="O que mostrar">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <ToggleChip
-                label="⭐ Só avaliadas"
-                tone="positive"
-                active={searchParams.get("rated") === "1"}
-                onClick={() =>
-                  updateParams({ rated: searchParams.get("rated") === "1" ? null : "1" })
-                }
-                tooltip="Só obras com nota pessoal sua — as que treinaram o modelo. Ligar isto também mostra as já terminadas e abandonadas."
-              />
-              <ToggleChip
-                label={`🎯 Só com ${LABELS.expected_score.short}`}
-                active={searchParams.get("only_scored") === "1"}
-                onClick={() =>
-                  updateParams({ only_scored: searchParams.get("only_scored") === "1" ? null : "1" })
-                }
-                tooltip="Esconde obras sem Nota Prevista (as que ainda não têm os 9 atributos de IA)."
-              />
-              <ToggleChip
-                label="❤️ Só favoritas"
-                active={searchParams.get("fav") === "1"}
-                onClick={() => updateParams({ fav: searchParams.get("fav") === "1" ? null : "1" })}
-              />
-              <ToggleChip
-                label="📦 Incluir arquivadas"
-                active={searchParams.get("archived") === "1"}
-                onClick={() =>
-                  updateParams({ archived: searchParams.get("archived") === "1" ? null : "1" })
-                }
-              />
+          {/* Recortes booleanos + conteúdo 18+ em cards separados */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FilterCard title="O que mostrar">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <ToggleChip
+                  label="⭐ Só avaliadas"
+                  tone="positive"
+                  active={searchParams.get("rated") === "1"}
+                  onClick={() =>
+                    updateParams({ rated: searchParams.get("rated") === "1" ? null : "1" })
+                  }
+                  tooltip="Só obras com nota pessoal sua — as que treinaram o modelo. Ligar isto também mostra as já terminadas e abandonadas."
+                />
+                <ToggleChip
+                  label={`🎯 Só com ${LABELS.expected_score.short}`}
+                  active={searchParams.get("only_scored") === "1"}
+                  onClick={() =>
+                    updateParams({ only_scored: searchParams.get("only_scored") === "1" ? null : "1" })
+                  }
+                  tooltip="Esconde obras sem Nota Prevista (as que ainda não têm os 9 atributos de IA)."
+                />
+                <ToggleChip
+                  label="❤️ Só favoritas"
+                  active={searchParams.get("fav") === "1"}
+                  onClick={() => updateParams({ fav: searchParams.get("fav") === "1" ? null : "1" })}
+                />
+                <ToggleChip
+                  label="📦 Incluir arquivadas"
+                  active={searchParams.get("archived") === "1"}
+                  onClick={() =>
+                    updateParams({ archived: searchParams.get("archived") === "1" ? null : "1" })
+                  }
+                />
+              </div>
+            </FilterCard>
 
-              <div className="flex items-center gap-2">
-                <Label
-                  className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-                  title="Filtra pela classificação da obra (o mesmo selo 🔞 da página da obra), não pelas tags. 'Tudo' respeita sua preferência global."
-                >
-                  Conteúdo 18+
-                </Label>
+            <FilterCard title="Conteúdo 18+">
+              <div
+                title="Filtra pela classificação da obra (o mesmo selo 🔞 da página da obra), não pelas tags. 'Tudo' respeita sua preferência global."
+              >
                 <AdultContentSegment
                   value={adultMode}
                   onChange={(v) => updateParams({ adult: v === "all" ? null : v })}
                 />
               </div>
-            </div>
-          </FilterCard>
+            </FilterCard>
+          </div>
 
-          {/* Linha 1: Publicação + Status Pessoal + Status IA (cards estreitos) */}
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {/* Linha 1: Publicação + Status Pessoal (cards estreitos) */}
+          <div className="grid gap-3 sm:grid-cols-2">
             <FilterCard
               title={`Publicação${isAllPub ? " (todos)" : selectedPubStatuses.size ? ` (${selectedPubStatuses.size})` : ""}`}
               action={
@@ -1376,25 +1361,6 @@ export function TitleFilters({
                     tooltip={getPersonalStatusDescription(s.status, s.comment)}
                     onClick={() => togglePerStatus(s.status)}
                   />
-                ))}
-              </div>
-            </FilterCard>
-
-            <FilterCard title={`Status IA${selectedAiStatuses.size ? ` (${selectedAiStatuses.size})` : ""}`}>
-              <div className="flex flex-wrap gap-1.5">
-                {AI_EVAL_STATUSES.map((status) => (
-                  <button
-                    key={status}
-                    type="button"
-                    onClick={() => toggleCsv("ai_status", status)}
-                  >
-                    <Badge
-                      variant={selectedAiStatuses.has(status) ? "default" : "outline"}
-                      className="cursor-pointer rounded-full px-2.5 py-1 text-xs"
-                    >
-                      {AI_STATUS_LABELS[status] ?? status}
-                    </Badge>
-                  </button>
                 ))}
               </div>
             </FilterCard>
@@ -1541,8 +1507,8 @@ export function TitleFilters({
             </details>
           </TabsContent>
 
-          {/* ==================== GÊNEROS ==================== */}
-          <TabsContent value="generos">
+          {/* ==================== GÊNEROS E TAGS ==================== */}
+          <TabsContent value="generos" className="space-y-3">
             <FilterCard title={`Gênero${selectedGenreAny.size ? ` (${selectedGenreAny.size})` : ""}`}>
               {availableGenres.length === 0 ? (
                 <p className="text-xs text-muted-foreground">Nenhum gênero disponível</p>
@@ -1565,10 +1531,7 @@ export function TitleFilters({
                 </div>
               )}
             </FilterCard>
-          </TabsContent>
 
-          {/* ==================== TAGS ==================== */}
-          <TabsContent value="tags">
             <FilterCard title={`Tags${selectedTagAny.size ? ` (${selectedTagAny.size})` : ""}`}>
               <TagFilter
                 selected={[...selectedTagAny]}
