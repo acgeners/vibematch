@@ -163,9 +163,10 @@ export async function getImportReviewWorks(ids: string[]): Promise<ReviewWork[]>
   return works.map((w) => toReviewWork(w))
 }
 
-// Revisão persistente: todas as obras pendentes de avaliação (inclui as
-// importadas que ainda não foram avaliadas). Disponível em /import enquanto
-// houver pendentes; uma obra sai daqui quando é avaliada (vira 'done'/'skipped').
+// Revisão de importação: obras CRIADAS por uma importação que ainda não foram
+// avaliadas pela IA. Só as provenientes de import (import_rows.status = "imported")
+// — obras criadas em /titles/new já vêm com dados e NÃO entram aqui, mesmo sem
+// avaliação IA. Uma obra sai daqui quando é avaliada (vira 'done'/'skipped').
 export async function getPendingReviewWorks(limit = 300): Promise<ReviewWork[]> {
   const supabase = createAdminClient()
   // Lê o dado PESSOAL do DONO (observations) → vem do espelho via a view `works_owner`,
@@ -180,7 +181,21 @@ export async function getPendingReviewWorks(limit = 300): Promise<ReviewWork[]> 
     .order("created_at", { ascending: false })
     .limit(limit)
   if (error) throw new Error(error.message)
-  return ((data ?? []) as ReviewWorkRow[]).map(toReviewWork)
+  const rows = (data ?? []) as ReviewWorkRow[]
+  if (rows.length === 0) return []
+
+  // Filtra pelas que foram CRIADAS por uma importação. Parte do conjunto pequeno
+  // de pendentes (poucas) e consulta import_rows só por esses ids — sem embeds,
+  // então o `.in` não cai na armadilha do plano do PostgREST.
+  const ids = rows.map((r) => r.id)
+  const { data: imported, error: impError } = await supabase
+    .from("import_rows")
+    .select("work_id")
+    .eq("status", "imported")
+    .in("work_id", ids)
+  if (impError) throw new Error(impError.message)
+  const importedIds = new Set((imported ?? []).map((r: { work_id: string }) => r.work_id))
+  return rows.filter((r) => importedIds.has(r.id)).map(toReviewWork)
 }
 
 export async function enrichWorkExternal(workId: string): Promise<EnrichResult> {
