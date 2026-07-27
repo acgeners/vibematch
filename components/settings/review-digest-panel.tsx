@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
-import { Layers } from "lucide-react"
+import { Layers, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { StatCard } from "@/components/settings/stat-card"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
@@ -17,15 +17,20 @@ import {
 
 interface ReviewDigestPanelProps {
   accent: SettingsAccent
+  /** Obras com reviews e digest nulo/versão antiga (espelha o filtro da action). */
+  pendingCount: number
+  /** Obras com ≥1 review (universo digestável). */
+  totalCount: number
 }
 
 /**
  * Item C, Passe 2 — backfill OPT-IN do digest estruturado (Sonnet). Diferente do
  * resumo-texto (Haiku, automático), o digest é gerado só sob demanda aqui pra o
- * user controlar o gasto Sonnet (~$0.02/obra, one-time). Sem badge de pendência:
- * a action filtra as pendentes (sem digest ou versão antiga) por conta própria.
+ * user controlar o gasto Sonnet (~$0.02/obra, one-time). NÃO entra no badge da
+ * sidebar (opt-in), mas mostra a fila (Pendentes/Gerados) igual ao Resumo —
+ * `pendingCount`/`totalCount` vêm de `countReviewDigestCoverage` (mesmo filtro).
  */
-export function ReviewDigestPanel({ accent }: ReviewDigestPanelProps) {
+export function ReviewDigestPanel({ accent, pendingCount, totalCount }: ReviewDigestPanelProps) {
   const [lastResult, setLastResult] = useState<ConsolidateReviewDigestsProgress | null>(null)
   const refresh = useRefresh()
   const tasks = useAppTasks()
@@ -40,7 +45,7 @@ export function ReviewDigestPanel({ accent }: ReviewDigestPanelProps) {
     if (
       !(await confirmCost({
         action: "review_digest",
-        scale: 10,
+        scale: Math.min(pendingCount, 10),
         title: "Gerar digests pendentes (até 10 obras)?",
       }))
     ) {
@@ -76,48 +81,78 @@ export function ReviewDigestPanel({ accent }: ReviewDigestPanelProps) {
     })
   }
 
+  const completionPct =
+    totalCount > 0 ? Math.round(((totalCount - pendingCount) / totalCount) * 100) : 0
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-2xl space-y-1 text-sm text-muted-foreground">
           <p>
-            Destila as reviews de cada obra num <strong>digest estruturado</strong>{" "}
-            (consenso, divergência, traços salientes, alertas, execução) via Sonnet 4.6
-            (~$0.02–0.04 por obra, varia com o volume de reviews), com amostragem
-            estratificada por fonte. É o sinal qualitativo
-            que o <strong>consultor IA</strong> consome (Recomendar / Veredito IA / Deep Dive / Chat).
+            Destila as reviews num{" "}
+            <strong className="font-semibold text-foreground">digest estruturado</strong> (consenso,
+            divergências, traços, alertas) via Sonnet 4.6 (~$0.02–0.04 por obra). É o sinal
+            qualitativo que o{" "}
+            <strong className="font-semibold text-foreground">consultor IA</strong> consome (Recomendar
+            / Veredito / Deep Dive / Chat).
           </p>
           <p className="text-xs">
-            Custo único por obra, amortizado — só re-roda quando a versão do digest muda.
-            Cada clique processa até 10 obras pendentes; rode várias vezes até zerar.
-            Requer a migration <code>103_works_review_digest</code> aplicada.
+            Custo único por obra — só re-roda quando a versão do digest muda. Cada clique processa até
+            10 pendentes e roda em segundo plano (pode sair da página).
           </p>
         </div>
         <Button
           type="button"
           onClick={() => void handleRun()}
-          disabled={isPending}
+          disabled={isPending || pendingCount === 0}
           className={ACCENT_BUTTON[accent]}
         >
-          <Layers className={isPending ? "animate-pulse" : ""} />
+          {isPending ? <Loader2 className="animate-spin" /> : <Layers />}
           {isPending ? "Gerando…" : "Gerar digests pendentes"}
         </Button>
       </div>
 
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatCard label="Pendentes" value={pendingCount} hint="com reviews, sem digest" />
+        <StatCard
+          label="Gerados"
+          value={`${totalCount - pendingCount} / ${totalCount}`}
+          hint={`${completionPct}% das obras com reviews`}
+        />
+        <StatCard
+          label="Modelo"
+          value="claude-sonnet-4-6"
+          valueClassName="text-xs"
+          hint="~$0.02–0.04/obra"
+        />
+      </div>
+
       {lastResult && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <StatCard label="Gerados" value={lastResult.digested} hint={`de ${lastResult.attempted} tentativas`} />
-          <StatCard
-            label="Pulados / falhas"
-            value={`${lastResult.skipped} / ${lastResult.failed}`}
-            hint="sem review útil / erro de API"
-          />
-          <StatCard
-            label="Tokens"
-            value={(lastResult.tokensIn + lastResult.tokensOut).toLocaleString("pt-BR")}
-            valueClassName="text-sm"
-            hint={`${lastResult.tokensIn.toLocaleString("pt-BR")} in / ${lastResult.tokensOut.toLocaleString("pt-BR")} out`}
-          />
+        <div className="space-y-1 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs">
+          <p className="font-medium text-emerald-700 dark:text-emerald-300">Última execução</p>
+          <ul className="space-y-0.5 text-muted-foreground">
+            <li>
+              Gerados: <span className="font-mono text-foreground">{lastResult.digested}</span> de{" "}
+              {lastResult.attempted} tentativas
+            </li>
+            {lastResult.skipped > 0 && (
+              <li>
+                Pulados (sem review útil): <span className="font-mono">{lastResult.skipped}</span>
+              </li>
+            )}
+            {lastResult.failed > 0 && (
+              <li className="text-amber-600 dark:text-amber-400">
+                Falhas: <span className="font-mono">{lastResult.failed}</span>
+              </li>
+            )}
+            <li>
+              Tokens:{" "}
+              <span className="font-mono text-foreground">
+                {lastResult.tokensIn.toLocaleString("pt-BR")} in /{" "}
+                {lastResult.tokensOut.toLocaleString("pt-BR")} out
+              </span>
+            </li>
+          </ul>
         </div>
       )}
     </div>

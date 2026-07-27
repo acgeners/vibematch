@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { toast } from "sonner"
-import { MessageSquareText } from "lucide-react"
+import { Loader2, MessageSquareText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { StatCard } from "@/components/settings/stat-card"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
@@ -87,7 +87,7 @@ export function ReviewSummaryPanel({ accent, pendingCount, totalCount }: ReviewS
           disabled={isPending || pendingCount === 0}
           className={ACCENT_BUTTON[accent]}
         >
-          <MessageSquareText className={isPending ? "animate-pulse" : ""} />
+          {isPending ? <Loader2 className="animate-spin" /> : <MessageSquareText />}
           {isPending ? "Resumindo…" : "Resumir reviews pendentes"}
         </Button>
       </div>

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import {
   BookOpen,
   Gauge,
+  Globe,
   Palette,
   Scale,
   Settings,
@@ -36,6 +37,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   Gauge,
   Sparkles,
   BookOpen,
+  Globe,
   Wrench,
   Trophy,
   Scale,

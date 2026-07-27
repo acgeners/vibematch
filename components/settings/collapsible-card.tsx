@@ -3,17 +3,31 @@
 import { useEffect, useState } from "react"
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react"
 import { ChevronDown } from "lucide-react"
+import { ACCENT_STYLES } from "@/components/console/console-registry"
+import type { SettingsAccent } from "@/lib/settings-accent"
 import { cn } from "@/lib/utils"
+
+// Mantidos em sincronia com settings-card.tsx (barra padronizada). Header = barra
+// opaca sticky com padding próprio + cantos superiores arredondados; corpo com
+// padding próprio + divisória sob o header.
+const CARD_HEADER =
+  "sticky -top-5 md:-top-7 z-10 flex items-start gap-3.5 rounded-t-2xl bg-card px-5 py-4 pl-6"
+const CARD_BODY = "border-t border-border/60 px-5 pb-5 pl-6 pt-4"
 
 // Colapso de UM card (item) dentro de um tópico. O cabeçalho (ícone + título + ⓘ
 // + chips + descrição) é renderizado no servidor e chega como `headerInner`;
 // aqui só somamos a seta de expandir/colapsar e animamos o corpo. Estado
 // lembrado por card (localStorage). Começa expandido. O ⓘ do cabeçalho é um
 // botão à parte da seta, então continua funcionando sem disparar o colapso.
+//
+// Expandido (#4): marca `data-card-open="true"` (o <section> pai reage com ring de
+// accent via `:has()`), tinge o chevron e mostra a divisória sob o header. O
+// header fica sticky (#8) enquanto o corpo está na viewport.
 export function CollapsibleCardInner({
   storageKey,
   defaultOpen = true,
   forceOpen = false,
+  accent,
   headerInner,
   children,
 }: {
@@ -22,6 +36,8 @@ export function CollapsibleCardInner({
   defaultOpen?: boolean
   /** Deep-link `?open=` — força o card aberto, ignorando o estado lembrado. */
   forceOpen?: boolean
+  /** Accent do grupo — tinge o chevron aberto (o ring do card vem do <section>). */
+  accent: SettingsAccent
   headerInner: ReactNode
   children: ReactNode
 }) {
@@ -29,6 +45,7 @@ export function CollapsibleCardInner({
   // Anima só depois do 1º commit, pra a sincronização inicial (localStorage) não
   // disparar animação de abre/fecha no carregamento.
   const [animate, setAnimate] = useState(false)
+  const s = ACCENT_STYLES[accent]
 
   useEffect(() => {
     if (forceOpen) {
@@ -75,14 +92,23 @@ export function CollapsibleCardInner({
         role="button"
         tabIndex={0}
         aria-expanded={open}
+        data-card-open={open ? "true" : undefined}
         onClick={onHeaderClick}
         onKeyDown={onHeaderKey}
-        className="group/hd flex cursor-pointer items-start gap-3.5 rounded-xl transition-colors hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        className={cn(
+          "group/hd cursor-pointer transition-colors hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60",
+          CARD_HEADER
+        )}
       >
         {headerInner}
         <span
           aria-hidden
-          className="grid size-8 shrink-0 self-start place-items-center rounded-lg border border-border/60 bg-card/60 text-muted-foreground transition-colors group-hover/hd:bg-muted/60 group-hover/hd:text-foreground"
+          className={cn(
+            "grid size-8 shrink-0 self-start place-items-center rounded-lg transition-colors",
+            open
+              ? cn(s.iconBg, s.iconText, "ring-1 ring-inset", s.ring)
+              : "border border-border/60 bg-card/60 text-muted-foreground group-hover/hd:bg-muted/60 group-hover/hd:text-foreground"
+          )}
         >
           <ChevronDown
             className={cn(
@@ -101,7 +127,7 @@ export function CollapsibleCardInner({
         )}
       >
         <div className="overflow-hidden">
-          <div className="pt-4">{children}</div>
+          <div className={CARD_BODY}>{children}</div>
         </div>
       </div>
     </>

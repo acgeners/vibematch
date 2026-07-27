@@ -49,10 +49,10 @@ export function ProtectedSourcesHealthPanel({ accent }: { accent: SettingsAccent
     <div className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <p className="text-sm text-muted-foreground">
-          Roda um canário (obra fixa) em cada fonte que só passa via bypass do Cloudflare.
-          Diferente da Comix, estas <strong className="font-semibold text-foreground">dependem</strong> dele:
-          se o bypass cair, elas somem — e a obra passa a mostrar “fonte fora do ar”. A pergunta
-          aqui é se os dados chegam agora, não se o container respira.
+          Um canário (obra fixa) checa{" "}
+          <strong className="font-semibold text-foreground">Mangago</strong> e{" "}
+          <strong className="font-semibold text-foreground">AnimePlanet</strong> — mostra se o bypass
+          entrega dados agora.
         </p>
         <div className="flex flex-col items-end gap-1">
           <Button type="button" onClick={run} disabled={pending} className={ACCENT_BUTTON[accent]}>

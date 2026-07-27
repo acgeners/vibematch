@@ -6,6 +6,7 @@ import { useRefresh } from "@/lib/use-refresh"
 import { ArrowRightLeft, Check, ChevronDown, ChevronUp, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { ACCENT_BUTTON } from "@/lib/settings-accent"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
@@ -74,6 +75,11 @@ interface Props {
    *  quando embutida inline em /settings, recebe "/settings" pra ficar na pilha. */
   basePath?: string
 }
+
+// Consolidação de tags vive no grupo "Avançado" (accent slate). Ações afirmativas
+// (aprovar/aplicar/criar) = botão sólido no accent do grupo; rejeitar/deletar ficam
+// secundárias (outline/ghost). Padrão de /settings: 1 primário no accent por card.
+const AFFIRM_BTN = ACCENT_BUTTON.slate
 
 const STATUSES: Array<{ value: ProposalStatus; label: string }> = [
   { value: "pending", label: "Pendentes" },
@@ -352,7 +358,7 @@ export function TagConsolidationClient({
           <div className="flex items-center gap-2">
             <Button
               size="sm"
-              variant="default"
+              className={AFFIRM_BTN}
               disabled={selectedIds.size === 0 || isBulkRunning}
               onClick={() => (view === "clusters" ? runBulkClusters("approved") : runBulkGroupMoves("approved"))}
             >
@@ -380,7 +386,7 @@ export function TagConsolidationClient({
               variant="outline"
               disabled={selectedIds.size === 0 || isBulkRunning}
               onClick={() => (view === "clusters" ? runBulkDeleteClusters() : runBulkDeleteGroupMoves())}
-              className="text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"
+              className="text-rose-600 hover:bg-rose-500/10 dark:text-rose-400"
               title="Deleta as propostas selecionadas permanentemente"
             >
               <Trash2 className="mr-1 h-3.5 w-3.5" /> Deletar ({selectedIds.size})
@@ -415,7 +421,7 @@ export function TagConsolidationClient({
         >
           Mudanças de grupo
           {pendingGroupMoveCount > 0 && (
-            <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400/25 px-1.5 text-xs font-bold tabular-nums text-amber-200">
+            <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500/20 px-1.5 text-xs font-bold tabular-nums text-amber-700 dark:text-amber-300">
               {pendingGroupMoveCount}
             </span>
           )}
@@ -523,7 +529,7 @@ export function TagConsolidationClient({
           )}
           {(approvedCount && approvedCount > 0) || initialStatus !== "approved" ? (
             <Button
-              variant="default"
+              className={AFFIRM_BTN}
               size="sm"
               onClick={handleApply}
               disabled={isApplying || isPending}
@@ -744,7 +750,7 @@ function CreateClusterDialog({
                   <span>
                     {selectedIds.size} selecionada{selectedIds.size === 1 ? "" : "s"}{" "}
                     {selectedIds.size < 2 && (
-                      <span className="text-amber-300">(mínimo 2)</span>
+                      <span className="text-amber-600 dark:text-amber-400">(mínimo 2)</span>
                     )}
                   </span>
                   {selectedIds.size > 0 && (
@@ -821,7 +827,7 @@ function CreateClusterDialog({
           <Button variant="ghost" onClick={onClose} disabled={submitting}>
             Cancelar
           </Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit}>
+          <Button onClick={handleSubmit} disabled={!canSubmit} className={AFFIRM_BTN}>
             {submitting ? "Criando..." : "Criar cluster"}
           </Button>
         </DialogFooter>
@@ -861,7 +867,7 @@ function TagRow({ tag, checked, isCanonical, onToggle, onMakeCanonical }: TagRow
           title="Definir como canonical"
           className={`rounded px-1.5 py-0.5 text-xs ${
             isCanonical
-              ? "bg-amber-400/20 text-amber-200"
+              ? "bg-amber-500/20 text-amber-700 dark:text-amber-300"
               : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
           }`}
         >
@@ -943,7 +949,7 @@ function GroupMovesPanel({
             </Button>
           )}
           {currentStatus === "approved" && groupMoves.length > 0 && (
-            <Button size="sm" onClick={onApplyAll} disabled={isApplying || isPending}>
+            <Button size="sm" className={AFFIRM_BTN} onClick={onApplyAll} disabled={isApplying || isPending}>
               {isApplying ? "Aplicando…" : `Aplicar ${groupMoves.length} aprovadas`}
             </Button>
           )}
@@ -1011,10 +1017,10 @@ function GroupMoveCard({
 
   const confidencePct = Math.round(m.confidence * 100)
   const statusBadge: Record<GroupMoveStatus, { label: string; cls: string }> = {
-    pending: { label: "Pendente", cls: "bg-amber-400/15 text-amber-200 border-amber-400/30" },
-    approved: { label: "Aprovada", cls: "bg-emerald-400/15 text-emerald-200 border-emerald-400/30" },
-    rejected: { label: "Rejeitada", cls: "bg-rose-400/15 text-rose-200 border-rose-400/30" },
-    applied: { label: "Aplicada", cls: "bg-sky-400/15 text-sky-200 border-sky-400/30" },
+    pending: { label: "Pendente", cls: "bg-amber-500/15 text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-300" },
+    approved: { label: "Aprovada", cls: "bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300" },
+    rejected: { label: "Rejeitada", cls: "bg-rose-500/15 text-rose-700 ring-1 ring-rose-500/30 dark:text-rose-300" },
+    applied: { label: "Aplicada", cls: "bg-sky-500/15 text-sky-700 ring-1 ring-sky-500/30 dark:text-sky-300" },
   }
   const sb = statusBadge[m.status]
   const isLocked = m.status === "applied"
@@ -1059,16 +1065,16 @@ function GroupMoveCard({
                   ))}
               </select>
             )}
-            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${sb.cls}`}>
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${sb.cls}`}>
               {sb.label}
             </span>
             <span
               className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${
                 confidencePct >= 90
-                  ? "bg-emerald-400/15 text-emerald-200"
+                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
                   : confidencePct >= 80
-                    ? "bg-sky-400/15 text-sky-200"
-                    : "bg-amber-400/15 text-amber-200"
+                    ? "bg-sky-500/15 text-sky-700 dark:text-sky-300"
+                    : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
               }`}
             >
               {confidencePct}%
@@ -1086,7 +1092,7 @@ function GroupMoveCard({
               <>
                 <Button
                   size="sm"
-                  variant="default"
+                  className={AFFIRM_BTN}
                   disabled={isPending || draftSlug === m.suggested_group_slug}
                   onClick={() => {
                     onSaveEdit(draftSlug)
@@ -1113,7 +1119,7 @@ function GroupMoveCard({
                 </Button>
                 {m.status === "pending" && (
                   <>
-                    <Button size="sm" variant="default" onClick={onApprove} disabled={isPending}>
+                    <Button size="sm" className={AFFIRM_BTN} onClick={onApprove} disabled={isPending}>
                       <Check className="mr-1 h-3.5 w-3.5" /> Aprovar
                     </Button>
                     <Button size="sm" variant="outline" onClick={onReject} disabled={isPending}>
@@ -1260,10 +1266,10 @@ function ProposalCard({
 
   const confidencePct = Math.round(p.confidence * 100)
   const statusBadge: Record<ProposalStatus, { label: string; cls: string }> = {
-    pending: { label: "Pendente", cls: "bg-amber-400/15 text-amber-200 border-amber-400/30" },
-    approved: { label: "Aprovada", cls: "bg-emerald-400/15 text-emerald-200 border-emerald-400/30" },
-    rejected: { label: "Rejeitada", cls: "bg-rose-400/15 text-rose-200 border-rose-400/30" },
-    applied: { label: "Aplicada", cls: "bg-sky-400/15 text-sky-200 border-sky-400/30" },
+    pending: { label: "Pendente", cls: "bg-amber-500/15 text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-300" },
+    approved: { label: "Aprovada", cls: "bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300" },
+    rejected: { label: "Rejeitada", cls: "bg-rose-500/15 text-rose-700 ring-1 ring-rose-500/30 dark:text-rose-300" },
+    applied: { label: "Aplicada", cls: "bg-sky-500/15 text-sky-700 ring-1 ring-sky-500/30 dark:text-sky-300" },
   }
   const sb = statusBadge[p.status]
 
@@ -1307,16 +1313,16 @@ function ProposalCard({
               <span className="text-base font-semibold">{p.canonical_name}</span>
             )}
             <span className="text-xs text-muted-foreground">{p.group_slug}</span>
-            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${sb.cls}`}>
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${sb.cls}`}>
               {sb.label}
             </span>
             <span
               className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${
                 confidencePct >= 90
-                  ? "bg-emerald-400/15 text-emerald-200"
+                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
                   : confidencePct >= 80
-                    ? "bg-sky-400/15 text-sky-200"
-                    : "bg-amber-400/15 text-amber-200"
+                    ? "bg-sky-500/15 text-sky-700 dark:text-sky-300"
+                    : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
               }`}
             >
               {confidencePct}%
@@ -1334,7 +1340,7 @@ function ProposalCard({
               <>
                 <Button
                   size="sm"
-                  variant="default"
+                  className={AFFIRM_BTN}
                   disabled={isPending || !draftName.trim()}
                   title={draftMemberIds.length < 2 ? "Cluster ficará com <2 membros — proposta será rejeitada" : undefined}
                   onClick={() => {
@@ -1364,7 +1370,7 @@ function ProposalCard({
                 </Button>
                 {p.status === "pending" && (
                   <>
-                    <Button size="sm" variant="default" onClick={onApprove} disabled={isPending} title="Aprovar">
+                    <Button size="sm" className={AFFIRM_BTN} onClick={onApprove} disabled={isPending} title="Aprovar">
                       <Check className="mr-1 h-3.5 w-3.5" /> Aprovar
                     </Button>
                     <Button size="sm" variant="outline" onClick={onReject} disabled={isPending} title="Rejeitar">
@@ -1393,7 +1399,7 @@ function ProposalCard({
                   onClick={onDelete}
                   disabled={isPending}
                   title="Deletar proposta permanentemente"
-                  className="text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"
+                  className="text-rose-600 hover:bg-rose-500/10 dark:text-rose-400"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>

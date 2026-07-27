@@ -45,11 +45,10 @@ export function ComixHealthPanel({ accent }: { accent: SettingsAccent }) {
     <div className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <p className="text-sm text-muted-foreground">
-          Roda um canário (hid fixo) por todas as superfícies da Comix — detalhe (SSR), reviews
-          (threads) e imagem (CDN) — sem precisar abrir uma obra. O FlareSolverr aparece só como
-          informação: <strong className="font-semibold text-foreground">a Comix</strong> não depende
-          dele (passa em texto puro). Mangago e AnimePlanet dependem — veja “Fontes atrás do
-          Cloudflare”.
+          Um canário (hid fixo) checa{" "}
+          <strong className="font-semibold text-foreground">detalhe</strong>,{" "}
+          <strong className="font-semibold text-foreground">reviews</strong> e{" "}
+          <strong className="font-semibold text-foreground">imagem</strong> — sem abrir nenhuma obra.
         </p>
         <div className="flex flex-col items-end gap-1">
           <Button type="button" onClick={run} disabled={pending} className={ACCENT_BUTTON[accent]}>

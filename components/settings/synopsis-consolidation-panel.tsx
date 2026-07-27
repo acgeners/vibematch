@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { toast } from "sonner"
-import { FileText } from "lucide-react"
+import { FileText, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { StatCard } from "@/components/settings/stat-card"
 import { ACCENT_BUTTON, type SettingsAccent } from "@/lib/settings-accent"
@@ -85,7 +85,7 @@ export function SynopsisConsolidationPanel({
           disabled={isPending || pendingCount === 0}
           className={ACCENT_BUTTON[accent]}
         >
-          <FileText className={isPending ? "animate-pulse" : ""} />
+          {isPending ? <Loader2 className="animate-spin" /> : <FileText />}
           {isPending ? "Consolidando…" : "Consolidar sinopses pendentes"}
         </Button>
       </div>

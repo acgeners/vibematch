@@ -13,6 +13,9 @@ export interface ComixCoverageLists {
   missing: WorkMissingComix[]
   /** Obras marcadas pelo usuário como "não existem no Comix" (marcador da mig 038). */
   absent: WorkMissingComix[]
+  /** Total de obras ativas (não arquivadas) no catálogo. Base do strip de cobertura;
+   *  `com hid Comix` = total − missing − absent (derivado no cliente, reativo às ações). */
+  total: number
 }
 
 /**
@@ -66,7 +69,7 @@ const loadComixCoverage = cache(async (): Promise<ComixCoverageLists> => {
     if (absent.has(w.id)) absentList.push(item)
     else missing.push(item)
   }
-  return { missing, absent: absentList }
+  return { missing, absent: absentList, total: works.length }
 })
 
 /**

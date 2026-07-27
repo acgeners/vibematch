@@ -3,8 +3,9 @@
 import { useEffect, useState, useTransition } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ArrowDownWideNarrow, ArrowRight, ChevronDown, Info, Layers, SlidersHorizontal } from "lucide-react"
+import { ArrowDownWideNarrow, ArrowRight, ChevronDown, Info, Layers, Loader2, SlidersHorizontal } from "lucide-react"
 import { MaeHistoryChart } from "@/components/settings/calibration/mae-history-chart"
+import { RunningStrip } from "@/components/settings/running-strip"
 import { Button } from "@/components/ui/button"
 import { AiPendingGuardDialog } from "@/components/settings/ai-pending-guard-dialog"
 import type { AiPendingItem } from "@/components/settings/ai-pending-guard-dialog"
@@ -152,6 +153,10 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
   return (
     <TooltipProvider delayDuration={150}>
       <div className="space-y-6">
+        {/* Faixa de execução proeminente (Nível B): o recálculo é a ação mais
+            longa do console — um contador que anda deixa claro que ainda roda. */}
+        <RunningStrip accent={accent} label="Recalibrando as notas" running={isPending} />
+
         {/* ============================================================ */}
         {/* KPI PRINCIPAL — o que importa pra avaliar saúde do sistema  */}
         {/* ============================================================ */}
@@ -188,7 +193,8 @@ export function CalibrationPanel({ accent, aiPending, config, metrics, snapshot 
             {/* Ação */}
             <div className="flex flex-col items-stretch gap-1 sm:items-end">
               <Button onClick={handleRecalibrateClick} disabled={isPending} className={ACCENT_BUTTON[accent]}>
-                {isPending ? "Recalibrando..." : "Recalibrar agora"}
+                {isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+                {isPending ? "Recalibrando…" : "Recalibrar agora"}
               </Button>
               {pendingItems.length > 0 && (
                 <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">

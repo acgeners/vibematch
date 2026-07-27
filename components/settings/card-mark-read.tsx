@@ -39,8 +39,10 @@ export function CardMarkRead({
 }) {
   const refresh = useRefresh()
   const [saving, startTransition] = useTransition()
-  // 3 estados: há não-lido → botão; já silenciado (ack) → selo; nada a fazer → nada.
-  const initialMode: Mode = unread > 0 ? "unread" : isRead ? "read" : "none"
+  // 3 estados: há não-lido → botão; já silenciado E ainda há pendência real → selo;
+  // nada pendente → nada (mesmo se houver ack: sem pendência, o selo "Lida" não faz
+  // sentido — o ack é limpo em segundo plano por lowerSettingsReadAcks).
+  const initialMode: Mode = unread > 0 ? "unread" : isRead && pending > 0 ? "read" : "none"
   const [mode, setMode] = useOptimistic(initialMode, (_prev, next: Mode) => next)
 
   const mark = () => {
