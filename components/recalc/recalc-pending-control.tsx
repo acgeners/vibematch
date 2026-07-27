@@ -25,9 +25,9 @@ interface RecalcPendingControlProps {
 /** Monta a lista de pendências de IA (só as com count > 0), com links pro /settings. */
 function buildAiPendingItems(counts: AiPendingCounts): AiPendingItem[] {
   return [
-    { label: "Embeddings", count: counts.embeddings, href: "/settings?s=embeddings" },
-    { label: "Sinopse canônica", count: counts.canonicalSynopsis, href: "/settings?s=synopsis-canonical" },
-    { label: "Resumo de reviews", count: counts.reviewSummary, href: "/settings?s=review-summary" },
+    { label: "Embeddings", count: counts.embeddings, href: "/settings?g=ia#card-embeddings" },
+    { label: "Sinopse canônica", count: counts.canonicalSynopsis, href: "/settings?g=ia#card-synopsis-canonical" },
+    { label: "Resumo de reviews", count: counts.reviewSummary, href: "/settings?g=ia#card-review-synthesis" },
   ].filter((i) => i.count > 0)
 }
 
