@@ -2,12 +2,16 @@ import type { PersonalStatus } from "@/types/domain"
 
 // Fontes de listas externas suportadas na importação.
 // "animeplanet" é exportado no formato XML do MyAnimeList (gzip).
-export type ExternalListSource = "myanimelist" | "mangaupdates" | "animeplanet"
+// "anilist" não vem de arquivo — é buscado pela API pública a partir do usuário.
+// "titles" é uma lista de títulos colada (só-título, pra curadoria em massa do admin).
+export type ExternalListSource = "myanimelist" | "mangaupdates" | "animeplanet" | "anilist" | "titles"
 
 export const EXTERNAL_LIST_SOURCE_LABELS: Record<ExternalListSource, string> = {
   myanimelist: "MyAnimeList (JSON)",
   mangaupdates: "MangaUpdates (JSON)",
   animeplanet: "Anime-Planet (XML)",
+  anilist: "AniList (usuário)",
+  titles: "Lista de títulos",
 }
 
 // Entrada já normalizada a partir do arquivo de origem.

@@ -171,6 +171,78 @@ export async function fetchAniListById(anilistId: number) {
   }
 }
 
+// ── Lista de mangás de um usuário ────────────────────────────────────
+// A lista pública é lida direto pela API — sem arquivo, sem OAuth (só serve
+// pra dados privados). `score(format: POINT_10_DECIMAL)` normaliza qualquer
+// sistema de nota do usuário (100, 5 estrelas, smileys…) pra escala 0–10.
+const USER_LIST_QUERY = `
+query UserMangaList($userName: String) {
+  MediaListCollection(userName: $userName, type: MANGA) {
+    lists {
+      entries {
+        status
+        score(format: POINT_10_DECIMAL)
+        progress
+        media { id idMal title { romaji english native } }
+      }
+    }
+  }
+}
+`
+
+export type AniListListStatus =
+  | "CURRENT" | "PLANNING" | "COMPLETED" | "DROPPED" | "PAUSED" | "REPEATING"
+
+export interface AniListListEntry {
+  mediaId: number
+  malId: number | null
+  title: string
+  status: AniListListStatus | null
+  /** 0–10 (POINT_10_DECIMAL). null quando o usuário não deu nota. */
+  score: number | null
+  progress: number | null
+}
+
+/**
+ * Lista pública de mangás de um usuário do AniList.
+ * `null` = falha (usuário inexistente, lista privada, ou API fora do ar).
+ * `[]` = usuário existe mas sem mangás na lista.
+ */
+export async function fetchAniListUserMangaList(
+  userName: string
+): Promise<AniListListEntry[] | null> {
+  try {
+    const json = await anilistRequest(USER_LIST_QUERY, { userName }, "user-list")
+    const lists: unknown = json?.data?.MediaListCollection?.lists
+    if (!Array.isArray(lists)) return null
+    const out: AniListListEntry[] = []
+    const seen = new Set<number>()
+    for (const list of lists) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const e of (list?.entries ?? []) as any[]) {
+        const m = e?.media
+        const mediaId = typeof m?.id === "number" ? m.id : null
+        // Uma obra pode estar em várias listas customizadas → dedup por mediaId.
+        if (mediaId == null || seen.has(mediaId)) continue
+        seen.add(mediaId)
+        const title: string = m.title?.english ?? m.title?.romaji ?? m.title?.native ?? ""
+        if (!title) continue
+        out.push({
+          mediaId,
+          malId: typeof m.idMal === "number" ? m.idMal : null,
+          title,
+          status: typeof e.status === "string" ? (e.status as AniListListStatus) : null,
+          score: typeof e.score === "number" && e.score > 0 ? e.score : null,
+          progress: typeof e.progress === "number" && e.progress > 0 ? e.progress : null,
+        })
+      }
+    }
+    return out
+  } catch {
+    return null
+  }
+}
+
 const REVIEWS_QUERY = `
 query GetMangaReviews($id: Int) {
   Media(id: $id, type: MANGA) {

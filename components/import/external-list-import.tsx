@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import { Upload, FileText, Check, AlertCircle, ArrowRight } from "lucide-react"
+import { Upload, FileText, Check, AlertCircle, ArrowRight, User, Search, ClipboardList } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -32,6 +32,14 @@ import type {
 import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 
 type Phase = "upload" | "analyzing" | "review" | "committing" | "result"
+type Method = "file" | "anilist" | "titles"
+
+type ImportInput = {
+  filename: string
+  contentBase64: string
+  source?: ExternalListSource
+  username?: string
+}
 
 const FIELD_LABELS: Record<ReconcileField, string> = {
   personal_status: "Status",
@@ -58,6 +66,15 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
+// base64 UTF-8-safe (btoa quebra em não-ASCII; títulos têm acento/coreano).
+// O servidor decodifica com Buffer.from(b64,"base64").toString("utf8").
+function textToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text)
+  let bin = ""
+  for (const b of bytes) bin += String.fromCharCode(b)
+  return btoa(bin)
+}
+
 export function ExternalListImport({
   onReviewBatchComplete,
 }: {
@@ -66,9 +83,13 @@ export function ExternalListImport({
   onReviewBatchComplete?: () => void
 } = {}) {
   const [phase, setPhase] = useState<Phase>("upload")
+  const [method, setMethod] = useState<Method>("file")
   const [file, setFile] = useState<File | null>(null)
+  const [username, setUsername] = useState("")
+  const [titlesText, setTitlesText] = useState("")
   const [sourceOverride, setSourceOverride] = useState<ExternalListSource | "auto">("auto")
-  const [contentBase64, setContentBase64] = useState<string>("")
+  // Input usado no analyze — guardado pra reusar no commit (re-parseado no servidor).
+  const [pendingInput, setPendingInput] = useState<ImportInput | null>(null)
   const [analysis, setAnalysis] = useState<AnalyzeExternalListResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [commitResult, setCommitResult] = useState<CommitExternalListResult | null>(null)
@@ -81,9 +102,12 @@ export function ExternalListImport({
 
   const reset = () => {
     setPhase("upload")
+    setMethod("file")
     setFile(null)
+    setUsername("")
+    setTitlesText("")
     setSourceOverride("auto")
-    setContentBase64("")
+    setPendingInput(null)
     setAnalysis(null)
     setError(null)
     setCommitResult(null)
@@ -94,17 +118,36 @@ export function ExternalListImport({
   }
 
   const runAnalyze = useCallback(async () => {
-    if (!file) return
-    setPhase("analyzing")
     setError(null)
     try {
-      const base64 = await fileToBase64(file)
-      setContentBase64(base64)
-      const res = await analyzeExternalListImport({
-        filename: file.name,
-        contentBase64: base64,
-        source: sourceOverride === "auto" ? undefined : sourceOverride,
-      })
+      let input: ImportInput
+      if (method === "anilist") {
+        const u = username.trim()
+        if (!u) {
+          setError("Informe seu nome de usuário do AniList.")
+          return
+        }
+        setPhase("analyzing")
+        input = { filename: `AniList: @${u}`, contentBase64: "", source: "anilist", username: u }
+      } else if (method === "titles") {
+        const text = titlesText.trim()
+        if (!text) {
+          setError("Cole ao menos um título (um por linha).")
+          return
+        }
+        setPhase("analyzing")
+        input = { filename: "Lista de títulos", contentBase64: textToBase64(text), source: "titles" }
+      } else {
+        if (!file) return
+        setPhase("analyzing")
+        input = {
+          filename: file.name,
+          contentBase64: await fileToBase64(file),
+          source: sourceOverride === "auto" ? undefined : sourceOverride,
+        }
+      }
+      setPendingInput(input)
+      const res = await analyzeExternalListImport(input)
       if (res.error || !res.data) {
         setError(res.error ?? "Falha ao analisar o arquivo")
         setPhase("upload")
@@ -131,24 +174,21 @@ export function ExternalListImport({
       setAnalysis(res.data)
       setPhase("review")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao ler o arquivo")
+      setError(err instanceof Error ? err.message : "Erro ao ler a lista")
       setPhase("upload")
     }
-  }, [file, sourceOverride])
+  }, [file, sourceOverride, method, username, titlesText])
 
   const runCommit = useCallback(async () => {
-    if (!analysis) return
+    if (!analysis || !pendingInput) return
     setPhase("committing")
     setError(null)
     try {
-      const res = await commitExternalListImport(
-        { filename: file?.name ?? "lista", contentBase64, source: analysis.source },
-        {
-          conflicts: conflictChoices,
-          ambiguous: ambiguousChoices,
-          skipCreates: Array.from(skipCreates),
-        }
-      )
+      const res = await commitExternalListImport(pendingInput, {
+        conflicts: conflictChoices,
+        ambiguous: ambiguousChoices,
+        skipCreates: Array.from(skipCreates),
+      })
       if (res.error || !res.data) {
         setError(res.error ?? "Falha ao importar")
         setPhase("review")
@@ -163,7 +203,7 @@ export function ExternalListImport({
       setError(err instanceof Error ? err.message : "Erro na importação")
       setPhase("review")
     }
-  }, [analysis, file, contentBase64, conflictChoices, ambiguousChoices, skipCreates])
+  }, [analysis, pendingInput, conflictChoices, ambiguousChoices, skipCreates])
 
   const reloadReview = useCallback(async () => {
     if (!commitResult) return
@@ -172,57 +212,150 @@ export function ExternalListImport({
 
   // ── Upload ───────────────────────────────────────────────────────
   if (phase === "upload" || phase === "analyzing") {
+    const analyzing = phase === "analyzing"
+    const titleCount = titlesText.split(/\r?\n/).filter((l) => l.trim()).length
     return (
       <div className="space-y-4">
-        <label
-          className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/70 bg-card/50 px-6 py-10 text-center transition hover:bg-card/80"
-        >
-          <Upload className="h-7 w-7 text-muted-foreground" />
-          <span className="text-sm font-medium">
-            {file ? file.name : "Selecione um arquivo de lista"}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            MyAnimeList (.json) · MangaUpdates (.json) · Anime-Planet (.xml.gz)
-          </span>
-          <input
-            type="file"
-            accept=".json,.xml,.gz,.xml.gz,application/json,application/gzip"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) {
-                setFile(f)
-                setError(null)
-              }
-            }}
-          />
-        </label>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="space-y-1">
-            <span className="text-xs text-muted-foreground">Formato</span>
-            <Select value={sourceOverride} onValueChange={(v) => setSourceOverride(v as ExternalListSource | "auto")}>
-              <SelectTrigger className="w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">Detectar automaticamente</SelectItem>
-                {SOURCES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {EXTERNAL_LIST_SOURCE_LABELS[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            className="mt-5"
-            disabled={!file || phase === "analyzing"}
-            onClick={runAnalyze}
-          >
-            {phase === "analyzing" ? "Analisando…" : "Analisar lista"}
-          </Button>
+        {/* Método: arquivo (padrão), usuário do AniList, ou lista de títulos */}
+        <div className="inline-flex w-fit flex-wrap items-center gap-1 rounded-lg bg-muted p-[3px]">
+          {([
+            { id: "file" as Method, label: "Por arquivo", icon: FileText },
+            { id: "anilist" as Method, label: "Por usuário (AniList)", icon: User },
+            { id: "titles" as Method, label: "Colar títulos", icon: ClipboardList },
+          ]).map((m) => {
+            const Icon = m.icon
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => {
+                  setMethod(m.id)
+                  setError(null)
+                }}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition",
+                  method === m.id
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-foreground/60 hover:text-foreground"
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" /> {m.label}
+                {m.id === "anilist" && (
+                  <span className="ml-0.5 rounded px-1 text-[9px] font-bold uppercase tracking-wide text-primary ring-1 ring-inset ring-primary/40">
+                    Novo
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
+
+        {method === "file" ? (
+          <>
+            <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/70 bg-card/50 px-6 py-10 text-center transition hover:bg-card/80">
+              <Upload className="h-7 w-7 text-muted-foreground" />
+              <span className="text-sm font-medium">
+                {file ? file.name : "Selecione ou arraste o arquivo da lista"}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                MyAnimeList (.json) · MangaUpdates (.json) · Anime-Planet (.xml.gz)
+              </span>
+              <input
+                type="file"
+                accept=".json,.xml,.gz,.xml.gz,application/json,application/gzip"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) {
+                    setFile(f)
+                    setError(null)
+                  }
+                }}
+              />
+            </label>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">Formato</span>
+                <Select value={sourceOverride} onValueChange={(v) => setSourceOverride(v as ExternalListSource | "auto")}>
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Detectar automaticamente</SelectItem>
+                    {SOURCES.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {EXTERNAL_LIST_SOURCE_LABELS[s]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button disabled={!file || analyzing} onClick={runAnalyze}>
+                {analyzing ? "Analisando…" : "Analisar lista"}
+              </Button>
+            </div>
+          </>
+        ) : method === "anilist" ? (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[240px] flex-1 space-y-1">
+                <span className="text-xs text-muted-foreground">Usuário do AniList</span>
+                <div className="flex items-center rounded-md border border-border bg-background focus-within:ring-2 focus-within:ring-ring">
+                  <span className="pl-3 text-sm text-muted-foreground">@</span>
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => {
+                      setUsername(e.target.value)
+                      setError(null)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && username.trim() && !analyzing) runAnalyze()
+                    }}
+                    placeholder="seu-usuario"
+                    spellCheck={false}
+                    className="w-full bg-transparent px-2 py-2 text-sm outline-none"
+                  />
+                </div>
+              </div>
+              <Button disabled={!username.trim() || analyzing} onClick={runAnalyze}>
+                <Search className="h-4 w-4" /> {analyzing ? "Buscando…" : "Buscar lista"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              A lista pública é lida direto pela API do AniList — nenhum arquivo necessário. Precisa estar pública no seu perfil.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <span className="text-xs text-muted-foreground">Cole os títulos — um por linha</span>
+              <textarea
+                value={titlesText}
+                onChange={(e) => {
+                  setTitlesText(e.target.value)
+                  setError(null)
+                }}
+                rows={8}
+                spellCheck={false}
+                placeholder={"Solo Leveling\nThe Beginning After the End\nOmniscient Reader's Viewpoint"}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <Button disabled={!titlesText.trim() || analyzing} onClick={runAnalyze}>
+                {analyzing ? "Analisando…" : "Analisar títulos"}
+              </Button>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {titleCount > 0 ? `${titleCount} ${titleCount === 1 ? "título" : "títulos"}` : "um por linha"}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Cria as obras só com o título (pendentes de revisão) e reconhece as que já existem no catálogo. Ideal pra popular o DB em massa — você enriquece capa/sinopse depois em &quot;Revisar pendentes&quot;.
+            </p>
+          </div>
+        )}
 
         {error && (
           <p className="flex items-center gap-2 text-sm text-destructive">
