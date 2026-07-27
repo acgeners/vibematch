@@ -19,11 +19,14 @@ import {
   type SubgroupWithTags,
   type UnassignedTag as UnassignedSubgroupTag,
 } from "@/server/actions/tag-subgroups"
+import { listNewTags, listGenreProposals, type NewTagRow, type GenreProposalRow } from "@/server/actions/tag-review"
+import { GENRE_PROPOSAL_MIN_OCCURRENCES } from "@/lib/tags/genre-proposals"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 
 const VALID_STATUSES: ProposalStatus[] = ["pending", "approved", "rejected", "applied"]
 const VALID_SUBGROUP_STATUSES: SubgroupStatus[] = ["pending", "approved", "rejected"]
-type View = "clusters" | "groupmoves" | "subgroups"
+type View = "clusters" | "groupmoves" | "subgroups" | "tags-novas" | "genres"
 type SubgroupPhase = "define" | "assign"
 
 export interface TagConsolidationParams {
@@ -47,7 +50,15 @@ export async function TagConsolidationTool({
   basePath?: string
 }) {
   const view: View =
-    params.view === "groupmoves" ? "groupmoves" : params.view === "subgroups" ? "subgroups" : "clusters"
+    params.view === "groupmoves"
+      ? "groupmoves"
+      : params.view === "subgroups"
+        ? "subgroups"
+        : params.view === "tags-novas"
+          ? "tags-novas"
+          : params.view === "genres"
+            ? "genres"
+            : "clusters"
   const groupSlug = params.group && params.group !== "all" ? params.group : undefined
   const status = (params.status && VALID_STATUSES.includes(params.status as ProposalStatus)
     ? (params.status as ProposalStatus)
@@ -66,8 +77,25 @@ export async function TagConsolidationTool({
   let subgroups: Subgroup[] = []
   let subgroupsWithTags: SubgroupWithTags[] = []
   let unassignedSubgroupTags: UnassignedSubgroupTag[] = []
+  let newTags: NewTagRow[] = []
+  let genreProposals: GenreProposalRow[] = []
 
-  if (view === "clusters") {
+  // Contagens sempre (badges nas abas). Head-count barato via service role.
+  const admin = createAdminClient()
+  const [{ count: newTagsCount }, { count: genreProposalsCount }] = await Promise.all([
+    admin.from("tags").select("*", { count: "exact", head: true }).eq("origin", "external").is("reviewed_at", null),
+    admin
+      .from("genre_proposal")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "pending")
+      .gte("occurrences", GENRE_PROPOSAL_MIN_OCCURRENCES),
+  ])
+
+  if (view === "tags-novas") {
+    newTags = await listNewTags()
+  } else if (view === "genres") {
+    genreProposals = await listGenreProposals("pending")
+  } else if (view === "clusters") {
     const [p, u, gmAll] = await Promise.all([
       listProposals(groupSlug, status),
       groupSlug ? listUncoveredTags(groupSlug) : Promise.resolve([] as UncoveredTag[]),
@@ -118,6 +146,10 @@ export async function TagConsolidationTool({
       subgroups={subgroups}
       subgroupsWithTags={subgroupsWithTags}
       unassignedSubgroupTags={unassignedSubgroupTags}
+      newTags={newTags}
+      newTagsCount={newTagsCount ?? 0}
+      genreProposals={genreProposals}
+      genreProposalsCount={genreProposalsCount ?? 0}
       basePath={basePath}
     />
   )

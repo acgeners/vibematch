@@ -8,12 +8,22 @@ export interface EnrichInputTag {
   slug: string
 }
 
+/** Nível de indicação de conteúdo sexual adulto da tag. */
+export type AdultLevel = "none" | "label" | "explicit"
+
 export interface EnrichResult {
   /** slug of an approved sub-group of the group, or null if none fits. */
   subgroupSlug: string | null
   /** slug of an existing tag this one is a near-synonym of, or null. */
   synonymOfSlug: string | null
   confidence: number
+  /**
+   * 18+: "explicit" = nomeia/afirma conteúdo sexual EXPLÍCITO mostrado (ato,
+   * anatomia, pornográfico) → adult_indicator + strong. "label" = rótulo de
+   * conteúdo adulto sem afirmar cena (Adult, R19, Erotica) → só adult_indicator.
+   * "none" = não é indicador sexual (inclui violência/gore/tema maduro).
+   */
+  adultLevel: AdultLevel
 }
 
 export interface EnrichTagsForGroupInput {
@@ -29,6 +39,7 @@ interface RawClassification {
   subgroup_slug?: string | null
   synonym_of_slug?: string | null
   confidence?: number | null
+  adult_level?: string | null
 }
 
 const ENRICH_TOOL = {
@@ -46,8 +57,13 @@ const ENRICH_TOOL = {
             subgroup_slug: { type: "string", description: "slug de um sub-grupo da lista, ou \"none\"." },
             synonym_of_slug: { type: "string", description: "slug de uma tag existente da qual esta é sinônimo claro, ou \"none\"." },
             confidence: { type: "number", description: "0–1, confiança no sinônimo (use a do sub-grupo se não houver sinônimo)." },
+            adult_level: {
+              type: "string",
+              enum: ["none", "label", "explicit"],
+              description: "18+: \"explicit\" = conteúdo sexual explícito mostrado (ato/anatomia/pornô); \"label\" = rótulo adulto sem afirmar cena (adult/r19/erotica/smut); \"none\" = não sexual (violência/gore/tema maduro incluídos).",
+            },
           },
-          required: ["tag_name", "subgroup_slug", "synonym_of_slug", "confidence"],
+          required: ["tag_name", "subgroup_slug", "synonym_of_slug", "confidence", "adult_level"],
         },
       },
     },
@@ -66,10 +82,14 @@ function buildSystemPrompt(input: EnrichTagsForGroupInput): string {
     ? input.existingTags.map((t) => `- ${t.slug}: ${t.name}`).join("\n")
     : "(nenhuma tag existente — use \"none\" em synonym_of_slug)"
 
-  return `Você enriquece tags novas de um grupo de tags de obras (mangás/manhwas/webtoons/novels). Para cada tag nova você faz DUAS coisas:
+  return `Você enriquece tags novas de um grupo de tags de obras (mangás/manhwas/webtoons/novels). Para cada tag nova você faz TRÊS coisas:
 
 1. SUB-GRUPO: escolha o slug do sub-grupo (da lista abaixo) que melhor descreve a tag, usando as descrições como fonte de verdade. Se nenhum encaixa bem, use "none".
 2. SINÔNIMO: diga se a tag é um SINÔNIMO CLARO de alguma tag JÁ EXISTENTE do grupo (mesmo conceito, redação diferente — ex.: "abandoned-fl" ↔ "abandoned-protagonist"). Se for, retorne o slug da tag existente em synonym_of_slug; senão "none". NÃO marque como sinônimo tags que apenas compartilham um atributo mas têm significado diferente (ex.: "blonde-protagonist" vs "blonde-villain").
+3. 18+ (adult_level): a tag indica conteúdo SEXUAL adulto?
+   - "explicit": nomeia ou afirma conteúdo sexual EXPLÍCITO mostrado — ato sexual, anatomia genital, pornográfico (ex.: "Oral Sex", "Smut", "Hentai", "Pornographic").
+   - "label": rótulo de conteúdo adulto sem afirmar que uma cena é mostrada (ex.: "Adult", "R19", "Sexual Content", "Erotica").
+   - "none": NÃO é indicador sexual. Isto inclui violência, gore, tortura, temas maduros/sombrios, e fatos de enredo ("Sexually Active Protagonist") — retratar violência sexual ou ter sexo na história NÃO é ser sexualmente explícito. Na dúvida, use "none" (conservador).
 
 confidence (0–1): confiança no SINÔNIMO quando houver; sem sinônimo, a confiança da escolha do sub-grupo.
 
@@ -91,7 +111,7 @@ export async function enrichTagsForGroup(
 ): Promise<Map<string, EnrichResult>> {
   const out = new Map<string, EnrichResult>()
   for (const t of input.newTags) {
-    out.set(t.name, { subgroupSlug: null, synonymOfSlug: null, confidence: 0 })
+    out.set(t.name, { subgroupSlug: null, synonymOfSlug: null, confidence: 0, adultLevel: "none" })
   }
   if (input.newTags.length === 0) return out
   if (!process.env.ANTHROPIC_API_KEY) return out
@@ -134,7 +154,9 @@ export async function enrichTagsForGroup(
     const subgroupSlug = r.subgroup_slug && subSlugs.has(r.subgroup_slug) ? r.subgroup_slug : null
     const synonymOfSlug = r.synonym_of_slug && existingSlugs.has(r.synonym_of_slug) ? r.synonym_of_slug : null
     const confidence = typeof r.confidence === "number" ? r.confidence : 0
-    out.set(r.tag_name, { subgroupSlug, synonymOfSlug, confidence })
+    const adultLevel: AdultLevel =
+      r.adult_level === "explicit" || r.adult_level === "label" ? r.adult_level : "none"
+    out.set(r.tag_name, { subgroupSlug, synonymOfSlug, confidence, adultLevel })
   }
   return out
 }

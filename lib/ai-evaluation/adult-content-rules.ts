@@ -161,6 +161,19 @@ export const ADULT_LABEL_TAGS: ReadonlySet<string> = new Set([
   "Hypersexuality",
   "R19",
   "R19 Version",
+  "Erotica", // semeada (mig 166): rótulo adulto, cena não afirmada → piso 7
+])
+
+/**
+ * Tags-RÓTULO que, ao contrário das de ADULT_LABEL, AFIRMAM conteúdo sexual
+ * explícito mostrado (mesmo sem nomear um ato específico). Semeadas na mig 166 no
+ * grupo `content_indicator`. Acionam o piso EXPLÍCITO (9), como os gêneros homônimos
+ * "smut"/"hentai" já faziam antes — que agora chegam como TAG, não gênero.
+ */
+export const EXPLICIT_LABEL_TAGS: ReadonlySet<string> = new Set([
+  "Smut",
+  "Hentai",
+  "Pornographic",
 ])
 
 /** Gêneros que declaram sexo explícito sem ambiguidade. "Adult" fica de fora e vai
@@ -238,7 +251,8 @@ export function computeAdultContentBounds(input: AdultContentInput): AdultConten
   const ratings = (input.contentRatings ?? []).map((r) => r.toLowerCase().trim())
 
   const explicitSignals: string[] = []
-  for (const name of ciTags) if (EXPLICIT_ACT_TAGS.has(name)) explicitSignals.push(`tag "${name}"`)
+  for (const name of ciTags)
+    if (EXPLICIT_ACT_TAGS.has(name) || EXPLICIT_LABEL_TAGS.has(name)) explicitSignals.push(`tag "${name}"`)
   for (const g of genresLower) {
     if (EXPLICIT_GENRES.some((kw) => g === kw)) explicitSignals.push(`gênero "${g}"`)
   }

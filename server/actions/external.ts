@@ -16,6 +16,8 @@ import { boolEnv } from "@/lib/external/mangago-band"
 import { AI_EVAL_REVIEW_CAPS, requestAiEvaluation, type AiEvaluationTag } from "@/lib/ai-evaluation/service"
 import { SONNET_MODEL } from "@/lib/ai/models"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
+import { recordGenreCandidates } from "@/lib/tags/genre-proposals"
+import { normalizeTagKey, SOURCE_TAG_DENYLIST } from "@/lib/tags/source-tag-filter"
 import { getSourcesHealth } from "@/lib/external/source-health-store"
 import type { ExternalSourceId, MergedCandidate, TagSuggestion, ExternalWorkData, ConflictField, SourcedReview, ExternalSearchResult, SourceHealthRow } from "@/lib/external/types"
 import type { CriterionSlug } from "@/types/domain"
@@ -156,10 +158,6 @@ export async function checkExistingWorkInDb(input: {
   }))
 }
 
-function normalizeTagKey(name: string): string {
-  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "")
-}
-
 const TAG_NAME_BY_KEY: Map<string, string> = (() => {
   const map = new Map<string, string>()
   for (const group of TAG_GROUPS_CATALOG) {
@@ -214,22 +212,42 @@ export async function fetchExternalData(
   const tagCatalogByKey = TAG_NAME_BY_KEY
   const genreCatalogByKey = GENRE_NAME_BY_KEY
 
+  // NÃO descarta mais o que não bate no catálogo. Gênero conhecido → gênero;
+  // bate em tag do catálogo → tag; desconhecido → tag CRUA (create-on-demand no
+  // save). String de CAMPO-GÊNERO desconhecida também vira candidato a gênero.
+  // Só a denylist de formato é filtrada (com log — nunca em silêncio).
   const genres: string[] = []
   const tagsFromGenresField: string[] = []
+  const genreCandidates: string[] = []
   for (const g of result.data.genres) {
-    const key = normalizeTagKey(g)
+    const raw = g.trim()
+    const key = normalizeTagKey(raw)
+    if (!key) continue
+    if (SOURCE_TAG_DENYLIST.has(key)) {
+      console.info(`[fetchExternalData] denylist descartou gênero "${raw}"`)
+      continue
+    }
     const genreName = genreCatalogByKey.get(key)
     if (genreName) {
       genres.push(genreName)
       continue
     }
     const tagName = tagCatalogByKey.get(key)
-    if (tagName) tagsFromGenresField.push(tagName)
+    if (tagName) {
+      tagsFromGenresField.push(tagName)
+      continue
+    }
+    // desconhecido no campo gênero → vira TAG crua + candidato a gênero
+    tagsFromGenresField.push(raw)
+    genreCandidates.push(raw)
   }
-  const tagsFromSources = result.data.tags.flatMap((t) => {
-    const name = tagCatalogByKey.get(normalizeTagKey(t))
-    return name ? [name] : []
-  })
+  const tagsFromSources: string[] = []
+  for (const t of result.data.tags) {
+    const raw = t.trim()
+    const key = normalizeTagKey(raw)
+    if (!key || SOURCE_TAG_DENYLIST.has(key)) continue
+    tagsFromSources.push(tagCatalogByKey.get(key) ?? raw) // conhecida → canônica; senão crua
+  }
   const seen = new Set<string>()
   const tags: string[] = []
   for (const name of [...tagsFromGenresField, ...tagsFromSources]) {
@@ -237,6 +255,15 @@ export async function fetchExternalData(
     if (!key || seen.has(key)) continue
     seen.add(key)
     tags.push(name)
+  }
+
+  // Registra candidatos a gênero (best-effort — nunca quebra o fetch).
+  if (genreCandidates.length > 0) {
+    try {
+      await recordGenreCandidates(createAdminClient(), genreCandidates)
+    } catch (e) {
+      console.warn("[fetchExternalData] recordGenreCandidates falhou", e)
+    }
   }
 
   return { data: { ...result.data, genres, tags }, conflicts: result.conflicts }
@@ -253,7 +280,7 @@ export async function upsertExternalTags(tagNames: string[]): Promise<void> {
   if (!gate.ok) return
   if (!tagNames.length) return
   const supabase = createAdminClient()
-  const { createdIds } = await resolveOrCreateTags(supabase, tagNames)
+  const { createdIds } = await resolveOrCreateTags(supabase, tagNames, "external")
   scheduleTagEnrichment(createdIds)
 }
 
