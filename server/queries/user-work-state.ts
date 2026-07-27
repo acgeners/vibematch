@@ -2,7 +2,7 @@ import "server-only"
 import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createUserClient } from "@/lib/supabase/user"
-import { getCurrentUserId, getOwnerUserId } from "./current-user"
+import { getCurrentUserId, getOwnerUserId, ensureSignedIn, ensurePermission } from "./current-user"
 import type { SynopsisQuality, SynopsisQualitySource } from "@/types/domain"
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -444,4 +444,37 @@ export async function mirrorOwnerState(
  */
 export async function canWriteSharedWorkRow(userId: string): Promise<boolean> {
   return userId === (await getOwnerUserId())
+}
+
+export type ReadingStateWriterGate =
+  | { ok: true; userId: string; isOwner: boolean }
+  | { ok: false; error: string }
+
+/**
+ * Gate dos writers de estado pessoal (acompanhamento E gosto).
+ *
+ * ⚠️ IDENTIDADE antes de PERMISSÃO, e nesta ordem. `ensurePermission("own_state")` sozinho
+ * NÃO basta: o papel de um anônimo é `leitor` (fail-closed) e `own_state` é liberado pro
+ * leitor — ou seja, o gate de papel PASSA. O que falta ao anônimo não é permissão, é um
+ * `user_id` próprio: sem sessão, `getCurrentUserId()` cai no singleton e ele escreveria
+ * como o DONO. Só `ensureSignedIn()` fecha isso.
+ *
+ * Mora AQUI (e não em `server/actions/works.ts`, de onde veio) porque o estado pessoal tem
+ * dois writers enxutos em arquivos diferentes — status de leitura em `works.ts` e Interesse ♥
+ * em `synopsis-quality.ts`. Duplicar um gate é como ele fica diferente dos dois lados.
+ * Não pode ir num arquivo `"use server"`: lá todo export vira endpoint HTTP público, e este
+ * devolve o `user_id` de quem chamou.
+ */
+export async function ensureReadingStateWriter(): Promise<ReadingStateWriterGate> {
+  const session = await ensureSignedIn()
+  if (!session.ok) return { ok: false, error: session.error }
+
+  const gate = await ensurePermission("own_state")
+  if (!gate.ok) return { ok: false, error: gate.error }
+
+  return {
+    ok: true,
+    userId: session.userId,
+    isOwner: await canWriteSharedWorkRow(session.userId),
+  }
 }

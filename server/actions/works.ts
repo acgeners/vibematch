@@ -40,6 +40,7 @@ import {
   writeReadingState,
   mirrorOwnerState,
   canWriteSharedWorkRow,
+  ensureReadingStateWriter,
   toDay,
   getPersonalStateReader,
 } from "@/server/queries/user-work-state"
@@ -1992,29 +1993,10 @@ export async function setAdultOverride(id: string, value: boolean | null) {
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
 /**
- * Gate dos writers de estado de leitura.
- *
- * ⚠️ IDENTIDADE antes de PERMISSÃO, e nesta ordem. `ensurePermission("own_state")` sozinho
- * NÃO basta: o papel de um anônimo é `leitor` (fail-closed) e `own_state` é liberado pro
- * leitor — ou seja, o gate de papel PASSA. O que falta ao anônimo não é permissão, é um
- * `user_id` próprio: sem sessão, `getCurrentUserId()` cai no singleton e ele escreveria
- * como o DONO. Só `ensureSignedIn()` fecha isso.
+ * O gate (`ensureReadingStateWriter`) mora em `server/queries/user-work-state.ts` — o mesmo
+ * módulo do writer. O Interesse ♥ enxuto (`setSynopsisQualityAction`, em synopsis-quality.ts)
+ * usa exatamente este gate, e um gate duplicado é um gate que diverge.
  */
-async function ensureReadingStateWriter(): Promise<
-  { ok: true; userId: string; isOwner: boolean } | { ok: false; error: string }
-> {
-  const session = await ensureSignedIn()
-  if (!session.ok) return { ok: false, error: session.error }
-
-  const gate = await ensurePermission("own_state")
-  if (!gate.ok) return { ok: false, error: gate.error }
-
-  return {
-    ok: true,
-    userId: session.userId,
-    isOwner: await canWriteSharedWorkRow(session.userId),
-  }
-}
 
 /**
  * Aplica o patch nos DOIS lugares, na ordem certa: primeiro o dado de quem clicou
@@ -2336,6 +2318,9 @@ export async function setReadingStatusForWorks(ids: string[], status: string) {
   revalidatePath("/ai-evaluation")
   revalidateTag("ai-eval-tab-counts", "max")
   revalidatePath("/titles")
+  // A própria página da obra: desde os controles rápidos da faixa (status/♥), esta action é
+  // chamada de DENTRO dela — sem isto o badge voltaria ao valor antigo no refresh.
+  revalidatePath("/titles/[id]", "page")
   revalidateTag("works-slug-index", "max")
   revalidatePath("/ranking")
   revalidatePath("/")

@@ -9,7 +9,7 @@ import { UpdateProgressWatcher } from "@/components/titles/update-progress-watch
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { SynopsisQualitySuggestion } from "@/components/titles/synopsis-quality-suggestion"
-import { InterestAppliedMark } from "@/components/ui/interest-applied-mark"
+import { QuickStatusCell, QuickInterestCell } from "@/components/titles/quick-personal-controls"
 import { GenerateAllBanner } from "@/components/titles/generate-all-banner"
 import type { CascadeStatus } from "@/lib/generate-all/types"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
@@ -25,14 +25,20 @@ import {
   getLatestAiEvaluationAttributes,
   getExistingPostReadingAssessment,
 } from "@/server/queries/post-attribute-assessment"
-import { getCurrentUserId, canConsumeAi, getHideAdultContent } from "@/server/queries/current-user"
+import {
+  getCurrentUserId,
+  canConsumeAi,
+  getHideAdultContent,
+  ensureSignedIn,
+  ensurePermission,
+} from "@/server/queries/current-user"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getWorkReviews } from "@/server/queries/work-reviews"
 import { getLastDeepDive } from "@/server/queries/deep-dive"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getGenerationReadinessMany } from "@/server/queries/generation-readiness"
-import { getWorkAiCost } from "@/server/queries/ai-usage"
+import { getWorkAiCost, getFromScratchBaselineCost } from "@/server/queries/ai-usage"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
@@ -40,10 +46,7 @@ import { ScoreBadge, getScoreTextColor, pickCriterionTierByRange, criterionTierP
 import type { CriterionTier } from "@/components/ui/score-badge"
 import { ForceMeters } from "@/components/ranking/force-meters"
 import { computeWorkForces } from "@/lib/calculations/forces"
-import {
-  PublicationStatusBadge,
-  PersonalStatusBadge,
-} from "@/components/ui/status-badge"
+import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { SimilarWorksCard } from "@/components/titles/similar-works-card"
 import { getSimilarWorks } from "@/server/queries/similar-works"
@@ -269,6 +272,18 @@ const getSourceRows = unstable_cache(
   { revalidate: 300 }
 )
 
+/**
+ * Baseline "criar uma obra do zero" do badge DEV de custo. É a MESMA resposta pra
+ * todas as obras (mediana do catálogo inteiro) e varre ~2,7 mil linhas de
+ * `ai_api_calls` — cachear é o que a torna aceitável numa página de detalhe. 30 min:
+ * o número só se move quando novas obras são geradas.
+ */
+const getCachedFromScratchBaseline = unstable_cache(
+  async () => getFromScratchBaselineCost(),
+  ["from-scratch-baseline"],
+  { revalidate: 1800 }
+)
+
 const POST_READING_SCORE_FIELDS = Object.keys(DEFAULT_POST_READING_WEIGHTS) as PostReadingScoreField[]
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -366,9 +381,15 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     ? await readManualExternalReviewsForDisplay(work.id as string)
     : []
 
-  // Custo de IA acumulado desta obra — só em dev; em produção a query nem roda.
-  const devAiCost =
-    process.env.NODE_ENV !== "production" ? await getWorkAiCost(work.id as string) : null
+  // Custo de IA acumulado desta obra + o baseline "criar do zero" — só em dev; em
+  // produção nenhuma das duas queries roda.
+  const [devAiCost, devFromScratchBaseline] =
+    process.env.NODE_ENV !== "production"
+      ? await Promise.all([
+          getWorkAiCost(work.id as string),
+          getCachedFromScratchBaseline(),
+        ])
+      : [null, null]
 
   const scoreMap: Record<string, number> = {}
   for (const cs of work.category_scores ?? []) {
@@ -558,6 +579,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   const synopsisInterest = work.synopsis_quality?.trim() || null
   // Interesse manual que veio da aplicação da previsão (não definido à mão) → selo ✨.
   const synopsisFromPrediction = work.synopsis_quality_source === "prediction_applied"
+
+  // Afordância dos controles rápidos da faixa (status + ♥). É o MESMO par de checagens do
+  // gate das actions (`ensureReadingStateWriter`) — nunca um critério paralelo, senão a UI
+  // oferece um clique que o servidor recusa. Visitante anônimo passa no papel (`leitor` tem
+  // `own_state`) mas não tem identidade: sem sessão ele escreveria como o DONO.
+  const canEditPersonalState =
+    (await ensureSignedIn()).ok && (await ensurePermission("own_state")).ok
 
   const statusInitial: WorkStatusValues = {
     personal_status:
@@ -763,32 +791,21 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             </div>
           </div>
 
-          {/* Pessoal: status pessoal, interesse, nota esperada */}
+          {/* Pessoal: status pessoal, interesse, nota esperada.
+              As duas primeiras células são EDITÁVEIS in-loco (menu de status / corações ♥) —
+              a faixa fica fora do <TabsContent>, então o atalho vale nas 5 abas. */}
           <div className="flex divide-x divide-border/40 rounded-lg border border-border/40 bg-card/20 overflow-hidden">
-            <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Pessoal
-              </span>
-              <PersonalStatusBadge statusId={work.personal_status_id} />
-            </div>
-            <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Interesse
-              </span>
-              {synopsisInterest ? (
-                <span className="inline-flex items-center gap-1 rounded-full border border-rose-400/30 bg-rose-500/10 px-2.5 py-0.5 text-xs font-semibold text-rose-600 dark:text-rose-300">
-                  {synopsisInterest}
-                  {synopsisFromPrediction && <InterestAppliedMark size={12} />}
-                </span>
-              ) : (
-                <span
-                  className="text-sm font-mono font-semibold text-muted-foreground"
-                  title="Interesse na sinopse ainda não informado"
-                >
-                  —
-                </span>
-              )}
-            </div>
+            <QuickStatusCell
+              workId={work.id}
+              statusId={work.personal_status_id ?? null}
+              canEdit={canEditPersonalState}
+            />
+            <QuickInterestCell
+              workId={work.id}
+              value={synopsisInterest}
+              fromPrediction={synopsisFromPrediction}
+              canEdit={canEditPersonalState}
+            />
             {work.calculated_scores?.expected_score != null ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -956,7 +973,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 />
                 {devAiCost && (
                   <div className="ml-auto">
-                    <DevWorkAiCost summary={devAiCost} />
+                    <DevWorkAiCost summary={devAiCost} baseline={devFromScratchBaseline} />
                   </div>
                 )}
               </div>
