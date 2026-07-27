@@ -34,6 +34,13 @@ const META: Record<
     ring: "ring-teal-500/30",
     bg: "bg-teal-500/10",
   },
+  comix: {
+    label: "Comix",
+    dot: "bg-fuchsia-500",
+    text: "text-fuchsia-700 dark:text-fuchsia-300",
+    ring: "ring-fuchsia-500/30",
+    bg: "bg-fuchsia-500/10",
+  },
   titles: {
     label: "Lista de títulos",
     dot: "bg-slate-500",

@@ -78,19 +78,19 @@ export function ImportModes({
         />
       </div>
 
-      {/* ── Abas ─────────────────────────────────────────────────── */}
+      {/* ── Abas: nível 1 = segmentado preenchido (padrão /leitura) ──── */}
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="import">
+        <TabsList className="h-10 w-fit rounded-xl p-1">
+          <TabsTrigger value="import" className="flex-none rounded-lg px-4 font-semibold">
             <Upload /> Importar
           </TabsTrigger>
-          <TabsTrigger value="review">
+          <TabsTrigger value="review" className="flex-none rounded-lg px-4 font-semibold">
             <ClipboardCheck /> Revisar pendentes
             {pendingCount > 0 && (
               <span className="tabular-nums text-xs text-muted-foreground">{pendingCount}</span>
             )}
           </TabsTrigger>
-          <TabsTrigger value="history">
+          <TabsTrigger value="history" className="flex-none rounded-lg px-4 font-semibold">
             <History /> Histórico
           </TabsTrigger>
         </TabsList>

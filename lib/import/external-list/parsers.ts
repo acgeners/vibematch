@@ -86,7 +86,9 @@ export function parseExternalList(text: string, source: ExternalListSource): Ext
     case "mangaupdates":
       return parseMangaUpdates(text)
     case "animeplanet":
-      return parseMalXml(text)
+    case "comix":
+      // Comix exporta no mesmo formato XML do MyAnimeList.
+      return parseMalXml(text, source)
     case "anilist":
       // AniList não vem de texto/arquivo — é buscado pela API e convertido por
       // parseAniListList. Cair aqui é erro de uso.
@@ -201,7 +203,10 @@ function parseMangaUpdates(text: string): ExternalListEntry[] {
 // ── Anime-Planet / MyAnimeList XML ───────────────────────────────────
 // <myanimelist><manga>…</manga>…</myanimelist>
 // Estrutura plana e regular → extração por blocos, sem dependência de XML.
-function parseMalXml(text: string): ExternalListEntry[] {
+function parseMalXml(
+  text: string,
+  source: "animeplanet" | "comix" = "animeplanet"
+): ExternalListEntry[] {
   const blocks = text.split(/<manga>/i).slice(1).map((b) => b.split(/<\/manga>/i)[0])
   const out: ExternalListEntry[] = []
   for (const block of blocks) {
@@ -210,7 +215,7 @@ function parseMalXml(text: string): ExternalListEntry[] {
     const statusKey = (xmlTag(block, "my_status") ?? "").toLowerCase().trim()
     const score = toPositiveInt(xmlTag(block, "my_score"))
     out.push({
-      source: "animeplanet",
+      source,
       externalId: xmlTag(block, "manga_mangadb_id"),
       title,
       personalStatus: MAL_XML_STATUS[statusKey] ?? null,

@@ -36,6 +36,14 @@ const GUIDES: { source: string; steps: string[] }[] = [
       "Suba direto — não precisa descompactar.",
     ],
   },
+  {
+    source: "comix",
+    steps: [
+      "Perfil → Import / Export / Sync → Export.",
+      "Escolha o formato MAL XML e baixe.",
+      'Suba em "Por arquivo" (formato Comix (XML)).',
+    ],
+  },
 ]
 
 export function ExportHelp() {

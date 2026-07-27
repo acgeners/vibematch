@@ -56,6 +56,7 @@ const FILE_TYPE: Record<ExternalListSource, string> = {
   animeplanet: "mal_xml",
   anilist: "anilist_user",
   titles: "titles_paste",
+  comix: "comix_xml",
 }
 
 async function resolveEntries(input: ExternalListInput): Promise<{

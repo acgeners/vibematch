@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import { Upload, FileText, Check, AlertCircle, ArrowRight, User, Search, ClipboardList } from "lucide-react"
+import { Upload, FileText, Check, AlertCircle, ArrowRight, User, Search, ClipboardList, Info } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -47,7 +48,7 @@ const FIELD_LABELS: Record<ReconcileField, string> = {
   chapters_read: "Capítulos",
 }
 
-const SOURCES: ExternalListSource[] = ["myanimelist", "mangaupdates", "animeplanet"]
+const SOURCES: ExternalListSource[] = ["myanimelist", "mangaupdates", "animeplanet", "comix"]
 
 function fmt(value: string | number | null): string {
   if (value === null || value === undefined || value === "") return "—"
@@ -216,38 +217,41 @@ export function ExternalListImport({
     const titleCount = titlesText.split(/\r?\n/).filter((l) => l.trim()).length
     return (
       <div className="space-y-4">
-        {/* Método: arquivo (padrão), usuário do AniList, ou lista de títulos */}
-        <div className="inline-flex w-fit flex-wrap items-center gap-1 rounded-lg bg-muted p-[3px]">
-          {([
-            { id: "file" as Method, label: "Por arquivo", icon: FileText },
-            { id: "anilist" as Method, label: "Por usuário (AniList)", icon: User },
-            { id: "titles" as Method, label: "Colar títulos", icon: ClipboardList },
-          ]).map((m) => {
-            const Icon = m.icon
-            return (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => {
-                  setMethod(m.id)
-                  setError(null)
-                }}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition",
-                  method === m.id
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-foreground/60 hover:text-foreground"
-                )}
-              >
-                <Icon className="h-3.5 w-3.5" /> {m.label}
-                {m.id === "anilist" && (
-                  <span className="ml-0.5 rounded px-1 text-[9px] font-bold uppercase tracking-wide text-primary ring-1 ring-inset ring-primary/40">
-                    Novo
-                  </span>
-                )}
-              </button>
-            )
-          })}
+        {/* Método (nível 2): pílulas discretas — forma diferente das abas (padrão /leitura) */}
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground">De onde importar</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {([
+              { id: "file" as Method, label: "Por arquivo", icon: FileText },
+              { id: "titles" as Method, label: "Colar títulos", icon: ClipboardList },
+              { id: "anilist" as Method, label: "Por usuário (AniList)", icon: User },
+            ]).map((m) => {
+              const Icon = m.icon
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    setMethod(m.id)
+                    setError(null)
+                  }}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[13px] font-medium transition-colors",
+                    method === m.id
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <Icon className="size-3.5" /> {m.label}
+                  {m.id === "anilist" && (
+                    <span className="rounded px-1 text-[9px] font-bold uppercase tracking-wide text-primary ring-1 ring-inset ring-primary/40">
+                      Novo
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
         </div>
 
         {method === "file" ? (
@@ -292,7 +296,7 @@ export function ExternalListImport({
                 </Select>
               </div>
               <Button disabled={!file || analyzing} onClick={runAnalyze}>
-                {analyzing ? "Analisando…" : "Analisar lista"}
+                {analyzing ? "Analisando…" : "Importar lista"}
               </Button>
             </div>
           </>
@@ -330,7 +334,21 @@ export function ExternalListImport({
         ) : (
           <div className="space-y-3">
             <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">Cole os títulos — um por linha</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-muted-foreground">Cole os títulos — um por linha</span>
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button type="button" aria-label="Como funciona" className="text-muted-foreground/70 transition-colors hover:text-foreground">
+                        <Info className="size-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      Cria as obras só com o título (pendentes de revisão) e reconhece as que já existem no catálogo. Ideal pra popular o DB em massa — você enriquece capa/sinopse depois em “Revisar pendentes”.
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
               <textarea
                 value={titlesText}
                 onChange={(e) => {
@@ -339,21 +357,20 @@ export function ExternalListImport({
                 }}
                 rows={8}
                 spellCheck={false}
-                placeholder={"Solo Leveling\nThe Beginning After the End\nOmniscient Reader's Viewpoint"}
+                placeholder={"The Remarried Empress\nWho Made Me a Princess\nDaughter of the Emperor"}
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
             <div className="flex items-center gap-3">
               <Button disabled={!titlesText.trim() || analyzing} onClick={runAnalyze}>
-                {analyzing ? "Analisando…" : "Analisar títulos"}
+                {analyzing ? "Analisando…" : "Incluir títulos"}
               </Button>
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {titleCount > 0 ? `${titleCount} ${titleCount === 1 ? "título" : "títulos"}` : "um por linha"}
-              </span>
+              {titleCount > 0 && (
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {titleCount} {titleCount === 1 ? "título" : "títulos"}
+                </span>
+              )}
             </div>
-            <p className="text-xs text-muted-foreground">
-              Cria as obras só com o título (pendentes de revisão) e reconhece as que já existem no catálogo. Ideal pra popular o DB em massa — você enriquece capa/sinopse depois em &quot;Revisar pendentes&quot;.
-            </p>
           </div>
         )}
 
