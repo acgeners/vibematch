@@ -58,6 +58,14 @@ const tolerantCriterionPreferences = z
     return out
   })
 
+// short_summary é OPCIONAL na tolerância (perfis pré-v7 não têm; o modelo pode
+// omitir). Ausência vira "" — o painel detecta vazio e cai no `summary` cortado,
+// em vez de mostrar um texto de fallback fixo.
+const tolerantOptionalSummary = z
+  .string()
+  .nullish()
+  .transform((s) => s?.trim() ?? "")
+
 export const tasteProfileToolPayloadSchema = z.object({
   loved_tags: z.array(profileTagSchema),
   avoided_tags: z.array(profileTagSchema),
@@ -66,6 +74,7 @@ export const tasteProfileToolPayloadSchema = z.object({
   criterion_preferences: tolerantCriterionPreferences,
   narrative_patterns: tolerantStringArray,
   summary: tolerantSummary,
+  short_summary: tolerantOptionalSummary,
 })
 
 export type TasteProfileToolPayload = z.infer<typeof tasteProfileToolPayloadSchema>
