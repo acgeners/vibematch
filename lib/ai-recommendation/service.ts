@@ -32,7 +32,7 @@ export const MODEL = SONNET_MODEL
 // seleção das cruas por qualidade/diversidade de fonte (não mais por nota).
 // v6 (Item C, Passe 2): digest estruturado (review_digest, Sonnet) tem
 // precedência sobre o review_summary-texto no tailBlock.
-export const PROMPT_VERSION = "v6"
+export const PROMPT_VERSION = "v7"
 
 const CRITERION_SLUG_ENUM = [...CRITERION_SLUGS]
 
@@ -84,6 +84,7 @@ const TASTE_PROFILE_TOOL: Anthropic.Messages.Tool = {
       },
       narrative_patterns: { type: "array", items: { type: "string" } },
       summary: { type: "string" },
+      short_summary: { type: "string" },
     },
     required: [
       "loved_tags",
@@ -93,6 +94,7 @@ const TASTE_PROFILE_TOOL: Anthropic.Messages.Tool = {
       "criterion_preferences",
       "narrative_patterns",
       "summary",
+      "short_summary",
     ],
   },
 }

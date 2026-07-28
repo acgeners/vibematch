@@ -54,7 +54,11 @@ export interface TasteProfilePayload {
   avoided_themes: string[]
   criterion_preferences: Partial<Record<CriterionSlug, ProfileCriterionPreference>>
   narrative_patterns: string[]
+  /** Síntese completa (parágrafo) do gosto. */
   summary: string
+  /** Síntese curta (2–3 frases, ~4–6 linhas) exibida por padrão; o `summary`
+   *  completo fica atrás de "ver completo". Opcional: perfis pré-v7 não têm. */
+  short_summary?: string
 }
 
 export interface TasteProfileRow {

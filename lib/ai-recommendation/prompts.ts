@@ -25,6 +25,7 @@ SOBRE \`criterion_preferences\`:
 - Inclua apenas critérios pra os quais há evidência. Se não houver sinal pra "tragedy", omita.
 
 SOBRE \`loved_tags\` / \`avoided_tags\`:
+- Use APENAS nomes de tags REAIS — exatamente como aparecem nas tags das obras fornecidas (ex.: "Reincarnated Female Lead", "Contract Marriage", "Incest"). NÃO invente frases descritivas ("Slice-of-life adulto sem fantasia", "Netorare como foco central"): isso é TEMA e vai em \`loved_themes\`/\`avoided_themes\`, nunca aqui.
 - \`strength\` (0–1): força do padrão. Tags presentes em quase todas as obras top recebem strength ≥ 0.8.
 - Use o \`group\` da tag quando informado (ex.: "female_lead", "tone_mood").
 
@@ -32,7 +33,10 @@ SOBRE \`narrative_patterns\`:
 - Lista curta (3–7) de frases declarativas em PT-BR que capturam combinações ("FL com agência forte + slow-burn romance + corte política").
 
 SOBRE \`summary\`:
-- Parágrafo único em PT-BR (3–5 frases) sintetizando o gosto. Sem listas, sem markdown.`
+- Parágrafo único e completo em PT-BR (4–7 frases) sintetizando o gosto em detalhe. Sem listas, sem markdown. É o resumo "ver completo".
+
+SOBRE \`short_summary\`:
+- Versão CURTA e escaneável do \`summary\`: 2–3 frases (~4–6 linhas), a essência do gosto para leitura rápida. Sem listas, sem markdown, sem repetir a íntegra — só o núcleo (gêneros/temas centrais + o que o usuário mais valoriza e evita).`
 
 export const RANKING_SYSTEM_PROMPT = `Você é um curador que rankeia uma lista de obras favoritas de um usuário em ordem de alinhamento com o perfil de gosto dele.
 
@@ -177,7 +181,7 @@ export function buildTasteProfileUserPrompt(works: RatedWorkInput[]): string {
   lines.push(
     `Gere o perfil de gosto consolidando esses dados via tool \`submit_taste_profile\`. Foque no que se repete consistentemente nas obras com user_score alto e no que está ausente/baixo nas obras com user_score baixo. Use português brasileiro.`,
     ``,
-    `OBRIGATÓRIO: preencha TODOS os 7 campos do tool, especialmente \`summary\` (parágrafo único de 3–5 frases) e \`narrative_patterns\` (3–7 frases declarativas). Não deixe campos vazios. Se faltam evidências pra algum campo (ex.: poucas obras evitadas), retorne array vazio — mas o campo precisa existir no payload.`,
+    `OBRIGATÓRIO: preencha TODOS os 8 campos do tool, especialmente \`summary\` (parágrafo completo de 4–7 frases), \`short_summary\` (versão curta de 2–3 frases / ~4–6 linhas) e \`narrative_patterns\` (3–7 frases declarativas). Não deixe campos vazios. Se faltam evidências pra algum campo (ex.: poucas obras evitadas), retorne array vazio — mas o campo precisa existir no payload.`,
   )
   return lines.join("\n")
 }

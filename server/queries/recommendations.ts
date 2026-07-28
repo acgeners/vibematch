@@ -12,6 +12,8 @@ import {
   personalStatusNameOrDefault,
 } from "@/lib/constants/status-lookups"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
+import { topNonCriterionDrivers } from "@/lib/calculations/ridge-feature-labels"
+import type { PredictionDriver } from "@/lib/calculations/ridge-feature-labels"
 import {
   applyBiasToCategoryScores,
   type AttributeBiasMap,
@@ -1606,4 +1608,28 @@ export async function getAlignedWorkSplit(limit = 5): Promise<AlignedWorkSplit> 
     otherTotal: works.length - read.length - unread.length,
     confirmation,
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Fatores da Nota Prevista (Ridge) — exibidos no /perfil
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Top-N features que mais pesam na Nota Prevista, EXCLUINDO os 9 critérios IA
+ * (já mostrados nas barras da Assinatura). Lê os coeficientes do Ridge de
+ * `formula_config` (singleton do dono — quando o app for multi-user isto passa
+ * a ser por-usuário). Vazio quando não há modelo treinado.
+ */
+export async function getPredictionDrivers(limit = 7): Promise<PredictionDriver[]> {
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from("formula_config")
+    .select("expected_ridge_coefficients")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const ridge = (data?.expected_ridge_coefficients ?? null) as
+    | { featureNames?: string[]; coefficients?: number[] }
+    | null
+  return topNonCriterionDrivers(ridge, limit)
 }
