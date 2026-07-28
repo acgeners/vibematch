@@ -135,6 +135,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     minTotalVotes: num("min_votes"),
     maxTotalVotes: num("max_votes"),
     onlyWithFinalScore: str("only_scored") === "1",
+    onlyWithoutFinalScore: str("no_score") === "1",
     // "Todos": universo de favoritos. Grupo: escopo pelos IDs do grupo.
     onlyFavorites: isAll,
     onlyWorkIds: isAll ? undefined : listDetail!.workIds,

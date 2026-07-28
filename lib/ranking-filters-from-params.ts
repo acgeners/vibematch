@@ -72,6 +72,7 @@ export function parseFiltersFromSearchParams(sp: URLSearchParams): RankingFilter
     minTotalVotes: num("min_votes"),
     maxTotalVotes: num("max_votes"),
     onlyWithFinalScore: sp.get("only_scored") === "1",
+    onlyWithoutFinalScore: sp.get("no_score") === "1",
     onlyFavorites: sp.get("fav") === "1",
   }
 }

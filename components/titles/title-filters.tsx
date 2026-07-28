@@ -923,8 +923,12 @@ export function TitleFilters({
   const hasFilters = draftSearch !== "" || appliedSearchString !== ""
 
   const applyAllFilters = () => {
-    const target = draftSearch ? `/titles?${draftSearch}` : "/titles"
-    startTransition(() => router.replace(target))
+    // Volta pra página 1: aplicar um recorte novo estando na página 3 cai num
+    // vazio que parece "não tenho nenhuma obra assim" e é só paginação.
+    const next = new URLSearchParams(draftSearch)
+    next.delete("page")
+    const qs = next.toString()
+    startTransition(() => router.replace(qs ? `/titles?${qs}` : "/titles"))
   }
   // "Limpar" é imediato: zera o rascunho E navega, sem exigir "Aplicar filtros".
   const clearAll = () => {
@@ -1077,6 +1081,13 @@ export function TitleFilters({
       key: "only_scored",
       label: `Só com ${LABELS.expected_score.full}`,
       onRemove: () => updateParams({ only_scored: null }),
+    })
+  }
+  if (searchParams.get("no_score") === "1") {
+    activeChips.push({
+      key: "no_score",
+      label: `Só sem ${LABELS.expected_score.full}`,
+      onRemove: () => updateParams({ no_score: null }),
     })
   }
   if (searchParams.get("fav") === "1") {
@@ -1282,10 +1293,29 @@ export function TitleFilters({
                 <ToggleChip
                   label={`🎯 Só com ${LABELS.expected_score.short}`}
                   active={searchParams.get("only_scored") === "1"}
+                  // Os dois recortes de Nota Prevista são mutuamente exclusivos:
+                  // ligados juntos a lista seria SEMPRE vazia, e o usuário leria
+                  // isso como "não tenho nenhuma obra" em vez de "filtro impossível".
                   onClick={() =>
-                    updateParams({ only_scored: searchParams.get("only_scored") === "1" ? null : "1" })
+                    updateParams(
+                      searchParams.get("only_scored") === "1"
+                        ? { only_scored: null }
+                        : { only_scored: "1", no_score: null },
+                    )
                   }
                   tooltip="Esconde obras sem Nota Prevista (as que ainda não têm os 9 atributos de IA)."
+                />
+                <ToggleChip
+                  label={`🚫 Só sem ${LABELS.expected_score.short}`}
+                  active={searchParams.get("no_score") === "1"}
+                  onClick={() =>
+                    updateParams(
+                      searchParams.get("no_score") === "1"
+                        ? { no_score: null }
+                        : { no_score: "1", only_scored: null },
+                    )
+                  }
+                  tooltip="Só obras SEM Nota Prevista — a fila do que ainda falta avaliar (sem os 9 atributos de IA)."
                 />
                 <ToggleChip
                   label="❤️ Só favoritas"

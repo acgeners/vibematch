@@ -126,6 +126,7 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     maxTotalVotes: num("max_votes"),
     topN: num("top_n"),
     onlyWithFinalScore: str("only_scored") === "1",
+    onlyWithoutFinalScore: str("no_score") === "1",
     onlyFavorites: str("fav") === "1",
     includeFinishedDropped: true,
     sortLevels,
