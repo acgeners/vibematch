@@ -35,9 +35,11 @@ import type {
   ExternalSourceDebug,
   ExternalSourceId,
   ExternalWorkData,
+  FieldValueProvenance,
   MergedCandidate,
   MultiSourceResult,
   PlatformRating,
+  ProvenancedField,
   SimilarWork,
   SourcedReview,
 } from "./types"
@@ -1744,6 +1746,47 @@ function bySourcePriority<T extends { source: ExternalSourceId }>(items: T[]): T
   )
 }
 
+/**
+ * Coleta, por campo, os valores DISTINTOS que as fontes aceitas reportaram — junto de
+ * quem reportou cada um. É o que o passo de conflitos usa pra dizer "MangaDex · 1" em
+ * vez de "Externo · 1", e pra oferecer o "50 do MangaUpdates" que o merge descartou.
+ *
+ * A ordem preservada é a de `accepted` (MangaUpdates içado à frente), a MESMA que o
+ * `accepted.find(...)` do merge percorre — então o primeiro valor de cada lista é o
+ * que venceu. Não há dedup por significado aqui de propósito: dois títulos que diferem
+ * por um hífen SÃO duas escolhas diferentes para quem está decidindo.
+ */
+function buildFieldProvenance(
+  accepted: ExternalSearchResult[],
+): Partial<Record<ProvenancedField, FieldValueProvenance[]>> {
+  const getters: Record<ProvenancedField, (result: ExternalSearchResult) => string | number | null | undefined> = {
+    title: (r) => r.title,
+    originalTitle: (r) => r.originalTitle,
+    publicationStatus: (r) => r.publicationStatus,
+    totalChapters: (r) => r.chapters,
+    year: (r) => r.year,
+    yearEnd: (r) => r.yearEnd,
+  }
+
+  const provenance: Partial<Record<ProvenancedField, FieldValueProvenance[]>> = {}
+  for (const [field, get] of Object.entries(getters) as Array<[ProvenancedField, (r: ExternalSearchResult) => string | number | null | undefined]>) {
+    const byValue = new Map<string, FieldValueProvenance>()
+    for (const result of accepted) {
+      const raw = get(result)
+      if (raw == null || raw === "") continue
+      const key = String(raw)
+      const entry = byValue.get(key)
+      if (entry) {
+        if (!entry.sources.includes(result.source)) entry.sources.push(result.source)
+      } else {
+        byValue.set(key, { value: raw, sources: [result.source] })
+      }
+    }
+    if (byValue.size > 0) provenance[field] = [...byValue.values()]
+  }
+  return provenance
+}
+
 function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[], apDetail?: AnimePlanetDetail | null, muStatusText?: string): ExternalWorkData {
   const primary = accepted[0] ?? candidate
   const synopsisInputs: Array<{ source: ExternalSourceId; text: string | null | undefined }> = accepted.map(
@@ -1808,6 +1851,7 @@ function mergeData(candidate: MergedCandidate, accepted: ExternalSearchResult[],
     apVotes: apDetail?.votes ?? undefined,
     externalPlatformRatings: [...ratings, ...apEntry],
     mangaUpdatesStatusText: muStatusText,
+    fieldProvenance: buildFieldProvenance(accepted),
   }
 }
 

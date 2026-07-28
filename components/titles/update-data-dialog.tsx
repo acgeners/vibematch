@@ -29,7 +29,8 @@ import { getCoverImageSrc } from "@/lib/image-proxy"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
 import { cleanSynopsisText, dedupeByMeaning } from "@/lib/synopsis-text"
 import { titleToSlug } from "@/lib/utils"
-import type { ExternalSourceId, ExternalWorkData } from "@/lib/external/types"
+import { sourceLabel } from "@/lib/external/source-labels"
+import type { ExternalSourceId, ExternalWorkData, FieldValueProvenance } from "@/lib/external/types"
 
 /**
  * Barra de ações de cada passo. Fica GRUDADA no rodapé da área de rolagem: os
@@ -79,16 +80,43 @@ interface UpdateDataDialogProps {
   withSourceStep?: boolean
 }
 
+/**
+ * Uma opção EXTERNA do passo de conflitos: um valor distinto e quem o reportou.
+ * `sources` vazio = o merge herdou o valor do candidato da busca, sem fonte
+ * hidratada atribuível → a UI cai no rótulo genérico "Externo".
+ */
+interface ExternalChoice {
+  /** Chave do radio: "ext:0", "ext:1"… "current" é o outro valor possível. */
+  key: ResolutionValue
+  sources: ExternalSourceId[]
+  display: string
+  value: string | number
+}
+
 interface FieldConflict {
   field: keyof CurrentWork
   label: string
   currentValue: string | null
-  externalValue: string | null
+  /** Sempre ≥ 1: a primeira é o valor que venceu o merge. */
+  externalChoices: ExternalChoice[]
 }
+
+/**
+ * Decisão do usuário por campo. Tudo que NÃO é "current" significa "usar o externo" —
+ * é assim que `applyUpdate` sempre leu isto, e continua lendo. O que mudou é que
+ * "ext:N" também diz QUAL dos valores externos, resolvido antes do save.
+ */
+type ResolutionValue = "current" | "external" | `ext:${number}`
 
 function formatValue(value: string | number | null | undefined): string {
   if (value == null) return "—"
   return String(value)
+}
+
+/** Rótulo das fontes de uma opção. Sem fonte atribuível volta ao "Externo" de antes. */
+function choiceLabel(choice: ExternalChoice): string[] {
+  if (choice.sources.length === 0) return ["Externo"]
+  return choice.sources.map(sourceLabel)
 }
 
 function isHttpUrl(value: string): boolean {
@@ -100,6 +128,17 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+/**
+ * Monta o passo de conflitos: para cada campo em que o externo difere do salvo, UMA
+ * LINHA POR VALOR DISTINTO — não por fonte. Fontes que concordam dividem a linha
+ * ("MangaUpdates AniList · Completo"), e fonte que concorda com o valor salvo não vira
+ * linha nenhuma: escolhê-la e escolher "Atual" dariam exatamente o mesmo resultado.
+ *
+ * A primeira opção é SEMPRE o valor que venceu o merge (o pré-selecionado, como antes).
+ * Ele é injetado a partir do próprio `external[field]` e não da procedência, porque o
+ * merge tem fallbacks que a procedência não enxerga (`originalTitle` pode vir do
+ * candidato da busca) — assim a lista nunca deixa de conter o que de fato será salvo.
+ */
 function getConflicts(current: CurrentWork, external: ExternalWorkData): FieldConflict[] {
   const conflicts: FieldConflict[] = []
 
@@ -107,21 +146,54 @@ function getConflicts(current: CurrentWork, external: ExternalWorkData): FieldCo
     field: keyof CurrentWork,
     label: string,
     currentVal: string | number | null | undefined,
-    externalVal: string | number | null | undefined
+    externalVal: string | number | null | undefined,
+    /** Demais valores que as fontes reportaram para este campo. */
+    alternatives: FieldValueProvenance[] = [],
   ) => {
     const cv = formatValue(currentVal)
     const ev = formatValue(externalVal)
-    if (ev !== "—" && cv !== ev) {
-      conflicts.push({ field, label, currentValue: cv === "—" ? null : cv, externalValue: ev })
+    if (ev === "—" || cv === ev || externalVal == null) return
+
+    const sourcesFor = (value: string | number): ExternalSourceId[] =>
+      alternatives.find((entry) => String(entry.value) === String(value))?.sources ?? []
+
+    const byDisplay = new Map<string, Omit<ExternalChoice, "key">>()
+    const push = (value: string | number) => {
+      const display = formatValue(value)
+      // Valor idêntico ao salvo não vira opção externa — seria um clone do "Atual".
+      if (display === cv || byDisplay.has(display)) return
+      byDisplay.set(display, { sources: sourcesFor(value), display, value })
     }
+
+    push(externalVal)
+    for (const entry of alternatives) push(entry.value)
+
+    const externalChoices: ExternalChoice[] = [...byDisplay.values()].map((choice, i) => ({
+      ...choice,
+      key: `ext:${i}`,
+    }))
+    conflicts.push({ field, label, currentValue: cv === "—" ? null : cv, externalChoices })
   }
 
-  check("title", "Título", current.title, external.title)
-  check("originalTitle", "Título original", current.originalTitle, external.originalTitle)
-  check("synopsis", "Sinopse", current.synopsis, external.synopsis)
-  check("coverUrl", "Capa (URL)", current.coverUrl, external.coverUrl)
-  check("publicationStatus", "Status de publicação", current.publicationStatus, external.publicationStatus)
-  check("totalChapters", "Capítulos totais", current.totalChapters, external.totalChapters)
+  const provenance = external.fieldProvenance ?? {}
+  // Sinopse e capa não têm procedência escalar (o texto/URL viaja em multiSynopses/
+  // multiCovers) — a fonte sai dali. Na prática ambas já foram decididas nos passos
+  // anteriores e raramente chegam aqui.
+  const synopsisAlternatives: FieldValueProvenance[] = (external.multiSynopses ?? []).map((s) => ({
+    value: s.text,
+    sources: [s.source],
+  }))
+  const coverAlternatives: FieldValueProvenance[] = (external.multiCovers ?? []).map((c) => ({
+    value: c.url,
+    sources: [c.source],
+  }))
+
+  check("title", "Título", current.title, external.title, provenance.title)
+  check("originalTitle", "Título original", current.originalTitle, external.originalTitle, provenance.originalTitle)
+  check("synopsis", "Sinopse", current.synopsis, external.synopsis, synopsisAlternatives)
+  check("coverUrl", "Capa (URL)", current.coverUrl, external.coverUrl, coverAlternatives)
+  check("publicationStatus", "Status de publicação", current.publicationStatus, external.publicationStatus, provenance.publicationStatus)
+  check("totalChapters", "Capítulos totais", current.totalChapters, external.totalChapters, provenance.totalChapters)
 
   return conflicts
 }
@@ -275,7 +347,7 @@ export function UpdateDataDialog({
   /** Nomes que a busca de fato usou nas fontes (título + variantes do retry). */
   const [searchQueries, setSearchQueries] = useState<string[]>([])
   const [conflicts, setConflicts] = useState<FieldConflict[]>([])
-  const [resolutions, setResolutions] = useState<Record<string, "current" | "external">>({})
+  const [resolutions, setResolutions] = useState<Record<string, ResolutionValue>>({})
   const [synopsisChoices, setSynopsisChoices] = useState<SynopsisChoice[]>([])
   const [coverChoices, setCoverChoices] = useState<CoverChoice[]>([])
   const [coversNeedPick, setCoversNeedPick] = useState(false)
@@ -347,13 +419,15 @@ export function UpdateDataDialog({
 
   const proceedToConflictsOrApply = (
     data: ExternalWorkData,
-    preResolved: Record<string, "current" | "external"> = {}
+    preResolved: Record<string, ResolutionValue> = {}
   ) => {
     const detected = getConflicts(currentWork, data).filter((c) => !(c.field in preResolved))
     setPendingData(data)
     if (detected.length > 0) {
-      const defaults: Record<string, "current" | "external"> = { ...preResolved }
-      for (const c of detected) defaults[c.field] = "external"
+      const defaults: Record<string, ResolutionValue> = { ...preResolved }
+      // Default segue no externo (comportamento de antes) — e agora é a primeira
+      // opção da lista, que é justamente o valor que venceu o merge.
+      for (const c of detected) defaults[c.field] = c.externalChoices[0]?.key ?? "external"
       setResolutions(defaults)
       setConflicts(detected)
       setPhase("conflicts")
@@ -374,7 +448,7 @@ export function UpdateDataDialog({
     // O usuário já escolheu sinopse/capa no multipick — não perguntar de novo
     // na tela de conflitos (que comparava só o campo single e dava a impressão
     // de que as outras escolhas estavam sendo descartadas).
-    const preResolved: Record<string, "current" | "external"> = {}
+    const preResolved: Record<string, ResolutionValue> = {}
     if (includedSynopses.length > 0) preResolved.synopsis = "external"
 
     const next: ExternalWorkData = {
@@ -574,7 +648,7 @@ export function UpdateDataDialog({
 
   const applyUpdate = async (
     data: ExternalWorkData,
-    fieldResolutions: Record<string, "current" | "external">
+    fieldResolutions: Record<string, ResolutionValue>
   ) => {
     setPhase("saving")
     // Returns the external value only if it's non-empty and user didn't explicitly keep current.
@@ -717,7 +791,33 @@ export function UpdateDataDialog({
 
   const handleConfirm = () => {
     if (!pendingData) return
-    applyUpdate(pendingData, resolutions)
+    // O merge escolheu um valor por campo; se o usuário preferiu OUTRA fonte, o dado
+    // que vai pro save tem que carregar o valor dela — `applyUpdate` lê de `data`,
+    // não das opções. Sem este patch, escolher "MangaUpdates · 50" salvaria o 1 do
+    // MangaDex em silêncio (a resolução não-"current" só dizia "use o externo").
+    const patched: ExternalWorkData = { ...pendingData }
+    for (const conflict of conflicts) {
+      const resolution = resolutions[conflict.field]
+      if (!resolution || resolution === "current") continue
+      const chosen = conflict.externalChoices.find((choice) => choice.key === resolution)
+      if (!chosen) continue
+      // Sinopse: manter `multiSynopses` coerente com a escolha, senão o gravador
+      // reinsere a lista antiga e a principal volta a ser a do merge.
+      if (conflict.field === "synopsis") {
+        patched.synopsis = String(chosen.value)
+        const source = chosen.sources[0]
+        if (source) patched.multiSynopses = [{ source, text: String(chosen.value) }]
+        continue
+      }
+      if (conflict.field === "coverUrl") {
+        patched.coverUrl = String(chosen.value)
+        const source = chosen.sources[0]
+        if (source) patched.multiCovers = [{ url: String(chosen.value), source }]
+        continue
+      }
+      ;(patched as unknown as Record<string, unknown>)[conflict.field] = chosen.value
+    }
+    applyUpdate(patched, resolutions)
   }
 
   const handleClose = () => {
@@ -1064,36 +1164,55 @@ export function UpdateDataDialog({
               <p className="text-sm text-muted-foreground">
                 Os campos abaixo diferem dos dados atuais. Escolha qual versão manter:
               </p>
-              {conflicts.map((c) => (
-                <div key={c.field} className="space-y-1.5">
-                  <p className="text-sm font-medium">{c.label}</p>
-                  <div className="space-y-1">
-                    {([
-                      { key: "external", label: "Externo", value: c.externalValue },
-                      { key: "current", label: "Atual", value: c.currentValue },
-                    ] as const).map(({ key, label, value }) => (
-                      <label
-                        key={key}
-                        className={`flex items-start gap-3 p-2.5 rounded-md border cursor-pointer transition-colors ${
-                          resolutions[c.field] === key ? "border-primary bg-primary/5" : "hover:bg-accent/50"
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name={c.field}
-                          checked={resolutions[c.field] === key}
-                          onChange={() => setResolutions((prev) => ({ ...prev, [c.field]: key }))}
-                          className="mt-0.5 accent-primary shrink-0"
-                        />
-                        <span className="min-w-0 flex-1 text-sm">
-                          <Badge variant="outline" className="text-[11px] py-0 mr-1.5">{label}</Badge>
-                          <span className="break-all">{value ?? "—"}</span>
-                        </span>
-                      </label>
-                    ))}
+              {conflicts.map((c) => {
+                // Uma linha por VALOR distinto: as externas (nomeadas pela fonte que as
+                // reportou) e o "Atual". Fonte que concorda com o salvo não vira linha —
+                // `getConflicts` já a descartou, porque escolhê-la não mudaria nada.
+                const rows = [
+                  ...c.externalChoices.map((choice) => ({
+                    key: choice.key,
+                    labels: choiceLabel(choice),
+                    isCurrent: false,
+                    value: choice.display,
+                  })),
+                  { key: "current" as const, labels: ["Atual"], isCurrent: true, value: c.currentValue ?? "—" },
+                ]
+                return (
+                  <div key={c.field} className="space-y-1.5">
+                    <p className="text-sm font-medium">{c.label}</p>
+                    <div className="space-y-1">
+                      {rows.map(({ key, labels, isCurrent, value }) => (
+                        <label
+                          key={key}
+                          className={`flex items-start gap-3 p-2.5 rounded-md border cursor-pointer transition-colors ${
+                            resolutions[c.field] === key ? "border-primary bg-primary/5" : "hover:bg-accent/50"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name={c.field}
+                            checked={resolutions[c.field] === key}
+                            onChange={() => setResolutions((prev) => ({ ...prev, [c.field]: key }))}
+                            className="mt-0.5 accent-primary shrink-0"
+                          />
+                          <span className="min-w-0 flex-1 text-sm">
+                            {labels.map((label) => (
+                              <Badge
+                                key={label}
+                                variant={isCurrent ? "secondary" : "outline"}
+                                className="text-[11px] py-0 mr-1.5"
+                              >
+                                {label}
+                              </Badge>
+                            ))}
+                            <span className="break-all">{value}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
               <div className={ACTION_BAR}>
                 <Button
                   variant="ghost"

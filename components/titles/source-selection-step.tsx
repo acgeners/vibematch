@@ -15,19 +15,8 @@ import type { SourceHealthRow } from "@/lib/external/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getCoverImageSrc } from "@/lib/image-proxy"
+import { SOURCE_LABELS as SOURCE_LABEL } from "@/lib/external/source-labels"
 import type { ExternalSourceId } from "@/lib/external/types"
-
-const SOURCE_LABEL: Record<string, string> = {
-  anilist: "AniList",
-  mangaupdates: "MangaUpdates",
-  myanimelist: "MyAnimeList",
-  kitsu: "Kitsu",
-  mangadex: "MangaDex",
-  comick: "ComicK",
-  animeplanet: "AnimePlanet",
-  comix: "Comix",
-  mangago: "Mangago",
-}
 
 // "rejected" = "nenhum match válido pra essa fonte".
 type SelectionValue = string | "rejected" | "none"
