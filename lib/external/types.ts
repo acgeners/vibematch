@@ -117,6 +117,25 @@ export interface ConflictField {
   options: ConflictOption[]
 }
 
+/** Campos escalares cuja procedência por fonte é rastreada no merge. Sinopse e capa
+ *  ficam de fora de propósito: elas já viajam com a fonte em `multiSynopses`/`multiCovers`,
+ *  e repetir o texto aqui dobraria o payload da server action à toa. */
+export type ProvenancedField =
+  | "title"
+  | "originalTitle"
+  | "publicationStatus"
+  | "totalChapters"
+  | "year"
+  | "yearEnd"
+
+/** Um valor distinto que as fontes reportaram para um campo, com quem o reportou.
+ *  `sources` vazio = valor que o merge herdou do candidato da busca (sem fonte
+ *  hidratada atribuível) — a UI mostra "Externo" nesse caso. */
+export interface FieldValueProvenance {
+  value: string | number
+  sources: ExternalSourceId[]
+}
+
 export interface ExternalWorkData {
   title: string
   originalTitle?: string
@@ -154,6 +173,14 @@ export interface ExternalWorkData {
   }>
   /** Per-source synopsis blocks collected during fetch (cleaned + deduped). Empty when only one accepted source. */
   multiSynopses?: Array<{ source: ExternalSourceId; text: string }>
+  /**
+   * Quem disse o quê, por campo — o que permite o passo de conflitos dizer
+   * "MangaDex · 1" em vez de "Externo · 1". Os valores saem na ordem em que as
+   * fontes foram aceitas, então o PRIMEIRO de cada lista é (salvo herança do
+   * candidato) o que venceu o merge. A UI não depende disso: ela sempre garante
+   * o valor mergeado como primeira opção e usa esta lista só para atribuir fonte.
+   */
+  fieldProvenance?: Partial<Record<ProvenancedField, FieldValueProvenance[]>>
   /** Per-source external IDs from accepted sources, persisted to `work_external_ids` so future refreshes skip title search. */
   externalIds?: Partial<Record<ExternalSourceId, string>>
   /** Texto cru de "Status in Country of Origin" do MU detail. Usado pra
