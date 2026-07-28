@@ -23,7 +23,11 @@ vi.mock("@/lib/external/client-fetches", () => ({
 }))
 
 const refreshWorkExternalData = vi.fn()
-const updateWorkExternalData = vi.fn(async () => ({ data: { id: "w1", slug: "obra" } }))
+// Os args precisam estar na assinatura (mesmo ignorados): o teste inspeciona
+// `mock.calls[0][1]`, e com `vi.fn(async () => …)` o tsc tipa as calls como [].
+const updateWorkExternalData = vi.fn(async (..._args: unknown[]) => ({
+  data: { id: "w1", slug: "obra" },
+}))
 vi.mock("@/server/actions/works", () => ({
   refreshWorkExternalData: (...a: unknown[]) => refreshWorkExternalData(...a),
   updateWorkExternalData: (...a: unknown[]) => updateWorkExternalData(...a),
