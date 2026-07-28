@@ -25,6 +25,7 @@ import type { NoReviewsReason } from "@/lib/ai-evaluation/no-reviews"
 import { fetchComicKClient, fetchAnimePlanetClient } from "@/lib/external/client-fetches"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { SELECTABLE_EXTERNAL_SOURCES, sourceOrderIndex } from "@/lib/external/source-order"
+import { sourceLabel } from "@/lib/external/source-labels"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { SMALL_COVER_WIDTH } from "@/lib/cover-quality"
 import { cn, titleToSlug } from "@/lib/utils"
@@ -1930,7 +1931,7 @@ export function ExternalSearch({
                           />
                           <span className="flex-1 text-sm">
                             <span className="font-medium">{opt.displayValue}</span>
-                            <span className="text-xs text-muted-foreground ml-2">— {opt.source}</span>
+                            <span className="text-xs text-muted-foreground ml-2">— {sourceLabel(opt.source)}</span>
                           </span>
                         </label>
                       )
