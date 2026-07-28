@@ -255,6 +255,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     maxTotalVotes: num("max_votes"),
     topN: overrideTopN ?? prefs.topN ?? undefined,
     onlyWithFinalScore: str("only_scored") === "1",
+    onlyWithoutFinalScore: str("no_score") === "1",
     onlyFavorites: str("fav") === "1",
     onlyRated,
     adultFilter,

@@ -207,6 +207,10 @@ export interface RankingFilters {
   topN?: number
   /** "Só obras com nota" — filtra por Nota Prevista presente (era finalScore). */
   onlyWithFinalScore?: boolean
+  /** O inverso: só as obras SEM Nota Prevista (fila de "o que falta enriquecer").
+   *  Ligar os dois ao mesmo tempo devolve vazio — a UI os torna mutuamente
+   *  exclusivos, mas a query não presume isso. */
+  onlyWithoutFinalScore?: boolean
   /** "Só avaliadas" — obras com nota pessoal (user_score). Como avaliar costuma
    *  implicar ter terminado a obra, ligar isto também DESLIGA o hard filter que
    *  esconde Finished/Dropped — senão o filtro esconderia justamente o que quer
@@ -820,6 +824,9 @@ export async function getRanking(
   }
   if (filters.onlyWithFinalScore) {
     entries = entries.filter((e) => e.expectedScore != null)
+  }
+  if (filters.onlyWithoutFinalScore) {
+    entries = entries.filter((e) => e.expectedScore == null)
   }
 
   // Ordenação
