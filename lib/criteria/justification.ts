@@ -97,3 +97,26 @@ export function rubricTitle(slug: string, band: string): string | null {
   const title = afterBand.split(":")[0].trim()
   return title || null
 }
+
+/**
+ * Explicação curta da faixa PARA HUMANO — a primeira frase da rubrica, depois do rótulo.
+ *
+ * A rubrica de `criteria.ranges` é escrita pro prompt: depois da definição vêm ressalvas dirigidas
+ * ao modelo ("NÃO rebaixe porque…", "Marcador de EDIÇÃO…", exemplos em CAIXA ALTA) que não dizem
+ * nada a quem está preenchendo o formulário. Cortar na primeira frase entrega uma linha legível
+ * SEM manter uma segunda cópia do texto: a rubrica continua com uma fonte só, e mudar o banco
+ * continua mudando a UI.
+ *
+ * O corte é na quebra de frase real (ponto + espaço), então "ex.:" e "(…)." não partem a frase ao
+ * meio. null quando a faixa não tem rubrica ou não tem texto além do rótulo.
+ */
+export function rubricSummary(slug: string, band: string): string | null {
+  const range = rubricForBand(slug, band)
+  if (!range) return null
+  const afterBand = range.includes("|") ? range.slice(range.indexOf("|") + 1) : range
+  const colon = afterBand.indexOf(":")
+  if (colon === -1) return null
+  const detail = afterBand.slice(colon + 1).trim()
+  const first = detail.split(/(?<=\.)\s+/)[0]?.trim()
+  return first || null
+}
