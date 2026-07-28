@@ -637,7 +637,6 @@ function SearchInputWithHistory({
   const [settledQuery, setSettledQuery] = useState<string | null>(null)
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const router = useRouter()
 
   // Contador de requisição em vez de uma flag `mounted`: sob StrictMode o cleanup
   // zera a flag e ela nunca mais volta a true, e o loading trava pra sempre.
@@ -763,56 +762,65 @@ function SearchInputWithHistory({
                   <CommandItem
                     key={s.id}
                     value={`work-${s.id}`}
-                    // Abrir só no clique de verdade. onSelect do cmdk também
-                    // dispararia por teclado; o Enter é do input (→ submit).
-                    onClick={() => {
-                      setOpen(false)
-                      window.open(`/titles/${s.slug}`, "_blank", "noopener,noreferrer")
-                    }}
+                    // Âncora de verdade, não handler: o cmdk sobrescreve o
+                    // `onClick` que a gente passa (ele espalha as props ANTES de
+                    // definir o dele), então um onClick aqui nunca roda — o
+                    // clique virava no-op e parecia que fazia o mesmo que o
+                    // Enter. Com `asChild` o alvo é o próprio link, o que
+                    // também dá clique do meio, ctrl+clique e URL no hover.
+                    // O Enter continua sendo do input (→ submit da busca).
+                    asChild
                     onMouseDown={(e) => e.preventDefault()}
-                    className="gap-2.5"
+                    className="cursor-pointer gap-2.5"
                   >
-                    {s.coverUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={s.coverUrl}
-                        alt=""
-                        className="h-11 w-8 shrink-0 rounded-sm object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <span className="h-11 w-8 shrink-0 rounded-sm bg-muted" />
-                    )}
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="truncate text-sm font-medium">{s.title}</span>
-                      <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                        {s.publicationStatus && <span>{s.publicationStatus}</span>}
-                        {s.totalChapters != null && (
-                          <>
-                            <span className="opacity-50">·</span>
-                            <span className="tabular-nums">{s.totalChapters} caps</span>
-                          </>
-                        )}
-                        {s.year != null && (
-                          <>
-                            <span className="opacity-50">·</span>
-                            <span className="tabular-nums">{s.year}</span>
-                          </>
+                    <a
+                      href={`/titles/${s.slug}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setOpen(false)}
+                    >
+                      {s.coverUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={s.coverUrl}
+                          alt=""
+                          className="h-11 w-8 shrink-0 rounded-sm object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="h-11 w-8 shrink-0 rounded-sm bg-muted" />
+                      )}
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span className="truncate text-sm font-medium">{s.title}</span>
+                        <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                          {s.publicationStatus && <span>{s.publicationStatus}</span>}
+                          {s.totalChapters != null && (
+                            <>
+                              <span className="opacity-50">·</span>
+                              <span className="tabular-nums">{s.totalChapters} caps</span>
+                            </>
+                          )}
+                          {s.year != null && (
+                            <>
+                              <span className="opacity-50">·</span>
+                              <span className="tabular-nums">{s.year}</span>
+                            </>
+                          )}
+                        </span>
+                        {/* Sem isto o usuário vê um nome que não tem nada a ver com o
+                            que digitou — o casamento veio de um título alternativo. */}
+                        {s.matchedAlias && (
+                          <span className="truncate text-[11px] italic text-muted-foreground">
+                            achou por: {s.matchedAlias}
+                          </span>
                         )}
                       </span>
-                      {/* Sem isto o usuário vê um nome que não tem nada a ver com o
-                          que digitou — o casamento veio de um título alternativo. */}
-                      {s.matchedAlias && (
-                        <span className="truncate text-[11px] italic text-muted-foreground">
-                          achou por: {s.matchedAlias}
+                      {s.isAdult && (
+                        <span className="ml-auto shrink-0 rounded-full bg-destructive/15 px-1.5 py-0.5 text-[10px] font-bold text-destructive">
+                          18+
                         </span>
                       )}
-                    </span>
-                    {s.isAdult && (
-                      <span className="ml-auto shrink-0 rounded-full bg-destructive/15 px-1.5 py-0.5 text-[10px] font-bold text-destructive">
-                        18+
-                      </span>
-                    )}
+                    </a>
                   </CommandItem>
                 ))}
               </CommandGroup>
