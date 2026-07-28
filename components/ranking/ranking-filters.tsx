@@ -25,6 +25,7 @@ import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { saveFilterPreset, renameFilterPreset, deleteFilterPreset } from "@/server/actions/filter-presets"
 import { TERMINAL_PERSONAL_STATUSES } from "@/lib/constants/criteria"
 import { UNREAD_PERSONAL_STATUSES } from "@/lib/constants/criteria"
+import { toggleStatusParam } from "@/lib/status-filter-toggle"
 
 interface SavedFilterPreset {
   id: string
@@ -1921,8 +1922,45 @@ export function RankingFilters({
   const selectedSynopsisPred = csvSet("synopsis_pred")
   const interestMode: "and" | "or" = searchParams.get("synopsis_mode") === "and" ? "and" : "or"
 
+  // Opções de status em duas listas: a COMPLETA (materializa o "todos") e a VISÍVEL
+  // (o que vira chip). Só divergem no status pessoal, onde os terminais ficam fora da
+  // UI mas continuam DENTRO do "todos" — por isso o toggle materializa a completa: sair
+  // de "todos" desmarcando um chip não pode fazer obra terminal sumir em silêncio.
+  const allPublicationStatuses = useMemo(
+    () => dedupeStatusOptions(publicationStatuses),
+    [publicationStatuses]
+  )
+  const visiblePublicationStatuses = allPublicationStatuses
+  const allPersonalStatuses = useMemo(
+    () => dedupeStatusOptions(personalStatuses),
+    [personalStatuses]
+  )
+  // Filtra os status pessoais — Completed e Dropped nunca aparecem
+  const visiblePersonalStatuses = useMemo(
+    () => allPersonalStatuses.filter((s) => !HIDDEN_PERSONAL_STATUSES.has(s.status)),
+    [allPersonalStatuses]
+  )
+
   const DEFAULT_PUB_STATUS = "Completed"
   const DEFAULT_PER_STATUSES = [...UNREAD_PERSONAL_STATUSES]
+
+  // Toggle de um chip de status (Publicação · Status pessoal). A regra inteira mora em
+  // `toggleStatusParam` — ver lá por que o "todos" precisa ser materializado antes.
+  const toggleStatusSelection = (
+    key: string,
+    status: string,
+    options: StatusOption[],
+    defaults: readonly string[]
+  ) => {
+    updateParams({
+      [key]: toggleStatusParam(
+        searchParams.get(key),
+        status,
+        options.map((o) => o.status),
+        defaults
+      ),
+    })
+  }
 
   const pubStatusParam = searchParams.get("pub_status")
   const isAllPublication = pubStatusParam === "all"
@@ -1932,22 +1970,8 @@ export function RankingFilters({
       ? csvSet("pub_status")
       : new Set<string>([DEFAULT_PUB_STATUS])
 
-  const togglePublicationStatus = (status: string) => {
-    if (isAllPublication) {
-      updateParams({ pub_status: status })
-      return
-    }
-    if (pubStatusParam == null) {
-      if (status === DEFAULT_PUB_STATUS) {
-        updateParams({ pub_status: "all" })
-      } else {
-        const seeded = new Set<string>([DEFAULT_PUB_STATUS, status])
-        updateParams({ pub_status: [...seeded].join(",") })
-      }
-      return
-    }
-    toggleCsv("pub_status", status)
-  }
+  const togglePublicationStatus = (status: string) =>
+    toggleStatusSelection("pub_status", status, allPublicationStatuses, [DEFAULT_PUB_STATUS])
 
   const perStatusParam = searchParams.get("per_status")
   const isAllPersonal = perStatusParam === "all"
@@ -1957,21 +1981,14 @@ export function RankingFilters({
       ? csvSet("per_status")
       : new Set<string>(DEFAULT_PER_STATUSES)
 
-  const togglePersonalStatus = (status: string) => {
-    if (isAllPersonal) {
-      updateParams({ per_status: status })
-      return
-    }
-    if (perStatusParam == null) {
-      // Materializa a seleção default e aplica o toggle por cima.
-      const seeded = new Set<string>(DEFAULT_PER_STATUSES)
-      if (seeded.has(status)) seeded.delete(status)
-      else seeded.add(status)
-      updateParams({ per_status: seeded.size === 0 ? "all" : [...seeded].join(",") })
-      return
-    }
-    toggleCsv("per_status", status)
-  }
+  const togglePersonalStatus = (status: string) =>
+    toggleStatusSelection("per_status", status, allPersonalStatuses, DEFAULT_PER_STATUSES)
+
+  // O contador do cabeçalho conta só os status VISÍVEIS: a seleção pode carregar os
+  // terminais (que não têm chip), e "(11)" com 10 chips na tela é contador fantasma.
+  const selectedVisiblePerCount = visiblePersonalStatuses.filter((s) =>
+    selectedPerStatuses.has(s.status)
+  ).length
 
   const [genreSearch, setGenreSearch] = useState("")
   const filteredGenres = useMemo(
@@ -2018,17 +2035,6 @@ export function RankingFilters({
     [availableTags]
   )
 
-  const visiblePublicationStatuses = useMemo(
-    () => dedupeStatusOptions(publicationStatuses),
-    [publicationStatuses]
-  )
-
-  // Filtra os status pessoais — Completed e Dropped nunca aparecem
-  const visiblePersonalStatuses = useMemo(
-    () => dedupeStatusOptions(personalStatuses).filter((s) => !HIDDEN_PERSONAL_STATUSES.has(s.status)),
-    [personalStatuses]
-  )
-
   const activeFilterChips: Array<{ key: string; label: string; onRemove: () => void }> = []
   const pushRangeChip = (key: string, label: string, minKey: string, maxKey: string) => {
     const min = searchParams.get(minKey)
@@ -2068,36 +2074,64 @@ export function RankingFilters({
       onRemove: () => updateParams({ rated: null }),
     })
   }
-  if (isAllPublication) {
-    activeFilterChips.push({
-      key: "pub-all",
-      label: "Publicação: Todos",
-      onRemove: () => updateParams({ pub_status: null }),
-    })
-  } else {
-    selectedPublicationStatuses.forEach((status) => {
+  /**
+   * Um chip por status vira ruído agora que "todos menos um" é uma seleção alcançável
+   * em UM clique (status pessoal tem 12 valores → 11 chips). Quando as exclusões são
+   * minoria, inverte a leitura: "todos menos X, Y" — e remover esse chip volta ao "todos".
+   */
+  const pushStatusChips = (
+    prefix: string,
+    label: string,
+    key: string,
+    options: StatusOption[],
+    selected: Set<string>,
+    isAll: boolean,
+    toggle: (status: string) => void
+  ) => {
+    if (isAll) {
       activeFilterChips.push({
-        key: `pub-${status}`,
-        label: `Publicação: ${status}`,
-        onRemove: () => togglePublicationStatus(status),
+        key: `${prefix}-all`,
+        label: `${label}: Todos`,
+        onRemove: () => updateParams({ [key]: null }),
+      })
+      return
+    }
+    const excluded = options.map((o) => o.status).filter((s) => !selected.has(s))
+    if (excluded.length > 0 && excluded.length < selected.size) {
+      activeFilterChips.push({
+        key: `${prefix}-except`,
+        label: `${label}: todos menos ${excluded.join(", ")}`,
+        onRemove: () => updateParams({ [key]: "all" }),
+      })
+      return
+    }
+    selected.forEach((status) => {
+      activeFilterChips.push({
+        key: `${prefix}-${status}`,
+        label: `${label}: ${status}`,
+        onRemove: () => toggle(status),
       })
     })
   }
-  if (isAllPersonal) {
-    activeFilterChips.push({
-      key: "personal-all",
-      label: "Status: Todos",
-      onRemove: () => updateParams({ per_status: null }),
-    })
-  } else {
-    selectedPerStatuses.forEach((status) => {
-      activeFilterChips.push({
-        key: `personal-${status}`,
-        label: `Status: ${status}`,
-        onRemove: () => togglePersonalStatus(status),
-      })
-    })
-  }
+
+  pushStatusChips(
+    "pub",
+    "Publicação",
+    "pub_status",
+    allPublicationStatuses,
+    selectedPublicationStatuses,
+    isAllPublication,
+    togglePublicationStatus
+  )
+  pushStatusChips(
+    "personal",
+    "Status",
+    "per_status",
+    allPersonalStatuses,
+    selectedPerStatuses,
+    isAllPersonal,
+    togglePersonalStatus
+  )
   selectedSynopsisQ.forEach((quality) => {
     activeFilterChips.push({
       key: `synopsis-${quality}`,
@@ -2274,7 +2308,7 @@ export function RankingFilters({
             </FilterSection>
 
             <FilterSection
-              title={`Status pessoal${isAllPersonal ? " (todos)" : selectedPerStatuses.size ? ` (${selectedPerStatuses.size})` : ""}`}
+              title={`Status pessoal${isAllPersonal ? " (todos)" : selectedVisiblePerCount ? ` (${selectedVisiblePerCount})` : ""}`}
               headerAction={
                 <button
                   type="button"
