@@ -92,11 +92,18 @@ export function SynopsesViewer({ synopses, canonical, maxLines = 11, className }
         </button>
         {showOriginals && (
           <div className="space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
-            <ExpandableText
-              text={rawText}
-              maxLines={maxLines}
-              className={cn("whitespace-pre-line text-sm text-muted-foreground/90", className)}
-            />
+            {/* Sem clamp aqui de propósito: o chevron do cabeçalho é o ÚNICO
+             * controle: abriu = mostra todas as originais inteiras. Um
+             * ExpandableText aqui dentro criava um 2º chevron (e cortava a
+             * última sinopse num "…" que parecia dado faltando). */}
+            <p
+              className={cn(
+                "whitespace-pre-line text-sm text-muted-foreground/90",
+                className
+              )}
+            >
+              {rawText}
+            </p>
             <button
               type="button"
               onClick={() => setShowOriginals(false)}
