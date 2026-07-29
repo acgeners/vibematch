@@ -94,6 +94,8 @@ async function fetchAll(): Promise<RawRow[]> {
       .from("prediction_snapshots")
       .select(cols)
       .eq("prediction_context", CONTEXT)
+      // Mesmo filtro de prediction-metrics: medição cujo rótulo foi apagado não vale (mig 168).
+      .is("discarded_at", null)
       .range(from, from + 999)
     if (error) throw new Error(error.message)
     out.push(...((data ?? []) as unknown as RawRow[]))

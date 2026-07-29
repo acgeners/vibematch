@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { WorkStatusForm } from "./work-status-form"
 import { PostAttributeAssessmentForm } from "./post-attribute-assessment-form"
@@ -11,13 +12,14 @@ import type { CriterionSlug } from "@/types/domain"
 import { submitPostReadingAttributes } from "@/server/actions/post-reading-attributes"
 import { PostTasteAssessment } from "@/components/pilot/post-taste-assessment"
 import type { TasteCriterion, TasteScoreKey } from "@/server/queries/pilot-taste"
-import { isTerminalPersonalStatus, isFullyReadPersonalStatus } from "@/lib/constants/status-lookups"
+import { isFullyReadPersonalStatus } from "@/lib/constants/status-lookups"
+import { canRateReadingState, chaptersNeededForRating, MIN_READ_PCT_FOR_RATING } from "@/lib/reading-gate"
+import { DEFAULT_POST_READING_WEIGHTS } from "@/lib/constants/post-reading-criteria"
+import type { PostReadingScoreField } from "@/lib/constants/post-reading-criteria"
+import { ClearRatingButton } from "./clear-rating-button"
 
-// Atributos pós-leitura aparecem quando a obra já tem leitura suficiente:
-// status terminal OU mais de 20% lido. Quais status são "terminais" vem do banco
-// (`personal_status.is_terminal`, migration 155) — escrever o nome aqui é o que quebrou
-// este fluxo quando "Completed" virou "Finished".
-const MIN_READ_PCT_FOR_POST_ATTR = 20
+/** Os 8 critérios craft, derivados da tabela de pesos — não relistados à mão. */
+const CRAFT_FIELDS = Object.keys(DEFAULT_POST_READING_WEIGHTS) as PostReadingScoreField[]
 
 // Craft (os 8 critérios de execução + o badge "Nota Pessoal Calculada") saiu de vista: a nota
 // de gosto calculada dos 6 eixos o substitui na tela. NÃO é remoção — o dado craft continua
@@ -69,15 +71,27 @@ export function PostReadingFlow({
     statusInitial.chapters_read ?? null,
   )
 
-  // Revela ao vivo conforme o usuário muda status/capítulos no form (sem reload):
-  // status terminal OU % lido > 20%.
-  const readPct =
-    totalChapters != null && totalChapters > 0 && liveChaptersRead != null
-      ? (liveChaptersRead / totalChapters) * 100
-      : null
-  const isVisible =
-    isTerminalPersonalStatus(liveStatus) ||
-    (readPct != null && readPct > MIN_READ_PCT_FOR_POST_ATTR)
+  // Revela ao vivo conforme o usuário muda status/capítulos no form (sem reload). A REGRA
+  // (status terminal OU > 20% lido) mora em `lib/reading-gate.ts` — é a mesma que as server
+  // actions aplicam na escrita. Antes ela era um const local aqui, e por isso valia só na tela.
+  const readingState = {
+    personalStatus: liveStatus,
+    chaptersRead: liveChaptersRead,
+    totalChapters,
+  }
+  const isVisible = canRateReadingState(readingState)
+
+  // Nota que já existe numa obra que NÃO passa mais no gate (avaliei e depois voltei o status
+  // pra "On-hold"/"Untracked", ou nunca registrei os capítulos). A nota é PRESERVADA — é rótulo
+  // de treino do Ridge e apagá-la por um clique de status custa caro —, mas a inconsistência
+  // aparece: sem isto ela some da tela junto com a seção e vira dado invisível.
+  const orphanScore = !isVisible ? (statusInitial.user_score ?? null) : null
+  const chaptersNeeded = chaptersNeededForRating(readingState)
+
+  // O que o diálogo de "Remover minha nota" vai listar como perda. Vem das props (o servidor já
+  // mandou tudo) — sem round-trip extra e sem mais um endpoint público só pra contar.
+  const craftFilled = CRAFT_FIELDS.filter((f) => statusInitial[f] != null).length
+  const tasteFilled = Object.values(tasteScores).filter((v) => v != null).length
 
   // Atributos que a IA avaliou (sem nota da IA não há o que comparar/salvar).
   const ratedSlugs = useMemo(
@@ -129,6 +143,27 @@ export function PostReadingFlow({
         onSaved={onSaved}
         onStateChange={setFormState}
       />
+      {orphanScore != null && (
+        <div className="flex items-start gap-2 rounded-md bg-amber-500/10 p-3 text-sm text-muted-foreground ring-1 ring-amber-500/30">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <span>
+            Esta obra tem nota pessoal{" "}
+            <span className="font-medium text-foreground">{orphanScore.toFixed(1)}</span>, mas o
+            estado de leitura não a sustenta:{" "}
+            {liveChaptersRead == null || liveChaptersRead === 0
+              ? "nenhum capítulo lido registrado"
+              : `${liveChaptersRead} de ${totalChapters ?? "?"} capítulos`}
+            {" "}em <span className="font-medium text-foreground">{liveStatus}</span>. A nota foi
+            preservada (ela treina a Nota Prevista), mas só volta a ser editável com{" "}
+            {chaptersNeeded != null
+              ? <>mais <span className="font-medium text-foreground">{chaptersNeeded}</span> capítulo(s) lidos</>
+              : `mais de ${MIN_READ_PCT_FOR_RATING}% lido`}{" "}
+            ou status de leitura encerrada. Se você leu e só não registrou, corrija os capítulos
+            acima; se a nota não deveria existir, use{" "}
+            <span className="font-medium text-foreground">Remover minha nota</span> no fim da página.
+          </span>
+        </div>
+      )}
       {isVisible && tasteCriteria.length > 0 && (
         <PostTasteAssessment
           workId={workId}
@@ -148,9 +183,17 @@ export function PostReadingFlow({
           defaultOpen={true}
         />
       )}
-      {/* Botão Salvar no fim de tudo — submete o WorkStatusForm via form={formId}. */}
-      <div className="flex justify-end border-t border-border/40 pt-4">
-        <Button type="submit" form={formId} disabled={!formState.canSubmit}>
+      {/* Botão Salvar no fim de tudo — submete o WorkStatusForm via form={formId}. "Remover minha
+          nota" fica na MESMA barra e independe do gate: ela renderiza com a seção escondida
+          também, que é justamente o caso em que a nota é inconsistente e você quer apagá-la. */}
+      <div className="flex items-center justify-between gap-3 border-t border-border/40 pt-4">
+        <ClearRatingButton
+          workId={workId}
+          userScore={statusInitial.user_score ?? null}
+          craftFilled={craftFilled}
+          tasteFilled={tasteFilled}
+        />
+        <Button type="submit" form={formId} disabled={!formState.canSubmit} className="ml-auto">
           {formState.saving ? "Salvando…" : "Salvar"}
         </Button>
       </div>

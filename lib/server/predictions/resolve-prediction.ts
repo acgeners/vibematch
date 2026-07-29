@@ -138,3 +138,61 @@ export async function markPredictionLabelChanged(workId: string): Promise<number
     return 0
   }
 }
+
+/**
+ * Nota APAGADA de propósito (`clearUserRating`): a medição prospectiva daquela obra é
+ * DESCARTADA — não relabelada.
+ *
+ * A diferença com `markPredictionLabelChanged` é a que faltava no schema: `label_changed_at` é
+ * carimbo de AUDITORIA e **nenhuma métrica filtra por ele** (elas filtram `superseded`). Ou seja:
+ * a previsão continuava sendo medida contra um gabarito que o usuário retirou — acerto ou erro
+ * fabricado entrando na métrica prospectiva, que a tela de calibração chama de "a evidência mais
+ * forte de que o modelo funciona em uso real". Sem rótulo não há o que medir.
+ *
+ * `superseded` NÃO serve aqui: ele significa "editei a nota, a medição original vale e a nova a
+ * supersede". Apagar não produz rótulo novo nenhum.
+ *
+ * A linha é PRESERVADA (o snapshot é imutável e auditável) — só sai das métricas, que agora
+ * filtram `discarded_at is null` (migration 168). Idempotente: só carimba o que ainda não estava
+ * descartado. Best-effort, como o resto do ledger — é telemetria, não pode derrubar o delete.
+ */
+export async function discardPredictionsForWork(workId: string): Promise<number> {
+  if (!workId) return 0
+  const now = new Date().toISOString()
+  try {
+    const supabase = createAdminClient()
+    const userId = await getCurrentUserId(supabase)
+
+    const { error, count } = await supabase
+      .from("prediction_snapshots")
+      .update({ discarded_at: now }, { count: "exact" })
+      .eq("user_id", userId)
+      .eq("work_id", workId)
+      .not("resolved_at", "is", null)
+      .is("discarded_at", null)
+    if (error) {
+      console.warn("[discardPredictionsForWork] snapshots:", error.message)
+    }
+
+    // O ledger 101 é append-only e afirma `user_score NOT NULL` ("o rótulo verdadeiro foi X") —
+    // deixa de ser verdade quando a nota some. Hoje nenhuma métrica do app o lê (só o script
+    // `measure-audit-staleness`), mas marcar aqui evita que o descarte seja meia-verdade.
+    const { error: ledgerError } = await supabase
+      .from("prediction_ledger")
+      .update({ discarded_at: now })
+      .eq("user_id", userId)
+      .eq("work_id", workId)
+      .is("discarded_at", null)
+    if (ledgerError) {
+      console.warn("[discardPredictionsForWork] ledger:", ledgerError.message)
+    }
+
+    return count ?? 0
+  } catch (err) {
+    console.warn(
+      "[discardPredictionsForWork] falhou (best-effort):",
+      err instanceof Error ? err.message : err,
+    )
+    return 0
+  }
+}

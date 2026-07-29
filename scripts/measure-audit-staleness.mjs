@@ -109,8 +109,9 @@ async function main() {
   else level = 'fresh'
 
   // ALT — prediction_ledger: rótulo novo (1ª nota) desde o run, sem ruído de capítulo/backfill.
+  // `discarded_at is null` (mig 168): rótulo que o usuário apagou não conta como "obra avaliada".
   const ledger = await pageAll('prediction_ledger', 'work_id, captured_at', (q) =>
-    q.eq('user_id', ownerId).order('work_id', { ascending: true }),
+    q.eq('user_id', ownerId).is('discarded_at', null).order('work_id', { ascending: true }),
   )
   const ledgerWorkIds = new Set(ledger.map((r) => r.work_id))
   const newlyRated = new Set(

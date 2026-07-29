@@ -6,6 +6,7 @@ import { ensureAdmin, getOwnerUserId } from "@/server/queries/current-user"
 import { TASTE_SCORE_KEYS, computeTasteUserScore } from "@/server/queries/pilot-taste"
 import type { TasteScoreKey } from "@/server/queries/pilot-taste"
 import { mirrorOwnerState } from "@/server/queries/user-work-state"
+import { canRateReadingState } from "@/lib/reading-gate"
 import { markRecalcPending } from "@/server/recalc/queue"
 import { capturePredictionForFirstRating } from "./prediction-ledger"
 import { resolvePredictionsForWork } from "@/lib/server/predictions/resolve-prediction"
@@ -58,6 +59,7 @@ export async function savePilotTaste(
  * `updateWorkStatus` faz quando a nota muda: ledger prospectivo + recalc pendente.
  *
  * - Só grava quando os 7 eixos fixos estão completos (`computeTasteUserScore` → null caso falte).
+ * - Só grava quando o estado de leitura passa no gate (`canRateReadingState`).
  * - No-op quando o rótulo não mudou (evita churn de ledger/recalc no autosave por estrela).
  * - `mirrorOwnerState` (service role, dono explícito): é caminho de curadoria em background, não
  *   uma escrita de sessão — o cliente de sessão negaria por RLS quando roda fora de request.
@@ -76,11 +78,29 @@ async function applyTasteDerivedUserScore(
 
   const { data: prevRow } = await supabase
     .from("user_work_state")
-    .select("user_score")
+    .select("user_score, personal_status_id, chapters_read")
     .eq("user_id", ownerId)
     .eq("work_id", workId)
     .maybeSingle()
   const prevUserScore = (prevRow?.user_score as number | null | undefined) ?? null
+
+  // "Só avalia quem leu" (lib/reading-gate.ts). O `/pilot-taste` lista obras que JÁ têm nota, e
+  // a UI da página da obra esconde o card de gosto sem leitura suficiente — mas nenhuma das duas
+  // é regra: esta action é endpoint público, e é por aqui que a nota de gosto vira `user_score`.
+  // Sem o gate, uma obra cujo estado de leitura regrediu continuava tendo a nota REESCRITA a
+  // cada estrela clicada. As notas de gosto em si (`pilot_taste_scores`) já foram salvas — é o
+  // rótulo derivado que fica de fora.
+  const { data: workRow } = await supabase
+    .from("works")
+    .select("total_chapters")
+    .eq("id", workId)
+    .maybeSingle()
+  const canRate = canRateReadingState({
+    personalStatus: (prevRow?.personal_status_id as number | null | undefined) ?? null,
+    chaptersRead: (prevRow?.chapters_read as number | null | undefined) ?? null,
+    totalChapters: (workRow?.total_chapters as number | null | undefined) ?? null,
+  })
+  if (!canRate) return
 
   if (prevUserScore != null && Number(prevUserScore) === label) return // nada mudou
 
