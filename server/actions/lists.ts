@@ -9,6 +9,7 @@ import { writeReadingState } from "@/server/queries/user-work-state"
 import { runRecommendationAction } from "./recommendations"
 import { proposeFavoriteGroups as proposeFavoriteGroupsLLM } from "@/lib/lists/propose-groups"
 import type { FavoriteWork, ProposedGroup } from "@/lib/lists/propose-groups"
+import { countWorksInLists, purgeWorksFromAllLists } from "@/server/queries/lists"
 import type { ListComment } from "@/server/queries/lists"
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -29,6 +30,9 @@ interface WorkListInput {
 
 function revalidateLists(listId?: string) {
   revalidatePath("/favorites")
+  // Toda mudança de membro move a fronteira do "Sem grupo" (ele é `favoritas − agrupadas`):
+  // entrou num grupo, sai de lá; saiu do grupo, volta pra lá.
+  revalidatePath("/favorites/ungrouped")
   if (listId) revalidatePath(`/favorites/${listId}`)
   // Adicionar obras muda is_favorite → toca as mesmas superfícies do toggle.
   revalidatePath("/ranking")
@@ -202,14 +206,8 @@ export async function unfavoriteWorkFromFolders(
   const gate = await ensureListWriter()
   if (!gate.ok) return { error: gate.error }
 
-  const supabase = await createUserClient()
-  // Sem filtro de `list_id`: a RLS de `work_list_items` só deixa apagar itens de
-  // grupos DELE, então isto tira a obra das pastas do usuário e de mais ninguém.
-  const { error: delError } = await supabase
-    .from("work_list_items")
-    .delete()
-    .eq("work_id", workId)
-  if (delError) return { error: delError.message }
+  const purge = await purgeWorksFromAllLists([workId])
+  if (purge.error) return { error: purge.error }
 
   const mirror = await writeReadingState(gate.userId, [workId], { is_favorite: false })
   if (mirror.error) return { error: mirror.error }
@@ -217,6 +215,22 @@ export async function unfavoriteWorkFromFolders(
   revalidateLists()
   revalidatePath(`/titles/${workId}`)
   return { data: null }
+}
+
+/**
+ * Quantas das obras selecionadas estão em alguma pasta — alimenta o aviso do "Desfavoritar N"
+ * em lote. Existe porque desfavoritar passou a esvaziar as pastas e refavoritar NÃO devolve a
+ * obra ao grupo: sem o aviso, um clique em lote apaga curadoria em silêncio.
+ *
+ * Só LÊ, e só o que já é do próprio usuário (`countWorksInLists` escopa pelo dono) — daí não
+ * ter gate de escrita; sem sessão, devolve zero.
+ */
+export async function countSelectedWorksInFolders(
+  workIds: string[],
+): Promise<ActionResult<{ works: number; memberships: number }>> {
+  const session = await ensureSignedIn()
+  if (!session.ok) return { data: { works: 0, memberships: 0 } }
+  return { data: await countWorksInLists(workIds) }
 }
 
 // ── Comentários do grupo (log JSONB em work_lists.comments) ──────────────────

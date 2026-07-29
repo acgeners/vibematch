@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation"
 import Link from "next/link"
-import { ChevronLeft, Heart, Sparkles } from "lucide-react"
+import { ChevronLeft, FolderOpen, Heart, Sparkles } from "lucide-react"
 import { Header } from "@/components/layout/header"
 import { Badge } from "@/components/ui/badge"
 import { WorkTable } from "@/components/titles/work-table"
@@ -16,7 +16,7 @@ import { getWorksByIds } from "@/server/queries/works"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
 import { getFavoritesSummary } from "@/server/queries/favorites"
-import { getListDetail, getWorksLiteForPicker, getListRecommendations, getListsForPicker } from "@/server/queries/lists"
+import { getListDetail, getUngroupedFavorites, getWorksLiteForPicker, getListRecommendations, getListsForPicker } from "@/server/queries/lists"
 import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
@@ -37,11 +37,21 @@ function toArray(value: string | string[] | undefined): string[] {
 
 export default async function FavoritesListPage({ params, searchParams }: FavoritesListPageProps) {
   const { listId } = await params
+  // Dois ids RESERVADOS: nenhum dos dois é um `work_lists`. "all" é o universo de favoritos;
+  // "ungrouped" é a visão derivada das favoritas fora de qualquer grupo. Ambos são
+  // somente-leitura: não têm o que editar, comentar ou excluir.
   const isAll = listId === "all"
+  const isUngrouped = listId === "ungrouped"
+  const isPseudo = isAll || isUngrouped
 
   // Grupo real: carrega metadados + escopo. Grupo inexistente volta ao índice.
-  const listDetail = isAll ? null : await getListDetail(listId)
-  if (!isAll && !listDetail) redirect("/favorites")
+  const listDetail = isPseudo ? null : await getListDetail(listId)
+  if (!isPseudo && !listDetail) redirect("/favorites")
+
+  // "Sem grupo" sem grupo nenhum não é uma visão — é "Todos os favoritos" com outro nome.
+  // O card nem aparece nesse caso; quem chegar pela URL volta ao índice.
+  const ungrouped = isUngrouped ? await getUngroupedFavorites() : null
+  if (isUngrouped && ungrouped!.groupCount === 0) redirect("/favorites")
 
   const basePath = `/favorites/${listId}`
   const params_ = await searchParams
@@ -136,9 +146,10 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     maxTotalVotes: num("max_votes"),
     onlyWithFinalScore: str("only_scored") === "1",
     onlyWithoutFinalScore: str("no_score") === "1",
-    // "Todos": universo de favoritos. Grupo: escopo pelos IDs do grupo.
-    onlyFavorites: isAll,
-    onlyWorkIds: isAll ? undefined : listDetail!.workIds,
+    // "Todos": universo de favoritos. "Sem grupo": favoritas menos as agrupadas (a query já
+    // resolveu o conjunto). Grupo real: escopo pelos IDs do grupo.
+    onlyFavorites: isPseudo,
+    onlyWorkIds: isAll ? undefined : isUngrouped ? ungrouped!.workIds : listDetail!.workIds,
     includeFinishedDropped: true,
     sortLevels,
   }
@@ -154,13 +165,13 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
       getFilterPresets(basePath),
       getCriterionColorRanges(),
       canConsumeAi(),
-      isAll ? Promise.resolve([]) : getWorksLiteForPicker(),
-      isAll ? Promise.resolve([]) : getListRecommendations(listId),
+      isPseudo ? Promise.resolve([]) : getWorksLiteForPicker(),
+      isPseudo ? Promise.resolve([]) : getListRecommendations(listId),
       getListsForPicker(),
     ])
 
   // Destinos do "Adicionar a grupo": todos os grupos, menos o atual (numa página de grupo).
-  const groupOptions = isAll ? allGroups : allGroups.filter((g) => g.id !== listId)
+  const groupOptions = isPseudo ? allGroups : allGroups.filter((g) => g.id !== listId)
 
   const orderedIds = entries.map((e) => e.workId)
   const works = await getWorksByIds(orderedIds)
@@ -178,11 +189,14 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     }
   })
 
-  const summary = isAll ? favSummary! : listDetail!.summary
-  const title = isAll ? "Todos os favoritos" : listDetail!.name
+  const summary = isAll ? favSummary! : isUngrouped ? ungrouped!.summary : listDetail!.summary
+  const title = isAll ? "Todos os favoritos" : isUngrouped ? "Sem grupo" : listDetail!.name
   const description = isAll
     ? "Exploração detalhada das obras marcadas como favoritas."
-    : listDetail!.description ?? "Recorte dos seus favoritos pra comparar em um contexto."
+    : isUngrouped
+      ? "Favoritas que ainda não entraram em nenhum grupo — a fila do que falta organizar."
+      : listDetail!.description ?? "Recorte dos seus favoritos pra comparar em um contexto."
+  const kicker = isAll ? "Biblioteca" : isUngrouped ? "Visão derivada" : "Grupo"
 
   return (
     <div className="space-y-4">
@@ -194,16 +208,16 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
       </Link>
 
       <Header
-        kicker={isAll ? "Biblioteca" : "Grupo"}
+        kicker={kicker}
         title={title}
         description={description}
-        icon={<Heart />}
+        icon={isUngrouped ? <FolderOpen /> : <Heart />}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Badge variant="outline" className="text-sm">
               {works.length} obra{works.length !== 1 ? "s" : ""}
             </Badge>
-            {!isAll && listDetail && (
+            {!isPseudo && listDetail && (
               <GroupDetailActions
                 list={{
                   id: listDetail.id,
@@ -227,9 +241,10 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         shownCount={worksWithPred.length}
         actions={
           <>
-            {isAll ? (
-              <RecommendDialog context="favorites" isPaid={isPaid} />
-            ) : (
+            {isAll && <RecommendDialog context="favorites" isPaid={isPaid} />}
+            {/* "Sem grupo" não oferece recomendar: o botão de favoritos rodaria sobre TODOS os
+                favoritos, não sobre este recorte — prometeria um escopo que não entrega. */}
+            {!isPseudo && (
               <GroupRecommendButton listId={listId} workCount={listDetail!.workIds.length} isPaid={isPaid} />
             )}
             <ViewRecommendationsButton />
@@ -237,7 +252,7 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         }
       />
 
-      {!isAll && recentRecs.length > 0 && (
+      {!isPseudo && recentRecs.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-card/40 px-3 py-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
             <Sparkles className="size-3.5 text-primary" /> Recomendações deste grupo
@@ -276,6 +291,8 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         enableSelectAll
         isPaid={isPaid}
         groups={groupOptions}
+        // Só num grupo REAL há de onde remover — em /all e /ungrouped a ação não existe.
+        currentGroup={isPseudo ? undefined : { id: listId, name: listDetail!.name }}
       />
     </div>
   )

@@ -7,14 +7,15 @@ import { ViewRecommendationsButton } from "@/components/recommendations/view-rec
 import { canConsumeAi } from "@/server/queries/current-user"
 import { getFavoritesSummary } from "@/server/queries/favorites"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
-import { getListsWithSummary, getWorksLiteForPicker } from "@/server/queries/lists"
+import { getListsWithSummary, getUngroupedFavorites, getWorksLiteForPicker } from "@/server/queries/lists"
 
-// Índice de /favorites: grupos (recortes) + card fixo "Todos os favoritos".
-// O detalhe (tabela/filtros clássicos) vive em /favorites/[listId].
+// Índice de /favorites: grupos (recortes) + card fixo "Todos os favoritos" + card derivado
+// "Sem grupo". O detalhe (tabela/filtros clássicos) vive em /favorites/[listId].
 export default async function FavoritesPage() {
-  const [lists, summary, catalog, scoreThresholds, canAi] = await Promise.all([
+  const [lists, summary, ungrouped, catalog, scoreThresholds, canAi] = await Promise.all([
     getListsWithSummary(),
     getFavoritesSummary(),
+    getUngroupedFavorites(),
     getWorksLiteForPicker(),
     getScoreColorThresholds(),
     canConsumeAi(),
@@ -41,7 +42,7 @@ export default async function FavoritesPage() {
         }
       />
 
-      <GroupsIndex lists={lists} allSummary={summary} catalog={catalog} />
+      <GroupsIndex lists={lists} allSummary={summary} ungrouped={ungrouped} catalog={catalog} />
     </div>
   )
 }

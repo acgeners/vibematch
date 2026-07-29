@@ -50,6 +50,7 @@ import type {
   PersonalStatePatch,
 } from "@/server/queries/user-work-state"
 import { buildAutoRefreshPlan } from "@/lib/external/auto-refresh"
+import { purgeWorksFromAllLists } from "@/server/queries/lists"
 import { getScoresReader } from "@/server/queries/user-scores"
 import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
@@ -1315,7 +1316,29 @@ async function persistNewWork(
 // is_favorite/is_archived ou nos scores agregados pelo summary.
 function revalidateFavorites() {
   revalidatePath("/favorites")
+  // A visão "Sem grupo" é derivada de `favoritas − agrupadas`: favoritar/desfavoritar mexe no
+  // primeiro termo, então ela tem que ser recalculada junto com o índice.
+  revalidatePath("/favorites/ungrouped")
   revalidateTag("favorites-summary", "max")
+}
+
+/**
+ * Desfavoritar TIRA a obra de todas as pastas do usuário. É o invariante "grupo ⊂ favoritos"
+ * valendo nas duas direções.
+ *
+ * Antes, só a página da obra fazia isso (`unfavoriteWorkFromFolders`); o coração da tabela e o
+ * lote não mexiam em `work_list_items`. Resultado: a obra saía dos favoritos e **continuava
+ * listada no grupo** — o estado órfão "está na pasta mas não é favorita".
+ *
+ * ⚠️ É destrutivo e não tem volta: refavoritar NÃO devolve a obra ao grupo. Quem chama em lote
+ * avisa antes (ver `countSelectedWorksInFolders`).
+ *
+ * O erro NÃO derruba a ação: o favorito em si já foi gravado, e falhar aqui só deixaria a
+ * associação velha pra trás — melhor logar e seguir do que reverter um write que deu certo.
+ */
+async function purgeFoldersOnUnfavorite(ids: string[]) {
+  const { error } = await purgeWorksFromAllLists(ids)
+  if (error) console.error("[works] falha ao tirar obra(s) das pastas:", error)
 }
 
 export async function createWork(
@@ -2020,6 +2043,7 @@ export async function toggleFavorite(id: string, isFavorite: boolean) {
 
   const { error } = await applyReadingState(gate, [id], { is_favorite: isFavorite })
   if (error) return { error }
+  if (!isFavorite) await purgeFoldersOnUnfavorite([id])
 
   revalidatePath(`/titles/${id}`)
   revalidatePath("/titles")
@@ -2038,6 +2062,7 @@ export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
 
   const { error } = await applyReadingState(gate, filtered, { is_favorite: isFavorite })
   if (error) return { error }
+  if (!isFavorite) await purgeFoldersOnUnfavorite(filtered)
 
   revalidatePath("/titles")
   revalidatePath("/ranking")
