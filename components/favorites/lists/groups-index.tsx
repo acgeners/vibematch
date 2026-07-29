@@ -4,7 +4,7 @@ import { useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Heart, MessageSquare, Pencil, Plus, Sparkles, Trash2 } from "lucide-react"
+import { FolderOpen, Heart, MessageSquare, Pencil, Plus, Sparkles, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CoverImage } from "@/components/ui/cover-image"
@@ -13,13 +13,15 @@ import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { cn } from "@/lib/utils"
 import { deleteWorkList } from "@/server/actions/lists"
 import type { FavoritesSummary } from "@/server/queries/favorites"
-import type { WorkListSummary, WorkLiteForPicker } from "@/server/queries/lists"
+import type { UngroupedFavorites, WorkListSummary, WorkLiteForPicker } from "@/server/queries/lists"
 import { GroupFormDialog, type GroupFormData } from "./group-form-dialog"
 import { SuggestGroupsDialog } from "./suggest-groups-dialog"
 
 interface GroupsIndexProps {
   lists: WorkListSummary[]
   allSummary: FavoritesSummary
+  /** Visão derivada "Sem grupo" (favoritas fora de qualquer grupo). */
+  ungrouped: UngroupedFavorites
   catalog: WorkLiteForPicker[]
 }
 
@@ -112,7 +114,7 @@ function CardFoot({ summary, commentCount }: { summary: FavoritesSummary; commen
   )
 }
 
-export function GroupsIndex({ lists, allSummary, catalog }: GroupsIndexProps) {
+export function GroupsIndex({ lists, allSummary, ungrouped, catalog }: GroupsIndexProps) {
   const router = useRouter()
   const [createOpen, setCreateOpen] = useState(false)
   const [suggestOpen, setSuggestOpen] = useState(false)
@@ -192,6 +194,33 @@ export function GroupsIndex({ lists, allSummary, catalog }: GroupsIndexProps) {
             <CardFoot summary={allSummary} />
           </div>
         </div>
+
+        {/* Card DERIVADO: favoritas fora de qualquer grupo. Sem linha em `work_lists` — daí a
+            borda tracejada e a ausência de editar/excluir. Escondido quando não há grupo
+            nenhum: aí ele seria uma cópia exata de "Todos os favoritos". */}
+        {ungrouped.groupCount > 0 && (
+          <div className="relative flex min-h-[132px] items-center gap-4 rounded-xl border border-dashed border-muted-foreground/40 bg-muted/30 p-4 transition hover:-translate-y-0.5 hover:border-muted-foreground/70">
+            <Link
+              href="/favorites/ungrouped"
+              aria-label="Favoritas sem grupo"
+              className="absolute inset-0 rounded-xl"
+            />
+            <CoverStack urls={ungrouped.coverUrls} />
+            <div className="pointer-events-none min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                <p className="truncate font-semibold">Sem grupo</p>
+                <Badge variant="outline" className="text-[10px]">
+                  derivado
+                </Badge>
+              </div>
+              <p className="line-clamp-2 text-sm text-muted-foreground">
+                Favoritas que ainda não entraram em nenhum grupo — a fila do que falta organizar.
+              </p>
+              <CardFoot summary={ungrouped.summary} />
+            </div>
+          </div>
+        )}
 
         {/* Grupos do usuário */}
         {lists.map((list) => (

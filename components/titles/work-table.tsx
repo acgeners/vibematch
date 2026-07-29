@@ -17,6 +17,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  CircleMinus,
   ExternalLink,
   FolderPlus,
   Heart,
@@ -67,6 +68,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
@@ -77,6 +79,8 @@ import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { FavoriteCell } from "@/components/titles/favorite-cell"
 import { useIsAdmin, useCanWriteOwnState } from "@/components/layout/admin-context"
 import { AddToGroupDialog } from "@/components/favorites/lists/add-to-group-dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { countSelectedWorksInFolders, removeWorksFromList } from "@/server/actions/lists"
 import type { ListPickerOption } from "@/server/queries/lists"
 import { AlignmentCell, AlignmentScoreCell, DecisionCell, ManualInterestCell, SynopsisPredictionCell } from "@/components/ranking/ranking-cells"
 import { computeDecisionScore } from "@/lib/calculations/decision"
@@ -164,6 +168,10 @@ interface WorkTableProps {
   /** Grupos de destino pro "Adicionar a grupo" na barra de seleção (só /favorites).
    *  Quando presente, a barra ganha o botão de mover as obras selecionadas. */
   groups?: ListPickerOption[]
+  /** O grupo que esta tabela está EXIBINDO — só numa página de grupo real (/favorites/<id>).
+   *  Habilita "Remover do grupo" (lote + menu da linha). Ausente em /favorites/all e
+   *  /favorites/ungrouped, que não são grupos: não há de onde remover. */
+  currentGroup?: { id: string; name: string }
 }
 
 function scoreFor(work: WorkWithRelations, slug: string): number | null {
@@ -225,6 +233,7 @@ export function WorkTable({
   isPaid = true,
   criterionPrefs,
   groups,
+  currentGroup,
 }: WorkTableProps) {
   const router = useRouter()
   const refresh = useRefresh()
@@ -252,6 +261,10 @@ export function WorkTable({
   const [moodDialogOpen, setMoodDialogOpen] = useState(false)
   const [moodRefine, setMoodRefine] = useState<MoodRefine | null>(null)
   const [addGroupOpen, setAddGroupOpen] = useState(false)
+  // Desfavoritar em lote passou a esvaziar as pastas (e refavoritar não desfaz), então quando
+  // há obra em pasta a ação vira um "confirme": guarda quantas, pra dizer o que se perde.
+  const [unfavConfirm, setUnfavConfirm] = useState<{ works: number; memberships: number } | null>(null)
+  const [busy, setBusy] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
   const updateCompareIds = useCallback(
@@ -341,7 +354,7 @@ export function WorkTable({
     [works, selectedSet]
   )
 
-  const handleBatchUnfavorite = useCallback(async () => {
+  const runBatchUnfavorite = useCallback(async () => {
     if (favoriteSelectedIds.length === 0) return
     const result = await setFavoriteMany(favoriteSelectedIds, false)
     if (result.error) {
@@ -354,10 +367,48 @@ export function WorkTable({
     refresh()
   }, [favoriteSelectedIds, updateCompareIds, refresh])
 
+  /** Pergunta ao servidor se alguma das selecionadas está em pasta ANTES de desfavoritar.
+   *  Com pasta envolvida, abre o aviso; sem pasta, segue direto (o caso comum). */
+  const handleBatchUnfavorite = useCallback(async () => {
+    if (favoriteSelectedIds.length === 0 || busy) return
+    setBusy(true)
+    try {
+      const res = await countSelectedWorksInFolders(favoriteSelectedIds)
+      const inFolders = "data" in res ? res.data : { works: 0, memberships: 0 }
+      if (inFolders.works > 0) {
+        setUnfavConfirm(inFolders)
+        return
+      }
+      await runBatchUnfavorite()
+    } finally {
+      setBusy(false)
+    }
+  }, [favoriteSelectedIds, busy, runBatchUnfavorite])
+
   const handleAddedToGroup = useCallback(() => {
     updateCompareIds([])
     refresh()
   }, [updateCompareIds, refresh])
+
+  /** Tira as selecionadas do grupo que a página está exibindo. NÃO desfavorita: elas caem no
+   *  "Sem grupo", que é exatamente onde uma favorita sem pasta deve aparecer. */
+  const handleRemoveFromGroup = useCallback(async () => {
+    if (!currentGroup || compareIds.length === 0 || busy) return
+    setBusy(true)
+    try {
+      const res = await removeWorksFromList(currentGroup.id, compareIds)
+      if ("error" in res) {
+        toast.error(res.error)
+        return
+      }
+      const n = res.data.count
+      toast.success(`${n} obra${n !== 1 ? "s" : ""} removida${n !== 1 ? "s" : ""} de “${currentGroup.name}”.`)
+      updateCompareIds([])
+      refresh()
+    } finally {
+      setBusy(false)
+    }
+  }, [currentGroup, compareIds, busy, updateCompareIds, refresh])
 
   const totalPages = Math.ceil(total / pageSize)
 
@@ -426,6 +477,7 @@ export function WorkTable({
           onSelectAll={selectAllVisible}
           onClearAll={clearCompare}
           criterionPrefs={criterionPrefs}
+          currentGroup={currentGroup}
         />
       )}
 
@@ -442,6 +494,24 @@ export function WorkTable({
             onClear={clearCompare}
             onUnfavorite={handleBatchUnfavorite}
             onAddToGroup={groups ? () => setAddGroupOpen(true) : undefined}
+            onRemoveFromGroup={currentGroup ? handleRemoveFromGroup : undefined}
+            busy={busy}
+          />
+
+          <ConfirmDialog
+            open={unfavConfirm != null}
+            onOpenChange={(o) => !o && setUnfavConfirm(null)}
+            title={`Desfavoritar ${favoriteSelectedIds.length} obra${favoriteSelectedIds.length !== 1 ? "s" : ""}?`}
+            description={
+              unfavConfirm
+                ? `${unfavConfirm.works} dela${unfavConfirm.works !== 1 ? "s" : ""} está${unfavConfirm.works !== 1 ? "ão" : ""} em ${unfavConfirm.memberships} grupo${unfavConfirm.memberships !== 1 ? "s" : ""} e vai sair de todos. Refavoritar depois NÃO devolve a obra ao grupo.`
+                : undefined
+            }
+            confirmText="Desfavoritar"
+            onConfirm={async () => {
+              setUnfavConfirm(null)
+              await runBatchUnfavorite()
+            }}
           />
 
           {groups && (
@@ -497,6 +567,8 @@ function CompareSelectionBar({
   onClear,
   onUnfavorite,
   onAddToGroup,
+  onRemoveFromGroup,
+  busy = false,
 }: {
   count: number
   favoriteCount: number
@@ -504,10 +576,13 @@ function CompareSelectionBar({
   onClear: () => void
   onUnfavorite: () => void
   onAddToGroup?: () => void
+  onRemoveFromGroup?: () => void
+  busy?: boolean
 }) {
-  // Agrupar em lote muta o catálogo (grupos ainda não têm dono) → só o Curador.
-  // Desfavoritar em lote é estado PESSOAL (Fatia 1) → qualquer usuário logado.
-  const isAdmin = useIsAdmin()
+  // Grupo de favoritos é dado PESSOAL desde a mig 149 (`work_lists.user_id`), e a action é
+  // gateada por `own_state` — o mesmo verbo de favoritar. O gate aqui era `isAdmin`, herdado
+  // de quando os grupos não tinham dono: ele escondia da Leitora um botão que o servidor
+  // aceitaria, e que o menu de pastas da página da obra já oferecia a ela.
   const canWriteOwnState = useCanWriteOwnState()
   if (count === 0) return null
   const compareDisabled = count > MAX_COMPARE_WORKS
@@ -529,11 +604,12 @@ function CompareSelectionBar({
         >
           Comparar
         </Button>
-        {onAddToGroup && isAdmin && (
+        {onAddToGroup && canWriteOwnState && (
           <Button
             size="sm"
             variant="outline"
             onClick={onAddToGroup}
+            disabled={busy}
             className="h-7 gap-1.5 text-xs"
           >
             <FolderPlus className="h-3.5 w-3.5" />
@@ -545,10 +621,23 @@ function CompareSelectionBar({
             size="sm"
             variant="outline"
             onClick={onUnfavorite}
+            disabled={busy}
             className="h-7 gap-1.5 text-xs"
           >
             <HeartOff className="h-3.5 w-3.5" />
             Desfavoritar {favoriteCount}
+          </Button>
+        )}
+        {onRemoveFromGroup && canWriteOwnState && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onRemoveFromGroup}
+            disabled={busy}
+            className="h-7 gap-1.5 border-rose-500/45 text-xs text-rose-500 hover:border-rose-500/70 hover:text-rose-500"
+          >
+            <CircleMinus className="h-3.5 w-3.5" />
+            Remover do grupo
           </Button>
         )}
         <Button
@@ -787,6 +876,7 @@ function WorkListView({
   onSelectAll,
   onClearAll,
   criterionPrefs,
+  currentGroup,
 }: {
   works: WorkWithRelations[]
   searchParams: ReturnType<typeof useSearchParams>
@@ -803,11 +893,17 @@ function WorkListView({
   onSelectAll?: () => void
   onClearAll?: () => void
   criterionPrefs?: Record<string, CriterionRange>
+  currentGroup?: { id: string; name: string }
 }) {
   const refresh = useRefresh()
   // Stopgap multi-user: o menu "Gerenciar obra" (editar/favoritar/arquivar) muta o
   // catálogo compartilhado → só o dono. Usuário logado não vê a coluna de ações.
   const isAdmin = useIsAdmin()
+  // ...exceto "Remover deste grupo": o grupo é DELE (mig 149) e a action é gateada por
+  // `own_state`. Por isso a coluna passa a existir também pra não-admin dentro de um grupo —
+  // com só esse item dentro.
+  const canWriteOwnState = useCanWriteOwnState()
+  const canRemoveFromGroup = currentGroup != null && canWriteOwnState
   const colorMode = useSyncExternalStore(subscribeAttrColorMode, readAttrColorMode, () => "catalog" as const)
   const columnConfig = useSyncExternalStore(
     (onChange) => subscribeWorkColumnConfig(onChange, namespace),
@@ -1026,7 +1122,7 @@ function WorkListView({
       )
     },
     actions: (work) => {
-      if (!isAdmin) return null
+      if (!isAdmin && !canRemoveFromGroup) return null
       const slug = titleToSlug(work.title)
       return (
         <DropdownMenu>
@@ -1047,6 +1143,8 @@ function WorkListView({
             <TooltipContent side="top">Gerenciar</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end">
+            {isAdmin && (
+              <>
             <DropdownMenuItem asChild>
               <Link
                 href={`/titles/${slug}`}
@@ -1117,6 +1215,31 @@ function WorkListView({
               <Sparkles className="h-4 w-4 mr-2" />
               Avaliar Veredito IA
             </DropdownMenuItem>
+              </>
+            )}
+            {/* Nomeia o grupo: numa obra que está em várias pastas, "Remover do grupo" sozinho
+                não diz de qual — e a página é a única pista. */}
+            {canRemoveFromGroup && (
+              <>
+                {isAdmin && <DropdownMenuSeparator />}
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    const res = await removeWorksFromList(currentGroup!.id, [work.id])
+                    if ("error" in res) {
+                      toast.error(res.error)
+                      return
+                    }
+                    toast.success(`Removida de “${currentGroup!.name}”. Continua nos favoritos.`)
+                    refresh()
+                  }}
+                >
+                  <CircleMinus className="h-4 w-4 mr-2" />
+                  Remover de “{currentGroup!.name}”
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )
