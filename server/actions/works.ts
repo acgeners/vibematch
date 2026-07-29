@@ -57,6 +57,7 @@ import { getWorkTagReviewCounts } from "@/server/queries/work-card-meta"
 import { normalizeCoverSource, titleToSlug } from "@/lib/utils"
 import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 import { personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
+import { canRateReadingState } from "@/lib/reading-gate"
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>
 
@@ -2130,15 +2131,25 @@ export async function setChaptersRead(id: string, chaptersRead: number) {
  * `works` é onde eles moram. Por isso `works` só é escrita quando quem avalia é ele: se a nota
  * da Leitora entrasse ali, o modelo DELE passaria a aprender o gosto DELA, e a Nota Prevista de
  * 878 obras mudaria sem que ninguém tivesse pedido nada.
+ *
+ * Dividido em DOIS blocos porque o gate de leitura (lib/reading-gate.ts) só vale para um deles:
+ * `notesPatchFrom` é PRÉ-leitura (o interesse ♥ é justamente a opinião sobre a sinopse de quem
+ * ainda não leu) e passa sempre; `ratingPatchFrom` é pós-leitura e só passa com leitura
+ * suficiente. Juntar os dois num patch só bloquearia as anotações de toda obra não-lida.
  */
-function tastePatchFrom(data: WorkStatusValues): TasteStatePatch {
+function notesPatchFrom(data: WorkStatusValues): TasteStatePatch {
   return {
-    user_score: data.user_score ?? null,
     observations: data.observations ?? null,
     observation_adjustment: data.observation_adjustment,
     synopsis_quality: data.synopsis_quality ?? null,
     // Proveniência (Plano 3): valor vindo do form = informado/aceito pelo usuário.
     synopsis_quality_source: data.synopsis_quality != null ? "human_manual" : "legacy_unknown",
+  }
+}
+
+function ratingPatchFrom(data: WorkStatusValues): TasteStatePatch {
+  return {
+    user_score: data.user_score ?? null,
     post_story_score: data.post_story_score ?? null,
     post_fl_score: data.post_fl_score ?? null,
     post_ml_score: data.post_ml_score ?? null,
@@ -2177,7 +2188,7 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   const { data: sharedRow } = await supabase
     .from("works_owner")
     .select(
-      `personal_status_id, chapters_read, last_read_at,
+      `personal_status_id, chapters_read, last_read_at, total_chapters,
        user_score, observation_adjustment, observations, synopsis_quality,
        post_story_score, post_fl_score, post_ml_score, post_character_development_score,
        post_pacing_score, post_art_visual_score, post_impact_immersion_score,
@@ -2253,7 +2264,27 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
     chapters_read: data.chapters_read ?? null,
     last_read_at: nextLastReadAt,
   }
-  const personalState: PersonalStatePatch = { ...readingState, ...tastePatchFrom(data) }
+  // ── "Só avalia quem leu" (lib/reading-gate.ts), aplicada ao estado RESULTANTE do save.
+  //
+  // O gate existia só como visibilidade no cliente — e server action é endpoint público, então
+  // ele não era regra nenhuma: a nota chegava aqui igual e `tastePatchFrom` a regravava. Pior,
+  // o próprio form RECALCULA `user_score` dos `post_*` a cada render, inclusive com as seções
+  // escondidas: bastava salvar o status de uma obra "Untracked" pra a nota voltar pro banco.
+  //
+  // Sem leitura suficiente, o bloco de AVALIAÇÃO é omitido do patch — o upsert do PostgREST só
+  // escreve as colunas presentes, então o que já está gravado fica INTACTO. É de propósito:
+  // apagar a nota aqui destruiria um rótulo do Ridge por causa de um clique de status. Quem
+  // avisa da inconsistência é a UI (PostReadingFlow).
+  const canRate = canRateReadingState({
+    personalStatus: readingState.personal_status_id,
+    chaptersRead: readingState.chapters_read,
+    totalChapters: (sharedRow?.total_chapters as number | null | undefined) ?? null,
+  })
+  const personalState: PersonalStatePatch = {
+    ...readingState,
+    ...notesPatchFrom(data),
+    ...(canRate ? ratingPatchFrom(data) : {}),
+  }
 
   // ── Não-dono: TUDO dela (acompanhamento + gosto) vai pra `user_work_state`. `works` NÃO é
   // tocada — nem a nota, nem as observações. É o que impede a nota dela de virar o rótulo que
@@ -2291,19 +2322,25 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
   const mirror = await writeReadingState(gate.userId, [id], personalState)
   if (mirror.error) return { error: { _root: [mirror.error] } }
 
-  // Validação prospectiva: primeira nota (null → valor) → congela a previsão
-  // de-registro antes do recalc deferido incluir o rótulo.
-  if (prevUserScore == null && data.user_score != null) {
-    await capturePredictionForFirstRating(id, data.user_score)
-  }
+  // O ledger de previsões só tem o que fazer quando a NOTA de fato mudou no banco. Sem leitura
+  // suficiente o bloco de avaliação nem entrou no patch (ver `canRate` acima): a nota gravada
+  // continua a de antes, e resolver/relabelar aqui mediria uma mudança que não aconteceu — o
+  // ramo `markPredictionLabelChanged` chegaria a carimbar "rótulo removido" numa nota intacta.
+  if (canRate) {
+    // Validação prospectiva: primeira nota (null → valor) → congela a previsão
+    // de-registro antes do recalc deferido incluir o rótulo.
+    if (prevUserScore == null && data.user_score != null) {
+      await capturePredictionForFirstRating(id, data.user_score)
+    }
 
-  // P1: resolve snapshots prospectivos (prediction_snapshots) com a nota real.
-  // 1ª nota → resolve (imutável); edição → relabel (preserva a 1ª medição);
-  // remoção → só carimba label_changed_at. Idempotente. Best-effort.
-  if (data.user_score != null) {
-    await resolvePredictionsForWork(id, data.user_score)
-  } else if (prevUserScore != null) {
-    await markPredictionLabelChanged(id)
+    // P1: resolve snapshots prospectivos (prediction_snapshots) com a nota real.
+    // 1ª nota → resolve (imutável); edição → relabel (preserva a 1ª medição);
+    // remoção → só carimba label_changed_at. Idempotente. Best-effort.
+    if (data.user_score != null) {
+      await resolvePredictionsForWork(id, data.user_score)
+    } else if (prevUserScore != null) {
+      await markPredictionLabelChanged(id)
+    }
   }
 
   await markRecalcPending("updateWorkStatus")

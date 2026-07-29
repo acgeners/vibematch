@@ -169,11 +169,15 @@ export async function getModelMetricsDashboard(): Promise<ModelMetricsDashboard>
       ? Number(configRes.data.cv_mae_expected_stage1)
       : null
 
+  // `discarded_at is null` (migration 168): fora as medições cujo rótulo o usuário APAGOU. Sem
+  // gabarito não há acerto nem erro — medir contra uma nota retirada fabrica número. Filtrado
+  // aqui, na única leitura, pra que TODA métrica derivada saia limpa por construção.
   const { data, error } = await supabase
     .from("prediction_snapshots")
     .select(
       "work_id, captured_at, predicted_score, predicted_is_stub, calc_score, decision_score, actual_user_score, formula_version, resolved_at, training_sample_size, ranking_snapshot_id, superseded",
     )
+    .is("discarded_at", null)
     .limit(20000)
 
   if (error) {
