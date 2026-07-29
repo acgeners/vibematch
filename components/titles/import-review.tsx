@@ -1,19 +1,37 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRefresh } from "@/lib/use-refresh"
-import { Loader2, Check, AlertTriangle, X, Sparkles, RefreshCw, ImageOff } from "lucide-react"
+import { Loader2, Check, AlertTriangle, X, Sparkles, RefreshCw, ImageOff, ListChecks } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
+import { cn } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
+import type { ReviewQueueMark } from "@/components/titles/update-data-dialog"
 import { enrichWorkExternal } from "@/server/actions/enrich"
 import type { EnrichResult, ReviewWork } from "@/server/actions/enrich"
 
 type RowState = EnrichResult | "running" | undefined
 
 const CONCURRENCY = 3
+
+/**
+ * Fila de revisão em sequência. `cursor` aponta pra obra aberta agora; `marks`
+ * guarda o desfecho de cada posição (os pontinhos de progresso da faixa).
+ */
+interface ReviewQueue {
+  ids: string[]
+  cursor: number
+  marks: ReviewQueueMark[]
+}
+
+interface QueueSummary {
+  reviewedIds: string[]
+  skipped: number
+}
 
 // Abre em nova aba via <a target="_blank"> clicado. window.open(url, "_blank",
 // "...features...") abre POPUP (3º arg) — frequentemente bloqueado/falho,
@@ -54,27 +72,28 @@ export function ImportReview({
   const reload = onReload ?? (() => refresh())
   const [states, setStates] = useState<Record<string, RowState>>({})
   const [running, setRunning] = useState(false)
-  const [active, setActive] = useState<ReviewWork | null>(null)
   // Obras já revisadas nesta sessão — somem da lista mesmo após reload (ainda
   // ficam 'pending' no banco até serem avaliadas em /ai-evaluation).
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  // Puladas na fila: continuam pendentes, só ganham um selo na linha.
+  const [skippedIds, setSkippedIds] = useState<Set<string>>(new Set())
+  const [queue, setQueue] = useState<ReviewQueue | null>(null)
+  /** Revisão avulsa (botão "Revisar" da linha) — fora da fila. */
+  const [soloId, setSoloId] = useState<string | null>(null)
+  const [summary, setSummary] = useState<QueueSummary | null>(null)
 
+  const byId = useMemo(() => new Map(works.map((w) => [w.id, w])), [works])
   const visibleWorks = useMemo(() => works.filter((w) => !dismissed.has(w.id)), [works, dismissed])
   const coverless = useMemo(() => visibleWorks.filter((w) => w.coverCount === 0), [visibleWorks])
+  const selectedWorks = useMemo(
+    () => visibleWorks.filter((w) => selected.has(w.id)),
+    [visibleWorks, selected],
+  )
+  const selectedCoverless = selectedWorks.filter((w) => w.coverCount === 0)
 
-  const runBatch = async () => {
-    // Só busca dados das que ainda não têm capa e não foram processadas nesta sessão.
-    const targets = coverless.filter((w) => {
-      const s = states[w.id]
-      return s === undefined || (s !== "running" && s.status !== "enriched")
-    })
-    if (targets.length === 0) return
-    setRunning(true)
-    await runPool(targets, (w) => enrichOne(w.id), CONCURRENCY)
-    setRunning(false)
-    await reload()
-    onBatchComplete?.()
-  }
+  const activeId = queue ? queue.ids[queue.cursor] : soloId
+  const activeWork = activeId ? byId.get(activeId) ?? null : null
 
   const enrichOne = async (id: string) => {
     setStates((prev) => ({ ...prev, [id]: "running" }))
@@ -89,19 +108,198 @@ export function ImportReview({
     }
   }
 
+  // Só busca dados das que ainda não têm capa e não foram processadas nesta sessão.
+  const runBatch = async (pool: ReviewWork[]) => {
+    const targets = pool.filter((w) => {
+      const s = states[w.id]
+      return s === undefined || (s !== "running" && s.status !== "enriched")
+    })
+    if (targets.length === 0) return
+    setRunning(true)
+    await runPool(targets, (w) => enrichOne(w.id), CONCURRENCY)
+    setRunning(false)
+    await reload()
+    onBatchComplete?.()
+  }
+
+  // ── Fila ───────────────────────────────────────────────────────────────
+  const startQueue = (ids: string[]) => {
+    if (ids.length === 0) return
+    setSummary(null)
+    setSoloId(null)
+    setQueue({ ids, cursor: 0, marks: ids.map((_, i) => (i === 0 ? "current" : "todo")) })
+  }
+
+  const finishQueue = (final: ReviewQueue) => {
+    setQueue(null)
+    setSummary({
+      reviewedIds: final.ids.filter((_, i) => final.marks[i] === "done"),
+      skipped: final.marks.filter((m) => m === "skipped").length,
+    })
+    void reload()
+  }
+
+  const abortQueue = () => {
+    // As restantes continuam SELECIONADAS — dá pra retomar a fila de onde parou.
+    setQueue(null)
+    void reload()
+  }
+
+  /**
+   * Fecha a obra atual e avança. `outcome` "reviewed" só chega pelo save; tudo
+   * que fecha o diálogo sem salvar (Esc, clique fora, Cancelar, "Pular esta")
+   * vira "skipped" e a obra continua na lista.
+   */
+  const resolveActive = (id: string, outcome: "reviewed" | "skipped") => {
+    if (outcome === "reviewed") {
+      setDismissed((prev) => new Set(prev).add(id))
+      setSelected((prev) => {
+        if (!prev.has(id)) return prev
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+      setSkippedIds((prev) => {
+        if (!prev.has(id)) return prev
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+      onReviewed?.(id)
+    }
+
+    if (!queue) {
+      // Revisão avulsa: mantém o comportamento antigo — abre a obra em nova aba.
+      setSoloId(null)
+      if (outcome === "reviewed") openInNewTab(`/titles/${id}`)
+      void reload()
+      return
+    }
+
+    if (outcome === "skipped") setSkippedIds((prev) => new Set(prev).add(id))
+
+    const marks = [...queue.marks]
+    marks[queue.cursor] = outcome === "reviewed" ? "done" : "skipped"
+    const cursor = queue.cursor + 1
+    if (cursor >= queue.ids.length) {
+      finishQueue({ ...queue, marks, cursor })
+      return
+    }
+    marks[cursor] = "current"
+    setQueue({ ...queue, marks, cursor })
+  }
+
+  /**
+   * O UpdateDataDialog chama `onOpenChange(false)` ANTES de `onSaved`, no MESMO
+   * tick (ver `applyUpdate` lá). Então "fechou" sozinho NÃO distingue salvar de
+   * cancelar — sem isto, salvar contaria como pular e a obra avançaria duas
+   * posições. Adiamos um microtask: se `onSaved` marcou o id nesse meio tempo,
+   * o fechamento foi consequência do save e já está resolvido.
+   */
+  const savedIdRef = useRef<string | null>(null)
+  const handleDialogClosed = (id: string) => {
+    queueMicrotask(() => {
+      if (savedIdRef.current === id) {
+        savedIdRef.current = null
+        return
+      }
+      resolveActive(id, "skipped")
+    })
+  }
+
   if (visibleWorks.length === 0) {
     return <p className="text-sm text-muted-foreground">Nenhuma obra pendente de revisão. 🎉</p>
   }
 
+  const allSelected = selectedWorks.length > 0 && selectedWorks.length === visibleWorks.length
+  const someSelected = selectedWorks.length > 0 && !allSelected
+
   return (
     <div className="space-y-4">
+      {summary && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-600/45 bg-emerald-500/10 px-3 py-2 text-sm">
+          <span>
+            Fila concluída · <strong className="tabular-nums">{summary.reviewedIds.length}</strong>{" "}
+            {summary.reviewedIds.length === 1 ? "revisada" : "revisadas"}
+            {summary.skipped > 0 && (
+              <>
+                {" · "}
+                <strong className="tabular-nums">{summary.skipped}</strong>{" "}
+                {summary.skipped === 1 ? "pulada" : "puladas"} (seguem na lista)
+              </>
+            )}
+          </span>
+          <div className="flex items-center gap-2">
+            {summary.reviewedIds.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => summary.reviewedIds.forEach((id) => openInNewTab(`/titles/${id}`))}
+              >
+                Abrir as revisadas em abas
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => setSummary(null)}>
+              Dispensar
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {selectedWorks.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/45 bg-primary/10 px-3 py-2">
+          <span className="text-sm">
+            <strong className="tabular-nums">{selectedWorks.length}</strong>{" "}
+            {selectedWorks.length === 1 ? "selecionada" : "selecionadas"}
+            {selectedCoverless.length > 0 && (
+              <span className="text-muted-foreground"> · {selectedCoverless.length} sem capa</span>
+            )}
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+              Limpar seleção
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={running || selectedCoverless.length === 0}
+              onClick={() => void runBatch(selectedCoverless)}
+            >
+              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Buscar dados das sem capa ({selectedCoverless.length})
+            </Button>
+            <Button size="sm" onClick={() => startQueue(selectedWorks.map((w) => w.id))}>
+              <ListChecks className="h-4 w-4" /> Revisar em sequência ({selectedWorks.length})
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-        <span className="text-muted-foreground">
-          {visibleWorks.length} pendentes · {coverless.length} sem capa
-        </span>
+        <div className="flex items-center gap-2.5 text-muted-foreground">
+          <label className="flex cursor-pointer items-center gap-2">
+            <Checkbox
+              checked={allSelected ? true : someSelected ? "indeterminate" : false}
+              onCheckedChange={(v) =>
+                setSelected(v === true ? new Set(visibleWorks.map((w) => w.id)) : new Set())
+              }
+              aria-label="Selecionar todas"
+              // O traço do estado indeterminado é um ::after — o Indicator do
+              // componente base só sabe desenhar o check. O `dark:` no fundo é
+              // obrigatório: sem ele o `dark:bg-input/35` da base vence (é o
+              // mesmo motivo do `dark:data-[state=checked]:bg-primary` de lá).
+              className="relative after:absolute after:inset-x-[3px] after:top-1/2 after:hidden after:h-0.5 after:-translate-y-1/2 after:rounded-full after:bg-primary-foreground after:content-[''] data-[state=indeterminate]:border-primary data-[state=indeterminate]:bg-primary data-[state=indeterminate]:after:block data-[state=indeterminate]:[&_svg]:hidden dark:data-[state=indeterminate]:bg-primary"
+            />
+            Selecionar todas
+          </label>
+          <span aria-hidden="true">·</span>
+          <span>
+            {visibleWorks.length} pendentes · {coverless.length} sem capa
+          </span>
+        </div>
         <div className="flex items-center gap-2">
           {coverless.length > 0 && (
-            <Button onClick={runBatch} disabled={running}>
+            <Button onClick={() => void runBatch(coverless)} disabled={running}>
               {running ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" /> Buscando…
@@ -126,9 +324,26 @@ export function ImportReview({
           const coverUrl = enriched?.coverUrl ?? work.coverPrimaryUrl
           const coverCount = enriched ? Math.max(work.coverCount, enriched.sources.length) : work.coverCount
           const synopsisCount = enriched ? Math.max(work.synopsisCount, 1) : work.synopsisCount
+          const isSelected = selected.has(work.id)
 
           return (
-            <div key={work.id} className="flex items-center gap-3 p-2.5 text-sm">
+            <div
+              key={work.id}
+              className={cn("flex items-center gap-3 p-2.5 text-sm", isSelected && "bg-primary/[0.06]")}
+            >
+              <Checkbox
+                checked={isSelected}
+                onCheckedChange={(v) =>
+                  setSelected((prev) => {
+                    const next = new Set(prev)
+                    if (v === true) next.add(work.id)
+                    else next.delete(work.id)
+                    return next
+                  })
+                }
+                aria-label={`Selecionar ${work.title}`}
+              />
+
               {/* capa */}
               <div className="h-14 w-10 shrink-0 overflow-hidden rounded border border-border/60 bg-muted">
                 {coverUrl ? (
@@ -150,6 +365,9 @@ export function ImportReview({
                   <Badge variant="outline" className="text-[11px]">{coverCount} capas</Badge>
                   <Badge variant="outline" className="text-[11px]">{synopsisCount} sinopses</Badge>
                   <Badge variant="secondary" className="text-[11px]">IA: {work.aiEvalStatus}</Badge>
+                  {skippedIds.has(work.id) && (
+                    <Badge variant="secondary" className="text-[11px]">pulada</Badge>
+                  )}
                   <EnrichStatus state={state} />
                 </div>
               </div>
@@ -167,7 +385,7 @@ export function ImportReview({
                     Buscar dados
                   </Button>
                 )}
-                <Button variant="ghost" size="sm" onClick={() => setActive(work)}>
+                <Button variant="ghost" size="sm" onClick={() => setSoloId(work.id)}>
                   Revisar
                 </Button>
               </div>
@@ -176,34 +394,42 @@ export function ImportReview({
         })}
       </div>
 
-      {/* Picker de capa/sinopse reaproveitando o fluxo "Atualizar dados". */}
-      {active && (
+      {/* Picker de capa/sinopse reaproveitando o fluxo "Atualizar dados". A `key`
+          remonta o diálogo a cada obra da fila — é o que zera os passos internos
+          (sinopses/capas/conflitos) sem fechar e reabrir. */}
+      {activeWork && (
         <UpdateDataDialog
-          key={active.id}
-          workId={active.id}
+          key={activeWork.id}
+          workId={activeWork.id}
           hideTrigger
           open
+          queue={
+            queue
+              ? {
+                  index: queue.cursor,
+                  total: queue.ids.length,
+                  nextTitle: byId.get(queue.ids[queue.cursor + 1])?.title ?? null,
+                  marks: queue.marks,
+                  onSkip: () => resolveActive(activeWork.id, "skipped"),
+                  onAbort: abortQueue,
+                }
+              : undefined
+          }
           onSaved={(workId) => {
-            // Abre a obra em nova aba após escolher sinopse/capa e remove da
-            // lista de pendentes (revisada).
-            openInNewTab(`/titles/${workId}`)
-            setDismissed((prev) => new Set(prev).add(workId))
-            onReviewed?.(workId)
+            savedIdRef.current = workId
+            resolveActive(workId, "reviewed")
           }}
           onOpenChange={(v) => {
-            if (!v) {
-              setActive(null)
-              void reload()
-            }
+            if (!v) handleDialogClosed(activeWork.id)
           }}
           currentWork={{
-            title: active.title,
-            originalTitle: active.originalTitle,
-            synopsis: active.synopsisPrimary,
-            coverUrl: active.coverPrimaryUrl,
-            publicationStatus: active.publicationStatus,
-            totalChapters: active.totalChapters,
-            observations: active.observations,
+            title: activeWork.title,
+            originalTitle: activeWork.originalTitle,
+            synopsis: activeWork.synopsisPrimary,
+            coverUrl: activeWork.coverPrimaryUrl,
+            publicationStatus: activeWork.publicationStatus,
+            totalChapters: activeWork.totalChapters,
+            observations: activeWork.observations,
           }}
         />
       )}

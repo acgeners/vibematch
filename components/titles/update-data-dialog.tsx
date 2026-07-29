@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { useRefresh } from "@/lib/use-refresh"
-import { Archive, ChevronRight, Loader2, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react"
+import { Archive, ChevronRight, Loader2, Plus, RefreshCw, RotateCcw, SkipForward, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -28,7 +28,7 @@ import { buildPlatformRatings } from "@/lib/external/auto-refresh"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
 import { cleanSynopsisText, dedupeByMeaning } from "@/lib/synopsis-text"
-import { titleToSlug } from "@/lib/utils"
+import { cn, titleToSlug } from "@/lib/utils"
 import { sourceLabel } from "@/lib/external/source-labels"
 import type { ExternalSourceId, ExternalWorkData, FieldValueProvenance } from "@/lib/external/types"
 
@@ -52,6 +52,26 @@ interface CurrentWork {
   observations?: string | null
 }
 
+/** Estado de cada obra da fila, na ordem em que ela foi montada. */
+export type ReviewQueueMark = "done" | "skipped" | "current" | "todo"
+
+/**
+ * Contexto da revisão EM SEQUÊNCIA (fila da /import). Quando presente, o diálogo
+ * ganha uma faixa no topo com a posição, o progresso e as saídas da fila —
+ * o resto do fluxo (sinopses/capas/conflitos) é idêntico ao de uma revisão avulsa.
+ * Quem controla o cursor é o caller: aqui só emitimos `onSkip`/`onAbort`.
+ */
+export interface ReviewQueueContext {
+  /** Índice 0-based da obra atual. */
+  index: number
+  total: number
+  /** Título da próxima obra; null quando esta é a última. */
+  nextTitle: string | null
+  marks: ReviewQueueMark[]
+  onSkip: () => void
+  onAbort: () => void
+}
+
 interface UpdateDataDialogProps {
   workId: string
   currentWork: CurrentWork
@@ -73,6 +93,9 @@ interface UpdateDataDialogProps {
   // padrão (router.push/refresh) — o caller decide o que fazer (ex.: abrir a
   // obra em outra aba na revisão de importadas).
   onSaved?: (workId: string) => void
+  // Revisão em sequência: mostra a faixa da fila no topo (posição, progresso,
+  // "pular esta" e "encerrar fila"). Ausente = revisão avulsa, sem faixa nenhuma.
+  queue?: ReviewQueueContext
   // Quando true, o fluxo começa por um passo de CONFIRMAÇÃO DE FONTES (revalidação
   // com Comix/Mangago resolvidos por cross-ID) antes de rehidratar os dados — o
   // merge de "Revalidar fontes" + "Atualizar dados" numa ação só. Default false
@@ -317,6 +340,7 @@ export function UpdateDataDialog({
   onOpenChange,
   hideTrigger = false,
   onSaved,
+  queue,
   withSourceStep = false,
 }: UpdateDataDialogProps) {
   const router = useRouter()
@@ -872,6 +896,43 @@ export function UpdateDataDialog({
               </p>
             )}
           </DialogHeader>
+
+          {/* Faixa da fila (revisão em sequência). Fica FORA da área de rolagem —
+              as saídas da fila ("pular", "encerrar") têm que estar acessíveis em
+              qualquer passo, inclusive durante o "Comparando dados externos...".
+              O `-mx-6 px-6` sangra até as bordas, igual à barra de ações. */}
+          {queue && (
+            <div className="-mx-6 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-y bg-primary/12 px-6 py-2 text-xs">
+              <span className="font-semibold tabular-nums">
+                Fila · {queue.index + 1} de {queue.total}
+              </span>
+              <div className="flex items-center gap-1" aria-hidden="true">
+                {queue.marks.map((mark, i) => (
+                  <span
+                    key={i}
+                    className={cn(
+                      "h-1 w-4 rounded-full",
+                      mark === "done" && "bg-emerald-500",
+                      mark === "skipped" && "bg-muted-foreground/60",
+                      mark === "current" && "bg-primary",
+                      mark === "todo" && "bg-muted-foreground/25",
+                    )}
+                  />
+                ))}
+              </div>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                {queue.nextTitle ? `próxima: ${queue.nextTitle}` : "última da fila"}
+              </span>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button variant="ghost" size="sm" className="h-7 px-2" onClick={queue.onSkip}>
+                  <SkipForward className="h-3.5 w-3.5" /> Pular esta
+                </Button>
+                <Button variant="ghost" size="sm" className="h-7 px-2" onClick={queue.onAbort}>
+                  Encerrar fila
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* ÚNICA área de rolagem do diálogo. Antes quem rolava era o próprio
               DialogContent, e aí o cabeçalho E a linha de botões rolavam junto com
