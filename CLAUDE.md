@@ -41,6 +41,54 @@ tem teto configurável — limpe periodicamente com `npm run clean` (`rm -rf .ne
 próximo `npm run dev`, só a 1ª compilação fica mais lenta). Confira `next-server` órfãos antes
 (`pkill -f next-server`): cada dev server zumbi segura o cache e infla o `.next`.
 
+## ⚠️ Egress: o plano free tem 5 GB/ciclo, e desenvolver contra a nuvem estoura
+
+Em 2026-07-29 o projeto foi **restrito** (`exceed_egress_quota`, 16,76 GB contra 5 GB inclusos). O
+sintoma engana: o gateway devolve **402 em tudo**, e o erro aparece na UI como Runtime Error apontando
+uma `select` inocente de 1 coluna — a primeira query a estourar leva a culpa. Prova de que é infra:
+`/auth/v1/health` (que nem toca o Postgres) também dá 402. Postgres direto na 5432 e o endpoint de SQL
+da Management API continuam funcionando mesmo restrito — é assim que se tira o dump com o app fora do ar.
+
+**Custo por operação, medido no PostgREST (sem compressão):**
+
+| Operação | Payload |
+|---|---|
+| 1 página de `/titles` (24 obras, `WORK_LIST_SELECT`) | **569 KB** |
+| idem, trocando `work_tags(tag_id, tags(*))` por 4 colunas | 330 KB (**−42%**) |
+| catálogo inteiro com o mesmo select (966) | **20,1 MB** |
+| um `recalculateAll` (só a leitura de `works`) | **5,3 MB** |
+
+Auth é 0–3% do egress; **PostgREST é 97–100%**. Há três consumidores: curadoria, navegação/dev e
+**scripts de análise** — este último é o mais fácil de esquecer e explica o pico do mês (1,47 GB num dia
+com zero escrita de curadoria). **Quebrar a tabela `works` não ajuda**: `review_digest` +
+`review_summary` + `canonical_synopsis` são 78% dela e o `WORK_LIST_SELECT` não pede nenhuma. O peso
+está nos joins embutidos.
+
+## Desenvolver contra o Supabase LOCAL
+
+```bash
+supabase start                 # stack local: API 54321, Postgres 54322, Studio 54323
+npm run db:pull                # pg_dump da nuvem → local (DESTRÓI public/bkp do local)
+npm run db:local               # aponta o .env.local pro stack local
+npm run db:cloud               # volta pra nuvem
+npm run db:push-evals -- --yes # leva avaliações de IA feitas no local pra nuvem
+```
+
+`db:local` também redireciona **os 23 de 44 scripts do `package.json` que rodam com
+`--env-file=.env.local`** (`pilot2:*`, `baselines:ranking`, `e1:*`) — eles leem o catálogo várias vezes
+por execução, então rodá-los no local é o maior corte de egress disponível, de graça.
+
+`[db.migrations] enabled = false` no `config.toml` é **de propósito**: as 173 migrations foram aplicadas
+via Management API, têm colisões de número e nunca rodaram do zero. Quem popula o local é o `pg_dump`.
+
+**O banco local é refeito a cada `db:pull`.** Só a avaliação de IA tem caminho de volta
+(`db:push-evals`); todo o resto que você escrever no local morre. Em especial: **não avalie obra no
+local** — `user_score` é rótulo de treino do modelo e não se refaz.
+
+**Corolário de backup:** este `pg_dump` é hoje o **único** backup que inclui schema, policies e
+functions. O `scripts/backup-db.mjs` grava **só dado** (as 162 functions, 47 policies, 11 triggers e 2
+views do `public` não vão nele), e `supabase/migrations/` não reconstrói o banco.
+
 ## Architecture
 
 Next.js 16 App Router (Turbopack). Todo acesso ao banco é server-only, e há **dois clientes** — escolher o
@@ -220,7 +268,11 @@ Today a work's score flows through three stages:
 
 3. **Nota Prevista** (`expected_score`) — the headline predicted score. A **single Ridge regression** (`trainExpectedPredictor` in `lib/calculations/expected.ts`) trained on works with a manual `user_score`. Features: the 9 category scores, GPT.N, platform avg, log(votes), chapters, synopsis quality, loved/avoided tag overlap, criterion-fit score, release age, run length, plus categorical publication status (one-hot) and origin country. (8 post-reading "quality" features are added only on the paid plan via `includeQuality`.) The Ridge output is then **blended with Nota.Calc** (`calcScoreNoObs`) using a weight grid-searched on out-of-fold predictions to avoid leakage — `w = 1` (no blend) when training set < 30 or the model is a stub. The observation adjustment is **not** a feature; it is added deterministically once after the blend. Below `MIN_TRAIN = 20` labelled samples the predictor falls back to the training mean. Persisted as `expected_score`.
 
-Recalculation is triggered server-side by `recalculateWork(workId)` or `recalculateAll()` in `server/actions/calculations.ts`. The honest cross-validated MAE of Nota Prevista is stored in `formula_config` (`cv_mae_expected`). Since the `user_score` label switched from craft to **taste** (2026-07-16 — the average of the 7 fixed taste axes, excluding the "Final"; see `computeTasteUserScore`), the absolute cvMAE rose to **~0.73** (was ~0.58 under craft). This is a **scale artifact**, not a regression: the taste target has a wider spread (σ 0.95→1.25, baseline MAE 0.73→0.98), so normalized the model is slightly better (cvMAE/baseline 0.79→0.75). Don't read the raw ~0.73 as "the model got worse".
+Recalculation is triggered server-side by `recalculateAll()` in `server/actions/calculations.ts`, sempre via
+a fila em `server/recalc/queue.ts` (debounce de 1h; um teste de arquitetura garante que só o runner
+importa). ⚠️ **Não existe recálculo por obra** — `recalculateWork` foi citado aqui por muito tempo e
+**não existe no código** (conferido 2026-07-29: zero referências). Toda edição de dado custa uma leitura
+do catálogo inteiro: **5,3 MB** por rodada (medido). É o maior consumidor de egress do projeto. The honest cross-validated MAE of Nota Prevista is stored in `formula_config` (`cv_mae_expected`). Since the `user_score` label switched from craft to **taste** (2026-07-16 — the average of the 7 fixed taste axes, excluding the "Final"; see `computeTasteUserScore`), the absolute cvMAE rose to **~0.73** (was ~0.58 under craft). This is a **scale artifact**, not a regression: the taste target has a wider spread (σ 0.95→1.25, baseline MAE 0.73→0.98), so normalized the model is slightly better (cvMAE/baseline 0.79→0.75). Don't read the raw ~0.73 as "the model got worse".
 
 ## AI evaluation flow
 
