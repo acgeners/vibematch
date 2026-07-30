@@ -22,7 +22,7 @@ const WORK_WITH_RELATIONS_SELECT = `
   category_scores(*),
   platform_ratings(*),
   calculated_scores(*),
-  work_tags(tag_id, source, confidence, tags(*)),
+  work_tags(tag_id, source, confidence, tags(id, slug, name, tag_group_id)),
   work_genres(genre_id, genres(id, name, slug)),
   work_covers(id, url, source, is_primary, position),
   work_synopses(id, source, text, is_primary, position)
@@ -45,7 +45,7 @@ const WORK_LIST_SELECT = `
   calculated_scores(calc_score, expected_score, expected_baseline, expected_quality_adj, expected_is_stub, chance_score, chance_is_stub, personal_fit, personal_fit_percentile, alignment_score, alignment_justification, alignment_payload, alignment_stale, alignment_at, platform_avg, total_votes),
   category_scores(criterion_slug, score),
   work_covers(url, is_primary, position),
-  work_tags(tag_id, tags(*)),
+  work_tags(tag_id, tags(id, slug, name, tag_group_id)),
   work_genres(genre_id, genres(id, name, slug))
 `
 
