@@ -22,8 +22,19 @@ export type ConsolidateForWorkResult =
  */
 const inFlightConsolidation = new Map<string, Promise<ConsolidateForWorkResult>>()
 
+export interface ConsolidateForWorkOptions {
+  /**
+   * Ignora o gate de `canonical_synopsis_inputs_hash` e regenera mesmo com as
+   * fontes inalteradas. É o que o botão "Regerar sinopse" usa: sem isto, uma
+   * obra cujas fontes não mudaram devolve `fresh` para sempre e a troca de
+   * prompt/modelo nunca a alcança. Mesmo papel do `force` de `ensureReviewDigest`.
+   */
+  force?: boolean
+}
+
 export function consolidateSynopsisForWork(
   workId: string,
+  opts: ConsolidateForWorkOptions = {},
 ): Promise<ConsolidateForWorkResult> {
   // Single-flight por workId: na criação, DUAS `after()` PARALELAS pedem a canônica —
   // a consolidação agendada (`scheduleSynopsisConsolidation`) e a inferência de tags
@@ -31,17 +42,23 @@ export function consolidateSynopsisForWork(
   // concorrente (ambas leem o hash antes de qualquer uma gravar) ⇒ 2× Haiku. Aqui a
   // 2ª chamada reusa a promise em voo; a entrada sai no `finally`, e chamadas já
   // concluídas seguem cobertas pelo hash-gate.
-  const existing = inFlightConsolidation.get(workId)
+  //
+  // A chave inclui o `force`: uma chamada forçada NÃO pode reusar a promise de
+  // uma não-forçada em voo, senão herdaria o `fresh` dela e o botão "Regerar"
+  // não faria nada — falhando em silêncio, que é o pior desfecho possível.
+  const key = opts.force ? `${workId}:force` : workId
+  const existing = inFlightConsolidation.get(key)
   if (existing) return existing
-  const promise = runConsolidateSynopsisForWork(workId).finally(() =>
-    inFlightConsolidation.delete(workId),
+  const promise = runConsolidateSynopsisForWork(workId, opts).finally(() =>
+    inFlightConsolidation.delete(key),
   )
-  inFlightConsolidation.set(workId, promise)
+  inFlightConsolidation.set(key, promise)
   return promise
 }
 
 async function runConsolidateSynopsisForWork(
   workId: string,
+  opts: ConsolidateForWorkOptions = {},
 ): Promise<ConsolidateForWorkResult> {
   try {
     const supabase = createAdminClient()
@@ -67,7 +84,7 @@ async function runConsolidateSynopsisForWork(
       return blocks.length > 0 ? blocks : [t]
     })
     const hash = hashSynopsisInputs(expanded)
-    if (existingWork?.canonical_synopsis_inputs_hash === hash) return { status: "fresh" }
+    if (!opts.force && existingWork?.canonical_synopsis_inputs_hash === hash) return { status: "fresh" }
 
     const result = await consolidateSynopsis(expanded, { workId })
     if (!result) return { status: "failed", error: "consolidateSynopsis retornou vazio" }

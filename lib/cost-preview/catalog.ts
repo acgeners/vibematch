@@ -136,12 +136,15 @@ const CATALOG: Record<CostActionId, CostSpec> = {
     background: true,
   },
   consolidate_synopsis: {
+    // Sonnet desde o prompt v3 (era Haiku). Tokens e ETA remedidos no
+    // laboratório de 10 obras: ~1500 in / ~330 out, mediana de 6,9 s (o Sonnet
+    // escreve ~33% mais que o Haiku, então tanto o custo quanto o tempo subiram).
     label: "Consolidar sinopse",
-    model: HAIKU,
+    model: SONNET,
     base: ZERO,
-    perItem: tokens(1500, 400),
+    perItem: tokens(1500, 330),
     etaSeconds: 2,
-    etaPerItemSeconds: 6,
+    etaPerItemSeconds: 7,
     background: true,
   },
   calibration_audit: {

@@ -122,3 +122,46 @@ export async function inferTagsForWorks(workIds: string[]): Promise<InferTagsBat
   revalidateTag("ai-eval-tab-counts", "max")
   return { processed, added, failed, capped: (workIds ?? []).length > TAGS_BATCH_CAP }
 }
+
+export interface RegenerateSynopsisResult {
+  ok: boolean
+  /** done | fresh | no_synopsis | failed — espelha ConsolidateForWorkResult. */
+  status: string
+  message?: string
+}
+
+/**
+ * REGERA a sinopse canônica de UMA obra, furando o gate de
+ * `canonical_synopsis_inputs_hash`.
+ *
+ * Por que precisa de `force`: o gate compara só as sinopses de ENTRADA, não a
+ * versão do prompt nem o modelo. Sem furá-lo, uma obra cujas fontes não mudaram
+ * fica presa no texto gerado pelo prompt antigo para sempre — e a chamada
+ * devolveria `fresh` sem escrever nada, sem erro. É exatamente o caso deste
+ * botão: o usuário está pedindo justamente porque as fontes NÃO mudaram.
+ *
+ * Clique deliberado ⇒ custo pré-autorizado (~$0,008 no Sonnet, medido).
+ */
+export async function regenerateCanonicalSynopsis(workId: string): Promise<RegenerateSynopsisResult> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, status: "failed", message: gate.error }
+  if (!workId) return { ok: false, status: "failed", message: "Obra inválida." }
+
+  const { consolidateSynopsisForWork } = await import("@/lib/ai-recommendation/consolidate-for-work")
+  const r = await consolidateSynopsisForWork(workId, { force: true })
+
+  revalidatePath(`/titles/${workId}`)
+  revalidatePath("/ai-evaluation")
+
+  const messages: Record<string, string> = {
+    done: "Sinopse canônica regerada",
+    fresh: "Sem mudança (não deveria acontecer com force)",
+    no_synopsis: "A obra não tem sinopse de fonte para consolidar",
+    failed: "Falhou",
+  }
+  return {
+    ok: r.status === "done",
+    status: r.status,
+    message: r.status === "failed" ? `Falhou: ${r.error}` : messages[r.status],
+  }
+}
