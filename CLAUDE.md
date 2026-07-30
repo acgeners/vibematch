@@ -81,9 +81,46 @@ por execução, então rodá-los no local é o maior corte de egress disponível
 `[db.migrations] enabled = false` no `config.toml` é **de propósito**: as 173 migrations foram aplicadas
 via Management API, têm colisões de número e nunca rodaram do zero. Quem popula o local é o `pg_dump`.
 
-**O banco local é refeito a cada `db:pull`.** Só a avaliação de IA tem caminho de volta
-(`db:push-evals`); todo o resto que você escrever no local morre. Em especial: **não avalie obra no
-local** — `user_score` é rótulo de treino do modelo e não se refaz.
+**O banco local é refeito a cada `db:pull`.** Existem DOIS caminhos de volta:
+
+```bash
+npm run db:push-evals -- --yes        # só a avaliação de IA (5 tabelas)
+npm run db:push-curation -- --dry-run # curadoria INTEIRA: "Atualizar dados" + avaliação +
+npm run db:push-curation -- --yes     #   estado de leitura + saídas do recalc (18 tabelas)
+```
+
+O `db:push-curation` cobre o que foi **medido** num piloto real, não deduzido do código —
+foi assim que apareceram `work_processing_jobs`, `ai_cache_events` e o fato de
+`canonical_synopsis` ser um artefato pago próprio. Ferramenta que fecha o escopo:
+
+```bash
+npm run db:fingerprint snap antes    # … faz a operação no app …
+npm run db:fingerprint snap depois
+npm run db:fingerprint diff antes depois   # toda tabela que aparecer precisa estar no PLAN
+```
+
+Ele usa **hash de conteúdo, não contagem**: "Atualizar dados" mexe em dezenas de colunas de
+`works` sem criar linha — num diff por contagem isso é invisível.
+
+**Fora do push, de propósito:** `formula_config` (mistura saída do modelo com CONFIGURAÇÃO do
+usuário — faixas, cores, atalhos de nota), `external_source_health` e `genre_proposal` (derivados).
+
+⚠️ **`--dry-run` dá rollback e SAI ANTES da conferência** — o caminho do COMMIT e todo o código
+de verificação ficam sem execução. Ensaie de verdade contra um clone descartável:
+
+```bash
+npm run db:cloudsim   # clone da nuvem no Postgres local, a partir do dump do db:pull
+npm run db:push-curation -- --target='postgresql://postgres:postgres@127.0.0.1:54322/cloudsim'
+```
+
+Foi esse ensaio que pegou o `trg_works_updated_at` (BEFORE UPDATE, `NEW.updated_at = now()`):
+o destino reescreve a coluna, então ela **nunca** bate e não serve de invariante.
+
+🔴 **Login no local não funciona de cara:** os usuários são Google-only (`encrypted_password`
+NULL) e o `config.toml` vem com todo provider externo `enabled = false` — dá
+`Unsupported provider`. O `/login` tem formulário de e-mail+senha, então crie uma senha só no
+local (`update auth.users set encrypted_password = extensions.crypt('…', extensions.gen_salt('bf'))`).
+Refazer depois de cada `db:pull`.
 
 **Corolário de backup:** este `pg_dump` é hoje o **único** backup que inclui schema, policies e
 functions. O `scripts/backup-db.mjs` grava **só dado** (as 162 functions, 47 policies, 11 triggers e 2
