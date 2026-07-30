@@ -31,6 +31,7 @@ import {
   getHideAdultContent,
   ensureSignedIn,
   ensurePermission,
+  ensureAdmin,
 } from "@/server/queries/current-user"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
@@ -40,6 +41,7 @@ import { getSynopsisPredictionForWork } from "@/server/queries/synopsis-quality"
 import { getGenerationReadinessMany } from "@/server/queries/generation-readiness"
 import { getWorkAiCost, getFromScratchBaselineCost } from "@/server/queries/ai-usage"
 import { WorkReviewsCard } from "@/components/titles/work-reviews-card"
+import { RegenerateSynopsisAction } from "@/components/works/regenerate-actions"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { isLocalExternalReviewEditorAllowed } from "@/lib/synopsis-interest/local-external-review-gate"
 import { ScoreBadge, getScoreTextColor, pickCriterionTierByRange, criterionTierPillClass } from "@/components/ui/score-badge"
@@ -587,6 +589,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   const canEditPersonalState =
     (await ensureSignedIn()).ok && (await ensurePermission("own_state")).ok
 
+  // Mesmo gate de `regenerateCanonicalSynopsis` (ensureAdmin) — pela mesma razão
+  // do bloco acima: oferecer um botão que o servidor recusa é pior que não ter botão.
+  const canRegenerateSynopsis = (await ensureAdmin()).ok
+
   const statusInitial: WorkStatusValues = {
     personal_status:
       personalStatusNameOrDefault(work.personal_status_id) as PersonalStatus,
@@ -1032,9 +1038,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               )}
               <Card className="gap-2 py-4 bg-card/50">
                 <CardHeader className="px-4">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4.5 w-4.5 text-muted-foreground" />
-                    <CardTitle className="text-base font-bold text-foreground">Sinopses</CardTitle>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4.5 w-4.5 text-muted-foreground" />
+                      <CardTitle className="text-base font-bold text-foreground">Sinopses</CardTitle>
+                    </div>
+                    {canRegenerateSynopsis && <RegenerateSynopsisAction workId={work.id as string} />}
                   </div>
                 </CardHeader>
                 <CardContent className="px-4">
