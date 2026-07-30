@@ -28,6 +28,8 @@ const ROOT = path.resolve(import.meta.dirname, "..")
 const args = process.argv.slice(2)
 const DRY = args.includes("--dry-run")
 const YES = args.includes("--yes")
+// `--synopses` só LÊ os dois lados e imprime a comparação — não exige --yes.
+const SYNOPSES_ONLY = args.includes("--synopses")
 const targetArg = args.find((a) => a.startsWith("--target="))?.slice("--target=".length)
 const sinceArg = args.find((a) => a.startsWith("--since="))?.slice("--since=".length)
 
@@ -74,7 +76,7 @@ if (targetArg) {
   if (!ref) die(`não consegui extrair o project ref de "${cloudUrl}"`)
   TARGET = `postgresql://postgres:${encodeURIComponent(password)}@db.${ref}.supabase.co:5432/postgres?sslmode=require`
   targetLabel = `NUVEM db.${ref}.supabase.co`
-  if (!DRY && !YES) {
+  if (!DRY && !YES && !SYNOPSES_ONLY) {
     die(
       "escrever na NUVEM exige --yes explícito.\n" +
         "  Ensaie primeiro:  node scripts/db-push-curation.mjs --dry-run",
@@ -180,6 +182,44 @@ if (newTags > 0) {
   console.log(`\ntags novas no local: ${newTags} (nenhuma colide por slug — uuid viaja junto, sem remap)`)
 } else {
   console.log(`\ntags novas no local: 0 — a classe inteira de risco de remap está ausente nesta rodada`)
+}
+
+// ── 3b. `--synopses`: comparar as sinopses canônicas e SAIR ─────────────────────────────
+// A sinopse canônica é o único item do push que exige julgamento humano: ela foi REGENERADA
+// na curadoria e a regeneração pode PIORAR o texto. O app mostra só a versão local (card
+// "Sinopses" da página da obra), então a comparação com a nuvem tem de vir daqui.
+if (SYNOPSES_ONLY) {
+  const wrap = (s, w = 96) =>
+    (s ?? "(vazia)")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(new RegExp(`(.{1,${w}})(\\s|$)`, "g"), "$1\n")
+      .trimEnd()
+      .split("\n")
+  const rows = lines(
+    psql(SOURCE, `select id || E'\\t' || title from public.works where id = any(${idArray}) order by title`),
+  ).map((l) => l.split("\t"))
+
+  let differ = 0
+  for (const [id, title] of rows) {
+    const here = psql(SOURCE, `select coalesce(canonical_synopsis,'') from public.works where id='${id}'`)
+    const there = psql(TARGET, `select coalesce(canonical_synopsis,'') from public.works where id='${id}'`)
+    if (here === there) continue
+    differ++
+    console.log(`\n${"─".repeat(100)}\n${title}`)
+    console.log(`\n  DESTINO (será substituída):`)
+    for (const l of wrap(there)) console.log(`    ${l}`)
+    console.log(`\n  LOCAL (vai entrar):`)
+    for (const l of wrap(here)) console.log(`    ${l}`)
+  }
+  console.log(`\n${"─".repeat(100)}`)
+  console.log(`${differ} de ${rows.length} obra(s) com sinopse canônica diferente.`)
+  if (differ) {
+    console.log(`\nSe alguma versão LOCAL ficou pior, conserte no app ANTES do push — depois é tarde:`)
+    console.log(`a sinopse viaja com o inputs_hash, e com o hash novo o app considera que está em dia`)
+    console.log(`e nunca mais regenera.`)
+  }
+  process.exit(0)
 }
 
 // ── 4. colunas ──────────────────────────────────────────────────────────────────────────
