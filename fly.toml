@@ -10,7 +10,7 @@ primary_region = "gru"
 [env]
   NODE_ENV = "production"
   TZ = "America/Sao_Paulo"
-  FLARESOLVERR_URL = "http://satoria-flaresolverr.flycast:8191/v1"
+  FLARESOLVERR_URL = "http://vibematch-flaresolverr.flycast:8191/v1"
   COMIX_FS_SESSION = "comix"
   COMIX_CF_ABORT_MS = "25000"
 
