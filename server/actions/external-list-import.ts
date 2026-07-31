@@ -1,10 +1,11 @@
 "use server"
 
 import { revalidatePath, revalidateTag } from "next/cache"
+import { after } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ensureAdmin, getOwnerUserId } from "@/server/queries/current-user"
-import { mirrorOwnerState } from "@/server/queries/user-work-state"
+import { ensureReadingStateWriter, writeReadingState } from "@/server/queries/user-work-state"
 import { markRecalcPending } from "@/server/recalc/queue"
+import { recalculateForUser } from "@/server/recalc/user-recalc"
 import {
   getPersonalStatusIdByName,
   getPublicationStatusIdByName,
@@ -103,14 +104,15 @@ async function classifyEntry(
 export async function analyzeExternalListImport(
   input: ExternalListInput
 ): Promise<{ error?: string; data?: AnalyzeExternalListResult }> {
-  // Só analisa (o commit já era gated), mas o import é fluxo de curadoria de ponta a
-  // ponta — deixar a análise aberta é inconsistência, não recurso.
-  const gate = await ensureAdmin()
+  // Multi-user (Bloco 02): o import é de QUEM ESTÁ LOGADO — a lista, as notas e o
+  // status vão pro estado pessoal de quem importa; o que é catálogo (obra criada)
+  // é compartilhado. Mesmo gate do resto do estado pessoal (sessão + own_state).
+  const gate = await ensureReadingStateWriter()
   if (!gate.ok) return { error: gate.error }
   try {
     const { source, entries } = await resolveEntries(input)
     const supabase = createAdminClient()
-    const ctx = await buildMatchContext(supabase)
+    const ctx = await buildMatchContext(supabase, gate.userId)
 
     const buckets: ReconciliationBuckets = {
       autoUpdate: [],
@@ -180,7 +182,7 @@ function resolveSet(
 }
 
 async function applyUpdate(
-  supabase: AnySupabaseClient,
+  userId: string,
   workId: string,
   set: ResolvedSet
 ): Promise<boolean> {
@@ -190,15 +192,16 @@ async function applyUpdate(
   if (set.chapters_read != null) update.chapters_read = set.chapters_read
   if (Object.keys(update).length === 0) return false
 
-  // Importar a lista do MAL/AniList traz NOTA e capítulos — dado pessoal, e em massa. Vai SÓ
-  // pro espelho do dono (Fase E): o `update` em `works` que existia aqui gravava o mesmo objeto.
-  const mirror = await mirrorOwnerState(await getOwnerUserId(), [workId], update)
-  if (mirror.error) throw new Error(mirror.error)
+  // Importar a lista do MAL/AniList traz NOTA e capítulos — dado pessoal, e em massa. Vai pro
+  // estado de QUEM IMPORTOU, pelo cliente de sessão (RLS valendo — estamos numa request).
+  const write = await writeReadingState(userId, [workId], update)
+  if (write.error) throw new Error(write.error)
   return true
 }
 
 async function createWorkFromEntry(
   supabase: AnySupabaseClient,
+  userId: string,
   entry: ExternalListEntry
 ): Promise<string> {
   const personal = {
@@ -218,8 +221,8 @@ async function createWorkFromEntry(
     .single()
   if (error) throw new Error(error.message)
 
-  const mirror = await mirrorOwnerState(await getOwnerUserId(), [data.id], personal)
-  if (mirror.error) throw new Error(mirror.error)
+  const write = await writeReadingState(userId, [data.id], personal)
+  if (write.error) throw new Error(write.error)
 
   return data.id
 }
@@ -259,15 +262,16 @@ export async function commitExternalListImport(
   decisions: ExternalListDecisions
 ): Promise<{ error?: string; data?: CommitExternalListResult }> {
   try {
-    const gate = await ensureAdmin()
+    const gate = await ensureReadingStateWriter()
     if (!gate.ok) return { error: gate.error }
     const { source, entries } = await resolveEntries(input)
     const supabase = createAdminClient()
-    const ctx = await buildMatchContext(supabase)
+    const ctx = await buildMatchContext(supabase, gate.userId)
 
     const { data: importRecord, error: importError } = await supabase
       .from("imports")
       .insert({
+        user_id: gate.userId,
         filename: input.filename,
         file_type: FILE_TYPE[source],
         status: "processing",
@@ -298,7 +302,7 @@ export async function commitExternalListImport(
 
         if (outcome.kind === "matched") {
           const set = resolveSet(buildChanges(entry, outcome.work), decisions.conflicts?.[entryIndex])
-          const changed = await applyUpdate(supabase, outcome.work.id, set)
+          const changed = await applyUpdate(gate.userId, outcome.work.id, set)
           await upsertExternalId(supabase, outcome.work.id, entry)
           if (changed) {
             result.updatedCount++
@@ -319,7 +323,7 @@ export async function commitExternalListImport(
             }
             // Match confirmado manualmente: só preenche campos vazios (não sobrescreve).
             const fills = buildChanges(entry, work).filter((c) => c.kind === "fill")
-            const changed = await applyUpdate(supabase, work.id, resolveSet(fills, undefined))
+            const changed = await applyUpdate(gate.userId, work.id, resolveSet(fills, undefined))
             await upsertExternalId(supabase, work.id, entry)
             if (changed) {
               result.updatedCount++
@@ -328,7 +332,7 @@ export async function commitExternalListImport(
               result.skippedCount++
             }
           } else if (decision.action === "create") {
-            const workId = await createWorkFromEntry(supabase, entry)
+            const workId = await createWorkFromEntry(supabase, gate.userId, entry)
             await upsertExternalId(supabase, workId, entry)
             result.createdCount++
             result.createdWorkIds.push(workId)
@@ -344,7 +348,7 @@ export async function commitExternalListImport(
           result.skippedCount++
           continue
         }
-        const workId = await createWorkFromEntry(supabase, entry)
+        const workId = await createWorkFromEntry(supabase, gate.userId, entry)
         await upsertExternalId(supabase, workId, entry)
         result.createdCount++
         result.createdWorkIds.push(workId)
@@ -369,7 +373,20 @@ export async function commitExternalListImport(
       .eq("id", importId)
 
     if (result.createdCount > 0 || result.updatedCount > 0) {
-      await markRecalcPending("external-list-import")
+      if (gate.isOwner) {
+        await markRecalcPending("external-list-import")
+      } else {
+        // Obra criada muda o CATÁLOGO (recalc global continua devido); as notas
+        // importadas mudam o modelo PESSOAL de quem importou.
+        if (result.createdCount > 0) await markRecalcPending("external-list-import")
+        after(async () => {
+          try {
+            await recalculateForUser(gate.userId)
+          } catch (err) {
+            console.error("[commitExternalListImport] recalc do usuário falhou:", err)
+          }
+        })
+      }
     }
 
     revalidatePath("/titles")

@@ -362,20 +362,21 @@ dedup contra o DB é a própria reconciliação (matcher Jaccard + rede `pg_trgm
 `import_rows.status = "imported"` ao filtro `ai_eval_status = "pending"` + não-arquivada). Obra criada
 em `/titles/new` **NÃO entra** aqui, mesmo sem avaliação IA — antes entrava e poluía a lista.
 
-### ⚠️ Postergado — depende do import multi-user (hoje é `ensureAdmin`-only, curador único)
+### Import multi-user (Bloco 02 do destrave — feito)
 
-Enquanto o import for admin-only, estes **não têm efeito prático** e foram deixados de fora **de
-propósito** (não é bug, é escopo):
+O import deixou de ser `ensureAdmin`-only: o gate é `ensureReadingStateWriter` (sessão +
+`own_state`), e cada importação registra o dono:
 
-- **Per-user** ("só as obras que ESTE usuário importou"): a tabela `imports` **NÃO tem `user_id`** →
-  precisa migration + setar no create + escopar `imports → import_rows → work_id` em
-  `getPendingReviewWorks`. Hoje, curador único, todo import é do dono.
-- **Gate por plano**: esconder a aba "Revisar pendentes" para `leitor` (free, sem autonomia de IA);
-  o plano vem de `getCurrentUserProfile().plan` (`leitor→free`, resto `→paid`).
-- **Fluxo do usuário free**: abrir o import para não-admin + aviso "obra criada, não enriquecida" (as
-  etapas que chamam IA ficam pendentes; a aba de pendências nem aparece para quem não pode gerar nada).
-
-Só reabrir estes quando/se o import deixar de ser `ensureAdmin`-only.
+- **Per-user**: `imports.user_id` (migration 170; backfill → dono) + RLS; o estado pessoal da
+  lista (nota/status/capítulos) vai pra `user_work_state` de quem importou via
+  `writeReadingState` (cliente de sessão). `getPendingReviewWorks`, Histórico e "última
+  importação" do `/import` filtram por `imports.user_id`; obra criada é catálogo compartilhado.
+- **`buildMatchContext(supabase, userId)`**: o lado "atual" do diff é o estado de QUEM importa
+  (works + `user_work_state` dele), não mais o espelho do dono. As três leituras são paginadas —
+  `work_external_ids` tinha 6.9k linhas com o índice de match SILENCIOSAMENTE truncado em 1000.
+- **Plano free**: sem gate novo, por decisão (2026-07-31) — o leitor importa igual; a aba
+  "Revisar pendentes" só INDICA que o enriquecimento usa IA (assinatura/créditos). Recalc:
+  dono → fila global; demais → `recalculateForUser` em `after()` (+ fila global se criou obra).
 
 ## External data sources
 

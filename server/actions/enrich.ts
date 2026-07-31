@@ -8,7 +8,7 @@ import type { ExternalWorkUpdate } from "@/server/actions/works"
 import { getWorksByIds } from "@/server/queries/works"
 import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
-import { ensureAdmin } from "@/server/queries/current-user"
+import { ensureAdmin, getCurrentUserId } from "@/server/queries/current-user"
 import type { ExternalWorkData } from "@/lib/external/types"
 
 // Confiança mínima do título (busca por nome) para auto-aceitar sem revisão.
@@ -169,6 +169,9 @@ export async function getImportReviewWorks(ids: string[]): Promise<ReviewWork[]>
 // avaliação IA. Uma obra sai daqui quando é avaliada (vira 'done'/'skipped').
 export async function getPendingReviewWorks(limit = 300): Promise<ReviewWork[]> {
   const supabase = createAdminClient()
+  // Multi-user (Bloco 02): cada um revisa o que ELE importou — o filtro por
+  // imports.user_id entra no join abaixo. Anônimo cai no dono (getCurrentUserId).
+  const userId = await getCurrentUserId(supabase)
   // Lê o dado PESSOAL do DONO (observations) → vem do espelho via a view `works_owner`,
   // não da linha compartilhada de `works` (que vai perder essas colunas).
   const { data, error } = await supabase
@@ -190,8 +193,9 @@ export async function getPendingReviewWorks(limit = 300): Promise<ReviewWork[]> 
   const ids = rows.map((r) => r.id)
   const { data: imported, error: impError } = await supabase
     .from("import_rows")
-    .select("work_id")
+    .select("work_id, imports!inner(user_id)")
     .eq("status", "imported")
+    .eq("imports.user_id", userId)
     .in("work_id", ids)
   if (impError) throw new Error(impError.message)
   const importedIds = new Set((imported ?? []).map((r: { work_id: string }) => r.work_id))
