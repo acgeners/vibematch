@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { after } from "next/server"
-import { createAdminClient } from "@/lib/supabase/admin"
+import { createUserClient } from "@/lib/supabase/user"
 import { ensureReadingStateWriter, writeReadingState } from "@/server/queries/user-work-state"
 import { discardPredictionsForWork } from "@/lib/server/predictions/resolve-prediction"
 import { markRecalcPending } from "@/server/recalc/queue"
@@ -64,14 +64,15 @@ export async function clearUserRating(
   })
   if (write.error) return { ok: false, error: write.error }
 
-  // Eixos de gosto: `pilot_taste_scores` é GLOBAL (não tem `user_id`) — é o experimento do DONO.
-  // Só ele tem linha lá, então só pra ele há o que apagar; para outra pessoa isto seria escrever
-  // no dado de terceiro.
-  if (gate.isOwner) {
-    const supabase = createAdminClient()
-    const { error } = await supabase
+  // Eixos de gosto: per-user desde a mig 169 (PK user_id+work_id, RLS `user_id = auth.uid()`).
+  // Apaga a PRÓPRIA linha pelo cliente de sessão — a RLS garante que a de outra pessoa fica
+  // intocada mesmo se o filtro estiver errado.
+  {
+    const userDb = await createUserClient()
+    const { error } = await userDb
       .from("pilot_taste_scores")
       .delete()
+      .eq("user_id", gate.userId)
       .eq("work_id", workId)
     if (error) return { ok: false, error: `Falha limpando as notas de gosto: ${error.message}` }
   }
