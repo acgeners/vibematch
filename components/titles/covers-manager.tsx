@@ -23,6 +23,9 @@ interface CoversManagerProps {
   /** Capas apagadas que NÃO devem voltar num "Atualizar dados" (migration 163). */
   archived?: ArchivedCoverEntry[]
   onArchivedChange?: (next: ArchivedCoverEntry[]) => void
+  /** Nasce com o modo avançado aberto — deep-link `?covers=advanced` do botão
+   *  "Editar capas" na página da obra. */
+  defaultAdvancedOpen?: boolean
 }
 
 export function CoversManager({
@@ -30,6 +33,7 @@ export function CoversManager({
   onChange,
   archived = [],
   onArchivedChange,
+  defaultAdvancedOpen = false,
 }: CoversManagerProps) {
   const [newUrl, setNewUrl] = useState("")
   const [newSource, setNewSource] = useState<string>("")
@@ -40,7 +44,11 @@ export function CoversManager({
   const [showArchived, setShowArchived] = useState(false)
   /** Capa aberta em tamanho grande (lightbox). `null` = fechado. */
   const [preview, setPreview] = useState<{ url: string; source: string } | null>(null)
-  const [advancedOpen, setAdvancedOpen] = useState(false)
+  // Mesma condição do botão "Avançado": sem capa nenhuma o diálogo renderiza
+  // null e o deep-link abriria só um overlay invisível.
+  const [advancedOpen, setAdvancedOpen] = useState(
+    defaultAdvancedOpen && (value.length > 0 || archived.length > 0),
+  )
   // O foco volta pro campo de URL depois de cada inclusão: sem isso ele fica no
   // botão, e colar a próxima capa exige um clique a mais. Faz par com o form
   // continuar aberto — os dois existem pra você adicionar várias em sequência.

@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, ImageIcon, Maximize2, X, ZoomIn } from "lucide-react"
+import Link from "next/link"
+import { ChevronLeft, ChevronRight, ImageIcon, Maximize2, Pencil, X, ZoomIn } from "lucide-react"
 import { PLATFORM_LABELS } from "@/lib/constants/criteria"
 import { getCoverImageSrc } from "@/lib/image-proxy"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
@@ -11,9 +12,12 @@ interface WorkCoverGalleryProps {
   title: string
   fallbackUrl?: string | null
   covers: WorkCover[]
+  /** Deep-link pro modo avançado de capas na edição (`?covers=advanced`).
+   *  `null` = usuário sem permissão de editar — quem decide é o servidor. */
+  editHref?: string | null
 }
 
-export function WorkCoverGallery({ title, fallbackUrl, covers }: WorkCoverGalleryProps) {
+export function WorkCoverGallery({ title, fallbackUrl, covers, editHref }: WorkCoverGalleryProps) {
   // Order: primary first, then by position. Fall back to the legacy single cover.
   const ordered = [...covers].sort((a, b) => {
     if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1
@@ -116,14 +120,25 @@ export function WorkCoverGallery({ title, fallbackUrl, covers }: WorkCoverGaller
       {/* Link explícito para a imagem completa — a lupa da capa só aparece no
           hover, que não existe no toque. */}
       {active && (
-        <button
-          type="button"
-          onClick={() => setLightboxOpen(true)}
-          className="inline-flex items-center justify-center gap-1.5 text-xs text-primary hover:underline"
-        >
-          <Maximize2 className="h-3 w-3" />
-          Ver imagem completa
-        </button>
+        <div className="flex items-center justify-center gap-4">
+          <button
+            type="button"
+            onClick={() => setLightboxOpen(true)}
+            className="inline-flex items-center justify-center gap-1.5 text-xs text-primary hover:underline"
+          >
+            <Maximize2 className="h-3 w-3" />
+            Ver imagem completa
+          </button>
+          {editHref && (
+            <Link
+              href={editHref}
+              className="inline-flex items-center justify-center gap-1.5 text-xs text-primary hover:underline"
+            >
+              <Pencil className="h-3 w-3" />
+              Editar capas
+            </Link>
+          )}
+        </div>
       )}
 
       {/* Miniaturas — clique só troca a capa exibida acima (padrão Amazon).

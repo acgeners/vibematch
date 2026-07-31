@@ -27,6 +27,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 interface EditPageProps {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ covers?: string }>
 }
 
 function workToFormValues(work: WorkWithRelations): Partial<WorkFormValues> {
@@ -117,8 +118,11 @@ export async function generateMetadata({ params }: EditPageProps): Promise<Metad
   return { title: title ? `Editar: ${title} · SatorIA` : "Editar · SatorIA" }
 }
 
-export default async function EditTitlePage({ params }: EditPageProps) {
+export default async function EditTitlePage({ params, searchParams }: EditPageProps) {
   const { id } = await params
+  // Deep-link do "Editar capas" na página da obra: abre o modo avançado direto.
+  const openCoversAdvanced = (await searchParams).covers === "advanced"
+  const querySuffix = openCoversAdvanced ? "?covers=advanced" : ""
 
   let work: WorkWithRelations | null = null
   if (UUID_RE.test(id)) {
@@ -126,7 +130,7 @@ export default async function EditTitlePage({ params }: EditPageProps) {
     work = (fetched as WorkWithRelations | null) ?? null
     if (work) {
       const slug = titleToSlug(work.title)
-      if (slug && slug !== id) redirect(`/titles/${slug}/edit`)
+      if (slug && slug !== id) redirect(`/titles/${slug}/edit${querySuffix}`)
     }
   } else {
     const fetched = await getWorkBySlug(id)
@@ -134,7 +138,7 @@ export default async function EditTitlePage({ params }: EditPageProps) {
     // Slug ANTIGO (previous_slugs, migration 162) → redireciona pro slug canônico de edição.
     if (work) {
       const canonical = titleToSlug(work.title)
-      if (canonical && canonical !== id) redirect(`/titles/${canonical}/edit`)
+      if (canonical && canonical !== id) redirect(`/titles/${canonical}/edit${querySuffix}`)
     }
   }
 
@@ -202,6 +206,7 @@ export default async function EditTitlePage({ params }: EditPageProps) {
         initialValues={initialValues}
         aiEvaluation={aiEvaluationForForm}
         existingExternalIds={existingExternalIds}
+        openCoversAdvanced={openCoversAdvanced}
         reviewsSlot={
           <ReviewsEditor
             workId={work.id}

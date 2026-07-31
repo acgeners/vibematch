@@ -13,6 +13,14 @@
  * medida com `db-table-fingerprint.mjs` num piloto real (2 obras) — não deduzida do código.
  * Foi assim que apareceram `work_processing_jobs`, `ai_cache_events` e o fato de
  * `canonical_synopsis` ser um artefato pago próprio; nenhum dos três estava no mapa lido.
+ * Em 2026-07-30 uma verificação de edição manual achou mais quatro fora do mapa:
+ * `work_external_reviews_manual` (reviews digitadas à mão — perda irrecuperável),
+ * `taste_profile` + `synopsis_quality_predictions` (artefatos pagos, FK entre elas) e
+ * `work_cover_archive` (arquivar/restaurar capa não viajava).
+ *
+ * ⚠️ Limite conhecido: DELETE puro sem rastro (ex.: apagar uma review manual sem tocar em
+ * mais nada da obra) não entra no escopo — não há timestamp que o denuncie. Se a obra for
+ * tocada por qualquer outro motivo, o conjunto inteiro viaja e o delete vai junto.
  *
  * ⚠️ Escreve em PRODUÇÃO com --yes. Tudo numa ÚNICA transação: entra inteiro ou nada.
  *
@@ -127,6 +135,10 @@ const scopeSql = `
     union select work_id     from public.ai_evaluations        where created_at  > '${cutoff}'::timestamptz
     union select work_id     from public.work_processing_jobs  where created_at  > '${cutoff}'::timestamptz
     union select work_id     from public.ai_cache_events       where created_at  > '${cutoff}'::timestamptz
+    union select work_id     from public.work_covers                  where created_at   > '${cutoff}'::timestamptz
+    union select work_id     from public.work_cover_archive           where archived_at  > '${cutoff}'::timestamptz
+    union select work_id     from public.work_external_reviews_manual where updated_at   > '${cutoff}'::timestamptz
+    union select work_id     from public.synopsis_quality_predictions where predicted_at > '${cutoff}'::timestamptz
   ) t where id is not null`
 const workIds = lines(psql(SOURCE, scopeSql))
 if (!workIds.length) {
@@ -266,6 +278,31 @@ const PLAN = [
     insert: (c) => `insert into public.ai_api_calls (${c}) select ${c} from stage_ai_api_calls on conflict do nothing`,
   },
   {
+    // Perfil de gosto — regenerado no local é artefato PAGO, e as previsões de Interesse
+    // apontam pra ele por FK (então entra ANTES delas). O índice parcial
+    // uniq_taste_profile_current_per_user aceita UM is_current por usuário: o `pre`
+    // despromove o atual da nuvem antes do insert (idempotente: exclui o próprio id,
+    // então re-push do mesmo perfil não despromove ninguém à toa).
+    table: "taste_profile",
+    where: `created_at > '${cutoff}'::timestamptz`,
+    atLeast: true,
+    pre: `update public.taste_profile t set is_current = false
+      where t.is_current and exists (
+        select 1 from stage_taste_profile s
+        where s.user_id = t.user_id and s.is_current and s.id <> t.id);`,
+    insert: (c) => `insert into public.taste_profile (${c}) select ${c} from stage_taste_profile on conflict do nothing`,
+  },
+  {
+    // Previsões de Interesse (pagas). CONJUNTO por obra: re-predição reescreve a linha
+    // in-place (chave natural work_id+prompt_version) e o flip de `stale` também tem de
+    // viajar — um insert-if-missing deixaria os dois pra trás. Folha nas FKs.
+    table: "synopsis_quality_predictions",
+    where: `work_id = any(${idArray})`,
+    pre: `delete from public.synopsis_quality_predictions where work_id = any(${idArray});`,
+    insert: (c) =>
+      `insert into public.synopsis_quality_predictions (${c}) select ${c} from stage_synopsis_quality_predictions on conflict do nothing`,
+  },
+  {
     table: "ai_evaluations",
     where: `work_id = any(${idArray})`,
     insert: (c) => `insert into public.ai_evaluations (${c}) select ${c} from stage_ai_evaluations on conflict do nothing`,
@@ -297,6 +334,16 @@ const PLAN = [
     where: `work_id = any(${idArray})`,
     pre: `delete from public.work_covers where work_id = any(${idArray});`,
     insert: (c) => `insert into public.work_covers (${c}) select ${c} from stage_work_covers on conflict do nothing`,
+  },
+  {
+    // Capas ARQUIVADAS (mig 163): arquivar/restaurar capa mexe SÓ aqui — fora do push, a
+    // curadoria de capas desfazia no pull seguinte. Conjunto, como work_covers (restaurar
+    // = a linha sumir daqui). Folha nas FKs.
+    table: "work_cover_archive",
+    where: `work_id = any(${idArray})`,
+    pre: `delete from public.work_cover_archive where work_id = any(${idArray});`,
+    insert: (c) =>
+      `insert into public.work_cover_archive (${c}) select ${c} from stage_work_cover_archive on conflict do nothing`,
   },
   {
     table: "work_synopses",
@@ -334,6 +381,17 @@ const PLAN = [
         where r.work_id = s.work_id and r.source = s.source
           and md5(coalesce(r.text,'')) = md5(coalesce(s.text,''))
       ) on conflict do nothing`,
+  },
+  {
+    // Reviews manuais digitadas no editor local-only da edição da obra — conteúdo de MÃO,
+    // perda irrecuperável (foi assim que a lacuna apareceu: 6 reviews digitadas no local,
+    // zero na nuvem). CONJUNTO: edição muda a linha in-place e delete tem de sumir na
+    // nuvem. Folha nas FKs.
+    table: "work_external_reviews_manual",
+    where: `work_id = any(${idArray})`,
+    pre: `delete from public.work_external_reviews_manual where work_id = any(${idArray});`,
+    insert: (c) =>
+      `insert into public.work_external_reviews_manual (${c}) select ${c} from stage_work_external_reviews_manual on conflict do nothing`,
   },
   {
     // Ledger de custo por job — é o que o /ai-usage soma. Sem ele a nuvem não mostra o que

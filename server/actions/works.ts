@@ -997,7 +997,7 @@ export async function findDuplicateWorkByTitle(
       return {
         id: matched.id,
         title: matched.title,
-        values: dbWorkToFormValues(aliasMatch),
+        values: dbWorkToFormValues(aliasMatch.work),
       }
     }
   }

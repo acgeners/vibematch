@@ -61,8 +61,38 @@ export function StaleRerankPanel({
     }
   }
 
+  const sortedWorks = useMemo(() => {
+    if (sortField === "default") {
+      // Desatualizados primeiro, depois não avaliados; cada grupo por título.
+      return [...works].sort((a, b) => {
+        const aStale = a.alignmentStale && a.alignmentScore != null ? 0 : 1
+        const bStale = b.alignmentStale && b.alignmentScore != null ? 0 : 1
+        if (aStale !== bStale) return aStale - bStale
+        return a.title.localeCompare(b.title, "pt-BR")
+      })
+    }
+    const key = (w: AlignmentQueueWork) =>
+      sortField === "expected" ? w.expectedScore : w.alignmentScore
+    const mult = sortDir === "asc" ? 1 : -1
+    return [...works].sort((a, b) => {
+      const ka = key(a)
+      const kb = key(b)
+      // Nulos sempre no fim, independente da direção.
+      if (ka == null && kb == null) return 0
+      if (ka == null) return 1
+      if (kb == null) return -1
+      return (ka - kb) * mult
+    })
+  }, [works, sortField, sortDir])
+
+  const ids = useMemo(() => sortedWorks.map((w) => w.id), [sortedWorks])
+  const selection = useWorkSelection(ids)
+
   const handleRerankQueue = async () => {
-    const targetIds = works.slice(0, queueSize).map((w) => w.id)
+    // Fatia a lista VISÍVEL (sortedWorks), não a ordem crua do servidor — senão
+    // o lote processa N obras fora da tela e o topo que o usuário está olhando
+    // continua "Não avaliado" (a query da fila nem tem ORDER BY).
+    const targetIds = sortedWorks.slice(0, queueSize).map((w) => w.id)
     if (targetIds.length === 0 || batchRunning) return
     const total = targetIds.length
     setBatchRunning(true)
@@ -95,33 +125,6 @@ export function StaleRerankPanel({
     }
     refresh()
   }
-
-  const sortedWorks = useMemo(() => {
-    if (sortField === "default") {
-      // Desatualizados primeiro, depois não avaliados; cada grupo por título.
-      return [...works].sort((a, b) => {
-        const aStale = a.alignmentStale && a.alignmentScore != null ? 0 : 1
-        const bStale = b.alignmentStale && b.alignmentScore != null ? 0 : 1
-        if (aStale !== bStale) return aStale - bStale
-        return a.title.localeCompare(b.title, "pt-BR")
-      })
-    }
-    const key = (w: AlignmentQueueWork) =>
-      sortField === "expected" ? w.expectedScore : w.alignmentScore
-    const mult = sortDir === "asc" ? 1 : -1
-    return [...works].sort((a, b) => {
-      const ka = key(a)
-      const kb = key(b)
-      // Nulos sempre no fim, independente da direção.
-      if (ka == null && kb == null) return 0
-      if (ka == null) return 1
-      if (kb == null) return -1
-      return (ka - kb) * mult
-    })
-  }, [works, sortField, sortDir])
-
-  const ids = useMemo(() => sortedWorks.map((w) => w.id), [sortedWorks])
-  const selection = useWorkSelection(ids)
 
   const handleRerankSelected = async () => {
     const selectedIds = selection.selectedIds

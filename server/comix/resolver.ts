@@ -733,14 +733,26 @@ export async function setComixHidManually(input: {
  * Marca que a obra NÃO EXISTE no Comix — grava o marcador da migration 038
  * (`external_id=NULL, is_rejected=true`, "sem match válido"). A obra sai da lista
  * de pendentes e do contador/badge de Cobertura (ver `loadComixCoverage`), mas
- * fica listável em "Ignoradas" pra restaurar. Upsert por (work_id, source): só é
- * chamado de uma linha pendente (sem hid ativo), então não sobrescreve hid válido.
+ * fica listável em "Ignoradas" pra restaurar. O upsert por (work_id, source)
+ * sobrescreveria um hid ativo com NULL, então há uma guarda no servidor: a UI só
+ * oferece a ação em linha pendente, mas uma lista de pendentes numa aba antiga pode
+ * estar defasada — o hid pode ter sido vinculado depois, inclusive em background
+ * (resolve resiliente). Nesse caso a ação falha em vez de apagar o vínculo.
  */
 export async function markComixAbsent(workId: string): Promise<{ ok: boolean; error?: string }> {
   const gate = await ensureAdmin()
   if (!gate.ok) return { ok: false, error: gate.error }
   if (!workId) return { ok: false, error: "Obra inválida." }
   const supabase = createAdminClient()
+  const { data: existing } = await supabase
+    .from("work_external_ids")
+    .select("external_id, is_rejected")
+    .eq("work_id", workId)
+    .eq("source", "comix")
+    .maybeSingle()
+  if (existing?.external_id && existing.is_rejected !== true) {
+    return { ok: false, error: "Esta obra já tem um hid da Comix vinculado — recarregue a lista." }
+  }
   const { error } = await supabase
     .from("work_external_ids")
     .upsert(

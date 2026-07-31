@@ -1,8 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useState } from "react"
-import { Sparkles, ImageOff, Info, BookOpen, Star, Users, Target } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Sparkles, ImageOff, Info, BookOpen, ChevronDown, Star, Users, Target } from "lucide-react"
 import type { ReactNode } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -11,7 +11,7 @@ import { PersonalStatusBadge } from "@/components/ui/status-badge"
 import { AdultBadge } from "@/components/ui/adult-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
-import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
+import { PERSONAL_STATUSES_BY_ID, PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { cn, titleToSlug } from "@/lib/utils"
 import { CoverImage } from "@/components/ui/cover-image"
@@ -124,6 +124,63 @@ function StatusFacet({ statusId }: { statusId: number }) {
   )
 }
 
+/**
+ * "Não lida" = sem estado de leitura OU status com `isUnread` (hoje Want to Read e
+ * Untracked — flag semântico da tabela `personal_status`, nunca IDs na mão).
+ */
+function isUnreadWork(w: SimilarWork): boolean {
+  if (w.personalStatusId == null) return true
+  return PERSONAL_STATUSES_BY_ID[w.personalStatusId]?.isUnread ?? false
+}
+
+/**
+ * Sinopse cortada em 6 linhas com "Ver tudo"/"Ver menos" — irmão do SynopsisBody
+ * do synopsis-picker: o botão só existe quando o clamp cortou DE VERDADE (medido
+ * pós-layout via scrollHeight), senão prometeria expandir sinopse de duas linhas.
+ */
+function ExpandableSynopsis({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const [clamped, setClamped] = useState(false)
+  const ref = useRef<HTMLParagraphElement>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    // Aberto, scrollHeight === clientHeight — medir aqui zeraria o `clamped` e o
+    // botão de fechar sumiria. Só se mede no estado cortado.
+    if (!el || expanded) return
+    const measure = () => setClamped(el.scrollHeight > el.clientHeight + 1)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [text, expanded])
+
+  return (
+    <div>
+      <p
+        ref={ref}
+        className={cn(
+          "text-[13px] italic text-muted-foreground leading-snug",
+          !expanded && "line-clamp-6",
+        )}
+      >
+        {text}
+      </p>
+      {(clamped || expanded) && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="mt-1.5 inline-flex items-center gap-0.5 text-[11px] text-muted-foreground/70 underline-offset-2 transition-colors hover:text-foreground hover:underline"
+        >
+          {expanded ? "Ver menos" : "Ver tudo"}
+          <ChevronDown className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** Métrica compacta: rótulo minúsculo + ícone/valor — mesmo padrão do hover/ranking. */
 function Metric({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -140,13 +197,22 @@ function Metric({ label, children }: { label: string; children: ReactNode }) {
 
 export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
   const [sortBy, setSortBy] = useState<"sim" | "nota">("sim")
+  // "Não lidas" por padrão: recomendação serve pra achar a PRÓXIMA leitura.
+  // O toggle "Todas" traz de volta as já lidas/em andamento.
+  const [showOnly, setShowOnly] = useState<"unread" | "all">("unread")
+
+  const filtered = useMemo(
+    () => (showOnly === "all" ? works : works.filter(isUnreadWork)),
+    [works, showOnly],
+  )
+
   const sorted = useMemo(() => {
     // Nota exibida no card: pessoal quando avaliada, senão a Nota Prevista.
     const score = (w: SimilarWork) => w.userScore ?? w.expectedScore
     if (sortBy === "nota") {
       // Maior nota primeiro; obras sem nota vão pro fim (sort estável preserva a
       // ordem de similaridade original como desempate).
-      return [...works].sort((a, b) => {
+      return [...filtered].sort((a, b) => {
         const sa = score(a)
         const sb = score(b)
         if (sa == null && sb == null) return 0
@@ -155,8 +221,8 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
         return sb - sa
       })
     }
-    return [...works].sort((a, b) => b.similarity - a.similarity)
-  }, [works, sortBy])
+    return [...filtered].sort((a, b) => b.similarity - a.similarity)
+  }, [filtered, sortBy])
 
   if (works.length === 0) {
     return (
@@ -204,39 +270,78 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
             </TooltipProvider>
           </CardTitle>
 
-          {works.length > 1 && (
-            <div className="flex items-center gap-2.5 sm:shrink-0">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:shrink-0">
+            <div className="flex items-center gap-2.5">
               <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground/60">
-                Ordenar por
+                Mostrar
               </span>
               <div className="inline-flex gap-0.5 rounded-full border border-border/50 bg-muted/20 p-[3px]">
                 <button
                   type="button"
-                  onClick={() => setSortBy("sim")}
-                  aria-pressed={sortBy === "sim"}
+                  onClick={() => setShowOnly("unread")}
+                  aria-pressed={showOnly === "unread"}
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] font-semibold transition-colors",
-                    sortBy === "sim" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+                    showOnly === "unread" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  <Target className="size-3" />
-                  Similaridade
+                  <BookOpen className="size-3" />
+                  Não lidas
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSortBy("nota")}
-                  aria-pressed={sortBy === "nota"}
+                  onClick={() => setShowOnly("all")}
+                  aria-pressed={showOnly === "all"}
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] font-semibold transition-colors",
-                    sortBy === "nota" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+                    showOnly === "all" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  <Star className="size-3" />
-                  Nota prevista
+                  Todas
                 </button>
               </div>
             </div>
-          )}
+
+            {works.length > 1 && (
+              <div className="flex items-center gap-2.5">
+                <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground/60">
+                  Ordenar por
+                </span>
+                <div className="inline-flex gap-0.5 rounded-full border border-border/50 bg-muted/20 p-[3px]">
+                  <button
+                    type="button"
+                    onClick={() => setSortBy("sim")}
+                    aria-pressed={sortBy === "sim"}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] font-semibold transition-colors",
+                      sortBy === "sim" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Target className="size-3" />
+                    Similaridade
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSortBy("nota")}
+                    aria-pressed={sortBy === "nota"}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] font-semibold transition-colors",
+                      sortBy === "nota" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Star className="size-3" />
+                    Nota prevista
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <span className="text-[11px] tabular-nums text-muted-foreground/60">
+              {showOnly === "all"
+                ? `${works.length} ${works.length === 1 ? "obra" : "obras"}`
+                : `${filtered.length} de ${works.length} · não lidas`}
+            </span>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="pt-0">
@@ -275,6 +380,21 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
             </div>
           </div>
         </div>
+
+        {/* Filtro "Não lidas" sem resultado: estado explícito com a saída a um
+            clique — a alternativa era um card silenciosamente vazio. */}
+        {sorted.length === 0 && (
+          <div className="rounded-xl border border-dashed border-border/60 p-6 text-center text-[13px] text-muted-foreground">
+            Nenhuma obra não lida entre as parecidas.{" "}
+            <button
+              type="button"
+              onClick={() => setShowOnly("all")}
+              className="font-semibold text-primary underline-offset-2 hover:underline"
+            >
+              Mostrar todas ({works.length})
+            </button>
+          </div>
+        )}
 
         <div className="flex flex-col gap-3">
           {sorted.map((w) => {
@@ -404,12 +524,10 @@ export function SimilarWorksCard({ works, className }: SimilarWorksCardProps) {
                   </div>
                 </div>
 
-                {/* Col 3 — sinopse canônica */}
+                {/* Col 3 — sinopse canônica (expansível quando o clamp cortar) */}
                 <div className="min-w-0 border-t border-border/40 p-4 sm:border-l sm:border-t-0">
                   {w.synopsis ? (
-                    <p className="text-[13px] italic text-muted-foreground leading-snug line-clamp-6">
-                      {w.synopsis}
-                    </p>
+                    <ExpandableSynopsis text={w.synopsis} />
                   ) : (
                     <p className="text-[13px] italic text-muted-foreground/50">Sem sinopse.</p>
                   )}
