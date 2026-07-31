@@ -1024,12 +1024,19 @@ export async function saveWorkSourceSelections(
   if (!gate.ok) return { error: gate.error }
   const supabase = createAdminClient()
 
-  const rowsToUpsert = selections.map((s) => ({
-    work_id: workId,
-    source: s.source,
-    external_id: s.externalId,
-    is_rejected: s.isRejected,
-  }))
+  // Linha sem id e sem rejeição = "não decidir". Não pode virar upsert: numa fonte
+  // com vínculo salvo, ela sobrescreveria o external_id com NULL. A UI de hoje nem
+  // manda essa forma (omite a fonte do payload), mas o endpoint é público ("use
+  // server") e o preço de confiar no cliente aqui é perder um hid. Fora do upsert
+  // mas dentro de presentSources → a linha existente não é tocada nem apagada.
+  const rowsToUpsert = selections
+    .filter((s) => s.externalId != null || s.isRejected)
+    .map((s) => ({
+      work_id: workId,
+      source: s.source,
+      external_id: s.externalId,
+      is_rejected: s.isRejected,
+    }))
 
   // Sources presentes no payload → upsert. Sources AUSENTES ("Não decidir agora"):
   // só apaga se NÃO for um vínculo aceito válido. Um id já aceito ausente do payload

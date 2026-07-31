@@ -589,9 +589,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   const canEditPersonalState =
     (await ensureSignedIn()).ok && (await ensurePermission("own_state")).ok
 
-  // Mesmo gate de `regenerateCanonicalSynopsis` (ensureAdmin) — pela mesma razão
-  // do bloco acima: oferecer um botão que o servidor recusa é pior que não ter botão.
-  const canRegenerateSynopsis = (await ensureAdmin()).ok
+  // Mesmo gate das actions de curadoria (ensureAdmin) — pela mesma razão do bloco
+  // acima: oferecer um botão que o servidor recusa é pior que não ter botão. Vale
+  // pro "Regerar" da sinopse e pro "Editar capas" da galeria.
+  const isAdmin = (await ensureAdmin()).ok
 
   const statusInitial: WorkStatusValues = {
     personal_status:
@@ -869,6 +870,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 title={work.title}
                 fallbackUrl={primaryCover}
                 covers={work.work_covers ?? []}
+                editHref={isAdmin ? `/titles/${id}/edit?covers=advanced` : null}
               />
             </div>
 
@@ -1043,7 +1045,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                       <FileText className="h-4.5 w-4.5 text-muted-foreground" />
                       <CardTitle className="text-base font-bold text-foreground">Sinopses</CardTitle>
                     </div>
-                    {canRegenerateSynopsis && <RegenerateSynopsisAction workId={work.id as string} />}
+                    {isAdmin && <RegenerateSynopsisAction workId={work.id as string} />}
                   </div>
                 </CardHeader>
                 <CardContent className="px-4">
@@ -1171,15 +1173,20 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               )}
             </div>
           </CardHeader>
-          <CardContent className="pt-0">
-            <div className={cn("grid grid-cols-1 gap-4", calcCardCount >= 3 && "sm:grid-cols-2")}>
+          <CardContent className="@container pt-0">
+            {/* Container query (@md = card ≥ 448px): as colunas dependem da largura REAL
+                do card — que varia com o grid externo (side-by-side com "Avaliações
+                externas") e a sidebar — não do viewport. Com `sm:` o grid abria 2
+                colunas com o card a ~350px e cada célula ficava estreita demais pro
+                próprio conteúdo (selos não encolhem → sobreposição). */}
+            <div className={cn("grid grid-cols-1 gap-4", calcCardCount >= 3 && "@md:grid-cols-2")}>
               {work.calculated_scores?.personal_fit != null && (
                 <div className={cn(
                   // min-w-0: sem isso o item do grid tem min-width:auto e transborda a
                   // trilha em vez de encolher. gap-3: o badge encostava no texto.
                   "flex min-w-0 items-center justify-between gap-3 p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
                   // Última célula de veredito numa contagem ímpar → ocupa a linha toda.
-                  spanLastVerdict && lastVerdict === "fit" && "sm:col-span-2",
+                  calcCardCount >= 3 && spanLastVerdict && lastVerdict === "fit" && "@md:col-span-2",
                 )}>
                   <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                     <span className="text-xs font-medium text-muted-foreground">Alinhamento</span>
@@ -1226,32 +1233,32 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                   : "bg-slate-500/15 text-slate-700 border-slate-500/40 dark:text-slate-300"
                 return (
                   <div className={cn(
-                    // flex-wrap + min-w-0: com o botão "Recalcular" (nowrap) ao lado da nota,
-                    // o min-content desta linha passava da trilha do grid e vazava pra fora do
-                    // card. Agora as ações quebram pra linha de baixo em vez de transbordar.
-                    "flex min-w-0 flex-wrap items-center justify-between gap-3 p-4 rounded-xl border bg-card/30 hover:bg-card/50 transition-all duration-200 shadow-sm",
+                    // flex-col: a linha de cima é sempre [rótulo+selo | nota] e as ações do
+                    // stale ganham linha PRÓPRIA embaixo. A versão anterior punha botão+selo
+                    // na mesma linha flex da coluna de texto (flex-1 = basis 0): a linha nunca
+                    // quebrava, a coluna era esmagada e o selo "Desatualizado" (que não
+                    // encolhe) vazava por cima do botão/nota.
+                    "flex min-w-0 flex-col gap-3 p-4 rounded-xl border bg-card/30 hover:bg-card/50 transition-all duration-200 shadow-sm",
                     stale
                       ? "border-amber-500/55 hover:border-amber-500/70"
                       : "border-border/80 hover:border-border",
-                    spanLastVerdict && lastVerdict === "align" && "sm:col-span-2",
+                    calcCardCount >= 3 && spanLastVerdict && lastVerdict === "align" && "@md:col-span-2",
                   )}>
-                    <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
-                      <span className="text-xs font-medium text-muted-foreground">{LABELS.alignment_score.full}</span>
-                      {stale ? (
-                        <span className="inline-flex items-center rounded-full border border-amber-500/55 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
-                          Desatualizado
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground">
-                          {alignAt
-                            ? `Calculado em ${new Date(alignAt).toLocaleDateString("pt-BR")}`
-                            : "Veredito do consultor IA (0–100)"}
-                        </span>
-                      )}
-                    </div>
-                    <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-                      {/* Recalcular aparece SÓ quando desatualizado, atrelado ao Veredito, antes da nota. */}
-                      {stale && <RerankAiRkButton workId={work.id} hasScore isPaid={isPaidPlan} icon="rotate" readiness={alignmentReadiness} />}
+                    <div className="flex min-w-0 items-center justify-between gap-3">
+                      <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
+                        <span className="text-xs font-medium text-muted-foreground">{LABELS.alignment_score.full}</span>
+                        {stale ? (
+                          <span className="inline-flex max-w-full items-center rounded-full border border-amber-500/55 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                            Desatualizado
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground">
+                            {alignAt
+                              ? `Calculado em ${new Date(alignAt).toLocaleDateString("pt-BR")}`
+                              : "Veredito do consultor IA (0–100)"}
+                          </span>
+                        )}
+                      </div>
                       <TooltipProvider delayDuration={150}>
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -1275,6 +1282,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                         </Tooltip>
                       </TooltipProvider>
                     </div>
+                    {/* Recalcular aparece SÓ quando desatualizado, atrelado ao Veredito. */}
+                    {stale && <RerankAiRkButton workId={work.id} hasScore isPaid={isPaidPlan} icon="rotate" readiness={alignmentReadiness} />}
                   </div>
                 )
               })()}
@@ -1282,7 +1291,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               {deepDivePresent && (
                 <div className={cn(
                   "flex min-w-0 items-center justify-between gap-3 p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
-                  spanLastVerdict && lastVerdict === "deep" && "sm:col-span-2",
+                  calcCardCount >= 3 && spanLastVerdict && lastVerdict === "deep" && "@md:col-span-2",
                 )}>
                   <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                     <span className="text-xs font-medium text-muted-foreground">Deep Dive</span>
@@ -1320,7 +1329,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
               {work.user_score != null && (
                 hasPostReadingScores ? (
-                  <details className="group rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm overflow-hidden sm:col-span-2">
+                  <details className={cn(
+                    "group rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm overflow-hidden",
+                    calcCardCount >= 3 && "@md:col-span-2",
+                  )}>
                     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
                       <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                         <div className="flex items-center gap-1.5">
@@ -1345,8 +1357,11 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                     </div>
                   </details>
                 ) : (
-                  <div className="flex items-center justify-between p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm sm:col-span-2">
-                    <div className="flex flex-col items-start gap-1">
+                  <div className={cn(
+                    "flex min-w-0 items-center justify-between gap-3 p-4 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm",
+                    calcCardCount >= 3 && "@md:col-span-2",
+                  )}>
+                    <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                       <span className="text-xs font-medium text-muted-foreground">Pessoal</span>
                       <span className="text-[11px] text-muted-foreground">Sua nota pós-leitura</span>
                     </div>
@@ -1359,9 +1374,13 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 inicial (não há badge pra atrelar). Some assim que o Veredito existe —
                 daí em diante o recálculo vive na linha do Veredito, só quando stale. */}
             {work.calculated_scores?.alignment_score == null && (
-              <div className="mt-4 flex items-center justify-between gap-3 border-t border-border/40 pt-3">
-                <span className="text-xs text-muted-foreground">Veredito IA ainda não calculado</span>
-                <RerankAiRkButton workId={work.id} hasScore={false} isPaid={isPaidPlan} readiness={alignmentReadiness} />
+              // flex-wrap + ml-auto: com o card estreito, o bloco botão+selo desce pra
+              // linha de baixo (alinhado à direita) em vez de esmagar o texto.
+              <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border/40 pt-3">
+                <span className="min-w-0 text-xs text-muted-foreground">Veredito IA ainda não calculado</span>
+                <div className="ml-auto">
+                  <RerankAiRkButton workId={work.id} hasScore={false} isPaid={isPaidPlan} readiness={alignmentReadiness} />
+                </div>
               </div>
             )}
           </CardContent>
@@ -1385,8 +1404,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 )}
               </div>
             </CardHeader>
-            <CardContent className="pt-0">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <CardContent className="@container pt-0">
+              {/* Mesmo racional do card "Notas calculadas": 2 colunas só quando o CARD
+                  tem largura pra isso (container query), não o viewport. */}
+              <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
                 {platformRatings.map((pr) => (
                   <div key={pr.platform} className="flex items-center justify-between p-3 rounded-xl border border-border/80 bg-card/30 hover:bg-card/50 hover:border-border transition-all duration-200 shadow-sm">
                     <div className="flex flex-col min-w-0">

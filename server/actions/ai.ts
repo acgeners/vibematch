@@ -10,6 +10,7 @@ import {
   selectReviewsForEvaluation,
 } from "@/lib/external/index"
 import { saveWorkReviews, loadWorkReviewsAsSourced } from "@/lib/external/persist-reviews"
+import { mergeFreshWithPersistedReviews } from "@/lib/external/review-merge"
 import type { ExternalSourceId, SourcedReview } from "@/lib/external/types"
 import { readManualExternalReviewsForDisplay } from "@/server/queries/external-manual-reviews"
 import { markRecalcPending } from "@/server/recalc/queue"
@@ -18,7 +19,8 @@ import { resolveMangagoForEvalContext } from "@/lib/external/mangago-eval-contex
 import { boolEnv } from "@/lib/external/mangago-band"
 import { markWorkAlignmentStale } from "@/server/queries/alignment"
 import type { AiEvaluation } from "@/types/domain"
-import { pickPrimaryCover, pickPrimarySynopsis } from "@/lib/work-derived"
+import { pickPrimaryCover, splitSynopsesForEvaluation } from "@/lib/work-derived"
+import { isSameSynopsis } from "@/lib/synopsis-text"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { SONNET_MODEL } from "@/lib/ai/models"
 import { ensureAdmin } from "@/server/queries/current-user"
@@ -284,24 +286,30 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
       alternativeTitles: work.alternative_titles,
     })
     const { externalContext, platformRatings, similarWorks, contentRatings } = context
-    let { sourcedReviews, allReviews } = context
+    const freshPool = context.allReviews ?? []
 
-    // Fallback de robustez (F0.3b): a busca fresca não trouxe nenhuma review
-    // (ex.: queda transitória do Cloudflare no Comix). Em vez de avaliar sem
-    // reviews, usa o pool já persistido em work_reviews (de uma aquisição na
-    // borda ou avaliação anterior). Só atua no caminho de FALHA — o caso normal
-    // (busca traz reviews) fica idêntico, preservando o input_hash do cache.
-    let usedPersistedFallback = false
-    if ((allReviews?.length ?? 0) === 0) {
-      const persisted = await loadWorkReviewsAsSourced(workId)
-      if (persisted.length > 0) {
-        allReviews = persisted
-        sourcedReviews = selectReviewsForEvaluation(persisted, AI_EVAL_REVIEW_CAPS)
-        usedPersistedFallback = true
-        console.log(
-          `[ai-eval reviews] busca fresca vazia → usando pool persistido (${persisted.length}) de work_reviews`,
-        )
-      }
+    // Mesclagem de robustez (sucede o fallback binário F0.3b): a busca fresca
+    // depende do sidecar/FlareSolverr pras fontes atrás de Cloudflare — quando a
+    // fila satura (503 busy) ou o CF bloqueia, elas devolvem 0 e o prompt sairia
+    // com 1–2 reviews mesmo com dezenas já colhidas em work_reviews. O fallback
+    // antigo só disparava com ZERO frescas ("1 fresca" vencia "77 persistidas").
+    // Agora o prompt seleciona da UNIÃO fresco+persistido (dedup por fonte+texto,
+    // rejeitadas fora). Sem recuperação, `sourcedReviews` fica byte-idêntico ao
+    // fresco — preserva o input_hash do cache no caso normal.
+    const persisted = await loadWorkReviewsAsSourced(workId)
+    const { merged: promptPool, recovered } = mergeFreshWithPersistedReviews(
+      freshPool,
+      persisted,
+      rejectedSources,
+    )
+    const sourcedReviews =
+      recovered > 0
+        ? selectReviewsForEvaluation(promptPool, AI_EVAL_REVIEW_CAPS)
+        : context.sourcedReviews
+    if (recovered > 0) {
+      console.log(
+        `[ai-eval reviews] busca fresca trouxe ${freshPool.length} → recuperadas ${recovered} do pool persistido (prompt seleciona de ${promptPool.length})`,
+      )
     }
     const externalMs = Date.now() - externalStart
 
@@ -336,17 +344,18 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
               ? "search_miss"
               : "no_external_ids"
 
-    // Persiste o pool completo (pode passar de 100 reviews), não só o subset
-    // capeado que vai pro prompt — recomendação usa essa base pra escolher
-    // top reviews por candidato.
-    // Não re-grava quando o pool veio do próprio work_reviews (fallback) — seria
-    // um delete+insert idêntico + recomputo de resumo à toa.
-    if (!usedPersistedFallback) await saveWorkReviews(workId, allReviews ?? [])
+    // Persiste o pool FRESCO completo (pode passar de 100 reviews), não só o
+    // subset capeado que vai pro prompt — recomendação usa essa base pra escolher
+    // top reviews por candidato. Só o fresco: o promptPool inclui reviews que JÁ
+    // estão em work_reviews (re-gravar seria delete+insert idêntico), e o merge
+    // por fonte do saveWorkReviews preserva as fontes ausentes desta rodada.
+    // Pool fresco vazio = no-op interno do saveWorkReviews.
+    await saveWorkReviews(workId, freshPool)
 
     // Debug: detalha o pipeline de reviews durante a avaliação. Útil pra
     // entender por que a IA recebeu N reviews quando esperava-se mais.
     const sourceCounts: Record<string, number> = {}
-    for (const r of allReviews ?? []) {
+    for (const r of promptPool) {
       sourceCounts[r.source] = (sourceCounts[r.source] ?? 0) + 1
     }
     const sentCounts: Record<string, number> = {}
@@ -354,12 +363,21 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
       sentCounts[r.source] = (sentCounts[r.source] ?? 0) + 1
     }
     console.log(
-      `[ai-eval reviews] work="${work.title}" hasAcceptedExternalIds=${hasAcceptedExternalIds} accepted=${JSON.stringify(acceptedExternalIds)} rejected=${JSON.stringify(rejectedSources)} pool=${allReviews?.length ?? 0} (${JSON.stringify(sourceCounts)}) manual=${manualSourced.length} sent=${effectiveSourcedReviews.length} (${JSON.stringify(sentCounts)})`
+      `[ai-eval reviews] work="${work.title}" hasAcceptedExternalIds=${hasAcceptedExternalIds} accepted=${JSON.stringify(acceptedExternalIds)} rejected=${JSON.stringify(rejectedSources)} poolFresh=${freshPool.length} recovered=${recovered} pool=${promptPool.length} (${JSON.stringify(sourceCounts)}) manual=${manualSourced.length} sent=${effectiveSourcedReviews.length} (${JSON.stringify(sentCounts)})`
     )
 
     const synopses = (work as { work_synopses?: Array<{ source?: string | null; text?: string | null; is_primary?: boolean | null; position?: number | null }> }).work_synopses ?? []
-    const primarySynopsisRow = synopses.find((s) => s?.is_primary) ?? null
-    const synopsisIsManual = primarySynopsisRow?.source === "manual"
+    // TODAS as sinopses persistidas entram no prompt: a primária como referência
+    // principal e as demais como blocos [S1]…[Sn] (manuais = autoridade alta).
+    const { primary: primarySynopsis, primaryIsManual: synopsisIsManual, additional: additionalSynopses } =
+      splitSynopsesForEvaluation(synopses)
+    // Bloco [C] fresco que é a MESMA sinopse já persistida vira ruído (e custo)
+    // duplicado no prompt. O filtro só roda quando há adicionais: sem elas o input
+    // fica byte-idêntico ao anterior e preserva o input_hash do cache de avaliação.
+    const persistedSynopsisTexts = [primarySynopsis, ...additionalSynopses.map((s) => s.text)]
+    const effectiveExternalContext = additionalSynopses.length
+      ? externalContext.filter((block) => !persistedSynopsisTexts.some((text) => isSameSynopsis(text, block)))
+      : externalContext
 
     const covers = (work as { work_covers?: Array<{ url?: string | null; is_primary?: boolean | null; position?: number | null }> }).work_covers ?? []
     const coverUrl = pickPrimaryCover(covers)
@@ -391,12 +409,13 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     const response = await requestAiEvaluation({
       workId,
       title: work.title,
-      synopsis: pickPrimarySynopsis(synopses) ?? undefined,
+      synopsis: primarySynopsis ?? undefined,
       synopsisIsManual,
+      additionalSynopses,
       genres: genreNames,
       tags,
       sourcedReviews: effectiveSourcedReviews,
-      externalContext,
+      externalContext: effectiveExternalContext,
       platformRatings,
       similarWorks,
       contentRatings,
@@ -419,6 +438,9 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
         evaluationContext: {
           ...existingCtx,
           noReviewsReason,
+          // Quantas reviews do prompt vieram do pool persistido (work_reviews) em
+          // vez da busca fresca — diagnóstico de degradação das fontes CF-gated.
+          reviewsRecoveredFromPersisted: recovered,
         },
       }
     })()

@@ -6,6 +6,7 @@ import {
 } from "@/lib/synopsis-text"
 
 interface WorkSynopsisRow {
+  source?: string | null
   text?: string | null
   is_primary?: boolean | null
   position?: number | null
@@ -85,6 +86,34 @@ export function pickPrimarySynopsis(rows: WorkSynopsisRow[] | null | undefined):
   const sorted = dedupeWorkSynopses(rows)
   const text = sorted[0]?.text?.trim()
   return text ? text : null
+}
+
+export interface EvaluationSynopses {
+  primary: string | null
+  primaryIsManual: boolean
+  additional: Array<{ text: string; source: string | null; isManual: boolean }>
+}
+
+/**
+ * Divide as sinopses persistidas pra avaliação IA: a primária segue como referência
+ * principal do prompt e TODAS as demais (deduplicadas por significado) viram blocos
+ * adicionais com a procedência preservada — `isManual` marca as escritas/editadas
+ * pelo usuário, que o prompt trata com autoridade alta.
+ */
+export function splitSynopsesForEvaluation(
+  rows: WorkSynopsisRow[] | null | undefined
+): EvaluationSynopses {
+  const deduped = dedupeWorkSynopses(rows ?? [])
+  const primaryRow = deduped[0] ?? null
+  return {
+    primary: primaryRow?.text?.trim() || null,
+    primaryIsManual: primaryRow?.source === "manual",
+    additional: deduped.slice(1).map((row) => ({
+      text: row.text ?? "",
+      source: row.source ?? null,
+      isManual: row.source === "manual",
+    })),
+  }
 }
 
 export function joinSynopsisBlocks(texts: Array<string | null | undefined>): string {

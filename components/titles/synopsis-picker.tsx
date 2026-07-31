@@ -128,7 +128,23 @@ export function SynopsisPicker({ choices, onChange, emptyHint }: SynopsisPickerP
   const [draft, setDraft] = useState("")
   const [manualOpen, setManualOpen] = useState(false)
   const [manualText, setManualText] = useState("")
+  const manualActionsRef = useRef<HTMLDivElement>(null)
+  const editActionsRef = useRef<HTMLDivElement>(null)
   const radioGroup = useId()
+
+  // O picker vive no fim de um diálogo com rolagem, e o textarea cresce com o
+  // conteúdo (field-sizing-content): abrir o formulário — e principalmente COLAR
+  // um texto longo — empurrava a linha de botões pra baixo da dobra, e o próximo
+  // botão visível era o "Continuar" do rodapé do diálogo. Seguir a LINHA DE
+  // BOTÕES (não o formulário) a cada mudança de texto mantém o alvo do clique à
+  // vista; com `block: "nearest"`, quando ela já está visível o scroll é no-op.
+  // `?.()` no método: o jsdom dos testes de componente não implementa scrollIntoView.
+  useEffect(() => {
+    if (manualOpen) manualActionsRef.current?.scrollIntoView?.({ block: "nearest" })
+  }, [manualOpen, manualText])
+  useEffect(() => {
+    if (editingIdx !== null) editActionsRef.current?.scrollIntoView?.({ block: "nearest" })
+  }, [editingIdx, draft])
 
   const allIncluded = choices.length > 0 && choices.every((c) => c.included)
   const someIncluded = choices.some((c) => c.included)
@@ -297,19 +313,27 @@ export function SynopsisPicker({ choices, onChange, emptyHint }: SynopsisPickerP
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   rows={7}
-                  className="resize-y text-sm"
+                  // Mesmo teto do formulário manual: field-sizing-content + colar
+                  // texto longo esticava a caixa e escondia os botões do formulário.
+                  className="max-h-64 resize-y overflow-y-auto text-sm"
                   autoFocus
                 />
-                <div className="flex items-center gap-2">
+                <div ref={editActionsRef} className="flex scroll-mb-16 items-center gap-2">
                   <p className="mr-auto text-[11px] leading-tight text-muted-foreground">
                     {s.source === "manual" && !s.editedFrom
                       ? "Já é sua — continua como manual."
                       : "Ao salvar, esta sinopse passa a contar como sua (manual)."}
                   </p>
-                  <Button type="button" variant="outline" size="sm" onClick={() => setEditingIdx(null)}>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setEditingIdx(null)}>
                     Cancelar
                   </Button>
-                  <Button type="button" size="sm" onClick={saveEdit} disabled={!draft.trim()}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={saveEdit}
+                    disabled={!draft.trim()}
+                    className="gap-1 bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+                  >
                     <Check className="h-3.5 w-3.5" />
                     Salvar texto
                   </Button>
@@ -329,14 +353,20 @@ export function SynopsisPicker({ choices, onChange, emptyHint }: SynopsisPickerP
             value={manualText}
             onChange={(e) => setManualText(e.target.value)}
             rows={3}
-            placeholder="Escreva uma sinopse própria…"
-            className="resize-y text-sm"
+            placeholder="Escreva ou cole uma sinopse própria…"
+            // max-h + rolagem própria: o Textarea base usa field-sizing-content, e
+            // colar uma sinopse longa esticava a caixa até empurrar o "Adicionar"
+            // pra fora da área visível do diálogo.
+            className="max-h-48 resize-y overflow-y-auto text-sm"
             autoFocus
           />
-          <div className="flex justify-end gap-2">
+          {/* scroll-mb-16: os diálogos que montam este picker têm uma barra de ações
+              sticky no rodapé DA MESMA área de rolagem — sem a margem, o
+              scrollIntoView "revela" a linha exatamente atrás da barra. */}
+          <div ref={manualActionsRef} className="flex scroll-mb-16 justify-end gap-2">
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={() => {
                 setManualOpen(false)
@@ -345,8 +375,18 @@ export function SynopsisPicker({ choices, onChange, emptyHint }: SynopsisPickerP
             >
               Cancelar
             </Button>
-            <Button type="button" size="sm" onClick={addManual} disabled={!manualText.trim()}>
-              Adicionar
+            {/* Esmeralda (a cor do "manual" neste picker), com ícone e rótulo
+                específico: os botões antigos eram gêmeos do Cancelar/Continuar do
+                rodapé do diálogo, a um clique de distância. */}
+            <Button
+              type="button"
+              size="sm"
+              onClick={addManual}
+              disabled={!manualText.trim()}
+              className="gap-1 bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Adicionar sinopse
             </Button>
           </div>
         </div>

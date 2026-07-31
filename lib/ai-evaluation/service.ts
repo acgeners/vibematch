@@ -36,6 +36,13 @@ export interface AiEvaluationRequest {
    * caso `externalContext` já contenha os blocos [C1]…[Cn] equivalentes.
    */
   synopsisIsManual?: boolean
+  /**
+   * Sinopses adicionais PERSISTIDAS na obra (todas além da principal), já
+   * deduplicadas por significado. Entram no prompt como blocos [S1]…[Sn];
+   * as com `isManual` são rotuladas como escritas/editadas pelo usuário
+   * (autoridade alta). Só o Caminho A (obra salva) preenche.
+   */
+  additionalSynopses?: Array<{ text: string; source?: string | null; isManual?: boolean }>
   genres?: string[]
   /** Aceita string[] (legado) ou AiEvaluationTag[] (preferido). */
   tags?: Array<string | AiEvaluationTag>
@@ -628,6 +635,19 @@ function buildUserPrompt(req: AiEvaluationRequest, prepared: PreparedReviews): s
     )
   }
 
+  const additionalSynopses = (req.additionalSynopses ?? []).filter((s) => s.text?.trim())
+  if (additionalSynopses.length) {
+    lines.push(
+      `\nSinopses adicionais salvas na obra (complementam a sinopse acima; as marcadas como MANUAL foram escritas/editadas pelo usuário e têm autoridade alta — em conflito com fontes externas, prevalecem):`
+    )
+    additionalSynopses.forEach((s, index) => {
+      const label = s.isManual
+        ? "MANUAL — escrita/editada pelo usuário"
+        : `fonte: ${s.source ?? "desconhecida"}`
+      lines.push(`[S${index + 1}] (${label}) ${s.text.trim()}`)
+    })
+  }
+
   if (req.genres?.length) {
     lines.push(`\nGêneros (todos os gêneros cadastrados): ${req.genres.join(", ")}`)
   }
@@ -962,14 +982,20 @@ function enforceConfidenceCapWhenLowEvidence(
 ): AiEvaluationResponse {
   const synopsisLength = (req.synopsis ?? "").trim().length
   const hasExternalContext = (req.externalContext?.length ?? 0) > 0
+  const hasAdditionalSynopsisEvidence = (req.additionalSynopses ?? []).some(
+    (s) => (s.text?.trim().length ?? 0) >= SYNOPSIS_MIN_CHARS,
+  )
   const substantiveReviews = (req.sourcedReviews ?? []).filter(
     (r) => (r.text?.trim().length ?? 0) >= SUBSTANTIVE_REVIEW_MIN_CHARS,
   ).length
   const hasReviewEvidence = substantiveReviews >= MIN_SUBSTANTIVE_REVIEWS
   // "Baixa evidência" = sinopse curta E sem contexto externo E sem reviews
-  // substantivas. Só então o teto de confiança se aplica.
+  // substantivas. Sinopse adicional persistida também é evidência.
   const lowEvidence =
-    synopsisLength < SYNOPSIS_MIN_CHARS && !hasExternalContext && !hasReviewEvidence
+    synopsisLength < SYNOPSIS_MIN_CHARS &&
+    !hasExternalContext &&
+    !hasReviewEvidence &&
+    !hasAdditionalSynopsisEvidence
 
   if (!lowEvidence) return response
   if (response.confidence <= LOW_EVIDENCE_CONFIDENCE_CAP) return response
@@ -1045,6 +1071,12 @@ function attachEvaluationContext(
         title: req.title,
         synopsis: req.synopsis ?? null,
         synopsisIsManual: req.synopsisIsManual ?? false,
+        additionalSynopses: (req.additionalSynopses ?? []).map((s) => ({
+          text: s.text,
+          source: s.source ?? null,
+          isManual: s.isManual ?? false,
+        })),
+        additionalSynopsesCount: req.additionalSynopses?.length ?? 0,
         synopsisOmittedFromPrompt: false,
         genres: req.genres ?? [],
         tagsGrouped: groupTagsByGroup(normalizedTags),
@@ -1116,6 +1148,14 @@ interface CacheEntry {
 
 const evaluationCache = new Map<string, CacheEntry>()
 
+function canonicalAdditionalSynopses(req: AiEvaluationRequest) {
+  return (req.additionalSynopses ?? []).map((s) => ({
+    text: s.text,
+    source: s.source ?? null,
+    isManual: s.isManual ?? false,
+  }))
+}
+
 function canonicalInputHash(req: AiEvaluationRequest): string {
   const normalizedTags = normalizeTags(req.tags)
     .map((t) => `${t.group ?? ""}::${t.name}`)
@@ -1126,6 +1166,11 @@ function canonicalInputHash(req: AiEvaluationRequest): string {
     title: req.title,
     synopsis: req.synopsis ?? "",
     synopsisIsManual: req.synopsisIsManual ?? false,
+    // Só entra no hash quando existe: obra de sinopse única mantém o hash antigo
+    // (mesma garantia de byte-identidade da união fresco+persistido das reviews).
+    ...(req.additionalSynopses?.length
+      ? { additionalSynopses: canonicalAdditionalSynopses(req) }
+      : {}),
     genres: [...(req.genres ?? [])].sort(),
     tags: normalizedTags,
     externalContext: req.externalContext ?? [],
@@ -1164,6 +1209,9 @@ function canonicalInputHashV2(req: AiEvaluationRequest): string {
       title: req.title,
       synopsis: req.synopsis ?? "",
       synopsisIsManual: req.synopsisIsManual ?? false,
+      ...(req.additionalSynopses?.length
+        ? { additionalSynopses: canonicalAdditionalSynopses(req) }
+        : {}),
       genres: [...(req.genres ?? [])].sort(),
       tags: normalizedTags,
       externalContext: req.externalContext ?? [],
@@ -1181,6 +1229,9 @@ function canonicalInputHashV2(req: AiEvaluationRequest): string {
     },
   })
 }
+
+// Expostos para testes (mesmo padrão de coerceToolPayload).
+export { buildUserPrompt, canonicalInputHash, canonicalInputHashV2 }
 
 function readCache(hash: string): AiEvaluationResponse | null {
   const entry = evaluationCache.get(hash)

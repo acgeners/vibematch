@@ -104,6 +104,9 @@ interface WorkFormProps {
   /** IDs externos já vinculados à obra (edição) — ex.: `{ comix: "003kd" }`.
    *  Exibidos/mantidos no passo de seleção de fontes do "Buscar dados". */
   existingExternalIds?: Record<string, string>
+  /** Abre o diálogo "Capas — modo avançado" já no load — deep-link
+   *  `?covers=advanced` do botão "Editar capas" na página da obra. */
+  openCoversAdvanced?: boolean
 }
 
 type EditTab = "geral" | "notas" | "status" | "tags"
@@ -682,7 +685,7 @@ function CriterionReadonlyValue({
   )
 }
 
-export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEvalOnCreate = false, reviewsSlot, existingExternalIds }: WorkFormProps) {
+export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEvalOnCreate = false, reviewsSlot, existingExternalIds, openCoversAdvanced = false }: WorkFormProps) {
   const router = useRouter()
   const refresh = useRefresh()
   const confirmCost = useCostConfirm()
@@ -2242,6 +2245,7 @@ export function WorkForm({ workId, workSlug, initialValues, aiEvaluation, aiEval
                   )}
                 </div>
                 <CoversManager
+                  defaultAdvancedOpen={openCoversAdvanced}
                   value={covers}
                   archived={archivedCovers}
                   onArchivedChange={(next) =>
