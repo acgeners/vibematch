@@ -1,5 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getCurrentUserId } from "@/server/queries/current-user"
 
 // Uma importação registrada (tabela `imports`). Toda importação de lista grava
 // uma linha aqui; a fonte fica em raw_metadata.source.
@@ -51,13 +52,16 @@ function toHistoryRow(r: ImportsRow): ImportHistoryRow {
   }
 }
 
+// Histórico per-user (Bloco 02): cada um vê as PRÓPRIAS importações.
 export async function getImportHistory(limit = 30): Promise<ImportHistoryRow[]> {
   const supabase = createAdminClient()
+  const userId = await getCurrentUserId(supabase)
   const { data, error } = await supabase
     .from("imports")
     .select(
       "id, filename, file_type, status, total_rows, imported_count, updated_count, skipped_count, error_count, created_at, completed_at, raw_metadata"
     )
+    .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit)
   if (error) throw new Error(error.message)
@@ -74,6 +78,7 @@ export interface ImportStats {
 // caem na armadilha do limite de 1000 linhas do select.
 export async function getImportStats(): Promise<ImportStats> {
   const supabase = createAdminClient()
+  const userId = await getCurrentUserId(supabase)
   const [catalog, evaluated, last] = await Promise.all([
     supabase.from("works").select("*", { count: "exact", head: true }).eq("is_archived", false),
     supabase
@@ -84,6 +89,7 @@ export async function getImportStats(): Promise<ImportStats> {
     supabase
       .from("imports")
       .select("imported_count, created_at, raw_metadata")
+      .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),

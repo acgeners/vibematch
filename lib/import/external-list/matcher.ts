@@ -26,28 +26,69 @@ export interface MatchContext {
   externalIndex: Map<string, string>
 }
 
-export async function buildMatchContext(supabase: AnySupabaseClient): Promise<MatchContext> {
-  // Lê o dado PESSOAL do DONO (personal_status_id, user_score, chapters_read) — é o lado
-  // "atual" do diff da importação → vem do espelho via a view `works_owner`, não da linha
-  // compartilhada de `works` (que vai perder essas colunas).
-  const { data: works } = await supabase
-    .from("works_owner")
-    .select("id, title, original_title, alternative_titles, personal_status_id, user_score, chapters_read")
+// Pagina de 1000 em 1000: o select do PostgREST corta em 1000 SEM AVISO, e duas das três
+// leituras daqui já passavam (ou passariam em breve) do teto — work_external_ids tinha
+// 6.933 linhas com o índice truncado em 1000, e o catálogo (966) está a meses de estourar.
+// Um índice truncado não dá erro: o match por ID falha em silêncio e cai pro título.
+async function fetchAll(
+  supabase: AnySupabaseClient,
+  table: string,
+  select: string,
+  filter?: (q: AnySupabaseClient) => AnySupabaseClient,
+): Promise<Record<string, unknown>[]> {
+  const rows: Record<string, unknown>[] = []
+  for (let from = 0; ; from += 1000) {
+    let q = supabase.from(table).select(select).range(from, from + 999)
+    if (filter) q = filter(q)
+    const { data, error } = await q
+    if (error) throw new Error(`buildMatchContext(${table}): ${error.message}`)
+    const batch = (data ?? []) as Record<string, unknown>[]
+    rows.push(...batch)
+    if (batch.length < 1000) break
+  }
+  return rows
+}
 
-  const { data: extIds } = await supabase
-    .from("work_external_ids")
-    .select("work_id, source, external_id")
+/**
+ * Lado "atual" do diff da importação, PARA UM USUÁRIO: o catálogo compartilhado (títulos,
+ * pra o match) + o estado pessoal DELE (`user_work_state`: status, nota, capítulos — pra
+ * decidir fill × conflito). Antes lia `works_owner` (o espelho do DONO): um segundo usuário
+ * reconciliaria a lista dele contra o SEU estado — conflito fantasma em tudo que você já leu.
+ */
+export async function buildMatchContext(
+  supabase: AnySupabaseClient,
+  userId: string,
+): Promise<MatchContext> {
+  // SEM filtro de is_archived, de propósito (igual ao comportamento anterior): obra
+  // arquivada continua no índice de match — senão importar uma lista que a contém
+  // criaria uma DUPLICATA dela no catálogo.
+  const [works, states, extIds] = await Promise.all([
+    fetchAll(supabase, "works", "id, title, original_title, alternative_titles"),
+    fetchAll(supabase, "user_work_state", "work_id, personal_status_id, user_score, chapters_read", (q) =>
+      q.eq("user_id", userId),
+    ),
+    fetchAll(supabase, "work_external_ids", "work_id, source, external_id"),
+  ])
 
-  const list: DbWork[] = (works ?? []).map((w: DbWork) => ({
-    ...w,
-    user_score: w.user_score == null ? null : Number(w.user_score),
-    alternative_titles: w.alternative_titles ?? [],
-  }))
+  const stateByWork = new Map(states.map((s) => [s.work_id as string, s]))
+
+  const list: DbWork[] = works.map((w) => {
+    const s = stateByWork.get(w.id as string)
+    return {
+      id: w.id as string,
+      title: w.title as string,
+      original_title: (w.original_title as string | null) ?? null,
+      alternative_titles: (w.alternative_titles as string[] | null) ?? [],
+      personal_status_id: (s?.personal_status_id as number | null | undefined) ?? null,
+      user_score: s?.user_score == null ? null : Number(s.user_score),
+      chapters_read: (s?.chapters_read as number | null | undefined) ?? null,
+    }
+  })
 
   const worksById = new Map<string, DbWork>(list.map((w) => [w.id, w]))
   const externalIndex = new Map<string, string>()
-  for (const row of extIds ?? []) {
-    externalIndex.set(`${row.source}:${row.external_id}`, row.work_id)
+  for (const row of extIds) {
+    externalIndex.set(`${row.source}:${row.external_id}`, row.work_id as string)
   }
 
   return { works: list, worksById, externalIndex }

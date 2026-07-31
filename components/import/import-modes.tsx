@@ -27,10 +27,14 @@ export function ImportModes({
   pendingReviewWorks,
   history,
   stats,
+  aiAvailable,
 }: {
   pendingReviewWorks: ReviewWork[]
   history: ImportHistoryRow[]
   stats: ImportStats
+  /** Plano atual pode consumir IA? Só INDICA (sem gate novo): quem não pode importa
+   *  igual — as etapas de IA ficam pendentes e o aviso diz o porquê. */
+  aiAvailable: boolean
 }) {
   const refresh = useRefresh()
   const [tab, setTab] = useState("import")
@@ -112,6 +116,13 @@ export function ImportModes({
             Obras importadas pendentes de avaliação. Busque capa/sinopses das que estão sem capa e
             confira o que veio das fontes. As notas dos atributos são geradas na Avaliação IA.
           </p>
+          {!aiAvailable && (
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-600 dark:text-amber-400">
+              Suas obras foram importadas e estão no catálogo. O enriquecimento
+              (capa/sinopse/atributos) usa avaliação de IA — recurso de assinatura/créditos;
+              elas seguem listadas aqui até lá.
+            </p>
+          )}
           <ImportReview
             works={pendingReviewWorks}
             onReviewed={(id) => setReviewed((prev) => new Set(prev).add(id))}
