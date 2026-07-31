@@ -1,6 +1,7 @@
 import "server-only"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getCurrentUserId, getOwnerUserId } from "@/server/queries/current-user"
 import { pickCoverUrls, pickPrimarySynopsis } from "@/lib/work-derived"
 
 /**
@@ -85,12 +86,23 @@ export interface PilotWork {
   personalStatusId: number | null
 }
 
-/** Notas de gosto já dadas a UMA obra (pra a avaliação embutida na página). */
+/**
+ * Notas de gosto já dadas a UMA obra (pra a avaliação embutida na página) — as DO USUÁRIO
+ * ATUAL. Per-user desde a mig 169: sem o filtro de user_id, o `maybeSingle` estouraria na
+ * primeira obra avaliada por duas pessoas — e antes disso mostraria a nota de outra pessoa.
+ * Anônimo cai no dono (`getCurrentUserId`): o catálogo é visto pelos olhos dele, por design.
+ */
 export async function getTasteScoresForWork(
   workId: string,
 ): Promise<{ scores: Record<TasteScoreKey, number | null>; endingNa: boolean }> {
   const sb = createAdminClient()
-  const { data } = await sb.from("pilot_taste_scores").select("*").eq("work_id", workId).maybeSingle()
+  const userId = await getCurrentUserId(sb)
+  const { data } = await sb
+    .from("pilot_taste_scores")
+    .select("*")
+    .eq("work_id", workId)
+    .eq("user_id", userId)
+    .maybeSingle()
   const scores = {} as Record<TasteScoreKey, number | null>
   for (const k of TASTE_SCORE_KEYS) {
     const v = (data as Record<string, unknown> | null)?.[k]
@@ -154,6 +166,10 @@ const POST_READING_SCORE_COLUMNS = [
  */
 export async function getPilotWorks(): Promise<PilotWork[]> {
   const sb = createAdminClient()
+  // O piloto é a ferramenta de rotulagem do DONO (lê works_owner, o espelho dele) —
+  // o embed de pilot_taste_scores tem que ficar no mesmo dono. Per-user desde a mig
+  // 169: sem o filtro, `ptsRaw[0]` podia ser a linha de OUTRA pessoa.
+  const ownerId = await getOwnerUserId(sb)
   const rows: Record<string, unknown>[] = []
   for (let from = 0; ; from += 1000) {
     const { data, error } = await sb
@@ -163,6 +179,7 @@ export async function getPilotWorks(): Promise<PilotWork[]> {
       )
       .not("user_score", "is", null)
       .eq("is_archived", false)
+      .eq("pilot_taste_scores.user_id", ownerId)
       .range(from, from + 999)
     if (error) throw new Error(`getPilotWorks: ${error.message}`)
     // cast via unknown: select montado por template string vira ParserError no
