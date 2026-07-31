@@ -62,13 +62,22 @@ describe("Revisão da avaliação IA — aplicar a todos", () => {
     clickApply("atual")
     expect(submitAiReview).not.toHaveBeenCalled()
 
+    // Tudo mantido na atual ⇒ a gravação não mudaria nada e o Salvar DESARMA
+    // (gating de sem-mudança). Clicar não grava.
+    save()
+    expect(submitAiReview).not.toHaveBeenCalled()
+    expect(screen.getByText(/salvar não muda nada/i)).toBeTruthy()
+
+    // Destoar UM critério pro sugerido rearma o Salvar e grava a mistura que o
+    // "Atual" em bloco posicionou nos demais.
+    fireEvent.click(screen.getByRole("button", { name: /Sugerido\s*5\.0/ }))
     save()
     expect(submitAiReview).toHaveBeenCalledTimes(1)
     const sent = submitAiReview.mock.calls[0][0].scores
     expect(sent).toEqual(
       expect.arrayContaining([
         { criterionSlug: "romance", acceptedScore: 8.0, wasEdited: true },
-        { criterionSlug: "drama", acceptedScore: 7.0, wasEdited: true },
+        { criterionSlug: "drama", acceptedScore: 5.0, wasEdited: false },
         // Igual nos dois lados: manter a atual não conta como edição.
         { criterionSlug: "art", acceptedScore: 8.5, wasEdited: false },
       ])
@@ -164,8 +173,10 @@ describe("Revisão da avaliação IA — aplicar a todos", () => {
     renderForm(0.4)
     clickApply("atual")
     save()
-    // Nenhuma nota nova da IA entra — não há por que perguntar.
-    expect(submitAiReview).toHaveBeenCalledTimes(1)
+    // Nenhuma nota nova da IA entra — não há por que perguntar. Com o gating de
+    // sem-mudança o Salvar nem arma: nada grava e o diálogo de fricção não abre.
+    expect(screen.queryByText(/Confiança baixa/i)).toBeNull()
+    expect(submitAiReview).not.toHaveBeenCalled()
   })
 })
 
