@@ -6,7 +6,9 @@ import { useState, useTransition } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
+  BookOpenText,
   ChevronUp,
+  Info,
   Loader2,
   LogIn,
   LogOut,
@@ -200,6 +202,24 @@ export function AccountChip({ compact = false }: { compact?: boolean }) {
               <Link href="/signup">
                 <UserPlus />
                 Criar conta
+              </Link>
+            </DropdownMenuItem>
+          </>
+        )}
+
+        {loaded && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/guia">
+                <BookOpenText />
+                Guia do app
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/sobre">
+                <Info />
+                Sobre a SatorIA
               </Link>
             </DropdownMenuItem>
           </>
