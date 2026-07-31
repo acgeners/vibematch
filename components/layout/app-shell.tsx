@@ -4,9 +4,9 @@ import { usePathname } from "next/navigation"
 import type { ReactNode } from "react"
 import { useCrossTabRefreshListener } from "@/lib/use-refresh"
 
-// Rotas de auth e o onboarding /bem-vindo renderizam full-bleed (sem
+// Rotas de auth, o onboarding /bem-vindo e a página pública /sobre renderizam full-bleed (sem
 // sidebar/nav/fabs). Aditivo: todo o resto do app mantém o chrome idêntico.
-const FULL_BLEED_PREFIXES = ["/login", "/signup", "/auth", "/bem-vindo"]
+const FULL_BLEED_PREFIXES = ["/login", "/signup", "/auth", "/bem-vindo", "/sobre"]
 
 function isFullBleedRoute(pathname: string): boolean {
   return FULL_BLEED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))

@@ -22,6 +22,7 @@ import { getTasteProfileStatusAction } from "@/server/actions/recommendations"
 import { getPredictionHealth } from "@/server/queries/calibration-guards"
 import { getAiUsageTotals } from "@/server/queries/ai-usage"
 import { getCurrentUserProfile } from "@/server/queries/current-user"
+import { getFirstStepsProgress } from "@/server/queries/onboarding-progress"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { AiQueueCard } from "@/components/dashboard/ai-queue-card"
 import { StatusDistribution } from "@/components/dashboard/status-distribution"
@@ -30,6 +31,7 @@ import { ProfileSummary } from "@/components/dashboard/profile-summary"
 import { HealthStrip } from "@/components/dashboard/health-strip"
 import { TopWorkCard } from "@/components/dashboard/top-work-card"
 import { DashboardGreeting } from "@/components/dashboard/dashboard-greeting"
+import { FirstStepsCard } from "@/components/dashboard/first-steps-card"
 import { Header } from "@/components/layout/header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -46,6 +48,7 @@ export default async function DashboardPage() {
     health,
     usage,
     profile,
+    firstSteps,
   ] = await Promise.all([
     getDashboardStats(),
     getScoreColorThresholds(),
@@ -56,6 +59,7 @@ export default async function DashboardPage() {
     getPredictionHealth(),
     getAiUsageTotals(),
     getCurrentUserProfile(),
+    getFirstStepsProgress(),
   ])
 
   const firstName = profile.displayName?.trim().split(/\s+/)[0]
@@ -98,6 +102,9 @@ export default async function DashboardPage() {
           </>
         }
       />
+
+      {/* Ponte do onboarding: fica até a conta sair do estado inicial, some sozinha. */}
+      {firstSteps && !firstSteps.complete && <FirstStepsCard progress={firstSteps} />}
 
       {/* Faixa de KPIs acionáveis */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">

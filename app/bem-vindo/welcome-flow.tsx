@@ -780,7 +780,7 @@ export function WelcomeFlow({ displayName }: { displayName: string | null }) {
 
             <div className={styles.foot}>
               <span className={styles.hint}>
-                tudo isso vive em <b>Preferências</b>
+                tudo isso vive em <b>Preferências</b> · o <a href="/guia" style={{ color: "var(--sky)" }}>guia</a> explica cada número
               </span>
               <div style={{ display: "flex", gap: 9 }}>
                 <button type="button" className={`${styles.btn} ${styles.btnQuiet}`} onClick={() => goTo(0)}>

@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { AuthHero } from "@/components/auth/auth-hero"
 import { LoginForm } from "@/components/auth/login-form"
 import { Wordmark } from "@/components/auth/wordmark"
@@ -21,6 +22,13 @@ export default function LoginPage() {
           </div>
 
           <LoginForm />
+
+          <p className="text-center text-[13px] text-muted-foreground">
+            Primeira vez aqui?{" "}
+            <Link href="/sobre" className="font-medium text-primary hover:underline">
+              Conheça a SatorIA
+            </Link>
+          </p>
         </div>
       </div>
     </div>
