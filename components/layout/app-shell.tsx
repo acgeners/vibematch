@@ -4,12 +4,12 @@ import { usePathname } from "next/navigation"
 import type { ReactNode } from "react"
 import { useCrossTabRefreshListener } from "@/lib/use-refresh"
 
-// Rotas de auth renderizam full-bleed (sem sidebar/nav/fabs). Aditivo: todo o
-// resto do app mantém o chrome idêntico ao de antes.
-const AUTH_PREFIXES = ["/login", "/signup", "/auth"]
+// Rotas de auth e o onboarding /bem-vindo renderizam full-bleed (sem
+// sidebar/nav/fabs). Aditivo: todo o resto do app mantém o chrome idêntico.
+const FULL_BLEED_PREFIXES = ["/login", "/signup", "/auth", "/bem-vindo"]
 
-function isAuthRoute(pathname: string): boolean {
-  return AUTH_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+function isFullBleedRoute(pathname: string): boolean {
+  return FULL_BLEED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 }
 
 export function AppShell({
@@ -27,7 +27,7 @@ export function AppShell({
   // qualquer return pra o hook rodar em toda rota (inclusive auth).
   useCrossTabRefreshListener()
 
-  if (isAuthRoute(pathname)) {
+  if (isFullBleedRoute(pathname)) {
     return <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">{children}</div>
   }
 

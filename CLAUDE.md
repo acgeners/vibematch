@@ -122,6 +122,17 @@ NULL) e o `config.toml` vem com todo provider externo `enabled = false` — dá
 local (`update auth.users set encrypted_password = extensions.crypt('…', extensions.gen_salt('bf'))`).
 Refazer depois de cada `db:pull`.
 
+🔴 **Signup no local não provisiona `user_settings`:** o `db:pull` dumpa só o schema `public`, e o
+trigger `on_auth_user_created` (mig 137) mora em **`auth.users`** — a FUNÇÃO `handle_new_user` vem
+no dump, o TRIGGER não. Sem ele, conta nova fica sem linha de settings (sem display_name, sem
+preferências — `setHideAdultContent` falha com "sem linha pro usuário atual"). Recriar depois de
+cada `db:pull`:
+
+```sql
+create trigger on_auth_user_created
+  after insert on auth.users for each row execute function public.handle_new_user();
+```
+
 **Corolário de backup:** este `pg_dump` é hoje o **único** backup que inclui schema, policies e
 functions. O `scripts/backup-db.mjs` grava **só dado** (as 162 functions, 47 policies, 11 triggers e 2
 views do `public` não vão nele), e `supabase/migrations/` não reconstrói o banco.

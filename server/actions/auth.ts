@@ -45,7 +45,10 @@ export async function signUpAction(_prev: AuthState, formData: FormData): Promis
   })
   if (error) return { error: error.message }
 
-  if (data.session) redirect("/")
+  // Cadastro com sessão → onboarding (decisão 1 do fluxo de boas-vindas: roda DEPOIS
+  // do cadastro, gravando direto nas tabelas). Quem confirma por email entra depois
+  // pela home — o card "Primeiros passos" (ponte) cobre esse caminho.
+  if (data.session) redirect("/bem-vindo")
   return { message: "Conta criada. Confirme pelo link enviado ao seu email para entrar." }
 }
 
