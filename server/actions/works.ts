@@ -35,7 +35,7 @@ import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
-import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin, ensurePermission, ensureSignedIn, getOwnerUserId } from "@/server/queries/current-user"
+import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin, ensurePermission, ensureSignedIn, getOwnerUserId, getSessionUserId } from "@/server/queries/current-user"
 import {
   writeReadingState,
   mirrorOwnerState,
@@ -1745,10 +1745,15 @@ export async function updateWork(id: string, values: WorkFormValues, aiMeta?: Cr
 
   if (error) return { error: { _root: [error.message] } }
 
-  // Espelha a parte pessoal do form (ver `personalPatchFromForm`). Sem isto, editar uma obra
-  // pelo form completo reescrevia a nota/♥/capítulos em `works` e deixava o espelho do dono
-  // para trás — e o espelho é o que a Fase 2 passa a usar como fonte.
-  const personalMirror = await mirrorOwnerState(await getOwnerUserId(), [id], personalPatchFromForm(data))
+  // Espelha a parte pessoal do form (ver `personalPatchFromForm`) no estado de QUEM EDITA.
+  // 🔴 Era `mirrorOwnerState(getOwnerUserId())`: com um 2º curador, a nota/♥/capítulos que ELE
+  // preenchesse no form iam pra linha do DONO — mesma classe do bug fechado em `createWork`.
+  // Com sessão (o form é interativo e o gate é ensureAdmin, então há sessão) vai no cliente de
+  // sessão, RLS valendo; o fallback pro espelho do dono preserva qualquer caminho sem sessão.
+  const editorId = await getSessionUserId()
+  const personalMirror = editorId
+    ? await writeReadingState(editorId, [id], personalPatchFromForm(data))
+    : await mirrorOwnerState(await getOwnerUserId(), [id], personalPatchFromForm(data))
   if (personalMirror.error) return { error: { _root: [personalMirror.error] } }
 
   // Sincronizar notas por critério: upsert presentes, deletar removidos.
@@ -2481,13 +2486,17 @@ async function doUpdateWorkExternalData(
     if (error) return { error: error.message }
 
     // `observations` é a única coluna PESSOAL que este caminho escreve (o resto é catálogo:
-    // título, status de publicação, capítulos totais, capas) — e agora vai SÓ pro espelho do
-    // dono. Só quando o caller de fato mandou o campo: `undefined` aqui significa "não mexi",
-    // não "apague".
+    // título, status de publicação, capítulos totais, capas). Vai pro estado de QUEM EDITA
+    // ("Atualizar dados" é interativo); nos caminhos SEM sessão (refresh automático/cascata)
+    // o campo não vem preenchido — e se vier, cai no espelho do dono, o comportamento antigo.
+    // Só quando o caller de fato mandou o campo: `undefined` significa "não mexi", não "apague".
     if (updates.observations !== undefined) {
-      const mirror = await mirrorOwnerState(await getOwnerUserId(), [id], {
-        observations: updates.observations ?? null,
-      })
+      const editorId = await getSessionUserId()
+      const mirror = editorId
+        ? await writeReadingState(editorId, [id], { observations: updates.observations ?? null })
+        : await mirrorOwnerState(await getOwnerUserId(), [id], {
+            observations: updates.observations ?? null,
+          })
       if (mirror.error) return { error: mirror.error }
     }
 
