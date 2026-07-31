@@ -337,6 +337,8 @@ export type ReadingStatePatch = Partial<{
 /** Gosto (Fatia 2a): nota, anotações, interesse ♥ e as 8 pós-leitura. */
 export type TasteStatePatch = Partial<{
   user_score: number | null
+  /** Nota rápida 0–10 (mig 171). NÃO é o rótulo — ver lib/onboarding/quick-score-precedence.ts. */
+  quick_score: number | null
   observations: string | null
   observation_adjustment: number
   synopsis_quality: string | null
