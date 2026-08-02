@@ -15,6 +15,44 @@ function isPublicationHiatus(statusId: number | null): boolean {
   return statusId != null && PUBLICATION_STATUSES_BY_ID[statusId]?.status === "Hiatus"
 }
 
+function isOngoing(statusId: number | null): boolean {
+  return statusId != null && PUBLICATION_STATUSES_BY_ID[statusId]?.status === "Ongoing"
+}
+
+/**
+ * O rótulo da banda depende de a obra ainda estar saindo.
+ *
+ * A banda é a mesma (≥85% lido), mas o que 85% SIGNIFICA muda: numa obra concluída falta
+ * pouco para acabar — "quase no fim"; numa que ainda publica, não há fim à vista, você está é
+ * alcançando os lançamentos — "quase em dia". Dizer "quase no fim" de uma obra em publicação
+ * é simplesmente falso, e o leitor percebe.
+ */
+function bandLabel(publicationStatusId: number | null): string {
+  return isOngoing(publicationStatusId) ? "quase em dia" : "quase no fim"
+}
+
+/**
+ * Separa "Também em leitura" entre o que ainda publica e o resto, na mesma divisão que a
+ * /leitura usa ("Em andamento" × "Concluída & outras").
+ *
+ * O motivo é que "1 não lido" quer dizer coisas diferentes nos dois casos: numa obra em
+ * publicação é o capítulo desta semana, e amanhã tem mais; numa concluída é o que falta para
+ * acabar, e não vai crescer. Numa lista única as duas se confundem e a urgência some.
+ *
+ * Preserva a ordem de entrada dentro de cada grupo (já vem por atividade recente) e omite
+ * grupo vazio, para não sobrar um cabeçalho solto.
+ */
+function groupByPublication(
+  items: ContinueReadingItem[],
+): Array<{ label: string; items: ContinueReadingItem[] }> {
+  const ongoing = items.filter((i) => isOngoing(i.publicationStatusId))
+  const others = items.filter((i) => !isOngoing(i.publicationStatusId))
+  return [
+    { label: "Em publicação", items: ongoing },
+    { label: "Concluídas e outras", items: others },
+  ].filter((g) => g.items.length > 0)
+}
+
 /**
  * Escolhe a obra em destaque e a ordem das demais.
  *
@@ -123,7 +161,7 @@ export function ContinueHero({
           aria-hidden
           className="absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-primary to-emerald-400"
         />
-        <div className="relative w-[120px] shrink-0 sm:w-[132px]">
+        <div className="relative w-[148px] shrink-0 sm:w-[184px]">
           <CoverImage
             url={main.coverUrl}
             alt={main.title}
@@ -145,7 +183,7 @@ export function ContinueHero({
                 className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[9px] text-emerald-600 dark:text-emerald-400"
                 title="Mesma regra da /leitura: 85–99% lido e leitura recente"
               >
-                quase no fim
+                {bandLabel(main.publicationStatusId)}
               </span>
             )}
           </p>
@@ -232,40 +270,51 @@ export function ContinueHero({
             Só esta por enquanto.
           </p>
         ) : (
-          rest.slice(0, 4).map((item) => {
-            const pending = item.pending != null && item.pending > 0
-            return (
-              <Link
-                key={item.id}
-                href={`/titles/${item.id}`}
-                className="flex items-center gap-3 rounded-lg p-1.5 transition-colors hover:bg-muted/50"
-              >
-                <CoverImage
-                  url={item.coverUrl}
-                  alt={item.title}
-                  className="h-11 w-8 shrink-0 rounded-md object-cover"
-                />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-[13px] font-semibold">{item.title}</span>
-                  <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                    {item.totalChapters
-                      ? `${item.chaptersRead ?? 0}/${item.totalChapters}`
-                      : `${item.chaptersRead ?? 0}`}
-                    {pending ? ` · ${item.pending} não ${item.pending === 1 ? "lido" : "lidos"}` : " · em dia"}
-                  </span>
-                </span>
-                {pending && (
-                  <span
-                    className={cn(
-                      "shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary",
-                    )}
+          groupByPublication(rest.slice(0, 5)).map(({ label, items: group }) => (
+            <div key={label} className="flex flex-col gap-1">
+              {/* Rótulo do grupo: "capítulo novo" quer dizer coisas diferentes numa obra que
+                  ainda sai e numa que acabou — misturar as duas numa lista só esconde isso. */}
+              <p className="px-1 pt-1 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                {label}
+              </p>
+              {group.map((item) => {
+                const pending = item.pending != null && item.pending > 0
+                return (
+                  <Link
+                    key={item.id}
+                    href={`/titles/${item.id}`}
+                    className="flex items-center gap-3 rounded-lg p-1.5 transition-colors hover:bg-muted/50"
                   >
-                    novo
-                  </span>
-                )}
-              </Link>
-            )
-          })
+                    <CoverImage
+                      url={item.coverUrl}
+                      alt={item.title}
+                      className="h-11 w-8 shrink-0 rounded-md object-cover"
+                    />
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-[13px] font-semibold">{item.title}</span>
+                      <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                        {item.totalChapters
+                          ? `${item.chaptersRead ?? 0}/${item.totalChapters}`
+                          : `${item.chaptersRead ?? 0}`}
+                        {pending
+                          ? ` · ${item.pending} não ${item.pending === 1 ? "lido" : "lidos"}`
+                          : " · em dia"}
+                      </span>
+                    </span>
+                    {pending && (
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary",
+                        )}
+                      >
+                        novo
+                      </span>
+                    )}
+                  </Link>
+                )
+              })}
+            </div>
+          ))
         )}
 
         {items.length > 5 && (

@@ -17,6 +17,15 @@ export const metadata = { title: "Painel — SatorIA" }
 /**
  * O painel — a saúde da biblioteca e do sistema.
  *
+ * 🔴 PROVISÓRIO — REPENSAR POR ÚLTIMO (decidido 2026-08-02). No estado atual esta página
+ * "não tem valor real": sobrou o que a vitrine não quis, não o que alguém iria procurar aqui.
+ * Fica assim de propósito enquanto o resto da navegação assenta; quando as outras telas
+ * estiverem no lugar, decidir o que de fato pertence a um painel — e o que é redundante com
+ * `/conta/perfil` (o `ProfileSummary` daqui provavelmente é), com `/ai-usage` (o custo) e com
+ * a console de curadoria (fila de manutenção e telemetria de saúde). É possível que a
+ * conclusão seja que ele não deve existir e cada bloco volte para a página dona do assunto.
+ * NÃO investir em polimento aqui até essa decisão.
+ *
  * Era a home até 2026-08-02. Ao mover, o arquivo veio inteiro e passou a duplicar a vitrine:
  * os mesmos quatro contadores de atividade, o mesmo "Continue lendo" e a mesma lista de
  * melhores previstas, todos servidos das mesmas queries em duas telas. Era essa duplicação —

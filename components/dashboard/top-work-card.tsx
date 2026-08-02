@@ -3,6 +3,7 @@ import type { ScoreColorThresholds } from "@/components/ui/score-badge"
 import { PublicationStatusBadge, PersonalStatusBadge } from "@/components/ui/status-badge"
 import { AdultBadge } from "@/components/ui/adult-badge"
 import { CoverImage } from "@/components/ui/cover-image"
+import { QualityHearts } from "@/components/ui/quality-hearts"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 
 interface TopWorkCardProps {
@@ -15,6 +16,9 @@ interface TopWorkCardProps {
     publicationStatusId: number | null
     personalStatusId: number | null
     isAdult: boolean
+    totalChapters?: number | null
+    /** Interesse declarado (♥…♥♥♥♥). Ausente = ainda não avaliou a sinopse. */
+    synopsisQuality?: string | null
   }
   scoreThresholds: ScoreColorThresholds | null
   /**
@@ -58,6 +62,25 @@ export function TopWorkCard({ rank, work, scoreThresholds, hideRank = false }: T
         workId={work.id}
         className="line-clamp-2 text-sm font-semibold leading-snug hover:underline"
       />
+
+      {/* Capítulos + interesse: as duas perguntas que vêm logo depois de "gostei da capa" —
+          o tamanho da empreitada e o que EU já achei dela. Some quando não há dado, em vez de
+          reservar espaço vazio (o card já iguala altura pelo `h-full` do contêiner). */}
+      {(work.totalChapters != null || work.synopsisQuality) && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          {work.totalChapters != null && (
+            <span className="font-mono tabular-nums">{work.totalChapters} cap</span>
+          )}
+          {work.synopsisQuality && (
+            <QualityHearts
+              quality={work.synopsisQuality}
+              showEmpty={false}
+              className="text-[11px]"
+            />
+          )}
+        </div>
+      )}
+
       <div className="mt-auto flex flex-wrap gap-1 pt-1">
         {work.isAdult && <AdultBadge className="px-1.5 py-0" />}
         <PublicationStatusBadge statusId={work.publicationStatusId} />
