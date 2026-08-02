@@ -21,6 +21,27 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 })
 
+/**
+ * 🔴 NÃO REMOVA sem ler isto — e sem substituir por outra garantia.
+ *
+ * Este app é inteiramente per-user: quase toda página serve dado de QUEM OLHA (estado de
+ * leitura, Nota Prevista, favoritos, filas). Uma rota prerenderizada congela no HTML do build
+ * o que era verdade para quem (ou ninguém) estava logado naquele instante, e passa a servir
+ * isso para todo mundo — sem erro, sem log, com a página renderizando normalmente. É a mesma
+ * classe de falha do "anônimo vira dono" (ver `getScoresReader`), por outro mecanismo.
+ *
+ * Até 2026-08-02 essa garantia existia por ACIDENTE: o layout lia `cookies()` para saber se a
+ * sidebar estava recolhida, e isso bastava para marcar todas as rotas como dinâmicas. Quando a
+ * sidebar virou barra superior, o `cookies()` saiu junto — e a rede caiu sem que nada
+ * apontasse para ela. Esta linha existe para que a garantia pare de depender de um efeito
+ * colateral que qualquer refatoração inocente derruba.
+ *
+ * O preço: as institucionais (`/sobre`, `/guia`, `/login`, `/signup`) perdem prerender. Para
+ * liberar essas, o caminho é MEDIR — rodar `next build`, ler a tabela `ƒ`/`○` e marcar rota a
+ * rota — nunca simplesmente apagar esta linha.
+ */
+export const dynamic = "force-dynamic"
+
 export const metadata: Metadata = {
   title: "SatorIA",
   description: "Curadoria pessoal movida por IA: a SatorIA aprende o seu gosto e recomenda os próximos mangás e manhwas à altura dele.",
