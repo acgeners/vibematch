@@ -7,51 +7,53 @@ export type HeroWork = {
   coverUrl: string
   nota: number | null
   publicationStatusId: number | null
-  personalStatusId: number | null
 }
 
 /**
- * Capas reais pro painel do login/signup — as melhores obras por Nota Prevista
- * que tenham capa. Público (roda no login deslogado): mostra o catálogo do
- * dono como vitrine. Over-fetch + filtra pelas que têm capa. Falha silenciosa
- * (retorna []) — o hero degrada pro fundo sem cascata, nunca derruba a página.
+ * Capas reais pro painel do login/signup — as melhores obras por MÉDIA DAS PLATAFORMAS que
+ * tenham capa. Over-fetch + filtra pelas que têm capa. Falha silenciosa (retorna []) — o hero
+ * degrada pro fundo sem cascata, nunca derruba a página.
+ *
+ * ⚠️ Ordenava por `expected_score` e lia `works_owner` (a view do DONO), trazendo até o
+ * `personal_status_id` dele — numa tela que roda DESLOGADA. Era o mesmo padrão do eixo público
+ * corrigido em `getScoresReader`: preferência de uma pessoa exibida como se fosse a avaliação
+ * do acervo, aqui na primeira tela que um visitante vê. Agora usa `works` e um campo de
+ * catálogo; o status pessoal sai do tipo, porque não há "pessoal" sem sessão.
  */
 export async function getAuthHeroWorks(limit = 21): Promise<HeroWork[]> {
   const supabase = createAdminClient()
-  // Lê o dado PESSOAL do DONO (personal_status_id) → vem do espelho via a view
-  // `works_owner`, não da linha compartilhada de `works` (que vai perder essas colunas).
+  // `works` (não `works_owner`): a view é a fonte do DONO. Numa tela deslogada, nenhuma
+  // coluna pessoal deve entrar — nem de enfeite.
   const { data, error } = await supabase
     .from("calculated_scores")
     .select(
-      `expected_score, works_owner!inner(title, is_archived, publication_status_id, personal_status_id, work_covers(url, is_primary, position))`,
+      `platform_avg, works!inner(title, is_archived, publication_status_id, work_covers(url, is_primary, position))`,
     )
-    .not("expected_score", "is", null)
-    .eq("works_owner.is_archived", false)
-    .order("expected_score", { ascending: false })
+    .not("platform_avg", "is", null)
+    .eq("works.is_archived", false)
+    .order("platform_avg", { ascending: false })
     .limit(90)
 
   if (error) return []
 
   const rows = (data ?? []) as unknown as Array<{
-    expected_score: number | null
-    works_owner: {
+    platform_avg: number | null
+    works: {
       title: string
       publication_status_id: number | null
-      personal_status_id: number | null
       work_covers?: { url: string; is_primary: boolean }[] | null
     }
   }>
 
   const out: HeroWork[] = []
   for (const row of rows) {
-    const coverUrl = pickPrimaryCover(row.works_owner.work_covers)
+    const coverUrl = pickPrimaryCover(row.works.work_covers)
     if (!coverUrl) continue
     out.push({
-      title: row.works_owner.title,
+      title: row.works.title,
       coverUrl,
-      nota: row.expected_score,
-      publicationStatusId: row.works_owner.publication_status_id,
-      personalStatusId: row.works_owner.personal_status_id,
+      nota: row.platform_avg,
+      publicationStatusId: row.works.publication_status_id,
     })
     if (out.length >= limit) break
   }
