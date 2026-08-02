@@ -155,29 +155,37 @@ export function ContinueHero({
   const nextChapter = (main.chaptersRead ?? 0) + 1
 
   return (
-    // `items-start`: sem isso o grid estica os dois cards à altura do mais alto (a lista, que
-    // cresce com o número de obras) e o destaque ganha um vão morto embaixo do botão.
-    <section className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+    // Os dois cards voltam a ter a MESMA altura (stretch é o padrão do grid). `items-start`
+    // resolvia o vão interno mas criava um degrau entre os dois blocos — pior. O equilíbrio
+    // vem de outro lado: a lista lateral mostra 4 itens (não 5), o que a deixa perto da altura
+    // natural do destaque, e a capa acompanha o que sobrar via `h-full`.
+    <section className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
       {/* ── a obra em foco ─────────────────────────────────────────── */}
       <article className="relative flex gap-5 overflow-hidden rounded-2xl border border-border/70 bg-card p-5 shadow-md">
         <span
           aria-hidden
           className="absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-primary to-emerald-400"
         />
-        <div className="relative w-[148px] shrink-0 sm:w-[184px]">
+        {/* `min-h-[248px]` garante a proporção 3/4 na largura de 184px; daí pra cima a capa
+            acompanha a altura do card (`h-full` + `object-cover`) em vez de deixar faixa vazia
+            ao lado dela. */}
+        <div className="relative min-h-[248px] w-[148px] shrink-0 sm:w-[184px]">
           <CoverImage
             url={main.coverUrl}
             alt={main.title}
-            className="aspect-[3/4] w-full rounded-lg object-cover shadow-sm"
+            className="h-full w-full rounded-lg object-cover shadow-sm"
           />
           <span className="absolute right-1.5 top-1.5">
             <ScoreBadge score={main.expectedScore} size="sm" thresholds={thresholds} />
           </span>
         </div>
 
-        {/* `justify-start`: a coluna de texto começa na MESMA linha do topo da capa. Centrado
-            (como estava), o título flutuava no meio e nada alinhava com a imagem. */}
-        <div className="flex min-w-0 flex-1 flex-col justify-start gap-2">
+        {/* Duas âncoras, não uma pilha solta: a informação encosta no TOPO (mesma linha do
+            topo da capa) e a ação encosta na BASE (mesma linha do pé da capa). Assim a coluna
+            ocupa a altura inteira do card sem espaço morto no meio nem no fim — foi o que
+            faltou nas duas tentativas anteriores, uma centrada e outra só no topo. */}
+        <div className="flex min-w-0 flex-1 flex-col justify-between gap-3">
+          <div className="flex flex-col gap-2">
           <p className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <BookOpen className="size-3" />
@@ -245,7 +253,9 @@ export function ContinueHero({
             </p>
           )}
 
-          <div className="mt-1 flex flex-wrap gap-2">
+          </div>
+
+          <div className="flex flex-wrap gap-2">
             {main.comixUrl ? (
               <Button asChild size="sm">
                 <a href={main.comixUrl} target="_blank" rel="noopener noreferrer">
@@ -282,7 +292,7 @@ export function ContinueHero({
             Só esta por enquanto.
           </p>
         ) : (
-          groupByPublication(rest.slice(0, 5)).map(({ label, items: group }) => (
+          groupByPublication(rest.slice(0, 4)).map(({ label, items: group }) => (
             <div key={label} className="flex flex-col gap-1">
               {/* Rótulo do grupo: "capítulo novo" quer dizer coisas diferentes numa obra que
                   ainda sai e numa que acabou — misturar as duas numa lista só esconde isso. */}
