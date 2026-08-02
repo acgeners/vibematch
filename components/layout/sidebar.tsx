@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
+  Home,
   LayoutDashboard,
   BookOpen,
   BookMarked,
@@ -119,13 +120,16 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Principal",
     accent: "primary",
     items: [
-      { href: "/", icon: LayoutDashboard, label: "Dashboard" },
+      // "/" deixou de ser o painel de KPIs e virou a vitrine (2026-08-02); os números foram
+      // pra /painel. O rótulo acompanha — "Dashboard" apontando pra uma vitrine confundiria.
+      { href: "/", icon: Home, label: "Início" },
       { href: "/titles", icon: BookOpen, label: "Títulos" },
       { href: "/leitura", icon: BookMarked, label: "Acompanhamento" },
       { href: "/ranking", icon: Trophy, label: "Ranking" },
       { href: "/favorites", icon: Heart, label: "Favoritos" },
       { href: "/recommendations", icon: Wand2, label: "Recomendações" },
       { href: "/fila-recomendacao", icon: Clock, label: "Fila de Recomendação", badgeKey: "rec-queue", requiresSignedIn: true },
+      { href: "/painel", icon: LayoutDashboard, label: "Painel" },
     ],
   },
   {
