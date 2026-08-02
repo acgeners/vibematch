@@ -2,17 +2,30 @@
 
 import { useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { toast } from "sonner"
 import { useRefresh } from "@/lib/use-refresh"
-import { Loader2, Check, AlertTriangle, X, Sparkles, RefreshCw, ImageOff, ListChecks } from "lucide-react"
+import { Loader2, AlertTriangle, X, Sparkles, RefreshCw, ImageOff, ListChecks, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { getCoverImageSrc } from "@/lib/image-proxy"
+import { useIsAdmin } from "@/components/layout/admin-context"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
 import type { ReviewQueueMark } from "@/components/titles/update-data-dialog"
 import { enrichWorkExternal } from "@/server/actions/enrich"
 import type { EnrichResult, ReviewWork } from "@/server/actions/enrich"
+import { deleteWork } from "@/server/actions/works"
 
 type RowState = EnrichResult | "running" | undefined
 
@@ -68,6 +81,7 @@ export function ImportReview({
   // decrementar o contador da aba.
   onReviewed?: (workId: string) => void
 }) {
+  const isAdmin = useIsAdmin()
   const refresh = useRefresh()
   const reload = onReload ?? (() => refresh())
   const [states, setStates] = useState<Record<string, RowState>>({})
@@ -82,6 +96,9 @@ export function ImportReview({
   /** Revisão avulsa (botão "Revisar" da linha) — fora da fila. */
   const [soloId, setSoloId] = useState<string | null>(null)
   const [summary, setSummary] = useState<QueueSummary | null>(null)
+  /** Obra(s) a excluir, aguardando confirmação — 1 id na exclusão da linha, várias no lote. */
+  const [deleteTarget, setDeleteTarget] = useState<{ ids: string[] } | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const byId = useMemo(() => new Map(works.map((w) => [w.id, w])), [works])
   const visibleWorks = useMemo(() => works.filter((w) => !dismissed.has(w.id)), [works, dismissed])
@@ -91,6 +108,8 @@ export function ImportReview({
     [visibleWorks, selected],
   )
   const selectedCoverless = selectedWorks.filter((w) => w.coverCount === 0)
+  // Sem capa E sem sinopse — a página de "Revisar" dessas não tem nada pra mostrar.
+  const selectedEmpty = selectedWorks.filter((w) => w.coverCount === 0 && w.synopsisCount === 0)
 
   const activeId = queue ? queue.ids[queue.cursor] : soloId
   const activeWork = activeId ? byId.get(activeId) ?? null : null
@@ -106,6 +125,33 @@ export function ImportReview({
         [id]: { workId: id, status: "error", message: err instanceof Error ? err.message : String(err) },
       }))
     }
+  }
+
+  const handleDelete = async (target: { ids: string[] }) => {
+    setDeleting(true)
+    const outcomes = await Promise.all(
+      target.ids.map(async (id) => ({ id, result: await deleteWork(id) })),
+    )
+    setDeleting(false)
+    setDeleteTarget(null)
+
+    const succeeded = outcomes.filter((o) => !o.result.error).map((o) => o.id)
+    const failed = outcomes.filter((o) => o.result.error)
+
+    if (succeeded.length > 0) {
+      setDismissed((prev) => new Set([...prev, ...succeeded]))
+      setSelected((prev) => {
+        const next = new Set(prev)
+        succeeded.forEach((id) => next.delete(id))
+        return next
+      })
+    }
+    if (failed.length > 0) {
+      toast.error(failed.length === 1 ? failed[0].result.error : `${failed.length} obras não puderam ser excluídas.`)
+    } else {
+      toast.success(succeeded.length > 1 ? `${succeeded.length} obras excluídas.` : "Obra excluída.")
+    }
+    if (succeeded.length > 0) await reload()
   }
 
   // Só busca dados das que ainda não têm capa e não foram processadas nesta sessão.
@@ -268,6 +314,18 @@ export function ImportReview({
               {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               Buscar dados das sem capa ({selectedCoverless.length})
             </Button>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={selectedEmpty.length === 0}
+                className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setDeleteTarget({ ids: selectedEmpty.map((w) => w.id) })}
+              >
+                <Trash2 className="h-4 w-4" />
+                Excluir sem dados ({selectedEmpty.length})
+              </Button>
+            )}
             <Button size="sm" onClick={() => startQueue(selectedWorks.map((w) => w.id))}>
               <ListChecks className="h-4 w-4" /> Revisar em sequência ({selectedWorks.length})
             </Button>
@@ -329,7 +387,7 @@ export function ImportReview({
           return (
             <div
               key={work.id}
-              className={cn("flex items-center gap-3 p-2.5 text-sm", isSelected && "bg-primary/[0.06]")}
+              className={cn("flex items-center gap-3 p-3 text-sm", isSelected && "bg-primary/[0.06]")}
             >
               <Checkbox
                 checked={isSelected}
@@ -361,10 +419,8 @@ export function ImportReview({
                 <Link href={`/titles/${work.id}`} className="block truncate font-medium hover:underline">
                   {work.title}
                 </Link>
-                <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                  <Badge variant="outline" className="text-[11px]">{coverCount} capas</Badge>
-                  <Badge variant="outline" className="text-[11px]">{synopsisCount} sinopses</Badge>
-                  <Badge variant="secondary" className="text-[11px]">IA: {work.aiEvalStatus}</Badge>
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  <span>{coverCount} capas · {synopsisCount} sinopses</span>
                   {skippedIds.has(work.id) && (
                     <Badge variant="secondary" className="text-[11px]">pulada</Badge>
                   )}
@@ -372,22 +428,24 @@ export function ImportReview({
                 </div>
               </div>
 
-              {/* ações */}
-              <div className="flex shrink-0 items-center gap-2">
-                {work.coverCount === 0 && !enriched && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={state === "running" || running}
-                    onClick={() => enrichOne(work.id)}
-                  >
-                    {state === "running" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                    Buscar dados
-                  </Button>
-                )}
+              {/* ações — "Revisar" já dispara a mesma busca externa ao abrir, então
+                  não repetimos "Buscar dados" aqui (segue só como ação de lote). */}
+              <div className="flex shrink-0 items-center gap-1">
                 <Button variant="ghost" size="sm" onClick={() => setSoloId(work.id)}>
                   Revisar
                 </Button>
+                {isAdmin && coverCount === 0 && synopsisCount === 0 && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    title="Excluir obra"
+                    aria-label={`Excluir ${work.title}`}
+                    onClick={() => setDeleteTarget({ ids: [work.id] })}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
             </div>
           )
@@ -433,6 +491,43 @@ export function ImportReview({
           }}
         />
       )}
+
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(v) => { if (!v) setDeleteTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteTarget && deleteTarget.ids.length > 1
+                ? `Excluir ${deleteTarget.ids.length} obras sem dados?`
+                : "Excluir obra permanentemente?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget && deleteTarget.ids.length > 1
+                ? "Nenhuma delas tem capa ou sinopse salva. Esta ação não pode ser desfeita."
+                : "Esta ação não pode ser desfeita. A obra e todos os dados associados serão removidos."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteTarget && deleteTarget.ids.length > 1 && (
+            <ul className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border border-border/60 p-2 text-sm">
+              {deleteTarget.ids.map((id) => (
+                <li key={id} className="truncate rounded px-1.5 py-1">
+                  {byId.get(id)?.title ?? id}
+                </li>
+              ))}
+            </ul>
+          )}
+          <AlertDialogFooter className="gap-2 sm:justify-between">
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleting}
+              onClick={() => deleteTarget && void handleDelete(deleteTarget)}
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -440,11 +535,9 @@ export function ImportReview({
 function EnrichStatus({ state }: { state: RowState }) {
   if (!state || state === "running") return null
   if (state.status === "enriched") {
-    return (
-      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-500">
-        <Check className="h-3.5 w-3.5" /> {state.sources.slice(0, 4).join(", ")}
-      </span>
-    )
+    // Fonte encontrada não pede ação nenhuma — fica neutro pra não competir
+    // com o âmbar/vermelho das linhas que precisam de atenção.
+    return <span>{state.sources.slice(0, 4).join(", ")}</span>
   }
   if (state.status === "needs_review") {
     return (

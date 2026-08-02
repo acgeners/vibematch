@@ -64,6 +64,7 @@ export async function predictSynopsisQualityForWorkAction(
       revalidatePath("/titles")
       revalidatePath(`/titles/${workId}`)
       revalidatePath("/ai-evaluation")
+      revalidatePath("/fila-recomendacao")
       revalidateTag("ai-eval-tab-counts", "max")
     }
 
@@ -238,6 +239,7 @@ export async function applySynopsisPredictionForWorks(
 
   if (applied > 0) await markRecalcPending("applySynopsisPredictionBatch")
   revalidatePath("/ai-evaluation")
+  revalidatePath("/fila-recomendacao")
   revalidateTag("ai-eval-tab-counts", "max")
   revalidatePath("/titles")
   revalidatePath("/ranking")
@@ -277,6 +279,7 @@ export async function skipSynopsisInterestAction(
       return { error: `Falha ao pular: ${mirror.error}` }
     }
     revalidatePath("/ai-evaluation")
+    revalidatePath("/fila-recomendacao")
     revalidateTag("ai-eval-tab-counts", "max")
     return { data: { skipped } }
   } catch (err) {
@@ -287,7 +290,7 @@ export async function skipSynopsisInterestAction(
 /**
  * Atribui (ou limpa) o Interesse Sinopse MANUAL (`synopsis_quality`) diretamente — sem
  * passar pela previsão IA. É o caminho GRÁTIS de triagem manual (fila
- * /ai-evaluation?tab=sinopse e os corações da faixa na página da obra).
+ * /fila-recomendacao?tab=sinopse e os corações da faixa na página da obra).
  * `quality = null` limpa o campo ("Não avaliada").
  *
  * ⚠️ NÃO é `ensureAdmin()`, e a distinção importa: PREVER o interesse por IA é que é
@@ -342,6 +345,7 @@ export async function setSynopsisQualityAction(
     revalidatePath("/titles/[id]", "page")
     revalidatePath("/ranking")
     revalidatePath("/ai-evaluation")
+    revalidatePath("/fila-recomendacao")
     revalidateTag("ai-eval-tab-counts", "max")
 
     return { data: { synopsisQuality: quality } }
@@ -526,6 +530,7 @@ export async function runSynopsisInterestBatchAction(
     })
 
     revalidatePath("/ai-evaluation")
+    revalidatePath("/fila-recomendacao")
     revalidateTag("ai-eval-tab-counts", "max")
     revalidatePath("/titles")
     return { status: "ok", report }

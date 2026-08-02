@@ -38,19 +38,28 @@ export async function getReadAckSets(): Promise<Map<ReadQueue, Set<string>>> {
 }
 
 /**
- * IDs de TODOS os membros de cada fila (com os estados "acionáveis" de cada uma),
- * sem filtros de UI. Usado por "marcar tudo como lido" — acka o queue inteiro,
- * não só o subconjunto que o usuário está filtrando. Roda as 6 leituras em
- * paralelo (countOnly onde existe pra sair barato).
+ * IDs de TODOS os membros de cada fila pedida (com os estados "acionáveis" de
+ * cada uma), sem filtros de UI. Usado por "marcar tudo como lido" — acka o
+ * queue inteiro, não só o subconjunto que o usuário está filtrando. `queues`
+ * decide QUAIS das 5 leituras rodam (cada página só pede as suas — /ai-evaluation
+ * e /fila-recomendacao dividem o antigo conjunto de 5); default é todas, pra
+ * chamadas que ainda não precisam escolher.
  */
-export async function getAllQueueMemberIds(): Promise<Record<ReadQueue, string[]>> {
+export async function getAllQueueMemberIds(
+  queues: readonly ReadQueue[] = READ_QUEUES,
+): Promise<Record<ReadQueue, string[]>> {
+  const want = (q: ReadQueue) => queues.includes(q)
   const [attr, veredito, interesse, noReviews, noTags, untracked] = await Promise.all([
-    getAttributesMemberIds(),
-    getAlignmentQueueWorks({ states: ["stale", "unranked"], countOnly: true }),
-    getSynopsisQueueWorks({ states: ["unpredicted", "stale"], countOnly: true }),
-    getWorksWithoutReviews({}, { countOnly: true }),
-    getWorksWithoutTags({}, { countOnly: true }),
-    getUntrackedWorks({}),
+    want("attr") ? getAttributesMemberIds() : Promise.resolve([]),
+    want("veredito")
+      ? getAlignmentQueueWorks({ states: ["stale", "unranked"], countOnly: true })
+      : Promise.resolve([]),
+    want("interesse")
+      ? getSynopsisQueueWorks({ states: ["unpredicted", "stale"], countOnly: true })
+      : Promise.resolve([]),
+    want("tags_reviews") ? getWorksWithoutReviews({}, { countOnly: true }) : Promise.resolve({ ids: [] as string[] }),
+    want("tags_reviews") ? getWorksWithoutTags({}, { countOnly: true }) : Promise.resolve({ ids: [] as string[] }),
+    want("untracked") ? getUntrackedWorks({}) : Promise.resolve([]),
   ])
   const tagsReviews = new Set<string>([...(noReviews.ids ?? []), ...(noTags.ids ?? [])])
   return {
@@ -63,18 +72,21 @@ export async function getAllQueueMemberIds(): Promise<Record<ReadQueue, string[]
 }
 
 /**
- * Estado global do botão "Marcar tudo como lido" (defaults das 5 filas, sem
- * filtros de UI): `allRead` = existe algo lido E não sobra nenhuma não-lida
- * (⇒ o botão vira "Desmarcar tudo"); caso contrário oferece marcar.
+ * Estado do botão "Marcar tudo como lido" pras filas pedidas (sem filtros de
+ * UI): `allRead` = existe algo lido E não sobra nenhuma não-lida nessas filas
+ * (⇒ o botão vira "Desmarcar tudo"); caso contrário oferece marcar. Cada
+ * página passa só o subconjunto de `READ_QUEUES` que ela mostra.
  */
-export async function getEvalReadSummary(): Promise<{ allRead: boolean; hasAnyRead: boolean; totalUnread: number }> {
-  const [members, acks] = await Promise.all([getAllQueueMemberIds(), getReadAckSets()])
+export async function getEvalReadSummary(
+  queues: readonly ReadQueue[] = READ_QUEUES,
+): Promise<{ allRead: boolean; hasAnyRead: boolean; totalUnread: number }> {
+  const [members, acks] = await Promise.all([getAllQueueMemberIds(queues), getReadAckSets()])
   let totalUnread = 0
-  for (const q of READ_QUEUES) {
+  for (const q of queues) {
     const ack = acks.get(q)!
     totalUnread += members[q].filter((id) => !ack.has(id)).length
   }
-  const hasAnyRead = [...acks.values()].some((s) => s.size > 0)
+  const hasAnyRead = queues.some((q) => (acks.get(q)?.size ?? 0) > 0)
   return { allRead: hasAnyRead && totalUnread === 0, hasAnyRead, totalUnread }
 }
 
@@ -95,28 +107,35 @@ async function getAttributesMemberIds(): Promise<string[]> {
 }
 
 /**
- * Contagem do badge "Avaliação IA" da barra lateral = união DISTINTA das obras
- * NÃO-LIDAS nas 3 primeiras abas (atributos + Veredito IA "stale" + Interesse
- * "não previsto"), com os defaults das próprias abas. Subtrai os acks por fila
- * e conta ids distintos (uma obra em 2 filas não conta 2×). Some (retorna 0)
- * quando tudo está lido/resolvido — a sidebar oculta o badge no zero.
- *
- * Fresco a cada chamada (sem `unstable_cache`): 3 leituras de ids em paralelo +
- * a tabela de acks; barato com o DB em São Paulo (~30ms/round-trip).
+ * Contagem do badge "Curadoria da Obra" da barra lateral = obras NÃO-LIDAS na
+ * fila de atributos (avaliação IA pendente/aguardando revisão). Sucessora da
+ * antiga `getEvalBadgeUnreadCount`, que unia attr+veredito+interesse — dividida
+ * quando as 3 primeiras abas de /ai-evaluation viraram duas páginas (Curadoria
+ * da Obra × Fila de Recomendação). Fresco a cada chamada (sem `unstable_cache`).
  */
-export async function getEvalBadgeUnreadCount(): Promise<number> {
-  const [attrIds, veredito, interesse, ackSets] = await Promise.all([
-    getAttributesMemberIds(),
+export async function getCuradoriaBadgeUnreadCount(): Promise<number> {
+  const [attrIds, ackSets] = await Promise.all([getAttributesMemberIds(), getReadAckSets()])
+  const ackAttr = ackSets.get("attr")!
+  return attrIds.filter((id) => !ackAttr.has(id)).length
+}
+
+/**
+ * Contagem do badge "Fila de Recomendação" da barra lateral = união DISTINTA
+ * das obras NÃO-LIDAS em Veredito IA "stale" + Interesse "não previsto".
+ * Metade que sobrou da antiga `getEvalBadgeUnreadCount` depois da divisão em
+ * duas páginas (ver `getCuradoriaBadgeUnreadCount`). "Untracked" não entra —
+ * nunca entrou no badge original, mesmo hoje morando na mesma página.
+ */
+export async function getRecommendationBadgeUnreadCount(): Promise<number> {
+  const [veredito, interesse, ackSets] = await Promise.all([
     getAlignmentQueueWorks({ states: ["stale"], countOnly: true }),
     getSynopsisQueueWorks({ states: ["unpredicted"], countOnly: true }),
     getReadAckSets(),
   ])
-  const ackAttr = ackSets.get("attr")!
   const ackVer = ackSets.get("veredito")!
   const ackInt = ackSets.get("interesse")!
 
   const unread = new Set<string>()
-  for (const id of attrIds) if (!ackAttr.has(id)) unread.add(id)
   for (const w of veredito) if (!ackVer.has(w.id)) unread.add(w.id)
   for (const w of interesse) if (!ackInt.has(w.id)) unread.add(w.id)
   return unread.size

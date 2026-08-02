@@ -28,11 +28,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Input } from "@/components/ui/input"
 import type { ListPickerOption } from "@/server/queries/lists"
 import { UpdateDataDialog } from "@/components/titles/update-data-dialog"
-import { StatusEditDialog } from "@/components/titles/status-edit-dialog"
+import { useWorkStatusGate } from "@/components/titles/work-status-gate"
 import { useCan, useIsAdmin, useCanWriteOwnState } from "@/components/layout/admin-context"
-import type { PostAttributeAssessmentFormProps } from "@/components/titles/post-attribute-assessment-form"
-import type { WorkStatusValues } from "@/lib/validations/work.schema"
-import type { TasteCriterion, TasteScoreKey } from "@/server/queries/pilot-taste"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -335,26 +332,11 @@ export function FavoriteToggleButton({
 }
 
 export function StatusActionButton({
-  workId,
-  statusInitialValues,
-  totalChapters,
-  latestAiEvaluation,
-  existingAssessment,
-  tasteCriteria,
-  tasteScores,
   label = "Alterar Status",
   variant = "outline",
   size = "sm",
   className,
 }: {
-  workId: string
-  statusInitialValues: WorkStatusValues
-  totalChapters?: number | null
-  latestAiEvaluation: PostAttributeAssessmentFormProps["latestAiEvaluation"]
-  existingAssessment: PostAttributeAssessmentFormProps["existingAssessment"]
-  /** Critérios/notas de gosto ("Como foi pra você") — repassados ao dialog. */
-  tasteCriteria?: TasteCriterion[]
-  tasteScores?: Record<TasteScoreKey, number | null>
   label?: string
   variant?: "outline" | "default" | "ghost"
   size?: "sm" | "default" | "lg"
@@ -365,26 +347,15 @@ export function StatusActionButton({
   // chamado assim mesmo. Agora vale pra qualquer usuário logado; o form em si é que decide o
   // que ela pode editar (nota e pós-leitura seguem do Curador — Fatia 2).
   const canWriteOwnState = useCanWriteOwnState()
-  const [open, setOpen] = useState(false)
+  // O diálogo em si mora no WorkStatusGateProvider (ancestral, em page.tsx) — dono ÚNICO,
+  // compartilhado com os atalhos da faixa (status/capítulos), pra não duplicar instância.
+  const { requestOpen } = useWorkStatusGate()
   if (!canWriteOwnState) return null
   return (
-    <>
-      <Button variant={variant} size={size} onClick={() => setOpen(true)} className={className}>
-        <BookOpen className="h-4 w-4" />
-        {label}
-      </Button>
-      <StatusEditDialog
-        open={open}
-        onOpenChange={setOpen}
-        workId={workId}
-        totalChapters={totalChapters ?? null}
-        initialValues={statusInitialValues}
-        latestAiEvaluation={latestAiEvaluation}
-        existingAssessment={existingAssessment}
-        tasteCriteria={tasteCriteria}
-        tasteScores={tasteScores}
-      />
-    </>
+    <Button variant={variant} size={size} onClick={() => requestOpen()} className={className}>
+      <BookOpen className="h-4 w-4" />
+      {label}
+    </Button>
   )
 }
 

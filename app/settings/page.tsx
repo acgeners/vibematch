@@ -17,6 +17,10 @@ import {
 import { EmbeddingsPanel } from "@/components/settings/embeddings-panel"
 import { AdultAuditTool } from "@/components/settings/adult-audit-tool"
 import { getAdultAuditQueue } from "@/server/queries/adult-audit"
+import { AdultScoreTierTool } from "@/components/settings/adult-score-tier-tool"
+import { listAdultScoreTierBacklog } from "@/server/actions/tag-review"
+import { AdultBoundsDriftTool } from "@/components/settings/adult-bounds-drift-tool"
+import { getAdultBoundsDriftQueue } from "@/server/queries/adult-audit"
 import { SyncConstantsPanel } from "@/components/settings/sync-constants-panel"
 import { SynopsisConsolidationPanel } from "@/components/settings/synopsis-consolidation-panel"
 import { ReviewSummaryPanel } from "@/components/settings/review-summary-panel"
@@ -316,6 +320,16 @@ async function ItemBody({
     case "adult-audit": {
       const queue = await getAdultAuditQueue()
       return <AdultAuditTool initialQueue={queue} />
+    }
+
+    case "adult-score-tier": {
+      const queue = await listAdultScoreTierBacklog()
+      return <AdultScoreTierTool initialQueue={queue} />
+    }
+
+    case "adult-bounds-drift": {
+      const queue = await getAdultBoundsDriftQueue()
+      return <AdultBoundsDriftTool initialQueue={queue} />
     }
 
     case "embeddings": {

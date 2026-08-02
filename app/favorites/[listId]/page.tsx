@@ -21,6 +21,7 @@ import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
 import { getFilterPresets } from "@/server/queries/filter-presets"
+import { getDeclaredTagPreferences } from "@/server/queries/tag-preferences"
 import { CRITERION_SLUGS } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
 import { MAX_COMPARE_WORKS } from "@/lib/compare-config"
@@ -114,6 +115,24 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
       ? undefined
       : pubStatusParam.split(",").map((s) => s.trim()).filter(Boolean)
 
+  // Filtro opt-in "esconder minhas tags evitadas" (mesmo padrão de /ranking, ver
+  // app/ranking/page.tsx) — off | "strong" (só as evitadas com ênfase 2×) | "all".
+  const hideMode = str("hide_avoided") // "strong" | "all" | undefined
+  const hideActive = hideMode === "strong" || hideMode === "all"
+  const declaredPrefs = hideActive ? await getDeclaredTagPreferences() : []
+  const avoided = declaredPrefs.filter((p) => p.stance === "avoid")
+  const avoidedSlugs =
+    hideMode === "all"
+      ? avoided.map((p) => p.slug)
+      : hideMode === "strong"
+        ? avoided.filter((p) => p.weight >= 2).map((p) => p.slug)
+        : []
+
+  // Conteúdo 18+ por-página (?adult=hide|only), mesmo padrão de /ranking. Usa
+  // works.is_adult; ausente respeita a preferência global do usuário.
+  const adultParam = str("adult")
+  const adultFilter = adultParam === "hide" || adultParam === "only" ? adultParam : undefined
+
   const filters: RankingFilters = {
     search: str("search"),
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
@@ -126,7 +145,11 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     genreExclude: multi("genres_exclude"),
     tagSlugsAll: multi("tags_all"),
     tagSlugsAny: multi("tags_any") ?? multi("tags"),
-    tagSlugsExclude: multi("tags_exclude"),
+    tagSlugsExclude: (() => {
+      const fromUrl = multi("tags_exclude") ?? []
+      const merged = [...new Set([...fromUrl, ...avoidedSlugs])]
+      return merged.length ? merged : undefined
+    })(),
     synopsisQualities: multi("synopsis_q"),
     predictedSynopsisQualities: multi("synopsis_pred"),
     interestMode: str("synopsis_mode") === "and" ? "and" : "or",
@@ -151,7 +174,29 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
     onlyFavorites: isPseudo,
     onlyWorkIds: isAll ? undefined : isUngrouped ? ungrouped!.workIds : listDetail!.workIds,
     includeFinishedDropped: true,
+    adultFilter,
     sortLevels,
+  }
+
+  // URLs do segmentado "Esconder tags evitadas" (3 estados), preservando os demais
+  // params — mesmo padrão de app/ranking/page.tsx, mas contra este basePath (que
+  // varia por grupo: /favorites/all, /favorites/ungrouped, /favorites/<id>).
+  const buildHideUrl = (mode: "strong" | "all" | null) => {
+    const p = new URLSearchParams()
+    for (const [key, value] of Object.entries(params_)) {
+      if (value == null) continue
+      if (Array.isArray(value)) value.forEach((v) => p.append(key, v))
+      else p.set(key, value)
+    }
+    if (mode) p.set("hide_avoided", mode)
+    else p.delete("hide_avoided")
+    return `${basePath}${p.toString() ? `?${p}` : ""}`
+  }
+  const hideAvoided = {
+    current: (hideMode === "strong" || hideMode === "all" ? hideMode : "off") as "off" | "strong" | "all",
+    offUrl: buildHideUrl(null),
+    strongUrl: buildHideUrl("strong"),
+    allUrl: buildHideUrl("all"),
   }
 
   const [entries, allGenres, allTags, statusOptions, favSummary, scoreThresholds, savedPresets, criterionPrefs, canAi, catalog, recentRecs, allGroups] =
@@ -270,11 +315,19 @@ export default async function FavoritesListPage({ params, searchParams }: Favori
         availableTags={allTags}
         publicationStatuses={statusOptions.publicationStatuses}
         personalStatuses={statusOptions.personalStatuses}
+        // Ausência de pub_status/per_status já significa "sem filtro" pro getRanking
+        // acima (nenhum default é aplicado) — "all" faz o painel mostrar isso
+        // corretamente (chips todos marcados, nada em "Filtros ativos"), em vez do
+        // "Completed"/"Want to Read" hardcoded de /ranking, que aqui seria mentira.
+        defaultPublicationStatus="all"
+        defaultPersonalStatus="all"
         defaultTopN={null}
         basePath={basePath}
         savedPresets={savedPresets}
         showTopN={false}
         showTierBand={false}
+        hideAvoided={hideAvoided}
+        showAdultFilter
       />
 
       <WorkTable

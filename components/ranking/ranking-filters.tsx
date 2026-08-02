@@ -218,6 +218,15 @@ interface RankingFiltersProps {
   availableTags: Array<{ slug: string; name: string; tag_group_id?: string | null; groupName?: string; subGroupName?: string; subGroupSlug?: string }>
   publicationStatuses?: StatusOption[]
   personalStatuses?: StatusOption[]
+  /** Status assumido quando `?pub_status` está ausente da URL — governa tanto quais
+   *  chips aparecem MARCADOS quanto o efeito de clicar num chip. Omitido = `["Completed"]`
+   *  (comportamento histórico de /ranking, onde a ausência do parâmetro É um filtro real
+   *  no servidor). Passe `"all"` em páginas onde a ausência já significa "sem filtro" lá
+   *  (ex.: favoritos) — senão o painel mostra "Completed" marcado enquanto a lista mostra
+   *  tudo, e o contador/"Filtros ativos" mente sobre o que está de fato aplicado. */
+  defaultPublicationStatus?: string[] | "all"
+  /** Idem para `?per_status`. Omitido = `UNREAD_PERSONAL_STATUSES` (Want to Read + Untracked). */
+  defaultPersonalStatus?: string[] | "all"
   defaultTopN: number | null
   basePath?: string
   /**
@@ -1785,6 +1794,8 @@ export function RankingFilters({
   availableTags,
   publicationStatuses = [],
   personalStatuses = [],
+  defaultPublicationStatus,
+  defaultPersonalStatus,
   defaultTopN,
   basePath = "/ranking",
   defaultSort,
@@ -1941,8 +1952,22 @@ export function RankingFilters({
     [allPersonalStatuses]
   )
 
-  const DEFAULT_PUB_STATUS = "Completed"
-  const DEFAULT_PER_STATUSES = [...UNREAD_PERSONAL_STATUSES]
+  // "all" = a página não tem filtro padrão de status (ausente no servidor já mostra
+  // tudo) — os defaults viram a lista COMPLETA de opções, pra ausência de parâmetro se
+  // comportar exatamente como o "Todos" explícito (chips todos marcados, e clicar um
+  // deles DESMARCA em vez de somar a uma seleção mínima). Ver doc da prop.
+  const pubStatusDefaultsAll = defaultPublicationStatus === "all"
+  const pubStatusDefaults = Array.isArray(defaultPublicationStatus)
+    ? defaultPublicationStatus
+    : pubStatusDefaultsAll
+      ? allPublicationStatuses.map((o) => o.status)
+      : ["Completed"]
+  const perStatusDefaultsAll = defaultPersonalStatus === "all"
+  const perStatusDefaults = Array.isArray(defaultPersonalStatus)
+    ? defaultPersonalStatus
+    : perStatusDefaultsAll
+      ? allPersonalStatuses.map((o) => o.status)
+      : [...UNREAD_PERSONAL_STATUSES]
 
   // Toggle de um chip de status (Publicação · Status pessoal). A regra inteira mora em
   // `toggleStatusParam` — ver lá por que o "todos" precisa ser materializado antes.
@@ -1963,26 +1988,32 @@ export function RankingFilters({
   }
 
   const pubStatusParam = searchParams.get("pub_status")
-  const isAllPublication = pubStatusParam === "all"
+  // Explícito ("all" literal na URL) vs. silencioso (parâmetro ausente E a página não
+  // tem filtro padrão) — só o primeiro deve virar chip em "Filtros ativos": o segundo
+  // não é uma escolha de ninguém, é só o estado inicial, e mostrar um chip "Todos"
+  // removível pra ele contradiz "sem filtro nenhum aplicado por padrão".
+  const pubStatusExplicitAll = pubStatusParam === "all"
+  const isAllPublication = pubStatusExplicitAll || (pubStatusParam == null && pubStatusDefaultsAll)
   const selectedPublicationStatuses = isAllPublication
     ? new Set<string>()
     : pubStatusParam != null
       ? csvSet("pub_status")
-      : new Set<string>([DEFAULT_PUB_STATUS])
+      : new Set<string>(pubStatusDefaults)
 
   const togglePublicationStatus = (status: string) =>
-    toggleStatusSelection("pub_status", status, allPublicationStatuses, [DEFAULT_PUB_STATUS])
+    toggleStatusSelection("pub_status", status, allPublicationStatuses, pubStatusDefaults)
 
   const perStatusParam = searchParams.get("per_status")
-  const isAllPersonal = perStatusParam === "all"
+  const perStatusExplicitAll = perStatusParam === "all"
+  const isAllPersonal = perStatusExplicitAll || (perStatusParam == null && perStatusDefaultsAll)
   const selectedPerStatuses = isAllPersonal
     ? new Set<string>()
     : perStatusParam != null
       ? csvSet("per_status")
-      : new Set<string>(DEFAULT_PER_STATUSES)
+      : new Set<string>(perStatusDefaults)
 
   const togglePersonalStatus = (status: string) =>
-    toggleStatusSelection("per_status", status, allPersonalStatuses, DEFAULT_PER_STATUSES)
+    toggleStatusSelection("per_status", status, allPersonalStatuses, perStatusDefaults)
 
   // O contador do cabeçalho conta só os status VISÍVEIS: a seleção pode carregar os
   // terminais (que não têm chip), e "(11)" com 10 chips na tela é contador fantasma.
@@ -2120,7 +2151,7 @@ export function RankingFilters({
     "pub_status",
     allPublicationStatuses,
     selectedPublicationStatuses,
-    isAllPublication,
+    pubStatusExplicitAll,
     togglePublicationStatus
   )
   pushStatusChips(
@@ -2129,7 +2160,7 @@ export function RankingFilters({
     "per_status",
     allPersonalStatuses,
     selectedPerStatuses,
-    isAllPersonal,
+    perStatusExplicitAll,
     togglePersonalStatus
   )
   selectedSynopsisQ.forEach((quality) => {

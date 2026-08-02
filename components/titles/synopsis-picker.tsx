@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useId, useRef, useState } from "react"
-import { Check, ChevronDown, Pencil, Plus } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Check, ChevronDown, PenLine, Pencil, Plus, Star } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -34,10 +34,20 @@ function sourceLabel(source: string): string {
   return PLATFORM_LABELS[source] ?? source
 }
 
-function choiceLabel(choice: SynopsisChoice): string {
-  if (choice.editedFrom) return `${sourceLabel(choice.editedFrom)} · editada`
+/** Rótulo do chip — "Sua sinopse" pra QUALQUER manual (escrita do zero ou editada
+ *  de uma fonte), não só a editada. Antes só a editada ganhava destaque, e uma
+ *  manual "pura" (via `addManual`) ficava com a cara de uma externa qualquer. */
+function chipLabel(choice: SynopsisChoice): string {
   if (choice.source === "manual") return "Sua sinopse"
   return sourceLabel(choice.source)
+}
+
+/** Legenda pequena abaixo do chip — aqui sim a origem da edição aparece. */
+function metaLabel(choice: SynopsisChoice): string {
+  if (choice.source === "manual") {
+    return choice.editedFrom ? `${sourceLabel(choice.editedFrom)} · editada` : "escrita por você"
+  }
+  return choice.saved ? "já salva" : "nova"
 }
 
 /**
@@ -56,7 +66,7 @@ export function normalizeSynopsisChoices(choices: SynopsisChoice[]): SynopsisCho
 }
 
 /**
- * Texto da sinopse cortado em 6 linhas, com "Ver tudo" pra abrir. As sinopses das
+ * Texto da sinopse cortado em 4 linhas, com "Ver tudo" pra abrir. As sinopses das
  * fontes variam de duas linhas a vários parágrafos, e sem isto as longas ficavam
  * ilegíveis: dava pra escolher a Principal sem conseguir ler o que ela diz.
  */
@@ -76,7 +86,7 @@ function SynopsisBody({ text }: { text: string }) {
     const measure = () => setClamped(el.scrollHeight > el.clientHeight + 1)
     measure()
     // A largura do card muda quando a janela muda, e com ela quantas linhas cabem:
-    // o que entrava em 6 linhas passa a não entrar (e vice-versa).
+    // o que entrava em 4 linhas passa a não entrar (e vice-versa).
     const observer = new ResizeObserver(measure)
     observer.observe(el)
     return () => observer.disconnect()
@@ -87,8 +97,8 @@ function SynopsisBody({ text }: { text: string }) {
       <p
         ref={ref}
         className={cn(
-          "whitespace-pre-wrap text-xs text-muted-foreground",
-          !expanded && "line-clamp-6"
+          "whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground",
+          !expanded && "line-clamp-4"
         )}
       >
         {text}
@@ -130,7 +140,6 @@ export function SynopsisPicker({ choices, onChange, emptyHint }: SynopsisPickerP
   const [manualText, setManualText] = useState("")
   const manualActionsRef = useRef<HTMLDivElement>(null)
   const editActionsRef = useRef<HTMLDivElement>(null)
-  const radioGroup = useId()
 
   // O picker vive no fim de um diálogo com rolagem, e o textarea cresce com o
   // conteúdo (field-sizing-content): abrir o formulário — e principalmente COLAR
@@ -199,12 +208,155 @@ export function SynopsisPicker({ choices, onChange, emptyHint }: SynopsisPickerP
     setManualOpen(false)
   }
 
+  // Duas seções: a sua (manual) sempre primeiro, depois as das fontes — em vez de
+  // uma lista única onde a única pista de qual é a sua era a cor da borda. O
+  // índice original (`idx`) viaja junto pra toggle/edit/setPrimary continuarem
+  // batendo com a posição real em `choices`.
+  const indexed = choices.map((c, idx) => ({ c, idx }))
+  const manualEntries = indexed.filter(({ c }) => c.source === "manual")
+  const externalEntries = indexed.filter(({ c }) => c.source !== "manual")
+
+  const renderCard = (s: SynopsisChoice, idx: number, isManual: boolean) => {
+    const editing = editingIdx === idx
+    return (
+      <div
+        key={`${s.source}-${idx}`}
+        // Card inteiro alterna a inclusão; os controles internos param a
+        // propagação. Durante a edição o clique não alterna nada (senão
+        // clicar no textarea tiraria a sinopse da seleção).
+        role={editing ? undefined : "checkbox"}
+        aria-checked={editing ? undefined : s.included}
+        aria-label={editing ? undefined : `Incluir a sinopse de ${chipLabel(s)}`}
+        tabIndex={editing ? undefined : 0}
+        onClick={editing ? undefined : () => toggleIncluded(idx)}
+        onKeyDown={
+          editing
+            ? undefined
+            : (e) => {
+                if (e.key === " " || e.key === "Enter") {
+                  e.preventDefault()
+                  toggleIncluded(idx)
+                }
+              }
+        }
+        className={cn(
+          "relative space-y-2 overflow-hidden rounded-xl border p-3 pl-4 transition-colors",
+          !editing && "cursor-pointer focus-visible:outline-2 focus-visible:outline-ring",
+          !s.included && "opacity-60 hover:opacity-100",
+          // `ring`, não `border-<cor>`: a regra `* { border-color }` de
+          // globals.css mata as utilidades de cor de borda no TW v4 — por isso o
+          // friso lateral abaixo usa `bg-*` (span absoluto) em vez de border-left.
+          s.included && (isManual ? "bg-emerald-500/[0.04]" : "bg-primary/5 ring-1 ring-inset ring-primary/50")
+        )}
+      >
+        {/* Friso lateral — o principal sinal de "isto é seu". Discreto de propósito,
+            só a cor (sem preencher o card inteiro de esmeralda). */}
+        <span
+          aria-hidden="true"
+          className={cn(
+            "absolute inset-y-2.5 left-0 w-[3px] rounded-full",
+            isManual ? "bg-emerald-500" : s.included ? "bg-primary" : "bg-transparent"
+          )}
+        />
+
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-[11px]",
+                isManual && "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+              )}
+            >
+              {isManual && <PenLine className="h-2.5 w-2.5" />}
+              {chipLabel(s)}
+            </Badge>
+            <span className="text-[11px] font-medium text-muted-foreground">{metaLabel(s)}</span>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              disabled={s.isPrimary}
+              onClick={() => setPrimary(idx)}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap transition-colors",
+                s.isPrimary
+                  ? isManual
+                    ? "bg-emerald-600 text-white dark:bg-emerald-500 dark:text-emerald-950"
+                    : "bg-primary text-primary-foreground"
+                  : "border border-dashed text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Star className={cn("h-2.5 w-2.5", s.isPrimary && "fill-current")} />
+              {s.isPrimary ? "Principal" : "Definir Principal"}
+            </button>
+            {!editing && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                title="Editar o texto"
+                aria-label={`Editar o texto da sinopse de ${chipLabel(s)}`}
+                onClick={() => openEditor(idx)}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            <Checkbox
+              checked={s.included}
+              onCheckedChange={() => toggleIncluded(idx)}
+              aria-label="Incluir esta sinopse"
+            />
+          </div>
+        </div>
+
+        {editing ? (
+          <div className="space-y-2">
+            <Textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={7}
+              // Mesmo teto do formulário manual: field-sizing-content + colar
+              // texto longo esticava a caixa e escondia os botões do formulário.
+              className="max-h-64 resize-y overflow-y-auto text-sm"
+              autoFocus
+            />
+            <div ref={editActionsRef} className="flex scroll-mb-16 items-center gap-2">
+              <p className="mr-auto text-[11px] leading-tight text-muted-foreground">
+                {s.source === "manual" && !s.editedFrom
+                  ? "Já é sua — continua como manual."
+                  : "Ao salvar, esta sinopse passa a contar como sua (manual)."}
+              </p>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setEditingIdx(null)}>
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={saveEdit}
+                disabled={!draft.trim()}
+                className="gap-1 bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+              >
+                <Check className="h-3.5 w-3.5" />
+                Salvar texto
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <SynopsisBody text={s.text} />
+        )}
+      </div>
+    )
+  }
+
   return (
-    <section className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">Sinopses</h3>
+    <section className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold">Sinopses</h3>
         {choices.length > 0 && (
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
             Selecionar todas
             <Checkbox
               checked={allIncluded ? true : someIncluded ? "indeterminate" : false}
@@ -215,139 +367,37 @@ export function SynopsisPicker({ choices, onChange, emptyHint }: SynopsisPickerP
       </div>
 
       {choices.length === 0 && (
-        <p className="rounded-md border border-dashed p-3 text-xs italic text-muted-foreground">
+        <p className="rounded-xl border border-dashed p-3 text-xs italic text-muted-foreground">
           {emptyHint ?? "Nenhuma sinopse veio das fontes. Você pode escrever a sua abaixo."}
         </p>
       )}
 
-      {choices.map((s, idx) => {
-        const editing = editingIdx === idx
-        const isEdited = Boolean(s.editedFrom)
-        return (
-          <div
-            key={`${s.source}-${idx}`}
-            // Card inteiro alterna a inclusão; os controles internos param a
-            // propagação. Durante a edição o clique não alterna nada (senão
-            // clicar no textarea tiraria a sinopse da seleção).
-            role={editing ? undefined : "checkbox"}
-            aria-checked={editing ? undefined : s.included}
-            aria-label={editing ? undefined : `Incluir a sinopse de ${choiceLabel(s)}`}
-            tabIndex={editing ? undefined : 0}
-            onClick={editing ? undefined : () => toggleIncluded(idx)}
-            onKeyDown={
-              editing
-                ? undefined
-                : (e) => {
-                    if (e.key === " " || e.key === "Enter") {
-                      e.preventDefault()
-                      toggleIncluded(idx)
-                    }
-                  }
-            }
-            className={cn(
-              "space-y-2 rounded-md border p-3 transition-colors",
-              !editing && "cursor-pointer focus-visible:outline-2 focus-visible:outline-ring",
-              // `ring`, não `border-<cor>`: a regra `* { border-color }` de
-              // globals.css mata as utilidades de cor de borda no TW v4 — o
-              // `border-primary/60` que estava aqui nunca pintou nada.
-              s.included
-                ? isEdited
-                  ? "bg-emerald-500/10 ring-1 ring-inset ring-emerald-500/50"
-                  : "bg-primary/5 ring-1 ring-inset ring-primary/50"
-                : "bg-transparent opacity-60 hover:opacity-100"
-            )}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <Badge
-                  variant="outline"
-                  className={cn("text-[11px]", isEdited && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400")}
-                >
-                  {choiceLabel(s)}
-                </Badge>
-                {!isEdited && (
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {s.saved ? "já salva" : "nova"}
-                  </span>
-                )}
-              </div>
+      {manualEntries.length > 0 && (
+        <div className="space-y-2">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+            <PenLine className="h-3 w-3" />
+            Sua sinopse
+          </p>
+          {manualEntries.map(({ c, idx }) => renderCard(c, idx, true))}
+        </div>
+      )}
 
-              <div className="flex items-center gap-2 text-xs" onClick={(e) => e.stopPropagation()}>
-                <label className="flex cursor-pointer items-center gap-1.5">
-                  <input
-                    type="radio"
-                    // Nome por instância: o UpdateDataDialog monta um ExternalSearch
-                    // dentro dele, e um nome fixo faria os dois pickers dividirem o
-                    // mesmo grupo de rádio se algum dia coexistirem na árvore.
-                    name={`${radioGroup}-primary`}
-                    checked={s.isPrimary}
-                    onChange={() => setPrimary(idx)}
-                    className="accent-primary"
-                  />
-                  Principal
-                </label>
-                {!editing && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                    title="Editar o texto"
-                    aria-label={`Editar o texto da sinopse de ${choiceLabel(s)}`}
-                    onClick={() => openEditor(idx)}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-                <Checkbox
-                  checked={s.included}
-                  onCheckedChange={() => toggleIncluded(idx)}
-                  aria-label="Incluir esta sinopse"
-                />
-              </div>
-            </div>
-
-            {editing ? (
-              <div className="space-y-2">
-                <Textarea
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  rows={7}
-                  // Mesmo teto do formulário manual: field-sizing-content + colar
-                  // texto longo esticava a caixa e escondia os botões do formulário.
-                  className="max-h-64 resize-y overflow-y-auto text-sm"
-                  autoFocus
-                />
-                <div ref={editActionsRef} className="flex scroll-mb-16 items-center gap-2">
-                  <p className="mr-auto text-[11px] leading-tight text-muted-foreground">
-                    {s.source === "manual" && !s.editedFrom
-                      ? "Já é sua — continua como manual."
-                      : "Ao salvar, esta sinopse passa a contar como sua (manual)."}
-                  </p>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setEditingIdx(null)}>
-                    Cancelar
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={saveEdit}
-                    disabled={!draft.trim()}
-                    className="gap-1 bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
-                  >
-                    <Check className="h-3.5 w-3.5" />
-                    Salvar texto
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <SynopsisBody text={s.text} />
-            )}
-          </div>
-        )
-      })}
+      {externalEntries.length > 0 && (
+        <div className="space-y-2">
+          {manualEntries.length > 0 && (
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Das fontes externas{" "}
+              <span className="font-medium tracking-normal normal-case text-muted-foreground/70">
+                · {externalEntries.length}
+              </span>
+            </p>
+          )}
+          {externalEntries.map(({ c, idx }) => renderCard(c, idx, false))}
+        </div>
+      )}
 
       {manualOpen ? (
-        <div className="space-y-2 rounded-md border border-dashed border-emerald-500/50 bg-emerald-500/5 p-3">
+        <div className="space-y-2 rounded-xl border border-dashed p-3">
           <p className="text-xs font-medium text-muted-foreground">Nova sinopse manual</p>
           <Textarea
             value={manualText}
@@ -375,9 +425,6 @@ export function SynopsisPicker({ choices, onChange, emptyHint }: SynopsisPickerP
             >
               Cancelar
             </Button>
-            {/* Esmeralda (a cor do "manual" neste picker), com ícone e rótulo
-                específico: os botões antigos eram gêmeos do Cancelar/Continuar do
-                rodapé do diálogo, a um clique de distância. */}
             <Button
               type="button"
               size="sm"
@@ -396,10 +443,10 @@ export function SynopsisPicker({ choices, onChange, emptyHint }: SynopsisPickerP
           variant="outline"
           size="sm"
           onClick={() => setManualOpen(true)}
-          className="gap-1 border-dashed text-primary hover:border-solid"
+          className="gap-1 border-dashed text-muted-foreground hover:text-emerald-700 dark:hover:text-emerald-400"
         >
           <Plus className="h-3.5 w-3.5" />
-          Adicionar sinopse manual
+          {manualEntries.length > 0 ? "Adicionar outra sinopse manual" : "Adicionar sinopse manual"}
         </Button>
       )}
     </section>

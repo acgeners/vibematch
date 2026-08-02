@@ -216,6 +216,10 @@ interface TriggerAiEvaluationOpts {
   proceedWithoutReviews?: boolean
 }
 
+function toAdultScoreTier(v: string | null | undefined): "label" | "explicit" | null {
+  return v === "label" || v === "explicit" ? v : null
+}
+
 export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluationOpts = {}) {
   const gate = await ensureAdmin()
   if (!gate.ok) return { error: gate.error }
@@ -225,7 +229,7 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
     .from("works")
     .select(`
       id, title, original_title, alternative_titles,
-      work_tags(tags(name, tag_group_id)),
+      work_tags(tags(name, tag_group_id, adult_score_tier)),
       work_genres(genres(name)),
       work_synopses(source, text, is_primary, position),
       work_covers(url, is_primary, position)
@@ -235,12 +239,24 @@ export async function triggerAiEvaluation(workId: string, opts: TriggerAiEvaluat
 
   if (workError || !work) return { error: "Obra não encontrada" }
 
-  const tags = ((work as { work_tags?: Array<{ tags?: { name?: string; tag_group_id?: string | null } }> }).work_tags ?? [])
+  const tags = (
+    (
+      work as {
+        work_tags?: Array<{
+          tags?: { name?: string; tag_group_id?: string | null; adult_score_tier?: string | null }
+        }>
+      }
+    ).work_tags ?? []
+  )
     .map((wt) => wt.tags)
-    .filter((tag): tag is { name: string; tag_group_id?: string | null } => Boolean(tag?.name))
+    .filter(
+      (tag): tag is { name: string; tag_group_id?: string | null; adult_score_tier?: string | null } =>
+        Boolean(tag?.name)
+    )
     .map((tag) => ({
       name: tag.name,
       group: tag.tag_group_id ? (TAG_GROUP_ID_TO_NORMALIZED_SLUG[tag.tag_group_id] ?? null) : null,
+      adultScoreTier: toAdultScoreTier(tag.adult_score_tier),
     }))
 
   const genreNames = ((work as { work_genres?: Array<{ genres?: { name?: string } | null }> }).work_genres ?? [])

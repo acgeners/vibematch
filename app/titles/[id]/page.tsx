@@ -9,7 +9,8 @@ import { UpdateProgressWatcher } from "@/components/titles/update-progress-watch
 import { DeepDiveButton } from "@/components/titles/deep-dive-button"
 import { RerankAiRkButton } from "@/components/titles/rerank-ai-rk-button"
 import { SynopsisQualitySuggestion } from "@/components/titles/synopsis-quality-suggestion"
-import { QuickStatusCell, QuickInterestCell } from "@/components/titles/quick-personal-controls"
+import { QuickStatusCell, QuickChaptersCell, QuickInterestCell } from "@/components/titles/quick-personal-controls"
+import { WorkStatusGateProvider } from "@/components/titles/work-status-gate"
 import { GenerateAllBanner } from "@/components/titles/generate-all-banner"
 import type { CascadeStatus } from "@/lib/generate-all/types"
 import { PostReadingFlow } from "@/components/titles/post-reading-flow"
@@ -69,6 +70,8 @@ import { AltTitlesChips } from "@/components/titles/alt-titles-chips"
 import { CriterionTitleTooltip } from "@/components/titles/criterion-title-tooltip"
 import { AlignmentTooltipContent, VerdictTooltipContent } from "@/components/ranking/score-tooltip-content"
 import { Badge } from "@/components/ui/badge"
+import { EditionNoteBadge } from "@/components/ui/edition-note-badge"
+import { hasEditionNoteTag } from "@/lib/tags/edition-note-tags"
 import { TagRowAction } from "@/components/ai-evaluation/tag-actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -439,6 +442,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
 
   const genres = Array.isArray(work.genres) ? work.genres.filter(Boolean) : []
   const tags = Array.isArray(work.tags) ? work.tags.filter(Boolean) : []
+  const hasEditionNote = hasEditionNoteTag(
+    (tags as Array<WorkTagForDisplay | string>).map((tag) => (typeof tag === "string" ? tag : tag.name)),
+  )
   const primaryCover = pickPrimaryCover(work.work_covers)
   const primarySynopsis = pickPrimarySynopsis(work.work_synopses)
   // Normaliza cada tag com nome/slug/grupo + stance (perfil ∪ preferências).
@@ -563,19 +569,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       ? ratedPlatforms.reduce((sum, pr) => sum + Number(pr.rating) * pr.vote_count, 0) /
         ratedPlatforms.reduce((sum, pr) => sum + pr.vote_count, 0)
       : null
-  const chapterText = (() => {
-    const total = work.total_chapters == null || Number(work.total_chapters) <= 0
-      ? null
-      : Number(work.total_chapters)
-    const read = work.chapters_read == null || Number(work.chapters_read) <= 0
-      ? null
-      : Number(work.chapters_read)
-    if (read != null && total != null) return `${read} / ${total} capítulos`
-    if (total != null) return `${total} capítulos`
-    if (read != null) return `${read} capítulos lidos`
-    return null
-  })()
-
   // Interesse na sinopse (♥ a ♥♥♥♥), preenchido manualmente. Quando vazio,
   // mostramos "—" em vez de inventar uma nota — null sinaliza "sem dado ainda".
   const synopsisInterest = work.synopsis_quality?.trim() || null
@@ -643,7 +636,18 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   const tabTriggerClass =
     "flex-1 min-w-[120px] cursor-pointer gap-2.5 rounded-md border border-border bg-card px-4 py-5 text-base font-semibold tracking-normal text-foreground shadow-md transition-all duration-200 hover:bg-primary/5 hover:border-primary/40 hover:text-primary hover:-translate-y-0.5 hover:shadow-lg data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:border-primary data-[state=active]:shadow-[0_0_32px_-2px_hsl(var(--primary)/0.6),0_8px_22px_-6px_hsl(var(--primary)/0.65)] dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground [&_svg]:h-5 [&_svg]:w-5"
 
+  const totalChaptersNum = work.total_chapters != null ? Number(work.total_chapters) : null
+
   return (
+    <WorkStatusGateProvider
+      workId={work.id}
+      totalChapters={totalChaptersNum}
+      initialValues={statusInitial}
+      latestAiEvaluation={postAttrAi}
+      existingAssessment={postAttrExisting}
+      tasteCriteria={tasteCriteria}
+      tasteScores={tasteScoresData.scores}
+    >
     <div className="max-w-6xl space-y-5">
       <div className="flex items-center justify-between gap-3">
         <BackButton />
@@ -681,17 +685,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             folders={favoriteFolderMenu.folders}
             memberOf={favoriteFolderMenu.memberOf}
           />
-          <StatusActionButton
-            workId={work.id}
-            statusInitialValues={statusInitial}
-            totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
-            latestAiEvaluation={postAttrAi}
-            existingAssessment={postAttrExisting}
-            tasteCriteria={tasteCriteria}
-            tasteScores={tasteScoresData.scores}
-            label="Status"
-            size="default"
-          />
+          <StatusActionButton label="Status" size="default" />
           <MoreActionsMenu
             workId={work.id}
             workSlug={id}
@@ -723,6 +717,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               🔞 18+
             </span>
           )}
+          {hasEditionNote && <EditionNoteBadge className="px-3.5 py-1.5 text-base font-bold" />}
         </div>
       </header>
 
@@ -780,16 +775,12 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
                 </span>
               </div>
             )}
-            {chapterText && (
-              <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Capítulos
-                </span>
-                <span className="text-sm font-mono font-semibold text-foreground">
-                  {chapterText}
-                </span>
-              </div>
-            )}
+            <QuickChaptersCell
+              workId={work.id}
+              totalChapters={totalChaptersNum}
+              chaptersRead={work.chapters_read != null ? Number(work.chapters_read) : null}
+              canEdit={canEditPersonalState}
+            />
             <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Publicação
@@ -799,8 +790,10 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
           </div>
 
           {/* Pessoal: status pessoal, interesse, nota esperada.
-              As duas primeiras células são EDITÁVEIS in-loco (menu de status / corações ♥) —
-              a faixa fica fora do <TabsContent>, então o atalho vale nas 5 abas. */}
+              As duas primeiras células são EDITÁVEIS in-loco (menu de status / corações ♥), assim
+              como "Capítulos" no card Geral acima — a faixa fica fora do <TabsContent>, então os
+              atalhos valem nas 5 abas. Status terminal (Finished/Dropped) ou capítulos cruzando
+              20% do total abrem "Meu Status" sozinhos (WorkStatusGateProvider). */}
           <div className="flex divide-x divide-border/40 rounded-lg border border-border/40 bg-card/20 overflow-hidden">
             <QuickStatusCell
               workId={work.id}
@@ -1775,5 +1768,6 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
         </AdultGate>
       </Tabs>
     </div>
+    </WorkStatusGateProvider>
   )
 }

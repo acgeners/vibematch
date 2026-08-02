@@ -35,6 +35,8 @@ import { buildCandidateFromExternalIds } from "@/lib/external/index"
 import type { MergedCandidate, ExternalSourceId, ExternalWorkData, ConflictField, SourcedReview } from "@/lib/external/types"
 import { resolveOrCreateTags, scheduleTagEnrichment } from "@/lib/tags/ingest"
 import { recomputeAdultAuto } from "@/lib/tags/adult-classify"
+import { computeAdultContentBounds, clampAdultContentScore } from "@/lib/ai-evaluation/adult-content-rules"
+import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { getSynopsisCanonicalOnCreate, getTagInferenceOnCreate, getGenerateAllOnCreate, ensureAdmin, ensurePermission, ensureSignedIn, getOwnerUserId, getSessionUserId } from "@/server/queries/current-user"
 import {
   writeReadingState,
@@ -2007,6 +2009,60 @@ export async function setAdultOverride(id: string, value: boolean | null) {
   return { data: null }
 }
 
+/**
+ * Recalcula o piso/teto de `adult_content` (adult-content-rules.ts) com as tags
+ * ATUAIS da obra e ajusta a nota persistida se estiver fora da faixa — a versão
+ * "por obra, sob demanda" do que `scripts/adult-content-retroactive-bounds.ts`
+ * faz em lote. Alimenta a fila de drift em /settings (getAdultBoundsDriftQueue).
+ */
+function toAdultScoreTier(v: string | null | undefined): "label" | "explicit" | null {
+  return v === "label" || v === "explicit" ? v : null
+}
+
+export async function applyAdultContentBoundsClamp(workId: string): Promise<{ ok: boolean; error?: string }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false, error: gate.error }
+  const supabase = createAdminClient()
+
+  const [{ data: wt }, { data: wg }, { data: cs }] = await Promise.all([
+    supabase.from("work_tags").select("tags(name, tag_group_id, adult_score_tier)").eq("work_id", workId),
+    supabase.from("work_genres").select("genres(name)").eq("work_id", workId),
+    supabase
+      .from("category_scores")
+      .select("id, score")
+      .eq("work_id", workId)
+      .eq("criterion_slug", "adult_content")
+      .maybeSingle(),
+  ])
+  if (!cs) return { ok: false, error: "obra sem nota adult_content" }
+
+  const tags = ((wt ?? []) as unknown as Array<{
+    tags: { name: string; tag_group_id: string | null; adult_score_tier: string | null } | null
+  }>)
+    .map((r) => r.tags)
+    .filter((t): t is { name: string; tag_group_id: string | null; adult_score_tier: string | null } => !!t)
+    .map((t) => ({
+      name: t.name,
+      group: t.tag_group_id ? (TAG_GROUP_ID_TO_NORMALIZED_SLUG[t.tag_group_id] ?? null) : null,
+      scoreTier: toAdultScoreTier(t.adult_score_tier),
+    }))
+  const genres = ((wg ?? []) as unknown as Array<{ genres: { name: string } | null }>)
+    .map((r) => r.genres?.name)
+    .filter((n): n is string => Boolean(n))
+
+  const bounds = computeAdultContentBounds({ tags, genres })
+  const oldScore = Number(cs.score)
+  const newScore = clampAdultContentScore(oldScore, bounds)
+  if (newScore === oldScore) return { ok: true }
+
+  const { error } = await supabase.from("category_scores").update({ score: newScore }).eq("id", cs.id)
+  if (error) return { ok: false, error: error.message }
+  await markRecalcPending("adult-content-bounds-clamp")
+  revalidatePath(`/titles/${workId}`)
+  revalidatePath("/settings")
+  return { ok: true }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // Estado de LEITURA — FATIA 1 (PLANO-MULTIUSER-FASE2.md §13)
 //
@@ -2383,6 +2439,7 @@ export async function setReadingStatusForWorks(ids: string[], status: string) {
 
   revalidatePath("/leitura")
   revalidatePath("/ai-evaluation")
+  revalidatePath("/fila-recomendacao")
   revalidateTag("ai-eval-tab-counts", "max")
   revalidatePath("/titles")
   // A própria página da obra: desde os controles rápidos da faixa (status/♥), esta action é

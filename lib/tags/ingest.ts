@@ -283,6 +283,20 @@ export async function enrichNewTags(createdIds: string[]): Promise<void> {
           .eq("id", t.id)
         adultTagIds.push(t.id)
       }
+      // Piso da NOTA adult_content (migração 174) — eixo independente do flag
+      // acima; fecha o vazamento estrutural pra tags NOVAS (o rules.ts lê esta
+      // coluna, não mais um Set hardcoded no código). Marca reviewed_at mesmo
+      // quando a IA decide "none" — sem isso a tag reapareceria pra sempre na
+      // fila de revisão manual (server/actions/tag-review.ts).
+      await supabase
+        .from("tags")
+        .update({
+          ...(r.adultScoreTier === "explicit" || r.adultScoreTier === "label"
+            ? { adult_score_tier: r.adultScoreTier }
+            : {}),
+          adult_score_tier_reviewed_at: now,
+        })
+        .eq("id", t.id)
     }
   }
 

@@ -22,8 +22,8 @@ interface QueueRow {
 export function AiQueueCard({ attributes, iaRk, synopsis }: AiQueueCardProps) {
   const rows: QueueRow[] = [
     { label: "Atributos", count: attributes, href: "/ai-evaluation", icon: ListChecks },
-    { label: LABELS.alignment_score.full, count: iaRk, href: "/ai-evaluation?tab=ia-rk", icon: Sparkles },
-    { label: "Interesse por sinopse", count: synopsis, href: "/ai-evaluation?tab=sinopse", icon: FileText },
+    { label: LABELS.alignment_score.full, count: iaRk, href: "/fila-recomendacao?tab=ia-rk", icon: Sparkles },
+    { label: "Interesse por sinopse", count: synopsis, href: "/fila-recomendacao?tab=sinopse", icon: FileText },
   ]
   const total = attributes + iaRk + synopsis
 

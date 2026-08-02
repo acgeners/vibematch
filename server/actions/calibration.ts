@@ -688,14 +688,29 @@ export async function regenerateCalibratedArtifacts(): Promise<
     return { ok: false, error: `Falha regenerando TasteProfile: ${profileResult.error}` }
   }
 
-  // 2. Marca alignment stale onde há score persistido.
-  const { data: staleRows, error: staleErr } = await supabase
-    .from("calculated_scores")
-    .update({ alignment_stale: true })
-    .not("alignment_score", "is", null)
-    .select("work_id")
+  // 2. Marca alignment stale onde há score persistido — na linha compartilhada
+  // (dono) E em todo user_calculated_scores (demais usuários com Veredito IA
+  // próprio; ver markWorkAlignmentStale em server/queries/alignment.ts).
+  const [staleResult, personalStaleResult] = await Promise.all([
+    supabase
+      .from("calculated_scores")
+      .update({ alignment_stale: true })
+      .not("alignment_score", "is", null)
+      .select("work_id"),
+    supabase
+      .from("user_calculated_scores")
+      .update({ alignment_stale: true })
+      .not("alignment_score", "is", null),
+  ])
+  const { data: staleRows, error: staleErr } = staleResult
   if (staleErr) {
     return { ok: false, error: `Falha marcando alignment stale: ${staleErr.message}` }
+  }
+  if (personalStaleResult.error) {
+    console.warn(
+      "[calibration] falha marcando alignment stale pessoal:",
+      personalStaleResult.error.message,
+    )
   }
 
   // 3. Recalcula tudo com o bias atual.

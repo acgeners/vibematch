@@ -433,51 +433,75 @@ export async function getStaleAlignmentWorks(
   opts: { pubStatusIds?: number[]; personalStatusIds?: number[] } = {},
 ): Promise<StaleAlignmentWork[]> {
   const supabase = createAdminClient()
+  // Veredito IA é per-usuário (ver getAlignmentQueueWorks) — o filtro de "stale"
+  // não pode mais ser feito no SQL contra a linha compartilhada (`!inner` +
+  // `.eq()`), senão devolveria o stale de QUALQUER UM, não do usuário atual.
+  // LEFT join simples + overlay + filtro em JS, igual à função irmã. Status de
+  // leitura é a MESMA história: `works_owner.personal_status_id` é sempre o do
+  // DONO — vem de `getPersonalStateReader()` (per usuário) e filtra em JS.
+  const [reader, personalReader] = await Promise.all([getScoresReader(), getPersonalStateReader()])
   let query = supabase
     .from("works_owner")
     .select(
-      "id, title, publication_status_id, personal_status_id, work_covers(url, is_primary, position), calculated_scores!inner(alignment_score, alignment_at, alignment_stale)",
+      "id, title, publication_status_id, work_covers(url, is_primary, position), calculated_scores(alignment_score, alignment_at, alignment_stale)",
     )
     .eq("is_archived", false)
-    .eq("calculated_scores.alignment_stale", true)
-    .not("calculated_scores.alignment_score", "is", null)
   if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
     query = query.in("publication_status_id", opts.pubStatusIds)
   }
-  if (opts.personalStatusIds && opts.personalStatusIds.length > 0) {
-    query = query.in("personal_status_id", opts.personalStatusIds)
-  }
-  const { data, error } = await query.limit(limit)
+  // Busca ampla — o corte por `limit` agora acontece DEPOIS do filtro em JS (um
+  // corte pré-filtro sub-contaria candidatos reais, dependendo da ordem física
+  // das linhas). Mesmo teto de getAlignmentQueueWorks.
+  const { data, error } = await query.limit(5000)
   if (error) throw new Error(`Falha listando Veredito IA desatualizados: ${error.message}`)
 
-  const rows = (data ?? []).map((row) => {
-    const w = row as Record<string, unknown>
-    const calc =
-      (w.calculated_scores as { alignment_score?: number | null; alignment_at?: string | null } | null) ?? null
-    return {
-      id: w.id as string,
-      title: w.title as string,
-      publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
-      personalStatusId: w.personal_status_id != null ? Number(w.personal_status_id) : null,
-      coverUrl: pickPrimaryCover(
-        (w.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
-          url: c.url ?? null,
-          is_primary: c.is_primary ?? null,
-          position: c.position ?? null,
-        })),
-      ),
-      alignmentScore: calc?.alignment_score != null ? Number(calc.alignment_score) : null,
-      alignmentAt: calc?.alignment_at ?? null,
-    } satisfies StaleAlignmentWork
-  })
+  const candidates = (data ?? [])
+    .map((row) => {
+      const w = row as Record<string, unknown>
+      const calc = reader.overlay(
+        w.id as string,
+        (w.calculated_scores as {
+          alignment_score?: number | null
+          alignment_at?: string | null
+          alignment_stale?: boolean | null
+        } | null) ?? null,
+      )
+      return {
+        id: w.id as string,
+        title: w.title as string,
+        publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
+        personalStatusId: personalReader.get(w.id as string).personalStatusId,
+        coverUrl: pickPrimaryCover(
+          (w.work_covers as RawCoverRow[] | undefined)?.map((c) => ({
+            url: c.url ?? null,
+            is_primary: c.is_primary ?? null,
+            position: c.position ?? null,
+          })),
+        ),
+        alignmentScore: calc?.alignment_score != null ? Number(calc.alignment_score) : null,
+        alignmentStale: Boolean(calc?.alignment_stale),
+        alignmentAt: calc?.alignment_at ?? null,
+      }
+    })
+    .filter((w) => w.alignmentScore != null && w.alignmentStale)
+    .filter(
+      (w) =>
+        !opts.personalStatusIds ||
+        opts.personalStatusIds.length === 0 ||
+        (w.personalStatusId != null && opts.personalStatusIds.includes(w.personalStatusId)),
+    )
+
   // Ordena por re-rank mais antigo primeiro (PostgREST não ordena por coluna
-  // embedada de forma confiável — ordena em JS).
-  rows.sort((a, b) => {
+  // embedada de forma confiável — ordena em JS), corta no limite por último.
+  candidates.sort((a, b) => {
     const at = a.alignmentAt ? new Date(a.alignmentAt).getTime() : 0
     const bt = b.alignmentAt ? new Date(b.alignmentAt).getTime() : 0
     return at - bt
   })
-  return rows
+  return candidates.slice(0, limit).map(
+    ({ id, title, publicationStatusId, personalStatusId, coverUrl, alignmentScore, alignmentAt }) =>
+      ({ id, title, publicationStatusId, personalStatusId, coverUrl, alignmentScore, alignmentAt }) satisfies StaleAlignmentWork,
+  )
 }
 
 export interface AlignmentQueueWork {
@@ -502,7 +526,7 @@ export interface AlignmentQueueWork {
 }
 
 /**
- * Fila de Veredito IA pra aba /ai-evaluation?tab=ia-rk. Dois estados:
+ * Fila de Veredito IA pra aba /fila-recomendacao?tab=ia-rk. Dois estados:
  *   - "stale": tem alignment_score mas alignment_stale=true (re-rank velho)
  *   - "unranked": ainda não tem alignment_score (nunca passou pelo re-rank)
  * Filtra por status (publicação/leitura) em SQL e por estado em JS. Sort é no
@@ -524,13 +548,20 @@ export async function getAlignmentQueueWorks(opts: {
   const wantStale = states.includes("stale")
   const wantUnranked = states.includes("unranked")
   const supabase = createAdminClient()
+  // O Veredito IA é per-usuário (mora em user_calculated_scores pra quem não é o
+  // dono — ver server/queries/user-scores.ts). Sem isto, a fila usaria sempre o
+  // alignment_score da linha COMPARTILHADA, que só reflete quem rankeou por
+  // último — um assinante veria obras que ELE já rankeou como "não avaliadas".
+  // Status de leitura é a mesma história: `works_owner.personal_status_id` é
+  // sempre o do DONO — vem de `getPersonalStateReader()` e filtra em JS.
+  const [reader, personalReader] = await Promise.all([getScoresReader(), getPersonalStateReader()])
   // String não-literal (`: string`) de propósito: um ternário de literais no
   // `.select()` faz o parser de tipos do supabase-js estourar (ParserError). As
   // linhas já são lidas via `Record<string, unknown>` abaixo, então o `any` aqui
   // é inofensivo.
   const selectCols: string = opts.countOnly
     ? "id, calculated_scores(alignment_score, alignment_stale)"
-    : "id, title, publication_status_id, personal_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score, alignment_score, alignment_stale, alignment_at)"
+    : "id, title, publication_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score, alignment_score, alignment_stale, alignment_at)"
   let query = supabase
     .from("works_owner")
     .select(selectCols)
@@ -538,9 +569,6 @@ export async function getAlignmentQueueWorks(opts: {
     .neq("ai_eval_status", "skipped")
   if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
     query = query.in("publication_status_id", opts.pubStatusIds)
-  }
-  if (opts.personalStatusIds && opts.personalStatusIds.length > 0) {
-    query = query.in("personal_status_id", opts.personalStatusIds)
   }
   if (opts.synopsisQualities && opts.synopsisQualities.length > 0) {
     query = query.in("synopsis_quality", opts.synopsisQualities)
@@ -554,18 +582,31 @@ export async function getAlignmentQueueWorks(opts: {
   const rows: AlignmentQueueWork[] = []
   for (const row of (data ?? []) as unknown[]) {
     const w = row as Record<string, unknown>
-    const calc =
+    const calc = reader.overlay(
+      w.id as string,
       (w.calculated_scores as {
         expected_score?: number | null
         alignment_score?: number | null
         alignment_stale?: boolean | null
         alignment_at?: string | null
-      } | null) ?? null
+      } | null) ?? null,
+    )
     const alignmentScore = calc?.alignment_score != null ? Number(calc.alignment_score) : null
     const alignmentStale = Boolean(calc?.alignment_stale)
     const isStale = alignmentScore != null && alignmentStale
     const isUnranked = alignmentScore == null
     if (!((wantStale && isStale) || (wantUnranked && isUnranked))) continue
+    // Calculado ANTES do early-return do countOnly: o caminho de contagem
+    // (countStaleAlignmentWorks/getAllQueueMemberIds) também precisa respeitar
+    // o filtro de status pessoal quando ele é passado.
+    const personalStatusId = personalReader.get(w.id as string).personalStatusId
+    if (
+      opts.personalStatusIds &&
+      opts.personalStatusIds.length > 0 &&
+      (personalStatusId == null || !opts.personalStatusIds.includes(personalStatusId))
+    ) {
+      continue
+    }
     if (opts.countOnly) {
       // Só o comprimento importa pro badge — evita montar covers/campos por obra.
       rows.push({ id: w.id as string } as AlignmentQueueWork)
@@ -578,7 +619,7 @@ export async function getAlignmentQueueWorks(opts: {
       coverUrl: coverUrls[0] ?? null,
       coverUrls,
       publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
-      personalStatusId: w.personal_status_id != null ? Number(w.personal_status_id) : null,
+      personalStatusId,
       synopsisQuality: (w.synopsis_quality as string | null) ?? null,
       expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
       alignmentScore,
@@ -602,7 +643,7 @@ export interface UntrackedWork {
 
 /**
  * Obras com personal_status = "Untracked" (id 10 — sem status de leitura ativo),
- * pra a aba /ai-evaluation?tab=untracked, onde se atribui um status em lote.
+ * pra a aba /fila-recomendacao?tab=untracked, onde se atribui um status em lote.
  * Filtra por publicação + Interesse na sinopse em SQL (o filtro de Leitura não se
  * aplica: todas são Untracked). Espelha `getAlignmentQueueWorks`.
  */
@@ -612,13 +653,22 @@ export async function getUntrackedWorks(opts: {
   limit?: number
 }): Promise<UntrackedWork[]> {
   const supabase = createAdminClient()
+  // "Untracked" (10) é per-usuário — `works_owner.personal_status_id` é sempre o
+  // do DONO. Sem linha em `user_work_state` o default é "Want to Read" (id 8,
+  // não 10), então não dá pra recortar isso no SQL: uma obra sem linha NUNCA é
+  // Untracked por omissão, só quando existe uma linha explícita com status 10.
+  // Busca o catálogo (já filtrado por pubStatusIds/synopsisQualities) e filtra
+  // Untracked em memória, igual às filas irmãs.
+  // expected_score também é per-usuário (Fatia 2b) — `calculated_scores` não tem
+  // `user_id`; sem o overlay a Nota Prevista exibida seria sempre a do dono, como
+  // as 3 filas irmãs já corrigiram.
+  const [personalReader, scoresReader] = await Promise.all([getPersonalStateReader(), getScoresReader()])
   let query = supabase
     .from("works_owner")
     .select(
-      "id, title, publication_status_id, personal_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score)",
+      "id, title, publication_status_id, synopsis_quality, work_covers(url, is_primary, position), calculated_scores(expected_score)",
     )
     .eq("is_archived", false)
-    .eq("personal_status_id", 10) // Untracked (PERSONAL_STATUSES_BY_ID[10])
   if (opts.pubStatusIds && opts.pubStatusIds.length > 0) {
     query = query.in("publication_status_id", opts.pubStatusIds)
   }
@@ -631,7 +681,12 @@ export async function getUntrackedWorks(opts: {
   const rows: UntrackedWork[] = []
   for (const row of data ?? []) {
     const w = row as Record<string, unknown>
-    const calc = (w.calculated_scores as { expected_score?: number | null } | null) ?? null
+    const personalStatusId = personalReader.get(w.id as string).personalStatusId
+    if (personalStatusId !== 10) continue
+    const calc = scoresReader.overlay(
+      w.id as string,
+      (w.calculated_scores as { expected_score?: number | null } | null) ?? null,
+    )
     const coverUrls = orderedCoverUrls(w.work_covers as RawCoverRow[] | undefined)
     rows.push({
       id: w.id as string,
@@ -639,7 +694,7 @@ export async function getUntrackedWorks(opts: {
       coverUrl: coverUrls[0] ?? null,
       coverUrls,
       publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
-      personalStatusId: w.personal_status_id != null ? Number(w.personal_status_id) : null,
+      personalStatusId,
       synopsisQuality: (w.synopsis_quality as string | null) ?? null,
       expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
     })
@@ -709,7 +764,7 @@ async function getVeredictoReadAckIds(): Promise<Set<string>> {
  * link/badge da fila no header do ranking só quando há o que processar.
  */
 export async function countStaleAlignmentWorks(): Promise<number> {
-  // Mesma definição da fila /ai-evaluation?tab=ia-rk: view works_owner, exclui
+  // Mesma definição da fila /fila-recomendacao?tab=ia-rk: view works_owner, exclui
   // arquivadas e ai_eval_status="skipped", E subtrai as obras marcadas como lidas
   // na fila `veredito` — como faz o contador da aba (page.tsx: `!ackVer.has(id)`) e
   // o badge da sidebar. Sem isto, marcar um veredito como lido sumia do badge lateral
@@ -743,7 +798,7 @@ export interface SynopsisQueueWork {
   /** Proveniência do valor: human_manual | prediction_applied | legacy_unknown | null. */
   synopsisQualitySource: string | null
   expectedScore: number | null
-  /** Data da última leitura (works.last_read_at) — pra ordenação. */
+  /** Data da última leitura de QUEM OLHA (user_work_state, via getPersonalStateReader) — pra ordenação. */
   lastReadAt: string | null
   /** Previsão IA ATIVA (versão atual se houver, senão a mais recente). */
   predictedQuality: string | null
@@ -768,7 +823,7 @@ export interface SynopsisQueueWork {
 }
 
 /**
- * Fila da aba /ai-evaluation?tab=sinopse: obras com `canonical_synopsis` que
+ * Fila da aba /fila-recomendacao?tab=sinopse: obras com `canonical_synopsis` que
  * precisam de estimativa de Interesse Sinopse. Três estados (espelha a fila de
  * Veredito IA):
  *   - "stale": já têm previsão mas marcada desatualizada (perfil/sinopse mudou)
@@ -788,7 +843,7 @@ interface SynopsisPredRow {
 }
 
 const SYNOPSIS_QUEUE_SELECT =
-  "id, title, publication_status_id, personal_status_id, synopsis_quality, synopsis_quality_source, last_read_at, work_covers(url, is_primary, position), calculated_scores(expected_score)"
+  "id, title, publication_status_id, synopsis_quality, synopsis_quality_source, work_covers(url, is_primary, position), calculated_scores(expected_score)"
 
 // Probe defensivo da coluna `synopsis_interest_skipped` (migration 121). Enquanto a
 // migration não for aplicada, a fila simplesmente não filtra pulados (não quebra).
@@ -846,7 +901,13 @@ export async function getSynopsisQueueWorks(opts: {
   if (!wantStale && !wantUnpredicted && !wantPredicted) return []
   const supabase = createAdminClient()
   // Exclui obras "puladas" (migration 121) — só se a coluna existir (probe).
-  const excludeSkipped = await hasSynopsisInterestSkippedColumn(supabase)
+  // personalReader: `works_owner.personal_status_id` é sempre o do DONO —
+  // status pessoal vem per-usuário daqui e filtra em memória (mesma razão de
+  // getAlignmentQueueWorks/getUntrackedWorks).
+  const [excludeSkipped, personalReader] = await Promise.all([
+    hasSynopsisInterestSkippedColumn(supabase),
+    getPersonalStateReader(),
+  ])
 
   // Carrega TODAS as previsões — fonte da verdade do estado de cada obra. A tabela
   // já passou de 1000 linhas, então pagina (sem isso o PostgREST corta em 1000 e
@@ -895,6 +956,13 @@ export async function getSynopsisQueueWorks(opts: {
 
   const pubIds = opts.pubStatusIds ?? []
   const personalIds = opts.personalStatusIds ?? []
+  // Status pessoal não dá pra filtrar no SQL (works_owner é sempre o do DONO) —
+  // resolve pelo reader e aplica sobre as linhas já buscadas.
+  const matchesPersonalStatus = (workId: string): boolean => {
+    if (personalIds.length === 0) return true
+    const id = personalReader.get(workId).personalStatusId
+    return id != null && personalIds.includes(id)
+  }
   // "none"/"unknown" são sentinelas de UI — nunca casam num valor real, então são
   // removidos antes de qualquer `.in("synopsis_quality", …)`.
   //  - "none"    = "Não avaliada" (synopsis_quality IS NULL) → via missingManual.
@@ -909,17 +977,20 @@ export async function getSynopsisQueueWorks(opts: {
     const pred = predByWork.get(w.id as string) ?? null
     const prev = prevByWork.get(w.id as string) ?? null
     const coverUrls = orderedCoverUrls(w.work_covers as RawCoverRow[] | undefined)
+    // `personal` cobre status E última leitura — as duas são per-usuário e
+    // `works_owner` só devolveria as do DONO (mesma razão do personal_status_id).
+    const personal = personalReader.get(w.id as string)
     return {
       id: w.id as string,
       title: w.title as string,
       coverUrl: coverUrls[0] ?? null,
       coverUrls,
       publicationStatusId: w.publication_status_id != null ? Number(w.publication_status_id) : null,
-      personalStatusId: w.personal_status_id != null ? Number(w.personal_status_id) : null,
+      personalStatusId: personal.personalStatusId,
       manualSynopsisQuality: (w.synopsis_quality as string | null) ?? null,
       synopsisQualitySource: (w.synopsis_quality_source as string | null) ?? null,
       expectedScore: calc?.expected_score != null ? Number(calc.expected_score) : null,
-      lastReadAt: (w.last_read_at as string | null) ?? null,
+      lastReadAt: personal.lastReadAt,
       predictedQuality: (pred?.predicted_quality as string | null) ?? null,
       predictedPromptVersion: (pred?.prompt_version as string | null) ?? null,
       predictedAt: (pred?.predicted_at as string | null) ?? null,
@@ -1030,7 +1101,6 @@ export async function getSynopsisQueueWorks(opts: {
         .is("synopsis_quality", null)
         .order("updated_at", { ascending: false })
       if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
-      if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
       if (excludeSkipped) q = q.eq("synopsis_interest_skipped", false)
       return q
     }
@@ -1043,6 +1113,7 @@ export async function getSynopsisQueueWorks(opts: {
     } else {
       data = await fetchAllRows<Record<string, unknown>>((from, to) => baseQ().range(from, to), "Falha listando obras sem Interesse manual")
     }
+    data = data.filter((w) => matchesPersonalStatus(w.id as string))
     await hydrateJustifications(data.map((w) => w.id as string))
     return withReadiness(postFilter(data.map((w) => mapWork(w))))
   }
@@ -1059,7 +1130,6 @@ export async function getSynopsisQueueWorks(opts: {
       .not("canonical_synopsis", "is", null)
       .order("updated_at", { ascending: false })
     if (pubIds.length > 0) q = q.in("publication_status_id", pubIds)
-    if (personalIds.length > 0) q = q.in("personal_status_id", personalIds)
     if (synQ.length > 0) q = q.in("synopsis_quality", synQ)
     if (unknownSource) q = q.eq("synopsis_quality_source", "legacy_unknown")
     if (excludeSkipped) q = q.eq("synopsis_interest_skipped", false)
@@ -1077,6 +1147,7 @@ export async function getSynopsisQueueWorks(opts: {
   const displayed: Record<string, unknown>[] = []
   for (const row of rows) {
     const id = row.id as string
+    if (!matchesPersonalStatus(id)) continue
     const hasPred = predByWork.has(id)
     // Estado: sem previsão → unpredicted; previsão desatualizada → stale; senão → predicted.
     const state = !hasPred ? "unpredicted" : outdatedWorks.has(id) ? "stale" : "predicted"

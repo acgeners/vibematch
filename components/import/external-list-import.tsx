@@ -1,13 +1,26 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import { Upload, FileText, Check, AlertCircle, ArrowRight, User, Search, ClipboardList, Info } from "lucide-react"
+import {
+  Upload,
+  FileText,
+  Check,
+  AlertCircle,
+  AlertTriangle,
+  ArrowRight,
+  ArrowRightLeft,
+  User,
+  Search,
+  ClipboardList,
+  Info,
+} from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { CollapsibleCard } from "@/components/ui/collapsible-card"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Select,
   SelectContent,
@@ -431,41 +444,98 @@ export function ExternalListImport({
   if (!analysis) return null
   const { buckets } = analysis
   const createCount = buckets.creates.length - skipCreates.size
+  // O que exige uma decisão sua vs. o que é só informativo/em lote — vira a
+  // linha de destaque no topo, pra responder "o que eu preciso fazer aqui"
+  // antes da frase técnica com todas as contagens.
+  const pendingDecisions = buckets.ambiguous.length + buckets.conflicts.length
+  const breakdown = [
+    buckets.creates.length > 0 ? `${buckets.creates.length} ${buckets.creates.length === 1 ? "nova" : "novas"}` : null,
+    buckets.unchangedCount > 0 ? `${buckets.unchangedCount} sem mudança` : null,
+    buckets.autoUpdate.length > 0
+      ? `${buckets.autoUpdate.length} automática${buckets.autoUpdate.length === 1 ? "" : "s"}`
+      : null,
+  ].filter((s): s is string => s !== null)
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Badge variant="secondary">{EXTERNAL_LIST_SOURCE_LABELS[analysis.source]}</Badge>
-        <span className="text-muted-foreground">
-          {analysis.entryCount} entradas · {buckets.autoUpdate.length} atualizações ·{" "}
-          {buckets.conflicts.length} conflitos · {buckets.ambiguous.length} a confirmar ·{" "}
-          {buckets.creates.length} novas · {buckets.unchangedCount} sem mudança
-        </span>
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Badge variant="secondary">{EXTERNAL_LIST_SOURCE_LABELS[analysis.source]}</Badge>
+          <span className="text-muted-foreground">
+            {analysis.entryCount} {analysis.entryCount === 1 ? "título" : "títulos"} na lista
+          </span>
+        </div>
+        {pendingDecisions > 0 ? (
+          <p className="flex items-center gap-1.5 text-sm font-medium text-amber-600 dark:text-amber-500">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>
+              <strong className="tabular-nums">{pendingDecisions}</strong>{" "}
+              {pendingDecisions === 1 ? "pendência precisa" : "pendências precisam"} da sua confirmação antes de
+              importar.
+            </span>
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">Nada pra confirmar — pronto pra importar.</p>
+        )}
+        {breakdown.length > 0 && <p className="text-xs text-muted-foreground">{breakdown.join(" · ")}</p>}
       </div>
 
-      {/* Atualizar sem conflito */}
-      {buckets.autoUpdate.length > 0 && (
-        <CollapsibleCard
-          title={`Atualizar sem conflito (${buckets.autoUpdate.length})`}
-          description="Campos vazios serão preenchidos com os valores importados."
-          defaultOpen={false}
-        >
-          <div className="space-y-2">
-            {buckets.autoUpdate.map((plan) => (
-              <div key={plan.entryIndex} className="rounded-md border border-border/60 p-2 text-sm">
-                <div className="font-medium">{plan.workTitle}</div>
-                <ChangeList changes={plan.changes} />
-              </div>
-            ))}
-          </div>
-        </CollapsibleCard>
+      {/* Confirmar correspondência — identidade incerta, decide primeiro */}
+      {buckets.ambiguous.length > 0 && (
+        <Card>
+          <CardHeader>
+            <AttentionCardTitle icon={Search} title="Pode já existir no catálogo" count={buckets.ambiguous.length} />
+            <CardDescription>Achamos um título parecido no que você já tem. Confirme se é a mesma obra.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {buckets.ambiguous.map((a) => {
+              const decision = ambiguousChoices[a.entryIndex]
+              return (
+                <div key={a.entryIndex} className="rounded-md border border-border/60 p-3 text-sm">
+                  <div className="mb-2 font-medium">{a.entry.title}</div>
+                  <p className="mb-1.5 text-xs text-muted-foreground">No catálogo, achamos:</p>
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {a.candidates.map((cand) => (
+                      <CandidateButton
+                        key={cand.workId}
+                        selected={decision?.action === "match" && decision.workId === cand.workId}
+                        title={cand.title}
+                        scorePercent={Math.round(cand.score * 100)}
+                        onClick={() => setAmbiguous(a.entryIndex, { action: "match", workId: cand.workId })}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1 border-t border-dashed border-border/60 pt-2">
+                    <TextChoice
+                      selected={decision?.action === "create"}
+                      onClick={() => setAmbiguous(a.entryIndex, { action: "create" })}
+                    >
+                      É outra obra — criar nova
+                    </TextChoice>
+                    <TextChoice
+                      selected={decision?.action === "skip"}
+                      onClick={() => setAmbiguous(a.entryIndex, { action: "skip" })}
+                    >
+                      Pular esta
+                    </TextChoice>
+                  </div>
+                </div>
+              )
+            })}
+          </CardContent>
+        </Card>
       )}
 
-      {/* Conflitos */}
+      {/* Conflitos — identidade já confirmada, só o valor do campo diverge */}
       {buckets.conflicts.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Conflitos ({buckets.conflicts.length})</CardTitle>
+            <AttentionCardTitle
+              icon={ArrowRightLeft}
+              title="Valor diferente do que está salvo"
+              count={buckets.conflicts.length}
+            />
+            <CardDescription>Já existe no catálogo com um valor diferente do da lista. Escolha qual vale.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {buckets.conflicts.map((plan) => (
@@ -498,54 +568,29 @@ export function ExternalListImport({
         </Card>
       )}
 
-      {/* Confirmar correspondência */}
-      {buckets.ambiguous.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Confirmar correspondência ({buckets.ambiguous.length})</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {buckets.ambiguous.map((a) => {
-              const decision = ambiguousChoices[a.entryIndex]
-              return (
-                <div key={a.entryIndex} className="rounded-md border border-border/60 p-3 text-sm">
-                  <div className="mb-2 font-medium">{a.entry.title}</div>
-                  <div className="flex flex-wrap gap-2">
-                    {a.candidates.map((cand) => (
-                      <ChoiceButton
-                        key={cand.workId}
-                        selected={decision?.action === "match" && decision.workId === cand.workId}
-                        onClick={() => setAmbiguous(a.entryIndex, { action: "match", workId: cand.workId })}
-                      >
-                        {cand.title}{" "}
-                        <span className="text-xs text-muted-foreground">({Math.round(cand.score * 100)}%)</span>
-                      </ChoiceButton>
-                    ))}
-                    <ChoiceButton
-                      selected={decision?.action === "create"}
-                      onClick={() => setAmbiguous(a.entryIndex, { action: "create" })}
-                    >
-                      Criar nova
-                    </ChoiceButton>
-                    <ChoiceButton
-                      selected={decision?.action === "skip"}
-                      onClick={() => setAmbiguous(a.entryIndex, { action: "skip" })}
-                    >
-                      Pular
-                    </ChoiceButton>
-                  </div>
-                </div>
-              )
-            })}
-          </CardContent>
-        </Card>
+      {/* Atualiza sozinho — informativo, nada pra decidir */}
+      {buckets.autoUpdate.length > 0 && (
+        <CollapsibleCard
+          title={`Atualiza sozinho (${buckets.autoUpdate.length})`}
+          description="Campo vazio no catálogo — preenchido com o valor da lista, sem precisar decidir nada."
+          defaultOpen={false}
+        >
+          <div className="space-y-2">
+            {buckets.autoUpdate.map((plan) => (
+              <div key={plan.entryIndex} className="rounded-md border border-border/60 p-2 text-sm">
+                <div className="font-medium">{plan.workTitle}</div>
+                <ChangeList changes={plan.changes} />
+              </div>
+            ))}
+          </div>
+        </CollapsibleCard>
       )}
 
-      {/* Criar novas */}
+      {/* Criar novas — em lote */}
       {buckets.creates.length > 0 && (
         <CollapsibleCard
-          title={`Criar novas (${createCount}/${buckets.creates.length})`}
-          description="Novas obras entram como pendentes na fila de Avaliação IA."
+          title={`Serão criadas (${createCount}/${buckets.creates.length})`}
+          description="Não achamos essas no catálogo — viram obras novas, pendentes de avaliação por IA."
           defaultOpen={false}
           action={
             <button
@@ -637,18 +682,71 @@ function ConflictRow({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="w-20 shrink-0 text-xs text-muted-foreground">{FIELD_LABELS[change.field]}</span>
-      <ChoiceButton selected={choice === "local"} onClick={() => onChoose("local")}>
-        Local: {fmt(change.local)}
-      </ChoiceButton>
-      <ChoiceButton selected={choice === "imported"} onClick={() => onChoose("imported")}>
-        Importado: {fmt(change.imported)}
-      </ChoiceButton>
+      <span className="w-24 shrink-0 text-xs text-muted-foreground">{FIELD_LABELS[change.field]}</span>
+      <ValueButton
+        selected={choice === "local"}
+        source="No catálogo"
+        value={fmt(change.local)}
+        onClick={() => onChoose("local")}
+      />
+      <ValueButton
+        selected={choice === "imported"}
+        source="Na lista importada"
+        value={fmt(change.imported)}
+        onClick={() => onChoose("imported")}
+      />
     </div>
   )
 }
 
-function ChoiceButton({
+// Cabeçalho das seções que exigem uma decisão (correspondência, conflito) —
+// ícone + contagem em âmbar, a única cor que a tela usa pra "isto pede sua atenção".
+function AttentionCardTitle({ icon: Icon, title, count }: { icon: LucideIcon; title: string; count: number }) {
+  return (
+    <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-500">
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+      {title}
+      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold tabular-nums text-amber-600 dark:text-amber-500">
+        {count}
+      </span>
+    </CardTitle>
+  )
+}
+
+// Candidato de correspondência — a sugestão do catálogo é a resposta, o %
+// só um detalhe secundário (antes o título+score ERA o rótulo inteiro do botão).
+function CandidateButton({
+  selected,
+  title,
+  scorePercent,
+  onClick,
+}: {
+  selected: boolean
+  title: string
+  scorePercent: number
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition",
+        selected ? "border-primary bg-primary/10" : "border-border/60 text-muted-foreground hover:bg-card/80"
+      )}
+    >
+      <Check className={cn("h-3.5 w-3.5 shrink-0 text-primary", !selected && "invisible")} />
+      <span className={selected ? "text-foreground" : undefined}>{title}</span>
+      <span className="text-xs text-muted-foreground">· {scorePercent}% parecido</span>
+    </button>
+  )
+}
+
+// "É outra obra"/"Pular" — escape hatches da correspondência ambígua, texto
+// simples de propósito: não competem em peso com a sugestão principal.
+function TextChoice({
   selected,
   onClick,
   children,
@@ -662,13 +760,39 @@ function ChoiceButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-md border px-2.5 py-1 text-xs transition",
-        selected
-          ? "border-primary bg-primary/15 text-foreground"
-          : "border-border/60 text-muted-foreground hover:bg-card/80"
+        "rounded px-2 py-1 text-xs transition",
+        selected ? "bg-card/80 font-medium text-foreground" : "text-muted-foreground hover:bg-card/80 hover:text-foreground"
       )}
     >
       {children}
+    </button>
+  )
+}
+
+// Linha "de onde vem cada valor" nos conflitos — rótulo curto + valor em
+// destaque, no lugar do antigo "Local: 8" / "Importado: 7" (não dizia a origem).
+function ValueButton({
+  selected,
+  source,
+  value,
+  onClick,
+}: {
+  selected: boolean
+  source: string
+  value: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex flex-col items-start rounded-md border px-2.5 py-1.5 text-left transition",
+        selected ? "border-primary bg-primary/10" : "border-border/60 hover:bg-card/80"
+      )}
+    >
+      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{source}</span>
+      <span className="text-sm font-semibold">{value}</span>
     </button>
   )
 }

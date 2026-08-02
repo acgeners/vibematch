@@ -422,6 +422,31 @@ export function WorkTable({
           )}
         </p>
         <div className="flex items-center gap-2">
+          {viewMode === "cards" && enableSelectAll && works.length > 0 && (
+            // Lista/Heatmap selecionam via checkbox no cabeçalho da tabela — Cards não
+            // tem cabeçalho, então precisa do próprio gatilho (mesmo padrão visual do
+            // "Selecionar todos" dos cards compactos mobile, abaixo).
+            <button
+              type="button"
+              onClick={() => (allSelected ? clearCompare() : selectAllVisible())}
+              className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-card/80 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-card hover:text-foreground"
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "grid size-4 shrink-0 place-content-center rounded-[4px] border border-input/90 bg-background/55 shadow-xs",
+                  (allSelected || someSelected) && "border-primary bg-primary text-primary-foreground"
+                )}
+              >
+                {allSelected ? (
+                  <Check className="size-3.5" />
+                ) : someSelected ? (
+                  <Minus className="size-3.5" />
+                ) : null}
+              </span>
+              {allSelected ? "Limpar seleção" : "Selecionar todos"}
+            </button>
+          )}
           {(viewMode === "list" || viewMode === "heatmap") && hasCriterionPrefs && (
             <AttrColorModeToggle />
           )}

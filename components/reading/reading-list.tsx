@@ -25,6 +25,7 @@ import {
   Archive,
   CalendarDays,
   List,
+  Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -98,6 +99,11 @@ function wholeChapters(n: number): number {
 /** Último capítulo lançado conhecido: contagem externa pós-check, senão o total salvo. */
 function latestOf(w: ReadingWork, result: ReadingUpdateResult | undefined): number | null {
   return result?.latestExternal ?? w.totalChapters
+}
+
+/** Quantos capítulos novos a checagem achou (badge "+N novo"); mínimo 1 quando `hasNew`. */
+function newChapterCount(result: ReadingUpdateResult | undefined): number {
+  return result?.delta != null ? Math.max(1, wholeChapters(result.delta)) : 1
 }
 
 /**
@@ -412,7 +418,8 @@ export function ReadingList({
   const [openKeys, setOpenKeys] = useState<Set<SectionKey> | null>(null)
   const ongoingRef = useRef<HTMLElement>(null)
   const othersRef = useRef<HTMLElement>(null)
-  const pendingScroll = useRef<SectionKey | null>(null)
+  // `workId` opcional: quando presente, o efeito rola até o CARD (não só o topo da seção).
+  const pendingScroll = useRef<{ section: SectionKey; workId?: string } | null>(null)
 
   // Última verificação = a mais recente entre as obras (cada uma grava chapters_checked_at).
   const lastChecked = useMemo(() => {
@@ -450,19 +457,58 @@ export function ReadingList({
   const effectiveOpen = openKeys ?? new Set<SectionKey>([defaultOpen])
   const isOpen = (key: SectionKey) => effectiveOpen.has(key)
 
-  // Rola até a seção depois que ela expande (efeito só faz scroll — nada de setState).
+  // Rola até a seção (ou até um card específico dentro dela) depois que ela expande —
+  // efeito só faz scroll, nada de setState.
   useEffect(() => {
-    const key = pendingScroll.current
-    if (!key) return
+    const target = pendingScroll.current
+    if (!target) return
     pendingScroll.current = null
-    const ref = key === "ongoing" ? ongoingRef : othersRef
+    if (target.workId) {
+      document.getElementById(`work-${target.workId}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+      return
+    }
+    const ref = target.section === "ongoing" ? ongoingRef : othersRef
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" })
   }, [openKeys])
 
   // Clique na aba: abre só aquela, fecha a outra e rola até ela.
   const selectSection = (key: SectionKey) => {
-    pendingScroll.current = key
+    pendingScroll.current = { section: key }
     setOpenKeys(new Set([key]))
+  }
+
+  // Chip da faixa de novidades: abre a seção certa (se ainda fechada) e rola até o card.
+  const jumpToWork = (work: ReadingWork) => {
+    const section: SectionKey = isOngoing(work) ? "ongoing" : "others"
+    if (effectiveOpen.has(section)) {
+      document.getElementById(`work-${work.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+      return
+    }
+    pendingScroll.current = { section, workId: work.id }
+    setOpenKeys((prev) => {
+      const next = new Set(prev ?? new Set<SectionKey>([defaultOpen]))
+      next.add(section)
+      return next
+    })
+  }
+
+  // Obras com capítulo novo nesta sessão (pós "Verificar atualizações"), pra faixa do topo.
+  const newReleases = useMemo(
+    () =>
+      works
+        .filter((w) => results[w.id]?.hasNew)
+        .map((w) => ({ work: w, result: results[w.id] })),
+    [works, results],
+  )
+
+  // Limpa "hasNew" quando o usuário se atualiza (marcar até o último ou stepper alcança
+  // o lançado) — senão a faixa e o anel do card ficam "novo" mesmo já lido.
+  const clearHasNew = (workId: string) => {
+    setResults((prev) => {
+      const cur = prev[workId]
+      if (!cur?.hasNew) return prev
+      return { ...prev, [workId]: { ...cur, hasNew: false } }
+    })
   }
 
   // Clique no cabeçalho: alterna aquela seção livremente (pode deixar as duas abertas).
@@ -674,6 +720,36 @@ export function ReadingList({
             </>
           )}
         </div>
+
+        {/* Faixa de novidades — só na lista, e só quando a checagem achou algo pendente. */}
+        {view === "list" && newReleases.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3 border-t border-border bg-emerald-500/[0.06] px-4 py-2.5">
+            <span className="flex shrink-0 items-center gap-1.5 text-[13px] font-semibold text-emerald-600 dark:text-emerald-400">
+              <Sparkles className="size-4 shrink-0" />
+              {newReleases.length} obra{newReleases.length !== 1 ? "s" : ""} com capítulo novo
+            </span>
+            <div className="flex flex-1 flex-wrap items-center gap-1.5">
+              {newReleases.map(({ work, result }) => (
+                <button
+                  key={work.id}
+                  type="button"
+                  onClick={() => jumpToWork(work)}
+                  className="inline-flex max-w-56 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-card px-2 py-1 text-xs text-foreground transition-colors hover:bg-emerald-500/10"
+                >
+                  <CoverImage
+                    url={work.coverUrl}
+                    alt=""
+                    className="h-6 w-[1.15rem] shrink-0 rounded object-cover"
+                  />
+                  <span className="truncate">{work.title}</span>
+                  <span className="shrink-0 font-semibold text-emerald-600 dark:text-emerald-400">
+                    +{newChapterCount(result)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Conteúdo da vista ativa */}
@@ -711,6 +787,7 @@ export function ReadingList({
                 classify={classifyReadingState}
                 order={READING_STATE_ORDER}
                 config={READING_STATE_CONFIG}
+                onCaughtUp={clearHasNew}
               />
             </ReadingSection>
           )}
@@ -739,6 +816,7 @@ export function ReadingList({
                 order={TRIAGE_STATE_ORDER}
                 config={TRIAGE_STATE_CONFIG}
                 actionState="parado"
+                onCaughtUp={clearHasNew}
               />
             </ReadingSection>
           )}
@@ -907,6 +985,7 @@ function BandedGrid<S extends string>({
   order,
   config,
   actionState,
+  onCaughtUp,
 }: {
   works: ReadingWork[]
   results: Record<string, ReadingUpdateResult>
@@ -916,6 +995,8 @@ function BandedGrid<S extends string>({
   config: Record<S, BandConfig>
   /** Banda cujos cards ganham ações (On-hold / Arquivar) — ex.: "parado". */
   actionState?: S
+  /** Chamado quando o card alcança o lançado (marcar até o X / stepper) — limpa o "hasNew". */
+  onCaughtUp: (workId: string) => void
 }) {
   const bands = useMemo(
     () => groupBands(works, results, classify, order),
@@ -937,7 +1018,7 @@ function BandedGrid<S extends string>({
                 {cfg.hint}
               </span>
             </div>
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
               {items.map((work) => (
                 <ReadingCard
                   key={work.id}
@@ -945,6 +1026,7 @@ function BandedGrid<S extends string>({
                   result={results[work.id]}
                   cfg={cfg}
                   showActions={actionState != null && state === actionState}
+                  onCaughtUp={onCaughtUp}
                 />
               ))}
             </div>
@@ -961,11 +1043,13 @@ function ReadingCard({
   result,
   cfg,
   showActions,
+  onCaughtUp,
 }: {
   work: ReadingWork
   result: ReadingUpdateResult | undefined
   cfg: BandConfig
   showActions?: boolean
+  onCaughtUp: (workId: string) => void
 }) {
   const refresh = useRefresh()
   // Progresso local otimista. `read` é a fonte da verdade da UI do card; o servidor é
@@ -1006,6 +1090,7 @@ function ReadingCard({
     if (next === read) return
     setRead(next)
     persist(next)
+    if (lancado != null && next >= lancado) onCaughtUp(work.id)
   }
 
   const markLatest = () => {
@@ -1013,6 +1098,7 @@ function ReadingCard({
     const next = wholeChapters(lancado)
     setRead(next)
     persist(next, true)
+    onCaughtUp(work.id)
     toast.success(`Marcado como lido até o ${next}`)
   }
 
@@ -1065,7 +1151,16 @@ function ReadingCard({
     : null
 
   return (
-    <Card className="relative overflow-hidden">
+    <Card
+      id={`work-${work.id}`}
+      className={cn(
+        "relative scroll-mt-4 overflow-hidden",
+        result?.hasNew && "ring-1 ring-emerald-400/60 dark:ring-emerald-500/50",
+      )}
+    >
+      {/* Tingimento quase imperceptível pra diferenciar (não destacar demais) quem tem
+          capítulo novo — some sozinho quando `hasNew` é limpo (marcar até o X / stepper). */}
+      {result?.hasNew && <span className="absolute inset-0 bg-emerald-500/5" aria-hidden />}
       {/* Faixa de estado: `bg-*` porque `border-<cor>` é morto neste projeto
           (regra `* { border-color }` fora de @layer sobrepõe as utilities do Tailwind). */}
       <span className={cn("absolute inset-y-0 left-0 w-1", cfg.bar)} aria-hidden />
@@ -1073,14 +1168,14 @@ function ReadingCard({
         <CoverImage
           url={work.coverUrl}
           alt={work.title}
-          className="h-36 w-24 shrink-0 rounded-lg object-cover ring-1 ring-border/60"
+          className="h-48 w-32 shrink-0 rounded-lg object-cover ring-1 ring-border/60"
         />
         <div className="flex min-w-0 flex-1 flex-col gap-2.5">
           <div className="flex items-start justify-between gap-2">
             <WorkTitleLink
               title={work.title}
               workId={work.id}
-              className="line-clamp-2 text-base font-semibold leading-snug hover:underline"
+              className="line-clamp-2 text-lg font-semibold leading-snug hover:underline"
             />
             <div className="flex shrink-0 items-center gap-1.5">
               {work.isAdult && <AdultBadge className="px-1.5 py-0" />}
@@ -1091,13 +1186,13 @@ function ReadingCard({
 
           {fraction != null && (
             <div className="flex items-center gap-2.5">
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
                 <div
                   className={cn("h-full rounded-full", cfg.progress)}
                   style={{ width: `${Math.round(fraction * 100)}%` }}
                 />
               </div>
-              <span className="min-w-9 text-right text-xs tabular-nums text-muted-foreground">
+              <span className="min-w-10 text-right text-sm tabular-nums text-muted-foreground">
                 {Math.round(fraction * 100)}%
               </span>
             </div>
@@ -1105,68 +1200,52 @@ function ReadingCard({
 
           <div className="flex items-end gap-3">
             <div className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
                 Último lido
               </span>
-              <div className="flex h-8 items-center rounded-lg border border-border/80">
+              <div className="flex h-9 items-center rounded-lg border border-border/80">
                 <button
                   type="button"
                   onClick={() => bump(-1)}
                   disabled={read <= 0}
                   aria-label="Diminuir capítulos lidos"
-                  className="grid h-8 w-7 place-items-center rounded-l-lg text-foreground transition-colors hover:bg-muted disabled:opacity-40"
+                  className="grid h-9 w-8 place-items-center rounded-l-lg text-foreground transition-colors hover:bg-muted disabled:opacity-40"
                 >
-                  <Minus className="size-3.5" />
+                  <Minus className="size-4" />
                 </button>
-                <span className="min-w-9 px-1 text-center text-lg font-bold tabular-nums leading-none">
+                <span className="min-w-10 px-1 text-center text-2xl font-bold tabular-nums leading-none">
                   {read}
                 </span>
                 <button
                   type="button"
                   onClick={() => bump(1)}
                   aria-label="Aumentar capítulos lidos"
-                  className="grid h-8 w-7 place-items-center rounded-r-lg text-foreground transition-colors hover:bg-muted"
+                  className="grid h-9 w-8 place-items-center rounded-r-lg text-foreground transition-colors hover:bg-muted"
                 >
-                  <Plus className="size-3.5" />
+                  <Plus className="size-4" />
                 </button>
               </div>
             </div>
-            <span className="flex h-8 items-center text-muted-foreground/50">→</span>
+            <span className="flex h-9 items-center text-muted-foreground/50">→</span>
             <Stat label="Último lançado" value={lancado ?? "—"} highlight={result?.hasNew} />
             {result?.hasNew && (
-              <span className="flex h-8 items-center">
+              <span className="flex h-9 items-center">
                 <Badge className="gap-1 border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                  +{result.delta != null ? Math.max(1, wholeChapters(result.delta)) : ""} novo
-                  {result.delta != null && Math.max(1, wholeChapters(result.delta)) !== 1 ? "s" : ""}
+                  +{newChapterCount(result)} novo{newChapterCount(result) !== 1 ? "s" : ""}
                 </Badge>
               </span>
             )}
             {saving && (
-              <span className="flex h-8 items-center">
-                <Loader2 className="size-3.5 animate-spin text-muted-foreground/60" />
-              </span>
-            )}
-
-            {/* Botão de "marcar até o último", à direita da linha dos capítulos. */}
-            {canMarkLatest && (
-              <span className="ml-auto flex h-8 items-center">
-                <button
-                  type="button"
-                  onClick={markLatest}
-                  title={`Marcar como lido até o capítulo ${wholeChapters(lancado)}`}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400"
-                >
-                  <CheckCheck className="size-3.5" />
-                  Marcar até o {wholeChapters(lancado)}
-                </button>
+              <span className="flex h-9 items-center">
+                <Loader2 className="size-4 animate-spin text-muted-foreground/60" />
               </span>
             )}
           </div>
 
-          <div className="min-h-[1.25rem] space-y-0.5 text-[13px] text-muted-foreground">
+          <div className="min-h-[1.25rem] space-y-0.5 text-sm text-muted-foreground">
             {work.lastReadAt && (
               <span className="flex items-center gap-1.5 text-muted-foreground/70">
-                <BookOpenCheck className="size-3.5 shrink-0" /> Última leitura:{" "}
+                <BookOpenCheck className="size-4 shrink-0" /> Última leitura:{" "}
                 {formatRelativeDate(work.lastReadAt)}
                 {isRecentlyStarted(work, result) && (
                   <span className="font-medium text-rose-600 dark:text-rose-400">
@@ -1177,39 +1256,43 @@ function ReadingCard({
             )}
             {result?.failed ? (
               <span className="flex items-center gap-1.5">
-                <AlertCircle className="size-3.5" /> não verificado
+                <AlertCircle className="size-4" /> não verificado
               </span>
             ) : result?.skipped ? (
               <span className="flex items-center gap-1.5">
-                <Check className="size-3.5 shrink-0 text-emerald-500" /> Concluída — sem capítulos novos
+                <Check className="size-4 shrink-0 text-emerald-500" /> Concluída — sem capítulos novos
               </span>
             ) : (
               <>
                 {result?.statusApplied && (
                   <span className="flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
-                    <RotateCw className="size-3.5 shrink-0" /> Status atualizado →{" "}
+                    <RotateCw className="size-4 shrink-0" /> Status atualizado →{" "}
                     {APPLIED_STATUS_LABEL[result.statusApplied] ?? result.statusApplied}
                   </span>
                 )}
-                {releasedAge && (
-                  <span className="flex items-center gap-1.5">
-                    <Clock className="size-3.5 shrink-0" /> Último cap lançado {releasedAge}
-                  </span>
-                )}
-                {predictedIso &&
-                  (predictedOverdue ? (
-                    <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-                      <CalendarClock className="size-3.5 shrink-0 text-amber-500" /> Próximo previsto:{" "}
-                      {predictedShort} <span className="font-semibold">· já passou</span>
-                    </span>
-                  ) : (
-                    predicted && (
-                      <span className="flex items-center gap-1.5 text-foreground/80">
-                        <CalendarClock className="size-3.5 shrink-0 text-sky-500" /> Próximo cap previsto:{" "}
-                        {predicted}
+                {(releasedAge || predictedIso) && (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5">
+                    {releasedAge && (
+                      <span className="flex items-center gap-1.5">
+                        <Clock className="size-4 shrink-0" /> Último cap lançado {releasedAge}
                       </span>
-                    )
-                  ))}
+                    )}
+                    {predictedIso &&
+                      (predictedOverdue ? (
+                        <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                          <CalendarClock className="size-4 shrink-0 text-amber-500" /> Próximo previsto:{" "}
+                          {predictedShort} <span className="font-semibold">· já passou</span>
+                        </span>
+                      ) : (
+                        predicted && (
+                          <span className="flex items-center gap-1.5 text-foreground/80">
+                            <CalendarClock className="size-4 shrink-0 text-sky-500" /> Próximo cap previsto:{" "}
+                            {predicted}
+                          </span>
+                        )
+                      ))}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1227,6 +1310,18 @@ function ReadingCard({
               <span className="text-[11px] text-muted-foreground/70">
                 Sem link (verifique atualizações)
               </span>
+            )}
+
+            {canMarkLatest && (
+              <Button
+                size="sm"
+                onClick={markLatest}
+                title={`Marcar como lido até o capítulo ${wholeChapters(lancado)}`}
+                className="bg-none bg-emerald-600 text-white shadow-sm shadow-emerald-500/25 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+              >
+                <CheckCheck className="mr-1.5 size-3.5" />
+                Marcar até o {wholeChapters(lancado)}
+              </Button>
             )}
 
             {showActions && (
@@ -1296,11 +1391,11 @@ function Stat({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
-      <div className="flex h-8 items-center">
+      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</span>
+      <div className="flex h-9 items-center">
         <span
           className={cn(
-            "text-xl font-bold tabular-nums leading-none",
+            "text-2xl font-bold tabular-nums leading-none",
             highlight ? "text-emerald-500" : "text-foreground",
           )}
         >
