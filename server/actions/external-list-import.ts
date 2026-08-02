@@ -393,6 +393,7 @@ export async function commitExternalListImport(
     revalidatePath("/")
     revalidatePath("/ranking")
     revalidatePath("/ai-evaluation")
+    revalidatePath("/fila-recomendacao")
     revalidatePath("/import")
     revalidateTag("ai-eval-tab-counts", "max")
 
