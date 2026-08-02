@@ -29,10 +29,6 @@ export const metadata: Metadata = {
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  // A sidebar sai do servidor JÁ no estado colapsado/expandido do usuário. Ler isto
-  // aqui torna as rotas dinâmicas — custo real, mas as 7 que ainda eram estáticas
-  // (/login, /signup, redirects) não fazem trabalho de banco. Em troca, some o
-  // mismatch de hidratação e o pulo visual. Ver lib/sidebar-preference.ts.
 
   return (
     <html

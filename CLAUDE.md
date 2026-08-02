@@ -158,16 +158,23 @@ As duas trocas erradas, e o que cada uma faz **em silêncio**:
 recalcularia as notas dele **sem a calibração dele** — sem erro, sem log, só notas erradas.
 
 **Auth existe** (esta linha já disse o contrário — não confie na memória, confira): Supabase Auth com
-`/login`, `/signup` e **logout no menu do chip da sidebar** (`components/layout/account-chip.tsx` →
+`/login`, `/signup` e **logout no menu do avatar na barra superior** (`components/layout/account-chip.tsx` →
 `signOutAction`). O `middleware.ts` só **refresca a sessão**; ele **não protege rota** — visitante
 anônimo carrega qualquer página e vê o catálogo (que é compartilhado por design). Quem autoriza é o
 **papel** (`user_settings.role` → `lib/plans/roles.ts`, `ensureAdmin`/`roleAllows`), verificado
 dentro das actions, não na borda.
 
-**Toda rota é dinâmica (`ƒ`).** `app/layout.tsx` lê `cookies()` pra saber se a sidebar está
-recolhida, e isso desliga o prerender do app inteiro. Foi uma troca consciente (ver a armadilha de
-hidratação abaixo): nenhuma das 7 rotas que ainda prerenderizavam fazia trabalho de banco. Se um dia
-uma página pública precisar de prerender, é este `cookies()` que estará no caminho.
+**A navegação é uma BARRA SUPERIOR** (`components/layout/top-nav.tsx`), desde 2026-08-02 — a
+sidebar de 13 itens foi removida. A régua: **o topo é sobre obras, o avatar é sobre você, a console
+é sobre o catálogo dos outros.** Cinco entradas no topo (Início · Minha lista ▾ · Explorar ▾ ·
+Ranking · Recomendações); Preferências/Importar/Painel no menu do avatar; fila e curadoria como
+ÍCONE com contador (dentro de dropdown o número não é visto).
+
+⚠️ Com a sidebar saiu o `cookies()` que o `app/layout.tsx` lia pro colapso — era ele que fazia
+**toda rota ser dinâmica (`ƒ`)**. Sem ele, rotas sem trabalho de sessão podem voltar a
+prerenderizar; conferir o output do `next build` antes de assumir que a home continua dinâmica (ela
+é, por `getSessionUserId()`, mas isso é acidente da implementação, não garantia). `lib/sidebar-preference.ts`
+segue no repo como a documentação do padrão cookie-vs-localStorage, sem uso funcional.
 
 ```
 app/              – Next.js routes (server components by default)
