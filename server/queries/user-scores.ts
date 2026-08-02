@@ -1,7 +1,7 @@
 import "server-only"
 import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getCurrentUserId, getOwnerUserId } from "./current-user"
+import { getOwnerUserId, getSessionUserId } from "./current-user"
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // Os SCORES DERIVADOS de quem está olhando — FATIA 2b
@@ -89,12 +89,35 @@ export interface ScoresReader {
 /**
  * Leitor dos scores do usuário da requisição. Memoizado por request.
  *
- * Sem sessão (anônimo) → cai no singleton, ou seja, o visitante vê o app pelos olhos do dono.
- * É o comportamento de hoje, e é intencional: o catálogo é compartilhado. Quem ganha scores
- * próprios é quem LOGA.
+ * ⚠️ Usa `getSessionUserId()` (null sem sessão), NUNCA `getCurrentUserId()` — este último cai
+ * no singleton, e era exatamente por isso que o visitante anônimo recebia `isOwner: true` e
+ * lia `calculated_scores`: a Nota Prevista, o personal_fit e o Veredito IA DO DONO, exibidos
+ * como se fossem a avaliação do acervo. Numa página pública isso publica o gosto de uma
+ * pessoa com cara de dado objetivo — e o /ranking e o /titles ordenam por `expected_score`
+ * por padrão, então era a ordem do catálogo inteiro que saía dali.
+ *
+ * Anônimo → `hasModel: false` + os campos pessoais zerados. O fallback que já existia para
+ * "quem não tem modelo" (ranking.ts troca os campos pessoais do sort por `platform_avg`)
+ * passa a valer para ele também — não foi preciso criar caminho novo, só parar de mentir
+ * sobre quem ele é. Sobra o que é FATO da obra: platform_avg, total_votes, ia_eval.
  */
 export const getScoresReader = cache(async (): Promise<ScoresReader> => {
-  const [userId, ownerId] = await Promise.all([getCurrentUserId(), getOwnerUserId()])
+  const [sessionId, ownerId] = await Promise.all([getSessionUserId(), getOwnerUserId()])
+
+  if (!sessionId) {
+    return {
+      // O id do dono segue aqui só porque o tipo pede um `string` e porque as chaves de cache
+      // derivadas dele devem ser as MESMAS para todo visitante — todos veem a mesma página.
+      // Ninguém deve escrever por este id: `isOwner` é false e não há sessão.
+      userId: ownerId,
+      isOwner: false,
+      hasModel: false,
+      overlay: <T,>(_workId: string, calcRow: T): T =>
+        calcRow ? ({ ...(calcRow as object), ...EMPTY_PERSONAL_SCORES } as T) : calcRow,
+    }
+  }
+
+  const userId = sessionId
   const isOwner = userId === ownerId
 
   if (isOwner) {

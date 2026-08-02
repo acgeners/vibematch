@@ -2,7 +2,7 @@ import "server-only"
 import { cache } from "react"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createUserClient } from "@/lib/supabase/user"
-import { getCurrentUserId, getOwnerUserId, ensureSignedIn, ensurePermission } from "./current-user"
+import { getSessionUserId, getOwnerUserId, ensureSignedIn, ensurePermission } from "./current-user"
 import type { SynopsisQuality, SynopsisQualitySource } from "@/types/domain"
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -209,16 +209,32 @@ export interface PersonalStateReader {
  * Leitor do estado pessoal do usuário da requisição. Memoizado por request (React `cache`):
  * uma página que renderiza tabela + KPIs + cards paga uma query só.
  *
- * Sem sessão (anônimo) → `getCurrentUserId()` cai no singleton, ou seja, o visitante segue
- * vendo o app pelos olhos do dono. É intencional (o catálogo é compartilhado por design), e
- * agora ele vê o estado do dono pelo ESPELHO do dono — mesmo dado, outra tabela.
+ * ⚠️ Usa `getSessionUserId()` (null sem sessão), NUNCA `getCurrentUserId()`. Este arquivo já
+ * dizia que cair no singleton para o anônimo era intencional — "o catálogo é compartilhado
+ * por design". O catálogo é; o ESTADO DE LEITURA não. Pelo caminho antigo, um visitante sem
+ * conta via os favoritos, o status ("Lendo", "Terminei"), os capítulos lidos e as notas do
+ * dono espalhados pelo catálogo, como se fossem dele. Isso não é catálogo compartilhado, é
+ * dado pessoal de uma pessoa exposto a quem passa.
+ *
+ * Anônimo → estado vazio, que é o que "não acompanho isto" já significa em toda a API. E não
+ * custa query nenhuma: sem sessão não há o que carregar (também poupa egress).
  */
 export const getPersonalStateReader = cache(async (): Promise<PersonalStateReader> => {
-  const userId = await getCurrentUserId()
-  const byWorkId = await loadUserWorkState(userId)
+  const sessionId = await getSessionUserId()
+
+  if (!sessionId) {
+    // `userId` do dono só para satisfazer o tipo e manter as chaves de cache derivadas iguais
+    // entre todos os visitantes. Nenhuma escrita deve sair daqui — não há sessão.
+    return {
+      userId: await getOwnerUserId(),
+      get: () => EMPTY_PERSONAL_STATE,
+    }
+  }
+
+  const byWorkId = await loadUserWorkState(sessionId)
 
   return {
-    userId,
+    userId: sessionId,
     get: (workId) => byWorkId.get(workId) ?? EMPTY_PERSONAL_STATE,
   }
 })
