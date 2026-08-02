@@ -6,6 +6,7 @@ import {
   getPersonalStatusIdByName,
 } from "@/lib/constants/status-lookups"
 import { pickPrimaryCover } from "@/lib/covers"
+import type { SynopsisQuality } from "@/types/domain"
 import { comixWorkUrl } from "@/lib/external/comix"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
@@ -48,6 +49,10 @@ export interface TopWorkItem {
   personalStatusId: number | null
   /** Conteúdo adulto (18+) efetivo — works.is_adult. */
   isAdult: boolean
+  /** Total de capítulos conhecido; null quando nenhuma fonte sabe. */
+  totalChapters: number | null
+  /** Interesse na obra de QUEM OLHA (♥…♥♥♥♥), quando já declarado. */
+  synopsisQuality: SynopsisQuality | null
 }
 
 export interface ContinueReadingItem {
@@ -55,6 +60,8 @@ export interface ContinueReadingItem {
   title: string
   coverUrl: string | null
   personalStatusId: number | null
+  /** Status de PUBLICAÇÃO — a home usa para o hiato oficial das bandas de ritmo. */
+  publicationStatusId: number | null
   chaptersRead: number | null
   totalChapters: number | null
   /** Capítulos não lidos = total − lidos (mín. 0); null quando o total é desconhecido. */
@@ -193,7 +200,7 @@ export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]>
   const { data, error } = await supabase
     .from("works")
     .select(`
-      id, title, is_archived, publication_status_id, is_adult,
+      id, title, is_archived, publication_status_id, is_adult, total_chapters,
       calculated_scores(expected_score, platform_avg),
       work_covers(url, is_primary, position)
     `)
@@ -207,6 +214,7 @@ export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]>
     title: string
     publication_status_id: number | null
     is_adult?: boolean | null
+    total_chapters?: number | null
     calculated_scores: { expected_score: number | null; platform_avg: number | null } | null
     work_covers?: CoverRow[] | null
   }
@@ -225,6 +233,8 @@ export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]>
         personalStatusId: state.personalStatusId,
         userScore: state.userScore,
         isAdult: Boolean(w.is_adult),
+        totalChapters: w.total_chapters ?? null,
+        synopsisQuality: state.synopsisQuality,
       }
     })
     // "ainda não avaliou" = a nota DELA é nula (não a dele).
@@ -243,6 +253,8 @@ export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]>
     publicationStatusId: w.publicationStatusId,
     personalStatusId: w.personalStatusId,
     isAdult: w.isAdult,
+    totalChapters: w.totalChapters,
+    synopsisQuality: w.synopsisQuality,
   }))
 }
 
@@ -280,7 +292,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
   const { data, error } = await supabase
     .from("works")
     .select(`
-      id, title, total_chapters, is_adult,
+      id, title, total_chapters, is_adult, publication_status_id,
       last_chapter_released_at, next_chapter_predicted_at,
       calculated_scores(expected_score),
       work_covers(url, is_primary, position),
@@ -298,6 +310,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
     is_adult?: boolean | null
     last_chapter_released_at: string | null
     next_chapter_predicted_at: string | null
+    publication_status_id?: number | null
     calculated_scores?: { expected_score?: number | null } | null
     work_covers?: CoverRow[] | null
     work_external_ids?: ExternalIdRow[] | null
@@ -311,6 +324,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
       title: w.title,
       coverUrl: pickPrimaryCover(w.work_covers),
       personalStatusId: state.personalStatusId,
+      publicationStatusId: w.publication_status_id ?? null,
       chaptersRead: state.chaptersRead,
       totalChapters: w.total_chapters ?? null,
       pending,
