@@ -7,7 +7,7 @@ import {
 } from "@/server/queries/dashboard"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getCurrentUserProfile, getSessionUserId } from "@/server/queries/current-user"
-import { getPublicShowcase } from "@/server/queries/public-showcase"
+import { getPublicShowcase, getSpotlightWork } from "@/server/queries/public-showcase"
 import { getSiteStats } from "@/server/queries/auth-hero"
 import { PublicHome } from "@/components/home/public-home"
 import { getFirstStepsProgress } from "@/server/queries/onboarding-progress"
@@ -37,8 +37,12 @@ export default async function HomePage() {
   // mostra o que é fato da obra e convida a criar conta.
   const sessionId = await getSessionUserId()
   if (!sessionId) {
-    const [works, siteStats] = await Promise.all([getPublicShowcase(12), getSiteStats()])
-    return <PublicHome works={works} stats={siteStats} />
+    const [works, siteStats, spotlight] = await Promise.all([
+      getPublicShowcase(12),
+      getSiteStats(),
+      getSpotlightWork(),
+    ])
+    return <PublicHome works={works} stats={siteStats} spotlight={spotlight} />
   }
 
   const [stats, thresholds, continueReading, topPicks, profile, firstSteps] = await Promise.all([

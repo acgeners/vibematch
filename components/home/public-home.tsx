@@ -3,7 +3,8 @@ import { ArrowRight, Star } from "lucide-react"
 import { CoverImage } from "@/components/ui/cover-image"
 import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
-import type { PublicShowcaseWork } from "@/server/queries/public-showcase"
+import type { PublicShowcaseWork, SpotlightWork } from "@/server/queries/public-showcase"
+import { CriteriaXray } from "@/components/home/criteria-xray"
 import type { SiteStats } from "@/server/queries/auth-hero"
 
 /**
@@ -22,14 +23,18 @@ import type { SiteStats } from "@/server/queries/auth-hero"
 export function PublicHome({
   works,
   stats,
+  spotlight,
 }: {
   works: PublicShowcaseWork[]
   stats: SiteStats
+  /** Obra do raio-X. `null` quando nenhuma das melhores tem os 9 critérios + capa. */
+  spotlight: SpotlightWork | null
 }) {
   return (
     <div className="flex flex-col gap-10">
-      {/* ── hero ───────────────────────────────────────────────── */}
-      <section className="flex flex-col gap-4 pt-2">
+      {/* ── hero: o argumento à esquerda, a PROVA dele à direita ── */}
+      <section className="grid items-center gap-6 pt-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] lg:gap-10">
+      <div className="flex flex-col gap-4">
         <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">
           {stats.works.toLocaleString("pt-BR")} obras lidas por critério
         </p>
@@ -63,6 +68,9 @@ export function PublicHome({
           <Stat value={stats.reviews} label="reviews lidas" />
           <Stat value={stats.sources} label="fontes cruzadas" />
         </dl>
+      </div>
+
+        {spotlight && <CriteriaXray work={spotlight} />}
       </section>
 
       {/* ── prateleira pública ─────────────────────────────────── */}

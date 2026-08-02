@@ -1,6 +1,7 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { pickPrimaryCover } from "@/lib/covers"
+import { CRITERION_SLUGS } from "@/types/domain"
 
 /**
  * As obras da vitrine PÚBLICA — para quem não tem sessão.
@@ -29,6 +30,81 @@ export interface PublicShowcaseWork {
 
 /** Piso de votos para entrar na vitrine: abaixo disso a média não é sinal, é acaso. */
 const MIN_VOTES = 300
+
+export interface SpotlightWork extends PublicShowcaseWork {
+  /** As notas por critério, na ordem de `CRITERION_SLUGS`. Só entra com os 9 completos. */
+  scores: Array<{ slug: string; score: number }>
+}
+
+/**
+ * A obra do hero público — a que demonstra o produto em vez de descrevê-lo.
+ *
+ * Exige os **9 critérios completos**: o argumento da página é "toda obra passa por uma leitura
+ * de nove critérios", e ilustrá-lo com uma obra de seis notas desmentiria a própria frase.
+ *
+ * Escolha determinística (a melhor por `platform_avg` que satisfaz os requisitos), nunca
+ * aleatória — sorteio aqui mudaria o hero a cada request, quebrando cache e tornando a página
+ * impossível de conferir.
+ */
+export async function getSpotlightWork(): Promise<SpotlightWork | null> {
+  const supabase = createAdminClient()
+
+  const { data, error } = await supabase
+    .from("calculated_scores")
+    .select(
+      `platform_avg, total_votes,
+       works!inner(id, title, is_archived, is_adult, publication_status_id, total_chapters,
+                   work_covers(url, is_primary, position),
+                   category_scores(criterion_slug, score))`,
+    )
+    .not("platform_avg", "is", null)
+    .gte("total_votes", MIN_VOTES)
+    .eq("works.is_archived", false)
+    .order("platform_avg", { ascending: false })
+    .limit(60)
+
+  if (error) return null
+
+  const rows = (data ?? []) as unknown as Array<{
+    platform_avg: number | null
+    total_votes: number | null
+    works: {
+      id: string
+      title: string
+      is_adult?: boolean | null
+      publication_status_id: number | null
+      total_chapters: number | null
+      work_covers?: { url: string; is_primary: boolean; position: number }[] | null
+      category_scores?: Array<{ criterion_slug: string; score: number | null }> | null
+    }
+  }>
+
+  for (const row of rows) {
+    if (row.works.is_adult) continue
+    const coverUrl = pickPrimaryCover(row.works.work_covers)
+    if (!coverUrl) continue
+
+    const bySlug = new Map(
+      (row.works.category_scores ?? [])
+        .filter((c) => c.score != null)
+        .map((c) => [c.criterion_slug, c.score as number]),
+    )
+    if (CRITERION_SLUGS.some((s) => !bySlug.has(s))) continue
+
+    return {
+      id: row.works.id,
+      title: row.works.title,
+      coverUrl,
+      platformAvg: row.platform_avg,
+      totalVotes: row.total_votes ?? 0,
+      publicationStatusId: row.works.publication_status_id,
+      isAdult: false,
+      totalChapters: row.works.total_chapters,
+      scores: CRITERION_SLUGS.map((slug) => ({ slug, score: bySlug.get(slug) as number })),
+    }
+  }
+  return null
+}
 
 export async function getPublicShowcase(limit = 12): Promise<PublicShowcaseWork[]> {
   const supabase = createAdminClient()
