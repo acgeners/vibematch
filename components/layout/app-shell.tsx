@@ -13,11 +13,11 @@ function isFullBleedRoute(pathname: string): boolean {
 }
 
 export function AppShell({
-  sidebar,
+  topNav,
   overlays,
   children,
 }: {
-  sidebar: ReactNode
+  topNav: ReactNode
   overlays: ReactNode
   children: ReactNode
 }) {
@@ -31,15 +31,16 @@ export function AppShell({
     return <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">{children}</div>
   }
 
+  // A barra passou de COLUNA (sidebar, irmã do main) para LINHA acima dele — por isso o
+  // shell deixou de ser flex-row e o scroll saiu do <main> para o contêiner: com a barra
+  // `sticky` no topo, rolar dentro do main a deixaria parada em cima de conteúdo rolando.
   return (
-    <>
-      {sidebar}
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-        <main className="relative z-10 min-h-0 flex-1 overflow-y-auto scroll-smooth px-4 py-5 pb-24 md:px-7 md:py-7 md:pb-7">
-          {children}
-        </main>
-      </div>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto scroll-smooth">
+      {topNav}
+      <main className="relative z-10 mx-auto w-full max-w-[1560px] flex-1 px-4 py-5 pb-24 md:px-7 md:py-7 md:pb-7">
+        {children}
+      </main>
       {overlays}
-    </>
+    </div>
   )
 }
