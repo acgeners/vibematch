@@ -1,6 +1,7 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { slugifyTagName } from "@/lib/utils"
 import { TAG_GROUP_LABELS, type TagGroupSlug } from "@/lib/constants/tag-groups"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG, normalizeTagGroupSlug } from "@/lib/constants/tag-groups-utils"
 import { TAG_GROUPS_CATALOG, GENRE_NAMES } from "@/lib/constants/tags"
@@ -184,7 +185,13 @@ const TAG_GROUP_BY_TAG_KEY: Map<string, string> = (() => {
   return map
 })()
 
-function tagsForAi(tagNames: string[] | undefined): AiEvaluationTag[] {
+// Antes da IA rodar, o work ainda não existe (Path B, "Buscar dados"/criação) — as
+// strings de tag vêm direto da fonte externa, sem work_tags pra juntar. Ainda assim
+// muitas já existem no catálogo `tags` (criadas por uma obra anterior), então
+// buscamos `adult_score_tier` por slug pra elas também terem piso/teto corretos na
+// 1ª avaliação — sem isso, toda avaliação em Path B ficava sem NENHUM piso/teto por
+// tag (só gênero/contentRating), mesmo pra tags já revisadas na Consolidação.
+async function tagsForAi(tagNames: string[] | undefined): Promise<AiEvaluationTag[]> {
   const seen = new Set<string>()
   const out: AiEvaluationTag[] = []
   for (const raw of tagNames ?? []) {
@@ -193,6 +200,16 @@ function tagsForAi(tagNames: string[] | undefined): AiEvaluationTag[] {
     if (!name || !key || seen.has(key)) continue
     seen.add(key)
     out.push({ name, group: TAG_GROUP_BY_TAG_KEY.get(key) ?? null })
+  }
+  if (out.length === 0) return out
+
+  const slugs = out.map((t) => slugifyTagName(t.name))
+  const supabase = createAdminClient()
+  const { data } = await supabase.from("tags").select("slug, adult_score_tier").in("slug", slugs)
+  const tierBySlug = new Map((data ?? []).map((t) => [t.slug as string, t.adult_score_tier as string | null]))
+  for (const t of out) {
+    const tier = tierBySlug.get(slugifyTagName(t.name))
+    if (tier === "label" || tier === "explicit") t.adultScoreTier = tier
   }
   return out
 }
@@ -434,7 +451,7 @@ export async function evaluateCandidateForCreate(input: {
     title: input.title,
     synopsis: input.synopsis ?? undefined,
     genres: input.genres ?? [],
-    tags: tagsForAi(input.tags),
+    tags: await tagsForAi(input.tags),
     sourcedReviews: contextResult.sourcedReviews,
     externalContext,
     platformRatings: contextResult.platformRatings,

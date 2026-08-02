@@ -135,6 +135,98 @@ export async function setTagAdult(tagId: string, level: AdultLevel): Promise<{ o
   return { ok: true }
 }
 
+export type AdultScoreTier = "none" | "label" | "explicit"
+
+export interface AdultScoreTierBacklogRow {
+  id: string
+  name: string
+  /** Nível atual do FLAG is_adult (contexto — o eixo que este ajuste NÃO mexe). */
+  adultLevel: AdultLevel
+  workCount: number
+  sampleTitles: string[]
+}
+
+/**
+ * Tags que já contam pro flag `is_adult` (adult_indicator) mas nunca foram
+ * avaliadas no eixo do PISO da nota `adult_content` (migração 174) — inclui tanto
+ * o backlog pré-existente (tags seedadas antes da migração 174 existir) quanto
+ * qualquer tag futura que escape do enricher automático. Critério de saída da
+ * fila é `adult_score_tier_reviewed_at`, não `adult_score_tier` (que pode ficar
+ * NULL de propósito quando a decisão é "sem piso").
+ */
+export async function listAdultScoreTierBacklog(): Promise<AdultScoreTierBacklogRow[]> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return []
+  const supabase = createAdminClient()
+
+  const { data: tags, error } = await supabase
+    .from("tags")
+    .select("id, name, adult_indicator, adult_indicator_strong")
+    .eq("adult_indicator", true)
+    .is("adult_score_tier_reviewed_at", null)
+    .order("name", { ascending: true })
+  if (error) {
+    console.error("[listAdultScoreTierBacklog] falhou", error.message)
+    return []
+  }
+  if (!tags?.length) return []
+
+  const ids = tags.map((t) => t.id as string)
+  const counts = new Map<string, number>()
+  const samplesByTag = new Map<string, string[]>()
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase
+      .from("work_tags")
+      .select("tag_id, works(title)")
+      .in("tag_id", ids)
+      .range(from, from + 999)
+    for (const r of (data ?? []) as Array<{ tag_id: string; works: { title?: string } | null }>) {
+      counts.set(r.tag_id, (counts.get(r.tag_id) ?? 0) + 1)
+      const title = r.works?.title
+      if (title) {
+        const samples = samplesByTag.get(r.tag_id) ?? []
+        if (samples.length < 3) samples.push(title)
+        samplesByTag.set(r.tag_id, samples)
+      }
+    }
+    if (!data || data.length < 1000) break
+  }
+
+  return tags
+    .map((t) => ({
+      id: t.id as string,
+      name: t.name as string,
+      adultLevel: adultLevelOf(t.adult_indicator as boolean, t.adult_indicator_strong as boolean),
+      workCount: counts.get(t.id as string) ?? 0,
+      sampleTitles: samplesByTag.get(t.id as string) ?? [],
+    }))
+    .sort((a, b) => b.workCount - a.workCount)
+}
+
+/**
+ * Decide o piso de `adult_content` da tag (eixo independente de setTagAdult). Marca
+ * `adult_score_tier_reviewed_at` mesmo quando `tier="none"` — é essa marca, não o
+ * valor do tier, que tira a tag da fila (ver listAdultScoreTierBacklog).
+ */
+export async function setTagScoreTier(tagId: string, tier: AdultScoreTier): Promise<{ ok: boolean }> {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { ok: false }
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from("tags")
+    .update({
+      adult_score_tier: tier === "none" ? null : tier,
+      adult_score_tier_reviewed_at: new Date().toISOString(),
+    })
+    .eq("id", tagId)
+  if (error) {
+    console.error("[setTagScoreTier] falhou", error.message)
+    return { ok: false }
+  }
+  revalidatePath("/settings")
+  return { ok: true }
+}
+
 /** Troca o grupo de uma tag (quando a IA errou a classificação). */
 export async function changeTagGroup(tagId: string, groupSlug: string): Promise<{ ok: boolean }> {
   const gate = await ensureAdmin()

@@ -8,8 +8,19 @@ export interface EnrichInputTag {
   slug: string
 }
 
-/** Nível de indicação de conteúdo sexual adulto da tag. */
+/** Nível de indicação de conteúdo sexual adulto da tag (decide o FLAG works.is_adult). */
 export type AdultLevel = "none" | "label" | "explicit"
+
+/**
+ * Piso de `category_scores.adult_content` implicado pela tag (decide a NOTA, eixo
+ * independente do flag). Ver lib/ai-evaluation/adult-content-rules.ts: uma tag pode
+ * ser forte o bastante pra marcar a obra como 18+ (adultLevel="explicit", ex.
+ * "BDSM", "Big Breasts") sem AFIRMAR que uma cena sexual é mostrada — nesse caso
+ * scoreTier fica null. Só vira 'explicit'/'label' quando a tag nomeia um ato/rótulo
+ * que garante a nota mínima; na dúvida, null (conservador — o modelo continua livre
+ * pra pontuar alto pela evidência, só não é OBRIGADO).
+ */
+export type AdultScoreTier = "none" | "label" | "explicit"
 
 export interface EnrichResult {
   /** slug of an approved sub-group of the group, or null if none fits. */
@@ -24,6 +35,8 @@ export interface EnrichResult {
    * "none" = não é indicador sexual (inclui violência/gore/tema maduro).
    */
   adultLevel: AdultLevel
+  /** Ver AdultScoreTier acima. */
+  adultScoreTier: AdultScoreTier
 }
 
 export interface EnrichTagsForGroupInput {
@@ -40,6 +53,7 @@ interface RawClassification {
   synonym_of_slug?: string | null
   confidence?: number | null
   adult_level?: string | null
+  adult_score_tier?: string | null
 }
 
 const ENRICH_TOOL = {
@@ -62,8 +76,13 @@ const ENRICH_TOOL = {
               enum: ["none", "label", "explicit"],
               description: "18+: \"explicit\" = conteúdo sexual explícito mostrado (ato/anatomia/pornô); \"label\" = rótulo adulto sem afirmar cena (adult/r19/erotica/smut); \"none\" = não sexual (violência/gore/tema maduro incluídos).",
             },
+            adult_score_tier: {
+              type: "string",
+              enum: ["none", "label", "explicit"],
+              description: "Piso de NOTA que a tag GARANTE (eixo separado de adult_level — ver system prompt). Use \"none\" sempre que houver a menor dúvida.",
+            },
           },
-          required: ["tag_name", "subgroup_slug", "synonym_of_slug", "confidence", "adult_level"],
+          required: ["tag_name", "subgroup_slug", "synonym_of_slug", "confidence", "adult_level", "adult_score_tier"],
         },
       },
     },
@@ -82,14 +101,18 @@ function buildSystemPrompt(input: EnrichTagsForGroupInput): string {
     ? input.existingTags.map((t) => `- ${t.slug}: ${t.name}`).join("\n")
     : "(nenhuma tag existente — use \"none\" em synonym_of_slug)"
 
-  return `Você enriquece tags novas de um grupo de tags de obras (mangás/manhwas/webtoons/novels). Para cada tag nova você faz TRÊS coisas:
+  return `Você enriquece tags novas de um grupo de tags de obras (mangás/manhwas/webtoons/novels). Para cada tag nova você faz QUATRO coisas:
 
 1. SUB-GRUPO: escolha o slug do sub-grupo (da lista abaixo) que melhor descreve a tag, usando as descrições como fonte de verdade. Se nenhum encaixa bem, use "none".
 2. SINÔNIMO: diga se a tag é um SINÔNIMO CLARO de alguma tag JÁ EXISTENTE do grupo (mesmo conceito, redação diferente — ex.: "abandoned-fl" ↔ "abandoned-protagonist"). Se for, retorne o slug da tag existente em synonym_of_slug; senão "none". NÃO marque como sinônimo tags que apenas compartilham um atributo mas têm significado diferente (ex.: "blonde-protagonist" vs "blonde-villain").
-3. 18+ (adult_level): a tag indica conteúdo SEXUAL adulto?
+3. 18+ (adult_level): a tag indica conteúdo SEXUAL adulto? Decide se a obra é marcada 18+ (works.is_adult).
    - "explicit": nomeia ou afirma conteúdo sexual EXPLÍCITO mostrado — ato sexual, anatomia genital, pornográfico (ex.: "Oral Sex", "Smut", "Hentai", "Pornographic").
    - "label": rótulo de conteúdo adulto sem afirmar que uma cena é mostrada (ex.: "Adult", "R19", "Sexual Content", "Erotica").
    - "none": NÃO é indicador sexual. Isto inclui violência, gore, tortura, temas maduros/sombrios, e fatos de enredo ("Sexually Active Protagonist") — retratar violência sexual ou ter sexo na história NÃO é ser sexualmente explícito. Na dúvida, use "none" (conservador).
+4. PISO DE NOTA (adult_score_tier): eixo SEPARADO de adult_level — decide o piso mínimo obrigatório da NOTA numérica "conteúdo adulto" (0-10) desta obra, não se ela é marcada 18+.
+   - "explicit": a tag NOMEIA um ato ou posição sexual específica RETRATADA (ex.: "Oral Sex", "Cunnilingus", "Handjob") — só quando a tag é específica o bastante que ninguém a usaria numa cena cortada/fade-to-black. Rótulos que AFIRMAM pornografia (Smut/Hentai/Pornographic) também entram aqui.
+   - "label": rótulo de FAIXA ADULTA que não afirma cena mostrada (ex.: "Adult", "R19", "Sexual Content", "Erotica") — pode ser adulta por violência, não necessariamente sexo.
+   - "none": USE PARA TUDO O RESTO, mesmo se adult_level="explicit" acima. Em especial: atributos/anatomia (ex.: "Big Breasts", "Big Penis"), dinâmicas/temas (ex.: "BDSM", "Netorare", "Incest"), avisos de conteúdo (ex.: "Rape", "Pedophilia", "Gore", "Sexual Harassment") e fatos de enredo (ex.: "Sexually Active Protagonist") — todos podem ser fortes o bastante pra marcar a obra 18+ (adult_level="explicit") SEM afirmar que uma cena sexual é efetivamente MOSTRADA na obra. Retratar uma dinâmica ou tema não é o mesmo que mostrar o ato. NA MENOR DÚVIDA, use "none" — um falso positivo aqui força a nota pra cima incorretamente.
 
 confidence (0–1): confiança no SINÔNIMO quando houver; sem sinônimo, a confiança da escolha do sub-grupo.
 
@@ -111,7 +134,13 @@ export async function enrichTagsForGroup(
 ): Promise<Map<string, EnrichResult>> {
   const out = new Map<string, EnrichResult>()
   for (const t of input.newTags) {
-    out.set(t.name, { subgroupSlug: null, synonymOfSlug: null, confidence: 0, adultLevel: "none" })
+    out.set(t.name, {
+      subgroupSlug: null,
+      synonymOfSlug: null,
+      confidence: 0,
+      adultLevel: "none",
+      adultScoreTier: "none",
+    })
   }
   if (input.newTags.length === 0) return out
   if (!process.env.ANTHROPIC_API_KEY) return out
@@ -156,7 +185,9 @@ export async function enrichTagsForGroup(
     const confidence = typeof r.confidence === "number" ? r.confidence : 0
     const adultLevel: AdultLevel =
       r.adult_level === "explicit" || r.adult_level === "label" ? r.adult_level : "none"
-    out.set(r.tag_name, { subgroupSlug, synonymOfSlug, confidence, adultLevel })
+    const adultScoreTier: AdultScoreTier =
+      r.adult_score_tier === "explicit" || r.adult_score_tier === "label" ? r.adult_score_tier : "none"
+    out.set(r.tag_name, { subgroupSlug, synonymOfSlug, confidence, adultLevel, adultScoreTier })
   }
   return out
 }

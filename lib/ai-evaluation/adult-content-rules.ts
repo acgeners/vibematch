@@ -1,6 +1,26 @@
 /**
  * Limites de `adult_content` por PROCEDÊNCIA do sinal.
  *
+ * ## `tags.adult_score_tier` (migração 174) — fonte de verdade em dado, não código
+ *
+ * Até 2026-07-31 este módulo decidia o piso via três Sets hardcoded de nomes de
+ * tag. Isso divergiu silenciosamente de `tags.adult_indicator[_strong]` (migração
+ * 161, usado pelo flag `works.is_adult`): tag nova classificada pelo enricher de IA
+ * (`lib/tags/ingest.ts`) ou por `setTagAdult` virava indicador do FLAG sem nunca
+ * entrar nos Sets do PISO — 65 tags "strong" no banco, 41 cobertas pelo código,
+ * medido em 2026-07-31 (17 obras is_adult=true sem NENHUM piso garantido).
+ *
+ * A coluna `tags.adult_score_tier` ('explicit' | 'label' | null) resolve isso —
+ * agora é dado consultado em runtime, populado por: (1) a migração 174, que
+ * migrou 1:1 os nomes que já estavam nos Sets antigos (zero mudança); (2) o
+ * enricher de IA, pra tags NOVAS (fecha o vazamento daqui pra frente); (3) revisão
+ * humana via `setTagScoreTier`, pra tags antigas que nunca foram avaliadas nesse
+ * eixo (fila em /settings). Deliberadamente DESACOPLADA de adult_indicator_strong:
+ * tag "strong" o suficiente pra marcar a obra como 18+ (ex. BDSM, Big Breasts,
+ * Pedophilia) não implica necessariamente cena sexual EXPLÍCITA mostrada — são
+ * eixos diferentes, e a colisão dos dois é exatamente o que causava nota baixa +
+ * flag 18+ em obras cujo sinal era só aviso/dinâmica, não ato retratado.
+ *
  * ## Por que este módulo existe
  *
  * A regra anterior procurava o token "R19" em QUALQUER evidência — sinopse, tags,
@@ -76,105 +96,12 @@ export const ADULT_LABEL_FLOOR = 7
 const ADULT_TAG_GROUP = "content_indicator"
 
 /**
- * Tags do grupo `content_indicator` que nomeiam um ATO sexual RETRATADO. Só estas
- * acionam o piso 9,0 — a lista é conservadora de propósito, porque um falso positivo
- * aqui afirma "esta obra mostra sexo explícito", o que é forte.
- *
- * O critério de inclusão é: **a tag nomeia um ato ou posição sexual específica**. Isso
- * só é atribuído a uma obra que mostra a cena; ninguém etiqueta "Cunnilingus" numa
- * obra com fade to black.
- *
- * Ficam FORA de propósito, em três grupos:
- *  · **rótulo de faixa** (Adult, Sexual Content, Borderline H) → vão pro piso 7, com
- *    o R19: dizem que há conteúdo adulto, não que uma cena é mostrada.
- *  · **fato de enredo/personagem** (Sexually Active Protagonist, One-Night Stand,
- *    Sexual Teasing, Virginity) → NENHUM piso. Dizem que sexo acontece na história,
- *    e a obra pode perfeitamente cortar a cena. Foi o que a medição mostrou: sem
- *    essa separação, 204 obras subiriam pra 9 e várias só têm "Sexually Active
- *    Protagonist".
- *  · **aviso de conteúdo e dinâmica** (Sexual Harassment/Assault/Abuse, Gore, Torture,
- *    Suicide/s, Corpses, BDSM, Femdom, Aphrodisiac, Nudity, Big Breasts, Incest) →
- *    nenhum piso. Retratar violência sexual não é o mesmo que ser sexualmente explícito.
- *
- * Casos de fronteira deixados FORA, mas fáceis de mover se a curadoria discordar:
- * "Breast Sucking", "Breast Grabbing", "Vanilla", "Condom/s", "Voyeurism", "Dirty Talk".
- * São atos ou indícios fortes, mas menos inequívocos que os da lista.
- *
- * Em todos os casos o modelo continua LIVRE pra pontuar alto por causa dessas tags —
- * o que esta lista controla é apenas o piso OBRIGATÓRIO.
+ * A distinção "ato retratado" (piso 9) vs "rótulo de faixa" (piso 7) vs "aviso/
+ * dinâmica, sem piso" (BDSM, Big Breasts, Sexually Active Protagonist…) que antes
+ * vivia em três Sets hardcoded aqui agora é dado: `tags.adult_score_tier` (migração
+ * 174), consultado por tag em `computeAdultContentBounds`. Ver o comentário do
+ * módulo (topo do arquivo) para o raciocínio completo e o porquê da migração.
  */
-export const EXPLICIT_ACT_TAGS: ReadonlySet<string> = new Set([
-  "Ahegao",
-  "Anal Sex",
-  "Ashikoki",
-  "Bukkake",
-  "Cervix Penetration",
-  "Clothed Intercourse",
-  "Cowgirl Position",
-  "Cunnilingus",
-  "Doggy Style",
-  "Double/Multiple Penetration",
-  "Drunken Intercourse",
-  "Ejaculation",
-  "Enemies Have Sex",
-  "Facial",
-  "Fingering",
-  "First-Time Intercourse",
-  "Footjob",
-  "Gangbang",
-  "Handjob",
-  "Intercrural Intercourse",
-  "Masturbation",
-  "Mirror Sex",
-  "Missionary Position",
-  "Office Intercourse",
-  "Oral Sex",
-  "Orgasms",
-  "Outdoor Intercourse",
-  "Pegging",
-  "Phone Sex",
-  "Pregnancy Sex",
-  "Prison Sex",
-  "Public Sex",
-  "Rough Sex",
-  "School Intercourse",
-  "Sex Magic",
-  "Sex Toy/s",
-  "Sitting Sex",
-  "Squirting",
-  "Strap-On",
-  "Sumata",
-  "Threesome",
-  "Toilet Intercourse",
-  "Urethral Insertion",
-])
-
-/**
- * Tags que ROTULAM a obra como adulta sem nomear uma cena. Acionam o mesmo piso da
- * tag R19 (7,0 = "Mature"): há conteúdo adulto, mas o rótulo não diz que uma cena
- * explícita aparece. Se houver também tag de ato, a camada EXPLÍCITO manda.
- */
-export const ADULT_LABEL_TAGS: ReadonlySet<string> = new Set([
-  "Adult",
-  "Sexual Content",
-  "Borderline H",
-  "Hypersexuality",
-  "R19",
-  "R19 Version",
-  "Erotica", // semeada (mig 166): rótulo adulto, cena não afirmada → piso 7
-])
-
-/**
- * Tags-RÓTULO que, ao contrário das de ADULT_LABEL, AFIRMAM conteúdo sexual
- * explícito mostrado (mesmo sem nomear um ato específico). Semeadas na mig 166 no
- * grupo `content_indicator`. Acionam o piso EXPLÍCITO (9), como os gêneros homônimos
- * "smut"/"hentai" já faziam antes — que agora chegam como TAG, não gênero.
- */
-export const EXPLICIT_LABEL_TAGS: ReadonlySet<string> = new Set([
-  "Smut",
-  "Hentai",
-  "Pornographic",
-])
 
 /** Gêneros que declaram sexo explícito sem ambiguidade. "Adult" fica de fora e vai
  *  pro tier de RÓTULO (piso 7), pra bater com a tag homônima: na taxonomia das fontes
@@ -189,9 +116,13 @@ const ADULT_LABEL_GENRES = ["adult"]
 /** Tag que diz que o R19 é do NOVEL, não da obra. */
 export const R15_FROM_R19_TAG = "R15 but Based on a R19 Novel"
 
+/** `tags.adult_score_tier` (migração 174): piso implicado pela tag, ou nenhum. */
+export type AdultScoreTier = "label" | "explicit" | null | undefined
+
 export interface AdultContentInput {
-  /** Nomes das tags com o slug do grupo (só `content_indicator` importa aqui). */
-  tags?: Array<{ name: string; group?: string | null }>
+  /** Nomes das tags com o slug do grupo (só `content_indicator` importa aqui) e
+   *  o `adult_score_tier` de cada uma (join em `tags`, migração 174). */
+  tags?: Array<{ name: string; group?: string | null; scoreTier?: AdultScoreTier }>
   genres?: string[]
   /** `contentRating` das fontes externas aceitas (MangaDex/ComicK). */
   contentRatings?: string[]
@@ -217,11 +148,12 @@ export interface AdultContentBounds {
   conflict: boolean
 }
 
-function contentIndicatorTags(input: AdultContentInput): string[] {
+function contentIndicatorTags(
+  input: AdultContentInput
+): Array<{ name: string; scoreTier: AdultScoreTier }> {
   return (input.tags ?? [])
-    .filter((t) => (t.group ?? null) === ADULT_TAG_GROUP)
-    .map((t) => t.name.trim())
-    .filter(Boolean)
+    .filter((t) => (t.group ?? null) === ADULT_TAG_GROUP && t.name.trim())
+    .map((t) => ({ name: t.name.trim(), scoreTier: t.scoreTier }))
 }
 
 /**
@@ -251,8 +183,8 @@ export function computeAdultContentBounds(input: AdultContentInput): AdultConten
   const ratings = (input.contentRatings ?? []).map((r) => r.toLowerCase().trim())
 
   const explicitSignals: string[] = []
-  for (const name of ciTags)
-    if (EXPLICIT_ACT_TAGS.has(name) || EXPLICIT_LABEL_TAGS.has(name)) explicitSignals.push(`tag "${name}"`)
+  for (const t of ciTags)
+    if (t.scoreTier === "explicit") explicitSignals.push(`tag "${t.name}"`)
   for (const g of genresLower) {
     if (EXPLICIT_GENRES.some((kw) => g === kw)) explicitSignals.push(`gênero "${g}"`)
   }
@@ -263,7 +195,7 @@ export function computeAdultContentBounds(input: AdultContentInput): AdultConten
   )
 
   const adultLabels = [
-    ...ciTags.filter((n) => ADULT_LABEL_TAGS.has(n)).map((n) => `tag "${n}"`),
+    ...ciTags.filter((t) => t.scoreTier === "label").map((t) => `tag "${t.name}"`),
     ...genresLower.filter((g) => ADULT_LABEL_GENRES.some((kw) => g === kw)).map((g) => `gênero "${g}"`),
   ]
 

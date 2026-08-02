@@ -23,6 +23,9 @@ export interface AiEvaluationTag {
   name: string
   /** Slug do tag_group (ex: "content_indicator", "romance"). null/undefined quando a tag não tem grupo. */
   group?: string | null
+  /** `tags.adult_score_tier` (migração 174) — piso de adult_content implicado pela
+   *  tag, quando já revisado. Ver lib/ai-evaluation/adult-content-rules.ts. */
+  adultScoreTier?: "label" | "explicit" | null
 }
 
 export interface AiEvaluationRequest {
@@ -69,6 +72,7 @@ export interface AiEvaluationRequest {
 interface NormalizedTag {
   name: string
   group: string | null
+  scoreTier?: "label" | "explicit" | null
 }
 
 function normalizeTags(tags: AiEvaluationRequest["tags"]): NormalizedTag[] {
@@ -82,7 +86,7 @@ function normalizeTags(tags: AiEvaluationRequest["tags"]): NormalizedTag[] {
       const name = tag.name?.trim()
       if (!name) return null
       const group = normalizeTagGroupSlug(tag.group)
-      return { name, group }
+      return { name, group, scoreTier: tag.adultScoreTier }
     })
     .filter((t): t is NormalizedTag => t !== null)
 }
