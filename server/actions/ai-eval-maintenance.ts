@@ -152,6 +152,7 @@ export async function regenerateCanonicalSynopsis(workId: string): Promise<Regen
 
   revalidatePath(`/titles/${workId}`)
   revalidatePath("/ai-evaluation")
+  revalidatePath("/fila-recomendacao")
 
   const messages: Record<string, string> = {
     done: "Sinopse canônica regerada",

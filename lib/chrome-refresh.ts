@@ -24,9 +24,10 @@
  */
 export const CHROME_REFRESH_EVENT = "app:chrome-refresh"
 
-/** Variação de contagem dos badges da sidebar (sinal, ex.: `aiEval: -1`). */
+/** Variação de contagem dos badges da sidebar (sinal, ex.: `curadoria: -1`). */
 export interface ChromeBadgeDelta {
-  aiEval?: number
+  curadoria?: number
+  recQueue?: number
   settings?: number
 }
 
@@ -62,7 +63,8 @@ function mergePatch(into: ChromePatch, add: ChromePatch): void {
   }
   if (add.badgeDelta) {
     const acc = (into.badgeDelta ??= {})
-    if (add.badgeDelta.aiEval != null) acc.aiEval = (acc.aiEval ?? 0) + add.badgeDelta.aiEval
+    if (add.badgeDelta.curadoria != null) acc.curadoria = (acc.curadoria ?? 0) + add.badgeDelta.curadoria
+    if (add.badgeDelta.recQueue != null) acc.recQueue = (acc.recQueue ?? 0) + add.badgeDelta.recQueue
     if (add.badgeDelta.settings != null) acc.settings = (acc.settings ?? 0) + add.badgeDelta.settings
   }
   if (add.recalcPending != null) into.recalcPending = add.recalcPending
@@ -73,7 +75,9 @@ function isEmptyPatch(patch: ChromePatch): boolean {
     patch.balanceDeltaUsd == null &&
     patch.recalcPending == null &&
     (patch.badgeDelta == null ||
-      (patch.badgeDelta.aiEval == null && patch.badgeDelta.settings == null))
+      (patch.badgeDelta.curadoria == null &&
+        patch.badgeDelta.recQueue == null &&
+        patch.badgeDelta.settings == null))
   )
 }
 

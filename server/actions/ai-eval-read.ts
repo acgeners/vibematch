@@ -18,13 +18,16 @@ function invalidateEvalChrome() {
 }
 
 /**
- * Marca TUDO como lido (ação binária global): acka todos os membros atuais das 5
- * filas. Idempotente (ignora duplicatas). Retorna quantas acks passaram a existir.
+ * Marca TUDO como lido nas filas pedidas (ação binária por página): acka todos
+ * os membros atuais dessas filas. Idempotente (ignora duplicatas). Retorna
+ * quantas acks passaram a existir. Default = as 5 filas (compat).
  */
-export async function markAllAiEvalRead(): Promise<{ ok: boolean; marked: number }> {
-  const membersByQueue = await getAllQueueMemberIds()
+export async function markAllAiEvalRead(
+  queues: readonly ReadQueue[] = READ_QUEUES,
+): Promise<{ ok: boolean; marked: number }> {
+  const membersByQueue = await getAllQueueMemberIds(queues)
   const rows: { work_id: string; queue: ReadQueue }[] = []
-  for (const queue of READ_QUEUES) {
+  for (const queue of queues) {
     for (const id of membersByQueue[queue]) rows.push({ work_id: id, queue })
   }
   if (rows.length === 0) return { ok: true, marked: 0 }
@@ -43,13 +46,15 @@ export async function markAllAiEvalRead(): Promise<{ ok: boolean; marked: number
 }
 
 /**
- * Desmarca TUDO (limpa a tabela de acks) — "nada" lido. Volta a contar todas as
- * pendências.
+ * Desmarca TUDO nas filas pedidas (limpa os acks só dessas filas) — "nada"
+ * lido nelas. Volta a contar todas as pendências dessas filas. Default = as 5
+ * filas (compat) — vira o delete geral de antes, só que expresso como filtro.
  */
-export async function unmarkAllAiEvalRead(): Promise<{ ok: boolean }> {
+export async function unmarkAllAiEvalRead(
+  queues: readonly ReadQueue[] = READ_QUEUES,
+): Promise<{ ok: boolean }> {
   const supabase = createAdminClient()
-  // DELETE sem WHERE não é aceito pelo PostgREST; filtro sempre-verdadeiro.
-  const { error } = await supabase.from("ai_eval_read_acks").delete().not("work_id", "is", null)
+  const { error } = await supabase.from("ai_eval_read_acks").delete().in("queue", queues as string[])
   if (error) throw new Error(`Falha desmarcando pendências: ${error.message}`)
   invalidateEvalChrome()
   return { ok: true }

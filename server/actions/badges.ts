@@ -1,14 +1,16 @@
 "use server"
 
-import { getEvalBadgeUnreadCount } from "@/server/queries/ai-eval-read"
+import { getCuradoriaBadgeUnreadCount, getRecommendationBadgeUnreadCount } from "@/server/queries/ai-eval-read"
 import { getSettingsItemUnread } from "@/server/queries/settings-read"
 import { maybeTriggerStaleRecalc } from "@/server/recalc/queue"
 import { getComixStatus } from "@/lib/external/comix-gate"
 import type { ComixHealthState } from "@/lib/external/comix-gate"
 
 export interface SidebarBadgeCounts {
-  /** Obras NÃO-LIDAS nas 3 primeiras abas de /ai-evaluation (atributos + Veredito IA + Interesse), união distinta. Marcar como lido silencia sem resolver. */
-  aiEval: number
+  /** Obras NÃO-LIDAS na fila de atributos de /ai-evaluation ("Curadoria da Obra"). */
+  curadoria: number
+  /** Obras NÃO-LIDAS em Veredito IA + Interesse de /fila-recomendacao, união distinta. */
+  recQueue: number
   /** Soma de todas as pendências acionáveis de /settings (todos os tópicos). */
   settings: number
   /** Há edições de nota aguardando recálculo (fila de recálculo, migration 096). */
@@ -20,16 +22,17 @@ export interface SidebarBadgeCounts {
 /**
  * Totais dos badges de pendência da sidebar.
  *
- * - aiEval: união DISTINTA das obras NÃO-LIDAS nas 3 primeiras abas (atributos +
- *   Veredito IA "stale" + Interesse "não previsto"). "Marcar como lido" em
- *   /ai-evaluation silencia pendências sem resolvê-las, então o antigo problema
- *   de inflar o badge (regen de perfil) é neutralizado pelo próprio usuário. Ver
- *   `getEvalBadgeUnreadCount`. A sidebar oculta o badge quando isto é 0.
+ * - curadoria / recQueue: as duas metades do antigo badge único "Avaliação IA"
+ *   (união distinta attr+veredito+interesse), separadas quando a página virou
+ *   /ai-evaluation (Curadoria da Obra, só-curador) + /fila-recomendacao (qualquer
+ *   logado). "Marcar como lido" em cada página silencia pendências sem resolvê-las.
+ *   Ver `getCuradoriaBadgeUnreadCount`/`getRecommendationBadgeUnreadCount`. A
+ *   sidebar oculta cada badge quando o valor é 0.
  * - settings: soma do NÃO-LIDO de todas as pendências de /settings (sugestões de
  *   critérios + embeddings + sinopse + resumo + comix), via `getSettingsItemUnread`
  *   — as MESMAS contagens por-item que a página e a sub-nav usam, então sidebar →
  *   tópico → card batem. "Marcar como lido" em /settings silencia sem resolver
- *   (migration 134), igual ao /ai-evaluation. A sidebar oculta o badge no 0.
+ *   (migration 134), igual às filas de avaliação. A sidebar oculta o badge no 0.
  *
  * Cada parcela falha silenciosa em 0 pra nunca derrubar o layout.
  */
@@ -45,10 +48,17 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
     lastEditAt: null,
   }))
 
-  const [aiEval, settings, recalc] = await Promise.all([
-    getEvalBadgeUnreadCount().catch((err) => {
+  const [curadoria, recQueue, settings, recalc] = await Promise.all([
+    getCuradoriaBadgeUnreadCount().catch((err) => {
       console.warn(
-        "[getSidebarBadgeCounts] contagem de não-lidas falhou:",
+        "[getSidebarBadgeCounts] contagem de Curadoria da Obra falhou:",
+        err instanceof Error ? err.message : err,
+      )
+      return 0
+    }),
+    getRecommendationBadgeUnreadCount().catch((err) => {
+      console.warn(
+        "[getSidebarBadgeCounts] contagem de Fila de Recomendação falhou:",
         err instanceof Error ? err.message : err,
       )
       return 0
@@ -57,7 +67,7 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
     recalcStatePromise,
   ])
 
-  return { aiEval, settings, recalcPending: recalc.pending, comixHealth }
+  return { curadoria, recQueue, settings, recalcPending: recalc.pending, comixHealth }
 }
 
 /**

@@ -7,10 +7,12 @@ import {
   LayoutDashboard,
   BookOpen,
   BookMarked,
+  BookPlus,
   Heart,
   Upload,
   Trophy,
-  Sparkles,
+  Wrench,
+  Clock,
   Settings,
   SlidersHorizontal,
   Wand2,
@@ -29,12 +31,12 @@ import { getSidebarBadgeCounts } from "@/server/actions/badges"
 import { useChromeData } from "@/lib/use-refresh"
 import { AccountChip } from "@/components/layout/account-chip"
 import { BalanceChip } from "@/components/layout/balance-chip"
-import { useIsAdmin } from "@/components/layout/admin-context"
+import { useIsAdmin, useIsSignedIn } from "@/components/layout/admin-context"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
 import { SidebarTasks } from "@/components/tasks/sidebar-tasks"
 import { LogoMark } from "@/components/ui/logo-mark"
 
-type BadgeKey = "ai-eval" | "settings"
+type BadgeKey = "curadoria" | "rec-queue" | "settings"
 // Derivado do retorno da action (evita importar o módulo server-only comix-gate no client).
 type ComixHealth = Awaited<ReturnType<typeof getSidebarBadgeCounts>>["comixHealth"]
 
@@ -61,6 +63,8 @@ interface NavItem {
   query?: { key: string; value: string }
   // Exibe um badge de pendências (contagem buscada no client por chave).
   badgeKey?: BadgeKey
+  // Some do menu pra visitante anônimo (sem sessão) — independe do papel/isAdmin.
+  requiresSignedIn?: boolean
 }
 
 // Accent por seção — mesmo vocabulário visual da sub-nav de /settings e
@@ -121,15 +125,17 @@ const NAV_SECTIONS: NavSection[] = [
       { href: "/ranking", icon: Trophy, label: "Ranking" },
       { href: "/favorites", icon: Heart, label: "Favoritos" },
       { href: "/recommendations", icon: Wand2, label: "Recomendações" },
+      { href: "/fila-recomendacao", icon: Clock, label: "Fila de Recomendação", badgeKey: "rec-queue", requiresSignedIn: true },
     ],
   },
   {
     title: "Gerenciar",
     accent: "violet",
     items: [
+      { href: "/titles/new", icon: BookPlus, label: "Nova Obra" },
       { href: "/preferencias", icon: SlidersHorizontal, label: "Preferências" },
       { href: "/settings", icon: Settings, label: "Configurações", badgeKey: "settings" },
-      { href: "/ai-evaluation", icon: Sparkles, label: "Avaliação IA", badgeKey: "ai-eval" },
+      { href: "/ai-evaluation", icon: Wrench, label: "Curadoria da Obra", badgeKey: "curadoria" },
       { href: "/ai-usage", icon: Activity, label: "Uso da API IA" },
       { href: "/import", icon: Upload, label: "Importar" },
     ],
@@ -160,9 +166,11 @@ export function Sidebar({ defaultCollapsed = false }: { defaultCollapsed?: boole
   // GERENCIAR (curadoria/config/import), o saldo Anthropic e o recalc — controles
   // do dono do catálogo. Vê só a navegação de leitura (Principal).
   const isAdmin = useIsAdmin()
-  const sections = isAdmin
-    ? NAV_SECTIONS
-    : NAV_SECTIONS.filter((s) => s.title !== "Gerenciar")
+  // Itens com `requiresSignedIn` (ex.: Fila de Recomendação) somem pro visitante
+  // anônimo — independe do papel, já que o papel de um anônimo também é "leitor".
+  const signedIn = useIsSignedIn()
+  const sections = (isAdmin ? NAV_SECTIONS : NAV_SECTIONS.filter((s) => s.title !== "Gerenciar"))
+    .map((s) => ({ ...s, items: s.items.filter((item) => !item.requiresSignedIn || signedIn) }))
 
   // Trilho ↔ expandido. O inicial precisa ser IDÊNTICO no servidor e no cliente, senão
   // a hidratação quebra: por isso a preferência vem do cookie (`defaultCollapsed`, lido
@@ -205,14 +213,17 @@ export function Sidebar({ defaultCollapsed = false }: { defaultCollapsed?: boole
     })
 
   // Badges de pendências (contagens):
-  //   - "ai-eval":  obras NÃO-LIDAS nas 3 primeiras abas de /ai-evaluation
-  //                 (atributos + Veredito IA + Interesse), união distinta.
-  //                 "Marcar como lido" na página silencia sem resolver → o badge
-  //                 some (só é renderizado quando > 0).
-  //   - "settings": pendências do Pipeline de dados de /settings
+  //   - "curadoria": obras NÃO-LIDAS na fila de atributos de /ai-evaluation.
+  //   - "rec-queue": obras NÃO-LIDAS em Veredito IA + Interesse de
+  //                  /fila-recomendacao, união distinta. As duas eram um badge
+  //                  único ("ai-eval") antes da página virar duas.
+  //                  "Marcar como lido" em cada página silencia sem resolver →
+  //                  o badge some (só é renderizado quando > 0).
+  //   - "settings":  pendências do Pipeline de dados de /settings
   // Falha silenciosa em 0.
   const [badgeCounts, setBadgeCounts] = useState<Record<BadgeKey, number>>({
-    "ai-eval": 0,
+    curadoria: 0,
+    "rec-queue": 0,
     settings: 0,
   })
   // Há edições de nota aguardando recálculo (fila de recálculo). Vem do mesmo
@@ -227,8 +238,8 @@ export function Sidebar({ defaultCollapsed = false }: { defaultCollapsed?: boole
   // re-run pós-mutação vivem em useChromeData.
   useChromeData(
     getSidebarBadgeCounts,
-    ({ aiEval, settings, recalcPending, comixHealth }) => {
-      setBadgeCounts({ "ai-eval": aiEval, settings })
+    ({ curadoria, recQueue, settings, recalcPending, comixHealth }) => {
+      setBadgeCounts({ curadoria, "rec-queue": recQueue, settings })
       setRecalcPending(recalcPending)
       setComixHealth(comixHealth)
     },
@@ -237,9 +248,10 @@ export function Sidebar({ defaultCollapsed = false }: { defaultCollapsed?: boole
       // Delta otimista: ex.: avaliar uma obra tira 1 da fila de /ai-evaluation
       // sem re-contar no DB. Clampa em 0 (a navegação reconcilia o exato).
       if (patch.badgeDelta) {
-        const { aiEval = 0, settings = 0 } = patch.badgeDelta
+        const { curadoria = 0, recQueue = 0, settings = 0 } = patch.badgeDelta
         setBadgeCounts((prev) => ({
-          "ai-eval": Math.max(0, prev["ai-eval"] + aiEval),
+          curadoria: Math.max(0, prev.curadoria + curadoria),
+          "rec-queue": Math.max(0, prev["rec-queue"] + recQueue),
           settings: Math.max(0, prev.settings + settings),
         }))
       }
@@ -247,6 +259,10 @@ export function Sidebar({ defaultCollapsed = false }: { defaultCollapsed?: boole
     },
   )
 
+  // Prefixo mais específico vence GLOBALMENTE (todas as seções), não só entre irmãos
+  // da mesma seção — necessário desde que "/titles/new" (Gerenciar) passou a ser
+  // prefixo de "/titles" (Principal): sem isto, os dois acendiam juntos em /titles/new.
+  const allItems = sections.flatMap((s) => s.items)
   const isItemActive = (item: NavItem, siblings: NavItem[]): boolean => {
     const basePath = item.href.split("?")[0]
     const pathMatches = basePath === "/" ? pathname === "/" : pathname.startsWith(basePath)
@@ -254,6 +270,12 @@ export function Sidebar({ defaultCollapsed = false }: { defaultCollapsed?: boole
     if (item.query) {
       return searchParams.get(item.query.key) === item.query.value
     }
+    const longerMatchExists = allItems.some((other) => {
+      if (other === item) return false
+      const otherBase = other.href.split("?")[0]
+      return otherBase.length > basePath.length && pathname.startsWith(otherBase)
+    })
+    if (longerMatchExists) return false
     return !siblings.some(
       (other) =>
         other !== item &&
