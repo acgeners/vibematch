@@ -54,7 +54,11 @@ export function WorkShelf({
       <ShelfRail ariaLabel={title}>
         {/* `items-stretch` + `h-full` no card: sem isso, um card com dois selos de status fica
             mais alto que um com um só, e a fileira desalinha na base. */}
-        <ul className="grid auto-cols-[minmax(158px,1fr)] grid-flow-col items-stretch gap-3 md:auto-cols-[minmax(184px,1fr)]">
+        {/* Largura calibrada pelos SELOS, não pela capa: "Ongoing" + "On-hold" lado a lado
+            pedem ~210px, e abaixo disso o par quebra em duas linhas — o que desalinhava a base
+            dos cards e era o que fazia um parecer menor que o vizinho. Cards mais largos
+            significam menos por tela; as setas resolvem o alcance. */}
+        <ul className="grid auto-cols-[minmax(196px,1fr)] grid-flow-col items-stretch gap-3 md:auto-cols-[minmax(216px,1fr)]">
           {works.map((work, i) => (
             <li key={work.id} className="h-full" style={{ scrollSnapAlign: "start" }}>
               <TopWorkCard

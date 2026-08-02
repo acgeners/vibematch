@@ -2,6 +2,7 @@ import Link from "next/link"
 import { ArrowRight, BookOpen, ExternalLink } from "lucide-react"
 import { CoverImage } from "@/components/ui/cover-image"
 import { AdultBadge } from "@/components/ui/adult-badge"
+import { PublicationStatusBadge, PersonalStatusBadge } from "@/components/ui/status-badge"
 import { ScoreBadge } from "@/components/ui/score-badge"
 import type { ScoreColorThresholds } from "@/components/ui/score-badge"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
@@ -154,7 +155,9 @@ export function ContinueHero({
   const nextChapter = (main.chaptersRead ?? 0) + 1
 
   return (
-    <section className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+    // `items-start`: sem isso o grid estica os dois cards à altura do mais alto (a lista, que
+    // cresce com o número de obras) e o destaque ganha um vão morto embaixo do botão.
+    <section className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
       {/* ── a obra em foco ─────────────────────────────────────────── */}
       <article className="relative flex gap-5 overflow-hidden rounded-2xl border border-border/70 bg-card p-5 shadow-md">
         <span
@@ -172,7 +175,9 @@ export function ContinueHero({
           </span>
         </div>
 
-        <div className="flex min-w-0 flex-col justify-center gap-2">
+        {/* `justify-start`: a coluna de texto começa na MESMA linha do topo da capa. Centrado
+            (como estava), o título flutuava no meio e nada alinhava com a imagem. */}
+        <div className="flex min-w-0 flex-1 flex-col justify-start gap-2">
           <p className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <BookOpen className="size-3" />
@@ -205,7 +210,14 @@ export function ContinueHero({
                 {main.pending} não {main.pending === 1 ? "lido" : "lidos"}
               </span>
             )}
+          </div>
+
+          {/* Os selos que a obra já carrega no resto do app — a coluna de texto era mais curta
+              que a capa e o que sobrava era vão, não respiro. */}
+          <div className="flex flex-wrap items-center gap-1.5">
             {main.isAdult && <AdultBadge className="px-1.5 py-0" />}
+            <PublicationStatusBadge statusId={main.publicationStatusId} />
+            <PersonalStatusBadge statusId={main.personalStatusId} />
           </div>
 
           {progress != null && (
