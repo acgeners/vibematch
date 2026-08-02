@@ -6,6 +6,8 @@ import { generateTasteProfile, rankFavorites, MODEL, PROMPT_VERSION } from "@/li
 import { type RankingFilters } from "@/server/queries/ranking"
 import { ensureAdmin, getSessionUserId } from "@/server/queries/current-user"
 import { ensureAiConsumption } from "@/server/queries/ai-quota"
+import { ensureReadingStateWriter } from "@/server/queries/user-work-state"
+import { mirrorOwnerScores } from "@/server/queries/owner-labels"
 import { buildTasteProfileHeuristic } from "@/lib/ai-recommendation/taste-profile-heuristic"
 import { classifyProfileStaleness, computeHeuristicFingerprint } from "@/lib/ai-recommendation/profile-drift"
 import type { ProfileStaleness } from "@/lib/ai-recommendation/profile-staleness"
@@ -60,6 +62,44 @@ function buildAlignmentPayload(r: RankedWork): Record<string, unknown> | null {
   if (r.review_quotes && r.review_quotes.length > 0) payload.review_quotes = r.review_quotes
   if (r.mood_fit != null) payload.mood_fit = r.mood_fit
   return Object.keys(payload).length > 0 ? payload : null
+}
+
+interface AlignmentRow {
+  work_id: string
+  alignment_score: number | null
+  alignment_run_id: string | null
+  alignment_justification: string | null
+  alignment_payload: Record<string, unknown> | null
+  alignment_at: string
+  alignment_stale: boolean
+}
+
+/**
+ * Persiste alignment_* (Veredito IA) pro usuário ATUAL, não pra linha
+ * compartilhada de `calculated_scores` (que não tem `user_id` — 1 linha por
+ * obra, `UNIQUE(work_id)`). O valor depende do PERFIL de quem clicou
+ * (`loadOrEnsureProfile`), então gravar sempre na linha compartilhada faz o
+ * 2º usuário a rankear uma obra apagar o Veredito do 1º, em silêncio.
+ *
+ * Dono: grava nas DUAS tabelas — mantém `calculated_scores` como passthrough
+ * de leitura pra ele e pro visitante anônimo (mesmo dual-write de
+ * `recalculateAll`/`server/actions/calculations.ts`). Não-dono: grava SÓ em
+ * `user_calculated_scores` (via `mirrorOwnerScores`, já genérica — mesmo
+ * padrão de `recalculateForUser`/`server/recalc/user-recalc.ts`).
+ */
+async function persistAlignmentScores(
+  userId: string,
+  isOwner: boolean,
+  rows: AlignmentRow[],
+): Promise<{ error: string | null }> {
+  if (rows.length === 0) return { error: null }
+  if (isOwner) {
+    const { error } = await createAdminClient()
+      .from("calculated_scores")
+      .upsert(rows, { onConflict: "work_id" })
+    if (error) return { error: `Falha persistindo alignment_score: ${error.message}` }
+  }
+  return mirrorOwnerScores(userId, rows as unknown as Record<string, unknown>[])
 }
 
 // Gera slug único no formato YYYY-MM-DD-N. Tenta computar N olhando o máximo do
@@ -321,6 +361,9 @@ export async function runRecommendationAction(
     // Gate: Smart Shortlist (re-rank por IA + mood) é exclusivo do Pago.
     const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
+    // Identidade de quem grava o Veredito IA — nunca a linha compartilhada pra não-dono.
+    const identity = await ensureReadingStateWriter()
+    if (!identity.ok) return { error: identity.error }
 
     const runsToday = await getRunsToday()
     if (runsToday >= MAX_RUNS_PER_DAY) {
@@ -423,11 +466,13 @@ export async function runRecommendationAction(
 
     const runRow = await insertRecommendationRun(supabase, baseInsert)
 
-    // Persiste alignment_score em calculated_scores pra a coluna "Veredito IA." ficar
-    // disponível em qualquer tabela (ranking, favoritos, títulos) — independente
-    // do modo da run, já que sempre representa o re-rank mais recente da obra.
+    // Persiste alignment_score pra a coluna "Veredito IA." ficar disponível em
+    // qualquer tabela (ranking, favoritos, títulos) — independente do modo da
+    // run, já que sempre representa o re-rank mais recente da obra.
     // alignment_payload guarda os campos enriquecidos (sub-fase 2.3.A) — pode
-    // ficar NULL se o modelo não preencheu nenhum opcional.
+    // ficar NULL se o modelo não preencheu nenhum opcional. Vai pra
+    // `user_calculated_scores` de QUEM RODOU (ou também na linha compartilhada,
+    // se for o dono) — nunca sobrescreve o Veredito de outra pessoa.
     if (runRow?.id) {
       const now = new Date().toISOString()
       const upsertRows = ranked.map((r) => {
@@ -442,13 +487,9 @@ export async function runRecommendationAction(
           alignment_stale: false, // recém-computado com bias/perfil atuais
         }
       })
-      if (upsertRows.length > 0) {
-        const { error: upErr } = await supabase
-          .from("calculated_scores")
-          .upsert(upsertRows, { onConflict: "work_id" })
-        if (upErr) {
-          console.error("[recommendations] falha persistindo alignment_score:", upErr)
-        }
+      const persistResult = await persistAlignmentScores(identity.userId, identity.isOwner, upsertRows)
+      if (persistResult.error) {
+        console.error("[recommendations] falha persistindo alignment_score:", persistResult.error)
       }
       revalidatePath("/ranking")
       revalidatePath("/favorites")
@@ -545,6 +586,8 @@ export async function rerankSingleWorkAction(
     // Gate: re-rank por IA é exclusivo do Pago.
     const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
+    const identity = await ensureReadingStateWriter()
+    if (!identity.ok) return { error: identity.error }
 
     const runsToday = await getRunsToday()
     if (runsToday >= MAX_RUNS_PER_DAY) {
@@ -584,24 +627,20 @@ export async function rerankSingleWorkAction(
       return { error: "O modelo não retornou ranking pra esta obra." }
     }
 
-    const supabase = createAdminClient()
     const now = new Date().toISOString()
-    const { error: upErr } = await supabase
-      .from("calculated_scores")
-      .upsert(
-        {
-          work_id: workId,
-          alignment_score: ranking.alignment_score,
-          alignment_run_id: null,
-          alignment_justification: ranking.justification,
-          alignment_payload: buildAlignmentPayload(ranking),
-          alignment_at: now,
-          alignment_stale: false, // recém-computado com bias/perfil atuais
-        },
-        { onConflict: "work_id" },
-      )
-    if (upErr) {
-      return { error: `Falha persistindo alignment_score: ${upErr.message}` }
+    const persistResult = await persistAlignmentScores(identity.userId, identity.isOwner, [
+      {
+        work_id: workId,
+        alignment_score: ranking.alignment_score,
+        alignment_run_id: null,
+        alignment_justification: ranking.justification,
+        alignment_payload: buildAlignmentPayload(ranking),
+        alignment_at: now,
+        alignment_stale: false, // recém-computado com bias/perfil atuais
+      },
+    ])
+    if (persistResult.error) {
+      return { error: persistResult.error }
     }
 
     revalidatePath("/favorites")
@@ -640,6 +679,8 @@ export async function rerankStaleBatchAction(
   try {
     const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
+    const identity = await ensureReadingStateWriter()
+    if (!identity.ok) return { error: identity.error }
 
     const runsToday = await getRunsToday()
     if (runsToday >= MAX_RUNS_PER_DAY) {
@@ -676,7 +717,6 @@ export async function rerankStaleBatchAction(
       preferenceRules,
     })
 
-    const supabase = createAdminClient()
     const now = new Date().toISOString()
     const candidateIds = new Set(candidates.map((c) => c.id))
     const upsertRows = result.rankings
@@ -691,13 +731,9 @@ export async function rerankStaleBatchAction(
         alignment_stale: false, // recém-computado com bias/perfil atuais
       }))
 
-    if (upsertRows.length > 0) {
-      const { error: upErr } = await supabase
-        .from("calculated_scores")
-        .upsert(upsertRows, { onConflict: "work_id" })
-      if (upErr) {
-        return { error: `Falha persistindo alignment_score: ${upErr.message}` }
-      }
+    const persistResult = await persistAlignmentScores(identity.userId, identity.isOwner, upsertRows)
+    if (persistResult.error) {
+      return { error: persistResult.error }
     }
 
     revalidatePath("/ranking")
@@ -741,6 +777,8 @@ export async function rerankWorksBatchAction(
   try {
     const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
+    const identity = await ensureReadingStateWriter()
+    if (!identity.ok) return { error: identity.error }
 
     const runsToday = await getRunsToday()
     if (runsToday >= MAX_RUNS_PER_DAY) {
@@ -782,7 +820,6 @@ export async function rerankWorksBatchAction(
       preferenceRules,
     })
 
-    const supabase = createAdminClient()
     const now = new Date().toISOString()
     const candidateIds = new Set(candidates.map((c) => c.id))
     const upsertRows = result.rankings
@@ -797,19 +834,15 @@ export async function rerankWorksBatchAction(
         alignment_stale: false, // recém-computado com bias/perfil atuais
       }))
 
-    if (upsertRows.length > 0) {
-      const { error: upErr } = await supabase
-        .from("calculated_scores")
-        .upsert(upsertRows, { onConflict: "work_id" })
-      if (upErr) {
-        return { error: `Falha persistindo alignment_score: ${upErr.message}` }
-      }
+    const persistResult = await persistAlignmentScores(identity.userId, identity.isOwner, upsertRows)
+    if (persistResult.error) {
+      return { error: persistResult.error }
     }
 
     revalidatePath("/ranking")
     revalidatePath("/ranking/desatualizados")
     revalidatePath("/favorites")
-    revalidatePath("/ai-evaluation")
+    revalidatePath("/fila-recomendacao")
     revalidateTag("ai-eval-tab-counts", "max")
 
     return {
@@ -852,6 +885,8 @@ export async function rerankClusterAction(
   try {
     const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
+    const identity = await ensureReadingStateWriter()
+    if (!identity.ok) return { error: identity.error }
 
     const ids = Array.from(new Set(workIds)).filter(Boolean)
     if (ids.length < 2) {
@@ -938,13 +973,9 @@ export async function rerankClusterAction(
         alignment_stale: false, // recém-computado com bias/perfil atuais
       }))
 
-    if (upsertRows.length > 0) {
-      const { error: upErr } = await supabase
-        .from("calculated_scores")
-        .upsert(upsertRows, { onConflict: "work_id" })
-      if (upErr) {
-        return { error: `Falha persistindo alignment_score: ${upErr.message}` }
-      }
+    const persistResult = await persistAlignmentScores(identity.userId, identity.isOwner, upsertRows)
+    if (persistResult.error) {
+      return { error: persistResult.error }
     }
 
     revalidatePath("/ranking")
@@ -990,6 +1021,8 @@ export async function rankSpecificWorksForChat(args: {
   try {
     const gate = await ensureAiConsumption()
     if (!gate.ok) return { error: gate.error }
+    const identity = await ensureReadingStateWriter()
+    if (!identity.ok) return { error: identity.error }
 
     const ids = Array.from(new Set(args.workIds)).filter(Boolean)
     if (ids.length === 0) return { error: "Nenhuma obra indicada." }
@@ -1029,7 +1062,6 @@ export async function rankSpecificWorksForChat(args: {
     })
 
     const byId = new Map<string, FavoriteCandidate>(candidates.map((c) => [c.id, c]))
-    const supabase = createAdminClient()
     const now = new Date().toISOString()
     const candidateIds = new Set(candidates.map((c) => c.id))
 
@@ -1046,11 +1078,9 @@ export async function rankSpecificWorksForChat(args: {
       }))
 
     if (upsertRows.length > 0) {
-      const { error: upErr } = await supabase
-        .from("calculated_scores")
-        .upsert(upsertRows, { onConflict: "work_id" })
-      if (upErr) {
-        return { error: `Falha persistindo alignment_score: ${upErr.message}` }
+      const persistResult = await persistAlignmentScores(identity.userId, identity.isOwner, upsertRows)
+      if (persistResult.error) {
+        return { error: persistResult.error }
       }
       revalidatePath("/ranking")
       revalidatePath("/favorites")
