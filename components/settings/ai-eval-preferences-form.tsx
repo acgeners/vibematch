@@ -76,29 +76,25 @@ export function AiEvalPreferencesForm({
           control={control}
           name="prompt_version_tolerance"
           render={({ field }) => (
-            <div className="rounded-lg border border-border/65 bg-background/40 p-3">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">
-                    Tolerância de versão de prompt
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">
-                    Quantas versões pra trás contam como atualizadas. Atual:{" "}
-                    <span className="font-mono font-medium text-foreground">{currentPromptVersion}</span>.
-                  </p>
-                </div>
+            <div className="rounded-lg border border-border/65 bg-background/40 p-4">
+              <p className="text-sm font-medium text-foreground">Tolerância de versão de prompt</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Quantas versões pra trás contam como atualizadas. Atual:{" "}
+                <span className="font-mono font-medium text-foreground">{currentPromptVersion}</span>.
+              </p>
+              <div className="mt-3 flex items-center gap-3">
+                <Slider
+                  value={[field.value]}
+                  min={0}
+                  max={10}
+                  step={1}
+                  onValueChange={(v) => field.onChange(v[0])}
+                  className="px-1"
+                />
                 <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-semibold tabular-nums text-primary">
                   {tolerance === 0 ? "Sem tolerância" : `±${tolerance}`}
                 </span>
               </div>
-              <Slider
-                value={[field.value]}
-                min={0}
-                max={10}
-                step={1}
-                onValueChange={(v) => field.onChange(v[0])}
-                className="px-1"
-              />
               <p className="mt-2 text-[11px] text-muted-foreground">
                 {tolerance > 0
                   ? `Obras em v${cutoff + 1}+ contam como atualizadas. v${cutoff} ou abaixo entram no filtro de "Modelo/prompt antigos".`
@@ -113,16 +109,20 @@ export function AiEvalPreferencesForm({
           control={control}
           name="low_confidence_threshold_pct"
           render={({ field }) => (
-            <div className="rounded-lg border border-border/65 bg-background/40 p-3">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">
-                    Threshold de baixa confiança
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">
-                    Avaliações IA com confiança abaixo desse valor entram no filtro de revisão.
-                  </p>
-                </div>
+            <div className="rounded-lg border border-border/65 bg-background/40 p-4">
+              <p className="text-sm font-medium text-foreground">Threshold de baixa confiança</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Avaliações IA com confiança abaixo desse valor entram no filtro de revisão.
+              </p>
+              <div className="mt-3 flex items-center gap-3">
+                <Slider
+                  value={[field.value]}
+                  min={0}
+                  max={100}
+                  step={1}
+                  onValueChange={(v) => field.onChange(v[0])}
+                  className="px-1"
+                />
                 <span
                   className={cn(
                     "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold tabular-nums",
@@ -138,14 +138,6 @@ export function AiEvalPreferencesForm({
                   {thresholdPct}%
                 </span>
               </div>
-              <Slider
-                value={[field.value]}
-                min={0}
-                max={100}
-                step={1}
-                onValueChange={(v) => field.onChange(v[0])}
-                className="px-1"
-              />
               <p className="mt-2 text-[11px] text-muted-foreground">
                 Obras com confiança IA <span className={`font-semibold ${thresholdTone}`}>&lt; {thresholdPct}%</span> aparecem em <span className="font-mono">/ai-evaluation</span>.
               </p>

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { useRefresh } from "@/lib/use-refresh"
-import { Archive, ChevronRight, Loader2, Plus, RefreshCw, RotateCcw, SkipForward, Trash2 } from "lucide-react"
+import { Archive, Check, ChevronRight, Loader2, Plus, RefreshCw, RotateCcw, SkipForward, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -41,6 +41,51 @@ import type { ExternalSourceId, ExternalWorkData, FieldValueProvenance } from "@
  */
 const ACTION_BAR =
   "sticky bottom-0 z-10 flex justify-between gap-2 border-t bg-background pt-3 pb-2"
+
+/**
+ * Indicador de progresso dos 3 passos do diálogo — puramente visual (não navega:
+ * pular direto pra "Conflitos" exigiria dados que só existem depois de confirmar
+ * os passos anteriores). Some fora deles (fontes/busca/salvando).
+ */
+const STEP_ORDER = ["synopses-pick", "covers-pick", "conflicts"] as const
+const STEP_LABELS: Record<(typeof STEP_ORDER)[number], string> = {
+  "synopses-pick": "Sinopses",
+  "covers-pick": "Capas",
+  conflicts: "Conflitos",
+}
+
+function DialogStepper({ phase }: { phase: string }) {
+  const currentIdx = STEP_ORDER.indexOf(phase as (typeof STEP_ORDER)[number])
+  if (currentIdx < 0) return null
+  return (
+    <nav aria-hidden="true" className="flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-1 px-6 pb-3 text-xs">
+      {STEP_ORDER.map((step, i) => {
+        const done = i < currentIdx
+        const active = i === currentIdx
+        return (
+          <div key={step} className="flex items-center gap-1.5">
+            <span
+              className={cn(
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
+                active
+                  ? "bg-primary text-primary-foreground"
+                  : done
+                    ? "bg-primary/15 text-primary"
+                    : "bg-muted text-muted-foreground"
+              )}
+            >
+              {done ? <Check className="h-2.5 w-2.5" /> : i + 1}
+            </span>
+            <span className={cn("font-medium", active ? "text-foreground" : "text-muted-foreground")}>
+              {STEP_LABELS[step]}
+            </span>
+            {i < STEP_ORDER.length - 1 && <span className="mx-1 h-px w-4 bg-border" aria-hidden="true" />}
+          </div>
+        )
+      })}
+    </nav>
+  )
+}
 
 interface CurrentWork {
   title: string
@@ -876,26 +921,44 @@ export function UpdateDataDialog({
             passo da capa ficava cortado/rolando.
             Só header e barra de ações são fixos; o miolo é que rola (ver abaixo). */}
         <DialogContent className="flex max-h-[95vh] flex-col overflow-hidden sm:max-w-2xl">
-          <DialogHeader className="shrink-0 gap-1.5">
-            <DialogTitle>Atualizar dados externos</DialogTitle>
-            <p className="text-base font-semibold text-foreground">{currentWork.title}</p>
-            <DialogDescription>
-              {withSourceStep
-                ? "Confirme as fontes e rebusque sinopse, capa, capítulos, avaliações, reviews e tags."
-                : "Rebusca os dados nas fontes já vinculadas."}
-            </DialogDescription>
-            {searchQueries.length > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Buscado nas fontes como:{" "}
-                {searchQueries.map((q, i) => (
-                  <span key={q}>
-                    {i > 0 && <span className="opacity-50"> · </span>}
-                    <span className="font-mono text-foreground/80">{q}</span>
-                  </span>
-                ))}
-              </p>
+          <DialogHeader className="shrink-0 flex-row items-start gap-3 text-left">
+            {currentWork.coverUrl && (
+              <div className="relative hidden h-16 w-11 shrink-0 overflow-hidden rounded-lg border bg-muted shadow-sm sm:block">
+                <Image
+                  src={getCoverImageSrc(currentWork.coverUrl)}
+                  alt=""
+                  fill
+                  sizes="44px"
+                  unoptimized
+                  className="object-cover"
+                />
+              </div>
             )}
+            <div className="min-w-0 flex-1 space-y-1">
+              <DialogTitle className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Atualizar dados externos
+              </DialogTitle>
+              <p className="truncate text-lg font-semibold text-foreground">{currentWork.title}</p>
+              <DialogDescription className="text-xs">
+                {withSourceStep
+                  ? "Confirme as fontes e rebusque sinopse, capa, capítulos, avaliações, reviews e tags."
+                  : "Rebusca os dados nas fontes já vinculadas."}
+              </DialogDescription>
+              {searchQueries.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Buscado nas fontes como:{" "}
+                  {searchQueries.map((q, i) => (
+                    <span key={q}>
+                      {i > 0 && <span className="opacity-50"> · </span>}
+                      <span className="font-mono text-foreground/80">{q}</span>
+                    </span>
+                  ))}
+                </p>
+              )}
+            </div>
           </DialogHeader>
+
+          <DialogStepper phase={phase} />
 
           {/* Faixa da fila (revisão em sequência). Fica FORA da área de rolagem —
               as saídas da fila ("pular", "encerrar") têm que estar acessíveis em
@@ -978,8 +1041,8 @@ export function UpdateDataDialog({
 
           {phase === "synopses-pick" && (
             <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Marque quais incluir e qual é a <span className="text-foreground">Principal</span> — a
+              <p className="text-xs text-muted-foreground">
+                Marque quais incluir e qual é a <span className="font-medium text-foreground">Principal</span> — a
                 Principal é a única que vai pro prompt da avaliação IA e pras features da Nota Prevista.
               </p>
 
@@ -1108,7 +1171,7 @@ export function UpdateDataDialog({
                             className="object-cover"
                           />
                           {c.included && (
-                            <span className="absolute top-0.5 left-0.5 rounded bg-emerald-500 px-1 text-[8px] font-semibold text-white">
+                            <span className="absolute top-0.5 left-0.5 rounded bg-primary/90 px-1 text-[8px] font-semibold text-primary-foreground">
                               ✓
                             </span>
                           )}
@@ -1118,7 +1181,7 @@ export function UpdateDataDialog({
                             </span>
                           )}
                           {!c.saved && (
-                            <span className="absolute bottom-0.5 left-0.5 rounded bg-blue-500 px-1 text-[8px] font-semibold text-white">
+                            <span className="absolute bottom-0.5 left-0.5 rounded bg-accent px-1 text-[8px] font-semibold text-accent-foreground">
                               nova
                             </span>
                           )}
@@ -1222,7 +1285,7 @@ export function UpdateDataDialog({
 
           {phase === "conflicts" && (
             <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Os campos abaixo diferem dos dados atuais. Escolha qual versão manter:
               </p>
               {conflicts.map((c) => {
@@ -1239,15 +1302,18 @@ export function UpdateDataDialog({
                   { key: "current" as const, labels: ["Atual"], isCurrent: true, value: c.currentValue ?? "—" },
                 ]
                 return (
-                  <div key={c.field} className="space-y-1.5">
-                    <p className="text-sm font-medium">{c.label}</p>
-                    <div className="space-y-1">
+                  <div key={c.field} className="space-y-2">
+                    <p className="text-sm font-semibold">{c.label}</p>
+                    <div className="space-y-1.5">
                       {rows.map(({ key, labels, isCurrent, value }) => (
                         <label
                           key={key}
-                          className={`flex items-start gap-3 p-2.5 rounded-md border cursor-pointer transition-colors ${
-                            resolutions[c.field] === key ? "border-primary bg-primary/5" : "hover:bg-accent/50"
-                          }`}
+                          className={cn(
+                            "flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors",
+                            resolutions[c.field] === key
+                              ? "ring-1 ring-inset ring-primary/50 bg-primary/5"
+                              : "hover:bg-accent/50"
+                          )}
                         >
                           <input
                             type="radio"
