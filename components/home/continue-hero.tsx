@@ -7,7 +7,58 @@ import type { ScoreColorThresholds } from "@/components/ui/score-badge"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { classifyPace, lastActivityAt } from "@/lib/reading/pace-bands"
+import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
 import type { ContinueReadingItem } from "@/server/queries/dashboard"
+
+function isPublicationHiatus(statusId: number | null): boolean {
+  return statusId != null && PUBLICATION_STATUSES_BY_ID[statusId]?.status === "Hiatus"
+}
+
+/**
+ * Escolhe a obra em destaque e a ordem das demais.
+ *
+ * O destaque sai da banda **Acompanhando** da /leitura (≥85% lido e leitura recente) — não do
+ * "li por último". Uma obra em que faltam 37 de 51 capítulos não é o que a pessoa está prestes
+ * a terminar; ocupar o hero com ela desperdiça o espaço mais valioso da home. Entre as que se
+ * qualificam, vence a de capítulo mais novo: é a que tem algo esperando agora.
+ *
+ * As demais são ordenadas pela ATIVIDADE mais recente (última leitura ou último lançamento, o
+ * que for mais novo), porque capítulo que acabou de sair é tão relevante quanto leitura de
+ * ontem — e o critério antigo, só `lastReadAt`, enterrava justamente as novidades.
+ */
+function pickHighlight(items: ContinueReadingItem[]): {
+  main: ContinueReadingItem
+  rest: ContinueReadingItem[]
+  onPace: boolean
+} {
+  const onPace = items.filter(
+    (i) =>
+      classifyPace({
+        chaptersRead: i.chaptersRead,
+        totalChapters: i.totalChapters,
+        pending: i.pending,
+        lastReadAt: i.lastReadAt,
+        publicationHiatus: isPublicationHiatus(i.publicationStatusId),
+      }) === "onpace",
+  )
+
+  const pool = onPace.length > 0 ? onPace : items
+  const main = [...pool].sort(
+    (a, b) =>
+      lastActivityAt(null, b.lastChapterReleasedAt) - lastActivityAt(null, a.lastChapterReleasedAt),
+  )[0]
+
+  const rest = items
+    .filter((i) => i.id !== main.id)
+    .sort(
+      (a, b) =>
+        lastActivityAt(b.lastReadAt, b.lastChapterReleasedAt) -
+        lastActivityAt(a.lastReadAt, a.lastChapterReleasedAt),
+    )
+
+  return { main, rest, onPace: onPace.length > 0 }
+}
 
 /** "5 ago" — curto porque divide linha com o resto da meta. */
 function shortDate(iso: string | null): string | null {
@@ -57,7 +108,7 @@ export function ContinueHero({
     )
   }
 
-  const [main, ...rest] = items
+  const { main, rest, onPace } = pickHighlight(items)
   const progress = pct(main.chaptersRead, main.totalChapters)
   const hasPending = main.pending != null && main.pending > 0
   const nextAt = shortDate(main.nextChapterPredictedAt)
@@ -84,9 +135,19 @@ export function ContinueHero({
         </div>
 
         <div className="flex min-w-0 flex-col justify-center gap-2">
-          <p className="inline-flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            <BookOpen className="size-3" />
-            Continue lendo
+          <p className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <BookOpen className="size-3" />
+              Continue lendo
+            </span>
+            {onPace && (
+              <span
+                className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[9px] text-emerald-600 dark:text-emerald-400"
+                title="Mesma regra da /leitura: 85–99% lido e leitura recente"
+              >
+                quase no fim
+              </span>
+            )}
           </p>
 
           <WorkTitleLink

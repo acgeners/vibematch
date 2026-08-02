@@ -34,7 +34,7 @@ const RANK_STYLES = [
 
 export function TopWorkCard({ rank, work, scoreThresholds, hideRank = false }: TopWorkCardProps) {
   return (
-    <div className="group relative flex flex-col gap-2.5 rounded-lg border border-border/65 bg-background/40 p-3 transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:bg-card hover:shadow-md hover:shadow-primary/10">
+    <div className="group relative flex h-full flex-col gap-2.5 rounded-lg border border-border/65 bg-background/40 p-3 transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:bg-card hover:shadow-md hover:shadow-primary/10">
       <div className="relative overflow-hidden rounded-md">
         <CoverImage
           url={work.coverUrl}

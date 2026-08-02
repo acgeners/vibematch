@@ -31,7 +31,13 @@ export default async function HomePage() {
   const [stats, thresholds, continueReading, topPicks, profile, firstSteps] = await Promise.all([
     getDashboardStats(),
     getScoreColorThresholds(),
-    getContinueReading(),
+    // Alto de propósito: `getContinueReading` ordena por última LEITURA e corta no limite, e
+    // o hero escolhe pela banda de ritmo + capítulo mais novo. Com o padrão (6), a obra que
+    // acabou de receber capítulo ficava fora do corte antes de a seleção rodar — foi
+    // exatamente isso que colocou uma obra sem `last_chapter_released_at` no destaque. A
+    // query já carrega todas as obras acompanhadas e filtra em memória, então subir o limite
+    // não custa ida a mais ao banco.
+    getContinueReading(60),
     getTopUnratedByExpected(12),
     getCurrentUserProfile(),
     getFirstStepsProgress(),

@@ -55,6 +55,8 @@ export interface ContinueReadingItem {
   title: string
   coverUrl: string | null
   personalStatusId: number | null
+  /** Status de PUBLICAÇÃO — a home usa para o hiato oficial das bandas de ritmo. */
+  publicationStatusId: number | null
   chaptersRead: number | null
   totalChapters: number | null
   /** Capítulos não lidos = total − lidos (mín. 0); null quando o total é desconhecido. */
@@ -280,7 +282,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
   const { data, error } = await supabase
     .from("works")
     .select(`
-      id, title, total_chapters, is_adult,
+      id, title, total_chapters, is_adult, publication_status_id,
       last_chapter_released_at, next_chapter_predicted_at,
       calculated_scores(expected_score),
       work_covers(url, is_primary, position),
@@ -298,6 +300,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
     is_adult?: boolean | null
     last_chapter_released_at: string | null
     next_chapter_predicted_at: string | null
+    publication_status_id?: number | null
     calculated_scores?: { expected_score?: number | null } | null
     work_covers?: CoverRow[] | null
     work_external_ids?: ExternalIdRow[] | null
@@ -311,6 +314,7 @@ export async function getContinueReading(limit = 6): Promise<ContinueReadingItem
       title: w.title,
       coverUrl: pickPrimaryCover(w.work_covers),
       personalStatusId: state.personalStatusId,
+      publicationStatusId: w.publication_status_id ?? null,
       chaptersRead: state.chaptersRead,
       totalChapters: w.total_chapters ?? null,
       pending,

@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { ArrowRight } from "lucide-react"
 import { TopWorkCard } from "@/components/dashboard/top-work-card"
+import { ShelfRail } from "@/components/home/shelf-rail"
 import type { ScoreColorThresholds } from "@/components/ui/score-badge"
 import type { TopWorkItem } from "@/server/queries/dashboard"
 
@@ -50,14 +51,12 @@ export function WorkShelf({
         )}
       </div>
 
-      {/* `-mx-1 px-1` dá respiro pro hover levantar o card sem cortar a sombra no overflow. */}
-      <div className="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
-        <ul
-          className="grid auto-cols-[minmax(140px,1fr)] grid-flow-col gap-3 md:auto-cols-[minmax(158px,1fr)]"
-          style={{ scrollSnapType: "x proximity" }}
-        >
+      <ShelfRail ariaLabel={title}>
+        {/* `items-stretch` + `h-full` no card: sem isso, um card com dois selos de status fica
+            mais alto que um com um só, e a fileira desalinha na base. */}
+        <ul className="grid auto-cols-[minmax(158px,1fr)] grid-flow-col items-stretch gap-3 md:auto-cols-[minmax(184px,1fr)]">
           {works.map((work, i) => (
-            <li key={work.id} style={{ scrollSnapAlign: "start" }}>
+            <li key={work.id} className="h-full" style={{ scrollSnapAlign: "start" }}>
               <TopWorkCard
                 rank={ranked ? i + 1 : 0}
                 work={work}
@@ -67,7 +66,7 @@ export function WorkShelf({
             </li>
           ))}
         </ul>
-      </div>
+      </ShelfRail>
     </section>
   )
 }
