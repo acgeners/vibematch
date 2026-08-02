@@ -7,6 +7,7 @@ import { ScoreBadge } from "@/components/ui/score-badge"
 import type { ScoreColorThresholds } from "@/components/ui/score-badge"
 import { WorkTitleLink } from "@/components/titles/work-title-link"
 import { Button } from "@/components/ui/button"
+import { MarkReadButton } from "@/components/home/mark-read-button"
 import { cn } from "@/lib/utils"
 import { classifyPace, lastActivityAt } from "@/lib/reading/pace-bands"
 import { PUBLICATION_STATUSES_BY_ID } from "@/lib/constants/criteria"
@@ -271,6 +272,13 @@ export function ContinueHero({
                 </Link>
               </Button>
             )}
+
+            {/* Só faz sentido quando há o que marcar e sabemos até onde. Some assim que a obra
+                fica em dia — e, como a home re-renderiza depois de salvar, o destaque troca
+                sozinho para a próxima com capítulo pendente. */}
+            {hasPending && main.totalChapters != null && (
+              <MarkReadButton workId={main.id} upTo={main.totalChapters} />
+            )}
           </div>
         </div>
       </article>
@@ -292,7 +300,9 @@ export function ContinueHero({
             Só esta por enquanto.
           </p>
         ) : (
-          groupByPublication(rest.slice(0, 4)).map(({ label, items: group }) => (
+          // 3 itens: com 4 a lista ficava mais alta que o destaque e a diferença voltava como
+          // vão no card da esquerda. O resto está a um clique em "Ver todas".
+          groupByPublication(rest.slice(0, 3)).map(({ label, items: group }) => (
             <div key={label} className="flex flex-col gap-1">
               {/* Rótulo do grupo: "capítulo novo" quer dizer coisas diferentes numa obra que
                   ainda sai e numa que acabou — misturar as duas numa lista só esconde isso. */}
@@ -339,7 +349,7 @@ export function ContinueHero({
           ))
         )}
 
-        {items.length > 5 && (
+        {items.length > 4 && (
           <Link
             href="/leitura"
             className="mt-auto inline-flex items-center gap-1 px-1 pt-2 text-xs font-semibold text-primary hover:underline"
