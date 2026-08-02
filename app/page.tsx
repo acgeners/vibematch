@@ -6,7 +6,10 @@ import {
   getTopUnratedByExpected,
 } from "@/server/queries/dashboard"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
-import { getCurrentUserProfile } from "@/server/queries/current-user"
+import { getCurrentUserProfile, getSessionUserId } from "@/server/queries/current-user"
+import { getPublicShowcase } from "@/server/queries/public-showcase"
+import { getSiteStats } from "@/server/queries/auth-hero"
+import { PublicHome } from "@/components/home/public-home"
 import { getFirstStepsProgress } from "@/server/queries/onboarding-progress"
 import { FirstStepsCard } from "@/components/dashboard/first-steps-card"
 import { DashboardGreeting } from "@/components/dashboard/dashboard-greeting"
@@ -28,6 +31,16 @@ import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
  * o que é fato da obra — ver `getScoresReader`, que zera os campos pessoais nesse caso.
  */
 export default async function HomePage() {
+  // Sem sessão a página é OUTRA, não a mesma com menos coisa. "Continue lendo" e "Pra você
+  // hoje" dependem de estado e de modelo — sem usuário os dois voltam vazios (correto desde o
+  // fix do eixo público), e o resultado seria uma vitrine de esqueletos. A versão pública
+  // mostra o que é fato da obra e convida a criar conta.
+  const sessionId = await getSessionUserId()
+  if (!sessionId) {
+    const [works, siteStats] = await Promise.all([getPublicShowcase(12), getSiteStats()])
+    return <PublicHome works={works} stats={siteStats} />
+  }
+
   const [stats, thresholds, continueReading, topPicks, profile, firstSteps] = await Promise.all([
     getDashboardStats(),
     getScoreColorThresholds(),

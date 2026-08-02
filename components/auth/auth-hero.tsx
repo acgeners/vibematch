@@ -1,6 +1,6 @@
 import { CoverImage } from "@/components/ui/cover-image"
 import { ScoreBadge } from "@/components/ui/score-badge"
-import { PublicationStatusBadge, PersonalStatusBadge } from "@/components/ui/status-badge"
+import { PublicationStatusBadge } from "@/components/ui/status-badge"
 import { getAuthHeroWorks, getSiteStats } from "@/server/queries/auth-hero"
 import type { HeroWork, SiteStats } from "@/server/queries/auth-hero"
 import { Wordmark } from "./wordmark"
@@ -21,7 +21,6 @@ function CoverCard({ work }: { work: HeroWork }) {
       ) : null}
       <div className="absolute inset-x-0 bottom-0 flex items-end gap-1 bg-gradient-to-t from-black/75 via-black/25 to-transparent p-1">
         <PublicationStatusBadge statusId={work.publicationStatusId} compact />
-        <PersonalStatusBadge statusId={work.personalStatusId} iconOnly />
       </div>
     </div>
   )
