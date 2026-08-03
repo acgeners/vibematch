@@ -18,6 +18,11 @@ import { join } from "node:path"
 const READERS = [
   { file: "server/queries/user-scores.ts", reader: "getScoresReader" },
   { file: "server/queries/user-work-state.ts", reader: "getPersonalStateReader" },
+  // 3º leitor (2026-08-03): a PREVISÃO DE INTERESSE. `synopsis_quality_predictions` não tem
+  // `user_id`, mas tem `taste_profile_id` — e ninguém usava esse vínculo, então a previsão
+  // do DONO aparecia rotulada "SEU INTERESSE" para qualquer visitante, com a justificativa
+  // descrevendo o gosto dele em prosa. Mesma classe dos outros dois, terceira ocorrência.
+  { file: "server/queries/user-interest.ts", reader: "getInterestReader" },
 ]
 
 /** Remove comentários de linha e de bloco — as menções em prosa são intencionais. */

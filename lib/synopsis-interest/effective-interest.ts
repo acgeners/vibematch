@@ -1,5 +1,6 @@
 import "server-only"
 import type { createAdminClient } from "@/lib/supabase/admin"
+import { getInterestReader } from "@/server/queries/user-interest"
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -22,14 +23,17 @@ export async function loadEffectiveInterest(
   ids: string[],
   manualByWork: Map<string, string | null>,
 ): Promise<Map<string, string | null>> {
+  const interest = await getInterestReader()
   const predicted = new Map<string, { ver: number; q: string | null }>()
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200)
     if (chunk.length === 0) continue
-    const { data, error } = await sb
-      .from("synopsis_quality_predictions")
-      .select("work_id, predicted_quality, prompt_version")
-      .in("work_id", chunk)
+    const { data, error } = await interest.scope(
+      sb
+        .from("synopsis_quality_predictions")
+        .select("work_id, predicted_quality, prompt_version")
+        .in("work_id", chunk),
+    )
     if (error) throw new Error(`synopsis_quality_predictions: ${error.message}`)
     for (const r of (data ?? []) as Array<{ work_id: string; predicted_quality: string | null; prompt_version: string | null }>) {
       const ver = promptVersionNum(r.prompt_version)

@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getInterestReader } from "@/server/queries/user-interest"
 import { fetchAllRows, fetchAllRowsParallel } from "@/lib/supabase/paginate"
 import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
 import { PERSONAL_STATUSES_BY_ID } from "@/lib/constants/criteria"
@@ -915,12 +916,19 @@ export async function getSynopsisQueueWorks(opts: {
   // `justification` (texto longo ≈ 72% do payload) fica FORA deste lote — é
   // hidratada sob demanda só pras obras exibidas (`hydrateJustifications`), cortando
   // ~1,2MB de egress por load. O `id` entra pra permitir esse fetch direcionado.
+  const interest = await getInterestReader()
   const predRows = await fetchAllRowsParallel<{ work_id: string } & SynopsisPredRow>(
-    () => supabase.from("synopsis_quality_predictions").select("work_id", { count: "exact", head: true }),
+    () =>
+      interest.scope(
+        supabase.from("synopsis_quality_predictions").select("work_id", { count: "exact", head: true }),
+      ),
     (from, to) =>
-      supabase
-        .from("synopsis_quality_predictions")
-        .select("id, work_id, predicted_quality, stale, confidence, prompt_version, predicted_at")
+      interest
+        .scope(
+          supabase
+            .from("synopsis_quality_predictions")
+            .select("id, work_id, predicted_quality, stale, confidence, prompt_version, predicted_at"),
+        )
         .range(from, to),
     "Falha lendo previsões de sinopse",
   )
@@ -1073,10 +1081,12 @@ export async function getSynopsisQueueWorks(opts: {
     // Chunk de 100 ids (URL do PostgREST ~16KB; 100 uuids ≈ 3.7KB).
     for (let i = 0; i < rowIds.length; i += 100) {
       const c = rowIds.slice(i, i + 100)
-      const { data, error } = await supabase
-        .from("synopsis_quality_predictions")
-        .select("id, justification")
-        .in("id", c)
+      // Redundante (os ids vieram do lote já escopado) e mantido: `justification` é o
+      // texto que descreve o GOSTO de alguém — é a última coisa que pode escapar por um
+      // caminho que confie em quem chamou.
+      const { data, error } = await interest.scope(
+        supabase.from("synopsis_quality_predictions").select("id, justification").in("id", c),
+      )
       if (error) throw new Error(`Falha hidratando justificativas: ${error.message}`)
       for (const r of (data ?? []) as Array<{ id: string; justification: string | null }>) {
         byId.set(r.id, r.justification ?? null)
@@ -1163,8 +1173,10 @@ export async function getSynopsisQueueWorks(opts: {
 /** Versões de prompt distintas presentes em synopsis_quality_predictions (mais nova primeiro). */
 export async function getSynopsisPredictionVersions(): Promise<string[]> {
   const supabase = createAdminClient()
+  const interest = await getInterestReader()
   const rows = await fetchAllRows<{ prompt_version: string | null }>(
-    (from, to) => supabase.from("synopsis_quality_predictions").select("prompt_version").range(from, to),
+    (from, to) =>
+      interest.scope(supabase.from("synopsis_quality_predictions").select("prompt_version")).range(from, to),
     "Falha lendo versões de previsão",
   )
   const versions = new Set<string>()

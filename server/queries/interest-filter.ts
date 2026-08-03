@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { selectByIdsInChunks } from "@/lib/supabase/paginate"
 import { resolveInterestPromptVersion } from "@/lib/ai-evaluation/compiled-preferences"
 import { getPersonalStateReader } from "@/server/queries/user-work-state"
+import { getInterestReader } from "@/server/queries/user-interest"
 
 /**
  * Filtro de Interesse na obra (manual + previsão da IA) aplicado como PÓS-FETCH
@@ -72,12 +73,20 @@ async function getActivePredictedQuality(
   ids: string[],
   sb: ReturnType<typeof createAdminClient>,
 ): Promise<Map<string, string | null>> {
+  // A previsão é DE ALGUÉM (deriva do taste_profile). Sem o escopo, filtrar por "previsão
+  // da IA" nesta página filtrava pelo gosto do dono.
+  const interest = await getInterestReader()
   const { data, error } = await selectByIdsInChunks<{
     work_id: string
     predicted_quality: string | null
     prompt_version: string | null
   }>(ids, (chunk) =>
-    sb.from("synopsis_quality_predictions").select("work_id, predicted_quality, prompt_version").in("work_id", chunk),
+    interest.scope(
+      sb
+        .from("synopsis_quality_predictions")
+        .select("work_id, predicted_quality, prompt_version")
+        .in("work_id", chunk),
+    ),
   )
   if (error) throw new Error(`Falha lendo previsões de Interesse: ${error.message}`)
 
