@@ -1276,13 +1276,30 @@ export interface RecommendationRunSummary {
   tasteProfileId: string | null
 }
 
+/**
+ * Histórico de recomendações de QUEM ESTÁ OLHANDO. Sem sessão → vazio.
+ *
+ * 🔴 Até 2026-08-03 esta função não tinha `.eq("user_id", …)` — devolvia as rodadas de
+ * TODO MUNDO. Como `/recommendations` está no menu do topo para deslogado, um visitante
+ * anônimo abria a página e via o histórico de gosto do dono: títulos recomendados, Veredito
+ * IA, datas e nº de candidatos de cada rodada. Medido: sem cookie nenhum, a tela mostrava
+ * "Recomendações 20 · Deep Dives 8" — exatamente os números dele no banco.
+ *
+ * `getSessionUserId()` e NUNCA `getCurrentUserId()`: o segundo cai no singleton (o dono)
+ * quando não há sessão, o que reintroduziria o mesmo vazamento com cara de código correto.
+ * Ver `readers-sem-sessao.test.ts`.
+ */
 export async function listRecommendationRuns(limit = 50): Promise<RecommendationRunSummary[]> {
+  const userId = await getSessionUserId()
+  if (!userId) return []
+
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("recommendation_runs")
     .select(
       "id, slug, mode, taste_profile_id, user_context, n_candidates, results, source_meta, created_at",
     )
+    .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit)
   if (error) {
@@ -1382,13 +1399,28 @@ export interface RecommendationRunWithWorks {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/**
+ * Uma rodada, pelo id ou slug — SÓ se for de quem está olhando. Sem sessão → null.
+ *
+ * 🔴 Até 2026-08-03 buscava por slug sem checar dono, e `/recommendations` listava os slugs
+ * de graça: qualquer visitante abria a rodada de qualquer pessoa. Medido, sem cookie: os 3
+ * de 3 títulos recomendados ao dono vinham no HTML. O `.eq("user_id")` está na QUERY (e não
+ * numa comparação depois) pra a linha nem sair do banco.
+ *
+ * A página chama `notFound()` com null — de propósito: "não é sua" e "não existe" devem ser
+ * indistinguíveis, senão o 404 vira um oráculo que confirma quais slugs existem.
+ */
 export async function getRecommendationRun(idOrSlug: string): Promise<RecommendationRunWithWorks | null> {
+  const userId = await getSessionUserId()
+  if (!userId) return null
+
   const supabase = createAdminClient()
   const column = UUID_RE.test(idOrSlug) ? "id" : "slug"
   const { data, error } = await supabase
     .from("recommendation_runs")
     .select("*, mode_summary")
     .eq(column, idOrSlug)
+    .eq("user_id", userId)
     .maybeSingle()
   if (error) {
     console.error("[recommendations] erro lendo run:", error)
@@ -1414,7 +1446,10 @@ export async function getRecommendationRun(idOrSlug: string): Promise<Recommenda
 
   const worksById = new Map<string, FavoriteCandidate>()
   if (workIds.length > 0) {
-    const userId = await getCurrentUserId(supabase)
+    // Reusa o `userId` da sessão resolvido no topo. Aqui havia um segundo
+    // `getCurrentUserId(supabase)`: hoje inofensivo (o early-return de anônimo vem antes),
+    // mas fazia a proteção depender de OUTRA linha — bastava alguém mover o guard pra o
+    // estado de leitura do dono voltar a vazar. Foi o teste de arquitetura que apontou.
     const { data: worksData } = await supabase
       .from("works")
       .select(CANDIDATE_WORK_SELECT)
