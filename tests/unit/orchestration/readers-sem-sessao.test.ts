@@ -51,6 +51,34 @@ describe("arquitetura: leitores per-usuário não caem no dono quando não há s
     })
   }
 
+  /**
+   * A brecha que deixou passar o vazamento de 2026-08-03: as regras acima travam o MECANISMO
+   * (resolver por `getSessionUserId`, ter um ramo de anônimo) e o código cumpria as duas —
+   * mas DENTRO do ramo do anônimo devolvia `userId: await getOwnerUserId()`, com um comentário
+   * dizendo que era "só para satisfazer o tipo". Não era: `resolvePersonalFilterIds` filtrava
+   * `user_work_state` por esse campo e `getFavoritesSummary` o usava como chave de cache, então
+   * um visitante sem conta via em `/leitura` a lista das obras que o dono acompanha.
+   *
+   * `getCurrentUserId` não estava envolvido — o id do dono entrou por uma função diferente e
+   * legítima em outros contextos. Por isso a regra aqui é sobre o RESULTADO do ramo, não sobre
+   * qual função foi chamada: sem sessão, `userId` é `null`.
+   */
+  for (const { file, reader } of READERS) {
+    it(`${reader}: o ramo sem sessão devolve userId null, nunca o id do dono`, () => {
+      const code = stripComments(readFileSync(join(process.cwd(), file), "utf8"))
+      const i = code.indexOf("if (!sessionId)")
+      expect(i, `${file}: não achei o ramo de anônimo`).toBeGreaterThan(-1)
+      // Recorta só até o fim do return do ramo — o resto do leitor legitimamente usa ids.
+      const branch = code.slice(i, i + 700)
+      const ret = branch.slice(0, branch.indexOf("}\n") + 1 || branch.length)
+
+      expect(ret, `${reader}: sem sessão o userId tem que ser null`).toMatch(/userId:\s*null/)
+      expect(ret, `${reader}: o ramo de anônimo não pode derivar id do DONO`).not.toMatch(
+        /getOwnerUserId|ownerId/,
+      )
+    })
+  }
+
   it("o leitor de scores devolve hasModel: false para anônimo", () => {
     const code = stripComments(
       readFileSync(join(process.cwd(), "server/queries/user-scores.ts"), "utf8"),

@@ -70,7 +70,14 @@ const EMPTY_PERSONAL_SCORES: Record<string, unknown> = Object.fromEntries(
 const PAGE = 1000
 
 export interface ScoresReader {
-  userId: string
+  /**
+   * Dono das notas que este leitor representa — `null` sem sessão. Mesma regra do
+   * `PersonalStateReader.userId`, e pelo mesmo motivo: emprestar o id do dono "porque o tipo
+   * pede um string" foi o que expôs a lista de leitura dele em `/leitura` (2026-08-03).
+   * Nenhum consumidor usava este campo quando ele foi corrigido — a mudança é para que o
+   * PRÓXIMO não herde a armadilha.
+   */
+  userId: string | null
   isOwner: boolean
   /** true quando esta pessoa TEM modelo (≥ MIN_TRAIN rótulos → Nota Prevista de verdade). */
   hasModel: boolean
@@ -106,10 +113,10 @@ export const getScoresReader = cache(async (): Promise<ScoresReader> => {
 
   if (!sessionId) {
     return {
-      // O id do dono segue aqui só porque o tipo pede um `string` e porque as chaves de cache
-      // derivadas dele devem ser as MESMAS para todo visitante — todos veem a mesma página.
-      // Ninguém deve escrever por este id: `isOwner` é false e não há sessão.
-      userId: ownerId,
+      // Sem sessão não há identidade. Quem derivar chave de cache daqui deve usar uma sentinela
+      // explícita (`?? "anon"`), como em `getFavoritesSummary` — nunca o id do dono, que faria o
+      // visitante ler a entrada de cache dele.
+      userId: null,
       isOwner: false,
       hasModel: false,
       overlay: <T,>(_workId: string, calcRow: T): T =>

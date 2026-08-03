@@ -118,9 +118,16 @@ export async function getFavoritesSummary(): Promise<FavoritesSummary> {
 
   // hideAdult entra na CHAVE do cache: sem isso, ligar/desligar o toggle serviria
   // o contador antigo por até 5 min (a chave é por usuário, não pela preferência).
+  //
+  // ⚠️ `"anon"` para quem não tem sessão. Enquanto `reader.userId` devolvia o id do DONO para o
+  // anônimo, a chave do visitante era a MESMA do dono — e o `unstable_cache` servia o resumo de
+  // favoritos dele a quem passasse. Compartilhar uma chave entre todos os anônimos é seguro
+  // (o estado deles é igual: vazio); compartilhar com o dono é o vazamento.
+  const cacheOwner = reader.userId ?? "anon"
+
   return unstable_cache(
     () => _getFavoritesSummary(favoriteIds, hideAdult),
-    ["favorites-summary", reader.userId, hideAdult ? "noadult" : "all"],
+    ["favorites-summary", cacheOwner, hideAdult ? "noadult" : "all"],
     { revalidate: 300, tags: ["favorites-summary"] },
   )()
 }
