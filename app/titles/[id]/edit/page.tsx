@@ -194,7 +194,7 @@ export default async function EditTitlePage({ params, searchParams }: EditPagePr
     : null
 
   return (
-    <div className="w-full max-w-6xl space-y-6">
+    <div className="mx-auto w-full max-w-6xl space-y-6">
       <Header
         kicker="Catálogo"
         title={`Editar: ${work.title}`}

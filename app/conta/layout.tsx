@@ -3,9 +3,13 @@ import { UserCircle } from "lucide-react"
 import { Header } from "@/components/layout/header"
 import { ContaTabs } from "@/components/conta/conta-tabs"
 
+// `mx-auto` porque /conta navega por ABAS horizontais, não por sidebar própria: sem ele o
+// conteúdo encostava à esquerda e deixava ~350px de vão só à direita — o buraco que a sidebar
+// removida ocupava. A exceção da regra são as rotas com menu lateral próprio (os membros da
+// console e /preferencias), onde centralizar descolaria o conteúdo do menu que o comanda.
 export default function ContaLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="w-full max-w-6xl space-y-4">
+    <div className="mx-auto w-full max-w-6xl space-y-4">
       <Header
         kicker="Você"
         title="Minha conta"
