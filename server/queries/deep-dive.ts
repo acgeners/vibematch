@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { pickPrimaryCover, pickPrimarySynopsis, splitSynopsesFromText } from "@/lib/work-derived"
 import { TAG_GROUP_ID_TO_NORMALIZED_SLUG } from "@/lib/constants/tag-groups-utils"
 import { loadCurrentTasteProfile } from "@/lib/ai-recommendation/taste-profile"
-import { getCurrentUserId } from "@/server/queries/current-user"
+import { getCurrentUserId, getSessionUserId } from "@/server/queries/current-user"
 import { getBiasMap } from "@/lib/calculations/attribute-bias"
 import { fetchReviewDigestsBatch } from "@/server/queries/recommendations"
 import {
@@ -485,17 +485,23 @@ export interface DeepDiveSummary {
 /**
  * ÚLTIMA análise Deep Dive POR OBRA do usuário atual, mais recente primeiro.
  *
- * Espelha `listRecommendationRuns` (hidrata título+capa num segundo query), mas
- * escopa por `user_id` (migration 159 + índice `deep_dive_results_user_created_idx`) —
- * mais correto que a lista de runs, que hoje não escopa.
+ * Escopa por `user_id` (migration 159 + índice `deep_dive_results_user_created_idx`).
+ *
+ * 🔴 O `.eq("user_id", …)` sempre esteve aqui — e mesmo assim VAZAVA, porque resolvia o id
+ * por `getCurrentUserId()`, que sem sessão cai no singleton: o DONO. Para o anônimo o filtro
+ * existia e não filtrava nada. Medido: deslogado via "Deep Dives 8", que é exatamente o nº de
+ * obras com Deep Dive dele. É a classe de bug mais cara daqui — o código contém `user_id` e
+ * passa em qualquer revisão. Ver [[gotcha-anonimo-vira-dono]] e `readers-sem-sessao.test.ts`.
  *
  * NÃO traz o `payload` (5-10KB/linha): manteria a página pesada. O modal carrega a
  * linha completa on-demand via `getDeepDiveById`. O histórico completo por obra
  * continua no drawer da própria obra (`getDeepDiveHistory`).
  */
 export async function listAllDeepDives(limit = 100): Promise<DeepDiveSummary[]> {
+  const userId = await getSessionUserId()
+  if (!userId) return []
+
   const supabase = createAdminClient()
-  const userId = await getCurrentUserId(supabase)
 
   // Pagina: o `select` corta em 1000 linhas SEM avisar (ver CLAUDE.md). Sem o
   // payload, as linhas são minúsculas — varrer tudo é barato, e precisamos de TODAS

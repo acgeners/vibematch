@@ -54,7 +54,9 @@ function MetaItem({
   )
 }
 
-export const revalidate = 300
+// Sem `revalidate`: a rodada é de UMA pessoa (`getRecommendationRun` filtra por sessão), então
+// cache de rota compartilharia o resultado dela com quem abrisse o mesmo slug depois. Inerte
+// hoje pelo force-dynamic do layout raiz, mas ver [[gotcha-force-dynamic-per-user]].
 
 async function loadProfileById(id: string | null): Promise<TasteProfileRow | null> {
   if (!id) return null

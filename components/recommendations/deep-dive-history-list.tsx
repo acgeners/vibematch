@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useMemo, useState, useTransition } from "react"
 import { Loader2, Sparkles } from "lucide-react"
 import {
@@ -46,7 +47,14 @@ const FILTERS: Array<{ key: "all" | DeepDiveReadWhen; label: string }> = [
   { key: "evitar", label: "Evitar" },
 ]
 
-export function DeepDiveHistoryList({ dives }: { dives: DeepDiveSummary[] }) {
+export function DeepDiveHistoryList({
+  dives,
+  signedIn,
+}: {
+  dives: DeepDiveSummary[]
+  /** Sem sessão o vazio é "entre para ver o SEU", não "rode um Deep Dive". */
+  signedIn: boolean
+}) {
   const [filter, setFilter] = useState<"all" | DeepDiveReadWhen>("all")
   const [openDive, setOpenDive] = useState<DeepDiveSummary | null>(null)
   const [full, setFull] = useState<DeepDiveResultRow | null>(null)
@@ -76,10 +84,23 @@ export function DeepDiveHistoryList({ dives }: { dives: DeepDiveSummary[] }) {
     return (
       <div className="rounded-lg border border-dashed bg-card/30 p-6 text-center">
         <Sparkles className="mx-auto h-5 w-5 text-violet-500/70" />
-        <p className="mt-2 text-sm font-medium text-foreground">Nenhum Deep Dive ainda</p>
+        <p className="mt-2 text-sm font-medium text-foreground">
+          {signedIn ? "Nenhum Deep Dive ainda" : "Os Deep Dives são pessoais"}
+        </p>
         <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
-          Abra uma obra e rode o <span className="font-medium text-foreground">Consultor IA — Deep Dive</span>.
-          Toda análise feita aparece aqui, sem precisar reabrir a obra.
+          {signedIn ? (
+            <>
+              Abra uma obra e rode o <span className="font-medium text-foreground">Consultor IA — Deep Dive</span>.
+              Toda análise feita aparece aqui, sem precisar reabrir a obra.
+            </>
+          ) : (
+            <>
+              <Link href="/login" className="font-medium text-primary underline-offset-4 hover:underline">
+                Entre
+              </Link>{" "}
+              para ver as suas análises.
+            </>
+          )}
         </p>
       </div>
     )

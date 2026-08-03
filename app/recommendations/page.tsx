@@ -9,20 +9,26 @@ import { getTasteProfileStatusAction } from "@/server/actions/recommendations"
 import { listRecommendationRuns } from "@/server/queries/recommendations"
 import { listAllDeepDives } from "@/server/queries/deep-dive"
 import { listChatsAction } from "@/server/actions/recommendation-chat"
-import { canConsumeAi } from "@/server/queries/current-user"
+import { canConsumeAi, getSessionUserId } from "@/server/queries/current-user"
 import { deniedMessage } from "@/lib/plans/roles"
 import { formatRelativeDateTime } from "@/lib/date-utils"
 
-export const revalidate = 60
+// Sem `revalidate`: esta página é inteiramente per-user (histórico de rodadas, chats, deep
+// dives). Hoje o `force-dynamic` do layout raiz já a torna dinâmica e o `revalidate = 60` que
+// morava aqui era inerte — mas deixá-lo escrito é uma mina: quem um dia remover o
+// force-dynamic passa a servir o histórico de UMA pessoa em cache para as próximas.
+// Ver [[gotcha-force-dynamic-per-user]].
 
 export default async function RecommendationsPage() {
-  const [status, runs, canAi, chats, deepDives] = await Promise.all([
+  const [status, runs, canAi, chats, deepDives, sessionUserId] = await Promise.all([
     getTasteProfileStatusAction(),
     listRecommendationRuns(50),
     canConsumeAi(),
     listChatsAction(8),
     listAllDeepDives(100),
+    getSessionUserId(),
   ])
+  const signedIn = sessionUserId != null
 
   const canChat = canAi
   const canShortlist = canAi
@@ -155,7 +161,7 @@ export default async function RecommendationsPage() {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Histórico
             </h2>
-            <HistoryTabs runs={runs} dives={deepDives} />
+            <HistoryTabs runs={runs} dives={deepDives} signedIn={signedIn} />
           </section>
         </div>
       </div>

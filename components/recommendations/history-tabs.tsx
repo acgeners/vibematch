@@ -11,6 +11,12 @@ import type { DeepDiveSummary } from "@/server/queries/deep-dive"
 interface HistoryTabsProps {
   runs: RecommendationRunSummary[]
   dives: DeepDiveSummary[]
+  /**
+   * Há sessão? Só muda o texto do estado VAZIO — sem conta, "gere a primeira" é um convite
+   * para algo que a pessoa não consegue fazer. Este estado passou a existir em 2026-08-03:
+   * antes o deslogado não via vazio nenhum, via o histórico do DONO.
+   */
+  signedIn: boolean
 }
 
 /**
@@ -18,7 +24,7 @@ interface HistoryTabsProps {
  * - "Recomendações": rankings salvos (Modo rápido + chat) — comportamento de antes.
  * - "Deep Dives": todas as análises do Consultor IA num só lugar, sem abrir cada obra.
  */
-export function HistoryTabs({ runs, dives }: HistoryTabsProps) {
+export function HistoryTabs({ runs, dives, signedIn }: HistoryTabsProps) {
   return (
     <Tabs defaultValue="runs" className="w-full">
       <TabsList className="w-full">
@@ -48,11 +54,11 @@ export function HistoryTabs({ runs, dives }: HistoryTabsProps) {
             ))}
           </div>
         )}
-        <RunHistoryList runs={runs} />
+        <RunHistoryList runs={runs} signedIn={signedIn} />
       </TabsContent>
 
       <TabsContent value="dives" className="mt-3">
-        <DeepDiveHistoryList dives={dives} />
+        <DeepDiveHistoryList dives={dives} signedIn={signedIn} />
       </TabsContent>
     </Tabs>
   )

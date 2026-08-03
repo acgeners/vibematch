@@ -14,6 +14,8 @@ import { getRunModeDisplay } from "@/components/recommendations/run-mode-display
 
 interface RunHistoryListProps {
   runs: RecommendationRunSummary[]
+  /** Sem sessão o vazio é "entre para ver o SEU", não "gere a primeira". */
+  signedIn: boolean
 }
 
 function alignmentColor(score: number): string {
@@ -23,7 +25,7 @@ function alignmentColor(score: number): string {
   return "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300"
 }
 
-export function RunHistoryList({ runs }: RunHistoryListProps) {
+export function RunHistoryList({ runs, signedIn }: RunHistoryListProps) {
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [, startTransition] = useTransition()
@@ -31,7 +33,17 @@ export function RunHistoryList({ runs }: RunHistoryListProps) {
   if (runs.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        Nenhuma execução ainda. Converse com a IA ou use o modo rápido pra gerar a primeira.
+        {signedIn ? (
+          "Nenhuma execução ainda. Converse com a IA ou use o modo rápido pra gerar a primeira."
+        ) : (
+          <>
+            O histórico de recomendações é pessoal.{" "}
+            <Link href="/login" className="font-medium text-primary underline-offset-4 hover:underline">
+              Entre
+            </Link>{" "}
+            para ver o seu.
+          </>
+        )}
       </p>
     )
   }
