@@ -642,6 +642,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
     <WorkStatusGateProvider
       workId={work.id}
       totalChapters={totalChaptersNum}
+      publicationStatusId={work.publication_status_id ?? null}
+      canEditCatalog={isAdmin}
       initialValues={statusInitial}
       latestAiEvaluation={postAttrAi}
       existingAssessment={postAttrExisting}
@@ -779,6 +781,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               workId={work.id}
               totalChapters={totalChaptersNum}
               chaptersRead={work.chapters_read != null ? Number(work.chapters_read) : null}
+              publicationStatusId={work.publication_status_id ?? null}
+              personalStatusId={work.personal_status_id ?? null}
               canEdit={canEditPersonalState}
             />
             <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5">
@@ -798,6 +802,9 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
             <QuickStatusCell
               workId={work.id}
               statusId={work.personal_status_id ?? null}
+              publicationStatusId={work.publication_status_id ?? null}
+              chaptersRead={work.chapters_read != null ? Number(work.chapters_read) : null}
+              totalChapters={totalChaptersNum}
               canEdit={canEditPersonalState}
             />
             <QuickInterestCell
@@ -1074,6 +1081,8 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
               <PostReadingFlow
                 workId={work.id as string}
                 totalChapters={work.total_chapters != null ? Number(work.total_chapters) : null}
+                publicationStatusId={work.publication_status_id ?? null}
+                canEditCatalog={isAdmin}
                 statusInitial={statusInitial}
                 latestAiEvaluation={postAttrAi}
                 existingAssessment={postAttrExisting}

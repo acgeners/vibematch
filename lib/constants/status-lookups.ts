@@ -47,6 +47,64 @@ export function getPersonalStatusNameById(
 }
 
 /**
+ * Perguntas SEMÂNTICAS sobre a PUBLICAÇÃO — "a obra ainda pode ganhar capítulo?".
+ *
+ * A tabela `publication_status` não tem colunas de semântica (ao contrário de `personal_status`,
+ * que ganhou as dela na migration 155), então a semântica mora aqui, casada por SLUG — que é a
+ * chave estável do `sync-constants`. Se um slug sumir do Supabase isto ESTOURA no import, de
+ * propósito: um `Set` que silenciosamente para de casar é exatamente o bug que a 155 documenta
+ * (renomear "Completed" → "Finished" quebrou 10 lugares e o TypeScript pegou 6).
+ */
+const PUBLICATION_BY_SLUG = new Map<string, number>(
+  Object.values(PUBLICATION_STATUSES_BY_ID).map((info) => [info.slug, info.id])
+)
+
+function publicationIdsBySlugOrThrow(slugs: string[]): Set<number> {
+  const ids = slugs.map((slug) => {
+    const id = PUBLICATION_BY_SLUG.get(slug)
+    if (id == null) {
+      throw new Error(
+        `publication_status: não existe status com slug "${slug}". ` +
+          `Slugs válidos: ${[...PUBLICATION_BY_SLUG.keys()].join(", ")}. ` +
+          `Se o slug mudou no Supabase, rode sync-constants e ajuste o chamador.`
+      )
+    }
+    return id
+  })
+  return new Set(ids)
+}
+
+/** Ainda sai capítulo novo (ou pode voltar a sair): a obra NÃO acabou. */
+const STILL_PUBLISHING_IDS = publicationIdsBySlugOrThrow(["ongoing", "hiatus"])
+
+/** A história chegou ao fim previsto pelo autor. `cancelled` fica de fora: acabou, mas incompleta. */
+const CONCLUDED_IDS = publicationIdsBySlugOrThrow(["completed"])
+
+/** A obra ainda está saindo (Ongoing/Hiatus) — logo, ninguém leu "a obra inteira". */
+export function isStillPublishingStatus(id: number | null | undefined): boolean {
+  return id != null && STILL_PUBLISHING_IDS.has(id)
+}
+
+/** A obra terminou de sair (Completed) — ler o último capítulo é ter lido tudo. */
+export function isConcludedPublicationStatus(id: number | null | undefined): boolean {
+  return id != null && CONCLUDED_IDS.has(id)
+}
+
+/**
+ * O nome do status "a obra acabou" — hoje "Completed". Existe pro botão "a obra terminou"
+ * do aviso de coerência, que precisa MANDAR um nome pra server action. Escrever a string à
+ * mão ali seria o mesmo acoplamento que a migration 155 documenta, do outro lado da tabela.
+ */
+export const CONCLUDED_PUBLICATION_STATUS = ((): string => {
+  const [id] = [...CONCLUDED_IDS]
+  const name = id != null ? getPublicationStatusNameById(id) : null
+  if (!name) {
+    throw new Error("publication_status: sem status 'completed' — rode sync-constants.")
+  }
+  return name
+})()
+
+/**
  * Perguntas SEMÂNTICAS sobre um status pessoal — aceitam o id ou o nome.
  *
  * 🔴 Use estas funções. NUNCA escreva o nome de um status à mão (`=== "Finished"`,

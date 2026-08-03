@@ -1064,7 +1064,10 @@ function ReadingCard({
     if (timer.current) clearTimeout(timer.current)
     const run = () =>
       startSave(async () => {
-        const res = await setChaptersRead(work.id, value)
+        // Sem o teto de `total_chapters`: aqui o limite é o ÚLTIMO LANÇADO (`lancado`, que vem
+        // da checagem externa), e ele passa do total do catálogo justamente quando o catálogo
+        // está velho. Deixar o servidor limitar faria "Marcar até o 132" gravar 120 calado.
+        const res = await setChaptersRead(work.id, value, { clampToTotal: false })
         if (res && "error" in res && res.error) {
           toast.error("Não salvou os capítulos", { description: res.error })
           setRead(work.chaptersRead ?? 0) // reverte pro persistido

@@ -17,6 +17,10 @@ export interface StatusEditDialogProps {
   onOpenChange: (open: boolean) => void
   workId: string
   totalChapters: number | null
+  /** `works.publication_status_id` — o aviso de coerência do form depende dele. */
+  publicationStatusId?: number | null
+  /** true ⇒ curador: o aviso oferece corrigir a publicação. */
+  canEditCatalog?: boolean
   initialValues: WorkStatusValues
   latestAiEvaluation: PostAttributeAssessmentFormProps["latestAiEvaluation"]
   existingAssessment: PostAttributeAssessmentFormProps["existingAssessment"]
@@ -31,6 +35,8 @@ export function StatusEditDialog({
   onOpenChange,
   workId,
   totalChapters,
+  publicationStatusId = null,
+  canEditCatalog = false,
   initialValues,
   latestAiEvaluation,
   existingAssessment,
@@ -53,6 +59,8 @@ export function StatusEditDialog({
         <PostReadingFlow
           workId={workId}
           totalChapters={totalChapters}
+          publicationStatusId={publicationStatusId}
+          canEditCatalog={canEditCatalog}
           statusInitial={initialValues}
           latestAiEvaluation={latestAiEvaluation}
           existingAssessment={existingAssessment}
