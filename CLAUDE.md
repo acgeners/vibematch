@@ -423,10 +423,18 @@ Post-processing applied to every evaluation (in `service.ts`):
   🔴 **A 174 ainda NÃO está aplicada na nuvem** (conferido 08-02); é aditiva, então aplicar ANTES
   do deploy do código. Ver [[project-conferir-migration-na-nuvem]].
 
-🔴 **A 175 (`recommendation_chats.user_id`) também está pendente na nuvem** (03-08). Aplicada e
-conferida SÓ no local. É aditiva e tem backfill (conversas antigas → dono), mas o código do chat
-**depende** dela: sem a coluna, o insert falha e a listagem quebra. Aplicar ANTES do deploy —
-junto com a 174, quando o egress sair do 402.
+🔴 **As migrations 175 e 176 também estão pendentes na nuvem** (03-08), aplicadas e conferidas SÓ
+no local. Ambas dão dono a dado pessoal, e **o código depende das duas**:
+
+| # | Tabela | Sem ela | Ordem |
+|---|---|---|---|
+| 174 | `tags.adult_score_tier` | aditiva, código tolera | qualquer |
+| 175 | `recommendation_chats.user_id` | insert do chat FALHA, listagem quebra | antes do deploy |
+| 176 | `ai_eval_read_acks.user_id` | "marcar como lido" FALHA (`user_id` NOT NULL) | antes do deploy |
+
+⚠️ A 176 **troca a PRIMARY KEY** de `(work_id, queue)` para `(user_id, work_id, queue)`, e o
+`onConflict` do upsert em `server/actions/ai-eval-read.ts` acompanha. Aplicar o código sem a
+migration (ou vice-versa) troca "ack de cada um" por "último que clicou vence", em silêncio.
 - `enforceR19AdultContentRule`: raises `adult_content` to ≥ 7.0 if R19 marker detected anywhere in input
 - `enforceExternalContentRatingRule`: raises `adult_content` to a floor from the accepted external sources' content rating (MangaDex `contentRating` / ComicK `content_rating`) — `suggestive`→5, `erotica`→7, `pornographic`→8. Chained with the R19 rule; both are monotonic so the effective floor is the max of whichever triggered.
 - `enforceNeutralCoupleDynamicsWhenNoRomance`: raises `couple_dynamics` to 5.0 when romance ≤ 3 and couple_dynamics < 5

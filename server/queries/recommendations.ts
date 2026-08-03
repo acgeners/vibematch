@@ -743,11 +743,20 @@ export async function getStaleAlignmentCandidates(limit = 200): Promise<Favorite
  * criaria import circular (ele já importa deste módulo).
  */
 async function getVeredictoReadAckIds(): Promise<Set<string>> {
+  // Acks são per-usuário (migration 176); sem sessão, nada foi marcado.
+  const userId = await getSessionUserId()
+  if (!userId) return new Set<string>()
+
   const supabase = createAdminClient()
   try {
     const rows = await fetchAllRows<{ work_id: string }>(
       (from, to) =>
-        supabase.from("ai_eval_read_acks").select("work_id").eq("queue", "veredito").range(from, to),
+        supabase
+          .from("ai_eval_read_acks")
+          .select("work_id")
+          .eq("user_id", userId)
+          .eq("queue", "veredito")
+          .range(from, to),
       "getVeredictoReadAckIds",
     )
     return new Set(rows.map((r) => r.work_id))
