@@ -393,10 +393,21 @@ export async function getAiQueueCounts(): Promise<AiQueueCounts> {
       ),
     ])
 
+    // ⚠️ `calculated_scores` é a linha do DONO. O Veredito IA virou per-usuário (mora em
+    // `user_calculated_scores` para os demais), então contar direto daqui devolvia a fila
+    // DELE para qualquer pessoa logada — no `/painel`, que qualquer logado abre. O overlay
+    // troca os campos pessoais pelos de quem olha; para o dono é identidade e custa zero
+    // query.
+    //
+    // ⚠️ Isto NÃO faz o número bater com o que `/fila-recomendacao?tab=ia-rk` lista: a aba
+    // filtra `["stale"]` por padrão e esta contagem usa `["stale","unranked"]`. A divergência
+    // é anterior e vale para o dono também — só ficou visível agora. Decidir qual dos dois é
+    // "pendente" é decisão de produto, não de leitura.
+    const scores = await getScoresReader()
     const calcByWork = new Map(calcRows.map((row) => [row.work_id, row] as const))
     let iaRk = 0
     for (const w of activeRows) {
-      const calc = calcByWork.get(w.id)
+      const calc = scores.overlay(w.id, calcByWork.get(w.id) ?? null)
       const alignmentScore = calc?.alignment_score ?? null
       const isUnranked = alignmentScore == null
       const isStale = alignmentScore != null && Boolean(calc?.alignment_stale)

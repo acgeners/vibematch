@@ -1,11 +1,17 @@
 import Link from "next/link"
-import { Brain, ListChecks, Sparkles, FileText, ArrowRight } from "lucide-react"
+import { Brain, Sparkles, FileText, ArrowRight } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { LABELS } from "@/lib/constants/ui-labels"
 
+/**
+ * As filas de IA PESSOAIS — as duas de `/fila-recomendacao`.
+ *
+ * Tinha uma terceira, "Atributos" (`/ai-evaluation`), removida em 2026-08-03: aquela fila é
+ * curadoria do catálogo compartilhado e mora na console `/curadoria`. Num card do `/painel`,
+ * que qualquer logado abre, ela era um link que o gate da console barra — botão que quica.
+ */
 interface AiQueueCardProps {
-  /** Avaliação de atributos pendente (ai_eval_status pending + review_pending). */
-  attributes: number
   /** Fila de re-rank (Veredito IA desatualizado/não avaliado). */
   iaRk: number
   /** Fila de previsão de interesse por sinopse. */
@@ -16,16 +22,15 @@ interface QueueRow {
   label: string
   count: number
   href: string
-  icon: typeof ListChecks
+  icon: LucideIcon
 }
 
-export function AiQueueCard({ attributes, iaRk, synopsis }: AiQueueCardProps) {
+export function AiQueueCard({ iaRk, synopsis }: AiQueueCardProps) {
   const rows: QueueRow[] = [
-    { label: "Atributos", count: attributes, href: "/ai-evaluation", icon: ListChecks },
     { label: LABELS.alignment_score.full, count: iaRk, href: "/fila-recomendacao?tab=ia-rk", icon: Sparkles },
     { label: "Interesse por sinopse", count: synopsis, href: "/fila-recomendacao?tab=sinopse", icon: FileText },
   ]
-  const total = attributes + iaRk + synopsis
+  const total = iaRk + synopsis
 
   return (
     <Card>
@@ -36,7 +41,7 @@ export function AiQueueCard({ attributes, iaRk, synopsis }: AiQueueCardProps) {
         </CardTitle>
         <span className="text-2xl font-bold tabular-nums leading-none">{total}</span>
       </CardHeader>
-      <CardContent className="grid gap-1.5 sm:grid-cols-3">
+      <CardContent className="grid gap-1.5 sm:grid-cols-2">
         {rows.map(({ label, count, href, icon: Icon }) => (
           <Link
             key={href}

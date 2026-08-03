@@ -1,53 +1,50 @@
 import Link from "next/link"
-import { Coins, Gauge, Upload, Sparkles, Plus } from "lucide-react"
+import { Gauge, Upload, Plus } from "lucide-react"
 import { getDashboardStats, getAiQueueCounts } from "@/server/queries/dashboard"
 import { getTasteProfileStatusAction } from "@/server/actions/recommendations"
-import { getPredictionHealth } from "@/server/queries/calibration-guards"
-import { getAiUsageTotals } from "@/server/queries/ai-usage"
-import { StatCard } from "@/components/dashboard/stat-card"
+import { isCurrentUserAdmin } from "@/server/queries/current-user"
 import { AiQueueCard } from "@/components/dashboard/ai-queue-card"
 import { StatusDistribution } from "@/components/dashboard/status-distribution"
 import { ProfileSummary } from "@/components/dashboard/profile-summary"
-import { HealthStrip } from "@/components/dashboard/health-strip"
 import { Header } from "@/components/layout/header"
 import { Button } from "@/components/ui/button"
 
 export const metadata = { title: "Painel — SatorIA" }
 
 /**
- * O painel — a saúde da biblioteca e do sistema.
+ * O painel — **a SUA biblioteca**. Tudo aqui é de quem olha; nada é do catálogo.
  *
- * 🔴 PROVISÓRIO — REPENSAR POR ÚLTIMO (decidido 2026-08-02). No estado atual esta página
- * "não tem valor real": sobrou o que a vitrine não quis, não o que alguém iria procurar aqui.
- * Fica assim de propósito enquanto o resto da navegação assenta; quando as outras telas
- * estiverem no lugar, decidir o que de fato pertence a um painel — e o que é redundante com
- * `/conta/perfil` (o `ProfileSummary` daqui provavelmente é), com `/ai-usage` (o custo) e com
- * a console de curadoria (fila de manutenção e telemetria de saúde). É possível que a
- * conclusão seja que ele não deve existir e cada bloco volte para a página dona do assunto.
- * NÃO investir em polimento aqui até essa decisão.
+ * Era a home até 2026-08-02, e veio inteiro. A régua da divisão ficou: **a home responde "o
+ * que eu leio agora"; o painel responde "como está a minha biblioteca"**. O que a vitrine já
+ * mostrava saiu na mudança (os 4 contadores de atividade → faixa da home; ContinueReading →
+ * hero; "Pra ler agora" → prateleira "Pra você hoje").
  *
- * Era a home até 2026-08-02. Ao mover, o arquivo veio inteiro e passou a duplicar a vitrine:
- * os mesmos quatro contadores de atividade, o mesmo "Continue lendo" e a mesma lista de
- * melhores previstas, todos servidos das mesmas queries em duas telas. Era essa duplicação —
- * não a divisão — que tornava impossível dizer para que serve cada página.
+ * ## A poda de 2026-08-03 — o que saiu, e por quê
  *
- * A régua ficou: **a home responde "o que eu leio agora"; o painel responde "como está a
- * minha biblioteca e o sistema"**. O que a vitrine já mostra saiu daqui:
+ * A console `/curadoria` assumiu o que é do CATÁLOGO, e o que tinha ficado aqui virou
+ * duplicata. Três blocos saíram, cada um por um motivo que não é só arrumação:
  *
- *   - os 4 StatCards de atividade  → faixa da home
- *   - ContinueReading              → hero da home
- *   - "Pra ler agora"              → prateleira "Pra você hoje"
+ *   - **Custo IA (30d)** → `/ai-usage`. `getAiUsageTotals()` **não filtra por usuário**: lia
+ *     a `ai_api_calls` inteira e mostrava o gasto do DONO para qualquer pessoa logada. Era
+ *     exposição, e ainda um full-table read numa página que todo mundo abre.
+ *   - **"Saúde da previsão"** (`HealthStrip`) → a Visão geral da console. Telemetria do
+ *     modelo/catálogo, não da sua leitura — e custava 4 queries de guarda por carga.
+ *   - **Fila "Atributos"** do card de pendências → `/ai-evaluation`. Curadoria do catálogo.
+ *     As outras duas filas ficaram: são as SUAS (`/fila-recomendacao`).
  *
- * Fica o que a home deliberadamente não carrega: a forma da biblioteca (distribuição por
- * status), o perfil de gosto, o custo de IA, a fila de manutenção e a telemetria de saúde.
+ * As três eram links para rotas que o gate da console passou a barrar — para um Leitor viravam
+ * botões que quicam de volta para `/`. Sumir com eles é o que corrige isso.
+ *
+ * Sobrou o que só esta página responde: a forma da biblioteca, o perfil de gosto e as filas
+ * pessoais. Se um dia isso também couber em `/leitura` e `/conta/perfil`, o painel deixa de
+ * ter razão de existir — a poda tornou essa pergunta respondível, não a respondeu.
  */
 export default async function PainelPage() {
-  const [stats, queueCounts, profileStatus, health, usage] = await Promise.all([
+  const [stats, queueCounts, profileStatus, canCurate] = await Promise.all([
     getDashboardStats(),
     getAiQueueCounts(),
     getTasteProfileStatusAction(),
-    getPredictionHealth(),
-    getAiUsageTotals(),
+    isCurrentUserAdmin(),
   ])
 
   return (
@@ -65,35 +62,21 @@ export default async function PainelPage() {
                 <span className="hidden sm:inline">Importar</span>
               </Link>
             </Button>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/ai-evaluation">
-                <Sparkles className="size-4" />
-                <span className="hidden sm:inline">Avaliar</span>
-              </Link>
-            </Button>
-            <Button asChild size="sm">
-              <Link href="/titles/new">
-                <Plus className="size-4" />
-                Novo título
-              </Link>
-            </Button>
+            {/* Criar obra escreve no catálogo COMPARTILHADO (`curate_work`). Mostrar o botão
+                a quem não pode entrega um formulário que só falha no salvar. */}
+            {canCurate && (
+              <Button asChild size="sm">
+                <Link href="/titles/new">
+                  <Plus className="size-4" />
+                  Novo título
+                </Link>
+              </Button>
+            )}
           </>
         }
       />
 
-      {/* Custo é o único número de OPERAÇÃO que sobrou em cartão: não descreve a leitura de
-          ninguém, então não cabe na faixa da home. */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <StatCard
-          title="Custo IA (30d)"
-          value={`$${usage.last30d.totalCostUsd.toFixed(2)}`}
-          icon={<Coins />}
-          href="/ai-usage"
-          description={`$${usage.last7d.totalCostUsd.toFixed(2)} nos últimos 7 dias`}
-          accent="slate"
-        />
-        <ProfileSummary status={profileStatus} />
-      </div>
+      <ProfileSummary status={profileStatus} />
 
       {/* A forma da biblioteca — o que a vitrine não mostra por não caber numa prateleira. */}
       <StatusDistribution
@@ -101,13 +84,7 @@ export default async function PainelPage() {
         byPublicationStatus={stats.byPublicationStatus}
       />
 
-      <AiQueueCard
-        attributes={stats.pendingAi}
-        iaRk={queueCounts.iaRk}
-        synopsis={queueCounts.synopsis}
-      />
-
-      <HealthStrip health={health} />
+      <AiQueueCard iaRk={queueCounts.iaRk} synopsis={queueCounts.synopsis} />
     </div>
   )
 }
