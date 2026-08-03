@@ -65,6 +65,15 @@ async function getChatMessagesToday(
   return count ?? 0
 }
 
+/**
+ * Próximo slug livre do dia (`YYYY-MM-DD-N`).
+ *
+ * ⚠️ Varre TODOS os slugs do dia de propósito, sem filtrar por usuário — mesmo depois da
+ * migration 175, que deu dono à tabela. `recommendation_chats_slug_key` é UNIQUE GLOBAL:
+ * escopar esta contagem por usuário faria duas pessoas conversando no mesmo dia disputarem
+ * `2026-08-03-1`, e a segunda tomaria erro de conflito. O que precisa ser per-user é a
+ * LEITURA das conversas, não a numeração delas.
+ */
 async function generateChatSlug(
   supabase: ReturnType<typeof createAdminClient>,
 ): Promise<string> {
@@ -219,14 +228,22 @@ function rowToChat(row: Record<string, unknown>): ChatRow {
   }
 }
 
+/**
+ * Uma conversa pelo slug — SÓ se for de `userId` (migration 175).
+ *
+ * O `.eq("user_id")` fica na QUERY, não numa comparação depois: a conversa inteira (todo o
+ * histórico de mensagens) não deve sequer sair do banco quando não é de quem pediu.
+ */
 async function loadChatBySlug(
   supabase: ReturnType<typeof createAdminClient>,
   slug: string,
+  userId: string,
 ): Promise<ChatRow | null> {
   const { data } = await supabase
     .from("recommendation_chats")
     .select("*")
     .eq("slug", slug)
+    .eq("user_id", userId)
     .maybeSingle()
   return data ? rowToChat(data as Record<string, unknown>) : null
 }
@@ -279,7 +296,10 @@ export async function sendChatMessageAction(
     if ("error" in profileResult) return { error: profileResult.error }
     const profile = profileResult.profile
 
-    const existing = args.slug ? await loadChatBySlug(supabase, args.slug) : null
+    // Escopado por `userId`: sem isto, mandar uma mensagem com o slug de outra pessoa
+    // continuaria a conversa DELA — o gate de consumo acima só verifica que há sessão e
+    // plano, não de quem é a conversa.
+    const existing = args.slug ? await loadChatBySlug(supabase, args.slug, userId) : null
     const priorMessages = existing?.messages ?? []
 
     // Force-recommend sem texto novo precisa de conversa prévia pra resumir.
@@ -427,10 +447,15 @@ export async function sendChatMessageAction(
 
     let slug = existing?.slug ?? null
     if (existing) {
+      // O `.eq("user_id")` é redundante hoje — `existing` veio de `loadChatBySlug`, que já
+      // escopa — e fica de propósito: é a service role, que ignora RLS, então sem ele a
+      // corretude depende de o carregamento lá em cima continuar escopado. Foi exatamente
+      // esse tipo de dependência à distância que abriu o buraco do PR #127.
       const { error } = await supabase
         .from("recommendation_chats")
         .update({ messages: newMessages, updated_at: new Date().toISOString() })
         .eq("id", existing.id)
+        .eq("user_id", userId)
       if (error) console.error("[recommendation-chat] falha atualizando conversa:", error)
     } else {
       for (let attempt = 0; attempt < 5; attempt++) {
@@ -439,6 +464,9 @@ export async function sendChatMessageAction(
           .from("recommendation_chats")
           .insert({
             slug: candidateSlug,
+            // Dono da conversa (migration 175). A coluna é NOT NULL: esquecer aqui não
+            // grava linha órfã, dá erro — que é o que se quer.
+            user_id: userId,
             title: deriveTitle(userText),
             messages: newMessages,
             taste_profile_id: profile.id,
@@ -475,9 +503,18 @@ export async function sendChatMessageAction(
   }
 }
 
+/**
+ * Uma conversa, pelo slug. Sem sessão → null; de outra pessoa → null.
+ *
+ * ⚠️ `"use server"` faz desta função um endpoint HTTP público: qualquer um pode fazer POST
+ * com um slug. "Só a nossa UI chama" nunca protegeu nada — o gate tem que estar aqui.
+ */
 export async function getChatAction(slug: string): Promise<ChatRow | null> {
+  const userId = await getSessionUserId()
+  if (!userId) return null
+
   const supabase = createAdminClient()
-  return loadChatBySlug(supabase, slug)
+  return loadChatBySlug(supabase, slug, userId)
 }
 
 export interface ChatSummary {
@@ -487,11 +524,25 @@ export interface ChatSummary {
   messageCount: number
 }
 
+/**
+ * As conversas de QUEM ESTÁ OLHANDO. Sem sessão → vazio.
+ *
+ * 🔴 Até a migration 175 esta função não tinha filtro — e não PODIA ter: a tabela não
+ * tinha coluna de dono. Devolvia slug, título e nº de mensagens de todas as conversas de
+ * todo mundo, para qualquer chamador, inclusive por POST direto no endpoint.
+ *
+ * `getSessionUserId()` e nunca `getCurrentUserId()`: o segundo devolve o dono quando não há
+ * sessão, o que traria o vazamento de volta com cara de código correto.
+ */
 export async function listChatsAction(limit = 20): Promise<ChatSummary[]> {
+  const userId = await getSessionUserId()
+  if (!userId) return []
+
   const supabase = createAdminClient()
   const { data } = await supabase
     .from("recommendation_chats")
     .select("slug, title, updated_at, messages")
+    .eq("user_id", userId)
     .order("updated_at", { ascending: false })
     .limit(limit)
   return (data ?? []).map((row) => ({
