@@ -1,17 +1,16 @@
 /**
- * As bandas de RITMO da /leitura, como regra pura — para a home poder destacar exatamente o
- * que aquela página chama de "Acompanhando", em vez de inventar um critério paralelo.
+ * As bandas de RITMO da /leitura, como regra pura — para a home destacar exatamente o que
+ * aquela página chama de "Acompanhando", em vez de inventar um critério paralelo.
  *
- * A matriz é % lido × recência da leitura, com o hiato de publicação na frente de tudo. Os
- * três limiares são os mesmos de `components/reading/reading-list.tsx`.
+ * A matriz é % lido × recência da leitura, com o hiato de publicação na frente de tudo.
  *
- * ⚠️ DÍVIDA CONHECIDA: o `reading-list.tsx` ainda tem a sua própria cópia desta classificação.
- * Não foi migrado junto porque aquele arquivo está sendo alterado num trabalho paralelo ainda
- * não mergeado (o badge "+N novo"), e mexer nele agora garantiria conflito. Quando aquele
- * ramo entrar, apagar o `classifyReadingState` de lá e importar daqui — enquanto houver duas
- * cópias, mudar um limiar num lugar e não no outro faz a home e a /leitura discordarem sobre
- * a mesma obra, sem erro nenhum.
+ * ✅ FONTE ÚNICA desde 2026-08-03: `components/reading/reading-list.tsx` importa daqui.
+ * Ele tinha a própria cópia dos três limiares e da classificação — enquanto existiram duas,
+ * mudar um limiar num lugar e não no outro fazia a home e a /leitura discordarem sobre a
+ * MESMA obra, sem erro nenhum. Quem for mexer nos limiares mexe aqui, e os dois andam juntos.
  */
+
+import { differenceInCalendarDays } from "date-fns"
 
 export const ONPACE_PCT = 0.85 // ≥ 85% lido (e recente) → Acompanhando (quase no fim)
 export const BEHIND_PCT = 0.4 // < 40% lido → Atrasado (independe da recência)
@@ -32,12 +31,20 @@ export interface PaceInput {
   publicationHiatus: boolean
 }
 
-/** Dias de calendário desde `iso`. `Infinity` quando nulo/inválido — nunca conta como recente. */
+/**
+ * Dias de CALENDÁRIO desde `iso`. `Infinity` quando nulo/inválido — nunca conta como recente.
+ *
+ * Calendário, não janelas de 24 h: uma leitura às 23h de ontem é "1 dia atrás" à 1h de hoje,
+ * não "0". Era o que a /leitura já fazia (`differenceInCalendarDays`) e o que a doc daqui já
+ * afirmava — a implementação anterior, com `Math.floor(ms / 86.400.000)`, é que discordava
+ * das duas. Com 30 dias de limiar a diferença só aparece na fronteira, mas quando aparece
+ * põe a mesma obra em bandas diferentes na home e na /leitura.
+ */
 export function daysSince(iso: string | null, now: Date = new Date()): number {
   if (!iso) return Infinity
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return Infinity
-  return Math.floor((now.getTime() - d.getTime()) / 86_400_000)
+  return differenceInCalendarDays(now, d)
 }
 
 /** Fração lida (0–1), ou null quando o total é desconhecido. */

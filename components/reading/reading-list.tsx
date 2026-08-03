@@ -40,6 +40,8 @@ import { personalStatusNameBySlugOrThrow } from "@/lib/constants/status-lookups"
 import { cn } from "@/lib/utils"
 import { formatRelativeDate, formatPredictedDate, formatRelativeDateTime } from "@/lib/date-utils"
 import { differenceInCalendarDays, startOfMonth, addMonths, format } from "date-fns"
+import { classifyPace, daysSince, BEHIND_PCT, STALE_DAYS } from "@/lib/reading/pace-bands"
+import type { ReadingBand } from "@/lib/reading/pace-bands"
 import { ptBR } from "date-fns/locale"
 import { checkReadingUpdates, type ReadingUpdateResult } from "@/server/actions/reading"
 import { setChaptersRead, setReadingStatusForWorks, archiveWork } from "@/server/actions/works"
@@ -140,11 +142,11 @@ type BandConfig = { label: string; hint: string; bar: string; progress: string; 
 // do usuário, não o gradiente de %.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type ReadingState = "onpace" | "uptodate" | "trailing" | "slowing" | "hiatus" | "behind"
-
-const ONPACE_PCT = 0.85 // ≥ 85% lido (e recente) → Acompanhando (quase no fim)
-const BEHIND_PCT = 0.4 // < 40% lido → Atrasado (independe da recência)
-const STALE_DAYS = 30 // ≥ 30 dias sem ler → "frio" (Desacelerando / Possível hiato)
+// Os limiares e a classificação moram em `lib/reading/pace-bands.ts` — a home usa os
+// MESMOS pra escolher o destaque "Continue lendo". Havia uma cópia deles aqui; duas
+// cópias significavam que ajustar um limiar num lado deixava as duas telas discordando
+// sobre a mesma obra, sem erro nenhum.
+type ReadingState = ReadingBand
 
 const READING_STATE_ORDER: readonly ReadingState[] = [
   "onpace", // 1 Acompanhando
@@ -200,40 +202,27 @@ const READING_STATE_CONFIG: Record<ReadingState, BandConfig> = {
   },
 }
 
-/** Dias desde `iso` (calendário). `Infinity` quando nulo/inválido — nunca conta como recente. */
-function daysSince(iso: string | null): number {
-  if (!iso) return Infinity
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return Infinity
-  return differenceInCalendarDays(new Date(), d)
-}
-
 /**
- * Classifica a obra numa das 6 bandas de ritmo — matriz % lido × recência + hiato de publicação.
- * Aplicada SÓ à seção "Em andamento" (publicação Ongoing). Ordem de avaliação (a 1ª que casa vence).
+ * Classifica a obra numa das 6 bandas de ritmo. Aplicada SÓ à seção "Em andamento"
+ * (publicação Ongoing).
+ *
+ * Só ADAPTA: traduz o par (obra, resultado da edição em voo) para o `PaceInput` da regra
+ * compartilhada. A matriz % lido × recência + hiato vive em `classifyPace` — inclusive o
+ * caso "sem total conhecido → Acompanhando (neutro)".
  */
 function classifyReadingState(
   w: ReadingWork,
   result: ReadingUpdateResult | undefined,
 ): ReadingState {
-  // Série em hiato oficial → provável pausa, seja qual for o % (prioridade máxima).
-  if (
-    w.publicationStatusId != null &&
-    PUBLICATION_STATUSES_BY_ID[w.publicationStatusId]?.status === "Hiatus"
-  ) {
-    return "hiatus"
-  }
-  const pending = pendingOf(w, result, w.chaptersRead ?? 0)
-  const pct = progressOf(w, result)
-  // Sem total conhecido não dá pra medir progresso: fica em "Acompanhando" (neutro).
-  if (pending == null || pct == null) return "onpace"
-
-  const stale = daysSince(w.lastReadAt) >= STALE_DAYS
-  if (pending === 0) return stale ? "hiatus" : "uptodate" // 100%
-  if (pct < BEHIND_PCT) return "behind" // ≤ 39%
-  if (stale) return "slowing" // 40–99% + frio (inclui o vazio 85–99% frio)
-  if (pct >= ONPACE_PCT) return "onpace" // 85–99% + recente
-  return "trailing" // 40–84% + recente
+  return classifyPace({
+    chaptersRead: w.chaptersRead,
+    totalChapters: latestOf(w, result),
+    pending: pendingOf(w, result, w.chaptersRead ?? 0),
+    lastReadAt: w.lastReadAt,
+    publicationHiatus:
+      w.publicationStatusId != null &&
+      PUBLICATION_STATUSES_BY_ID[w.publicationStatusId]?.status === "Hiatus",
+  })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

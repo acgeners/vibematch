@@ -1,59 +1,19 @@
-import { Suspense } from "react"
 import type { ReactNode } from "react"
-import { SETTINGS_GROUPS, DEFAULT_GROUP_ID } from "@/app/settings/sections"
-import {
-  SettingsMobileNav,
-  SettingsSubnav,
-} from "@/components/settings/settings-nav"
-import type { SubnavGroup } from "@/components/settings/settings-nav"
-import { getSettingsItemUnread } from "@/server/queries/settings-read"
+import { CuradoriaConsole } from "@/components/curadoria/console-shell"
 
-// NÃO-LIDO por GRUPO (badge na sub-nav) = soma do não-lido dos itens do grupo.
-// Fonte única `getSettingsItemUnread` (mesmas contagens da page e do badge da
-// sidebar, já descontando os "lidos"). "Avançado" não tem item com pendência → 0.
-async function loadGroupPending(): Promise<Record<string, number>> {
-  const itemUnread = await getSettingsItemUnread()
-  return Object.fromEntries(
-    SETTINGS_GROUPS.map((g) => [
-      g.id,
-      g.sections.reduce((sum, s) => sum + (itemUnread[s.id] ?? 0), 0),
-    ]),
-  )
-}
-
-// Layout da área /settings: navegação em DUAS CAMADAS. A camada 1 (menu do site)
-// vem do layout raiz; aqui adicionamos a camada 2 (sub-nav de tópicos) COLADA na
-// sidebar. Os `md:-m-7` cancelam o padding do <main> pra a sub-nav encostar na
-// borda e ocupar a altura toda; o conteúdo reganha o padding.
-export default async function SettingsLayout({ children }: { children: ReactNode }) {
-  const pending = await loadGroupPending()
-
-  const groups: SubnavGroup[] = SETTINGS_GROUPS.map((g) => ({
-    id: g.id,
-    label: g.label,
-    iconName: g.iconName,
-    accent: g.accent,
-    itemCount: g.sections.length,
-    pending: pending[g.id] ?? 0,
-  }))
-  return (
-    <div className="md:-mx-7 md:-my-7 md:flex md:min-h-dvh md:items-stretch">
-      <Suspense>
-        <SettingsSubnav
-          groups={groups}
-          defaultGroup={DEFAULT_GROUP_ID}
-          basePath="/settings"
-          title="Configurações"
-          subtitle="Console de operação"
-          headerIconName="Settings"
-        />
-      </Suspense>
-      <div className="min-w-0 flex-1 md:px-7 md:py-7">
-        <Suspense>
-          <SettingsMobileNav groups={groups} defaultGroup={DEFAULT_GROUP_ID} basePath="/settings" />
-        </Suspense>
-        {children}
-      </div>
-    </div>
-  )
+/**
+ * /settings entrou na console de curadoria — e por isso PERDEU a sub-nav própria.
+ *
+ * Até 2026-08-02 este layout montava a `SettingsSubnav` (a lista dos quatro tópicos)
+ * como camada 2. Com a console, essa lista virou o ramo "Configurações" da sidebar
+ * dela; manter as duas daria duas sidebars lado a lado, cada uma reivindicando ser
+ * a camada 2. Nada se perdeu: os tópicos continuam sendo `?g=` na mesma rota, com os
+ * mesmos badges de pendência — só mudaram de lugar.
+ *
+ * `SettingsSubnav`/`SettingsMobileNav` seguem existindo: `/preferencias` usa. Ela é
+ * do USUÁRIO (mora no menu do avatar) e nunca entrou nesta console, então continua
+ * sendo dona da própria camada 2.
+ */
+export default function SettingsLayout({ children }: { children: ReactNode }) {
+  return <CuradoriaConsole>{children}</CuradoriaConsole>
 }

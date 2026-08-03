@@ -1,16 +1,24 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
+import type { User } from "@supabase/supabase-js"
+
+export interface SessionRefresh {
+  response: NextResponse
+  /** Usuário da sessão já revalidada, ou null quando anônimo. */
+  user: User | null
+  /** Cliente com a SESSÃO do usuário — RLS vale. Só para leitura das linhas dele. */
+  supabase: ReturnType<typeof createServerClient>
+}
 
 /**
  * Refresh da sessão Supabase a cada request. Padrão @supabase/ssr: reescreve os
  * cookies de auth na resposta pra manter o token válido nos Server Components.
  *
- * Não protege rotas ainda (transição single-user → multi-user): sem sessão, o
- * request segue normal e o app cai no fallback singleton em getCurrentUserId.
- * A proteção de rota entra quando o fluxo de login/signup existir (Fase 1b).
+ * Devolve também o usuário e o cliente: quem chama decide sobre proteção de rota
+ * (ver `middleware.ts`) sem pagar um segundo `getUser()`.
  */
-export async function updateSession(request: NextRequest): Promise<NextResponse> {
+export async function updateSession(request: NextRequest): Promise<SessionRefresh> {
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -33,7 +41,7 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   )
 
   // IMPORTANTE: não remover getUser() — é o que revalida/renova o token de sessão.
-  await supabase.auth.getUser()
+  const { data } = await supabase.auth.getUser()
 
-  return supabaseResponse
+  return { response: supabaseResponse, user: data.user ?? null, supabase }
 }

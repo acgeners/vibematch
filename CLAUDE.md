@@ -159,10 +159,21 @@ recalcularia as notas dele **sem a calibração dele** — sem erro, sem log, s�
 
 **Auth existe** (esta linha já disse o contrário — não confie na memória, confira): Supabase Auth com
 `/login`, `/signup` e **logout no menu do avatar na barra superior** (`components/layout/account-chip.tsx` →
-`signOutAction`). O `middleware.ts` só **refresca a sessão**; ele **não protege rota** — visitante
-anônimo carrega qualquer página e vê o catálogo (que é compartilhado por design). Quem autoriza é o
-**papel** (`user_settings.role` → `lib/plans/roles.ts`, `ensureAdmin`/`roleAllows`), verificado
-dentro das actions, não na borda.
+`signOutAction`). Quem autoriza é o **papel** (`user_settings.role` → `lib/plans/roles.ts`,
+`ensureAdmin`/`roleAllows`), verificado dentro das actions.
+
+**O `middleware.ts` protege UMA coisa: a console de curadoria** (desde 2026-08-03). Ele refresca a
+sessão em toda rota e, só nos prefixos `/curadoria`, `/ai-evaluation`, `/settings`, `/ai-usage` e
+`/admin`, decide: sem sessão → `/login`; logado não-curador → `/`. **Todo o resto do app segue sem
+gate de rota** — visitante anônimo carrega `/titles`, `/painel`, `/leitura` e vê o catálogo (que é
+compartilhado por design).
+
+🔴 **Gate de rota NÃO funciona só no layout.** A 1ª versão fazia `notFound()` no layout da console e
+o Next devolvia **200 com o HTML da página protegida no corpo**, seguido do 404: layout e página
+renderizam em PARALELO, então o `notFound()` chega depois de o stream ter começado. O proxy roda
+antes de qualquer renderização — é o único ponto onde a decisão cabe. O `notFound()` do layout ficou
+como 2ª linha (matcher pode mudar; e o proxy é fail-OPEN quando o usuário está logado mas não tem
+linha em `user_settings`, caso que só `isCurrentUserAdmin()` resolve, pois precisa da service role).
 
 **A home (`/`) é uma VITRINE, e bifurca por sessão.** Não é mais o painel de KPIs — esse virou
 `/painel` ([[project-painel-provisorio]], provisório de propósito).
@@ -185,6 +196,22 @@ sidebar de 13 itens foi removida. A régua: **o topo é sobre obras, o avatar é
 é sobre o catálogo dos outros.** Cinco entradas no topo (Início · Minha lista ▾ · Explorar ▾ ·
 Ranking · Recomendações); Preferências/Importar/Painel no menu do avatar; fila e curadoria como
 ÍCONE com contador (dentro de dropdown o número não é visto).
+
+**A console `/curadoria`** (`components/curadoria/console-shell.tsx`) é o terceiro braço dessa régua,
+desde 2026-08-03 — o 🛠 da barra aponta pra ela. Sidebar PRÓPRIA de dois níveis com Visão geral ·
+Curadoria da Obra · Configurações (+ os 4 tópicos) · Uso da API IA · Métricas do modelo. Cada rota
+membro entra por um `layout.tsx` de 3 linhas que renderiza a shell — o gate e a sidebar vêm dela.
+
+- ⚠️ **`/settings` PERDEU a `SettingsSubnav`**: os 4 tópicos viraram o ramo "Configurações" da
+  sidebar da console. Continuam sendo `?g=` na mesma rota (nenhum deep-link quebrou, inclusive o
+  `/settings?g=fontes` do alerta do Comix). `SettingsSubnav` segue viva, para `/preferencias`.
+- ⚠️ **"Desatualizados" ficou de FORA**, apesar de constar no plano: virou aba de
+  `/fila-recomendacao` e é de qualquer logado. Item de console que joga o usuário pra fora da
+  console é pior do que item ausente. `/ranking/desatualizados` segue como redirect.
+- Os contadores da sidebar e os da barra superior saem de **um fetch só**
+  (`components/layout/chrome-badges.tsx`, no layout raiz). O coalescing do `useChromeData` é por
+  instância — um hook em cada consumidor duplicaria `getSettingsItemPending` (que puxa LINHAS, não
+  `count: exact`) e o gatilho do auto-recalc.
 
 **Toda rota é dinâmica (`ƒ`) — e agora POR ESCRITO.** `app/layout.tsx` declara
 `export const dynamic = "force-dynamic"`. 🔴 **Não remova sem substituir por outra garantia.**

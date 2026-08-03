@@ -31,8 +31,7 @@ export interface SubnavGroup {
 }
 
 // Ícones por NOME. O registry das seções vive no servidor e não pode cruzar
-// LucideIcon como prop pro client, então mapeamos por string aqui. Cobre os dois
-// consoles que usam esta sub-nav (Configurações e Preferências).
+// LucideIcon como prop pro client, então mapeamos por string aqui.
 const NAV_ICONS: Record<string, LucideIcon> = {
   Gauge,
   Sparkles,
@@ -59,9 +58,15 @@ interface SubnavProps {
 }
 
 /**
- * Camada 2 — a sub-camada de um console. Colada na sidebar do site (o layout
- * quebra o padding do <main>), mesmo padrão visual. Lista os tópicos do console.
- * Compartilhada por /settings e /preferencias (parametrizada por `basePath`).
+ * Camada 2 — a sub-camada de um console. Colada na borda (o layout quebra o padding
+ * do <main>). Lista os tópicos do console, parametrizada por `basePath`.
+ *
+ * Hoje só `/preferencias` usa. `/settings` usou até 2026-08-03, quando entrou na
+ * console `/curadoria`: os quatro tópicos dele viraram o ramo "Configurações" da
+ * sidebar de lá, porque duas sub-navs empilhadas dariam duas sidebars lado a lado.
+ * `/preferencias` continua aqui porque é do USUÁRIO (mora no menu do avatar) e nunca
+ * entrou na console — segue dona da própria camada 2. Segue genérico de propósito:
+ * o `basePath` é o que torna o padrão reaproveitável se surgir um terceiro console.
  */
 export function SettingsSubnav({
   groups,
