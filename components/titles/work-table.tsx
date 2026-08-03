@@ -857,10 +857,23 @@ function WorkCardsView({
                     />
                   </div>
                 )}
-                <div className="absolute inset-x-0 bottom-0 flex items-end gap-1 bg-gradient-to-t from-black/75 via-black/30 to-transparent p-1.5">
-                  {work.is_adult && <AdultBadge className="px-1.5 py-0" />}
-                  <PublicationStatusBadge statusId={work.publication_status_id} />
-                  <PersonalStatusBadge statusId={work.personal_status_id} />
+                {/* Card estreito (2 col no celular, 7 col no 2xl) não comporta os 3 chips por
+                    extenso: o Badge é `shrink-0 whitespace-nowrap`, então o excedente sumia no
+                    `overflow-hidden` da capa — e o cortado era sempre o último, o status pessoal.
+                    Mesmo tratamento dos cards do /ranking: código curto + símbolo a 10px. O
+                    `flex-wrap` é rede de segurança pra rótulo novo mais longo. */}
+                <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-end gap-1 bg-gradient-to-t from-black/75 via-black/30 to-transparent p-1.5">
+                  {work.is_adult && <AdultBadge className="px-1.5 py-0 text-[10px]" />}
+                  <PublicationStatusBadge
+                    statusId={work.publication_status_id}
+                    compact
+                    className="px-1.5 py-0 text-[10px]"
+                  />
+                  <PersonalStatusBadge
+                    statusId={work.personal_status_id}
+                    iconOnly
+                    className="px-1.5 py-0 text-[10px]"
+                  />
                 </div>
               </div>
               <div className="px-0.5">
