@@ -2,7 +2,6 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useState } from "react"
 import {
   BookMarked,
   BookOpen,
@@ -16,8 +15,7 @@ import {
   AlertTriangle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { getSidebarBadgeCounts } from "@/server/actions/badges"
-import { useChromeData } from "@/lib/use-refresh"
+import { useChromeBadges } from "@/components/layout/chrome-badges"
 import { AccountChip } from "@/components/layout/account-chip"
 import { BalanceChip } from "@/components/layout/balance-chip"
 import { useIsAdmin, useIsSignedIn } from "@/components/layout/admin-context"
@@ -29,11 +27,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-
-type BadgeKey = "curadoria" | "rec-queue"
-type ComixHealth = Awaited<ReturnType<typeof getSidebarBadgeCounts>>["comixHealth"]
-
-const BADGES_TTL_MS = 30_000
 
 interface NavLink {
   href: string
@@ -97,29 +90,8 @@ export function TopNav() {
   const signedIn = useIsSignedIn()
   const isActive = useActive()
 
-  const [badges, setBadges] = useState<Record<BadgeKey, number>>({ curadoria: 0, "rec-queue": 0 })
-  const [recalcPending, setRecalcPending] = useState(false)
-  const [comixHealth, setComixHealth] = useState<ComixHealth>("unknown")
-
-  useChromeData(
-    getSidebarBadgeCounts,
-    ({ curadoria, recQueue, recalcPending, comixHealth }) => {
-      setBadges({ curadoria, "rec-queue": recQueue })
-      setRecalcPending(recalcPending)
-      setComixHealth(comixHealth)
-    },
-    BADGES_TTL_MS,
-    (patch) => {
-      if (patch.badgeDelta) {
-        const { curadoria = 0, recQueue = 0 } = patch.badgeDelta
-        setBadges((prev) => ({
-          curadoria: Math.max(0, prev.curadoria + curadoria),
-          "rec-queue": Math.max(0, prev["rec-queue"] + recQueue),
-        }))
-      }
-      if (patch.recalcPending != null) setRecalcPending(patch.recalcPending)
-    },
-  )
+  // Contadores do provider — a sidebar da console lê os MESMOS, de um fetch só.
+  const { curadoria, recQueue, recalcPending, comixHealth, clearRecalcPending } = useChromeBadges()
 
   const entries = NAV.filter((e) => !e.requiresSignedIn || signedIn).map((e) =>
     isGroup(e) ? { ...e, items: e.items.filter((i) => !i.requiresSignedIn || signedIn) } : e,
@@ -165,7 +137,7 @@ export function TopNav() {
               <RecalcPendingControl
                 pending={recalcPending}
                 variant="compact"
-                onDone={() => setRecalcPending(false)}
+                onDone={clearRecalcPending}
               />
             </div>
           )}
@@ -195,18 +167,21 @@ export function TopNav() {
             <ToolIcon
               href="/fila-recomendacao"
               label="Fila de recomendação"
-              count={badges["rec-queue"]}
+              count={recQueue}
               tone="primary"
             >
               <Clock className="size-[18px]" />
             </ToolIcon>
           )}
 
+          {/* Aponta pra CONSOLE, não direto pra fila: /settings e /ai-usage também
+              moram lá, e desde a remoção da sidebar não tinham mais entrada de menu.
+              O contador segue sendo o da fila de atributos — é o único acionável. */}
           {isAdmin && (
             <ToolIcon
-              href="/ai-evaluation"
-              label="Curadoria da obra"
-              count={badges.curadoria}
+              href="/curadoria"
+              label="Curadoria do catálogo"
+              count={curadoria}
               tone="violet"
             >
               <Wrench className="size-[18px]" />

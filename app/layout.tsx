@@ -5,6 +5,7 @@ import { TopNav } from "@/components/layout/top-nav"
 import { MobileNav } from "@/components/layout/mobile-nav"
 import { AppShell } from "@/components/layout/app-shell"
 import { AdminProvider } from "@/components/layout/admin-context"
+import { ChromeBadgesProvider } from "@/components/layout/chrome-badges"
 import { Toaster } from "@/components/ui/sonner"
 import { ThemeProvider } from "@/components/theme-provider"
 import { ActiveChatFab } from "@/components/recommendations/active-chat-fab"
@@ -61,18 +62,23 @@ export default async function RootLayout({
         <ThemeProvider>
           <CostConfirmProvider>
             <AdminProvider>
-              <AppShell
-                topNav={<TopNav />}
-                overlays={
-                  <>
-                    <MobileNav />
-                    <ActiveChatFab />
-                    <TasksFab />
-                  </>
-                }
-              >
-                {children}
-              </AppShell>
+              {/* Acima do shell: a barra superior e a sidebar da console leem os
+                  mesmos contadores, e um fetch por consumidor duplicaria a leitura
+                  mais cara do chrome. Ver components/layout/chrome-badges.tsx. */}
+              <ChromeBadgesProvider>
+                <AppShell
+                  topNav={<TopNav />}
+                  overlays={
+                    <>
+                      <MobileNav />
+                      <ActiveChatFab />
+                      <TasksFab />
+                    </>
+                  }
+                >
+                  {children}
+                </AppShell>
+              </ChromeBadgesProvider>
             </AdminProvider>
             <Toaster />
           </CostConfirmProvider>

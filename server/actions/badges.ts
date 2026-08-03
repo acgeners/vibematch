@@ -2,6 +2,7 @@
 
 import { getCuradoriaBadgeUnreadCount, getRecommendationBadgeUnreadCount } from "@/server/queries/ai-eval-read"
 import { getSettingsItemUnread } from "@/server/queries/settings-read"
+import { SETTINGS_GROUPS } from "@/app/settings/sections"
 import { maybeTriggerStaleRecalc } from "@/server/recalc/queue"
 import { getComixStatus } from "@/lib/external/comix-gate"
 import type { ComixHealthState } from "@/lib/external/comix-gate"
@@ -13,6 +14,16 @@ export interface SidebarBadgeCounts {
   recQueue: number
   /** Soma de todas as pendências acionáveis de /settings (todos os tópicos). */
   settings: number
+  /**
+   * O mesmo não-lido, QUEBRADO por tópico de /settings (`grupo -> contagem`).
+   *
+   * Sai da MESMA leitura que o total — `getSettingsItemUnread()` é uma só, e
+   * agrupá-la custa zero query. Existe porque a sidebar da console mostra o badge
+   * no tópico, não só no pai: sem a quebra, a console teria que refazer a leitura
+   * por conta própria, e `getSettingsItemPending` puxa LINHAS (não `count: exact`)
+   * — é uma das leituras mais caras do chrome. Ver o §Egress do CLAUDE.md.
+   */
+  settingsByGroup: Record<string, number>
   /** Há edições de nota aguardando recálculo (fila de recálculo, migration 096). */
   recalcPending: boolean
   /** Saúde observada do Comix (in-memory, ComixGate) — alerta no chrome quando degradado/fora. */
@@ -48,7 +59,7 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
     lastEditAt: null,
   }))
 
-  const [curadoria, recQueue, settings, recalc] = await Promise.all([
+  const [curadoria, recQueue, settingsUnread, recalc] = await Promise.all([
     getCuradoriaBadgeUnreadCount().catch((err) => {
       console.warn(
         "[getSidebarBadgeCounts] contagem de Curadoria da Obra falhou:",
@@ -63,24 +74,42 @@ export async function getSidebarBadgeCounts(): Promise<SidebarBadgeCounts> {
       )
       return 0
     }),
-    getSettingsBadgeTotal(),
+    getSettingsBadges(),
     recalcStatePromise,
   ])
 
-  return { curadoria, recQueue, settings, recalcPending: recalc.pending, comixHealth }
+  return {
+    curadoria,
+    recQueue,
+    settings: settingsUnread.total,
+    settingsByGroup: settingsUnread.byGroup,
+    recalcPending: recalc.pending,
+    comixHealth,
+  }
 }
 
 /**
- * Total NÃO-LIDO de /settings (badge "Configurações") = soma dos itens de
- * `getSettingsItemUnread` (as MESMAS contagens por-item da página/sub-nav, já
- * descontando os "lidos"). Falha → 0 (nunca derruba o layout).
+ * Não-lido de /settings, no total e por tópico, de uma leitura só.
+ *
+ * A contagem por-item vem de `getSettingsItemUnread` (as MESMAS da página e dos
+ * badges da console, já descontando os "lidos"); o registry `SETTINGS_GROUPS` diz
+ * a que tópico cada item pertence. Falha → tudo zero (nunca derruba o layout).
  */
-async function getSettingsBadgeTotal(): Promise<number> {
+async function getSettingsBadges(): Promise<{ total: number; byGroup: Record<string, number> }> {
   try {
     const itemUnread = await getSettingsItemUnread()
-    return Object.values(itemUnread).reduce((sum, n) => sum + n, 0)
+    const byGroup = Object.fromEntries(
+      SETTINGS_GROUPS.map((g) => [
+        g.id,
+        g.sections.reduce((sum, s) => sum + (itemUnread[s.id] ?? 0), 0),
+      ]),
+    )
+    return {
+      total: Object.values(itemUnread).reduce((sum, n) => sum + n, 0),
+      byGroup,
+    }
   } catch (err) {
     console.error("[getSidebarBadgeCounts] contagem de settings falhou:", err)
-    return 0
+    return { total: 0, byGroup: {} }
   }
 }
