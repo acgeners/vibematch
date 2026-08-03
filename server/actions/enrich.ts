@@ -8,7 +8,7 @@ import type { ExternalWorkUpdate } from "@/server/actions/works"
 import { getWorksByIds } from "@/server/queries/works"
 import { getPublicationStatusNameById } from "@/lib/constants/status-lookups"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
-import { ensureAdmin, getCurrentUserId } from "@/server/queries/current-user"
+import { ensureAdmin, getSessionUserId } from "@/server/queries/current-user"
 import type { ExternalWorkData } from "@/lib/external/types"
 
 // Confiança mínima do título (busca por nome) para auto-aceitar sem revisão.
@@ -170,8 +170,13 @@ export async function getImportReviewWorks(ids: string[]): Promise<ReviewWork[]>
 export async function getPendingReviewWorks(limit = 300): Promise<ReviewWork[]> {
   const supabase = createAdminClient()
   // Multi-user (Bloco 02): cada um revisa o que ELE importou — o filtro por
-  // imports.user_id entra no join abaixo. Anônimo cai no dono (getCurrentUserId).
-  const userId = await getCurrentUserId(supabase)
+  // imports.user_id entra no join abaixo.
+  //
+  // 🔴 "Anônimo cai no dono" era o comportamento documentado nesta linha, e é justamente o bug:
+  // medido em 2026-08-03 com fixture, o /import anônimo mostrava "Pendentes de revisão 1" e
+  // levava o título da obra dele no payload. Sem sessão não há fila de revisão de ninguém.
+  const userId = await getSessionUserId()
+  if (!userId) return []
   // Lê o dado PESSOAL do DONO (observations) → vem do espelho via a view `works_owner`,
   // não da linha compartilhada de `works` (que vai perder essas colunas).
   const { data, error } = await supabase

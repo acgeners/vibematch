@@ -27,7 +27,7 @@ import {
   getExistingPostReadingAssessment,
 } from "@/server/queries/post-attribute-assessment"
 import {
-  getCurrentUserId,
+  getSessionUserId,
   canConsumeAi,
   getHideAdultContent,
   ensureSignedIn,
@@ -610,10 +610,17 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
   // Questionário pós-leitura (atributos): carrega notas da IA + avaliação salva.
   // Sempre carregado pra que o fluxo client-side (PostReadingFlow) possa revelar
   // a seção de atributos na hora em que o status vira terminal — sem reload.
-  const postAttrUserId = await getCurrentUserId(configClient)
+  // 🔴 `getSessionUserId()`, nunca `getCurrentUserId()`: este último devolve o DONO sem sessão,
+  // e a avaliação de atributos DELE ia parar no payload servido a visitante anônimo
+  // (`"existingAssessment":{"action_adventure":5,…}`, medido em 2026-08-03). Não aparecia na
+  // tela — o gate de leitura esconde a seção —, mas viajava no HTML. Sem sessão não há
+  // avaliação a carregar: a query nem roda.
+  const postAttrUserId = await getSessionUserId()
   const [postAttrAi, postAttrExisting] = await Promise.all([
     getLatestAiEvaluationAttributes(work.id as string, configClient),
-    getExistingPostReadingAssessment(work.id as string, postAttrUserId, configClient),
+    postAttrUserId
+      ? getExistingPostReadingAssessment(work.id as string, postAttrUserId, configClient)
+      : Promise.resolve(null),
   ])
 
   const categoriesCount = genres.length + tags.length

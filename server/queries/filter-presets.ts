@@ -1,6 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getCurrentUserId } from "./current-user"
+import { getSessionUserId } from "./current-user"
 
 export interface FilterPreset {
   id: string
@@ -17,7 +17,10 @@ export interface FilterPreset {
  */
 export async function getFilterPresets(basePath: string): Promise<FilterPreset[]> {
   const supabase = createAdminClient()
-  const userId = await getCurrentUserId(supabase)
+  // Sem sessão não há preset salvo: com `getCurrentUserId()` o /ranking anônimo mostrava
+  // "Salvos (1)" e levava o nome do preset do dono no payload (medido em 2026-08-03).
+  const userId = await getSessionUserId()
+  if (!userId) return []
 
   const { data, error } = await supabase
     .from("ranking_filter_presets")

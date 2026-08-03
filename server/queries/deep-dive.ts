@@ -420,12 +420,25 @@ function mapDeepDiveRow(row: Record<string, unknown>): DeepDiveResultRow {
   }
 }
 
+/**
+ * O último Deep Dive DE QUEM ESTÁ OLHANDO para uma obra.
+ *
+ * 🔴 Não tinha filtro de usuário NENHUM até 2026-08-03 — nem errado, ausente. Medido com
+ * Chrome sem cookies: a aba "Recomendações" da página da obra servia o badge de match e o
+ * one-liner do Deep Dive do DONO para visitante anônimo. `deep_dive_results` é recurso pago
+ * e per-usuário desde sempre; a leitura é que nunca perguntou de quem. Mesma classe A da
+ * auditoria de 2026-08-03, terceira ocorrência neste arquivo.
+ */
 export async function getLastDeepDive(workId: string): Promise<DeepDiveResultRow | null> {
+  const userId = await getSessionUserId()
+  if (!userId) return null
+
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("deep_dive_results")
     .select("*")
     .eq("work_id", workId)
+    .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -437,12 +450,17 @@ export async function getLastDeepDive(workId: string): Promise<DeepDiveResultRow
   return mapDeepDiveRow(data as Record<string, unknown>)
 }
 
+/** Histórico da obra — o de quem está olhando, pelo mesmo motivo de `getLastDeepDive`. */
 export async function getDeepDiveHistory(workId: string, limit = 10): Promise<DeepDiveResultRow[]> {
+  const userId = await getSessionUserId()
+  if (!userId) return []
+
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("deep_dive_results")
     .select("*")
     .eq("work_id", workId)
+    .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit)
   if (error) {
@@ -453,13 +471,20 @@ export async function getDeepDiveHistory(workId: string, limit = 10): Promise<De
 }
 
 /** Uma linha específica por id — usada pelo modal da central de Deep Dives, que
- *  carrega o `payload` completo on-demand (a listagem só traz os campos leves). */
+ *  carrega o `payload` completo on-demand (a listagem só traz os campos leves).
+ *
+ *  Filtra por dono TAMBÉM aqui: o id vem do cliente e a action que expõe isto é endpoint
+ *  público, então sem o filtro qualquer um lê a análise de qualquer um sabendo o UUID. */
 export async function getDeepDiveById(id: string): Promise<DeepDiveResultRow | null> {
+  const userId = await getSessionUserId()
+  if (!userId) return null
+
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from("deep_dive_results")
     .select("*")
     .eq("id", id)
+    .eq("user_id", userId)
     .maybeSingle()
   if (error) {
     console.error("[deep-dive] erro lendo deep dive por id:", error)

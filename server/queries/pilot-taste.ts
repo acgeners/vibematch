@@ -1,7 +1,7 @@
 import "server-only"
 
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getCurrentUserId, getOwnerUserId } from "@/server/queries/current-user"
+import { getOwnerUserId, getSessionUserId } from "@/server/queries/current-user"
 import { pickCoverUrls, pickPrimarySynopsis } from "@/lib/work-derived"
 
 /**
@@ -87,28 +87,44 @@ export interface PilotWork {
 }
 
 /**
- * Notas de gosto já dadas a UMA obra (pra a avaliação embutida na página) — as DO USUÁRIO
- * ATUAL. Per-user desde a mig 169: sem o filtro de user_id, o `maybeSingle` estouraria na
+ * Notas de gosto já dadas a UMA obra (pra a avaliação embutida na página) — as DE QUEM ESTÁ
+ * OLHANDO. Per-user desde a mig 169: sem o filtro de user_id, o `maybeSingle` estouraria na
  * primeira obra avaliada por duas pessoas — e antes disso mostraria a nota de outra pessoa.
- * Anônimo cai no dono (`getCurrentUserId`): o catálogo é visto pelos olhos dele, por design.
+ *
+ * 🔴 Resolvia por `getCurrentUserId()`, e a doc daqui chamava isso de design ("anônimo cai no
+ * dono; o catálogo é visto pelos olhos dele"). Não era: MEDIDO em 2026-08-03 com Chrome sem
+ * cookies, as 8 notas de gosto do dono viajavam no payload da página da obra
+ * (`"tasteScores":{"like_art_score":10,…}`). Não apareciam na TELA porque o gate de leitura
+ * esconde a seção — o dado ia junto do mesmo jeito. Ver [[gotcha-anonimo-vira-dono]]: o que
+ * pode ser visto pelos olhos do dono é o CATÁLOGO, nunca a avaliação dele.
  */
 export async function getTasteScoresForWork(
   workId: string,
 ): Promise<{ scores: Record<TasteScoreKey, number | null>; endingNa: boolean }> {
   const sb = createAdminClient()
-  const userId = await getCurrentUserId(sb)
+  const userId = await getSessionUserId()
+  // Sem sessão não há "minhas notas" — e devolver as de alguém é o bug que isto conserta.
+  if (!userId) return { scores: emptyTasteScores(), endingNa: false }
   const { data } = await sb
     .from("pilot_taste_scores")
     .select("*")
     .eq("work_id", workId)
     .eq("user_id", userId)
     .maybeSingle()
-  const scores = {} as Record<TasteScoreKey, number | null>
+  const scores = emptyTasteScores()
   for (const k of TASTE_SCORE_KEYS) {
     const v = (data as Record<string, unknown> | null)?.[k]
     scores[k] = v == null ? null : Number(v)
   }
   return { scores, endingNa: Boolean((data as Record<string, unknown> | null)?.ending_na) }
+}
+
+/** Todas as chaves presentes e nulas — a forma que o form espera quando não há nota. */
+function emptyTasteScores(): Record<TasteScoreKey, number | null> {
+  return Object.fromEntries(TASTE_SCORE_KEYS.map((k) => [k, null])) as Record<
+    TasteScoreKey,
+    number | null
+  >
 }
 
 /**
