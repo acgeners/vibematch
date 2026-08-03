@@ -86,7 +86,7 @@ export default async function GuiaPage() {
   const aiAvailable = await canConsumeAi()
 
   return (
-    <div className="w-full max-w-5xl space-y-6">
+    <div className="mx-auto w-full max-w-5xl space-y-6">
       <Header
         kicker="Guia"
         icon={<BookOpenText />}

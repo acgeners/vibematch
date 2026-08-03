@@ -21,7 +21,7 @@ export default async function NewTitlePage({ searchParams }: NewTitlePageProps) 
   const initialValues: Partial<WorkFormValues> | undefined = title ? { title } : undefined
 
   return (
-    <div className="w-full max-w-6xl space-y-6">
+    <div className="mx-auto w-full max-w-6xl space-y-6">
       <Header
         kicker="Catálogo"
         title="Adicionar nova obra"

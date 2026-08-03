@@ -657,7 +657,7 @@ export default async function TitleDetailPage({ params }: TitleDetailPageProps) 
       tasteCriteria={tasteCriteria}
       tasteScores={tasteScoresData.scores}
     >
-    <div className="max-w-6xl space-y-5">
+    <div className="mx-auto w-full max-w-6xl space-y-5">
       <div className="flex items-center justify-between gap-3">
         <BackButton />
         <div className="flex flex-wrap items-center gap-2">
