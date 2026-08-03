@@ -6,6 +6,7 @@ import { MobileNav } from "@/components/layout/mobile-nav"
 import { AppShell } from "@/components/layout/app-shell"
 import { AdminProvider } from "@/components/layout/admin-context"
 import { ChromeBadgesProvider } from "@/components/layout/chrome-badges"
+import { buildSearchIndex } from "@/server/queries/search-index"
 import { Toaster } from "@/components/ui/sonner"
 import { ThemeProvider } from "@/components/theme-provider"
 import { ActiveChatFab } from "@/components/recommendations/active-chat-fab"
@@ -51,6 +52,10 @@ export const metadata: Metadata = {
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  // Índice da busca global: dado estático dos registries (páginas + as seções de
+  // Configurações e Preferências). Montado aqui e embarcado no HTML, então buscar um ajuste
+  // responde na tecla — só obra vai ao servidor. Ver server/queries/search-index.ts.
+  const searchIndex = buildSearchIndex()
 
   return (
     <html
@@ -67,7 +72,7 @@ export default async function RootLayout({
                   mais cara do chrome. Ver components/layout/chrome-badges.tsx. */}
               <ChromeBadgesProvider>
                 <AppShell
-                  topNav={<TopNav />}
+                  topNav={<TopNav searchIndex={searchIndex} />}
                   overlays={
                     <>
                       <MobileNav />
