@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRefresh } from "@/lib/use-refresh"
 import { useForm, useWatch, type FieldErrors } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -20,7 +20,7 @@ import { StarRating } from "@/components/ui/star-rating"
 import { Textarea } from "@/components/ui/textarea"
 import { workStatusSchema } from "@/lib/validations/work.schema"
 import type { WorkStatusInput, WorkStatusValues } from "@/lib/validations/work.schema"
-import { updateWorkStatus } from "@/server/actions/works"
+import { setPublicationStatusForWork, updateWorkStatus } from "@/server/actions/works"
 import { PERSONAL_STATUSES, SYNOPSIS_QUALITIES } from "@/types/domain"
 import { PERSONAL_STATUS_LABELS, PERSONAL_STATUSES_BY_ID, SYNOPSIS_QUALITY_LABELS } from "@/lib/constants/criteria"
 import {
@@ -37,8 +37,13 @@ import {
   type PostReadingScoreField,
 } from "@/lib/constants/post-reading-criteria"
 import { cn, readingProgressPercent } from "@/lib/utils"
-import { BookOpen, Users, Palette, FileEdit, Bookmark, ChevronDown, Star, X } from "lucide-react"
-import { isFullyReadPersonalStatus, readingPersonalStatusName } from "@/lib/constants/status-lookups"
+import { AlertTriangle, BookOpen, Users, Palette, FileEdit, Bookmark, Check, ChevronDown, Star, X } from "lucide-react"
+import { CONCLUDED_PUBLICATION_STATUS } from "@/lib/constants/status-lookups"
+import {
+  chaptersForFullyRead,
+  evaluateReadingCoherence,
+  promoteStatusForProgress,
+} from "@/lib/reading/status-coherence"
 import {
   Tooltip,
   TooltipProvider,
@@ -154,6 +159,10 @@ export const hasChanges = (initial: WorkStatusValues, current: Partial<WorkStatu
 export interface WorkStatusFormProps {
   workId: string
   totalChapters: number | null
+  /** `works.publication_status_id` — sem ele o aviso de coerência simplesmente não aparece. */
+  publicationStatusId?: number | null
+  /** true ⇒ curador: o aviso ganha a saída "a obra terminou, corrigir publicação" (catálogo). */
+  canEditCatalog?: boolean
   initialValues: WorkStatusValues
   /** Chamado após salvar com sucesso (ex: fechar dialog). */
   onSaved?: () => void
@@ -193,6 +202,8 @@ export interface WorkStatusFormProps {
 export function WorkStatusForm({
   workId,
   totalChapters,
+  publicationStatusId = null,
+  canEditCatalog = false,
   initialValues,
   onSaved,
   hideFooter = false,
@@ -280,25 +291,58 @@ export function WorkStatusForm({
     onChaptersReadChange?.(chaptersRead ?? null)
   }, [chaptersRead, onChaptersReadChange])
 
+  // ── Coerência entre status, progresso e publicação (lib/reading/status-coherence.ts).
+  // As duas regras automáticas moravam AQUI como efeitos com a lógica inline; agora são funções
+  // puras, e as mesmas server actions as aplicam na escrita — porque enquanto valeram só na
+  // tela, o atalho da faixa da página da obra produzia "Finished com 6/26" sem passar por elas.
+
+  // "Finished" = leu a obra inteira → completa os capítulos.
   useEffect(() => {
-    if (!isFullyReadPersonalStatus(personalStatus)) return
-    if (typeof totalChapters !== "number" || totalChapters <= 0) return
-    if (chaptersRead != null && chaptersRead >= totalChapters) return
-    setValue("chapters_read", totalChapters, { shouldDirty: true, shouldValidate: true })
+    const completed = chaptersForFullyRead({ personalStatus, chaptersRead, totalChapters })
+    if (completed == null) return
+    setValue("chapters_read", completed, { shouldDirty: true, shouldValidate: true })
   }, [personalStatus, totalChapters, chaptersRead, setValue])
 
-  // Simétrico ao de cima: "Want to Read" = "não comecei". Se há capítulos lidos > 0, a obra já
-  // foi começada → promove pra "Reading" na hora, pra a UI nunca exibir o estado contraditório.
-  // A mesma regra é reforçada no servidor (updateWorkStatus), que cobre os caminhos que não
-  // passam por este form. Sem loop: ao virar "Reading", a condição abaixo deixa de valer.
+  // Simétrico: "não comecei" com capítulo lido é contradição → promove pra "Reading".
+  //
+  // ⚠️ A DIREÇÃO decide o alcance da regra, e é isso que o `trigger` carrega. Capítulo que
+  // CRESCEU é a pessoa dizendo "comecei" — promove qualquer um dos quatro "não comecei". Já
+  // ESCOLHER o status (nada mudou nos capítulos) só promove o default: forçar "Reading" em cima
+  // de um "Untracked" escolhido à mão tornaria impossível destrackear obra já lida.
+  const lastChapters = useRef<number | null>(initialValues.chapters_read ?? null)
   useEffect(() => {
-    if (personalStatus !== DEFAULT_PERSONAL_STATUS) return
-    if (chaptersRead == null || chaptersRead <= 0) return
-    setValue("personal_status", readingPersonalStatusName() as WorkStatusValues["personal_status"], {
+    const before = lastChapters.current
+    lastChapters.current = chaptersRead ?? null
+    const grew = (chaptersRead ?? 0) > (before ?? 0)
+    const promoted = promoteStatusForProgress(
+      { personalStatus, chaptersRead },
+      grew ? "chapters" : "status",
+    )
+    if (!promoted || promoted === personalStatus) return
+    setValue("personal_status", promoted as WorkStatusValues["personal_status"], {
       shouldDirty: true,
       shouldValidate: true,
     })
   }, [personalStatus, chaptersRead, setValue])
+
+  // ── O aviso (a família NÃO-automática das regras de coerência).
+  //
+  // Só aparece; nunca decide. `publication_status` vem de fonte externa e envelhece — bloquear
+  // "Finished" numa obra marcada Ongoing impediria registrar a verdade justamente quando quem
+  // está errado é o catálogo. Por isso as três saídas ficam aqui, inclusive "não mexe".
+  //
+  // Dispensar é por TIPO e só nesta sessão do diálogo: não grava preferência, e o selo da faixa
+  // continua marcando a contradição — fechar o aviso não a desfez no banco.
+  const [dismissedIssue, setDismissedIssue] = useState<string | null>(null)
+  const [fixingPublication, startPublicationFix] = useTransition()
+  const liveIssue = evaluateReadingCoherence({
+    personalStatus,
+    publicationStatusId,
+    chaptersRead,
+    totalChapters,
+  })
+  const coherenceIssue = liveIssue && liveIssue.kind !== dismissedIssue ? liveIssue : null
+  const dismissCoherence = () => setDismissedIssue(liveIssue?.kind ?? null)
 
   const computedManualScore = useMemo(() => {
     let scoreSum = 0
@@ -479,6 +523,94 @@ export function WorkStatusForm({
           <Bookmark className="h-4.5 w-4.5 text-muted-foreground" />
           <h3 className="text-base font-bold text-foreground">Progresso de leitura</h3>
         </div>
+
+        {coherenceIssue?.kind === "finished-while-publishing" && (
+          <div className="flex items-start gap-3 rounded-lg border border-amber-500/35 bg-amber-500/10 p-3">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div className="flex min-w-0 flex-col gap-2">
+              <p className="text-sm font-bold text-foreground">Esta obra ainda está em publicação</p>
+              <p className="text-[13px] leading-relaxed text-muted-foreground">
+                “{PERSONAL_STATUS_LABELS[personalStatus] ?? personalStatus}” diz que você leu a obra
+                inteira, e ela ainda não acabou ({coherenceIssue.publicationStatus}
+                {coherenceIssue.totalChapters ? `, ${coherenceIssue.totalChapters} capítulos publicados` : ""}
+                ). Quem leu tudo que saiu está <b>em dia</b> — não terminou.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() =>
+                    setValue(
+                      "personal_status",
+                      coherenceIssue.suggestedStatus as WorkStatusValues["personal_status"],
+                      { shouldDirty: true, shouldValidate: true },
+                    )
+                  }
+                >
+                  Estou em dia ({PERSONAL_STATUS_LABELS[coherenceIssue.suggestedStatus] ?? coherenceIssue.suggestedStatus})
+                </Button>
+                {canEditCatalog && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={fixingPublication}
+                    onClick={() =>
+                      startPublicationFix(async () => {
+                        const res = await setPublicationStatusForWork(workId, CONCLUDED_PUBLICATION_STATUS)
+                        if (res && "error" in res && res.error) {
+                          toast.error("Não deu pra corrigir a publicação", { description: res.error })
+                          return
+                        }
+                        toast.success(`Publicação: ${CONCLUDED_PUBLICATION_STATUS}`)
+                        refresh()
+                      })
+                    }
+                  >
+                    A obra terminou — corrigir publicação
+                  </Button>
+                )}
+                <Button type="button" size="sm" variant="ghost" onClick={() => dismissCoherence()}>
+                  Manter
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {coherenceIssue?.kind === "finish-suggested" && (
+          <div className="flex items-start gap-3 rounded-lg border border-primary/35 bg-primary/10 p-3">
+            <Check className="mt-0.5 size-4 shrink-0 text-primary" />
+            <div className="flex min-w-0 flex-col gap-2">
+              <p className="text-sm font-bold text-foreground">
+                Você leu os {coherenceIssue.totalChapters} de {coherenceIssue.totalChapters} capítulos
+              </p>
+              <p className="text-[13px] leading-relaxed text-muted-foreground">
+                A obra está concluída e você chegou ao fim. Marcar como{" "}
+                {PERSONAL_STATUS_LABELS[coherenceIssue.suggestedStatus] ?? coherenceIssue.suggestedStatus}{" "}
+                libera a avaliação completa (nota, atributos, “Como foi pra você”).
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() =>
+                    setValue(
+                      "personal_status",
+                      coherenceIssue.suggestedStatus as WorkStatusValues["personal_status"],
+                      { shouldDirty: true, shouldValidate: true },
+                    )
+                  }
+                >
+                  Marcar como {PERSONAL_STATUS_LABELS[coherenceIssue.suggestedStatus] ?? coherenceIssue.suggestedStatus}
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => dismissCoherence()}>
+                  Ainda não
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
           <div className="space-y-1.5 w-full sm:w-[200px]">
             <Label>Status leitura</Label>

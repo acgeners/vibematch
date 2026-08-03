@@ -11,8 +11,14 @@ import {
   getPersonalStatusIdByName,
   getPublicationStatusNameById,
   getPersonalStatusNameById,
-  readingPersonalStatusName,
+  isFullyReadPersonalStatus,
 } from "@/lib/constants/status-lookups"
+import {
+  chapterCeiling,
+  chaptersForFullyRead,
+  clampChaptersRead,
+  promoteStatusForProgress,
+} from "@/lib/reading/status-coherence"
 import {
   dedupeSynopsisEntries,
   pickPrimarySynopsis,
@@ -2143,30 +2149,67 @@ export async function setFavoriteMany(ids: string[], isFavorite: boolean) {
  *
  * Vai por `applyReadingState` → `user_work_state` (cliente de sessão): o dado é de quem
  * clicou, e a RLS da mig 142 barra escrever na linha de outra pessoa.
+ *
+ * Aplica as regras de `lib/reading/status-coherence.ts` do lado do progresso — teto no total
+ * conhecido e promoção de "não comecei" pra "Reading". O campo digitável da faixa (que aceita
+ * qualquer número) e o fato de server action ser endpoint público fazem disto obrigação, não
+ * conveniência: o clamp do cliente é conforto, este aqui é a regra.
+ *
+ * ⚠️ `clampToTotal: false` existe pra UM caso REAL: a `/leitura` marca "até o último lançado",
+ * que vem da checagem externa (`latestExternal`) e legitimamente PASSA de `works.total_chapters`
+ * quando o catálogo está defasado — é o cenário do capítulo agregado velho. Com o teto ligado ali,
+ * "Marcar até o 132" gravaria 120 em silêncio, com o botão dizendo 132.
  */
-export async function setChaptersRead(id: string, chaptersRead: number) {
+export async function setChaptersRead(
+  id: string,
+  chaptersRead: number,
+  opts: { clampToTotal?: boolean } = {},
+) {
   const gate = await ensureReadingStateWriter()
   if (!gate.ok) return { error: gate.error }
 
-  const n = Math.floor(Number(chaptersRead))
-  if (!Number.isFinite(n) || n < 0) return { error: "Número de capítulos inválido." }
+  const clampToTotal = opts.clampToTotal ?? true
+  const raw = Math.floor(Number(chaptersRead))
+  if (!Number.isFinite(raw) || raw < 0) return { error: "Número de capítulos inválido." }
 
-  // Estado atual DE QUEM ESCREVE (mora em user_work_state pra todo mundo desde a Fase E),
-  // pra decidir o carimbo de `last_read_at`: só marca "li agora" quando o número avança —
-  // corrigir um typo pra baixo não deve mexer na data de última leitura.
   const supabase = createAdminClient()
-  const { data: current } = await supabase
-    .from("user_work_state")
-    .select("chapters_read")
-    .eq("user_id", gate.userId)
-    .eq("work_id", id)
-    .maybeSingle()
 
+  // Duas leituras minúsculas (1 coluna do catálogo + 2 do espelho de quem escreve). Poderiam
+  // virar uma só com um embed, mas embed em `user_work_state` traria a linha inteira — e o
+  // egress deste projeto morre exatamente assim (ver o cabeçalho do CLAUDE.md).
+  const [{ data: work }, { data: current }] = await Promise.all([
+    supabase.from("works").select("total_chapters").eq("id", id).maybeSingle(),
+    // Estado atual DE QUEM ESCREVE (mora em user_work_state pra todo mundo desde a Fase E),
+    // pra decidir o carimbo de `last_read_at`: só marca "li agora" quando o número avança —
+    // corrigir um typo pra baixo não deve mexer na data de última leitura.
+    supabase
+      .from("user_work_state")
+      .select("chapters_read, personal_status_id")
+      .eq("user_id", gate.userId)
+      .eq("work_id", id)
+      .maybeSingle(),
+  ])
+
+  const total = (work?.total_chapters as number | null | undefined) ?? null
   const prev = (current?.chapters_read as number | null | undefined) ?? null
+  // Teto = o maior entre o total do catálogo e o que já estava gravado: limitar o que a pessoa
+  // digitou agora é correção, mas nunca às custas de progresso real já registrado.
+  const { value: n, clamped } = clampChaptersRead(raw, clampToTotal ? chapterCeiling(total, prev) : null)
+
   const grew = prev == null || n > prev
+
+  // "Não comecei" com capítulo lido é estado contraditório: quem marca progresso está lendo.
+  // Trigger "chapters" — quem escolhe o status é a outra action, e lá a direção é outra.
+  const promoted = promoteStatusForProgress(
+    { personalStatus: (current?.personal_status_id as number | null | undefined) ?? null, chaptersRead: n },
+    "chapters",
+  )
+  const promotedId = promoted ? getPersonalStatusIdByName(promoted) : null
+
   const patch: ReadingStatePatch = {
     chapters_read: n,
     ...(grew ? { last_read_at: new Date().toISOString().slice(0, 10) } : {}),
+    ...(promotedId != null ? { personal_status_id: promotedId } : {}),
   }
 
   const { error } = await applyReadingState(gate, [id], patch)
@@ -2174,10 +2217,19 @@ export async function setChaptersRead(id: string, chaptersRead: number) {
 
   revalidatePath("/leitura")
   revalidatePath("/titles")
+  revalidatePath("/titles/[id]", "page")
   revalidatePath("/ranking")
   revalidatePath("/")
   revalidateFavorites()
-  return { data: { chaptersRead: n } }
+  return {
+    data: {
+      chaptersRead: n,
+      /** true ⇒ o pedido passava do total; a UI explica em vez de engolir o número digitado. */
+      clamped,
+      /** Nome do status novo quando a escrita promoveu a obra, senão null (a UI dá refresh). */
+      promotedStatus: promotedId != null ? promoted : null,
+    },
+  }
 }
 
 /**
@@ -2232,11 +2284,18 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
 
   const data = parsed.data
 
-  // "Want to Read" = "não comecei". Capítulos lidos > 0 contradiz isso → promove pra "Reading".
-  // Espelha o auto-switch do WorkStatusForm e fecha os caminhos que não passam por ele (a action
-  // é um endpoint público). O id é resolvido do nome mais abaixo (getPersonalStatusIdByName).
-  if (data.personal_status === DEFAULT_PERSONAL_STATUS && (data.chapters_read ?? 0) > 0) {
-    data.personal_status = readingPersonalStatusName() as typeof data.personal_status
+  // "Não comecei" com capítulo lido é contradição → promove pra "Reading". Trigger "status"
+  // porque aqui o usuário submeteu o form inteiro: nesse sentido a regra só vale pro status
+  // DEFAULT (ver a nota de direção em lib/reading/status-coherence.ts — promover um "Untracked"
+  // escolhido à mão tornaria impossível destrackear uma obra já lida). Espelha o auto-switch do
+  // WorkStatusForm e fecha os caminhos que não passam por ele (a action é endpoint público).
+  // O id é resolvido do nome mais abaixo (getPersonalStatusIdByName).
+  const promoted = promoteStatusForProgress(
+    { personalStatus: data.personal_status, chaptersRead: data.chapters_read },
+    "status",
+  )
+  if (promoted) {
+    data.personal_status = promoted as typeof data.personal_status
     data.personal_status_id = null
   }
 
@@ -2294,6 +2353,25 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
 
   // Só do DONO: é a nota DELE que o ledger de previsões resolve e que o Ridge treina.
   const prevUserScore = (sharedRow?.user_score as number | null | undefined) ?? null
+
+  // Coerência do progresso, aplicada ao que vai ser GRAVADO (lib/reading/status-coherence.ts).
+  // O total é do catálogo, então serve pra todo mundo — `works_owner` só personaliza as colunas
+  // pessoais. Ordem importa: as duas correções entram ANTES de `chaptersGrew`/`nextLastReadAt`,
+  // pra completar até o fim contar como leitura que avançou (e carimbar a data).
+  const catalogTotal = (sharedRow?.total_chapters as number | null | undefined) ?? null
+  if (data.chapters_read != null) {
+    // `chapterCeiling` e não `catalogTotal` cru: quem já marcou 132 numa obra cujo catálogo diz
+    // 120 (via "marcar até o último lançado" da /leitura) não pode perder 12 capítulos só por
+    // salvar o status. O teto limita o que foi digitado agora, não o que já estava lá.
+    const ceiling = chapterCeiling(catalogTotal, current?.chapters_read ?? null)
+    data.chapters_read = clampChaptersRead(data.chapters_read, ceiling).value
+  }
+  const completedChapters = chaptersForFullyRead({
+    personalStatus: data.personal_status,
+    chaptersRead: data.chapters_read,
+    totalChapters: catalogTotal,
+  })
+  if (completedChapters != null) data.chapters_read = completedChapters
 
   const currentStatusName = current
     ? getPersonalStatusNameById(current.personal_status_id)
@@ -2419,9 +2497,9 @@ export async function updateWorkStatus(id: string, values: WorkStatusValues) {
 
 /**
  * Troca o status de leitura (personal_status) de VÁRIAS obras de uma vez —
- * action enxuta pra aba "Untracked" do /ai-evaluation. Ao contrário de
- * `updateWorkStatus` (form completo), só mexe em `personal_status_id`, sem tocar
- * notas/observações/capítulos. 1 update em lote + 1 recalc deferido.
+ * action enxuta pra aba "Untracked" do /ai-evaluation e pro atalho da faixa da página da obra.
+ * Ao contrário de `updateWorkStatus` (form completo), não toca notas nem observações; de
+ * capítulos só mexe pra manter a coerência de "Finished" (ver abaixo).
  */
 export async function setReadingStatusForWorks(ids: string[], status: string) {
   const gate = await ensureReadingStateWriter()
@@ -2431,8 +2509,46 @@ export async function setReadingStatusForWorks(ids: string[], status: string) {
   const statusId = getPersonalStatusIdByName(status)
   if (statusId == null) return { error: `Status de leitura inválido: ${status}` }
 
+  const supabase = createAdminClient()
+
   const { error } = await applyReadingState(gate, cleanIds, { personal_status_id: statusId })
   if (error) return { error }
+
+  // "Finished" = leu a obra INTEIRA, então os capítulos acompanham. Sem isto, o atalho da faixa
+  // (que só grava o status) deixa "Finished com 6/26" — o estado que abriu esta mudança. É a
+  // mesma regra que o WorkStatusForm já aplicava, só que ali ela morava num useEffect e valia
+  // apenas pra quem passasse pelo diálogo.
+  //
+  // Escreve em grupos por total: um patch só não serve, cada obra tem o seu. E NÃO carimba
+  // `last_read_at` de propósito — marcar 50 obras antigas como lidas em lote não é "li hoje", e
+  // a data alimenta as bandas de ritmo da /leitura (lib/reading/pace-bands.ts).
+  let syncedChapters = 0
+  if (isFullyReadPersonalStatus(statusId)) {
+    const idsByTotal = new Map<number, string[]>()
+    // Fatia em 500: `select().in()` corta em 1000 linhas SEM AVISO, e um lote grande viraria
+    // "sincronizei tudo" tendo sincronizado os primeiros mil.
+    for (let i = 0; i < cleanIds.length; i += 500) {
+      const chunk = cleanIds.slice(i, i + 500)
+      const { data: rows } = await supabase
+        .from("works")
+        .select("id, total_chapters")
+        .in("id", chunk)
+      for (const row of rows ?? []) {
+        const total = Number(row.total_chapters)
+        if (!Number.isFinite(total) || total <= 0) continue
+        const bucket = idsByTotal.get(total)
+        if (bucket) bucket.push(row.id as string)
+        else idsByTotal.set(total, [row.id as string])
+      }
+    }
+    for (const [total, ids] of idsByTotal) {
+      const { error: chaptersError } = await applyReadingState(gate, ids, { chapters_read: total })
+      // Falha aqui não desfaz o status: ele é o que a pessoa pediu, os capítulos são o
+      // arredondamento. Reportar o erro cancelaria uma escrita que deu certo.
+      if (chaptersError) console.error("[setReadingStatusForWorks] capítulos:", chaptersError)
+      else syncedChapters += ids.length
+    }
+  }
 
   // Recalc só faz sentido pro dono: é a linha de `works` (e o modelo dele) que mudou.
   if (gate.isOwner) await markRecalcPending("setReadingStatusForWorks")
@@ -2449,7 +2565,39 @@ export async function setReadingStatusForWorks(ids: string[], status: string) {
   revalidatePath("/ranking")
   revalidatePath("/")
   revalidateFavorites()
-  return { data: { updated: cleanIds.length } }
+  return { data: { updated: cleanIds.length, syncedChapters } }
+}
+
+/**
+ * Corrige o STATUS DE PUBLICAÇÃO de uma obra — a saída oferecida pelo aviso de coerência
+ * ("marquei Finished, mas o catálogo diz Ongoing porque a obra terminou e ninguém atualizou").
+ *
+ * É catálogo, não estado pessoal: a linha é COMPARTILHADA, então o gate é `ensureAdmin` — quem
+ * não for curador vê só as opções pessoais no aviso.
+ *
+ * Escreve `publication_status_id` e mais nada. NÃO carimba `data_refreshed_at`: isso significa
+ * "os dados vieram de fonte externa agora", e aqui quem sabe é a pessoa, não a fonte.
+ */
+export async function setPublicationStatusForWork(id: string, status: string) {
+  const gate = await ensureAdmin()
+  if (!gate.ok) return { error: gate.error }
+
+  const statusId = getPublicationStatusIdByName(status)
+  if (statusId == null) return { error: `Status de publicação inválido: ${status}` }
+
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from("works")
+    .update({ publication_status_id: statusId })
+    .eq("id", id)
+  if (error) return { error: error.message }
+
+  revalidatePath("/titles/[id]", "page")
+  revalidatePath("/titles")
+  revalidatePath("/ranking")
+  revalidatePath("/leitura")
+  revalidateFavorites()
+  return { data: { publicationStatusId: statusId } }
 }
 
 export async function deleteWork(id: string) {

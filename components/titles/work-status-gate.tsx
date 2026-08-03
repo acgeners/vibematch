@@ -34,6 +34,10 @@ export function useWorkStatusGate(): WorkStatusGateContextValue {
 export interface WorkStatusGateProviderProps {
   workId: string
   totalChapters: number | null
+  /** `works.publication_status_id` — o aviso "obra ainda em publicação" depende dele. */
+  publicationStatusId?: number | null
+  /** true ⇒ curador: o aviso oferece corrigir a publicação. */
+  canEditCatalog?: boolean
   initialValues: WorkStatusValues
   latestAiEvaluation: PostAttributeAssessmentFormProps["latestAiEvaluation"]
   existingAssessment: PostAttributeAssessmentFormProps["existingAssessment"]
@@ -45,6 +49,8 @@ export interface WorkStatusGateProviderProps {
 export function WorkStatusGateProvider({
   workId,
   totalChapters,
+  publicationStatusId = null,
+  canEditCatalog = false,
   initialValues,
   latestAiEvaluation,
   existingAssessment,
@@ -75,6 +81,8 @@ export function WorkStatusGateProvider({
         onOpenChange={handleOpenChange}
         workId={workId}
         totalChapters={totalChapters}
+        publicationStatusId={publicationStatusId}
+        canEditCatalog={canEditCatalog}
         initialValues={values}
         latestAiEvaluation={latestAiEvaluation}
         existingAssessment={existingAssessment}

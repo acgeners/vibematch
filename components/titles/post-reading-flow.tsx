@@ -30,6 +30,10 @@ const CRAFT_EVALUATION_VISIBLE = false
 interface PostReadingFlowProps {
   workId: string
   totalChapters: number | null
+  /** `works.publication_status_id` — alimenta o aviso de coerência do WorkStatusForm. */
+  publicationStatusId?: number | null
+  /** true ⇒ curador: o aviso oferece corrigir a publicação (dado do catálogo). */
+  canEditCatalog?: boolean
   statusInitial: WorkStatusValues
   latestAiEvaluation: PostAttributeAssessmentFormProps["latestAiEvaluation"]
   existingAssessment: PostAttributeAssessmentFormProps["existingAssessment"]
@@ -56,6 +60,8 @@ interface PostReadingFlowProps {
 export function PostReadingFlow({
   workId,
   totalChapters,
+  publicationStatusId = null,
+  canEditCatalog = false,
   statusInitial,
   latestAiEvaluation,
   existingAssessment,
@@ -130,6 +136,8 @@ export function PostReadingFlow({
       <WorkStatusForm
         workId={workId}
         totalChapters={totalChapters}
+        publicationStatusId={publicationStatusId}
+        canEditCatalog={canEditCatalog}
         initialValues={statusInitial}
         onStatusChange={setLiveStatus}
         onChaptersReadChange={setLiveChaptersRead}
