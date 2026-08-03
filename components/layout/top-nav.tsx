@@ -21,6 +21,8 @@ import { BalanceChip } from "@/components/layout/balance-chip"
 import { useIsAdmin, useIsSignedIn } from "@/components/layout/admin-context"
 import { RecalcPendingControl } from "@/components/recalc/recalc-pending-control"
 import { LogoMark } from "@/components/ui/logo-mark"
+import { GlobalSearch } from "@/components/search/global-search"
+import type { SearchEntry } from "@/server/queries/search-index"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -85,7 +87,7 @@ function useActive() {
   return (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href))
 }
 
-export function TopNav() {
+export function TopNav({ searchIndex }: { searchIndex: SearchEntry[] }) {
   const isAdmin = useIsAdmin()
   const signedIn = useIsSignedIn()
   const isActive = useActive()
@@ -130,6 +132,10 @@ export function TopNav() {
         </nav>
 
         <div className="ml-auto flex items-center gap-1.5">
+          {/* A busca fica à ESQUERDA das ferramentas: ela é sobre o catálogo inteiro, e os
+              ícones à direita são estados que pedem atenção (fila, curadoria, saldo). */}
+          <GlobalSearch index={searchIndex} />
+
           {/* Ferramentas do dono. Ficam como ÍCONE e não como item de menu porque o que
               importa nelas é o contador — dentro de um dropdown o número não é visto. */}
           {isAdmin && recalcPending && (
