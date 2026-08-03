@@ -5,7 +5,7 @@ import { pickPrimaryCover } from "@/lib/covers"
 import { CRITERION_SLUGS, type CriterionSlug } from "@/types/domain"
 import type { FavoritesSummary } from "@/server/queries/favorites"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
-import { getCurrentUserId, getHideAdultContent } from "@/server/queries/current-user"
+import { getHideAdultContent, getSessionUserId } from "@/server/queries/current-user"
 import { getScoresReader } from "@/server/queries/user-scores"
 import type { ScoresReader } from "@/server/queries/user-scores"
 
@@ -211,7 +211,12 @@ export async function getListsWithSummary(): Promise<WorkListSummary[]> {
   const supabase = createAdminClient()
   // Fatia 2b (mig 149): os grupos têm DONO. Sem este filtro, a Leitora abriria /favoritos e
   // veria os grupos DELE ("Comfort reads", "Pra maratonar") como se fossem dela.
-  const viewerId = await getCurrentUserId()
+  //
+  // 🔴 O filtro existia e mesmo assim vazava: `getCurrentUserId()` devolve o DONO quando não há
+  // sessão, então /favorites servia os grupos dele a VISITANTE ANÔNIMO — nomes das pastas,
+  // contagens e médias, medido em 2026-08-03. Ver [[gotcha-anonimo-vira-dono]].
+  const viewerId = await getSessionUserId()
+  if (!viewerId) return []
 
   const listsRes = await supabase
     .from("work_lists")
@@ -273,6 +278,8 @@ export async function getListsWithSummary(): Promise<WorkListSummary[]> {
 /** Detalhe de um grupo: metadados + IDs (escopo do ranking) + resumo escopado. */
 export async function getListDetail(id: string): Promise<WorkListDetail | null> {
   const supabase = createAdminClient()
+  const viewerId = await getSessionUserId()
+  if (!viewerId) return null
 
   // Escopado ao dono: sem isso, bastaria a URL /favorites/<id-de-um-grupo-dele> pra ela abrir
   // o grupo dele. Um id não é um segredo.
@@ -280,7 +287,7 @@ export async function getListDetail(id: string): Promise<WorkListDetail | null> 
     .from("work_lists")
     .select("id, name, description, color, cover_work_ids, comments")
     .eq("id", id)
-    .eq("user_id", await getCurrentUserId())
+    .eq("user_id", viewerId)
     .maybeSingle()
 
   if (error || !list) {
@@ -331,7 +338,7 @@ export interface UngroupedFavorites {
  */
 export async function getUngroupedFavorites(): Promise<UngroupedFavorites> {
   const supabase = createAdminClient()
-  const viewerId = await getCurrentUserId()
+  const viewerId = await getSessionUserId()
   const empty: UngroupedFavorites = {
     workIds: [],
     coverUrls: [],
@@ -400,10 +407,13 @@ export async function getListRecommendations(listId: string): Promise<ListRecomm
  *  Só id/nome/cor + contagem de obras — sem os agregados de resumo do índice. */
 export async function getListsForPicker(): Promise<ListPickerOption[]> {
   const supabase = createAdminClient()
+  const viewerId = await getSessionUserId()
+  if (!viewerId) return []
+
   const listsRes = await supabase
     .from("work_lists")
     .select("id, name, color, position, created_at")
-    .eq("user_id", await getCurrentUserId())
+    .eq("user_id", viewerId)
     .order("position", { ascending: true })
     .order("created_at", { ascending: false })
   if (listsRes.error) {
@@ -430,7 +440,10 @@ export interface FavoriteFolderMenu {
  *  `user_id` (anônimo) devolve vazio. */
 export async function getFavoriteFolderMenu(workId: string): Promise<FavoriteFolderMenu> {
   const supabase = createAdminClient()
-  const viewerId = await getCurrentUserId()
+  // O `if (!viewerId)` abaixo era LETRA MORTA: `getCurrentUserId()` nunca devolve null (cai no
+  // dono ou estoura). Guard presente, proteção nenhuma — só com `getSessionUserId()` ele passa
+  // a valer de fato.
+  const viewerId = await getSessionUserId()
   if (!viewerId) return { folders: [], memberOf: [] }
 
   const listsRes = await supabase
@@ -500,7 +513,7 @@ export async function countWorksInLists(
   const ids = Array.from(new Set(workIds.filter(Boolean)))
   if (ids.length === 0) return { works: 0, memberships: 0 }
 
-  const viewerId = await getCurrentUserId()
+  const viewerId = await getSessionUserId() // idem getFavoriteFolderMenu: o guard só vale com este
   if (!viewerId) return { works: 0, memberships: 0 }
 
   const supabase = createAdminClient()

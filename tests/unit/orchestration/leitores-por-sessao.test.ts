@@ -27,6 +27,29 @@ const READERS = [
   { file: "server/queries/recommendations.ts", fn: "listRecommendationRuns" },
   { file: "server/queries/recommendations.ts", fn: "getRecommendationRun" },
   { file: "server/queries/deep-dive.ts", fn: "listAllDeepDives" },
+  // Os três Deep Dives da PÁGINA DA OBRA (medidos em 2026-08-03, Chrome sem cookies):
+  // `getLastDeepDive` não tinha filtro NENHUM e a aba "Recomendações" servia o badge de match
+  // e o one-liner do dono a visitante anônimo. `getDeepDiveById` é pior de outro jeito: o id
+  // vem do cliente, então sem filtro qualquer um lê a análise de qualquer um sabendo o UUID.
+  { file: "server/queries/deep-dive.ts", fn: "getLastDeepDive" },
+  { file: "server/queries/deep-dive.ts", fn: "getDeepDiveHistory" },
+  { file: "server/queries/deep-dive.ts", fn: "getDeepDiveById" },
+  // Notas de gosto da obra. Resolvia por `getCurrentUserId()` — e a doc da função chamava isso
+  // de design. As 8 notas do dono viajavam no payload (`"tasteScores":{…}`) sem aparecer na
+  // tela, porque o gate de leitura escondia a seção. Invisível a olho nu, presente no HTML.
+  { file: "server/queries/pilot-taste.ts", fn: "getTasteScoresForWork" },
+  // Os 4 medidos depois, quando a varredura de `readers-sem-sessao.test.ts` os nomeou. Todos
+  // vazavam PRA TELA, não só pro payload — `/favorites`, `/import` e `/ranking` são rotas
+  // públicas, e as três mostravam dado do dono a quem chegasse sem cookie nenhum.
+  { file: "server/queries/lists.ts", fn: "getListsWithSummary" },
+  { file: "server/queries/lists.ts", fn: "getListDetail" },
+  { file: "server/queries/lists.ts", fn: "getUngroupedFavorites" },
+  { file: "server/queries/lists.ts", fn: "getListsForPicker" },
+  { file: "server/queries/lists.ts", fn: "getFavoriteFolderMenu" },
+  { file: "server/queries/lists.ts", fn: "countWorksInLists" },
+  { file: "server/queries/imports.ts", fn: "getImportHistory" },
+  { file: "server/queries/filter-presets.ts", fn: "getFilterPresets" },
+  { file: "server/actions/enrich.ts", fn: "getPendingReviewWorks" },
   // Conversas do chat. Estas duas não tinham como filtrar até a migration 175 —
   // `recommendation_chats` não tinha coluna de dono. Eram invisíveis à auditoria que
   // achou as três acima: aquela varredura partia de "tabelas que TÊM dono".
@@ -47,6 +70,35 @@ function stripComments(src: string): string {
 }
 
 /**
+ * Onde o CORPO começa — que não é "a primeira `{` depois do nome".
+ *
+ * `async function f(id: string): Promise<{ scores: … }> {` tem uma chave no TIPO DE RETORNO,
+ * e a versão ingênua recortava o tipo como se fosse o corpo. Aconteceu de verdade com
+ * `getTasteScoresForWork`: as três asserções reprovaram uma função correta, apontando um
+ * trecho que nem código é. Falhou alto, mas ensina a ignorar o teste — que é como um teste
+ * de arquitetura morre.
+ *
+ * Estratégia: fecha a lista de parâmetros contando parênteses; depois disso, uma `{` só é o
+ * corpo se estivermos fora de qualquer `<…>` de genérico (`=>` não conta como fechamento).
+ */
+function bodyStart(src: string, declStart: number): number {
+  let i = src.indexOf("(", declStart)
+  if (i < 0) return -1
+  for (let depth = 0; i < src.length; i++) {
+    if (src[i] === "(") depth++
+    else if (src[i] === ")" && --depth === 0) break
+  }
+  let angle = 0
+  for (i++; i < src.length; i++) {
+    const c = src[i]
+    if (c === "<") angle++
+    else if (c === ">" && src[i - 1] !== "=") angle--
+    else if (c === "{" && angle === 0) return i
+  }
+  return -1
+}
+
+/**
  * Corpo da função nomeada, delimitado por CONTAGEM DE CHAVES.
  *
  * A 1ª versão recortava "até a próxima declaração exportada" e capturava funções vizinhas
@@ -60,7 +112,7 @@ function bodyOf(file: string, fn: string): string {
   const start = src.search(new RegExp(`(export\\s+)?async\\s+function\\s+${fn}\\b`))
   expect(start, `${fn} não encontrada em ${file}`).toBeGreaterThan(-1)
 
-  const open = src.indexOf("{", start)
+  const open = bodyStart(src, start)
   expect(open, `${fn}: não achei o corpo`).toBeGreaterThan(-1)
   let depth = 0
   for (let i = open; i < src.length; i++) {
@@ -99,17 +151,27 @@ describe("arquitetura: histórico pessoal é escopado por SESSÃO", () => {
         ).toMatch(/\.eq\(\s*["']user_id["']/)
         return
       }
-      expect(bodyOf(file, fn), `${fn} precisa de .eq("user_id", …)`).toMatch(
-        /\.eq\(\s*["']user_id["']/,
+      // Aceita coluna QUALIFICADA (`imports.user_id`): `getPendingReviewWorks` filtra por
+      // embed (`.eq("imports.user_id", …)`), que é filtro igual — exigir a forma nua reprovaria
+      // código certo, e teste que acusa inocente é teste que alguém apaga.
+      expect(bodyOf(file, fn), `${fn} precisa de .eq("[tabela.]user_id", …)`).toMatch(
+        /\.eq\(\s*["'][\w]*\.?user_id["']/,
       )
     })
 
     it(`${fn} tem ramo explícito de "sem sessão"`, () => {
       const body = bodyOf(file, fn)
-      // Sem o early-return, o resto assume que há usuário — e um `undefined` no `.eq()`
+      // O guard tem que ser sobre a variável que RECEBEU o id da sessão — `lists.ts` chama a
+      // dela de `viewerId`, e travar o nome "userId" reprovaria o arquivo inteiro por estilo.
+      // Ancorar na atribuição também impede o falso positivo de um `if (!ids) return` vizinho
+      // passar por proteção de sessão.
+      const bind = /const\s+(\w+)\s*=\s*await\s+getSessionUserId\s*\(/.exec(body)
+      expect(bind, `${fn} precisa atribuir getSessionUserId() a uma variável`).not.toBeNull()
+      const id = bind![1]
+      // Sem o early-return, o resto assume que há usuário — e um `undefined`/`null` no `.eq()`
       // não é erro no PostgREST, é um filtro que não filtra.
-      expect(body, `faltou o early-return de anônimo em ${fn}`).toMatch(
-        /if\s*\(\s*!\s*userId\s*\)\s*return/,
+      expect(body, `faltou o early-return de anônimo (!${id}) em ${fn}`).toMatch(
+        new RegExp(`if\\s*\\(\\s*!\\s*${id}\\s*\\)\\s*return`),
       )
     })
   }

@@ -1,6 +1,6 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getCurrentUserId } from "@/server/queries/current-user"
+import { getSessionUserId } from "@/server/queries/current-user"
 
 // Uma importação registrada (tabela `imports`). Toda importação de lista grava
 // uma linha aqui; a fonte fica em raw_metadata.source.
@@ -53,9 +53,14 @@ function toHistoryRow(r: ImportsRow): ImportHistoryRow {
 }
 
 // Histórico per-user (Bloco 02): cada um vê as PRÓPRIAS importações.
+//
+// 🔴 Resolvia por `getCurrentUserId()` — que sem sessão devolve o DONO. Medido em 2026-08-03:
+// /import servia a visitante anônimo "Última importação anteontem · Lista de títulos +4 novas",
+// o histórico dele inteiro. O filtro por user_id estava lá o tempo todo.
 export async function getImportHistory(limit = 30): Promise<ImportHistoryRow[]> {
   const supabase = createAdminClient()
-  const userId = await getCurrentUserId(supabase)
+  const userId = await getSessionUserId()
+  if (!userId) return []
   const { data, error } = await supabase
     .from("imports")
     .select(
@@ -78,7 +83,9 @@ export interface ImportStats {
 // caem na armadilha do limite de 1000 linhas do select.
 export async function getImportStats(): Promise<ImportStats> {
   const supabase = createAdminClient()
-  const userId = await getCurrentUserId(supabase)
+  // Sem sessão, `lastImport` fica null — o catálogo (contagens de obras) é compartilhado e
+  // continua valendo pra todo mundo; a ÚLTIMA IMPORTAÇÃO é de alguém.
+  const userId = await getSessionUserId()
   const [catalog, evaluated, last] = await Promise.all([
     supabase.from("works").select("*", { count: "exact", head: true }).eq("is_archived", false),
     supabase
@@ -86,13 +93,18 @@ export async function getImportStats(): Promise<ImportStats> {
       .select("*", { count: "exact", head: true })
       .eq("is_archived", false)
       .eq("ai_eval_status", "done"),
-    supabase
-      .from("imports")
-      .select("imported_count, created_at, raw_metadata")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+    // Ramo explícito em vez de `.eq("user_id", userId)` com userId nulo: um null/undefined no
+    // `.eq()` do PostgREST não dá erro — vira um filtro que não filtra, que é o mesmo bug
+    // usando outra porta.
+    userId
+      ? supabase
+          .from("imports")
+          .select("imported_count, created_at, raw_metadata")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ])
 
   const lastRow = last.data as
