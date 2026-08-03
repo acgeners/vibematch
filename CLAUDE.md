@@ -164,6 +164,22 @@ anônimo carrega qualquer página e vê o catálogo (que é compartilhado por de
 **papel** (`user_settings.role` → `lib/plans/roles.ts`, `ensureAdmin`/`roleAllows`), verificado
 dentro das actions, não na borda.
 
+**A home (`/`) é uma VITRINE, e bifurca por sessão.** Não é mais o painel de KPIs — esse virou
+`/painel` ([[project-painel-provisorio]], provisório de propósito).
+
+- **Com sessão:** destaque "Continue lendo" escolhido pela banda **Acompanhando** da `/leitura`
+  (`lib/reading/pace-bands.ts`, ≥85% lido + leitura recente, desempate por capítulo mais novo),
+  faixa de atividade e prateleira "Pra você hoje". ⚠️ `getContinueReading` ordena por última
+  LEITURA e corta no limite **antes** de qualquer seleção — pedir poucos itens esconde do
+  destaque a obra que acabou de receber capítulo (foi bug real).
+- **Sem sessão:** `components/home/public-home.tsx` — raio-X dos 9 critérios de uma obra,
+  prateleira por `platform_avg` (com piso de votos), rodapé pra `/sobre` e `/guia`. Nada
+  pessoal: sem sessão os leitores per-usuário devolvem vazio, e o que existia ali antes eram os
+  dados do dono.
+
+⚠️ **Rótulo depende da publicação:** "quase no fim" só vale pra obra concluída; em `Ongoing` a
+mesma banda quer dizer "quase em dia" (você está alcançando os lançamentos, não terminando).
+
 **A navegação é uma BARRA SUPERIOR** (`components/layout/top-nav.tsx`), desde 2026-08-02 — a
 sidebar de 13 itens foi removida. A régua: **o topo é sobre obras, o avatar é sobre você, a console
 é sobre o catálogo dos outros.** Cinco entradas no topo (Início · Minha lista ▾ · Explorar ▾ ·
@@ -348,7 +364,12 @@ do catálogo inteiro: **5,3 MB** por rodada (medido). É o maior consumidor de e
 
 Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evaluation/service.ts`:
 
-**Path A — "✨ Avaliar" page (`/ai-evaluation`)**
+**Path A — "✨ Avaliar" (`/ai-evaluation`, "Curadoria da Obra")**
+
+⚠️ A página virou **duas** em 2026-08-02: `/ai-evaluation` ficou só com a fila de **atributos**
+(curadoria do catálogo — do dono), e as filas de **Veredito IA / IA-Rk / Interesse / Sinopse**
+foram pra **`/fila-recomendacao`** (qualquer logado). O badge da barra também se dividiu:
+`curadoria` e `rec-queue`. `/ranking/desatualizados` segue como redirect pra aba nova.
 `triggerAiEvaluation(workId)` → `fetchExternalEvaluationContextForWork()` → `requestAiEvaluation()`
 - Uses saved work data (**ALL persisted synopses**, genres, grouped tags, cover). The primary synopsis is the prompt's main reference; every other persisted synopsis enters as `[S1]…[Sn]` blocks (`splitSynopsesForEvaluation` in `lib/work-derived.ts`), with `source = "manual"` ones labeled as user-written/high-authority. Fresh external `[C]` blocks that duplicate a persisted synopsis are filtered out (`isSameSynopsis`) — but only when additional synopses exist, so single-synopsis works keep a byte-identical input and preserve the eval cache `input_hash` (the `additionalSynopses` field is omitted from both hash versions when empty). If the work has accepted `work_external_ids`, reviews/context are fetched from those confirmed source IDs; otherwise it falls back to title search.
 - Review sources (each only when the candidate has that source's ID): MangaUpdates + AniList + MyAnimeList + Kitsu (reactions) + AnimePlanet + MangaDex (forum comments) + ComicK (curated reviews + comments) + Comix (per-work comment thread, mini-reviews). Comix has no formal reviews API; `fetchComixReviews(hid)` walks detail `id` → `threads/lookup?page_identifier=manga{id}&page_url=/title/{hid}` → `threads/{threadId}/comments` (cursor-paginated, via `fetchComixJson`/FlareSolverr).
@@ -368,6 +389,12 @@ Two distinct paths both ultimately call `requestAiEvaluation()` in `lib/ai-evalu
 - Completed AI evaluations that still need review use `ai_eval_status = "review_pending"`
 
 Post-processing applied to every evaluation (in `service.ts`):
+- ⚠️ O piso/teto por TAG saiu do código e virou **dado** em `tags.adult_score_tier` (migration
+  **174**, 2026-08-02): antes eram três `Set`s hardcoded em `lib/ai-evaluation/adult-content-rules.ts`,
+  enquanto o FLAG `works.is_adult` já lia `tags.adult_indicator[_strong]` do banco — as duas fontes
+  divergiam, e tag nova classificada pelo enricher afetava o flag mas nunca o piso da nota.
+  🔴 **A 174 ainda NÃO está aplicada na nuvem** (conferido 08-02); é aditiva, então aplicar ANTES
+  do deploy do código. Ver [[project-conferir-migration-na-nuvem]].
 - `enforceR19AdultContentRule`: raises `adult_content` to ≥ 7.0 if R19 marker detected anywhere in input
 - `enforceExternalContentRatingRule`: raises `adult_content` to a floor from the accepted external sources' content rating (MangaDex `contentRating` / ComicK `content_rating`) — `suggestive`→5, `erotica`→7, `pornographic`→8. Chained with the R19 rule; both are monotonic so the effective floor is the max of whichever triggered.
 - `enforceNeutralCoupleDynamicsWhenNoRomance`: raises `couple_dynamics` to 5.0 when romance ≤ 3 and couple_dynamics < 5
@@ -480,4 +507,16 @@ O catálogo **não tem política**: é lido/escrito pela service role, que ignor
 
 ## Tests
 
-Tests live in `tests/unit/calculations/` and cover the deterministic scoring functions only. No integration or component tests. Vitest with jsdom environment; path alias `@` → project root.
+`npm run test` → **~1.780 testes em ~157 arquivos** (Vitest, jsdom, alias `@` → raiz). A
+descrição antiga ("só `tests/unit/calculations/`, sem teste de componente") estava desatualizada
+havia muito: hoje `calculations` é a 4ª maior pasta, atrás de `synopsis-interest` (36),
+`external` (30) e `orchestration` (19), e há `.test.tsx` de componente.
+
+⚠️ **O Vitest NÃO faz checagem completa de tipos do projeto.** Suíte verde não garante que
+compila — quem responde isso é `npm run build`. Rode-o antes de abrir PR que mexa em tipos
+compartilhados. (E `next build` disputa o `.next` com o `next dev`: pare o dev antes.)
+
+Vale conhecer `tests/unit/orchestration/`: além de unidade, ele guarda **testes de arquitetura**
+que varrem o source e falham quando uma invariante é violada — ex.: só o runner da fila pode
+importar `recalculateAll`; os leitores per-usuário não podem usar `getCurrentUserId()`. Servem
+pra classe de erro que não quebra build nem runtime, só serve o dado errado.
