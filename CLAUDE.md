@@ -422,6 +422,11 @@ Post-processing applied to every evaluation (in `service.ts`):
   divergiam, e tag nova classificada pelo enricher afetava o flag mas nunca o piso da nota.
   🔴 **A 174 ainda NÃO está aplicada na nuvem** (conferido 08-02); é aditiva, então aplicar ANTES
   do deploy do código. Ver [[project-conferir-migration-na-nuvem]].
+
+🔴 **A 175 (`recommendation_chats.user_id`) também está pendente na nuvem** (03-08). Aplicada e
+conferida SÓ no local. É aditiva e tem backfill (conversas antigas → dono), mas o código do chat
+**depende** dela: sem a coluna, o insert falha e a listagem quebra. Aplicar ANTES do deploy —
+junto com a 174, quando o egress sair do 402.
 - `enforceR19AdultContentRule`: raises `adult_content` to ≥ 7.0 if R19 marker detected anywhere in input
 - `enforceExternalContentRatingRule`: raises `adult_content` to a floor from the accepted external sources' content rating (MangaDex `contentRating` / ComicK `content_rating`) — `suggestive`→5, `erotica`→7, `pornographic`→8. Chained with the R19 rule; both are monotonic so the effective floor is the max of whichever triggered.
 - `enforceNeutralCoupleDynamicsWhenNoRomance`: raises `couple_dynamics` to 5.0 when romance ≤ 3 and couple_dynamics < 5

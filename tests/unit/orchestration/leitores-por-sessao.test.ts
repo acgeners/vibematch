@@ -27,6 +27,18 @@ const READERS = [
   { file: "server/queries/recommendations.ts", fn: "listRecommendationRuns" },
   { file: "server/queries/recommendations.ts", fn: "getRecommendationRun" },
   { file: "server/queries/deep-dive.ts", fn: "listAllDeepDives" },
+  // Conversas do chat. Estas duas não tinham como filtrar até a migration 175 —
+  // `recommendation_chats` não tinha coluna de dono. Eram invisíveis à auditoria que
+  // achou as três acima: aquela varredura partia de "tabelas que TÊM dono".
+  { file: "server/actions/recommendation-chat.ts", fn: "listChatsAction" },
+  {
+    file: "server/actions/recommendation-chat.ts",
+    fn: "getChatAction",
+    // Não consulta direto: repassa o `userId` para este helper, que é quem filtra. A
+    // asserção do filtro corre no helper — exigi-la aqui reprovaria código correto, e um
+    // teste que acusa o inocente é um teste que alguém apaga.
+    delegatesTo: "loadChatBySlug",
+  },
 ]
 
 /** Comentários fora: as menções em prosa (inclusive a este próprio bug) são intencionais. */
@@ -44,7 +56,8 @@ function stripComments(src: string): string {
  */
 function bodyOf(file: string, fn: string): string {
   const src = stripComments(readFileSync(join(process.cwd(), file), "utf8"))
-  const start = src.search(new RegExp(`export\\s+async\\s+function\\s+${fn}\\b`))
+  // Aceita helper privado também: o filtro pode morar numa função não exportada.
+  const start = src.search(new RegExp(`(export\\s+)?async\\s+function\\s+${fn}\\b`))
   expect(start, `${fn} não encontrada em ${file}`).toBeGreaterThan(-1)
 
   const open = src.indexOf("{", start)
@@ -58,7 +71,11 @@ function bodyOf(file: string, fn: string): string {
 }
 
 describe("arquitetura: histórico pessoal é escopado por SESSÃO", () => {
-  for (const { file, fn } of READERS) {
+  for (const { file, fn, delegatesTo } of READERS as Array<{
+    file: string
+    fn: string
+    delegatesTo?: string
+  }>) {
     it(`${fn} resolve o usuário por getSessionUserId (nunca getCurrentUserId)`, () => {
       const body = bodyOf(file, fn)
       expect(body, `${fn} deve usar getSessionUserId()`).toMatch(/getSessionUserId\s*\(/)
@@ -69,8 +86,20 @@ describe("arquitetura: histórico pessoal é escopado por SESSÃO", () => {
     })
 
     it(`${fn} filtra a query por user_id`, () => {
-      const body = bodyOf(file, fn)
-      expect(body, `${fn} precisa de .eq("user_id", …)`).toMatch(
+      if (delegatesTo) {
+        // 1) repassa o userId adiante — sem isto o helper filtraria por outra coisa;
+        // 2) o helper de fato filtra. As duas juntas fecham a cadeia.
+        expect(
+          bodyOf(file, fn),
+          `${fn} deve repassar o userId para ${delegatesTo}`,
+        ).toMatch(new RegExp(`${delegatesTo}\\([^)]*userId`))
+        expect(
+          bodyOf(file, delegatesTo),
+          `${delegatesTo} precisa de .eq("user_id", …)`,
+        ).toMatch(/\.eq\(\s*["']user_id["']/)
+        return
+      }
+      expect(bodyOf(file, fn), `${fn} precisa de .eq("user_id", …)`).toMatch(
         /\.eq\(\s*["']user_id["']/,
       )
     })
