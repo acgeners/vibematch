@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getSessionUserId } from "@/server/queries/current-user"
 import { fetchAllRows } from "@/lib/supabase/paginate"
 import { getAlignmentQueueWorks, getSynopsisQueueWorks, getUntrackedWorks } from "@/server/queries/recommendations"
 import { getWorksWithoutReviews } from "@/server/queries/works-without-reviews"
@@ -20,10 +21,21 @@ export type ReadQueue = (typeof READ_QUEUES)[number]
 export async function getReadAckSets(): Promise<Map<ReadQueue, Set<string>>> {
   const map = new Map<ReadQueue, Set<string>>()
   for (const q of READ_QUEUES) map.set(q, new Set())
+
+  // "Lido" é julgamento PESSOAL (migration 176). Sem sessão ninguém marcou nada:
+  // devolve tudo vazio em vez de herdar os acks do dono.
+  const userId = await getSessionUserId()
+  if (!userId) return map
+
   const supabase = createAdminClient()
   try {
     const rows = await fetchAllRows<{ work_id: string; queue: string }>(
-      (from, to) => supabase.from("ai_eval_read_acks").select("work_id, queue").range(from, to),
+      (from, to) =>
+        supabase
+          .from("ai_eval_read_acks")
+          .select("work_id, queue")
+          .eq("user_id", userId)
+          .range(from, to),
       "getReadAckSets",
     )
     for (const r of rows) {
