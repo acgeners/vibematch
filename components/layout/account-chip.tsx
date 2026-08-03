@@ -5,18 +5,7 @@
 import { useState, useTransition } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import {
-  BookOpenText,
-  ChevronUp,
-  Info,
-  Loader2,
-  LogIn,
-  LogOut,
-  SlidersHorizontal,
-  Sparkles,
-  UserCircle,
-  UserPlus,
-} from "lucide-react"
+import { BookOpenText, ChevronUp, Gauge, Info, Loader2, LogIn, LogOut, SlidersHorizontal, Sparkles, Upload, UserCircle, UserPlus } from "lucide-react"
 import { getAccountSummary } from "@/server/actions/account"
 import type { AccountSummary } from "@/server/actions/account"
 import { signOutAction } from "@/server/actions/auth"
@@ -33,10 +22,15 @@ import { cn } from "@/lib/utils"
 
 // Mesmos ícones das abas de /conta e do item "Preferências" da sidebar — o menu
 // não inventa um vocabulário próprio pros mesmos destinos.
+// Coisas do USUÁRIO, nunca das obras — é o que separa este menu da barra de cima.
+// Importar entrou aqui (e não na console de curadoria) porque o gate virou
+// `ensureReadingStateWriter`: importar é ação sobre a SUA lista, não sobre o catálogo.
 const MENU_LINKS = [
   { href: "/conta", icon: UserCircle, label: "Minha conta" },
   { href: "/conta/perfil", icon: Sparkles, label: "Perfil de gosto" },
   { href: "/preferencias", icon: SlidersHorizontal, label: "Preferências" },
+  { href: "/import", icon: Upload, label: "Importar minha lista" },
+  { href: "/painel", icon: Gauge, label: "Painel de métricas" },
 ]
 
 /**

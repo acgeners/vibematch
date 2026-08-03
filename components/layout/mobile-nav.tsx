@@ -2,29 +2,25 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import {
-  LayoutDashboard,
-  BookOpen,
-  Trophy,
-  Wand2,
-  Upload,
-} from "lucide-react"
+import { Home, BookOpen, BookMarked, Trophy, Wand2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useIsAdmin } from "@/components/layout/admin-context"
+import { useIsSignedIn } from "@/components/layout/admin-context"
 
+// Espelha a barra de cima, que no mobile fica só com logo e ícones. "Import" saiu daqui
+// quando virou item do menu do usuário (é ação sobre a SUA lista, não navegação de catálogo);
+// no lugar entrou Acompanhamento, que é o destino nº 1 de quem já usa o app.
 const MOBILE_NAV = [
-  { href: "/", icon: LayoutDashboard, label: "Início" },
-  { href: "/titles", icon: BookOpen, label: "Títulos" },
+  { href: "/", icon: Home, label: "Início" },
+  { href: "/titles", icon: BookOpen, label: "Catálogo" },
+  { href: "/leitura", icon: BookMarked, label: "Lendo", requiresSignedIn: true },
   { href: "/ranking", icon: Trophy, label: "Ranking" },
   { href: "/recommendations", icon: Wand2, label: "Recom." },
-  { href: "/import", icon: Upload, label: "Import", adminOnly: true },
 ]
 
 export function MobileNav() {
   const pathname = usePathname()
-  // Stopgap multi-user: Importar é do dono do catálogo → some pra usuário logado.
-  const isAdmin = useIsAdmin()
-  const items = MOBILE_NAV.filter((i) => isAdmin || !i.adminOnly)
+  const signedIn = useIsSignedIn()
+  const items = MOBILE_NAV.filter((i) => !i.requiresSignedIn || signedIn)
   return (
     <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-border/80 bg-background/92 px-1.5 py-1.5 shadow-[0_-16px_30px_hsl(220_30%_5%/0.18)] backdrop-blur md:hidden">
       {items.map(({ href, icon: Icon, label }) => {

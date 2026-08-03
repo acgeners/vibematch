@@ -158,16 +158,38 @@ As duas trocas erradas, e o que cada uma faz **em silêncio**:
 recalcularia as notas dele **sem a calibração dele** — sem erro, sem log, só notas erradas.
 
 **Auth existe** (esta linha já disse o contrário — não confie na memória, confira): Supabase Auth com
-`/login`, `/signup` e **logout no menu do chip da sidebar** (`components/layout/account-chip.tsx` →
+`/login`, `/signup` e **logout no menu do avatar na barra superior** (`components/layout/account-chip.tsx` →
 `signOutAction`). O `middleware.ts` só **refresca a sessão**; ele **não protege rota** — visitante
 anônimo carrega qualquer página e vê o catálogo (que é compartilhado por design). Quem autoriza é o
 **papel** (`user_settings.role` → `lib/plans/roles.ts`, `ensureAdmin`/`roleAllows`), verificado
 dentro das actions, não na borda.
 
-**Toda rota é dinâmica (`ƒ`).** `app/layout.tsx` lê `cookies()` pra saber se a sidebar está
-recolhida, e isso desliga o prerender do app inteiro. Foi uma troca consciente (ver a armadilha de
-hidratação abaixo): nenhuma das 7 rotas que ainda prerenderizavam fazia trabalho de banco. Se um dia
-uma página pública precisar de prerender, é este `cookies()` que estará no caminho.
+**A navegação é uma BARRA SUPERIOR** (`components/layout/top-nav.tsx`), desde 2026-08-02 — a
+sidebar de 13 itens foi removida. A régua: **o topo é sobre obras, o avatar é sobre você, a console
+é sobre o catálogo dos outros.** Cinco entradas no topo (Início · Minha lista ▾ · Explorar ▾ ·
+Ranking · Recomendações); Preferências/Importar/Painel no menu do avatar; fila e curadoria como
+ÍCONE com contador (dentro de dropdown o número não é visto).
+
+**Toda rota é dinâmica (`ƒ`) — e agora POR ESCRITO.** `app/layout.tsx` declara
+`export const dynamic = "force-dynamic"`. 🔴 **Não remova sem substituir por outra garantia.**
+
+Motivo: o app é inteiramente per-user, e uma rota prerenderizada congela no HTML do build o que
+era verdade pra quem (ou ninguém) estava logado naquele instante — e serve isso pra todo mundo,
+**sem erro e sem log**. É a mesma classe do "anônimo vira dono" ([[gotcha-anonimo-vira-dono]]),
+por outro mecanismo.
+
+Até 2026-08-02 essa garantia existia **por acidente**: o layout lia `cookies()` pro colapso da
+sidebar, e isso bastava pra marcar tudo como dinâmico. Quando a sidebar virou barra superior o
+`cookies()` saiu junto e a rede caiu — nada apontava pra ela. Daí a linha explícita.
+
+O preço: as institucionais (`/sobre`, `/guia`, `/login`, `/signup`) perdem prerender. Pra liberar
+essas, **meça**: `next build`, ler a tabela `ƒ`/`○`, marcar rota a rota. Nunca apagar a linha e
+torcer. ⚠️ Um grep por `cookies()` **não** responde quem é dinâmica: a detecção do Next é
+transitiva (`/favorites` não cita `cookies()`, mas chama `getPersonalStateReader` →
+`getSessionUserId` → `cookies()`).
+
+`lib/sidebar-preference.ts` segue no repo como documentação do padrão cookie-vs-localStorage, sem
+uso funcional.
 
 ```
 app/              – Next.js routes (server components by default)
