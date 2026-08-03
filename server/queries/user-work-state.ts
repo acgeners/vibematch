@@ -192,7 +192,21 @@ export const personalStateFromRow = stateFromMirrorRow
 const PAGE = 1000
 
 export interface PersonalStateReader {
-  userId: string
+  /**
+   * Dono do estado que este leitor representa — `null` quando NÃO HÁ SESSÃO.
+   *
+   * ⚠️ `null` de propósito, e o tipo é a proteção. Até 2026-08-03 este campo devolvia o id do
+   * DONO para o anônimo, com o comentário de que era "só para satisfazer o tipo". Não era: dois
+   * módulos o usavam como identidade real — `resolvePersonalFilterIds` filtrava
+   * `user_work_state` por ele e `getFavoritesSummary` o usava como chave de `unstable_cache`.
+   * Resultado, medido em produção: um visitante sem conta abria `/leitura` e via a lista de
+   * obras que o dono acompanha ("Obras que você acompanha", "Continuar lendo"), com o progresso
+   * zerado — porque `get()` já devolvia vazio, mas o `userId` não.
+   *
+   * Um id de outra pessoa nunca "satisfaz o tipo": ou é a identidade da requisição, ou é `null`.
+   * Quem precisar de um id para escrever deve exigir sessão explicitamente.
+   */
+  userId: string | null
   /**
    * Estado pessoal do usuário atual para uma obra. Obra sem linha = estado vazio (é o que
    * "não acompanho isto" significa) — nunca o estado de outra pessoa.
@@ -223,10 +237,10 @@ export const getPersonalStateReader = cache(async (): Promise<PersonalStateReade
   const sessionId = await getSessionUserId()
 
   if (!sessionId) {
-    // `userId` do dono só para satisfazer o tipo e manter as chaves de cache derivadas iguais
-    // entre todos os visitantes. Nenhuma escrita deve sair daqui — não há sessão.
+    // Sem sessão não há identidade — e emprestar a do dono aqui foi exatamente o que vazou a
+    // lista de leitura dele para visitantes anônimos (ver o comentário de `userId` acima).
     return {
-      userId: await getOwnerUserId(),
+      userId: null,
       get: () => EMPTY_PERSONAL_STATE,
     }
   }
@@ -308,6 +322,15 @@ export async function resolvePersonalFilterIds(filter: {
   if (!wantsStatus && !onlyFavorites && !wantsInterest) return null
 
   const reader = await getPersonalStateReader()
+  // Sem sessão não existe "meu estado": devolve LISTA VAZIA, que os chamadores já leem como
+  // "não acompanho nada". ⚠️ `[]`, nunca `null` — `null` aqui significa "sem filtro pessoal" e
+  // faria a página cair no catálogo inteiro.
+  //
+  // ⚠️ Este guard é explícito de propósito: o `.eq()` do Supabase aceita `null` sem erro de
+  // tipo nem de runtime, então tornar `reader.userId` nullable NÃO faz o compilador apontar
+  // esta linha — ela compilava e vazava. Só a checagem explícita fecha.
+  if (!reader.userId) return []
+
   const supabase = createAdminClient()
   const ids: string[] = []
 

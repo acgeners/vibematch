@@ -25,7 +25,13 @@ const require = createRequire(import.meta.url)
 const { createClient } = require("@supabase/supabase-js")
 
 const ROOT = path.resolve(import.meta.dirname, "..")
-for (const line of fs.readFileSync(path.join(ROOT, ".env.local"), "utf8").split("\n")) {
+// Qual .env ler. O `.env.local` alterna entre nuvem e LOCAL (`npm run db:local`), então
+// quando o alvo é o stack local este script faria um backup do BANCO ERRADO — e passaria
+// na conferência de linhas, porque o local também é consistente consigo mesmo. Daí a
+// guarda abaixo e a possibilidade de mirar direto na cópia da nuvem:
+//   BACKUP_ENV_FILE=.env.supabase-cloud node scripts/backup-db.mjs
+const ENV_FILE = process.env.BACKUP_ENV_FILE ?? ".env.local"
+for (const line of fs.readFileSync(path.join(ROOT, ENV_FILE), "utf8").split("\n")) {
   const m = line.match(/^([A-Z0-9_]+)=(.*)$/)
   if (m) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "")
 }
@@ -33,8 +39,14 @@ for (const line of fs.readFileSync(path.join(ROOT, ".env.local"), "utf8").split(
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 if (!URL_ || !KEY) {
-  console.error("faltam NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY no .env.local")
+  console.error(`faltam NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY no ${ENV_FILE}`)
   process.exit(1)
+}
+if (/127\.0\.0\.1|localhost/.test(URL_)) {
+  console.error(`✗ ${ENV_FILE} aponta pro Supabase LOCAL (${URL_}) — isto seria um backup do banco errado.`)
+  console.error(`  Pra salvar a NUVEM:  BACKUP_ENV_FILE=.env.supabase-cloud node scripts/backup-db.mjs`)
+  console.error(`  Se você QUER mesmo o local, rode com BACKUP_ALLOW_LOCAL=1.`)
+  if (process.env.BACKUP_ALLOW_LOCAL !== "1") process.exit(1)
 }
 const sb = createClient(URL_, KEY, { auth: { persistSession: false } })
 

@@ -94,6 +94,9 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   // partir do espelho; sem ele o filtro de arquivada seria silenciosamente ignorado.
   const personal = await getPersonalStateReader()
   const countRated = async () => {
+    // Sem sessão não há notas "minhas" — 0, sem ir ao banco. O `.eq()` aceitaria `null` sem
+    // reclamar (nem o compilador nem o runtime apontam), então o guard tem que ser explícito.
+    if (!personal.userId) return 0
     const { count } = await supabase
       .from("user_work_state")
       .select("work_id, works!inner(is_archived)", { count: "exact", head: true })
