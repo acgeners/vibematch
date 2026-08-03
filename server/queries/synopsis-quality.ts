@@ -1,6 +1,7 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchAllRows } from "@/lib/supabase/paginate"
+import { getInterestReader } from "@/server/queries/user-interest"
 import { resolveInterestPromptVersion, COMPILED_PREFERENCES_V4_SHADOW } from "@/lib/ai-evaluation/compiled-preferences"
 import { SYNOPSIS_QUALITIES } from "@/types/domain"
 import type { SynopsisQuality } from "@/types/domain"
@@ -70,10 +71,10 @@ export async function getSynopsisPredictionForWork(
   workId: string,
 ): Promise<SynopsisQualityPredictionRow | null> {
   const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("synopsis_quality_predictions")
-    .select("*")
-    .eq("work_id", workId)
+  const interest = await getInterestReader()
+  const { data, error } = await interest.scope(
+    supabase.from("synopsis_quality_predictions").select("*").eq("work_id", workId),
+  )
   if (error) {
     console.warn("[synopsis-pred] getSynopsisPredictionForWork falhou:", error.message)
     return null
@@ -88,10 +89,10 @@ export async function getSynopsisPredictionsByWorkIds(
   const out = new Map<string, SynopsisQualityPredictionRow>()
   if (workIds.length === 0) return out
   const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from("synopsis_quality_predictions")
-    .select("*")
-    .in("work_id", workIds)
+  const interest = await getInterestReader()
+  const { data, error } = await interest.scope(
+    supabase.from("synopsis_quality_predictions").select("*").in("work_id", workIds),
+  )
   if (error) {
     console.warn("[synopsis-pred] getSynopsisPredictionsByWorkIds falhou:", error.message)
     return out
@@ -127,11 +128,12 @@ export async function getAllActiveSynopsisPredictions(): Promise<
 > {
   const out = new Map<string, SynopsisQualityPredictionRow>()
   const supabase = createAdminClient()
+  const interest = await getInterestReader()
   let rows: Array<Record<string, unknown>>
   try {
     rows = await fetchAllRows<Record<string, unknown>>(
       (from, to) =>
-        supabase.from("synopsis_quality_predictions").select("*").range(from, to),
+        interest.scope(supabase.from("synopsis_quality_predictions").select("*")).range(from, to),
       "getAllActiveSynopsisPredictions",
     )
   } catch (e) {
