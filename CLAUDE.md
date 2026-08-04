@@ -399,7 +399,7 @@ foram pra **`/fila-recomendacao`** (qualquer logado). O badge da barra também s
 `curadoria` e `rec-queue`. `/ranking/desatualizados` segue como redirect pra aba nova.
 `triggerAiEvaluation(workId)` → `fetchExternalEvaluationContextForWork()` → `requestAiEvaluation()`
 - Uses saved work data (**ALL persisted synopses**, genres, grouped tags, cover). The primary synopsis is the prompt's main reference; every other persisted synopsis enters as `[S1]…[Sn]` blocks (`splitSynopsesForEvaluation` in `lib/work-derived.ts`), with `source = "manual"` ones labeled as user-written/high-authority. Fresh external `[C]` blocks that duplicate a persisted synopsis are filtered out (`isSameSynopsis`) — but only when additional synopses exist, so single-synopsis works keep a byte-identical input and preserve the eval cache `input_hash` (the `additionalSynopses` field is omitted from both hash versions when empty). If the work has accepted `work_external_ids`, reviews/context are fetched from those confirmed source IDs; otherwise it falls back to title search.
-- Review sources (each only when the candidate has that source's ID): MangaUpdates + AniList + MyAnimeList + Kitsu (reactions) + AnimePlanet + MangaDex (forum comments) + ComicK (curated reviews + comments) + Comix (per-work comment thread, mini-reviews). Comix has no formal reviews API; `fetchComixReviews(hid)` walks detail `id` → `threads/lookup?page_identifier=manga{id}&page_url=/title/{hid}` → `threads/{threadId}/comments` (cursor-paginated, via `fetchComixJson`/FlareSolverr).
+- Review sources (each only when the candidate has that source's ID): MangaUpdates + AniList + MyAnimeList + Kitsu (reactions) + AnimePlanet + MangaDex (forum comments) + ComicK (curated reviews + comments) + Comix (per-work comment thread, mini-reviews). Comix has no formal reviews API; `fetchComixReviews(hid)` walks detail `id` → `threads/lookup?page_identifier=manga{id}&page_url=/title/{hid}` → `threads/{threadId}/comments` (cursor-paginated). ⚠️ Este caminho é **TOKEN-FREE**: usa `fetchComixDetailRaw`/`fetchComixThreadJson`, **não** o `fetchComixJson` — então o circuito de auth aberto pela busca gateada **não** o bloqueia (medido 2026-08-04: circuito aberto e, na sequência, 52 e 57 reviews normais em ~1,3s). Hoje ele resolve por **plain fetch**, com resultado IDÊNTICO sem bypass, só com sidecar e com sidecar+FlareSolverr. 🔴 Isso é estado ATUAL, não garantia: os dois passos têm fallback de CF (`fetchComixHtml` → `isCfBypassUnavailable()` → `fetchHtmlWithCfFallback`), então se a Comix voltar a desafiar, ~30% do acervo de reviews passa a depender do bypass da noite pro dia.
 - Reviews go through `selectReviewsForEvaluation()` before the prompt — stratified per-source sampling with an **adaptive** quota: `perSource = min(maxPerSource, ceil(total / sourcesWithReviews))`, capped by `AI_EVAL_REVIEW_CAPS = { total: 30, maxPerSource: 12 }` (service.ts), then global round-robin in `REVIEW_SOURCE_PRIORITY` order (MangaUpdates first). So few-source works fill the budget (2 sources → up to 24, not 16) instead of being stuck at a fixed 8/source. All sources are always fetched in parallel; the cap is applied at selection time only (no fetch short-circuit). The full pool persists to `work_reviews`. **The prompt selects from the UNION of fresh fetch + persisted `work_reviews` pool** (`mergeFreshWithPersistedReviews`, dedup by source+text, rejected sources filtered): CF-gated sources dropping out (sidecar 503 busy / Cloudflare block) can no longer shrink the evidence to 1–2 reviews when dozens are already persisted. Only the fresh pool is re-persisted (persistence semantics unchanged); when nothing is recovered the input is byte-identical to fresh-only, preserving the eval cache `input_hash`.
 - Passes `sourcedReviews: SourcedReview[]` (rich format with source, matchScore, sourceTitle)
 - Also passes `externalContext` (synopsis strings from external sources)
@@ -490,8 +490,13 @@ O import deixou de ser `ensureAdmin`-only: o gate é `ensureReadingStateWriter` 
 >    descobre a Comix; `/render` atravessa o Cloudflare das demais. **Sobe sozinho em dev** via launchd
 >    (`com.geners.comix-render`). Ver o README do serviço: duas armadilhas silenciosas moram lá (flags
 >    de automação e `content_rating`).
-> 2. **FlareSolverr** (Docker `:8191`) — rede de segurança. Sem o sidecar, a busca perde ComicK,
->    AnimePlanet e Mangago quando o container pisca (medido: 5/9 fontes vs 8/9).
+> 2. **FlareSolverr** (Docker `:8191`) — rede de segurança **e ÚNICA via do ComicK**.
+>    🔴 **As duas camadas NÃO são substituíveis** (medido 2026-08-04, 6 buscas por condição):
+>    ComicK volta **6/6 com FlareSolverr** e **0/6 com o sidecar sozinho**. Quem cobre Mangago e
+>    AnimePlanet é o sidecar (81 e 12 reviews em 4 obras); o FlareSolverr sozinho cobre as duas de
+>    forma ERRÁTICA (20 e 4, e só em 2 das 4 obras). Os números de Mangago/AnimePlanet são de UMA
+>    rodada por condição — o do ComicK foi remedido com repetição justamente porque o agregado
+>    dava 1/4 num cenário e 4/4 noutro.
 >
 > **Em dev, o Docker/FlareSolverr é OPCIONAL — o sidecar é a camada primária.** O sidecar não tem
 > nenhum fio pro FlareSolverr (só o cita em comentário); ele atravessa o Cloudflare com o Chromium
@@ -509,7 +514,17 @@ O import deixou de ser `ensureAdmin`-only: o gate é `ensureReadingStateWriter` 
 > plataforma — e ele costuma ser a fonte com **mais votos** de todas.
 
 `lib/external/index.ts` is the multi-source orchestration layer:
-- `searchAllSources(query)` — parallel search across AniList, MangaUpdates, ComicK, Kitsu, MyAnimeList, MangaDex, AnimePlanet, Mangago (a Comix **não** entra: a busca dela é gateada por token → resolvida por cross-ID via sidecar); merges by title similarity (threshold 0.65 for grouping, 0.72 for accepted)
+- `searchAllSources(query)` — parallel search across AniList, MangaUpdates, ComicK, Kitsu, MyAnimeList, MangaDex, AnimePlanet, Mangago **e Comix**; merges by title similarity (threshold 0.65 for grouping, 0.72 for accepted)
+  - ⚠️ **A Comix ESTÁ em `SEARCH_CONNECTORS`** (esta linha dizia o contrário até 2026-08-04) — mas
+    hoje volta sempre VAZIA: `/manga*` exige o token de assinatura `_=` e responde `Missing token`.
+    **Não é Cloudflare, é autenticação, e nenhum bypass atravessa** (medido em 3 condições: sem
+    nada, só sidecar, sidecar+FlareSolverr — idêntico nas três). Ela devolve `[]` e não erro, então
+    **nem em `failedSources` aparece**: some do relatório sem deixar rastro, e num diagnóstico
+    agregado isso é indistinguível de "a obra não está na Comix". A 1ª negativa abre o circuito de
+    auth (`COMIX_AUTH_CIRCUIT_TTL_MS` = 30min) e as chamadas seguintes custam 0ms — o custo de
+    mantê-la na lista é uma requisição falha de ~0,4s por processo. Quem de fato dá o hid a uma
+    obra NOVA é o cross-ID do sidecar (`quickResolveComixHidForWork`), que sem `COMIX_RENDER_URL`
+    devolve `false` na hora.
 - `fetchMultiSourceDetails(candidate)` — hydrates a candidate from all platforms by ID, filters accepted sources (titleScore ≥ 0.72 AND synScore ≥ 0.18 AND composite ≥ 0.62), then calls the AI. Reverse-substring matches ("Fake Lady" inside "The Fake Lady and Her Rabbit Duke") são graduados por proporção pra evitar falsos positivos.
 
 Client-side fetches (ComicK ratings, AnimePlanet ratings) live in `lib/external/client-fetches.ts` and are called directly from `ExternalSearch` component to avoid the server action round-trip.
