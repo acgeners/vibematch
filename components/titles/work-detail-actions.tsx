@@ -385,12 +385,14 @@ export function UpdateDataActionButton({
   const canRefresh = useCan("refresh_work")
   const [open, setOpen] = useState(false)
 
-  // Leitor não atualiza nada.
+  // Leitor e assinante não atualizam nada: `refresh_work` subiu para CURADOR em 2026-08-04,
+  // porque re-hidratar em produção (sem sidecar) colhe 6 das 9 fontes e sobrescreve dado bom
+  // por dado pobre, sem erro. O botão SOME em vez de falhar no clique.
   if (!canRefresh) return null
 
-  // ASSINANTE: atualização automática. Sem diálogo — ele não escolhe capa, sinopse
-  // nem resolve conflito (isso é curadoria, e `works` é compartilhada). Um clique,
-  // o servidor funde e grava. Ver autoRefreshWorkData / buildAutoRefreshPlan.
+  // Sobra o curador — mas `role` e `is_admin` são colunas DIFERENTES de `user_settings`, então
+  // um curador sem `is_admin` ainda cai aqui: atualização automática, sem as telas de escolha.
+  // Antes deste ramo era o do assinante; hoje nenhum assinante o alcança.
   if (!isAdmin) return <AutoRefreshButton workId={workId} />
 
   // CURADOR: fluxo completo, com as telas de escolha.
