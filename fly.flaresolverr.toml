@@ -1,4 +1,13 @@
-app = "satoria-flaresolverr"
+# ⚠️ Este nome é METADE de um par: o app principal chama
+# `http://vibematch-flaresolverr.flycast:8191/v1` (FLARESOLVERR_URL no fly.toml), e a app que
+# existe na Fly é `vibematch-flaresolverr`. O PR #288 corrigiu o lado do `fly.toml` e deixou
+# este arquivo em `satoria-flaresolverr` — deployar assim criaria uma TERCEIRA app, com o
+# principal continuando a chamar um nome sem máquina. O sintoma não é erro: as fontes gateadas
+# por Cloudflare (ComicK, AnimePlanet, Mangago) somem da busca em silêncio.
+app = "vibematch-flaresolverr"
+# `iad` de propósito até prova em contrário: o app está em `gru`, então há um salto de
+# hemisfério por request — mas quem responde do outro lado é o Cloudflare dos sites raspados,
+# e sair de um IP US pode ser justamente o que faz o desafio passar. Medir antes de mover.
 primary_region = "iad"
 
 [build]
