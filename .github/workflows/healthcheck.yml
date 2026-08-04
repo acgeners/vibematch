@@ -1,0 +1,41 @@
+# Monitor de produção.
+#
+# Existe por uma falha real: entre 2026-07-31 e 08-03 a satoria ficou no ar respondendo HTTP 200
+# enquanto toda leitura do banco falhava (`Invalid API key`). Três dias, ninguém soube — o smoke
+# da época testava só `/sobre` e `/`, que não tocam o banco.
+#
+# Roda no GitHub (não no launchd) de propósito: assim vigia mesmo com o Mac desligado. Repo
+# público ⇒ Actions sem cota. Nenhum segredo: só chama uma URL pública.
+name: healthcheck
+
+on:
+  schedule:
+    # A cada 6h. Não é "quanto mais melhor": cada chamada ACORDA a máquina da Fly
+    # (auto_start_machines), que dorme por padrão. 4×/dia é barato; de minuto em minuto
+    # manteria a máquina de pé o tempo todo e passaria a custar de verdade.
+    - cron: "17 */6 * * *"
+  workflow_dispatch: # permite rodar na mão pelo site do GitHub
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: /api/health (exercita o banco)
+        run: |
+          # --max-time generoso: a máquina dorme e o cold start medido é ~10s.
+          body=$(curl -sS --max-time 90 -w "\n%{http_code}" https://satoria.fly.dev/api/health) || {
+            echo "::error::healthcheck não respondeu (app fora do ar ou DNS)"; exit 1; }
+          code=$(echo "$body" | tail -1)
+          json=$(echo "$body" | sed '$d')
+          echo "HTTP $code · $json"
+
+          [ "$code" = "200" ] || { echo "::error::/api/health devolveu $code — $json"; exit 1; }
+
+          # ⚠️ Status 200 NÃO basta, e é essa a lição da falha: a rota devolve `ok:false` com 503,
+          # mas se um dia alguém mudar o status e esquecer do corpo, o grep abaixo ainda pega.
+          echo "$json" | grep -q '"ok":true' || { echo "::error::corpo não confirma ok:true — $json"; exit 1; }
+
+      - name: rota pública (o app renderiza, não só responde)
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 90 https://satoria.fly.dev/sobre)
+          [ "$code" = "200" ] || { echo "::error::/sobre devolveu $code"; exit 1; }
