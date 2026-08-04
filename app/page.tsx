@@ -16,7 +16,6 @@ import { DashboardGreeting } from "@/components/dashboard/dashboard-greeting"
 import { ActivityStrip } from "@/components/home/activity-strip"
 import { ContinueHero } from "@/components/home/continue-hero"
 import { WorkShelf } from "@/components/home/work-shelf"
-import { DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 
 /**
  * A home — a VITRINE.
@@ -61,7 +60,10 @@ export default async function HomePage() {
   ])
 
   const firstName = profile.displayName?.trim().split(/\s+/)[0]
-  const wantToRead = stats.byPersonalStatus[DEFAULT_PERSONAL_STATUS] ?? 0
+  // A prateleira cai em `platform_avg` quando não há modelo de gosto — e aí o rótulo tem que
+  // dizer isso. Prometer "maiores Notas Previstas" mostrando nota da comunidade é vender
+  // curadoria que o app não fez; foi o que uma conta nova viu em prod (2026-08-04).
+  const semModelo = topPicks.basis === "platform"
 
   return (
     <div className="flex flex-col gap-7">
@@ -90,7 +92,10 @@ export default async function HomePage() {
             accent: stats.followingWithPending > 0,
           },
           { value: stats.following, label: "em leitura", href: "/leitura" },
-          { value: wantToRead, label: "quero ler", href: "/titles" },
+          // `stats.wantToRead` conta só marcação EXPLÍCITA. O antigo
+          // `byPersonalStatus[DEFAULT_PERSONAL_STATUS]` herdava o default de obra sem estado, e
+          // pra conta nova anunciava o catálogo inteiro ("957 quero ler").
+          { value: stats.wantToRead, label: "quero ler", href: "/titles" },
           { value: stats.rated, label: "avaliadas por você", href: "/titles" },
         ]}
       />
@@ -103,14 +108,22 @@ export default async function HomePage() {
 
       <WorkShelf
         title="Pra você hoje"
-        why="as maiores Notas Previstas que você ainda não leu"
-        works={topPicks}
+        why={
+          semModelo
+            ? "as maiores notas da comunidade que você ainda não leu"
+            : "as maiores Notas Previstas que você ainda não leu"
+        }
+        works={topPicks.items}
         thresholds={thresholds?.expected ?? null}
         moreHref="/ranking"
         moreLabel="Ver ranking"
       />
 
-      {topPicks.length === 0 && (
+      {/* Este aviso mirava `length === 0` e por isso NUNCA aparecia pra quem mais precisava dele:
+          sem modelo a prateleira vem cheia (pelo fallback), então a condição certa é a base da
+          ordenação, não o vazio. O ramo vazio continua coberto: sem modelo E sem catálogo, `semModelo`
+          é true do mesmo jeito. */}
+      {semModelo && (
         <section className="flex flex-col items-start gap-3 rounded-2xl border border-dashed border-border bg-card/40 p-6">
           <p className="text-sm font-semibold">Ainda não dá para prever seu gosto</p>
           <p className="max-w-prose text-sm text-muted-foreground">
