@@ -446,6 +446,21 @@ const stamp = new Date().toISOString().replace(/[:.]/g, "-")
 const outDir = path.join(ROOT, ".backups", `new-works-${stamp}`)
 fs.mkdirSync(outDir, { recursive: true })
 
+// Retenção: TODA execução grava um cofre (~1,3 MB aqui), inclusive `--dry-run`. Sem teto, um dia
+// de ensaios enche o `.backups` — o mesmo problema que o `backup-db.mjs` já resolve pros dumps
+// dele, e que não pega estes (ele só poda diretório com nome de stamp ISO puro). Ajuste com
+// `COFRE_KEEP=<n>`.
+{
+  const keep = Number(process.env.COFRE_KEEP ?? 5)
+  const antigos = fs
+    .readdirSync(path.join(ROOT, ".backups"))
+    .filter((d) => /^new-works-\d{4}-\d{2}-\d{2}T/.test(d))
+    .sort()
+    .slice(0, -keep)
+  for (const d of antigos) fs.rmSync(path.join(ROOT, ".backups", d), { recursive: true, force: true })
+  if (antigos.length) console.log(`\n(retenção: ${antigos.length} cofre(s) antigo(s) apagado(s), mantendo ${keep})`)
+}
+
 console.log(`\nlinhas a transferir:`)
 const staged = []
 for (const step of PLAN) {
