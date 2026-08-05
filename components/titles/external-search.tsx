@@ -32,6 +32,7 @@ import { cn, titleToSlug } from "@/lib/utils"
 import { dedupeSynopsisEntries } from "@/lib/work-derived"
 import { SynopsisPicker } from "@/components/titles/synopsis-picker"
 import type { SynopsisChoice } from "@/components/titles/synopsis-picker"
+import { RequestByNameBanner } from "@/components/titles/curation-request-panel"
 import type {
   MergedCandidate,
   ConflictField,
@@ -1261,10 +1262,17 @@ export function ExternalSearch({
 
           {phase === "results" && (
             candidates.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
-                <Search className="h-8 w-8 mb-3 opacity-40" />
-                <p className="font-medium">Nenhum resultado encontrado</p>
-                <p className="text-sm mt-1">Tente variações do título ou adicione manualmente</p>
+              <div className="space-y-4 py-8">
+                <div className="flex flex-col items-center justify-center text-center text-muted-foreground">
+                  <Search className="h-8 w-8 mb-3 opacity-40" />
+                  <p className="font-medium">Nenhum resultado encontrado</p>
+                  <p className="text-sm mt-1">Tente variações do título ou adicione manualmente</p>
+                </div>
+                {/* Em produção a busca só alcança 6 das 9 fontes — as outras três ficam atrás
+                    de Cloudflare. "Não achei" pode significar "não existe" OU "está numa fonte
+                    que este servidor não enxerga", e o leitor não tem como distinguir. Some
+                    para o curador, que roda local com as 9. */}
+                <RequestByNameBanner query={titleQuery} />
               </div>
             ) : (
               <div className="space-y-2">
