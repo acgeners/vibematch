@@ -254,6 +254,29 @@ scripts/sync-constants.js – DB → TypeScript code generator
 supabase/migrations/ – SQL migration history
 ```
 
+## A query string do /ranking é um CONTRATO — e ela fala PONTOS
+
+Os limiares dos 9 atributos (`min_<slug>`/`max_<slug>`) estão **sempre em pontos (0–10)** na
+URL. O `/ranking` tem uma unidade **σ** (`?crit_unit=sd`), mas ela é **lente de exibição**: a
+UI converte na hora de mostrar e de gravar, e a URL nunca carrega σ.
+
+Não é estilo — é o que mantém correto todo mundo que lê essa mesma query string **sem saber
+que σ existe**: `getRanking`, os presets salvos (`ranking_filter_presets` guarda a query
+CRUA), o `/favorites` e o `parseFiltersFromSearchParams` do diálogo de recomendação. Numa
+primeira versão a URL carregava σ, e `min_romance=-0.5` chegava na recomendação como
+"romance ≥ −0,5 **pontos**" — filtro nenhum, sem erro, com resultado plausível.
+
+Corolário de graça: trocar de unidade não reescreve valor, então **nunca muda o resultado**.
+Guardado por `tests/unit/orchestration/criterion-unit-url-invariant.test.ts`.
+
+⚠️ **Em eixo normalizado (σ, percentil, log), nada pode ser constante.** Quatro bugs da mesma
+família saíram desta feature, todos silenciosos e todos produzindo resultado plausível:
+arredondar pro mais próximo em vez de direcional (−54 obras), limiar fora da grade de 0,5 em
+que as notas existem (−421 obras), σ na URL lido como pontos por outro consumidor, e domínio
+de slider FIXO em vez de derivado dos momentos — este apagava o filtro do usuário, porque o
+Radix clampava o valor fora do domínio e o `commit` gravava `null`. Ver
+`lib/ranking/criterion-unit.ts`, onde cada um está documentado com o número medido.
+
 ## Inline type imports and Turbopack
 
 Turbopack (Next.js 16) fails to parse `import { type Foo }` inline syntax when a client component is traversed from a server context. Always use separate `import type` statements:
