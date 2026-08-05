@@ -10,7 +10,7 @@ import type { SynopsisQuality } from "@/types/domain"
 import { comixWorkUrl } from "@/lib/external/comix"
 import { getPersonalStateReader, resolvePersonalFilterIds } from "@/server/queries/user-work-state"
 import { getScoresReader } from "@/server/queries/user-scores"
-import { FOLLOWING_PERSONAL_STATUSES } from "@/lib/constants/criteria"
+import { FOLLOWING_PERSONAL_STATUSES, DEFAULT_PERSONAL_STATUS } from "@/lib/constants/criteria"
 import { isFollowingPersonalStatus, personalStatusNameOrDefault } from "@/lib/constants/status-lookups"
 
 type CoverRow = { url: string; is_primary: boolean; position: number }
@@ -37,7 +37,22 @@ export interface DashboardStats {
   rated: number
   avgExpectedScore: number | null
   byPublicationStatus: Record<string, number>
+  /**
+   * Distribuição do CATÁLOGO por status pessoal — obra sem linha entra no default
+   * ([DEFAULT_PERSONAL_STATUS]), de propósito: aqui a pergunta é "como o catálogo se distribui
+   * aos meus olhos", e "não marquei" tem uma resposta ("quero ler", que é o que a UI mostra).
+   *
+   * ⚠️ NÃO use isto como contador de atividade — ver [wantToRead].
+   */
   byPersonalStatus: Record<string, number>
+  /**
+   * Obras que o usuário marcou EXPLICITAMENTE como "quero ler".
+   *
+   * Existe separado de `byPersonalStatus[DEFAULT_PERSONAL_STATUS]` porque aquele número herda o
+   * default: pra conta nova ele é o catálogo inteiro. Medido em prod (2026-08-04): conta recém
+   * criada abria a home anunciando "957 quero ler", que é o total de obras não-arquivadas.
+   */
+  wantToRead: number
 }
 
 export interface TopWorkItem {
@@ -156,12 +171,16 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   const byPersonalStatus: Record<string, number> = {}
   let following = 0
   let followingWithPending = 0
+  let wantToRead = 0
   for (const w of active) {
     const state = personal.get(w.id)
     const pubName = getPublicationStatusNameById(w.publication_status_id) ?? "Unknown"
     const persName = personalStatusNameOrDefault(state.personalStatusId)
     byPublicationStatus[pubName] = (byPublicationStatus[pubName] ?? 0) + 1
     byPersonalStatus[persName] = (byPersonalStatus[persName] ?? 0) + 1
+    // O `!= null` é a correção inteira: sem ele, "não tenho linha nenhuma" e "marquei quero
+    // ler" viram o mesmo número, e o contador de atividade pessoal passa a medir o catálogo.
+    if (state.personalStatusId != null && persName === DEFAULT_PERSONAL_STATUS) wantToRead++
     if (isFollowingPersonalStatus(persName)) {
       following++
       if (w.total_chapters != null && w.total_chapters - (state.chaptersRead ?? 0) > 0) {
@@ -181,16 +200,23 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     avgExpectedScore,
     byPublicationStatus,
     byPersonalStatus,
+    wantToRead,
   }
 }
 
 /**
- * Melhores obras por Nota Prevista que você ainda NÃO avaliou (user_score null)
- * — a lista "o que ler a seguir" do dashboard. Ordena por expected_score no
- * próprio calculated_scores e filtra a obra embutida (is_archived=false,
- * user_score IS NULL) via !inner, buscando só `limit` linhas.
+ * Melhores obras que você ainda NÃO avaliou (user_score null) — a prateleira "o que ler a
+ * seguir". Ordena por Nota Prevista quando há modelo de gosto e por nota da comunidade
+ * (`platform_avg`) quando não há.
+ *
+ * ⚠️ Devolve `basis` junto, e não é enfeite: quem chama PRECISA saber por qual das duas a lista
+ * foi ordenada pra se explicar. A home prometia "as maiores Notas Previstas" num rótulo fixo, e
+ * pra conta nova (sem modelo) isso era falso — as capas ali vinham de `platform_avg`. Medido em
+ * prod em 2026-08-04. Devolver só o array convida o chamador a adivinhar de novo.
  */
-export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]> {
+export async function getTopUnratedByExpected(
+  limit = 5,
+): Promise<{ items: TopWorkItem[]; basis: "expected" | "platform" }> {
   const supabase = createAdminClient()
 
   // 🔴 Este widget é PESSOAL nas duas pontas — e as duas estavam erradas:
@@ -248,17 +274,20 @@ export async function getTopUnratedByExpected(limit = 5): Promise<TopWorkItem[]>
     ? candidatas.filter((w) => w.expectedScore != null).sort((a, b) => (b.expectedScore ?? -1) - (a.expectedScore ?? -1))
     : candidatas.filter((w) => w.platformAvg != null).sort((a, b) => (b.platformAvg ?? -1) - (a.platformAvg ?? -1))
 
-  return ordenadas.slice(0, limit).map((w) => ({
-    id: w.id,
-    title: w.title,
-    coverUrl: w.coverUrl,
-    expectedScore: w.expectedScore,
-    publicationStatusId: w.publicationStatusId,
-    personalStatusId: w.personalStatusId,
-    isAdult: w.isAdult,
-    totalChapters: w.totalChapters,
-    synopsisQuality: w.synopsisQuality,
-  }))
+  return {
+    basis: scores.hasModel ? "expected" : "platform",
+    items: ordenadas.slice(0, limit).map((w) => ({
+      id: w.id,
+      title: w.title,
+      coverUrl: w.coverUrl,
+      expectedScore: w.expectedScore,
+      publicationStatusId: w.publicationStatusId,
+      personalStatusId: w.personalStatusId,
+      isAdult: w.isAdult,
+      totalChapters: w.totalChapters,
+      synopsisQuality: w.synopsisQuality,
+    })),
+  }
 }
 
 /**
