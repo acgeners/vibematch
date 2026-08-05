@@ -41,23 +41,31 @@ describe("permissões por papel", () => {
     }
   })
 
-  it("o LEITOR só pode escrever o PRÓPRIO estado — nada do catálogo, nada de IA", () => {
-    // `own_state` é o único verbo do leitor: favoritar, status, capítulo lido, nota. É o
-    // que o faz deixar de ser um espectador. (Enquanto a Fase 2 não parte `works`, esse
-    // estado mora na linha COMPARTILHADA e os writers seguem em `curate_work` — o verbo
-    // existe, mas ainda não tem onde escrever. Ver PLANO-MULTIUSER-FASE2.md §2.)
+  it("o LEITOR escreve o PRÓPRIO estado e BUSCA fontes — nada do catálogo, nada de IA", () => {
+    // `own_state`: favoritar, status, capítulo lido, nota. É o que o faz deixar de ser um
+    // espectador. (Enquanto a Fase 2 não parte `works`, esse estado mora na linha COMPARTILHADA
+    // e os writers seguem em `curate_work`. Ver PLANO-MULTIUSER-FASE2.md §2.)
     expect(roleAllows("leitor", "own_state")).toBe(true)
+    // `search_sources` entrou em 2026-08-04: o leitor precisa achar e escolher a obra certa pra
+    // cadastrar o que falta no catálogo. Só LÊ das fontes — não grava nada e não gasta token.
+    expect(roleAllows("leitor", "search_sources")).toBe(true)
 
+    const DO_LEITOR = new Set<Permission>(["own_state", "search_sources"])
     for (const p of Object.keys(PERMISSIONS) as Permission[]) {
-      if (p === "own_state") continue
-      expect(roleAllows("leitor", p)).toBe(false)
+      if (DO_LEITOR.has(p)) continue
+      expect(roleAllows("leitor", p), `leitor não pode "${p}"`).toBe(false)
     }
   })
 
-  it("ASSINANTE: atualiza obra e consome IA, mas NÃO cura", () => {
+  it("ASSINANTE: consome IA, mas NÃO cura nem re-hidrata", () => {
     // O que ele paga pra ter:
-    expect(roleAllows("assinante", "refresh_work")).toBe(true)
     expect(roleAllows("assinante", "consume_ai")).toBe(true)
+
+    // 🔴 `refresh_work` SAIU daqui em 2026-08-04 e virou curador. Não é aperto de segurança: é
+    // que produção não tem sidecar nem FlareSolverr, então re-hidratar lá colhe 6 das 9 fontes
+    // e sobrescreve dado bom por dado pobre, SEM ERRO. A curadoria roda local, onde o bypass é
+    // grátis. Ver `project-curadoria-centralizada-solicitacoes`.
+    expect(roleAllows("assinante", "refresh_work")).toBe(false)
 
     // A fronteira que não pode vazar: `works` é COMPARTILHADA (sem user_id), então
     // curar = decidir pelos outros. Se algum destes virar true, o assinante passa a
@@ -67,8 +75,11 @@ describe("permissões por papel", () => {
     expect(roleAllows("assinante", "global_config")).toBe(false)
   })
 
-  it("atualizar ≠ curar: a distinção existe de fato na tabela de permissões", () => {
-    expect(PERMISSIONS.refresh_work).toBe("assinante")
+  it("ler fonte ≠ escrever com ela: a distinção existe de fato na tabela", () => {
+    // A distinção que sobrou depois de `refresh_work` subir. É ela que sustenta o desenho:
+    // BUSCAR é grátis e de qualquer um; tudo que GRAVA a partir das fontes é do curador.
+    expect(PERMISSIONS.search_sources).toBe("leitor")
+    expect(PERMISSIONS.refresh_work).toBe("curador")
     expect(PERMISSIONS.curate_work).toBe("curador")
   })
 })
@@ -76,6 +87,8 @@ describe("permissões por papel", () => {
 describe("mensagens de bloqueio", () => {
   it("dizem o que falta, não só que negou", () => {
     expect(deniedMessage("curate_work")).toContain("Curador")
-    expect(deniedMessage("refresh_work")).toContain(ROLE_LABELS.assinante)
+    // `consume_ai` ocupou o lugar do `refresh_work` neste caso: é a permissão de assinante que
+    // sobrou depois que a re-hidratação subiu pra curador.
+    expect(deniedMessage("consume_ai")).toContain(ROLE_LABELS.assinante)
   })
 })

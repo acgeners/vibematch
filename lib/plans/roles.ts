@@ -64,8 +64,28 @@ export const PERMISSIONS = {
    * PLANO-MULTIUSER-FASE2.md §2.
    */
   own_state: "leitor",
-  /** Re-hidratar obra das fontes externas (merge automático, sem escolha). */
-  refresh_work: "assinante",
+  /**
+   * BUSCAR nas fontes externas por título (só leitura, sem gravar nada).
+   *
+   * É "leitor" desde 2026-08-04 para o leitor poder cadastrar obra que falta no catálogo:
+   * ele busca, escolhe a obra certa entre as fontes e a obra nasce vinculada. Sem isto ele
+   * teria de digitar tudo na mão, e a obra nasceria sem fonte nenhuma — o que empurra o
+   * enriquecimento para adivinhação por título em vez de hidratação por ID.
+   *
+   * ⚠️ Só é seguro em par com LIMITE DE TAXA: `"use server"` é endpoint público, e sem teto
+   * isto vira um proxy de scraping grátis que derruba as fontes para todo mundo. Ver
+   * `searchExternalTitles`.
+   */
+  search_sources: "leitor",
+  /**
+   * Re-hidratar obra das fontes externas (merge automático, sem escolha).
+   *
+   * Subiu de "assinante" para "curador" em 2026-08-04: produção não tem sidecar nem
+   * FlareSolverr, então re-hidratar lá colhe 6 das 9 fontes e sobrescreve dado bom por dado
+   * pobre — sem erro. A curadoria roda LOCAL, onde o bypass é grátis. Ver
+   * [[project-curadoria-centralizada-solicitacoes]].
+   */
+  refresh_work: "curador",
   /**
    * IA de CONSUMO (custa dinheiro, não muda o catálogo): recomendar, re-rank, chat,
    * deep dive, perfil de gosto por LLM, previsão de interesse.

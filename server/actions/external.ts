@@ -25,7 +25,14 @@ import type { CriterionSlug } from "@/types/domain"
 import { revalidatePath } from "next/cache"
 import { pickPrimaryCover } from "@/lib/work-derived"
 import { isBlockedCoverUrl } from "@/lib/external/blocked-covers"
-import { ensureAdmin } from "@/server/queries/current-user"
+import { ensureAdmin, ensureSignedIn, ensurePermission } from "@/server/queries/current-user"
+import { withinRateLimit } from "@/lib/rate-limit"
+
+// Tetos da busca externa por usuário. Generosos para uso humano — cadastrar uma obra são poucas
+// buscas — e apertados para script. Ficam aqui, e não em `lib/`, porque são política desta action;
+// `"use server"` proíbe EXPORTAR não-função, mas const de módulo é livre.
+const SEARCH_SOURCES_BURST = 20
+const SEARCH_SOURCES_HOURLY = 200
 
 export interface TagCatalogItem {
   id: string
@@ -89,15 +96,35 @@ export async function listGenreCatalog(): Promise<TagCatalogItem[]> {
 }
 
 /**
- * Busca o título nas 9 fontes externas. Gate de admin: não muta nada, mas dispara
- * scraping (FlareSolverr/sidecar) na infra do dono — sem gate, é um proxy de scraping
- * grátis, e o excesso de tráfego derruba as fontes pra todo mundo. Só a curadoria
- * (criar/atualizar obra) precisa disto, e curadoria é admin.
+ * Busca o título nas 9 fontes externas. Não muta nada.
+ *
+ * Era `ensureAdmin` até 2026-08-04, com a justificativa (correta) de que sem gate isto é "um
+ * proxy de scraping grátis, e o excesso de tráfego derruba as fontes pra todo mundo". O gate
+ * desceu para LEITOR porque a curadoria foi centralizada no curador rodando local: o leitor
+ * precisa poder buscar e escolher a obra certa para cadastrar o que falta no catálogo — a parte
+ * que não custa token nem IA. A justificativa antiga não sumiu; virou o limite abaixo.
+ *
+ * ⚠️ O limite é por PROCESSO (ver `lib/rate-limit.ts`), então em produção, com 2 máquinas, o teto
+ * efetivo é o dobro. Aceitável: aqui o objetivo é conter rajada e abuso, não cobrar cota.
+ *
  * Sinaliza por throw; o caller (ExternalSearch) já trata em try/catch.
  */
 export async function searchExternalTitles(query: string): Promise<SearchAllSourcesResult> {
-  const gate = await ensureAdmin()
+  const session = await ensureSignedIn()
+  if (!session.ok) throw new Error(session.error)
+  const gate = await ensurePermission("search_sources")
   if (!gate.ok) throw new Error(gate.error)
+
+  // Duas janelas de propósito: a curta corta o dedo no F5 e o autocomplete acidental; a longa
+  // corta o script paciente, que a curta sozinha deixaria passar a noite inteira.
+  const chave = `search-sources:${session.userId}`
+  if (
+    !withinRateLimit(chave, SEARCH_SOURCES_BURST, 60_000) ||
+    !withinRateLimit(chave, SEARCH_SOURCES_HOURLY, 60 * 60_000)
+  ) {
+    throw new Error("Muitas buscas seguidas. Espere um minuto e tente de novo.")
+  }
+
   return searchAllSourcesWithStatus(query)
 }
 
