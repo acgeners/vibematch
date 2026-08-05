@@ -30,7 +30,6 @@ import { TagFilter } from "@/components/titles/tag-filter"
 import type { TagOption } from "@/server/queries/tags"
 import { searchWorkSuggestions } from "@/server/actions/work-search"
 import type { WorkSuggestion } from "@/server/queries/work-suggestions"
-import type { SignatureCount } from "@/server/queries/work-signature"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { CRITERION_SLUGS, SYNOPSIS_QUALITIES } from "@/types/domain"
@@ -86,8 +85,6 @@ interface TitleFiltersProps {
   availableTags: TagOption[]
   publicationStatuses?: StatusOption[]
   personalStatuses?: StatusOption[]
-  /** Contagem por assinatura (atributo dominante) — alimenta a aba Atributos. */
-  signatureCounts?: SignatureCount[]
 }
 
 function dedupeStatusOptions(options: StatusOption[]): StatusOption[] {
@@ -284,62 +281,6 @@ function AdultContentSegment({
  * CATÁLOGO — não conhece os outros filtros ativos —, por isso o rótulo diz "no
  * catálogo" em vez de prometer o tamanho do resultado.
  */
-function SignatureGrid({
-  counts,
-  selected,
-  onToggle,
-}: {
-  counts: SignatureCount[]
-  selected: Set<string>
-  onToggle: (slug: string) => void
-}) {
-  const max = Math.max(1, ...counts.map((c) => c.count))
-  return (
-    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-      {counts.map(({ slug, count }) => {
-        const active = selected.has(slug)
-        return (
-          <button
-            key={slug}
-            type="button"
-            onClick={() => onToggle(slug)}
-            aria-pressed={active}
-            disabled={count === 0}
-            className={cn(
-              "flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors",
-              active
-                ? "border-transparent bg-primary/15"
-                : "border-border hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border",
-            )}
-          >
-            <span aria-hidden className="shrink-0 text-base leading-none">
-              {CRITERIA_INFO[slug]?.emoji ?? "•"}
-            </span>
-            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="truncate text-xs font-medium">
-                {CRITERION_LABELS[slug] ?? CRITERIA_INFO[slug]?.name ?? slug}
-              </span>
-              <span
-                className={cn(
-                  "text-[11px] tabular-nums",
-                  active ? "font-semibold text-primary" : "text-muted-foreground",
-                )}
-              >
-                {count} {count === 1 ? "obra" : "obras"}
-              </span>
-              <span
-                aria-hidden
-                className={cn("mt-0.5 block h-[3px] rounded-full bg-primary", active ? "" : "opacity-40")}
-                style={{ width: `${Math.round((count / max) * 100)}%` }}
-              />
-            </span>
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 function ScoreRangeCard({
   emoji,
   label,
@@ -864,7 +805,6 @@ export function TitleFilters({
   availableTags,
   publicationStatuses = [],
   personalStatuses = [],
-  signatureCounts = [],
 }: TitleFiltersProps) {
   const router = useRouter()
   const appliedSearchParams = useSearchParams()
@@ -1014,14 +954,13 @@ export function TitleFilters({
 
   const selectedGenreAny = csvSet(searchParams, "genres_any")
   const selectedTagAny = csvSet(searchParams, "tags_any")
-  const selectedSignatures = csvSet(searchParams, "signature")
   const adultParam = searchParams.get("adult")
   const adultMode: "all" | "hide" | "only" =
     adultParam === "hide" ? "hide" : adultParam === "only" ? "only" : "all"
   const criterionRangeCount = CRITERION_SLUGS.filter(
     (slug) => searchParams.get(`min_${slug}`) || searchParams.get(`max_${slug}`),
   ).length
-  const attributesTabCount = selectedSignatures.size + criterionRangeCount
+  const attributesTabCount = criterionRangeCount
 
   // Active filter chips
   const activeChips: Array<{ key: string; label: string; onRemove: () => void }> = []
@@ -1067,11 +1006,6 @@ export function TitleFilters({
   }
   selectedSynopsisQ.forEach((q) => activeChips.push({
     key: `syn-${q}`, label: `Sinopse: ${q}`, onRemove: () => toggleCsv("synopsis_q", q),
-  }))
-  selectedSignatures.forEach((slug) => activeChips.push({
-    key: `sig-${slug}`,
-    label: `Assinatura: ${CRITERION_LABELS[slug] ?? slug}`,
-    onRemove: () => toggleCsv("signature", slug),
   }))
   if (searchParams.get("rated") === "1") {
     activeChips.push({ key: "rated", label: "Só avaliadas", onRemove: () => updateParams({ rated: null }) })
@@ -1484,50 +1418,13 @@ export function TitleFilters({
 
           {/* ==================== ATRIBUTOS ==================== */}
           <TabsContent value="atributos" className="space-y-3">
-            <FilterCard
-              title={`Assinatura — o que mais marca a obra${selectedSignatures.size ? ` (${selectedSignatures.size})` : ""}`}
-              action={
-                selectedSignatures.size > 0 ? (
-                  <button
-                    type="button"
-                    className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                    onClick={() => updateParams({ signature: null })}
-                  >
-                    Limpar
-                  </button>
-                ) : undefined
-              }
-            >
-              <p className="mb-2.5 text-[11px] leading-relaxed text-muted-foreground">
-                O atributo mais fora da curva da obra, comparado à média do catálogo — não a nota
-                mais alta. Seu catálogo tem Romance alto em quase tudo, então &ldquo;Romance
-                alto&rdquo; não distinguiria nada. Contagens sobre o catálogo, sem os outros
-                filtros.
-              </p>
-              {signatureCounts.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Nenhuma obra com os 9 atributos avaliados ainda.
-                </p>
-              ) : (
-                <SignatureGrid
-                  counts={signatureCounts}
-                  selected={selectedSignatures}
-                  onToggle={(slug) => toggleCsv("signature", slug)}
-                />
-              )}
-            </FilterCard>
-
-            {/* Mín/máx dos 9 fica RECOLHIDO: é o controle que o /ranking já tem, e
-                deixá-lo aberto faria esta aba virar cópia daquela. */}
-            <details className="group rounded-lg border bg-background shadow-sm">
-              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground">
-                <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
-                Ajuste fino — mín/máx dos 9 atributos
-                {criterionRangeCount > 0 && (
-                  <Badge className="ml-1 h-4 px-1.5 text-[10px] tabular-nums">{criterionRangeCount}</Badge>
-                )}
-              </summary>
-              <div className="grid grid-cols-2 gap-2 border-t px-3 py-3 md:grid-cols-3 xl:grid-cols-5">
+            {/* Mín/máx em PONTOS, e só. A lente relativa (limiar em σ contra a média
+                do catálogo) mora no /ranking desde 2026-08-05: é lá que estão os
+                presets salvos, o mood e a bússola — e era lá que a normalização
+                fazia falta (o preset "Romance ≥ 7" devolvia 55% do acervo).
+                /titles é pra navegar; filtro literal é o certo aqui. */}
+            <FilterCard title={`Notas dos 9 atributos${criterionRangeCount ? ` (${criterionRangeCount})` : ""}`}>
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
                 {CRITERION_SLUGS.map((slug) => (
                   <ScoreRangeCard
                     key={slug}
@@ -1542,7 +1439,7 @@ export function TitleFilters({
                   />
                 ))}
               </div>
-            </details>
+            </FilterCard>
           </TabsContent>
 
           {/* ==================== GÊNEROS E TAGS ==================== */}

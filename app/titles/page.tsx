@@ -8,7 +8,6 @@ import { getAllGenres } from "@/server/queries/genres"
 import { getAllTags } from "@/server/queries/tags"
 import { getStatusOptions } from "@/server/queries/status-options"
 import { isCurrentUserAdmin } from "@/server/queries/current-user"
-import { getSignatureCounts } from "@/server/queries/work-signature"
 import { Header } from "@/components/layout/header"
 import { TitleFilters } from "@/components/titles/title-filters"
 import { WorkTable } from "@/components/titles/work-table"
@@ -97,9 +96,6 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     // "Só avaliadas" (?rated=1): obras com nota pessoal.
     onlyRated: str("rated") === "1",
     adultFilter,
-    // Assinatura (?signature=): o atributo que mais marca a obra. Slugs inválidos
-    // são descartados dentro de resolveSignatureWorkIds.
-    signatureSlugs: multi("signature"),
     criterionMin: Object.keys(criterionMin).length ? criterionMin : undefined,
     criterionMax: Object.keys(criterionMax).length ? criterionMax : undefined,
     publicationStatus,
@@ -143,7 +139,6 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     scoreThresholds,
     criterionPrefs,
     isAdmin,
-    signatureCounts,
   ] = await Promise.all([
     getRanking(filters),
     getAllGenres(),
@@ -152,7 +147,6 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
     getScoreColorThresholds(),
     getCriterionColorRanges(),
     isCurrentUserAdmin(),
-    getSignatureCounts(),
   ])
 
   const total = entries.length
@@ -185,7 +179,6 @@ export default async function TitlesPage({ searchParams }: TitlesPageProps) {
         availableTags={allTags}
         publicationStatuses={statusOptions.publicationStatuses}
         personalStatuses={statusOptions.personalStatuses}
-        signatureCounts={signatureCounts}
       />
 
       <WorkTable
