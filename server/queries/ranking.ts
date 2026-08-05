@@ -158,12 +158,13 @@ export interface RankingFilters {
    */
   adultFilter?: "hide" | "only"
   /**
-   * Limiares dos 9 atributos, sempre em PONTOS (0–10).
+   * Limiares dos 9 atributos, em PONTOS (0–10) — e só.
    *
-   * O /ranking também aceita esses limiares em σ (`?crit_unit=sd`), mas a
-   * conversão acontece na página, contra `getCriterionMoments()` — a query
-   * nunca vê σ. Assim o filtro relativo não duplica caminho de SQL, e uma
-   * mudança nos momentos não muda a semântica de quem passa pontos direto.
+   * O /ranking tem uma unidade σ (`?crit_unit=sd`), mas ela é lente de
+   * EXIBIÇÃO: a query string continua carregando pontos, e esta query nunca vê
+   * σ. Quem converte é a UI, na hora de mostrar e de gravar. Ver
+   * lib/ranking/criterion-unit.ts e o teste de invariante em
+   * tests/unit/orchestration/criterion-unit-url-invariant.test.ts.
    */
   criterionMin?: Partial<Record<string, number>>
   criterionMax?: Partial<Record<string, number>>

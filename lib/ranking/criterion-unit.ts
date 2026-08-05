@@ -21,10 +21,31 @@ export type CriterionUnit = "points" | "sd"
 /** slug → média e desvio-padrão do atributo no catálogo. */
 export type CriterionMoments = Record<string, { mean: number; sd: number }>
 
-export const SD_MIN = -2.5
-export const SD_MAX = 3
 export const SD_STEP = 0.25
 export const SD_PRESETS = [0.5, 1, 1.5, 2]
+
+/**
+ * Domínio em σ de um atributo: exatamente a imagem de [0, 10] — a escala em que
+ * as notas existem.
+ *
+ * 🔴 NÃO use faixa fixa. Uma versão anterior fixava [−2,5σ, +3σ] pros nove, e
+ * essa faixa não cobre a escala 0–10 em 7 deles: em romance (média 7,43, σ 1,16)
+ * o −2,5σ é 4,53, então qualquer `min_romance` abaixo de 4,5 caía FORA do
+ * domínio do slider. O Radix clampava o valor, o `commit` lia o valor clampado,
+ * a comparação `lo > def.min` dava falso — e o filtro era gravado como `null`.
+ * Medido no app: `?min_romance=3&crit_unit=sd`, mexer só no thumb do MÁXIMO, e
+ * o mínimo SUMIA da URL. O usuário perdia um filtro que nunca pediu pra tirar.
+ *
+ * Derivado dos momentos, nenhum ponto de [0, 10] pode cair fora — a classe do
+ * bug deixa de existir em vez de ficar dependendo de a constante ser larga o
+ * bastante.
+ */
+export function sigmaDomain(m: { mean: number; sd: number }): { min: number; max: number } {
+  return {
+    min: scoreToSigma(0, m) ?? 0,
+    max: scoreToSigma(10, m) ?? 0,
+  }
+}
 
 export function fmtSigma(v: number): string {
   return `${v >= 0 ? "+" : "−"}${Math.abs(parseFloat(v.toFixed(2)))}σ`

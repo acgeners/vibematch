@@ -24,10 +24,10 @@ import {
   fmtSigma,
   readCriterionUnit,
   scoreToSigma,
+  sigmaDomain,
   sigmaToScore,
   snapToScoreGrid,
-  SD_MAX,
-  SD_MIN,
+  SCORE_GRID,
   SD_PRESETS,
   SD_STEP,
 } from "@/lib/ranking/criterion-unit"
@@ -255,8 +255,11 @@ interface RankingFiltersProps {
   /** Atalhos ≥ configuráveis da aba Notas (migration 132). Ausente = default [5,6,7,8]. */
   criterionPresets?: CriterionScorePresets
   /**
-   * Média/σ dos 9 atributos no catálogo — habilita a unidade σ do filtro de
-   * critério. Ausente (ex: /favorites) → só pontos, e o seletor fica desativado.
+   * Média/σ dos 9 atributos no catálogo — habilita a lente σ do filtro de
+   * critério. Três estados, e eles são distintos de propósito:
+   * `undefined` = a página não oferece a lente (ex: /favorites, que não busca os
+   * momentos) → o seletor nem aparece; `null` = oferece, mas a leitura falhou →
+   * seletor desabilitado, com a explicação; preenchido = lente disponível.
    */
   criterionMoments?: CriterionMoments | null
   /** Confiança do público (pseudo_votes_nota_m): acima desse nº de votos a média
@@ -580,12 +583,17 @@ function buildCriterionScoreDefs(
     // lente ligada: sem conversão possível, mostrar σ seria inventar número.
     const moment = moments?.[slug]
     if (unit === "sd" && moment && moment.sd > 0) {
+      // Domínio DERIVADO dos momentos (a imagem em σ de 0–10). Faixa fixa deixava
+      // limiares legítimos fora do slider, e o commit os apagava — ver sigmaDomain.
+      const domain = sigmaDomain(moment)
       return {
         ...base,
-        min: SD_MIN,
-        max: SD_MAX,
+        min: domain.min,
+        max: domain.max,
         step: SD_STEP,
-        presets: SD_PRESETS,
+        // Preset acima do teto do atributo é promessa que a escala não cumpre:
+        // em fantasia/nobreza (média 7,27) o "+2σ" já passaria de nota 10.
+        presets: SD_PRESETS.filter((p) => p <= domain.max),
         unit: "sd" as const,
         moment,
       }
@@ -723,7 +731,14 @@ function ScoreThresholdEditor({
   const write = (v: number | null, bound: "min" | "max") => {
     if (v == null) return null
     const p = toPoints(def, v, bound)
-    return p == null ? null : String(p)
+    if (p == null) return null
+    // Limiar nas pontas da escala não é filtro: "≤ 10" e "≥ 0" não excluem nada.
+    // Em Pontos o `lo > def.min` / `hi < def.max` já resolve, mas na lente o
+    // domínio em σ tem pontas fracionárias e o thumb pode parar um passo aquém —
+    // gravando um chip que promete recorte e não recorta.
+    if (bound === "max" && p >= 10) return null
+    if (bound === "min" && p <= 0) return null
+    return String(p)
   }
   const commit = (next: number[]) => {
     const [lo, hi] = next as [number, number]
@@ -740,10 +755,17 @@ function ScoreThresholdEditor({
   // Em σ o preset não bate exato: ele é gravado em pontos e encaixado na grade
   // de 0,5, então "+0,5σ" volta como +0,49σ. Comparar por igualdade deixaria o
   // chip que o usuário acabou de clicar apagado.
-  const presetActive = (p: number) =>
-    !info.hasMax &&
-    info.vMin != null &&
-    (def.unit === "sd" ? Math.abs(info.vMin - p) < SD_STEP / 2 : info.vMin === p)
+  // Em σ o preset volta deslocado: ele é gravado em pontos e encaixado na grade
+  // de 0,5, então "+0,5σ" pode voltar como +0,33σ. A tolerância é meia casa da
+  // GRADE convertida pro σ daquele atributo — usar um número fixo deixava o chip
+  // recém-clicado apagado nos atributos de σ estreito (protagonista, σ 0,89).
+  const presetActive = (p: number) => {
+    if (info.hasMax || info.vMin == null) return false
+    if (def.unit !== "sd") return info.vMin === p
+    const sd = def.moment?.sd
+    if (!sd) return false
+    return Math.abs(info.vMin - p) < SCORE_GRID / (2 * sd)
+  }
   return (
     <>
       <div className="flex flex-wrap gap-1.5">

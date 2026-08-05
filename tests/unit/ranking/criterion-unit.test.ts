@@ -4,6 +4,7 @@ import {
   readCriterionUnit,
   scoreToSigma,
   resolveMoodThresholds,
+  sigmaDomain,
   sigmaToScore,
   snapToScoreGrid,
 } from "@/lib/ranking/criterion-unit"
@@ -203,5 +204,45 @@ describe("os 5 mood presets de verdade", () => {
         ).toEqual(Object.keys(emPontos).sort())
       }
     }
+  })
+})
+
+describe("sigmaDomain — o domínio tem que cobrir a escala inteira", () => {
+  it("🔴 todo ponto de 0 a 10 cai DENTRO do domínio, nos 9 atributos", () => {
+    // A regressão que motivou isto: com faixa fixa [−2,5σ, +3σ], `min_romance=3`
+    // ficava fora (−3,81σ), o Radix clampava, `lo > def.min` dava falso e o
+    // commit gravava null — o filtro do usuário SUMIA ao mexer no outro thumb.
+    for (const [slug, m] of Object.entries(MOMENTS)) {
+      const { min, max } = sigmaDomain(m)
+      for (let pontos = 0; pontos <= 10; pontos += 0.5) {
+        const z = scoreToSigma(pontos, m)!
+        expect(z, `${slug} @ ${pontos} pts abaixo do domínio`).toBeGreaterThanOrEqual(min)
+        expect(z, `${slug} @ ${pontos} pts acima do domínio`).toBeLessThanOrEqual(max)
+      }
+    }
+  })
+
+  it("as pontas do domínio SÃO 0 e 10 em pontos — nem mais largo, nem mais estreito", () => {
+    for (const [slug, m] of Object.entries(MOMENTS)) {
+      const { min, max } = sigmaDomain(m)
+      expect(sigmaToScore(min, m), `${slug}: ponta inferior`).toBeCloseTo(0, 6)
+      expect(sigmaToScore(max, m), `${slug}: ponta superior`).toBeCloseTo(10, 6)
+    }
+  })
+
+  it("a faixa fixa antiga NÃO cobria — o teste falharia em 7 dos 9", () => {
+    // Documenta o tamanho do buraco que existia, pra ninguém reintroduzir uma
+    // constante "larga o bastante" achando que resolve.
+    const forasDaFaixaFixa = Object.entries(MOMENTS).filter(([, m]) => {
+      const { min, max } = sigmaDomain(m)
+      return min < -2.5 || max > 3
+    })
+    expect(forasDaFaixaFixa.length).toBe(7)
+  })
+
+  it("σ = 0 não passa por aqui (o builder já mantém o atributo em pontos)", () => {
+    const { min, max } = sigmaDomain({ mean: 5, sd: 0 })
+    expect(min).toBe(0)
+    expect(max).toBe(0)
   })
 })
