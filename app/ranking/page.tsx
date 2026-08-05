@@ -2,6 +2,8 @@ import { getRanking, type RankingFilters, type RankingSortBy, type SortLevel } f
 import { canConsumeAi } from "@/server/queries/current-user"
 import { getScoreColorThresholds } from "@/server/queries/score-thresholds"
 import { getCriterionColorRanges } from "@/server/queries/criterion-prefs"
+import { getCriterionMomentsSafe } from "@/server/queries/criterion-moments"
+import { resolveMoodThresholds } from "@/lib/ranking/criterion-unit"
 import { getTierBandWidth } from "@/server/queries/tier-band-width"
 import { getLowCoverageWorkIds } from "@/server/queries/calibration-guards"
 import { getAllGenres, getGenreCatTypes } from "@/server/queries/genres"
@@ -92,6 +94,21 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     return v.split(",").map((s) => s.trim()).filter(Boolean)
   }
 
+  // ⚠️ Os limiares por critério na URL estão SEMPRE em pontos (0–10). A unidade σ
+  // do /ranking é uma lente de EXIBIÇÃO (?crit_unit=sd) e não muda o que a URL
+  // carrega — de propósito: a mesma query string é lida por `getRanking`, pelos
+  // presets salvos e pelo `parseFiltersFromSearchParams` do diálogo de
+  // recomendação. Guardar σ aqui fazia `min_romance=-0.5` virar "≥ −0,5 PONTOS"
+  // naquele último, ou seja, filtro nenhum, sem erro e com resultado.
+  const moodId = str("mood")
+  const moodPreset = moodId ? MOOD_PRESETS_BY_ID[moodId] : null
+  // Dispara já, sem await: só entra no caminho crítico quando há mood ativo (que
+  // guarda os limiares em σ e precisa convertê-los agora). Fora disso é aguardada
+  // no Promise.all lá embaixo, porque a UI precisa dos momentos pra exibir a lente.
+  const momentsPromise = getCriterionMomentsSafe()
+  const needsMoments = Boolean(moodPreset?.criterionMinSd || moodPreset?.criterionMaxSd)
+  const moments = needsMoments ? await momentsPromise : null
+
   const criterionMin: Partial<Record<string, number>> = {}
   const criterionMax: Partial<Record<string, number>> = {}
   for (const slug of CRITERION_SLUGS) {
@@ -104,18 +121,18 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
   // Mood preset (?mood=ID) sobrescreve filtros de critério e sort de forma
   // temporária (não persiste). Aplica somente nos critérios que o preset
   // define — campos não-mencionados mantêm valor da URL/preferências.
-  const moodId = str("mood")
-  const moodPreset = moodId ? MOOD_PRESETS_BY_ID[moodId] : null
+  //
+  // Os limiares do preset vivem em σ e são convertidos aqui com os momentos de
+  // HOJE: é isso que impede a calibração de apodrecer sozinha conforme o
+  // catálogo cresce (era como "Romance" tinha virado 55% do acervo). Quando os
+  // momentos não vêm, cada atributo cai no seu valor em pontos.
   if (moodPreset) {
-    if (moodPreset.criterionMin) {
-      for (const [slug, value] of Object.entries(moodPreset.criterionMin)) {
-        if (value != null) criterionMin[slug] = value
-      }
+    const mood = resolveMoodThresholds(moodPreset, moments)
+    for (const [slug, value] of Object.entries(mood.min)) {
+      if (value != null) criterionMin[slug] = value
     }
-    if (moodPreset.criterionMax) {
-      for (const [slug, value] of Object.entries(moodPreset.criterionMax)) {
-        if (value != null) criterionMax[slug] = value
-      }
+    for (const [slug, value] of Object.entries(mood.max)) {
+      if (value != null) criterionMax[slug] = value
     }
   }
 
@@ -270,6 +287,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     rawEntries,
     allGenres, genreCatTypes, allTags, statusOptions, savedPresets,
     scoreThresholds, tierBandWidth, lowCoverageIds, staleAlignmentCount, recalcState, criterionPrefs,
+    criterionMoments,
   ] = await Promise.all([
     getRanking(filters),
     getAllGenres(),
@@ -283,6 +301,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
     countStaleAlignmentWorks(),
     getRecalcPendingState(),
     getCriterionColorRanges(),
+    momentsPromise,
   ])
   // Marca obras não-lidas com baixa cobertura de gênero (badge ⚠ na Nota esperada).
   const entries = rawEntries.map((e) => ({ ...e, lowCoverage: lowCoverageIds.has(e.workId) }))
@@ -445,6 +464,7 @@ export default async function RankingPage({ searchParams }: RankingPageProps) {
         defaultBand={tierBandWidth}
         criterionPresets={prefs.criterionPresets}
         confidenceVotes={prefs.confidenceVotes}
+        criterionMoments={criterionMoments}
         showAdultFilter
       />
 

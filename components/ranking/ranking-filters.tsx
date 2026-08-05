@@ -20,6 +20,18 @@ import { CRITERIA_INFO } from "@/lib/constants/criteria"
 import { getPersonalStatusDescription } from "@/lib/constants/personal-status-descriptions"
 import { LABELS } from "@/lib/constants/ui-labels"
 import { CRITERION_SLUGS, SYNOPSIS_QUALITIES, DEFAULT_CRITERION_SCORE_PRESETS } from "@/types/domain"
+import {
+  fmtSigma,
+  readCriterionUnit,
+  scoreToSigma,
+  sigmaDomain,
+  sigmaToScore,
+  snapToScoreGrid,
+  SCORE_GRID,
+  SD_PRESETS,
+  SD_STEP,
+} from "@/lib/ranking/criterion-unit"
+import type { CriterionMoments, CriterionUnit } from "@/lib/ranking/criterion-unit"
 import type { CriterionScorePresets } from "@/types/domain"
 import { useCollapsedFilters } from "@/lib/use-collapsed-filters"
 import { saveFilterPreset, renameFilterPreset, deleteFilterPreset } from "@/server/actions/filter-presets"
@@ -242,6 +254,14 @@ interface RankingFiltersProps {
   defaultBand?: number
   /** Atalhos ≥ configuráveis da aba Notas (migration 132). Ausente = default [5,6,7,8]. */
   criterionPresets?: CriterionScorePresets
+  /**
+   * Média/σ dos 9 atributos no catálogo — habilita a lente σ do filtro de
+   * critério. Três estados, e eles são distintos de propósito:
+   * `undefined` = a página não oferece a lente (ex: /favorites, que não busca os
+   * momentos) → o seletor nem aparece; `null` = oferece, mas a leitura falhou →
+   * seletor desabilitado, com a explicação; preenchido = lente disponível.
+   */
+  criterionMoments?: CriterionMoments | null
   /** Confiança do público (pseudo_votes_nota_m): acima desse nº de votos a média
    *  externa pesa ≥50% na Nota Prevista. Marca o limiar "confiável" no filtro de votos. */
   confidenceVotes?: number | null
@@ -469,24 +489,123 @@ type ScoreDef = {
   presets: number[]
   kind?: "votes"
   fullWidth?: boolean
+  /**
+   * Unidade de EXIBIÇÃO/EDIÇÃO. Ausente = pontos. "sd" = o controle mostra e
+   * edita em desvios-padrão contra a média do catálogo.
+   *
+   * 🔴 A URL guarda SEMPRE pontos, em qualquer unidade. σ é uma lente, não um
+   * formato de armazenamento — e é isso que mantém todo consumidor correto sem
+   * saber que σ existe: `getRanking`, os presets salvos
+   * (`ranking_filter_presets` guarda a query crua) e o
+   * `parseFiltersFromSearchParams` do diálogo de recomendação, que lê a URL do
+   * /ranking pra montar o universo de candidatos. Guardar σ na URL fazia
+   * `min_romance=-0.5` virar "romance ≥ −0,5 PONTOS" lá — isto é, filtro
+   * nenhum, sem erro e com resultado.
+   *
+   * Corolário de graça: trocar a unidade não mexe em nenhum valor, então NUNCA
+   * muda o resultado — vira só outra forma de ler o mesmo limiar.
+   */
+  unit?: "sd"
+  /** Momentos do atributo — sem eles não há conversão, e o pill fica em pontos. */
+  moment?: { mean: number; sd: number }
   /** Texto do ⓘ ao lado do rótulo do filtro (explica o que a métrica é). */
   help?: string
 }
 
+/** Segmentado Pontos | σ do cabeçalho de "Notas por critério". */
+function CriterionUnitToggle({
+  unit,
+  updateParams,
+  moments,
+}: {
+  unit: CriterionUnit
+  // Sem `searchParams` de propósito: o toggle não LÊ limiar nenhum porque não
+  // reescreve limiar nenhum — trocar de unidade é inócuo por construção.
+  updateParams: (updates: Record<string, string | null>) => void
+  moments: CriterionMoments | null | undefined
+}) {
+  const seg = (active: boolean) =>
+    cn(
+      "inline-flex h-6 items-center rounded px-2 text-[11px] font-medium transition-colors",
+      active ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+    )
+  const toggle = (
+    <div className="inline-flex items-center gap-0.5 rounded-md border border-border/65 bg-background/60 p-0.5">
+      <button
+        type="button"
+        onClick={() => updateParams({ crit_unit: null })}
+        aria-pressed={unit === "points"}
+        className={seg(unit === "points")}
+      >
+        Pontos
+      </button>
+      <button
+        type="button"
+        onClick={() => updateParams({ crit_unit: "sd" })}
+        aria-pressed={unit === "sd"}
+        className={seg(unit === "sd")}
+        disabled={!moments}
+      >
+        &sigma;
+      </button>
+    </div>
+  )
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>{toggle}</TooltipTrigger>
+        <TooltipContent className="max-w-xs text-xs leading-relaxed">
+          {moments
+            ? "\u03c3 mede o limiar em desvios-padr\u00e3o contra a m\u00e9dia do catálogo, e n\u00e3o em pontos. \u201cRomance \u2265 7\u201d pega 55% do acervo (a m\u00e9dia j\u00e1 \u00e9 7,4); \u201cHumor \u2265 7\u201d pega 3,5%. Em \u03c3 os dois querem dizer a mesma coisa: quanto acima do normal daquele atributo."
+            : "Indispon\u00edvel: as m\u00e9dias do cat\u00e1logo n\u00e3o puderam ser lidas agora."}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 // Presets ≥ configuráveis (migration 132): overrides[slug] ?? default. As demais
 // páginas (ex: /favorites) omitem a prop → cai no default hardcoded [5,6,7,8].
-function buildCriterionScoreDefs(presets: CriterionScorePresets): ScoreDef[] {
-  return CRITERION_SLUGS.map((slug) => ({
-    key: slug,
-    emoji: CRITERIA_INFO[slug]?.emoji ?? "",
-    label: CRITERION_LABELS[slug] ?? slug,
-    minKey: `min_${slug}`,
-    maxKey: `max_${slug}`,
-    min: 0,
-    max: 10,
-    step: 1,
-    presets: presets.overrides[slug] ?? presets.default,
-  }))
+function buildCriterionScoreDefs(
+  presets: CriterionScorePresets,
+  unit: CriterionUnit,
+  moments: CriterionMoments | null | undefined,
+): ScoreDef[] {
+  return CRITERION_SLUGS.map((slug) => {
+    const base = {
+      key: slug,
+      emoji: CRITERIA_INFO[slug]?.emoji ?? "",
+      label: CRITERION_LABELS[slug] ?? slug,
+      minKey: `min_${slug}`,
+      maxKey: `max_${slug}`,
+    }
+    // Atributo sem momento (σ = 0, ou leitura falhou) fica em PONTOS mesmo com a
+    // lente ligada: sem conversão possível, mostrar σ seria inventar número.
+    const moment = moments?.[slug]
+    if (unit === "sd" && moment && moment.sd > 0) {
+      // Domínio DERIVADO dos momentos (a imagem em σ de 0–10). Faixa fixa deixava
+      // limiares legítimos fora do slider, e o commit os apagava — ver sigmaDomain.
+      const domain = sigmaDomain(moment)
+      return {
+        ...base,
+        min: domain.min,
+        max: domain.max,
+        step: SD_STEP,
+        // Preset acima do teto do atributo é promessa que a escala não cumpre:
+        // em fantasia/nobreza (média 7,27) o "+2σ" já passaria de nota 10.
+        presets: SD_PRESETS.filter((p) => p <= domain.max),
+        unit: "sd" as const,
+        moment,
+      }
+    }
+    return {
+      ...base,
+      min: 0,
+      max: 10,
+      step: 1,
+      presets: presets.overrides[slug] ?? presets.default,
+    }
+  })
 }
 
 const GENERAL_SCORE_DEFS: ScoreDef[] = [
@@ -502,7 +621,31 @@ function scoreDecimals(step: number): number {
 }
 function fmtScore(def: ScoreDef, v: number): string {
   if (def.kind === "votes") return formatVotes(v)
+  if (def.unit === "sd") return fmtSigma(v)
   return v.toFixed(scoreDecimals(def.step))
+}
+
+/**
+ * Pontos (como está na URL) → domínio de EXIBIÇÃO do controle. Identidade em
+ * pontos; σ quando a lente está ligada e o atributo tem momentos.
+ */
+function toDisplay(def: ScoreDef, points: number | undefined): number | undefined {
+  if (points == null) return undefined
+  if (def.unit !== "sd") return points
+  return scoreToSigma(points, def.moment) ?? undefined
+}
+
+/**
+ * Domínio de exibição → pontos, que é o que vai pra URL.
+ *
+ * Encaixa na grade de 0,5 (o passo real das notas) porque um limiar fracionário
+ * faz o pill em Pontos mentir: `+0,5σ` em romance dá 8,01, o pill mostra "≥ 8" e
+ * o filtro exclui as 421 obras com romance exatamente 8,0. Ver snapToScoreGrid.
+ */
+function toPoints(def: ScoreDef, display: number, bound: "min" | "max"): number | null {
+  if (def.unit !== "sd") return display
+  const p = sigmaToScore(display, def.moment)
+  return p == null ? null : snapToScoreGrid(p, bound)
 }
 
 /** Estado/rótulo atual de uma nota: Qualquer / ≥X / X–Y / ≤X. */
@@ -511,8 +654,8 @@ function scoreValueInfo(def: ScoreDef, searchParams: Pick<URLSearchParams, "get"
   const rawMax = searchParams.get(def.maxKey)
   const hasMin = rawMin != null && rawMin !== ""
   const hasMax = rawMax != null && rawMax !== ""
-  const vMin = num(rawMin)
-  const vMax = num(rawMax)
+  const vMin = toDisplay(def, num(rawMin))
+  const vMax = toDisplay(def, num(rawMax))
   let label = "Qualquer"
   if (hasMin && hasMax && vMin != null && vMax != null) label = `${fmtScore(def, vMin)}–${fmtScore(def, vMax)}`
   else if (hasMin && vMin != null) label = `≥ ${fmtScore(def, vMin)}`
@@ -583,19 +726,46 @@ function ScoreThresholdEditor({
   const [dragValue, setDragValue] = useState<[number, number] | null>(null)
   const committed: [number, number] = [info.vMin ?? def.min, info.vMax ?? def.max]
   const display = dragValue ?? committed
+  // O slider trabalha no domínio de EXIBIÇÃO (σ quando a lente está ligada), mas
+  // o que vai pra URL é sempre ponto — ver a nota em ScoreDef.unit.
+  const write = (v: number | null, bound: "min" | "max") => {
+    if (v == null) return null
+    const p = toPoints(def, v, bound)
+    if (p == null) return null
+    // Limiar nas pontas da escala não é filtro: "≤ 10" e "≥ 0" não excluem nada.
+    // Em Pontos o `lo > def.min` / `hi < def.max` já resolve, mas na lente o
+    // domínio em σ tem pontas fracionárias e o thumb pode parar um passo aquém —
+    // gravando um chip que promete recorte e não recorta.
+    if (bound === "max" && p >= 10) return null
+    if (bound === "min" && p <= 0) return null
+    return String(p)
+  }
   const commit = (next: number[]) => {
     const [lo, hi] = next as [number, number]
     updateParams({
-      [def.minKey]: lo > def.min ? String(lo) : null,
-      [def.maxKey]: hi < def.max ? String(hi) : null,
+      [def.minKey]: lo > def.min ? write(lo, "min") : null,
+      [def.maxKey]: hi < def.max ? write(hi, "max") : null,
     })
     setDragValue(null)
   }
   const setMinPreset = (p: number | null) => {
     setDragValue(null)
-    updateParams({ [def.minKey]: p != null ? String(p) : null, [def.maxKey]: null })
+    updateParams({ [def.minKey]: p != null ? write(p, "min") : null, [def.maxKey]: null })
   }
-  const presetActive = (p: number) => !info.hasMax && info.vMin === p
+  // Em σ o preset não bate exato: ele é gravado em pontos e encaixado na grade
+  // de 0,5, então "+0,5σ" volta como +0,49σ. Comparar por igualdade deixaria o
+  // chip que o usuário acabou de clicar apagado.
+  // Em σ o preset volta deslocado: ele é gravado em pontos e encaixado na grade
+  // de 0,5, então "+0,5σ" pode voltar como +0,33σ. A tolerância é meia casa da
+  // GRADE convertida pro σ daquele atributo — usar um número fixo deixava o chip
+  // recém-clicado apagado nos atributos de σ estreito (protagonista, σ 0,89).
+  const presetActive = (p: number) => {
+    if (info.hasMax || info.vMin == null) return false
+    if (def.unit !== "sd") return info.vMin === p
+    const sd = def.moment?.sd
+    if (!sd) return false
+    return Math.abs(info.vMin - p) < SCORE_GRID / (2 * sd)
+  }
   return (
     <>
       <div className="flex flex-wrap gap-1.5">
@@ -620,13 +790,36 @@ function ScoreThresholdEditor({
           onValueCommit={commit}
           className="flex-1"
         />
-        <span className="w-20 shrink-0 text-right text-xs font-semibold tabular-nums text-primary">
+        <span className="w-24 shrink-0 text-right text-xs font-semibold tabular-nums text-primary">
           {fmtScore(def, display[0])} – {fmtScore(def, display[1])}
         </span>
       </div>
+      {/* Em σ o número não diz nada sozinho: "+1σ" é 6,7 em humor e 8,6 em
+          romance. Sem esta linha o controle vira um filtro cego — que foi
+          exatamente o defeito da Assinatura que este modo substitui. */}
+      {def.unit === "sd" && (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          {def.moment && def.moment.sd > 0 ? (
+            <>
+              Hoje, em {def.label.toLowerCase()}: {fmtScore(def, display[0])} ={" "}
+              <span className="font-semibold tabular-nums text-foreground">
+                {(sigmaToScore(display[0], def.moment) ?? 0).toFixed(1)}
+              </span>{" "}
+              pts e {fmtScore(def, display[1])} ={" "}
+              <span className="font-semibold tabular-nums text-foreground">
+                {(sigmaToScore(display[1], def.moment) ?? 0).toFixed(1)}
+              </span>{" "}
+              pts (média {def.moment.mean.toFixed(1)}, σ {def.moment.sd.toFixed(2)}).
+            </>
+          ) : (
+            "Sem média do catálogo para este atributo — o limiar em σ não se aplica."
+          )}
+        </p>
+      )}
     </>
   )
 }
+
 
 function VotesThresholdEditor({
   searchParams,
@@ -725,6 +918,7 @@ function ScorePillGroup({
   searchParams,
   updateParams,
   confidenceVotes,
+  headerAction,
 }: {
   title: string
   defs: ScoreDef[]
@@ -732,12 +926,13 @@ function ScorePillGroup({
   searchParams: Pick<URLSearchParams, "get">
   updateParams: (updates: Record<string, string | null>) => void
   confidenceVotes?: number | null
+  headerAction?: React.ReactNode
 }) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const selectedDef = defs.find((d) => d.key === selectedKey) ?? null
   const gridCls = cols === 3 ? "grid grid-cols-2 gap-2 lg:grid-cols-3" : "grid grid-cols-2 gap-2"
   return (
-    <FilterSection title={title}>
+    <FilterSection title={title} headerAction={headerAction}>
       <div className={gridCls}>
         {defs.map((def) => (
           <ScorePill
@@ -1802,20 +1997,29 @@ export function RankingFilters({
   savedPresets = [],
   defaultBand = 0.5,
   criterionPresets,
+  criterionMoments,
   confidenceVotes,
   showTopN = true,
   showTierBand = true,
   showAdultFilter = false,
 }: RankingFiltersProps) {
   const router = useRouter()
-  const criterionScoreDefs = useMemo(
-    () => buildCriterionScoreDefs(criterionPresets ?? DEFAULT_CRITERION_SCORE_PRESETS),
-    [criterionPresets]
-  )
   const appliedSearchParams = useSearchParams()
   const appliedSearchString = appliedSearchParams.toString()
   const [draftSearch, setDraftSearch] = useState(appliedSearchString)
   const searchParams = useMemo(() => new URLSearchParams(draftSearch), [draftSearch])
+  // Sem momentos a lente não funciona: força Pontos em vez de deixar o seletor
+  // dizer σ enquanto os pills mostram pontos.
+  const criterionUnit = criterionMoments ? readCriterionUnit(searchParams) : "points"
+  const criterionScoreDefs = useMemo(
+    () =>
+      buildCriterionScoreDefs(
+        criterionPresets ?? DEFAULT_CRITERION_SCORE_PRESETS,
+        criterionUnit,
+        criterionMoments,
+      ),
+    [criterionPresets, criterionUnit, criterionMoments]
+  )
   // isApplying: a navegação por filtro (router.replace) roda numa transition que
   // fica pendente enquanto o servidor re-renderiza o ranking (~1s). Sem expor isso,
   // o clique em "Aplicar filtros" ficava sem feedback nenhum nesse intervalo.
@@ -2067,13 +2271,21 @@ export function RankingFilters({
   )
 
   const activeFilterChips: Array<{ key: string; label: string; onRemove: () => void }> = []
-  const pushRangeChip = (key: string, label: string, minKey: string, maxKey: string) => {
+  const pushRangeChip = (
+    key: string,
+    label: string,
+    minKey: string,
+    maxKey: string,
+    /** Converte o valor da URL (pontos) pro texto exibido — usado pela lente σ. */
+    fmt?: (raw: string) => string,
+  ) => {
     const min = searchParams.get(minKey)
     const max = searchParams.get(maxKey)
     if (!min && !max) return
     // Override =0 desliga um pré-filtro de preferência; ">= 0" não é filtro real.
     if (min === "0" && !max) return
-    const suffix = min && max ? `${min} - ${max}` : min ? `>= ${min}` : `<= ${max}`
+    const f = fmt ?? ((raw: string) => raw)
+    const suffix = min && max ? `${f(min)} - ${f(max)}` : min ? `>= ${f(min)}` : `<= ${f(max as string)}`
     activeFilterChips.push({
       key,
       label: `${label}: ${suffix}`,
@@ -2096,7 +2308,17 @@ export function RankingFilters({
   pushRangeChip("platform", LABELS.platform_avg.full, "min_platform_avg", "max_platform_avg")
   pushRangeChip("votes", LABELS.total_votes.full, "min_votes", "max_votes")
   for (const slug of CRITERION_SLUGS) {
-    pushRangeChip(`crit-${slug}`, CRITERION_LABELS[slug] ?? slug, `min_${slug}`, `max_${slug}`)
+    // Com a lente ligada o chip fala σ, igual ao pill. O valor guardado segue em
+    // pontos — quem traduz é só a exibição. Sem momento pro slug, fica em pontos.
+    const m = criterionMoments?.[slug]
+    const fmt =
+      criterionUnit === "sd" && m && m.sd > 0
+        ? (raw: string) => {
+            const z = scoreToSigma(parseFloat(raw), m)
+            return z == null ? raw : fmtSigma(z)
+          }
+        : undefined
+    pushRangeChip(`crit-${slug}`, CRITERION_LABELS[slug] ?? slug, `min_${slug}`, `max_${slug}`, fmt)
   }
   if (searchParams.get("rated") === "1") {
     activeFilterChips.push({
@@ -2621,6 +2843,20 @@ export function RankingFilters({
               cols={2}
               searchParams={searchParams}
               updateParams={updateParams}
+              headerAction={
+                // `undefined` = a página não oferece a lente (ex: /favorites, que
+                // não busca os momentos) → some com o seletor. `null` = ela
+                // oferece mas a leitura falhou → seletor desabilitado, com a
+                // explicação. Um estado só pros dois fazia o /favorites acusar
+                // uma falha que nunca houve.
+                criterionMoments !== undefined ? (
+                  <CriterionUnitToggle
+                    unit={criterionUnit}
+                    updateParams={updateParams}
+                    moments={criterionMoments}
+                  />
+                ) : undefined
+              }
             />
             <ScorePillGroup
               title="Notas gerais"
